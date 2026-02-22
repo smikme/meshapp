@@ -21,7 +21,15 @@
 </a>
 </p>
 
+<div align="right">
+
+[![Release](https://img.shields.io/badge/Release-v1.0.14-blue?style=flat-square&logo=gitea)](https://git.privatepractice.app/covox/meshapp/releases/tag/AlphaTest)
+
+</div>
+
 ---
+
+
 
 ## O проекте
 
