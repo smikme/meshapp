@@ -16,7 +16,7 @@
   <img src="https://img.shields.io/badge/JavaFX-21.0.7-blue?logo=java" alt="JavaFX"/>
   <img src="https://img.shields.io/badge/Platform-Win%20%7C%20macOS%20%7C%20Linux-brightgreen" alt="Platform"/>
   <img src="https://img.shields.io/badge/License-GPL--3.0-blue" alt="License"/>
-  <a href="https://t.me/username">
+  <a href="https://t.me/MeshAppClient">
   <img src="https://img.shields.io/badge/Telegram-@username-blue?logo=telegram" alt="Telegram">
 </a>
 </p>
