@@ -16,9 +16,20 @@
   <img src="https://img.shields.io/badge/JavaFX-21.0.7-blue?logo=java" alt="JavaFX"/>
   <img src="https://img.shields.io/badge/Platform-Win%20%7C%20macOS%20%7C%20Linux-brightgreen" alt="Platform"/>
   <img src="https://img.shields.io/badge/License-GPL--3.0-blue" alt="License"/>
+  <a href="https://t.me/MeshAppClient">
+  <img src="https://img.shields.io/badge/Telegram-@MeshAppClient-blue?logo=telegram" alt="Telegram">
+</a>
 </p>
 
+<div align="right">
+
+[![Release](https://img.shields.io/badge/Release-v1.0.14-blue?style=flat-square&logo=gitea)](https://git.privatepractice.app/covox/meshapp/releases/tag/AlphaTest)
+
+</div>
+
 ---
+
+
 
 ## O проекте
 
@@ -217,5 +228,9 @@ MeshApp собирается в нативные пакеты через `jpacka
 ---
 
 <p align="center">
-  Создано для сообщества <a href="https://meshtastic.org">Meshtastic</a>
+  Создано Konstantin A. Smirnov <a href="mailto:covox@covox.ru">covox@covox.ru</a>
+  <br>
+<a href="https://t.me/coVox">
+  <img src="https://img.shields.io/badge/Telegram-2CA5E0?style=for-the-badge&logo=telegram&logoColor=white" alt="Telegram">
+</a>
 </p>
