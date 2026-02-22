@@ -217,5 +217,5 @@ MeshApp собирается в нативные пакеты через `jpacka
 ---
 
 <p align="center">
-  Создано для сообщества <a href="https://meshtastic.org">Meshtastic</a>
+  Создано Konstantin A. Smirnov <a href="mailto:covox@covox.ru">covox@covox.ru</a>
 </p>
