@@ -1,0 +1,339 @@
+plugins {
+	id 'java'
+	id 'application'
+	id 'org.graalvm.buildtools.native' version '0.10.6'
+	id 'com.google.protobuf' version '0.9.4'
+	id 'org.openjfx.javafxplugin' version '0.1.0'
+}
+
+application {
+	mainClass = 'com.meshtastic.client.MeshApp'
+	def jvmArgs = [
+		'--add-opens', 'javafx.graphics/javafx.stage=ALL-UNNAMED',
+		'--add-opens', 'javafx.graphics/com.sun.javafx.tk=ALL-UNNAMED',
+		'--add-opens', 'javafx.graphics/com.sun.javafx.tk.quantum=ALL-UNNAMED',
+		'--add-opens', 'javafx.graphics/com.sun.glass.ui=ALL-UNNAMED'
+	]
+	if (org.gradle.internal.os.OperatingSystem.current().isWindows()) {
+		jvmArgs += ['--add-opens', 'javafx.graphics/com.sun.glass.ui.win=ALL-UNNAMED']
+	}
+	if (org.gradle.internal.os.OperatingSystem.current().isMacOsX()) {
+		jvmArgs += ['--add-opens', 'javafx.graphics/com.sun.glass.ui.mac=ALL-UNNAMED']
+	}
+	applicationDefaultJvmArgs = jvmArgs
+}
+
+javafx {
+	version = "21.0.7"
+	modules = ['javafx.controls']
+}
+
+group = 'com.meshtastic'
+version = {
+	try {
+		return 'git describe --tags --always --dirty'.execute().text.trim() ?: 'dev'
+	} catch (ignored) {
+		return 'dev'
+	}
+}()
+
+java {
+	toolchain {
+		languageVersion = JavaLanguageVersion.of(21)
+	}
+}
+
+repositories {
+	mavenCentral()
+}
+
+dependencies {
+	implementation 'com.google.protobuf:protobuf-java:4.33.4'
+	implementation 'com.miglayout:miglayout-javafx:11.4.2'
+	implementation 'ch.qos.logback:logback-classic:1.5.16'
+	implementation 'com.fazecast:jSerialComm:2.11.0'
+	implementation 'com.google.code.gson:gson:2.11.0'
+	implementation 'com.h2database:h2:2.3.232'
+	implementation 'io.github.mkpaz:atlantafx-base:2.1.0'
+	implementation 'net.java.dev.jna:jna:5.16.0'
+	implementation 'net.java.dev.jna:jna-platform:5.16.0'
+	testImplementation 'org.junit.jupiter:junit-jupiter:5.11.4'
+	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+protobuf {
+	protoc {
+		artifact = 'com.google.protobuf:protoc:4.33.4'
+	}
+}
+
+jar {
+	manifest {
+		attributes(
+			'Implementation-Title': project.name,
+			'Implementation-Version': project.version
+		)
+	}
+	// Файлы только для jpackage/бандла — в jar не нужны
+	exclude 'logo/MeshApp.icns', 'logo/MeshApp.ico'
+	exclude 'macos/**'
+}
+
+// Генерация version.properties при каждой сборке
+tasks.register('generateVersionProperties') {
+	def outputDir = layout.buildDirectory.dir('generated/resources')
+	outputs.dir(outputDir)
+	// Всегда пересоздавать — версия может измениться (dirty/commit)
+	outputs.upToDateWhen { false }
+	doLast {
+		def dir = outputDir.get().asFile
+		dir.mkdirs()
+		new File(dir, 'version.properties').text = "version=${project.version}\n"
+	}
+}
+
+sourceSets.main.resources.srcDir(layout.buildDirectory.dir('generated/resources'))
+tasks.named('processResources') { dependsOn 'generateVersionProperties' }
+
+tasks.withType(JavaCompile).configureEach {
+	options.encoding = 'UTF-8'
+}
+
+tasks.named('test') {
+	useJUnitPlatform()
+}
+tasks.named("run") {
+	outputs.upToDateWhen { false }
+	// macOS: перенаправить на runMac для отображения в Dock и Cmd+Tab
+	if (org.gradle.internal.os.OperatingSystem.current().isMacOsX()) {
+		dependsOn 'runMac'
+		// Отключить саму JavaExec — приложение запускается через runMac
+		enabled = false
+	}
+}
+
+// ============================================================
+// jpackage: создание нативного инсталлятора
+// Windows: .msi, macOS: .dmg, Linux: .deb/.rpm
+// Использование: ./gradlew jpackage
+// ============================================================
+tasks.register('jpackage') {
+	dependsOn installDist
+	group = 'distribution'
+	description = 'Создать нативный инсталлятор через jpackage'
+
+	doLast {
+		def os = org.gradle.internal.os.OperatingSystem.current()
+		def installDir = layout.buildDirectory.dir("install/${project.name}").get().asFile
+		def outputDir = layout.buildDirectory.dir("jpackage").get().asFile
+		if (outputDir.exists()) outputDir.deleteDir()
+		outputDir.mkdirs()
+		def appVersion = '1.0.0'
+
+		def javaHome = javaToolchains.launcherFor {
+			languageVersion = JavaLanguageVersion.of(21)
+		}.get().executablePath.asFile.parentFile.parentFile.absolutePath
+
+		def jpackageBin = os.isWindows()
+			? "${javaHome}/bin/jpackage.exe"
+			: "${javaHome}/bin/jpackage"
+
+		def libDir = new File(installDir, "lib")
+
+		// Выделить JavaFX JAR в поддиректорию — только они должны быть на module path.
+		// Если $APPDIR целиком на module path, app JAR становится automatic module,
+		// и --add-opens ...=ALL-UNNAMED перестаёт действовать (рефлексия для HWND ломается).
+		def fxDir = new File(libDir, "fx")
+		fxDir.mkdirs()
+		libDir.listFiles()?.findAll { it.name.startsWith('javafx-') }?.each { jar ->
+			java.nio.file.Files.move(jar.toPath(), new File(fxDir, jar.name).toPath(),
+				java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+		}
+
+		def jvmArgsList = application.applicationDefaultJvmArgs.collect()
+		// $APPDIR — токен jpackage, заменяется на реальную директорию приложения при запуске.
+		// Абсолютные пути билд-машины не работают на других компьютерах.
+		// $APPDIR/fx — только JavaFX модули, app остаётся на classpath (unnamed module).
+		jvmArgsList << "--module-path"
+		jvmArgsList << '$APPDIR/fx'
+		jvmArgsList << "--add-modules"
+		jvmArgsList << "javafx.controls"
+
+		// macOS: app-image → копируем Icon Composer ресурсы → DMG
+		def macBuild = os.isMacOsX()
+
+		def args = [
+			jpackageBin,
+			'--type', os.isWindows() ? 'msi' : (macBuild ? 'app-image' : 'deb'),
+			'--name', 'MeshApp',
+			'--app-version', appVersion,
+			'--vendor', 'Meshtastic',
+			'--dest', outputDir.absolutePath,
+			'--input', libDir.absolutePath,
+			'--main-jar', "${project.name}-${project.version}.jar",
+			'--main-class', application.mainClass.get(),
+		]
+
+		jvmArgsList.each { arg ->
+			args << '--java-options'
+			args << arg
+		}
+
+		// Иконка для jpackage (Windows .ico, macOS — заменяется Icon Composer версией)
+		if (os.isWindows()) {
+			def icoFile = file('src/main/resources/logo/MeshApp.ico')
+			if (icoFile.exists()) {
+				args << '--icon'
+				args << icoFile.absolutePath
+			}
+		} else if (macBuild) {
+			def icnsFile = file('src/main/resources/macos/MeshApp.icns')
+			if (icnsFile.exists()) {
+				args << '--icon'
+				args << icnsFile.absolutePath
+			}
+		}
+
+		if (os.isWindows()) {
+			args << '--win-dir-chooser'
+			args << '--win-shortcut'
+			args << '--win-menu'
+		}
+
+		if (macBuild) {
+			args << '--mac-package-identifier'
+			args << 'com.meshtastic.meshapp'
+			args << '--mac-package-name'
+			args << 'MeshApp'
+		}
+
+		// Шаг 1: создать app-image (macOS) или финальный инсталлятор (Windows/Linux)
+		def strArgs = args.collect { it.toString() }
+		def proc1 = new ProcessBuilder(strArgs).redirectErrorStream(true).start()
+		def proc1Output = proc1.inputStream.text
+		proc1.waitFor()
+		if (proc1Output) logger.lifecycle(proc1Output.trim())
+		if (proc1.exitValue() != 0) throw new GradleException("jpackage failed with exit code ${proc1.exitValue()}")
+
+		// macOS шаг 2: скопировать Assets.car (Icon Composer) в бандл, собрать DMG
+		if (macBuild) {
+			def appDir = new File(outputDir, "MeshApp.app")
+			def resourcesDir = new File(appDir, "Contents/Resources")
+
+			// Assets.car содержит иконку из Icon Composer с вариантами стилей
+			def assetsCar = file('src/main/resources/macos/Assets.car')
+			if (assetsCar.exists()) {
+				java.nio.file.Files.copy(assetsCar.toPath(), new File(resourcesDir, assetsCar.name).toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+				logger.lifecycle("jpackage: Assets.car скопирован в бандл")
+			}
+
+			// Собрать DMG
+			def dmgFile = new File(outputDir, "MeshApp-${appVersion}.dmg")
+			if (dmgFile.exists()) dmgFile.delete()
+
+			def dmgArgs = [
+				jpackageBin,
+				'--type', 'dmg',
+				'--name', 'MeshApp',
+				'--app-version', appVersion,
+				'--app-image', appDir.absolutePath,
+				'--dest', outputDir.absolutePath,
+				'--mac-package-identifier', 'com.meshtastic.meshapp',
+				'--mac-package-name', 'MeshApp'
+			]
+			def proc2 = new ProcessBuilder(dmgArgs.collect { it.toString() }).redirectErrorStream(true).start()
+			def proc2Output = proc2.inputStream.text
+			proc2.waitFor()
+			if (proc2Output) logger.lifecycle(proc2Output.trim())
+			if (proc2.exitValue() != 0) throw new GradleException("jpackage DMG failed with exit code ${proc2.exitValue()}")
+			logger.lifecycle("jpackage: DMG создан в ${outputDir}")
+		}
+	}
+}
+
+// macOS: запуск через .app bundle для отображения в Dock и Cmd+Tab
+if (org.gradle.internal.os.OperatingSystem.current().isMacOsX()) {
+	tasks.register('runMac') {
+		dependsOn classes
+		group = 'application'
+		description = 'Запуск на macOS через .app bundle (Dock + Cmd+Tab)'
+
+		doLast {
+			def appDir = layout.buildDirectory.dir("tmp/MeshApp.app").get().asFile
+			def contentsDir = new File(appDir, "Contents")
+			def macosDir = new File(contentsDir, "MacOS")
+			def resourcesDir = new File(contentsDir, "Resources")
+			macosDir.mkdirs()
+			resourcesDir.mkdirs()
+
+			// Скопировать иконку в .app bundle
+			def icnsSource = file('src/main/resources/logo/MeshApp.icns')
+			if (icnsSource.exists()) {
+				java.nio.file.Files.copy(icnsSource.toPath(), new File(resourcesDir, icnsSource.name).toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+			}
+
+			// Info.plist
+			new File(contentsDir, "Info.plist").text = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>MeshApp</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.meshtastic.meshapp</string>
+    <key>CFBundleVersion</key>
+    <string>1.0</string>
+    <key>CFBundleExecutable</key>
+    <string>run</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleIconFile</key>
+    <string>MeshApp</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+</dict>
+</plist>"""
+
+			// Собрать classpath и module-path из Gradle
+			def cpJars = []
+			def fxJars = []
+			sourceSets.main.runtimeClasspath.files.each { f ->
+				if (f.name.startsWith('javafx-') && (f.name.contains('-mac') || f.name.contains('-aarch64'))) {
+					fxJars << f.absolutePath
+				} else {
+					cpJars << f.absolutePath
+				}
+			}
+			def cpStr = cpJars.join(':')
+			def fxStr = fxJars.join(':')
+
+			// Java из toolchain
+			def javaLauncher = javaToolchains.launcherFor {
+				languageVersion = JavaLanguageVersion.of(21)
+			}.get()
+			def javaPath = javaLauncher.executablePath.asFile.absolutePath
+
+			def jvmArgsList = application.applicationDefaultJvmArgs
+			def jvmArgsStr = jvmArgsList.collect { "    '${it}'" }.join(" \\\n")
+
+			def script = new File(macosDir, "run")
+			script.text = """\
+#!/bin/bash
+exec '${javaPath}' \\
+${jvmArgsStr} \\
+    --module-path '${fxStr}' \\
+    --add-modules javafx.controls \\
+    -cp '${cpStr}' \\
+    ${application.mainClass.get()}
+"""
+			script.setExecutable(true)
+
+			// Запустить .app через 'open -W' (ждём завершения)
+			def proc = ['open', '-W', appDir.absolutePath].execute()
+			proc.consumeProcessOutput(System.out, System.err)
+			proc.waitFor()
+		}
+	}
+}

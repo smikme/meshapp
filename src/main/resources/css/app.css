@@ -1,0 +1,1207 @@
+/* MeshApp — кастомные стили поверх AtlantaFX Cupertino */
+
+/* Footer */
+.main-footer {
+    -fx-min-height: 30;
+    -fx-max-height: 30;
+    -fx-background-color: -color-bg-subtle;
+}
+
+.footer-label {
+    -fx-text-fill: -color-fg-muted;
+    -fx-font-size: 11px;
+}
+
+/* Drawer (ToolBar) */
+.drawer-pane {
+    -fx-background-color: transparent;
+    -fx-border-color: -color-border-default;
+    -fx-border-width: 0 1 0 0;
+    -fx-padding: 0;
+}
+
+.drawer-toolbar {
+    -fx-background-color: transparent;
+    -fx-padding: 4 0 8 0;
+    -fx-spacing: 4;
+    -fx-alignment: top-center;
+    -fx-border-color: transparent;
+    -fx-border-width: 0;
+}
+
+.drawer-toolbar > .container {
+    -fx-alignment: top-center;
+}
+
+.drawer-toolbar-button {
+    -fx-background-color: transparent;
+    -fx-background-radius: 10;
+    -fx-background-insets: 0;
+    -fx-border-color: transparent;
+    -fx-border-width: 0;
+    -fx-min-width: 42;
+    -fx-min-height: 42;
+    -fx-max-width: 42;
+    -fx-max-height: 42;
+    -fx-padding: 0;
+    -fx-cursor: hand;
+    -fx-alignment: center;
+    -fx-font-size: 18px;
+    -fx-text-fill: rgba(255, 255, 255, 0.7);
+}
+
+.drawer-toolbar-button .svg-icon {
+    -fx-fill: rgba(255, 255, 255, 0.7);
+}
+
+.drawer-toolbar-button:hover {
+    -fx-background-color: rgba(255, 255, 255, 0.1);
+    -fx-text-fill: rgba(255, 255, 255, 0.9);
+}
+
+.drawer-toolbar-button:hover .svg-icon {
+    -fx-fill: rgba(255, 255, 255, 0.9);
+}
+
+.drawer-toolbar-button-selected {
+    -fx-background-color: rgba(255, 255, 255, 0.15);
+    -fx-text-fill: white;
+}
+
+.drawer-toolbar-button-selected .svg-icon {
+    -fx-fill: white;
+}
+
+.drawer-toolbar-button-selected:hover {
+    -fx-background-color: rgba(255, 255, 255, 0.2);
+    -fx-text-fill: white;
+}
+
+.drawer-toolbar-button-selected:hover .svg-icon {
+    -fx-fill: white;
+}
+
+/* Светлая тема — тёмные иконки/текст на светлом полупрозрачном фоне */
+.light-theme .drawer-toolbar-button {
+    -fx-text-fill: rgba(0, 0, 0, 0.6);
+}
+
+.light-theme .drawer-toolbar-button .svg-icon {
+    -fx-fill: rgba(0, 0, 0, 0.6);
+}
+
+.light-theme .drawer-toolbar-button:hover {
+    -fx-background-color: rgba(0, 0, 0, 0.08);
+    -fx-text-fill: rgba(0, 0, 0, 0.85);
+}
+
+.light-theme .drawer-toolbar-button:hover .svg-icon {
+    -fx-fill: rgba(0, 0, 0, 0.85);
+}
+
+.light-theme .drawer-toolbar-button-selected {
+    -fx-background-color: rgba(0, 0, 0, 0.1);
+    -fx-text-fill: rgba(0, 0, 0, 0.9);
+}
+
+.light-theme .drawer-toolbar-button-selected .svg-icon {
+    -fx-fill: rgba(0, 0, 0, 0.9);
+}
+
+.light-theme .drawer-toolbar-button-selected:hover {
+    -fx-background-color: rgba(0, 0, 0, 0.14);
+    -fx-text-fill: rgba(0, 0, 0, 0.9);
+}
+
+.light-theme .drawer-toolbar-button-selected:hover .svg-icon {
+    -fx-fill: rgba(0, 0, 0, 0.9);
+}
+
+/* Кастомный title bar (полная ширина окна) */
+.custom-title-bar {
+    -fx-background-color: transparent;
+    -fx-min-height: 36;
+    -fx-max-height: 36;
+}
+
+.title-bar-label {
+    -fx-text-fill: rgba(255, 255, 255, 0.6);
+    -fx-font-size: 13px;
+}
+
+.light-theme .title-bar-label {
+    -fx-text-fill: rgba(0, 0, 0, 0.5);
+}
+
+/* Кнопки управления окном (traffic lights) */
+.window-control-btn {
+    -fx-background-radius: 7;
+    -fx-background-insets: 0;
+    -fx-border-width: 0;
+    -fx-padding: 0;
+    -fx-font-size: 7px;
+    -fx-text-fill: transparent;
+    -fx-cursor: hand;
+    -fx-min-width: 13;
+    -fx-min-height: 13;
+    -fx-max-width: 13;
+    -fx-max-height: 13;
+}
+
+.window-btn-close {
+    -fx-background-color: #ff5f57;
+}
+.window-btn-close:hover {
+    -fx-background-color: #ff3b30;
+    -fx-text-fill: rgba(0, 0, 0, 0.5);
+}
+
+.window-btn-minimize {
+    -fx-background-color: #febc2e;
+}
+.window-btn-minimize:hover {
+    -fx-background-color: #f0a000;
+    -fx-text-fill: rgba(0, 0, 0, 0.5);
+}
+
+.window-btn-maximize {
+    -fx-background-color: #28c840;
+}
+.window-btn-maximize:hover {
+    -fx-background-color: #1aab29;
+    -fx-text-fill: rgba(0, 0, 0, 0.5);
+}
+
+.drawer-toolbar-separator {
+    -fx-padding: 4 8;
+}
+
+.drawer-toolbar-separator .line {
+    -fx-border-color: rgba(255, 255, 255, 0.15);
+    -fx-border-width: 1 0 0 0;
+}
+
+.light-theme .drawer-toolbar-separator .line {
+    -fx-border-color: rgba(0, 0, 0, 0.12);
+}
+
+/* Content area */
+.content-area {
+    -fx-background-color: -color-bg-default;
+    -fx-background-radius: 10 10 0 0;
+}
+
+/* Прозрачный content-area для форм с vibrancy (ноды) */
+.content-area.transparent-content {
+    -fx-background-color: transparent;
+    -fx-background-radius: 0;
+}
+
+/* Toast */
+.toast {
+    -fx-padding: 12 24;
+    -fx-background-radius: 8;
+    -fx-font-size: 13px;
+    -fx-translate-y: 20;
+    -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.2), 10, 0, 0, 2);
+}
+
+.toast-success {
+    -fx-background-color: -color-success-emphasis;
+    -fx-text-fill: -color-fg-emphasis;
+}
+
+.toast-error {
+    -fx-background-color: -color-danger-emphasis;
+    -fx-text-fill: -color-fg-emphasis;
+}
+
+.toast-info {
+    -fx-background-color: -color-accent-emphasis;
+    -fx-text-fill: -color-fg-emphasis;
+}
+
+.toast-warning {
+    -fx-background-color: -color-warning-emphasis;
+    -fx-text-fill: -color-fg-emphasis;
+}
+
+/* Memory bar */
+.memory-bar {
+    -fx-pref-width: 150;
+    -fx-pref-height: 16;
+}
+
+.memory-label {
+    -fx-font-size: 10px;
+}
+
+/* Connection cards */
+.connection-card {
+    -fx-background-color: -color-bg-subtle;
+    -fx-background-radius: 12;
+    -fx-border-color: -color-border-default;
+    -fx-border-radius: 12;
+    -fx-padding: 15;
+}
+
+/* Tables */
+.table-view {
+    -fx-fixed-cell-size: 28;
+}
+
+.table-view .column-header {
+    -fx-font-weight: bold;
+}
+
+.no-header .column-header-background {
+    -fx-max-height: 0;
+    -fx-pref-height: 0;
+    -fx-min-height: 0;
+}
+
+/* Таблица деталей ноды — без внешней рамки, только разделители строк */
+.node-detail-table {
+    -fx-border-width: 0;
+    -fx-border-color: transparent;
+    -fx-background-color: transparent;
+    -fx-padding: 0;
+}
+
+.node-detail-table .virtual-flow .clipped-container .sheet .table-row-cell {
+    -fx-border-color: -color-border-default;
+    -fx-border-width: 0 0 1 0;
+}
+
+/* Modal overlay (in-scene) */
+.modal-overlay {
+    -fx-background-color: rgba(0, 0, 0, 0.4);
+}
+
+/* Боковая панель справа */
+.modal-side-panel {
+    -fx-background-color: -color-bg-default;
+    -fx-border-color: -color-border-default;
+    -fx-border-width: 0 0 0 1;
+    -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.25), 15, 0, -4, 0);
+}
+
+/* Панель ошибки — красный акцент слева */
+.modal-dialog-error {
+    -fx-border-color: #E53935;
+}
+
+/* Node Detail Panel (модальная панель детальной информации о ноде) */
+.node-detail-back-btn {
+    -fx-background-color: transparent;
+    -fx-border-width: 0;
+    -fx-padding: 6 12;
+    -fx-font-size: 13px;
+    -fx-cursor: hand;
+    -fx-text-fill: -color-accent-emphasis;
+    -fx-font-weight: bold;
+}
+
+.node-detail-back-btn:hover {
+    -fx-background-color: -color-bg-subtle;
+    -fx-background-radius: 6;
+}
+
+/* ============================================================
+   Nodes — список + детали
+   ============================================================ */
+
+/* Список нод — левая панель (прозрачная, как drawer) */
+.node-list-pane {
+    -fx-background-color: transparent;
+}
+
+.node-search-field {
+    -fx-background-radius: 8;
+    -fx-padding: 8 12;
+    -fx-background-color: rgba(255, 255, 255, 0.08);
+    -fx-text-fill: rgba(255, 255, 255, 0.9);
+    -fx-prompt-text-fill: rgba(255, 255, 255, 0.4);
+}
+
+.light-theme .node-search-field {
+    -fx-background-color: rgba(0, 0, 0, 0.06);
+    -fx-text-fill: rgba(0, 0, 0, 0.85);
+    -fx-prompt-text-fill: rgba(0, 0, 0, 0.4);
+}
+
+.node-list-view {
+    -fx-background-color: transparent;
+    -fx-border-width: 0;
+    -fx-padding: 0;
+}
+
+.node-list-view .virtual-flow .clipped-container .sheet .list-cell {
+    -fx-background-color: transparent;
+    -fx-padding: 0;
+    -fx-border-color: rgba(255, 255, 255, 0.08);
+    -fx-border-width: 0 0 1 0;
+}
+
+.light-theme .node-list-view .virtual-flow .clipped-container .sheet .list-cell {
+    -fx-border-color: rgba(0, 0, 0, 0.08);
+}
+
+.node-list-view .virtual-flow .clipped-container .sheet .list-cell:selected {
+    -fx-background-color: #3A3A3C;
+    -fx-background-radius: 0;
+    -fx-border-color: transparent;
+}
+
+.light-theme .node-list-view .virtual-flow .clipped-container .sheet .list-cell:selected {
+    -fx-background-color: #D1D1D6;
+}
+
+.node-list-view .list-cell:selected .node-name-label {
+    -fx-text-fill: white;
+}
+
+.light-theme .node-list-view .list-cell:selected .node-name-label {
+    -fx-text-fill: rgba(0, 0, 0, 0.9);
+}
+
+.node-list-view .list-cell:selected .node-subtitle-label {
+    -fx-text-fill: rgba(255, 255, 255, 0.7);
+}
+
+.light-theme .node-list-view .list-cell:selected .node-subtitle-label {
+    -fx-text-fill: rgba(0, 0, 0, 0.6);
+}
+
+.node-name-label {
+    -fx-text-fill: rgba(255, 255, 255, 0.9);
+}
+
+.light-theme .node-name-label {
+    -fx-text-fill: rgba(0, 0, 0, 0.85);
+}
+
+.node-subtitle-label {
+    -fx-text-fill: rgba(255, 255, 255, 0.5);
+    -fx-font-size: 12px;
+}
+
+.light-theme .node-subtitle-label {
+    -fx-text-fill: rgba(0, 0, 0, 0.5);
+}
+
+.node-count-badge {
+    -fx-background-color: rgba(255, 255, 255, 0.15);
+    -fx-background-radius: 12;
+    -fx-padding: 4 10;
+    -fx-text-fill: rgba(255, 255, 255, 0.7);
+    -fx-font-size: 12px;
+}
+
+.light-theme .node-count-badge {
+    -fx-background-color: rgba(0, 0, 0, 0.45);
+    -fx-text-fill: white;
+}
+
+/* Форма нод и SplitPane — прозрачные, vibrancy просвечивает слева */
+.node-form {
+    -fx-background-color: transparent;
+}
+
+.node-split-pane {
+    -fx-background-color: transparent;
+    -fx-padding: 0;
+}
+
+.node-split-pane > .split-pane-divider {
+    -fx-background-color: transparent;
+    -fx-padding: 0 1 0 0;
+}
+
+/* Детальная панель */
+.node-detail-pane {
+    -fx-background-color: -color-bg-default;
+    -fx-border-color: rgba(255, 255, 255, 0.08);
+    -fx-border-width: 0 0 0 1;
+}
+
+.light-theme .node-detail-pane {
+    -fx-border-color: rgba(0, 0, 0, 0.1);
+}
+
+.detail-key {
+    -fx-text-fill: -color-fg-muted;
+    -fx-font-size: 13px;
+}
+
+.detail-value {
+    -fx-text-fill: -color-fg-default;
+    -fx-font-size: 13px;
+    -fx-font-weight: bold;
+}
+
+/* Separator */
+.separator {
+    -fx-padding: 0;
+}
+
+/* ============================================================
+   Seamless frame (Mica / vibrancy активна) — полупрозрачные фоны,
+   чтобы нативный backdrop просвечивал.
+   Подход как у xpipe: scene.fill=TRANSPARENT + rgba фоны.
+   ============================================================ */
+
+/* Корневой контейнер (BorderPane) — прозрачный для vibrancy */
+:seamless-frame {
+    -fx-background-color: transparent;
+}
+
+/* Контент — непрозрачный фон поверх vibrancy */
+:seamless-frame .content-area {
+    -fx-background-color: -color-bg-default;
+}
+
+/* Drawer — прозрачный, нативный vibrancy/Mica просвечивает */
+:seamless-frame .drawer-pane {
+    -fx-background-color: transparent;
+    -fx-border-color: transparent;
+    -fx-border-width: 0;
+}
+
+:seamless-frame .drawer-toolbar {
+    -fx-background-color: transparent;
+}
+
+:seamless-frame .custom-title-bar {
+    -fx-background-color: transparent;
+}
+
+/* Content area — левая граница отделяет от toolbar */
+:seamless-frame .content-area {
+    -fx-border-color: rgba(255, 255, 255, 0.08);
+    -fx-border-width: 0 0 0 1;
+}
+
+:seamless-frame.light-theme .content-area {
+    -fx-border-color: rgba(0, 0, 0, 0.1);
+}
+
+/* Node list — прозрачный на seamless, vibrancy просвечивает */
+:seamless-frame .node-list-pane {
+    -fx-background-color: transparent;
+}
+
+/* ============================================================
+   Separate frame (fallback) — стандартные непрозрачные фоны
+   ============================================================ */
+
+:separate-frame .drawer-pane {
+    -fx-background-color: -color-bg-default;
+    -fx-border-color: -color-border-default;
+}
+
+/* Node list — на separate-frame полупрозрачный фон вместо vibrancy */
+:separate-frame .node-list-pane {
+    -fx-background-color: -color-bg-subtle;
+}
+
+:separate-frame .content-area {
+    -fx-background-color: -color-bg-default;
+}
+
+:separate-frame .custom-title-bar {
+    -fx-background-color: -color-bg-subtle;
+}
+
+:separate-frame .title-bar-label {
+    -fx-text-fill: -color-fg-muted;
+}
+
+:separate-frame .main-footer {
+    -fx-background-color: -color-bg-subtle;
+}
+
+/* ============================================================
+   Chat — список чатов
+   ============================================================ */
+
+.chat-form {
+    -fx-background-color: transparent;
+}
+
+.chat-split-pane {
+    -fx-background-color: transparent;
+    -fx-padding: 0;
+}
+
+.chat-split-pane > .split-pane-divider {
+    -fx-background-color: transparent;
+    -fx-padding: 0 1 0 0;
+}
+
+/* Левая панель — список чатов */
+.chat-list-pane {
+    -fx-background-color: transparent;
+}
+
+.chat-search-field {
+    -fx-background-radius: 8;
+    -fx-padding: 8 12;
+    -fx-background-color: rgba(255, 255, 255, 0.08);
+    -fx-text-fill: rgba(255, 255, 255, 0.9);
+    -fx-prompt-text-fill: rgba(255, 255, 255, 0.4);
+}
+
+.light-theme .chat-search-field {
+    -fx-background-color: rgba(0, 0, 0, 0.06);
+    -fx-text-fill: rgba(0, 0, 0, 0.85);
+    -fx-prompt-text-fill: rgba(0, 0, 0, 0.4);
+}
+
+.chat-new-btn {
+    -fx-background-color: rgba(255, 255, 255, 0.08);
+    -fx-background-radius: 8;
+    -fx-text-fill: rgba(255, 255, 255, 0.7);
+    -fx-font-size: 16px;
+    -fx-min-width: 36;
+    -fx-min-height: 36;
+    -fx-max-height: 36;
+    -fx-padding: 0 8;
+    -fx-cursor: hand;
+    -fx-background-insets: 0;
+    -fx-border-width: 0;
+}
+
+.light-theme .chat-new-btn {
+    -fx-background-color: rgba(0, 0, 0, 0.06);
+    -fx-text-fill: rgba(0, 0, 0, 0.6);
+}
+
+.chat-new-btn:hover {
+    -fx-background-color: rgba(255, 255, 255, 0.15);
+}
+
+.light-theme .chat-new-btn:hover {
+    -fx-background-color: rgba(0, 0, 0, 0.1);
+}
+
+/* Список чатов */
+.chat-list-view {
+    -fx-background-color: transparent;
+    -fx-border-width: 0;
+    -fx-padding: 0;
+}
+
+.chat-list-view .virtual-flow .clipped-container .sheet .list-cell {
+    -fx-background-color: transparent;
+    -fx-padding: 0;
+    -fx-border-color: rgba(255, 255, 255, 0.08);
+    -fx-border-width: 0 0 1 0;
+}
+
+.light-theme .chat-list-view .virtual-flow .clipped-container .sheet .list-cell {
+    -fx-border-color: rgba(0, 0, 0, 0.08);
+}
+
+.chat-list-view .virtual-flow .clipped-container .sheet .list-cell:selected {
+    -fx-background-color: #3A3A3C;
+    -fx-background-radius: 0;
+    -fx-border-color: transparent;
+}
+
+.light-theme .chat-list-view .virtual-flow .clipped-container .sheet .list-cell:selected {
+    -fx-background-color: #D1D1D6;
+}
+
+.chat-list-view .list-cell:selected .chat-name-label {
+    -fx-text-fill: white;
+}
+
+.light-theme .chat-list-view .list-cell:selected .chat-name-label {
+    -fx-text-fill: rgba(0, 0, 0, 0.9);
+}
+
+.chat-list-view .list-cell:selected .chat-preview-label {
+    -fx-text-fill: rgba(255, 255, 255, 0.7);
+}
+
+.light-theme .chat-list-view .list-cell:selected .chat-preview-label {
+    -fx-text-fill: rgba(0, 0, 0, 0.6);
+}
+
+.chat-list-view .list-cell:selected .chat-time-label {
+    -fx-text-fill: rgba(255, 255, 255, 0.6);
+}
+
+.light-theme .chat-list-view .list-cell:selected .chat-time-label {
+    -fx-text-fill: rgba(0, 0, 0, 0.5);
+}
+
+/* Текстовые стили чата */
+.chat-name-label {
+    -fx-text-fill: rgba(255, 255, 255, 0.9);
+}
+
+.light-theme .chat-name-label {
+    -fx-text-fill: rgba(0, 0, 0, 0.85);
+}
+
+.chat-preview-label {
+    -fx-text-fill: rgba(255, 255, 255, 0.5);
+    -fx-font-size: 12px;
+    -fx-text-overrun: ellipsis;
+}
+
+.light-theme .chat-preview-label {
+    -fx-text-fill: rgba(0, 0, 0, 0.5);
+}
+
+.chat-time-label {
+    -fx-text-fill: rgba(255, 255, 255, 0.4);
+    -fx-font-size: 11px;
+}
+
+.light-theme .chat-time-label {
+    -fx-text-fill: rgba(0, 0, 0, 0.4);
+}
+
+/* Бейдж непрочитанных сообщений */
+.chat-unread-badge {
+    -fx-background-color: -color-accent-emphasis;
+    -fx-background-radius: 10;
+    -fx-padding: 2 6;
+    -fx-text-fill: white;
+    -fx-font-size: 11px;
+    -fx-font-weight: bold;
+    -fx-min-width: 20;
+    -fx-alignment: center;
+}
+
+/* Правая панель (детали/плейсхолдер) */
+.chat-detail-pane {
+    -fx-background-color: -color-bg-default;
+    -fx-border-color: rgba(255, 255, 255, 0.08);
+    -fx-border-width: 0 0 0 1;
+}
+
+.light-theme .chat-detail-pane {
+    -fx-border-color: rgba(0, 0, 0, 0.1);
+}
+
+/* Seamless / separate frame варианты */
+:seamless-frame .chat-list-pane {
+    -fx-background-color: transparent;
+}
+
+:separate-frame .chat-list-pane {
+    -fx-background-color: -color-bg-subtle;
+}
+
+/* ============================================================
+   Chat — правая панель: заголовок, сообщения, ввод
+   ============================================================ */
+
+/* Заголовок чата */
+.chat-header {
+    -fx-background-color: -color-bg-subtle;
+    -fx-border-color: rgba(255, 255, 255, 0.08);
+    -fx-border-width: 0 0 1 0;
+    -fx-min-height: 56;
+}
+
+.light-theme .chat-header {
+    -fx-border-color: rgba(0, 0, 0, 0.1);
+}
+
+.chat-header-name {
+    -fx-text-fill: rgba(255, 255, 255, 0.9);
+}
+
+.light-theme .chat-header-name {
+    -fx-text-fill: rgba(0, 0, 0, 0.85);
+}
+
+/* Область сообщений */
+.chat-message-scroll {
+    -fx-background-color: transparent;
+    -fx-background: transparent;
+}
+
+.chat-message-scroll > .viewport {
+    -fx-background-color: transparent;
+}
+
+.chat-message-scroll .scroll-bar:vertical {
+    -fx-pref-width: 6;
+}
+
+.chat-message-scroll .scroll-bar:vertical .thumb {
+    -fx-background-radius: 3;
+}
+
+.chat-message-container {
+    -fx-background-color: transparent;
+}
+
+/* Кнопка «прокрутка вниз» — полупрозрачный круг поверх чата */
+.chat-scroll-down-btn {
+    -fx-background-color: rgba(40, 40, 40, 0.55);
+    -fx-text-fill: rgba(255, 255, 255, 0.9);
+    -fx-font-size: 18px;
+    -fx-font-weight: bold;
+    -fx-min-width: 36;
+    -fx-min-height: 36;
+    -fx-max-width: 36;
+    -fx-max-height: 36;
+    -fx-background-radius: 18;
+    -fx-cursor: hand;
+    -fx-padding: 0;
+    -fx-effect: dropshadow(gaussian, rgba(0, 0, 0, 0.25), 4, 0, 0, 2);
+}
+
+.chat-scroll-down-btn:hover {
+    -fx-background-color: rgba(40, 40, 40, 0.8);
+}
+
+.light-theme .chat-scroll-down-btn {
+    -fx-background-color: rgba(255, 255, 255, 0.65);
+    -fx-text-fill: rgba(0, 0, 0, 0.7);
+    -fx-effect: dropshadow(gaussian, rgba(0, 0, 0, 0.15), 4, 0, 0, 2);
+}
+
+.light-theme .chat-scroll-down-btn:hover {
+    -fx-background-color: rgba(255, 255, 255, 0.9);
+}
+
+/* Пузыри сообщений — входящее (используем lookup-цвет, авто-адаптация light/dark) */
+.chat-bubble-incoming {
+    -fx-background-color: -color-bg-subtle;
+    -fx-background-radius: 12 12 12 4;
+    -fx-padding: 8 12;
+}
+
+/* Пузыри — исходящее (серый фон, как входящее) */
+.chat-bubble-outgoing {
+    -fx-background-color: -color-bg-subtle;
+    -fx-background-radius: 12 12 4 12;
+    -fx-padding: 8 12;
+}
+
+/* Пузыри — упоминание моей ноды (тёмно-зелёный фон) */
+.chat-bubble-mentioned {
+    -fx-background-color: #1B5E20;
+}
+
+.chat-bubble-mentioned .chat-bubble-text {
+    -fx-text-fill: rgba(255, 255, 255, 0.9);
+}
+
+.chat-bubble-mentioned .chat-bubble-sender {
+    -fx-text-fill: #81C784;
+}
+
+.chat-bubble-mentioned .chat-bubble-time,
+.chat-bubble-mentioned .chat-bubble-hops {
+    -fx-text-fill: rgba(255, 255, 255, 0.45);
+}
+
+.chat-bubble-mentioned .chat-bubble-quote {
+    -fx-text-fill: rgba(255, 255, 255, 0.6);
+    -fx-border-color: rgba(255, 255, 255, 0.3);
+}
+
+.light-theme .chat-bubble-mentioned {
+    -fx-background-color: #C8E6C9;
+}
+
+.light-theme .chat-bubble-mentioned .chat-bubble-text {
+    -fx-text-fill: rgba(0, 0, 0, 0.85);
+}
+
+.light-theme .chat-bubble-mentioned .chat-bubble-sender {
+    -fx-text-fill: #2E7D32;
+}
+
+.light-theme .chat-bubble-mentioned .chat-bubble-time,
+.light-theme .chat-bubble-mentioned .chat-bubble-hops {
+    -fx-text-fill: rgba(0, 0, 0, 0.45);
+}
+
+.light-theme .chat-bubble-mentioned .chat-bubble-quote {
+    -fx-text-fill: rgba(0, 0, 0, 0.6);
+    -fx-border-color: rgba(0, 0, 0, 0.2);
+}
+
+/* Пузыри — системное/бот (тёмно-синий, белый текст на тёмном фоне) */
+.chat-bubble-system {
+    -fx-background-color: #1A237E;
+    -fx-background-radius: 12 12 12 4;
+    -fx-padding: 8 12;
+}
+
+.light-theme .chat-bubble-system {
+    -fx-background-color: #BBDEFB;
+}
+
+/* Текстовые элементы пузырей */
+.chat-bubble-sender {
+    -fx-text-fill: -color-accent-emphasis;
+    -fx-font-size: 12px;
+    -fx-font-weight: bold;
+}
+
+.chat-bubble-quote {
+    -fx-text-fill: -color-fg-muted;
+    -fx-font-size: 12px;
+    -fx-font-style: italic;
+    -fx-border-color: -color-border-default;
+    -fx-border-width: 0 0 0 2;
+    -fx-padding: 2 0 2 8;
+}
+
+/* Текст пузыря — lookup-цвет, авто-адаптация light/dark */
+.chat-bubble-text {
+    -fx-text-fill: -color-fg-default;
+    -fx-font-size: 13px;
+}
+
+/* Системные: белый текст на тёмном фоне */
+.chat-bubble-system .chat-bubble-text {
+    -fx-text-fill: rgba(255, 255, 255, 0.9);
+}
+
+.light-theme .chat-bubble-system .chat-bubble-text {
+    -fx-text-fill: rgba(0, 0, 0, 0.85);
+}
+
+.chat-bubble-meta {
+    -fx-padding: 2 0 0 0;
+}
+
+/* Время и хопы — lookup-цвет, авто-адаптация */
+.chat-bubble-time {
+    -fx-text-fill: -color-fg-muted;
+    -fx-font-size: 10px;
+}
+
+.chat-bubble-hops {
+    -fx-text-fill: -color-fg-muted;
+    -fx-font-size: 10px;
+}
+
+.chat-bubble-status {
+    -fx-text-fill: -color-fg-muted;
+    -fx-font-size: 11px;
+}
+
+.chat-bubble-status-failed {
+    -fx-text-fill: #E53935;
+}
+
+/* Системные: белый мета-текст на тёмном фоне */
+.chat-bubble-system .chat-bubble-time {
+    -fx-text-fill: rgba(255, 255, 255, 0.45);
+}
+
+.light-theme .chat-bubble-system .chat-bubble-time {
+    -fx-text-fill: rgba(0, 0, 0, 0.45);
+}
+
+.chat-countdown-cancel {
+    -fx-text-fill: rgba(255, 255, 255, 0.6);
+    -fx-font-size: 11px;
+    -fx-padding: 2 0 0 0;
+    -fx-underline: true;
+}
+
+.chat-countdown-cancel:hover {
+    -fx-text-fill: rgba(255, 255, 255, 0.9);
+}
+
+.light-theme .chat-countdown-cancel {
+    -fx-text-fill: rgba(0, 0, 0, 0.5);
+}
+
+.light-theme .chat-countdown-cancel:hover {
+    -fx-text-fill: rgba(0, 0, 0, 0.8);
+}
+
+/* Traceroute визуализация */
+.traceroute-hop-name {
+    -fx-font-size: 10px;
+    -fx-text-fill: rgba(255, 255, 255, 0.85);
+    -fx-padding: 1 0 0 0;
+}
+
+.light-theme .traceroute-hop-name {
+    -fx-text-fill: rgba(0, 0, 0, 0.75);
+}
+
+.traceroute-snr-label {
+    -fx-font-size: 9px;
+    -fx-padding: 0;
+}
+
+.traceroute-section-label {
+    -fx-font-size: 11px;
+    -fx-padding: 4 0 0 0;
+    -fx-opacity: 0.7;
+}
+
+/* Строки сообщений */
+.chat-message-row-incoming {
+    -fx-padding: 2 0;
+}
+
+.chat-message-row-outgoing {
+    -fx-padding: 2 0;
+}
+
+.chat-message-row-system {
+    -fx-padding: 2 0;
+}
+
+/* Панель ввода */
+.chat-input-bar {
+    -fx-background-color: -color-bg-subtle;
+    -fx-border-color: rgba(255, 255, 255, 0.08);
+    -fx-border-width: 1 0 0 0;
+    -fx-min-height: 50;
+}
+
+.light-theme .chat-input-bar {
+    -fx-border-color: rgba(0, 0, 0, 0.1);
+}
+
+.chat-message-input {
+    -fx-background-radius: 18;
+    -fx-padding: 8 14;
+    -fx-background-color: rgba(255, 255, 255, 0.08);
+    -fx-text-fill: rgba(255, 255, 255, 0.9);
+    -fx-prompt-text-fill: rgba(255, 255, 255, 0.4);
+}
+
+.light-theme .chat-message-input {
+    -fx-background-color: rgba(0, 0, 0, 0.06);
+    -fx-text-fill: rgba(0, 0, 0, 0.85);
+    -fx-prompt-text-fill: rgba(0, 0, 0, 0.4);
+}
+
+.chat-emoji-btn {
+    -fx-background-color: transparent;
+    -fx-font-size: 18px;
+    -fx-padding: 4;
+    -fx-cursor: hand;
+    -fx-background-insets: 0;
+    -fx-border-width: 0;
+}
+
+.chat-emoji-btn:hover {
+    -fx-background-color: rgba(255, 255, 255, 0.1);
+    -fx-background-radius: 14;
+}
+
+.light-theme .chat-emoji-btn:hover {
+    -fx-background-color: rgba(0, 0, 0, 0.08);
+}
+
+.chat-send-btn {
+    -fx-background-color: -color-accent-emphasis;
+    -fx-text-fill: white;
+    -fx-font-size: 16px;
+    -fx-background-radius: 14;
+    -fx-min-width: 36;
+    -fx-min-height: 36;
+    -fx-max-width: 36;
+    -fx-max-height: 36;
+    -fx-padding: 0;
+    -fx-cursor: hand;
+    -fx-background-insets: 0;
+    -fx-border-width: 0;
+}
+
+.chat-send-btn:hover {
+    -fx-opacity: 0.85;
+}
+
+.chat-send-btn:disabled {
+    -fx-opacity: 0.4;
+}
+
+.chat-char-count {
+    -fx-text-fill: -color-fg-muted;
+    -fx-font-size: 11px;
+}
+
+.chat-char-count-limit {
+    -fx-text-fill: #E53935;
+}
+
+/* Разделители чата */
+.chat-header-separator {
+    -fx-padding: 0;
+}
+
+.chat-input-separator {
+    -fx-padding: 0;
+}
+
+/* Панель ответа на сообщение */
+.chat-reply-bar {
+    -fx-background-color: rgba(255, 255, 255, 0.05);
+    -fx-border-color: rgba(255, 255, 255, 0.08);
+    -fx-border-width: 1 0 0 0;
+}
+
+.light-theme .chat-reply-bar {
+    -fx-background-color: rgba(0, 0, 0, 0.03);
+    -fx-border-color: rgba(0, 0, 0, 0.1);
+}
+
+.chat-reply-icon {
+    -fx-text-fill: -color-accent-emphasis;
+    -fx-font-size: 14px;
+    -fx-font-weight: bold;
+}
+
+.chat-reply-quote {
+    -fx-text-fill: -color-fg-muted;
+    -fx-font-size: 12px;
+    -fx-border-color: -color-accent-emphasis;
+    -fx-border-width: 0 0 0 2;
+    -fx-padding: 2 0 2 8;
+    -fx-text-overrun: ellipsis;
+}
+
+.chat-reply-cancel {
+    -fx-background-color: transparent;
+    -fx-text-fill: -color-fg-muted;
+    -fx-font-size: 13px;
+    -fx-padding: 2 6;
+    -fx-cursor: hand;
+    -fx-background-insets: 0;
+    -fx-border-width: 0;
+}
+
+.chat-reply-cancel:hover {
+    -fx-text-fill: -color-fg-default;
+    -fx-background-color: rgba(255, 255, 255, 0.1);
+    -fx-background-radius: 10;
+}
+
+.light-theme .chat-reply-cancel:hover {
+    -fx-background-color: rgba(0, 0, 0, 0.08);
+}
+
+/* ═══════════════════ Emoji Picker ═══════════════════ */
+
+.emoji-picker {
+    -fx-background-color: -color-bg-default;
+    -fx-border-color: -color-border-default;
+    -fx-border-width: 1;
+    -fx-border-radius: 12;
+    -fx-background-radius: 12;
+    -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.3), 12, 0, 0, 4);
+}
+
+.emoji-picker-search {
+    -fx-background-radius: 8;
+    -fx-padding: 6 10;
+    -fx-background-color: rgba(255, 255, 255, 0.08);
+    -fx-text-fill: rgba(255, 255, 255, 0.9);
+    -fx-prompt-text-fill: rgba(255, 255, 255, 0.4);
+}
+
+.light-theme .emoji-picker-search {
+    -fx-background-color: rgba(0, 0, 0, 0.06);
+    -fx-text-fill: rgba(0, 0, 0, 0.85);
+    -fx-prompt-text-fill: rgba(0, 0, 0, 0.4);
+}
+
+.emoji-picker-categories {
+    -fx-padding: 4 0;
+}
+
+.emoji-cat-btn {
+    -fx-font-size: 18px;
+    -fx-padding: 4 6;
+    -fx-cursor: hand;
+    -fx-background-color: transparent;
+    -fx-background-radius: 8;
+    -fx-opacity: 0.6;
+}
+
+.emoji-cat-btn:hover {
+    -fx-background-color: rgba(255, 255, 255, 0.1);
+    -fx-opacity: 1.0;
+}
+
+.light-theme .emoji-cat-btn:hover {
+    -fx-background-color: rgba(0, 0, 0, 0.08);
+}
+
+.emoji-cat-btn-active {
+    -fx-opacity: 1.0;
+    -fx-border-color: -color-accent-emphasis;
+    -fx-border-width: 0 0 2 0;
+}
+
+.emoji-picker-scroll {
+    -fx-background-color: transparent;
+    -fx-background: transparent;
+}
+
+.emoji-picker-scroll .viewport {
+    -fx-background-color: transparent;
+}
+
+.emoji-picker-grid {
+    -fx-padding: 4;
+}
+
+.emoji-cell {
+    -fx-font-size: 22px;
+    -fx-cursor: hand;
+    -fx-background-color: transparent;
+    -fx-background-radius: 6;
+    -fx-alignment: center;
+}
+
+.emoji-cell:hover {
+    -fx-background-color: rgba(255, 255, 255, 0.12);
+}
+
+.light-theme .emoji-cell:hover {
+    -fx-background-color: rgba(0, 0, 0, 0.08);
+}
+
+/* ContextMenu */
+.context-menu {
+    -fx-background-color: -color-bg-default;
+    -fx-border-color: -color-border-default;
+    -fx-border-width: 1;
+    -fx-border-radius: 8;
+    -fx-background-radius: 8;
+    -fx-padding: 4;
+    -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.3), 12, 0, 0, 4);
+}
+
+.menu-item {
+    -fx-background-color: transparent;
+    -fx-background-radius: 6;
+    -fx-padding: 6 12;
+}
+
+.menu-item:hover, .menu-item:focused {
+    -fx-background-color: rgba(255, 255, 255, 0.1);
+}
+
+.menu-item .label {
+    -fx-text-fill: -color-fg-default;
+}
+
+.light-theme .menu-item:hover,
+.light-theme .menu-item:focused {
+    -fx-background-color: rgba(0, 0, 0, 0.08);
+}
+

@@ -1,0 +1,150 @@
+package com.meshtastic.client.service;
+
+import org.meshtastic.proto.*;
+import com.meshtastic.client.model.DeviceState;
+import com.meshtastic.client.model.NodeData;
+import com.meshtastic.client.model.TelemetryEntry;
+import com.meshtastic.client.protocol.FromRadioListener;
+import com.meshtastic.client.protocol.ProtocolHandler;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ThreadLocalRandom;
+
+public class ConfigExchangeService implements FromRadioListener {
+
+    private static final Logger log = LoggerFactory.getLogger(ConfigExchangeService.class);
+
+    private final ProtocolHandler protocolHandler;
+    private final DeviceState deviceState;
+    private int sentConfigId;
+    private CompletableFuture<DeviceState> future;
+
+    public ConfigExchangeService(ProtocolHandler protocolHandler, DeviceState deviceState) {
+        this.protocolHandler = protocolHandler;
+        this.deviceState = deviceState;
+    }
+
+    public CompletableFuture<DeviceState> startConfigExchange() {
+        future = new CompletableFuture<>();
+        deviceState.clear();
+
+        sentConfigId = ThreadLocalRandom.current().nextInt(1, Integer.MAX_VALUE);
+        log.info("Starting config exchange with want_config_id={}", sentConfigId);
+
+        protocolHandler.addListener(this);
+
+        MeshProtos.ToRadio toRadio = MeshProtos.ToRadio.newBuilder()
+                .setWantConfigId(sentConfigId)
+                .build();
+        protocolHandler.sendToRadio(toRadio);
+
+        return future;
+    }
+
+    @Override
+    public void onMyNodeInfo(MeshProtos.MyNodeInfo myInfo) {
+        deviceState.setMyNodeNum(myInfo.getMyNodeNum());
+        log.info("My node number: {}", myInfo.getMyNodeNum());
+    }
+
+    @Override
+    public void onNodeInfo(MeshProtos.NodeInfo nodeInfo) {
+        NodeData node = deviceState.getOrCreateNode(nodeInfo.getNum());
+
+        if (nodeInfo.hasUser()) {
+            MeshProtos.User user = nodeInfo.getUser();
+            // Protobuf возвращает "" для незаполненных строковых полей —
+            // пустые значения не должны затирать существующие данные
+            if (!user.getLongName().isEmpty()) node.setLongName(user.getLongName());
+            if (!user.getShortName().isEmpty()) node.setShortName(user.getShortName());
+            if (!user.getId().isEmpty()) node.setNodeId(user.getId());
+            if (user.getRole() != ConfigProtos.Config.DeviceConfig.Role.CLIENT || node.getRole() == null) {
+                node.setRole(user.getRole().name());
+            }
+            if (user.getHwModel() != MeshProtos.HardwareModel.UNSET || node.getHwModel() == null) {
+                node.setHwModel(user.getHwModel().name());
+            }
+            if (!user.getPublicKey().isEmpty()) {
+                node.setPublicKey(user.getPublicKey().toByteArray());
+            }
+        }
+
+        if (nodeInfo.hasPosition()) {
+            MeshProtos.Position pos = nodeInfo.getPosition();
+            // Нулевые координаты означают отсутствие данных — не затираем существующие
+            if (pos.getLatitudeI() != 0) node.setLatitude(pos.getLatitudeI() * 1e-7);
+            if (pos.getLongitudeI() != 0) node.setLongitude(pos.getLongitudeI() * 1e-7);
+            if (pos.getAltitude() != 0) node.setAltitude(pos.getAltitude());
+        }
+
+        if (nodeInfo.getSnr() != 0) node.setSnr(nodeInfo.getSnr());
+        if (nodeInfo.getLastHeard() != 0) node.setLastHeard(nodeInfo.getLastHeard());
+        if (nodeInfo.getHopsAway() != 0) node.setHopsAway(nodeInfo.getHopsAway());
+
+        if (nodeInfo.hasDeviceMetrics()) {
+            TelemetryProtos.DeviceMetrics dm = nodeInfo.getDeviceMetrics();
+            if (dm.getBatteryLevel() != 0) node.setBatteryLevel(dm.getBatteryLevel());
+            if (dm.getVoltage() != 0) node.setVoltage(dm.getVoltage());
+            if (dm.getChannelUtilization() != 0) node.setChannelUtilization(dm.getChannelUtilization());
+            if (dm.getAirUtilTx() != 0) node.setAirUtilTx(dm.getAirUtilTx());
+            if (dm.getUptimeSeconds() != 0) node.setUptimeSeconds(dm.getUptimeSeconds());
+
+            // Сохранить начальную точку телеметрии, если есть реальные данные
+            // (пропускаем полностью нулевые записи — артефакты config exchange)
+            if (dm.getBatteryLevel() != 0 || dm.getChannelUtilization() != 0 || dm.getAirUtilTx() != 0) {
+                long ts = nodeInfo.getLastHeard() > 0 ? nodeInfo.getLastHeard() : System.currentTimeMillis() / 1000;
+                TelemetryEntry entry = new TelemetryEntry(ts, nodeInfo.getNum());
+                entry.setBatteryLevel(dm.getBatteryLevel());
+                entry.setVoltage(dm.getVoltage());
+                entry.setChannelUtilization(dm.getChannelUtilization());
+                entry.setAirUtilTx(dm.getAirUtilTx());
+                deviceState.addTelemetryEntry(entry);
+                NodeCacheService.getInstance().persistTelemetry(entry);
+            }
+        }
+
+        log.debug("Updated node: {}", node);
+    }
+
+    @Override
+    public void onConfig(ConfigProtos.Config config) {
+        deviceState.addConfig(config);
+    }
+
+    @Override
+    public void onModuleConfig(ModuleConfigProtos.ModuleConfig moduleConfig) {
+        deviceState.addModuleConfig(moduleConfig);
+    }
+
+    @Override
+    public void onChannel(ChannelProtos.Channel channel) {
+        deviceState.addChannel(channel);
+    }
+
+    @Override
+    public void onConfigComplete(int configCompleteId) {
+        if (configCompleteId == sentConfigId) {
+            log.info("Config exchange complete. Nodes: {}, Channels: {}, Configs: {}",
+                    deviceState.getNodeCount(),
+                    deviceState.getChannels().size(),
+                    deviceState.getConfigs().size());
+            protocolHandler.removeListener(this);
+            NodeCacheService ncs = NodeCacheService.getInstance();
+            ncs.updateAll(deviceState.getNodeDb());
+
+            // Загрузить архив телеметрии из H2 + подчистить старые записи
+            ncs.pruneTelemetryHistory(30);
+            var archived = ncs.loadTelemetryHistory(200);
+            deviceState.prependTelemetryHistory(archived);
+            log.info("Loaded {} archived telemetry entries from DB", archived.size());
+
+            if (future != null) {
+                future.complete(deviceState);
+            }
+        } else {
+            log.warn("Received config_complete_id {} but expected {}", configCompleteId, sentConfigId);
+        }
+    }
+}

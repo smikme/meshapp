@@ -1,0 +1,201 @@
+package com.meshtastic.client.service;
+
+import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
+import com.google.gson.reflect.TypeToken;
+import com.meshtastic.client.connection.ConnectionException;
+import com.meshtastic.client.connection.ConnectionListener;
+import com.meshtastic.client.connection.TcpConnection;
+import com.meshtastic.client.model.ConnectionEntry;
+import com.meshtastic.client.model.DeviceState;
+import com.meshtastic.client.protocol.ProtocolHandler;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.io.*;
+import java.lang.reflect.Type;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.*;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CopyOnWriteArrayList;
+
+public class ConnectionManager {
+
+    private static final Logger log = LoggerFactory.getLogger(ConnectionManager.class);
+
+    private static ConnectionManager instance;
+
+    private final List<ConnectionEntry> entries = new ArrayList<>();
+    private final Map<String, TcpConnection> activeConnections = new HashMap<>();
+    private final Map<String, DeviceState> deviceStates = new HashMap<>();
+    private final Map<String, ProtocolHandler> protocolHandlers = new HashMap<>();
+    private final Map<String, CompletableFuture<DeviceState>> configFutures = new HashMap<>();
+    private final List<Runnable> listeners = new CopyOnWriteArrayList<>();
+    private final Gson gson = new GsonBuilder().setPrettyPrinting().create();
+    private final Path configPath;
+
+    private ConnectionManager() {
+        String home = System.getProperty("user.home");
+        configPath = Paths.get(home, ".meshapp", "connections.json");
+        load();
+    }
+
+    public static synchronized ConnectionManager getInstance() {
+        if (instance == null) {
+            instance = new ConnectionManager();
+        }
+        return instance;
+    }
+
+    public void load() {
+        if (!Files.exists(configPath)) {
+            return;
+        }
+        try (Reader reader = new InputStreamReader(Files.newInputStream(configPath), StandardCharsets.UTF_8)) {
+            Type listType = new TypeToken<List<ConnectionEntry>>() {}.getType();
+            List<ConnectionEntry> loaded = gson.fromJson(reader, listType);
+            if (loaded != null) {
+                entries.clear();
+                entries.addAll(loaded);
+            }
+        } catch (Exception e) {
+            log.error("Failed to load connections from {}", configPath, e);
+        }
+    }
+
+    public void save() {
+        try {
+            Files.createDirectories(configPath.getParent());
+            try (Writer writer = new OutputStreamWriter(Files.newOutputStream(configPath), StandardCharsets.UTF_8)) {
+                gson.toJson(entries, writer);
+            }
+        } catch (Exception e) {
+            log.error("Failed to save connections to {}", configPath, e);
+        }
+    }
+
+    public void addEntry(ConnectionEntry entry) {
+        entries.add(entry);
+        save();
+        fireChanged();
+    }
+
+    public void removeEntry(String id) {
+        disconnect(id);
+        entries.removeIf(e -> e.getId().equals(id));
+        save();
+        fireChanged();
+    }
+
+    public void connect(String id) throws ConnectionException {
+        ConnectionEntry entry = findEntry(id);
+        if (entry == null) {
+            throw new ConnectionException("Connection entry not found: " + id);
+        }
+        if (activeConnections.containsKey(id)) {
+            return;
+        }
+        TcpConnection tcp = new TcpConnection(entry.getHost(), entry.getPort());
+        tcp.setConnectionListener(new ConnectionListener() {
+            @Override
+            public void onConnected() {
+                entry.setConnected(true);
+                fireChanged();
+            }
+
+            @Override
+            public void onDisconnected() {
+                entry.setConnected(false);
+                activeConnections.remove(id);
+                deviceStates.remove(id);
+                protocolHandlers.remove(id);
+                configFutures.remove(id);
+                fireChanged();
+            }
+
+            @Override
+            public void onConnectionError(String message, Throwable cause) {
+                entry.setConnected(false);
+                activeConnections.remove(id);
+                deviceStates.remove(id);
+                protocolHandlers.remove(id);
+                configFutures.remove(id);
+                fireChanged();
+            }
+        });
+        tcp.connect();
+        activeConnections.put(id, tcp);
+
+        ProtocolHandler protocolHandler = new ProtocolHandler(tcp);
+        protocolHandlers.put(id, protocolHandler);
+        DeviceState deviceState = new DeviceState();
+        deviceStates.put(id, deviceState);
+
+        MessageListenerService messageListener = new MessageListenerService(deviceState);
+        protocolHandler.addListener(messageListener);
+
+        ConfigExchangeService configExchange = new ConfigExchangeService(protocolHandler, deviceState);
+        CompletableFuture<DeviceState> future = configExchange.startConfigExchange();
+        configFutures.put(id, future);
+
+        entry.setConnected(true);
+        fireChanged();
+    }
+
+    public void disconnect(String id) {
+        TcpConnection tcp = activeConnections.remove(id);
+        deviceStates.remove(id);
+        protocolHandlers.remove(id);
+        configFutures.remove(id);
+        if (tcp != null) {
+            tcp.disconnect();
+        }
+        ConnectionEntry entry = findEntry(id);
+        if (entry != null) {
+            entry.setConnected(false);
+        }
+        fireChanged();
+    }
+
+    public List<ConnectionEntry> getEntries() {
+        return new ArrayList<>(entries);
+    }
+
+    public DeviceState getDeviceState(String id) {
+        return deviceStates.get(id);
+    }
+
+    public ProtocolHandler getProtocolHandler(String id) {
+        return protocolHandlers.get(id);
+    }
+
+    public CompletableFuture<DeviceState> getConfigFuture(String id) {
+        return configFutures.get(id);
+    }
+
+    public void addListener(Runnable listener) {
+        listeners.add(listener);
+    }
+
+    public void removeListener(Runnable listener) {
+        listeners.remove(listener);
+    }
+
+    private ConnectionEntry findEntry(String id) {
+        for (ConnectionEntry e : entries) {
+            if (e.getId().equals(id)) {
+                return e;
+            }
+        }
+        return null;
+    }
+
+    private void fireChanged() {
+        for (Runnable listener : listeners) {
+            listener.run();
+        }
+    }
+}

@@ -1,0 +1,94 @@
+package com.meshtastic.client.protocol;
+
+import org.meshtastic.proto.MeshProtos;
+import com.google.protobuf.InvalidProtocolBufferException;
+import com.meshtastic.client.connection.MeshtasticConnection;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
+
+public class ProtocolHandler {
+
+    private static final Logger log = LoggerFactory.getLogger(ProtocolHandler.class);
+
+    private final MeshtasticConnection connection;
+    private final List<FromRadioListener> listeners = new CopyOnWriteArrayList<>();
+
+    public ProtocolHandler(MeshtasticConnection connection) {
+        this.connection = connection;
+        connection.setDataListener(this::handleRawPacket);
+    }
+
+    public void addListener(FromRadioListener listener) {
+        listeners.add(listener);
+    }
+
+    public void removeListener(FromRadioListener listener) {
+        listeners.remove(listener);
+    }
+
+    public void sendToRadio(MeshProtos.ToRadio toRadio) {
+        byte[] frame = PacketFramer.frame(toRadio);
+        log.debug("Sending ToRadio: {} ({} bytes framed)", toRadio.getPayloadVariantCase(), frame.length);
+        connection.sendBytes(frame);
+    }
+
+    private void handleRawPacket(byte[] data) {
+        try {
+            MeshProtos.FromRadio fromRadio = MeshProtos.FromRadio.parseFrom(data);
+            dispatchFromRadio(fromRadio);
+        } catch (InvalidProtocolBufferException e) {
+            log.warn("Failed to parse FromRadio ({} bytes): {}", data.length, e.getMessage());
+        }
+    }
+
+    private void dispatchFromRadio(MeshProtos.FromRadio fromRadio) {
+        switch (fromRadio.getPayloadVariantCase()) {
+            case MY_INFO -> {
+                log.info("Received MyNodeInfo: nodeNum={}", fromRadio.getMyInfo().getMyNodeNum());
+                for (FromRadioListener l : listeners) l.onMyNodeInfo(fromRadio.getMyInfo());
+            }
+            case NODE_INFO -> {
+                log.debug("Received NodeInfo: num={}", fromRadio.getNodeInfo().getNum());
+                for (FromRadioListener l : listeners) l.onNodeInfo(fromRadio.getNodeInfo());
+            }
+            case CONFIG -> {
+                log.debug("Received Config: {}", fromRadio.getConfig().getPayloadVariantCase());
+                for (FromRadioListener l : listeners) l.onConfig(fromRadio.getConfig());
+            }
+            case MODULECONFIG -> {
+                log.debug("Received ModuleConfig: {}", fromRadio.getModuleConfig().getPayloadVariantCase());
+                for (FromRadioListener l : listeners) l.onModuleConfig(fromRadio.getModuleConfig());
+            }
+            case CHANNEL -> {
+                log.debug("Received Channel: index={}", fromRadio.getChannel().getIndex());
+                for (FromRadioListener l : listeners) l.onChannel(fromRadio.getChannel());
+            }
+            case CONFIG_COMPLETE_ID -> {
+                log.info("Received config_complete_id: {}", fromRadio.getConfigCompleteId());
+                for (FromRadioListener l : listeners) l.onConfigComplete(fromRadio.getConfigCompleteId());
+            }
+            case PACKET -> {
+                MeshProtos.MeshPacket pkt = fromRadio.getPacket();
+                log.debug("Received MeshPacket: from={} to={} portnum={}",
+                        String.format("!%08x", pkt.getFrom()),
+                        String.format("!%08x", pkt.getTo()),
+                        pkt.hasDecoded() ? pkt.getDecoded().getPortnum() : "encrypted");
+                for (FromRadioListener l : listeners) l.onMeshPacket(pkt);
+            }
+            case LOG_RECORD -> {
+                log.trace("Received LogRecord: {}", fromRadio.getLogRecord().getMessage());
+                for (FromRadioListener l : listeners) l.onLogRecord(fromRadio.getLogRecord());
+            }
+            case QUEUESTATUS -> {
+                var qs = fromRadio.getQueueStatus();
+                log.debug("QueueStatus: res={} free={}/{} meshPacketId={}",
+                        qs.getRes(), qs.getFree(), qs.getMaxlen(), qs.getMeshPacketId());
+                for (FromRadioListener l : listeners) l.onQueueStatus(qs);
+            }
+            default -> log.debug("Unhandled FromRadio variant: {}", fromRadio.getPayloadVariantCase());
+        }
+    }
+}
