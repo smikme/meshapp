@@ -218,4 +218,5 @@ MeshApp собирается в нативные пакеты через `jpacka
 
 <p align="center">
   Создано Konstantin A. Smirnov <a href="mailto:covox@covox.ru">covox@covox.ru</a>
+  [![Telegram](https://img.shields.io/badge/Telegram-@username-blue?logo=telegram)](https://t.me/username)
 </p>
