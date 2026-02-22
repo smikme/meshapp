@@ -17,7 +17,7 @@
   <img src="https://img.shields.io/badge/Platform-Win%20%7C%20macOS%20%7C%20Linux-brightgreen" alt="Platform"/>
   <img src="https://img.shields.io/badge/License-GPL--3.0-blue" alt="License"/>
   <a href="https://t.me/MeshAppClient">
-  <img src="https://img.shields.io/badge/Telegram-@MeshApp-blue?logo=telegram" alt="Telegram">
+  <img src="https://img.shields.io/badge/Telegram-@MeshAppClient-blue?logo=telegram" alt="Telegram">
 </a>
 </p>
 
