@@ -19,6 +19,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 
@@ -39,11 +40,11 @@ public class ConnectionManager {
 
     private static ConnectionManager instance;
 
-    private final List<ConnectionEntry> entries = new ArrayList<>();
-    private final Map<String, TcpConnection> activeConnections = new HashMap<>();
-    private final Map<String, DeviceState> deviceStates = new HashMap<>();
-    private final Map<String, ProtocolHandler> protocolHandlers = new HashMap<>();
-    private final Map<String, CompletableFuture<DeviceState>> configFutures = new HashMap<>();
+    private final List<ConnectionEntry> entries = new CopyOnWriteArrayList<>();
+    private final Map<String, TcpConnection> activeConnections = new ConcurrentHashMap<>();
+    private final Map<String, DeviceState> deviceStates = new ConcurrentHashMap<>();
+    private final Map<String, ProtocolHandler> protocolHandlers = new ConcurrentHashMap<>();
+    private final Map<String, CompletableFuture<DeviceState>> configFutures = new ConcurrentHashMap<>();
     private final List<Runnable> listeners = new CopyOnWriteArrayList<>();
     private final Gson gson = new GsonBuilder().setPrettyPrinting().create();
     private final Path configPath;
@@ -67,7 +68,7 @@ public class ConnectionManager {
         return instance;
     }
 
-    public void load() {
+    public synchronized void load() {
         if (!Files.exists(configPath)) {
             return;
         }
@@ -83,7 +84,7 @@ public class ConnectionManager {
         }
     }
 
-    public void save() {
+    public synchronized void save() {
         try {
             Files.createDirectories(configPath.getParent());
             try (Writer writer = new OutputStreamWriter(Files.newOutputStream(configPath), StandardCharsets.UTF_8)) {
@@ -126,7 +127,7 @@ public class ConnectionManager {
      * @param id идентификатор профиля подключения
      * @throws ConnectionException если профиль не найден или TCP-соединение не удалось
      */
-    public void connect(String id) throws ConnectionException {
+    public synchronized void connect(String id) throws ConnectionException {
         ConnectionEntry entry = findEntry(id);
         if (entry == null) {
             throw new ConnectionException("Connection entry not found: " + id);
@@ -145,20 +146,14 @@ public class ConnectionManager {
             @Override
             public void onDisconnected() {
                 entry.setConnected(false);
-                activeConnections.remove(id);
-                deviceStates.remove(id);
-                protocolHandlers.remove(id);
-                configFutures.remove(id);
+                cleanupConnection(id);
                 fireChanged();
             }
 
             @Override
             public void onConnectionError(String message, Throwable cause) {
                 entry.setConnected(false);
-                activeConnections.remove(id);
-                deviceStates.remove(id);
-                protocolHandlers.remove(id);
-                configFutures.remove(id);
+                cleanupConnection(id);
                 fireChanged();
             }
         });
@@ -187,11 +182,9 @@ public class ConnectionManager {
      *
      * @param id идентификатор профиля подключения
      */
-    public void disconnect(String id) {
-        TcpConnection tcp = activeConnections.remove(id);
-        deviceStates.remove(id);
-        protocolHandlers.remove(id);
-        configFutures.remove(id);
+    public synchronized void disconnect(String id) {
+        TcpConnection tcp = activeConnections.get(id);
+        cleanupConnection(id);
         if (tcp != null) {
             tcp.disconnect();
         }
@@ -224,6 +217,13 @@ public class ConnectionManager {
 
     public void removeListener(Runnable listener) {
         listeners.remove(listener);
+    }
+
+    private synchronized void cleanupConnection(String id) {
+        activeConnections.remove(id);
+        deviceStates.remove(id);
+        protocolHandlers.remove(id);
+        configFutures.remove(id);
     }
 
     private ConnectionEntry findEntry(String id) {
