@@ -41,6 +41,14 @@ public class ChatItem {
         this.peerNodeNum = peerNodeNum;
     }
 
+    /**
+     * Создаёт ChatItem для канала с последним сообщением из in-memory списка.
+     *
+     * @param channel     канал (содержит имя и индекс)
+     * @param messages    список сообщений канала (последнее используется для preview)
+     * @param unreadCount количество непрочитанных сообщений
+     * @return элемент списка чатов
+     */
     public static ChatItem fromChannel(ChannelProtos.Channel channel,
                                        List<MeshMessage> messages,
                                        int unreadCount) {
@@ -68,6 +76,15 @@ public class ChatItem {
                 lastText, lastTime, unreadCount, channel.getIndex(), 0);
     }
 
+    /**
+     * Создаёт ChatItem для DM с последним сообщением из in-memory списка.
+     *
+     * @param peerNodeNum номер ноды собеседника
+     * @param peerNode    данные ноды (для отображения имени), может быть {@code null}
+     * @param messages    список сообщений DM (последнее используется для preview)
+     * @param unreadCount количество непрочитанных сообщений
+     * @return элемент списка чатов
+     */
     public static ChatItem fromDirectMessage(int peerNodeNum, NodeData peerNode,
                                              List<MeshMessage> messages,
                                              int unreadCount) {

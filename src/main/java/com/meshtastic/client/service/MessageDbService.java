@@ -227,7 +227,7 @@ public class MessageDbService {
      *
      * @param chatType   "channel" или "dm"
      * @param chatKey    channelIndex или peerNodeNum
-     * @param beforeDbId загружать сообщения с id < beforeDbId
+     * @param beforeDbId загружать сообщения с id &lt; beforeDbId
      * @param limit      максимальное количество
      * @return список сообщений (старые → новые)
      */

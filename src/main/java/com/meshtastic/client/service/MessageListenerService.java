@@ -15,6 +15,23 @@ import org.slf4j.LoggerFactory;
 
 import java.nio.charset.StandardCharsets;
 
+/**
+ * Сервис обработки входящих mesh-пакетов ({@code MeshPacket}).
+ * <p>
+ * Реализует {@link FromRadioListener#onMeshPacket} и распределяет пакеты
+ * по типу portnum:
+ * <ul>
+ *   <li>{@code TEXT_MESSAGE_APP} — текстовые сообщения (канальные и DM)</li>
+ *   <li>{@code ROUTING_APP} — ACK/NAK для отправленных сообщений</li>
+ *   <li>{@code NODEINFO_APP} — обновление информации о ноде</li>
+ *   <li>{@code POSITION_APP} — обновление координат ноды</li>
+ *   <li>{@code TELEMETRY_APP} — метрики устройства и окружения</li>
+ *   <li>{@code TRACEROUTE_APP} — ответ на traceroute</li>
+ *   <li>{@code ADMIN_APP} — admin-ответы (owner info и др.)</li>
+ * </ul>
+ * Обновляет {@link com.meshtastic.client.model.DeviceState}, сохраняет сообщения
+ * в БД через {@link MessageDbService}, синхронизирует кэш нод через {@link NodeCacheService}.
+ */
 public class MessageListenerService implements FromRadioListener {
 
     private static final Logger log = LoggerFactory.getLogger(MessageListenerService.class);

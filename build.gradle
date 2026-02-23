@@ -102,6 +102,27 @@ tasks.withType(JavaCompile).configureEach {
 tasks.named('test') {
 	useJUnitPlatform()
 }
+
+// ============================================================
+// JavaDoc: генерация документации в docs/javadoc/
+// Использование: ./gradlew javadoc
+// ============================================================
+javadoc {
+	destinationDir = file("${projectDir}/docs/javadoc")
+	options.encoding = 'UTF-8'
+	options.charSet = 'UTF-8'
+	options.docEncoding = 'UTF-8'
+	options.locale = 'ru'
+	options.windowTitle = "MeshApp ${project.version} API"
+	options.docTitle = "MeshApp — Meshtastic Desktop Client"
+	options.header = "MeshApp ${project.version}"
+	options.links('https://docs.oracle.com/en/java/javase/21/docs/api/')
+	// Не падать при предупреждениях (protobuf-generated классы и т.д.)
+	options.addBooleanOption('Xdoclint:none', true)
+	// Исключить protobuf-generated классы из документации
+	exclude 'org/meshtastic/proto/**'
+	failOnError = false
+}
 tasks.named("run") {
 	outputs.upToDateWhen { false }
 	// macOS: перенаправить на runMac для отображения в Dock и Cmd+Tab

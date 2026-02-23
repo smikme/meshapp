@@ -19,20 +19,32 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 
+/**
+ * Менеджер соединений с Meshtastic-устройствами (singleton).
+ * <p>
+ * Управляет жизненным циклом TCP-соединений: хранит профили подключений
+ * ({@link ConnectionEntry}) в JSON-файле {@code ~/.meshapp/connections.json},
+ * создаёт/разрывает TCP-соединения, инициирует config exchange
+ * и предоставляет доступ к {@link DeviceState} и {@link ProtocolHandler}
+ * для каждого активного соединения.
+ * <p>
+ * Каждое соединение идентифицируется по строковому {@code id} из {@link ConnectionEntry}.
+ */
 public class ConnectionManager {
 
     private static final Logger log = LoggerFactory.getLogger(ConnectionManager.class);
 
     private static ConnectionManager instance;
 
-    private final List<ConnectionEntry> entries = new ArrayList<>();
-    private final Map<String, TcpConnection> activeConnections = new HashMap<>();
-    private final Map<String, DeviceState> deviceStates = new HashMap<>();
-    private final Map<String, ProtocolHandler> protocolHandlers = new HashMap<>();
-    private final Map<String, CompletableFuture<DeviceState>> configFutures = new HashMap<>();
+    private final List<ConnectionEntry> entries = new CopyOnWriteArrayList<>();
+    private final Map<String, TcpConnection> activeConnections = new ConcurrentHashMap<>();
+    private final Map<String, DeviceState> deviceStates = new ConcurrentHashMap<>();
+    private final Map<String, ProtocolHandler> protocolHandlers = new ConcurrentHashMap<>();
+    private final Map<String, CompletableFuture<DeviceState>> configFutures = new ConcurrentHashMap<>();
     private final List<Runnable> listeners = new CopyOnWriteArrayList<>();
     private final Gson gson = new GsonBuilder().setPrettyPrinting().create();
     private final Path configPath;
@@ -43,6 +55,12 @@ public class ConnectionManager {
         load();
     }
 
+    /**
+     * Возвращает единственный экземпляр менеджера соединений.
+     * При первом вызове загружает профили из {@code ~/.meshapp/connections.json}.
+     *
+     * @return экземпляр {@code ConnectionManager}
+     */
     public static synchronized ConnectionManager getInstance() {
         if (instance == null) {
             instance = new ConnectionManager();
@@ -50,7 +68,7 @@ public class ConnectionManager {
         return instance;
     }
 
-    public void load() {
+    public synchronized void load() {
         if (!Files.exists(configPath)) {
             return;
         }
@@ -66,7 +84,7 @@ public class ConnectionManager {
         }
     }
 
-    public void save() {
+    public synchronized void save() {
         try {
             Files.createDirectories(configPath.getParent());
             try (Writer writer = new OutputStreamWriter(Files.newOutputStream(configPath), StandardCharsets.UTF_8)) {
@@ -77,12 +95,23 @@ public class ConnectionManager {
         }
     }
 
+    /**
+     * Добавляет новый профиль подключения. Автоматически сохраняет в JSON и оповещает слушателей.
+     *
+     * @param entry профиль подключения
+     */
     public void addEntry(ConnectionEntry entry) {
         entries.add(entry);
         save();
         fireChanged();
     }
 
+    /**
+     * Удаляет профиль подключения. Предварительно разрывает соединение,
+     * если оно активно. Сохраняет в JSON и оповещает слушателей.
+     *
+     * @param id идентификатор профиля
+     */
     public void removeEntry(String id) {
         disconnect(id);
         entries.removeIf(e -> e.getId().equals(id));
@@ -90,7 +119,15 @@ public class ConnectionManager {
         fireChanged();
     }
 
-    public void connect(String id) throws ConnectionException {
+    /**
+     * Устанавливает TCP-соединение по идентификатору профиля.
+     * Создаёт {@link TcpConnection}, {@link ProtocolHandler}, {@link DeviceState}
+     * и запускает config exchange. Если соединение с этим id уже активно, вызов игнорируется.
+     *
+     * @param id идентификатор профиля подключения
+     * @throws ConnectionException если профиль не найден или TCP-соединение не удалось
+     */
+    public synchronized void connect(String id) throws ConnectionException {
         ConnectionEntry entry = findEntry(id);
         if (entry == null) {
             throw new ConnectionException("Connection entry not found: " + id);
@@ -109,20 +146,14 @@ public class ConnectionManager {
             @Override
             public void onDisconnected() {
                 entry.setConnected(false);
-                activeConnections.remove(id);
-                deviceStates.remove(id);
-                protocolHandlers.remove(id);
-                configFutures.remove(id);
+                cleanupConnection(id);
                 fireChanged();
             }
 
             @Override
             public void onConnectionError(String message, Throwable cause) {
                 entry.setConnected(false);
-                activeConnections.remove(id);
-                deviceStates.remove(id);
-                protocolHandlers.remove(id);
-                configFutures.remove(id);
+                cleanupConnection(id);
                 fireChanged();
             }
         });
@@ -145,11 +176,15 @@ public class ConnectionManager {
         fireChanged();
     }
 
-    public void disconnect(String id) {
-        TcpConnection tcp = activeConnections.remove(id);
-        deviceStates.remove(id);
-        protocolHandlers.remove(id);
-        configFutures.remove(id);
+    /**
+     * Разрывает TCP-соединение и очищает связанные ресурсы
+     * (DeviceState, ProtocolHandler, config future).
+     *
+     * @param id идентификатор профиля подключения
+     */
+    public synchronized void disconnect(String id) {
+        TcpConnection tcp = activeConnections.get(id);
+        cleanupConnection(id);
         if (tcp != null) {
             tcp.disconnect();
         }
@@ -182,6 +217,13 @@ public class ConnectionManager {
 
     public void removeListener(Runnable listener) {
         listeners.remove(listener);
+    }
+
+    private synchronized void cleanupConnection(String id) {
+        activeConnections.remove(id);
+        deviceStates.remove(id);
+        protocolHandlers.remove(id);
+        configFutures.remove(id);
     }
 
     private ConnectionEntry findEntry(String id) {
