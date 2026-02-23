@@ -18,6 +18,17 @@ import javafx.stage.Stage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+/**
+ * Корневая панель окна приложения с кастомным title bar.
+ * <p>
+ * Реализует кастомную оконную рамку (traffic light кнопки, перетаскивание,
+ * resize по краям) для работы с {@code StageStyle.TRANSPARENT}.
+ * Содержит {@link DrawerPane} (боковое меню), {@link MainForm} (область контента),
+ * {@link com.meshtastic.client.modal.ModalPane} и overlay для toast-уведомлений.
+ * <p>
+ * На macOS resize делегируется нативному {@code NSWindowStyleMaskResizable}.
+ * На Windows/Linux используются кастомные обработчики мыши по краям/углам окна.
+ */
 public class RootPane extends BorderPane {
 
     private static final Logger log = LoggerFactory.getLogger(RootPane.class);

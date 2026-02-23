@@ -11,6 +11,12 @@ public class PacketFramer {
     private static final byte START_BYTE_1 = (byte) 0x94;
     private static final byte START_BYTE_2 = (byte) 0xC3;
 
+    /**
+     * Оборачивает protobuf-сообщение в фрейм Meshtastic.
+     *
+     * @param message protobuf-сообщение для фреймирования
+     * @return байтовый массив с заголовком (4 байта) и payload
+     */
     public static byte[] frame(MessageLite message) {
         byte[] payload = message.toByteArray();
         byte[] frame = new byte[4 + payload.length];

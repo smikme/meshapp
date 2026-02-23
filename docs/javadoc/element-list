@@ -1,0 +1,17 @@
+com.meshtastic.client
+com.meshtastic.client.components
+com.meshtastic.client.components.chat
+com.meshtastic.client.connection
+com.meshtastic.client.forms
+com.meshtastic.client.logging
+com.meshtastic.client.menu
+com.meshtastic.client.modal
+com.meshtastic.client.model
+com.meshtastic.client.platform
+com.meshtastic.client.protocol
+com.meshtastic.client.service
+com.meshtastic.client.simple
+com.meshtastic.client.system
+com.meshtastic.client.themes
+com.meshtastic.client.utils
+fi.kapsi.koti.jpa.nanopb

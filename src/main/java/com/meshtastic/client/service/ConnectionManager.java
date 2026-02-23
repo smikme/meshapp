@@ -22,6 +22,17 @@ import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 
+/**
+ * Менеджер соединений с Meshtastic-устройствами (singleton).
+ * <p>
+ * Управляет жизненным циклом TCP-соединений: хранит профили подключений
+ * ({@link ConnectionEntry}) в JSON-файле {@code ~/.meshapp/connections.json},
+ * создаёт/разрывает TCP-соединения, инициирует config exchange
+ * и предоставляет доступ к {@link DeviceState} и {@link ProtocolHandler}
+ * для каждого активного соединения.
+ * <p>
+ * Каждое соединение идентифицируется по строковому {@code id} из {@link ConnectionEntry}.
+ */
 public class ConnectionManager {
 
     private static final Logger log = LoggerFactory.getLogger(ConnectionManager.class);
@@ -43,6 +54,12 @@ public class ConnectionManager {
         load();
     }
 
+    /**
+     * Возвращает единственный экземпляр менеджера соединений.
+     * При первом вызове загружает профили из {@code ~/.meshapp/connections.json}.
+     *
+     * @return экземпляр {@code ConnectionManager}
+     */
     public static synchronized ConnectionManager getInstance() {
         if (instance == null) {
             instance = new ConnectionManager();
@@ -77,12 +94,23 @@ public class ConnectionManager {
         }
     }
 
+    /**
+     * Добавляет новый профиль подключения. Автоматически сохраняет в JSON и оповещает слушателей.
+     *
+     * @param entry профиль подключения
+     */
     public void addEntry(ConnectionEntry entry) {
         entries.add(entry);
         save();
         fireChanged();
     }
 
+    /**
+     * Удаляет профиль подключения. Предварительно разрывает соединение,
+     * если оно активно. Сохраняет в JSON и оповещает слушателей.
+     *
+     * @param id идентификатор профиля
+     */
     public void removeEntry(String id) {
         disconnect(id);
         entries.removeIf(e -> e.getId().equals(id));
@@ -90,6 +118,14 @@ public class ConnectionManager {
         fireChanged();
     }
 
+    /**
+     * Устанавливает TCP-соединение по идентификатору профиля.
+     * Создаёт {@link TcpConnection}, {@link ProtocolHandler}, {@link DeviceState}
+     * и запускает config exchange. Если соединение с этим id уже активно, вызов игнорируется.
+     *
+     * @param id идентификатор профиля подключения
+     * @throws ConnectionException если профиль не найден или TCP-соединение не удалось
+     */
     public void connect(String id) throws ConnectionException {
         ConnectionEntry entry = findEntry(id);
         if (entry == null) {
@@ -145,6 +181,12 @@ public class ConnectionManager {
         fireChanged();
     }
 
+    /**
+     * Разрывает TCP-соединение и очищает связанные ресурсы
+     * (DeviceState, ProtocolHandler, config future).
+     *
+     * @param id идентификатор профиля подключения
+     */
     public void disconnect(String id) {
         TcpConnection tcp = activeConnections.remove(id);
         deviceStates.remove(id);

@@ -3,6 +3,13 @@ package com.meshtastic.client.system;
 import com.meshtastic.client.forms.FormConnections;
 import com.meshtastic.client.modal.ModalPane;
 
+/**
+ * Управляет навигацией между формами приложения.
+ * <p>
+ * Статический менеджер. Инициализируется через {@link #install(RootPane)},
+ * после чего {@link #showForm(Form)} переключает активную форму
+ * внутри {@link MainForm}. Навигация блокируется при открытом модальном окне.
+ */
 public class FormManager {
 
     private static MainForm mainForm;

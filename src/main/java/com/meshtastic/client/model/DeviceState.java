@@ -19,6 +19,19 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
+/**
+ * Центральное хранилище состояния подключённого Meshtastic-устройства.
+ * <p>
+ * Содержит базу нод ({@code nodeDb}), каналы, конфиги, сообщения (канальные и личные),
+ * телеметрию и ожидающие подтверждения ACK. Каждое TCP-соединение получает свой экземпляр
+ * {@code DeviceState} через {@link com.meshtastic.client.service.ConnectionManager}.
+ * <p>
+ * Потокобезопасность: nodeDb ({@link java.util.concurrent.ConcurrentHashMap}),
+ * каналы/конфиги ({@link java.util.Collections#synchronizedList}), списки слушателей
+ * ({@link java.util.concurrent.CopyOnWriteArrayList}). Списки сообщений по каналам/DM
+ * хранятся в {@code ConcurrentHashMap}, каждый список — {@code synchronizedList}.
+ * UI-обновления выполняются через {@code Platform.runLater()}.
+ */
 public class DeviceState {
 
     private static final Logger log = LoggerFactory.getLogger(DeviceState.class);
@@ -49,6 +62,14 @@ public class DeviceState {
 
     public ConcurrentHashMap<Integer, NodeData> getNodeDb() { return nodeDb; }
 
+    /**
+     * Возвращает ноду из базы или создаёт новую атомарно.
+     * Использует {@link java.util.concurrent.ConcurrentHashMap#computeIfAbsent},
+     * гарантируя что для одного {@code nodeNum} создаётся ровно один объект.
+     *
+     * @param nodeNum номер ноды
+     * @return существующая или новая {@link NodeData}
+     */
     public NodeData getOrCreateNode(int nodeNum) {
         return nodeDb.computeIfAbsent(nodeNum, NodeData::new);
     }
@@ -137,6 +158,13 @@ public class DeviceState {
         }
     }
 
+    /**
+     * Добавляет запись телеметрии в историю. Если размер истории превышает
+     * {@code MAX_TELEMETRY_HISTORY} (200), самые старые записи удаляются.
+     * После добавления оповещает telemetry-слушателей.
+     *
+     * @param entry запись телеметрии
+     */
     public void addTelemetryEntry(TelemetryEntry entry) {
         synchronized (telemetryHistory) {
             telemetryHistory.addLast(entry);
@@ -177,6 +205,15 @@ public class DeviceState {
         }
     }
 
+    /**
+     * Добавляет канальное сообщение с дедупликацией по {@code packetId}.
+     * Радио может ретранслировать один и тот же пакет несколько раз;
+     * если сообщение с таким {@code packetId} уже есть в списке канала, оно игнорируется.
+     * Сообщения с {@code packetId=0} не дедуплицируются.
+     * После добавления оповещает всех message-слушателей.
+     *
+     * @param msg сообщение для добавления
+     */
     public void addMessage(MeshMessage msg) {
         List<MeshMessage> list = messagesByChannel
                 .computeIfAbsent(msg.getChannelIndex(), k -> Collections.synchronizedList(new ArrayList<>()));
@@ -197,6 +234,14 @@ public class DeviceState {
         return list != null ? list : Collections.emptyList();
     }
 
+    /**
+     * Добавляет личное (DM) сообщение с дедупликацией по {@code packetId}.
+     * Сообщения группируются по {@code peerNodeNum} — номеру собеседника.
+     * Дубликаты (повторные ретрансляции) игнорируются.
+     *
+     * @param msg         сообщение для добавления
+     * @param peerNodeNum номер ноды собеседника (ключ группировки)
+     */
     public void addDirectMessage(MeshMessage msg, int peerNodeNum) {
         List<MeshMessage> list = directMessages
                 .computeIfAbsent(peerNodeNum, k -> Collections.synchronizedList(new ArrayList<>()));
@@ -229,14 +274,37 @@ public class DeviceState {
         return messagesByChannel;
     }
 
+    /**
+     * Регистрирует исходящее сообщение для отслеживания ACK/NAK.
+     * При получении routing-ответа с этим {@code packetId}
+     * статус сообщения будет обновлён через {@link #resolvePendingAck}.
+     *
+     * @param packetId уникальный идентификатор пакета
+     * @param msg      сообщение в статусе {@code SENDING}
+     */
     public void registerPendingAck(int packetId, MeshMessage msg) {
         pendingAcks.put(packetId, msg);
     }
 
+    /**
+     * Извлекает и удаляет сообщение из очереди ожидающих ACK.
+     * Вызывается при получении routing-ответа (ACK/NAK).
+     *
+     * @param packetId идентификатор пакета из routing-ответа
+     * @return сообщение, ожидавшее подтверждения, или {@code null} если не найдено
+     */
     public MeshMessage resolvePendingAck(int packetId) {
         return pendingAcks.remove(packetId);
     }
 
+    /**
+     * Ищет сообщение по {@code packetId} сначала в in-memory кэше (канальные и DM),
+     * затем — fallback в H2 БД через {@link com.meshtastic.client.service.MessageDbService}.
+     * Используется для получения текста цитируемого сообщения ({@code replyText}).
+     *
+     * @param packetId идентификатор пакета (0 — не искать)
+     * @return найденное сообщение или {@code null}
+     */
     public MeshMessage findMessageByPacketId(int packetId) {
         if (packetId == 0) return null;
         // Сначала ищем в памяти (быстро, для текущей сессии)
@@ -278,6 +346,11 @@ public class DeviceState {
         }
     }
 
+    /**
+     * Полностью сбрасывает состояние устройства: очищает nodeDb, каналы,
+     * конфиги, все сообщения, ожидающие ACK, owner info и историю телеметрии.
+     * Вызывается перед началом нового config exchange.
+     */
     public void clear() {
         myNodeNum = 0;
         nodeDb.clear();
