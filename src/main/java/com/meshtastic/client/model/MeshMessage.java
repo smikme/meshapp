@@ -1,7 +1,26 @@
 package com.meshtastic.client.model;
 
+/**
+ * Сообщение Meshtastic-чата (канальное или личное).
+ * <p>
+ * Содержит текст, адресацию (отправитель, получатель, канал),
+ * статус доставки и метаданные маршрутизации (hop start/limit).
+ * Исходящие сообщения создаются через {@link com.meshtastic.client.service.MessageService},
+ * входящие — через {@link com.meshtastic.client.service.MessageListenerService}.
+ * <p>
+ * Поле {@code status} объявлено как {@code volatile} для безопасного
+ * обновления из потока TCP-reader с последующим чтением из UI-потока.
+ */
 public class MeshMessage {
 
+    /**
+     * Статус доставки сообщения.
+     * <ul>
+     *   <li>{@code SENDING} — отправлено на радио, ожидает ACK</li>
+     *   <li>{@code DELIVERED} — получено подтверждение (ACK) от получателя</li>
+     *   <li>{@code FAILED} — получен NAK или таймаут доставки</li>
+     * </ul>
+     */
     public enum DeliveryStatus { SENDING, DELIVERED, FAILED }
 
     private final int fromNum;
@@ -22,6 +41,16 @@ public class MeshMessage {
     private boolean systemMessage;
     private long dbId;
 
+    /**
+     * Создаёт сообщение с основными полями.
+     *
+     * @param fromNum      номер ноды-отправителя
+     * @param toNum        номер ноды-получателя ({@code 0xFFFFFFFF} для broadcast)
+     * @param channelIndex индекс канала (0 для primary)
+     * @param text         текст сообщения (UTF-8)
+     * @param timestamp    время в секундах с начала эпохи (epoch seconds)
+     * @param outgoing     {@code true} если сообщение отправлено с этого устройства
+     */
     public MeshMessage(int fromNum, int toNum, int channelIndex, String text, long timestamp, boolean outgoing) {
         this.fromNum = fromNum;
         this.toNum = toNum;
@@ -68,6 +97,13 @@ public class MeshMessage {
     public long getDbId() { return dbId; }
     public void setDbId(long dbId) { this.dbId = dbId; }
 
+    /**
+     * Вычисляет количество хопов, которое прошло сообщение.
+     * Рассчитывается как {@code hopStart - hopLimit}. Если {@code hopStart}
+     * не задан (0), возвращает 0.
+     *
+     * @return количество хопов или 0 если данные недоступны
+     */
     public int getHopsTraveled() {
         return hopStart > 0 ? hopStart - hopLimit : 0;
     }

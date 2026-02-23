@@ -12,6 +12,22 @@ import org.slf4j.LoggerFactory;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ThreadLocalRandom;
 
+/**
+ * Сервис обмена конфигурацией с Meshtastic-устройством.
+ * <p>
+ * Реализует протокол config exchange: отправляет {@code want_config_id},
+ * получает поток MyNodeInfo, NodeInfo, Channel, Config, ModuleConfig,
+ * и завершается при получении {@code config_complete_id}.
+ * <p>
+ * Жизненный цикл:
+ * <ol>
+ *   <li>Создание с привязкой к {@link ProtocolHandler} и {@link com.meshtastic.client.model.DeviceState}</li>
+ *   <li>{@link #startConfigExchange()} — отправка {@code want_config_id}, возврат {@link CompletableFuture}</li>
+ *   <li>Приём данных через callback-и {@link com.meshtastic.client.protocol.FromRadioListener}</li>
+ *   <li>Завершение — future.complete(deviceState), снятие слушателя</li>
+ * </ol>
+ * После завершения обновляет {@link NodeCacheService}, загружает архив телеметрии из H2.
+ */
 public class ConfigExchangeService implements FromRadioListener {
 
     private static final Logger log = LoggerFactory.getLogger(ConfigExchangeService.class);
@@ -26,6 +42,15 @@ public class ConfigExchangeService implements FromRadioListener {
         this.deviceState = deviceState;
     }
 
+    /**
+     * Запускает обмен конфигурацией. Очищает текущее состояние устройства,
+     * генерирует случайный {@code want_config_id} и отправляет его на радио.
+     * Регистрирует себя как {@link com.meshtastic.client.protocol.FromRadioListener}
+     * для приёма потока конфигурации.
+     *
+     * @return {@link CompletableFuture}, который завершится с заполненным
+     *         {@link DeviceState} после получения {@code config_complete_id}
+     */
     public CompletableFuture<DeviceState> startConfigExchange() {
         future = new CompletableFuture<>();
         deviceState.clear();

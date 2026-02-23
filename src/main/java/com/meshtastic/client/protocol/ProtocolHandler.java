@@ -9,6 +9,14 @@ import org.slf4j.LoggerFactory;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 
+/**
+ * Диспетчер протокола Meshtastic. Принимает сырые protobuf-payload из
+ * {@link MeshtasticConnection}, парсит {@code FromRadio} и распределяет
+ * по зарегистрированным {@link FromRadioListener}-ам.
+ * <p>
+ * Также предоставляет метод отправки {@code ToRadio} на устройство
+ * через фреймирование ({@link PacketFramer}) и транспорт.
+ */
 public class ProtocolHandler {
 
     private static final Logger log = LoggerFactory.getLogger(ProtocolHandler.class);
@@ -21,14 +29,30 @@ public class ProtocolHandler {
         connection.setDataListener(this::handleRawPacket);
     }
 
+    /**
+     * Регистрирует слушателя входящих {@code FromRadio} сообщений.
+     *
+     * @param listener слушатель для регистрации
+     */
     public void addListener(FromRadioListener listener) {
         listeners.add(listener);
     }
 
+    /**
+     * Удаляет ранее зарегистрированного слушателя.
+     *
+     * @param listener слушатель для удаления
+     */
     public void removeListener(FromRadioListener listener) {
         listeners.remove(listener);
     }
 
+    /**
+     * Отправляет {@code ToRadio} сообщение на устройство.
+     * Сериализует protobuf, оборачивает в фрейм и передаёт через транспорт.
+     *
+     * @param toRadio сообщение для отправки
+     */
     public void sendToRadio(MeshProtos.ToRadio toRadio) {
         byte[] frame = PacketFramer.frame(toRadio);
         log.debug("Sending ToRadio: {} ({} bytes framed)", toRadio.getPayloadVariantCase(), frame.length);

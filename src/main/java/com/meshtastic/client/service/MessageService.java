@@ -16,10 +16,34 @@ import com.meshtastic.client.service.MessageDbService;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.ThreadLocalRandom;
 
+/**
+ * Сервис отправки сообщений и admin-команд на Meshtastic-устройство.
+ * <p>
+ * Статический утилитный класс (без состояния). Формирует protobuf-пакеты
+ * {@code ToRadio} для различных типов операций:
+ * <ul>
+ *   <li>Текстовые сообщения (канальные и личные)</li>
+ *   <li>Запросы информации о нодах (NODEINFO_APP)</li>
+ *   <li>Traceroute (TRACEROUTE_APP)</li>
+ *   <li>Admin-операции: owner info, каналы, конфигурация</li>
+ * </ul>
+ */
 public class MessageService {
 
     private MessageService() {}
 
+    /**
+     * Отправляет текстовое сообщение в канал (broadcast, {@code to=0xFFFFFFFF}).
+     * Создаёт {@link MeshMessage}, сохраняет в БД, добавляет в {@link DeviceState}
+     * и регистрирует для отслеживания ACK.
+     *
+     * @param handler      протокол-обработчик для отправки
+     * @param state        состояние устройства
+     * @param channelIndex индекс канала (0 — Primary)
+     * @param text         текст сообщения
+     * @param replyId      packetId цитируемого сообщения (0 — без цитаты)
+     * @return созданное сообщение в статусе {@code SENDING}
+     */
     public static MeshMessage sendChannelMessage(ProtocolHandler handler, DeviceState state, int channelIndex, String text, int replyId) {
         int packetId = ThreadLocalRandom.current().nextInt(1, Integer.MAX_VALUE);
         long now = System.currentTimeMillis() / 1000;
@@ -65,6 +89,18 @@ public class MessageService {
         return msg;
     }
 
+    /**
+     * Отправляет личное текстовое сообщение (DM) конкретной ноде.
+     * Создаёт {@link MeshMessage}, сохраняет в БД, добавляет в {@link DeviceState}
+     * и регистрирует для отслеживания ACK.
+     *
+     * @param handler      протокол-обработчик для отправки
+     * @param state        состояние устройства
+     * @param peerNodeNum  номер ноды-получателя
+     * @param text         текст сообщения
+     * @param replyId      packetId цитируемого сообщения (0 — без цитаты)
+     * @return созданное сообщение в статусе {@code SENDING}
+     */
     public static MeshMessage sendDirectMessage(ProtocolHandler handler, DeviceState state, int peerNodeNum, String text, int replyId) {
         int packetId = ThreadLocalRandom.current().nextInt(1, Integer.MAX_VALUE);
         long now = System.currentTimeMillis() / 1000;

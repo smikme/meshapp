@@ -24,6 +24,15 @@ public class FrameParser {
     private int payloadIndex;
     private byte[] payloadBuffer;
 
+    /**
+     * Обрабатывает один байт из входного потока.
+     * Продвигает конечный автомат по состояниям: WAIT_START1 → WAIT_START2 →
+     * READ_LEN_MSB → READ_LEN_LSB → READ_PAYLOAD.
+     * Пакеты с длиной {@code <= 0} или {@code > MAX_PACKET_SIZE} отбрасываются.
+     *
+     * @param b очередной байт
+     * @return полный protobuf-payload при завершении фрейма, или {@code null} если фрейм не собран
+     */
     public byte[] processByte(byte b) {
         switch (state) {
             case WAIT_START1:
@@ -73,6 +82,10 @@ public class FrameParser {
         }
     }
 
+    /**
+     * Сбрасывает парсер в начальное состояние.
+     * Используется при переподключении или обнаружении ошибки синхронизации.
+     */
     public void reset() {
         state = State.WAIT_START1;
         payloadLength = 0;

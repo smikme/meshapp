@@ -4,6 +4,16 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 
+/**
+ * Данные одной ноды Meshtastic-сети.
+ * <p>
+ * Изменяемый POJO, содержащий идентификацию (longName, shortName, nodeId),
+ * позицию (lat/lon/alt), метрики устройства (батарея, напряжение, утилизация канала),
+ * метрики окружения (температура, влажность, давление) и метаданные (роль, hw_model, hopsAway).
+ * <p>
+ * Создаётся через {@link DeviceState#getOrCreateNode(int)} или напрямую по номеру ноды.
+ * Поле {@code nodeId} генерируется автоматически в формате {@code !XXXXXXXX} (hex).
+ */
 public class NodeData {
 
     private static final DateTimeFormatter TIME_FMT = DateTimeFormatter.ofPattern("dd.MM.yy HH:mm");
@@ -30,6 +40,12 @@ public class NodeData {
     private String hwModel;
     private byte[] publicKey;
 
+    /**
+     * Создаёт ноду с указанным номером. Автоматически генерирует {@code nodeId}
+     * в формате {@code !XXXXXXXX} (hex-представление nodeNum).
+     *
+     * @param nodeNum уникальный числовой идентификатор ноды
+     */
     public NodeData(int nodeNum) {
         this.nodeNum = nodeNum;
         this.nodeId = String.format("!%08x", nodeNum);

@@ -2,6 +2,14 @@ package com.meshtastic.client.model;
 
 import java.util.UUID;
 
+/**
+ * Профиль подключения к Meshtastic-устройству (host + port).
+ * <p>
+ * Сериализуется в JSON ({@code ~/.meshapp/connections.json}) через Gson.
+ * Поле {@code connected} помечено как {@code transient} — не сохраняется,
+ * отражает текущее runtime-состояние. По умолчанию порт {@code 4403}
+ * (стандартный TCP-порт Meshtastic).
+ */
 public class ConnectionEntry {
 
     private String id;
