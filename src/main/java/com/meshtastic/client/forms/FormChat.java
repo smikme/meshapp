@@ -357,6 +357,36 @@ public class FormChat extends Form {
 
     // ==================== Правая панель: открытие/закрытие чата ====================
 
+    /**
+     * Программно открыть приватный DM-чат с указанной нодой.
+     * Вызывается извне (например, из NodeDetailContent) после навигации на эту форму.
+     * Если чат с этим пиром ещё не существует в списке — добавляет его.
+     */
+    public void openDirectChat(int peerNodeNum, NodeData peerNode) {
+        ChatItem dm = ChatItem.fromDirectMessage(peerNodeNum, peerNode, (MeshMessage) null, 0);
+
+        // Добавить в список если DM с этим пиром ещё нет
+        boolean exists = chatItems.stream()
+                .anyMatch(item -> item.getType() == ChatItem.ChatType.DIRECT_MESSAGE
+                               && item.getPeerNodeNum() == peerNodeNum);
+        if (!exists) {
+            chatItems.add(dm);
+        }
+
+        // Выделить в списке (suppress → не вызвать openChat дважды)
+        suppressSelectionListener = true;
+        try {
+            chatListView.getItems().stream()
+                    .filter(item -> chatItemMatches(item, dm))
+                    .findFirst()
+                    .ifPresent(chatListView.getSelectionModel()::select);
+        } finally {
+            suppressSelectionListener = false;
+        }
+
+        openChat(dm);
+    }
+
     private void openChat(ChatItem chat) {
         this.selectedChat = chat;
 
@@ -875,9 +905,9 @@ public class FormChat extends Form {
             lastReadCounts.remove("dm:" + peer);
         }
 
-        // Сбросить выделение, если удалён текущий чат
+        // Закрыть правую панель, если удалён текущий чат
         if (selectedChat != null && chatItemMatches(selectedChat, item)) {
-            selectedChat = null;
+            closeChat();
         }
 
         reloadChatList();
