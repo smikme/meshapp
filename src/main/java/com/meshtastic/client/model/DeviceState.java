@@ -270,6 +270,13 @@ public class DeviceState {
         directMessages.remove(peerNodeNum);
     }
 
+    /** Удалить ноду из nodeDb и directMessages, оповестить listener'ы. */
+    public void removeNode(int nodeNum) {
+        nodeDb.remove(nodeNum);
+        directMessages.remove(nodeNum);
+        fireNodeUpdateListeners(nodeNum);
+    }
+
     public Map<Integer, List<MeshMessage>> getAllChannelMessages() {
         return messagesByChannel;
     }

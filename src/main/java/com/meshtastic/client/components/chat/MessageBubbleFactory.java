@@ -125,9 +125,10 @@ public class MessageBubbleFactory {
         avatar.setOnMouseClicked(e -> {
             if (state != null) {
                 NodeData node = state.getNodeDb().get(msg.getFromNum());
-                if (node != null) {
-                    NodeDetailPanel.showForNode(state, node);
+                if (node == null) {
+                    node = new NodeData(msg.getFromNum());
                 }
+                NodeDetailPanel.showForNode(state, node);
             }
             e.consume();
         });

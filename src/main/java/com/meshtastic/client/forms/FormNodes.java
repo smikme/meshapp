@@ -1,6 +1,6 @@
 package com.meshtastic.client.forms;
 
-import com.meshtastic.client.components.TelemetryChartPanel;
+import com.meshtastic.client.components.NodeDetailContent;
 import com.meshtastic.client.model.ConnectionEntry;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.NodeData;
@@ -43,10 +43,8 @@ public class FormNodes extends Form {
 
     private VBox detailPane;
     private Label detailPlaceholder;
-    private GridPane detailGrid;
-    private TelemetryChartPanel currentChartPanel;
+    private NodeDetailContent currentDetailContent;
     private int currentDetailNodeNum;
-    private ObservableList<String[]> detailTableData;
 
     private boolean suppressSelectionListener;
 
@@ -57,30 +55,38 @@ public class FormNodes extends Form {
     private final IntConsumer nodeUpdateListener = num -> Platform.runLater(() -> {
         if (state == null) return;
         NodeData node = state.getNodeDb().get(num);
-        if (node != null) {
-            for (int i = 0; i < nodeData.size(); i++) {
-                if (nodeData.get(i).getNodeNum() == num) {
-                    suppressSelectionListener = true;
-                    try {
-                        nodeData.set(i, node);
-                    } finally {
-                        suppressSelectionListener = false;
-                    }
-                    // Восстановить выделение если обновлённая нода была выбрана
-                    if (num == currentDetailNodeNum) {
-                        for (NodeData n : nodeListView.getItems()) {
-                            if (n.getNodeNum() == num) {
-                                nodeListView.getSelectionModel().select(n);
-                                break;
-                            }
+
+        // Нода удалена из nodeDb — убрать из списка и очистить детали
+        if (node == null) {
+            nodeData.removeIf(n -> n.getNodeNum() == num);
+            if (num == currentDetailNodeNum) {
+                showDetail(null);
+            }
+            return;
+        }
+
+        for (int i = 0; i < nodeData.size(); i++) {
+            if (nodeData.get(i).getNodeNum() == num) {
+                suppressSelectionListener = true;
+                try {
+                    nodeData.set(i, node);
+                } finally {
+                    suppressSelectionListener = false;
+                }
+                // Восстановить выделение если обновлённая нода была выбрана
+                if (num == currentDetailNodeNum) {
+                    for (NodeData n : nodeListView.getItems()) {
+                        if (n.getNodeNum() == num) {
+                            nodeListView.getSelectionModel().select(n);
+                            break;
                         }
                     }
-                    refreshDetail();
-                    return;
                 }
+                refreshDetail();
+                return;
             }
-            nodeData.add(node);
         }
+        nodeData.add(node);
     });
 
     private final Runnable connectionListener = () -> Platform.runLater(this::rebindState);
@@ -173,25 +179,14 @@ public class FormNodes extends Form {
         leftPane.getChildren().addAll(searchBox, listWrapper);
 
         // --- Правая панель: детали ---
-        detailPane = new VBox(10);
-        detailPane.setPadding(new Insets(15));
+        detailPane = new VBox();
+        detailPane.setPadding(Insets.EMPTY);
         detailPane.getStyleClass().add("node-detail-pane");
 
         detailPlaceholder = new Label("Выберите ноду из списка");
         detailPlaceholder.setStyle("-fx-opacity: 0.5; -fx-font-size: 14px;");
         detailPlaceholder.setMaxWidth(Double.MAX_VALUE);
         detailPlaceholder.setAlignment(Pos.CENTER);
-
-        detailGrid = new GridPane();
-        detailGrid.setHgap(12);
-        detailGrid.setVgap(6);
-        detailGrid.getStyleClass().add("node-detail-grid");
-        // Значение растягивается
-        ColumnConstraints labelCol = new ColumnConstraints();
-        labelCol.setMinWidth(110);
-        ColumnConstraints valueCol = new ColumnConstraints();
-        valueCol.setHgrow(Priority.ALWAYS);
-        detailGrid.getColumnConstraints().addAll(labelCol, valueCol);
 
         detailPane.getChildren().add(detailPlaceholder);
 
@@ -286,10 +281,9 @@ public class FormNodes extends Form {
 
     private void showDetail(NodeData node) {
         if (node == null) {
-            // Отвязать предыдущий график телеметрии
-            if (currentChartPanel != null) {
-                currentChartPanel.unbind();
-                currentChartPanel = null;
+            if (currentDetailContent != null) {
+                currentDetailContent.getChartPanel().unbind();
+                currentDetailContent = null;
             }
             currentDetailNodeNum = 0;
             detailPane.getChildren().clear();
@@ -298,72 +292,22 @@ public class FormNodes extends Form {
         }
 
         // Если та же нода — обновляем только данные таблицы, не пересоздаём UI
-        if (node.getNodeNum() == currentDetailNodeNum) {
-            updateDetailTable(node);
+        if (node.getNodeNum() == currentDetailNodeNum && currentDetailContent != null) {
+            currentDetailContent.updateTableData(node);
             return;
         }
 
-        // Отвязать предыдущий график
-        if (currentChartPanel != null) {
-            currentChartPanel.unbind();
-            currentChartPanel = null;
+        // Отвязать предыдущий компонент
+        if (currentDetailContent != null) {
+            currentDetailContent.getChartPanel().unbind();
         }
 
         currentDetailNodeNum = node.getNodeNum();
+        currentDetailContent = new NodeDetailContent(state, node, protocolHandler);
+        VBox.setVgrow(currentDetailContent, Priority.ALWAYS);
+
         detailPane.getChildren().clear();
-
-        // Заголовок с аватаром
-        String displayName = node.getLongName() != null && !node.getLongName().isEmpty()
-                ? node.getLongName() : (node.getNodeId() != null ? node.getNodeId() : "?");
-
-        String avatarText;
-        if (node.getShortName() != null && !node.getShortName().isEmpty()) {
-            avatarText = node.getShortName().toUpperCase();
-        } else {
-            avatarText = displayName.length() > 4
-                    ? displayName.substring(0, 4).toUpperCase()
-                    : displayName.toUpperCase();
-        }
-        String color = NodeUtils.roleColor(node.getRole());
-
-        StackPane bigAvatar = new StackPane();
-        bigAvatar.setMinSize(56, 56);
-        bigAvatar.setMaxSize(56, 56);
-        bigAvatar.setStyle("-fx-background-color: " + color + "; -fx-background-radius: 28;");
-        Label bigAvatarLabel = new Label(avatarText);
-        bigAvatarLabel.setFont(Font.font("Roboto", FontWeight.BOLD, NodeUtils.avatarFontSize(avatarText.length(), 56)));
-        bigAvatarLabel.setStyle("-fx-text-fill: white;");
-        bigAvatar.getChildren().add(bigAvatarLabel);
-
-        Label headerName = new Label(displayName);
-        headerName.setFont(Font.font("Roboto", FontWeight.BOLD, 18));
-
-        Label headerSub = new Label(node.getNodeId() != null ? node.getNodeId() : "");
-        headerSub.setStyle("-fx-opacity: 0.6;");
-
-        VBox headerText = new VBox(2, headerName, headerSub);
-        headerText.setAlignment(Pos.CENTER_LEFT);
-
-        HBox header = new HBox(12, bigAvatar, headerText);
-        header.setAlignment(Pos.CENTER_LEFT);
-        header.setPadding(new Insets(0, 0, 10, 0));
-
-        Separator sep = new Separator();
-
-        // Таблица ключ-значение
-        detailTableData = FXCollections.observableArrayList();
-        NodeUtils.fillDetailRows(detailTableData, node);
-
-        TableView<String[]> table = NodeUtils.createDetailTable(detailTableData);
-
-        // --- График телеметрии ---
-        currentChartPanel = new TelemetryChartPanel();
-        VBox.setVgrow(currentChartPanel, Priority.ALWAYS);
-        if (state != null) {
-            currentChartPanel.bind(state, node.getNodeNum());
-        }
-
-        detailPane.getChildren().addAll(header, sep, table, currentChartPanel);
+        detailPane.getChildren().add(currentDetailContent);
     }
 
     /** Обновить детали если выбранная нода обновилась (не пересоздаёт UI, сохраняет фильтр графика) */
@@ -376,9 +320,8 @@ public class FormNodes extends Form {
 
     /** Обновить только данные таблицы деталей без пересоздания UI */
     private void updateDetailTable(NodeData node) {
-        if (detailTableData == null) return;
-        detailTableData.clear();
-        NodeUtils.fillDetailRows(detailTableData, node);
+        if (currentDetailContent == null) return;
+        currentDetailContent.updateTableData(node);
     }
 
     // ==================== Data ====================
