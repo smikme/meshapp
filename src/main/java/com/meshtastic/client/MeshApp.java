@@ -2,6 +2,7 @@ package com.meshtastic.client;
 
 import com.meshtastic.client.platform.NativeWindowHelper;
 import com.meshtastic.client.platform.OsDetect;
+import com.meshtastic.client.service.DatabaseProvider;
 import com.meshtastic.client.service.MessageDbService;
 import com.meshtastic.client.service.NodeCacheService;
 import com.meshtastic.client.system.FormManager;
@@ -48,6 +49,7 @@ public class MeshApp extends Application {
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             MessageDbService.closeIfInitialized();
             NodeCacheService.closeIfInitialized();
+            DatabaseProvider.close();
         }));
 
         // Seamless frame: StageStyle.UNIFIED ДО создания сцены

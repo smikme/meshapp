@@ -13,8 +13,6 @@ import org.slf4j.LoggerFactory;
 import java.io.InputStreamReader;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.sql.*;
 import java.time.Instant;
 import java.util.*;
@@ -65,11 +63,7 @@ public class NodeCacheService {
 
     private void initDb() {
         try {
-            Path dbDir = Path.of(System.getProperty("user.home"), ".meshapp");
-            Files.createDirectories(dbDir);
-            String dbPath = dbDir.resolve("nodedb").toString();
-
-            dbConnection = DriverManager.getConnection("jdbc:h2:" + dbPath + ";AUTO_SERVER=FALSE");
+            dbConnection = DatabaseProvider.getConnection();
 
             try (Statement stmt = dbConnection.createStatement()) {
                 stmt.execute("""
@@ -128,7 +122,7 @@ public class NodeCacheService {
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """);
 
-            log.info("Node cache DB initialized: {}", dbPath);
+            log.info("Node cache DB initialized");
         } catch (Exception e) {
             log.error("Failed to initialize node cache DB", e);
         }
@@ -680,12 +674,8 @@ public class NodeCacheService {
         try {
             if (mergeStmt != null) mergeStmt.close();
             if (insertTelemetryStmt != null) insertTelemetryStmt.close();
-            if (dbConnection != null && !dbConnection.isClosed()) {
-                dbConnection.close();
-                log.info("Node cache DB connection closed");
-            }
         } catch (SQLException e) {
-            log.error("Error closing node cache DB", e);
+            log.error("Error closing node cache DB statements", e);
         }
     }
 

@@ -54,11 +54,7 @@ public class MessageDbService {
 
     private void initDb() {
         try {
-            Path dbDir = Path.of(System.getProperty("user.home"), ".meshapp");
-            Files.createDirectories(dbDir);
-            String dbPath = dbDir.resolve("nodedb").toString();
-
-            dbConnection = DriverManager.getConnection("jdbc:h2:" + dbPath + ";AUTO_SERVER=FALSE");
+            dbConnection = DatabaseProvider.getConnection();
 
             try (Statement stmt = dbConnection.createStatement()) {
                 stmt.execute("""
@@ -630,12 +626,8 @@ public class MessageDbService {
         try {
             if (insertStmt != null) insertStmt.close();
             if (updateStatusStmt != null) updateStatusStmt.close();
-            if (dbConnection != null && !dbConnection.isClosed()) {
-                dbConnection.close();
-                log.info("Message DB connection closed");
-            }
         } catch (SQLException e) {
-            log.error("Error closing message DB", e);
+            log.error("Error closing message DB statements", e);
         }
     }
 }
