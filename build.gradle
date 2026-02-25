@@ -149,7 +149,14 @@ tasks.register('jpackage') {
 		def outputDir = layout.buildDirectory.dir("jpackage").get().asFile
 		if (outputDir.exists()) outputDir.deleteDir()
 		outputDir.mkdirs()
-		def appVersion = '1.0.0'
+		def appVersion = {
+			try {
+				def count = 'git rev-list --count HEAD'.execute().text.trim()
+				return "1.0.${count}"
+			} catch (ignored) {
+				return '1.0.0'
+			}
+		}()
 
 		def javaHome = javaToolchains.launcherFor {
 			languageVersion = JavaLanguageVersion.of(21)
