@@ -23,7 +23,7 @@
 
 <div align="right">
 
-[![Release](https://img.shields.io/badge/Release-v1.0.14-blue?style=flat-square&logo=gitea)](https://git.privatepractice.app/covox/meshapp/releases/tag/AlphaTest)
+[![Release](https://img.shields.io/badge/Release-v1.0.35-blue?style=flat-square&logo=gitea)](https://git.privatepractice.app/covox/meshapp/releases/tag/v1.1.0-beta$0)
 
 </div>
 
