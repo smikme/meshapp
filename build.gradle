@@ -196,6 +196,7 @@ tasks.register('jpackage') {
 			'--name', 'MeshApp',
 			'--app-version', appVersion,
 			'--vendor', 'Meshtastic',
+			'--copyright', 'Copyright © Konstantin A. Smirnov',
 			'--dest', outputDir.absolutePath,
 			'--input', libDir.absolutePath,
 			'--main-jar', "${project.name}-${project.version}.jar",
