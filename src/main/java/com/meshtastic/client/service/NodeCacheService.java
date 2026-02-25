@@ -279,6 +279,22 @@ public class NodeCacheService {
         }
     }
 
+    /** Удалить конкретную ноду и её телеметрию из кэша и БД. */
+    public synchronized void deleteNode(int nodeNum) {
+        cache.remove(nodeNum);
+        if (dbConnection == null) return;
+        try (PreparedStatement ps1 = dbConnection.prepareStatement("DELETE FROM telemetry_history WHERE node_num = ?");
+             PreparedStatement ps2 = dbConnection.prepareStatement("DELETE FROM nodes WHERE node_num = ?")) {
+            ps1.setInt(1, nodeNum);
+            ps1.executeUpdate();
+            ps2.setInt(1, nodeNum);
+            ps2.executeUpdate();
+            log.info("Нода !{} удалена из кэша", Integer.toHexString(nodeNum));
+        } catch (SQLException e) {
+            log.error("Ошибка удаления ноды !{} из кэша", Integer.toHexString(nodeNum), e);
+        }
+    }
+
     // ═══════════════════════════════════════════════════════════
     //  Телеметрия — персистентная история
     // ═══════════════════════════════════════════════════════════

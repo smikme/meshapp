@@ -55,30 +55,38 @@ public class FormNodes extends Form {
     private final IntConsumer nodeUpdateListener = num -> Platform.runLater(() -> {
         if (state == null) return;
         NodeData node = state.getNodeDb().get(num);
-        if (node != null) {
-            for (int i = 0; i < nodeData.size(); i++) {
-                if (nodeData.get(i).getNodeNum() == num) {
-                    suppressSelectionListener = true;
-                    try {
-                        nodeData.set(i, node);
-                    } finally {
-                        suppressSelectionListener = false;
-                    }
-                    // Восстановить выделение если обновлённая нода была выбрана
-                    if (num == currentDetailNodeNum) {
-                        for (NodeData n : nodeListView.getItems()) {
-                            if (n.getNodeNum() == num) {
-                                nodeListView.getSelectionModel().select(n);
-                                break;
-                            }
+
+        // Нода удалена из nodeDb — убрать из списка и очистить детали
+        if (node == null) {
+            nodeData.removeIf(n -> n.getNodeNum() == num);
+            if (num == currentDetailNodeNum) {
+                showDetail(null);
+            }
+            return;
+        }
+
+        for (int i = 0; i < nodeData.size(); i++) {
+            if (nodeData.get(i).getNodeNum() == num) {
+                suppressSelectionListener = true;
+                try {
+                    nodeData.set(i, node);
+                } finally {
+                    suppressSelectionListener = false;
+                }
+                // Восстановить выделение если обновлённая нода была выбрана
+                if (num == currentDetailNodeNum) {
+                    for (NodeData n : nodeListView.getItems()) {
+                        if (n.getNodeNum() == num) {
+                            nodeListView.getSelectionModel().select(n);
+                            break;
                         }
                     }
-                    refreshDetail();
-                    return;
                 }
+                refreshDetail();
+                return;
             }
-            nodeData.add(node);
         }
+        nodeData.add(node);
     });
 
     private final Runnable connectionListener = () -> Platform.runLater(this::rebindState);
@@ -295,7 +303,7 @@ public class FormNodes extends Form {
         }
 
         currentDetailNodeNum = node.getNodeNum();
-        currentDetailContent = new NodeDetailContent(state, node);
+        currentDetailContent = new NodeDetailContent(state, node, protocolHandler);
         VBox.setVgrow(currentDetailContent, Priority.ALWAYS);
 
         detailPane.getChildren().clear();
