@@ -1,8 +1,12 @@
 package com.meshtastic.client.components;
 
 import com.meshtastic.client.forms.FormChat;
+import com.meshtastic.client.modal.ModalPane;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.NodeData;
+import com.meshtastic.client.protocol.ProtocolHandler;
+import com.meshtastic.client.service.MessageService;
+import com.meshtastic.client.service.NodeCacheService;
 import com.meshtastic.client.system.AllForms;
 import com.meshtastic.client.system.FormManager;
 import com.meshtastic.client.utils.NodeUtils;
@@ -33,15 +37,23 @@ public class NodeDetailContent extends HBox {
     private final TelemetryChartPanel chartPanel;
     private final ObservableList<String[]> tableData;
     private final int nodeNum;
+    private final ProtocolHandler protocolHandler;
+    private final DeviceState state;
 
     /**
      * @param state             состояние устройства (для телеметрии), может быть {@code null}
      * @param node              нода для отображения
+     * @param handler           протокол-обработчик для отправки радио-запросов, может быть {@code null}
      * @param onBeforeNavigate  вызывается перед навигацией в приватный чат (напр. закрыть модалку),
      *                          может быть {@code null}
      */
-    public NodeDetailContent(DeviceState state, NodeData node, Runnable onBeforeNavigate) {
+    public NodeDetailContent(DeviceState state, NodeData node, ProtocolHandler handler, Runnable onBeforeNavigate) {
         this.nodeNum = node.getNodeNum();
+        this.protocolHandler = handler;
+        this.state = state;
+
+        String displayName = node.getLongName() != null && !node.getLongName().isEmpty()
+                ? node.getLongName() : (node.getNodeId() != null ? node.getNodeId() : "?");
 
         // === Вертикальный тулбар слева (56px, структура как DrawerPane) ===
         StackPane toolbarPane = new StackPane();
@@ -72,7 +84,55 @@ public class NodeDetailContent extends HBox {
             formChat.openDirectChat(node.getNodeNum(), node);
         });
 
-        actionToolbar.getItems().add(privateChatBtn);
+        // Кнопка «Обновить ноду» — запрос информации по радио
+        SVGPath refreshIcon = SvgIconLoader.load("/drawer/icon/refresh-node.svg", 22);
+        Button refreshBtn = new Button();
+        refreshBtn.setGraphic(refreshIcon);
+        refreshBtn.setContentDisplay(ContentDisplay.GRAPHIC_ONLY);
+        refreshBtn.getStyleClass().add("drawer-toolbar-button");
+        refreshBtn.setTooltip(new Tooltip("Обновить информацию о ноде"));
+        refreshBtn.setDisable(handler == null || state == null);
+        refreshBtn.setOnAction(e -> {
+            if (protocolHandler != null && this.state != null) {
+                ModalPane.showConfirm(
+                        "Обновить информацию?",
+                        "Запросить обновление информации о ноде \"" + displayName + "\" по радио?",
+                        confirmed -> {
+                            if (confirmed) {
+                                MessageService.requestNodeInfo(protocolHandler, this.state, nodeNum);
+                            }
+                        }
+                );
+            }
+        });
+
+        // Кнопка «Удалить ноду»
+        SVGPath deleteIcon = SvgIconLoader.load("/drawer/icon/delete-node.svg", 22);
+        Button deleteBtn = new Button();
+        deleteBtn.setGraphic(deleteIcon);
+        deleteBtn.setContentDisplay(ContentDisplay.GRAPHIC_ONLY);
+        deleteBtn.getStyleClass().add("drawer-toolbar-button");
+        deleteBtn.setTooltip(new Tooltip("Удалить ноду"));
+        deleteBtn.setDisable(state == null);
+        deleteBtn.setOnAction(e -> {
+            if (this.state != null) {
+                ModalPane.showConfirm(
+                        "Удалить ноду?",
+                        "Удалить ноду \"" + displayName + "\" из списка? Данные телеметрии также будут удалены.",
+                        confirmed -> {
+                            if (confirmed) {
+                                this.state.removeNode(nodeNum);
+                                NodeCacheService.getInstance().deleteNode(nodeNum);
+                                if (onBeforeNavigate != null) {
+                                    onBeforeNavigate.run();
+                                }
+                            }
+                        }
+                );
+            }
+        });
+
+        actionToolbar.getItems().addAll(privateChatBtn, refreshBtn, deleteBtn);
 
         VBox toolbarContainer = new VBox(actionToolbar);
         toolbarContainer.setAlignment(Pos.TOP_CENTER);
@@ -81,9 +141,6 @@ public class NodeDetailContent extends HBox {
         toolbarPane.getChildren().add(toolbarContainer);
 
         // === Заголовок: большой аватар + имя + nodeId ===
-        String displayName = node.getLongName() != null && !node.getLongName().isEmpty()
-                ? node.getLongName() : (node.getNodeId() != null ? node.getNodeId() : "?");
-
         String avatarText;
         if (node.getShortName() != null && !node.getShortName().isEmpty()) {
             avatarText = node.getShortName().toUpperCase();
@@ -139,8 +196,8 @@ public class NodeDetailContent extends HBox {
     }
 
     /** Конструктор без callback навигации (для inline-использования в FormNodes). */
-    public NodeDetailContent(DeviceState state, NodeData node) {
-        this(state, node, null);
+    public NodeDetailContent(DeviceState state, NodeData node, ProtocolHandler handler) {
+        this(state, node, handler, null);
     }
 
     /** Обновить только данные таблицы (без пересоздания UI). */

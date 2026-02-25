@@ -1,8 +1,11 @@
 package com.meshtastic.client.components;
 
 import com.meshtastic.client.modal.ModalPane;
+import com.meshtastic.client.model.ConnectionEntry;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.NodeData;
+import com.meshtastic.client.protocol.ProtocolHandler;
+import com.meshtastic.client.service.ConnectionManager;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.control.Button;
@@ -39,7 +42,8 @@ public class NodeDetailPanel extends VBox {
         backRow.setPadding(new Insets(4, 0, 0, 64));
 
         // === Единый компонент информации о ноде ===
-        detailContent = new NodeDetailContent(state, node, this::close);
+        ProtocolHandler handler = findActiveProtocolHandler();
+        detailContent = new NodeDetailContent(state, node, handler, this::close);
         VBox.setVgrow(detailContent, Priority.ALWAYS);
 
         getChildren().addAll(backRow, detailContent);
@@ -52,6 +56,17 @@ public class NodeDetailPanel extends VBox {
         if (modal != null) {
             modal.hide();
         }
+    }
+
+    /** Найти ProtocolHandler активного соединения */
+    private static ProtocolHandler findActiveProtocolHandler() {
+        ConnectionManager mgr = ConnectionManager.getInstance();
+        for (ConnectionEntry entry : mgr.getEntries()) {
+            if (entry.isConnected()) {
+                return mgr.getProtocolHandler(entry.getId());
+            }
+        }
+        return null;
     }
 
     /**

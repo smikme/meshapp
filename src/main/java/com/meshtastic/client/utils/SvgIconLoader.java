@@ -1,5 +1,6 @@
 package com.meshtastic.client.utils;
 
+import javafx.scene.shape.FillRule;
 import javafx.scene.shape.SVGPath;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -25,11 +26,12 @@ public final class SvgIconLoader {
 
     private static final Pattern PATH_D_PATTERN = Pattern.compile("<path[^>]+d=\"([^\"]+)\"", Pattern.DOTALL);
     private static final Pattern VIEWBOX_PATTERN = Pattern.compile("viewBox=\"([^\"]+)\"");
+    private static final Pattern FILL_RULE_PATTERN = Pattern.compile("fill-rule=\"evenodd\"");
 
     /** Кэш: путь к ресурсу → распарсенные данные SVG */
     private static final Map<String, SvgData> cache = new HashMap<>();
 
-    private record SvgData(String pathData, double viewBoxSize) {}
+    private record SvgData(String pathData, double viewBoxSize, boolean evenOdd) {}
 
     /**
      * Создать SVGPath из SVG-файла в ресурсах.
@@ -44,6 +46,9 @@ public final class SvgIconLoader {
 
         SVGPath svgPath = new SVGPath();
         svgPath.setContent(data.pathData());
+        if (data.evenOdd()) {
+            svgPath.setFillRule(FillRule.EVEN_ODD);
+        }
         svgPath.getStyleClass().add("svg-icon");
 
         // Масштабирование: SVG viewBox → целевой размер
@@ -84,7 +89,9 @@ public final class SvgIconLoader {
                 }
             }
 
-            SvgData data = new SvgData(pathData, viewBoxSize);
+            boolean evenOdd = FILL_RULE_PATTERN.matcher(svg).find();
+
+            SvgData data = new SvgData(pathData, viewBoxSize, evenOdd);
             cache.put(resourcePath, data);
             return data;
         } catch (Exception e) {

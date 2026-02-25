@@ -3,6 +3,8 @@ package com.meshtastic.client.modal;
 import javafx.animation.FadeTransition;
 import javafx.animation.ParallelTransition;
 import javafx.animation.TranslateTransition;
+import javafx.event.EventHandler;
+import javafx.geometry.Bounds;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Node;
@@ -11,6 +13,7 @@ import javafx.scene.control.Label;
 import javafx.scene.control.Separator;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyEvent;
+import javafx.scene.input.MouseEvent;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
@@ -33,18 +36,23 @@ public class ModalPane extends StackPane {
     private Node currentContent;
     private Runnable onHidden;
 
+    /** Scene-level фильтр: закрытие по клику вне контента */
+    private final EventHandler<MouseEvent> sceneClickFilter = e -> {
+        if (currentContent != null && isVisible()) {
+            // layoutBounds — только размеры самого Region, без overflow детей и эффектов
+            Bounds contentBounds = currentContent.localToScene(currentContent.getLayoutBounds());
+            if (contentBounds != null && !contentBounds.contains(e.getSceneX(), e.getSceneY())) {
+                hide();
+                e.consume();
+            }
+        }
+    };
+
     public ModalPane() {
         setVisible(false);
         setPickOnBounds(true);
         getStyleClass().add("modal-overlay");
         setAlignment(Pos.CENTER_RIGHT);
-
-        // Клик по фону закрывает модалку
-        setOnMouseClicked(e -> {
-            if (e.getTarget() == this) {
-                hide();
-            }
-        });
 
         // ESC закрывает модалку
         addEventHandler(KeyEvent.KEY_PRESSED, e -> {
@@ -79,6 +87,11 @@ public class ModalPane extends StackPane {
         getChildren().setAll(content);
         setVisible(true);
 
+        // Scene-level фильтр для закрытия по клику вне контента
+        if (getScene() != null) {
+            getScene().addEventFilter(MouseEvent.MOUSE_PRESSED, sceneClickFilter);
+        }
+
         // Фон: fade-in
         setOpacity(0);
         FadeTransition bgFade = new FadeTransition(ANIM_DURATION, this);
@@ -102,6 +115,11 @@ public class ModalPane extends StackPane {
      */
     public void hide() {
         if (currentContent == null) return;
+
+        // Снять scene-level фильтр
+        if (getScene() != null) {
+            getScene().removeEventFilter(MouseEvent.MOUSE_PRESSED, sceneClickFilter);
+        }
 
         FadeTransition bgFade = new FadeTransition(ANIM_DURATION, this);
         bgFade.setFromValue(1);
