@@ -46,6 +46,7 @@ public class MeshApp extends Application {
         AppPreferences.init();
         // Инициализировать MessageDbService и выполнить миграцию JSON → H2 при первом запуске
         MessageDbService.getInstance().migrateFromJsonHistory();
+        MessageDbService.getInstance().markStaleSendingAsFailed();
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             MessageDbService.closeIfInitialized();
             NodeCacheService.closeIfInitialized();

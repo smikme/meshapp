@@ -16,6 +16,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
@@ -36,6 +39,14 @@ public class DeviceState {
 
     private static final Logger log = LoggerFactory.getLogger(DeviceState.class);
 
+    /** Таймаут ожидания ACK: если за это время ACK не пришёл — статус → FAILED */
+    private static final long ACK_TIMEOUT_MS = 120_000;
+    /** Интервал проверки просроченных pending ACK */
+    private static final long ACK_SWEEP_INTERVAL_MS = 10_000;
+
+    /** Запись в очереди ожидающих ACK: сообщение + время регистрации */
+    private record PendingAckEntry(MeshMessage message, long registeredAtMillis) {}
+
     private volatile int myNodeNum;
     private final ConcurrentHashMap<Integer, NodeData> nodeDb = new ConcurrentHashMap<>();
     private final List<ChannelProtos.Channel> channels = Collections.synchronizedList(new ArrayList<>());
@@ -43,7 +54,13 @@ public class DeviceState {
     private final List<ModuleConfigProtos.ModuleConfig> moduleConfigs = Collections.synchronizedList(new ArrayList<>());
     private final Map<Integer, List<MeshMessage>> messagesByChannel = new ConcurrentHashMap<>();
     private final Map<Integer, List<MeshMessage>> directMessages = new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<Integer, MeshMessage> pendingAcks = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<Integer, PendingAckEntry> pendingAcks = new ConcurrentHashMap<>();
+
+    private final ScheduledExecutorService ackTimeoutExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
+        Thread t = new Thread(r, "ack-timeout-sweeper");
+        t.setDaemon(true);
+        return t;
+    });
     /** История телеметрии (последние MAX_TELEMETRY_HISTORY записей). */
     private static final int MAX_TELEMETRY_HISTORY = 200;
     private final LinkedList<TelemetryEntry> telemetryHistory = new LinkedList<>();
@@ -56,6 +73,11 @@ public class DeviceState {
     private volatile MeshProtos.User ownerInfo;
     private volatile ByteString sessionPasskey;
     private final List<Runnable> ownerInfoListeners = new CopyOnWriteArrayList<>();
+
+    public DeviceState() {
+        ackTimeoutExecutor.scheduleWithFixedDelay(this::sweepExpiredAcks,
+                ACK_SWEEP_INTERVAL_MS, ACK_SWEEP_INTERVAL_MS, TimeUnit.MILLISECONDS);
+    }
 
     public int getMyNodeNum() { return myNodeNum; }
     public void setMyNodeNum(int myNodeNum) { this.myNodeNum = myNodeNum; }
@@ -285,12 +307,14 @@ public class DeviceState {
      * Регистрирует исходящее сообщение для отслеживания ACK/NAK.
      * При получении routing-ответа с этим {@code packetId}
      * статус сообщения будет обновлён через {@link #resolvePendingAck}.
+     * Если ACK не придёт в течение {@link #ACK_TIMEOUT_MS}, сообщение
+     * автоматически получит статус {@code FAILED} с причиной {@code TIMEOUT}.
      *
      * @param packetId уникальный идентификатор пакета
      * @param msg      сообщение в статусе {@code SENDING}
      */
     public void registerPendingAck(int packetId, MeshMessage msg) {
-        pendingAcks.put(packetId, msg);
+        pendingAcks.put(packetId, new PendingAckEntry(msg, System.currentTimeMillis()));
     }
 
     /**
@@ -301,7 +325,48 @@ public class DeviceState {
      * @return сообщение, ожидавшее подтверждения, или {@code null} если не найдено
      */
     public MeshMessage resolvePendingAck(int packetId) {
-        return pendingAcks.remove(packetId);
+        PendingAckEntry entry = pendingAcks.remove(packetId);
+        return entry != null ? entry.message() : null;
+    }
+
+    /**
+     * Помечает все ожидающие ACK сообщения как {@code FAILED} с указанной причиной.
+     * Обновляет статус в БД и оповещает слушателей.
+     * Вызывается при отключении от устройства.
+     *
+     * @param reason причина неудачи (например, {@code "DISCONNECTED"})
+     */
+    public void failAllPendingAcks(String reason) {
+        if (pendingAcks.isEmpty()) return;
+        int count = 0;
+        var iterator = pendingAcks.entrySet().iterator();
+        while (iterator.hasNext()) {
+            var entry = iterator.next();
+            iterator.remove();
+            int packetId = entry.getKey();
+            MeshMessage msg = entry.getValue().message();
+            msg.setStatus(MeshMessage.DeliveryStatus.FAILED);
+            msg.setErrorReason(reason);
+            try {
+                com.meshtastic.client.service.MessageDbService.getInstance()
+                        .updateStatus(packetId, msg.getStatus(), msg.getErrorReason());
+            } catch (Exception e) {
+                log.warn("Failed to update status in DB for packetId {} during failAll", packetId, e);
+            }
+            count++;
+        }
+        if (count > 0) {
+            log.info("Marked {} pending messages as FAILED (reason: {})", count, reason);
+            fireMessageListeners();
+        }
+    }
+
+    /**
+     * Останавливает фоновый поток проверки таймаутов ACK.
+     * Вызывается при удалении {@code DeviceState} (отключение от устройства).
+     */
+    public void shutdown() {
+        ackTimeoutExecutor.shutdownNow();
     }
 
     /**
@@ -350,6 +415,39 @@ public class DeviceState {
         for (Runnable r : ownerInfoListeners) {
             try { r.run(); }
             catch (Exception e) { log.error("Exception in owner info listener", e); }
+        }
+    }
+
+    /**
+     * Периодическая проверка просроченных pending ACK.
+     * Сообщения, ожидающие ACK дольше {@link #ACK_TIMEOUT_MS},
+     * помечаются как {@code FAILED} с причиной {@code TIMEOUT}.
+     */
+    private void sweepExpiredAcks() {
+        long now = System.currentTimeMillis();
+        boolean anyExpired = false;
+        for (var mapEntry : pendingAcks.entrySet()) {
+            int packetId = mapEntry.getKey();
+            PendingAckEntry entry = mapEntry.getValue();
+            if (now - entry.registeredAtMillis() >= ACK_TIMEOUT_MS) {
+                PendingAckEntry removed = pendingAcks.remove(packetId);
+                if (removed != null) {
+                    MeshMessage msg = removed.message();
+                    msg.setStatus(MeshMessage.DeliveryStatus.FAILED);
+                    msg.setErrorReason("TIMEOUT");
+                    try {
+                        com.meshtastic.client.service.MessageDbService.getInstance()
+                                .updateStatus(packetId, msg.getStatus(), msg.getErrorReason());
+                    } catch (Exception e) {
+                        log.warn("Failed to update timed-out message status in DB for packetId {}", packetId, e);
+                    }
+                    log.warn("ACK timeout for packetId {}", packetId);
+                    anyExpired = true;
+                }
+            }
+        }
+        if (anyExpired) {
+            fireMessageListeners();
         }
     }
 

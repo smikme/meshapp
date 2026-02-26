@@ -115,6 +115,27 @@ public class MessageDbService {
         }
     }
 
+    /**
+     * Помечает все сообщения со статусом {@code SENDING} как {@code FAILED}
+     * с причиной {@code STALE}. Вызывается один раз при старте приложения,
+     * чтобы очистить «зависшие» сообщения от предыдущей сессии
+     * (аварийное завершение, потеря питания и т.д.).
+     */
+    public synchronized void markStaleSendingAsFailed() {
+        if (dbConnection == null) return;
+        try (PreparedStatement ps = dbConnection.prepareStatement(
+                "UPDATE messages SET status = ?, error_reason = ? WHERE status = 'SENDING'")) {
+            ps.setString(1, MeshMessage.DeliveryStatus.FAILED.name());
+            ps.setString(2, "STALE");
+            int updated = ps.executeUpdate();
+            if (updated > 0) {
+                log.info("Marked {} stale SENDING messages as FAILED on startup", updated);
+            }
+        } catch (SQLException e) {
+            log.error("Failed to mark stale SENDING messages as FAILED", e);
+        }
+    }
+
     // ═══════════════════════════════════════════════════════════
     //  Запись
     // ═══════════════════════════════════════════════════════════

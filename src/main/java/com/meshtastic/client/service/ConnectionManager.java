@@ -221,7 +221,11 @@ public class ConnectionManager {
 
     private synchronized void cleanupConnection(String id) {
         activeConnections.remove(id);
-        deviceStates.remove(id);
+        DeviceState ds = deviceStates.remove(id);
+        if (ds != null) {
+            ds.failAllPendingAcks("DISCONNECTED");
+            ds.shutdown();
+        }
         protocolHandlers.remove(id);
         configFutures.remove(id);
     }
