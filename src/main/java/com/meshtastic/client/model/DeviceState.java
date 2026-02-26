@@ -40,7 +40,7 @@ public class DeviceState {
     private static final Logger log = LoggerFactory.getLogger(DeviceState.class);
 
     /** Таймаут ожидания ACK: если за это время ACK не пришёл — статус → FAILED */
-    private static final long ACK_TIMEOUT_MS = 120_000;
+    private static final long ACK_TIMEOUT_MS = 240_000;
     /** Интервал проверки просроченных pending ACK */
     private static final long ACK_SWEEP_INTERVAL_MS = 10_000;
 
