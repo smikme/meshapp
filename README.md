@@ -155,7 +155,7 @@ Meshtastic — открытый проект, превращающий недо�
 
 ```bash
 # Клонировать репозиторий
-git clone https://github.com/<your-org>/meshapp.git
+git clone https://git.privatepractice.app/covox/meshapp.git
 cd meshapp
 
 # Запустить приложение
