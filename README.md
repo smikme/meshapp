@@ -234,3 +234,6 @@ MeshApp собирается в нативные пакеты через `jpacka
   <img src="https://img.shields.io/badge/Telegram-2CA5E0?style=for-the-badge&logo=telegram&logoColor=white" alt="Telegram">
 </a>
 </p>
+
+<noscript><div><img src="https://mc.yandex.ru/watch/107025810" style="position:absolute; left:-9999px;" alt="" /></div></noscript>
+<!-- /Yandex.Metrika counter -->
