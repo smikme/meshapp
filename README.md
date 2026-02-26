@@ -235,5 +235,4 @@ MeshApp собирается в нативные пакеты через `jpacka
 </a>
 </p>
 
-<noscript><div><img src="https://mc.yandex.ru/watch/107025810" style="position:absolute; left:-9999px;" alt="" /></div></noscript>
-<!-- /Yandex.Metrika counter -->
+<img src="https://mc.yandex.ru/watch/107025810" style="position:absolute; left:-9999px;" alt="" />
