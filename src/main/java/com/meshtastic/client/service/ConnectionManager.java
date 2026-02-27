@@ -45,6 +45,7 @@ public class ConnectionManager {
     private final Map<String, DeviceState> deviceStates = new ConcurrentHashMap<>();
     private final Map<String, ProtocolHandler> protocolHandlers = new ConcurrentHashMap<>();
     private final Map<String, CompletableFuture<DeviceState>> configFutures = new ConcurrentHashMap<>();
+    private final Set<String> userDisconnectedIds = ConcurrentHashMap.newKeySet();
     private final List<Runnable> listeners = new CopyOnWriteArrayList<>();
     private final Gson gson = new GsonBuilder().setPrettyPrinting().create();
     private final Path configPath;
@@ -113,6 +114,7 @@ public class ConnectionManager {
      * @param id идентификатор профиля
      */
     public void removeEntry(String id) {
+        ReconnectService.getInstance().cancelReconnect(id);
         disconnect(id);
         entries.removeIf(e -> e.getId().equals(id));
         save();
@@ -128,6 +130,7 @@ public class ConnectionManager {
      * @throws ConnectionException если профиль не найден или TCP-соединение не удалось
      */
     public synchronized void connect(String id) throws ConnectionException {
+        userDisconnectedIds.remove(id);
         ConnectionEntry entry = findEntry(id);
         if (entry == null) {
             throw new ConnectionException("Connection entry not found: " + id);
@@ -148,6 +151,9 @@ public class ConnectionManager {
                 entry.setConnected(false);
                 cleanupConnection(id);
                 fireChanged();
+                if (!userDisconnectedIds.contains(id)) {
+                    ReconnectService.getInstance().startReconnect(id);
+                }
             }
 
             @Override
@@ -155,6 +161,9 @@ public class ConnectionManager {
                 entry.setConnected(false);
                 cleanupConnection(id);
                 fireChanged();
+                if (!userDisconnectedIds.contains(id)) {
+                    ReconnectService.getInstance().startReconnect(id);
+                }
             }
         });
         tcp.connect();
@@ -183,6 +192,8 @@ public class ConnectionManager {
      * @param id идентификатор профиля подключения
      */
     public synchronized void disconnect(String id) {
+        userDisconnectedIds.add(id);
+        ReconnectService.getInstance().cancelReconnect(id);
         TcpConnection tcp = activeConnections.get(id);
         cleanupConnection(id);
         if (tcp != null) {
@@ -230,7 +241,7 @@ public class ConnectionManager {
         configFutures.remove(id);
     }
 
-    private ConnectionEntry findEntry(String id) {
+    ConnectionEntry findEntry(String id) {
         for (ConnectionEntry e : entries) {
             if (e.getId().equals(id)) {
                 return e;
@@ -239,7 +250,7 @@ public class ConnectionManager {
         return null;
     }
 
-    private void fireChanged() {
+    void fireChanged() {
         for (Runnable listener : listeners) {
             listener.run();
         }

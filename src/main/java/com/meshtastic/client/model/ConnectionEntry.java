@@ -17,6 +17,7 @@ public class ConnectionEntry {
     private String host;
     private int port;
     private transient boolean connected;
+    private transient boolean reconnecting;
 
     public ConnectionEntry() {
         this.id = UUID.randomUUID().toString();
@@ -68,5 +69,13 @@ public class ConnectionEntry {
 
     public void setConnected(boolean connected) {
         this.connected = connected;
+    }
+
+    public boolean isReconnecting() {
+        return reconnecting;
+    }
+
+    public void setReconnecting(boolean reconnecting) {
+        this.reconnecting = reconnecting;
     }
 }
