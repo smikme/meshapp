@@ -16,7 +16,7 @@
   <img src="https://img.shields.io/badge/JavaFX-21.0.7-blue?logo=java" alt="JavaFX"/>
   <img src="https://img.shields.io/badge/Platform-Win%20%7C%20macOS%20%7C%20Linux-brightgreen" alt="Platform"/>
   <img src="https://img.shields.io/badge/License-GPL--3.0-blue" alt="License"/>
-  <a href="https://t.me/MeshAppClient">
+  <a href="https://t.me/+SRaOd1gftoo5MWRi">
   <img src="https://img.shields.io/badge/Telegram-@MeshAppClient-blue?logo=telegram" alt="Telegram">
 </a>
 </p>
@@ -155,7 +155,7 @@ Meshtastic — открытый проект, превращающий недо�
 
 ```bash
 # Клонировать репозиторий
-git clone https://github.com/<your-org>/meshapp.git
+git clone https://git.privatepractice.app/covox/meshapp.git
 cd meshapp
 
 # Запустить приложение
@@ -234,3 +234,5 @@ MeshApp собирается в нативные пакеты через `jpacka
   <img src="https://img.shields.io/badge/Telegram-2CA5E0?style=for-the-badge&logo=telegram&logoColor=white" alt="Telegram">
 </a>
 </p>
+
+
