@@ -55,6 +55,8 @@ public class FormSetting extends Form {
 
     // Config tab
     private TreeTableView<ConfigTreeItem> configTree;
+    private TextField configSearchField;
+    private TreeItem<ConfigTreeItem> fullConfigRoot;
     private Label configStatusLabel;
     private Button saveConfigBtn;
     private Button refreshConfigBtn;
@@ -78,12 +80,10 @@ public class FormSetting extends Form {
         TabPane tabPane = new TabPane();
         tabPane.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
 
-        VBox generalTab = createGeneralPanel();
-
         cacheTab = new Tab("Кэш", createCachePanel());
         configTab = new Tab("Конфигурация", createConfigPanel());
 
-        tabPane.getTabs().addAll(new Tab("Общие", generalTab), configTab, cacheTab);
+        tabPane.getTabs().addAll(configTab, cacheTab);
         tabPane.getSelectionModel().selectedItemProperty().addListener((obs, oldTab, newTab) -> {
             if (newTab == cacheTab) {
                 reloadCacheTable();
@@ -98,13 +98,17 @@ public class FormSetting extends Form {
     }
 
     @Override
+    public void formOpen() {
+        reloadConfigTree();
+    }
+
+    @Override
     public void formRefresh() {
-        refreshConnection();
-        reloadCacheTable();
+        reloadConfigTree();
     }
 
     /**
-     * Находит активное подключение и предзаполняет поля owner info.
+     * Находит активное подключение и обновляет ссылки state/handler.
      */
     private void refreshConnection() {
         // Снять предыдущий listener
@@ -124,72 +128,6 @@ public class FormSetting extends Form {
         }
         this.state = newState;
         this.handler = newHandler;
-
-        boolean connected = state != null && handler != null;
-        saveOwnerBtn.setDisable(!connected);
-
-        if (connected) {
-            // Предзаполнить из текущих данных nodeDb
-            NodeData myNode = state.getNodeDb().get(state.getMyNodeNum());
-            if (myNode != null) {
-                if (longNameField.getText().isEmpty() && myNode.getLongName() != null) {
-                    longNameField.setText(myNode.getLongName());
-                }
-                if (shortNameField.getText().isEmpty() && myNode.getShortName() != null) {
-                    shortNameField.setText(myNode.getShortName());
-                }
-            }
-            ownerStatusLabel.setText("");
-        } else {
-            ownerStatusLabel.setText("Нет подключения к радио");
-        }
-    }
-
-    private VBox createGeneralPanel() {
-        VBox panel = new VBox(12);
-        panel.setPadding(new Insets(15));
-        panel.setAlignment(Pos.TOP_LEFT);
-
-        // Секция: Имя ноды
-        Label sectionLabel = new Label("Имя ноды");
-        sectionLabel.setFont(Font.font("Roboto", FontWeight.BOLD, 14));
-
-        Label longNameLabel = new Label("Длинное имя (до 40 символов):");
-        longNameField = new TextField();
-        longNameField.setPromptText("Например: Мой узел");
-        longNameField.setMaxWidth(300);
-        // Лимит 40 символов
-        longNameField.textProperty().addListener((obs, oldVal, newVal) -> {
-            if (newVal != null && newVal.length() > 40) {
-                longNameField.setText(oldVal);
-            }
-        });
-
-        Label shortNameLabel = new Label("Короткое имя (до 4 символов):");
-        shortNameField = new TextField();
-        shortNameField.setPromptText("Например: МУ");
-        shortNameField.setMaxWidth(100);
-        // Лимит 4 символа
-        shortNameField.textProperty().addListener((obs, oldVal, newVal) -> {
-            if (newVal != null && newVal.length() > 4) {
-                shortNameField.setText(oldVal);
-            }
-        });
-
-        ownerStatusLabel = new Label("");
-        ownerStatusLabel.setStyle("-fx-opacity: 0.7;");
-
-        saveOwnerBtn = new Button("Сохранить на радио");
-        saveOwnerBtn.setDisable(true);
-        saveOwnerBtn.setOnAction(e -> onSaveOwnerInfo());
-
-        panel.getChildren().addAll(
-                sectionLabel,
-                longNameLabel, longNameField,
-                shortNameLabel, shortNameField,
-                saveOwnerBtn, ownerStatusLabel
-        );
-        return panel;
     }
 
     private void onSaveOwnerInfo() {
@@ -408,6 +346,42 @@ public class FormSetting extends Form {
         VBox panel = new VBox(8);
         panel.setPadding(new Insets(5));
 
+        // Имя ноды
+        HBox ownerRow = new HBox(8);
+        ownerRow.setAlignment(Pos.CENTER_LEFT);
+
+        longNameField = new TextField();
+        longNameField.setPromptText("Длинное имя");
+        longNameField.setPrefWidth(200);
+        longNameField.textProperty().addListener((obs, oldVal, newVal) -> {
+            if (newVal != null && newVal.length() > 40) longNameField.setText(oldVal);
+        });
+
+        shortNameField = new TextField();
+        shortNameField.setPromptText("Короткое");
+        shortNameField.setPrefWidth(80);
+        shortNameField.textProperty().addListener((obs, oldVal, newVal) -> {
+            if (newVal != null && newVal.length() > 4) shortNameField.setText(oldVal);
+        });
+
+        saveOwnerBtn = new Button("Сохранить имя");
+        saveOwnerBtn.setDisable(true);
+        saveOwnerBtn.setOnAction(e -> onSaveOwnerInfo());
+
+        ownerStatusLabel = new Label("");
+        ownerStatusLabel.setStyle("-fx-opacity: 0.7;");
+
+        ownerRow.getChildren().addAll(
+                new Label("Имя:"), longNameField,
+                new Label("Короткое:"), shortNameField,
+                saveOwnerBtn, ownerStatusLabel
+        );
+
+        // Поиск
+        configSearchField = new TextField();
+        configSearchField.setPromptText("Поиск параметров...");
+        configSearchField.textProperty().addListener((obs, oldVal, newVal) -> filterConfigTree(newVal));
+
         // Кнопки
         HBox btnRow = new HBox(8);
         btnRow.setAlignment(Pos.CENTER_LEFT);
@@ -467,7 +441,7 @@ public class FormSetting extends Form {
 
         VBox.setVgrow(configTree, Priority.ALWAYS);
 
-        panel.getChildren().addAll(btnRow, configTree);
+        panel.getChildren().addAll(ownerRow, configSearchField, btnRow, configTree);
         return panel;
     }
 
@@ -480,12 +454,28 @@ public class FormSetting extends Form {
             refreshConnection();
         }
 
-        if (state == null) {
+        boolean connected = state != null && handler != null;
+        saveOwnerBtn.setDisable(!connected);
+
+        if (!connected) {
             configStatusLabel.setText("Нет подключения к радио");
             saveConfigBtn.setDisable(true);
             configTree.setRoot(null);
+            ownerStatusLabel.setText("Нет подключения");
             return;
         }
+
+        // Предзаполнить имя ноды
+        NodeData myNode = state.getNodeDb().get(state.getMyNodeNum());
+        if (myNode != null) {
+            if (longNameField.getText().isEmpty() && myNode.getLongName() != null) {
+                longNameField.setText(myNode.getLongName());
+            }
+            if (shortNameField.getText().isEmpty() && myNode.getShortName() != null) {
+                shortNameField.setText(myNode.getShortName());
+            }
+        }
+        ownerStatusLabel.setText("");
 
         // Сохраняем оригинальные protobuf для пересборки
         List<ConfigProtos.Config> stateConfigs;
@@ -515,7 +505,9 @@ public class FormSetting extends Form {
             root.getChildren().add(moduleRoot);
         }
 
+        fullConfigRoot = root;
         configTree.setRoot(root);
+        configSearchField.clear();
 
         if (originalConfigs.isEmpty() && originalModuleConfigs.isEmpty()) {
             configStatusLabel.setText("Конфигурация не получена от устройства");
@@ -541,6 +533,95 @@ public class FormSetting extends Form {
     }
 
     /**
+     * Фильтрует дерево конфигурации по строке поиска.
+     * Показывает только параметры, содержащие запрос в имени или fieldName,
+     * а также их родительские категории.
+     */
+    private void filterConfigTree(String query) {
+        if (fullConfigRoot == null) return;
+
+        if (query == null || query.isBlank()) {
+            configTree.setRoot(fullConfigRoot);
+            return;
+        }
+
+        String lowerQuery = query.toLowerCase();
+        TreeItem<ConfigTreeItem> filteredRoot = new TreeItem<>(fullConfigRoot.getValue());
+        filteredRoot.setExpanded(true);
+
+        for (TreeItem<ConfigTreeItem> topLevel : fullConfigRoot.getChildren()) {
+            TreeItem<ConfigTreeItem> filteredTopLevel = filterTreeItem(topLevel, lowerQuery);
+            if (filteredTopLevel != null) {
+                filteredRoot.getChildren().add(filteredTopLevel);
+            }
+        }
+
+        configTree.setRoot(filteredRoot);
+    }
+
+    /**
+     * Рекурсивно фильтрует узел дерева. Возвращает копию с совпадающими потомками или null.
+     */
+    private TreeItem<ConfigTreeItem> filterTreeItem(TreeItem<ConfigTreeItem> item, String lowerQuery) {
+        ConfigTreeItem data = item.getValue();
+        boolean selfMatches = false;
+
+        if (data != null && !data.isCategory()) {
+            String name = data.getName() != null ? data.getName().toLowerCase() : "";
+            String fieldName = data.getFieldName() != null ? data.getFieldName().toLowerCase() : "";
+            selfMatches = name.contains(lowerQuery) || fieldName.contains(lowerQuery);
+        }
+
+        // Категория с совпадающим именем — показать целиком
+        if (data != null && data.isCategory()) {
+            String name = data.getName() != null ? data.getName().toLowerCase() : "";
+            if (name.contains(lowerQuery)) {
+                // Показать всю секцию
+                TreeItem<ConfigTreeItem> copy = new TreeItem<>(data);
+                copy.setExpanded(true);
+                for (TreeItem<ConfigTreeItem> child : item.getChildren()) {
+                    copy.getChildren().add(copyTreeItem(child));
+                }
+                return copy;
+            }
+        }
+
+        if (selfMatches) {
+            return new TreeItem<>(data);
+        }
+
+        // Проверить детей
+        List<TreeItem<ConfigTreeItem>> matchedChildren = new ArrayList<>();
+        for (TreeItem<ConfigTreeItem> child : item.getChildren()) {
+            TreeItem<ConfigTreeItem> filtered = filterTreeItem(child, lowerQuery);
+            if (filtered != null) {
+                matchedChildren.add(filtered);
+            }
+        }
+
+        if (!matchedChildren.isEmpty()) {
+            TreeItem<ConfigTreeItem> copy = new TreeItem<>(data);
+            copy.setExpanded(true);
+            copy.getChildren().addAll(matchedChildren);
+            return copy;
+        }
+
+        return null;
+    }
+
+    /**
+     * Глубокая копия узла дерева (для показа полной секции при совпадении категории).
+     */
+    private TreeItem<ConfigTreeItem> copyTreeItem(TreeItem<ConfigTreeItem> item) {
+        TreeItem<ConfigTreeItem> copy = new TreeItem<>(item.getValue());
+        copy.setExpanded(item.isExpanded());
+        for (TreeItem<ConfigTreeItem> child : item.getChildren()) {
+            copy.getChildren().add(copyTreeItem(child));
+        }
+        return copy;
+    }
+
+    /**
      * Сохраняет изменённые настройки на устройство.
      * Использует begin_edit_settings / commit_edit_settings для батч-отправки.
      */
@@ -550,7 +631,7 @@ public class FormSetting extends Form {
             return;
         }
 
-        TreeItem<ConfigTreeItem> root = configTree.getRoot();
+        TreeItem<ConfigTreeItem> root = fullConfigRoot != null ? fullConfigRoot : configTree.getRoot();
         if (root == null) return;
 
         // Собрать изменённые секции
@@ -648,7 +729,7 @@ public class FormSetting extends Form {
         MessageService.commitEditSettings(handler, state);
 
         // Сбросить originalValue в дереве
-        resetModifiedFlags(configTree.getRoot());
+        resetModifiedFlags(fullConfigRoot != null ? fullConfigRoot : configTree.getRoot());
 
         saveConfigBtn.setDisable(false);
         configStatusLabel.setText("Отправлено секций: " + totalChanges + ". Устройство перезагрузится.");
