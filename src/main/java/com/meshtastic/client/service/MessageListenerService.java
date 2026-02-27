@@ -108,10 +108,17 @@ public class MessageListenerService implements FromRadioListener {
 
     private void handleRoutingAck(MeshProtos.MeshPacket packet, MeshProtos.Data data) {
         int requestId = data.getRequestId();
-        if (requestId == 0) return;
+        if (requestId == 0) {
+            log.debug("Ignoring routing packet with requestId=0 from !{}",
+                    Integer.toHexString(packet.getFrom()));
+            return;
+        }
 
         MeshMessage pending = deviceState.resolvePendingAck(requestId);
-        if (pending == null) return;
+        if (pending == null) {
+            log.debug("No pending message found for ACK requestId={}", requestId);
+            return;
+        }
 
         try {
             MeshProtos.Routing routing = MeshProtos.Routing.parseFrom(data.getPayload());

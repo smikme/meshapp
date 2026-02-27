@@ -14,18 +14,25 @@ import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
 
+import java.nio.charset.StandardCharsets;
 import java.util.function.Consumer;
 
 /**
- * Панель ввода чата: кнопка эмодзи + текстовое поле + счётчик символов
+ * Панель ввода чата: кнопка эмодзи + текстовое поле + счётчик байт
  * + кнопка отправки + полоса ответа.
  *
  * <p>Расширяет VBox (содержит replyBar + inputBar).
  */
 public class ChatInputBar extends VBox {
 
-    /** Максимальная длина сообщения в символах. */
-    public static final int MAX_MESSAGE_LENGTH = 200;
+    /**
+     * Максимальный размер сериализованного Data protobuf (mesh.proto: DATA_PAYLOAD_LEN).
+     * Протокольный overhead внутри Data: portnum (2 байта) + payload tag+length (3 байта) = 5.
+     * При режиме ответа добавляется reply_id: tag (1 байт) + fixed32 (4 байта) = 5.
+     */
+    private static final int DATA_PAYLOAD_LEN = 233;
+    private static final int PROTO_OVERHEAD = 5;
+    private static final int REPLY_ID_OVERHEAD = 5;
 
     /** Данные для колбэка отправки. */
     public record SendRequest(String text, int replyId) {}
@@ -67,8 +74,8 @@ public class ChatInputBar extends VBox {
         messageInput.getStyleClass().add("chat-message-input");
         HBox.setHgrow(messageInput, Priority.ALWAYS);
 
-        // Счётчик символов
-        charCountLabel = new Label("0/" + MAX_MESSAGE_LENGTH);
+        // Счётчик байт
+        charCountLabel = new Label("0/" + getMaxTextBytes());
         charCountLabel.getStyleClass().add("chat-char-count");
 
         // Кнопка отправки
@@ -85,8 +92,8 @@ public class ChatInputBar extends VBox {
         });
 
         messageInput.textProperty().addListener((obs, oldVal, newVal) -> {
-            if (newVal != null && newVal.length() > MAX_MESSAGE_LENGTH) {
-                messageInput.setText(newVal.substring(0, MAX_MESSAGE_LENGTH));
+            if (newVal != null && textByteLength(newVal) > getMaxTextBytes()) {
+                messageInput.setText(truncateToBytes(newVal, getMaxTextBytes()));
                 return;
             }
             updateCharCount();
@@ -161,6 +168,7 @@ public class ChatInputBar extends VBox {
 
         replyBar.setVisible(true);
         replyBar.setManaged(true);
+        updateCharCount();
         messageInput.requestFocus();
     }
 
@@ -170,6 +178,7 @@ public class ChatInputBar extends VBox {
         replyBar.setVisible(false);
         replyBar.setManaged(false);
         replyQuoteLabel.setText("");
+        updateCharCount();
     }
 
     /** Запросить фокус на текстовое поле. */
@@ -178,6 +187,15 @@ public class ChatInputBar extends VBox {
     }
 
     // === Внутренние методы ===
+
+    /** Максимальное количество байт текста с учётом protobuf overhead и режима ответа. */
+    private int getMaxTextBytes() {
+        int overhead = PROTO_OVERHEAD;
+        if (replyToMessage != null) {
+            overhead += REPLY_ID_OVERHEAD;
+        }
+        return DATA_PAYLOAD_LEN - overhead;
+    }
 
     private void doSend() {
         String text = messageInput.getText();
@@ -195,7 +213,8 @@ public class ChatInputBar extends VBox {
     private void insertEmoji(String emoji) {
         String text = messageInput.getText() != null
                 ? messageInput.getText() : "";
-        if (text.length() + emoji.length() > MAX_MESSAGE_LENGTH) {
+        int maxBytes = getMaxTextBytes();
+        if (textByteLength(text) + textByteLength(emoji) > maxBytes) {
             return;
         }
         int caret = Math.min(savedCaretPosition, text.length());
@@ -209,15 +228,40 @@ public class ChatInputBar extends VBox {
     }
 
     private void updateCharCount() {
-        int len = messageInput.getText() != null
-                ? messageInput.getText().length() : 0;
-        charCountLabel.setText(len + "/" + MAX_MESSAGE_LENGTH);
-        if (len >= MAX_MESSAGE_LENGTH) {
+        String text = messageInput.getText();
+        int byteLen = text != null ? textByteLength(text) : 0;
+        int maxBytes = getMaxTextBytes();
+        charCountLabel.setText(byteLen + "/" + maxBytes);
+        if (byteLen >= maxBytes) {
             if (!charCountLabel.getStyleClass().contains("chat-char-count-limit")) {
                 charCountLabel.getStyleClass().add("chat-char-count-limit");
             }
         } else {
             charCountLabel.getStyleClass().remove("chat-char-count-limit");
         }
+    }
+
+    /** Длина строки в байтах UTF-8. */
+    private static int textByteLength(String text) {
+        return text.getBytes(StandardCharsets.UTF_8).length;
+    }
+
+    /**
+     * Обрезает строку до указанного лимита байт UTF-8,
+     * не разрезая многобайтовые символы.
+     */
+    private static String truncateToBytes(String text, int maxBytes) {
+        int byteCount = 0;
+        int end = 0;
+        for (int i = 0; i < text.length(); ) {
+            int codePoint = text.codePointAt(i);
+            int charLen = Character.charCount(codePoint);
+            int byteLen = new String(Character.toChars(codePoint)).getBytes(StandardCharsets.UTF_8).length;
+            if (byteCount + byteLen > maxBytes) break;
+            byteCount += byteLen;
+            i += charLen;
+            end = i;
+        }
+        return text.substring(0, end);
     }
 }

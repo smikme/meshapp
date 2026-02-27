@@ -3,6 +3,7 @@ package com.meshtastic.client.model;
 import org.meshtastic.proto.ChannelProtos;
 import org.meshtastic.proto.ConfigProtos;
 import org.meshtastic.proto.ModuleConfigProtos;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -18,6 +19,11 @@ class DeviceStateTest {
     @BeforeEach
     void setUp() {
         state = new DeviceState();
+    }
+
+    @AfterEach
+    void tearDown() {
+        state.shutdown();
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -245,5 +251,52 @@ class DeviceStateTest {
         state.removeTelemetryListener(telListener);
         state.fireTelemetryListeners();
         assertEquals(1, telCount.get(), "Removed telemetry listener should not fire again");
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    //  Pending ACKs
+    // ═══════════════════════════════════════════════════════════
+
+    @Test
+    void testRegisterAndResolvePendingAck() {
+        MeshMessage msg = createMessage(0, 700, "test");
+        state.registerPendingAck(700, msg);
+
+        MeshMessage resolved = state.resolvePendingAck(700);
+        assertSame(msg, resolved, "Should return the same MeshMessage instance");
+
+        MeshMessage secondResolve = state.resolvePendingAck(700);
+        assertNull(secondResolve, "Second resolve should return null (already removed)");
+    }
+
+    @Test
+    void testFailAllPendingAcksMarksAllAsFailed() {
+        MeshMessage msg1 = createMessage(0, 600, "msg1");
+        msg1.setStatus(MeshMessage.DeliveryStatus.SENDING);
+        MeshMessage msg2 = createMessage(0, 601, "msg2");
+        msg2.setStatus(MeshMessage.DeliveryStatus.SENDING);
+
+        state.registerPendingAck(600, msg1);
+        state.registerPendingAck(601, msg2);
+
+        state.failAllPendingAcks("DISCONNECTED");
+
+        assertEquals(MeshMessage.DeliveryStatus.FAILED, msg1.getStatus());
+        assertEquals("DISCONNECTED", msg1.getErrorReason());
+        assertEquals(MeshMessage.DeliveryStatus.FAILED, msg2.getStatus());
+        assertEquals("DISCONNECTED", msg2.getErrorReason());
+        assertNull(state.resolvePendingAck(600), "Pending acks should be empty after failAll");
+        assertNull(state.resolvePendingAck(601), "Pending acks should be empty after failAll");
+    }
+
+    @Test
+    void testFailAllPendingAcksEmptyMapDoesNotFireListeners() {
+        AtomicBoolean listenerFired = new AtomicBoolean(false);
+        state.addMessageListener(() -> listenerFired.set(true));
+
+        state.failAllPendingAcks("DISCONNECTED");
+
+        assertFalse(listenerFired.get(),
+                "No listeners should fire when there are no pending acks");
     }
 }
