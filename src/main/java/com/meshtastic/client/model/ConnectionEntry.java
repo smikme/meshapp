@@ -3,19 +3,25 @@ package com.meshtastic.client.model;
 import java.util.UUID;
 
 /**
- * Профиль подключения к Meshtastic-устройству (host + port).
+ * Профиль подключения к Meshtastic-устройству.
  * <p>
  * Сериализуется в JSON ({@code ~/.meshapp/connections.json}) через Gson.
- * Поле {@code connected} помечено как {@code transient} — не сохраняется,
- * отражает текущее runtime-состояние. По умолчанию порт {@code 4403}
- * (стандартный TCP-порт Meshtastic).
+ * Поддерживает два типа транспорта: TCP (host + port) и Serial (portName + baudRate).
+ * <p>
+ * Поле {@code type} может быть {@code null} для legacy-записей —
+ * в этом случае {@link #getEffectiveType()} возвращает {@link ConnectionType#TCP}.
+ * Поля {@code connected} и {@code reconnecting} помечены как {@code transient} —
+ * не сохраняются, отражают текущее runtime-состояние.
  */
 public class ConnectionEntry {
 
     private String id;
     private String name;
+    private ConnectionType type;
     private String host;
     private int port;
+    private String portName;
+    private int baudRate;
     private transient boolean connected;
     private transient boolean reconnecting;
 
@@ -24,11 +30,30 @@ public class ConnectionEntry {
         this.port = 4403;
     }
 
+    /** Конструктор для TCP-подключения. */
     public ConnectionEntry(String name, String host, int port) {
         this.id = UUID.randomUUID().toString();
+        this.type = ConnectionType.TCP;
         this.name = name;
         this.host = host;
         this.port = port;
+    }
+
+    /** Конструктор для Serial-подключения (USB / Bluetooth SPP). */
+    public ConnectionEntry(String name, String portName, int baudRate, ConnectionType type) {
+        this.id = UUID.randomUUID().toString();
+        this.type = type;
+        this.name = name;
+        this.portName = portName;
+        this.baudRate = baudRate;
+    }
+
+    /**
+     * Возвращает эффективный тип подключения.
+     * Для legacy-записей (type == null) возвращает {@link ConnectionType#TCP}.
+     */
+    public ConnectionType getEffectiveType() {
+        return type != null ? type : ConnectionType.TCP;
     }
 
     public String getId() {
@@ -47,6 +72,14 @@ public class ConnectionEntry {
         this.name = name;
     }
 
+    public ConnectionType getType() {
+        return type;
+    }
+
+    public void setType(ConnectionType type) {
+        this.type = type;
+    }
+
     public String getHost() {
         return host;
     }
@@ -61,6 +94,22 @@ public class ConnectionEntry {
 
     public void setPort(int port) {
         this.port = port;
+    }
+
+    public String getPortName() {
+        return portName;
+    }
+
+    public void setPortName(String portName) {
+        this.portName = portName;
+    }
+
+    public int getBaudRate() {
+        return baudRate;
+    }
+
+    public void setBaudRate(int baudRate) {
+        this.baudRate = baudRate;
     }
 
     public boolean isConnected() {
