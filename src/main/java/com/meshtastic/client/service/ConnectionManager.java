@@ -3,10 +3,9 @@ package com.meshtastic.client.service;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.reflect.TypeToken;
-import com.meshtastic.client.connection.ConnectionException;
-import com.meshtastic.client.connection.ConnectionListener;
-import com.meshtastic.client.connection.TcpConnection;
+import com.meshtastic.client.connection.*;
 import com.meshtastic.client.model.ConnectionEntry;
+import com.meshtastic.client.model.ConnectionType;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.protocol.ProtocolHandler;
 import org.slf4j.Logger;
@@ -26,9 +25,9 @@ import java.util.concurrent.CopyOnWriteArrayList;
 /**
  * Менеджер соединений с Meshtastic-устройствами (singleton).
  * <p>
- * Управляет жизненным циклом TCP-соединений: хранит профили подключений
+ * Управляет жизненным циклом соединений (TCP и Serial): хранит профили подключений
  * ({@link ConnectionEntry}) в JSON-файле {@code ~/.meshapp/connections.json},
- * создаёт/разрывает TCP-соединения, инициирует config exchange
+ * создаёт/разрывает соединения, инициирует config exchange
  * и предоставляет доступ к {@link DeviceState} и {@link ProtocolHandler}
  * для каждого активного соединения.
  * <p>
@@ -41,7 +40,7 @@ public class ConnectionManager {
     private static ConnectionManager instance;
 
     private final List<ConnectionEntry> entries = new CopyOnWriteArrayList<>();
-    private final Map<String, TcpConnection> activeConnections = new ConcurrentHashMap<>();
+    private final Map<String, MeshtasticConnection> activeConnections = new ConcurrentHashMap<>();
     private final Map<String, DeviceState> deviceStates = new ConcurrentHashMap<>();
     private final Map<String, ProtocolHandler> protocolHandlers = new ConcurrentHashMap<>();
     private final Map<String, CompletableFuture<DeviceState>> configFutures = new ConcurrentHashMap<>();
@@ -122,12 +121,12 @@ public class ConnectionManager {
     }
 
     /**
-     * Устанавливает TCP-соединение по идентификатору профиля.
-     * Создаёт {@link TcpConnection}, {@link ProtocolHandler}, {@link DeviceState}
+     * Устанавливает соединение по идентификатору профиля.
+     * Создаёт транспорт (TCP или Serial), {@link ProtocolHandler}, {@link DeviceState}
      * и запускает config exchange. Если соединение с этим id уже активно, вызов игнорируется.
      *
      * @param id идентификатор профиля подключения
-     * @throws ConnectionException если профиль не найден или TCP-соединение не удалось
+     * @throws ConnectionException если профиль не найден или соединение не удалось
      */
     public synchronized void connect(String id) throws ConnectionException {
         userDisconnectedIds.remove(id);
@@ -138,8 +137,8 @@ public class ConnectionManager {
         if (activeConnections.containsKey(id)) {
             return;
         }
-        TcpConnection tcp = new TcpConnection(entry.getHost(), entry.getPort());
-        tcp.setConnectionListener(new ConnectionListener() {
+        MeshtasticConnection conn = createConnection(entry);
+        conn.setConnectionListener(new ConnectionListener() {
             @Override
             public void onConnected() {
                 entry.setConnected(true);
@@ -166,10 +165,10 @@ public class ConnectionManager {
                 }
             }
         });
-        tcp.connect();
-        activeConnections.put(id, tcp);
+        conn.connect();
+        activeConnections.put(id, conn);
 
-        ProtocolHandler protocolHandler = new ProtocolHandler(tcp);
+        ProtocolHandler protocolHandler = new ProtocolHandler(conn);
         protocolHandlers.put(id, protocolHandler);
         DeviceState deviceState = new DeviceState();
         deviceStates.put(id, deviceState);
@@ -186,7 +185,7 @@ public class ConnectionManager {
     }
 
     /**
-     * Разрывает TCP-соединение и очищает связанные ресурсы
+     * Разрывает соединение и очищает связанные ресурсы
      * (DeviceState, ProtocolHandler, config future).
      *
      * @param id идентификатор профиля подключения
@@ -194,10 +193,10 @@ public class ConnectionManager {
     public synchronized void disconnect(String id) {
         userDisconnectedIds.add(id);
         ReconnectService.getInstance().cancelReconnect(id);
-        TcpConnection tcp = activeConnections.get(id);
+        MeshtasticConnection conn = activeConnections.get(id);
         cleanupConnection(id);
-        if (tcp != null) {
-            tcp.disconnect();
+        if (conn != null) {
+            conn.disconnect();
         }
         ConnectionEntry entry = findEntry(id);
         if (entry != null) {
@@ -239,6 +238,16 @@ public class ConnectionManager {
         }
         protocolHandlers.remove(id);
         configFutures.remove(id);
+    }
+
+    private MeshtasticConnection createConnection(ConnectionEntry entry) {
+        return switch (entry.getEffectiveType()) {
+            case TCP -> new TcpConnection(entry.getHost(), entry.getPort());
+            case SERIAL -> new SerialConnection(
+                    entry.getPortName(),
+                    entry.getBaudRate() > 0 ? entry.getBaudRate() : SerialConnection.DEFAULT_BAUD_RATE
+            );
+        };
     }
 
     ConnectionEntry findEntry(String id) {

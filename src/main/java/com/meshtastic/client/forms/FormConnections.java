@@ -5,9 +5,11 @@ import com.meshtastic.client.menu.MyDrawerBuilder;
 import com.meshtastic.client.modal.ModalPane;
 import com.meshtastic.client.modal.Toast;
 import com.meshtastic.client.model.ConnectionEntry;
+import com.meshtastic.client.model.ConnectionType;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.service.ConnectionManager;
+import com.meshtastic.client.service.SerialPortDiscoveryService;
 import com.meshtastic.client.simple.SimpleConnectionForm;
 import com.meshtastic.client.system.Form;
 import com.meshtastic.client.utils.SystemForm;
@@ -69,6 +71,7 @@ public class FormConnections extends Form {
     @Override
     public void formInit() {
         ConnectionManager.getInstance().addListener(changeListener);
+        SerialPortDiscoveryService.getInstance().startScanning();
         rebuildCards();
     }
 
@@ -129,7 +132,13 @@ public class FormConnections extends Form {
 
         topRow.getChildren().addAll(indicator, lblName, lblStatus, spacer, btnConnect, btnDelete);
 
-        Label lblAddress = new Label(entry.getHost() + ":" + entry.getPort());
+        String addressText;
+        if (entry.getEffectiveType() == ConnectionType.SERIAL) {
+            addressText = "Serial: " + entry.getPortName() + " (" + entry.getBaudRate() + " бод)";
+        } else {
+            addressText = "TCP: " + entry.getHost() + ":" + entry.getPort();
+        }
+        Label lblAddress = new Label(addressText);
         lblAddress.setStyle("-fx-opacity: 0.6;");
 
         card.getChildren().addAll(topRow, lblAddress);
@@ -191,6 +200,7 @@ public class FormConnections extends Form {
 
         SimpleConnectionForm form = new SimpleConnectionForm();
         form.setOnSave(entry -> {
+            form.cleanup();
             modalPane.hide();
             ConnectionManager.getInstance().addEntry(entry);
             Toast.show(Toast.Type.SUCCESS, "Добавлено: " + entry.getName());

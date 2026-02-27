@@ -14,11 +14,12 @@ import java.util.Map;
 import java.util.concurrent.*;
 
 /**
- * Сервис автоматического переподключения TCP-соединений (singleton).
+ * Сервис автоматического переподключения соединений (singleton).
  * <p>
- * При разрыве соединения запускает цикл повторных попыток с экспоненциальным backoff
- * (2с → 4с → 8с → 16с → 30с max). Показывает статусные Toast-уведомления
- * и обновляет состояние {@link ConnectionEntry#isReconnecting()}.
+ * При разрыве соединения (TCP или Serial) запускает цикл повторных попыток
+ * с экспоненциальным backoff (2с → 4с → 8с → 16с → 30с max).
+ * Показывает статусные Toast-уведомления и обновляет состояние
+ * {@link ConnectionEntry#isReconnecting()}.
  */
 public class ReconnectService {
 
@@ -35,7 +36,7 @@ public class ReconnectService {
 
     private ReconnectService() {
         ThreadFactory tf = r -> {
-            Thread t = new Thread(r, "tcp-reconnect");
+            Thread t = new Thread(r, "reconnect");
             t.setDaemon(true);
             return t;
         };
