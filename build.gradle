@@ -152,9 +152,9 @@ tasks.register('jpackage') {
 		def appVersion = {
 			try {
 				def count = 'git rev-list --count HEAD'.execute().text.trim()
-				return "1.0.${count}"
+				return "1.1.${count}"
 			} catch (ignored) {
-				return '1.0.0'
+				return '1.1.0'
 			}
 		}()
 
