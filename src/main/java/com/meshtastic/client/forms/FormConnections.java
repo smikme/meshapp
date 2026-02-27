@@ -86,32 +86,38 @@ public class FormConnections extends Form {
 
     private VBox createConnectionCard(ConnectionEntry entry) {
         boolean connected = entry.isConnected();
+        boolean reconnecting = entry.isReconnecting();
 
         VBox card = new VBox(5);
         card.setPadding(new Insets(15));
         card.getStyleClass().add("connection-card");
         if (connected) {
             card.setStyle("-fx-border-color: #1EA97C; -fx-border-width: 0 0 0 4; -fx-background-radius: 20; -fx-border-radius: 20;");
+        } else if (reconnecting) {
+            card.setStyle("-fx-border-color: #F59E0B; -fx-border-width: 0 0 0 4; -fx-background-radius: 20; -fx-border-radius: 20;");
         }
 
         HBox topRow = new HBox(10);
         topRow.setAlignment(Pos.CENTER_LEFT);
 
+        String indicatorColor = connected ? "#1EA97C" : (reconnecting ? "#F59E0B" : "#9CA3AF");
         Label indicator = new Label("\u25CF");
-        indicator.setStyle("-fx-text-fill: " + (connected ? "#1EA97C" : "#9CA3AF") + "; -fx-font-weight: bold;");
+        indicator.setStyle("-fx-text-fill: " + indicatorColor + "; -fx-font-weight: bold;");
 
         Label lblName = new Label(entry.getName());
         lblName.setFont(Font.font("Roboto", FontWeight.BOLD, 14));
 
-        Label lblStatus = new Label(connected ? "\u2713 Подключено" : "");
-        lblStatus.setStyle("-fx-text-fill: #1EA97C; -fx-font-weight: bold;");
+        String statusText = connected ? "\u2713 Подключено" : (reconnecting ? "\u21BB Переподключение..." : "");
+        String statusColor = connected ? "#1EA97C" : "#F59E0B";
+        Label lblStatus = new Label(statusText);
+        lblStatus.setStyle("-fx-text-fill: " + statusColor + "; -fx-font-weight: bold;");
 
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
 
-        Button btnConnect = new Button(connected ? "Отключить" : "Подключить");
+        Button btnConnect = new Button(connected || reconnecting ? "Отключить" : "Подключить");
         btnConnect.setOnAction(e -> {
-            if (entry.isConnected()) {
+            if (entry.isConnected() || entry.isReconnecting()) {
                 doDisconnect(entry);
             } else {
                 doConnect(entry);
