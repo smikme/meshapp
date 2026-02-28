@@ -22,6 +22,8 @@ public class ConnectionEntry {
     private int port;
     private String portName;
     private int baudRate;
+    private String bleAddress;
+    private String bleDeviceName;
     private transient boolean connected;
     private transient boolean reconnecting;
 
@@ -46,6 +48,15 @@ public class ConnectionEntry {
         this.name = name;
         this.portName = portName;
         this.baudRate = baudRate;
+    }
+
+    /** Конструктор для BLE-подключения. */
+    public ConnectionEntry(String name, String bleAddress, String bleDeviceName) {
+        this.id = UUID.randomUUID().toString();
+        this.type = ConnectionType.BLE;
+        this.name = name;
+        this.bleAddress = bleAddress;
+        this.bleDeviceName = bleDeviceName;
     }
 
     /**
@@ -110,6 +121,22 @@ public class ConnectionEntry {
 
     public void setBaudRate(int baudRate) {
         this.baudRate = baudRate;
+    }
+
+    public String getBleAddress() {
+        return bleAddress;
+    }
+
+    public void setBleAddress(String bleAddress) {
+        this.bleAddress = bleAddress;
+    }
+
+    public String getBleDeviceName() {
+        return bleDeviceName;
+    }
+
+    public void setBleDeviceName(String bleDeviceName) {
+        this.bleDeviceName = bleDeviceName;
     }
 
     public boolean isConnected() {

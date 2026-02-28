@@ -16,6 +16,8 @@ import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableRow;
 import javafx.scene.control.TableView;
 import javafx.scene.control.cell.PropertyValueFactory;
+import javafx.scene.input.Clipboard;
+import javafx.scene.input.ClipboardContent;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
@@ -48,13 +50,16 @@ public class FormLogs extends Form {
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
 
+        Button btnCopy = new Button("Копировать");
+        btnCopy.setOnAction(e -> copyLogsToClipboard());
+
         Button btnClear = new Button("Очистить");
         btnClear.setOnAction(e -> {
             UiLogAppender.clearBuffer();
             logData.clear();
         });
 
-        titleRow.getChildren().addAll(title, spacer, btnClear);
+        titleRow.getChildren().addAll(title, spacer, btnCopy, btnClear);
 
         // Таблица логов
         logTable = new TableView<>(logData);
@@ -128,6 +133,18 @@ public class FormLogs extends Form {
         // Обновить из буфера при каждом открытии
         logData.setAll(UiLogAppender.getBuffer());
         scrollToBottom();
+    }
+
+    private void copyLogsToClipboard() {
+        StringBuilder sb = new StringBuilder();
+        for (LogEntry entry : logData) {
+            sb.append('[').append(entry.getTime()).append("] ")
+              .append(entry.getLevel()).append(": ")
+              .append(entry.getMessage()).append('\n');
+        }
+        ClipboardContent content = new ClipboardContent();
+        content.putString(sb.toString());
+        Clipboard.getSystemClipboard().setContent(content);
     }
 
     private void scrollToBottom() {

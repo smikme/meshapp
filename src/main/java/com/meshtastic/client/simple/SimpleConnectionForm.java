@@ -1,7 +1,10 @@
 package com.meshtastic.client.simple;
 
+import com.meshtastic.client.connection.ble.BleDevice;
+import com.meshtastic.client.connection.ble.BlePlatformFactory;
 import com.meshtastic.client.model.ConnectionEntry;
 import com.meshtastic.client.model.ConnectionType;
+import com.meshtastic.client.service.BleDeviceDiscoveryService;
 import com.meshtastic.client.service.SerialPortDiscoveryService;
 import com.meshtastic.client.service.SerialPortDiscoveryService.DiscoveredPort;
 import javafx.application.Platform;
@@ -32,8 +35,14 @@ public class SimpleConnectionForm extends VBox {
     private final ComboBox<String> cmbPort;
     private final TextField txtBaudRate;
 
+    // BLE fields
+    private final VBox bleFields;
+    private final ComboBox<String> cmbBleDevice;
+    private final Label lblBleStatus;
+
     private Consumer<ConnectionEntry> onSave;
     private final Consumer<List<DiscoveredPort>> discoveryListener = this::onPortsDiscovered;
+    private final Consumer<List<BleDevice>> bleDiscoveryListener = this::onBleDevicesDiscovered;
 
     public SimpleConnectionForm() {
         setSpacing(8);
@@ -48,7 +57,10 @@ public class SimpleConnectionForm extends VBox {
 
         // Тип подключения
         cmbType = new ComboBox<>();
-        cmbType.getItems().addAll("TCP", "Serial (USB / Bluetooth)");
+        cmbType.getItems().addAll("TCP", "Serial / USB");
+        if (BlePlatformFactory.isSupported()) {
+            cmbType.getItems().add("BLE");
+        }
         cmbType.getSelectionModel().selectFirst();
         cmbType.setMaxWidth(Double.MAX_VALUE);
         cmbType.setOnAction(e -> updateFieldVisibility());
@@ -92,6 +104,30 @@ public class SimpleConnectionForm extends VBox {
         serialFields.setVisible(false);
         serialFields.setManaged(false);
 
+        // --- BLE fields ---
+        cmbBleDevice = new ComboBox<>();
+        cmbBleDevice.setPromptText("Поиск устройств...");
+        cmbBleDevice.setMaxWidth(Double.MAX_VALUE);
+        HBox.setHgrow(cmbBleDevice, Priority.ALWAYS);
+
+        Button btnBleScan = new Button("\u27F3");
+        btnBleScan.setTooltip(new Tooltip("Сканировать BLE устройства"));
+        btnBleScan.setOnAction(e -> refreshBleDevices());
+
+        HBox bleDeviceRow = new HBox(6, cmbBleDevice, btnBleScan);
+        bleDeviceRow.setAlignment(Pos.CENTER_LEFT);
+
+        lblBleStatus = new Label();
+        lblBleStatus.getStyleClass().add("text-muted");
+
+        bleFields = new VBox(8);
+        bleFields.getChildren().addAll(
+                new Label("BLE устройство"), bleDeviceRow,
+                lblBleStatus
+        );
+        bleFields.setVisible(false);
+        bleFields.setManaged(false);
+
         // Buttons
         Button btnSave = new Button("Сохранить");
         btnSave.getStyleClass().add("accent");
@@ -110,6 +146,7 @@ public class SimpleConnectionForm extends VBox {
                 new Label("Название"), txtName,
                 tcpFields,
                 serialFields,
+                bleFields,
                 buttons
         );
     }
@@ -139,7 +176,17 @@ public class SimpleConnectionForm extends VBox {
             return null;
         }
 
-        if (isSerialMode()) {
+        if (isBleMode()) {
+            String selectedDevice = cmbBleDevice.getValue();
+            if (selectedDevice == null || selectedDevice.isEmpty()) {
+                return null;
+            }
+            BleDevice device = findBleDeviceByLabel(selectedDevice);
+            if (device == null) {
+                return null;
+            }
+            return new ConnectionEntry(name, device.address(), device.displayName());
+        } else if (isSerialMode()) {
             String selectedPort = cmbPort.getValue();
             if (selectedPort == null || selectedPort.isEmpty()) {
                 return null;
@@ -173,24 +220,39 @@ public class SimpleConnectionForm extends VBox {
         refreshPorts();
     }
 
-    /** Отписка от discovery-сервиса. Вызывается при закрытии формы. */
+    /** Отписка от discovery-сервисов. Вызывается при закрытии формы. */
     public void cleanup() {
         SerialPortDiscoveryService.getInstance().removeListener(discoveryListener);
+        BleDeviceDiscoveryService.getInstance().removeListener(bleDiscoveryListener);
+        BleDeviceDiscoveryService.getInstance().stopScanning();
     }
 
     private boolean isSerialMode() {
         return cmbType.getSelectionModel().getSelectedIndex() == 1;
     }
 
+    private boolean isBleMode() {
+        String selected = cmbType.getSelectionModel().getSelectedItem();
+        return "BLE".equals(selected);
+    }
+
     private void updateFieldVisibility() {
         boolean serial = isSerialMode();
-        tcpFields.setVisible(!serial);
-        tcpFields.setManaged(!serial);
+        boolean ble = isBleMode();
+        boolean tcp = !serial && !ble;
+
+        tcpFields.setVisible(tcp);
+        tcpFields.setManaged(tcp);
         serialFields.setVisible(serial);
         serialFields.setManaged(serial);
+        bleFields.setVisible(ble);
+        bleFields.setManaged(ble);
 
         if (serial) {
             refreshPorts();
+        }
+        if (ble) {
+            refreshBleDevices();
         }
     }
 
@@ -199,8 +261,25 @@ public class SimpleConnectionForm extends VBox {
         populatePortCombo(ports);
     }
 
+    private void refreshBleDevices() {
+        lblBleStatus.setText("Сканирование...");
+        BleDeviceDiscoveryService discovery = BleDeviceDiscoveryService.getInstance();
+        discovery.addListener(bleDiscoveryListener);
+        discovery.startScanning();
+
+        // Показать уже найденные устройства
+        List<BleDevice> devices = discovery.getDiscoveredDevices();
+        if (!devices.isEmpty()) {
+            populateBleDeviceCombo(devices);
+        }
+    }
+
     private void onPortsDiscovered(List<DiscoveredPort> ports) {
         Platform.runLater(() -> populatePortCombo(ports));
+    }
+
+    private void onBleDevicesDiscovered(List<BleDevice> devices) {
+        Platform.runLater(() -> populateBleDeviceCombo(devices));
     }
 
     private void populatePortCombo(List<DiscoveredPort> ports) {
@@ -235,6 +314,57 @@ public class SimpleConnectionForm extends VBox {
                 }
             }
         }
+    }
+
+    private void populateBleDeviceCombo(List<BleDevice> devices) {
+        String previousSelection = cmbBleDevice.getValue();
+        cmbBleDevice.getItems().clear();
+
+        for (BleDevice device : devices) {
+            String label = device.displayName() + " (" + device.rssi() + " dBm)";
+            cmbBleDevice.getItems().add(label);
+        }
+
+        // Восстановить предыдущий выбор
+        if (previousSelection != null) {
+            for (String item : cmbBleDevice.getItems()) {
+                if (item.startsWith(previousSelection.split(" \\(")[0])) {
+                    cmbBleDevice.setValue(item);
+                    break;
+                }
+            }
+        }
+
+        // Автовыбор первого устройства
+        if (cmbBleDevice.getValue() == null && !devices.isEmpty()) {
+            cmbBleDevice.getSelectionModel().selectFirst();
+        }
+
+        int count = devices.size();
+        lblBleStatus.setText(count == 0
+                ? "Устройства не найдены. Убедитесь, что Bluetooth включён."
+                : "Найдено устройств: " + count);
+    }
+
+    /**
+     * Находит BleDevice по отображаемой строке в ComboBox.
+     * Формат: "DeviceName (-65 dBm)"
+     */
+    private BleDevice findBleDeviceByLabel(String label) {
+        List<BleDevice> devices = BleDeviceDiscoveryService.getInstance().getDiscoveredDevices();
+        for (BleDevice device : devices) {
+            String expected = device.displayName() + " (" + device.rssi() + " dBm)";
+            if (label.equals(expected)) {
+                return device;
+            }
+        }
+        // Fallback: по началу строки (RSSI мог измениться)
+        for (BleDevice device : devices) {
+            if (label.startsWith(device.displayName())) {
+                return device;
+            }
+        }
+        return null;
     }
 
     /**
