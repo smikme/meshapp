@@ -256,6 +256,7 @@ public class MessageService {
         MeshProtos.Data data = MeshProtos.Data.newBuilder()
                 .setPortnum(Portnums.PortNum.ADMIN_APP)
                 .setPayload(adminMsg.toByteString())
+                .setWantResponse(true)
                 .build();
 
         int packetId = ThreadLocalRandom.current().nextInt(1, Integer.MAX_VALUE);
@@ -291,6 +292,7 @@ public class MessageService {
         MeshProtos.Data data = MeshProtos.Data.newBuilder()
                 .setPortnum(Portnums.PortNum.ADMIN_APP)
                 .setPayload(adminMsg.toByteString())
+                .setWantResponse(true)
                 .build();
 
         int packetId = ThreadLocalRandom.current().nextInt(1, Integer.MAX_VALUE);
@@ -379,6 +381,7 @@ public class MessageService {
         MeshProtos.Data data = MeshProtos.Data.newBuilder()
                 .setPortnum(Portnums.PortNum.ADMIN_APP)
                 .setPayload(adminMsg.toByteString())
+                .setWantResponse(true)
                 .build();
 
         int packetId = ThreadLocalRandom.current().nextInt(1, Integer.MAX_VALUE);
