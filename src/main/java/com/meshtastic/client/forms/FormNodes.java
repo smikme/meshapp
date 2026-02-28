@@ -6,12 +6,9 @@ import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.protocol.ProtocolHandler;
 import com.meshtastic.client.service.ConnectionManager;
-import com.meshtastic.client.service.MessageService;
 import com.meshtastic.client.system.Form;
 import com.meshtastic.client.utils.NodeUtils;
 import com.meshtastic.client.utils.SystemForm;
-import javafx.animation.KeyFrame;
-import javafx.animation.Timeline;
 import javafx.application.Platform;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
@@ -24,16 +21,12 @@ import javafx.scene.layout.*;
 import javafx.scene.shape.Circle;
 import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
-import javafx.util.Duration;
 
 import java.util.Comparator;
 import java.util.function.IntConsumer;
 
 @SystemForm(name = "Ноды", description = "Список нод в сети", tags = {"ноды", "nodes", "устройства", "mesh"})
 public class FormNodes extends Form {
-
-    private static final int REFRESH_INTERVAL_MS = 60_000;
-
 
     private ListView<NodeData> nodeListView;
     private final ObservableList<NodeData> nodeData = FXCollections.observableArrayList();
@@ -91,8 +84,6 @@ public class FormNodes extends Form {
 
     private final Runnable connectionListener = () -> Platform.runLater(this::rebindState);
 
-    private Timeline refreshTimer;
-
     public FormNodes() {
         initComponents();
     }
@@ -101,7 +92,6 @@ public class FormNodes extends Form {
     public void formInit() {
         ConnectionManager.getInstance().addListener(connectionListener);
         rebindState();
-        startRefreshTimer();
     }
 
     @Override
@@ -112,7 +102,6 @@ public class FormNodes extends Form {
     @Override
     public void formRefresh() {
         reloadList();
-        requestMissingNodeInfo();
     }
 
     // ==================== UI ====================
@@ -386,27 +375,6 @@ public class FormNodes extends Form {
             }
         } finally {
             suppressSelectionListener = false;
-        }
-    }
-
-    private void startRefreshTimer() {
-        if (refreshTimer != null) return;
-        refreshTimer = new Timeline(
-                new KeyFrame(Duration.millis(REFRESH_INTERVAL_MS), e -> requestMissingNodeInfo())
-        );
-        refreshTimer.setCycleCount(Timeline.INDEFINITE);
-        refreshTimer.play();
-    }
-
-    private void requestMissingNodeInfo() {
-        if (state == null || protocolHandler == null) return;
-
-        int myNodeNum = state.getMyNodeNum();
-        for (NodeData node : state.getNodeDb().values()) {
-            if (node.getNodeNum() == myNodeNum) continue;
-            if (node.getLongName() == null || node.getLongName().isEmpty()) {
-                MessageService.requestNodeInfo(protocolHandler, state, node.getNodeNum());
-            }
         }
     }
 
