@@ -65,6 +65,8 @@ public class ProtocolHandler {
             dispatchFromRadio(fromRadio);
         } catch (InvalidProtocolBufferException e) {
             log.warn("Failed to parse FromRadio ({} bytes): {}", data.length, e.getMessage());
+        } catch (Exception e) {
+            log.error("Error processing FromRadio ({} bytes)", data.length, e);
         }
     }
 
@@ -72,27 +74,27 @@ public class ProtocolHandler {
         switch (fromRadio.getPayloadVariantCase()) {
             case MY_INFO -> {
                 log.info("Received MyNodeInfo: nodeNum={}", fromRadio.getMyInfo().getMyNodeNum());
-                for (FromRadioListener l : listeners) l.onMyNodeInfo(fromRadio.getMyInfo());
+                notifyListeners(l -> l.onMyNodeInfo(fromRadio.getMyInfo()));
             }
             case NODE_INFO -> {
                 log.debug("Received NodeInfo: num={}", fromRadio.getNodeInfo().getNum());
-                for (FromRadioListener l : listeners) l.onNodeInfo(fromRadio.getNodeInfo());
+                notifyListeners(l -> l.onNodeInfo(fromRadio.getNodeInfo()));
             }
             case CONFIG -> {
                 log.debug("Received Config: {}", fromRadio.getConfig().getPayloadVariantCase());
-                for (FromRadioListener l : listeners) l.onConfig(fromRadio.getConfig());
+                notifyListeners(l -> l.onConfig(fromRadio.getConfig()));
             }
             case MODULECONFIG -> {
                 log.debug("Received ModuleConfig: {}", fromRadio.getModuleConfig().getPayloadVariantCase());
-                for (FromRadioListener l : listeners) l.onModuleConfig(fromRadio.getModuleConfig());
+                notifyListeners(l -> l.onModuleConfig(fromRadio.getModuleConfig()));
             }
             case CHANNEL -> {
                 log.debug("Received Channel: index={}", fromRadio.getChannel().getIndex());
-                for (FromRadioListener l : listeners) l.onChannel(fromRadio.getChannel());
+                notifyListeners(l -> l.onChannel(fromRadio.getChannel()));
             }
             case CONFIG_COMPLETE_ID -> {
                 log.info("Received config_complete_id: {}", fromRadio.getConfigCompleteId());
-                for (FromRadioListener l : listeners) l.onConfigComplete(fromRadio.getConfigCompleteId());
+                notifyListeners(l -> l.onConfigComplete(fromRadio.getConfigCompleteId()));
             }
             case PACKET -> {
                 MeshProtos.MeshPacket pkt = fromRadio.getPacket();
@@ -100,19 +102,29 @@ public class ProtocolHandler {
                         String.format("!%08x", pkt.getFrom()),
                         String.format("!%08x", pkt.getTo()),
                         pkt.hasDecoded() ? pkt.getDecoded().getPortnum() : "encrypted");
-                for (FromRadioListener l : listeners) l.onMeshPacket(pkt);
+                notifyListeners(l -> l.onMeshPacket(pkt));
             }
             case LOG_RECORD -> {
                 log.trace("Received LogRecord: {}", fromRadio.getLogRecord().getMessage());
-                for (FromRadioListener l : listeners) l.onLogRecord(fromRadio.getLogRecord());
+                notifyListeners(l -> l.onLogRecord(fromRadio.getLogRecord()));
             }
             case QUEUESTATUS -> {
                 var qs = fromRadio.getQueueStatus();
                 log.debug("QueueStatus: res={} free={}/{} meshPacketId={}",
                         qs.getRes(), qs.getFree(), qs.getMaxlen(), qs.getMeshPacketId());
-                for (FromRadioListener l : listeners) l.onQueueStatus(qs);
+                notifyListeners(l -> l.onQueueStatus(qs));
             }
             default -> log.debug("Unhandled FromRadio variant: {}", fromRadio.getPayloadVariantCase());
+        }
+    }
+
+    private void notifyListeners(java.util.function.Consumer<FromRadioListener> action) {
+        for (FromRadioListener l : listeners) {
+            try {
+                action.accept(l);
+            } catch (Exception e) {
+                log.error("Error in FromRadioListener {}", l.getClass().getSimpleName(), e);
+            }
         }
     }
 }

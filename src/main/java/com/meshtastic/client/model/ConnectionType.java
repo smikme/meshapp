@@ -6,5 +6,6 @@ package com.meshtastic.client.model;
  */
 public enum ConnectionType {
     TCP,
-    SERIAL
+    SERIAL,
+    BLE
 }
