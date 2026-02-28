@@ -246,10 +246,25 @@ tasks.register('jpackage') {
 		if (proc1Output) logger.lifecycle(proc1Output.trim())
 		if (proc1.exitValue() != 0) throw new GradleException("jpackage failed with exit code ${proc1.exitValue()}")
 
-		// macOS шаг 2: скопировать Assets.car (Icon Composer) в бандл, собрать DMG
+		// macOS шаг 2: патчить Info.plist, скопировать Assets.car, собрать DMG
 		if (macBuild) {
 			def appDir = new File(outputDir, "MeshApp.app")
 			def resourcesDir = new File(appDir, "Contents/Resources")
+
+			// Добавить NSBluetoothAlwaysUsageDescription — без него macOS 10.15+
+			// убивает процесс при инициализации CBCentralManager (BLE)
+			def infoPlist = new File(appDir, "Contents/Info.plist")
+			if (infoPlist.exists()) {
+				def plistText = infoPlist.text
+				if (!plistText.contains('NSBluetoothAlwaysUsageDescription')) {
+					plistText = plistText.replace('</dict>', """\
+ <key>NSBluetoothAlwaysUsageDescription</key>
+ <string>MeshApp uses Bluetooth to connect to Meshtastic devices.</string>
+</dict>""")
+					infoPlist.text = plistText
+					logger.lifecycle("jpackage: NSBluetoothAlwaysUsageDescription добавлен в Info.plist")
+				}
+			}
 
 			// Assets.car содержит иконку из Icon Composer с вариантами стилей
 			def assetsCar = file('src/main/resources/macos/Assets.car')
@@ -324,6 +339,8 @@ if (org.gradle.internal.os.OperatingSystem.current().isMacOsX()) {
     <string>MeshApp</string>
     <key>NSHighResolutionCapable</key>
     <true/>
+    <key>NSBluetoothAlwaysUsageDescription</key>
+    <string>MeshApp uses Bluetooth to connect to Meshtastic devices.</string>
 </dict>
 </plist>"""
 
