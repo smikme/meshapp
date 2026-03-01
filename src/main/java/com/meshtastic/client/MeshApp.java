@@ -57,7 +57,7 @@ public class MeshApp extends Application {
         NativeWindowHelper.prepareStage(stage);
 
         RootPane rootPane = new RootPane();
-        Scene scene = new Scene(rootPane, 1010, 855);
+        Scene scene = new Scene(rootPane, 1010, 750);
 
         boolean isDark = AppPreferences.isDarkMode();
         ThemeManager.applyTheme(scene, isDark);

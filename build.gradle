@@ -95,6 +95,52 @@ tasks.register('generateVersionProperties') {
 sourceSets.main.resources.srcDir(layout.buildDirectory.dir('generated/resources'))
 tasks.named('processResources') { dependsOn 'generateVersionProperties' }
 
+// ============================================================
+// Windows BLE: сборка meshapp-ble.dll из native/windows-ble/
+// Использование: ./gradlew buildBleNative (или автоматически при processResources на Windows)
+// ============================================================
+if (org.gradle.internal.os.OperatingSystem.current().isWindows()) {
+	tasks.register('buildBleNative') {
+		group = 'build'
+		description = 'Собрать meshapp-ble.dll (WinRT BLE) через CMake'
+
+		def nativeDir = file('native/windows-ble')
+		def buildDir = new File(nativeDir, 'build')
+		def dllOutput = new File(buildDir, 'Release/meshapp-ble.dll')
+		def dllDest = file('src/main/resources/win32-x86-64/meshapp-ble.dll')
+
+		inputs.files(fileTree(nativeDir) { include '*.cpp', '*.h', 'CMakeLists.txt' })
+		outputs.file(dllDest)
+
+		doLast {
+			// CMake configure
+			if (!new File(buildDir, 'CMakeCache.txt').exists()) {
+				def cfg = new ProcessBuilder('cmake', '-B', 'build', '-A', 'x64')
+					.directory(nativeDir).redirectErrorStream(true).start()
+				def cfgOut = cfg.inputStream.text
+				cfg.waitFor()
+				if (cfgOut) logger.lifecycle(cfgOut.trim())
+				if (cfg.exitValue() != 0) throw new GradleException("CMake configure failed (exit ${cfg.exitValue()})")
+			}
+			// CMake build
+			def bld = new ProcessBuilder('cmake', '--build', 'build', '--config', 'Release')
+				.directory(nativeDir).redirectErrorStream(true).start()
+			def bldOut = bld.inputStream.text
+			bld.waitFor()
+			if (bldOut) logger.lifecycle(bldOut.trim())
+			if (bld.exitValue() != 0) throw new GradleException("CMake build failed (exit ${bld.exitValue()})")
+			// Copy DLL to resources
+			dllDest.parentFile.mkdirs()
+			java.nio.file.Files.copy(
+				dllOutput.toPath(), dllDest.toPath(),
+				java.nio.file.StandardCopyOption.REPLACE_EXISTING
+			)
+			logger.lifecycle("buildBleNative: DLL скопирован в ${dllDest}")
+		}
+	}
+	tasks.named('processResources') { dependsOn 'buildBleNative' }
+}
+
 tasks.withType(JavaCompile).configureEach {
 	options.encoding = 'UTF-8'
 }
@@ -152,9 +198,12 @@ tasks.register('jpackage') {
 		def appVersion = {
 			try {
 				def count = 'git rev-list --count HEAD'.execute().text.trim()
-				return "1.1.${count}"
+				def hash = 'git rev-parse --short=4 HEAD'.execute().text.trim()
+				// Доп. разряд из хеша (0-65535) — чтобы MSI всегда считал версию новой
+				def minor = Integer.parseInt(hash, 16) % 65536
+				return "1.1.${count}.${minor}"
 			} catch (ignored) {
-				return '1.1.0'
+				return '1.1.0.0'
 			}
 		}()
 
@@ -176,6 +225,17 @@ tasks.register('jpackage') {
 		libDir.listFiles()?.findAll { it.name.startsWith('javafx-') }?.each { jar ->
 			java.nio.file.Files.move(jar.toPath(), new File(fxDir, jar.name).toPath(),
 				java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+		}
+
+		// Windows: скопировать meshapp-ble.dll (WinRT BLE) в lib/ для jpackage
+		if (os.isWindows()) {
+			def bleDll = file('src/main/resources/win32-x86-64/meshapp-ble.dll')
+			if (bleDll.exists()) {
+				java.nio.file.Files.copy(bleDll.toPath(),
+					new File(libDir, bleDll.name).toPath(),
+					java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+				logger.lifecycle("jpackage: meshapp-ble.dll скопирован в lib/")
+			}
 		}
 
 		def jvmArgsList = application.applicationDefaultJvmArgs.collect()
