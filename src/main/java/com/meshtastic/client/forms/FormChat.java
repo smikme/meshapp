@@ -1,5 +1,6 @@
 package com.meshtastic.client.forms;
 
+import com.meshtastic.client.components.EmojiTextFlow;
 import com.meshtastic.client.components.chat.ChatInputBar;
 import com.meshtastic.client.components.chat.ChatListCell;
 import com.meshtastic.client.components.chat.ChatNameResolver;
@@ -129,7 +130,7 @@ public class FormChat extends Form {
         final String prefix;
         final int[] remaining;
         final boolean[] done = {false};
-        Label countdownLabel;  // пересоздаётся при переключении чатов
+        EmojiTextFlow countdownLabel;  // пересоздаётся при переключении чатов
         HBox tempBubble;       // пересоздаётся при переключении чатов
         Runnable cancelAction; // действие при отмене (останавливает таймер, убирает слушатель)
 
@@ -612,7 +613,7 @@ public class FormChat extends Form {
         scrollToBottom();
         // buildSystemBubble → HBox(botAvatar, VBox(textLabel, timeLabel))
         VBox content = (VBox) bubble.getChildren().get(1);
-        pc.countdownLabel = (Label) content.getChildren().getFirst();
+        pc.countdownLabel = (EmojiTextFlow) content.getChildren().getFirst();
 
         // Кнопка «Отменить»
         Label cancelBtn = new Label("Отменить");

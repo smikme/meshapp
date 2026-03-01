@@ -1,5 +1,6 @@
 package com.meshtastic.client.components.chat;
 
+import com.meshtastic.client.components.EmojiImageCache;
 import com.meshtastic.client.components.EmojiPicker;
 import com.meshtastic.client.model.MeshMessage;
 import javafx.application.Platform;
@@ -8,8 +9,8 @@ import javafx.geometry.Pos;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 import javafx.scene.control.Separator;
-import javafx.scene.control.TextField;
 import javafx.scene.control.Tooltip;
+import javafx.scene.image.ImageView;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
@@ -38,7 +39,7 @@ public class ChatInputBar extends VBox {
     public record SendRequest(String text, int replyId) {}
 
     private final Consumer<SendRequest> onSend;
-    private final TextField messageInput;
+    private final EmojiTextField messageInput;
     private final Label charCountLabel;
     private final Button sendButton;
     private final EmojiPicker emojiPicker;
@@ -61,17 +62,22 @@ public class ChatInputBar extends VBox {
         inputSep = new Separator();
         inputSep.getStyleClass().add("chat-input-separator");
 
-        // Кнопка эмодзи
-        Button emojiBtn = new Button("\uD83D\uDE00");
+        // Кнопка эмодзи (с изображением)
+        Button emojiBtn = new Button();
+        ImageView emojiBtnIcon = EmojiImageCache.createImageView("\uD83D\uDE00", 18);
+        if (emojiBtnIcon != null) {
+            emojiBtn.setGraphic(emojiBtnIcon);
+        } else {
+            emojiBtn.setText("\uD83D\uDE00");
+        }
         emojiBtn.getStyleClass().add("chat-emoji-btn");
         emojiBtn.setTooltip(new Tooltip("Эмодзи"));
         emojiPicker = new EmojiPicker(this::insertEmoji);
         emojiBtn.setOnAction(e -> emojiPicker.toggle(emojiBtn));
 
-        // Поле ввода
-        messageInput = new TextField();
+        // Поле ввода (кастомное с emoji-картинками)
+        messageInput = new EmojiTextField();
         messageInput.setPromptText("Сообщение...");
-        messageInput.getStyleClass().add("chat-message-input");
         HBox.setHgrow(messageInput, Priority.ALWAYS);
 
         // Счётчик байт
@@ -100,7 +106,7 @@ public class ChatInputBar extends VBox {
             sendButton.setDisable(newVal == null || newVal.trim().isEmpty());
         });
 
-        messageInput.setOnAction(e -> doSend());
+        messageInput.setOnAction(v -> doSend());
 
         HBox inputBar = new HBox(8,
                 emojiBtn, messageInput, charCountLabel, sendButton);
@@ -146,9 +152,8 @@ public class ChatInputBar extends VBox {
 
     /** Включить/выключить панель ввода. */
     public void setInputEnabled(boolean enabled) {
-        messageInput.setDisable(!enabled);
+        messageInput.setFieldDisabled(!enabled);
         sendButton.setDisable(!enabled
-                || messageInput.getText() == null
                 || messageInput.getText().trim().isEmpty());
     }
 
@@ -211,8 +216,7 @@ public class ChatInputBar extends VBox {
     }
 
     private void insertEmoji(String emoji) {
-        String text = messageInput.getText() != null
-                ? messageInput.getText() : "";
+        String text = messageInput.getText();
         int maxBytes = getMaxTextBytes();
         if (textByteLength(text) + textByteLength(emoji) > maxBytes) {
             return;
@@ -220,10 +224,9 @@ public class ChatInputBar extends VBox {
         int caret = Math.min(savedCaretPosition, text.length());
         messageInput.insertText(caret, emoji);
         savedCaretPosition = caret + emoji.length();
-        int newCaret = savedCaretPosition;
         Platform.runLater(() -> {
             messageInput.requestFocus();
-            messageInput.positionCaret(newCaret);
+            messageInput.positionCaret(savedCaretPosition);
         });
     }
 

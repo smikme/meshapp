@@ -1,5 +1,6 @@
 package com.meshtastic.client.components.chat;
 
+import com.meshtastic.client.components.EmojiTextFlow;
 import com.meshtastic.client.modal.ModalPane;
 import com.meshtastic.client.model.ChatItem;
 import com.meshtastic.client.utils.NodeUtils;
@@ -13,6 +14,7 @@ import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
+import javafx.scene.shape.Rectangle;
 import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
 
@@ -28,7 +30,7 @@ public class ChatListCell extends ListCell<ChatItem> {
     private final Label avatarLabel = new Label();
     private final VBox textBox = new VBox(2);
     private final Label nameLabel = new Label();
-    private final Label messagePreview = new Label();
+    private final EmojiTextFlow messagePreview = new EmojiTextFlow();
     private final VBox metaBox = new VBox(4);
     private final Label timeLabel = new Label();
     private final Label unreadBadge = new Label();
@@ -51,10 +53,15 @@ public class ChatListCell extends ListCell<ChatItem> {
         nameLabel.getStyleClass().add("chat-name-label");
 
         messagePreview.getStyleClass().add("chat-preview-label");
-        messagePreview.setWrapText(true);
+        messagePreview.setTextStyleClass("chat-preview-text-node");
+        messagePreview.setEmojiSize(12);
         messagePreview.setMinHeight(34);
         messagePreview.setPrefHeight(34);
         messagePreview.setMaxHeight(34);
+        Rectangle clip = new Rectangle();
+        clip.widthProperty().bind(messagePreview.widthProperty());
+        clip.heightProperty().bind(messagePreview.heightProperty());
+        messagePreview.setClip(clip);
 
         textBox.getChildren().addAll(nameLabel, messagePreview);
         textBox.setMinWidth(0);

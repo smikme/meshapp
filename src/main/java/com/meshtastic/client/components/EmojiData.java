@@ -456,7 +456,19 @@ public class EmojiData {
         KEYWORDS = Collections.unmodifiableMap(m);
     }
 
+    private static final Set<String> ALL_EMOJIS;
+    static {
+        Set<String> set = new HashSet<>();
+        for (Category cat : CATEGORIES) {
+            set.addAll(cat.emojis());
+        }
+        ALL_EMOJIS = Collections.unmodifiableSet(set);
+    }
+
     public static List<Category> getCategories() { return CATEGORIES; }
+
+    /** Множество всех известных эмодзи для быстрого поиска. */
+    public static Set<String> getAllEmojis() { return ALL_EMOJIS; }
 
     /**
      * Поиск эмодзи по русским ключевым словам (substring match).
