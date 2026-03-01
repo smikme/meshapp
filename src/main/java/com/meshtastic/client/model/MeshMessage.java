@@ -37,6 +37,8 @@ public class MeshMessage {
     private String replyText;
     private int hopStart;
     private int hopLimit;
+    private int rxRssi;
+    private float rxSnr;
     private String senderName;
     private boolean systemMessage;
     private long dbId;
@@ -87,6 +89,12 @@ public class MeshMessage {
 
     public int getHopLimit() { return hopLimit; }
     public void setHopLimit(int hopLimit) { this.hopLimit = hopLimit; }
+
+    public int getRxRssi() { return rxRssi; }
+    public void setRxRssi(int rxRssi) { this.rxRssi = rxRssi; }
+
+    public float getRxSnr() { return rxSnr; }
+    public void setRxSnr(float rxSnr) { this.rxSnr = rxSnr; }
 
     public String getSenderName() { return senderName; }
     public void setSenderName(String senderName) { this.senderName = senderName; }
