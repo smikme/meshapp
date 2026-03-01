@@ -1,6 +1,7 @@
 package com.meshtastic.client.connection.ble;
 
 import com.meshtastic.client.connection.ble.macos.MacOsBle;
+import com.meshtastic.client.connection.ble.windows.WinBle;
 import com.meshtastic.client.platform.OsDetect;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -27,8 +28,10 @@ public final class BlePlatformFactory {
             }
             case LINUX -> throw new UnsupportedOperationException(
                     "BLE на Linux ещё не реализован (BlueZ D-Bus)");
-            case WINDOWS -> throw new UnsupportedOperationException(
-                    "BLE на Windows ещё не реализован (WinRT)");
+            case WINDOWS -> {
+                log.info("Используется WinRT BLE (Windows)");
+                yield new WinBle();
+            }
             case UNKNOWN -> throw new UnsupportedOperationException(
                     "BLE не поддерживается на этой ОС");
         };
@@ -38,7 +41,7 @@ public final class BlePlatformFactory {
      * Проверяет, поддерживается ли BLE на текущей платформе.
      */
     public static boolean isSupported() {
-        return OsDetect.isMacOs(); // Linux и Windows будут добавлены позже
+        return OsDetect.isMacOs() || OsDetect.isWindows();
     }
 
     private BlePlatformFactory() {}
