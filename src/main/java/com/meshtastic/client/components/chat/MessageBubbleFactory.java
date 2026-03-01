@@ -1,5 +1,7 @@
 package com.meshtastic.client.components.chat;
 
+import com.meshtastic.client.components.EmojiImageCache;
+import com.meshtastic.client.components.EmojiTextFlow;
 import com.meshtastic.client.components.NodeDetailPanel;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.MeshMessage;
@@ -13,6 +15,7 @@ import javafx.scene.control.ContextMenu;
 import javafx.scene.control.Label;
 import javafx.scene.control.MenuItem;
 import javafx.scene.control.SeparatorMenuItem;
+import javafx.scene.image.ImageView;
 import javafx.scene.input.Clipboard;
 import javafx.scene.input.ClipboardContent;
 import javafx.scene.layout.HBox;
@@ -157,9 +160,15 @@ public class MessageBubbleFactory {
 
         int hops = msg.getHopsTraveled();
         if (hops > 0) {
-            Label hopLabel = new Label("\uD83D\uDC07 " + hops);
-            hopLabel.getStyleClass().add("chat-bubble-hops");
-            meta.getChildren().add(hopLabel);
+            HBox hopBox = new HBox(2);
+            hopBox.setAlignment(Pos.CENTER);
+            hopBox.getStyleClass().add("chat-bubble-hops");
+            ImageView hopImg = EmojiImageCache.createImageView("\uD83D\uDC07", 12);
+            if (hopImg != null) {
+                hopBox.getChildren().add(hopImg);
+            }
+            hopBox.getChildren().add(new Label(String.valueOf(hops)));
+            meta.getChildren().add(hopBox);
         }
 
         addTimeToMeta(meta, msg);
@@ -235,21 +244,18 @@ public class MessageBubbleFactory {
             }
         }
 
-        Label botAvatar = new Label("\uD83E\uDD16");
-        botAvatar.setFont(Font.font(20));
-        botAvatar.setMinSize(28, 28);
-        botAvatar.setAlignment(Pos.CENTER);
+        StackPane botAvatar = buildBotAvatar();
 
         VBox content = new VBox(2);
         content.getStyleClass().add("chat-bubble-system");
         content.maxWidthProperty().bind(containerWidthProp.multiply(0.85));
         content.setMinHeight(Region.USE_PREF_SIZE);
 
-        Label textLabel = new Label(msg.getText());
-        textLabel.setWrapText(true);
-        textLabel.setMinHeight(Region.USE_PREF_SIZE);
-        textLabel.getStyleClass().add("chat-bubble-text");
-        content.getChildren().add(textLabel);
+        EmojiTextFlow textFlow = new EmojiTextFlow(msg.getText(), 18);
+        textFlow.setTextStyleClass("chat-bubble-text-node");
+        textFlow.getStyleClass().add("chat-bubble-text");
+        textFlow.setMinHeight(Region.USE_PREF_SIZE);
+        content.getChildren().add(textFlow);
 
         Label timeLabel = new Label(
                 ChatTimeFormatter.formatMessageTime(msg.getTimestamp()));
@@ -264,7 +270,24 @@ public class MessageBubbleFactory {
         return row;
     }
 
-    // === Аватар ===
+    // === Аватары ===
+
+    /** Аватар бота (🤖) — изображение или fallback на текст. */
+    private static StackPane buildBotAvatar() {
+        StackPane avatar = new StackPane();
+        avatar.setMinSize(28, 28);
+        avatar.setMaxSize(28, 28);
+        avatar.setAlignment(Pos.CENTER);
+        ImageView botImg = EmojiImageCache.createImageView("\uD83E\uDD16", 20);
+        if (botImg != null) {
+            avatar.getChildren().add(botImg);
+        } else {
+            Label fallback = new Label("\uD83E\uDD16");
+            fallback.setFont(Font.font(20));
+            avatar.getChildren().add(fallback);
+        }
+        return avatar;
+    }
 
     private StackPane buildSmallAvatar(MeshMessage msg) {
         StackPane avatar = new StackPane();
@@ -366,20 +389,20 @@ public class MessageBubbleFactory {
 
     private void addQuoteIfPresent(VBox content, MeshMessage msg) {
         if (msg.getReplyText() != null && !msg.getReplyText().isEmpty()) {
-            Label quoteLabel = new Label(msg.getReplyText());
-            quoteLabel.getStyleClass().add("chat-bubble-quote");
-            quoteLabel.setWrapText(true);
-            quoteLabel.setMinHeight(Region.USE_PREF_SIZE);
-            content.getChildren().add(quoteLabel);
+            EmojiTextFlow quoteFlow = new EmojiTextFlow(msg.getReplyText(), 14);
+            quoteFlow.setTextStyleClass("chat-bubble-quote-node");
+            quoteFlow.getStyleClass().add("chat-bubble-quote");
+            quoteFlow.setMinHeight(Region.USE_PREF_SIZE);
+            content.getChildren().add(quoteFlow);
         }
     }
 
     private void addTextLabel(VBox content, MeshMessage msg) {
-        Label textLabel = new Label(msg.getText());
-        textLabel.setWrapText(true);
-        textLabel.setMinHeight(Region.USE_PREF_SIZE);
-        textLabel.getStyleClass().add("chat-bubble-text");
-        content.getChildren().add(textLabel);
+        EmojiTextFlow textFlow = new EmojiTextFlow(msg.getText(), 18);
+        textFlow.setTextStyleClass("chat-bubble-text-node");
+        textFlow.getStyleClass().add("chat-bubble-text");
+        textFlow.setMinHeight(Region.USE_PREF_SIZE);
+        content.getChildren().add(textFlow);
     }
 
     private void addTimeToMeta(HBox meta, MeshMessage msg) {

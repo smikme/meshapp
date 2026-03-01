@@ -1,5 +1,7 @@
 package com.meshtastic.client.components.chat;
 
+import com.meshtastic.client.components.EmojiImageCache;
+import com.meshtastic.client.components.EmojiTextFlow;
 import com.meshtastic.client.model.MeshMessage;
 import javafx.beans.property.ReadOnlyDoubleProperty;
 import javafx.geometry.Insets;
@@ -8,10 +10,12 @@ import javafx.scene.control.ContextMenu;
 import javafx.scene.control.Label;
 import javafx.scene.control.MenuItem;
 import javafx.scene.control.SeparatorMenuItem;
+import javafx.scene.image.ImageView;
 import javafx.scene.input.Clipboard;
 import javafx.scene.input.ClipboardContent;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Region;
+import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 import javafx.scene.paint.Color;
 import javafx.scene.shape.Circle;
@@ -122,8 +126,8 @@ public class TracerouteView {
                                MeshMessage msg) {
         VBox content = createBubbleContent();
 
-        Label header = new Label(TRACEROUTE_PREFIX + targetName);
-        header.setWrapText(true);
+        EmojiTextFlow header = new EmojiTextFlow(TRACEROUTE_PREFIX + targetName, 18);
+        header.setTextStyleClass("chat-bubble-text-node");
         header.getStyleClass().add("chat-bubble-text");
         content.getChildren().add(header);
 
@@ -178,8 +182,8 @@ public class TracerouteView {
 
         VBox content = createBubbleContent();
 
-        Label headerLabel = new Label(TRACEROUTE_PREFIX + targetName);
-        headerLabel.setWrapText(true);
+        EmojiTextFlow headerLabel = new EmojiTextFlow(TRACEROUTE_PREFIX + targetName, 18);
+        headerLabel.setTextStyleClass("chat-bubble-text-node");
         headerLabel.getStyleClass().add("chat-bubble-text");
         content.getChildren().add(headerLabel);
 
@@ -217,10 +221,18 @@ public class TracerouteView {
     }
 
     private HBox wrapWithAvatar(VBox content, MeshMessage msg) {
-        Label botAvatar = new Label("\uD83E\uDD16");
-        botAvatar.setFont(Font.font(20));
+        StackPane botAvatar = new StackPane();
         botAvatar.setMinSize(28, 28);
+        botAvatar.setMaxSize(28, 28);
         botAvatar.setAlignment(Pos.CENTER);
+        ImageView botImg = EmojiImageCache.createImageView("\uD83E\uDD16", 20);
+        if (botImg != null) {
+            botAvatar.getChildren().add(botImg);
+        } else {
+            Label fallback = new Label("\uD83E\uDD16");
+            fallback.setFont(Font.font(20));
+            botAvatar.getChildren().add(fallback);
+        }
 
         HBox row = new HBox(6, botAvatar, content);
         row.setAlignment(Pos.BOTTOM_LEFT);

@@ -1,5 +1,6 @@
 package com.meshtastic.client.forms;
 
+import com.meshtastic.client.components.EmojiImageCache;
 import com.meshtastic.client.logging.UiLogAppender;
 import com.meshtastic.client.model.LogEntry;
 import com.meshtastic.client.system.Form;
@@ -16,6 +17,7 @@ import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableRow;
 import javafx.scene.control.TableView;
 import javafx.scene.control.cell.PropertyValueFactory;
+import javafx.scene.image.ImageView;
 import javafx.scene.input.Clipboard;
 import javafx.scene.input.ClipboardContent;
 import javafx.scene.layout.HBox;
@@ -81,9 +83,18 @@ public class FormLogs extends Form {
                 super.updateItem(level, empty);
                 if (empty || level == null) {
                     setText(null);
+                    setGraphic(null);
                     setTooltip(null);
                 } else {
-                    setText(levelEmoji(level));
+                    String emoji = levelEmoji(level);
+                    ImageView iv = EmojiImageCache.createImageView(emoji, 16);
+                    if (iv != null) {
+                        setText(null);
+                        setGraphic(iv);
+                    } else {
+                        setGraphic(null);
+                        setText(emoji);
+                    }
                     setTooltip(new javafx.scene.control.Tooltip(level));
                 }
             }
