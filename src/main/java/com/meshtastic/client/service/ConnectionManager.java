@@ -4,6 +4,7 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.reflect.TypeToken;
 import com.meshtastic.client.connection.*;
+import com.meshtastic.client.connection.ble.BleConnection;
 import com.meshtastic.client.model.ConnectionEntry;
 import com.meshtastic.client.model.ConnectionType;
 import com.meshtastic.client.model.DeviceState;
@@ -247,6 +248,8 @@ public class ConnectionManager {
                     entry.getPortName(),
                     entry.getBaudRate() > 0 ? entry.getBaudRate() : SerialConnection.DEFAULT_BAUD_RATE
             );
+            case BLE -> new BleConnection(entry.getBleAddress(),
+                    BleDeviceDiscoveryService.getInstance().getPlatform());
         };
     }
 

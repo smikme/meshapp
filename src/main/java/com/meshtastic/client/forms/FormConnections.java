@@ -133,7 +133,10 @@ public class FormConnections extends Form {
         topRow.getChildren().addAll(indicator, lblName, lblStatus, spacer, btnConnect, btnDelete);
 
         String addressText;
-        if (entry.getEffectiveType() == ConnectionType.SERIAL) {
+        if (entry.getEffectiveType() == ConnectionType.BLE) {
+            String devName = entry.getBleDeviceName() != null ? entry.getBleDeviceName() : "";
+            addressText = "BLE: " + devName + " (" + entry.getBleAddress() + ")";
+        } else if (entry.getEffectiveType() == ConnectionType.SERIAL) {
             addressText = "Serial: " + entry.getPortName() + " (" + entry.getBaudRate() + " бод)";
         } else {
             addressText = "TCP: " + entry.getHost() + ":" + entry.getPort();
