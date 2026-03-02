@@ -198,12 +198,16 @@ tasks.register('jpackage') {
 		def appVersion = {
 			try {
 				def count = 'git rev-list --count HEAD'.execute().text.trim()
+				if (os.isMacOsX()) {
+					// macOS jpackage allows 1-3 numbers only
+					return "1.1.${count}"
+				}
 				def hash = 'git rev-parse --short=4 HEAD'.execute().text.trim()
 				// Доп. разряд из хеша (0-65535) — чтобы MSI всегда считал версию новой
 				def minor = Integer.parseInt(hash, 16) % 65536
 				return "1.1.${count}.${minor}"
 			} catch (ignored) {
-				return '1.1.0.0'
+				return os.isMacOsX() ? '1.1.0' : '1.1.0.0'
 			}
 		}()
 
