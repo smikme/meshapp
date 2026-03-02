@@ -1018,7 +1018,7 @@
     -fx-background-color: -color-accent-emphasis;
     -fx-text-fill: white;
     -fx-font-size: 16px;
-    -fx-background-radius: 14;
+    -fx-background-radius: 18;
     -fx-min-width: 36;
     -fx-min-height: 36;
     -fx-max-width: 36;
@@ -1035,15 +1035,6 @@
 
 .chat-send-btn:disabled {
     -fx-opacity: 0.4;
-}
-
-.chat-char-count {
-    -fx-text-fill: -color-fg-muted;
-    -fx-font-size: 11px;
-}
-
-.chat-char-count-limit {
-    -fx-text-fill: #E53935;
 }
 
 /* Разделители чата */

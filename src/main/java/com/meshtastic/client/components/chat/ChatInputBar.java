@@ -40,8 +40,7 @@ public class ChatInputBar extends VBox {
 
     private final Consumer<SendRequest> onSend;
     private final EmojiTextField messageInput;
-    private final Label charCountLabel;
-    private final Button sendButton;
+    private final SendButtonWithRing sendRing;
     private final EmojiPicker emojiPicker;
 
     private final HBox replyBar;
@@ -80,20 +79,8 @@ public class ChatInputBar extends VBox {
         messageInput.setPromptText("Сообщение...");
         HBox.setHgrow(messageInput, Priority.ALWAYS);
 
-        // Счётчик байт (фиксированная ширина чтобы не влиял на размер поля ввода)
-        charCountLabel = new Label("0/" + getMaxTextBytes());
-        charCountLabel.getStyleClass().add("chat-char-count");
-        charCountLabel.setMinWidth(55);
-        charCountLabel.setPrefWidth(55);
-        charCountLabel.setMaxWidth(55);
-        charCountLabel.setAlignment(Pos.CENTER_RIGHT);
-
-        // Кнопка отправки
-        sendButton = new Button("➤");
-        sendButton.getStyleClass().add("chat-send-btn");
-        sendButton.setTooltip(new Tooltip("Отправить"));
-        sendButton.setOnAction(e -> doSend());
-        sendButton.setDisable(true);
+        // Кнопка отправки с кольцевым индикатором заполненности
+        sendRing = new SendButtonWithRing(this::doSend);
 
         messageInput.focusedProperty().addListener((obs, wasFocused, isFocused) -> {
             if (!isFocused) {
@@ -109,13 +96,12 @@ public class ChatInputBar extends VBox {
                 return;
             }
             updateCharCount();
-            sendButton.setDisable(newVal == null || newVal.trim().isEmpty());
+            sendRing.setSendDisable(newVal == null || newVal.trim().isEmpty());
         });
 
         messageInput.setOnAction(v -> doSend());
 
-        HBox inputBar = new HBox(8,
-                emojiBtn, messageInput, charCountLabel, sendButton);
+        HBox inputBar = new HBox(8, emojiBtn, messageInput, sendRing);
         inputBar.setAlignment(Pos.BOTTOM_LEFT);
         inputBar.setPadding(new Insets(8, 15, 8, 15));
         inputBar.getStyleClass().add("chat-input-bar");
@@ -159,7 +145,7 @@ public class ChatInputBar extends VBox {
     /** Включить/выключить панель ввода. */
     public void setInputEnabled(boolean enabled) {
         messageInput.setFieldDisabled(!enabled);
-        sendButton.setDisable(!enabled
+        sendRing.setSendDisable(!enabled
                 || messageInput.getText().trim().isEmpty());
     }
 
@@ -240,14 +226,7 @@ public class ChatInputBar extends VBox {
         String text = messageInput.getText();
         int byteLen = text != null ? textByteLength(text) : 0;
         int maxBytes = getMaxTextBytes();
-        charCountLabel.setText(byteLen + "/" + maxBytes);
-        if (byteLen >= maxBytes) {
-            if (!charCountLabel.getStyleClass().contains("chat-char-count-limit")) {
-                charCountLabel.getStyleClass().add("chat-char-count-limit");
-            }
-        } else {
-            charCountLabel.getStyleClass().remove("chat-char-count-limit");
-        }
+        sendRing.update(byteLen, maxBytes);
     }
 
     /** Длина строки в байтах UTF-8. */
