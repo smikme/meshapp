@@ -999,15 +999,20 @@
 .chat-emoji-btn {
     -fx-background-color: transparent;
     -fx-font-size: 18px;
-    -fx-padding: 4;
+    -fx-min-width: 36;
+    -fx-min-height: 36;
+    -fx-max-width: 36;
+    -fx-max-height: 36;
+    -fx-padding: 0;
     -fx-cursor: hand;
     -fx-background-insets: 0;
     -fx-border-width: 0;
+    -fx-background-radius: 18;
 }
 
 .chat-emoji-btn:hover {
     -fx-background-color: rgba(255, 255, 255, 0.1);
-    -fx-background-radius: 14;
+    -fx-background-radius: 18;
 }
 
 .light-theme .chat-emoji-btn:hover {

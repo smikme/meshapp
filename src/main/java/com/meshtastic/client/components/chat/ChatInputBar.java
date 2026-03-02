@@ -61,9 +61,9 @@ public class ChatInputBar extends VBox {
         inputSep = new Separator();
         inputSep.getStyleClass().add("chat-input-separator");
 
-        // Кнопка эмодзи (с изображением)
+        // Кнопка эмодзи (с изображением, размер как у кнопки отправки)
         Button emojiBtn = new Button();
-        ImageView emojiBtnIcon = EmojiImageCache.createImageView("\uD83D\uDE00", 18);
+        ImageView emojiBtnIcon = EmojiImageCache.createImageView("\uD83D\uDE00", 22);
         if (emojiBtnIcon != null) {
             emojiBtn.setGraphic(emojiBtnIcon);
         } else {
@@ -102,7 +102,7 @@ public class ChatInputBar extends VBox {
         messageInput.setOnAction(v -> doSend());
 
         HBox inputBar = new HBox(8, emojiBtn, messageInput, sendRing);
-        inputBar.setAlignment(Pos.BOTTOM_LEFT);
+        inputBar.setAlignment(Pos.CENTER_LEFT);
         inputBar.setPadding(new Insets(8, 15, 8, 15));
         inputBar.getStyleClass().add("chat-input-bar");
 
