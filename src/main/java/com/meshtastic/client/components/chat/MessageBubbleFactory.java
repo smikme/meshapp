@@ -169,6 +169,19 @@ public class MessageBubbleFactory {
             }
             hopBox.getChildren().add(new Label(String.valueOf(hops)));
             meta.getChildren().add(hopBox);
+        } else if (msg.getRxRssi() != 0 || msg.getRxSnr() != 0) {
+            HBox signalBox = new HBox(2);
+            signalBox.setAlignment(Pos.CENTER);
+            signalBox.getStyleClass().add("chat-bubble-hops");
+            ImageView sigImg = EmojiImageCache.createImageView("\uD83D\uDCF6", 12);
+            if (sigImg != null) {
+                signalBox.getChildren().add(sigImg);
+            }
+            String snrStr = msg.getRxSnr() == (int) msg.getRxSnr()
+                    ? String.valueOf((int) msg.getRxSnr())
+                    : String.format("%.1f", msg.getRxSnr());
+            signalBox.getChildren().add(new Label(msg.getRxRssi() + "dBm/" + snrStr + "dB"));
+            meta.getChildren().add(signalBox);
         }
 
         addTimeToMeta(meta, msg);

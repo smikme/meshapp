@@ -79,6 +79,8 @@ public class MessageListenerService implements FromRadioListener {
         msg.setPacketId(packet.getId());
         msg.setHopStart(packet.getHopStart());
         msg.setHopLimit(packet.getHopLimit());
+        msg.setRxRssi(packet.getRxRssi());
+        msg.setRxSnr(packet.getRxSnr());
 
         if (data.getReplyId() != 0) {
             msg.setReplyId(data.getReplyId());

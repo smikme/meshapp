@@ -1224,7 +1224,7 @@
 .emoji-text-field {
     -fx-background-radius: 18;
     -fx-padding: 8 14;
-    -fx-background-color: rgba(255, 255, 255, 0.08);
+    -fx-background-color: #2a2a2e;
     -fx-border-color: transparent;
     -fx-border-width: 1;
     -fx-border-radius: 18;
@@ -1235,7 +1235,7 @@
 }
 
 .light-theme .emoji-text-field {
-    -fx-background-color: rgba(0, 0, 0, 0.06);
+    -fx-background-color: #eaeaec;
 }
 
 .emoji-text-field-text {
@@ -1258,8 +1258,20 @@
     -fx-fill: rgba(0, 0, 0, 0.4);
 }
 
+.emoji-text-field-caret {
+    -fx-fill: rgba(255, 255, 255, 0.9);
+}
+
 .light-theme .emoji-text-field-caret {
     -fx-fill: rgba(0, 0, 0, 0.8);
+}
+
+.emoji-text-field-selection {
+    -fx-fill: rgba(51, 144, 255, 0.3);
+}
+
+.light-theme .emoji-text-field-selection {
+    -fx-fill: rgba(51, 144, 255, 0.4);
 }
 
 /* ContextMenu */

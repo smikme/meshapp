@@ -76,9 +76,15 @@ public class MessageDbService {
                         hop_start    INT DEFAULT 0,
                         hop_limit    INT DEFAULT 0,
                         sender_name  VARCHAR(100),
-                        system_msg   BOOLEAN DEFAULT FALSE
+                        system_msg   BOOLEAN DEFAULT FALSE,
+                        rx_rssi      INT DEFAULT 0,
+                        rx_snr       REAL DEFAULT 0
                     )
                     """);
+
+                // Миграция для существующих БД: добавить новые колонки если их нет
+                stmt.execute("ALTER TABLE messages ADD COLUMN IF NOT EXISTS rx_rssi INT DEFAULT 0");
+                stmt.execute("ALTER TABLE messages ADD COLUMN IF NOT EXISTS rx_snr REAL DEFAULT 0");
 
                 stmt.execute("""
                     CREATE INDEX IF NOT EXISTS idx_msg_chat ON messages (chat_type, chat_key, id)
@@ -101,8 +107,9 @@ public class MessageDbService {
             insertStmt = dbConnection.prepareStatement("""
                 INSERT INTO messages (chat_type, chat_key, from_num, to_num, channel_idx,
                     text, timestamp, outgoing, packet_id, status, error_reason,
-                    reply_id, reply_text, hop_start, hop_limit, sender_name, system_msg)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    reply_id, reply_text, hop_start, hop_limit, sender_name, system_msg,
+                    rx_rssi, rx_snr)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, Statement.RETURN_GENERATED_KEYS);
 
             updateStatusStmt = dbConnection.prepareStatement("""
@@ -171,6 +178,8 @@ public class MessageDbService {
             insertStmt.setInt(15, msg.getHopLimit());
             insertStmt.setString(16, msg.getSenderName());
             insertStmt.setBoolean(17, msg.isSystemMessage());
+            insertStmt.setInt(18, msg.getRxRssi());
+            insertStmt.setFloat(19, msg.getRxSnr());
             insertStmt.executeUpdate();
 
             try (ResultSet keys = insertStmt.getGeneratedKeys()) {
@@ -637,6 +646,8 @@ public class MessageDbService {
         msg.setHopLimit(rs.getInt("hop_limit"));
         msg.setSenderName(rs.getString("sender_name"));
         msg.setSystemMessage(rs.getBoolean("system_msg"));
+        msg.setRxRssi(rs.getInt("rx_rssi"));
+        msg.setRxSnr(rs.getFloat("rx_snr"));
         return msg;
     }
 

@@ -80,9 +80,13 @@ public class ChatInputBar extends VBox {
         messageInput.setPromptText("Сообщение...");
         HBox.setHgrow(messageInput, Priority.ALWAYS);
 
-        // Счётчик байт
+        // Счётчик байт (фиксированная ширина чтобы не влиял на размер поля ввода)
         charCountLabel = new Label("0/" + getMaxTextBytes());
         charCountLabel.getStyleClass().add("chat-char-count");
+        charCountLabel.setMinWidth(55);
+        charCountLabel.setPrefWidth(55);
+        charCountLabel.setMaxWidth(55);
+        charCountLabel.setAlignment(Pos.CENTER_RIGHT);
 
         // Кнопка отправки
         sendButton = new Button("➤");
@@ -99,7 +103,9 @@ public class ChatInputBar extends VBox {
 
         messageInput.textProperty().addListener((obs, oldVal, newVal) -> {
             if (newVal != null && textByteLength(newVal) > getMaxTextBytes()) {
-                messageInput.setText(truncateToBytes(newVal, getMaxTextBytes()));
+                // Откатить к предыдущему тексту целиком, а не обрезать конец —
+                // иначе вставка в середину «работает» (удаляет последний символ)
+                messageInput.setText(oldVal != null ? oldVal : "");
                 return;
             }
             updateCharCount();
@@ -110,7 +116,7 @@ public class ChatInputBar extends VBox {
 
         HBox inputBar = new HBox(8,
                 emojiBtn, messageInput, charCountLabel, sendButton);
-        inputBar.setAlignment(Pos.CENTER);
+        inputBar.setAlignment(Pos.BOTTOM_LEFT);
         inputBar.setPadding(new Insets(8, 15, 8, 15));
         inputBar.getStyleClass().add("chat-input-bar");
 
