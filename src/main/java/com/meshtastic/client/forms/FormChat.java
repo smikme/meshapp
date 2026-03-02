@@ -9,7 +9,6 @@ import com.meshtastic.client.components.chat.MessageBubbleFactory;
 import com.meshtastic.client.components.chat.NodeInfoFormatter;
 import com.meshtastic.client.components.chat.TracerouteView;
 import com.meshtastic.client.modal.ModalPane;
-import com.meshtastic.client.modal.Toast;
 import com.meshtastic.client.model.ChatItem;
 import com.meshtastic.client.model.ConnectionEntry;
 import com.meshtastic.client.model.DeviceState;
@@ -73,7 +72,6 @@ public class FormChat extends Form {
     private ListView<ChatItem> chatListView;
     private final ObservableList<ChatItem> chatItems = FXCollections.observableArrayList();
     private FilteredList<ChatItem> filteredChats;
-    private TextField searchField;
 
     // === Правая панель ===
     private VBox detailPane;
@@ -98,6 +96,7 @@ public class FormChat extends Form {
     // Панель ввода
     private ChatInputBar chatInputBar;
     private Button newChatBtn;
+    private ContextMenu newChatMenu;
 
     // === Компоненты ===
     private TracerouteView tracerouteView;
@@ -181,7 +180,7 @@ public class FormChat extends Form {
         VBox leftPane = new VBox();
         leftPane.getStyleClass().add("chat-list-pane");
 
-        searchField = new TextField();
+        TextField searchField = new TextField();
         searchField.setPromptText("🔍 Поиск чатов");
         searchField.getStyleClass().add("chat-search-field");
 
@@ -946,16 +945,17 @@ public class FormChat extends Form {
     }
 
     private void showNewChatDialog() {
-        ContextMenu menu = new ContextMenu();
-
-        MenuItem createChannel = new MenuItem("Создать канал");
-        createChannel.setOnAction(e -> showCreateChannelDialog());
-
-        MenuItem createDM = new MenuItem("Создать приватный чат");
-        createDM.setOnAction(e -> Toast.show(Toast.Type.INFO, "В разработке"));
-
-        menu.getItems().addAll(createChannel, createDM);
-        menu.show(newChatBtn, javafx.geometry.Side.BOTTOM, 0, 0);
+        if (newChatMenu == null) {
+            newChatMenu = new ContextMenu();
+            MenuItem createChannel = new MenuItem("Создать канал");
+            createChannel.setOnAction(e -> showCreateChannelDialog());
+            newChatMenu.getItems().add(createChannel);
+        }
+        if (newChatMenu.isShowing()) {
+            newChatMenu.hide();
+        } else {
+            newChatMenu.show(newChatBtn, javafx.geometry.Side.BOTTOM, 0, 0);
+        }
     }
 
     private void showCreateChannelDialog() {
