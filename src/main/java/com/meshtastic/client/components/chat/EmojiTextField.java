@@ -8,23 +8,23 @@ import javafx.beans.property.ReadOnlyIntegerProperty;
 import javafx.beans.property.ReadOnlyIntegerWrapper;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.beans.property.StringProperty;
-import javafx.geometry.Insets;
+import javafx.event.EventHandler;
+import javafx.geometry.Point2D;
 import javafx.geometry.Pos;
 import javafx.scene.Cursor;
 import javafx.scene.Node;
+import javafx.scene.Scene;
 import javafx.scene.image.ImageView;
 import javafx.scene.input.Clipboard;
 import javafx.scene.input.ClipboardContent;
-import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyEvent;
 import javafx.scene.input.MouseEvent;
-import javafx.scene.layout.HBox;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.StackPane;
-import javafx.scene.paint.Color;
 import javafx.scene.shape.Rectangle;
 import javafx.scene.text.Font;
 import javafx.scene.text.Text;
+import javafx.scene.text.TextFlow;
 import javafx.util.Duration;
 
 import java.util.ArrayList;
@@ -32,18 +32,25 @@ import java.util.List;
 import java.util.function.Consumer;
 
 /**
- * Кастомное однострочное текстовое поле с отображением эмодзи как изображений.
+ * Кастомное многострочное текстовое поле с отображением эмодзи как изображений.
  *
  * <p>Внутренняя модель — обычная строка Unicode (для отправки по Meshtastic).
- * Визуально рендерится как HBox с Text + ImageView узлами.
+ * Визуально рендерится как TextFlow с Text + ImageView узлами.
+ * Текст переносится по словам, поле растёт вертикально (до MAX_HEIGHT).
  * Поддерживает: ввод текста, каретку, выделение, clipboard, навигацию стрелками.
  */
 public class EmojiTextField extends StackPane {
 
     private static final double EMOJI_SIZE = 18;
     private static final double CARET_WIDTH = 1.5;
+    private static final double PAD_LEFT = 14;
+    private static final double PAD_TOP = 8;
+    private static final double PAD_RIGHT = 14;
+    private static final double MIN_HEIGHT = 36;
+    private static final double MAX_HEIGHT = 120;
+    private static final double LINE_HEIGHT = 20;
 
-    private final HBox contentBox;
+    private final TextFlow contentFlow;
     private final Rectangle caret;
     private final Timeline blinkTimeline;
     private final Rectangle clipRect;
@@ -65,35 +72,48 @@ public class EmojiTextField extends StackPane {
     // Сегменты для маппинга между текстом и визуальными узлами
     private List<VisualSegment> segments = new ArrayList<>();
 
-    // Горизонтальный скроллинг
-    private double scrollOffset = 0;
+    // Вертикальный скролл (translateY при переполнении)
+    private double verticalOffset = 0;
+    // Отслеживание ширины для пересчёта высоты при изменении размера
+    private double lastLayoutWidth = -1;
+
+    // Отслеживание drag-жеста для выделения мышью
+    private boolean dragging = false;
+    private final EventHandler<MouseEvent> sceneDragHandler = this::handleSceneDrag;
+    private final EventHandler<MouseEvent> sceneReleaseHandler = this::handleSceneRelease;
+
+    /** Позиция каретки в 2D */
+    private record CaretPos(double x, double y) {}
 
     public EmojiTextField() {
         getStyleClass().add("emoji-text-field");
         setFocusTraversable(true);
         setCursor(Cursor.TEXT);
+        setPickOnBounds(true);
 
-        contentBox = new HBox(0);
-        contentBox.setAlignment(Pos.CENTER_LEFT);
-        contentBox.setPadding(new Insets(0, 0, 0, 0));
+        contentFlow = new TextFlow();
+        contentFlow.setManaged(false);
+        contentFlow.setMouseTransparent(true);
 
         promptNode = new Text();
         promptNode.getStyleClass().add("emoji-text-field-prompt");
         promptNode.setManaged(false);
+        promptNode.setMouseTransparent(true);
 
         caret = new Rectangle(CARET_WIDTH, 16);
         caret.getStyleClass().add("emoji-text-field-caret");
-        caret.setFill(Color.web("#FFFFFF", 0.9));
+        // Цвет каретки задаётся через CSS (.emoji-text-field-caret)
+        // для корректной работы при смене темы
         caret.setManaged(false);
         caret.setVisible(false);
+        caret.setMouseTransparent(true);
 
         clipRect = new Rectangle();
         clipRect.widthProperty().bind(widthProperty());
         clipRect.heightProperty().bind(heightProperty());
         setClip(clipRect);
 
-        getChildren().addAll(contentBox, promptNode, caret);
-        StackPane.setAlignment(contentBox, Pos.CENTER_LEFT);
+        getChildren().addAll(contentFlow, promptNode, caret);
 
         // Мигание каретки
         blinkTimeline = new Timeline(
@@ -113,6 +133,7 @@ public class EmojiTextField extends StackPane {
                 blinkTimeline.stop();
                 caret.setVisible(false);
                 clearSelection();
+                dragging = false;
                 pseudoClassStateChanged(javafx.css.PseudoClass.getPseudoClass("focused"), false);
             }
         });
@@ -121,7 +142,21 @@ public class EmojiTextField extends StackPane {
         setOnKeyTyped(this::handleKeyTyped);
         setOnKeyPressed(this::handleKeyPressed);
         setOnMousePressed(this::handleMousePressed);
-        setOnMouseDragged(this::handleMouseDragged);
+
+        // Drag-обработку вешаем на Scene — гарантирует получение MOUSE_DRAGGED
+        // независимо от того, как JavaFX определяет drag target.
+        // Нельзя вешать на компонент: consume() в MOUSE_PRESSED фильтре
+        // может помешать JavaFX установить drag target.
+        sceneProperty().addListener((obs, oldScene, newScene) -> {
+            if (oldScene != null) {
+                oldScene.removeEventFilter(MouseEvent.MOUSE_DRAGGED, sceneDragHandler);
+                oldScene.removeEventFilter(MouseEvent.MOUSE_RELEASED, sceneReleaseHandler);
+            }
+            if (newScene != null) {
+                newScene.addEventFilter(MouseEvent.MOUSE_DRAGGED, sceneDragHandler);
+                newScene.addEventFilter(MouseEvent.MOUSE_RELEASED, sceneReleaseHandler);
+            }
+        });
 
         // Обновление визуала при изменении текста
         text.addListener((obs, oldVal, newVal) -> {
@@ -135,9 +170,9 @@ public class EmojiTextField extends StackPane {
             resetBlink();
         });
 
-        setPrefHeight(36);
-        setMinHeight(36);
-        setMaxHeight(36);
+        setMinHeight(MIN_HEIGHT);
+        setPrefHeight(MIN_HEIGHT);
+        setMaxHeight(MAX_HEIGHT);
 
         updatePromptVisibility();
     }
@@ -181,6 +216,7 @@ public class EmojiTextField extends StackPane {
         text.set("");
         caretPosition.set(0);
         clearSelection();
+        verticalOffset = 0;
     }
 
     public void setPromptText(String prompt) {
@@ -211,7 +247,12 @@ public class EmojiTextField extends StackPane {
         String t = text.get();
         int pos = caretPosition.get();
         text.set(t.substring(0, pos) + ch + t.substring(pos));
-        caretPosition.set(pos + ch.length());
+        // Если внешний listener (ChatInputBar) откатил текст — не двигать каретку
+        if (text.get().equals(t)) {
+            caretPosition.set(pos);
+        } else {
+            caretPosition.set(Math.min(pos + ch.length(), text.get().length()));
+        }
         e.consume();
     }
 
@@ -260,6 +301,24 @@ public class EmojiTextField extends StackPane {
                     } else {
                         moveCaret(1);
                     }
+                }
+                e.consume();
+            }
+            case UP -> {
+                if (shift) {
+                    moveCaretVerticalWithSelection(-1);
+                } else {
+                    clearSelection();
+                    moveCaretVertically(-1);
+                }
+                e.consume();
+            }
+            case DOWN -> {
+                if (shift) {
+                    moveCaretVerticalWithSelection(1);
+                } else {
+                    clearSelection();
+                    moveCaretVertically(1);
                 }
                 e.consume();
             }
@@ -318,25 +377,41 @@ public class EmojiTextField extends StackPane {
     private void handleMousePressed(MouseEvent e) {
         if (disabled) return;
         requestFocus();
-        int pos = hitTestCaret(e.getX());
+        int pos = hitTestCaret(e.getX(), e.getY());
         clearSelection();
         caretPosition.set(pos);
         selectionAnchor = pos;
+        dragging = true;
         e.consume();
     }
 
-    private void handleMouseDragged(MouseEvent e) {
-        if (disabled || selectionAnchor < 0) return;
-        int pos = hitTestCaret(e.getX());
+    /** Обработчик drag на уровне Scene — гарантированно получает все MOUSE_DRAGGED. */
+    private void handleSceneDrag(MouseEvent e) {
+        if (!dragging || disabled || selectionAnchor < 0) return;
+        Point2D local = sceneToLocal(e.getSceneX(), e.getSceneY());
+        if (local == null) return;
+        int pos = hitTestCaret(local.getX(), local.getY());
         caretPosition.set(pos);
         int start = Math.min(selectionAnchor, pos);
         int end = Math.max(selectionAnchor, pos);
         if (start != end) {
             setSelection(start, end);
         } else {
-            clearSelection();
+            // Только визуальная очистка — anchor сохраняем для продолжения drag.
+            // НЕЛЬЗЯ вызывать clearSelection() — он сбросит selectionAnchor = -1
+            // и все последующие drag-события будут проигнорированы.
+            selectionStart = -1;
+            selectionEnd = -1;
+            clearSelectionRects();
         }
         e.consume();
+    }
+
+    /** Сброс drag-состояния при отпускании кнопки мыши. */
+    private void handleSceneRelease(MouseEvent e) {
+        if (dragging) {
+            dragging = false;
+        }
     }
 
     // === Навигация каретки ===
@@ -366,6 +441,60 @@ public class EmojiTextField extends StackPane {
         }
     }
 
+    /** Переместить каретку на строку вверх (-1) или вниз (+1). */
+    private void moveCaretVertically(int direction) {
+        CaretPos cp = computeCaretPos(caretPosition.get());
+
+        // Собираем реальные Y-позиции строк из layout (не из константы LINE_HEIGHT)
+        List<Double> lineYs = new ArrayList<>();
+        for (VisualSegment seg : segments) {
+            double y = seg.node.getLayoutY();
+            if (lineYs.isEmpty() || Math.abs(lineYs.getLast() - y) > 2) {
+                lineYs.add(y);
+            }
+        }
+        if (lineYs.isEmpty()) return;
+
+        // Находим текущую строку каретки
+        int currentLine = 0;
+        double minDist = Double.MAX_VALUE;
+        for (int i = 0; i < lineYs.size(); i++) {
+            double dist = Math.abs(lineYs.get(i) - cp.y);
+            if (dist < minDist) {
+                minDist = dist;
+                currentLine = i;
+            }
+        }
+
+        // Целевая строка
+        int targetLine = currentLine + direction;
+        if (targetLine < 0 || targetLine >= lineYs.size()) return;
+
+        // hitTestCaret ожидает экранные координаты, конвертирует:
+        // adjustedY = clickY - PAD_TOP + verticalOffset
+        // Нам нужно adjustedY = targetLineY + halfNodeH (середина строки)
+        double nodeH = segments.getFirst().node.getBoundsInLocal().getHeight();
+        double screenX = cp.x + PAD_LEFT;
+        double screenY = lineYs.get(targetLine) + nodeH / 2 + PAD_TOP - verticalOffset;
+        int newPos = hitTestCaret(screenX, screenY);
+        caretPosition.set(newPos);
+    }
+
+    private void moveCaretVerticalWithSelection(int direction) {
+        if (selectionAnchor < 0) {
+            selectionAnchor = caretPosition.get();
+        }
+        moveCaretVertically(direction);
+        int pos = caretPosition.get();
+        int start = Math.min(selectionAnchor, pos);
+        int end = Math.max(selectionAnchor, pos);
+        if (start != end) {
+            setSelection(start, end);
+        } else {
+            clearSelection();
+        }
+    }
+
     private void extendSelectionTo(int target) {
         if (selectionAnchor < 0) {
             selectionAnchor = caretPosition.get();
@@ -383,15 +512,15 @@ public class EmojiTextField extends StackPane {
     /** Предыдущая граница символа (с учётом суррогатных пар и ZWJ-последовательностей). */
     private int prevCharBoundary(String text, int pos) {
         if (pos <= 0) return 0;
-        // Проверяем, не является ли позиция серединой эмодзи-сегмента
+        // Защита от позиции за пределами текста (может случиться при внешней обрезке)
+        if (pos > text.length()) return text.length();
         for (VisualSegment seg : segments) {
             if (seg.isEmoji && pos > seg.charStart && pos <= seg.charEnd) {
                 return seg.charStart;
             }
         }
-        // Стандартный откат: учёт суррогатных пар
         int prev = pos - 1;
-        if (prev > 0 && Character.isLowSurrogate(text.charAt(prev))) {
+        if (prev > 0 && prev < text.length() && Character.isLowSurrogate(text.charAt(prev))) {
             prev--;
         }
         return prev;
@@ -400,7 +529,6 @@ public class EmojiTextField extends StackPane {
     /** Следующая граница символа. */
     private int nextCharBoundary(String text, int pos) {
         if (pos >= text.length()) return text.length();
-        // Проверяем, не является ли позиция внутри эмодзи-сегмента
         for (VisualSegment seg : segments) {
             if (seg.isEmoji && pos >= seg.charStart && pos < seg.charEnd) {
                 return seg.charEnd;
@@ -486,23 +614,28 @@ public class EmojiTextField extends StackPane {
     private void paste() {
         String clip = Clipboard.getSystemClipboard().getString();
         if (clip == null || clip.isEmpty()) return;
-        // Убираем переносы строк
         clip = clip.replace("\n", " ").replace("\r", "");
         deleteSelection();
         String t = text.get();
         int pos = caretPosition.get();
         text.set(t.substring(0, pos) + clip + t.substring(pos));
-        caretPosition.set(pos + clip.length());
+        // Если внешний listener откатил текст — не двигать каретку
+        if (text.get().equals(t)) {
+            caretPosition.set(pos);
+        } else {
+            caretPosition.set(Math.min(pos + clip.length(), text.get().length()));
+        }
     }
 
     // === Визуальное построение ===
 
     private void rebuild() {
-        contentBox.getChildren().clear();
+        contentFlow.getChildren().clear();
         segments.clear();
 
         String t = text.get();
         if (t == null || t.isEmpty()) {
+            updateHeight();
             updateCaretVisual();
             return;
         }
@@ -510,32 +643,57 @@ public class EmojiTextField extends StackPane {
         List<EmojiTextFlow.Segment> parsed = EmojiTextFlow.parseSegments(t);
         int charIdx = 0;
         for (EmojiTextFlow.Segment seg : parsed) {
-            int segStart = charIdx;
-            int segEnd = charIdx + seg.text().length();
-
             if (seg.isEmoji()) {
+                int segStart = charIdx;
+                int segEnd = charIdx + seg.text().length();
                 ImageView iv = EmojiImageCache.createImageView(seg.text(), EMOJI_SIZE);
                 if (iv != null) {
                     segments.add(new VisualSegment(iv, segStart, segEnd, true));
-                    contentBox.getChildren().add(iv);
+                    contentFlow.getChildren().add(iv);
                 } else {
                     Text textNode = createTextNode(seg.text());
                     segments.add(new VisualSegment(textNode, segStart, segEnd, false));
-                    contentBox.getChildren().add(textNode);
+                    contentFlow.getChildren().add(textNode);
                 }
+                charIdx = segEnd;
             } else {
-                Text textNode = createTextNode(seg.text());
-                segments.add(new VisualSegment(textNode, segStart, segEnd, false));
-                contentBox.getChildren().add(textNode);
+                // Разбиваем текст по словам для корректного переноса строк
+                charIdx = splitTextIntoWords(seg.text(), charIdx);
             }
-            charIdx = segEnd;
         }
 
-        // Обновить каретку после перестроения
-        contentBox.applyCss();
-        contentBox.layout();
+        // Пересчитать layout и высоту
+        updateHeight();
         updateCaretVisual();
         ensureCaretVisible();
+    }
+
+    /**
+     * Разбивает текстовый сегмент на отдельные слова (с сохранением пробелов),
+     * каждое слово — отдельный Text-узел в TextFlow для корректного переноса.
+     * @return обновлённый charIdx
+     */
+    private int splitTextIntoWords(String content, int charIdx) {
+        int i = 0;
+        while (i < content.length()) {
+            int wordStart = i;
+            // Собираем слово + последующие пробелы в один узел
+            while (i < content.length() && content.charAt(i) != ' ') {
+                i++;
+            }
+            // Присоединяем пробелы после слова
+            while (i < content.length() && content.charAt(i) == ' ') {
+                i++;
+            }
+            String word = content.substring(wordStart, i);
+            Text textNode = createTextNode(word);
+            int segStart = charIdx;
+            int segEnd = charIdx + word.length();
+            segments.add(new VisualSegment(textNode, segStart, segEnd, false));
+            contentFlow.getChildren().add(textNode);
+            charIdx = segEnd;
+        }
+        return charIdx;
     }
 
     private Text createTextNode(String content) {
@@ -552,68 +710,125 @@ public class EmojiTextField extends StackPane {
         if (showPrompt) {
             promptNode.setText(promptText);
             promptNode.setFont(Font.font("Roboto", 13));
-            // Позиционируем промпт
-            promptNode.setLayoutX(8);
-            promptNode.setLayoutY(getHeight() / 2 + 4);
+            promptNode.setLayoutX(PAD_LEFT);
+            promptNode.setLayoutY(MIN_HEIGHT / 2 + 4);
         }
+    }
+
+    /**
+     * Пересчёт высоты поля по содержимому.
+     * <p>
+     * Для надёжного измерения используется Text-helper с wrappingWidth —
+     * он корректно вычисляет высоту многострочного текста без зависимости
+     * от layout-состояния TextFlow.
+     * <p>
+     * setMinHeight(target) необходим, чтобы родительский HBox выделил место:
+     * setPrefHeight одного недостаточно — HBox может выдать только minHeight.
+     */
+    private void updateHeight() {
+        double flowWidth = getWidth() - PAD_LEFT - PAD_RIGHT;
+        if (flowWidth <= 0) return;
+
+        String t = text.get();
+        double contentH;
+        if (t == null || t.isEmpty()) {
+            contentH = LINE_HEIGHT;
+        } else {
+            // Измеряем высоту текста через Text с wrappingWidth —
+            // надёжнее, чем читать позиции детей TextFlow
+            Text helper = new Text(t);
+            helper.setFont(Font.font("Roboto", 13));
+            helper.setWrappingWidth(flowWidth);
+            contentH = helper.getBoundsInLocal().getHeight();
+        }
+
+        double target = Math.max(MIN_HEIGHT, Math.min(contentH + PAD_TOP * 2, MAX_HEIGHT));
+        if (Math.abs(getPrefHeight() - target) > 1) {
+            setPrefHeight(target);
+            setMinHeight(target);
+        }
+
+        // Layout contentFlow для позиционирования детей (каретка, выделение)
+        contentFlow.setMinWidth(flowWidth);
+        contentFlow.setPrefWidth(flowWidth);
+        contentFlow.setMaxWidth(flowWidth);
+        contentFlow.resize(flowWidth, Math.max(contentH, MAX_HEIGHT));
+        contentFlow.requestLayout();
+        contentFlow.layout();
     }
 
     @Override
     protected void layoutChildren() {
         super.layoutChildren();
+        double w = getWidth();
         double h = getHeight();
-        double padLeft = 8;
+        double flowWidth = w - PAD_LEFT - PAD_RIGHT;
 
-        // Позиционируем contentBox с учётом скролла
-        contentBox.setLayoutX(padLeft - scrollOffset);
-        contentBox.setLayoutY(0);
-        contentBox.setPrefHeight(h);
-        contentBox.setMinHeight(h);
-        contentBox.setMaxHeight(h);
+        if (flowWidth > 0) {
+            contentFlow.setMinWidth(flowWidth);
+            contentFlow.setPrefWidth(flowWidth);
+            contentFlow.setMaxWidth(flowWidth);
+            // Явно задать размер unmanaged TextFlow для корректного переноса строк
+            contentFlow.resize(flowWidth, MAX_HEIGHT * 10);
+            contentFlow.layout();
+        }
+
+        // Позиционируем contentFlow с учётом вертикального скролла
+        contentFlow.setLayoutX(PAD_LEFT);
+        contentFlow.setLayoutY(PAD_TOP - verticalOffset);
+
+        // При изменении ширины пересчитать высоту (текст перетекает на другие строки)
+        if (Math.abs(w - lastLayoutWidth) > 1) {
+            lastLayoutWidth = w;
+            updateHeight();
+        }
 
         // Промпт
         if (promptNode.isVisible()) {
-            promptNode.setLayoutX(padLeft);
-            promptNode.setLayoutY(h / 2 + 4);
+            promptNode.setLayoutX(PAD_LEFT);
+            promptNode.setLayoutY(MIN_HEIGHT / 2 + 4);
         }
 
         updateCaretVisual();
         updateSelectionVisual();
     }
 
+    // === Позиционирование каретки (2D) ===
+
     private void updateCaretVisual() {
         if (segments.isEmpty() && (text.get() == null || text.get().isEmpty())) {
-            caret.setLayoutX(8);
-            caret.setLayoutY((getHeight() - caret.getHeight()) / 2);
+            caret.setLayoutX(PAD_LEFT);
+            caret.setLayoutY((Math.min(getHeight(), MIN_HEIGHT) - caret.getHeight()) / 2);
             return;
         }
 
-        double x = computeCaretX(caretPosition.get());
-        caret.setLayoutX(x - scrollOffset + 8);
-        caret.setLayoutY((getHeight() - caret.getHeight()) / 2);
+        CaretPos cp = computeCaretPos(caretPosition.get());
+        caret.setLayoutX(cp.x + PAD_LEFT);
+        caret.setLayoutY(cp.y + PAD_TOP - verticalOffset);
     }
 
-    private double computeCaretX(int pos) {
-        if (segments.isEmpty()) return 0;
+    private CaretPos computeCaretPos(int pos) {
+        if (segments.isEmpty()) return new CaretPos(0, 0);
 
         for (VisualSegment seg : segments) {
             if (pos >= seg.charStart && pos <= seg.charEnd) {
                 Node node = seg.node;
-                double nodeX = node.getLayoutX() + contentBox.getLayoutX()
-                        - (8 - scrollOffset);
+                double nodeX = node.getLayoutX();
+                double nodeY = node.getLayoutY();
 
                 if (seg.isEmoji) {
-                    return pos <= seg.charStart
-                            ? nodeX
-                            : nodeX + node.getBoundsInLocal().getWidth();
+                    if (pos <= seg.charStart) {
+                        return new CaretPos(nodeX, nodeY);
+                    } else {
+                        return new CaretPos(nodeX + node.getBoundsInLocal().getWidth(), nodeY);
+                    }
                 } else {
-                    // Текстовый узел — вычислить X внутри текста
                     Text textNode = (Text) node;
                     int offset = pos - seg.charStart;
                     String sub = textNode.getText().substring(0, offset);
                     Text measure = new Text(sub);
                     measure.setFont(textNode.getFont());
-                    return nodeX + measure.getBoundsInLocal().getWidth();
+                    return new CaretPos(nodeX + measure.getBoundsInLocal().getWidth(), nodeY);
                 }
             }
         }
@@ -622,21 +837,36 @@ public class EmojiTextField extends StackPane {
         if (!segments.isEmpty()) {
             VisualSegment last = segments.getLast();
             Node node = last.node;
-            return node.getLayoutX() + contentBox.getLayoutX()
-                    - (8 - scrollOffset) + node.getBoundsInLocal().getWidth();
+            return new CaretPos(
+                    node.getLayoutX() + node.getBoundsInLocal().getWidth(),
+                    node.getLayoutY()
+            );
         }
-        return 0;
+        return new CaretPos(0, 0);
     }
 
+    /**
+     * Обеспечить видимость каретки (вертикальный скролл).
+     * <p>
+     * Используем getPrefHeight() (целевая высота), а не getHeight() (текущая),
+     * потому что layout ещё не применил новую высоту после updateHeight().
+     * Иначе ensureCaretVisible() видит старую высоту и ошибочно скроллит вверх.
+     */
     private void ensureCaretVisible() {
-        double caretX = computeCaretX(caretPosition.get()) + 8 - scrollOffset;
-        double viewWidth = getWidth() - 16;
+        CaretPos cp = computeCaretPos(caretPosition.get());
+        double caretY = cp.y;
+        double viewH = getPrefHeight() - PAD_TOP * 2;
 
-        if (caretX > viewWidth) {
-            scrollOffset += (caretX - viewWidth + 10);
+        if (viewH <= 0) return;
+
+        // Каретка ниже видимой области
+        if (caretY - verticalOffset + LINE_HEIGHT > viewH) {
+            verticalOffset = caretY + LINE_HEIGHT - viewH;
             requestLayout();
-        } else if (caretX < 0) {
-            scrollOffset = Math.max(0, scrollOffset + caretX - 10);
+        }
+        // Каретка выше видимой области
+        else if (caretY - verticalOffset < 0) {
+            verticalOffset = Math.max(0, caretY);
             requestLayout();
         }
     }
@@ -649,45 +879,119 @@ public class EmojiTextField extends StackPane {
         ensureCaretVisible();
     }
 
-    /** Определить позицию каретки по X-координате клика. */
-    private int hitTestCaret(double clickX) {
-        double adjustedX = clickX - 8 + scrollOffset;
+    // === Hit testing (2D) ===
+
+    /** Определить позицию каретки по координатам клика. */
+    private int hitTestCaret(double clickX, double clickY) {
+        double adjustedX = clickX - PAD_LEFT;
+        double adjustedY = clickY - PAD_TOP + verticalOffset;
 
         if (segments.isEmpty()) return 0;
 
+        // Ищем сегмент на той же строке (по Y), затем по X
+        VisualSegment bestOnLine = null;
+        double bestDistOnLine = Double.MAX_VALUE;
+        double matchedLineY = -1;
+
         for (VisualSegment seg : segments) {
             Node node = seg.node;
-            double nodeLeft = node.getLayoutX();
-            double nodeRight = nodeLeft + node.getBoundsInLocal().getWidth();
+            double nodeY = node.getLayoutY();
+            double nodeH = node.getBoundsInLocal().getHeight();
+            double nodeX = node.getLayoutX();
+            double nodeW = node.getBoundsInLocal().getWidth();
 
-            if (adjustedX >= nodeLeft && adjustedX <= nodeRight) {
-                if (seg.isEmoji) {
-                    double mid = (nodeLeft + nodeRight) / 2;
-                    return adjustedX < mid ? seg.charStart : seg.charEnd;
-                } else {
-                    Text textNode = (Text) node;
-                    String content = textNode.getText();
-                    // Ищем ближайшую границу символа
-                    double bestDist = Double.MAX_VALUE;
-                    int bestPos = seg.charStart;
-                    for (int i = 0; i <= content.length(); i++) {
-                        String sub = content.substring(0, i);
-                        Text measure = new Text(sub);
-                        measure.setFont(textNode.getFont());
-                        double charX = nodeLeft + measure.getBoundsInLocal().getWidth();
-                        double dist = Math.abs(charX - adjustedX);
-                        if (dist < bestDist) {
-                            bestDist = dist;
-                            bestPos = seg.charStart + i;
-                        }
+            // Проверяем, попал ли клик на строку этого узла
+            if (adjustedY >= nodeY && adjustedY < nodeY + nodeH) {
+                matchedLineY = nodeY;
+                // Прямое попадание по X
+                if (adjustedX >= nodeX && adjustedX <= nodeX + nodeW) {
+                    if (seg.isEmoji) {
+                        double mid = nodeX + nodeW / 2;
+                        return adjustedX < mid ? seg.charStart : seg.charEnd;
+                    } else {
+                        return findCharInTextNode(seg, adjustedX);
                     }
-                    return bestPos;
+                }
+                // На той же строке, но не на этом узле — запомним ближайший
+                double dist = Math.min(Math.abs(adjustedX - nodeX),
+                        Math.abs(adjustedX - (nodeX + nodeW)));
+                if (dist < bestDistOnLine) {
+                    bestDistOnLine = dist;
+                    bestOnLine = seg;
                 }
             }
         }
 
-        // Клик за пределами текста — конец строки
+        // Нашли строку, но не попали точно в узел — привязка к краю ближайшего
+        if (bestOnLine != null) {
+            double nodeX = bestOnLine.node.getLayoutX();
+            double nodeW = bestOnLine.node.getBoundsInLocal().getWidth();
+            return adjustedX <= nodeX ? bestOnLine.charStart : bestOnLine.charEnd;
+        }
+
+        // Клик выше или ниже всего контента
+        // Ищем ближайшую строку
+        double closestLineDist = Double.MAX_VALUE;
+        double closestLineY = 0;
+        for (VisualSegment seg : segments) {
+            double nodeY = seg.node.getLayoutY();
+            double dist = Math.abs(adjustedY - nodeY);
+            if (dist < closestLineDist) {
+                closestLineDist = dist;
+                closestLineY = nodeY;
+            }
+        }
+
+        // Среди сегментов на ближайшей строке — найти по X
+        VisualSegment bestNear = null;
+        double bestNearDist = Double.MAX_VALUE;
+        for (VisualSegment seg : segments) {
+            if (Math.abs(seg.node.getLayoutY() - closestLineY) < 1) {
+                double nodeX = seg.node.getLayoutX();
+                double nodeW = seg.node.getBoundsInLocal().getWidth();
+                if (adjustedX >= nodeX && adjustedX <= nodeX + nodeW) {
+                    if (seg.isEmoji) {
+                        return adjustedX < nodeX + nodeW / 2 ? seg.charStart : seg.charEnd;
+                    } else {
+                        return findCharInTextNode(seg, adjustedX);
+                    }
+                }
+                double dist = Math.min(Math.abs(adjustedX - nodeX),
+                        Math.abs(adjustedX - (nodeX + nodeW)));
+                if (dist < bestNearDist) {
+                    bestNearDist = dist;
+                    bestNear = seg;
+                }
+            }
+        }
+
+        if (bestNear != null) {
+            double nodeX = bestNear.node.getLayoutX();
+            return adjustedX <= nodeX ? bestNear.charStart : bestNear.charEnd;
+        }
+
         return text.get().length();
+    }
+
+    /** Найти символ внутри текстового узла по X-координате. */
+    private int findCharInTextNode(VisualSegment seg, double adjustedX) {
+        Text textNode = (Text) seg.node;
+        String content = textNode.getText();
+        double nodeX = textNode.getLayoutX();
+        double bestDist = Double.MAX_VALUE;
+        int bestPos = seg.charStart;
+        for (int i = 0; i <= content.length(); i++) {
+            String sub = content.substring(0, i);
+            Text measure = new Text(sub);
+            measure.setFont(textNode.getFont());
+            double charX = nodeX + measure.getBoundsInLocal().getWidth();
+            double dist = Math.abs(charX - adjustedX);
+            if (dist < bestDist) {
+                bestDist = dist;
+                bestPos = seg.charStart + i;
+            }
+        }
+        return bestPos;
     }
 
     // === Выделение — визуал ===
@@ -696,23 +1000,48 @@ public class EmojiTextField extends StackPane {
         clearSelectionRects();
         if (!hasSelection()) return;
 
+        int insertIdx = getChildren().indexOf(contentFlow);
+
         for (VisualSegment seg : segments) {
             int overlapStart = Math.max(selectionStart, seg.charStart);
             int overlapEnd = Math.min(selectionEnd, seg.charEnd);
             if (overlapStart >= overlapEnd) continue;
 
-            double x1 = computeCaretX(overlapStart) + 8 - scrollOffset;
-            double x2 = computeCaretX(overlapEnd) + 8 - scrollOffset;
+            // Координаты напрямую из узла сегмента (не через computeCaretPos,
+            // который на границе сегментов может вернуть позицию предыдущего)
+            Node node = seg.node;
+            double nodeX = node.getLayoutX();
+            double nodeY = node.getLayoutY();
+            double x1, x2;
 
-            Rectangle rect = new Rectangle(x2 - x1, caret.getHeight());
-            rect.setLayoutX(x1);
-            rect.setLayoutY((getHeight() - caret.getHeight()) / 2);
+            if (seg.isEmoji) {
+                double nodeW = node.getBoundsInLocal().getWidth();
+                x1 = overlapStart <= seg.charStart ? nodeX : nodeX + nodeW;
+                x2 = overlapEnd >= seg.charEnd ? nodeX + nodeW : nodeX;
+            } else {
+                Text textNode = (Text) node;
+                int startOff = overlapStart - seg.charStart;
+                Text m1 = new Text(textNode.getText().substring(0, startOff));
+                m1.setFont(textNode.getFont());
+                x1 = nodeX + m1.getBoundsInLocal().getWidth();
+
+                int endOff = overlapEnd - seg.charStart;
+                Text m2 = new Text(textNode.getText().substring(0, endOff));
+                m2.setFont(textNode.getFont());
+                x2 = nodeX + m2.getBoundsInLocal().getWidth();
+            }
+
+            double w = Math.max(1, x2 - x1);
+            Rectangle rect = new Rectangle(w, caret.getHeight());
+            rect.setLayoutX(x1 + PAD_LEFT);
+            rect.setLayoutY(nodeY + PAD_TOP - verticalOffset);
             rect.getStyleClass().add("emoji-text-field-selection");
-            rect.setFill(Color.web("#3390FF", 0.3));
+            // Цвет выделения задаётся через CSS (.emoji-text-field-selection)
             rect.setManaged(false);
             rect.setMouseTransparent(true);
             selectionRects.add(rect);
-            getChildren().add(getChildren().indexOf(contentBox), rect);
+            getChildren().add(insertIdx, rect);
+            insertIdx++;
         }
     }
 
