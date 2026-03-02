@@ -38,9 +38,7 @@ public class RootPane extends BorderPane {
 
     private final DrawerPane drawerPane;
     private final MainForm mainForm;
-    private final ModalPane modalPane;
     private final StackPane toastOverlay;
-    private HBox titleBar;
 
     private double dragStartX, dragStartY;
     private double stageStartX, stageStartY, stageStartW, stageStartH;
@@ -60,12 +58,12 @@ public class RootPane extends BorderPane {
     public RootPane() {
         drawerPane = new DrawerPane();
         mainForm = new MainForm();
-        modalPane = new ModalPane();
+        ModalPane modalPane = new ModalPane();
         toastOverlay = new StackPane();
         toastOverlay.setPickOnBounds(false);
 
         // Title bar — на всю ширину окна, прозрачный (frosted glass просвечивает)
-        titleBar = createTitleBar();
+        HBox titleBar = createTitleBar();
 
         StackPane centerStack = new StackPane(mainForm, modalPane, toastOverlay);
         setTop(titleBar);
@@ -209,7 +207,7 @@ public class RootPane extends BorderPane {
 
         Rectangle2D bounds = Screen.getScreensForRectangle(
                 stage.getX(), stage.getY(), stage.getWidth(), stage.getHeight()
-        ).get(0).getVisualBounds();
+        ).getFirst().getVisualBounds();
 
         stage.setX(bounds.getMinX());
         stage.setY(bounds.getMinY());
@@ -375,16 +373,25 @@ public class RootPane extends BorderPane {
                sceneY < RESIZE_MARGIN || sceneY > h - RESIZE_MARGIN;
     }
 
+    // ==================== Maximize state accessors ====================
+
+    public boolean isCustomMaximized() { return customMaximized; }
+    public double getRestoreX() { return restoreX; }
+    public double getRestoreY() { return restoreY; }
+    public double getRestoreW() { return restoreW; }
+    public double getRestoreH() { return restoreH; }
+
+    public void maximizeToVisualBounds() {
+        Stage stage = MeshApp.getPrimaryStage();
+        if (stage != null) maximizeToVisualBounds(stage);
+    }
+
     public DrawerPane getDrawerPane() {
         return drawerPane;
     }
 
     public MainForm getMainForm() {
         return mainForm;
-    }
-
-    public StackPane getToastOverlay() {
-        return toastOverlay;
     }
 
     private enum ResizeDirection {

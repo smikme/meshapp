@@ -10,10 +10,14 @@ import com.meshtastic.client.system.RootPane;
 import com.meshtastic.client.themes.ThemeManager;
 import com.meshtastic.client.utils.AppPreferences;
 import javafx.application.Application;
+import javafx.collections.ObservableList;
 import javafx.scene.Scene;
 import javafx.scene.image.Image;
 import javafx.scene.text.Font;
+import javafx.stage.Screen;
 import javafx.stage.Stage;
+
+import java.util.Objects;
 
 public class MeshApp extends Application {
 
@@ -69,18 +73,79 @@ public class MeshApp extends Application {
         // На Windows/Linux — через stage.getIcons().
         if (!OsDetect.isMacOs()) {
             stage.getIcons().addAll(
-                    new Image(getClass().getResourceAsStream("/logo/icon_256.png")),
-                    new Image(getClass().getResourceAsStream("/logo/icon_128.png")),
-                    new Image(getClass().getResourceAsStream("/logo/icon_64.png")),
-                    new Image(getClass().getResourceAsStream("/logo/icon_32.png")),
-                    new Image(getClass().getResourceAsStream("/logo/icon_16.png"))
+                    new Image(Objects.requireNonNull(getClass().getResourceAsStream("/logo/icon_256.png"))),
+                    new Image(Objects.requireNonNull(getClass().getResourceAsStream("/logo/icon_128.png"))),
+                    new Image(Objects.requireNonNull(getClass().getResourceAsStream("/logo/icon_64.png"))),
+                    new Image(Objects.requireNonNull(getClass().getResourceAsStream("/logo/icon_32.png"))),
+                    new Image(Objects.requireNonNull(getClass().getResourceAsStream("/logo/icon_16.png")))
             );
         }
+
+        // Восстановить позицию/размер окна из предыдущей сессии
+        restoreWindowBounds(stage);
+
         stage.setScene(scene);
         stage.show();
 
+        // Восстановить maximize ПОСЛЕ show()
+        if (AppPreferences.isWindowMaximized()) {
+            if (OsDetect.isMacOs()) {
+                stage.setMaximized(true);
+            } else {
+                rootPane.maximizeToVisualBounds();
+            }
+        }
+
         // Нативные эффекты: ПОСЛЕ show() (HWND/NSWindow уже существует)
         NativeWindowHelper.applyNativeEffects(stage, isDark);
+
+        // Сохранять состояние окна при закрытии (setOnHiding срабатывает и при
+        // программном stage.close() из кастомного title bar, и при нативном закрытии)
+        stage.setOnHiding(e -> saveWindowState(stage, rootPane));
+    }
+
+    private void restoreWindowBounds(Stage stage) {
+        if (!AppPreferences.hasWindowBounds()) return;
+
+        double x = AppPreferences.getWindowX();
+        double y = AppPreferences.getWindowY();
+        double w = AppPreferences.getWindowWidth();
+        double h = AppPreferences.getWindowHeight();
+
+        // Проверить, что окно попадает хотя бы частично на один из доступных экранов
+        ObservableList<Screen> screens = Screen.getScreensForRectangle(x, y, w, h);
+        if (screens.isEmpty()) return;
+
+        stage.setX(x);
+        stage.setY(y);
+        stage.setWidth(w);
+        stage.setHeight(h);
+    }
+
+    private void saveWindowState(Stage stage, RootPane rootPane) {
+        boolean maximized;
+        double x, y, w, h;
+
+        if (OsDetect.isMacOs()) {
+            maximized = stage.isMaximized();
+        } else {
+            maximized = rootPane.isCustomMaximized();
+        }
+
+        if (maximized && !OsDetect.isMacOs()) {
+            // Для custom maximize сохраняем restore-координаты
+            x = rootPane.getRestoreX();
+            y = rootPane.getRestoreY();
+            w = rootPane.getRestoreW();
+            h = rootPane.getRestoreH();
+        } else {
+            x = stage.getX();
+            y = stage.getY();
+            w = stage.getWidth();
+            h = stage.getHeight();
+        }
+
+        AppPreferences.saveWindowBounds(x, y, w, h, maximized);
     }
 
     public static Stage getPrimaryStage() {
