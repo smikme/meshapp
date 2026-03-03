@@ -62,7 +62,7 @@ public class DeviceState {
     });
     /** История телеметрии (последние MAX_TELEMETRY_HISTORY записей). */
     private static final int MAX_TELEMETRY_HISTORY = 200;
-    private final LinkedList<TelemetryEntry> telemetryHistory = new LinkedList<>();
+    private final List<TelemetryEntry> telemetryHistory = new LinkedList<>();
     private final List<Runnable> telemetryListeners = new CopyOnWriteArrayList<>();
     private final List<Runnable> messageListeners = new CopyOnWriteArrayList<>();
     private final List<java.util.function.IntConsumer> nodeUpdateListeners = new CopyOnWriteArrayList<>();
@@ -131,7 +131,7 @@ public class DeviceState {
                 }
             }
             for (int i = 1; i <= 7; i++) {
-                if (!usedIndices.contains(i)) return i;
+                if (!usedIndices.contains(i)) { return i; }
             }
         }
         return -1;
@@ -207,7 +207,7 @@ public class DeviceState {
      * Вызывается один раз при подключении к устройству.
      */
     public void prependTelemetryHistory(List<TelemetryEntry> archived) {
-        if (archived == null || archived.isEmpty()) return;
+        if (archived == null || archived.isEmpty()) { return; }
         synchronized (telemetryHistory) {
             // Добавляем архив перед текущими live-записями
             telemetryHistory.addAll(0, archived);
@@ -242,7 +242,8 @@ public class DeviceState {
         if (msg.getPacketId() != 0) {
             synchronized (list) {
                 for (MeshMessage existing : list) {
-                    if (existing.getPacketId() == msg.getPacketId()) return;
+                    if (existing.getPacketId() == msg.getPacketId()) { return; }
+
                 }
             }
         }
@@ -270,7 +271,8 @@ public class DeviceState {
         if (msg.getPacketId() != 0) {
             synchronized (list) {
                 for (MeshMessage existing : list) {
-                    if (existing.getPacketId() == msg.getPacketId()) return;
+                    if (existing.getPacketId() == msg.getPacketId()) { return; }
+
                 }
             }
         }
@@ -306,9 +308,9 @@ public class DeviceState {
      * @return NodeData или {@code null}
      */
     public NodeData getNodeByNodeId(String nodeId) {
-        if (nodeId == null) return null;
+        if (nodeId == null) { return null; }
         for (NodeData n : nodeDb.values()) {
-            if (nodeId.equals(n.getNodeId())) return n;
+            if (nodeId.equals(n.getNodeId())) { return n; }
         }
         return null;
     }
@@ -351,7 +353,7 @@ public class DeviceState {
      * @param reason причина неудачи (например, {@code "DISCONNECTED"})
      */
     public void failAllPendingAcks(String reason) {
-        if (pendingAcks.isEmpty()) return;
+        if (pendingAcks.isEmpty()) { return; }
         int count = 0;
         var iterator = pendingAcks.entrySet().iterator();
         while (iterator.hasNext()) {
@@ -392,19 +394,21 @@ public class DeviceState {
      * @return найденное сообщение или {@code null}
      */
     public MeshMessage findMessageByPacketId(int packetId) {
-        if (packetId == 0) return null;
+        if (packetId == 0) { return null; }
         // Сначала ищем в памяти (быстро, для текущей сессии)
         for (List<MeshMessage> msgs : messagesByChannel.values()) {
             synchronized (msgs) {
                 for (MeshMessage msg : msgs) {
-                    if (msg.getPacketId() == packetId) return msg;
+                    if (msg.getPacketId() == packetId) { return msg; }
+
                 }
             }
         }
         for (List<MeshMessage> msgs : directMessages.values()) {
             synchronized (msgs) {
                 for (MeshMessage msg : msgs) {
-                    if (msg.getPacketId() == packetId) return msg;
+                    if (msg.getPacketId() == packetId) { return msg; }
+
                 }
             }
         }

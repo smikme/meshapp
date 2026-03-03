@@ -169,7 +169,7 @@ public class TelemetryChartPanel extends VBox {
             @Override
             public String toString(Number object) {
                 long epoch = object.longValue();
-                if (epoch <= 0) return "";
+                if (epoch <= 0) { return ""; }
                 return Instant.ofEpochSecond(epoch)
                         .atZone(ZoneId.systemDefault())
                         .format(AXIS_FMT);
@@ -246,8 +246,13 @@ public class TelemetryChartPanel extends VBox {
                 long bucketStart = minTs + (long) b * bucketSize;
                 long bucketEnd = bucketStart + bucketSize;
 
-                double sumBattery = 0, sumVoltage = 0, sumChUtil = 0, sumAirUtil = 0;
-                int countBattery = 0, countVoltage = 0, count = 0;
+                double sumBattery = 0;
+                double sumVoltage = 0;
+                double sumChUtil = 0;
+                double sumAirUtil = 0;
+                int countBattery = 0;
+                int countVoltage = 0;
+                int count = 0;
 
                 while (idx < entries.size() && entries.get(idx).getTimestamp() < bucketEnd) {
                     TelemetryEntry e = entries.get(idx);

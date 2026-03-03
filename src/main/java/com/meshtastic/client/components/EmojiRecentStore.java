@@ -12,6 +12,8 @@ import java.util.List;
  */
 public class EmojiRecentStore {
 
+    private EmojiRecentStore() {} // utility class
+
     private static final String KEY_RECENT_EMOJI = "recentEmoji";
     private static final int MAX_RECENT = 32;
     private static final String SEPARATOR = "\\|";
@@ -20,7 +22,7 @@ public class EmojiRecentStore {
     /** Получить список недавних эмодзи (новые первыми) */
     public static List<String> getRecent() {
         String raw = AppPreferences.getState().get(KEY_RECENT_EMOJI, "");
-        if (raw.isEmpty()) return new ArrayList<>();
+        if (raw.isEmpty()) { return new ArrayList<>(); }
         return new ArrayList<>(Arrays.asList(raw.split(SEPARATOR)));
     }
 

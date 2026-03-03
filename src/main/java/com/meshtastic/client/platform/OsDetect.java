@@ -1,5 +1,7 @@
 package com.meshtastic.client.platform;
 
+import java.util.Locale;
+
 /**
  * Определение операционной системы.
  */
@@ -10,7 +12,7 @@ public final class OsDetect {
     private static final OsType CURRENT;
 
     static {
-        String os = System.getProperty("os.name", "").toLowerCase();
+        String os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
         if (os.contains("win")) {
             CURRENT = OsType.WINDOWS;
         } else if (os.contains("mac") || os.contains("darwin")) {

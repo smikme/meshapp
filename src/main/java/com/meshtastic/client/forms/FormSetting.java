@@ -19,7 +19,21 @@ import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
-import javafx.scene.control.*;
+import javafx.scene.control.Button;
+import javafx.scene.control.CheckBox;
+import javafx.scene.control.ComboBox;
+import javafx.scene.control.Label;
+import javafx.scene.control.ListCell;
+import javafx.scene.control.ScrollPane;
+import javafx.scene.control.Tab;
+import javafx.scene.control.TabPane;
+import javafx.scene.control.TableColumn;
+import javafx.scene.control.TableView;
+import javafx.scene.control.TextField;
+import javafx.scene.control.TreeItem;
+import javafx.scene.control.TreeTableCell;
+import javafx.scene.control.TreeTableColumn;
+import javafx.scene.control.TreeTableView;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
@@ -30,6 +44,7 @@ import org.meshtastic.proto.ModuleConfigProtos;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 @SystemForm(name = "Настройки", description = "Настройки клиента", tags = {"settings", "options"})
 public class FormSetting extends Form {
@@ -123,7 +138,7 @@ public class FormSetting extends Form {
             if (entry.isConnected()) {
                 newState = mgr.getDeviceState(entry.getId());
                 newHandler = mgr.getProtocolHandler(entry.getId());
-                if (newState != null) break;
+                if (newState != null) { break; }
             }
         }
         this.state = newState;
@@ -321,7 +336,7 @@ public class FormSetting extends Form {
     }
 
     private void loadNextCachePage() {
-        if (cacheOffset >= cacheTotalInDb) return;
+        if (cacheOffset >= cacheTotalInDb) { return; }
         List<NodeData> page = NodeCacheService.getInstance().loadPage(cacheOffset, PAGE_SIZE);
         cacheData.addAll(page);
         cacheOffset += page.size();
@@ -354,14 +369,14 @@ public class FormSetting extends Form {
         longNameField.setPromptText("Длинное имя");
         longNameField.setPrefWidth(200);
         longNameField.textProperty().addListener((obs, oldVal, newVal) -> {
-            if (newVal != null && newVal.length() > 40) longNameField.setText(oldVal);
+            if (newVal != null && newVal.length() > 40) { longNameField.setText(oldVal); }
         });
 
         shortNameField = new TextField();
         shortNameField.setPromptText("Короткое");
         shortNameField.setPrefWidth(80);
         shortNameField.textProperty().addListener((obs, oldVal, newVal) -> {
-            if (newVal != null && newVal.length() > 4) shortNameField.setText(oldVal);
+            if (newVal != null && newVal.length() > 4) { shortNameField.setText(oldVal); }
         });
 
         saveOwnerBtn = new Button("Сохранить имя");
@@ -525,7 +540,7 @@ public class FormSetting extends Form {
      */
     private int countFields(TreeItem<ConfigTreeItem> item) {
         int count = 0;
-        if (item.getValue() != null && item.getValue().isEditable()) count++;
+        if (item.getValue() != null && item.getValue().isEditable()) { count++; }
         for (TreeItem<ConfigTreeItem> child : item.getChildren()) {
             count += countFields(child);
         }
@@ -538,14 +553,14 @@ public class FormSetting extends Form {
      * а также их родительские категории.
      */
     private void filterConfigTree(String query) {
-        if (fullConfigRoot == null) return;
+        if (fullConfigRoot == null) { return; }
 
         if (query == null || query.isBlank()) {
             configTree.setRoot(fullConfigRoot);
             return;
         }
 
-        String lowerQuery = query.toLowerCase();
+        String lowerQuery = query.toLowerCase(Locale.ROOT);
         TreeItem<ConfigTreeItem> filteredRoot = new TreeItem<>(fullConfigRoot.getValue());
         filteredRoot.setExpanded(true);
 
@@ -567,14 +582,14 @@ public class FormSetting extends Form {
         boolean selfMatches = false;
 
         if (data != null && !data.isCategory()) {
-            String name = data.getName() != null ? data.getName().toLowerCase() : "";
-            String fieldName = data.getFieldName() != null ? data.getFieldName().toLowerCase() : "";
+            String name = data.getName() != null ? data.getName().toLowerCase(Locale.ROOT) : "";
+            String fieldName = data.getFieldName() != null ? data.getFieldName().toLowerCase(Locale.ROOT) : "";
             selfMatches = name.contains(lowerQuery) || fieldName.contains(lowerQuery);
         }
 
         // Категория с совпадающим именем — показать целиком
         if (data != null && data.isCategory()) {
-            String name = data.getName() != null ? data.getName().toLowerCase() : "";
+            String name = data.getName() != null ? data.getName().toLowerCase(Locale.ROOT) : "";
             if (name.contains(lowerQuery)) {
                 // Показать всю секцию
                 TreeItem<ConfigTreeItem> copy = new TreeItem<>(data);
@@ -632,7 +647,7 @@ public class FormSetting extends Form {
         }
 
         TreeItem<ConfigTreeItem> root = fullConfigRoot != null ? fullConfigRoot : configTree.getRoot();
-        if (root == null) return;
+        if (root == null) { return; }
 
         // Собрать изменённые секции
         List<ConfigProtos.Config> modifiedConfigs = new ArrayList<>();
@@ -641,7 +656,7 @@ public class FormSetting extends Form {
         for (TreeItem<ConfigTreeItem> topLevel : root.getChildren()) {
             // topLevel = "Конфигурация устройства" или "Конфигурация модулей"
             for (TreeItem<ConfigTreeItem> section : topLevel.getChildren()) {
-                if (!hasMoifiedFields(section)) continue;
+                if (!hasMoifiedFields(section)) { continue; }
 
                 ConfigTreeItem sectionData = section.getValue();
                 if ("config".equals(sectionData.getConfigType())) {
@@ -650,7 +665,7 @@ public class FormSetting extends Form {
                         var oneofField = getActiveOneofFieldNumber(orig);
                         if (oneofField == sectionData.getConfigVariantNumber()) {
                             ConfigProtos.Config rebuilt = ProtobufTreeBuilder.rebuildConfig(section, orig);
-                            if (rebuilt != null) modifiedConfigs.add(rebuilt);
+                            if (rebuilt != null) { modifiedConfigs.add(rebuilt); }
                             break;
                         }
                     }
@@ -660,7 +675,7 @@ public class FormSetting extends Form {
                         if (oneofField == sectionData.getConfigVariantNumber()) {
                             ModuleConfigProtos.ModuleConfig rebuilt =
                                     ProtobufTreeBuilder.rebuildModuleConfig(section, orig);
-                            if (rebuilt != null) modifiedModuleConfigs.add(rebuilt);
+                            if (rebuilt != null) { modifiedModuleConfigs.add(rebuilt); }
                             break;
                         }
                     }
@@ -691,7 +706,7 @@ public class FormSetting extends Form {
         Thread timeoutThread = new Thread(() -> {
             try { Thread.sleep(5000); } catch (InterruptedException ignored) { return; }
             Platform.runLater(() -> {
-                if (state != null && ownerInfoListener == configSaveListener) {
+                if (state != null && configSaveListener.equals(ownerInfoListener)) {
                     state.removeOwnerInfoListener(configSaveListener);
                 }
                 if (saveConfigBtn.isDisable()) {
@@ -740,9 +755,9 @@ public class FormSetting extends Form {
      */
     private boolean hasMoifiedFields(TreeItem<ConfigTreeItem> item) {
         ConfigTreeItem data = item.getValue();
-        if (data != null && data.isModified()) return true;
+        if (data != null && data.isModified()) { return true; }
         for (TreeItem<ConfigTreeItem> child : item.getChildren()) {
-            if (hasMoifiedFields(child)) return true;
+            if (hasMoifiedFields(child)) { return true; }
         }
         return false;
     }
@@ -751,8 +766,8 @@ public class FormSetting extends Form {
      * Сбрасывает флаги модификации после сохранения.
      */
     private void resetModifiedFlags(TreeItem<ConfigTreeItem> item) {
-        if (item == null) return;
-        if (item.getValue() != null) item.getValue().resetOriginal();
+        if (item == null) { return; }
+        if (item.getValue() != null) { item.getValue().resetOriginal(); }
         for (TreeItem<ConfigTreeItem> child : item.getChildren()) {
             resetModifiedFlags(child);
         }
@@ -763,9 +778,9 @@ public class FormSetting extends Form {
      */
     private int getActiveOneofFieldNumber(ConfigProtos.Config config) {
         var oneof = config.getDescriptorForType().getOneofs().stream()
-                .filter(o -> o.getName().equals("payload_variant"))
+                .filter(o -> "payload_variant".equals(o.getName()))
                 .findFirst().orElse(null);
-        if (oneof == null) return -1;
+        if (oneof == null) { return -1; }
         var fd = config.getOneofFieldDescriptor(oneof);
         return fd != null ? fd.getNumber() : -1;
     }
@@ -775,9 +790,9 @@ public class FormSetting extends Form {
      */
     private int getActiveModuleOneofFieldNumber(ModuleConfigProtos.ModuleConfig mc) {
         var oneof = mc.getDescriptorForType().getOneofs().stream()
-                .filter(o -> o.getName().equals("payload_variant"))
+                .filter(o -> "payload_variant".equals(o.getName()))
                 .findFirst().orElse(null);
-        if (oneof == null) return -1;
+        if (oneof == null) { return -1; }
         var fd = mc.getOneofFieldDescriptor(oneof);
         return fd != null ? fd.getNumber() : -1;
     }
@@ -788,7 +803,7 @@ public class FormSetting extends Form {
      * Кастомная ячейка для колонки «Значение» в TreeTableView.
      * Отображает CheckBox для boolean, ComboBox для enum, TextField для строк/чисел.
      */
-    private static class ConfigValueCell extends TreeTableCell<ConfigTreeItem, ConfigTreeItem> {
+    private static final class ConfigValueCell extends TreeTableCell<ConfigTreeItem, ConfigTreeItem> {
 
         @Override
         protected void updateItem(ConfigTreeItem item, boolean empty) {
@@ -797,7 +812,7 @@ public class FormSetting extends Form {
             setGraphic(null);
             setStyle("");
 
-            if (empty || item == null) return;
+            if (empty || item == null) { return; }
 
             if (item.isCategory()) {
                 // Категории — без значения
@@ -849,7 +864,7 @@ public class FormSetting extends Form {
                 TextField textField = new TextField(item.getValue() != null ? item.getValue().toString() : "");
                 textField.setMaxWidth(Double.MAX_VALUE);
                 textField.focusedProperty().addListener((obs, wasFocused, isFocused) -> {
-                    if (!isFocused) item.setValue(textField.getText());
+                    if (!isFocused) { item.setValue(textField.getText()); }
                 });
                 textField.setOnAction(e -> item.setValue(textField.getText()));
                 setGraphic(textField);

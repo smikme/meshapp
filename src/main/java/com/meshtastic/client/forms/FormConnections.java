@@ -103,14 +103,14 @@ public class FormConnections extends Form {
         HBox topRow = new HBox(10);
         topRow.setAlignment(Pos.CENTER_LEFT);
 
-        String indicatorColor = connected ? "#1EA97C" : (reconnecting ? "#F59E0B" : "#9CA3AF");
+        String indicatorColor = connected ? "#1EA97C" : reconnecting ? "#F59E0B" : "#9CA3AF";
         Label indicator = new Label("\u25CF");
         indicator.setStyle("-fx-text-fill: " + indicatorColor + "; -fx-font-weight: bold;");
 
         Label lblName = new Label(entry.getName());
         lblName.setFont(Font.font("Roboto", FontWeight.BOLD, 14));
 
-        String statusText = connected ? "\u2713 Подключено" : (reconnecting ? "\u21BB Переподключение..." : "");
+        String statusText = connected ? "\u2713 Подключено" : reconnecting ? "\u21BB Переподключение..." : "";
         String statusColor = connected ? "#1EA97C" : "#F59E0B";
         Label lblStatus = new Label(statusText);
         lblStatus.setStyle("-fx-text-fill: " + statusColor + "; -fx-font-weight: bold;");
@@ -199,7 +199,7 @@ public class FormConnections extends Form {
 
     private void showAddDialog() {
         ModalPane modalPane = ModalPane.getInstance();
-        if (modalPane == null) return;
+        if (modalPane == null) { return; }
 
         SimpleConnectionForm form = new SimpleConnectionForm();
         form.setOnSave(entry -> {

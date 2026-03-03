@@ -156,6 +156,7 @@ public class DrawerPane extends StackPane {
     }
 
     public void setCompact(boolean compact) {
+        // no-op
     }
 
     public boolean isCompact() {

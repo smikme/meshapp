@@ -55,7 +55,7 @@ public class NodeDetailContent extends HBox {
         this.state = state;
 
         String displayName = node.getLongName() != null && !node.getLongName().isEmpty()
-                ? node.getLongName() : (node.getNodeId() != null ? node.getNodeId() : "?");
+                ? node.getLongName() : node.getNodeId() != null ? node.getNodeId() : "?";
 
         // === Вертикальный тулбар слева (56px, структура как DrawerPane) ===
         StackPane toolbarPane = new StackPane();
@@ -145,11 +145,11 @@ public class NodeDetailContent extends HBox {
         // === Заголовок: большой аватар + имя + nodeId ===
         String avatarText;
         if (node.getShortName() != null && !node.getShortName().isEmpty()) {
-            avatarText = node.getShortName().toUpperCase();
+            avatarText = node.getShortName().toUpperCase(java.util.Locale.ROOT);
         } else {
             avatarText = displayName.length() > 4
-                    ? displayName.substring(0, 4).toUpperCase()
-                    : displayName.toUpperCase();
+                    ? displayName.substring(0, 4).toUpperCase(java.util.Locale.ROOT)
+                    : displayName.toUpperCase(java.util.Locale.ROOT);
         }
         String color = NodeUtils.roleColor(node.getRole());
 

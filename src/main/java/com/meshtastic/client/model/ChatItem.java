@@ -1,13 +1,14 @@
 package com.meshtastic.client.model;
 
 import org.meshtastic.proto.ChannelProtos;
+import java.util.Locale;
 
 import java.util.List;
 
 /**
  * Элемент списка чатов — обёртка для канала или DM.
  */
-public class ChatItem {
+public final class ChatItem {
 
     public enum ChatType { CHANNEL, DIRECT_MESSAGE }
 
@@ -101,12 +102,12 @@ public class ChatItem {
 
         if (peerNode != null && peerNode.getShortName() != null && !peerNode.getShortName().isEmpty()) {
             avatarText = peerNode.getShortName().length() > 4
-                    ? peerNode.getShortName().substring(0, 4).toUpperCase()
-                    : peerNode.getShortName().toUpperCase();
+                    ? peerNode.getShortName().substring(0, 4).toUpperCase(Locale.ROOT)
+                    : peerNode.getShortName().toUpperCase(Locale.ROOT);
         } else {
             avatarText = displayName.length() > 4
-                    ? displayName.substring(0, 4).toUpperCase()
-                    : displayName.toUpperCase();
+                    ? displayName.substring(0, 4).toUpperCase(Locale.ROOT)
+                    : displayName.toUpperCase(Locale.ROOT);
         }
 
         String color = CHANNEL_COLORS[Math.abs(peerNodeId.hashCode()) % CHANNEL_COLORS.length];
@@ -171,12 +172,12 @@ public class ChatItem {
 
         if (peerNode != null && peerNode.getShortName() != null && !peerNode.getShortName().isEmpty()) {
             avatarText = peerNode.getShortName().length() > 4
-                    ? peerNode.getShortName().substring(0, 4).toUpperCase()
-                    : peerNode.getShortName().toUpperCase();
+                    ? peerNode.getShortName().substring(0, 4).toUpperCase(Locale.ROOT)
+                    : peerNode.getShortName().toUpperCase(Locale.ROOT);
         } else {
             avatarText = displayName.length() > 4
-                    ? displayName.substring(0, 4).toUpperCase()
-                    : displayName.toUpperCase();
+                    ? displayName.substring(0, 4).toUpperCase(Locale.ROOT)
+                    : displayName.toUpperCase(Locale.ROOT);
         }
 
         String color = CHANNEL_COLORS[Math.abs(peerNodeId.hashCode()) % CHANNEL_COLORS.length];
@@ -193,7 +194,7 @@ public class ChatItem {
     }
 
     private static String truncate(String text) {
-        if (text == null) return null;
+        if (text == null) { return null; }
         text = text.replace('\n', ' ').replace('\r', ' ');
         return text.length() > MAX_PREVIEW_LENGTH
                 ? text.substring(0, MAX_PREVIEW_LENGTH) + "…"

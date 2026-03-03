@@ -1,8 +1,12 @@
 package com.meshtastic.client.utils;
 
+import java.util.Collections;
+import java.util.List;
 import java.util.prefs.Preferences;
 
 public class AppPreferences {
+
+    private AppPreferences() {} // utility class
 
     public static final String PREFERENCES_ROOT_PATH = "/meshapp";
     public static final String KEY_DARK_MODE = "darkMode";
@@ -32,10 +36,10 @@ public class AppPreferences {
         state.putBoolean(KEY_DARK_MODE, dark);
     }
 
-    public static String[] getRecentSearch(boolean favorite) {
+    public static List<String> getRecentSearch(boolean favorite) {
         String stringArr = state.get(favorite ? KEY_RECENT_SEARCH_FAVORITE : KEY_RECENT_SEARCH, null);
-        if (stringArr == null || stringArr.trim().isEmpty()) return null;
-        return stringArr.trim().split(",");
+        if (stringArr == null || stringArr.trim().isEmpty()) { return Collections.emptyList(); }
+        return List.of(stringArr.trim().split(","));
     }
 
     // ==================== Window Bounds ====================

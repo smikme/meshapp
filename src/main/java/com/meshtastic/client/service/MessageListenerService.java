@@ -44,7 +44,7 @@ public class MessageListenerService implements FromRadioListener {
 
     @Override
     public void onMeshPacket(MeshProtos.MeshPacket packet) {
-        if (!packet.hasDecoded()) return;
+        if (!packet.hasDecoded()) { return; }
 
         MeshProtos.Data data = packet.getDecoded();
 
@@ -73,7 +73,7 @@ public class MessageListenerService implements FromRadioListener {
         long timestamp = packet.getRxTime() > 0 ? packet.getRxTime() : System.currentTimeMillis() / 1000;
         boolean outgoing = from == deviceState.getMyNodeNum();
 
-        if (outgoing) return; // outgoing messages are already added by MessageService
+        if (outgoing) { return; } // outgoing messages are already added by MessageService
 
         // Lookup nodeId через NodeData (не математическая конвертация)
         NodeData fromNode = deviceState.getOrCreateNode(from);
@@ -92,7 +92,7 @@ public class MessageListenerService implements FromRadioListener {
                     data.getReplyId(), Integer.toHexString(data.getReplyId()), fromNodeId);
             msg.setReplyId(data.getReplyId());
             MeshMessage original = deviceState.findMessageByPacketId(data.getReplyId());
-            if (original != null) msg.setReplyText(original.getText());
+            if (original != null) { msg.setReplyText(original.getText()); }
         }
 
         if (fromNode.getLongName() != null) {
@@ -155,9 +155,9 @@ public class MessageListenerService implements FromRadioListener {
             node.setLastHeard(rxTime);
             // Protobuf возвращает "" для незаполненных строковых полей —
             // пустые значения не должны затирать существующие данные
-            if (!user.getLongName().isEmpty()) node.setLongName(user.getLongName());
-            if (!user.getShortName().isEmpty()) node.setShortName(user.getShortName());
-            if (!user.getId().isEmpty()) node.setNodeId(user.getId());
+            if (!user.getLongName().isEmpty()) { node.setLongName(user.getLongName()); }
+            if (!user.getShortName().isEmpty()) { node.setShortName(user.getShortName()); }
+            if (!user.getId().isEmpty()) { node.setNodeId(user.getId()); }
             if (user.getRole() != ConfigProtos.Config.DeviceConfig.Role.CLIENT || node.getRole() == null) {
                 node.setRole(user.getRole().name());
             }
@@ -186,9 +186,12 @@ public class MessageListenerService implements FromRadioListener {
             int rxTime = packet.getRxTime() > 0 ? packet.getRxTime() : (int)(System.currentTimeMillis() / 1000);
             node.setLastHeard(rxTime);
             // Нулевые координаты означают отсутствие данных — не затираем существующие
-            if (position.getLatitudeI() != 0) node.setLatitude(position.getLatitudeI() * 1e-7);
-            if (position.getLongitudeI() != 0) node.setLongitude(position.getLongitudeI() * 1e-7);
-            if (position.getAltitude() != 0) node.setAltitude(position.getAltitude());
+            if (position.getLatitudeI() != 0) { node.setLatitude(position.getLatitudeI() * 1e-7); }
+
+            if (position.getLongitudeI() != 0) { node.setLongitude(position.getLongitudeI() * 1e-7); }
+
+            if (position.getAltitude() != 0) { node.setAltitude(position.getAltitude()); }
+
             deviceState.fireNodeUpdateListeners(fromNum);
             NodeCacheService.getInstance().update(node);
             log.info("Received POSITION_APP from !{}", Integer.toHexString(fromNum));
@@ -204,7 +207,7 @@ public class MessageListenerService implements FromRadioListener {
                     org.meshtastic.proto.TelemetryProtos.Telemetry.parseFrom(data.getPayload());
 
             long ts = telemetry.getTime() > 0 ? telemetry.getTime()
-                    : (packet.getRxTime() > 0 ? packet.getRxTime() : System.currentTimeMillis() / 1000);
+                    : packet.getRxTime() > 0 ? packet.getRxTime() : System.currentTimeMillis() / 1000;
 
             NodeData node = deviceState.getOrCreateNode(fromNum);
             TelemetryEntry entry = new TelemetryEntry(ts, node.getNodeId());
@@ -233,9 +236,12 @@ public class MessageListenerService implements FromRadioListener {
 
             if (telemetry.hasEnvironmentMetrics()) {
                 org.meshtastic.proto.TelemetryProtos.EnvironmentMetrics em = telemetry.getEnvironmentMetrics();
-                if (em.getTemperature() != 0) node.setTemperature(em.getTemperature());
-                if (em.getRelativeHumidity() != 0) node.setRelativeHumidity(em.getRelativeHumidity());
-                if (em.getBarometricPressure() != 0) node.setBarometricPressure(em.getBarometricPressure());
+                if (em.getTemperature() != 0) { node.setTemperature(em.getTemperature()); }
+
+                if (em.getRelativeHumidity() != 0) { node.setRelativeHumidity(em.getRelativeHumidity()); }
+
+                if (em.getBarometricPressure() != 0) { node.setBarometricPressure(em.getBarometricPressure()); }
+
 
                 entry.setTemperature(em.getTemperature());
                 entry.setRelativeHumidity(em.getRelativeHumidity());
@@ -253,6 +259,7 @@ public class MessageListenerService implements FromRadioListener {
         }
     }
 
+    @SuppressWarnings("PMD.UnusedFormalParameter") // consistent handler signature
     private void handleAdminResponse(MeshProtos.MeshPacket packet, MeshProtos.Data data) {
         try {
             AdminProtos.AdminMessage adminMsg = AdminProtos.AdminMessage.parseFrom(data.getPayload());

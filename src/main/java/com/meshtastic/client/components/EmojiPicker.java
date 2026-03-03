@@ -114,7 +114,7 @@ public class EmojiPicker {
 
         // Позиция: над кнопкой, выровнено по левому краю
         Bounds bounds = anchor.localToScreen(anchor.getBoundsInLocal());
-        if (bounds == null) return;
+        if (bounds == null) { return; }
         double x = bounds.getMinX();
         double y = bounds.getMinY() - PICKER_HEIGHT - 4;
         // Если не влезает сверху — показать снизу

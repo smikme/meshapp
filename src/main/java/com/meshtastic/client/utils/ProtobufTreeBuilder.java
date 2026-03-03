@@ -1,6 +1,5 @@
 package com.meshtastic.client.utils;
 
-import com.google.protobuf.ByteString;
 import com.google.protobuf.Descriptors;
 import com.google.protobuf.Descriptors.EnumValueDescriptor;
 import com.google.protobuf.Descriptors.FieldDescriptor;
@@ -12,13 +11,14 @@ import org.meshtastic.proto.ModuleConfigProtos;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 /**
  * Утилита для построения дерева ConfigTreeItem из protobuf Config/ModuleConfig.
  * Использует protobuf reflection для автоматического обхода полей.
  */
-public class ProtobufTreeBuilder {
+public final class ProtobufTreeBuilder {
 
     /** Русские названия секций конфига */
     private static final Map<String, String> SECTION_NAMES = Map.ofEntries(
@@ -61,7 +61,7 @@ public class ProtobufTreeBuilder {
 
         for (ConfigProtos.Config config : configs) {
             FieldDescriptor oneofField = getActiveOneofField(config, "payload_variant");
-            if (oneofField == null) continue;
+            if (oneofField == null) { continue; }
 
             Message sectionMsg = (Message) config.getField(oneofField);
             String sectionName = oneofField.getName();
@@ -91,7 +91,7 @@ public class ProtobufTreeBuilder {
 
         for (ModuleConfigProtos.ModuleConfig mc : moduleConfigs) {
             FieldDescriptor oneofField = getActiveOneofField(mc, "payload_variant");
-            if (oneofField == null) continue;
+            if (oneofField == null) { continue; }
 
             Message sectionMsg = (Message) mc.getField(oneofField);
             String sectionName = oneofField.getName();
@@ -118,8 +118,8 @@ public class ProtobufTreeBuilder {
                                           String configType, int variantNumber) {
         for (FieldDescriptor fd : message.getDescriptorForType().getFields()) {
             // Пропускаем repeated/map поля и bytes
-            if (fd.isRepeated()) continue;
-            if (fd.getType() == FieldDescriptor.Type.BYTES) continue;
+            if (fd.isRepeated()) { continue; }
+            if (fd.getType() == FieldDescriptor.Type.BYTES) { continue; }
 
             String fieldName = fd.getName();
             String displayName = humanize(fieldName);
@@ -191,7 +191,7 @@ public class ProtobufTreeBuilder {
                 .filter(o -> o.getName().equals(oneofName))
                 .findFirst()
                 .orElse(null);
-        if (oneof == null) return null;
+        if (oneof == null) { return null; }
         return msg.getOneofFieldDescriptor(oneof);
     }
 
@@ -200,9 +200,9 @@ public class ProtobufTreeBuilder {
      * Например: "node_info_broadcast_secs" -> "Node info broadcast secs"
      */
     public static String humanize(String fieldName) {
-        if (fieldName == null || fieldName.isEmpty()) return fieldName;
+        if (fieldName == null || fieldName.isEmpty()) { return fieldName; }
         String result = fieldName.replace('_', ' ');
-        return result.substring(0, 1).toUpperCase() + result.substring(1);
+        return result.substring(0, 1).toUpperCase(Locale.ROOT) + result.substring(1);
     }
 
     /**
@@ -212,7 +212,7 @@ public class ProtobufTreeBuilder {
     public static ConfigProtos.Config rebuildConfig(TreeItem<ConfigTreeItem> sectionItem,
                                                       ConfigProtos.Config originalConfig) {
         FieldDescriptor oneofField = getActiveOneofField(originalConfig, "payload_variant");
-        if (oneofField == null) return null;
+        if (oneofField == null) { return null; }
 
         Message originalSection = (Message) originalConfig.getField(oneofField);
         Message.Builder sectionBuilder = originalSection.toBuilder();
@@ -231,7 +231,7 @@ public class ProtobufTreeBuilder {
             TreeItem<ConfigTreeItem> sectionItem,
             ModuleConfigProtos.ModuleConfig originalModuleConfig) {
         FieldDescriptor oneofField = getActiveOneofField(originalModuleConfig, "payload_variant");
-        if (oneofField == null) return null;
+        if (oneofField == null) { return null; }
 
         Message originalSection = (Message) originalModuleConfig.getField(oneofField);
         Message.Builder sectionBuilder = originalSection.toBuilder();
@@ -253,12 +253,12 @@ public class ProtobufTreeBuilder {
                 // Вложенная группа (sub-message) — не поддерживается для записи пока
                 continue;
             }
-            if (item.getFieldDescriptor() == null || item.getValue() == null) continue;
+            if (item.getFieldDescriptor() == null || item.getValue() == null) { continue; }
 
             FieldDescriptor fd = item.getFieldDescriptor();
             // Ищем соответствующий FieldDescriptor в текущем builder (может отличаться от оригинала)
             FieldDescriptor builderFd = builder.getDescriptorForType().findFieldByName(fd.getName());
-            if (builderFd == null) continue;
+            if (builderFd == null) { continue; }
 
             Object value = item.getValue();
             try {
@@ -288,7 +288,7 @@ public class ProtobufTreeBuilder {
                     builder.setField(builderFd, ((Number) value).longValue());
                 }
             } catch (Exception e) {
-                // Пропускаем поле, если не удалось установить значение
+                // intentionally ignored
             }
         }
     }

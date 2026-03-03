@@ -8,6 +8,8 @@ import java.util.*;
  */
 public class EmojiData {
 
+    private EmojiData() {} // utility class
+
     /** Категория эмодзи */
     public record Category(String id, String icon, String label, List<String> emojis) {}
 
@@ -489,14 +491,14 @@ public class EmojiData {
      * Возвращает уникальные эмодзи в порядке категорий.
      */
     public static List<String> search(String query) {
-        if (query == null || query.isBlank()) return List.of();
-        String q = query.toLowerCase().trim();
+        if (query == null || query.isBlank()) { return List.of(); }
+        String q = query.toLowerCase(java.util.Locale.ROOT).trim();
         // Собираем все emoji из всех категорий в порядке их расположения
         List<String> results = new ArrayList<>();
         Set<String> seen = new HashSet<>();
         for (Category cat : CATEGORIES) {
             for (String emoji : cat.emojis()) {
-                if (seen.contains(emoji)) continue;
+                if (seen.contains(emoji)) { continue; }
                 List<String> kws = KEYWORDS.get(emoji);
                 if (kws != null) {
                     for (String kw : kws) {

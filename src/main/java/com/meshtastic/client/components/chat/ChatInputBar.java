@@ -234,22 +234,4 @@ public class ChatInputBar extends VBox {
         return text.getBytes(StandardCharsets.UTF_8).length;
     }
 
-    /**
-     * Обрезает строку до указанного лимита байт UTF-8,
-     * не разрезая многобайтовые символы.
-     */
-    private static String truncateToBytes(String text, int maxBytes) {
-        int byteCount = 0;
-        int end = 0;
-        for (int i = 0; i < text.length(); ) {
-            int codePoint = text.codePointAt(i);
-            int charLen = Character.charCount(codePoint);
-            int byteLen = new String(Character.toChars(codePoint)).getBytes(StandardCharsets.UTF_8).length;
-            if (byteCount + byteLen > maxBytes) break;
-            byteCount += byteLen;
-            i += charLen;
-            end = i;
-        }
-        return text.substring(0, end);
-    }
 }

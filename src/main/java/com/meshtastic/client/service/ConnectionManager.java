@@ -6,7 +6,6 @@ import com.google.gson.reflect.TypeToken;
 import com.meshtastic.client.connection.*;
 import com.meshtastic.client.connection.ble.BleConnection;
 import com.meshtastic.client.model.ConnectionEntry;
-import com.meshtastic.client.model.ConnectionType;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.protocol.ProtocolHandler;
 import org.slf4j.Logger;
@@ -34,7 +33,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
  * <p>
  * Каждое соединение идентифицируется по строковому {@code id} из {@link ConnectionEntry}.
  */
-public class ConnectionManager {
+public final class ConnectionManager {
 
     private static final Logger log = LoggerFactory.getLogger(ConnectionManager.class);
 

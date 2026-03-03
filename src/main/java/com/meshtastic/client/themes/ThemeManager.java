@@ -9,6 +9,8 @@ import javafx.scene.Scene;
 
 public class ThemeManager {
 
+    private ThemeManager() {} // utility class
+
     private static final String APP_CSS = "/css/app.css";
     private static final String LIGHT_THEME_CLASS = "light-theme";
 

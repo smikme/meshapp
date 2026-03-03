@@ -5,7 +5,11 @@ import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.service.NodeCacheService;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.collections.ObservableList;
-import javafx.scene.control.*;
+import javafx.scene.control.ContextMenu;
+import javafx.scene.control.MenuItem;
+import javafx.scene.control.TableCell;
+import javafx.scene.control.TableColumn;
+import javafx.scene.control.TableView;
 import javafx.scene.input.Clipboard;
 import javafx.scene.input.ClipboardContent;
 import org.slf4j.Logger;
@@ -75,7 +79,7 @@ public final class NodeUtils {
 
     /** Цвет аватара по роли ноды */
     public static String roleColor(String role) {
-        if (role == null) return "#5B8DEF";
+        if (role == null) { return "#5B8DEF"; }
         return switch (role) {
             case "CLIENT"         -> "#5B8DEF";
             case "CLIENT_MUTE"    -> "#8E99A4";
@@ -96,9 +100,9 @@ public final class NodeUtils {
     /** Размер шрифта аватара в зависимости от количества символов и размера круга */
     public static double avatarFontSize(int charCount, int circleSize) {
         double base = circleSize * 0.5; // 1 символ — 50% от размера круга
-        if (charCount <= 1) return base;
-        if (charCount == 2) return base * 0.85;
-        if (charCount == 3) return base * 0.7;
+        if (charCount <= 1) { return base; }
+        if (charCount == 2) { return base * 0.85; }
+        if (charCount == 3) { return base * 0.7; }
         return base * 0.6; // 4+
     }
 
@@ -114,8 +118,8 @@ public final class NodeUtils {
 
         int level = node.getBatteryLevel();
         String battery = null;
-        if (level > 0 && level <= 100) battery = level + "%";
-        else if (level == 101) battery = "Внешнее питание";
+        if (level > 0 && level <= 100) { battery = level + "%"; }
+        else if (level == 101) { battery = "Внешнее питание"; }
         rows.add(new String[]{"\uD83D\uDD0B  Батарея", battery});
 
         rows.add(new String[]{"\u26A1  Напряжение", node.getVoltage() > 0 ? String.format("%.2f В", node.getVoltage()) : null});
@@ -139,7 +143,7 @@ public final class NodeUtils {
         TableColumn<String[], String> valCol = new TableColumn<>();
         valCol.setCellValueFactory(cd -> {
             String v = cd.getValue()[1];
-            return new SimpleStringProperty(v != null && !v.isEmpty() ? v : "—");
+            return new SimpleStringProperty(v != null && !v.isEmpty() ? v : "\u2014");
         });
         valCol.setSortable(false);
         valCol.setStyle("-fx-font-weight: bold;");
@@ -147,8 +151,8 @@ public final class NodeUtils {
             @Override
             protected void updateItem(String value, boolean empty) {
                 super.updateItem(value, empty);
-                if (empty || value == null || value.equals("—")) {
-                    setText(empty ? null : "—");
+                if (empty || value == null || "\u2014".equals(value)) {
+                    setText(empty ? null : "\u2014");
                     setStyle("-fx-font-weight: bold;");
                     setContextMenu(null);
                 } else {
