@@ -22,7 +22,7 @@ import java.util.*;
  *   <li>{@code "dm"} — личные сообщения, {@code chat_key} = peerNodeNum</li>
  * </ul>
  */
-public class MessageDbService {
+public final class MessageDbService {
 
     private static final Logger log = LoggerFactory.getLogger(MessageDbService.class);
 
@@ -126,7 +126,7 @@ public class MessageDbService {
      * (аварийное завершение, потеря питания и т.д.).
      */
     public synchronized void markStaleSendingAsFailed() {
-        if (dbConnection == null) return;
+        if (dbConnection == null) { return; }
         try (PreparedStatement ps = dbConnection.prepareStatement(
                 "UPDATE messages SET status = ?, error_reason = ? WHERE status = 'SENDING'")) {
             ps.setString(1, MeshMessage.DeliveryStatus.FAILED.name());
@@ -152,7 +152,7 @@ public class MessageDbService {
      * @param chatKey  channelIndex (как строка) или peerNodeId
      */
     public synchronized void save(MeshMessage msg, String chatType, String chatKey) {
-        if (msg == null) return;
+        if (msg == null) { return; }
         if (insertStmt == null) {
             log.warn("Message DB not initialized — message dropped (chatType={}, chatKey={})", chatType, chatKey);
             return;
@@ -193,7 +193,7 @@ public class MessageDbService {
      * Обновляет статус доставки сообщения по packetId.
      */
     public synchronized void updateStatus(int packetId, MeshMessage.DeliveryStatus status, String errorReason) {
-        if (packetId == 0) return;
+        if (packetId == 0) { return; }
         if (updateStatusStmt == null) {
             log.warn("Message DB not initialized — status update dropped (packetId={})", packetId);
             return;
@@ -222,7 +222,7 @@ public class MessageDbService {
      */
     public List<MeshMessage> loadLast(String chatType, String chatKey, int limit) {
         List<MeshMessage> result = new ArrayList<>();
-        if (dbConnection == null) return result;
+        if (dbConnection == null) { return result; }
         String sql = """
             SELECT * FROM (
                 SELECT * FROM messages WHERE chat_type = ? AND chat_key = ?
@@ -256,7 +256,7 @@ public class MessageDbService {
      */
     public List<MeshMessage> loadBefore(String chatType, String chatKey, long beforeDbId, int limit) {
         List<MeshMessage> result = new ArrayList<>();
-        if (dbConnection == null) return result;
+        if (dbConnection == null) { return result; }
         String sql = """
             SELECT * FROM (
                 SELECT * FROM messages WHERE chat_type = ? AND chat_key = ? AND id < ?
@@ -289,7 +289,7 @@ public class MessageDbService {
      */
     public List<MeshMessage> loadAfter(String chatType, String chatKey, long afterDbId) {
         List<MeshMessage> result = new ArrayList<>();
-        if (dbConnection == null) return result;
+        if (dbConnection == null) { return result; }
         String sql = "SELECT * FROM messages WHERE chat_type = ? AND chat_key = ? AND id > ? ORDER BY id ASC";
         try (PreparedStatement ps = dbConnection.prepareStatement(sql)) {
             ps.setString(1, chatType);
@@ -314,12 +314,12 @@ public class MessageDbService {
      * Находит сообщение по packetId (для reply_text).
      */
     public MeshMessage findByPacketId(int packetId) {
-        if (dbConnection == null || packetId == 0) return null;
+        if (dbConnection == null || packetId == 0) { return null; }
         try (PreparedStatement ps = dbConnection.prepareStatement(
                 "SELECT * FROM messages WHERE packet_id = ? LIMIT 1")) {
             ps.setInt(1, packetId);
             try (ResultSet rs = ps.executeQuery()) {
-                if (rs.next()) return readMessage(rs);
+                if (rs.next()) { return readMessage(rs); }
             }
         } catch (SQLException e) {
             log.error("Failed to find message by packetId {}", packetId, e);
@@ -332,7 +332,7 @@ public class MessageDbService {
      */
     public List<String> getDistinctDmPeers() {
         List<String> peers = new ArrayList<>();
-        if (dbConnection == null) return peers;
+        if (dbConnection == null) { return peers; }
         try (PreparedStatement ps = dbConnection.prepareStatement(
                 "SELECT DISTINCT chat_key FROM messages WHERE chat_type = 'dm'")) {
             try (ResultSet rs = ps.executeQuery()) {
@@ -352,7 +352,7 @@ public class MessageDbService {
      */
     public Map<String, MeshMessage> getLastMessagePerChat(String chatType) {
         Map<String, MeshMessage> result = new LinkedHashMap<>();
-        if (dbConnection == null) return result;
+        if (dbConnection == null) { return result; }
         // Подзапрос: максимальный id для каждого chat_key
         String sql = """
             SELECT m.* FROM messages m
@@ -381,13 +381,13 @@ public class MessageDbService {
      * Возвращает количество сообщений в чате.
      */
     public int getMessageCount(String chatType, String chatKey) {
-        if (dbConnection == null) return 0;
+        if (dbConnection == null) { return 0; }
         try (PreparedStatement ps = dbConnection.prepareStatement(
                 "SELECT COUNT(*) FROM messages WHERE chat_type = ? AND chat_key = ?")) {
             ps.setString(1, chatType);
             ps.setString(2, chatKey);
             try (ResultSet rs = ps.executeQuery()) {
-                if (rs.next()) return rs.getInt(1);
+                if (rs.next()) { return rs.getInt(1); }
             }
         } catch (SQLException e) {
             log.error("Failed to count messages ({}, {})", chatType, chatKey, e);
@@ -406,7 +406,7 @@ public class MessageDbService {
      * @param chatKey  channelIndex (как строка) или peerNodeId
      */
     public synchronized void deleteChat(String chatType, String chatKey) {
-        if (dbConnection == null) return;
+        if (dbConnection == null) { return; }
         try (PreparedStatement ps1 = dbConnection.prepareStatement(
                      "DELETE FROM messages WHERE chat_type = ? AND chat_key = ?");
              PreparedStatement ps2 = dbConnection.prepareStatement(
@@ -427,7 +427,7 @@ public class MessageDbService {
      * Удаляет одно сообщение по его id в БД.
      */
     public synchronized void deleteMessage(long dbId) {
-        if (dbConnection == null || dbId <= 0) return;
+        if (dbConnection == null || dbId <= 0) { return; }
         try (PreparedStatement ps = dbConnection.prepareStatement("DELETE FROM messages WHERE id = ?")) {
             ps.setLong(1, dbId);
             ps.executeUpdate();
@@ -444,7 +444,7 @@ public class MessageDbService {
      * Сохранить количество прочитанных сообщений для чата.
      */
     public void saveReadCount(String chatType, String chatKey, int readCount) {
-        if (dbConnection == null) return;
+        if (dbConnection == null) { return; }
         try (PreparedStatement ps = dbConnection.prepareStatement(
                 "MERGE INTO chat_read_counts (chat_type, chat_key, read_count) VALUES (?, ?, ?)")) {
             ps.setString(1, chatType);
@@ -462,7 +462,7 @@ public class MessageDbService {
      */
     public Map<String, Integer> loadAllReadCounts() {
         Map<String, Integer> result = new HashMap<>();
-        if (dbConnection == null) return result;
+        if (dbConnection == null) { return result; }
         try (Statement stmt = dbConnection.createStatement();
              ResultSet rs = stmt.executeQuery("SELECT chat_type, chat_key, read_count FROM chat_read_counts")) {
             while (rs.next()) {
@@ -488,7 +488,7 @@ public class MessageDbService {
      */
     public void migrateFromJsonHistory() {
         Path historyDir = Path.of(System.getProperty("user.home"), ".meshapp", "history");
-        if (!Files.isDirectory(historyDir)) return;
+        if (!Files.isDirectory(historyDir)) { return; }
 
         // Проверяем, есть ли уже данные
         if (getMessageCount("channel", "0") > 0 || !getDistinctDmPeers().isEmpty()) {
@@ -509,7 +509,7 @@ public class MessageDbService {
                     String name = file.getFileName().toString();
                     try (var reader = Files.newBufferedReader(file)) {
                         List<JsonStoredMessage> stored = gson.fromJson(reader, msgListType);
-                        if (stored == null || stored.isEmpty()) continue;
+                        if (stored == null || stored.isEmpty()) { continue; }
 
                         String chatType;
                         String chatKey;
@@ -600,7 +600,7 @@ public class MessageDbService {
 
     /** Структура JSON-файлов из MessageHistoryService */
     @SuppressWarnings("unused")
-    private static class JsonStoredMessage {
+    private static final class JsonStoredMessage {
         int fromNum;
         int toNum;
         int channelIndex;
@@ -657,8 +657,8 @@ public class MessageDbService {
      */
     public void close() {
         try {
-            if (insertStmt != null) insertStmt.close();
-            if (updateStatusStmt != null) updateStatusStmt.close();
+            if (insertStmt != null) { insertStmt.close(); }
+            if (updateStatusStmt != null) { updateStatusStmt.close(); }
         } catch (SQLException e) {
             log.error("Error closing message DB statements", e);
         }

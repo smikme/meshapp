@@ -30,7 +30,7 @@ public class MeshApp extends Application {
                 var props = new java.util.Properties();
                 props.load(is);
                 String v = props.getProperty("version");
-                if (v != null && !v.isBlank()) return v;
+                if (v != null && !v.isBlank()) { return v; }
             }
         } catch (Exception ignored) {}
         // 2. MANIFEST.MF (при запуске из jar)
@@ -105,7 +105,7 @@ public class MeshApp extends Application {
     }
 
     private void restoreWindowBounds(Stage stage) {
-        if (!AppPreferences.hasWindowBounds()) return;
+        if (!AppPreferences.hasWindowBounds()) { return; }
 
         double x = AppPreferences.getWindowX();
         double y = AppPreferences.getWindowY();
@@ -114,7 +114,7 @@ public class MeshApp extends Application {
 
         // Проверить, что окно попадает хотя бы частично на один из доступных экранов
         ObservableList<Screen> screens = Screen.getScreensForRectangle(x, y, w, h);
-        if (screens.isEmpty()) return;
+        if (screens.isEmpty()) { return; }
 
         stage.setX(x);
         stage.setY(y);
@@ -124,7 +124,10 @@ public class MeshApp extends Application {
 
     private void saveWindowState(Stage stage, RootPane rootPane) {
         boolean maximized;
-        double x, y, w, h;
+        double x;
+        double y;
+        double w;
+        double h;
 
         if (OsDetect.isMacOs()) {
             maximized = stage.isMaximized();

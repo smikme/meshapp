@@ -86,15 +86,15 @@ public class ConfigTreeItem {
      * Проверяет, было ли значение изменено пользователем.
      */
     public boolean isModified() {
-        if (!editable) return false;
-        if (value == null && originalValue == null) return false;
-        if (value == null || originalValue == null) return true;
+        if (!editable) { return false; }
+        if (value == null && originalValue == null) { return false; }
+        if (value == null || originalValue == null) { return true; }
         return !value.equals(originalValue);
     }
 
     @Override
     public String toString() {
-        if (category) return name;
+        if (category) { return name; }
         return name + " = " + value;
     }
 }

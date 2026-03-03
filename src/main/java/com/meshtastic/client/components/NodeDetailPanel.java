@@ -61,9 +61,9 @@ public class NodeDetailPanel extends VBox {
      * Универсальный метод — можно вызывать из любого места приложения.
      */
     public static void showForNode(DeviceState state, NodeData node) {
-        if (node == null) return;
+        if (node == null) { return; }
         ModalPane modal = ModalPane.getInstance();
-        if (modal == null) return;
+        if (modal == null) { return; }
 
         NodeDetailPanel panel = new NodeDetailPanel(state, node);
         modal.setOnHidden(panel.detailContent.getChartPanel()::unbind);

@@ -8,7 +8,11 @@ import javafx.scene.control.Label;
 import javafx.scene.layout.StackPane;
 import javafx.util.Duration;
 
+import java.util.Locale;
+
 public class Toast {
+
+    private Toast() {}
 
     public enum Type {
         SUCCESS, ERROR, INFO, WARNING
@@ -21,10 +25,10 @@ public class Toast {
     }
 
     public static void show(Type type, String message) {
-        if (overlay == null) return;
+        if (overlay == null) { return; }
 
         Label toast = new Label(message);
-        toast.getStyleClass().addAll("toast", "toast-" + type.name().toLowerCase());
+        toast.getStyleClass().addAll("toast", "toast-" + type.name().toLowerCase(Locale.ROOT));
         toast.setMaxWidth(500);
         toast.setWrapText(true);
         StackPane.setAlignment(toast, Pos.TOP_CENTER);

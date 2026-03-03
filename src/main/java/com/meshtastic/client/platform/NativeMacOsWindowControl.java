@@ -61,7 +61,7 @@ public class NativeMacOsWindowControl {
      * Кастомный resize из RootPane отключается на macOS — ресайз обрабатывает macOS нативно.
      */
     public void makeVisibleInAppSwitcher() {
-        if (nsWindow == 0) return;
+        if (nsWindow == 0) { return; }
         try {
             long currentMask = msgSend(nsWindow, "styleMask");
             long titled = 1L;                // NSWindowStyleMaskTitled
@@ -108,11 +108,11 @@ public class NativeMacOsWindowControl {
      *    передачи CGRect struct через JNA на arm64.
      */
     public boolean applyVisualEffect(boolean darkMode) {
-        if (nsWindow == 0) return false;
+        if (nsWindow == 0) { return false; }
         try {
             // Получить contentView окна
             long contentView = msgSend(nsWindow, "contentView");
-            if (contentView == 0) return false;
+            if (contentView == 0) { return false; }
 
             // Разрешить прозрачность окна
             msgSendBool(nsWindow, "setOpaque:", false);
@@ -195,10 +195,10 @@ public class NativeMacOsWindowControl {
      * Находит существующий NSVisualEffectView среди subviews contentView.
      */
     public void updateVisualEffectAppearance(boolean dark) {
-        if (nsWindow == 0) return;
+        if (nsWindow == 0) { return; }
         try {
             long contentView = msgSend(nsWindow, "contentView");
-            if (contentView == 0) return;
+            if (contentView == 0) { return; }
 
             // Перебрать subviews, найти NSVisualEffectView
             long subviews = msgSend(contentView, "subviews");
@@ -222,7 +222,7 @@ public class NativeMacOsWindowControl {
 
     /** Переключить NSAppearance на окне (DarkAqua / Aqua) */
     public void setDarkMode(boolean dark) {
-        if (nsWindow == 0) return;
+        if (nsWindow == 0) { return; }
         try {
             setAppearanceOnView(nsWindow, dark);
         } catch (Throwable t) {
@@ -237,9 +237,9 @@ public class NativeMacOsWindowControl {
     private void hideTitlebarContainer() {
         try {
             long contentView = msgSend(nsWindow, "contentView");
-            if (contentView == 0) return;
+            if (contentView == 0) { return; }
             long themeFrame = msgSend(contentView, "superview");
-            if (themeFrame == 0) return;
+            if (themeFrame == 0) { return; }
 
             long subviews = msgSend(themeFrame, "subviews");
             long count = msgSend(subviews, "count");

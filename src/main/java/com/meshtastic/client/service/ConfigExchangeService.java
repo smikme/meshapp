@@ -1,7 +1,7 @@
 package com.meshtastic.client.service;
 
-import org.meshtastic.proto.*;
 import com.meshtastic.client.model.DeviceState;
+import org.meshtastic.proto.*;
 import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.model.TelemetryEntry;
 import com.meshtastic.client.protocol.FromRadioListener;
@@ -82,9 +82,9 @@ public class ConfigExchangeService implements FromRadioListener {
             MeshProtos.User user = nodeInfo.getUser();
             // Protobuf возвращает "" для незаполненных строковых полей —
             // пустые значения не должны затирать существующие данные
-            if (!user.getLongName().isEmpty()) node.setLongName(user.getLongName());
-            if (!user.getShortName().isEmpty()) node.setShortName(user.getShortName());
-            if (!user.getId().isEmpty()) node.setNodeId(user.getId());
+            if (!user.getLongName().isEmpty()) { node.setLongName(user.getLongName()); }
+            if (!user.getShortName().isEmpty()) { node.setShortName(user.getShortName()); }
+            if (!user.getId().isEmpty()) { node.setNodeId(user.getId()); }
             if (user.getRole() != ConfigProtos.Config.DeviceConfig.Role.CLIENT || node.getRole() == null) {
                 node.setRole(user.getRole().name());
             }
@@ -99,22 +99,33 @@ public class ConfigExchangeService implements FromRadioListener {
         if (nodeInfo.hasPosition()) {
             MeshProtos.Position pos = nodeInfo.getPosition();
             // Нулевые координаты означают отсутствие данных — не затираем существующие
-            if (pos.getLatitudeI() != 0) node.setLatitude(pos.getLatitudeI() * 1e-7);
-            if (pos.getLongitudeI() != 0) node.setLongitude(pos.getLongitudeI() * 1e-7);
-            if (pos.getAltitude() != 0) node.setAltitude(pos.getAltitude());
+            if (pos.getLatitudeI() != 0) { node.setLatitude(pos.getLatitudeI() * 1e-7); }
+
+            if (pos.getLongitudeI() != 0) { node.setLongitude(pos.getLongitudeI() * 1e-7); }
+
+            if (pos.getAltitude() != 0) { node.setAltitude(pos.getAltitude()); }
+
         }
 
-        if (nodeInfo.getSnr() != 0) node.setSnr(nodeInfo.getSnr());
-        if (nodeInfo.getLastHeard() != 0) node.setLastHeard(nodeInfo.getLastHeard());
-        if (nodeInfo.getHopsAway() != 0) node.setHopsAway(nodeInfo.getHopsAway());
+        if (nodeInfo.getSnr() != 0) { node.setSnr(nodeInfo.getSnr()); }
+
+        if (nodeInfo.getLastHeard() != 0) { node.setLastHeard(nodeInfo.getLastHeard()); }
+
+        if (nodeInfo.getHopsAway() != 0) { node.setHopsAway(nodeInfo.getHopsAway()); }
+
 
         if (nodeInfo.hasDeviceMetrics()) {
             TelemetryProtos.DeviceMetrics dm = nodeInfo.getDeviceMetrics();
-            if (dm.getBatteryLevel() != 0) node.setBatteryLevel(dm.getBatteryLevel());
-            if (dm.getVoltage() != 0) node.setVoltage(dm.getVoltage());
-            if (dm.getChannelUtilization() != 0) node.setChannelUtilization(dm.getChannelUtilization());
-            if (dm.getAirUtilTx() != 0) node.setAirUtilTx(dm.getAirUtilTx());
-            if (dm.getUptimeSeconds() != 0) node.setUptimeSeconds(dm.getUptimeSeconds());
+            if (dm.getBatteryLevel() != 0) { node.setBatteryLevel(dm.getBatteryLevel()); }
+
+            if (dm.getVoltage() != 0) { node.setVoltage(dm.getVoltage()); }
+
+            if (dm.getChannelUtilization() != 0) { node.setChannelUtilization(dm.getChannelUtilization()); }
+
+            if (dm.getAirUtilTx() != 0) { node.setAirUtilTx(dm.getAirUtilTx()); }
+
+            if (dm.getUptimeSeconds() != 0) { node.setUptimeSeconds(dm.getUptimeSeconds()); }
+
 
             // Сохранить начальную точку телеметрии, если есть реальные данные
             // (пропускаем полностью нулевые записи — артефакты config exchange)

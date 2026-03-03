@@ -19,7 +19,7 @@ import java.util.function.Consumer;
  * <p>
  * Паттерн аналогичен {@link SerialPortDiscoveryService}.
  */
-public class BleDeviceDiscoveryService {
+public final class BleDeviceDiscoveryService {
 
     private static final Logger log = LoggerFactory.getLogger(BleDeviceDiscoveryService.class);
 
@@ -44,7 +44,7 @@ public class BleDeviceDiscoveryService {
      * добавляются в список и оповещают подписчиков.
      */
     public void startScanning() {
-        if (scanning) return;
+        if (scanning) { return; }
         if (!BlePlatformFactory.isSupported()) {
             log.warn("BLE not supported on this platform");
             return;

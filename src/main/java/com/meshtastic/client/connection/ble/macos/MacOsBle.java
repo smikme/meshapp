@@ -6,6 +6,7 @@ import com.sun.jna.Callback;
 import com.sun.jna.Pointer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import java.util.Locale;
 
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -341,7 +342,7 @@ public class MacOsBle implements BlePlatform {
     // ====== Helpers ======
 
     private void waitForPoweredOn() {
-        if (adapterState == AdapterState.POWERED_ON) return;
+        if (adapterState == AdapterState.POWERED_ON) { return; }
         try {
             if (!poweredOnLatch.await(5, TimeUnit.SECONDS)) {
                 log.warn("BLE adapter not PoweredOn within 5s (state: {})", adapterState);
@@ -379,7 +380,7 @@ public class MacOsBle implements BlePlatform {
 
     /** Запускает drain если ещё не активен (вызывается poll-таймером и fromNum). */
     private void triggerDrain() {
-        if (drainInProgress) return;
+        if (drainInProgress) { return; }
         drainInProgress = true;
         drainFromRadio();
     }
@@ -419,7 +420,7 @@ public class MacOsBle implements BlePlatform {
     // ====== Static delegate class creation (один раз на JVM) ======
 
     private static synchronized void createDelegateClasses() {
-        if (centralDelegateClass != 0) return;
+        if (centralDelegateClass != 0) { return; }
 
         centralDelegateClass = createCentralDelegateClassStatic();
         peripheralDelegateClass = createPeripheralDelegateClassStatic();
@@ -431,7 +432,7 @@ public class MacOsBle implements BlePlatform {
 
         cbDidUpdateState = (CentralDidUpdateStateCallback) (self, cmd, central) -> {
             MacOsBle me = resolve(self);
-            if (me == null) return;
+            if (me == null) { return; }
             long state = msgSend(central, "state");
             log.info("CBCentralManager state changed: {}", state);
             me.adapterState = switch ((int) state) {
@@ -450,7 +451,7 @@ public class MacOsBle implements BlePlatform {
         cbDidDiscover = (CentralDidDiscoverCallback) (self, cmd, central,
                                                       peripheral, advertisementData, rssi) -> {
             MacOsBle me = resolve(self);
-            if (me == null) return;
+            if (me == null) { return; }
 
             long identifier = msgSend(peripheral, "identifier");
             long uuidString = msgSend(identifier, "UUIDString");
@@ -479,16 +480,16 @@ public class MacOsBle implements BlePlatform {
 
         cbDidConnect = (CentralDidConnectCallback) (self, cmd, central, peripheral) -> {
             MacOsBle me = resolve(self);
-            if (me == null) return;
+            if (me == null) { return; }
             log.info("CBCentralManager: didConnectPeripheral");
             CountDownLatch latch = me.connectLatch;
-            if (latch != null) latch.countDown();
+            if (latch != null) { latch.countDown(); }
         };
         addMethod(cls, "centralManager:didConnectPeripheral:", cbDidConnect, "v@:@@");
 
         cbDidDisconnect = (CentralDidDisconnectCallback) (self, cmd, central, peripheral, error) -> {
             MacOsBle me = resolve(self);
-            if (me == null) return;
+            if (me == null) { return; }
             log.info("CBCentralManager: didDisconnectPeripheral");
             me.connected = false;
             me.connectedPeripheral = 0;
@@ -501,7 +502,7 @@ public class MacOsBle implements BlePlatform {
 
         cbDidFailToConnect = (CentralDidDisconnectCallback) (self, cmd, central, peripheral, error) -> {
             MacOsBle me = resolve(self);
-            if (me == null) return;
+            if (me == null) { return; }
             String msg = "Failed to connect";
             if (error != 0) {
                 long desc = msgSend(error, "localizedDescription");
@@ -509,7 +510,7 @@ public class MacOsBle implements BlePlatform {
             }
             log.error("CBCentralManager: didFailToConnect — {}", msg);
             CountDownLatch latch = me.connectLatch;
-            if (latch != null) latch.countDown();
+            if (latch != null) { latch.countDown(); }
             Consumer<BleState> listener = me.stateListener;
             if (listener != null) {
                 listener.accept(new BleState.Error(msg, null));
@@ -528,7 +529,7 @@ public class MacOsBle implements BlePlatform {
 
         cbDidDiscoverServices = (PeripheralDelegateCallback) (self, cmd, peripheral, arg) -> {
             MacOsBle me = resolve(self);
-            if (me == null) return;
+            if (me == null) { return; }
             if (arg != 0) {
                 long desc = msgSend(arg, "localizedDescription");
                 log.error("GATT service discovery error: {}", toJavaString(desc));
@@ -538,14 +539,14 @@ public class MacOsBle implements BlePlatform {
                 log.info("Discovered {} GATT services", count);
             }
             CountDownLatch latch = me.serviceDiscoveryLatch;
-            if (latch != null) latch.countDown();
+            if (latch != null) { latch.countDown(); }
         };
         addMethod(cls, "peripheral:didDiscoverServices:", cbDidDiscoverServices, "v@:@@");
 
         cbDidDiscoverCharacteristics = (PeripheralDelegateCallback)
                 (self, cmd, peripheral, service) -> {
             MacOsBle me = resolve(self);
-            if (me == null) return;
+            if (me == null) { return; }
             // Третий аргумент — service (не error); error идёт как 4-й, но наш callback
             // interface имеет только 4 аргумента, поэтому error не доступен здесь.
             // Для didDiscoverCharacteristicsForService:error: нужен 5-arg callback.
@@ -560,7 +561,7 @@ public class MacOsBle implements BlePlatform {
                 String uuidJava = toJavaString(uuidStr);
 
                 if (uuidJava != null) {
-                    String lower = uuidJava.toLowerCase();
+                    String lower = uuidJava.toLowerCase(Locale.ROOT);
                     if (lower.equals(BleConstants.FROM_RADIO_UUID)) {
                         me.fromRadioCharacteristic = characteristic;
                         log.info("Found fromRadio characteristic");
@@ -574,7 +575,7 @@ public class MacOsBle implements BlePlatform {
                 }
             }
             CountDownLatch latch = me.characteristicDiscoveryLatch;
-            if (latch != null) latch.countDown();
+            if (latch != null) { latch.countDown(); }
         };
         addMethod(cls, "peripheral:didDiscoverCharacteristicsForService:error:",
                 cbDidDiscoverCharacteristics, "v@:@@@");
@@ -582,7 +583,7 @@ public class MacOsBle implements BlePlatform {
         cbDidUpdateValue = (PeripheralDelegateCallback)
                 (self, cmd, peripheral, characteristic) -> {
             MacOsBle me = resolve(self);
-            if (me == null) return;
+            if (me == null) { return; }
 
             long uuid = msgSend(characteristic, "UUID");
             long uuidStr = msgSend(uuid, "UUIDString");
@@ -594,7 +595,7 @@ public class MacOsBle implements BlePlatform {
             log.info("[BLE] didUpdateValue: uuid={} dataLen={}", uuidJava, data.length);
 
             if (uuidJava != null) {
-                String lower = uuidJava.toLowerCase();
+                String lower = uuidJava.toLowerCase(Locale.ROOT);
                 if (lower.equals(BleConstants.FROM_NUM_UUID)) {
                     log.info("[BLE] fromNum notification → triggering drain...");
                     me.triggerDrain();
@@ -615,7 +616,7 @@ public class MacOsBle implements BlePlatform {
                         log.debug("[BLE] fromRadio empty — drain complete");
                         me.drainInProgress = false;
                         CountDownLatch latch = me.drainLatch;
-                        if (latch != null) latch.countDown();
+                        if (latch != null) { latch.countDown(); }
                     }
                 }
             }
@@ -638,7 +639,7 @@ public class MacOsBle implements BlePlatform {
         cbDidUpdateNotificationState = (PeripheralDelegateWithErrorCallback)
                 (self, cmd, peripheral, characteristic, error) -> {
             MacOsBle me = resolve(self);
-            if (me == null) return;
+            if (me == null) { return; }
             long uuid = msgSend(characteristic, "UUID");
             long uuidStr = msgSend(uuid, "UUIDString");
             if (error != 0) {
@@ -649,7 +650,7 @@ public class MacOsBle implements BlePlatform {
                 log.info("[BLE] Notification subscribed for: {}", toJavaString(uuidStr));
             }
             CountDownLatch latch = me.notifyLatch;
-            if (latch != null) latch.countDown();
+            if (latch != null) { latch.countDown(); }
         };
         addMethod(cls, "peripheral:didUpdateNotificationStateForCharacteristic:error:",
                 cbDidUpdateNotificationState, "v@:@@@");

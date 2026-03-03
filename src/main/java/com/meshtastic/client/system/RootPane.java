@@ -12,7 +12,11 @@ import javafx.scene.Node;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 import javafx.scene.input.MouseEvent;
-import javafx.scene.layout.*;
+import javafx.scene.layout.BorderPane;
+import javafx.scene.layout.HBox;
+import javafx.scene.layout.Priority;
+import javafx.scene.layout.Region;
+import javafx.scene.layout.StackPane;
 import javafx.stage.Screen;
 import javafx.stage.Stage;
 import org.slf4j.Logger;
@@ -40,16 +44,24 @@ public class RootPane extends BorderPane {
     private final MainForm mainForm;
     private final StackPane toastOverlay;
 
-    private double dragStartX, dragStartY;
-    private double stageStartX, stageStartY, stageStartW, stageStartH;
+    private double dragStartX;
+    private double dragStartY;
+    private double stageStartX;
+    private double stageStartY;
+    private double stageStartW;
+    private double stageStartH;
     private ResizeDirection resizeDir = ResizeDirection.NONE;
 
-    private double dragOffsetX, dragOffsetY;
+    private double dragOffsetX;
+    private double dragOffsetY;
     private boolean dragging = false;
 
     /** Кастомный maximize (Windows/Linux): stage.setMaximized() при TRANSPARENT перекрывает панель задач */
     private boolean customMaximized = false;
-    private double restoreX, restoreY, restoreW, restoreH;
+    private double restoreX;
+    private double restoreY;
+    private double restoreW;
+    private double restoreH;
 
     /** Узел, на котором мы принудительно подменили курсор; null если не подменяли */
     private Node cursorOverriddenNode;
@@ -105,13 +117,13 @@ public class RootPane extends BorderPane {
         Button closeBtn = createWindowButton("window-btn-close");
         closeBtn.setOnAction(e -> {
             Stage stage = MeshApp.getPrimaryStage();
-            if (stage != null) stage.close();
+            if (stage != null) { stage.close(); }
         });
 
         Button minimizeBtn = createWindowButton("window-btn-minimize");
         minimizeBtn.setOnAction(e -> {
             Stage stage = MeshApp.getPrimaryStage();
-            if (stage != null) stage.setIconified(true);
+            if (stage != null) { stage.setIconified(true); }
         });
 
         Button maximizeBtn = createWindowButton("window-btn-maximize");
@@ -140,8 +152,8 @@ public class RootPane extends BorderPane {
 
         // Перетаскивание окна за title bar (кроме зон resize по краям/углам)
         bar.setOnMousePressed(event -> {
-            if (event.getTarget() instanceof Button) return;
-            if (isInResizeZone(event)) return;
+            if (event.getTarget() instanceof Button) { return; }
+            if (isInResizeZone(event)) { return; }
             Stage stage = MeshApp.getPrimaryStage();
             if (stage != null) {
                 dragOffsetX = event.getScreenX() - stage.getX();
@@ -150,7 +162,7 @@ public class RootPane extends BorderPane {
             }
         });
         bar.setOnMouseDragged(event -> {
-            if (!dragging) return;
+            if (!dragging) { return; }
             Stage stage = MeshApp.getPrimaryStage();
             if (stage != null) {
                 // При перетаскивании из maximized — сначала восстанавливаем размер
@@ -184,7 +196,7 @@ public class RootPane extends BorderPane {
 
     private void toggleMaximize() {
         Stage stage = MeshApp.getPrimaryStage();
-        if (stage == null) return;
+        if (stage == null) { return; }
 
         if (OsDetect.isMacOs()) {
             // На macOS нативный NSWindowStyleMaskResizable корректно обрабатывает maximize
@@ -282,7 +294,7 @@ public class RootPane extends BorderPane {
     }
 
     private void onResizeStart(MouseEvent e) {
-        if (customMaximized) return;
+        if (customMaximized) { return; }
         resizeDir = detectEdge(e);
         log.info("RESIZE_START: sceneX={} sceneY={} dir={} target={}",
                 e.getSceneX(), e.getSceneY(), resizeDir, e.getTarget().getClass().getSimpleName());
@@ -299,7 +311,7 @@ public class RootPane extends BorderPane {
     }
 
     private void onResizeDrag(MouseEvent e) {
-        if (resizeDir == ResizeDirection.NONE) return;
+        if (resizeDir == ResizeDirection.NONE) { return; }
         log.info("RESIZE_DRAG: sceneX={} sceneY={} dir={}", e.getSceneX(), e.getSceneY(), resizeDir);
         Stage stage = (Stage) getScene().getWindow();
         double dx = e.getScreenX() - dragStartX;
@@ -330,8 +342,10 @@ public class RootPane extends BorderPane {
         // Используем sceneX/sceneY — при EventFilter e.getX()/getY() относительны к target-узлу,
         // а не к RootPane. sceneX/sceneY совпадают с локальными координатами RootPane,
         // т.к. RootPane — корневой узел сцены.
-        double x = e.getSceneX(), y = e.getSceneY();
-        double w = getWidth(), h = getHeight();
+        double x = e.getSceneX();
+        double y = e.getSceneY();
+        double w = getWidth();
+        double h = getHeight();
 
         // Углы — увеличенная зона захвата
         boolean cornerTop = y < CORNER_MARGIN;
@@ -339,10 +353,10 @@ public class RootPane extends BorderPane {
         boolean cornerLeft = x < CORNER_MARGIN;
         boolean cornerRight = x > w - CORNER_MARGIN;
 
-        if (cornerTop && cornerLeft) return ResizeDirection.NW;
-        if (cornerTop && cornerRight) return ResizeDirection.NE;
-        if (cornerBottom && cornerLeft) return ResizeDirection.SW;
-        if (cornerBottom && cornerRight) return ResizeDirection.SE;
+        if (cornerTop && cornerLeft) { return ResizeDirection.NW; }
+        if (cornerTop && cornerRight) { return ResizeDirection.NE; }
+        if (cornerBottom && cornerLeft) { return ResizeDirection.SW; }
+        if (cornerBottom && cornerRight) { return ResizeDirection.SE; }
 
         // Стороны — стандартная зона
         boolean top = y < RESIZE_MARGIN;
@@ -350,10 +364,10 @@ public class RootPane extends BorderPane {
         boolean left = x < RESIZE_MARGIN;
         boolean right = x > w - RESIZE_MARGIN;
 
-        if (top) return ResizeDirection.N;
-        if (bottom) return ResizeDirection.S;
-        if (left) return ResizeDirection.W;
-        if (right) return ResizeDirection.E;
+        if (top) { return ResizeDirection.N; }
+        if (bottom) { return ResizeDirection.S; }
+        if (left) { return ResizeDirection.W; }
+        if (right) { return ResizeDirection.E; }
         return ResizeDirection.NONE;
     }
 
@@ -367,7 +381,7 @@ public class RootPane extends BorderPane {
         if ((sceneX < CORNER_MARGIN && sceneY < CORNER_MARGIN) ||
             (sceneX > w - CORNER_MARGIN && sceneY < CORNER_MARGIN) ||
             (sceneX < CORNER_MARGIN && sceneY > h - CORNER_MARGIN) ||
-            (sceneX > w - CORNER_MARGIN && sceneY > h - CORNER_MARGIN)) return true;
+            (sceneX > w - CORNER_MARGIN && sceneY > h - CORNER_MARGIN)) { return true; }
         // Края
         return sceneX < RESIZE_MARGIN || sceneX > w - RESIZE_MARGIN ||
                sceneY < RESIZE_MARGIN || sceneY > h - RESIZE_MARGIN;
@@ -383,7 +397,7 @@ public class RootPane extends BorderPane {
 
     public void maximizeToVisualBounds() {
         Stage stage = MeshApp.getPrimaryStage();
-        if (stage != null) maximizeToVisualBounds(stage);
+        if (stage != null) { maximizeToVisualBounds(stage); }
     }
 
     public DrawerPane getDrawerPane() {

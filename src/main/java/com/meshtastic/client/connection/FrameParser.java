@@ -67,7 +67,8 @@ public class FrameParser {
                 return null;
 
             case READ_PAYLOAD:
-                payloadBuffer[payloadIndex++] = b;
+                payloadBuffer[payloadIndex] = b;
+                payloadIndex++;
                 if (payloadIndex == payloadLength) {
                     state = State.WAIT_START1;
                     byte[] result = payloadBuffer;

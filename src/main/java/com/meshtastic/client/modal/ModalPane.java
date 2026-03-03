@@ -114,7 +114,7 @@ public class ModalPane extends StackPane {
      * Скрыть — контент уезжает вправо с fade-out.
      */
     public void hide() {
-        if (currentContent == null) return;
+        if (currentContent == null) { return; }
 
         // Снять scene-level фильтр
         if (getScene() != null) {
@@ -148,7 +148,7 @@ public class ModalPane extends StackPane {
      */
     public static void showConfirm(String title, String message, Consumer<Boolean> callback) {
         ModalPane pane = getInstance();
-        if (pane == null) return;
+        if (pane == null) { return; }
 
         Button btnYes = new Button("Да");
         btnYes.getStyleClass().add("accent");
@@ -171,7 +171,7 @@ public class ModalPane extends StackPane {
      */
     public static void showInfo(String title, String message) {
         ModalPane pane = getInstance();
-        if (pane == null) return;
+        if (pane == null) { return; }
 
         Button btnOk = new Button("ОК");
         btnOk.getStyleClass().add("accent");
@@ -185,7 +185,7 @@ public class ModalPane extends StackPane {
      */
     public static void showError(String title, String message) {
         ModalPane pane = getInstance();
-        if (pane == null) return;
+        if (pane == null) { return; }
 
         Button btnOk = new Button("ОК");
         btnOk.getStyleClass().add("accent");
@@ -201,7 +201,7 @@ public class ModalPane extends StackPane {
      */
     public static void showAbout() {
         ModalPane pane = getInstance();
-        if (pane == null) return;
+        if (pane == null) { return; }
 
         About about = new About();
         about.getStyleClass().add("modal-side-panel");

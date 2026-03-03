@@ -30,7 +30,7 @@ import java.util.concurrent.ThreadLocalRandom;
  *   <li>Admin-операции: owner info, каналы, конфигурация</li>
  * </ul>
  */
-public class MessageService {
+public final class MessageService {
 
     private static final Logger log = LoggerFactory.getLogger(MessageService.class);
 
@@ -55,7 +55,7 @@ public class MessageService {
         MeshProtos.Data.Builder dataBuilder = MeshProtos.Data.newBuilder()
                 .setPortnum(Portnums.PortNum.TEXT_MESSAGE_APP)
                 .setPayload(ByteString.copyFrom(text, StandardCharsets.UTF_8));
-        if (replyId != 0) dataBuilder.setReplyId(replyId);
+        if (replyId != 0) { dataBuilder.setReplyId(replyId); }
         MeshProtos.Data data = dataBuilder.build();
 
         if (replyId != 0) {
@@ -88,7 +88,7 @@ public class MessageService {
         if (replyId != 0) {
             msg.setReplyId(replyId);
             MeshMessage original = state.findMessageByPacketId(replyId);
-            if (original != null) msg.setReplyText(original.getText());
+            if (original != null) { msg.setReplyText(original.getText()); }
         }
 
         if (myNode != null && myNode.getLongName() != null) {
@@ -124,7 +124,7 @@ public class MessageService {
         MeshProtos.Data.Builder dataBuilder = MeshProtos.Data.newBuilder()
                 .setPortnum(Portnums.PortNum.TEXT_MESSAGE_APP)
                 .setPayload(ByteString.copyFrom(text, StandardCharsets.UTF_8));
-        if (replyId != 0) dataBuilder.setReplyId(replyId);
+        if (replyId != 0) { dataBuilder.setReplyId(replyId); }
         MeshProtos.Data data = dataBuilder.build();
 
         if (replyId != 0) {
@@ -156,7 +156,7 @@ public class MessageService {
         if (replyId != 0) {
             msg.setReplyId(replyId);
             MeshMessage original = state.findMessageByPacketId(replyId);
-            if (original != null) msg.setReplyText(original.getText());
+            if (original != null) { msg.setReplyText(original.getText()); }
         }
 
         if (myNode != null && myNode.getLongName() != null) {
@@ -427,7 +427,7 @@ public class MessageService {
 
     private static String bytesToHex(byte[] bytes) {
         StringBuilder sb = new StringBuilder(bytes.length * 2);
-        for (byte b : bytes) sb.append(String.format("%02x", b));
+        for (byte b : bytes) { sb.append(String.format("%02x", b)); }
         return sb.toString();
     }
 }

@@ -4,6 +4,7 @@ import com.fazecast.jSerialComm.SerialPort;
 import com.meshtastic.client.platform.OsDetect;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import java.util.Locale;
 
 import java.util.*;
 import java.util.concurrent.*;
@@ -16,7 +17,7 @@ import java.util.function.Consumer;
  * и определяет по эвристике, какие из них вероятнее всего являются Meshtastic-устройствами.
  * Оповещает подписчиков при изменении списка портов.
  */
-public class SerialPortDiscoveryService {
+public final class SerialPortDiscoveryService {
 
     private static final Logger log = LoggerFactory.getLogger(SerialPortDiscoveryService.class);
 
@@ -148,9 +149,9 @@ public class SerialPortDiscoveryService {
         if (descriptiveName == null) {
             return false;
         }
-        String upper = descriptiveName.toUpperCase();
+        String upper = descriptiveName.toUpperCase(Locale.ROOT);
         for (String hint : MESHTASTIC_HINTS) {
-            if (upper.contains(hint.toUpperCase())) {
+            if (upper.contains(hint.toUpperCase(Locale.ROOT))) {
                 return true;
             }
         }

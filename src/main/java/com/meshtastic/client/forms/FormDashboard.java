@@ -7,13 +7,14 @@ import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.model.TelemetryEntry;
 import com.meshtastic.client.service.ConnectionManager;
 import com.meshtastic.client.system.Form;
-import com.meshtastic.client.utils.NodeUtils;
 import com.meshtastic.client.utils.SystemForm;
 import javafx.application.Platform;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import javafx.geometry.Insets;
-import javafx.scene.control.*;
+import javafx.scene.control.Label;
+import javafx.scene.control.TableColumn;
+import javafx.scene.control.TableView;
 import javafx.scene.control.cell.PropertyValueFactory;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
@@ -95,7 +96,7 @@ public class FormDashboard extends Form {
         for (ConnectionEntry entry : mgr.getEntries()) {
             if (entry.isConnected()) {
                 newState = mgr.getDeviceState(entry.getId());
-                if (newState != null) break;
+                if (newState != null) { break; }
             }
         }
 

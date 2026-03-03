@@ -1,11 +1,18 @@
 package com.meshtastic.client.menu;
 
-import com.meshtastic.client.forms.*;
+import com.meshtastic.client.forms.FormChat;
+import com.meshtastic.client.forms.FormConnections;
+import com.meshtastic.client.forms.FormDashboard;
+import com.meshtastic.client.forms.FormLogs;
+import com.meshtastic.client.forms.FormNodes;
+import com.meshtastic.client.forms.FormSetting;
 import com.meshtastic.client.system.DrawerManager;
 import com.meshtastic.client.system.DrawerPane;
 import com.meshtastic.client.system.FormManager;
 
 public class MyDrawerBuilder {
+
+    private MyDrawerBuilder() {}
 
     private static final MenuManager menuManager = new MenuManager();
 

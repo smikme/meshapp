@@ -57,6 +57,7 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -196,7 +197,7 @@ public class FormChat extends Form {
 
         filteredChats = new FilteredList<>(chatItems, c -> true);
         searchField.textProperty().addListener((obs, oldVal, newVal) -> {
-            String query = newVal == null ? "" : newVal.trim().toLowerCase();
+            String query = newVal == null ? "" : newVal.trim().toLowerCase(Locale.ROOT);
             filteredChats.setPredicate(chat -> query.isEmpty()
                     || containsIgnoreCase(chat.getDisplayName(), query)
                     || containsIgnoreCase(chat.getLastMessageText(), query));
@@ -679,7 +680,7 @@ public class FormChat extends Form {
         NodeData targetNode = state.getNodeByNodeId(msg.getFromNodeId());
         if (targetNode == null) {
             String nodeId = msg.getFromNodeId();
-            if (nodeId == null || nodeId.length() < 2) return;
+            if (nodeId == null || nodeId.length() < 2) { return; }
             int nodeNum = (int) Long.parseUnsignedLong(nodeId.substring(1), 16);
             targetNode = state.getOrCreateNode(nodeNum);
             NodeCacheService.getInstance().enrichFromCache(targetNode);
@@ -734,7 +735,7 @@ public class FormChat extends Form {
         NodeData targetNode = state.getNodeByNodeId(msg.getFromNodeId());
         if (targetNode == null) {
             String nodeId = msg.getFromNodeId();
-            if (nodeId == null || nodeId.length() < 2) return;
+            if (nodeId == null || nodeId.length() < 2) { return; }
             int nodeNum = (int) Long.parseUnsignedLong(nodeId.substring(1), 16);
             targetNode = state.getOrCreateNode(nodeNum);
             NodeCacheService.getInstance().enrichFromCache(targetNode);
@@ -804,7 +805,7 @@ public class FormChat extends Form {
             if (entry.isConnected()) {
                 newState = mgr.getDeviceState(entry.getId());
                 newHandler = mgr.getProtocolHandler(entry.getId());
-                if (newState != null) break;
+                if (newState != null) { break; }
             }
         }
 
@@ -997,6 +998,6 @@ public class FormChat extends Form {
     }
 
     private static boolean containsIgnoreCase(String text, String query) {
-        return text != null && text.toLowerCase().contains(query);
+        return text != null && text.toLowerCase(Locale.ROOT).contains(query);
     }
 }

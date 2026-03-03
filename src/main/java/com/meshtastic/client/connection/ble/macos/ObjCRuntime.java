@@ -2,8 +2,6 @@ package com.meshtastic.client.connection.ble.macos;
 
 import com.sun.jna.*;
 import com.sun.jna.Native;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /**
  * Утилиты для работы с Objective-C runtime через JNA.
@@ -17,11 +15,11 @@ import org.slf4j.LoggerFactory;
  */
 public final class ObjCRuntime {
 
-    private static final Logger log = LoggerFactory.getLogger(ObjCRuntime.class);
-
     private static final NativeLibrary OBJC = NativeLibrary.getInstance("objc");
+    @SuppressWarnings("PMD.UnusedPrivateField") // loading framework into process is a required side effect
     private static final NativeLibrary FOUNDATION = NativeLibrary.getInstance(
             "/System/Library/Frameworks/Foundation.framework/Foundation");
+    @SuppressWarnings("PMD.UnusedPrivateField")
     private static final NativeLibrary CORE_BLUETOOTH = NativeLibrary.getInstance(
             "/System/Library/Frameworks/CoreBluetooth.framework/CoreBluetooth");
     private static final NativeLibrary DISPATCH = NativeLibrary.getInstance(
@@ -108,9 +106,9 @@ public final class ObjCRuntime {
      * [nsStr UTF8String] → const char* → Java String
      */
     public static String toJavaString(long nsStr) {
-        if (nsStr == 0) return null;
+        if (nsStr == 0) { return null; }
         long cStr = msgSend(nsStr, "UTF8String");
-        if (cStr == 0) return null;
+        if (cStr == 0) { return null; }
         return new Pointer(cStr).getString(0);
     }
 
@@ -153,11 +151,11 @@ public final class ObjCRuntime {
      * [nsData bytes] + [nsData length]
      */
     public static byte[] toBytes(long nsData) {
-        if (nsData == 0) return new byte[0];
+        if (nsData == 0) { return new byte[0]; }
         long length = msgSend(nsData, "length");
-        if (length <= 0) return new byte[0];
+        if (length <= 0) { return new byte[0]; }
         long bytesPtr = msgSend(nsData, "bytes");
-        if (bytesPtr == 0) return new byte[0];
+        if (bytesPtr == 0) { return new byte[0]; }
         byte[] result = new byte[(int) length];
         new Pointer(bytesPtr).read(0, result, 0, result.length);
         return result;

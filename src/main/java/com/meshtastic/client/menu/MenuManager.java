@@ -7,7 +7,6 @@ import com.meshtastic.client.system.Form;
 import com.meshtastic.client.system.FormManager;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -48,7 +47,7 @@ public class MenuManager {
     }
 
     public void rebuildMenu(DrawerPane drawerPane) {
-        if (drawerPane == null) return;
+        if (drawerPane == null) { return; }
 
         List<DrawerPane.DrawerMenuItem> drawerItems = new ArrayList<>();
         for (MenuItem item : items) {

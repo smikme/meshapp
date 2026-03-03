@@ -50,21 +50,21 @@ public class BleConnection implements MeshtasticConnection {
 
         platform.setStateListener(state -> {
             switch (state) {
-                case BleState.Connected c -> {
+                case BleState.Connected ignored -> {
                     connected = true;
                     ConnectionListener listener = connectionListener;
-                    if (listener != null) listener.onConnected();
+                    if (listener != null) { listener.onConnected(); }
                 }
-                case BleState.Disconnected d -> {
+                case BleState.Disconnected ignored -> {
                     connected = false;
                     ConnectionListener listener = connectionListener;
-                    if (listener != null) listener.onDisconnected();
+                    if (listener != null) { listener.onDisconnected(); }
                 }
                 case BleState.Error e -> {
                     connected = false;
                     log.error("BLE error: {}", e.message(), e.cause());
                     ConnectionListener listener = connectionListener;
-                    if (listener != null) listener.onConnectionError(e.message(), e.cause());
+                    if (listener != null) { listener.onConnectionError(e.message(), e.cause()); }
                 }
             }
         });

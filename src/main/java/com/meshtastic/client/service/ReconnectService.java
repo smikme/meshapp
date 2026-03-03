@@ -21,7 +21,7 @@ import java.util.concurrent.*;
  * Показывает статусные Toast-уведомления и обновляет состояние
  * {@link ConnectionEntry#isReconnecting()}.
  */
-public class ReconnectService {
+public final class ReconnectService {
 
     private static final Logger log = LoggerFactory.getLogger(ReconnectService.class);
 
@@ -138,6 +138,7 @@ public class ReconnectService {
         }
     }
 
+    @SuppressWarnings("PMD.UnusedFormalParameter") // entry kept for future use / consistent API
     private void handlePostReconnectConfigExchange(String id, ConnectionEntry entry) {
         CompletableFuture<DeviceState> future = ConnectionManager.getInstance().getConfigFuture(id);
         if (future == null) {

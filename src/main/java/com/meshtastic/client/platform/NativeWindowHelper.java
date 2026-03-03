@@ -79,7 +79,7 @@ public final class NativeWindowHelper {
      * Вызывается при смене темы (light ↔ dark). Обновляет нативные атрибуты.
      */
     public static void updateTheme(Stage stage, boolean isDark) {
-        if (stage == null || !stage.isShowing()) return;
+        if (stage == null || !stage.isShowing()) { return; }
 
         // Обновить CSS pseudo-class для light/dark
         setThemeState(stage, isDark);
@@ -117,7 +117,8 @@ public final class NativeWindowHelper {
     }
 
     private static void setThemeState(Stage stage, boolean isDark) {
-        if (stage.getScene() == null || stage.getScene().getRoot() == null) return;
+        if (stage.getScene() == null || stage.getScene().getRoot() == null) { return; }
+
         var root = stage.getScene().getRoot();
         root.pseudoClassStateChanged(LIGHT_THEME, !isDark);
     }

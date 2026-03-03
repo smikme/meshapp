@@ -88,7 +88,7 @@ public final class NodeInfoFormatter {
 
         if (node.getUptimeSeconds() > 0) {
             long h = node.getUptimeSeconds() / 3600;
-            long m = (node.getUptimeSeconds() % 3600) / 60;
+            long m = node.getUptimeSeconds() % 3600 / 60;
             sb.append(String.format("⏱ %dч %dм\n", h, m));
         }
 

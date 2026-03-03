@@ -16,7 +16,8 @@ public class UiLogAppender extends UnsynchronizedAppenderBase<ILoggingEvent> {
 
     private static final int MAX_ENTRIES = 5000;
 
-    private static final CopyOnWriteArrayList<LogEntry> buffer = new CopyOnWriteArrayList<>();
+    @SuppressWarnings("PMD.LooseCoupling")
+    private static final List<LogEntry> buffer = new CopyOnWriteArrayList<>();
     private static volatile Consumer<LogEntry> liveListener;
 
     @Override

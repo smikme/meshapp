@@ -15,7 +15,7 @@ import java.sql.SQLException;
  * Используется всеми сервисами ({@link MessageDbService}, {@link NodeCacheService})
  * вместо создания отдельных соединений к одному файлу.
  */
-public class DatabaseProvider {
+public final class DatabaseProvider {
 
     private static final Logger log = LoggerFactory.getLogger(DatabaseProvider.class);
 
@@ -49,7 +49,7 @@ public class DatabaseProvider {
      * после того как все сервисы закроют свои PreparedStatement.
      */
     public static synchronized void close() {
-        if (connection == null) return;
+        if (connection == null) { return; }
         try {
             if (!connection.isClosed()) {
                 connection.close();

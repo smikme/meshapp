@@ -17,13 +17,20 @@ import javafx.collections.transformation.FilteredList;
 import javafx.collections.transformation.SortedList;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
-import javafx.scene.control.*;
-import javafx.scene.layout.*;
-import javafx.scene.shape.Circle;
+import javafx.scene.control.Label;
+import javafx.scene.control.ListCell;
+import javafx.scene.control.ListView;
+import javafx.scene.control.SplitPane;
+import javafx.scene.control.TextField;
+import javafx.scene.layout.HBox;
+import javafx.scene.layout.Priority;
+import javafx.scene.layout.StackPane;
+import javafx.scene.layout.VBox;
 import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
 
 import java.util.Comparator;
+import java.util.Locale;
 import java.util.function.IntConsumer;
 
 @SystemForm(name = "Ноды", description = "Список нод в сети", tags = {"ноды", "nodes", "устройства", "mesh"})
@@ -47,7 +54,7 @@ public class FormNodes extends Form {
     private String connectionId;
 
     private final IntConsumer nodeUpdateListener = num -> Platform.runLater(() -> {
-        if (state == null) return;
+        if (state == null) { return; }
         NodeData node = state.getNodeDb().get(num);
 
         // Нода удалена из nodeDb — убрать из списка и очистить детали
@@ -124,14 +131,13 @@ public class FormNodes extends Form {
 
         filteredNodes = new FilteredList<>(nodeData, n -> true);
         searchField.textProperty().addListener((obs, oldVal, newVal) -> {
-            String query = newVal == null ? "" : newVal.trim().toLowerCase();
+            String query = newVal == null ? "" : newVal.trim().toLowerCase(Locale.ROOT);
             filteredNodes.setPredicate(node -> {
-                if (query.isEmpty()) return true;
-                if (node.getLongName() != null && node.getLongName().toLowerCase().contains(query)) return true;
-                if (node.getShortName() != null && node.getShortName().toLowerCase().contains(query)) return true;
-                if (node.getNodeId() != null && node.getNodeId().toLowerCase().contains(query)) return true;
-                if (String.valueOf(node.getNodeNum()).contains(query)) return true;
-                return false;
+                if (query.isEmpty()) { return true; }
+                if (node.getLongName() != null && node.getLongName().toLowerCase(Locale.ROOT).contains(query)) { return true; }
+                if (node.getShortName() != null && node.getShortName().toLowerCase(Locale.ROOT).contains(query)) { return true; }
+                if (node.getNodeId() != null && node.getNodeId().toLowerCase(Locale.ROOT).contains(query)) { return true; }
+                return String.valueOf(node.getNodeNum()).contains(query);
             });
         });
 
@@ -144,7 +150,7 @@ public class FormNodes extends Form {
         nodeListView.setCellFactory(lv -> new NodeListCell());
         nodeListView.getSelectionModel().selectedItemProperty().addListener(
                 (obs, oldNode, newNode) -> {
-                    if (!suppressSelectionListener) showDetail(newNode);
+                    if (!suppressSelectionListener) { showDetail(newNode); }
                 });
 
         // Бейдж с количеством нод
@@ -209,7 +215,6 @@ public class FormNodes extends Form {
             root.getStyleClass().add("node-list-cell-root");
 
             // Круглый аватар
-            Circle clip = new Circle(20);
             avatarPane.setMinSize(40, 40);
             avatarPane.setMaxSize(40, 40);
             avatarPane.getStyleClass().add("node-avatar");
@@ -237,17 +242,17 @@ public class FormNodes extends Form {
 
             String displayName = node.getLongName() != null && !node.getLongName().isEmpty()
                     ? node.getLongName()
-                    : (node.getNodeId() != null ? node.getNodeId() : "?");
+                    : node.getNodeId() != null ? node.getNodeId() : "?";
             nameLabel.setText(displayName);
 
             // Аватар: shortName целиком или первые 4 символа имени
             String avatarText;
             if (node.getShortName() != null && !node.getShortName().isEmpty()) {
-                avatarText = node.getShortName().toUpperCase();
+                avatarText = node.getShortName().toUpperCase(Locale.ROOT);
             } else {
                 avatarText = displayName.length() > 4
-                        ? displayName.substring(0, 4).toUpperCase()
-                        : displayName.toUpperCase();
+                        ? displayName.substring(0, 4).toUpperCase(Locale.ROOT)
+                        : displayName.toUpperCase(Locale.ROOT);
             }
             avatarLabel.setText(avatarText);
             avatarLabel.setFont(Font.font("Roboto", FontWeight.BOLD, NodeUtils.avatarFontSize(avatarText.length(), 40)));
@@ -313,12 +318,6 @@ public class FormNodes extends Form {
         }
     }
 
-    /** Обновить только данные таблицы деталей без пересоздания UI */
-    private void updateDetailTable(NodeData node) {
-        if (currentDetailContent == null) return;
-        currentDetailContent.updateTableData(node);
-    }
-
     // ==================== Data ====================
 
     private void rebindState() {
@@ -332,7 +331,7 @@ public class FormNodes extends Form {
                 newState = mgr.getDeviceState(entry.getId());
                 newHandler = mgr.getProtocolHandler(entry.getId());
                 newConnId = entry.getId();
-                if (newState != null) break;
+                if (newState != null) { break; }
             }
         }
 
@@ -390,10 +389,10 @@ public class FormNodes extends Form {
      * Относительное время: «в сети», «X минут назад», «X часов назад», «X дней назад».
      */
     private static String formatLastHeardRelative(int epochSeconds) {
-        if (epochSeconds <= 0) return "нет данных";
+        if (epochSeconds <= 0) { return "нет данных"; }
         long now = System.currentTimeMillis() / 1000;
         long diff = now - epochSeconds;
-        if (diff < 60) return "в сети";
+        if (diff < 60) { return "в сети"; }
         if (diff < 3600) {
             long min = diff / 60;
             return "был(а) " + min + " " + minuteWord(min) + " назад";
@@ -409,27 +408,27 @@ public class FormNodes extends Form {
     private static String minuteWord(long n) {
         n = Math.abs(n) % 100;
         long n1 = n % 10;
-        if (n > 10 && n < 20) return "минут";
-        if (n1 == 1) return "минуту";
-        if (n1 >= 2 && n1 <= 4) return "минуты";
+        if (n > 10 && n < 20) { return "минут"; }
+        if (n1 == 1) { return "минуту"; }
+        if (n1 >= 2 && n1 <= 4) { return "минуты"; }
         return "минут";
     }
 
     private static String hourWord(long n) {
         n = Math.abs(n) % 100;
         long n1 = n % 10;
-        if (n > 10 && n < 20) return "часов";
-        if (n1 == 1) return "час";
-        if (n1 >= 2 && n1 <= 4) return "часа";
+        if (n > 10 && n < 20) { return "часов"; }
+        if (n1 == 1) { return "час"; }
+        if (n1 >= 2 && n1 <= 4) { return "часа"; }
         return "часов";
     }
 
     private static String dayWord(long n) {
         n = Math.abs(n) % 100;
         long n1 = n % 10;
-        if (n > 10 && n < 20) return "дней";
-        if (n1 == 1) return "день";
-        if (n1 >= 2 && n1 <= 4) return "дня";
+        if (n > 10 && n < 20) { return "дней"; }
+        if (n1 == 1) { return "день"; }
+        if (n1 >= 2 && n1 <= 4) { return "дня"; }
         return "дней";
     }
 }

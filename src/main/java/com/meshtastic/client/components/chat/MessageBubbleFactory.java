@@ -341,12 +341,12 @@ public class MessageBubbleFactory {
             if (senderNode != null
                     && senderNode.getShortName() != null
                     && !senderNode.getShortName().isEmpty()) {
-                text = senderNode.getShortName().toUpperCase();
+                text = senderNode.getShortName().toUpperCase(java.util.Locale.ROOT);
             } else {
                 String nid = msg.getFromNodeId();
                 text = nid.length() >= 4
-                        ? nid.substring(nid.length() - 4).toUpperCase()
-                        : nid.toUpperCase();
+                        ? nid.substring(nid.length() - 4).toUpperCase(java.util.Locale.ROOT)
+                        : nid.toUpperCase(java.util.Locale.ROOT);
             }
             color = AVATAR_COLORS[Math.abs(msg.getFromNodeId().hashCode())
                     % AVATAR_COLORS.length];
@@ -376,17 +376,17 @@ public class MessageBubbleFactory {
         }
 
         NodeData myNode = state.getNodeDb().get(state.getMyNodeNum());
-        String text = msg.getText() != null ? msg.getText().toLowerCase() : "";
+        String text = msg.getText() != null ? msg.getText().toLowerCase(java.util.Locale.ROOT) : "";
 
         if (myNode != null) {
             String longName = myNode.getLongName();
             if (longName != null && !longName.isEmpty()
-                    && text.contains(longName.toLowerCase())) {
+                    && text.contains(longName.toLowerCase(java.util.Locale.ROOT))) {
                 return true;
             }
             String shortName = myNode.getShortName();
             if (shortName != null && !shortName.isEmpty()
-                    && text.contains(shortName.toLowerCase())) {
+                    && text.contains(shortName.toLowerCase(java.util.Locale.ROOT))) {
                 return true;
             }
         }

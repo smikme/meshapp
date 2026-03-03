@@ -16,7 +16,7 @@ import java.sql.*;
  * <p>
  * Вызывается из {@link DatabaseProvider#getConnection()} при первом создании соединения.
  */
-public class DatabaseMigrator {
+public final class DatabaseMigrator {
 
     private static final Logger log = LoggerFactory.getLogger(DatabaseMigrator.class);
 
@@ -82,7 +82,7 @@ public class DatabaseMigrator {
     private static int getCurrentVersion(Connection connection) throws SQLException {
         try (Statement stmt = connection.createStatement();
              ResultSet rs = stmt.executeQuery("SELECT version FROM schema_version")) {
-            if (rs.next()) return rs.getInt("version");
+            if (rs.next()) { return rs.getInt("version"); }
         }
         return 0;
     }

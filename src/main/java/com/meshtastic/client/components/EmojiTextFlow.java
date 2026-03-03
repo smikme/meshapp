@@ -1,6 +1,5 @@
 package com.meshtastic.client.components;
 
-import javafx.scene.Node;
 import javafx.scene.image.ImageView;
 import javafx.scene.layout.Region;
 import javafx.scene.text.Text;
