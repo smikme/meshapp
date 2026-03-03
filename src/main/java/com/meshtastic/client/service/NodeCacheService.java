@@ -133,10 +133,18 @@ public class NodeCacheService {
     // ═══════════════════════════════════════════════════════════
 
     /**
-     * Возвращает ноду из in-memory кэша или {@code null} если отсутствует.
+     * Возвращает ноду из in-memory кэша или H2. Ленивая загрузка из БД,
+     * если в памяти нет — результат кэшируется.
      */
     public NodeData get(int nodeNum) {
-        return cache.get(nodeNum);
+        NodeData node = cache.get(nodeNum);
+        if (node == null) {
+            node = loadFromDb(nodeNum);
+            if (node != null && node.hasName()) {
+                cache.put(nodeNum, node);
+            }
+        }
+        return node;
     }
 
     /**
@@ -250,6 +258,9 @@ public class NodeCacheService {
             NodeData fresh = entry.getValue();
             cache.compute(nodeNum, (key, existing) -> {
                 if (existing == null) {
+                    existing = loadFromDb(nodeNum);
+                }
+                if (existing == null) {
                     existing = new NodeData(nodeNum);
                 }
                 merge(existing, fresh);
@@ -257,6 +268,44 @@ public class NodeCacheService {
             });
         }
         persistAll(nodes.keySet());
+    }
+
+    /**
+     * Обогащает bare-ноду (без имени) данными из кэша/H2.
+     * Заполняет только identity-поля (longName, shortName, role, hwModel),
+     * если они отсутствуют у ноды. Телеметрию и позицию не трогает —
+     * у ноды уже есть свежие данные от устройства.
+     *
+     * @param node нода из DeviceState для обогащения
+     */
+    public void enrichFromCache(NodeData node) {
+        if (node == null || node.hasName()) return;
+
+        NodeData cached = cache.get(node.getNodeNum());
+        if (cached == null) {
+            cached = loadFromDb(node.getNodeNum());
+            if (cached != null) {
+                log.debug("enrichFromCache: loaded !{} from H2, hasName={}", Integer.toHexString(node.getNodeNum()), cached.hasName());
+            } else {
+                log.debug("enrichFromCache: !{} not found in H2", Integer.toHexString(node.getNodeNum()));
+            }
+        }
+        if (cached == null || !cached.hasName()) return;
+
+        if ((node.getLongName() == null || node.getLongName().isEmpty())
+                && cached.getLongName() != null && !cached.getLongName().isEmpty()) {
+            node.setLongName(cached.getLongName());
+        }
+        if ((node.getShortName() == null || node.getShortName().isEmpty())
+                && cached.getShortName() != null && !cached.getShortName().isEmpty()) {
+            node.setShortName(cached.getShortName());
+        }
+        if (node.getRole() == null && cached.getRole() != null) {
+            node.setRole(cached.getRole());
+        }
+        if (node.getHwModel() == null && cached.getHwModel() != null) {
+            node.setHwModel(cached.getHwModel());
+        }
     }
 
     /**

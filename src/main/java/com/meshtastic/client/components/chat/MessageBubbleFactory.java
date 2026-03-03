@@ -127,7 +127,7 @@ public class MessageBubbleFactory {
         avatar.setCursor(Cursor.HAND);
         avatar.setOnMouseClicked(e -> {
             if (state != null) {
-                NodeData node = state.getNodeDb().get(msg.getFromNum());
+                NodeData node = NodeUtils.resolveNode(state, msg.getFromNum());
                 if (node == null) {
                     node = new NodeData(msg.getFromNum());
                 }
@@ -322,7 +322,7 @@ public class MessageBubbleFactory {
             }
             color = "#1EA97C";
         } else if (state != null) {
-            NodeData senderNode = state.getNodeDb().get(msg.getFromNum());
+            NodeData senderNode = NodeUtils.resolveNode(state, msg.getFromNum());
             if (senderNode != null
                     && senderNode.getShortName() != null
                     && !senderNode.getShortName().isEmpty()) {
@@ -386,13 +386,11 @@ public class MessageBubbleFactory {
     }
 
     private String resolveSenderDisplayName(MeshMessage msg) {
-        if (state != null) {
-            NodeData senderNode = state.getNodeDb().get(msg.getFromNum());
-            if (senderNode != null
-                    && senderNode.getLongName() != null
-                    && !senderNode.getLongName().isEmpty()) {
-                return senderNode.getLongName();
-            }
+        NodeData senderNode = NodeUtils.resolveNode(state, msg.getFromNum());
+        if (senderNode != null
+                && senderNode.getLongName() != null
+                && !senderNode.getLongName().isEmpty()) {
+            return senderNode.getLongName();
         }
         if (msg.getSenderName() != null && !msg.getSenderName().isEmpty()) {
             return msg.getSenderName();

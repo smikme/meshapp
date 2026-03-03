@@ -159,6 +159,11 @@ public class ConfigExchangeService implements FromRadioListener {
             NodeCacheService ncs = NodeCacheService.getInstance();
             ncs.updateAll(deviceState.getNodeDb());
 
+            // Обогатить bare-ноды (только телеметрия) кэшированными именами из H2
+            for (NodeData node : deviceState.getNodeDb().values()) {
+                ncs.enrichFromCache(node);
+            }
+
             // Загрузить архив телеметрии из H2 + подчистить старые записи
             ncs.pruneTelemetryHistory(30);
             var archived = ncs.loadTelemetryHistory(200);

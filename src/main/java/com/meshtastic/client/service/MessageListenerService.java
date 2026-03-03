@@ -146,6 +146,8 @@ public class MessageListenerService implements FromRadioListener {
         try {
             MeshProtos.User user = MeshProtos.User.parseFrom(data.getPayload());
             NodeData node = deviceState.getOrCreateNode(fromNum);
+            int rxTime = packet.getRxTime() > 0 ? packet.getRxTime() : (int)(System.currentTimeMillis() / 1000);
+            node.setLastHeard(rxTime);
             // Protobuf возвращает "" для незаполненных строковых полей —
             // пустые значения не должны затирать существующие данные
             if (!user.getLongName().isEmpty()) node.setLongName(user.getLongName());
@@ -173,6 +175,11 @@ public class MessageListenerService implements FromRadioListener {
         try {
             MeshProtos.Position position = MeshProtos.Position.parseFrom(data.getPayload());
             NodeData node = deviceState.getOrCreateNode(fromNum);
+            if (!node.hasName()) {
+                NodeCacheService.getInstance().enrichFromCache(node);
+            }
+            int rxTime = packet.getRxTime() > 0 ? packet.getRxTime() : (int)(System.currentTimeMillis() / 1000);
+            node.setLastHeard(rxTime);
             // Нулевые координаты означают отсутствие данных — не затираем существующие
             if (position.getLatitudeI() != 0) node.setLatitude(position.getLatitudeI() * 1e-7);
             if (position.getLongitudeI() != 0) node.setLongitude(position.getLongitudeI() * 1e-7);
@@ -195,9 +202,14 @@ public class MessageListenerService implements FromRadioListener {
                     : (packet.getRxTime() > 0 ? packet.getRxTime() : System.currentTimeMillis() / 1000);
             TelemetryEntry entry = new TelemetryEntry(ts, fromNum);
 
+            NodeData node = deviceState.getOrCreateNode(fromNum);
+            if (!node.hasName()) {
+                NodeCacheService.getInstance().enrichFromCache(node);
+            }
+            node.setLastHeard((int) ts);
+
             if (telemetry.hasDeviceMetrics()) {
                 org.meshtastic.proto.TelemetryProtos.DeviceMetrics dm = telemetry.getDeviceMetrics();
-                NodeData node = deviceState.getOrCreateNode(fromNum);
                 node.setBatteryLevel(dm.getBatteryLevel());
                 node.setVoltage(dm.getVoltage());
                 node.setChannelUtilization(dm.getChannelUtilization());
@@ -216,7 +228,6 @@ public class MessageListenerService implements FromRadioListener {
 
             if (telemetry.hasEnvironmentMetrics()) {
                 org.meshtastic.proto.TelemetryProtos.EnvironmentMetrics em = telemetry.getEnvironmentMetrics();
-                NodeData node = deviceState.getOrCreateNode(fromNum);
                 if (em.getTemperature() != 0) node.setTemperature(em.getTemperature());
                 if (em.getRelativeHumidity() != 0) node.setRelativeHumidity(em.getRelativeHumidity());
                 if (em.getBarometricPressure() != 0) node.setBarometricPressure(em.getBarometricPressure());

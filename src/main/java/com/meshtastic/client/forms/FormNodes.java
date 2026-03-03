@@ -6,6 +6,7 @@ import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.protocol.ProtocolHandler;
 import com.meshtastic.client.service.ConnectionManager;
+import com.meshtastic.client.service.NodeCacheService;
 import com.meshtastic.client.system.Form;
 import com.meshtastic.client.utils.NodeUtils;
 import com.meshtastic.client.utils.SystemForm;
@@ -135,7 +136,7 @@ public class FormNodes extends Form {
         });
 
         SortedList<NodeData> sortedNodes = new SortedList<>(filteredNodes,
-                Comparator.comparingInt(NodeData::getHopsAway)
+                Comparator.comparingInt(NodeData::getLastHeard).reversed()
                         .thenComparing(n -> n.getLongName() != null ? n.getLongName() : ""));
 
         nodeListView = new ListView<>(sortedNodes);
@@ -278,6 +279,11 @@ public class FormNodes extends Form {
             detailPane.getChildren().clear();
             detailPane.getChildren().add(detailPlaceholder);
             return;
+        }
+
+        // Обогатить bare-ноду данными из кэша перед показом
+        if (!node.hasName()) {
+            NodeCacheService.getInstance().enrichFromCache(node);
         }
 
         // Если та же нода — обновляем только данные таблицы, не пересоздаём UI

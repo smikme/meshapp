@@ -3,6 +3,7 @@ package com.meshtastic.client.components.chat;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.model.NodeData;
+import com.meshtastic.client.utils.NodeUtils;
 
 /**
  * Разрешение имён нод и отправителей для чата.
@@ -30,13 +31,11 @@ public class ChatNameResolver {
      * @return отображаемое имя
      */
     public String resolveNodeName(int nodeNum) {
-        if (state != null) {
-            NodeData node = state.getNodeDb().get(nodeNum);
-            if (node != null
-                    && node.getLongName() != null
-                    && !node.getLongName().isEmpty()) {
-                return node.getLongName();
-            }
+        NodeData node = NodeUtils.resolveNode(state, nodeNum);
+        if (node != null
+                && node.getLongName() != null
+                && !node.getLongName().isEmpty()) {
+            return node.getLongName();
         }
         return "!" + String.format("%08x", nodeNum);
     }
@@ -51,13 +50,11 @@ public class ChatNameResolver {
         if (msg.isOutgoing()) {
             return "Вы";
         }
-        if (state != null) {
-            NodeData node = state.getNodeDb().get(msg.getFromNum());
-            if (node != null
-                    && node.getLongName() != null
-                    && !node.getLongName().isEmpty()) {
-                return node.getLongName();
-            }
+        NodeData node = NodeUtils.resolveNode(state, msg.getFromNum());
+        if (node != null
+                && node.getLongName() != null
+                && !node.getLongName().isEmpty()) {
+            return node.getLongName();
         }
         if (msg.getSenderName() != null && !msg.getSenderName().isEmpty()) {
             return msg.getSenderName();
