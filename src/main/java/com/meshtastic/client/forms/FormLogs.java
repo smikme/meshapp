@@ -69,12 +69,14 @@ public class FormLogs extends Form {
 
         TableColumn<LogEntry, String> colTime = new TableColumn<>("Дата");
         colTime.setCellValueFactory(new PropertyValueFactory<>("time"));
-        colTime.setPrefWidth(100);
+        colTime.setMinWidth(90);
+        colTime.setMaxWidth(110);
         colTime.setSortable(false);
 
         TableColumn<LogEntry, String> colLevel = new TableColumn<>("Тип");
         colLevel.setCellValueFactory(new PropertyValueFactory<>("level"));
-        colLevel.setPrefWidth(40);
+        colLevel.setMinWidth(30);
+        colLevel.setMaxWidth(50);
         colLevel.setStyle("-fx-alignment: CENTER;");
         colLevel.setSortable(false);
         colLevel.setCellFactory(col -> new TableCell<>() {

@@ -37,6 +37,7 @@ public class DatabaseProvider {
 
             connection = DriverManager.getConnection("jdbc:h2:" + dbPath + ";AUTO_SERVER=FALSE");
             log.info("Database connection established: {}", dbPath);
+            DatabaseMigrator.migrate(connection);
         } catch (Exception e) {
             log.error("Failed to create database connection", e);
         }

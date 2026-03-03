@@ -135,6 +135,15 @@ public class MessageBubbleFactory {
                 if (node == null) {
                     node = NodeCacheService.getInstance().get(msg.getFromNodeId());
                 }
+                if (node == null) {
+                    // Нода не найдена нигде — создаём bare-ноду из nodeId
+                    String nodeId = msg.getFromNodeId();
+                    if (nodeId != null && nodeId.length() >= 2) {
+                        int nodeNum = (int) Long.parseUnsignedLong(nodeId.substring(1), 16);
+                        node = state.getOrCreateNode(nodeNum);
+                        NodeCacheService.getInstance().enrichFromCache(node);
+                    }
+                }
                 if (node != null) {
                     NodeDetailPanel.showForNode(state, node);
                 }

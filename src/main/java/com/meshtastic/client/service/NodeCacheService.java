@@ -68,8 +68,6 @@ public class NodeCacheService {
         try {
             dbConnection = DatabaseProvider.getConnection();
 
-            migrateIfNeeded();
-
             try (Statement stmt = dbConnection.createStatement()) {
                 stmt.execute("""
                     CREATE TABLE IF NOT EXISTS nodes (
@@ -133,34 +131,6 @@ public class NodeCacheService {
         }
     }
 
-    /**
-     * Миграция со старой схемы (node_num INT PK) на новую (node_id VARCHAR PK).
-     * Старые таблицы удаляются — кэш нод восстанавливается при подключении.
-     */
-    private void migrateIfNeeded() {
-        try {
-            boolean needsMigration = false;
-            try (ResultSet rs = dbConnection.getMetaData()
-                    .getPrimaryKeys(null, null, "NODES")) {
-                while (rs.next()) {
-                    if ("NODE_NUM".equalsIgnoreCase(rs.getString("COLUMN_NAME"))) {
-                        needsMigration = true;
-                    }
-                }
-            }
-            if (needsMigration) {
-                log.info("Migrating DB schema: node_num PK -> node_id PK");
-                try (Statement stmt = dbConnection.createStatement()) {
-                    stmt.execute("DROP TABLE IF EXISTS nodes");
-                    stmt.execute("DROP TABLE IF EXISTS telemetry_history");
-                }
-                log.info("Old tables dropped, will be recreated with new schema");
-            }
-        } catch (SQLException e) {
-            log.debug("Migration check skipped (tables may not exist yet): {}", e.getMessage());
-        }
-    }
-
     // ═══════════════════════════════════════════════════════════
     //  Чтение
     // ═══════════════════════════════════════════════════════════
@@ -174,7 +144,7 @@ public class NodeCacheService {
         NodeData node = cache.get(nodeId);
         if (node == null) {
             node = loadFromDb(nodeId);
-            if (node != null && node.hasName()) {
+            if (node != null) {
                 cache.put(nodeId, node);
             }
         }
@@ -276,16 +246,22 @@ public class NodeCacheService {
         if (fresh == null) return;
         String nodeId = fresh.getNodeId();
         if (nodeId == null || nodeId.isEmpty()) return;
+        log.info("CACHE_DEBUG update: nodeId={}, fresh.hasName={}, fresh.longName='{}'",
+                nodeId, fresh.hasName(), fresh.getLongName());
         cache.compute(nodeId, (key, existing) -> {
             if (existing == null) {
                 existing = loadFromDb(nodeId);
+                log.info("CACHE_DEBUG compute: loadFromDb={}", existing != null);
             }
             if (existing == null) {
                 existing = new NodeData(fresh.getNodeNum());
                 existing.setNodeId(nodeId);
+                log.info("CACHE_DEBUG compute: created new NodeData");
             }
             merge(existing, fresh);
-            return existing.hasName() ? existing : null;
+            log.info("CACHE_DEBUG compute: after merge hasName={}, longName='{}'",
+                    existing.hasName(), existing.getLongName());
+            return existing;
         });
         persistNode(nodeId);
     }
@@ -310,7 +286,7 @@ public class NodeCacheService {
                     existing.setNodeId(nodeId);
                 }
                 merge(existing, fresh);
-                return existing.hasName() ? existing : null;
+                return existing;
             });
             persistIds.add(nodeId);
         }
@@ -779,22 +755,23 @@ public class NodeCacheService {
 
     /**
      * Сохраняет одну ноду в БД (MERGE INTO).
-     * Ноды без имён (longName и shortName оба пусты) не сохраняются.
      */
     private synchronized void persistNode(String nodeId) {
         NodeData node = cache.get(nodeId);
-        if (node == null || mergeStmt == null || !node.hasName()) return;
+        log.info("CACHE_DEBUG persistNode: nodeId={}, inCache={}, mergeStmt={}, hasName={}",
+                nodeId, node != null, mergeStmt != null, node != null && node.hasName());
+        if (node == null || mergeStmt == null) return;
         try {
             bindNode(mergeStmt, node);
-            mergeStmt.executeUpdate();
+            int rows = mergeStmt.executeUpdate();
+            log.info("CACHE_DEBUG persistNode: OK, rows={}", rows);
         } catch (SQLException e) {
-            log.error("Failed to persist node {} to DB", nodeId, e);
+            log.error("CACHE_DEBUG persistNode FAILED for {}", nodeId, e);
         }
     }
 
     /**
      * Сохраняет набор нод в БД в одной транзакции (batch MERGE).
-     * Ноды без имён пропускаются.
      */
     private synchronized void persistAll(Set<String> nodeIds) {
         if (mergeStmt == null) return;
@@ -802,7 +779,7 @@ public class NodeCacheService {
             dbConnection.setAutoCommit(false);
             for (String nodeId : nodeIds) {
                 NodeData node = cache.get(nodeId);
-                if (node != null && node.hasName()) {
+                if (node != null) {
                     bindNode(mergeStmt, node);
                     mergeStmt.addBatch();
                 }

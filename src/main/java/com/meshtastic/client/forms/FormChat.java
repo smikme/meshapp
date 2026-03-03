@@ -677,7 +677,13 @@ public class FormChat extends Form {
     private void requestTraceroute(MeshMessage msg) {
         if (state == null || protocolHandler == null) { return; }
         NodeData targetNode = state.getNodeByNodeId(msg.getFromNodeId());
-        if (targetNode == null) { return; }
+        if (targetNode == null) {
+            String nodeId = msg.getFromNodeId();
+            if (nodeId == null || nodeId.length() < 2) return;
+            int nodeNum = (int) Long.parseUnsignedLong(nodeId.substring(1), 16);
+            targetNode = state.getOrCreateNode(nodeNum);
+            NodeCacheService.getInstance().enrichFromCache(targetNode);
+        }
         int targetNum = targetNode.getNodeNum();
         String name = nameResolver.resolveNodeName(targetNum);
         String prefix = "🔍 Traceroute → " + name;
@@ -726,7 +732,13 @@ public class FormChat extends Form {
     private void requestNodeInfo(MeshMessage msg) {
         if (state == null || protocolHandler == null) { return; }
         NodeData targetNode = state.getNodeByNodeId(msg.getFromNodeId());
-        if (targetNode == null) { return; }
+        if (targetNode == null) {
+            String nodeId = msg.getFromNodeId();
+            if (nodeId == null || nodeId.length() < 2) return;
+            int nodeNum = (int) Long.parseUnsignedLong(nodeId.substring(1), 16);
+            targetNode = state.getOrCreateNode(nodeNum);
+            NodeCacheService.getInstance().enrichFromCache(targetNode);
+        }
         int targetNum = targetNode.getNodeNum();
         String name = nameResolver.resolveNodeName(targetNum);
 

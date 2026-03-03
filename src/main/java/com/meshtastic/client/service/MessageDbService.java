@@ -56,7 +56,6 @@ public class MessageDbService {
     private void initDb() {
         try {
             dbConnection = DatabaseProvider.getConnection();
-            migrateMessagesIfNeeded();
 
             try (Statement stmt = dbConnection.createStatement()) {
                 stmt.execute("""
@@ -117,31 +116,6 @@ public class MessageDbService {
             log.info("Message DB initialized (table 'messages' in nodedb)");
         } catch (Exception e) {
             log.error("Failed to initialize message DB", e);
-        }
-    }
-
-    /**
-     * Миграция со старой схемы (from_num INT, chat_key INT) на новую (from_node_id VARCHAR, chat_key VARCHAR).
-     */
-    private void migrateMessagesIfNeeded() {
-        try {
-            boolean needsMigration = false;
-            try (ResultSet rs = dbConnection.getMetaData()
-                    .getColumns(null, null, "MESSAGES", "FROM_NUM")) {
-                if (rs.next()) {
-                    needsMigration = true;
-                }
-            }
-            if (needsMigration) {
-                log.info("Migrating messages DB: from_num/to_num -> from_node_id/to_node_id");
-                try (Statement stmt = dbConnection.createStatement()) {
-                    stmt.execute("DROP TABLE IF EXISTS messages");
-                    stmt.execute("DROP TABLE IF EXISTS chat_read_counts");
-                }
-                log.info("Old message tables dropped, will be recreated with new schema");
-            }
-        } catch (SQLException e) {
-            log.debug("Messages migration check skipped: {}", e.getMessage());
         }
     }
 
