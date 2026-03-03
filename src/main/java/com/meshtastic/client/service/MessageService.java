@@ -11,7 +11,9 @@ import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.protocol.ProtocolHandler;
-import com.meshtastic.client.service.MessageDbService;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.ThreadLocalRandom;
@@ -29,6 +31,8 @@ import java.util.concurrent.ThreadLocalRandom;
  * </ul>
  */
 public class MessageService {
+
+    private static final Logger log = LoggerFactory.getLogger(MessageService.class);
 
     private MessageService() {}
 
@@ -54,6 +58,12 @@ public class MessageService {
         if (replyId != 0) dataBuilder.setReplyId(replyId);
         MeshProtos.Data data = dataBuilder.build();
 
+        if (replyId != 0) {
+            byte[] dataBytes = data.toByteArray();
+            log.info("REPLY_DEBUG send channel: replyId={} (0x{}), data bytes={}",
+                    replyId, Integer.toHexString(replyId), bytesToHex(dataBytes));
+        }
+
         MeshProtos.MeshPacket packet = MeshProtos.MeshPacket.newBuilder()
                 .setFrom(state.getMyNodeNum())
                 .setTo(0xFFFFFFFF)
@@ -69,7 +79,10 @@ public class MessageService {
 
         handler.sendToRadio(toRadio);
 
-        MeshMessage msg = new MeshMessage(state.getMyNodeNum(), 0xFFFFFFFF, channelIndex, text, now, true);
+        NodeData myNode = state.getNodeDb().get(state.getMyNodeNum());
+        String myNodeId = myNode != null ? myNode.getNodeId() : null;
+
+        MeshMessage msg = new MeshMessage(myNodeId, "!ffffffff", channelIndex, text, now, true);
         msg.setStatus(MeshMessage.DeliveryStatus.SENDING);
         msg.setPacketId(packetId);
         if (replyId != 0) {
@@ -78,12 +91,11 @@ public class MessageService {
             if (original != null) msg.setReplyText(original.getText());
         }
 
-        NodeData myNode = state.getNodeDb().get(state.getMyNodeNum());
         if (myNode != null && myNode.getLongName() != null) {
             msg.setSenderName(myNode.getLongName());
         }
 
-        MessageDbService.getInstance().save(msg, "channel", channelIndex);
+        MessageDbService.getInstance().save(msg, "channel", String.valueOf(channelIndex));
         state.addMessage(msg);
         state.registerPendingAck(packetId, msg);
         return msg;
@@ -96,20 +108,30 @@ public class MessageService {
      *
      * @param handler      протокол-обработчик для отправки
      * @param state        состояние устройства
-     * @param peerNodeNum  номер ноды-получателя
+     * @param peerNodeId   node_id получателя (например {@code "!9e755af0"})
      * @param text         текст сообщения
      * @param replyId      packetId цитируемого сообщения (0 — без цитаты)
      * @return созданное сообщение в статусе {@code SENDING}
      */
-    public static MeshMessage sendDirectMessage(ProtocolHandler handler, DeviceState state, int peerNodeNum, String text, int replyId) {
+    public static MeshMessage sendDirectMessage(ProtocolHandler handler, DeviceState state, String peerNodeId, String text, int replyId) {
         int packetId = ThreadLocalRandom.current().nextInt(1, Integer.MAX_VALUE);
         long now = System.currentTimeMillis() / 1000;
+
+        // Для протокола нужен int nodeNum — получаем через lookup NodeData
+        NodeData peerNode = state.getNodeByNodeId(peerNodeId);
+        int peerNodeNum = peerNode != null ? peerNode.getNodeNum() : 0;
 
         MeshProtos.Data.Builder dataBuilder = MeshProtos.Data.newBuilder()
                 .setPortnum(Portnums.PortNum.TEXT_MESSAGE_APP)
                 .setPayload(ByteString.copyFrom(text, StandardCharsets.UTF_8));
         if (replyId != 0) dataBuilder.setReplyId(replyId);
         MeshProtos.Data data = dataBuilder.build();
+
+        if (replyId != 0) {
+            byte[] dataBytes = data.toByteArray();
+            log.info("REPLY_DEBUG send DM: replyId={} (0x{}), data bytes={}",
+                    replyId, Integer.toHexString(replyId), bytesToHex(dataBytes));
+        }
 
         MeshProtos.MeshPacket packet = MeshProtos.MeshPacket.newBuilder()
                 .setFrom(state.getMyNodeNum())
@@ -125,7 +147,10 @@ public class MessageService {
 
         handler.sendToRadio(toRadio);
 
-        MeshMessage msg = new MeshMessage(state.getMyNodeNum(), peerNodeNum, 0, text, now, true);
+        NodeData myNode = state.getNodeDb().get(state.getMyNodeNum());
+        String myNodeId = myNode != null ? myNode.getNodeId() : null;
+
+        MeshMessage msg = new MeshMessage(myNodeId, peerNodeId, 0, text, now, true);
         msg.setStatus(MeshMessage.DeliveryStatus.SENDING);
         msg.setPacketId(packetId);
         if (replyId != 0) {
@@ -134,13 +159,12 @@ public class MessageService {
             if (original != null) msg.setReplyText(original.getText());
         }
 
-        NodeData myNode = state.getNodeDb().get(state.getMyNodeNum());
         if (myNode != null && myNode.getLongName() != null) {
             msg.setSenderName(myNode.getLongName());
         }
 
-        MessageDbService.getInstance().save(msg, "dm", peerNodeNum);
-        state.addDirectMessage(msg, peerNodeNum);
+        MessageDbService.getInstance().save(msg, "dm", peerNodeId);
+        state.addDirectMessage(msg, peerNodeId);
         state.registerPendingAck(packetId, msg);
         return msg;
     }
@@ -399,5 +423,11 @@ public class MessageService {
                 .build();
 
         handler.sendToRadio(toRadio);
+    }
+
+    private static String bytesToHex(byte[] bytes) {
+        StringBuilder sb = new StringBuilder(bytes.length * 2);
+        for (byte b : bytes) sb.append(String.format("%02x", b));
+        return sb.toString();
     }
 }

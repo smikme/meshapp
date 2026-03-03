@@ -1,10 +1,15 @@
 package com.meshtastic.client.utils;
 
+import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.NodeData;
+import com.meshtastic.client.service.NodeCacheService;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.collections.ObservableList;
-import javafx.scene.control.TableColumn;
-import javafx.scene.control.TableView;
+import javafx.scene.control.*;
+import javafx.scene.input.Clipboard;
+import javafx.scene.input.ClipboardContent;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Общие утилиты для работы с нодами — аватары, цвета, таблица деталей.
@@ -12,7 +17,61 @@ import javafx.scene.control.TableView;
  */
 public final class NodeUtils {
 
+    private static final Logger log = LoggerFactory.getLogger(NodeUtils.class);
+
     private NodeUtils() {}
+
+    /**
+     * Разрешить ноду по номеру: DeviceState → обогащение из кэша если bare → fallback на кэш.
+     *
+     * @param state    состояние устройства (может быть {@code null})
+     * @param nodeNum  номер ноды
+     * @return NodeData с максимально полными данными, или {@code null} если нигде не найдена
+     */
+    public static NodeData resolveNode(DeviceState state, int nodeNum) {
+        NodeData node = state != null ? state.getNodeDb().get(nodeNum) : null;
+        if (node != null && !node.hasName()) {
+            NodeCacheService.getInstance().enrichFromCache(node);
+            if (node.hasName()) {
+                log.debug("resolveNode: enriched {} from cache → '{}'",
+                        node.getNodeId(), node.getLongName());
+            }
+        }
+        if (node == null) {
+            node = NodeCacheService.getInstance().getByNum(nodeNum);
+            if (node != null) {
+                log.debug("resolveNode: !{} not in DeviceState, loaded from cache → '{}'",
+                        Integer.toHexString(nodeNum), node.getLongName());
+            }
+        }
+        return node;
+    }
+
+    /**
+     * Разрешить ноду по nodeId: DeviceState → обогащение из кэша если bare → fallback на кэш.
+     *
+     * @param state   состояние устройства (может быть {@code null})
+     * @param nodeId  идентификатор ноды (например {@code "!9e755af0"})
+     * @return NodeData с максимально полными данными, или {@code null} если нигде не найдена
+     */
+    public static NodeData resolveNode(DeviceState state, String nodeId) {
+        NodeData node = state != null ? state.getNodeByNodeId(nodeId) : null;
+        if (node != null && !node.hasName()) {
+            NodeCacheService.getInstance().enrichFromCache(node);
+            if (node.hasName()) {
+                log.debug("resolveNode: enriched {} from cache → '{}'",
+                        node.getNodeId(), node.getLongName());
+            }
+        }
+        if (node == null) {
+            node = NodeCacheService.getInstance().get(nodeId);
+            if (node != null) {
+                log.debug("resolveNode: {} not in DeviceState, loaded from cache → '{}'",
+                        nodeId, node.getLongName());
+            }
+        }
+        return node;
+    }
 
     /** Цвет аватара по роли ноды */
     public static String roleColor(String role) {
@@ -84,6 +143,27 @@ public final class NodeUtils {
         });
         valCol.setSortable(false);
         valCol.setStyle("-fx-font-weight: bold;");
+        valCol.setCellFactory(col -> new TableCell<>() {
+            @Override
+            protected void updateItem(String value, boolean empty) {
+                super.updateItem(value, empty);
+                if (empty || value == null || value.equals("—")) {
+                    setText(empty ? null : "—");
+                    setStyle("-fx-font-weight: bold;");
+                    setContextMenu(null);
+                } else {
+                    setText(value);
+                    setStyle("-fx-font-weight: bold;");
+                    MenuItem copyItem = new MenuItem("Копировать");
+                    copyItem.setOnAction(e -> {
+                        ClipboardContent cc = new ClipboardContent();
+                        cc.putString(value);
+                        Clipboard.getSystemClipboard().setContent(cc);
+                    });
+                    setContextMenu(new ContextMenu(copyItem));
+                }
+            }
+        });
 
         table.getColumns().add(keyCol);
         table.getColumns().add(valCol);

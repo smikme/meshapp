@@ -23,8 +23,8 @@ public class MeshMessage {
      */
     public enum DeliveryStatus { SENDING, DELIVERED, FAILED }
 
-    private final int fromNum;
-    private final int toNum;
+    private final String fromNodeId;
+    private final String toNodeId;
     private final int channelIndex;
     private final String text;
     private final long timestamp;
@@ -46,24 +46,24 @@ public class MeshMessage {
     /**
      * Создаёт сообщение с основными полями.
      *
-     * @param fromNum      номер ноды-отправителя
-     * @param toNum        номер ноды-получателя ({@code 0xFFFFFFFF} для broadcast)
+     * @param fromNodeId   node_id отправителя (например {@code "!9e755af0"})
+     * @param toNodeId     node_id получателя ({@code "!ffffffff"} для broadcast)
      * @param channelIndex индекс канала (0 для primary)
      * @param text         текст сообщения (UTF-8)
      * @param timestamp    время в секундах с начала эпохи (epoch seconds)
      * @param outgoing     {@code true} если сообщение отправлено с этого устройства
      */
-    public MeshMessage(int fromNum, int toNum, int channelIndex, String text, long timestamp, boolean outgoing) {
-        this.fromNum = fromNum;
-        this.toNum = toNum;
+    public MeshMessage(String fromNodeId, String toNodeId, int channelIndex, String text, long timestamp, boolean outgoing) {
+        this.fromNodeId = fromNodeId;
+        this.toNodeId = toNodeId;
         this.channelIndex = channelIndex;
         this.text = text;
         this.timestamp = timestamp;
         this.outgoing = outgoing;
     }
 
-    public int getFromNum() { return fromNum; }
-    public int getToNum() { return toNum; }
+    public String getFromNodeId() { return fromNodeId; }
+    public String getToNodeId() { return toNodeId; }
     public int getChannelIndex() { return channelIndex; }
     public String getText() { return text; }
     public long getTimestamp() { return timestamp; }

@@ -36,7 +36,8 @@ public class NodeDetailContent extends HBox {
 
     private final TelemetryChartPanel chartPanel;
     private final ObservableList<String[]> tableData;
-    private final int nodeNum;
+    private final int nodeNum;     // для протокольных операций (requestNodeInfo, removeNode)
+    private final String nodeId;   // для идентификации (openDirectChat, deleteNode)
     private final ProtocolHandler protocolHandler;
     private final DeviceState state;
 
@@ -49,6 +50,7 @@ public class NodeDetailContent extends HBox {
      */
     public NodeDetailContent(DeviceState state, NodeData node, ProtocolHandler handler, Runnable onBeforeNavigate) {
         this.nodeNum = node.getNodeNum();
+        this.nodeId = node.getNodeId();
         this.protocolHandler = handler;
         this.state = state;
 
@@ -81,7 +83,7 @@ public class NodeDetailContent extends HBox {
             }
             FormChat formChat = (FormChat) AllForms.getForm(FormChat.class);
             FormManager.showForm(formChat);
-            formChat.openDirectChat(node.getNodeNum(), node);
+            formChat.openDirectChat(node.getNodeId(), node);
         });
 
         // Кнопка «Обновить ноду» — запрос информации по радио
@@ -122,7 +124,7 @@ public class NodeDetailContent extends HBox {
                         confirmed -> {
                             if (confirmed) {
                                 this.state.removeNode(nodeNum);
-                                NodeCacheService.getInstance().deleteNode(nodeNum);
+                                NodeCacheService.getInstance().deleteNode(nodeId);
                                 if (onBeforeNavigate != null) {
                                     onBeforeNavigate.run();
                                 }
@@ -185,7 +187,7 @@ public class NodeDetailContent extends HBox {
         chartPanel = new TelemetryChartPanel();
         VBox.setVgrow(chartPanel, Priority.ALWAYS);
         if (state != null) {
-            chartPanel.bind(state, node.getNodeNum());
+            chartPanel.bind(state, node.getNodeId());
         }
 
         VBox contentPane = new VBox(10, header, sep, table, chartPanel);

@@ -3,6 +3,7 @@ package com.meshtastic.client.components.chat;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.model.NodeData;
+import com.meshtastic.client.utils.NodeUtils;
 
 /**
  * Разрешение имён нод и отправителей для чата.
@@ -30,13 +31,11 @@ public class ChatNameResolver {
      * @return отображаемое имя
      */
     public String resolveNodeName(int nodeNum) {
-        if (state != null) {
-            NodeData node = state.getNodeDb().get(nodeNum);
-            if (node != null
-                    && node.getLongName() != null
-                    && !node.getLongName().isEmpty()) {
-                return node.getLongName();
-            }
+        NodeData node = NodeUtils.resolveNode(state, nodeNum);
+        if (node != null
+                && node.getLongName() != null
+                && !node.getLongName().isEmpty()) {
+            return node.getLongName();
         }
         return "!" + String.format("%08x", nodeNum);
     }
@@ -45,23 +44,21 @@ public class ChatNameResolver {
      * Определить имя отправителя для цитаты ответа.
      *
      * @param msg сообщение
-     * @return «Вы» для исходящих, longName / senderName / {@code !hex} для входящих
+     * @return «Вы» для исходящих, longName / senderName / nodeId для входящих
      */
     public String resolveSenderName(MeshMessage msg) {
         if (msg.isOutgoing()) {
             return "Вы";
         }
-        if (state != null) {
-            NodeData node = state.getNodeDb().get(msg.getFromNum());
-            if (node != null
-                    && node.getLongName() != null
-                    && !node.getLongName().isEmpty()) {
-                return node.getLongName();
-            }
+        NodeData node = NodeUtils.resolveNode(state, msg.getFromNodeId());
+        if (node != null
+                && node.getLongName() != null
+                && !node.getLongName().isEmpty()) {
+            return node.getLongName();
         }
         if (msg.getSenderName() != null && !msg.getSenderName().isEmpty()) {
             return msg.getSenderName();
         }
-        return "!" + String.format("%08x", msg.getFromNum());
+        return msg.getFromNodeId();
     }
 }
