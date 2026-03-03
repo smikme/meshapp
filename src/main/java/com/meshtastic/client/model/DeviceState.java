@@ -20,7 +20,6 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
-import java.util.function.Consumer;
 
 /**
  * Центральное хранилище состояния подключённого Meshtastic-устройства.
@@ -53,7 +52,7 @@ public class DeviceState {
     private final List<ConfigProtos.Config> configs = Collections.synchronizedList(new ArrayList<>());
     private final List<ModuleConfigProtos.ModuleConfig> moduleConfigs = Collections.synchronizedList(new ArrayList<>());
     private final Map<Integer, List<MeshMessage>> messagesByChannel = new ConcurrentHashMap<>();
-    private final Map<Integer, List<MeshMessage>> directMessages = new ConcurrentHashMap<>();
+    private final Map<String, List<MeshMessage>> directMessages = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<Integer, PendingAckEntry> pendingAcks = new ConcurrentHashMap<>();
 
     private final ScheduledExecutorService ackTimeoutExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
@@ -258,15 +257,15 @@ public class DeviceState {
 
     /**
      * Добавляет личное (DM) сообщение с дедупликацией по {@code packetId}.
-     * Сообщения группируются по {@code peerNodeNum} — номеру собеседника.
+     * Сообщения группируются по {@code peerNodeId} — node_id собеседника.
      * Дубликаты (повторные ретрансляции) игнорируются.
      *
-     * @param msg         сообщение для добавления
-     * @param peerNodeNum номер ноды собеседника (ключ группировки)
+     * @param msg        сообщение для добавления
+     * @param peerNodeId node_id собеседника (ключ группировки)
      */
-    public void addDirectMessage(MeshMessage msg, int peerNodeNum) {
+    public void addDirectMessage(MeshMessage msg, String peerNodeId) {
         List<MeshMessage> list = directMessages
-                .computeIfAbsent(peerNodeNum, k -> Collections.synchronizedList(new ArrayList<>()));
+                .computeIfAbsent(peerNodeId, k -> Collections.synchronizedList(new ArrayList<>()));
         // Дедупликация по packetId (радио может ретранслировать пакеты)
         if (msg.getPacketId() != 0) {
             synchronized (list) {
@@ -279,24 +278,39 @@ public class DeviceState {
         fireMessageListeners();
     }
 
-    public List<MeshMessage> getDirectMessages(int peerNodeNum) {
-        List<MeshMessage> list = directMessages.get(peerNodeNum);
+    public List<MeshMessage> getDirectMessages(String peerNodeId) {
+        List<MeshMessage> list = directMessages.get(peerNodeId);
         return list != null ? list : Collections.emptyList();
     }
 
-    public Map<Integer, List<MeshMessage>> getAllDirectMessages() {
+    public Map<String, List<MeshMessage>> getAllDirectMessages() {
         return directMessages;
     }
 
-    public void removeDirectMessages(int peerNodeNum) {
-        directMessages.remove(peerNodeNum);
+    public void removeDirectMessages(String peerNodeId) {
+        directMessages.remove(peerNodeId);
     }
 
     /** Удалить ноду из nodeDb и directMessages, оповестить listener'ы. */
     public void removeNode(int nodeNum) {
+        NodeData node = nodeDb.get(nodeNum);
         nodeDb.remove(nodeNum);
-        directMessages.remove(nodeNum);
+        if (node != null && node.getNodeId() != null) {
+            directMessages.remove(node.getNodeId());
+        }
         fireNodeUpdateListeners(nodeNum);
+    }
+
+    /**
+     * Найти ноду по node_id (перебор nodeDb.values()).
+     * @return NodeData или {@code null}
+     */
+    public NodeData getNodeByNodeId(String nodeId) {
+        if (nodeId == null) return null;
+        for (NodeData n : nodeDb.values()) {
+            if (nodeId.equals(n.getNodeId())) return n;
+        }
+        return null;
     }
 
     public Map<Integer, List<MeshMessage>> getAllChannelMessages() {

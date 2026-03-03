@@ -7,6 +7,7 @@ import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.model.TelemetryEntry;
 import com.meshtastic.client.service.ConnectionManager;
 import com.meshtastic.client.system.Form;
+import com.meshtastic.client.utils.NodeUtils;
 import com.meshtastic.client.utils.SystemForm;
 import javafx.application.Platform;
 import javafx.collections.FXCollections;
@@ -113,8 +114,10 @@ public class FormDashboard extends Form {
             return;
         }
 
-        // bind() внутри проверяет — если state и nodeNum не изменились, просто обновит данные
-        chartPanel.bind(state, state.getMyNodeNum());
+        // bind() внутри проверяет — если state и nodeId не изменились, просто обновит данные
+        NodeData myNode = state.getNodeDb().get(state.getMyNodeNum());
+        String myNodeId = myNode != null ? myNode.getNodeId() : String.format("!%08x", state.getMyNodeNum());
+        chartPanel.bind(state, myNodeId);
     }
 
     /** Вызывается из TelemetryChartPanel после обновления данных графика */
@@ -208,9 +211,9 @@ public class FormDashboard extends Form {
             this.airUtil = String.format("%.1f%%", e.getAirUtilTx());
 
             // Имя ноды
-            String nodeName = String.format("!%08x", e.getNodeNum());
+            String nodeName = e.getNodeId() != null ? e.getNodeId() : "?";
             if (state != null) {
-                NodeData nd = state.getNodeDb().get(e.getNodeNum());
+                NodeData nd = state.getNodeByNodeId(e.getNodeId());
                 if (nd != null && nd.getLongName() != null && !nd.getLongName().isEmpty()) {
                     nodeName = nd.getLongName();
                 }

@@ -120,7 +120,7 @@ public class ConfigExchangeService implements FromRadioListener {
             // (пропускаем полностью нулевые записи — артефакты config exchange)
             if (dm.getBatteryLevel() != 0 || dm.getChannelUtilization() != 0 || dm.getAirUtilTx() != 0) {
                 long ts = nodeInfo.getLastHeard() > 0 ? nodeInfo.getLastHeard() : System.currentTimeMillis() / 1000;
-                TelemetryEntry entry = new TelemetryEntry(ts, nodeInfo.getNum());
+                TelemetryEntry entry = new TelemetryEntry(ts, node.getNodeId());
                 entry.setBatteryLevel(dm.getBatteryLevel());
                 entry.setVoltage(dm.getVoltage());
                 entry.setChannelUtilization(dm.getChannelUtilization());

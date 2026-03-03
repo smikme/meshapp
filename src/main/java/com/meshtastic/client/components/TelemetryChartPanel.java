@@ -20,6 +20,7 @@ import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * Переиспользуемый компонент: AreaChart телеметрии + панель фильтра по периоду.
@@ -52,7 +53,7 @@ public class TelemetryChartPanel extends VBox {
     private long selectedPeriodSeconds = PERIOD_6H;
 
     private DeviceState state;
-    private int nodeNum;
+    private String nodeId;
     private final Runnable telemetryListener = () -> Platform.runLater(this::refresh);
 
     /** Callback, вызываемый после обновления данных (для синхронизации таблицы логов) */
@@ -87,12 +88,12 @@ public class TelemetryChartPanel extends VBox {
     }
 
     /**
-     * Привязать компонент к состоянию устройства и номеру ноды.
+     * Привязать компонент к состоянию устройства и идентификатору ноды.
      * Подписывается на обновления телеметрии и загружает данные.
-     * Если уже привязан к тому же state и nodeNum — просто обновляет данные без переподписки.
+     * Если уже привязан к тому же state и nodeId — просто обновляет данные без переподписки.
      */
-    public void bind(DeviceState state, int nodeNum) {
-        if (this.state == state && this.nodeNum == nodeNum) {
+    public void bind(DeviceState state, String nodeId) {
+        if (this.state == state && Objects.equals(this.nodeId, nodeId)) {
             // Уже привязан к тем же данным — просто обновить
             refresh();
             return;
@@ -100,7 +101,7 @@ public class TelemetryChartPanel extends VBox {
 
         unbind();
         this.state = state;
-        this.nodeNum = nodeNum;
+        this.nodeId = nodeId;
 
         if (this.state != null) {
             this.state.addTelemetryListener(telemetryListener);
@@ -116,7 +117,7 @@ public class TelemetryChartPanel extends VBox {
             this.state.removeTelemetryListener(telemetryListener);
         }
         this.state = null;
-        this.nodeNum = 0;
+        this.nodeId = null;
         this.filteredEntries = Collections.emptyList();
         chart.getData().clear();
         chart.setTitle(null);
@@ -134,7 +135,7 @@ public class TelemetryChartPanel extends VBox {
     // ==================== Обновление данных ====================
 
     private void refresh() {
-        if (state == null || nodeNum == 0) {
+        if (state == null || nodeId == null) {
             chart.getData().clear();
             chart.setTitle("Нет подключения");
             ((NumberAxis) chart.getXAxis()).setAutoRanging(true);
@@ -148,7 +149,7 @@ public class TelemetryChartPanel extends VBox {
         long maxTs = now + 300; // допуск 5 мин на рассинхронизацию часов
 
         filteredEntries = NodeCacheService.getInstance()
-                .loadTelemetryForNode(nodeNum, sinceEpoch, maxTs);
+                .loadTelemetryForNode(nodeId, sinceEpoch, maxTs);
 
         updateChart(filteredEntries);
 

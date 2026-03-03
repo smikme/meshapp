@@ -75,7 +75,12 @@ public class MessageListenerService implements FromRadioListener {
 
         if (outgoing) return; // outgoing messages are already added by MessageService
 
-        MeshMessage msg = new MeshMessage(from, to, channel, text, timestamp, false);
+        // Lookup nodeId через NodeData (не математическая конвертация)
+        NodeData fromNode = deviceState.getOrCreateNode(from);
+        String fromNodeId = fromNode.getNodeId();
+        String toNodeId = (to == 0xFFFFFFFF) ? "!ffffffff" : deviceState.getOrCreateNode(to).getNodeId();
+
+        MeshMessage msg = new MeshMessage(fromNodeId, toNodeId, channel, text, timestamp, false);
         msg.setPacketId(packet.getId());
         msg.setHopStart(packet.getHopStart());
         msg.setHopLimit(packet.getHopLimit());
@@ -83,28 +88,28 @@ public class MessageListenerService implements FromRadioListener {
         msg.setRxSnr(packet.getRxSnr());
 
         if (data.getReplyId() != 0) {
+            log.info("REPLY_DEBUG recv: reply_id={} (0x{}) from {}",
+                    data.getReplyId(), Integer.toHexString(data.getReplyId()), fromNodeId);
             msg.setReplyId(data.getReplyId());
             MeshMessage original = deviceState.findMessageByPacketId(data.getReplyId());
             if (original != null) msg.setReplyText(original.getText());
         }
 
-        NodeData node = deviceState.getNodeDb().get(from);
-        if (node != null && node.getLongName() != null) {
-            msg.setSenderName(node.getLongName());
+        if (fromNode.getLongName() != null) {
+            msg.setSenderName(fromNode.getLongName());
         }
 
         boolean isDirect = to != 0xFFFFFFFF;
         if (isDirect) {
-            int peer = from;
             msg.setStatus(MeshMessage.DeliveryStatus.DELIVERED);
-            MessageDbService.getInstance().save(msg, "dm", peer);
-            deviceState.addDirectMessage(msg, peer);
-            log.info("Received DM from !{}: {}", Integer.toHexString(from), text);
+            MessageDbService.getInstance().save(msg, "dm", fromNodeId);
+            deviceState.addDirectMessage(msg, fromNodeId);
+            log.info("Received DM from {}: {}", fromNodeId, text);
         } else {
             msg.setStatus(MeshMessage.DeliveryStatus.DELIVERED);
-            MessageDbService.getInstance().save(msg, "channel", channel);
+            MessageDbService.getInstance().save(msg, "channel", String.valueOf(channel));
             deviceState.addMessage(msg);
-            log.info("Received channel {} message from !{}: {}", channel, Integer.toHexString(from), text);
+            log.info("Received channel {} message from {}: {}", channel, fromNodeId, text);
         }
     }
 
@@ -163,7 +168,7 @@ public class MessageListenerService implements FromRadioListener {
                 node.setPublicKey(user.getPublicKey().toByteArray());
             }
             deviceState.fireNodeUpdateListeners(fromNum);
-            NodeCacheService.getInstance().update(fromNum, node);
+            NodeCacheService.getInstance().update(node);
             log.info("Received NODEINFO_APP from !{}: {}", Integer.toHexString(fromNum), user.getLongName());
         } catch (InvalidProtocolBufferException e) {
             log.warn("Failed to parse User from NODEINFO_APP packet from !{}", Integer.toHexString(fromNum), e);
@@ -185,7 +190,7 @@ public class MessageListenerService implements FromRadioListener {
             if (position.getLongitudeI() != 0) node.setLongitude(position.getLongitudeI() * 1e-7);
             if (position.getAltitude() != 0) node.setAltitude(position.getAltitude());
             deviceState.fireNodeUpdateListeners(fromNum);
-            NodeCacheService.getInstance().update(fromNum, node);
+            NodeCacheService.getInstance().update(node);
             log.info("Received POSITION_APP from !{}", Integer.toHexString(fromNum));
         } catch (InvalidProtocolBufferException e) {
             log.warn("Failed to parse Position from POSITION_APP packet from !{}", Integer.toHexString(fromNum), e);
@@ -200,9 +205,9 @@ public class MessageListenerService implements FromRadioListener {
 
             long ts = telemetry.getTime() > 0 ? telemetry.getTime()
                     : (packet.getRxTime() > 0 ? packet.getRxTime() : System.currentTimeMillis() / 1000);
-            TelemetryEntry entry = new TelemetryEntry(ts, fromNum);
 
             NodeData node = deviceState.getOrCreateNode(fromNum);
+            TelemetryEntry entry = new TelemetryEntry(ts, node.getNodeId());
             if (!node.hasName()) {
                 NodeCacheService.getInstance().enrichFromCache(node);
             }
@@ -222,7 +227,7 @@ public class MessageListenerService implements FromRadioListener {
                 entry.setAirUtilTx(dm.getAirUtilTx());
 
                 deviceState.fireNodeUpdateListeners(fromNum);
-                NodeCacheService.getInstance().update(fromNum, node);
+                NodeCacheService.getInstance().update(node);
                 log.info("Received TELEMETRY_APP (device) from !{}", Integer.toHexString(fromNum));
             }
 
@@ -237,7 +242,7 @@ public class MessageListenerService implements FromRadioListener {
                 entry.setBarometricPressure(em.getBarometricPressure());
 
                 deviceState.fireNodeUpdateListeners(fromNum);
-                NodeCacheService.getInstance().update(fromNum, node);
+                NodeCacheService.getInstance().update(node);
                 log.info("Received TELEMETRY_APP (environment) from !{}", Integer.toHexString(fromNum));
             }
 

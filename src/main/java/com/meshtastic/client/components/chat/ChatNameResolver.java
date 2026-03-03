@@ -44,13 +44,13 @@ public class ChatNameResolver {
      * Определить имя отправителя для цитаты ответа.
      *
      * @param msg сообщение
-     * @return «Вы» для исходящих, longName / senderName / {@code !hex} для входящих
+     * @return «Вы» для исходящих, longName / senderName / nodeId для входящих
      */
     public String resolveSenderName(MeshMessage msg) {
         if (msg.isOutgoing()) {
             return "Вы";
         }
-        NodeData node = NodeUtils.resolveNode(state, msg.getFromNum());
+        NodeData node = NodeUtils.resolveNode(state, msg.getFromNodeId());
         if (node != null
                 && node.getLongName() != null
                 && !node.getLongName().isEmpty()) {
@@ -59,6 +59,6 @@ public class ChatNameResolver {
         if (msg.getSenderName() != null && !msg.getSenderName().isEmpty()) {
             return msg.getSenderName();
         }
-        return "!" + String.format("%08x", msg.getFromNum());
+        return msg.getFromNodeId();
     }
 }

@@ -33,15 +33,41 @@ public final class NodeUtils {
         if (node != null && !node.hasName()) {
             NodeCacheService.getInstance().enrichFromCache(node);
             if (node.hasName()) {
-                log.debug("resolveNode: enriched !{} from cache → '{}'",
-                        Integer.toHexString(nodeNum), node.getLongName());
+                log.debug("resolveNode: enriched {} from cache → '{}'",
+                        node.getNodeId(), node.getLongName());
             }
         }
         if (node == null) {
-            node = NodeCacheService.getInstance().get(nodeNum);
+            node = NodeCacheService.getInstance().getByNum(nodeNum);
             if (node != null) {
                 log.debug("resolveNode: !{} not in DeviceState, loaded from cache → '{}'",
                         Integer.toHexString(nodeNum), node.getLongName());
+            }
+        }
+        return node;
+    }
+
+    /**
+     * Разрешить ноду по nodeId: DeviceState → обогащение из кэша если bare → fallback на кэш.
+     *
+     * @param state   состояние устройства (может быть {@code null})
+     * @param nodeId  идентификатор ноды (например {@code "!9e755af0"})
+     * @return NodeData с максимально полными данными, или {@code null} если нигде не найдена
+     */
+    public static NodeData resolveNode(DeviceState state, String nodeId) {
+        NodeData node = state != null ? state.getNodeByNodeId(nodeId) : null;
+        if (node != null && !node.hasName()) {
+            NodeCacheService.getInstance().enrichFromCache(node);
+            if (node.hasName()) {
+                log.debug("resolveNode: enriched {} from cache → '{}'",
+                        node.getNodeId(), node.getLongName());
+            }
+        }
+        if (node == null) {
+            node = NodeCacheService.getInstance().get(nodeId);
+            if (node != null) {
+                log.debug("resolveNode: {} not in DeviceState, loaded from cache → '{}'",
+                        nodeId, node.getLongName());
             }
         }
         return node;

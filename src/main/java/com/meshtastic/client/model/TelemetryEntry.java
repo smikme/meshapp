@@ -7,7 +7,7 @@ package com.meshtastic.client.model;
 public class TelemetryEntry {
 
     private final long timestamp; // epoch seconds
-    private final int nodeNum;
+    private final String nodeId;
 
     // DeviceMetrics
     private int batteryLevel;
@@ -20,13 +20,13 @@ public class TelemetryEntry {
     private float relativeHumidity;
     private float barometricPressure;
 
-    public TelemetryEntry(long timestamp, int nodeNum) {
+    public TelemetryEntry(long timestamp, String nodeId) {
         this.timestamp = timestamp;
-        this.nodeNum = nodeNum;
+        this.nodeId = nodeId;
     }
 
     public long getTimestamp() { return timestamp; }
-    public int getNodeNum() { return nodeNum; }
+    public String getNodeId() { return nodeId; }
 
     public int getBatteryLevel() { return batteryLevel; }
     public void setBatteryLevel(int batteryLevel) { this.batteryLevel = batteryLevel; }

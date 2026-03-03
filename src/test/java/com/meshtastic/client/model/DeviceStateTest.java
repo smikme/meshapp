@@ -31,7 +31,7 @@ class DeviceStateTest {
     // ═══════════════════════════════════════════════════════════
 
     private static MeshMessage createMessage(int channelIndex, int packetId, String text) {
-        MeshMessage msg = new MeshMessage(1, 2, channelIndex, text,
+        MeshMessage msg = new MeshMessage("!00000001", "!00000002", channelIndex, text,
                 System.currentTimeMillis() / 1000, false);
         msg.setPacketId(packetId);
         return msg;
@@ -93,10 +93,10 @@ class DeviceStateTest {
     @Test
     void testAddDirectMessageStoresInCorrectPeer() {
         MeshMessage msg = createMessage(0, 200, "DM");
-        state.addDirectMessage(msg, 42);
+        state.addDirectMessage(msg, "!0000002a");
 
-        assertEquals(1, state.getDirectMessages(42).size(), "DM should be in peer 42 list");
-        assertEquals(0, state.getDirectMessages(99).size(), "Peer 99 should be empty");
+        assertEquals(1, state.getDirectMessages("!0000002a").size(), "DM should be in peer !0000002a list");
+        assertEquals(0, state.getDirectMessages("!00000063").size(), "Peer !00000063 should be empty");
     }
 
     @Test
@@ -104,10 +104,10 @@ class DeviceStateTest {
         MeshMessage msg1 = createMessage(0, 200, "First DM");
         MeshMessage msg2 = createMessage(0, 200, "Duplicate DM");
 
-        state.addDirectMessage(msg1, 42);
-        state.addDirectMessage(msg2, 42);
+        state.addDirectMessage(msg1, "!0000002a");
+        state.addDirectMessage(msg2, "!0000002a");
 
-        assertEquals(1, state.getDirectMessages(42).size(),
+        assertEquals(1, state.getDirectMessages("!0000002a").size(),
                 "Duplicate DM packetId should be rejected");
     }
 
@@ -129,7 +129,7 @@ class DeviceStateTest {
     @Test
     void testFindMessageByPacketIdInDirectMessages() {
         MeshMessage msg = createMessage(0, 400, "Findable DM");
-        state.addDirectMessage(msg, 42);
+        state.addDirectMessage(msg, "!0000002a");
 
         MeshMessage found = state.findMessageByPacketId(400);
 
@@ -193,9 +193,9 @@ class DeviceStateTest {
         state.addConfig(ConfigProtos.Config.getDefaultInstance());
         state.addModuleConfig(ModuleConfigProtos.ModuleConfig.getDefaultInstance());
         state.addMessage(createMessage(0, 500, "msg"));
-        state.addDirectMessage(createMessage(0, 501, "dm"), 10);
+        state.addDirectMessage(createMessage(0, 501, "dm"), "!0000000a");
         state.registerPendingAck(502, createMessage(0, 502, "ack"));
-        state.addTelemetryEntry(new TelemetryEntry(System.currentTimeMillis() / 1000, 1));
+        state.addTelemetryEntry(new TelemetryEntry(System.currentTimeMillis() / 1000, "!00000001"));
 
         state.clear();
 
@@ -205,7 +205,7 @@ class DeviceStateTest {
         assertTrue(state.getConfigs().isEmpty());
         assertTrue(state.getModuleConfigs().isEmpty());
         assertEquals(0, state.getMessages(0).size());
-        assertEquals(0, state.getDirectMessages(10).size());
+        assertEquals(0, state.getDirectMessages("!0000000a").size());
         assertNull(state.resolvePendingAck(502), "Pending acks should be cleared");
         assertTrue(state.getTelemetryHistory().isEmpty());
     }

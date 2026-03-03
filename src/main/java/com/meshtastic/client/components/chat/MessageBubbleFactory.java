@@ -7,6 +7,7 @@ import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.service.MessageDbService;
+import com.meshtastic.client.service.NodeCacheService;
 import com.meshtastic.client.utils.NodeUtils;
 import javafx.beans.property.ReadOnlyDoubleProperty;
 import javafx.geometry.Pos;
@@ -127,11 +128,16 @@ public class MessageBubbleFactory {
         avatar.setCursor(Cursor.HAND);
         avatar.setOnMouseClicked(e -> {
             if (state != null) {
-                NodeData node = NodeUtils.resolveNode(state, msg.getFromNum());
+                NodeData node = NodeUtils.resolveNode(state, msg.getFromNodeId());
                 if (node == null) {
-                    node = new NodeData(msg.getFromNum());
+                    node = state.getNodeByNodeId(msg.getFromNodeId());
                 }
-                NodeDetailPanel.showForNode(state, node);
+                if (node == null) {
+                    node = NodeCacheService.getInstance().get(msg.getFromNodeId());
+                }
+                if (node != null) {
+                    NodeDetailPanel.showForNode(state, node);
+                }
             }
             e.consume();
         });
@@ -322,16 +328,18 @@ public class MessageBubbleFactory {
             }
             color = "#1EA97C";
         } else if (state != null) {
-            NodeData senderNode = NodeUtils.resolveNode(state, msg.getFromNum());
+            NodeData senderNode = NodeUtils.resolveNode(state, msg.getFromNodeId());
             if (senderNode != null
                     && senderNode.getShortName() != null
                     && !senderNode.getShortName().isEmpty()) {
                 text = senderNode.getShortName().toUpperCase();
             } else {
-                text = String.format("!%04x", msg.getFromNum() & 0xFFFF)
-                        .toUpperCase();
+                String nid = msg.getFromNodeId();
+                text = nid.length() >= 4
+                        ? nid.substring(nid.length() - 4).toUpperCase()
+                        : nid.toUpperCase();
             }
-            color = AVATAR_COLORS[Math.abs(msg.getFromNum())
+            color = AVATAR_COLORS[Math.abs(msg.getFromNodeId().hashCode())
                     % AVATAR_COLORS.length];
         } else {
             text = "?";
@@ -386,7 +394,7 @@ public class MessageBubbleFactory {
     }
 
     private String resolveSenderDisplayName(MeshMessage msg) {
-        NodeData senderNode = NodeUtils.resolveNode(state, msg.getFromNum());
+        NodeData senderNode = NodeUtils.resolveNode(state, msg.getFromNodeId());
         if (senderNode != null
                 && senderNode.getLongName() != null
                 && !senderNode.getLongName().isEmpty()) {
@@ -395,7 +403,7 @@ public class MessageBubbleFactory {
         if (msg.getSenderName() != null && !msg.getSenderName().isEmpty()) {
             return msg.getSenderName();
         }
-        return "!" + String.format("%08x", msg.getFromNum());
+        return msg.getFromNodeId();
     }
 
     private void addQuoteIfPresent(VBox content, MeshMessage msg) {
