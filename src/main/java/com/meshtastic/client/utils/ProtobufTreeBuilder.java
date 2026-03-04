@@ -8,6 +8,8 @@ import com.meshtastic.client.model.ConfigTreeItem;
 import javafx.scene.control.TreeItem;
 import org.meshtastic.proto.ConfigProtos;
 import org.meshtastic.proto.ModuleConfigProtos;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -19,6 +21,8 @@ import java.util.Map;
  * Использует protobuf reflection для автоматического обхода полей.
  */
 public final class ProtobufTreeBuilder {
+
+    private static final Logger log = LoggerFactory.getLogger(ProtobufTreeBuilder.class);
 
     /** Русские названия секций конфига */
     private static final Map<String, String> SECTION_NAMES = Map.ofEntries(
@@ -287,8 +291,8 @@ public final class ProtobufTreeBuilder {
                         || builderFd.getType() == FieldDescriptor.Type.SFIXED64) {
                     builder.setField(builderFd, ((Number) value).longValue());
                 }
-            } catch (Exception e) {
-                // intentionally ignored
+            } catch (Exception e) { //NOPMD - field type mismatch is expected and safely skipped
+                log.trace("Skipping field '{}': {}", builderFd.getName(), e.getMessage());
             }
         }
     }

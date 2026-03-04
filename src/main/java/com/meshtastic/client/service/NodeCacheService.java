@@ -594,7 +594,9 @@ public final class NodeCacheService {
             log.info("Импорт из OneMesh завершён: {} нод", imported);
         } catch (SQLException e) {
             log.error("Ошибка при batch-импорте из OneMesh", e);
-            try { dbConnection.rollback(); dbConnection.setAutoCommit(true); } catch (SQLException ex) { /* ignored */ }
+            try { dbConnection.rollback(); dbConnection.setAutoCommit(true); } catch (SQLException ex) {
+                log.debug("Rollback failed during OneMesh import recovery", ex);
+            }
             throw e;
         }
         return imported;
@@ -805,7 +807,9 @@ public final class NodeCacheService {
             log.debug("Persisted {} nodes to DB in batch", nodeIds.size());
         } catch (SQLException e) {
             log.error("Failed to batch-persist nodes to DB", e);
-            try { dbConnection.rollback(); dbConnection.setAutoCommit(true); } catch (SQLException ex) { /* ignored */ }
+            try { dbConnection.rollback(); dbConnection.setAutoCommit(true); } catch (SQLException ex) {
+                log.debug("Rollback failed during batch-persist recovery", ex);
+            }
         }
     }
 
