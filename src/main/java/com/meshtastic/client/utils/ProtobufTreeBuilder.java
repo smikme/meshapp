@@ -11,10 +11,14 @@ import org.meshtastic.proto.ModuleConfigProtos;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.google.protobuf.ByteString;
+
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * Утилита для построения дерева ConfigTreeItem из protobuf Config/ModuleConfig.
@@ -121,9 +125,8 @@ public final class ProtobufTreeBuilder {
     private static void addFieldsToTree(TreeItem<ConfigTreeItem> parent, Message message,
                                           String configType, int variantNumber) {
         for (FieldDescriptor fd : message.getDescriptorForType().getFields()) {
-            // Пропускаем repeated/map поля и bytes
-            if (fd.isRepeated()) { continue; }
-            if (fd.getType() == FieldDescriptor.Type.BYTES) { continue; }
+            // Пропускаем repeated поля (кроме repeated bytes — для ключей шифрования)
+            if (fd.isRepeated() && fd.getType() != FieldDescriptor.Type.BYTES) { continue; }
 
             String fieldName = fd.getName();
             String displayName = humanize(fieldName);
@@ -181,6 +184,22 @@ public final class ProtobufTreeBuilder {
                     || fd.getType() == FieldDescriptor.Type.SFIXED64) {
                 ConfigTreeItem item = new ConfigTreeItem(
                         displayName, fieldName, value, Long.class,
+                        null, fd, configType, variantNumber);
+                parent.getChildren().add(new TreeItem<>(item));
+            } else if (fd.getType() == FieldDescriptor.Type.BYTES) {
+                String base64Value;
+                if (fd.isRepeated()) {
+                    @SuppressWarnings("unchecked")
+                    List<ByteString> bytesList = (List<ByteString>) value;
+                    base64Value = bytesList.stream()
+                            .map(bs -> Base64.getEncoder().encodeToString(bs.toByteArray()))
+                            .collect(Collectors.joining(", "));
+                } else {
+                    ByteString bs = (ByteString) value;
+                    base64Value = Base64.getEncoder().encodeToString(bs.toByteArray());
+                }
+                ConfigTreeItem item = new ConfigTreeItem(
+                        displayName, fieldName, base64Value, String.class,
                         null, fd, configType, variantNumber);
                 parent.getChildren().add(new TreeItem<>(item));
             }
@@ -290,6 +309,27 @@ public final class ProtobufTreeBuilder {
                         || builderFd.getType() == FieldDescriptor.Type.FIXED64
                         || builderFd.getType() == FieldDescriptor.Type.SFIXED64) {
                     builder.setField(builderFd, ((Number) value).longValue());
+                } else if (builderFd.getType() == FieldDescriptor.Type.BYTES) {
+                    String base64Str = value.toString().trim();
+                    if (builderFd.isRepeated()) {
+                        builder.clearField(builderFd);
+                        if (!base64Str.isEmpty()) {
+                            for (String part : base64Str.split(",")) {
+                                String trimmed = part.trim();
+                                if (!trimmed.isEmpty()) {
+                                    builder.addRepeatedField(builderFd,
+                                            ByteString.copyFrom(Base64.getDecoder().decode(trimmed)));
+                                }
+                            }
+                        }
+                    } else {
+                        if (base64Str.isEmpty()) {
+                            builder.setField(builderFd, ByteString.EMPTY);
+                        } else {
+                            builder.setField(builderFd,
+                                    ByteString.copyFrom(Base64.getDecoder().decode(base64Str)));
+                        }
+                    }
                 }
             } catch (Exception e) { //NOPMD - field type mismatch is expected and safely skipped
                 log.trace("Skipping field '{}': {}", builderFd.getName(), e.getMessage());
