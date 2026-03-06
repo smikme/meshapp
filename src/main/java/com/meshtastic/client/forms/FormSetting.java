@@ -42,12 +42,20 @@ import javafx.scene.text.FontWeight;
 import org.meshtastic.proto.ConfigProtos;
 import org.meshtastic.proto.ModuleConfigProtos;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 @SystemForm(name = "Настройки", description = "Настройки клиента", tags = {"settings", "options"})
 public class FormSetting extends Form {
+
+    private static final Logger log = LoggerFactory.getLogger(FormSetting.class);
 
     private DeviceState state;
     private ProtocolHandler handler;
@@ -132,6 +140,19 @@ public class FormSetting extends Form {
         }
         this.state = newState;
         this.handler = newHandler;
+    }
+
+    /**
+     * Возвращает ID активного подключения или null, если нет подключённых устройств.
+     */
+    private String findActiveConnectionId() {
+        ConnectionManager mgr = ConnectionManager.getInstance();
+        for (ConnectionEntry entry : mgr.getEntries()) {
+            if (entry.isConnected()) {
+                return entry.getId();
+            }
+        }
+        return null;
     }
 
     @SuppressWarnings("unchecked")
@@ -708,25 +729,92 @@ public class FormSetting extends Form {
             }
         }
 
-        // Protobuf-секции — через begin/commit edit
+        // Protobuf-секции — через begin/commit edit с задержками между сообщениями.
+        // Прошивка может не успеть обработать сообщение до прихода следующего,
+        // поэтому каждое admin-сообщение отправляется с интервалом 200ms.
         if (!configs.isEmpty() || !moduleConfigs.isEmpty()) {
-            MessageService.beginEditSettings(handler, state);
-
+            List<Runnable> tasks = new ArrayList<>();
+            tasks.add(() -> {
+                log.info("Config save: beginEditSettings");
+                MessageService.beginEditSettings(handler, state);
+            });
             for (ConfigProtos.Config c : configs) {
-                MessageService.setConfig(handler, state, c);
+                tasks.add(() -> {
+                    log.info("Config save: setConfig variant={} size={}",
+                            c.getPayloadVariantCase(), c.getSerializedSize());
+                    MessageService.setConfig(handler, state, c);
+                });
             }
             for (ModuleConfigProtos.ModuleConfig mc : moduleConfigs) {
-                MessageService.setModuleConfig(handler, state, mc);
+                tasks.add(() -> {
+                    log.info("Config save: setModuleConfig variant={} size={}",
+                            mc.getPayloadVariantCase(), mc.getSerializedSize());
+                    MessageService.setModuleConfig(handler, state, mc);
+                });
+            }
+            tasks.add(() -> {
+                log.info("Config save: commitEditSettings");
+                MessageService.commitEditSettings(handler, state);
+            });
+
+            long delayMs = 200;
+            ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+                Thread t = new Thread(r, "config-save-sender");
+                t.setDaemon(true);
+                return t;
+            });
+
+            // Каждый task оборачиваем в try-catch — ScheduledExecutorService
+            // тихо проглатывает исключения
+            for (int i = 0; i < tasks.size(); i++) {
+                final int idx = i;
+                scheduler.schedule(() -> {
+                    try {
+                        tasks.get(idx).run();
+                    } catch (Exception e) {
+                        log.error("Config save task {} failed", idx, e);
+                    }
+                }, (long) i * delayMs, TimeUnit.MILLISECONDS);
             }
 
-            MessageService.commitEditSettings(handler, state);
+            // Последний task обновляет UI
+            long uiDelay = (long) tasks.size() * delayMs;
+            scheduler.schedule(() -> Platform.runLater(() -> {
+                resetModifiedFlags(fullConfigRoot != null ? fullConfigRoot : configTree.getRoot());
+                saveConfigBtn.setDisable(false);
+                configStatusLabel.setText("Отправлено секций: " + totalChanges
+                        + ". Устройство перезагрузится. Отключение...");
+            }), uiDelay, TimeUnit.MILLISECONDS);
+
+            // Disconnect через 1с после последнего сообщения — НЕЗАВИСИМО от результата tasks
+            long disconnectDelay = uiDelay + 1000;
+            scheduler.schedule(() -> {
+                try {
+                    String connId = findActiveConnectionId();
+                    if (connId != null) {
+                        log.info("Config save: disconnecting after commit (device will reboot)");
+                        ConnectionManager.getInstance().disconnect(connId);
+                    } else {
+                        log.warn("Config save: no active connection to disconnect");
+                    }
+                    Platform.runLater(() -> {
+                        state = null;
+                        handler = null;
+                        reloadConfigTree();
+                    });
+                } catch (Exception e) {
+                    log.error("Config save: disconnect failed", e);
+                } finally {
+                    scheduler.shutdown();
+                }
+            }, disconnectDelay, TimeUnit.MILLISECONDS);
+
+        } else {
+            // Только виртуальные секции — завершить сразу (устройство не перезагружается)
+            resetModifiedFlags(fullConfigRoot != null ? fullConfigRoot : configTree.getRoot());
+            saveConfigBtn.setDisable(false);
+            configStatusLabel.setText("Отправлено секций: " + totalChanges);
         }
-
-        // Сбросить originalValue в дереве
-        resetModifiedFlags(fullConfigRoot != null ? fullConfigRoot : configTree.getRoot());
-
-        saveConfigBtn.setDisable(false);
-        configStatusLabel.setText("Отправлено секций: " + totalChanges + ". Устройство перезагрузится.");
     }
 
     /**

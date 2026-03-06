@@ -284,6 +284,7 @@ public final class ProtobufTreeBuilder {
             if (builderFd == null) { continue; }
 
             Object value = item.getValue();
+            log.debug("applyTreeValues: field='{}' value={} (type={})", builderFd.getName(), value, builderFd.getType());
             try {
                 if (builderFd.getType() == FieldDescriptor.Type.ENUM) {
                     if (value instanceof EnumValueDescriptor evd) {

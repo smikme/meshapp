@@ -4,11 +4,13 @@ import com.meshtastic.client.components.EmojiTextFlow;
 import com.meshtastic.client.components.chat.ChatInputBar;
 import com.meshtastic.client.components.chat.ChatListCell;
 import com.meshtastic.client.components.chat.ChatNameResolver;
+import com.meshtastic.client.components.chat.ChannelPropertiesDialog;
 import com.meshtastic.client.components.chat.CreateChannelDialog;
 import com.meshtastic.client.components.chat.MessageBubbleFactory;
 import com.meshtastic.client.components.chat.NodeInfoFormatter;
 import com.meshtastic.client.components.chat.TracerouteView;
 import com.meshtastic.client.modal.ModalPane;
+import com.meshtastic.client.modal.Toast;
 import com.meshtastic.client.model.ChatItem;
 import com.meshtastic.client.model.ConnectionEntry;
 import com.meshtastic.client.model.DeviceState;
@@ -208,7 +210,7 @@ public class FormChat extends Form {
 
         chatListView = new ListView<>(sortedChats);
         chatListView.getStyleClass().add("chat-list-view");
-        chatListView.setCellFactory(lv -> new ChatListCell(this::deleteChat));
+        chatListView.setCellFactory(lv -> new ChatListCell(this::deleteChat, this::showChannelProperties));
         chatListView.getSelectionModel().selectedItemProperty().addListener(
                 (obs, oldItem, newItem) -> {
                     if (suppressSelectionListener) { return; }
@@ -891,6 +893,21 @@ public class FormChat extends Form {
         } finally {
             suppressSelectionListener = false;
         }
+    }
+
+    /**
+     * Открывает панель свойств канала.
+     */
+    private void showChannelProperties(ChatItem item) {
+        if (item == null || item.getType() != ChatItem.ChatType.CHANNEL) {
+            return;
+        }
+        if (state == null || protocolHandler == null) {
+            Toast.show(Toast.Type.WARNING, "Нет подключения к радио");
+            return;
+        }
+        ChannelPropertiesDialog.show(state, protocolHandler,
+                item.getChannelIndex(), this::reloadChatList);
     }
 
     /**
