@@ -42,21 +42,23 @@ import javafx.scene.text.FontWeight;
 import org.meshtastic.proto.ConfigProtos;
 import org.meshtastic.proto.ModuleConfigProtos;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 @SystemForm(name = "Настройки", description = "Настройки клиента", tags = {"settings", "options"})
 public class FormSetting extends Form {
 
-    // Owner info UI
-    private TextField longNameField;
-    private TextField shortNameField;
-    private Button saveOwnerBtn;
-    private Label ownerStatusLabel;
+    private static final Logger log = LoggerFactory.getLogger(FormSetting.class);
+
     private DeviceState state;
     private ProtocolHandler handler;
-    private Runnable ownerInfoListener;
 
     // Cache tab
     private TableView<NodeData> cacheTable;
@@ -126,11 +128,6 @@ public class FormSetting extends Form {
      * Находит активное подключение и обновляет ссылки state/handler.
      */
     private void refreshConnection() {
-        // Снять предыдущий listener
-        if (state != null && ownerInfoListener != null) {
-            state.removeOwnerInfoListener(ownerInfoListener);
-        }
-
         ConnectionManager mgr = ConnectionManager.getInstance();
         DeviceState newState = null;
         ProtocolHandler newHandler = null;
@@ -145,78 +142,17 @@ public class FormSetting extends Form {
         this.handler = newHandler;
     }
 
-    private void onSaveOwnerInfo() {
-        if (state == null || handler == null) {
-            ownerStatusLabel.setText("Нет подключения к радио");
-            return;
-        }
-
-        String longName = longNameField.getText().trim();
-        String shortName = shortNameField.getText().trim();
-
-        if (longName.isEmpty()) {
-            ownerStatusLabel.setText("Введите длинное имя");
-            return;
-        }
-        if (shortName.isEmpty()) {
-            ownerStatusLabel.setText("Введите короткое имя");
-            return;
-        }
-
-        saveOwnerBtn.setDisable(true);
-        ownerStatusLabel.setText("Запрос session key...");
-
-        // 1. Запросить get_owner_request для получения session_passkey
-        ownerInfoListener = () -> Platform.runLater(() -> {
-            // 2. Получили ответ — отправляем set_owner
-            state.removeOwnerInfoListener(ownerInfoListener);
-            ownerStatusLabel.setText("Отправка имени...");
-
-            MessageService.setOwnerInfo(handler, state, longName, shortName, state.getSessionPasskey());
-
-            // Обновить локальные данные
-            NodeData myNode = state.getNodeDb().get(state.getMyNodeNum());
-            if (myNode != null) {
-                myNode.setLongName(longName);
-                myNode.setShortName(shortName);
-                state.fireNodeUpdateListeners(state.getMyNodeNum());
+    /**
+     * Возвращает ID активного подключения или null, если нет подключённых устройств.
+     */
+    private String findActiveConnectionId() {
+        ConnectionManager mgr = ConnectionManager.getInstance();
+        for (ConnectionEntry entry : mgr.getEntries()) {
+            if (entry.isConnected()) {
+                return entry.getId();
             }
-
-            ownerStatusLabel.setText("Имя установлено: " + longName + " (" + shortName + ")");
-            saveOwnerBtn.setDisable(false);
-        });
-        state.addOwnerInfoListener(ownerInfoListener);
-
-        // Таймаут — если ответ не пришёл за 5 секунд
-        Thread timeoutThread = new Thread(() -> {
-            try {
-                Thread.sleep(5000);
-            } catch (InterruptedException ignored) { return; }
-            Platform.runLater(() -> {
-                if (state != null && ownerInfoListener != null) {
-                    state.removeOwnerInfoListener(ownerInfoListener);
-                }
-                if (saveOwnerBtn.isDisable()) {
-                    // Попробовать без passkey (для локальных устройств может работать)
-                    ownerStatusLabel.setText("Отправка без session key...");
-                    MessageService.setOwnerInfo(handler, state, longName, shortName, null);
-
-                    NodeData myNode = state.getNodeDb().get(state.getMyNodeNum());
-                    if (myNode != null) {
-                        myNode.setLongName(longName);
-                        myNode.setShortName(shortName);
-                        state.fireNodeUpdateListeners(state.getMyNodeNum());
-                    }
-
-                    ownerStatusLabel.setText("Имя отправлено: " + longName + " (" + shortName + ")");
-                    saveOwnerBtn.setDisable(false);
-                }
-            });
-        }, "owner-timeout");
-        timeoutThread.setDaemon(true);
-        timeoutThread.start();
-
-        MessageService.requestOwnerInfo(handler, state);
+        }
+        return null;
     }
 
     @SuppressWarnings("unchecked")
@@ -361,37 +297,6 @@ public class FormSetting extends Form {
         VBox panel = new VBox(8);
         panel.setPadding(new Insets(5));
 
-        // Имя ноды
-        HBox ownerRow = new HBox(8);
-        ownerRow.setAlignment(Pos.CENTER_LEFT);
-
-        longNameField = new TextField();
-        longNameField.setPromptText("Длинное имя");
-        longNameField.setPrefWidth(200);
-        longNameField.textProperty().addListener((obs, oldVal, newVal) -> {
-            if (newVal != null && newVal.length() > 40) { longNameField.setText(oldVal); }
-        });
-
-        shortNameField = new TextField();
-        shortNameField.setPromptText("Короткое");
-        shortNameField.setPrefWidth(80);
-        shortNameField.textProperty().addListener((obs, oldVal, newVal) -> {
-            if (newVal != null && newVal.length() > 4) { shortNameField.setText(oldVal); }
-        });
-
-        saveOwnerBtn = new Button("Сохранить имя");
-        saveOwnerBtn.setDisable(true);
-        saveOwnerBtn.setOnAction(e -> onSaveOwnerInfo());
-
-        ownerStatusLabel = new Label("");
-        ownerStatusLabel.setStyle("-fx-opacity: 0.7;");
-
-        ownerRow.getChildren().addAll(
-                new Label("Имя:"), longNameField,
-                new Label("Короткое:"), shortNameField,
-                saveOwnerBtn, ownerStatusLabel
-        );
-
         // Поиск
         configSearchField = new TextField();
         configSearchField.setPromptText("Поиск параметров...");
@@ -456,7 +361,7 @@ public class FormSetting extends Form {
 
         VBox.setVgrow(configTree, Priority.ALWAYS);
 
-        panel.getChildren().addAll(ownerRow, configSearchField, btnRow, configTree);
+        panel.getChildren().addAll(configSearchField, btnRow, configTree);
         return panel;
     }
 
@@ -470,27 +375,15 @@ public class FormSetting extends Form {
         }
 
         boolean connected = state != null && handler != null;
-        saveOwnerBtn.setDisable(!connected);
 
         if (!connected) {
             configStatusLabel.setText("Нет подключения к радио");
             saveConfigBtn.setDisable(true);
             configTree.setRoot(null);
-            ownerStatusLabel.setText("Нет подключения");
             return;
         }
 
-        // Предзаполнить имя ноды
         NodeData myNode = state.getNodeDb().get(state.getMyNodeNum());
-        if (myNode != null) {
-            if (longNameField.getText().isEmpty() && myNode.getLongName() != null) {
-                longNameField.setText(myNode.getLongName());
-            }
-            if (shortNameField.getText().isEmpty() && myNode.getShortName() != null) {
-                shortNameField.setText(myNode.getShortName());
-            }
-        }
-        ownerStatusLabel.setText("");
 
         // Сохраняем оригинальные protobuf для пересборки
         List<ConfigProtos.Config> stateConfigs;
@@ -507,6 +400,36 @@ public class FormSetting extends Form {
         // Корневой элемент (невидимый)
         TreeItem<ConfigTreeItem> root = new TreeItem<>(new ConfigTreeItem("Корень", null, 0));
         root.setExpanded(true);
+
+        // Виртуальная секция: Имя устройства
+        TreeItem<ConfigTreeItem> ownerSection = new TreeItem<>(
+                new ConfigTreeItem("Имя устройства", "owner_info", 0));
+        String longName = myNode != null && myNode.getLongName() != null ? myNode.getLongName() : "";
+        ownerSection.getChildren().add(new TreeItem<>(
+                new ConfigTreeItem("Длинное имя", "long_name", longName, String.class,
+                        null, null, "owner_info", 0)));
+        String shortName = myNode != null && myNode.getShortName() != null ? myNode.getShortName() : "";
+        ownerSection.getChildren().add(new TreeItem<>(
+                new ConfigTreeItem("Короткое имя", "short_name", shortName, String.class,
+                        null, null, "owner_info", 0)));
+        root.getChildren().add(ownerSection);
+
+        // Виртуальная секция: Фиксированная позиция
+        TreeItem<ConfigTreeItem> posSection = new TreeItem<>(
+                new ConfigTreeItem("Фиксированная позиция", "fixed_position", 0));
+        double lat = myNode != null ? myNode.getLatitude() : 0;
+        double lon = myNode != null ? myNode.getLongitude() : 0;
+        int alt = myNode != null ? myNode.getAltitude() : 0;
+        posSection.getChildren().add(new TreeItem<>(
+                new ConfigTreeItem("Широта", "latitude", lat, Double.class,
+                        null, null, "fixed_position", 0)));
+        posSection.getChildren().add(new TreeItem<>(
+                new ConfigTreeItem("Долгота", "longitude", lon, Double.class,
+                        null, null, "fixed_position", 0)));
+        posSection.getChildren().add(new TreeItem<>(
+                new ConfigTreeItem("Высота (м)", "altitude", alt, Integer.class,
+                        null, null, "fixed_position", 0)));
+        root.getChildren().add(posSection);
 
         // Конфигурация устройства
         if (!originalConfigs.isEmpty()) {
@@ -649,69 +572,116 @@ public class FormSetting extends Form {
         TreeItem<ConfigTreeItem> root = fullConfigRoot != null ? fullConfigRoot : configTree.getRoot();
         if (root == null) { return; }
 
-        // Собрать изменённые секции
+        // Собрать виртуальные (admin) изменения
+        boolean ownerModified = false;
+        String newLongName = null;
+        String newShortName = null;
+        boolean positionModified = false;
+        double newLat = 0;
+        double newLon = 0;
+        int newAlt = 0;
+
+        // Собрать protobuf-изменения
         List<ConfigProtos.Config> modifiedConfigs = new ArrayList<>();
         List<ModuleConfigProtos.ModuleConfig> modifiedModuleConfigs = new ArrayList<>();
 
         for (TreeItem<ConfigTreeItem> topLevel : root.getChildren()) {
-            // topLevel = "Конфигурация устройства" или "Конфигурация модулей"
-            for (TreeItem<ConfigTreeItem> section : topLevel.getChildren()) {
-                if (!hasMoifiedFields(section)) { continue; }
+            ConfigTreeItem topData = topLevel.getValue();
+            if (topData == null) { continue; }
 
-                ConfigTreeItem sectionData = section.getValue();
-                if ("config".equals(sectionData.getConfigType())) {
-                    // Найти оригинальный Config по variantNumber
-                    for (ConfigProtos.Config orig : originalConfigs) {
-                        var oneofField = getActiveOneofFieldNumber(orig);
-                        if (oneofField == sectionData.getConfigVariantNumber()) {
-                            ConfigProtos.Config rebuilt = ProtobufTreeBuilder.rebuildConfig(section, orig);
-                            if (rebuilt != null) { modifiedConfigs.add(rebuilt); }
-                            break;
+            // Виртуальная секция: Имя устройства
+            if ("owner_info".equals(topData.getConfigType()) && hasMoifiedFields(topLevel)) {
+                ownerModified = true;
+                for (TreeItem<ConfigTreeItem> child : topLevel.getChildren()) {
+                    ConfigTreeItem ci = child.getValue();
+                    if ("long_name".equals(ci.getFieldName())) { newLongName = ci.getValue().toString(); }
+                    if ("short_name".equals(ci.getFieldName())) { newShortName = ci.getValue().toString(); }
+                }
+            }
+
+            // Виртуальная секция: Фиксированная позиция
+            if ("fixed_position".equals(topData.getConfigType()) && hasMoifiedFields(topLevel)) {
+                positionModified = true;
+                for (TreeItem<ConfigTreeItem> child : topLevel.getChildren()) {
+                    ConfigTreeItem ci = child.getValue();
+                    if ("latitude".equals(ci.getFieldName())) { newLat = ((Number) ci.getValue()).doubleValue(); }
+                    if ("longitude".equals(ci.getFieldName())) { newLon = ((Number) ci.getValue()).doubleValue(); }
+                    if ("altitude".equals(ci.getFieldName())) { newAlt = ((Number) ci.getValue()).intValue(); }
+                }
+            }
+
+            // Protobuf-секции: "Конфигурация устройства" / "Конфигурация модулей"
+            if ("config".equals(topData.getConfigType()) || "module_config".equals(topData.getConfigType())) {
+                for (TreeItem<ConfigTreeItem> section : topLevel.getChildren()) {
+                    if (!hasMoifiedFields(section)) { continue; }
+
+                    ConfigTreeItem sectionData = section.getValue();
+                    if ("config".equals(sectionData.getConfigType())) {
+                        for (ConfigProtos.Config orig : originalConfigs) {
+                            var oneofField = getActiveOneofFieldNumber(orig);
+                            if (oneofField == sectionData.getConfigVariantNumber()) {
+                                ConfigProtos.Config rebuilt = ProtobufTreeBuilder.rebuildConfig(section, orig);
+                                if (rebuilt != null) { modifiedConfigs.add(rebuilt); }
+                                break;
+                            }
                         }
-                    }
-                } else if ("module_config".equals(sectionData.getConfigType())) {
-                    for (ModuleConfigProtos.ModuleConfig orig : originalModuleConfigs) {
-                        var oneofField = getActiveModuleOneofFieldNumber(orig);
-                        if (oneofField == sectionData.getConfigVariantNumber()) {
-                            ModuleConfigProtos.ModuleConfig rebuilt =
-                                    ProtobufTreeBuilder.rebuildModuleConfig(section, orig);
-                            if (rebuilt != null) { modifiedModuleConfigs.add(rebuilt); }
-                            break;
+                    } else if ("module_config".equals(sectionData.getConfigType())) {
+                        for (ModuleConfigProtos.ModuleConfig orig : originalModuleConfigs) {
+                            var oneofField = getActiveModuleOneofFieldNumber(orig);
+                            if (oneofField == sectionData.getConfigVariantNumber()) {
+                                ModuleConfigProtos.ModuleConfig rebuilt =
+                                        ProtobufTreeBuilder.rebuildModuleConfig(section, orig);
+                                if (rebuilt != null) { modifiedModuleConfigs.add(rebuilt); }
+                                break;
+                            }
                         }
                     }
                 }
             }
         }
 
-        if (modifiedConfigs.isEmpty() && modifiedModuleConfigs.isEmpty()) {
+        if (!ownerModified && !positionModified
+                && modifiedConfigs.isEmpty() && modifiedModuleConfigs.isEmpty()) {
             configStatusLabel.setText("Нет изменений для сохранения");
             return;
         }
 
-        int totalChanges = modifiedConfigs.size() + modifiedModuleConfigs.size();
+        int totalChanges = modifiedConfigs.size() + modifiedModuleConfigs.size()
+                + (ownerModified ? 1 : 0) + (positionModified ? 1 : 0);
         saveConfigBtn.setDisable(true);
         configStatusLabel.setText("Запрос session key...");
 
+        // Захватываем финальные значения для лямбды
+        final boolean fOwnerModified = ownerModified;
+        final String fLongName = newLongName;
+        final String fShortName = newShortName;
+        final boolean fPositionModified = positionModified;
+        final double fLat = newLat;
+        final double fLon = newLon;
+        final int fAlt = newAlt;
+
         // Запрашиваем session key → отправляем настройки
-        Runnable configSaveListener = () -> Platform.runLater(() -> {
-            if (state != null && ownerInfoListener != null) {
-                state.removeOwnerInfoListener(ownerInfoListener);
-            }
-            sendConfigChanges(modifiedConfigs, modifiedModuleConfigs, totalChanges);
+        Runnable[] listenerHolder = new Runnable[1];
+        listenerHolder[0] = () -> Platform.runLater(() -> {
+            state.removeOwnerInfoListener(listenerHolder[0]);
+            sendConfigChanges(modifiedConfigs, modifiedModuleConfigs,
+                    fOwnerModified, fLongName, fShortName,
+                    fPositionModified, fLat, fLon, fAlt,
+                    totalChanges);
         });
-        ownerInfoListener = configSaveListener;
-        state.addOwnerInfoListener(configSaveListener);
+        state.addOwnerInfoListener(listenerHolder[0]);
 
         // Таймаут — отправить без passkey
         Thread timeoutThread = new Thread(() -> {
             try { Thread.sleep(5000); } catch (InterruptedException ignored) { return; }
             Platform.runLater(() -> {
-                if (state != null && configSaveListener.equals(ownerInfoListener)) {
-                    state.removeOwnerInfoListener(configSaveListener);
-                }
+                state.removeOwnerInfoListener(listenerHolder[0]);
                 if (saveConfigBtn.isDisable()) {
                     configStatusLabel.setText("Отправка без session key...");
-                    sendConfigChanges(modifiedConfigs, modifiedModuleConfigs, totalChanges);
+                    sendConfigChanges(modifiedConfigs, modifiedModuleConfigs,
+                            fOwnerModified, fLongName, fShortName,
+                            fPositionModified, fLat, fLon, fAlt,
+                            totalChanges);
                 }
             });
         }, "config-save-timeout");
@@ -722,32 +692,129 @@ public class FormSetting extends Form {
     }
 
     /**
-     * Отправляет изменённые конфигурации на устройство через begin/commit edit.
+     * Отправляет изменённые конфигурации на устройство.
+     * Виртуальные секции (имя, позиция) отправляются отдельными admin-сообщениями.
+     * Protobuf-секции оборачиваются в begin/commit edit.
      */
     private void sendConfigChanges(List<ConfigProtos.Config> configs,
                                     List<ModuleConfigProtos.ModuleConfig> moduleConfigs,
+                                    boolean ownerModified, String newLongName, String newShortName,
+                                    boolean positionModified, double newLat, double newLon, int newAlt,
                                     int totalChanges) {
         configStatusLabel.setText("Отправка настроек...");
 
-        // begin_edit_settings
-        MessageService.beginEditSettings(handler, state);
-
-        // Отправить каждую изменённую секцию
-        for (ConfigProtos.Config c : configs) {
-            MessageService.setConfig(handler, state, c);
+        // Виртуальные секции — отправить напрямую
+        if (ownerModified && newLongName != null && newShortName != null) {
+            MessageService.setOwnerInfo(handler, state, newLongName, newShortName, state.getSessionPasskey());
+            NodeData myNode = state.getNodeDb().get(state.getMyNodeNum());
+            if (myNode != null) {
+                myNode.setLongName(newLongName);
+                myNode.setShortName(newShortName);
+                state.fireNodeUpdateListeners(state.getMyNodeNum());
+            }
         }
-        for (ModuleConfigProtos.ModuleConfig mc : moduleConfigs) {
-            MessageService.setModuleConfig(handler, state, mc);
+
+        if (positionModified) {
+            if (newLat == 0 && newLon == 0 && newAlt == 0) {
+                MessageService.removeFixedPosition(handler, state);
+            } else {
+                MessageService.setFixedPosition(handler, state, newLat, newLon, newAlt);
+                NodeData myNode = state.getNodeDb().get(state.getMyNodeNum());
+                if (myNode != null) {
+                    myNode.setLatitude(newLat);
+                    myNode.setLongitude(newLon);
+                    myNode.setAltitude(newAlt);
+                    state.fireNodeUpdateListeners(state.getMyNodeNum());
+                }
+            }
         }
 
-        // commit_edit_settings
-        MessageService.commitEditSettings(handler, state);
+        // Protobuf-секции — через begin/commit edit с задержками между сообщениями.
+        // Прошивка может не успеть обработать сообщение до прихода следующего,
+        // поэтому каждое admin-сообщение отправляется с интервалом 200ms.
+        if (!configs.isEmpty() || !moduleConfigs.isEmpty()) {
+            List<Runnable> tasks = new ArrayList<>();
+            tasks.add(() -> {
+                log.info("Config save: beginEditSettings");
+                MessageService.beginEditSettings(handler, state);
+            });
+            for (ConfigProtos.Config c : configs) {
+                tasks.add(() -> {
+                    log.info("Config save: setConfig variant={} size={}",
+                            c.getPayloadVariantCase(), c.getSerializedSize());
+                    MessageService.setConfig(handler, state, c);
+                });
+            }
+            for (ModuleConfigProtos.ModuleConfig mc : moduleConfigs) {
+                tasks.add(() -> {
+                    log.info("Config save: setModuleConfig variant={} size={}",
+                            mc.getPayloadVariantCase(), mc.getSerializedSize());
+                    MessageService.setModuleConfig(handler, state, mc);
+                });
+            }
+            tasks.add(() -> {
+                log.info("Config save: commitEditSettings");
+                MessageService.commitEditSettings(handler, state);
+            });
 
-        // Сбросить originalValue в дереве
-        resetModifiedFlags(fullConfigRoot != null ? fullConfigRoot : configTree.getRoot());
+            long delayMs = 200;
+            ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+                Thread t = new Thread(r, "config-save-sender");
+                t.setDaemon(true);
+                return t;
+            });
 
-        saveConfigBtn.setDisable(false);
-        configStatusLabel.setText("Отправлено секций: " + totalChanges + ". Устройство перезагрузится.");
+            // Каждый task оборачиваем в try-catch — ScheduledExecutorService
+            // тихо проглатывает исключения
+            for (int i = 0; i < tasks.size(); i++) {
+                final int idx = i;
+                scheduler.schedule(() -> {
+                    try {
+                        tasks.get(idx).run();
+                    } catch (Exception e) {
+                        log.error("Config save task {} failed", idx, e);
+                    }
+                }, (long) i * delayMs, TimeUnit.MILLISECONDS);
+            }
+
+            // Последний task обновляет UI
+            long uiDelay = (long) tasks.size() * delayMs;
+            scheduler.schedule(() -> Platform.runLater(() -> {
+                resetModifiedFlags(fullConfigRoot != null ? fullConfigRoot : configTree.getRoot());
+                saveConfigBtn.setDisable(false);
+                configStatusLabel.setText("Отправлено секций: " + totalChanges
+                        + ". Устройство перезагрузится. Отключение...");
+            }), uiDelay, TimeUnit.MILLISECONDS);
+
+            // Disconnect через 1с после последнего сообщения — НЕЗАВИСИМО от результата tasks
+            long disconnectDelay = uiDelay + 1000;
+            scheduler.schedule(() -> {
+                try {
+                    String connId = findActiveConnectionId();
+                    if (connId != null) {
+                        log.info("Config save: disconnecting after commit (device will reboot)");
+                        ConnectionManager.getInstance().disconnect(connId);
+                    } else {
+                        log.warn("Config save: no active connection to disconnect");
+                    }
+                    Platform.runLater(() -> {
+                        state = null;
+                        handler = null;
+                        reloadConfigTree();
+                    });
+                } catch (Exception e) {
+                    log.error("Config save: disconnect failed", e);
+                } finally {
+                    scheduler.shutdown();
+                }
+            }, disconnectDelay, TimeUnit.MILLISECONDS);
+
+        } else {
+            // Только виртуальные секции — завершить сразу (устройство не перезагружается)
+            resetModifiedFlags(fullConfigRoot != null ? fullConfigRoot : configTree.getRoot());
+            saveConfigBtn.setDisable(false);
+            configStatusLabel.setText("Отправлено секций: " + totalChanges);
+        }
     }
 
     /**

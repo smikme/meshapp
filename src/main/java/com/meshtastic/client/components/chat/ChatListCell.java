@@ -36,9 +36,10 @@ public class ChatListCell extends ListCell<ChatItem> {
     private final Label unreadBadge = new Label();
 
     /**
-     * @param onDeleteChat колбэк удаления чата (вызывается из контекстного меню «Закрыть»)
+     * @param onDeleteChat      колбэк удаления чата (вызывается из контекстного меню «Закрыть»)
+     * @param onShowProperties  колбэк свойств канала (вызывается из контекстного меню «Свойства»)
      */
-    public ChatListCell(Consumer<ChatItem> onDeleteChat) {
+    public ChatListCell(Consumer<ChatItem> onDeleteChat, Consumer<ChatItem> onShowProperties) {
         root.setAlignment(Pos.CENTER_LEFT);
         root.setPadding(new Insets(8, 10, 8, 10));
         root.getStyleClass().add("chat-list-cell-root");
@@ -83,9 +84,25 @@ public class ChatListCell extends ListCell<ChatItem> {
         root.getChildren().addAll(avatarPane, textBox, metaBox);
 
         // Контекстное меню (правый клик)
+        MenuItem propertiesItem = new MenuItem("Свойства");
+        propertiesItem.setOnAction(ev -> {
+            ChatItem chatItem = getItem();
+            if (chatItem != null) {
+                onShowProperties.accept(chatItem);
+            }
+        });
+
         MenuItem closeItem = new MenuItem("Закрыть");
-        ContextMenu ctxMenu = new ContextMenu(closeItem);
+        ContextMenu ctxMenu = new ContextMenu(propertiesItem, closeItem);
         setContextMenu(ctxMenu);
+
+        // «Свойства» только для каналов
+        ctxMenu.setOnShowing(ev -> {
+            ChatItem chatItem = getItem();
+            boolean isChannel = chatItem != null
+                    && chatItem.getType() == ChatItem.ChatType.CHANNEL;
+            propertiesItem.setVisible(isChannel);
+        });
 
         closeItem.setOnAction(ev -> {
             ChatItem chatItem = getItem();

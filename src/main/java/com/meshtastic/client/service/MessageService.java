@@ -398,6 +398,55 @@ public final class MessageService {
     }
 
     /**
+     * Устанавливает фиксированную позицию на устройстве.
+     * Отправляет AdminMessage.set_fixed_position с координатами.
+     * Прошивка автоматически установит position.fixed_position = true.
+     *
+     * @param latDegrees широта в градусах (-90..90)
+     * @param lonDegrees долгота в градусах (-180..180)
+     * @param altMeters  высота в метрах над уровнем моря
+     */
+    public static void setFixedPosition(ProtocolHandler handler, DeviceState state,
+                                         double latDegrees, double lonDegrees, int altMeters) {
+        int latI = (int) Math.round(latDegrees * 1e7);
+        int lonI = (int) Math.round(lonDegrees * 1e7);
+
+        MeshProtos.Position position = MeshProtos.Position.newBuilder()
+                .setLatitudeI(latI)
+                .setLongitudeI(lonI)
+                .setAltitude(altMeters)
+                .setTime((int) (System.currentTimeMillis() / 1000))
+                .setLocationSource(MeshProtos.Position.LocSource.LOC_MANUAL)
+                .setAltitudeSource(MeshProtos.Position.AltSource.ALT_MANUAL)
+                .build();
+
+        AdminProtos.AdminMessage.Builder adminBuilder = AdminProtos.AdminMessage.newBuilder()
+                .setSetFixedPosition(position);
+        ByteString passkey = state.getSessionPasskey();
+        if (passkey != null) {
+            adminBuilder.setSessionPasskey(passkey);
+        }
+
+        sendAdminMessage(handler, state, adminBuilder.build());
+    }
+
+    /**
+     * Удаляет фиксированную позицию с устройства.
+     * Отправляет AdminMessage.remove_fixed_position = true.
+     * Прошивка автоматически установит position.fixed_position = false.
+     */
+    public static void removeFixedPosition(ProtocolHandler handler, DeviceState state) {
+        AdminProtos.AdminMessage.Builder adminBuilder = AdminProtos.AdminMessage.newBuilder()
+                .setRemoveFixedPosition(true);
+        ByteString passkey = state.getSessionPasskey();
+        if (passkey != null) {
+            adminBuilder.setSessionPasskey(passkey);
+        }
+
+        sendAdminMessage(handler, state, adminBuilder.build());
+    }
+
+    /**
      * Вспомогательный метод для отправки AdminMessage на локальное устройство.
      */
     private static void sendAdminMessage(ProtocolHandler handler, DeviceState state,

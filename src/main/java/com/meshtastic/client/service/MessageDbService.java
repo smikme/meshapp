@@ -594,7 +594,9 @@ public final class MessageDbService {
             log.info("JSON → H2 migration complete: {} messages imported", total);
         } catch (Exception e) {
             log.error("Failed to migrate JSON history to H2", e);
-            try { dbConnection.rollback(); dbConnection.setAutoCommit(true); } catch (SQLException ex) { /* ignored */ }
+            try { dbConnection.rollback(); dbConnection.setAutoCommit(true); } catch (SQLException ex) {
+                log.debug("Rollback failed during JSON migration recovery", ex);
+            }
         }
     }
 
