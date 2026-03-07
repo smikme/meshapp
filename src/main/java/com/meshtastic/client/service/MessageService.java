@@ -410,6 +410,8 @@ public final class MessageService {
                                          double latDegrees, double lonDegrees, int altMeters) {
         int latI = (int) Math.round(latDegrees * 1e7);
         int lonI = (int) Math.round(lonDegrees * 1e7);
+        log.info("setFixedPosition: lat={}→latI={}, lon={}→lonI={}, alt={}",
+                latDegrees, latI, lonDegrees, lonI, altMeters);
 
         MeshProtos.Position position = MeshProtos.Position.newBuilder()
                 .setLatitudeI(latI)

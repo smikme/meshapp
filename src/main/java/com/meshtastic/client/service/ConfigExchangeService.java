@@ -98,13 +98,25 @@ public class ConfigExchangeService implements FromRadioListener {
 
         if (nodeInfo.hasPosition()) {
             MeshProtos.Position pos = nodeInfo.getPosition();
-            // Нулевые координаты означают отсутствие данных — не затираем существующие
-            if (pos.getLatitudeI() != 0) { node.setLatitude(pos.getLatitudeI() * 1e-7); }
+            log.debug("NodeInfo position: nodeNum={}, latI={}, lonI={}, alt={}",
+                    nodeInfo.getNum(), pos.getLatitudeI(), pos.getLongitudeI(), pos.getAltitude());
 
-            if (pos.getLongitudeI() != 0) { node.setLongitude(pos.getLongitudeI() * 1e-7); }
-
-            if (pos.getAltitude() != 0) { node.setAltitude(pos.getAltitude()); }
-
+            // If user recently saved a fixed position for our own node,
+            // use the pending values instead of potentially stale device data
+            boolean isMyNode = nodeInfo.getNum() == deviceState.getMyNodeNum();
+            if (isMyNode && deviceState.hasPendingFixedPosition()) {
+                log.info("Using pending fixed position instead of device-reported: lat={}, lon={}, alt={}",
+                        deviceState.getPendingFixedLat(), deviceState.getPendingFixedLon(),
+                        deviceState.getPendingFixedAlt());
+                node.setLatitude(Math.round(deviceState.getPendingFixedLat() * 1e7) * 1e-7);
+                node.setLongitude(Math.round(deviceState.getPendingFixedLon() * 1e7) * 1e-7);
+                node.setAltitude(deviceState.getPendingFixedAlt());
+            } else {
+                // Нулевые координаты означают отсутствие данных — не затираем существующие
+                if (pos.getLatitudeI() != 0) { node.setLatitude(pos.getLatitudeI() * 1e-7); }
+                if (pos.getLongitudeI() != 0) { node.setLongitude(pos.getLongitudeI() * 1e-7); }
+                if (pos.getAltitude() != 0) { node.setAltitude(pos.getAltitude()); }
+            }
         }
 
         if (nodeInfo.getSnr() != 0) { node.setSnr(nodeInfo.getSnr()); }
@@ -167,6 +179,7 @@ public class ConfigExchangeService implements FromRadioListener {
                     deviceState.getChannels().size(),
                     deviceState.getConfigs().size());
             protocolHandler.removeListener(this);
+            deviceState.clearPendingFixedPosition();
             NodeCacheService ncs = NodeCacheService.getInstance();
             ncs.updateAll(deviceState.getNodeDb());
 

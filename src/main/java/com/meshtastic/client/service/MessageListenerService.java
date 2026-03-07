@@ -185,12 +185,20 @@ public class MessageListenerService implements FromRadioListener {
             }
             int rxTime = packet.getRxTime() > 0 ? packet.getRxTime() : (int)(System.currentTimeMillis() / 1000);
             node.setLastHeard(rxTime);
-            // Нулевые координаты означают отсутствие данных — не затираем существующие
-            if (position.getLatitudeI() != 0) { node.setLatitude(position.getLatitudeI() * 1e-7); }
+            log.debug("Position update: nodeNum={}, latI={}, lonI={}, alt={}",
+                    fromNum, position.getLatitudeI(), position.getLongitudeI(), position.getAltitude());
 
-            if (position.getLongitudeI() != 0) { node.setLongitude(position.getLongitudeI() * 1e-7); }
-
-            if (position.getAltitude() != 0) { node.setAltitude(position.getAltitude()); }
+            // If user recently saved a fixed position for our own node,
+            // skip overwriting with potentially stale device position
+            boolean isMyNode = fromNum == deviceState.getMyNodeNum();
+            if (isMyNode && deviceState.hasPendingFixedPosition()) {
+                log.info("Ignoring position update for own node — pending fixed position active");
+            } else {
+                // Нулевые координаты означают отсутствие данных — не затираем существующие
+                if (position.getLatitudeI() != 0) { node.setLatitude(position.getLatitudeI() * 1e-7); }
+                if (position.getLongitudeI() != 0) { node.setLongitude(position.getLongitudeI() * 1e-7); }
+                if (position.getAltitude() != 0) { node.setAltitude(position.getAltitude()); }
+            }
 
             deviceState.fireNodeUpdateListeners(fromNum);
             NodeCacheService.getInstance().update(node);

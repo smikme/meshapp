@@ -73,6 +73,13 @@ public class DeviceState {
     private volatile ByteString sessionPasskey;
     private final List<Runnable> ownerInfoListeners = new CopyOnWriteArrayList<>();
 
+    // Pending fixed position — saved by user, not yet confirmed by device.
+    // Survives clear() to protect against stale position from config re-exchange.
+    private volatile double pendingFixedLat;
+    private volatile double pendingFixedLon;
+    private volatile int pendingFixedAlt;
+    private volatile long pendingFixedSetAt; // epoch millis, 0 = none
+
     public DeviceState() {
         ackTimeoutExecutor.scheduleWithFixedDelay(this::sweepExpiredAcks,
                 ACK_SWEEP_INTERVAL_MS, ACK_SWEEP_INTERVAL_MS, TimeUnit.MILLISECONDS);
@@ -469,10 +476,38 @@ public class DeviceState {
         }
     }
 
+    // ═══════════════════════════════════════════════════════════
+    //  Pending fixed position (survives clear)
+    // ═══════════════════════════════════════════════════════════
+
+    public void setPendingFixedPosition(double lat, double lon, int alt) {
+        this.pendingFixedLat = lat;
+        this.pendingFixedLon = lon;
+        this.pendingFixedAlt = alt;
+        this.pendingFixedSetAt = System.currentTimeMillis();
+    }
+
+    public void clearPendingFixedPosition() {
+        this.pendingFixedSetAt = 0;
+    }
+
+    /**
+     * Returns {@code true} if a fixed position was set by the user recently (< 120s ago).
+     */
+    public boolean hasPendingFixedPosition() {
+        long setAt = pendingFixedSetAt;
+        return setAt > 0 && (System.currentTimeMillis() - setAt) < 120_000;
+    }
+
+    public double getPendingFixedLat() { return pendingFixedLat; }
+    public double getPendingFixedLon() { return pendingFixedLon; }
+    public int getPendingFixedAlt() { return pendingFixedAlt; }
+
     /**
      * Полностью сбрасывает состояние устройства: очищает nodeDb, каналы,
      * конфиги, все сообщения, ожидающие ACK, owner info и историю телеметрии.
      * Вызывается перед началом нового config exchange.
+     * Pending fixed position НЕ сбрасывается — он должен пережить переподключение.
      */
     public void clear() {
         myNodeNum = 0;
