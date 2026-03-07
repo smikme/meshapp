@@ -9,6 +9,7 @@ import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.model.TelemetryEntry;
+import com.meshtastic.client.notification.NotificationManager;
 import com.meshtastic.client.protocol.FromRadioListener;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -37,9 +38,15 @@ public class MessageListenerService implements FromRadioListener {
     private static final Logger log = LoggerFactory.getLogger(MessageListenerService.class);
 
     private final DeviceState deviceState;
+    private final NotificationManager notificationManager;
 
     public MessageListenerService(DeviceState deviceState) {
         this.deviceState = deviceState;
+        this.notificationManager = new NotificationManager(deviceState);
+    }
+
+    public NotificationManager getNotificationManager() {
+        return notificationManager;
     }
 
     @Override
@@ -105,11 +112,21 @@ public class MessageListenerService implements FromRadioListener {
             MessageDbService.getInstance().save(msg, "dm", fromNodeId);
             deviceState.addDirectMessage(msg, fromNodeId);
             log.info("Received DM from {}: {}", fromNodeId, text);
+            try {
+                notificationManager.onIncomingMessage(msg, "dm", fromNodeId);
+            } catch (Throwable t) {
+                log.error("Notification error", t);
+            }
         } else {
             msg.setStatus(MeshMessage.DeliveryStatus.DELIVERED);
             MessageDbService.getInstance().save(msg, "channel", String.valueOf(channel));
             deviceState.addMessage(msg);
             log.info("Received channel {} message from {}: {}", channel, fromNodeId, text);
+            try {
+                notificationManager.onIncomingMessage(msg, "channel", String.valueOf(channel));
+            } catch (Throwable t) {
+                log.error("Notification error", t);
+            }
         }
     }
 

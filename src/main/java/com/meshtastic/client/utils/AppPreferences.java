@@ -17,6 +17,7 @@ public class AppPreferences {
     public static final String KEY_WINDOW_WIDTH = "windowWidth";
     public static final String KEY_WINDOW_HEIGHT = "windowHeight";
     public static final String KEY_WINDOW_MAXIMIZED = "windowMaximized";
+    public static final String KEY_NOTIFICATIONS_ENABLED = "notificationsEnabled";
 
     private static Preferences state;
 
@@ -34,6 +35,14 @@ public class AppPreferences {
 
     public static void setDarkMode(boolean dark) {
         state.putBoolean(KEY_DARK_MODE, dark);
+    }
+
+    public static boolean isNotificationsEnabled() {
+        return state.getBoolean(KEY_NOTIFICATIONS_ENABLED, true);
+    }
+
+    public static void setNotificationsEnabled(boolean enabled) {
+        state.putBoolean(KEY_NOTIFICATIONS_ENABLED, enabled);
     }
 
     public static List<String> getRecentSearch(boolean favorite) {

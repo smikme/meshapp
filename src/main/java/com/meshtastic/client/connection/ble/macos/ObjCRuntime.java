@@ -70,6 +70,11 @@ public final class ObjCRuntime {
         return MSG_SEND.invokeLong(new Object[]{receiver, sel(selector), arg1, arg2});
     }
 
+    /** objc_msgSend(receiver, sel, id, id, id) → id */
+    public static long msgSend(long receiver, String selector, long arg1, long arg2, long arg3) {
+        return MSG_SEND.invokeLong(new Object[]{receiver, sel(selector), arg1, arg2, arg3});
+    }
+
     /** objc_msgSend(receiver, sel, bool) */
     public static void msgSendBool(long receiver, String selector, boolean arg) {
         MSG_SEND.invokeLong(new Object[]{receiver, sel(selector), arg ? 1L : 0L});

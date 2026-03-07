@@ -43,6 +43,7 @@ public final class ConnectionManager {
     private final Map<String, MeshtasticConnection> activeConnections = new ConcurrentHashMap<>();
     private final Map<String, DeviceState> deviceStates = new ConcurrentHashMap<>();
     private final Map<String, ProtocolHandler> protocolHandlers = new ConcurrentHashMap<>();
+    private final Map<String, MessageListenerService> messageListenerServices = new ConcurrentHashMap<>();
     private final Map<String, CompletableFuture<DeviceState>> configFutures = new ConcurrentHashMap<>();
     private final Set<String> userDisconnectedIds = ConcurrentHashMap.newKeySet();
     private final List<Runnable> listeners = new CopyOnWriteArrayList<>();
@@ -174,6 +175,7 @@ public final class ConnectionManager {
         deviceStates.put(id, deviceState);
 
         MessageListenerService messageListener = new MessageListenerService(deviceState);
+        messageListenerServices.put(id, messageListener);
         protocolHandler.addListener(messageListener);
 
         ConfigExchangeService configExchange = new ConfigExchangeService(protocolHandler, deviceState);
@@ -217,6 +219,10 @@ public final class ConnectionManager {
         return protocolHandlers.get(id);
     }
 
+    public MessageListenerService getMessageListenerService(String id) {
+        return messageListenerServices.get(id);
+    }
+
     public CompletableFuture<DeviceState> getConfigFuture(String id) {
         return configFutures.get(id);
     }
@@ -235,6 +241,10 @@ public final class ConnectionManager {
         if (ds != null) {
             ds.failAllPendingAcks("DISCONNECTED");
             ds.shutdown();
+        }
+        MessageListenerService mls = messageListenerServices.remove(id);
+        if (mls != null) {
+            mls.getNotificationManager().dispose();
         }
         protocolHandlers.remove(id);
         configFutures.remove(id);

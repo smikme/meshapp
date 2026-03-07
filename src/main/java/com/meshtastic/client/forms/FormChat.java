@@ -19,6 +19,7 @@ import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.protocol.ProtocolHandler;
 import com.meshtastic.client.service.ConnectionManager;
 import com.meshtastic.client.service.MessageDbService;
+import com.meshtastic.client.service.MessageListenerService;
 import com.meshtastic.client.service.MessageService;
 import com.meshtastic.client.service.NodeCacheService;
 import com.meshtastic.client.system.Form;
@@ -832,6 +833,16 @@ public class FormChat extends Form {
 
         if (this.state != null) {
             this.state.addMessageListener(messageListener);
+
+            // Регистрация проверки активного чата для подавления уведомлений
+            for (ConnectionEntry ce : mgr.getEntries()) {
+                if (ce.isConnected()) {
+                    MessageListenerService mls = mgr.getMessageListenerService(ce.getId());
+                    if (mls != null) {
+                        mls.getNotificationManager().setActiveChatChecker(this::isCurrentChat);
+                    }
+                }
+            }
         }
 
         reloadChatList();
