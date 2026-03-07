@@ -719,10 +719,12 @@ public class FormSetting extends Form {
                 MessageService.removeFixedPosition(handler, state);
             } else {
                 MessageService.setFixedPosition(handler, state, newLat, newLon, newAlt);
+                state.setPendingFixedPosition(newLat, newLon, newAlt);
                 NodeData myNode = state.getNodeDb().get(state.getMyNodeNum());
                 if (myNode != null) {
-                    myNode.setLatitude(newLat);
-                    myNode.setLongitude(newLon);
+                    // Round-trip through int to show what the device will actually store
+                    myNode.setLatitude(Math.round(newLat * 1e7) * 1e-7);
+                    myNode.setLongitude(Math.round(newLon * 1e7) * 1e-7);
                     myNode.setAltitude(newAlt);
                     state.fireNodeUpdateListeners(state.getMyNodeNum());
                 }
