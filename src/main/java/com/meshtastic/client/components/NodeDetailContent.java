@@ -5,6 +5,7 @@ import com.meshtastic.client.modal.ModalPane;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.protocol.ProtocolHandler;
+import com.meshtastic.client.service.FavoriteNodeService;
 import com.meshtastic.client.service.MessageService;
 import com.meshtastic.client.service.NodeCacheService;
 import com.meshtastic.client.system.AllForms;
@@ -134,7 +135,31 @@ public class NodeDetailContent extends HBox {
             }
         });
 
-        actionToolbar.getItems().addAll(privateChatBtn, refreshBtn, deleteBtn);
+        // Кнопка «Избранное»
+        SVGPath favoriteIcon = SvgIconLoader.load("/icons/favorite.svg", 22);
+        Button favoriteBtn = new Button();
+        favoriteBtn.setGraphic(favoriteIcon);
+        favoriteBtn.setContentDisplay(ContentDisplay.GRAPHIC_ONLY);
+        favoriteBtn.getStyleClass().add("drawer-toolbar-button");
+
+        FavoriteNodeService favService = FavoriteNodeService.getInstance();
+        boolean initFav = favService.isFavorite(nodeId);
+        if (initFav) {
+            favoriteBtn.getStyleClass().add("favorite-btn-active");
+        }
+        favoriteBtn.setTooltip(new Tooltip(initFav ? "Убрать из избранного" : "Добавить в избранное"));
+
+        favoriteBtn.setOnAction(e -> {
+            boolean nowFav = favService.toggleFavorite(nodeId);
+            if (nowFav) {
+                favoriteBtn.getStyleClass().add("favorite-btn-active");
+            } else {
+                favoriteBtn.getStyleClass().remove("favorite-btn-active");
+            }
+            favoriteBtn.getTooltip().setText(nowFav ? "Убрать из избранного" : "Добавить в избранное");
+        });
+
+        actionToolbar.getItems().addAll(privateChatBtn, favoriteBtn, refreshBtn, deleteBtn);
 
         VBox toolbarContainer = new VBox(actionToolbar);
         toolbarContainer.setAlignment(Pos.TOP_CENTER);
