@@ -49,6 +49,7 @@ public class FormNodes extends Form {
     private boolean suppressSelectionListener;
     private boolean showFavoritesOnly;
     private Button favFilterBtn;
+    private SortedList<NodeData> sortedNodes;
 
     private DeviceState state;
     private ProtocolHandler protocolHandler;
@@ -153,7 +154,39 @@ public class FormNodes extends Form {
             updateFilterPredicate();
         });
 
-        HBox searchBox = new HBox(8, searchField, favFilterBtn);
+        // Кнопка сортировки
+        SVGPath sortIcon = SvgIconLoader.load("/icons/sort.svg", 16);
+        Button sortBtn = new Button();
+        sortBtn.setGraphic(sortIcon);
+        sortBtn.setContentDisplay(ContentDisplay.GRAPHIC_ONLY);
+        sortBtn.getStyleClass().add("chat-new-btn");
+        sortBtn.setTooltip(new Tooltip("Сортировка"));
+
+        ToggleGroup sortGroup = new ToggleGroup();
+        RadioMenuItem sortByTime = new RadioMenuItem("По времени в сети");
+        RadioMenuItem sortByNameAsc = new RadioMenuItem("По алфавиту (А→Я)");
+        RadioMenuItem sortByNameDesc = new RadioMenuItem("По алфавиту (Я→А)");
+        RadioMenuItem sortByAdded = new RadioMenuItem("По порядку добавления");
+        sortByTime.setToggleGroup(sortGroup);
+        sortByNameAsc.setToggleGroup(sortGroup);
+        sortByNameDesc.setToggleGroup(sortGroup);
+        sortByAdded.setToggleGroup(sortGroup);
+        sortByTime.setSelected(true);
+
+        ContextMenu sortMenu = new ContextMenu(sortByTime, sortByNameAsc, sortByNameDesc, sortByAdded);
+        sortBtn.setOnAction(e -> sortMenu.show(sortBtn, javafx.geometry.Side.BOTTOM, 0, 0));
+
+        Comparator<NodeData> defaultSort = Comparator.comparingInt(NodeData::getLastHeard).reversed()
+                .thenComparing(n -> n.getLongName() != null ? n.getLongName() : "");
+
+        sortByTime.setOnAction(e -> sortedNodes.setComparator(defaultSort));
+        sortByNameAsc.setOnAction(e -> sortedNodes.setComparator(
+                Comparator.comparing(n -> n.getLongName() != null ? n.getLongName().toLowerCase(Locale.ROOT) : "\uffff")));
+        sortByNameDesc.setOnAction(e -> sortedNodes.setComparator(
+                Comparator.comparing((NodeData n) -> n.getLongName() != null ? n.getLongName().toLowerCase(Locale.ROOT) : "").reversed()));
+        sortByAdded.setOnAction(e -> sortedNodes.setComparator(null));
+
+        HBox searchBox = new HBox(8, searchField, favFilterBtn, sortBtn);
         searchBox.setPadding(new Insets(8));
         searchBox.setAlignment(Pos.CENTER_LEFT);
         HBox.setHgrow(searchField, Priority.ALWAYS);
@@ -161,9 +194,7 @@ public class FormNodes extends Form {
         filteredNodes = new FilteredList<>(nodeData, n -> true);
         searchField.textProperty().addListener((obs, oldVal, newVal) -> updateFilterPredicate());
 
-        SortedList<NodeData> sortedNodes = new SortedList<>(filteredNodes,
-                Comparator.comparingInt(NodeData::getLastHeard).reversed()
-                        .thenComparing(n -> n.getLongName() != null ? n.getLongName() : ""));
+        sortedNodes = new SortedList<>(filteredNodes, defaultSort);
 
         nodeListView = new ListView<>(sortedNodes);
         nodeListView.getStyleClass().add("node-list-view");

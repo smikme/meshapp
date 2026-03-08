@@ -564,17 +564,33 @@
     -fx-border-width: 0;
 }
 
+.chat-new-btn .svg-icon {
+    -fx-fill: rgba(255, 255, 255, 0.7);
+}
+
 .light-theme .chat-new-btn {
     -fx-background-color: rgba(0, 0, 0, 0.06);
     -fx-text-fill: rgba(0, 0, 0, 0.6);
+}
+
+.light-theme .chat-new-btn .svg-icon {
+    -fx-fill: rgba(0, 0, 0, 0.6);
 }
 
 .chat-new-btn:hover {
     -fx-background-color: rgba(255, 255, 255, 0.15);
 }
 
+.chat-new-btn:hover .svg-icon {
+    -fx-fill: rgba(255, 255, 255, 0.9);
+}
+
 .light-theme .chat-new-btn:hover {
     -fx-background-color: rgba(0, 0, 0, 0.1);
+}
+
+.light-theme .chat-new-btn:hover .svg-icon {
+    -fx-fill: rgba(0, 0, 0, 0.8);
 }
 
 /* Список чатов */
