@@ -6,9 +6,11 @@ import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.protocol.ProtocolHandler;
 import com.meshtastic.client.service.ConnectionManager;
+import com.meshtastic.client.service.FavoriteNodeService;
 import com.meshtastic.client.service.NodeCacheService;
 import com.meshtastic.client.system.Form;
 import com.meshtastic.client.utils.NodeUtils;
+import com.meshtastic.client.utils.SvgIconLoader;
 import com.meshtastic.client.utils.SystemForm;
 import javafx.application.Platform;
 import javafx.collections.FXCollections;
@@ -17,15 +19,12 @@ import javafx.collections.transformation.FilteredList;
 import javafx.collections.transformation.SortedList;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
-import javafx.scene.control.Label;
-import javafx.scene.control.ListCell;
-import javafx.scene.control.ListView;
-import javafx.scene.control.SplitPane;
-import javafx.scene.control.TextField;
+import javafx.scene.control.*;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
+import javafx.scene.shape.SVGPath;
 import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
 
@@ -48,6 +47,8 @@ public class FormNodes extends Form {
     private int currentDetailNodeNum;
 
     private boolean suppressSelectionListener;
+    private boolean showFavoritesOnly;
+    private Button favFilterBtn;
 
     private DeviceState state;
     private ProtocolHandler protocolHandler;
@@ -92,6 +93,13 @@ public class FormNodes extends Form {
 
     private final Runnable connectionListener = () -> Platform.runLater(this::rebindState);
 
+    private final Runnable favoritesListener = () -> Platform.runLater(() -> {
+        if (showFavoritesOnly) {
+            updateFilterPredicate();
+        }
+        nodeListView.refresh();
+    });
+
     public FormNodes() {
         initComponents();
     }
@@ -99,6 +107,7 @@ public class FormNodes extends Form {
     @Override
     public void formInit() {
         ConnectionManager.getInstance().addListener(connectionListener);
+        FavoriteNodeService.getInstance().addListener(favoritesListener);
         rebindState();
     }
 
@@ -122,24 +131,35 @@ public class FormNodes extends Form {
         leftPane.getStyleClass().add("node-list-pane");
 
         searchField = new TextField();
-        searchField.setPromptText("\uD83D\uDD0D Поиск (\u2318K)");
+        searchField.setPromptText("\uD83D\uDD0D Поиск");
         searchField.getStyleClass().add("node-search-field");
 
-        HBox searchBox = new HBox(searchField);
+        // Кнопка фильтра «Только избранные»
+        SVGPath favFilterIcon = SvgIconLoader.load("/icons/favorite.svg", 16);
+        favFilterBtn = new Button();
+        favFilterBtn.setGraphic(favFilterIcon);
+        favFilterBtn.setContentDisplay(ContentDisplay.GRAPHIC_ONLY);
+        favFilterBtn.getStyleClass().add("chat-new-btn");
+        favFilterBtn.setTooltip(new Tooltip("Только избранные"));
+        favFilterBtn.setOnAction(e -> {
+            showFavoritesOnly = !showFavoritesOnly;
+            if (showFavoritesOnly) {
+                favFilterBtn.getStyleClass().add("favorite-btn-active");
+                favFilterBtn.getTooltip().setText("Показать все");
+            } else {
+                favFilterBtn.getStyleClass().remove("favorite-btn-active");
+                favFilterBtn.getTooltip().setText("Только избранные");
+            }
+            updateFilterPredicate();
+        });
+
+        HBox searchBox = new HBox(8, searchField, favFilterBtn);
         searchBox.setPadding(new Insets(8));
+        searchBox.setAlignment(Pos.CENTER_LEFT);
         HBox.setHgrow(searchField, Priority.ALWAYS);
 
         filteredNodes = new FilteredList<>(nodeData, n -> true);
-        searchField.textProperty().addListener((obs, oldVal, newVal) -> {
-            String query = newVal == null ? "" : newVal.trim().toLowerCase(Locale.ROOT);
-            filteredNodes.setPredicate(node -> {
-                if (query.isEmpty()) { return true; }
-                if (node.getLongName() != null && node.getLongName().toLowerCase(Locale.ROOT).contains(query)) { return true; }
-                if (node.getShortName() != null && node.getShortName().toLowerCase(Locale.ROOT).contains(query)) { return true; }
-                if (node.getNodeId() != null && node.getNodeId().toLowerCase(Locale.ROOT).contains(query)) { return true; }
-                return String.valueOf(node.getNodeNum()).contains(query);
-            });
-        });
+        searchField.textProperty().addListener((obs, oldVal, newVal) -> updateFilterPredicate());
 
         SortedList<NodeData> sortedNodes = new SortedList<>(filteredNodes,
                 Comparator.comparingInt(NodeData::getLastHeard).reversed()
@@ -199,6 +219,23 @@ public class FormNodes extends Form {
         splitPane.prefHeightProperty().bind(heightProperty());
     }
 
+    // ==================== Filter ====================
+
+    private void updateFilterPredicate() {
+        String query = searchField.getText() == null ? "" : searchField.getText().trim().toLowerCase(Locale.ROOT);
+        FavoriteNodeService favService = FavoriteNodeService.getInstance();
+        filteredNodes.setPredicate(node -> {
+            if (showFavoritesOnly && !favService.isFavorite(node.getNodeId())) {
+                return false;
+            }
+            if (query.isEmpty()) { return true; }
+            if (node.getLongName() != null && node.getLongName().toLowerCase(Locale.ROOT).contains(query)) { return true; }
+            if (node.getShortName() != null && node.getShortName().toLowerCase(Locale.ROOT).contains(query)) { return true; }
+            if (node.getNodeId() != null && node.getNodeId().toLowerCase(Locale.ROOT).contains(query)) { return true; }
+            return String.valueOf(node.getNodeNum()).contains(query);
+        });
+    }
+
     // ==================== Node list cell ====================
 
     private class NodeListCell extends ListCell<NodeData> {
@@ -208,6 +245,7 @@ public class FormNodes extends Form {
         private final VBox textBox = new VBox(2);
         private final Label nameLabel = new Label();
         private final Label subtitleLabel = new Label();
+        private final StackPane starPane = new StackPane();
 
         NodeListCell() {
             root.setAlignment(Pos.CENTER_LEFT);
@@ -228,7 +266,41 @@ public class FormNodes extends Form {
 
             textBox.getChildren().addAll(nameLabel, subtitleLabel);
             HBox.setHgrow(textBox, Priority.ALWAYS);
-            root.getChildren().addAll(avatarPane, textBox);
+
+            // Звёздочка избранного
+            SVGPath starIcon = SvgIconLoader.load("/icons/favorite.svg", 12);
+            if (starIcon != null) {
+                starPane.getChildren().add(starIcon);
+                starPane.getStyleClass().add("node-favorite-star");
+            }
+            starPane.setMinSize(16, 16);
+            starPane.setMaxSize(16, 16);
+            starPane.setAlignment(Pos.CENTER);
+
+            root.getChildren().addAll(avatarPane, textBox, starPane);
+
+            // Контекстное меню
+            MenuItem addFavItem = new MenuItem("Добавить в избранное");
+            MenuItem removeFavItem = new MenuItem("Убрать из избранного");
+            ContextMenu ctxMenu = new ContextMenu(addFavItem, removeFavItem);
+            setContextMenu(ctxMenu);
+
+            ctxMenu.setOnShowing(ev -> {
+                NodeData nd = getItem();
+                boolean fav = nd != null && FavoriteNodeService.getInstance().isFavorite(nd.getNodeId());
+                addFavItem.setVisible(!fav);
+                removeFavItem.setVisible(fav);
+            });
+
+            addFavItem.setOnAction(ev -> {
+                NodeData nd = getItem();
+                if (nd != null) { FavoriteNodeService.getInstance().addFavorite(nd.getNodeId()); }
+            });
+
+            removeFavItem.setOnAction(ev -> {
+                NodeData nd = getItem();
+                if (nd != null) { FavoriteNodeService.getInstance().removeFavorite(nd.getNodeId()); }
+            });
         }
 
         @Override
@@ -266,6 +338,11 @@ public class FormNodes extends Form {
                 subtitle += " · " + node.getHopsAway() + " хоп";
             }
             subtitleLabel.setText(subtitle);
+
+            // Звёздочка избранного
+            boolean isFav = FavoriteNodeService.getInstance().isFavorite(node.getNodeId());
+            starPane.setVisible(isFav);
+            starPane.setManaged(isFav);
 
             setGraphic(root);
             setText(null);

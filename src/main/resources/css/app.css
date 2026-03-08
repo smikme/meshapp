@@ -1300,3 +1300,32 @@
     -fx-background-color: rgba(0, 0, 0, 0.08);
 }
 
+/* ============================================================
+   Избранные ноды — кнопка-звезда (активное состояние)
+   ============================================================ */
+
+.favorite-btn-active .svg-icon {
+    -fx-fill: #FFD700;
+}
+
+.favorite-btn-active:hover .svg-icon {
+    -fx-fill: #FFC107;
+}
+
+.light-theme .favorite-btn-active .svg-icon {
+    -fx-fill: #F9A825;
+}
+
+.light-theme .favorite-btn-active:hover .svg-icon {
+    -fx-fill: #E65100;
+}
+
+/* Звёздочка избранного в списке нод */
+.node-favorite-star .svg-icon {
+    -fx-fill: #FFD700;
+}
+
+.light-theme .node-favorite-star .svg-icon {
+    -fx-fill: #F9A825;
+}
+
