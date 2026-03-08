@@ -28,8 +28,7 @@ import javafx.scene.shape.SVGPath;
 import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
 
-import java.util.Comparator;
-import java.util.Locale;
+import java.util.*;
 import java.util.function.IntConsumer;
 
 @SystemForm(name = "Ноды", description = "Список нод в сети", tags = {"ноды", "nodes", "устройства", "mesh"})
@@ -96,6 +95,7 @@ public class FormNodes extends Form {
 
     private final Runnable favoritesListener = () -> Platform.runLater(() -> {
         if (showFavoritesOnly) {
+            injectOfflineFavorites();
             updateFilterPredicate();
         }
         nodeListView.refresh();
@@ -147,9 +147,11 @@ public class FormNodes extends Form {
             if (showFavoritesOnly) {
                 favFilterBtn.getStyleClass().add("favorite-btn-active");
                 favFilterBtn.getTooltip().setText("Показать все");
+                injectOfflineFavorites();
             } else {
                 favFilterBtn.getStyleClass().remove("favorite-btn-active");
                 favFilterBtn.getTooltip().setText("Только избранные");
+                removeOfflineNodes();
             }
             updateFilterPredicate();
         });
@@ -251,6 +253,25 @@ public class FormNodes extends Form {
     }
 
     // ==================== Filter ====================
+
+    /** Подгрузить избранные ноды из БД, которых нет в текущем живом списке. */
+    private void injectOfflineFavorites() {
+        List<NodeData> dbFavorites = NodeCacheService.getInstance().loadFavoriteNodes();
+        Set<Integer> existingNums = new HashSet<>();
+        for (NodeData n : nodeData) { existingNums.add(n.getNodeNum()); }
+        for (NodeData dbNode : dbFavorites) {
+            if (!existingNums.contains(dbNode.getNodeNum())) {
+                nodeData.add(dbNode);
+            }
+        }
+    }
+
+    /** Убрать ноды, которых нет в DeviceState (были подгружены из БД). */
+    private void removeOfflineNodes() {
+        if (state == null) { return; }
+        Set<Integer> liveNums = state.getNodeDb().keySet();
+        nodeData.removeIf(n -> !liveNums.contains(n.getNodeNum()));
+    }
 
     private void updateFilterPredicate() {
         String query = searchField.getText() == null ? "" : searchField.getText().trim().toLowerCase(Locale.ROOT);

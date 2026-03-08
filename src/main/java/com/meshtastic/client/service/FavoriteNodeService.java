@@ -1,23 +1,19 @@
 package com.meshtastic.client.service;
 
-import com.meshtastic.client.utils.AppPreferences;
-
-import java.util.*;
+import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.CopyOnWriteArraySet;
 
+/**
+ * Сервис управления избранными нодами.
+ * Делегирует персистентность в {@link NodeCacheService} (H2, колонка {@code favorite}).
+ */
 public final class FavoriteNodeService {
-
-    private static final String SEPARATOR = ",";
 
     private static FavoriteNodeService instance;
 
-    private final Set<String> favorites = new CopyOnWriteArraySet<>();
     private final List<Runnable> listeners = new CopyOnWriteArrayList<>();
 
-    private FavoriteNodeService() {
-        load();
-    }
+    private FavoriteNodeService() {}
 
     public static synchronized FavoriteNodeService getInstance() {
         if (instance == null) {
@@ -27,36 +23,30 @@ public final class FavoriteNodeService {
     }
 
     public boolean isFavorite(String nodeId) {
-        return nodeId != null && favorites.contains(nodeId);
+        return nodeId != null && NodeCacheService.getInstance().isFavorite(nodeId);
     }
 
     public void addFavorite(String nodeId) {
-        if (nodeId != null && favorites.add(nodeId)) {
-            persist();
-            fireListeners();
-        }
+        if (nodeId == null) { return; }
+        NodeCacheService.getInstance().setFavorite(nodeId, true);
+        fireListeners();
     }
 
     public void removeFavorite(String nodeId) {
-        if (nodeId != null && favorites.remove(nodeId)) {
-            persist();
-            fireListeners();
-        }
+        if (nodeId == null) { return; }
+        NodeCacheService.getInstance().setFavorite(nodeId, false);
+        fireListeners();
     }
 
     public boolean toggleFavorite(String nodeId) {
-        if (nodeId == null) return false;
-        boolean added;
-        if (favorites.contains(nodeId)) {
-            favorites.remove(nodeId);
-            added = false;
+        if (nodeId == null) { return false; }
+        boolean was = isFavorite(nodeId);
+        if (was) {
+            removeFavorite(nodeId);
         } else {
-            favorites.add(nodeId);
-            added = true;
+            addFavorite(nodeId);
         }
-        persist();
-        fireListeners();
-        return added;
+        return !was;
     }
 
     public void addListener(Runnable listener) { listeners.add(listener); }
@@ -66,16 +56,5 @@ public final class FavoriteNodeService {
         for (Runnable r : listeners) {
             try { r.run(); } catch (Exception ignored) { }
         }
-    }
-
-    private void load() {
-        String raw = AppPreferences.getState().get(AppPreferences.KEY_FAVORITE_NODES, "");
-        if (!raw.isEmpty()) {
-            favorites.addAll(Arrays.asList(raw.split(SEPARATOR)));
-        }
-    }
-
-    private void persist() {
-        AppPreferences.getState().put(AppPreferences.KEY_FAVORITE_NODES, String.join(SEPARATOR, favorites));
     }
 }

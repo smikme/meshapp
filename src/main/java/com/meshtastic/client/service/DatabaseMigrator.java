@@ -21,7 +21,7 @@ public final class DatabaseMigrator {
     private static final Logger log = LoggerFactory.getLogger(DatabaseMigrator.class);
 
     /** Текущая версия схемы. Увеличивается при каждом изменении схемы. */
-    static final int CURRENT_VERSION = 1;
+    static final int CURRENT_VERSION = 2;
 
     private DatabaseMigrator() {}
 
@@ -50,9 +50,7 @@ public final class DatabaseMigrator {
             log.info("Database schema version {} → migrating to {}", version, CURRENT_VERSION);
 
             // Последовательные миграции: v0→v1, v1→v2, ...
-            // На данный момент миграций нет — версия 1 является начальной.
-            // Пример будущей миграции:
-            // if (version < 2) { migrateToV2(connection); version = 2; }
+            if (version < 2) { migrateToV2(connection); version = 2; }
 
             setVersion(connection, CURRENT_VERSION);
             log.info("Database migration complete, schema version = {}", CURRENT_VERSION);
@@ -93,6 +91,14 @@ public final class DatabaseMigrator {
             ps.setInt(1, version);
             ps.executeUpdate();
         }
+    }
+
+    /** v2: колонка favorite для избранных нод. */
+    private static void migrateToV2(Connection connection) throws SQLException {
+        try (Statement stmt = connection.createStatement()) {
+            stmt.execute("ALTER TABLE nodes ADD COLUMN IF NOT EXISTS favorite BOOLEAN DEFAULT FALSE");
+        }
+        log.info("Migration v2: added 'favorite' column to nodes");
     }
 
     private static void dropAll(Connection connection) throws SQLException {

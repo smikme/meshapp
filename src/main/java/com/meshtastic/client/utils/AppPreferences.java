@@ -18,7 +18,6 @@ public class AppPreferences {
     public static final String KEY_WINDOW_HEIGHT = "windowHeight";
     public static final String KEY_WINDOW_MAXIMIZED = "windowMaximized";
     public static final String KEY_NOTIFICATIONS_ENABLED = "notificationsEnabled";
-    public static final String KEY_FAVORITE_NODES = "favoriteNodes";
 
     private static Preferences state;
 

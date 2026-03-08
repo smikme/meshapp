@@ -84,7 +84,8 @@ public final class NodeCacheService {
                         last_heard    INT,
                         battery_level INT,
                         voltage       REAL,
-                        hops_away     INT
+                        hops_away     INT,
+                        favorite      BOOLEAN DEFAULT FALSE
                     )
                     """);
 
@@ -361,6 +362,62 @@ public final class NodeCacheService {
         } catch (SQLException e) {
             log.error("Ошибка удаления ноды {} из кэша", nodeId, e);
         }
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    //  Избранные ноды
+    // ═══════════════════════════════════════════════════════════
+
+    /**
+     * Устанавливает флаг избранного для ноды.
+     * Если нода отсутствует в БД, ничего не делает.
+     */
+    public synchronized void setFavorite(String nodeId, boolean favorite) {
+        if (dbConnection == null || nodeId == null) { return; }
+        try (PreparedStatement ps = dbConnection.prepareStatement(
+                "UPDATE nodes SET favorite = ? WHERE node_id = ?")) {
+            ps.setBoolean(1, favorite);
+            ps.setString(2, nodeId);
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            log.error("Failed to set favorite for node {}", nodeId, e);
+        }
+    }
+
+    /**
+     * Проверяет, является ли нода избранной.
+     */
+    public boolean isFavorite(String nodeId) {
+        if (dbConnection == null || nodeId == null) { return false; }
+        try (PreparedStatement ps = dbConnection.prepareStatement(
+                "SELECT favorite FROM nodes WHERE node_id = ?")) {
+            ps.setString(1, nodeId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) { return rs.getBoolean("favorite"); }
+            }
+        } catch (SQLException e) {
+            log.error("Failed to check favorite for node {}", nodeId, e);
+        }
+        return false;
+    }
+
+    /**
+     * Загружает все избранные ноды из БД.
+     */
+    public List<NodeData> loadFavoriteNodes() {
+        List<NodeData> favorites = new ArrayList<>();
+        if (dbConnection == null) { return favorites; }
+        try (PreparedStatement ps = dbConnection.prepareStatement(
+                "SELECT * FROM nodes WHERE favorite = TRUE")) {
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    favorites.add(readNode(rs));
+                }
+            }
+        } catch (SQLException e) {
+            log.error("Failed to load favorite nodes from DB", e);
+        }
+        return favorites;
     }
 
     // ═══════════════════════════════════════════════════════════
