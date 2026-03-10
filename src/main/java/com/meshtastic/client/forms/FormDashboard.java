@@ -12,7 +12,10 @@ import javafx.application.Platform;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import javafx.geometry.Insets;
+import javafx.geometry.Orientation;
+import javafx.scene.Node;
 import javafx.scene.control.Label;
+import javafx.scene.control.ScrollBar;
 import javafx.scene.control.Tab;
 import javafx.scene.control.TabPane;
 import javafx.scene.control.TableColumn;
@@ -24,6 +27,8 @@ import javafx.scene.layout.VBox;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 /**
@@ -37,11 +42,17 @@ import java.util.List;
 public class FormDashboard extends Form {
 
     private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("dd.MM.yy HH:mm");
+    private static final int PAGE_SIZE = 100;
 
     private TelemetryChartPanel chartPanel;
     private Label logCountLabel;
     private TableView<TelemetryLogRow> logTable;
     private final ObservableList<TelemetryLogRow> logData = FXCollections.observableArrayList();
+
+    /** Полный список записей (новые первыми) для постраничной подгрузки */
+    private List<TelemetryEntry> allEntries = Collections.emptyList();
+    /** Сколько строк уже загружено в logData */
+    private int loadedCount;
 
     private DeviceState state;
 
@@ -219,19 +230,49 @@ public class FormDashboard extends Form {
         colNode.setPrefWidth(120);
 
         table.getColumns().addAll(colTime, colBattery, colVoltage, colChUtil, colAirUtil, colGoodRx, colBadRx, colDupeRx, colTx, colTxDropped, colTxRelay, colTxCanceled, colSnr, colRssi, colHops, colNode);
+
+        // Lazy loading: подгружать следующую страницу при прокрутке до конца
+        table.skinProperty().addListener((obs, oldSkin, newSkin) -> {
+            if (newSkin == null) return;
+            for (Node node : table.lookupAll(".scroll-bar")) {
+                if (node instanceof ScrollBar sb && sb.getOrientation() == Orientation.VERTICAL) {
+                    sb.valueProperty().addListener((v, oldVal, newVal) -> {
+                        if (newVal.doubleValue() >= 0.95 && loadedCount < allEntries.size()) {
+                            loadNextPage();
+                        }
+                    });
+                    break;
+                }
+            }
+        });
+
         return table;
     }
 
     private void updateLogTable(List<TelemetryEntry> entries) {
+        // Сохраняем полный список в обратном порядке (новые сверху)
+        List<TelemetryEntry> reversed = new ArrayList<>(entries.size());
+        for (int i = entries.size() - 1; i >= 0; i--) {
+            reversed.add(entries.get(i));
+        }
+        allEntries = reversed;
+        loadedCount = 0;
         logData.clear();
 
-        // Отображаем в обратном порядке — новые сверху
-        for (int i = entries.size() - 1; i >= 0; i--) {
-            TelemetryEntry e = entries.get(i);
-            logData.add(new TelemetryLogRow(e, state));
-        }
+        loadNextPage();
+    }
 
-        logCountLabel.setText(entries.size() + " записей");
+    /** Подгружает следующие PAGE_SIZE строк в таблицу */
+    private void loadNextPage() {
+        if (loadedCount >= allEntries.size()) return;
+
+        int end = Math.min(loadedCount + PAGE_SIZE, allEntries.size());
+        for (int i = loadedCount; i < end; i++) {
+            logData.add(new TelemetryLogRow(allEntries.get(i), state));
+        }
+        loadedCount = end;
+
+        logCountLabel.setText(loadedCount + " / " + allEntries.size() + " записей");
     }
 
     // ==================== Модель строки таблицы ====================

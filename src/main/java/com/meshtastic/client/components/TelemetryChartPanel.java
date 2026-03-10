@@ -283,7 +283,11 @@ public class TelemetryChartPanel extends VBox {
         filteredEntries = NodeCacheService.getInstance()
                 .loadTelemetryForNode(nodeId, sinceEpoch, maxTs);
 
-        updateChart(filteredEntries);
+        List<TelemetryEntry> qualityEntries = basicOnly
+                ? Collections.emptyList()
+                : NodeCacheService.getInstance().loadTelemetryQuality(sinceEpoch, maxTs);
+
+        updateChart(filteredEntries, qualityEntries);
 
         if (onDataRefreshed != null) {
             onDataRefreshed.run();
@@ -358,7 +362,7 @@ public class TelemetryChartPanel extends VBox {
         return Math.max(0, Math.min(100, pct));
     }
 
-    private void updateChart(List<TelemetryEntry> entries) {
+    private void updateChart(List<TelemetryEntry> entries, List<TelemetryEntry> qualityEntries) {
         chart.getData().clear();
         NumberAxis xAxis = (NumberAxis) chart.getXAxis();
 
@@ -450,6 +454,10 @@ public class TelemetryChartPanel extends VBox {
         long minTs = entries.getFirst().getTimestamp();
         long maxTs = entries.getLast().getTimestamp();
 
+        // Предыдущие значения кумулятивных счётчиков для вычисления дельты
+        int prevPktRx = -1, prevBadRx = -1, prevDupeRx = -1;
+        int prevTx = -1, prevTxDropped = -1, prevTxRelay = -1, prevTxCanceled = -1;
+
         if (entries.size() <= MAX_CHART_POINTS) {
             for (TelemetryEntry e : entries) {
                 long ts = e.getTimestamp();
@@ -462,29 +470,42 @@ public class TelemetryChartPanel extends VBox {
                 chUtilSeries.getData().add(new XYChart.Data<>(ts, e.getChannelUtilization()));
                 airUtilSeries.getData().add(new XYChart.Data<>(ts, e.getAirUtilTx()));
                 if (!basicOnly && e.getNumPacketsRx() > 0) {
-                    double total = e.getNumPacketsRx();
-                    goodRxSeries.getData().add(new XYChart.Data<>(ts, (total - e.getNumPacketsRxBad() - e.getNumRxDupe()) / total * 100.0));
-                    badRxSeries.getData().add(new XYChart.Data<>(ts, e.getNumPacketsRxBad() / total * 100.0));
-                    dupeRxSeries.getData().add(new XYChart.Data<>(ts, e.getNumRxDupe() / total * 100.0));
-                    pktRxSeries.getData().add(new XYChart.Data<>(ts, e.getNumPacketsRx()));
-                    pktBadSeries.getData().add(new XYChart.Data<>(ts, e.getNumPacketsRxBad()));
-                    pktDupeSeries.getData().add(new XYChart.Data<>(ts, e.getNumRxDupe()));
+                    // Дельта (пакетов за интервал), а не кумулятивный счётчик
+                    if (prevPktRx >= 0) {
+                        int dRx = e.getNumPacketsRx() - prevPktRx;
+                        int dBad = e.getNumPacketsRxBad() - prevBadRx;
+                        int dDupe = e.getNumRxDupe() - prevDupeRx;
+                        if (dRx < 0) { dRx = e.getNumPacketsRx(); dBad = e.getNumPacketsRxBad(); dDupe = e.getNumRxDupe(); }
+                        pktRxSeries.getData().add(new XYChart.Data<>(ts, dRx));
+                        pktBadSeries.getData().add(new XYChart.Data<>(ts, dBad));
+                        pktDupeSeries.getData().add(new XYChart.Data<>(ts, dDupe));
+                        // Проценты из дельт (реальное качество за интервал)
+                        if (dRx > 0) {
+                            goodRxSeries.getData().add(new XYChart.Data<>(ts, (dRx - dBad - dDupe) / (double) dRx * 100.0));
+                            badRxSeries.getData().add(new XYChart.Data<>(ts, dBad / (double) dRx * 100.0));
+                            dupeRxSeries.getData().add(new XYChart.Data<>(ts, dDupe / (double) dRx * 100.0));
+                        }
+                    }
+                    prevPktRx = e.getNumPacketsRx();
+                    prevBadRx = e.getNumPacketsRxBad();
+                    prevDupeRx = e.getNumRxDupe();
                 }
                 if (!basicOnly && e.getNumPacketsTx() > 0) {
-                    txSeries.getData().add(new XYChart.Data<>(ts, e.getNumPacketsTx()));
-                    txDroppedSeries.getData().add(new XYChart.Data<>(ts, e.getNumTxDropped()));
-                    txRelaySeries.getData().add(new XYChart.Data<>(ts, e.getNumTxRelay()));
-                    txRelayCanceledSeries.getData().add(new XYChart.Data<>(ts, e.getNumTxRelayCanceled()));
-                }
-                if (!basicOnly && (e.getRxSnr() != 0 || e.getRxRssi() != 0)) {
-                    snrSeries.getData().add(new XYChart.Data<>(ts, e.getRxSnr()));
-                    rssiSeries.getData().add(new XYChart.Data<>(ts, e.getRxRssi()));
-                }
-                if (!basicOnly && e.getHopStart() > 0) {
-                    int hops = e.getHopsTraveled();
-                    avgHopsSeries.getData().add(new XYChart.Data<>(ts, hops));
-                    maxHopsSeries.getData().add(new XYChart.Data<>(ts, hops));
-                    minHopsSeries.getData().add(new XYChart.Data<>(ts, hops));
+                    if (prevTx >= 0) {
+                        int dTx = e.getNumPacketsTx() - prevTx;
+                        int dDr = e.getNumTxDropped() - prevTxDropped;
+                        int dRl = e.getNumTxRelay() - prevTxRelay;
+                        int dCn = e.getNumTxRelayCanceled() - prevTxCanceled;
+                        if (dTx < 0) { dTx = e.getNumPacketsTx(); dDr = e.getNumTxDropped(); dRl = e.getNumTxRelay(); dCn = e.getNumTxRelayCanceled(); }
+                        txSeries.getData().add(new XYChart.Data<>(ts, dTx));
+                        txDroppedSeries.getData().add(new XYChart.Data<>(ts, dDr));
+                        txRelaySeries.getData().add(new XYChart.Data<>(ts, dRl));
+                        txRelayCanceledSeries.getData().add(new XYChart.Data<>(ts, dCn));
+                    }
+                    prevTx = e.getNumPacketsTx();
+                    prevTxDropped = e.getNumTxDropped();
+                    prevTxRelay = e.getNumTxRelay();
+                    prevTxCanceled = e.getNumTxRelayCanceled();
                 }
             }
         } else {
@@ -498,13 +519,10 @@ public class TelemetryChartPanel extends VBox {
                 long bucketEnd = bucketStart + bucketSize;
 
                 double sumBattery = 0, sumVoltage = 0, sumChUtil = 0, sumAirUtil = 0;
-                double sumGoodRx = 0, sumBadRx = 0, sumDupeRx = 0;
-                double sumPktRx = 0, sumPktBad = 0, sumPktDupe = 0;
-                double sumTx = 0, sumTxDropped = 0, sumTxRelay = 0, sumTxRelayCanceled = 0;
-                double sumSnr = 0, sumRssi = 0;
-                double sumHops = 0; int maxHops = Integer.MIN_VALUE, minHops = Integer.MAX_VALUE;
+                double sumDeltaRx = 0, sumDeltaBadRx = 0, sumDeltaDupeRx = 0;
+                double sumDeltaTx = 0, sumDeltaTxDr = 0, sumDeltaTxRl = 0, sumDeltaTxCn = 0;
                 int countBattery = 0, countVoltage = 0, count = 0;
-                int countRx = 0, countTx = 0, countQuality = 0, countHops = 0;
+                int countDeltaRx = 0, countDeltaTx = 0;
 
                 while (idx < entries.size() && entries.get(idx).getTimestamp() < bucketEnd) {
                     TelemetryEntry e = entries.get(idx);
@@ -519,33 +537,37 @@ public class TelemetryChartPanel extends VBox {
                     sumChUtil += e.getChannelUtilization();
                     sumAirUtil += e.getAirUtilTx();
                     if (!basicOnly && e.getNumPacketsRx() > 0) {
-                        double total = e.getNumPacketsRx();
-                        sumGoodRx += (total - e.getNumPacketsRxBad() - e.getNumRxDupe()) / total * 100.0;
-                        sumBadRx += e.getNumPacketsRxBad() / total * 100.0;
-                        sumDupeRx += e.getNumRxDupe() / total * 100.0;
-                        sumPktRx += e.getNumPacketsRx();
-                        sumPktBad += e.getNumPacketsRxBad();
-                        sumPktDupe += e.getNumRxDupe();
-                        countRx++;
+                        if (prevPktRx >= 0) {
+                            int dRx = e.getNumPacketsRx() - prevPktRx;
+                            int dBad = e.getNumPacketsRxBad() - prevBadRx;
+                            int dDupe = e.getNumRxDupe() - prevDupeRx;
+                            if (dRx < 0) { dRx = e.getNumPacketsRx(); dBad = e.getNumPacketsRxBad(); dDupe = e.getNumRxDupe(); }
+                            sumDeltaRx += dRx;
+                            sumDeltaBadRx += dBad;
+                            sumDeltaDupeRx += dDupe;
+                            countDeltaRx++;
+                        }
+                        prevPktRx = e.getNumPacketsRx();
+                        prevBadRx = e.getNumPacketsRxBad();
+                        prevDupeRx = e.getNumRxDupe();
                     }
                     if (!basicOnly && e.getNumPacketsTx() > 0) {
-                        sumTx += e.getNumPacketsTx();
-                        sumTxDropped += e.getNumTxDropped();
-                        sumTxRelay += e.getNumTxRelay();
-                        sumTxRelayCanceled += e.getNumTxRelayCanceled();
-                        countTx++;
-                    }
-                    if (!basicOnly && (e.getRxSnr() != 0 || e.getRxRssi() != 0)) {
-                        sumSnr += e.getRxSnr();
-                        sumRssi += e.getRxRssi();
-                        countQuality++;
-                    }
-                    if (!basicOnly && e.getHopStart() > 0) {
-                        int hops = e.getHopsTraveled();
-                        sumHops += hops;
-                        maxHops = Math.max(maxHops, hops);
-                        minHops = Math.min(minHops, hops);
-                        countHops++;
+                        if (prevTx >= 0) {
+                            int dTx = e.getNumPacketsTx() - prevTx;
+                            int dDr = e.getNumTxDropped() - prevTxDropped;
+                            int dRl = e.getNumTxRelay() - prevTxRelay;
+                            int dCn = e.getNumTxRelayCanceled() - prevTxCanceled;
+                            if (dTx < 0) { dTx = e.getNumPacketsTx(); dDr = e.getNumTxDropped(); dRl = e.getNumTxRelay(); dCn = e.getNumTxRelayCanceled(); }
+                            sumDeltaTx += dTx;
+                            sumDeltaTxDr += dDr;
+                            sumDeltaTxRl += dRl;
+                            sumDeltaTxCn += dCn;
+                            countDeltaTx++;
+                        }
+                        prevTx = e.getNumPacketsTx();
+                        prevTxDropped = e.getNumTxDropped();
+                        prevTxRelay = e.getNumTxRelay();
+                        prevTxCanceled = e.getNumTxRelayCanceled();
                     }
                     count++;
                     idx++;
@@ -561,29 +583,97 @@ public class TelemetryChartPanel extends VBox {
                     }
                     chUtilSeries.getData().add(new XYChart.Data<>(bucketCenter, sumChUtil / count));
                     airUtilSeries.getData().add(new XYChart.Data<>(bucketCenter, sumAirUtil / count));
-                    if (countRx > 0) {
-                        goodRxSeries.getData().add(new XYChart.Data<>(bucketCenter, sumGoodRx / countRx));
-                        badRxSeries.getData().add(new XYChart.Data<>(bucketCenter, sumBadRx / countRx));
-                        dupeRxSeries.getData().add(new XYChart.Data<>(bucketCenter, sumDupeRx / countRx));
-                        pktRxSeries.getData().add(new XYChart.Data<>(bucketCenter, sumPktRx / countRx));
-                        pktBadSeries.getData().add(new XYChart.Data<>(bucketCenter, sumPktBad / countRx));
-                        pktDupeSeries.getData().add(new XYChart.Data<>(bucketCenter, sumPktDupe / countRx));
+                    if (countDeltaRx > 0 && sumDeltaRx > 0) {
+                        goodRxSeries.getData().add(new XYChart.Data<>(bucketCenter, (sumDeltaRx - sumDeltaBadRx - sumDeltaDupeRx) / sumDeltaRx * 100.0));
+                        badRxSeries.getData().add(new XYChart.Data<>(bucketCenter, sumDeltaBadRx / sumDeltaRx * 100.0));
+                        dupeRxSeries.getData().add(new XYChart.Data<>(bucketCenter, sumDeltaDupeRx / sumDeltaRx * 100.0));
                     }
-                    if (countTx > 0) {
-                        txSeries.getData().add(new XYChart.Data<>(bucketCenter, sumTx / countTx));
-                        txDroppedSeries.getData().add(new XYChart.Data<>(bucketCenter, sumTxDropped / countTx));
-                        txRelaySeries.getData().add(new XYChart.Data<>(bucketCenter, sumTxRelay / countTx));
-                        txRelayCanceledSeries.getData().add(new XYChart.Data<>(bucketCenter, sumTxRelayCanceled / countTx));
+                    if (countDeltaRx > 0) {
+                        pktRxSeries.getData().add(new XYChart.Data<>(bucketCenter, sumDeltaRx));
+                        pktBadSeries.getData().add(new XYChart.Data<>(bucketCenter, sumDeltaBadRx));
+                        pktDupeSeries.getData().add(new XYChart.Data<>(bucketCenter, sumDeltaDupeRx));
                     }
-                    if (countQuality > 0) {
-                        snrSeries.getData().add(new XYChart.Data<>(bucketCenter, sumSnr / countQuality));
-                        rssiSeries.getData().add(new XYChart.Data<>(bucketCenter, sumRssi / countQuality));
+                    if (countDeltaTx > 0) {
+                        txSeries.getData().add(new XYChart.Data<>(bucketCenter, sumDeltaTx));
+                        txDroppedSeries.getData().add(new XYChart.Data<>(bucketCenter, sumDeltaTxDr));
+                        txRelaySeries.getData().add(new XYChart.Data<>(bucketCenter, sumDeltaTxRl));
+                        txRelayCanceledSeries.getData().add(new XYChart.Data<>(bucketCenter, sumDeltaTxCn));
                     }
-                    if (countHops > 0) {
-                        avgHopsSeries.getData().add(new XYChart.Data<>(bucketCenter, sumHops / countHops));
-                        maxHopsSeries.getData().add(new XYChart.Data<>(bucketCenter, maxHops));
-                        minHopsSeries.getData().add(new XYChart.Data<>(bucketCenter, minHops));
+                }
+            }
+        }
+
+        // Заполняем серии quality/hops из данных по всем нодам
+        if (!basicOnly && !qualityEntries.isEmpty()) {
+            long qMinTs = qualityEntries.getFirst().getTimestamp();
+            long qMaxTs = qualityEntries.getLast().getTimestamp();
+            long qRange = qMaxTs - qMinTs;
+
+            // SNR/RSSI — per-point если мало данных
+            if (qualityEntries.size() <= MAX_CHART_POINTS) {
+                for (TelemetryEntry e : qualityEntries) {
+                    long ts = e.getTimestamp();
+                    if (e.getRxSnr() != 0 || e.getRxRssi() != 0) {
+                        snrSeries.getData().add(new XYChart.Data<>(ts, e.getRxSnr()));
+                        rssiSeries.getData().add(new XYChart.Data<>(ts, e.getRxRssi()));
                     }
+                }
+            } else {
+                long qBucketSize = Math.max(qRange / MAX_CHART_POINTS, 1);
+                int qi = 0;
+                for (int b = 0; b < MAX_CHART_POINTS && qi < qualityEntries.size(); b++) {
+                    long bStart = qMinTs + (long) b * qBucketSize;
+                    long bEnd = bStart + qBucketSize;
+                    double sumSnr = 0, sumRssi = 0;
+                    int cntQ = 0;
+                    while (qi < qualityEntries.size() && qualityEntries.get(qi).getTimestamp() < bEnd) {
+                        TelemetryEntry e = qualityEntries.get(qi);
+                        if (e.getRxSnr() != 0 || e.getRxRssi() != 0) {
+                            sumSnr += e.getRxSnr();
+                            sumRssi += e.getRxRssi();
+                            cntQ++;
+                        }
+                        qi++;
+                    }
+                    if (cntQ > 0) {
+                        long bCenter = bStart + qBucketSize / 2;
+                        snrSeries.getData().add(new XYChart.Data<>(bCenter, sumSnr / cntQ));
+                        rssiSeries.getData().add(new XYChart.Data<>(bCenter, sumRssi / cntQ));
+                    }
+                }
+            }
+
+            // Hops — ВСЕГДА бакетируем, чтобы avg/max/min отличались
+            // (каждая запись — одна нода с одним hop count; агрегация даёт разные значения)
+            int hopBuckets = Math.min(30, Math.max(1, (int)(qRange / 900))); // ~15мин на бакет
+            if (hopBuckets < 3) hopBuckets = Math.min(3, qualityEntries.size());
+            long hopBucketSize = Math.max(qRange / hopBuckets, 1);
+
+            int hi = 0;
+            for (int b = 0; b < hopBuckets && hi < qualityEntries.size(); b++) {
+                long bStart = qMinTs + (long) b * hopBucketSize;
+                long bEnd = bStart + hopBucketSize;
+                double sumHops = 0;
+                int cntH = 0;
+                int bMaxHops = Integer.MIN_VALUE, bMinHops = Integer.MAX_VALUE;
+
+                while (hi < qualityEntries.size() && qualityEntries.get(hi).getTimestamp() < bEnd) {
+                    TelemetryEntry e = qualityEntries.get(hi);
+                    if (e.getHopStart() > 0) {
+                        int hops = e.getHopsTraveled();
+                        sumHops += hops;
+                        bMaxHops = Math.max(bMaxHops, hops);
+                        bMinHops = Math.min(bMinHops, hops);
+                        cntH++;
+                    }
+                    hi++;
+                }
+
+                if (cntH > 0) {
+                    long bCenter = bStart + hopBucketSize / 2;
+                    avgHopsSeries.getData().add(new XYChart.Data<>(bCenter, sumHops / cntH));
+                    maxHopsSeries.getData().add(new XYChart.Data<>(bCenter, bMaxHops));
+                    minHopsSeries.getData().add(new XYChart.Data<>(bCenter, bMinHops));
                 }
             }
         }
@@ -680,9 +770,9 @@ public class TelemetryChartPanel extends VBox {
             boolean hasHopsData = !avgHopsSeries.getData().isEmpty();
             if (hasHopsData) {
                 hopsChart.setTitle("Прыжки");
-                hopsChart.getData().add(avgHopsSeries);
                 hopsChart.getData().add(maxHopsSeries);
                 hopsChart.getData().add(minHopsSeries);
+                hopsChart.getData().add(avgHopsSeries);
             } else {
                 hopsChart.setTitle(null);
             }

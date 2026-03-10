@@ -577,6 +577,37 @@ public final class NodeCacheService {
     }
 
     /**
+     * Загружает записи телеметрии по всем нодам, содержащие данные о качестве соединения (SNR/RSSI/hops).
+     */
+    public List<TelemetryEntry> loadTelemetryQuality(long sinceEpoch, long maxFutureTs) {
+        List<TelemetryEntry> result = new ArrayList<>();
+        if (dbConnection == null) { return result; }
+
+        String sql = """
+            SELECT * FROM telemetry_history
+            WHERE ts <= ?
+              AND (rx_snr <> 0 OR hop_start <> 0)
+            """ + (sinceEpoch > 0 ? "  AND ts >= ?\n" : "") + """
+            ORDER BY ts ASC
+            """;
+
+        try (PreparedStatement ps = dbConnection.prepareStatement(sql)) {
+            ps.setLong(1, maxFutureTs);
+            if (sinceEpoch > 0) {
+                ps.setLong(2, sinceEpoch);
+            }
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    result.add(readTelemetryRow(rs));
+                }
+            }
+        } catch (SQLException e) {
+            log.error("Failed to load quality telemetry since {}", sinceEpoch, e);
+        }
+        return result;
+    }
+
+    /**
      * Возвращает общее количество записей телеметрии в БД.
      */
     public int countTelemetryEntries() {
