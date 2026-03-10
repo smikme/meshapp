@@ -1,0 +1,78 @@
+package com.meshtastic.client.service;
+
+import com.google.gson.Gson;
+import com.meshtastic.client.MeshApp;
+import com.meshtastic.client.model.UpdateInfo;
+import javafx.application.Platform;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.time.Duration;
+import java.util.function.Consumer;
+
+/**
+ * Проверка обновлений при запуске приложения.
+ * Асинхронный HTTP-запрос к серверу, сравнение versionCode,
+ * callback на FX-потоке если доступна новая версия.
+ */
+public final class UpdateCheckService {
+
+    private static final Logger log = LoggerFactory.getLogger(UpdateCheckService.class);
+    private static final String UPDATE_URL = "https://meshapp.privatepractice.app/meshapp.json";
+    private static final Duration TIMEOUT = Duration.ofSeconds(10);
+
+    private UpdateCheckService() {}
+
+    /**
+     * Проверить обновления асинхронно. Если доступна новая версия,
+     * callback вызывается на JavaFX Application Thread.
+     */
+    public static void checkAsync(Consumer<UpdateInfo> onUpdateAvailable) {
+        if (MeshApp.VERSION_CODE == 0) {
+            log.debug("Skipping update check: dev build (versionCode=0)");
+            return;
+        }
+
+        HttpClient client = HttpClient.newBuilder()
+                .connectTimeout(TIMEOUT)
+                .followRedirects(HttpClient.Redirect.NORMAL)
+                .build();
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(UPDATE_URL))
+                .timeout(TIMEOUT)
+                .header("Accept", "application/json")
+                .GET()
+                .build();
+
+        client.sendAsync(request, HttpResponse.BodyHandlers.ofString())
+                .thenAccept(response -> {
+                    if (response.statusCode() != 200) {
+                        log.warn("Update check: HTTP {}", response.statusCode());
+                        return;
+                    }
+                    try {
+                        UpdateInfo info = new Gson().fromJson(response.body(), UpdateInfo.class);
+                        if (info != null && info.getVersionCode() > MeshApp.VERSION_CODE) {
+                            log.info("Update available: {} (code {}), current code {}",
+                                    info.getVersion(), info.getVersionCode(), MeshApp.VERSION_CODE);
+                            Platform.runLater(() -> onUpdateAvailable.accept(info));
+                        } else {
+                            log.debug("No update available (server={}, local={})",
+                                    info != null ? info.getVersionCode() : "null",
+                                    MeshApp.VERSION_CODE);
+                        }
+                    } catch (Exception e) {
+                        log.warn("Update check: failed to parse response", e);
+                    }
+                })
+                .exceptionally(ex -> {
+                    log.debug("Update check failed: {}", ex.getMessage());
+                    return null;
+                });
+    }
+}
