@@ -1,0 +1,16 @@
+/* Цвета серий: 0=синий (Среднее), 1=оранжевый (Макс), 2=бирюзовый (Мин) */
+
+/* Линии */
+.default-color0.chart-series-area-line { -fx-stroke: #2196F3; }
+.default-color1.chart-series-area-line { -fx-stroke: #FF9800; }
+.default-color2.chart-series-area-line { -fx-stroke: #00BCD4; }
+
+/* Заливка */
+.default-color0.chart-series-area-fill { -fx-fill: rgba(33, 150, 243, 0.2); }
+.default-color1.chart-series-area-fill { -fx-fill: rgba(255, 152, 0, 0.2); }
+.default-color2.chart-series-area-fill { -fx-fill: rgba(0, 188, 212, 0.2); }
+
+/* Легенда */
+.default-color0.chart-legend-item-symbol { -fx-background-color: #2196F3; }
+.default-color1.chart-legend-item-symbol { -fx-background-color: #FF9800; }
+.default-color2.chart-legend-item-symbol { -fx-background-color: #00BCD4; }

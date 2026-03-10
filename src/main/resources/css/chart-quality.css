@@ -1,0 +1,13 @@
+/* Цвета серий: 0=зеленый (SNR), 1=красный (RSSI) */
+
+/* Линии */
+.default-color0.chart-series-area-line { -fx-stroke: #4caf50; }
+.default-color1.chart-series-area-line { -fx-stroke: #f44336; }
+
+/* Заливка */
+.default-color0.chart-series-area-fill { -fx-fill: rgba(76, 175, 80, 0.2); }
+.default-color1.chart-series-area-fill { -fx-fill: rgba(244, 67, 54, 0.2); }
+
+/* Легенда */
+.default-color0.chart-legend-item-symbol { -fx-background-color: #4caf50; }
+.default-color1.chart-legend-item-symbol { -fx-background-color: #f44336; }

@@ -100,9 +100,36 @@ public final class NodeCacheService {
                         air_util_tx         REAL,
                         temperature         REAL,
                         relative_humidity   REAL,
-                        barometric_pressure REAL
+                        barometric_pressure REAL,
+                        num_packets_rx      INT DEFAULT 0,
+                        num_packets_rx_bad  INT DEFAULT 0,
+                        num_rx_dupe         INT DEFAULT 0,
+                        num_packets_tx      INT DEFAULT 0,
+                        num_tx_dropped      INT DEFAULT 0,
+                        num_tx_relay        INT DEFAULT 0,
+                        num_tx_relay_canceled INT DEFAULT 0,
+                        rx_snr              REAL DEFAULT 0,
+                        rx_rssi             INT DEFAULT 0,
+                        hop_start           INT DEFAULT 0,
+                        hop_limit           INT DEFAULT 0
                     )
                     """);
+
+                // Migration for existing DBs: add packet stats columns
+                for (String col : new String[]{"num_packets_rx", "num_packets_rx_bad", "num_rx_dupe",
+                        "num_packets_tx", "num_tx_dropped", "num_tx_relay", "num_tx_relay_canceled"}) {
+                    try {
+                        stmt.execute("ALTER TABLE telemetry_history ADD COLUMN " + col + " INT DEFAULT 0");
+                    } catch (SQLException ignored) {
+                        // Column already exists
+                    }
+                }
+                // Migration: connection quality columns
+                try { stmt.execute("ALTER TABLE telemetry_history ADD COLUMN rx_snr REAL DEFAULT 0"); } catch (SQLException ignored) {}
+                try { stmt.execute("ALTER TABLE telemetry_history ADD COLUMN rx_rssi INT DEFAULT 0"); } catch (SQLException ignored) {}
+                // Migration: hop columns
+                try { stmt.execute("ALTER TABLE telemetry_history ADD COLUMN hop_start INT DEFAULT 0"); } catch (SQLException ignored) {}
+                try { stmt.execute("ALTER TABLE telemetry_history ADD COLUMN hop_limit INT DEFAULT 0"); } catch (SQLException ignored) {}
 
                 stmt.execute("""
                     CREATE INDEX IF NOT EXISTS idx_telemetry_ts ON telemetry_history (ts)
@@ -122,8 +149,11 @@ public final class NodeCacheService {
 
             insertTelemetryStmt = dbConnection.prepareStatement("""
                 INSERT INTO telemetry_history (ts, node_id, battery_level, voltage,
-                    channel_utilization, air_util_tx, temperature, relative_humidity, barometric_pressure)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    channel_utilization, air_util_tx, temperature, relative_humidity, barometric_pressure,
+                    num_packets_rx, num_packets_rx_bad, num_rx_dupe,
+                    num_packets_tx, num_tx_dropped, num_tx_relay, num_tx_relay_canceled,
+                    rx_snr, rx_rssi, hop_start, hop_limit)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """);
 
             log.info("Node cache DB initialized");
@@ -439,6 +469,17 @@ public final class NodeCacheService {
             insertTelemetryStmt.setFloat(7, entry.getTemperature());
             insertTelemetryStmt.setFloat(8, entry.getRelativeHumidity());
             insertTelemetryStmt.setFloat(9, entry.getBarometricPressure());
+            insertTelemetryStmt.setInt(10, entry.getNumPacketsRx());
+            insertTelemetryStmt.setInt(11, entry.getNumPacketsRxBad());
+            insertTelemetryStmt.setInt(12, entry.getNumRxDupe());
+            insertTelemetryStmt.setInt(13, entry.getNumPacketsTx());
+            insertTelemetryStmt.setInt(14, entry.getNumTxDropped());
+            insertTelemetryStmt.setInt(15, entry.getNumTxRelay());
+            insertTelemetryStmt.setInt(16, entry.getNumTxRelayCanceled());
+            insertTelemetryStmt.setFloat(17, entry.getRxSnr());
+            insertTelemetryStmt.setInt(18, entry.getRxRssi());
+            insertTelemetryStmt.setInt(19, entry.getHopStart());
+            insertTelemetryStmt.setInt(20, entry.getHopLimit());
             insertTelemetryStmt.executeUpdate();
         } catch (SQLException e) {
             log.error("Failed to persist telemetry entry", e);
@@ -513,7 +554,7 @@ public final class NodeCacheService {
             SELECT * FROM telemetry_history
             WHERE node_id = ?
               AND ts <= ?
-              AND (battery_level <> 0 OR channel_utilization <> 0 OR air_util_tx <> 0 OR voltage <> 0)
+              AND (battery_level <> 0 OR channel_utilization <> 0 OR air_util_tx <> 0 OR voltage <> 0 OR num_packets_rx <> 0 OR num_packets_tx <> 0 OR rx_snr <> 0 OR hop_start <> 0)
             """ + (sinceEpoch > 0 ? "  AND ts >= ?\n" : "") + """
             ORDER BY ts ASC
             """;
@@ -558,6 +599,17 @@ public final class NodeCacheService {
         e.setTemperature(rs.getFloat("temperature"));
         e.setRelativeHumidity(rs.getFloat("relative_humidity"));
         e.setBarometricPressure(rs.getFloat("barometric_pressure"));
+        e.setNumPacketsRx(rs.getInt("num_packets_rx"));
+        e.setNumPacketsRxBad(rs.getInt("num_packets_rx_bad"));
+        e.setNumRxDupe(rs.getInt("num_rx_dupe"));
+        e.setNumPacketsTx(rs.getInt("num_packets_tx"));
+        e.setNumTxDropped(rs.getInt("num_tx_dropped"));
+        e.setNumTxRelay(rs.getInt("num_tx_relay"));
+        e.setNumTxRelayCanceled(rs.getInt("num_tx_relay_canceled"));
+        e.setRxSnr(rs.getFloat("rx_snr"));
+        e.setRxRssi(rs.getInt("rx_rssi"));
+        e.setHopStart(rs.getInt("hop_start"));
+        e.setHopLimit(rs.getInt("hop_limit"));
         return e;
     }
 

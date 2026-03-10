@@ -13,6 +13,8 @@ import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import javafx.geometry.Insets;
 import javafx.scene.control.Label;
+import javafx.scene.control.Tab;
+import javafx.scene.control.TabPane;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableView;
 import javafx.scene.control.cell.PropertyValueFactory;
@@ -50,24 +52,42 @@ public class FormDashboard extends Form {
     }
 
     private void init() {
-        VBox content = new VBox(10);
+        VBox content = new VBox(0);
         content.setPadding(new Insets(10));
 
         // --- График телеметрии (переиспользуемый компонент) ---
         chartPanel = new TelemetryChartPanel();
-        chartPanel.setPrefHeight(320);
         chartPanel.setOnDataRefreshed(this::onChartDataRefreshed);
+        VBox.setVgrow(chartPanel, Priority.ALWAYS);
+
+        VBox chartTab = new VBox(chartPanel);
+        chartTab.setPadding(new Insets(10, 0, 0, 0));
+        VBox.setVgrow(chartPanel, Priority.ALWAYS);
 
         // --- Счётчик логов ---
         logCountLabel = new Label("0 записей");
         logCountLabel.setStyle("-fx-opacity: 0.6; -fx-font-size: 12px;");
-        logCountLabel.setPadding(new Insets(4, 0, 0, 2));
+        logCountLabel.setPadding(new Insets(4, 0, 4, 2));
 
         // --- Таблица логов ---
         logTable = createLogTable();
         VBox.setVgrow(logTable, Priority.ALWAYS);
 
-        content.getChildren().addAll(chartPanel, logCountLabel, logTable);
+        VBox dataTab = new VBox(4, logCountLabel, logTable);
+        dataTab.setPadding(new Insets(10, 0, 0, 0));
+        VBox.setVgrow(logTable, Priority.ALWAYS);
+
+        // --- TabPane ---
+        Tab tabCharts = new Tab("Графики", chartTab);
+        tabCharts.setClosable(false);
+        Tab tabData = new Tab("Данные", dataTab);
+        tabData.setClosable(false);
+
+        TabPane tabPane = new TabPane(tabCharts, tabData);
+        tabPane.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
+        VBox.setVgrow(tabPane, Priority.ALWAYS);
+
+        content.getChildren().add(tabPane);
         getChildren().add(content);
     }
 
@@ -154,11 +174,51 @@ public class FormDashboard extends Form {
         colAirUtil.setCellValueFactory(new PropertyValueFactory<>("airUtil"));
         colAirUtil.setPrefWidth(90);
 
+        TableColumn<TelemetryLogRow, String> colGoodRx = new TableColumn<>("Good RX");
+        colGoodRx.setCellValueFactory(new PropertyValueFactory<>("goodRx"));
+        colGoodRx.setPrefWidth(80);
+
+        TableColumn<TelemetryLogRow, String> colBadRx = new TableColumn<>("Bad RX");
+        colBadRx.setCellValueFactory(new PropertyValueFactory<>("badRx"));
+        colBadRx.setPrefWidth(80);
+
+        TableColumn<TelemetryLogRow, String> colDupeRx = new TableColumn<>("Dupe RX");
+        colDupeRx.setCellValueFactory(new PropertyValueFactory<>("dupeRx"));
+        colDupeRx.setPrefWidth(80);
+
+        TableColumn<TelemetryLogRow, String> colTx = new TableColumn<>("TX");
+        colTx.setCellValueFactory(new PropertyValueFactory<>("tx"));
+        colTx.setPrefWidth(60);
+
+        TableColumn<TelemetryLogRow, String> colTxDropped = new TableColumn<>("Dropped");
+        colTxDropped.setCellValueFactory(new PropertyValueFactory<>("txDropped"));
+        colTxDropped.setPrefWidth(70);
+
+        TableColumn<TelemetryLogRow, String> colTxRelay = new TableColumn<>("Relayed");
+        colTxRelay.setCellValueFactory(new PropertyValueFactory<>("txRelay"));
+        colTxRelay.setPrefWidth(70);
+
+        TableColumn<TelemetryLogRow, String> colTxCanceled = new TableColumn<>("Canceled");
+        colTxCanceled.setCellValueFactory(new PropertyValueFactory<>("txCanceled"));
+        colTxCanceled.setPrefWidth(70);
+
+        TableColumn<TelemetryLogRow, String> colSnr = new TableColumn<>("SNR");
+        colSnr.setCellValueFactory(new PropertyValueFactory<>("snr"));
+        colSnr.setPrefWidth(60);
+
+        TableColumn<TelemetryLogRow, String> colRssi = new TableColumn<>("RSSI");
+        colRssi.setCellValueFactory(new PropertyValueFactory<>("rssi"));
+        colRssi.setPrefWidth(60);
+
+        TableColumn<TelemetryLogRow, String> colHops = new TableColumn<>("Hops");
+        colHops.setCellValueFactory(new PropertyValueFactory<>("hops"));
+        colHops.setPrefWidth(60);
+
         TableColumn<TelemetryLogRow, String> colNode = new TableColumn<>("Нода");
         colNode.setCellValueFactory(new PropertyValueFactory<>("node"));
         colNode.setPrefWidth(120);
 
-        table.getColumns().addAll(colTime, colBattery, colVoltage, colChUtil, colAirUtil, colNode);
+        table.getColumns().addAll(colTime, colBattery, colVoltage, colChUtil, colAirUtil, colGoodRx, colBadRx, colDupeRx, colTx, colTxDropped, colTxRelay, colTxCanceled, colSnr, colRssi, colHops, colNode);
         return table;
     }
 
@@ -186,6 +246,16 @@ public class FormDashboard extends Form {
         private final String voltage;
         private final String chUtil;
         private final String airUtil;
+        private final String goodRx;
+        private final String badRx;
+        private final String dupeRx;
+        private final String tx;
+        private final String txDropped;
+        private final String txRelay;
+        private final String txCanceled;
+        private final String snr;
+        private final String rssi;
+        private final String hops;
         private final String node;
 
         public TelemetryLogRow(TelemetryEntry e, DeviceState state) {
@@ -211,6 +281,26 @@ public class FormDashboard extends Form {
             this.chUtil = String.format("%.1f%%", e.getChannelUtilization());
             this.airUtil = String.format("%.1f%%", e.getAirUtilTx());
 
+            if (e.getNumPacketsRx() > 0) {
+                double total = e.getNumPacketsRx();
+                this.goodRx = String.format("%.1f%%", (total - e.getNumPacketsRxBad() - e.getNumRxDupe()) / total * 100.0);
+                this.badRx = String.format("%.1f%%", e.getNumPacketsRxBad() / total * 100.0);
+                this.dupeRx = String.format("%.1f%%", e.getNumRxDupe() / total * 100.0);
+            } else {
+                this.goodRx = "—";
+                this.badRx = "—";
+                this.dupeRx = "—";
+            }
+
+            this.tx = e.getNumPacketsTx() > 0 ? String.valueOf(e.getNumPacketsTx()) : "—";
+            this.txDropped = e.getNumPacketsTx() > 0 ? String.valueOf(e.getNumTxDropped()) : "—";
+            this.txRelay = e.getNumPacketsTx() > 0 ? String.valueOf(e.getNumTxRelay()) : "—";
+            this.txCanceled = e.getNumPacketsTx() > 0 ? String.valueOf(e.getNumTxRelayCanceled()) : "—";
+
+            this.snr = (e.getRxSnr() != 0) ? String.format("%.1f", e.getRxSnr()) : "—";
+            this.rssi = (e.getRxRssi() != 0) ? String.valueOf(e.getRxRssi()) : "—";
+            this.hops = e.getHopStart() > 0 ? String.valueOf(e.getHopsTraveled()) : "—";
+
             // Имя ноды
             String nodeName = e.getNodeId() != null ? e.getNodeId() : "?";
             if (state != null) {
@@ -227,6 +317,16 @@ public class FormDashboard extends Form {
         public String getVoltage()  { return voltage; }
         public String getChUtil()   { return chUtil; }
         public String getAirUtil()  { return airUtil; }
+        public String getGoodRx()   { return goodRx; }
+        public String getBadRx()    { return badRx; }
+        public String getDupeRx()   { return dupeRx; }
+        public String getTx()       { return tx; }
+        public String getTxDropped() { return txDropped; }
+        public String getTxRelay()  { return txRelay; }
+        public String getTxCanceled() { return txCanceled; }
+        public String getSnr()      { return snr; }
+        public String getRssi()     { return rssi; }
+        public String getHops()     { return hops; }
         public String getNode()     { return node; }
     }
 }

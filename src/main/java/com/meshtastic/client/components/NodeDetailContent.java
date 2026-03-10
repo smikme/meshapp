@@ -209,7 +209,7 @@ public class NodeDetailContent extends HBox {
         TableView<String[]> table = NodeUtils.createDetailTable(tableData);
 
         // === График телеметрии ===
-        chartPanel = new TelemetryChartPanel();
+        chartPanel = new TelemetryChartPanel(true);
         VBox.setVgrow(chartPanel, Priority.ALWAYS);
         if (state != null) {
             chartPanel.bind(state, node.getNodeId());
