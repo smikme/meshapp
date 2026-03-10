@@ -88,7 +88,12 @@ tasks.register('generateVersionProperties') {
 	doLast {
 		def dir = outputDir.get().asFile
 		dir.mkdirs()
-		new File(dir, 'version.properties').text = "version=${project.version}\n"
+		def versionCode = '0'
+		try {
+			versionCode = 'git rev-list --count HEAD'.execute().text.trim() ?: '0'
+		} catch (ignored) {}
+		new File(dir, 'version.properties').text =
+			"version=${project.version}\nversionCode=${versionCode}\n"
 	}
 }
 

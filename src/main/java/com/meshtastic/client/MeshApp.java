@@ -1,10 +1,12 @@
 package com.meshtastic.client;
 
+import com.meshtastic.client.modal.ModalPane;
 import com.meshtastic.client.platform.NativeWindowHelper;
 import com.meshtastic.client.platform.OsDetect;
 import com.meshtastic.client.service.DatabaseProvider;
 import com.meshtastic.client.service.MessageDbService;
 import com.meshtastic.client.service.NodeCacheService;
+import com.meshtastic.client.service.UpdateCheckService;
 import com.meshtastic.client.system.FormManager;
 import com.meshtastic.client.system.RootPane;
 import com.meshtastic.client.themes.ThemeManager;
@@ -22,6 +24,7 @@ import java.util.Objects;
 public class MeshApp extends Application {
 
     public static final String APPLICATION_VERSION = resolveVersion();
+    public static final int VERSION_CODE = resolveVersionCode();
 
     private static String resolveVersion() {
         // 1. version.properties (генерируется Gradle при каждой сборке)
@@ -36,6 +39,20 @@ public class MeshApp extends Application {
         // 2. MANIFEST.MF (при запуске из jar)
         String v = MeshApp.class.getPackage().getImplementationVersion();
         return v != null ? v : "dev";
+    }
+
+    private static int resolveVersionCode() {
+        try (var is = MeshApp.class.getResourceAsStream("/version.properties")) {
+            if (is != null) {
+                var props = new java.util.Properties();
+                props.load(is);
+                String code = props.getProperty("versionCode");
+                if (code != null && !code.isBlank()) {
+                    return Integer.parseInt(code.trim());
+                }
+            }
+        } catch (Exception ignored) {}
+        return 0;
     }
 
     private static Stage primaryStage;
@@ -102,6 +119,9 @@ public class MeshApp extends Application {
         // Сохранять состояние окна при закрытии (setOnHiding срабатывает и при
         // программном stage.close() из кастомного title bar, и при нативном закрытии)
         stage.setOnHiding(e -> saveWindowState(stage, rootPane));
+
+        // Проверка обновлений (асинхронно, не блокирует запуск)
+        UpdateCheckService.checkAsync(ModalPane::showUpdateAvailable);
     }
 
     private void restoreWindowBounds(Stage stage) {
