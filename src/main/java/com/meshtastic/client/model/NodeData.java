@@ -130,7 +130,7 @@ public class NodeData {
      * @return отформатированная строка или пустая строка для значений ≤ 0
      */
     public static String formatTime(long epochSeconds) {
-        if (epochSeconds <= 0) return "";
+        if (epochSeconds <= 0) { return ""; }
         return Instant.ofEpochSecond(epochSeconds)
                 .atZone(ZoneId.systemDefault())
                 .toLocalDateTime()
@@ -144,7 +144,7 @@ public class NodeData {
      * @return русскоязычное название роли, или исходная строка если перевод не найден
      */
     public static String translateRole(String role) {
-        if (role == null || role.isEmpty()) return null;
+        if (role == null || role.isEmpty()) { return null; }
         return switch (role) {
             case "CLIENT"         -> "Клиент";
             case "CLIENT_MUTE"    -> "Клиент (без звука)";

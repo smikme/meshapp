@@ -1,10 +1,13 @@
 package com.meshtastic.client.components.chat;
 
+import com.meshtastic.client.components.EmojiImageCache;
+import com.meshtastic.client.components.EmojiTextFlow;
 import com.meshtastic.client.components.NodeDetailPanel;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.service.MessageDbService;
+import com.meshtastic.client.service.NodeCacheService;
 import com.meshtastic.client.utils.NodeUtils;
 import javafx.beans.property.ReadOnlyDoubleProperty;
 import javafx.geometry.Pos;
@@ -13,6 +16,7 @@ import javafx.scene.control.ContextMenu;
 import javafx.scene.control.Label;
 import javafx.scene.control.MenuItem;
 import javafx.scene.control.SeparatorMenuItem;
+import javafx.scene.image.ImageView;
 import javafx.scene.input.Clipboard;
 import javafx.scene.input.ClipboardContent;
 import javafx.scene.layout.HBox;
@@ -124,11 +128,25 @@ public class MessageBubbleFactory {
         avatar.setCursor(Cursor.HAND);
         avatar.setOnMouseClicked(e -> {
             if (state != null) {
-                NodeData node = state.getNodeDb().get(msg.getFromNum());
+                NodeData node = NodeUtils.resolveNode(state, msg.getFromNodeId());
                 if (node == null) {
-                    node = new NodeData(msg.getFromNum());
+                    node = state.getNodeByNodeId(msg.getFromNodeId());
                 }
-                NodeDetailPanel.showForNode(state, node);
+                if (node == null) {
+                    node = NodeCacheService.getInstance().get(msg.getFromNodeId());
+                }
+                if (node == null) {
+                    // Нода не найдена нигде — создаём bare-ноду из nodeId
+                    String nodeId = msg.getFromNodeId();
+                    if (nodeId != null && nodeId.length() >= 2) {
+                        int nodeNum = (int) Long.parseUnsignedLong(nodeId.substring(1), 16);
+                        node = state.getOrCreateNode(nodeNum);
+                        NodeCacheService.getInstance().enrichFromCache(node);
+                    }
+                }
+                if (node != null) {
+                    NodeDetailPanel.showForNode(state, node);
+                }
             }
             e.consume();
         });
@@ -157,9 +175,28 @@ public class MessageBubbleFactory {
 
         int hops = msg.getHopsTraveled();
         if (hops > 0) {
-            Label hopLabel = new Label("\uD83D\uDC07 " + hops);
-            hopLabel.getStyleClass().add("chat-bubble-hops");
-            meta.getChildren().add(hopLabel);
+            HBox hopBox = new HBox(2);
+            hopBox.setAlignment(Pos.CENTER);
+            hopBox.getStyleClass().add("chat-bubble-hops");
+            ImageView hopImg = EmojiImageCache.createImageView("\uD83D\uDC07", 12);
+            if (hopImg != null) {
+                hopBox.getChildren().add(hopImg);
+            }
+            hopBox.getChildren().add(new Label(String.valueOf(hops)));
+            meta.getChildren().add(hopBox);
+        } else if (msg.getRxRssi() != 0 || msg.getRxSnr() != 0) {
+            HBox signalBox = new HBox(2);
+            signalBox.setAlignment(Pos.CENTER);
+            signalBox.getStyleClass().add("chat-bubble-hops");
+            ImageView sigImg = EmojiImageCache.createImageView("\uD83D\uDCF6", 12);
+            if (sigImg != null) {
+                signalBox.getChildren().add(sigImg);
+            }
+            String snrStr = msg.getRxSnr() == (int) msg.getRxSnr()
+                    ? String.valueOf((int) msg.getRxSnr())
+                    : String.format("%.1f", msg.getRxSnr());
+            signalBox.getChildren().add(new Label(msg.getRxRssi() + "dBm/" + snrStr + "dB"));
+            meta.getChildren().add(signalBox);
         }
 
         addTimeToMeta(meta, msg);
@@ -235,21 +272,18 @@ public class MessageBubbleFactory {
             }
         }
 
-        Label botAvatar = new Label("\uD83E\uDD16");
-        botAvatar.setFont(Font.font(20));
-        botAvatar.setMinSize(28, 28);
-        botAvatar.setAlignment(Pos.CENTER);
+        StackPane botAvatar = buildBotAvatar();
 
         VBox content = new VBox(2);
         content.getStyleClass().add("chat-bubble-system");
         content.maxWidthProperty().bind(containerWidthProp.multiply(0.85));
         content.setMinHeight(Region.USE_PREF_SIZE);
 
-        Label textLabel = new Label(msg.getText());
-        textLabel.setWrapText(true);
-        textLabel.setMinHeight(Region.USE_PREF_SIZE);
-        textLabel.getStyleClass().add("chat-bubble-text");
-        content.getChildren().add(textLabel);
+        EmojiTextFlow textFlow = new EmojiTextFlow(msg.getText(), 18);
+        textFlow.setTextStyleClass("chat-bubble-text-node");
+        textFlow.getStyleClass().add("chat-bubble-text");
+        textFlow.setMinHeight(Region.USE_PREF_SIZE);
+        content.getChildren().add(textFlow);
 
         Label timeLabel = new Label(
                 ChatTimeFormatter.formatMessageTime(msg.getTimestamp()));
@@ -264,7 +298,24 @@ public class MessageBubbleFactory {
         return row;
     }
 
-    // === Аватар ===
+    // === Аватары ===
+
+    /** Аватар бота (🤖) — изображение или fallback на текст. */
+    private static StackPane buildBotAvatar() {
+        StackPane avatar = new StackPane();
+        avatar.setMinSize(28, 28);
+        avatar.setMaxSize(28, 28);
+        avatar.setAlignment(Pos.CENTER);
+        ImageView botImg = EmojiImageCache.createImageView("\uD83E\uDD16", 20);
+        if (botImg != null) {
+            avatar.getChildren().add(botImg);
+        } else {
+            Label fallback = new Label("\uD83E\uDD16");
+            fallback.setFont(Font.font(20));
+            avatar.getChildren().add(fallback);
+        }
+        return avatar;
+    }
 
     private StackPane buildSmallAvatar(MeshMessage msg) {
         StackPane avatar = new StackPane();
@@ -286,16 +337,18 @@ public class MessageBubbleFactory {
             }
             color = "#1EA97C";
         } else if (state != null) {
-            NodeData senderNode = state.getNodeDb().get(msg.getFromNum());
+            NodeData senderNode = NodeUtils.resolveNode(state, msg.getFromNodeId());
             if (senderNode != null
                     && senderNode.getShortName() != null
                     && !senderNode.getShortName().isEmpty()) {
-                text = senderNode.getShortName().toUpperCase();
+                text = senderNode.getShortName().toUpperCase(java.util.Locale.ROOT);
             } else {
-                text = String.format("!%04x", msg.getFromNum() & 0xFFFF)
-                        .toUpperCase();
+                String nid = msg.getFromNodeId();
+                text = nid.length() >= 4
+                        ? nid.substring(nid.length() - 4).toUpperCase(java.util.Locale.ROOT)
+                        : nid.toUpperCase(java.util.Locale.ROOT);
             }
-            color = AVATAR_COLORS[Math.abs(msg.getFromNum())
+            color = AVATAR_COLORS[Math.abs(msg.getFromNodeId().hashCode())
                     % AVATAR_COLORS.length];
         } else {
             text = "?";
@@ -323,17 +376,17 @@ public class MessageBubbleFactory {
         }
 
         NodeData myNode = state.getNodeDb().get(state.getMyNodeNum());
-        String text = msg.getText() != null ? msg.getText().toLowerCase() : "";
+        String text = msg.getText() != null ? msg.getText().toLowerCase(java.util.Locale.ROOT) : "";
 
         if (myNode != null) {
             String longName = myNode.getLongName();
             if (longName != null && !longName.isEmpty()
-                    && text.contains(longName.toLowerCase())) {
+                    && text.contains(longName.toLowerCase(java.util.Locale.ROOT))) {
                 return true;
             }
             String shortName = myNode.getShortName();
             if (shortName != null && !shortName.isEmpty()
-                    && text.contains(shortName.toLowerCase())) {
+                    && text.contains(shortName.toLowerCase(java.util.Locale.ROOT))) {
                 return true;
             }
         }
@@ -350,36 +403,34 @@ public class MessageBubbleFactory {
     }
 
     private String resolveSenderDisplayName(MeshMessage msg) {
-        if (state != null) {
-            NodeData senderNode = state.getNodeDb().get(msg.getFromNum());
-            if (senderNode != null
-                    && senderNode.getLongName() != null
-                    && !senderNode.getLongName().isEmpty()) {
-                return senderNode.getLongName();
-            }
+        NodeData senderNode = NodeUtils.resolveNode(state, msg.getFromNodeId());
+        if (senderNode != null
+                && senderNode.getLongName() != null
+                && !senderNode.getLongName().isEmpty()) {
+            return senderNode.getLongName();
         }
         if (msg.getSenderName() != null && !msg.getSenderName().isEmpty()) {
             return msg.getSenderName();
         }
-        return "!" + String.format("%08x", msg.getFromNum());
+        return msg.getFromNodeId();
     }
 
     private void addQuoteIfPresent(VBox content, MeshMessage msg) {
         if (msg.getReplyText() != null && !msg.getReplyText().isEmpty()) {
-            Label quoteLabel = new Label(msg.getReplyText());
-            quoteLabel.getStyleClass().add("chat-bubble-quote");
-            quoteLabel.setWrapText(true);
-            quoteLabel.setMinHeight(Region.USE_PREF_SIZE);
-            content.getChildren().add(quoteLabel);
+            EmojiTextFlow quoteFlow = new EmojiTextFlow(msg.getReplyText(), 14);
+            quoteFlow.setTextStyleClass("chat-bubble-quote-node");
+            quoteFlow.getStyleClass().add("chat-bubble-quote");
+            quoteFlow.setMinHeight(Region.USE_PREF_SIZE);
+            content.getChildren().add(quoteFlow);
         }
     }
 
     private void addTextLabel(VBox content, MeshMessage msg) {
-        Label textLabel = new Label(msg.getText());
-        textLabel.setWrapText(true);
-        textLabel.setMinHeight(Region.USE_PREF_SIZE);
-        textLabel.getStyleClass().add("chat-bubble-text");
-        content.getChildren().add(textLabel);
+        EmojiTextFlow textFlow = new EmojiTextFlow(msg.getText(), 18);
+        textFlow.setTextStyleClass("chat-bubble-text-node");
+        textFlow.getStyleClass().add("chat-bubble-text");
+        textFlow.setMinHeight(Region.USE_PREF_SIZE);
+        content.getChildren().add(textFlow);
     }
 
     private void addTimeToMeta(HBox meta, MeshMessage msg) {

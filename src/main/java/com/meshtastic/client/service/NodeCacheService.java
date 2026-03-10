@@ -25,17 +25,20 @@ import java.util.concurrent.ConcurrentHashMap;
  * в H2 embedded БД {@code ~/.meshapp/nodedb}. Используется как fallback
  * когда в {@link com.meshtastic.client.model.DeviceState#getNodeDb()} нет данных.
  * <p>
+ * Ключ — {@code node_id} (строка вида {@code !9e755af0}), стабильный
+ * идентификатор ноды из {@code User.id} протокола Meshtastic.
+ * <p>
  * Обновляется при получении данных через config exchange и live-пакеты
  * (NODEINFO_APP, POSITION_APP, TELEMETRY_APP). Запись в БД происходит
  * немедленно (MERGE INTO), без debounce.
  */
-public class NodeCacheService {
+public final class NodeCacheService {
 
     private static final Logger log = LoggerFactory.getLogger(NodeCacheService.class);
 
     private static NodeCacheService instance;
 
-    private final ConcurrentHashMap<Integer, NodeData> cache = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, NodeData> cache = new ConcurrentHashMap<>();
     private Connection dbConnection;
     private PreparedStatement mergeStmt;
     private PreparedStatement insertTelemetryStmt;
@@ -68,10 +71,10 @@ public class NodeCacheService {
             try (Statement stmt = dbConnection.createStatement()) {
                 stmt.execute("""
                     CREATE TABLE IF NOT EXISTS nodes (
-                        node_num      INT PRIMARY KEY,
+                        node_id       VARCHAR(20) PRIMARY KEY,
+                        node_num      INT,
                         long_name     VARCHAR(100),
                         short_name    VARCHAR(10),
-                        node_id       VARCHAR(20),
                         role          VARCHAR(30),
                         hw_model      VARCHAR(50),
                         latitude      DOUBLE,
@@ -81,7 +84,8 @@ public class NodeCacheService {
                         last_heard    INT,
                         battery_level INT,
                         voltage       REAL,
-                        hops_away     INT
+                        hops_away     INT,
+                        favorite      BOOLEAN DEFAULT FALSE
                     )
                     """);
 
@@ -89,37 +93,67 @@ public class NodeCacheService {
                     CREATE TABLE IF NOT EXISTS telemetry_history (
                         id                  BIGINT AUTO_INCREMENT PRIMARY KEY,
                         ts                  BIGINT NOT NULL,
-                        node_num            INT NOT NULL,
+                        node_id             VARCHAR(20) NOT NULL,
                         battery_level       INT,
                         voltage             REAL,
                         channel_utilization REAL,
                         air_util_tx         REAL,
                         temperature         REAL,
                         relative_humidity   REAL,
-                        barometric_pressure REAL
+                        barometric_pressure REAL,
+                        num_packets_rx      INT DEFAULT 0,
+                        num_packets_rx_bad  INT DEFAULT 0,
+                        num_rx_dupe         INT DEFAULT 0,
+                        num_packets_tx      INT DEFAULT 0,
+                        num_tx_dropped      INT DEFAULT 0,
+                        num_tx_relay        INT DEFAULT 0,
+                        num_tx_relay_canceled INT DEFAULT 0,
+                        rx_snr              REAL DEFAULT 0,
+                        rx_rssi             INT DEFAULT 0,
+                        hop_start           INT DEFAULT 0,
+                        hop_limit           INT DEFAULT 0
                     )
                     """);
+
+                // Migration for existing DBs: add packet stats columns
+                for (String col : new String[]{"num_packets_rx", "num_packets_rx_bad", "num_rx_dupe",
+                        "num_packets_tx", "num_tx_dropped", "num_tx_relay", "num_tx_relay_canceled"}) {
+                    try {
+                        stmt.execute("ALTER TABLE telemetry_history ADD COLUMN " + col + " INT DEFAULT 0");
+                    } catch (SQLException ignored) {
+                        // Column already exists
+                    }
+                }
+                // Migration: connection quality columns
+                try { stmt.execute("ALTER TABLE telemetry_history ADD COLUMN rx_snr REAL DEFAULT 0"); } catch (SQLException ignored) {}
+                try { stmt.execute("ALTER TABLE telemetry_history ADD COLUMN rx_rssi INT DEFAULT 0"); } catch (SQLException ignored) {}
+                // Migration: hop columns
+                try { stmt.execute("ALTER TABLE telemetry_history ADD COLUMN hop_start INT DEFAULT 0"); } catch (SQLException ignored) {}
+                try { stmt.execute("ALTER TABLE telemetry_history ADD COLUMN hop_limit INT DEFAULT 0"); } catch (SQLException ignored) {}
 
                 stmt.execute("""
                     CREATE INDEX IF NOT EXISTS idx_telemetry_ts ON telemetry_history (ts)
                     """);
 
                 stmt.execute("""
-                    CREATE INDEX IF NOT EXISTS idx_telemetry_node_ts ON telemetry_history (node_num, ts)
+                    CREATE INDEX IF NOT EXISTS idx_telemetry_node_ts ON telemetry_history (node_id, ts)
                     """);
             }
 
             mergeStmt = dbConnection.prepareStatement("""
-                MERGE INTO nodes (node_num, long_name, short_name, node_id, role, hw_model,
+                MERGE INTO nodes (node_id, node_num, long_name, short_name, role, hw_model,
                                   latitude, longitude, altitude, snr, last_heard,
                                   battery_level, voltage, hops_away)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """);
 
             insertTelemetryStmt = dbConnection.prepareStatement("""
-                INSERT INTO telemetry_history (ts, node_num, battery_level, voltage,
-                    channel_utilization, air_util_tx, temperature, relative_humidity, barometric_pressure)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO telemetry_history (ts, node_id, battery_level, voltage,
+                    channel_utilization, air_util_tx, temperature, relative_humidity, barometric_pressure,
+                    num_packets_rx, num_packets_rx_bad, num_rx_dupe,
+                    num_packets_tx, num_tx_dropped, num_tx_relay, num_tx_relay_canceled,
+                    rx_snr, rx_rssi, hop_start, hop_limit)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """);
 
             log.info("Node cache DB initialized");
@@ -133,25 +167,42 @@ public class NodeCacheService {
     // ═══════════════════════════════════════════════════════════
 
     /**
-     * Возвращает ноду из in-memory кэша или {@code null} если отсутствует.
+     * Возвращает ноду из in-memory кэша или H2 по node_id.
+     * Ленивая загрузка из БД, если в памяти нет — результат кэшируется.
      */
-    public NodeData get(int nodeNum) {
-        return cache.get(nodeNum);
+    public NodeData get(String nodeId) {
+        if (nodeId == null || nodeId.isEmpty()) { return null; }
+        NodeData node = cache.get(nodeId);
+        if (node == null) {
+            node = loadFromDb(nodeId);
+            if (node != null) {
+                cache.put(nodeId, node);
+            }
+        }
+        return node;
     }
 
     /**
-     * Загружает одну ноду из БД по nodeNum.
+     * Convenience: поиск ноды по node_num (конвертируется в node_id).
+     * Используется в местах, где доступен только числовой идентификатор.
      */
-    private NodeData loadFromDb(int nodeNum) {
-        if (dbConnection == null) return null;
+    public NodeData getByNum(int nodeNum) {
+        return get(String.format("!%08x", nodeNum));
+    }
+
+    /**
+     * Загружает одну ноду из БД по node_id.
+     */
+    private NodeData loadFromDb(String nodeId) {
+        if (dbConnection == null || nodeId == null) { return null; }
         try (PreparedStatement ps = dbConnection.prepareStatement(
-                "SELECT * FROM nodes WHERE node_num = ?")) {
-            ps.setInt(1, nodeNum);
+                "SELECT * FROM nodes WHERE node_id = ?")) {
+            ps.setString(1, nodeId);
             try (ResultSet rs = ps.executeQuery()) {
-                if (rs.next()) return readNode(rs);
+                if (rs.next()) { return readNode(rs); }
             }
         } catch (SQLException e) {
-            log.error("Failed to load node {} from DB", nodeNum, e);
+            log.error("Failed to load node {} from DB", nodeId, e);
         }
         return null;
     }
@@ -180,7 +231,7 @@ public class NodeCacheService {
      */
     public List<NodeData> loadPage(int offset, int limit) {
         List<NodeData> page = new ArrayList<>();
-        if (dbConnection == null) return page;
+        if (dbConnection == null) { return page; }
         try (PreparedStatement ps = dbConnection.prepareStatement(
                 "SELECT * FROM nodes ORDER BY last_heard DESC LIMIT ? OFFSET ?")) {
             ps.setInt(1, limit);
@@ -202,10 +253,10 @@ public class NodeCacheService {
      * @return количество записей в таблице {@code nodes}
      */
     public int countNodesInDb() {
-        if (dbConnection == null) return 0;
+        if (dbConnection == null) { return 0; }
         try (Statement stmt = dbConnection.createStatement();
              ResultSet rs = stmt.executeQuery("SELECT COUNT(*) FROM nodes")) {
-            if (rs.next()) return rs.getInt(1);
+            if (rs.next()) { return rs.getInt(1); }
         } catch (SQLException e) {
             log.error("Failed to count nodes in DB", e);
         }
@@ -220,22 +271,30 @@ public class NodeCacheService {
      * Обновляет ноду в кэше и БД. Применяет merge — новые непустые поля
      * перезаписывают старые, нулевые/пустые поля не затирают имеющиеся данные.
      *
-     * @param nodeNum номер ноды
-     * @param fresh   свежие данные для merge
+     * @param fresh свежие данные для merge (nodeId берётся из fresh)
      */
-    public void update(int nodeNum, NodeData fresh) {
-        if (fresh == null) return;
-        cache.compute(nodeNum, (key, existing) -> {
+    public void update(NodeData fresh) {
+        if (fresh == null) { return; }
+        String nodeId = fresh.getNodeId();
+        if (nodeId == null || nodeId.isEmpty()) { return; }
+        log.info("CACHE_DEBUG update: nodeId={}, fresh.hasName={}, fresh.longName='{}'",
+                nodeId, fresh.hasName(), fresh.getLongName());
+        cache.compute(nodeId, (key, existing) -> {
             if (existing == null) {
-                existing = loadFromDb(nodeNum);
+                existing = loadFromDb(nodeId);
+                log.info("CACHE_DEBUG compute: loadFromDb={}", existing != null);
             }
             if (existing == null) {
-                existing = new NodeData(nodeNum);
+                existing = new NodeData(fresh.getNodeNum());
+                existing.setNodeId(nodeId);
+                log.info("CACHE_DEBUG compute: created new NodeData");
             }
             merge(existing, fresh);
-            return existing.hasName() ? existing : null;
+            log.info("CACHE_DEBUG compute: after merge hasName={}, longName='{}'",
+                    existing.hasName(), existing.getLongName());
+            return existing;
         });
-        persistNode(nodeNum);
+        persistNode(nodeId);
     }
 
     /**
@@ -245,18 +304,63 @@ public class NodeCacheService {
      * @param nodes карта нод из {@code DeviceState.getNodeDb()}
      */
     public void updateAll(Map<Integer, NodeData> nodes) {
-        for (Map.Entry<Integer, NodeData> entry : nodes.entrySet()) {
-            int nodeNum = entry.getKey();
-            NodeData fresh = entry.getValue();
-            cache.compute(nodeNum, (key, existing) -> {
+        Set<String> persistIds = new HashSet<>();
+        for (NodeData fresh : nodes.values()) {
+            String nodeId = fresh.getNodeId();
+            if (nodeId == null || nodeId.isEmpty()) { continue; }
+            cache.compute(nodeId, (key, existing) -> {
                 if (existing == null) {
-                    existing = new NodeData(nodeNum);
+                    existing = loadFromDb(nodeId);
+                }
+                if (existing == null) {
+                    existing = new NodeData(fresh.getNodeNum());
+                    existing.setNodeId(nodeId);
                 }
                 merge(existing, fresh);
-                return existing.hasName() ? existing : null;
+                return existing;
             });
+            persistIds.add(nodeId);
         }
-        persistAll(nodes.keySet());
+        persistAll(persistIds);
+    }
+
+    /**
+     * Обогащает bare-ноду (без имени) данными из кэша/H2.
+     * Заполняет только identity-поля (longName, shortName, role, hwModel),
+     * если они отсутствуют у ноды. Телеметрию и позицию не трогает —
+     * у ноды уже есть свежие данные от устройства.
+     *
+     * @param node нода из DeviceState для обогащения
+     */
+    public void enrichFromCache(NodeData node) {
+        if (node == null || node.hasName()) { return; }
+
+        String nodeId = node.getNodeId();
+        NodeData cached = cache.get(nodeId);
+        if (cached == null) {
+            cached = loadFromDb(nodeId);
+            if (cached != null) {
+                log.debug("enrichFromCache: loaded {} from H2, hasName={}", nodeId, cached.hasName());
+            } else {
+                log.debug("enrichFromCache: {} not found in H2", nodeId);
+            }
+        }
+        if (cached == null || !cached.hasName()) { return; }
+
+        if ((node.getLongName() == null || node.getLongName().isEmpty())
+                && cached.getLongName() != null && !cached.getLongName().isEmpty()) {
+            node.setLongName(cached.getLongName());
+        }
+        if ((node.getShortName() == null || node.getShortName().isEmpty())
+                && cached.getShortName() != null && !cached.getShortName().isEmpty()) {
+            node.setShortName(cached.getShortName());
+        }
+        if (node.getRole() == null && cached.getRole() != null) {
+            node.setRole(cached.getRole());
+        }
+        if (node.getHwModel() == null && cached.getHwModel() != null) {
+            node.setHwModel(cached.getHwModel());
+        }
     }
 
     /**
@@ -264,7 +368,7 @@ public class NodeCacheService {
      */
     public synchronized void clearAll() {
         cache.clear();
-        if (dbConnection == null) return;
+        if (dbConnection == null) { return; }
         try (Statement stmt = dbConnection.createStatement()) {
             stmt.execute("DELETE FROM nodes");
             log.info("Кэш нод полностью очищен");
@@ -274,19 +378,76 @@ public class NodeCacheService {
     }
 
     /** Удалить конкретную ноду и её телеметрию из кэша и БД. */
-    public synchronized void deleteNode(int nodeNum) {
-        cache.remove(nodeNum);
-        if (dbConnection == null) return;
-        try (PreparedStatement ps1 = dbConnection.prepareStatement("DELETE FROM telemetry_history WHERE node_num = ?");
-             PreparedStatement ps2 = dbConnection.prepareStatement("DELETE FROM nodes WHERE node_num = ?")) {
-            ps1.setInt(1, nodeNum);
+    public synchronized void deleteNode(String nodeId) {
+        if (nodeId == null) { return; }
+        cache.remove(nodeId);
+        if (dbConnection == null) { return; }
+        try (PreparedStatement ps1 = dbConnection.prepareStatement("DELETE FROM telemetry_history WHERE node_id = ?");
+             PreparedStatement ps2 = dbConnection.prepareStatement("DELETE FROM nodes WHERE node_id = ?")) {
+            ps1.setString(1, nodeId);
             ps1.executeUpdate();
-            ps2.setInt(1, nodeNum);
+            ps2.setString(1, nodeId);
             ps2.executeUpdate();
-            log.info("Нода !{} удалена из кэша", Integer.toHexString(nodeNum));
+            log.info("Нода {} удалена из кэша", nodeId);
         } catch (SQLException e) {
-            log.error("Ошибка удаления ноды !{} из кэша", Integer.toHexString(nodeNum), e);
+            log.error("Ошибка удаления ноды {} из кэша", nodeId, e);
         }
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    //  Избранные ноды
+    // ═══════════════════════════════════════════════════════════
+
+    /**
+     * Устанавливает флаг избранного для ноды.
+     * Если нода отсутствует в БД, ничего не делает.
+     */
+    public synchronized void setFavorite(String nodeId, boolean favorite) {
+        if (dbConnection == null || nodeId == null) { return; }
+        try (PreparedStatement ps = dbConnection.prepareStatement(
+                "UPDATE nodes SET favorite = ? WHERE node_id = ?")) {
+            ps.setBoolean(1, favorite);
+            ps.setString(2, nodeId);
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            log.error("Failed to set favorite for node {}", nodeId, e);
+        }
+    }
+
+    /**
+     * Проверяет, является ли нода избранной.
+     */
+    public boolean isFavorite(String nodeId) {
+        if (dbConnection == null || nodeId == null) { return false; }
+        try (PreparedStatement ps = dbConnection.prepareStatement(
+                "SELECT favorite FROM nodes WHERE node_id = ?")) {
+            ps.setString(1, nodeId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) { return rs.getBoolean("favorite"); }
+            }
+        } catch (SQLException e) {
+            log.error("Failed to check favorite for node {}", nodeId, e);
+        }
+        return false;
+    }
+
+    /**
+     * Загружает все избранные ноды из БД.
+     */
+    public List<NodeData> loadFavoriteNodes() {
+        List<NodeData> favorites = new ArrayList<>();
+        if (dbConnection == null) { return favorites; }
+        try (PreparedStatement ps = dbConnection.prepareStatement(
+                "SELECT * FROM nodes WHERE favorite = TRUE")) {
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    favorites.add(readNode(rs));
+                }
+            }
+        } catch (SQLException e) {
+            log.error("Failed to load favorite nodes from DB", e);
+        }
+        return favorites;
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -297,10 +458,10 @@ public class NodeCacheService {
      * Сохраняет одну запись телеметрии в H2.
      */
     public synchronized void persistTelemetry(TelemetryEntry entry) {
-        if (insertTelemetryStmt == null || entry == null) return;
+        if (insertTelemetryStmt == null || entry == null) { return; }
         try {
             insertTelemetryStmt.setLong(1, entry.getTimestamp());
-            insertTelemetryStmt.setInt(2, entry.getNodeNum());
+            insertTelemetryStmt.setString(2, entry.getNodeId());
             insertTelemetryStmt.setInt(3, entry.getBatteryLevel());
             insertTelemetryStmt.setFloat(4, entry.getVoltage());
             insertTelemetryStmt.setFloat(5, entry.getChannelUtilization());
@@ -308,6 +469,17 @@ public class NodeCacheService {
             insertTelemetryStmt.setFloat(7, entry.getTemperature());
             insertTelemetryStmt.setFloat(8, entry.getRelativeHumidity());
             insertTelemetryStmt.setFloat(9, entry.getBarometricPressure());
+            insertTelemetryStmt.setInt(10, entry.getNumPacketsRx());
+            insertTelemetryStmt.setInt(11, entry.getNumPacketsRxBad());
+            insertTelemetryStmt.setInt(12, entry.getNumRxDupe());
+            insertTelemetryStmt.setInt(13, entry.getNumPacketsTx());
+            insertTelemetryStmt.setInt(14, entry.getNumTxDropped());
+            insertTelemetryStmt.setInt(15, entry.getNumTxRelay());
+            insertTelemetryStmt.setInt(16, entry.getNumTxRelayCanceled());
+            insertTelemetryStmt.setFloat(17, entry.getRxSnr());
+            insertTelemetryStmt.setInt(18, entry.getRxRssi());
+            insertTelemetryStmt.setInt(19, entry.getHopStart());
+            insertTelemetryStmt.setInt(20, entry.getHopLimit());
             insertTelemetryStmt.executeUpdate();
         } catch (SQLException e) {
             log.error("Failed to persist telemetry entry", e);
@@ -323,7 +495,7 @@ public class NodeCacheService {
      */
     public List<TelemetryEntry> loadTelemetryHistory(int limit) {
         List<TelemetryEntry> result = new ArrayList<>();
-        if (dbConnection == null) return result;
+        if (dbConnection == null) { return result; }
         // Подзапрос берёт последние N записей (DESC), внешний сортирует ASC
         String sql = "SELECT * FROM (SELECT * FROM telemetry_history ORDER BY ts DESC LIMIT ?) ORDER BY ts ASC";
         try (PreparedStatement ps = dbConnection.prepareStatement(sql)) {
@@ -348,12 +520,12 @@ public class NodeCacheService {
      */
     public List<TelemetryEntry> loadTelemetrySince(long sinceEpoch) {
         List<TelemetryEntry> result = new ArrayList<>();
-        if (dbConnection == null) return result;
+        if (dbConnection == null) { return result; }
         String sql = sinceEpoch > 0
                 ? "SELECT * FROM telemetry_history WHERE ts >= ? ORDER BY ts ASC"
                 : "SELECT * FROM telemetry_history ORDER BY ts ASC";
         try (PreparedStatement ps = dbConnection.prepareStatement(sql)) {
-            if (sinceEpoch > 0) ps.setLong(1, sinceEpoch);
+            if (sinceEpoch > 0) { ps.setLong(1, sinceEpoch); }
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
                     result.add(readTelemetryRow(rs));
@@ -367,28 +539,28 @@ public class NodeCacheService {
 
     /**
      * Загружает записи телеметрии для конкретной ноды за указанный период.
-     * Фильтрация по nodeNum, периоду, нулевым артефактам и будущим датам выполняется в SQL.
+     * Фильтрация по nodeId, периоду, нулевым артефактам и будущим датам выполняется в SQL.
      *
-     * @param nodeNum      номер ноды
+     * @param nodeId       идентификатор ноды (например {@code !9e755af0})
      * @param sinceEpoch   метка времени начала периода (epoch seconds), 0 = без ограничений
      * @param maxFutureTs  максимально допустимая метка времени (для фильтрации будущих дат)
      * @return список записей, отсортированных по времени ASC (может быть пустым)
      */
-    public List<TelemetryEntry> loadTelemetryForNode(int nodeNum, long sinceEpoch, long maxFutureTs) {
+    public List<TelemetryEntry> loadTelemetryForNode(String nodeId, long sinceEpoch, long maxFutureTs) {
         List<TelemetryEntry> result = new ArrayList<>();
-        if (dbConnection == null) return result;
+        if (dbConnection == null || nodeId == null) { return result; }
 
         String sql = """
             SELECT * FROM telemetry_history
-            WHERE node_num = ?
+            WHERE node_id = ?
               AND ts <= ?
-              AND (battery_level <> 0 OR channel_utilization <> 0 OR air_util_tx <> 0 OR voltage <> 0)
+              AND (battery_level <> 0 OR channel_utilization <> 0 OR air_util_tx <> 0 OR voltage <> 0 OR num_packets_rx <> 0 OR num_packets_tx <> 0 OR rx_snr <> 0 OR hop_start <> 0)
             """ + (sinceEpoch > 0 ? "  AND ts >= ?\n" : "") + """
             ORDER BY ts ASC
             """;
 
         try (PreparedStatement ps = dbConnection.prepareStatement(sql)) {
-            ps.setInt(1, nodeNum);
+            ps.setString(1, nodeId);
             ps.setLong(2, maxFutureTs);
             if (sinceEpoch > 0) {
                 ps.setLong(3, sinceEpoch);
@@ -399,7 +571,38 @@ public class NodeCacheService {
                 }
             }
         } catch (SQLException e) {
-            log.error("Failed to load telemetry for node {} since {}", nodeNum, sinceEpoch, e);
+            log.error("Failed to load telemetry for node {} since {}", nodeId, sinceEpoch, e);
+        }
+        return result;
+    }
+
+    /**
+     * Загружает записи телеметрии по всем нодам, содержащие данные о качестве соединения (SNR/RSSI/hops).
+     */
+    public List<TelemetryEntry> loadTelemetryQuality(long sinceEpoch, long maxFutureTs) {
+        List<TelemetryEntry> result = new ArrayList<>();
+        if (dbConnection == null) { return result; }
+
+        String sql = """
+            SELECT * FROM telemetry_history
+            WHERE ts <= ?
+              AND (rx_snr <> 0 OR hop_start <> 0)
+            """ + (sinceEpoch > 0 ? "  AND ts >= ?\n" : "") + """
+            ORDER BY ts ASC
+            """;
+
+        try (PreparedStatement ps = dbConnection.prepareStatement(sql)) {
+            ps.setLong(1, maxFutureTs);
+            if (sinceEpoch > 0) {
+                ps.setLong(2, sinceEpoch);
+            }
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    result.add(readTelemetryRow(rs));
+                }
+            }
+        } catch (SQLException e) {
+            log.error("Failed to load quality telemetry since {}", sinceEpoch, e);
         }
         return result;
     }
@@ -408,10 +611,10 @@ public class NodeCacheService {
      * Возвращает общее количество записей телеметрии в БД.
      */
     public int countTelemetryEntries() {
-        if (dbConnection == null) return 0;
+        if (dbConnection == null) { return 0; }
         try (Statement stmt = dbConnection.createStatement();
              ResultSet rs = stmt.executeQuery("SELECT COUNT(*) FROM telemetry_history")) {
-            if (rs.next()) return rs.getInt(1);
+            if (rs.next()) { return rs.getInt(1); }
         } catch (SQLException e) {
             log.error("Failed to count telemetry entries", e);
         }
@@ -419,7 +622,7 @@ public class NodeCacheService {
     }
 
     private static TelemetryEntry readTelemetryRow(ResultSet rs) throws SQLException {
-        TelemetryEntry e = new TelemetryEntry(rs.getLong("ts"), rs.getInt("node_num"));
+        TelemetryEntry e = new TelemetryEntry(rs.getLong("ts"), rs.getString("node_id"));
         e.setBatteryLevel(rs.getInt("battery_level"));
         e.setVoltage(rs.getFloat("voltage"));
         e.setChannelUtilization(rs.getFloat("channel_utilization"));
@@ -427,6 +630,17 @@ public class NodeCacheService {
         e.setTemperature(rs.getFloat("temperature"));
         e.setRelativeHumidity(rs.getFloat("relative_humidity"));
         e.setBarometricPressure(rs.getFloat("barometric_pressure"));
+        e.setNumPacketsRx(rs.getInt("num_packets_rx"));
+        e.setNumPacketsRxBad(rs.getInt("num_packets_rx_bad"));
+        e.setNumRxDupe(rs.getInt("num_rx_dupe"));
+        e.setNumPacketsTx(rs.getInt("num_packets_tx"));
+        e.setNumTxDropped(rs.getInt("num_tx_dropped"));
+        e.setNumTxRelay(rs.getInt("num_tx_relay"));
+        e.setNumTxRelayCanceled(rs.getInt("num_tx_relay_canceled"));
+        e.setRxSnr(rs.getFloat("rx_snr"));
+        e.setRxRssi(rs.getInt("rx_rssi"));
+        e.setHopStart(rs.getInt("hop_start"));
+        e.setHopLimit(rs.getInt("hop_limit"));
         return e;
     }
 
@@ -437,13 +651,13 @@ public class NodeCacheService {
      * @return количество удалённых записей
      */
     public int pruneTelemetryHistory(int days) {
-        if (dbConnection == null) return 0;
+        if (dbConnection == null) { return 0; }
         long cutoff = System.currentTimeMillis() / 1000 - (long) days * 86400;
         try (PreparedStatement ps = dbConnection.prepareStatement(
                 "DELETE FROM telemetry_history WHERE ts < ?")) {
             ps.setLong(1, cutoff);
             int deleted = ps.executeUpdate();
-            if (deleted > 0) log.info("Pruned {} old telemetry entries (older than {} days)", deleted, days);
+            if (deleted > 0) { log.info("Pruned {} old telemetry entries (older than {} days)", deleted, days); }
             return deleted;
         } catch (SQLException e) {
             log.error("Failed to prune telemetry history", e);
@@ -491,7 +705,7 @@ public class NodeCacheService {
         }
 
         int imported = 0;
-        if (dbConnection == null) return 0;
+        if (dbConnection == null) { return 0; }
 
         try {
             dbConnection.setAutoCommit(false);
@@ -499,9 +713,9 @@ public class NodeCacheService {
                 try {
                     JsonArray row = elem.getAsJsonArray();
                     NodeData node = parseOneMeshRow(row);
-                    if (node == null || !node.hasName()) continue;
+                    if (node == null || !node.hasName()) { continue; }
 
-                    cache.put(node.getNodeNum(), node);
+                    cache.put(node.getNodeId(), node);
                     bindNode(mergeStmt, node);
                     mergeStmt.addBatch();
                     imported++;
@@ -520,7 +734,9 @@ public class NodeCacheService {
             log.info("Импорт из OneMesh завершён: {} нод", imported);
         } catch (SQLException e) {
             log.error("Ошибка при batch-импорте из OneMesh", e);
-            try { dbConnection.rollback(); dbConnection.setAutoCommit(true); } catch (SQLException ex) { /* ignored */ }
+            try { dbConnection.rollback(); dbConnection.setAutoCommit(true); } catch (SQLException ex) {
+                log.debug("Rollback failed during OneMesh import recovery", ex);
+            }
             throw e;
         }
         return imported;
@@ -533,12 +749,13 @@ public class NodeCacheService {
      * @return {@link NodeData} или {@code null} если строка невалидна
      */
     private static NodeData parseOneMeshRow(JsonArray row) {
-        if (row.size() < 20) return null;
+        if (row.size() < 20) { return null; }
+
 
         // [1] nodeNum — unsigned int как строка
         long nodeNumLong = Long.parseUnsignedLong(row.get(1).getAsString());
         int nodeNum = (int) nodeNumLong;
-        if (nodeNum == 0) return null;
+        if (nodeNum == 0) { return null; }
 
         NodeData node = new NodeData(nodeNum);
 
@@ -570,13 +787,13 @@ public class NodeCacheService {
         // [12] latitude (raw int * 1e-7)
         if (!row.get(12).isJsonNull()) {
             double lat = row.get(12).getAsLong() * 1e-7;
-            if (lat != 0) node.setLatitude(lat);
+            if (lat != 0) { node.setLatitude(lat); }
         }
 
         // [13] longitude (raw int * 1e-7)
         if (!row.get(13).isJsonNull()) {
             double lon = row.get(13).getAsLong() * 1e-7;
-            if (lon != 0) node.setLongitude(lon);
+            if (lon != 0) { node.setLongitude(lon); }
         }
 
         // [16] altitude
@@ -632,20 +849,34 @@ public class NodeCacheService {
         if (src.getHwModel() != null && !src.getHwModel().isEmpty()) {
             dst.setHwModel(src.getHwModel());
         }
-        if (src.getLatitude() != 0) dst.setLatitude(src.getLatitude());
-        if (src.getLongitude() != 0) dst.setLongitude(src.getLongitude());
-        if (src.getAltitude() != 0) dst.setAltitude(src.getAltitude());
-        if (src.getSnr() != 0) dst.setSnr(src.getSnr());
-        if (src.getLastHeard() != 0) dst.setLastHeard(src.getLastHeard());
-        if (src.getBatteryLevel() != 0) dst.setBatteryLevel(src.getBatteryLevel());
-        if (src.getVoltage() != 0) dst.setVoltage(src.getVoltage());
-        if (src.getChannelUtilization() != 0) dst.setChannelUtilization(src.getChannelUtilization());
-        if (src.getAirUtilTx() != 0) dst.setAirUtilTx(src.getAirUtilTx());
-        if (src.getUptimeSeconds() != 0) dst.setUptimeSeconds(src.getUptimeSeconds());
-        if (src.getTemperature() != 0) dst.setTemperature(src.getTemperature());
-        if (src.getRelativeHumidity() != 0) dst.setRelativeHumidity(src.getRelativeHumidity());
-        if (src.getBarometricPressure() != 0) dst.setBarometricPressure(src.getBarometricPressure());
-        if (src.getHopsAway() != 0) dst.setHopsAway(src.getHopsAway());
+        if (src.getLatitude() != 0) { dst.setLatitude(src.getLatitude()); }
+
+        if (src.getLongitude() != 0) { dst.setLongitude(src.getLongitude()); }
+
+        if (src.getAltitude() != 0) { dst.setAltitude(src.getAltitude()); }
+
+        if (src.getSnr() != 0) { dst.setSnr(src.getSnr()); }
+
+        if (src.getLastHeard() != 0) { dst.setLastHeard(src.getLastHeard()); }
+
+        if (src.getBatteryLevel() != 0) { dst.setBatteryLevel(src.getBatteryLevel()); }
+
+        if (src.getVoltage() != 0) { dst.setVoltage(src.getVoltage()); }
+
+        if (src.getChannelUtilization() != 0) { dst.setChannelUtilization(src.getChannelUtilization()); }
+
+        if (src.getAirUtilTx() != 0) { dst.setAirUtilTx(src.getAirUtilTx()); }
+
+        if (src.getUptimeSeconds() != 0) { dst.setUptimeSeconds(src.getUptimeSeconds()); }
+
+        if (src.getTemperature() != 0) { dst.setTemperature(src.getTemperature()); }
+
+        if (src.getRelativeHumidity() != 0) { dst.setRelativeHumidity(src.getRelativeHumidity()); }
+
+        if (src.getBarometricPressure() != 0) { dst.setBarometricPressure(src.getBarometricPressure()); }
+
+        if (src.getHopsAway() != 0) { dst.setHopsAway(src.getHopsAway()); }
+
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -672,8 +903,8 @@ public class NodeCacheService {
      */
     public void close() {
         try {
-            if (mergeStmt != null) mergeStmt.close();
-            if (insertTelemetryStmt != null) insertTelemetryStmt.close();
+            if (mergeStmt != null) { mergeStmt.close(); }
+            if (insertTelemetryStmt != null) { insertTelemetryStmt.close(); }
         } catch (SQLException e) {
             log.error("Error closing node cache DB statements", e);
         }
@@ -681,30 +912,31 @@ public class NodeCacheService {
 
     /**
      * Сохраняет одну ноду в БД (MERGE INTO).
-     * Ноды без имён (longName и shortName оба пусты) не сохраняются.
      */
-    private synchronized void persistNode(int nodeNum) {
-        NodeData node = cache.get(nodeNum);
-        if (node == null || mergeStmt == null || !node.hasName()) return;
+    private synchronized void persistNode(String nodeId) {
+        NodeData node = cache.get(nodeId);
+        log.info("CACHE_DEBUG persistNode: nodeId={}, inCache={}, mergeStmt={}, hasName={}",
+                nodeId, node != null, mergeStmt != null, node != null && node.hasName());
+        if (node == null || mergeStmt == null) { return; }
         try {
             bindNode(mergeStmt, node);
-            mergeStmt.executeUpdate();
+            int rows = mergeStmt.executeUpdate();
+            log.info("CACHE_DEBUG persistNode: OK, rows={}", rows);
         } catch (SQLException e) {
-            log.error("Failed to persist node {} to DB", nodeNum, e);
+            log.error("CACHE_DEBUG persistNode FAILED for {}", nodeId, e);
         }
     }
 
     /**
      * Сохраняет набор нод в БД в одной транзакции (batch MERGE).
-     * Ноды без имён пропускаются.
      */
-    private synchronized void persistAll(Set<Integer> nodeNums) {
-        if (mergeStmt == null) return;
+    private synchronized void persistAll(Set<String> nodeIds) {
+        if (mergeStmt == null) { return; }
         try {
             dbConnection.setAutoCommit(false);
-            for (int nodeNum : nodeNums) {
-                NodeData node = cache.get(nodeNum);
-                if (node != null && node.hasName()) {
+            for (String nodeId : nodeIds) {
+                NodeData node = cache.get(nodeId);
+                if (node != null) {
                     bindNode(mergeStmt, node);
                     mergeStmt.addBatch();
                 }
@@ -712,10 +944,12 @@ public class NodeCacheService {
             mergeStmt.executeBatch();
             dbConnection.commit();
             dbConnection.setAutoCommit(true);
-            log.debug("Persisted {} nodes to DB in batch", nodeNums.size());
+            log.debug("Persisted {} nodes to DB in batch", nodeIds.size());
         } catch (SQLException e) {
             log.error("Failed to batch-persist nodes to DB", e);
-            try { dbConnection.rollback(); dbConnection.setAutoCommit(true); } catch (SQLException ex) { /* ignored */ }
+            try { dbConnection.rollback(); dbConnection.setAutoCommit(true); } catch (SQLException ex) {
+                log.debug("Rollback failed during batch-persist recovery", ex);
+            }
         }
     }
 
@@ -725,12 +959,13 @@ public class NodeCacheService {
 
     /**
      * Привязывает поля NodeData к параметрам PreparedStatement.
+     * Порядок: node_id, node_num, long_name, short_name, role, hw_model, ...
      */
     private static void bindNode(PreparedStatement ps, NodeData n) throws SQLException {
-        ps.setInt(1, n.getNodeNum());
-        ps.setString(2, n.getLongName());
-        ps.setString(3, n.getShortName());
-        ps.setString(4, n.getNodeId());
+        ps.setString(1, n.getNodeId());
+        ps.setInt(2, n.getNodeNum());
+        ps.setString(3, n.getLongName());
+        ps.setString(4, n.getShortName());
         ps.setString(5, n.getRole());
         ps.setString(6, n.getHwModel());
         ps.setDouble(7, n.getLatitude());
@@ -748,10 +983,10 @@ public class NodeCacheService {
      */
     private static NodeData readNode(ResultSet rs) throws SQLException {
         NodeData node = new NodeData(rs.getInt("node_num"));
+        String nodeId = rs.getString("node_id");
+        if (nodeId != null) { node.setNodeId(nodeId); }
         node.setLongName(rs.getString("long_name"));
         node.setShortName(rs.getString("short_name"));
-        String nodeId = rs.getString("node_id");
-        if (nodeId != null) node.setNodeId(nodeId);
         node.setRole(rs.getString("role"));
         node.setHwModel(rs.getString("hw_model"));
         node.setLatitude(rs.getDouble("latitude"));

@@ -2,6 +2,8 @@ package com.meshtastic.client.system;
 
 public class DrawerManager {
 
+    private DrawerManager() {}
+
     private static DrawerPane drawerPane;
 
     public static void setDrawerPane(DrawerPane pane) {

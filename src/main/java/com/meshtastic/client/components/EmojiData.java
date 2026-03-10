@@ -8,6 +8,8 @@ import java.util.*;
  */
 public class EmojiData {
 
+    private EmojiData() {} // utility class
+
     /** Категория эмодзи */
     public record Category(String id, String icon, String label, List<String> emojis) {}
 
@@ -97,7 +99,8 @@ public class EmojiData {
             "⚕️","♻️","⚜️","🔱","📛","🔰","⭕","✅","☑️","✔️",
             "❌","❎","➰","➿","〽️","✳️","✴️","❇️","©️","®️",
             "™️","🔴","🟠","🟡","🟢","🔵","🟣","⚫","⚪","🟤",
-            "🔶","🔷","🔸","🔹","🔺","🔻","💠","🔘","🔳","🔲"
+            "🔶","🔷","🔸","🔹","🔺","🔻","💠","🔘","🔳","🔲",
+            "#️⃣","*️⃣","0️⃣","1️⃣","2️⃣","3️⃣","4️⃣","5️⃣","6️⃣","7️⃣","8️⃣","9️⃣","🔟"
         ))
     );
 
@@ -452,25 +455,50 @@ public class EmojiData {
         m.put("🔵", List.of("синий", "круг"));
         m.put("⚫", List.of("чёрный", "круг"));
         m.put("⚪", List.of("белый", "круг"));
+        m.put("#️⃣", List.of("решётка", "хеш", "диез"));
+        m.put("*️⃣", List.of("звёздочка", "астериск"));
+        m.put("0️⃣", List.of("ноль", "цифра"));
+        m.put("1️⃣", List.of("один", "цифра"));
+        m.put("2️⃣", List.of("два", "цифра"));
+        m.put("3️⃣", List.of("три", "цифра"));
+        m.put("4️⃣", List.of("четыре", "цифра"));
+        m.put("5️⃣", List.of("пять", "цифра"));
+        m.put("6️⃣", List.of("шесть", "цифра"));
+        m.put("7️⃣", List.of("семь", "цифра"));
+        m.put("8️⃣", List.of("восемь", "цифра"));
+        m.put("9️⃣", List.of("девять", "цифра"));
+        m.put("🔟", List.of("десять", "цифра"));
 
         KEYWORDS = Collections.unmodifiableMap(m);
     }
 
+    private static final Set<String> ALL_EMOJIS;
+    static {
+        Set<String> set = new HashSet<>();
+        for (Category cat : CATEGORIES) {
+            set.addAll(cat.emojis());
+        }
+        ALL_EMOJIS = Collections.unmodifiableSet(set);
+    }
+
     public static List<Category> getCategories() { return CATEGORIES; }
+
+    /** Множество всех известных эмодзи для быстрого поиска. */
+    public static Set<String> getAllEmojis() { return ALL_EMOJIS; }
 
     /**
      * Поиск эмодзи по русским ключевым словам (substring match).
      * Возвращает уникальные эмодзи в порядке категорий.
      */
     public static List<String> search(String query) {
-        if (query == null || query.isBlank()) return List.of();
-        String q = query.toLowerCase().trim();
+        if (query == null || query.isBlank()) { return List.of(); }
+        String q = query.toLowerCase(java.util.Locale.ROOT).trim();
         // Собираем все emoji из всех категорий в порядке их расположения
         List<String> results = new ArrayList<>();
         Set<String> seen = new HashSet<>();
         for (Category cat : CATEGORIES) {
             for (String emoji : cat.emojis()) {
-                if (seen.contains(emoji)) continue;
+                if (seen.contains(emoji)) { continue; }
                 List<String> kws = KEYWORDS.get(emoji);
                 if (kws != null) {
                     for (String kw : kws) {

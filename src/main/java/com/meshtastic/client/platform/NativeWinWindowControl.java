@@ -76,7 +76,7 @@ public class NativeWinWindowControl {
      * покрывает всю клиентскую область, через неё виден backdrop.
      */
     public boolean extendFrameIntoClientArea() {
-        if (hwnd == null) return false;
+        if (hwnd == null) { return false; }
         try {
             MARGINS margins = new MARGINS(-1, -1, -1, -1);
             WinNT.HRESULT hr = Dwm.INSTANCE.DwmExtendFrameIntoClientArea(hwnd, margins);
@@ -97,7 +97,7 @@ public class NativeWinWindowControl {
 
     /** Установить системный backdrop (Mica, Mica Alt, Acrylic, None). Windows 11 22H2+. */
     public boolean setWindowBackdrop(DwmSystemBackdropType backdrop) {
-        if (hwnd == null) return false;
+        if (hwnd == null) { return false; }
         try {
             WinNT.HRESULT hr = Dwm.INSTANCE.DwmSetWindowAttribute(
                     hwnd, DWMWA_SYSTEMBACKDROP_TYPE,
@@ -115,7 +115,7 @@ public class NativeWinWindowControl {
 
     /** Тёмный режим title bar */
     public boolean setDarkMode(boolean dark) {
-        if (hwnd == null) return false;
+        if (hwnd == null) { return false; }
         try {
             WinNT.HRESULT hr = Dwm.INSTANCE.DwmSetWindowAttribute(
                     hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE,
@@ -130,7 +130,7 @@ public class NativeWinWindowControl {
 
     /** Скруглённые углы (Windows 11+, non-fatal на Win10) */
     public boolean setRoundedCorners() {
-        if (hwnd == null) return false;
+        if (hwnd == null) { return false; }
         try {
             WinNT.HRESULT hr = Dwm.INSTANCE.DwmSetWindowAttribute(
                     hwnd, DWMWA_WINDOW_CORNER_PREFERENCE,
@@ -155,7 +155,7 @@ public class NativeWinWindowControl {
      * @return true если acrylic blur успешно применён
      */
     public boolean setAcrylicViaCompositionAttribute() {
-        if (hwnd == null) return false;
+        if (hwnd == null) { return false; }
         try {
             ACCENT_POLICY accent = new ACCENT_POLICY();
             accent.accentState = ACCENT_ENABLE_ACRYLICBLURBEHIND;
@@ -174,8 +174,8 @@ public class NativeWinWindowControl {
             wca.clear();
             wca.setInt(0, WCA_ACCENT_POLICY);
             wca.setPointer(offPData, accent.getPointer());
-            if (ps == 8) wca.setLong(offPData + ps, accent.size());
-            else         wca.setInt(offPData + ps, accent.size());
+            if (ps == 8) { wca.setLong(offPData + ps, accent.size()); }
+            else { wca.setInt(offPData + ps, accent.size()); }
 
             boolean ok = User32Ext.INSTANCE.SetWindowCompositionAttribute(hwnd, wca);
             log.info("SetWindowCompositionAttribute(ACRYLIC): {}", ok ? "OK" : "failed");
@@ -200,7 +200,7 @@ public class NativeWinWindowControl {
      * @return true если backdrop успешно применён
      */
     public boolean prepareMicaWindow(boolean isDark) {
-        if (hwnd == null) return false;
+        if (hwnd == null) { return false; }
 
         // 1. Расширить DWM frame на клиентскую область
         extendFrameIntoClientArea();
@@ -231,7 +231,7 @@ public class NativeWinWindowControl {
         public int cyTopHeight;
         public int cyBottomHeight;
 
-        public MARGINS() {}
+        public MARGINS() { /* required by JNA */ }
 
         public MARGINS(int left, int right, int top, int bottom) {
             this.cxLeftWidth = left;

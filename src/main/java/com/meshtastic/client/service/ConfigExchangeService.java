@@ -1,7 +1,7 @@
 package com.meshtastic.client.service;
 
-import org.meshtastic.proto.*;
 import com.meshtastic.client.model.DeviceState;
+import org.meshtastic.proto.*;
 import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.model.TelemetryEntry;
 import com.meshtastic.client.protocol.FromRadioListener;
@@ -82,9 +82,9 @@ public class ConfigExchangeService implements FromRadioListener {
             MeshProtos.User user = nodeInfo.getUser();
             // Protobuf возвращает "" для незаполненных строковых полей —
             // пустые значения не должны затирать существующие данные
-            if (!user.getLongName().isEmpty()) node.setLongName(user.getLongName());
-            if (!user.getShortName().isEmpty()) node.setShortName(user.getShortName());
-            if (!user.getId().isEmpty()) node.setNodeId(user.getId());
+            if (!user.getLongName().isEmpty()) { node.setLongName(user.getLongName()); }
+            if (!user.getShortName().isEmpty()) { node.setShortName(user.getShortName()); }
+            if (!user.getId().isEmpty()) { node.setNodeId(user.getId()); }
             if (user.getRole() != ConfigProtos.Config.DeviceConfig.Role.CLIENT || node.getRole() == null) {
                 node.setRole(user.getRole().name());
             }
@@ -98,29 +98,52 @@ public class ConfigExchangeService implements FromRadioListener {
 
         if (nodeInfo.hasPosition()) {
             MeshProtos.Position pos = nodeInfo.getPosition();
-            // Нулевые координаты означают отсутствие данных — не затираем существующие
-            if (pos.getLatitudeI() != 0) node.setLatitude(pos.getLatitudeI() * 1e-7);
-            if (pos.getLongitudeI() != 0) node.setLongitude(pos.getLongitudeI() * 1e-7);
-            if (pos.getAltitude() != 0) node.setAltitude(pos.getAltitude());
+            log.debug("NodeInfo position: nodeNum={}, latI={}, lonI={}, alt={}",
+                    nodeInfo.getNum(), pos.getLatitudeI(), pos.getLongitudeI(), pos.getAltitude());
+
+            // If user recently saved a fixed position for our own node,
+            // use the pending values instead of potentially stale device data
+            boolean isMyNode = nodeInfo.getNum() == deviceState.getMyNodeNum();
+            if (isMyNode && deviceState.hasPendingFixedPosition()) {
+                log.info("Using pending fixed position instead of device-reported: lat={}, lon={}, alt={}",
+                        deviceState.getPendingFixedLat(), deviceState.getPendingFixedLon(),
+                        deviceState.getPendingFixedAlt());
+                node.setLatitude(Math.round(deviceState.getPendingFixedLat() * 1e7) * 1e-7);
+                node.setLongitude(Math.round(deviceState.getPendingFixedLon() * 1e7) * 1e-7);
+                node.setAltitude(deviceState.getPendingFixedAlt());
+            } else {
+                // Нулевые координаты означают отсутствие данных — не затираем существующие
+                if (pos.getLatitudeI() != 0) { node.setLatitude(pos.getLatitudeI() * 1e-7); }
+                if (pos.getLongitudeI() != 0) { node.setLongitude(pos.getLongitudeI() * 1e-7); }
+                if (pos.getAltitude() != 0) { node.setAltitude(pos.getAltitude()); }
+            }
         }
 
-        if (nodeInfo.getSnr() != 0) node.setSnr(nodeInfo.getSnr());
-        if (nodeInfo.getLastHeard() != 0) node.setLastHeard(nodeInfo.getLastHeard());
-        if (nodeInfo.getHopsAway() != 0) node.setHopsAway(nodeInfo.getHopsAway());
+        if (nodeInfo.getSnr() != 0) { node.setSnr(nodeInfo.getSnr()); }
+
+        if (nodeInfo.getLastHeard() != 0) { node.setLastHeard(nodeInfo.getLastHeard()); }
+
+        if (nodeInfo.getHopsAway() != 0) { node.setHopsAway(nodeInfo.getHopsAway()); }
+
 
         if (nodeInfo.hasDeviceMetrics()) {
             TelemetryProtos.DeviceMetrics dm = nodeInfo.getDeviceMetrics();
-            if (dm.getBatteryLevel() != 0) node.setBatteryLevel(dm.getBatteryLevel());
-            if (dm.getVoltage() != 0) node.setVoltage(dm.getVoltage());
-            if (dm.getChannelUtilization() != 0) node.setChannelUtilization(dm.getChannelUtilization());
-            if (dm.getAirUtilTx() != 0) node.setAirUtilTx(dm.getAirUtilTx());
-            if (dm.getUptimeSeconds() != 0) node.setUptimeSeconds(dm.getUptimeSeconds());
+            if (dm.getBatteryLevel() != 0) { node.setBatteryLevel(dm.getBatteryLevel()); }
+
+            if (dm.getVoltage() != 0) { node.setVoltage(dm.getVoltage()); }
+
+            if (dm.getChannelUtilization() != 0) { node.setChannelUtilization(dm.getChannelUtilization()); }
+
+            if (dm.getAirUtilTx() != 0) { node.setAirUtilTx(dm.getAirUtilTx()); }
+
+            if (dm.getUptimeSeconds() != 0) { node.setUptimeSeconds(dm.getUptimeSeconds()); }
+
 
             // Сохранить начальную точку телеметрии, если есть реальные данные
             // (пропускаем полностью нулевые записи — артефакты config exchange)
             if (dm.getBatteryLevel() != 0 || dm.getChannelUtilization() != 0 || dm.getAirUtilTx() != 0) {
                 long ts = nodeInfo.getLastHeard() > 0 ? nodeInfo.getLastHeard() : System.currentTimeMillis() / 1000;
-                TelemetryEntry entry = new TelemetryEntry(ts, nodeInfo.getNum());
+                TelemetryEntry entry = new TelemetryEntry(ts, node.getNodeId());
                 entry.setBatteryLevel(dm.getBatteryLevel());
                 entry.setVoltage(dm.getVoltage());
                 entry.setChannelUtilization(dm.getChannelUtilization());
@@ -156,8 +179,14 @@ public class ConfigExchangeService implements FromRadioListener {
                     deviceState.getChannels().size(),
                     deviceState.getConfigs().size());
             protocolHandler.removeListener(this);
+            deviceState.clearPendingFixedPosition();
             NodeCacheService ncs = NodeCacheService.getInstance();
             ncs.updateAll(deviceState.getNodeDb());
+
+            // Обогатить bare-ноды (только телеметрия) кэшированными именами из H2
+            for (NodeData node : deviceState.getNodeDb().values()) {
+                ncs.enrichFromCache(node);
+            }
 
             // Загрузить архив телеметрии из H2 + подчистить старые записи
             ncs.pruneTelemetryHistory(30);

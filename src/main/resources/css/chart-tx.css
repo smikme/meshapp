@@ -1,0 +1,19 @@
+/* Цвета серий: 0=зеленый, 1=красный, 2=желтый, 3=фиолетовый */
+
+/* Линии */
+.default-color0.chart-series-area-line { -fx-stroke: #4caf50; }
+.default-color1.chart-series-area-line { -fx-stroke: #f44336; }
+.default-color2.chart-series-area-line { -fx-stroke: #ffeb3b; }
+.default-color3.chart-series-area-line { -fx-stroke: #9c27b0; }
+
+/* Заливка */
+.default-color0.chart-series-area-fill { -fx-fill: rgba(76, 175, 80, 0.2); }
+.default-color1.chart-series-area-fill { -fx-fill: rgba(244, 67, 54, 0.2); }
+.default-color2.chart-series-area-fill { -fx-fill: rgba(255, 235, 59, 0.2); }
+.default-color3.chart-series-area-fill { -fx-fill: rgba(156, 39, 176, 0.2); }
+
+/* Легенда */
+.default-color0.chart-legend-item-symbol { -fx-background-color: #4caf50; }
+.default-color1.chart-legend-item-symbol { -fx-background-color: #f44336; }
+.default-color2.chart-legend-item-symbol { -fx-background-color: #ffeb3b; }
+.default-color3.chart-legend-item-symbol { -fx-background-color: #9c27b0; }

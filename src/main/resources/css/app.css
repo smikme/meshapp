@@ -476,15 +476,6 @@
     -fx-background-color: transparent;
 }
 
-/* Content area — левая граница отделяет от toolbar */
-:seamless-frame .content-area {
-    -fx-border-color: rgba(255, 255, 255, 0.08);
-    -fx-border-width: 0 0 0 1;
-}
-
-:seamless-frame.light-theme .content-area {
-    -fx-border-color: rgba(0, 0, 0, 0.1);
-}
 
 /* Node list — прозрачный на seamless, vibrancy просвечивает */
 :seamless-frame .node-list-pane {
@@ -573,17 +564,33 @@
     -fx-border-width: 0;
 }
 
+.chat-new-btn .svg-icon {
+    -fx-fill: rgba(255, 255, 255, 0.7);
+}
+
 .light-theme .chat-new-btn {
     -fx-background-color: rgba(0, 0, 0, 0.06);
     -fx-text-fill: rgba(0, 0, 0, 0.6);
+}
+
+.light-theme .chat-new-btn .svg-icon {
+    -fx-fill: rgba(0, 0, 0, 0.6);
 }
 
 .chat-new-btn:hover {
     -fx-background-color: rgba(255, 255, 255, 0.15);
 }
 
+.chat-new-btn:hover .svg-icon {
+    -fx-fill: rgba(255, 255, 255, 0.9);
+}
+
 .light-theme .chat-new-btn:hover {
     -fx-background-color: rgba(0, 0, 0, 0.1);
+}
+
+.light-theme .chat-new-btn:hover .svg-icon {
+    -fx-fill: rgba(0, 0, 0, 0.8);
 }
 
 /* Список чатов */
@@ -626,8 +633,16 @@
     -fx-text-fill: rgba(255, 255, 255, 0.7);
 }
 
+.chat-list-view .list-cell:selected .chat-preview-text-node {
+    -fx-fill: rgba(255, 255, 255, 0.7);
+}
+
 .light-theme .chat-list-view .list-cell:selected .chat-preview-label {
     -fx-text-fill: rgba(0, 0, 0, 0.6);
+}
+
+.light-theme .chat-list-view .list-cell:selected .chat-preview-text-node {
+    -fx-fill: rgba(0, 0, 0, 0.6);
 }
 
 .chat-list-view .list-cell:selected .chat-time-label {
@@ -653,8 +668,17 @@
     -fx-text-overrun: ellipsis;
 }
 
+.chat-preview-text-node {
+    -fx-fill: rgba(255, 255, 255, 0.5);
+    -fx-font-size: 12px;
+}
+
 .light-theme .chat-preview-label {
     -fx-text-fill: rgba(0, 0, 0, 0.5);
+}
+
+.light-theme .chat-preview-text-node {
+    -fx-fill: rgba(0, 0, 0, 0.5);
 }
 
 .chat-time-label {
@@ -991,15 +1015,20 @@
 .chat-emoji-btn {
     -fx-background-color: transparent;
     -fx-font-size: 18px;
-    -fx-padding: 4;
+    -fx-min-width: 36;
+    -fx-min-height: 36;
+    -fx-max-width: 36;
+    -fx-max-height: 36;
+    -fx-padding: 0;
     -fx-cursor: hand;
     -fx-background-insets: 0;
     -fx-border-width: 0;
+    -fx-background-radius: 18;
 }
 
 .chat-emoji-btn:hover {
     -fx-background-color: rgba(255, 255, 255, 0.1);
-    -fx-background-radius: 14;
+    -fx-background-radius: 18;
 }
 
 .light-theme .chat-emoji-btn:hover {
@@ -1010,7 +1039,7 @@
     -fx-background-color: -color-accent-emphasis;
     -fx-text-fill: white;
     -fx-font-size: 16px;
-    -fx-background-radius: 14;
+    -fx-background-radius: 18;
     -fx-min-width: 36;
     -fx-min-height: 36;
     -fx-max-width: 36;
@@ -1027,15 +1056,6 @@
 
 .chat-send-btn:disabled {
     -fx-opacity: 0.4;
-}
-
-.chat-char-count {
-    -fx-text-fill: -color-fg-muted;
-    -fx-font-size: 11px;
-}
-
-.chat-char-count-limit {
-    -fx-text-fill: #E53935;
 }
 
 /* Разделители чата */
@@ -1176,6 +1196,96 @@
     -fx-background-color: rgba(0, 0, 0, 0.08);
 }
 
+/* ═══════════════════ EmojiTextFlow — Text nodes (используют -fx-fill вместо -fx-text-fill) ═══════════════════ */
+
+/* Текст пузыря (обычный) */
+.chat-bubble-text-node {
+    -fx-fill: -color-fg-default;
+    -fx-font-family: 'Roboto';
+    -fx-font-size: 13px;
+}
+
+/* Текст пузыря (системные — белый на тёмном фоне) */
+.chat-bubble-system .chat-bubble-text-node {
+    -fx-fill: rgba(255, 255, 255, 0.9);
+}
+
+.light-theme .chat-bubble-system .chat-bubble-text-node {
+    -fx-fill: rgba(0, 0, 0, 0.85);
+}
+
+/* Текст пузыря (упоминание) */
+.chat-bubble-mentioned .chat-bubble-text-node {
+    -fx-fill: rgba(255, 255, 255, 0.9);
+}
+
+.light-theme .chat-bubble-mentioned .chat-bubble-text-node {
+    -fx-fill: rgba(0, 0, 0, 0.85);
+}
+
+/* Текст цитаты */
+.chat-bubble-quote-node {
+    -fx-fill: -color-fg-muted;
+    -fx-font-family: 'Roboto';
+    -fx-font-size: 12px;
+    -fx-font-style: italic;
+}
+
+/* ═══════════════════ EmojiTextField — кастомное поле ввода ═══════════════════ */
+
+.emoji-text-field {
+    -fx-background-radius: 18;
+    -fx-padding: 8 14;
+    -fx-background-color: #2a2a2e;
+    -fx-border-color: transparent;
+    -fx-border-width: 1;
+    -fx-border-radius: 18;
+}
+
+.emoji-text-field:focused {
+    -fx-border-color: -color-accent-emphasis;
+}
+
+.light-theme .emoji-text-field {
+    -fx-background-color: #eaeaec;
+}
+
+.emoji-text-field-text {
+    -fx-fill: rgba(255, 255, 255, 0.9);
+    -fx-font-family: 'Roboto';
+    -fx-font-size: 13px;
+}
+
+.light-theme .emoji-text-field-text {
+    -fx-fill: rgba(0, 0, 0, 0.85);
+}
+
+.emoji-text-field-prompt {
+    -fx-fill: rgba(255, 255, 255, 0.4);
+    -fx-font-family: 'Roboto';
+    -fx-font-size: 13px;
+}
+
+.light-theme .emoji-text-field-prompt {
+    -fx-fill: rgba(0, 0, 0, 0.4);
+}
+
+.emoji-text-field-caret {
+    -fx-fill: rgba(255, 255, 255, 0.9);
+}
+
+.light-theme .emoji-text-field-caret {
+    -fx-fill: rgba(0, 0, 0, 0.8);
+}
+
+.emoji-text-field-selection {
+    -fx-fill: rgba(51, 144, 255, 0.3);
+}
+
+.light-theme .emoji-text-field-selection {
+    -fx-fill: rgba(51, 144, 255, 0.4);
+}
+
 /* ContextMenu */
 .context-menu {
     -fx-background-color: -color-bg-default;
@@ -1204,5 +1314,34 @@
 .light-theme .menu-item:hover,
 .light-theme .menu-item:focused {
     -fx-background-color: rgba(0, 0, 0, 0.08);
+}
+
+/* ============================================================
+   Избранные ноды — кнопка-звезда (активное состояние)
+   ============================================================ */
+
+.favorite-btn-active .svg-icon {
+    -fx-fill: #FFD700;
+}
+
+.favorite-btn-active:hover .svg-icon {
+    -fx-fill: #FFC107;
+}
+
+.light-theme .favorite-btn-active .svg-icon {
+    -fx-fill: #F9A825;
+}
+
+.light-theme .favorite-btn-active:hover .svg-icon {
+    -fx-fill: #E65100;
+}
+
+/* Звёздочка избранного в списке нод */
+.node-favorite-star .svg-icon {
+    -fx-fill: #FFD700;
+}
+
+.light-theme .node-favorite-star .svg-icon {
+    -fx-fill: #F9A825;
 }
 

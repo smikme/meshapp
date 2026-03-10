@@ -15,7 +15,7 @@ public class MemoryBar extends StackPane {
 
     private final ProgressBar progressBar;
     private final Label label;
-    private final String format = "%s / %s";
+    private static final String format = "%s / %s";
 
     public MemoryBar() {
         progressBar = new ProgressBar(0);
@@ -50,7 +50,7 @@ public class MemoryBar extends StackPane {
 
     private String formatSize(long bytes) {
         int unit = 1024;
-        if (bytes < unit) return bytes + " B";
+        if (bytes < unit) { return bytes + " B"; }
         int exp = (int) (Math.log(bytes) / Math.log(unit));
         String pre = "KMGTPE".charAt(exp - 1) + "";
         return String.format("%.1f %sB", bytes / Math.pow(unit, exp), pre);

@@ -9,6 +9,7 @@ import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.model.TelemetryEntry;
+import com.meshtastic.client.notification.NotificationManager;
 import com.meshtastic.client.protocol.FromRadioListener;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -37,14 +38,20 @@ public class MessageListenerService implements FromRadioListener {
     private static final Logger log = LoggerFactory.getLogger(MessageListenerService.class);
 
     private final DeviceState deviceState;
+    private final NotificationManager notificationManager;
 
     public MessageListenerService(DeviceState deviceState) {
         this.deviceState = deviceState;
+        this.notificationManager = new NotificationManager(deviceState);
+    }
+
+    public NotificationManager getNotificationManager() {
+        return notificationManager;
     }
 
     @Override
     public void onMeshPacket(MeshProtos.MeshPacket packet) {
-        if (!packet.hasDecoded()) return;
+        if (!packet.hasDecoded()) { return; }
 
         MeshProtos.Data data = packet.getDecoded();
 
@@ -73,36 +80,53 @@ public class MessageListenerService implements FromRadioListener {
         long timestamp = packet.getRxTime() > 0 ? packet.getRxTime() : System.currentTimeMillis() / 1000;
         boolean outgoing = from == deviceState.getMyNodeNum();
 
-        if (outgoing) return; // outgoing messages are already added by MessageService
+        if (outgoing) { return; } // outgoing messages are already added by MessageService
 
-        MeshMessage msg = new MeshMessage(from, to, channel, text, timestamp, false);
+        // Lookup nodeId через NodeData (не математическая конвертация)
+        NodeData fromNode = deviceState.getOrCreateNode(from);
+        String fromNodeId = fromNode.getNodeId();
+        String toNodeId = (to == 0xFFFFFFFF) ? "!ffffffff" : deviceState.getOrCreateNode(to).getNodeId();
+
+        MeshMessage msg = new MeshMessage(fromNodeId, toNodeId, channel, text, timestamp, false);
         msg.setPacketId(packet.getId());
         msg.setHopStart(packet.getHopStart());
         msg.setHopLimit(packet.getHopLimit());
+        msg.setRxRssi(packet.getRxRssi());
+        msg.setRxSnr(packet.getRxSnr());
 
         if (data.getReplyId() != 0) {
+            log.info("REPLY_DEBUG recv: reply_id={} (0x{}) from {}",
+                    data.getReplyId(), Integer.toHexString(data.getReplyId()), fromNodeId);
             msg.setReplyId(data.getReplyId());
             MeshMessage original = deviceState.findMessageByPacketId(data.getReplyId());
-            if (original != null) msg.setReplyText(original.getText());
+            if (original != null) { msg.setReplyText(original.getText()); }
         }
 
-        NodeData node = deviceState.getNodeDb().get(from);
-        if (node != null && node.getLongName() != null) {
-            msg.setSenderName(node.getLongName());
+        if (fromNode.getLongName() != null) {
+            msg.setSenderName(fromNode.getLongName());
         }
 
         boolean isDirect = to != 0xFFFFFFFF;
         if (isDirect) {
-            int peer = from;
             msg.setStatus(MeshMessage.DeliveryStatus.DELIVERED);
-            MessageDbService.getInstance().save(msg, "dm", peer);
-            deviceState.addDirectMessage(msg, peer);
-            log.info("Received DM from !{}: {}", Integer.toHexString(from), text);
+            MessageDbService.getInstance().save(msg, "dm", fromNodeId);
+            deviceState.addDirectMessage(msg, fromNodeId);
+            log.info("Received DM from {}: {}", fromNodeId, text);
+            try {
+                notificationManager.onIncomingMessage(msg, "dm", fromNodeId);
+            } catch (Throwable t) {
+                log.error("Notification error", t);
+            }
         } else {
             msg.setStatus(MeshMessage.DeliveryStatus.DELIVERED);
-            MessageDbService.getInstance().save(msg, "channel", channel);
+            MessageDbService.getInstance().save(msg, "channel", String.valueOf(channel));
             deviceState.addMessage(msg);
-            log.info("Received channel {} message from !{}: {}", channel, Integer.toHexString(from), text);
+            log.info("Received channel {} message from {}: {}", channel, fromNodeId, text);
+            try {
+                notificationManager.onIncomingMessage(msg, "channel", String.valueOf(channel));
+            } catch (Throwable t) {
+                log.error("Notification error", t);
+            }
         }
     }
 
@@ -144,11 +168,13 @@ public class MessageListenerService implements FromRadioListener {
         try {
             MeshProtos.User user = MeshProtos.User.parseFrom(data.getPayload());
             NodeData node = deviceState.getOrCreateNode(fromNum);
+            int rxTime = packet.getRxTime() > 0 ? packet.getRxTime() : (int)(System.currentTimeMillis() / 1000);
+            node.setLastHeard(rxTime);
             // Protobuf возвращает "" для незаполненных строковых полей —
             // пустые значения не должны затирать существующие данные
-            if (!user.getLongName().isEmpty()) node.setLongName(user.getLongName());
-            if (!user.getShortName().isEmpty()) node.setShortName(user.getShortName());
-            if (!user.getId().isEmpty()) node.setNodeId(user.getId());
+            if (!user.getLongName().isEmpty()) { node.setLongName(user.getLongName()); }
+            if (!user.getShortName().isEmpty()) { node.setShortName(user.getShortName()); }
+            if (!user.getId().isEmpty()) { node.setNodeId(user.getId()); }
             if (user.getRole() != ConfigProtos.Config.DeviceConfig.Role.CLIENT || node.getRole() == null) {
                 node.setRole(user.getRole().name());
             }
@@ -159,7 +185,7 @@ public class MessageListenerService implements FromRadioListener {
                 node.setPublicKey(user.getPublicKey().toByteArray());
             }
             deviceState.fireNodeUpdateListeners(fromNum);
-            NodeCacheService.getInstance().update(fromNum, node);
+            NodeCacheService.getInstance().update(node);
             log.info("Received NODEINFO_APP from !{}: {}", Integer.toHexString(fromNum), user.getLongName());
         } catch (InvalidProtocolBufferException e) {
             log.warn("Failed to parse User from NODEINFO_APP packet from !{}", Integer.toHexString(fromNum), e);
@@ -171,12 +197,28 @@ public class MessageListenerService implements FromRadioListener {
         try {
             MeshProtos.Position position = MeshProtos.Position.parseFrom(data.getPayload());
             NodeData node = deviceState.getOrCreateNode(fromNum);
-            // Нулевые координаты означают отсутствие данных — не затираем существующие
-            if (position.getLatitudeI() != 0) node.setLatitude(position.getLatitudeI() * 1e-7);
-            if (position.getLongitudeI() != 0) node.setLongitude(position.getLongitudeI() * 1e-7);
-            if (position.getAltitude() != 0) node.setAltitude(position.getAltitude());
+            if (!node.hasName()) {
+                NodeCacheService.getInstance().enrichFromCache(node);
+            }
+            int rxTime = packet.getRxTime() > 0 ? packet.getRxTime() : (int)(System.currentTimeMillis() / 1000);
+            node.setLastHeard(rxTime);
+            log.debug("Position update: nodeNum={}, latI={}, lonI={}, alt={}",
+                    fromNum, position.getLatitudeI(), position.getLongitudeI(), position.getAltitude());
+
+            // If user recently saved a fixed position for our own node,
+            // skip overwriting with potentially stale device position
+            boolean isMyNode = fromNum == deviceState.getMyNodeNum();
+            if (isMyNode && deviceState.hasPendingFixedPosition()) {
+                log.info("Ignoring position update for own node — pending fixed position active");
+            } else {
+                // Нулевые координаты означают отсутствие данных — не затираем существующие
+                if (position.getLatitudeI() != 0) { node.setLatitude(position.getLatitudeI() * 1e-7); }
+                if (position.getLongitudeI() != 0) { node.setLongitude(position.getLongitudeI() * 1e-7); }
+                if (position.getAltitude() != 0) { node.setAltitude(position.getAltitude()); }
+            }
+
             deviceState.fireNodeUpdateListeners(fromNum);
-            NodeCacheService.getInstance().update(fromNum, node);
+            NodeCacheService.getInstance().update(node);
             log.info("Received POSITION_APP from !{}", Integer.toHexString(fromNum));
         } catch (InvalidProtocolBufferException e) {
             log.warn("Failed to parse Position from POSITION_APP packet from !{}", Integer.toHexString(fromNum), e);
@@ -190,12 +232,17 @@ public class MessageListenerService implements FromRadioListener {
                     org.meshtastic.proto.TelemetryProtos.Telemetry.parseFrom(data.getPayload());
 
             long ts = telemetry.getTime() > 0 ? telemetry.getTime()
-                    : (packet.getRxTime() > 0 ? packet.getRxTime() : System.currentTimeMillis() / 1000);
-            TelemetryEntry entry = new TelemetryEntry(ts, fromNum);
+                    : packet.getRxTime() > 0 ? packet.getRxTime() : System.currentTimeMillis() / 1000;
+
+            NodeData node = deviceState.getOrCreateNode(fromNum);
+            TelemetryEntry entry = new TelemetryEntry(ts, node.getNodeId());
+            if (!node.hasName()) {
+                NodeCacheService.getInstance().enrichFromCache(node);
+            }
+            node.setLastHeard((int) ts);
 
             if (telemetry.hasDeviceMetrics()) {
                 org.meshtastic.proto.TelemetryProtos.DeviceMetrics dm = telemetry.getDeviceMetrics();
-                NodeData node = deviceState.getOrCreateNode(fromNum);
                 node.setBatteryLevel(dm.getBatteryLevel());
                 node.setVoltage(dm.getVoltage());
                 node.setChannelUtilization(dm.getChannelUtilization());
@@ -208,25 +255,56 @@ public class MessageListenerService implements FromRadioListener {
                 entry.setAirUtilTx(dm.getAirUtilTx());
 
                 deviceState.fireNodeUpdateListeners(fromNum);
-                NodeCacheService.getInstance().update(fromNum, node);
+                NodeCacheService.getInstance().update(node);
                 log.info("Received TELEMETRY_APP (device) from !{}", Integer.toHexString(fromNum));
             }
 
             if (telemetry.hasEnvironmentMetrics()) {
                 org.meshtastic.proto.TelemetryProtos.EnvironmentMetrics em = telemetry.getEnvironmentMetrics();
-                NodeData node = deviceState.getOrCreateNode(fromNum);
-                if (em.getTemperature() != 0) node.setTemperature(em.getTemperature());
-                if (em.getRelativeHumidity() != 0) node.setRelativeHumidity(em.getRelativeHumidity());
-                if (em.getBarometricPressure() != 0) node.setBarometricPressure(em.getBarometricPressure());
+                if (em.getTemperature() != 0) { node.setTemperature(em.getTemperature()); }
+
+                if (em.getRelativeHumidity() != 0) { node.setRelativeHumidity(em.getRelativeHumidity()); }
+
+                if (em.getBarometricPressure() != 0) { node.setBarometricPressure(em.getBarometricPressure()); }
+
 
                 entry.setTemperature(em.getTemperature());
                 entry.setRelativeHumidity(em.getRelativeHumidity());
                 entry.setBarometricPressure(em.getBarometricPressure());
 
                 deviceState.fireNodeUpdateListeners(fromNum);
-                NodeCacheService.getInstance().update(fromNum, node);
+                NodeCacheService.getInstance().update(node);
                 log.info("Received TELEMETRY_APP (environment) from !{}", Integer.toHexString(fromNum));
             }
+
+            if (telemetry.hasLocalStats()) {
+                org.meshtastic.proto.TelemetryProtos.LocalStats ls = telemetry.getLocalStats();
+                entry.setNumPacketsRx(ls.getNumPacketsRx());
+                entry.setNumPacketsRxBad(ls.getNumPacketsRxBad());
+                entry.setNumRxDupe(ls.getNumRxDupe());
+                entry.setNumPacketsTx(ls.getNumPacketsTx());
+                entry.setNumTxDropped(ls.getNumTxDropped());
+                entry.setNumTxRelay(ls.getNumTxRelay());
+                entry.setNumTxRelayCanceled(ls.getNumTxRelayCanceled());
+
+                // LocalStats also carries channel_utilization and air_util_tx
+                entry.setChannelUtilization(ls.getChannelUtilization());
+                entry.setAirUtilTx(ls.getAirUtilTx());
+                node.setChannelUtilization(ls.getChannelUtilization());
+                node.setAirUtilTx(ls.getAirUtilTx());
+
+                deviceState.fireNodeUpdateListeners(fromNum);
+                NodeCacheService.getInstance().update(node);
+                log.info("Received TELEMETRY_APP (localStats) from !{}: rx={}, bad={}, dupe={}, tx={}, dropped={}, relay={}, relayCanceled={}, chUtil={}, airUtil={}",
+                        Integer.toHexString(fromNum), ls.getNumPacketsRx(), ls.getNumPacketsRxBad(), ls.getNumRxDupe(),
+                        ls.getNumPacketsTx(), ls.getNumTxDropped(), ls.getNumTxRelay(), ls.getNumTxRelayCanceled(),
+                        ls.getChannelUtilization(), ls.getAirUtilTx());
+            }
+
+            entry.setRxSnr(packet.getRxSnr());
+            entry.setRxRssi(packet.getRxRssi());
+            entry.setHopStart(packet.getHopStart());
+            entry.setHopLimit(packet.getHopLimit());
 
             deviceState.addTelemetryEntry(entry);
             NodeCacheService.getInstance().persistTelemetry(entry);
@@ -235,6 +313,7 @@ public class MessageListenerService implements FromRadioListener {
         }
     }
 
+    @SuppressWarnings("PMD.UnusedFormalParameter") // consistent handler signature
     private void handleAdminResponse(MeshProtos.MeshPacket packet, MeshProtos.Data data) {
         try {
             AdminProtos.AdminMessage adminMsg = AdminProtos.AdminMessage.parseFrom(data.getPayload());

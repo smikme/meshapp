@@ -1,5 +1,6 @@
 package com.meshtastic.client.components.chat;
 
+import com.meshtastic.client.components.EmojiTextFlow;
 import com.meshtastic.client.modal.ModalPane;
 import com.meshtastic.client.model.ChatItem;
 import com.meshtastic.client.utils.NodeUtils;
@@ -13,6 +14,7 @@ import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
+import javafx.scene.shape.Rectangle;
 import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
 
@@ -28,15 +30,16 @@ public class ChatListCell extends ListCell<ChatItem> {
     private final Label avatarLabel = new Label();
     private final VBox textBox = new VBox(2);
     private final Label nameLabel = new Label();
-    private final Label messagePreview = new Label();
+    private final EmojiTextFlow messagePreview = new EmojiTextFlow();
     private final VBox metaBox = new VBox(4);
     private final Label timeLabel = new Label();
     private final Label unreadBadge = new Label();
 
     /**
-     * @param onDeleteChat колбэк удаления чата (вызывается из контекстного меню «Закрыть»)
+     * @param onDeleteChat      колбэк удаления чата (вызывается из контекстного меню «Закрыть»)
+     * @param onShowProperties  колбэк свойств канала (вызывается из контекстного меню «Свойства»)
      */
-    public ChatListCell(Consumer<ChatItem> onDeleteChat) {
+    public ChatListCell(Consumer<ChatItem> onDeleteChat, Consumer<ChatItem> onShowProperties) {
         root.setAlignment(Pos.CENTER_LEFT);
         root.setPadding(new Insets(8, 10, 8, 10));
         root.getStyleClass().add("chat-list-cell-root");
@@ -51,10 +54,15 @@ public class ChatListCell extends ListCell<ChatItem> {
         nameLabel.getStyleClass().add("chat-name-label");
 
         messagePreview.getStyleClass().add("chat-preview-label");
-        messagePreview.setWrapText(true);
+        messagePreview.setTextStyleClass("chat-preview-text-node");
+        messagePreview.setEmojiSize(12);
         messagePreview.setMinHeight(34);
         messagePreview.setPrefHeight(34);
         messagePreview.setMaxHeight(34);
+        Rectangle clip = new Rectangle();
+        clip.widthProperty().bind(messagePreview.widthProperty());
+        clip.heightProperty().bind(messagePreview.heightProperty());
+        messagePreview.setClip(clip);
 
         textBox.getChildren().addAll(nameLabel, messagePreview);
         textBox.setMinWidth(0);
@@ -76,9 +84,25 @@ public class ChatListCell extends ListCell<ChatItem> {
         root.getChildren().addAll(avatarPane, textBox, metaBox);
 
         // Контекстное меню (правый клик)
+        MenuItem propertiesItem = new MenuItem("Свойства");
+        propertiesItem.setOnAction(ev -> {
+            ChatItem chatItem = getItem();
+            if (chatItem != null) {
+                onShowProperties.accept(chatItem);
+            }
+        });
+
         MenuItem closeItem = new MenuItem("Закрыть");
-        ContextMenu ctxMenu = new ContextMenu(closeItem);
+        ContextMenu ctxMenu = new ContextMenu(propertiesItem, closeItem);
         setContextMenu(ctxMenu);
+
+        // «Свойства» только для каналов
+        ctxMenu.setOnShowing(ev -> {
+            ChatItem chatItem = getItem();
+            boolean isChannel = chatItem != null
+                    && chatItem.getType() == ChatItem.ChatType.CHANNEL;
+            propertiesItem.setVisible(isChannel);
+        });
 
         closeItem.setOnAction(ev -> {
             ChatItem chatItem = getItem();

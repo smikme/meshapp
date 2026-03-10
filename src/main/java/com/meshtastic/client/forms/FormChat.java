@@ -1,8 +1,10 @@
 package com.meshtastic.client.forms;
 
+import com.meshtastic.client.components.EmojiTextFlow;
 import com.meshtastic.client.components.chat.ChatInputBar;
 import com.meshtastic.client.components.chat.ChatListCell;
 import com.meshtastic.client.components.chat.ChatNameResolver;
+import com.meshtastic.client.components.chat.ChannelPropertiesDialog;
 import com.meshtastic.client.components.chat.CreateChannelDialog;
 import com.meshtastic.client.components.chat.MessageBubbleFactory;
 import com.meshtastic.client.components.chat.NodeInfoFormatter;
@@ -17,6 +19,7 @@ import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.protocol.ProtocolHandler;
 import com.meshtastic.client.service.ConnectionManager;
 import com.meshtastic.client.service.MessageDbService;
+import com.meshtastic.client.service.MessageListenerService;
 import com.meshtastic.client.service.MessageService;
 import com.meshtastic.client.service.NodeCacheService;
 import com.meshtastic.client.system.Form;
@@ -57,6 +60,7 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -72,7 +76,6 @@ public class FormChat extends Form {
     private ListView<ChatItem> chatListView;
     private final ObservableList<ChatItem> chatItems = FXCollections.observableArrayList();
     private FilteredList<ChatItem> filteredChats;
-    private TextField searchField;
 
     // === Правая панель ===
     private VBox detailPane;
@@ -97,6 +100,7 @@ public class FormChat extends Form {
     // Панель ввода
     private ChatInputBar chatInputBar;
     private Button newChatBtn;
+    private ContextMenu newChatMenu;
 
     // === Компоненты ===
     private TracerouteView tracerouteView;
@@ -107,7 +111,7 @@ public class FormChat extends Form {
     private DeviceState state;
     private ProtocolHandler protocolHandler;
 
-    // Трекинг непрочитанных: "ch:INDEX" или "dm:NODENUM" → кол-во прочитанных сообщений
+    // Трекинг непрочитанных: "ch:INDEX" или "dm:NODEID" → кол-во прочитанных сообщений
     private final Map<String, Integer> lastReadCounts = new HashMap<>();
 
     // Пагинация сообщений из БД
@@ -125,15 +129,15 @@ public class FormChat extends Form {
     /** Состояние активного запроса с обратным отсчётом */
     private static class PendingCountdown {
         final String chatType;
-        final int chatKey;
+        final String chatKey;
         final String prefix;
         final int[] remaining;
         final boolean[] done = {false};
-        Label countdownLabel;  // пересоздаётся при переключении чатов
+        EmojiTextFlow countdownLabel;  // пересоздаётся при переключении чатов
         HBox tempBubble;       // пересоздаётся при переключении чатов
         Runnable cancelAction; // действие при отмене (останавливает таймер, убирает слушатель)
 
-        PendingCountdown(String chatType, int chatKey, String prefix, int totalSeconds) {
+        PendingCountdown(String chatType, String chatKey, String prefix, int totalSeconds) {
             this.chatType = chatType;
             this.chatKey = chatKey;
             this.prefix = prefix;
@@ -180,7 +184,7 @@ public class FormChat extends Form {
         VBox leftPane = new VBox();
         leftPane.getStyleClass().add("chat-list-pane");
 
-        searchField = new TextField();
+        TextField searchField = new TextField();
         searchField.setPromptText("🔍 Поиск чатов");
         searchField.getStyleClass().add("chat-search-field");
 
@@ -196,7 +200,7 @@ public class FormChat extends Form {
 
         filteredChats = new FilteredList<>(chatItems, c -> true);
         searchField.textProperty().addListener((obs, oldVal, newVal) -> {
-            String query = newVal == null ? "" : newVal.trim().toLowerCase();
+            String query = newVal == null ? "" : newVal.trim().toLowerCase(Locale.ROOT);
             filteredChats.setPredicate(chat -> query.isEmpty()
                     || containsIgnoreCase(chat.getDisplayName(), query)
                     || containsIgnoreCase(chat.getLastMessageText(), query));
@@ -207,7 +211,7 @@ public class FormChat extends Form {
 
         chatListView = new ListView<>(sortedChats);
         chatListView.getStyleClass().add("chat-list-view");
-        chatListView.setCellFactory(lv -> new ChatListCell(this::deleteChat));
+        chatListView.setCellFactory(lv -> new ChatListCell(this::deleteChat, this::showChannelProperties));
         chatListView.getSelectionModel().selectedItemProperty().addListener(
                 (obs, oldItem, newItem) -> {
                     if (suppressSelectionListener) { return; }
@@ -349,7 +353,7 @@ public class FormChat extends Form {
             } else {
                 MessageService.sendDirectMessage(
                         protocolHandler, state,
-                        selectedChat.getPeerNodeNum(),
+                        selectedChat.getPeerNodeId(),
                         request.text(), request.replyId());
             }
         });
@@ -362,13 +366,13 @@ public class FormChat extends Form {
      * Вызывается извне (например, из NodeDetailContent) после навигации на эту форму.
      * Если чат с этим пиром ещё не существует в списке — добавляет его.
      */
-    public void openDirectChat(int peerNodeNum, NodeData peerNode) {
-        ChatItem dm = ChatItem.fromDirectMessage(peerNodeNum, peerNode, (MeshMessage) null, 0);
+    public void openDirectChat(String peerNodeId, NodeData peerNode) {
+        ChatItem dm = ChatItem.fromDirectMessage(peerNodeId, peerNode, (MeshMessage) null, 0);
 
         // Добавить в список если DM с этим пиром ещё нет
         boolean exists = chatItems.stream()
                 .anyMatch(item -> item.getType() == ChatItem.ChatType.DIRECT_MESSAGE
-                               && item.getPeerNodeNum() == peerNodeNum);
+                               && Objects.equals(item.getPeerNodeId(), peerNodeId));
         if (!exists) {
             chatItems.add(dm);
         }
@@ -430,10 +434,10 @@ public class FormChat extends Form {
         return selectedChat.getType() == ChatItem.ChatType.CHANNEL ? "channel" : "dm";
     }
 
-    private int currentChatKey() {
-        if (selectedChat == null) { return 0; }
+    private String currentChatKey() {
+        if (selectedChat == null) { return null; }
         return selectedChat.getType() == ChatItem.ChatType.CHANNEL
-                ? selectedChat.getChannelIndex() : selectedChat.getPeerNodeNum();
+                ? String.valueOf(selectedChat.getChannelIndex()) : selectedChat.getPeerNodeId();
     }
 
     /**
@@ -445,7 +449,7 @@ public class FormChat extends Form {
 
         MessageDbService db = MessageDbService.getInstance();
         String chatType = currentChatType();
-        int chatKey = currentChatKey();
+        String chatKey = currentChatKey();
 
         List<MeshMessage> msgs = db.loadLast(chatType, chatKey, PAGE_SIZE);
 
@@ -477,7 +481,7 @@ public class FormChat extends Form {
 
         MessageDbService db = MessageDbService.getInstance();
         String chatType = currentChatType();
-        int chatKey = currentChatKey();
+        String chatKey = currentChatKey();
 
         List<MeshMessage> older = db.loadBefore(chatType, chatKey, oldestLoadedDbId, PAGE_SIZE);
 
@@ -528,7 +532,7 @@ public class FormChat extends Form {
             return false;
         });
         String chatType = currentChatType();
-        int chatKey = currentChatKey();
+        String chatKey = currentChatKey();
 
         List<MeshMessage> newMsgs = db.loadAfter(chatType, chatKey, newestLoadedDbId);
         if (!newMsgs.isEmpty()) {
@@ -556,8 +560,8 @@ public class FormChat extends Form {
      * Добавить системное (бот) сообщение в указанный чат.
      * Сохраняет в БД. Обновляет UI и счётчик прочитанных, если чат сейчас открыт.
      */
-    private void addSystemMessageTo(String chatType, int chatKey, String text) {
-        MeshMessage sysMsg = new MeshMessage(0, 0, 0, text, System.currentTimeMillis() / 1000, false);
+    private void addSystemMessageTo(String chatType, String chatKey, String text) {
+        MeshMessage sysMsg = new MeshMessage("!00000000", "!00000000", 0, text, System.currentTimeMillis() / 1000, false);
         sysMsg.setSystemMessage(true);
         MessageDbService.getInstance().save(sysMsg, chatType, chatKey);
         if (isCurrentChat(chatType, chatKey)) {
@@ -573,10 +577,10 @@ public class FormChat extends Form {
     /**
      * Добавить результат traceroute: кастомный визуальный узел в UI + текстовый fallback в БД.
      */
-    private void addTracerouteResult(String chatType, int chatKey,
+    private void addTracerouteResult(String chatType, String chatKey,
                                      String targetName, MeshProtos.RouteDiscovery route) {
         String text = tracerouteView.formatText(targetName, route);
-        MeshMessage sysMsg = new MeshMessage(0, 0, 0, text, System.currentTimeMillis() / 1000, false);
+        MeshMessage sysMsg = new MeshMessage("!00000000", "!00000000", 0, text, System.currentTimeMillis() / 1000, false);
         sysMsg.setSystemMessage(true);
         MessageDbService.getInstance().save(sysMsg, chatType, chatKey);
 
@@ -595,7 +599,7 @@ public class FormChat extends Form {
     /**
      * Создать PendingCountdown, зарегистрировать и прикрепить UI-пузырь.
      */
-    private PendingCountdown createCountdown(String chatType, int chatKey, String prefix) {
+    private PendingCountdown createCountdown(String chatType, String chatKey, String prefix) {
         PendingCountdown pc = new PendingCountdown(chatType, chatKey, prefix, REQUEST_TIMEOUT_SECONDS);
         pendingCountdowns.add(pc);
         attachCountdownBubble(pc);
@@ -604,7 +608,7 @@ public class FormChat extends Form {
 
     /** Прикрепить UI-пузырь к PendingCountdown (создать или пересоздать при переключении чата) */
     private void attachCountdownBubble(PendingCountdown pc) {
-        MeshMessage tmp = new MeshMessage(0, 0, 0,
+        MeshMessage tmp = new MeshMessage("!00000000", "!00000000", 0,
                 pc.prefix + " ⏱ " + pc.remaining[0], System.currentTimeMillis() / 1000, false);
         tmp.setSystemMessage(true);
         HBox bubble = bubbleFactory.build(tmp);
@@ -612,7 +616,7 @@ public class FormChat extends Form {
         scrollToBottom();
         // buildSystemBubble → HBox(botAvatar, VBox(textLabel, timeLabel))
         VBox content = (VBox) bubble.getChildren().get(1);
-        pc.countdownLabel = (Label) content.getChildren().getFirst();
+        pc.countdownLabel = (EmojiTextFlow) content.getChildren().getFirst();
 
         // Кнопка «Отменить»
         Label cancelBtn = new Label("Отменить");
@@ -655,9 +659,9 @@ public class FormChat extends Form {
     private void restorePendingCountdowns() {
         if (selectedChat == null) { return; }
         String chatType = currentChatType();
-        int chatKey = currentChatKey();
+        String chatKey = currentChatKey();
         for (PendingCountdown pc : pendingCountdowns) {
-            if (!pc.done[0] && Objects.equals(pc.chatType, chatType) && pc.chatKey == chatKey) {
+            if (!pc.done[0] && Objects.equals(pc.chatType, chatType) && Objects.equals(pc.chatKey, chatKey)) {
                 attachCountdownBubble(pc);
             }
         }
@@ -676,12 +680,20 @@ public class FormChat extends Form {
     /** Запрос traceroute до ноды — ответ показывается как системное сообщение */
     private void requestTraceroute(MeshMessage msg) {
         if (state == null || protocolHandler == null) { return; }
-        int target = msg.getFromNum();
-        String name = nameResolver.resolveNodeName(target);
+        NodeData targetNode = state.getNodeByNodeId(msg.getFromNodeId());
+        if (targetNode == null) {
+            String nodeId = msg.getFromNodeId();
+            if (nodeId == null || nodeId.length() < 2) { return; }
+            int nodeNum = (int) Long.parseUnsignedLong(nodeId.substring(1), 16);
+            targetNode = state.getOrCreateNode(nodeNum);
+            NodeCacheService.getInstance().enrichFromCache(targetNode);
+        }
+        int targetNum = targetNode.getNodeNum();
+        String name = nameResolver.resolveNodeName(targetNum);
         String prefix = "🔍 Traceroute → " + name;
 
         String chatType = currentChatType();
-        int chatKey = currentChatKey();
+        String chatKey = currentChatKey();
         if (chatType == null) { return; }
 
         PendingCountdown pc = createCountdown(chatType, chatKey, prefix);
@@ -692,7 +704,7 @@ public class FormChat extends Form {
 
         holder[0] = (fromNodeNum, route) -> {
             // Фильтр: реагируем только на ответ от целевой ноды
-            if (fromNodeNum != target) { return; }
+            if (fromNodeNum != targetNum) { return; }
             state.removeTracerouteListener(holder[0]);
             Platform.runLater(() -> {
                 timer.stop();
@@ -717,17 +729,25 @@ public class FormChat extends Form {
 
         state.addTracerouteListener(holder[0]);
         timer.play();
-        MessageService.requestTraceroute(protocolHandler, state, target);
+        MessageService.requestTraceroute(protocolHandler, state, targetNum);
     }
 
     /** Запрос информации о ноде — всегда запрашивает актуальные данные по сети */
     private void requestNodeInfo(MeshMessage msg) {
         if (state == null || protocolHandler == null) { return; }
-        int target = msg.getFromNum();
-        String name = nameResolver.resolveNodeName(target);
+        NodeData targetNode = state.getNodeByNodeId(msg.getFromNodeId());
+        if (targetNode == null) {
+            String nodeId = msg.getFromNodeId();
+            if (nodeId == null || nodeId.length() < 2) { return; }
+            int nodeNum = (int) Long.parseUnsignedLong(nodeId.substring(1), 16);
+            targetNode = state.getOrCreateNode(nodeNum);
+            NodeCacheService.getInstance().enrichFromCache(targetNode);
+        }
+        int targetNum = targetNode.getNodeNum();
+        String name = nameResolver.resolveNodeName(targetNum);
 
         String chatType = currentChatType();
-        int chatKey = currentChatKey();
+        String chatKey = currentChatKey();
         if (chatType == null) { return; }
         String prefix = "📋 Запрос информации о " + name;
 
@@ -737,13 +757,13 @@ public class FormChat extends Form {
         Timeline timer = createCountdownTimer(pc, prefix);
 
         holder[0] = nodeNum -> {
-            if (nodeNum != target) { return; }
+            if (nodeNum != targetNum) { return; }
             state.removeNodeUpdateListener(holder[0]);
             Platform.runLater(() -> {
                 timer.stop();
                 finishCountdown(pc);
 
-                NodeData n = state.getNodeDb().get(target);
+                NodeData n = state.getNodeDb().get(targetNum);
                 if (n == null) {
                     addSystemMessageTo(chatType, chatKey, "📋 Нода " + name + " не найдена");
                     return;
@@ -768,7 +788,7 @@ public class FormChat extends Form {
 
         state.addNodeUpdateListener(holder[0]);
         timer.play();
-        MessageService.requestNodeInfo(protocolHandler, state, target);
+        MessageService.requestNodeInfo(protocolHandler, state, targetNum);
     }
 
     private void updateInputEnabled() {
@@ -788,7 +808,7 @@ public class FormChat extends Form {
             if (entry.isConnected()) {
                 newState = mgr.getDeviceState(entry.getId());
                 newHandler = mgr.getProtocolHandler(entry.getId());
-                if (newState != null) break;
+                if (newState != null) { break; }
             }
         }
 
@@ -813,6 +833,16 @@ public class FormChat extends Form {
 
         if (this.state != null) {
             this.state.addMessageListener(messageListener);
+
+            // Регистрация проверки активного чата для подавления уведомлений
+            for (ConnectionEntry ce : mgr.getEntries()) {
+                if (ce.isConnected()) {
+                    MessageListenerService mls = mgr.getMessageListenerService(ce.getId());
+                    if (mls != null) {
+                        mls.getNotificationManager().setActiveChatChecker(this::isCurrentChat);
+                    }
+                }
+            }
         }
 
         reloadChatList();
@@ -829,35 +859,36 @@ public class FormChat extends Form {
         List<ChatItem> items = new ArrayList<>();
 
         // Последние сообщения каналов и DM из БД (одним запросом на тип)
-        Map<Integer, MeshMessage> channelLastMsgs = db.getLastMessagePerChat("channel");
-        Map<Integer, MeshMessage> dmLastMsgs = db.getLastMessagePerChat("dm");
+        Map<String, MeshMessage> channelLastMsgs = db.getLastMessagePerChat("channel");
+        Map<String, MeshMessage> dmLastMsgs = db.getLastMessagePerChat("dm");
 
         // 1. Каналы (не DISABLED)
         for (ChannelProtos.Channel channel : state.getChannels()) {
             if (channel.getRole() == ChannelProtos.Channel.Role.DISABLED) { continue; }
-            MeshMessage lastMsg = channelLastMsgs.get(channel.getIndex());
-            String key = "ch:" + channel.getIndex();
-            int totalCount = db.getMessageCount("channel", channel.getIndex());
-            int lastRead = lastReadCounts.getOrDefault(key, 0);
+            String chKey = String.valueOf(channel.getIndex());
+            MeshMessage lastMsg = channelLastMsgs.get(chKey);
+            String readKey = "ch:" + channel.getIndex();
+            int totalCount = db.getMessageCount("channel", chKey);
+            int lastRead = lastReadCounts.getOrDefault(readKey, 0);
             int unread = Math.max(0, totalCount - lastRead);
             items.add(ChatItem.fromChannel(channel, lastMsg, unread));
         }
 
         // 2. DM-пиры: объединение из БД + текущей сессии
-        Set<Integer> dmPeers = new LinkedHashSet<>(db.getDistinctDmPeers());
+        Set<String> dmPeers = new LinkedHashSet<>(db.getDistinctDmPeers());
         dmPeers.addAll(state.getAllDirectMessages().keySet());
-        for (int peerNum : dmPeers) {
-            MeshMessage lastMsg = dmLastMsgs.get(peerNum);
-            NodeData peerNode = state.getNodeDb().get(peerNum);
+        for (String peerNodeId : dmPeers) {
+            MeshMessage lastMsg = dmLastMsgs.get(peerNodeId);
+            NodeData peerNode = state.getNodeByNodeId(peerNodeId);
             // Если ноды нет в state, попробовать из кэша нод
             if (peerNode == null) {
-                peerNode = NodeCacheService.getInstance().get(peerNum);
+                peerNode = NodeCacheService.getInstance().get(peerNodeId);
             }
-            String key = "dm:" + peerNum;
-            int totalCount = db.getMessageCount("dm", peerNum);
-            int lastRead = lastReadCounts.getOrDefault(key, 0);
+            String readKey = "dm:" + peerNodeId;
+            int totalCount = db.getMessageCount("dm", peerNodeId);
+            int lastRead = lastReadCounts.getOrDefault(readKey, 0);
             int unread = Math.max(0, totalCount - lastRead);
-            items.add(ChatItem.fromDirectMessage(peerNum, peerNode, lastMsg, unread));
+            items.add(ChatItem.fromDirectMessage(peerNodeId, peerNode, lastMsg, unread));
         }
 
         // Восстановить выделение
@@ -873,6 +904,21 @@ public class FormChat extends Form {
         } finally {
             suppressSelectionListener = false;
         }
+    }
+
+    /**
+     * Открывает панель свойств канала.
+     */
+    private void showChannelProperties(ChatItem item) {
+        if (item == null || item.getType() != ChatItem.ChatType.CHANNEL) {
+            return;
+        }
+        if (state == null || protocolHandler == null) {
+            Toast.show(Toast.Type.WARNING, "Нет подключения к радио");
+            return;
+        }
+        ChannelPropertiesDialog.show(state, protocolHandler,
+                item.getChannelIndex(), this::reloadChatList);
     }
 
     /**
@@ -894,15 +940,15 @@ public class FormChat extends Form {
                 state.updateChannel(disabled);
             }
 
-            db.deleteChat("channel", idx);
+            db.deleteChat("channel", String.valueOf(idx));
             lastReadCounts.remove("ch:" + idx);
         } else {
-            int peer = item.getPeerNodeNum();
+            String peerNodeId = item.getPeerNodeId();
             if (state != null) {
-                state.removeDirectMessages(peer);
+                state.removeDirectMessages(peerNodeId);
             }
-            db.deleteChat("dm", peer);
-            lastReadCounts.remove("dm:" + peer);
+            db.deleteChat("dm", peerNodeId);
+            lastReadCounts.remove("dm:" + peerNodeId);
         }
 
         // Закрыть правую панель, если удалён текущий чат
@@ -934,7 +980,7 @@ public class FormChat extends Form {
     private void markAsRead(ChatItem item) {
         boolean isChannel = item.getType() == ChatItem.ChatType.CHANNEL;
         String dbType = isChannel ? "channel" : "dm";
-        int dbKey = isChannel ? item.getChannelIndex() : item.getPeerNodeNum();
+        String dbKey = isChannel ? String.valueOf(item.getChannelIndex()) : item.getPeerNodeId();
         String readKey = (isChannel ? "ch:" : "dm:") + dbKey;
 
         MessageDbService db = MessageDbService.getInstance();
@@ -945,16 +991,17 @@ public class FormChat extends Form {
     }
 
     private void showNewChatDialog() {
-        ContextMenu menu = new ContextMenu();
-
-        MenuItem createChannel = new MenuItem("Создать канал");
-        createChannel.setOnAction(e -> showCreateChannelDialog());
-
-        MenuItem createDM = new MenuItem("Создать приватный чат");
-        createDM.setOnAction(e -> Toast.show(Toast.Type.INFO, "В разработке"));
-
-        menu.getItems().addAll(createChannel, createDM);
-        menu.show(newChatBtn, javafx.geometry.Side.BOTTOM, 0, 0);
+        if (newChatMenu == null) {
+            newChatMenu = new ContextMenu();
+            MenuItem createChannel = new MenuItem("Создать канал");
+            createChannel.setOnAction(e -> showCreateChannelDialog());
+            newChatMenu.getItems().add(createChannel);
+        }
+        if (newChatMenu.isShowing()) {
+            newChatMenu.hide();
+        } else {
+            newChatMenu.show(newChatBtn, javafx.geometry.Side.BOTTOM, 0, 0);
+        }
     }
 
     private void showCreateChannelDialog() {
@@ -967,18 +1014,18 @@ public class FormChat extends Form {
         }
         return a.getType() == ChatItem.ChatType.CHANNEL
                 ? a.getChannelIndex() == b.getChannelIndex()
-                : a.getPeerNodeNum() == b.getPeerNodeNum();
+                : Objects.equals(a.getPeerNodeId(), b.getPeerNodeId());
     }
 
     // ==================== Helpers ====================
 
-    private boolean isCurrentChat(String chatType, int chatKey) {
+    private boolean isCurrentChat(String chatType, String chatKey) {
         return selectedChat != null
                 && Objects.equals(currentChatType(), chatType)
-                && currentChatKey() == chatKey;
+                && Objects.equals(currentChatKey(), chatKey);
     }
 
     private static boolean containsIgnoreCase(String text, String query) {
-        return text != null && text.toLowerCase().contains(query);
+        return text != null && text.toLowerCase(Locale.ROOT).contains(query);
     }
 }

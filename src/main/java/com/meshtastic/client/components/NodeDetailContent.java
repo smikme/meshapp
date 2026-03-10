@@ -5,6 +5,7 @@ import com.meshtastic.client.modal.ModalPane;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.protocol.ProtocolHandler;
+import com.meshtastic.client.service.FavoriteNodeService;
 import com.meshtastic.client.service.MessageService;
 import com.meshtastic.client.service.NodeCacheService;
 import com.meshtastic.client.system.AllForms;
@@ -36,7 +37,8 @@ public class NodeDetailContent extends HBox {
 
     private final TelemetryChartPanel chartPanel;
     private final ObservableList<String[]> tableData;
-    private final int nodeNum;
+    private final int nodeNum;     // для протокольных операций (requestNodeInfo, removeNode)
+    private final String nodeId;   // для идентификации (openDirectChat, deleteNode)
     private final ProtocolHandler protocolHandler;
     private final DeviceState state;
 
@@ -49,11 +51,12 @@ public class NodeDetailContent extends HBox {
      */
     public NodeDetailContent(DeviceState state, NodeData node, ProtocolHandler handler, Runnable onBeforeNavigate) {
         this.nodeNum = node.getNodeNum();
+        this.nodeId = node.getNodeId();
         this.protocolHandler = handler;
         this.state = state;
 
         String displayName = node.getLongName() != null && !node.getLongName().isEmpty()
-                ? node.getLongName() : (node.getNodeId() != null ? node.getNodeId() : "?");
+                ? node.getLongName() : node.getNodeId() != null ? node.getNodeId() : "?";
 
         // === Вертикальный тулбар слева (56px, структура как DrawerPane) ===
         StackPane toolbarPane = new StackPane();
@@ -81,7 +84,7 @@ public class NodeDetailContent extends HBox {
             }
             FormChat formChat = (FormChat) AllForms.getForm(FormChat.class);
             FormManager.showForm(formChat);
-            formChat.openDirectChat(node.getNodeNum(), node);
+            formChat.openDirectChat(node.getNodeId(), node);
         });
 
         // Кнопка «Обновить ноду» — запрос информации по радио
@@ -122,7 +125,7 @@ public class NodeDetailContent extends HBox {
                         confirmed -> {
                             if (confirmed) {
                                 this.state.removeNode(nodeNum);
-                                NodeCacheService.getInstance().deleteNode(nodeNum);
+                                NodeCacheService.getInstance().deleteNode(nodeId);
                                 if (onBeforeNavigate != null) {
                                     onBeforeNavigate.run();
                                 }
@@ -132,7 +135,31 @@ public class NodeDetailContent extends HBox {
             }
         });
 
-        actionToolbar.getItems().addAll(privateChatBtn, refreshBtn, deleteBtn);
+        // Кнопка «Избранное»
+        SVGPath favoriteIcon = SvgIconLoader.load("/icons/favorite.svg", 22);
+        Button favoriteBtn = new Button();
+        favoriteBtn.setGraphic(favoriteIcon);
+        favoriteBtn.setContentDisplay(ContentDisplay.GRAPHIC_ONLY);
+        favoriteBtn.getStyleClass().add("drawer-toolbar-button");
+
+        FavoriteNodeService favService = FavoriteNodeService.getInstance();
+        boolean initFav = favService.isFavorite(nodeId);
+        if (initFav) {
+            favoriteBtn.getStyleClass().add("favorite-btn-active");
+        }
+        favoriteBtn.setTooltip(new Tooltip(initFav ? "Убрать из избранного" : "Добавить в избранное"));
+
+        favoriteBtn.setOnAction(e -> {
+            boolean nowFav = favService.toggleFavorite(nodeId);
+            if (nowFav) {
+                favoriteBtn.getStyleClass().add("favorite-btn-active");
+            } else {
+                favoriteBtn.getStyleClass().remove("favorite-btn-active");
+            }
+            favoriteBtn.getTooltip().setText(nowFav ? "Убрать из избранного" : "Добавить в избранное");
+        });
+
+        actionToolbar.getItems().addAll(privateChatBtn, favoriteBtn, refreshBtn, deleteBtn);
 
         VBox toolbarContainer = new VBox(actionToolbar);
         toolbarContainer.setAlignment(Pos.TOP_CENTER);
@@ -143,11 +170,11 @@ public class NodeDetailContent extends HBox {
         // === Заголовок: большой аватар + имя + nodeId ===
         String avatarText;
         if (node.getShortName() != null && !node.getShortName().isEmpty()) {
-            avatarText = node.getShortName().toUpperCase();
+            avatarText = node.getShortName().toUpperCase(java.util.Locale.ROOT);
         } else {
             avatarText = displayName.length() > 4
-                    ? displayName.substring(0, 4).toUpperCase()
-                    : displayName.toUpperCase();
+                    ? displayName.substring(0, 4).toUpperCase(java.util.Locale.ROOT)
+                    : displayName.toUpperCase(java.util.Locale.ROOT);
         }
         String color = NodeUtils.roleColor(node.getRole());
 
@@ -182,10 +209,10 @@ public class NodeDetailContent extends HBox {
         TableView<String[]> table = NodeUtils.createDetailTable(tableData);
 
         // === График телеметрии ===
-        chartPanel = new TelemetryChartPanel();
+        chartPanel = new TelemetryChartPanel(true);
         VBox.setVgrow(chartPanel, Priority.ALWAYS);
         if (state != null) {
-            chartPanel.bind(state, node.getNodeNum());
+            chartPanel.bind(state, node.getNodeId());
         }
 
         VBox contentPane = new VBox(10, header, sep, table, chartPanel);

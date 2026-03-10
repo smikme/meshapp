@@ -11,18 +11,18 @@ import javafx.scene.layout.StackPane;
  */
 public class Form extends StackPane {
 
-    public Form() {
-    }
-
     /** Инициализация формы. Вызывается один раз при создании экземпляра. */
     public void formInit() {
+        // no-op
     }
 
     /** Вызывается каждый раз при переключении на эту форму. */
     public void formOpen() {
+        // no-op
     }
 
     /** Обновление данных формы. Вызывается при изменении состояния устройства. */
     public void formRefresh() {
+        // no-op
     }
 }

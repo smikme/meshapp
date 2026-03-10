@@ -1,6 +1,5 @@
 package com.meshtastic.client.utils;
 
-import com.google.protobuf.ByteString;
 import com.google.protobuf.Descriptors;
 import com.google.protobuf.Descriptors.EnumValueDescriptor;
 import com.google.protobuf.Descriptors.FieldDescriptor;
@@ -9,16 +8,25 @@ import com.meshtastic.client.model.ConfigTreeItem;
 import javafx.scene.control.TreeItem;
 import org.meshtastic.proto.ConfigProtos;
 import org.meshtastic.proto.ModuleConfigProtos;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import com.google.protobuf.ByteString;
 
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * Утилита для построения дерева ConfigTreeItem из protobuf Config/ModuleConfig.
  * Использует protobuf reflection для автоматического обхода полей.
  */
-public class ProtobufTreeBuilder {
+public final class ProtobufTreeBuilder {
+
+    private static final Logger log = LoggerFactory.getLogger(ProtobufTreeBuilder.class);
 
     /** Русские названия секций конфига */
     private static final Map<String, String> SECTION_NAMES = Map.ofEntries(
@@ -61,7 +69,7 @@ public class ProtobufTreeBuilder {
 
         for (ConfigProtos.Config config : configs) {
             FieldDescriptor oneofField = getActiveOneofField(config, "payload_variant");
-            if (oneofField == null) continue;
+            if (oneofField == null) { continue; }
 
             Message sectionMsg = (Message) config.getField(oneofField);
             String sectionName = oneofField.getName();
@@ -91,7 +99,7 @@ public class ProtobufTreeBuilder {
 
         for (ModuleConfigProtos.ModuleConfig mc : moduleConfigs) {
             FieldDescriptor oneofField = getActiveOneofField(mc, "payload_variant");
-            if (oneofField == null) continue;
+            if (oneofField == null) { continue; }
 
             Message sectionMsg = (Message) mc.getField(oneofField);
             String sectionName = oneofField.getName();
@@ -117,9 +125,8 @@ public class ProtobufTreeBuilder {
     private static void addFieldsToTree(TreeItem<ConfigTreeItem> parent, Message message,
                                           String configType, int variantNumber) {
         for (FieldDescriptor fd : message.getDescriptorForType().getFields()) {
-            // Пропускаем repeated/map поля и bytes
-            if (fd.isRepeated()) continue;
-            if (fd.getType() == FieldDescriptor.Type.BYTES) continue;
+            // Пропускаем repeated поля (кроме repeated bytes — для ключей шифрования)
+            if (fd.isRepeated() && fd.getType() != FieldDescriptor.Type.BYTES) { continue; }
 
             String fieldName = fd.getName();
             String displayName = humanize(fieldName);
@@ -179,6 +186,22 @@ public class ProtobufTreeBuilder {
                         displayName, fieldName, value, Long.class,
                         null, fd, configType, variantNumber);
                 parent.getChildren().add(new TreeItem<>(item));
+            } else if (fd.getType() == FieldDescriptor.Type.BYTES) {
+                String base64Value;
+                if (fd.isRepeated()) {
+                    @SuppressWarnings("unchecked")
+                    List<ByteString> bytesList = (List<ByteString>) value;
+                    base64Value = bytesList.stream()
+                            .map(bs -> Base64.getEncoder().encodeToString(bs.toByteArray()))
+                            .collect(Collectors.joining(", "));
+                } else {
+                    ByteString bs = (ByteString) value;
+                    base64Value = Base64.getEncoder().encodeToString(bs.toByteArray());
+                }
+                ConfigTreeItem item = new ConfigTreeItem(
+                        displayName, fieldName, base64Value, String.class,
+                        null, fd, configType, variantNumber);
+                parent.getChildren().add(new TreeItem<>(item));
             }
         }
     }
@@ -191,7 +214,7 @@ public class ProtobufTreeBuilder {
                 .filter(o -> o.getName().equals(oneofName))
                 .findFirst()
                 .orElse(null);
-        if (oneof == null) return null;
+        if (oneof == null) { return null; }
         return msg.getOneofFieldDescriptor(oneof);
     }
 
@@ -200,9 +223,9 @@ public class ProtobufTreeBuilder {
      * Например: "node_info_broadcast_secs" -> "Node info broadcast secs"
      */
     public static String humanize(String fieldName) {
-        if (fieldName == null || fieldName.isEmpty()) return fieldName;
+        if (fieldName == null || fieldName.isEmpty()) { return fieldName; }
         String result = fieldName.replace('_', ' ');
-        return result.substring(0, 1).toUpperCase() + result.substring(1);
+        return result.substring(0, 1).toUpperCase(Locale.ROOT) + result.substring(1);
     }
 
     /**
@@ -212,7 +235,7 @@ public class ProtobufTreeBuilder {
     public static ConfigProtos.Config rebuildConfig(TreeItem<ConfigTreeItem> sectionItem,
                                                       ConfigProtos.Config originalConfig) {
         FieldDescriptor oneofField = getActiveOneofField(originalConfig, "payload_variant");
-        if (oneofField == null) return null;
+        if (oneofField == null) { return null; }
 
         Message originalSection = (Message) originalConfig.getField(oneofField);
         Message.Builder sectionBuilder = originalSection.toBuilder();
@@ -231,7 +254,7 @@ public class ProtobufTreeBuilder {
             TreeItem<ConfigTreeItem> sectionItem,
             ModuleConfigProtos.ModuleConfig originalModuleConfig) {
         FieldDescriptor oneofField = getActiveOneofField(originalModuleConfig, "payload_variant");
-        if (oneofField == null) return null;
+        if (oneofField == null) { return null; }
 
         Message originalSection = (Message) originalModuleConfig.getField(oneofField);
         Message.Builder sectionBuilder = originalSection.toBuilder();
@@ -253,14 +276,15 @@ public class ProtobufTreeBuilder {
                 // Вложенная группа (sub-message) — не поддерживается для записи пока
                 continue;
             }
-            if (item.getFieldDescriptor() == null || item.getValue() == null) continue;
+            if (item.getFieldDescriptor() == null || item.getValue() == null) { continue; }
 
             FieldDescriptor fd = item.getFieldDescriptor();
             // Ищем соответствующий FieldDescriptor в текущем builder (может отличаться от оригинала)
             FieldDescriptor builderFd = builder.getDescriptorForType().findFieldByName(fd.getName());
-            if (builderFd == null) continue;
+            if (builderFd == null) { continue; }
 
             Object value = item.getValue();
+            log.debug("applyTreeValues: field='{}' value={} (type={})", builderFd.getName(), value, builderFd.getType());
             try {
                 if (builderFd.getType() == FieldDescriptor.Type.ENUM) {
                     if (value instanceof EnumValueDescriptor evd) {
@@ -286,9 +310,30 @@ public class ProtobufTreeBuilder {
                         || builderFd.getType() == FieldDescriptor.Type.FIXED64
                         || builderFd.getType() == FieldDescriptor.Type.SFIXED64) {
                     builder.setField(builderFd, ((Number) value).longValue());
+                } else if (builderFd.getType() == FieldDescriptor.Type.BYTES) {
+                    String base64Str = value.toString().trim();
+                    if (builderFd.isRepeated()) {
+                        builder.clearField(builderFd);
+                        if (!base64Str.isEmpty()) {
+                            for (String part : base64Str.split(",")) {
+                                String trimmed = part.trim();
+                                if (!trimmed.isEmpty()) {
+                                    builder.addRepeatedField(builderFd,
+                                            ByteString.copyFrom(Base64.getDecoder().decode(trimmed)));
+                                }
+                            }
+                        }
+                    } else {
+                        if (base64Str.isEmpty()) {
+                            builder.setField(builderFd, ByteString.EMPTY);
+                        } else {
+                            builder.setField(builderFd,
+                                    ByteString.copyFrom(Base64.getDecoder().decode(base64Str)));
+                        }
+                    }
                 }
-            } catch (Exception e) {
-                // Пропускаем поле, если не удалось установить значение
+            } catch (Exception e) { //NOPMD - field type mismatch is expected and safely skipped
+                log.trace("Skipping field '{}': {}", builderFd.getName(), e.getMessage());
             }
         }
     }

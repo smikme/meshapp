@@ -7,7 +7,7 @@ package com.meshtastic.client.model;
 public class TelemetryEntry {
 
     private final long timestamp; // epoch seconds
-    private final int nodeNum;
+    private final String nodeId;
 
     // DeviceMetrics
     private int batteryLevel;
@@ -20,13 +20,32 @@ public class TelemetryEntry {
     private float relativeHumidity;
     private float barometricPressure;
 
-    public TelemetryEntry(long timestamp, int nodeNum) {
+    // LocalStats (packet counters — RX)
+    private int numPacketsRx;
+    private int numPacketsRxBad;
+    private int numRxDupe;
+
+    // LocalStats (packet counters — TX)
+    private int numPacketsTx;
+    private int numTxDropped;
+    private int numTxRelay;
+    private int numTxRelayCanceled;
+
+    // Connection quality (from MeshPacket)
+    private float rxSnr;
+    private int rxRssi;
+
+    // Hop info (from MeshPacket)
+    private int hopStart;
+    private int hopLimit;
+
+    public TelemetryEntry(long timestamp, String nodeId) {
         this.timestamp = timestamp;
-        this.nodeNum = nodeNum;
+        this.nodeId = nodeId;
     }
 
     public long getTimestamp() { return timestamp; }
-    public int getNodeNum() { return nodeNum; }
+    public String getNodeId() { return nodeId; }
 
     public int getBatteryLevel() { return batteryLevel; }
     public void setBatteryLevel(int batteryLevel) { this.batteryLevel = batteryLevel; }
@@ -48,4 +67,39 @@ public class TelemetryEntry {
 
     public float getBarometricPressure() { return barometricPressure; }
     public void setBarometricPressure(float barometricPressure) { this.barometricPressure = barometricPressure; }
+
+    public int getNumPacketsRx() { return numPacketsRx; }
+    public void setNumPacketsRx(int numPacketsRx) { this.numPacketsRx = numPacketsRx; }
+
+    public int getNumPacketsRxBad() { return numPacketsRxBad; }
+    public void setNumPacketsRxBad(int numPacketsRxBad) { this.numPacketsRxBad = numPacketsRxBad; }
+
+    public int getNumRxDupe() { return numRxDupe; }
+    public void setNumRxDupe(int numRxDupe) { this.numRxDupe = numRxDupe; }
+
+    public int getNumPacketsTx() { return numPacketsTx; }
+    public void setNumPacketsTx(int numPacketsTx) { this.numPacketsTx = numPacketsTx; }
+
+    public int getNumTxDropped() { return numTxDropped; }
+    public void setNumTxDropped(int numTxDropped) { this.numTxDropped = numTxDropped; }
+
+    public int getNumTxRelay() { return numTxRelay; }
+    public void setNumTxRelay(int numTxRelay) { this.numTxRelay = numTxRelay; }
+
+    public int getNumTxRelayCanceled() { return numTxRelayCanceled; }
+    public void setNumTxRelayCanceled(int numTxRelayCanceled) { this.numTxRelayCanceled = numTxRelayCanceled; }
+
+    public float getRxSnr() { return rxSnr; }
+    public void setRxSnr(float rxSnr) { this.rxSnr = rxSnr; }
+
+    public int getRxRssi() { return rxRssi; }
+    public void setRxRssi(int rxRssi) { this.rxRssi = rxRssi; }
+
+    public int getHopStart() { return hopStart; }
+    public void setHopStart(int hopStart) { this.hopStart = hopStart; }
+
+    public int getHopLimit() { return hopLimit; }
+    public void setHopLimit(int hopLimit) { this.hopLimit = hopLimit; }
+
+    public int getHopsTraveled() { return hopStart > 0 ? hopStart - hopLimit : 0; }
 }

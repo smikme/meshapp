@@ -1,13 +1,14 @@
 package com.meshtastic.client.model;
 
 import org.meshtastic.proto.ChannelProtos;
+import java.util.Locale;
 
 import java.util.List;
 
 /**
  * Элемент списка чатов — обёртка для канала или DM.
  */
-public class ChatItem {
+public final class ChatItem {
 
     public enum ChatType { CHANNEL, DIRECT_MESSAGE }
 
@@ -25,11 +26,11 @@ public class ChatItem {
     private final long lastMessageTime;
     private final int unreadCount;
     private final int channelIndex;
-    private final int peerNodeNum;
+    private final String peerNodeId;
 
     private ChatItem(ChatType type, String displayName, String avatarText, String avatarColor,
                      String lastMessageText, long lastMessageTime, int unreadCount,
-                     int channelIndex, int peerNodeNum) {
+                     int channelIndex, String peerNodeId) {
         this.type = type;
         this.displayName = displayName;
         this.avatarText = avatarText;
@@ -38,7 +39,7 @@ public class ChatItem {
         this.lastMessageTime = lastMessageTime;
         this.unreadCount = unreadCount;
         this.channelIndex = channelIndex;
-        this.peerNodeNum = peerNodeNum;
+        this.peerNodeId = peerNodeId;
     }
 
     /**
@@ -73,19 +74,19 @@ public class ChatItem {
         }
 
         return new ChatItem(ChatType.CHANNEL, name, avatarText, color,
-                lastText, lastTime, unreadCount, channel.getIndex(), 0);
+                lastText, lastTime, unreadCount, channel.getIndex(), null);
     }
 
     /**
      * Создаёт ChatItem для DM с последним сообщением из in-memory списка.
      *
-     * @param peerNodeNum номер ноды собеседника
+     * @param peerNodeId  node_id собеседника (например {@code "!9e755af0"})
      * @param peerNode    данные ноды (для отображения имени), может быть {@code null}
      * @param messages    список сообщений DM (последнее используется для preview)
      * @param unreadCount количество непрочитанных сообщений
      * @return элемент списка чатов
      */
-    public static ChatItem fromDirectMessage(int peerNodeNum, NodeData peerNode,
+    public static ChatItem fromDirectMessage(String peerNodeId, NodeData peerNode,
                                              List<MeshMessage> messages,
                                              int unreadCount) {
         String displayName;
@@ -96,20 +97,20 @@ public class ChatItem {
         } else if (peerNode != null && peerNode.getNodeId() != null) {
             displayName = peerNode.getNodeId();
         } else {
-            displayName = "!" + String.format("%08x", peerNodeNum);
+            displayName = peerNodeId;
         }
 
         if (peerNode != null && peerNode.getShortName() != null && !peerNode.getShortName().isEmpty()) {
             avatarText = peerNode.getShortName().length() > 4
-                    ? peerNode.getShortName().substring(0, 4).toUpperCase()
-                    : peerNode.getShortName().toUpperCase();
+                    ? peerNode.getShortName().substring(0, 4).toUpperCase(Locale.ROOT)
+                    : peerNode.getShortName().toUpperCase(Locale.ROOT);
         } else {
             avatarText = displayName.length() > 4
-                    ? displayName.substring(0, 4).toUpperCase()
-                    : displayName.toUpperCase();
+                    ? displayName.substring(0, 4).toUpperCase(Locale.ROOT)
+                    : displayName.toUpperCase(Locale.ROOT);
         }
 
-        String color = CHANNEL_COLORS[Math.abs(peerNodeNum) % CHANNEL_COLORS.length];
+        String color = CHANNEL_COLORS[Math.abs(peerNodeId.hashCode()) % CHANNEL_COLORS.length];
 
         // Последнее сообщение
         String lastText = null;
@@ -121,7 +122,7 @@ public class ChatItem {
         }
 
         return new ChatItem(ChatType.DIRECT_MESSAGE, displayName, avatarText, color,
-                lastText, lastTime, unreadCount, 0, peerNodeNum);
+                lastText, lastTime, unreadCount, 0, peerNodeId);
     }
 
     // === DB-backed factory methods ===
@@ -149,13 +150,13 @@ public class ChatItem {
         }
 
         return new ChatItem(ChatType.CHANNEL, name, avatarText, color,
-                lastText, lastTime, unreadCount, channel.getIndex(), 0);
+                lastText, lastTime, unreadCount, channel.getIndex(), null);
     }
 
     /**
      * Создаёт ChatItem для DM с последним сообщением из БД.
      */
-    public static ChatItem fromDirectMessage(int peerNodeNum, NodeData peerNode,
+    public static ChatItem fromDirectMessage(String peerNodeId, NodeData peerNode,
                                              MeshMessage lastMessage,
                                              int unreadCount) {
         String displayName;
@@ -166,20 +167,20 @@ public class ChatItem {
         } else if (peerNode != null && peerNode.getNodeId() != null) {
             displayName = peerNode.getNodeId();
         } else {
-            displayName = "!" + String.format("%08x", peerNodeNum);
+            displayName = peerNodeId;
         }
 
         if (peerNode != null && peerNode.getShortName() != null && !peerNode.getShortName().isEmpty()) {
             avatarText = peerNode.getShortName().length() > 4
-                    ? peerNode.getShortName().substring(0, 4).toUpperCase()
-                    : peerNode.getShortName().toUpperCase();
+                    ? peerNode.getShortName().substring(0, 4).toUpperCase(Locale.ROOT)
+                    : peerNode.getShortName().toUpperCase(Locale.ROOT);
         } else {
             avatarText = displayName.length() > 4
-                    ? displayName.substring(0, 4).toUpperCase()
-                    : displayName.toUpperCase();
+                    ? displayName.substring(0, 4).toUpperCase(Locale.ROOT)
+                    : displayName.toUpperCase(Locale.ROOT);
         }
 
-        String color = CHANNEL_COLORS[Math.abs(peerNodeNum) % CHANNEL_COLORS.length];
+        String color = CHANNEL_COLORS[Math.abs(peerNodeId.hashCode()) % CHANNEL_COLORS.length];
 
         String lastText = null;
         long lastTime = 0;
@@ -189,11 +190,11 @@ public class ChatItem {
         }
 
         return new ChatItem(ChatType.DIRECT_MESSAGE, displayName, avatarText, color,
-                lastText, lastTime, unreadCount, 0, peerNodeNum);
+                lastText, lastTime, unreadCount, 0, peerNodeId);
     }
 
     private static String truncate(String text) {
-        if (text == null) return null;
+        if (text == null) { return null; }
         text = text.replace('\n', ' ').replace('\r', ' ');
         return text.length() > MAX_PREVIEW_LENGTH
                 ? text.substring(0, MAX_PREVIEW_LENGTH) + "…"
@@ -208,5 +209,5 @@ public class ChatItem {
     public long getLastMessageTime() { return lastMessageTime; }
     public int getUnreadCount() { return unreadCount; }
     public int getChannelIndex() { return channelIndex; }
-    public int getPeerNodeNum() { return peerNodeNum; }
+    public String getPeerNodeId() { return peerNodeId; }
 }

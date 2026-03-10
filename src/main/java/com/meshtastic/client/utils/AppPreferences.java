@@ -1,16 +1,23 @@
 package com.meshtastic.client.utils;
 
-import java.util.ArrayList;
-import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.prefs.Preferences;
 
 public class AppPreferences {
 
+    private AppPreferences() {} // utility class
+
     public static final String PREFERENCES_ROOT_PATH = "/meshapp";
     public static final String KEY_DARK_MODE = "darkMode";
     public static final String KEY_RECENT_SEARCH = "recentSearch";
     public static final String KEY_RECENT_SEARCH_FAVORITE = "recentSearchFavorite";
+    public static final String KEY_WINDOW_X = "windowX";
+    public static final String KEY_WINDOW_Y = "windowY";
+    public static final String KEY_WINDOW_WIDTH = "windowWidth";
+    public static final String KEY_WINDOW_HEIGHT = "windowHeight";
+    public static final String KEY_WINDOW_MAXIMIZED = "windowMaximized";
+    public static final String KEY_NOTIFICATIONS_ENABLED = "notificationsEnabled";
 
     private static Preferences state;
 
@@ -30,53 +37,40 @@ public class AppPreferences {
         state.putBoolean(KEY_DARK_MODE, dark);
     }
 
-    public static String[] getRecentSearch(boolean favorite) {
+    public static boolean isNotificationsEnabled() {
+        return state.getBoolean(KEY_NOTIFICATIONS_ENABLED, true);
+    }
+
+    public static void setNotificationsEnabled(boolean enabled) {
+        state.putBoolean(KEY_NOTIFICATIONS_ENABLED, enabled);
+    }
+
+    public static List<String> getRecentSearch(boolean favorite) {
         String stringArr = state.get(favorite ? KEY_RECENT_SEARCH_FAVORITE : KEY_RECENT_SEARCH, null);
-        if (stringArr == null || stringArr.trim().isEmpty()) return null;
-        return stringArr.trim().split(",");
+        if (stringArr == null || stringArr.trim().isEmpty()) { return Collections.emptyList(); }
+        return List.of(stringArr.trim().split(","));
     }
 
-    public static void addRecentSearch(String value, boolean favorite) {
-        String[] oldRecent = getRecentSearch(false);
-        String[] oldFavorite = getRecentSearch(true);
-        if (favorite) {
-            if (oldRecent != null) {
-                List<String> list = new ArrayList<>(Arrays.asList(oldRecent));
-                list.remove(value);
-                state.put(KEY_RECENT_SEARCH, String.join(",", list));
-            }
-            if (oldFavorite != null) {
-                List<String> list = new ArrayList<>(Arrays.asList(oldFavorite));
-                list.remove(value);
-                list.add(0, value);
-                state.put(KEY_RECENT_SEARCH_FAVORITE, String.join(",", list));
-            } else {
-                state.put(KEY_RECENT_SEARCH_FAVORITE, value);
-            }
-        } else {
-            if (oldFavorite != null) {
-                List<String> list = new ArrayList<>(Arrays.asList(oldFavorite));
-                if (list.contains(value)) {
-                    return;
-                }
-            }
-            if (oldRecent == null) {
-                state.put(KEY_RECENT_SEARCH, value);
-            } else {
-                List<String> list = new ArrayList<>(Arrays.asList(oldRecent));
-                list.remove(value);
-                list.add(0, value);
-                state.put(KEY_RECENT_SEARCH, String.join(",", list));
-            }
-        }
+    // ==================== Window Bounds ====================
+
+    public static boolean hasWindowBounds() {
+        return !Double.isNaN(state.getDouble(KEY_WINDOW_WIDTH, Double.NaN));
     }
 
-    public static void removeRecentSearch(String value, boolean favorite) {
-        String[] oldRecent = getRecentSearch(favorite);
-        if (oldRecent != null) {
-            List<String> list = new ArrayList<>(Arrays.asList(oldRecent));
-            list.remove(value);
-            state.put(favorite ? KEY_RECENT_SEARCH_FAVORITE : KEY_RECENT_SEARCH, String.join(",", list));
-        }
+    public static double getWindowX() { return state.getDouble(KEY_WINDOW_X, Double.NaN); }
+    public static double getWindowY() { return state.getDouble(KEY_WINDOW_Y, Double.NaN); }
+    public static double getWindowWidth() { return state.getDouble(KEY_WINDOW_WIDTH, Double.NaN); }
+    public static double getWindowHeight() { return state.getDouble(KEY_WINDOW_HEIGHT, Double.NaN); }
+    public static boolean isWindowMaximized() { return state.getBoolean(KEY_WINDOW_MAXIMIZED, false); }
+
+    public static void saveWindowBounds(double x, double y, double w, double h, boolean maximized) {
+        state.putDouble(KEY_WINDOW_X, x);
+        state.putDouble(KEY_WINDOW_Y, y);
+        state.putDouble(KEY_WINDOW_WIDTH, w);
+        state.putDouble(KEY_WINDOW_HEIGHT, h);
+        state.putBoolean(KEY_WINDOW_MAXIMIZED, maximized);
     }
+
+    // ==================== Recent Search ====================
+
 }

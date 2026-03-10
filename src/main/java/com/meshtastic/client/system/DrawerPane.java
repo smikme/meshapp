@@ -28,6 +28,7 @@ public class DrawerPane extends StackPane {
 
     private final ToolBar toolBar;
     private final Button themeButton;
+    private final Button notifButton;
     private Class<?> selectedItemClass;
 
     public DrawerPane() {
@@ -40,13 +41,14 @@ public class DrawerPane extends StackPane {
         toolBar.setOrientation(Orientation.VERTICAL);
         toolBar.getStyleClass().add("drawer-toolbar");
 
-        // Кнопка переключения темы — прижата к низу
+        // Кнопки уведомлений и темы — прижаты к низу
+        notifButton = createNotificationButton();
         themeButton = createThemeButton();
 
         Region spacer = new Region();
         VBox.setVgrow(spacer, Priority.ALWAYS);
 
-        VBox container = new VBox(toolBar, spacer, themeButton);
+        VBox container = new VBox(toolBar, spacer, notifButton, themeButton);
         container.setAlignment(Pos.TOP_CENTER);
         container.setPadding(new javafx.geometry.Insets(0, 0, 8, 0));
 
@@ -134,6 +136,30 @@ public class DrawerPane extends StackPane {
         btn.setText(isDark ? "\u2600" : "\u263E");
     }
 
+    private Button createNotificationButton() {
+        SVGPath svgIcon = SvgIconLoader.load("/drawer/icon/bell.svg", 22);
+        Button btn = new Button();
+        btn.getStyleClass().add("drawer-toolbar-button");
+        if (svgIcon != null) {
+            btn.setGraphic(svgIcon);
+            btn.setContentDisplay(ContentDisplay.GRAPHIC_ONLY);
+        } else {
+            btn.setText("\uD83D\uDD14");
+        }
+        btn.setTooltip(new Tooltip("Уведомления"));
+        updateNotifIcon(btn, AppPreferences.isNotificationsEnabled());
+        btn.setOnAction(e -> {
+            boolean newState = !AppPreferences.isNotificationsEnabled();
+            AppPreferences.setNotificationsEnabled(newState);
+            updateNotifIcon(btn, newState);
+        });
+        return btn;
+    }
+
+    private void updateNotifIcon(Button btn, boolean enabled) {
+        btn.setOpacity(enabled ? 1.0 : 0.4);
+    }
+
     public void setSelectedItemClass(Class<?> cls) {
         this.selectedItemClass = cls;
         updateSelection();
@@ -156,6 +182,7 @@ public class DrawerPane extends StackPane {
     }
 
     public void setCompact(boolean compact) {
+        // no-op
     }
 
     public boolean isCompact() {

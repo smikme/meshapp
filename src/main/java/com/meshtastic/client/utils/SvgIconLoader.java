@@ -42,7 +42,7 @@ public final class SvgIconLoader {
      */
     public static SVGPath load(String resourcePath, double size) {
         SvgData data = parseSvg(resourcePath);
-        if (data == null) return null;
+        if (data == null) { return null; }
 
         SVGPath svgPath = new SVGPath();
         svgPath.setContent(data.pathData());
@@ -61,7 +61,7 @@ public final class SvgIconLoader {
 
     private static SvgData parseSvg(String resourcePath) {
         SvgData cached = cache.get(resourcePath);
-        if (cached != null) return cached;
+        if (cached != null) { return cached; }
 
         try (InputStream is = SvgIconLoader.class.getResourceAsStream(resourcePath)) {
             if (is == null) {

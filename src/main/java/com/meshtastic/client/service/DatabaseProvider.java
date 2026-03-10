@@ -15,7 +15,7 @@ import java.sql.SQLException;
  * Используется всеми сервисами ({@link MessageDbService}, {@link NodeCacheService})
  * вместо создания отдельных соединений к одному файлу.
  */
-public class DatabaseProvider {
+public final class DatabaseProvider {
 
     private static final Logger log = LoggerFactory.getLogger(DatabaseProvider.class);
 
@@ -37,6 +37,7 @@ public class DatabaseProvider {
 
             connection = DriverManager.getConnection("jdbc:h2:" + dbPath + ";AUTO_SERVER=FALSE");
             log.info("Database connection established: {}", dbPath);
+            DatabaseMigrator.migrate(connection);
         } catch (Exception e) {
             log.error("Failed to create database connection", e);
         }
@@ -48,7 +49,7 @@ public class DatabaseProvider {
      * после того как все сервисы закроют свои PreparedStatement.
      */
     public static synchronized void close() {
-        if (connection == null) return;
+        if (connection == null) { return; }
         try {
             if (!connection.isClosed()) {
                 connection.close();

@@ -1,5 +1,6 @@
 package com.meshtastic.client.components.chat;
 
+import com.meshtastic.client.components.EmojiImageCache;
 import com.meshtastic.client.components.EmojiPicker;
 import com.meshtastic.client.model.MeshMessage;
 import javafx.application.Platform;
@@ -8,8 +9,8 @@ import javafx.geometry.Pos;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 import javafx.scene.control.Separator;
-import javafx.scene.control.TextField;
 import javafx.scene.control.Tooltip;
+import javafx.scene.image.ImageView;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
@@ -38,9 +39,8 @@ public class ChatInputBar extends VBox {
     public record SendRequest(String text, int replyId) {}
 
     private final Consumer<SendRequest> onSend;
-    private final TextField messageInput;
-    private final Label charCountLabel;
-    private final Button sendButton;
+    private final EmojiTextField messageInput;
+    private final SendButtonWithRing sendRing;
     private final EmojiPicker emojiPicker;
 
     private final HBox replyBar;
@@ -61,29 +61,26 @@ public class ChatInputBar extends VBox {
         inputSep = new Separator();
         inputSep.getStyleClass().add("chat-input-separator");
 
-        // Кнопка эмодзи
-        Button emojiBtn = new Button("\uD83D\uDE00");
+        // Кнопка эмодзи (с изображением, размер как у кнопки отправки)
+        Button emojiBtn = new Button();
+        ImageView emojiBtnIcon = EmojiImageCache.createImageView("\uD83D\uDE00", 22);
+        if (emojiBtnIcon != null) {
+            emojiBtn.setGraphic(emojiBtnIcon);
+        } else {
+            emojiBtn.setText("\uD83D\uDE00");
+        }
         emojiBtn.getStyleClass().add("chat-emoji-btn");
         emojiBtn.setTooltip(new Tooltip("Эмодзи"));
         emojiPicker = new EmojiPicker(this::insertEmoji);
         emojiBtn.setOnAction(e -> emojiPicker.toggle(emojiBtn));
 
-        // Поле ввода
-        messageInput = new TextField();
+        // Поле ввода (кастомное с emoji-картинками)
+        messageInput = new EmojiTextField();
         messageInput.setPromptText("Сообщение...");
-        messageInput.getStyleClass().add("chat-message-input");
         HBox.setHgrow(messageInput, Priority.ALWAYS);
 
-        // Счётчик байт
-        charCountLabel = new Label("0/" + getMaxTextBytes());
-        charCountLabel.getStyleClass().add("chat-char-count");
-
-        // Кнопка отправки
-        sendButton = new Button("➤");
-        sendButton.getStyleClass().add("chat-send-btn");
-        sendButton.setTooltip(new Tooltip("Отправить"));
-        sendButton.setOnAction(e -> doSend());
-        sendButton.setDisable(true);
+        // Кнопка отправки с кольцевым индикатором заполненности
+        sendRing = new SendButtonWithRing(this::doSend);
 
         messageInput.focusedProperty().addListener((obs, wasFocused, isFocused) -> {
             if (!isFocused) {
@@ -93,18 +90,19 @@ public class ChatInputBar extends VBox {
 
         messageInput.textProperty().addListener((obs, oldVal, newVal) -> {
             if (newVal != null && textByteLength(newVal) > getMaxTextBytes()) {
-                messageInput.setText(truncateToBytes(newVal, getMaxTextBytes()));
+                // Откатить к предыдущему тексту целиком, а не обрезать конец —
+                // иначе вставка в середину «работает» (удаляет последний символ)
+                messageInput.setText(oldVal != null ? oldVal : "");
                 return;
             }
             updateCharCount();
-            sendButton.setDisable(newVal == null || newVal.trim().isEmpty());
+            sendRing.setSendDisable(newVal == null || newVal.trim().isEmpty());
         });
 
-        messageInput.setOnAction(e -> doSend());
+        messageInput.setOnAction(v -> doSend());
 
-        HBox inputBar = new HBox(8,
-                emojiBtn, messageInput, charCountLabel, sendButton);
-        inputBar.setAlignment(Pos.CENTER);
+        HBox inputBar = new HBox(8, emojiBtn, messageInput, sendRing);
+        inputBar.setAlignment(Pos.CENTER_LEFT);
         inputBar.setPadding(new Insets(8, 15, 8, 15));
         inputBar.getStyleClass().add("chat-input-bar");
 
@@ -146,9 +144,8 @@ public class ChatInputBar extends VBox {
 
     /** Включить/выключить панель ввода. */
     public void setInputEnabled(boolean enabled) {
-        messageInput.setDisable(!enabled);
-        sendButton.setDisable(!enabled
-                || messageInput.getText() == null
+        messageInput.setFieldDisabled(!enabled);
+        sendRing.setSendDisable(!enabled
                 || messageInput.getText().trim().isEmpty());
     }
 
@@ -211,8 +208,7 @@ public class ChatInputBar extends VBox {
     }
 
     private void insertEmoji(String emoji) {
-        String text = messageInput.getText() != null
-                ? messageInput.getText() : "";
+        String text = messageInput.getText();
         int maxBytes = getMaxTextBytes();
         if (textByteLength(text) + textByteLength(emoji) > maxBytes) {
             return;
@@ -220,10 +216,9 @@ public class ChatInputBar extends VBox {
         int caret = Math.min(savedCaretPosition, text.length());
         messageInput.insertText(caret, emoji);
         savedCaretPosition = caret + emoji.length();
-        int newCaret = savedCaretPosition;
         Platform.runLater(() -> {
             messageInput.requestFocus();
-            messageInput.positionCaret(newCaret);
+            messageInput.positionCaret(savedCaretPosition);
         });
     }
 
@@ -231,14 +226,7 @@ public class ChatInputBar extends VBox {
         String text = messageInput.getText();
         int byteLen = text != null ? textByteLength(text) : 0;
         int maxBytes = getMaxTextBytes();
-        charCountLabel.setText(byteLen + "/" + maxBytes);
-        if (byteLen >= maxBytes) {
-            if (!charCountLabel.getStyleClass().contains("chat-char-count-limit")) {
-                charCountLabel.getStyleClass().add("chat-char-count-limit");
-            }
-        } else {
-            charCountLabel.getStyleClass().remove("chat-char-count-limit");
-        }
+        sendRing.update(byteLen, maxBytes);
     }
 
     /** Длина строки в байтах UTF-8. */
@@ -246,22 +234,4 @@ public class ChatInputBar extends VBox {
         return text.getBytes(StandardCharsets.UTF_8).length;
     }
 
-    /**
-     * Обрезает строку до указанного лимита байт UTF-8,
-     * не разрезая многобайтовые символы.
-     */
-    private static String truncateToBytes(String text, int maxBytes) {
-        int byteCount = 0;
-        int end = 0;
-        for (int i = 0; i < text.length(); ) {
-            int codePoint = text.codePointAt(i);
-            int charLen = Character.charCount(codePoint);
-            int byteLen = new String(Character.toChars(codePoint)).getBytes(StandardCharsets.UTF_8).length;
-            if (byteCount + byteLen > maxBytes) break;
-            byteCount += byteLen;
-            i += charLen;
-            end = i;
-        }
-        return text.substring(0, end);
-    }
 }

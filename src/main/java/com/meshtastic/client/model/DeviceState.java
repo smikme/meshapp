@@ -20,7 +20,6 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
-import java.util.function.Consumer;
 
 /**
  * Центральное хранилище состояния подключённого Meshtastic-устройства.
@@ -53,7 +52,7 @@ public class DeviceState {
     private final List<ConfigProtos.Config> configs = Collections.synchronizedList(new ArrayList<>());
     private final List<ModuleConfigProtos.ModuleConfig> moduleConfigs = Collections.synchronizedList(new ArrayList<>());
     private final Map<Integer, List<MeshMessage>> messagesByChannel = new ConcurrentHashMap<>();
-    private final Map<Integer, List<MeshMessage>> directMessages = new ConcurrentHashMap<>();
+    private final Map<String, List<MeshMessage>> directMessages = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<Integer, PendingAckEntry> pendingAcks = new ConcurrentHashMap<>();
 
     private final ScheduledExecutorService ackTimeoutExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
@@ -63,7 +62,7 @@ public class DeviceState {
     });
     /** История телеметрии (последние MAX_TELEMETRY_HISTORY записей). */
     private static final int MAX_TELEMETRY_HISTORY = 200;
-    private final LinkedList<TelemetryEntry> telemetryHistory = new LinkedList<>();
+    private final List<TelemetryEntry> telemetryHistory = new LinkedList<>();
     private final List<Runnable> telemetryListeners = new CopyOnWriteArrayList<>();
     private final List<Runnable> messageListeners = new CopyOnWriteArrayList<>();
     private final List<java.util.function.IntConsumer> nodeUpdateListeners = new CopyOnWriteArrayList<>();
@@ -73,6 +72,13 @@ public class DeviceState {
     private volatile MeshProtos.User ownerInfo;
     private volatile ByteString sessionPasskey;
     private final List<Runnable> ownerInfoListeners = new CopyOnWriteArrayList<>();
+
+    // Pending fixed position — saved by user, not yet confirmed by device.
+    // Survives clear() to protect against stale position from config re-exchange.
+    private volatile double pendingFixedLat;
+    private volatile double pendingFixedLon;
+    private volatile int pendingFixedAlt;
+    private volatile long pendingFixedSetAt; // epoch millis, 0 = none
 
     public DeviceState() {
         ackTimeoutExecutor.scheduleWithFixedDelay(this::sweepExpiredAcks,
@@ -132,7 +138,7 @@ public class DeviceState {
                 }
             }
             for (int i = 1; i <= 7; i++) {
-                if (!usedIndices.contains(i)) return i;
+                if (!usedIndices.contains(i)) { return i; }
             }
         }
         return -1;
@@ -208,7 +214,7 @@ public class DeviceState {
      * Вызывается один раз при подключении к устройству.
      */
     public void prependTelemetryHistory(List<TelemetryEntry> archived) {
-        if (archived == null || archived.isEmpty()) return;
+        if (archived == null || archived.isEmpty()) { return; }
         synchronized (telemetryHistory) {
             // Добавляем архив перед текущими live-записями
             telemetryHistory.addAll(0, archived);
@@ -243,7 +249,8 @@ public class DeviceState {
         if (msg.getPacketId() != 0) {
             synchronized (list) {
                 for (MeshMessage existing : list) {
-                    if (existing.getPacketId() == msg.getPacketId()) return;
+                    if (existing.getPacketId() == msg.getPacketId()) { return; }
+
                 }
             }
         }
@@ -258,20 +265,21 @@ public class DeviceState {
 
     /**
      * Добавляет личное (DM) сообщение с дедупликацией по {@code packetId}.
-     * Сообщения группируются по {@code peerNodeNum} — номеру собеседника.
+     * Сообщения группируются по {@code peerNodeId} — node_id собеседника.
      * Дубликаты (повторные ретрансляции) игнорируются.
      *
-     * @param msg         сообщение для добавления
-     * @param peerNodeNum номер ноды собеседника (ключ группировки)
+     * @param msg        сообщение для добавления
+     * @param peerNodeId node_id собеседника (ключ группировки)
      */
-    public void addDirectMessage(MeshMessage msg, int peerNodeNum) {
+    public void addDirectMessage(MeshMessage msg, String peerNodeId) {
         List<MeshMessage> list = directMessages
-                .computeIfAbsent(peerNodeNum, k -> Collections.synchronizedList(new ArrayList<>()));
+                .computeIfAbsent(peerNodeId, k -> Collections.synchronizedList(new ArrayList<>()));
         // Дедупликация по packetId (радио может ретранслировать пакеты)
         if (msg.getPacketId() != 0) {
             synchronized (list) {
                 for (MeshMessage existing : list) {
-                    if (existing.getPacketId() == msg.getPacketId()) return;
+                    if (existing.getPacketId() == msg.getPacketId()) { return; }
+
                 }
             }
         }
@@ -279,24 +287,39 @@ public class DeviceState {
         fireMessageListeners();
     }
 
-    public List<MeshMessage> getDirectMessages(int peerNodeNum) {
-        List<MeshMessage> list = directMessages.get(peerNodeNum);
+    public List<MeshMessage> getDirectMessages(String peerNodeId) {
+        List<MeshMessage> list = directMessages.get(peerNodeId);
         return list != null ? list : Collections.emptyList();
     }
 
-    public Map<Integer, List<MeshMessage>> getAllDirectMessages() {
+    public Map<String, List<MeshMessage>> getAllDirectMessages() {
         return directMessages;
     }
 
-    public void removeDirectMessages(int peerNodeNum) {
-        directMessages.remove(peerNodeNum);
+    public void removeDirectMessages(String peerNodeId) {
+        directMessages.remove(peerNodeId);
     }
 
     /** Удалить ноду из nodeDb и directMessages, оповестить listener'ы. */
     public void removeNode(int nodeNum) {
+        NodeData node = nodeDb.get(nodeNum);
         nodeDb.remove(nodeNum);
-        directMessages.remove(nodeNum);
+        if (node != null && node.getNodeId() != null) {
+            directMessages.remove(node.getNodeId());
+        }
         fireNodeUpdateListeners(nodeNum);
+    }
+
+    /**
+     * Найти ноду по node_id (перебор nodeDb.values()).
+     * @return NodeData или {@code null}
+     */
+    public NodeData getNodeByNodeId(String nodeId) {
+        if (nodeId == null) { return null; }
+        for (NodeData n : nodeDb.values()) {
+            if (nodeId.equals(n.getNodeId())) { return n; }
+        }
+        return null;
     }
 
     public Map<Integer, List<MeshMessage>> getAllChannelMessages() {
@@ -337,7 +360,7 @@ public class DeviceState {
      * @param reason причина неудачи (например, {@code "DISCONNECTED"})
      */
     public void failAllPendingAcks(String reason) {
-        if (pendingAcks.isEmpty()) return;
+        if (pendingAcks.isEmpty()) { return; }
         int count = 0;
         var iterator = pendingAcks.entrySet().iterator();
         while (iterator.hasNext()) {
@@ -378,19 +401,21 @@ public class DeviceState {
      * @return найденное сообщение или {@code null}
      */
     public MeshMessage findMessageByPacketId(int packetId) {
-        if (packetId == 0) return null;
+        if (packetId == 0) { return null; }
         // Сначала ищем в памяти (быстро, для текущей сессии)
         for (List<MeshMessage> msgs : messagesByChannel.values()) {
             synchronized (msgs) {
                 for (MeshMessage msg : msgs) {
-                    if (msg.getPacketId() == packetId) return msg;
+                    if (msg.getPacketId() == packetId) { return msg; }
+
                 }
             }
         }
         for (List<MeshMessage> msgs : directMessages.values()) {
             synchronized (msgs) {
                 for (MeshMessage msg : msgs) {
-                    if (msg.getPacketId() == packetId) return msg;
+                    if (msg.getPacketId() == packetId) { return msg; }
+
                 }
             }
         }
@@ -451,10 +476,38 @@ public class DeviceState {
         }
     }
 
+    // ═══════════════════════════════════════════════════════════
+    //  Pending fixed position (survives clear)
+    // ═══════════════════════════════════════════════════════════
+
+    public void setPendingFixedPosition(double lat, double lon, int alt) {
+        this.pendingFixedLat = lat;
+        this.pendingFixedLon = lon;
+        this.pendingFixedAlt = alt;
+        this.pendingFixedSetAt = System.currentTimeMillis();
+    }
+
+    public void clearPendingFixedPosition() {
+        this.pendingFixedSetAt = 0;
+    }
+
+    /**
+     * Returns {@code true} if a fixed position was set by the user recently (< 120s ago).
+     */
+    public boolean hasPendingFixedPosition() {
+        long setAt = pendingFixedSetAt;
+        return setAt > 0 && (System.currentTimeMillis() - setAt) < 120_000;
+    }
+
+    public double getPendingFixedLat() { return pendingFixedLat; }
+    public double getPendingFixedLon() { return pendingFixedLon; }
+    public int getPendingFixedAlt() { return pendingFixedAlt; }
+
     /**
      * Полностью сбрасывает состояние устройства: очищает nodeDb, каналы,
      * конфиги, все сообщения, ожидающие ACK, owner info и историю телеметрии.
      * Вызывается перед началом нового config exchange.
+     * Pending fixed position НЕ сбрасывается — он должен пережить переподключение.
      */
     public void clear() {
         myNodeNum = 0;

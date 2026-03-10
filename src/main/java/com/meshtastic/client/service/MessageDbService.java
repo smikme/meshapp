@@ -1,6 +1,7 @@
 package com.meshtastic.client.service;
 
 import com.meshtastic.client.model.MeshMessage;
+import com.meshtastic.client.model.NodeData;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -21,7 +22,7 @@ import java.util.*;
  *   <li>{@code "dm"} — личные сообщения, {@code chat_key} = peerNodeNum</li>
  * </ul>
  */
-public class MessageDbService {
+public final class MessageDbService {
 
     private static final Logger log = LoggerFactory.getLogger(MessageDbService.class);
 
@@ -59,24 +60,26 @@ public class MessageDbService {
             try (Statement stmt = dbConnection.createStatement()) {
                 stmt.execute("""
                     CREATE TABLE IF NOT EXISTS messages (
-                        id           BIGINT AUTO_INCREMENT PRIMARY KEY,
-                        chat_type    VARCHAR(10) NOT NULL,
-                        chat_key     INT NOT NULL,
-                        from_num     INT NOT NULL,
-                        to_num       INT NOT NULL,
-                        channel_idx  INT NOT NULL,
-                        text         CLOB,
-                        timestamp    BIGINT NOT NULL,
-                        outgoing     BOOLEAN NOT NULL,
-                        packet_id    INT DEFAULT 0,
-                        status       VARCHAR(20),
-                        error_reason VARCHAR(100),
-                        reply_id     INT DEFAULT 0,
-                        reply_text   CLOB,
-                        hop_start    INT DEFAULT 0,
-                        hop_limit    INT DEFAULT 0,
-                        sender_name  VARCHAR(100),
-                        system_msg   BOOLEAN DEFAULT FALSE
+                        id             BIGINT AUTO_INCREMENT PRIMARY KEY,
+                        chat_type      VARCHAR(10) NOT NULL,
+                        chat_key       VARCHAR(20) NOT NULL,
+                        from_node_id   VARCHAR(20) NOT NULL,
+                        to_node_id     VARCHAR(20) NOT NULL,
+                        channel_idx    INT NOT NULL,
+                        text           CLOB,
+                        timestamp      BIGINT NOT NULL,
+                        outgoing       BOOLEAN NOT NULL,
+                        packet_id      INT DEFAULT 0,
+                        status         VARCHAR(20),
+                        error_reason   VARCHAR(100),
+                        reply_id       INT DEFAULT 0,
+                        reply_text     CLOB,
+                        hop_start      INT DEFAULT 0,
+                        hop_limit      INT DEFAULT 0,
+                        sender_name    VARCHAR(100),
+                        system_msg     BOOLEAN DEFAULT FALSE,
+                        rx_rssi        INT DEFAULT 0,
+                        rx_snr         REAL DEFAULT 0
                     )
                     """);
 
@@ -91,7 +94,7 @@ public class MessageDbService {
                 stmt.execute("""
                     CREATE TABLE IF NOT EXISTS chat_read_counts (
                         chat_type  VARCHAR(10) NOT NULL,
-                        chat_key   INT NOT NULL,
+                        chat_key   VARCHAR(20) NOT NULL,
                         read_count INT NOT NULL DEFAULT 0,
                         PRIMARY KEY (chat_type, chat_key)
                     )
@@ -99,10 +102,11 @@ public class MessageDbService {
             }
 
             insertStmt = dbConnection.prepareStatement("""
-                INSERT INTO messages (chat_type, chat_key, from_num, to_num, channel_idx,
+                INSERT INTO messages (chat_type, chat_key, from_node_id, to_node_id, channel_idx,
                     text, timestamp, outgoing, packet_id, status, error_reason,
-                    reply_id, reply_text, hop_start, hop_limit, sender_name, system_msg)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    reply_id, reply_text, hop_start, hop_limit, sender_name, system_msg,
+                    rx_rssi, rx_snr)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, Statement.RETURN_GENERATED_KEYS);
 
             updateStatusStmt = dbConnection.prepareStatement("""
@@ -122,7 +126,7 @@ public class MessageDbService {
      * (аварийное завершение, потеря питания и т.д.).
      */
     public synchronized void markStaleSendingAsFailed() {
-        if (dbConnection == null) return;
+        if (dbConnection == null) { return; }
         try (PreparedStatement ps = dbConnection.prepareStatement(
                 "UPDATE messages SET status = ?, error_reason = ? WHERE status = 'SENDING'")) {
             ps.setString(1, MeshMessage.DeliveryStatus.FAILED.name());
@@ -145,19 +149,19 @@ public class MessageDbService {
      *
      * @param msg      сообщение для сохранения
      * @param chatType "channel" или "dm"
-     * @param chatKey  channelIndex или peerNodeNum
+     * @param chatKey  channelIndex (как строка) или peerNodeId
      */
-    public synchronized void save(MeshMessage msg, String chatType, int chatKey) {
-        if (msg == null) return;
+    public synchronized void save(MeshMessage msg, String chatType, String chatKey) {
+        if (msg == null) { return; }
         if (insertStmt == null) {
             log.warn("Message DB not initialized — message dropped (chatType={}, chatKey={})", chatType, chatKey);
             return;
         }
         try {
             insertStmt.setString(1, chatType);
-            insertStmt.setInt(2, chatKey);
-            insertStmt.setInt(3, msg.getFromNum());
-            insertStmt.setInt(4, msg.getToNum());
+            insertStmt.setString(2, chatKey);
+            insertStmt.setString(3, msg.getFromNodeId());
+            insertStmt.setString(4, msg.getToNodeId());
             insertStmt.setInt(5, msg.getChannelIndex());
             insertStmt.setString(6, msg.getText());
             insertStmt.setLong(7, msg.getTimestamp());
@@ -171,6 +175,8 @@ public class MessageDbService {
             insertStmt.setInt(15, msg.getHopLimit());
             insertStmt.setString(16, msg.getSenderName());
             insertStmt.setBoolean(17, msg.isSystemMessage());
+            insertStmt.setInt(18, msg.getRxRssi());
+            insertStmt.setFloat(19, msg.getRxSnr());
             insertStmt.executeUpdate();
 
             try (ResultSet keys = insertStmt.getGeneratedKeys()) {
@@ -187,7 +193,7 @@ public class MessageDbService {
      * Обновляет статус доставки сообщения по packetId.
      */
     public synchronized void updateStatus(int packetId, MeshMessage.DeliveryStatus status, String errorReason) {
-        if (packetId == 0) return;
+        if (packetId == 0) { return; }
         if (updateStatusStmt == null) {
             log.warn("Message DB not initialized — status update dropped (packetId={})", packetId);
             return;
@@ -210,13 +216,13 @@ public class MessageDbService {
      * Загружает последние N сообщений чата (в хронологическом порядке).
      *
      * @param chatType "channel" или "dm"
-     * @param chatKey  channelIndex или peerNodeNum
+     * @param chatKey  channelIndex (как строка) или peerNodeId
      * @param limit    максимальное количество
      * @return список сообщений (старые → новые)
      */
-    public List<MeshMessage> loadLast(String chatType, int chatKey, int limit) {
+    public List<MeshMessage> loadLast(String chatType, String chatKey, int limit) {
         List<MeshMessage> result = new ArrayList<>();
-        if (dbConnection == null) return result;
+        if (dbConnection == null) { return result; }
         String sql = """
             SELECT * FROM (
                 SELECT * FROM messages WHERE chat_type = ? AND chat_key = ?
@@ -225,7 +231,7 @@ public class MessageDbService {
             """;
         try (PreparedStatement ps = dbConnection.prepareStatement(sql)) {
             ps.setString(1, chatType);
-            ps.setInt(2, chatKey);
+            ps.setString(2, chatKey);
             ps.setInt(3, limit);
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
@@ -243,14 +249,14 @@ public class MessageDbService {
      * Возвращает в хронологическом порядке (старые → новые).
      *
      * @param chatType   "channel" или "dm"
-     * @param chatKey    channelIndex или peerNodeNum
+     * @param chatKey    channelIndex (как строка) или peerNodeId
      * @param beforeDbId загружать сообщения с id &lt; beforeDbId
      * @param limit      максимальное количество
      * @return список сообщений (старые → новые)
      */
-    public List<MeshMessage> loadBefore(String chatType, int chatKey, long beforeDbId, int limit) {
+    public List<MeshMessage> loadBefore(String chatType, String chatKey, long beforeDbId, int limit) {
         List<MeshMessage> result = new ArrayList<>();
-        if (dbConnection == null) return result;
+        if (dbConnection == null) { return result; }
         String sql = """
             SELECT * FROM (
                 SELECT * FROM messages WHERE chat_type = ? AND chat_key = ? AND id < ?
@@ -259,7 +265,7 @@ public class MessageDbService {
             """;
         try (PreparedStatement ps = dbConnection.prepareStatement(sql)) {
             ps.setString(1, chatType);
-            ps.setInt(2, chatKey);
+            ps.setString(2, chatKey);
             ps.setLong(3, beforeDbId);
             ps.setInt(4, limit);
             try (ResultSet rs = ps.executeQuery()) {
@@ -277,17 +283,17 @@ public class MessageDbService {
      * Загружает новые сообщения ПОСЛЕ указанного id (для real-time обновления).
      *
      * @param chatType  "channel" или "dm"
-     * @param chatKey   channelIndex или peerNodeNum
+     * @param chatKey   channelIndex (как строка) или peerNodeId
      * @param afterDbId загружать сообщения с id > afterDbId
      * @return список новых сообщений (хронологический порядок)
      */
-    public List<MeshMessage> loadAfter(String chatType, int chatKey, long afterDbId) {
+    public List<MeshMessage> loadAfter(String chatType, String chatKey, long afterDbId) {
         List<MeshMessage> result = new ArrayList<>();
-        if (dbConnection == null) return result;
+        if (dbConnection == null) { return result; }
         String sql = "SELECT * FROM messages WHERE chat_type = ? AND chat_key = ? AND id > ? ORDER BY id ASC";
         try (PreparedStatement ps = dbConnection.prepareStatement(sql)) {
             ps.setString(1, chatType);
-            ps.setInt(2, chatKey);
+            ps.setString(2, chatKey);
             ps.setLong(3, afterDbId);
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
@@ -308,12 +314,12 @@ public class MessageDbService {
      * Находит сообщение по packetId (для reply_text).
      */
     public MeshMessage findByPacketId(int packetId) {
-        if (dbConnection == null || packetId == 0) return null;
+        if (dbConnection == null || packetId == 0) { return null; }
         try (PreparedStatement ps = dbConnection.prepareStatement(
                 "SELECT * FROM messages WHERE packet_id = ? LIMIT 1")) {
             ps.setInt(1, packetId);
             try (ResultSet rs = ps.executeQuery()) {
-                if (rs.next()) return readMessage(rs);
+                if (rs.next()) { return readMessage(rs); }
             }
         } catch (SQLException e) {
             log.error("Failed to find message by packetId {}", packetId, e);
@@ -324,14 +330,14 @@ public class MessageDbService {
     /**
      * Возвращает список уникальных DM-пиров (chat_key) из БД.
      */
-    public List<Integer> getDistinctDmPeers() {
-        List<Integer> peers = new ArrayList<>();
-        if (dbConnection == null) return peers;
+    public List<String> getDistinctDmPeers() {
+        List<String> peers = new ArrayList<>();
+        if (dbConnection == null) { return peers; }
         try (PreparedStatement ps = dbConnection.prepareStatement(
                 "SELECT DISTINCT chat_key FROM messages WHERE chat_type = 'dm'")) {
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
-                    peers.add(rs.getInt(1));
+                    peers.add(rs.getString(1));
                 }
             }
         } catch (SQLException e) {
@@ -344,9 +350,9 @@ public class MessageDbService {
      * Возвращает последнее сообщение для каждого chat_key данного типа.
      * Ключ — chat_key, значение — последнее MeshMessage.
      */
-    public Map<Integer, MeshMessage> getLastMessagePerChat(String chatType) {
-        Map<Integer, MeshMessage> result = new LinkedHashMap<>();
-        if (dbConnection == null) return result;
+    public Map<String, MeshMessage> getLastMessagePerChat(String chatType) {
+        Map<String, MeshMessage> result = new LinkedHashMap<>();
+        if (dbConnection == null) { return result; }
         // Подзапрос: максимальный id для каждого chat_key
         String sql = """
             SELECT m.* FROM messages m
@@ -362,7 +368,7 @@ public class MessageDbService {
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
                     MeshMessage msg = readMessage(rs);
-                    result.put(rs.getInt("chat_key"), msg);
+                    result.put(rs.getString("chat_key"), msg);
                 }
             }
         } catch (SQLException e) {
@@ -374,14 +380,14 @@ public class MessageDbService {
     /**
      * Возвращает количество сообщений в чате.
      */
-    public int getMessageCount(String chatType, int chatKey) {
-        if (dbConnection == null) return 0;
+    public int getMessageCount(String chatType, String chatKey) {
+        if (dbConnection == null) { return 0; }
         try (PreparedStatement ps = dbConnection.prepareStatement(
                 "SELECT COUNT(*) FROM messages WHERE chat_type = ? AND chat_key = ?")) {
             ps.setString(1, chatType);
-            ps.setInt(2, chatKey);
+            ps.setString(2, chatKey);
             try (ResultSet rs = ps.executeQuery()) {
-                if (rs.next()) return rs.getInt(1);
+                if (rs.next()) { return rs.getInt(1); }
             }
         } catch (SQLException e) {
             log.error("Failed to count messages ({}, {})", chatType, chatKey, e);
@@ -397,20 +403,20 @@ public class MessageDbService {
      * Удаляет все сообщения и счётчик прочитанных для указанного чата.
      *
      * @param chatType "channel" или "dm"
-     * @param chatKey  channelIndex или peerNodeNum
+     * @param chatKey  channelIndex (как строка) или peerNodeId
      */
-    public synchronized void deleteChat(String chatType, int chatKey) {
-        if (dbConnection == null) return;
+    public synchronized void deleteChat(String chatType, String chatKey) {
+        if (dbConnection == null) { return; }
         try (PreparedStatement ps1 = dbConnection.prepareStatement(
                      "DELETE FROM messages WHERE chat_type = ? AND chat_key = ?");
              PreparedStatement ps2 = dbConnection.prepareStatement(
                      "DELETE FROM chat_read_counts WHERE chat_type = ? AND chat_key = ?")) {
             ps1.setString(1, chatType);
-            ps1.setInt(2, chatKey);
+            ps1.setString(2, chatKey);
             ps1.executeUpdate();
 
             ps2.setString(1, chatType);
-            ps2.setInt(2, chatKey);
+            ps2.setString(2, chatKey);
             ps2.executeUpdate();
         } catch (SQLException e) {
             log.error("Failed to delete chat ({}, {})", chatType, chatKey, e);
@@ -421,7 +427,7 @@ public class MessageDbService {
      * Удаляет одно сообщение по его id в БД.
      */
     public synchronized void deleteMessage(long dbId) {
-        if (dbConnection == null || dbId <= 0) return;
+        if (dbConnection == null || dbId <= 0) { return; }
         try (PreparedStatement ps = dbConnection.prepareStatement("DELETE FROM messages WHERE id = ?")) {
             ps.setLong(1, dbId);
             ps.executeUpdate();
@@ -437,12 +443,12 @@ public class MessageDbService {
     /**
      * Сохранить количество прочитанных сообщений для чата.
      */
-    public void saveReadCount(String chatType, int chatKey, int readCount) {
-        if (dbConnection == null) return;
+    public void saveReadCount(String chatType, String chatKey, int readCount) {
+        if (dbConnection == null) { return; }
         try (PreparedStatement ps = dbConnection.prepareStatement(
                 "MERGE INTO chat_read_counts (chat_type, chat_key, read_count) VALUES (?, ?, ?)")) {
             ps.setString(1, chatType);
-            ps.setInt(2, chatKey);
+            ps.setString(2, chatKey);
             ps.setInt(3, readCount);
             ps.executeUpdate();
         } catch (SQLException e) {
@@ -456,12 +462,12 @@ public class MessageDbService {
      */
     public Map<String, Integer> loadAllReadCounts() {
         Map<String, Integer> result = new HashMap<>();
-        if (dbConnection == null) return result;
+        if (dbConnection == null) { return result; }
         try (Statement stmt = dbConnection.createStatement();
              ResultSet rs = stmt.executeQuery("SELECT chat_type, chat_key, read_count FROM chat_read_counts")) {
             while (rs.next()) {
                 String type = rs.getString("chat_type");
-                int key = rs.getInt("chat_key");
+                String key = rs.getString("chat_key");
                 int count = rs.getInt("read_count");
                 String mapKey = ("channel".equals(type) ? "ch:" : "dm:") + key;
                 result.put(mapKey, count);
@@ -482,10 +488,10 @@ public class MessageDbService {
      */
     public void migrateFromJsonHistory() {
         Path historyDir = Path.of(System.getProperty("user.home"), ".meshapp", "history");
-        if (!Files.isDirectory(historyDir)) return;
+        if (!Files.isDirectory(historyDir)) { return; }
 
         // Проверяем, есть ли уже данные
-        if (getMessageCount("channel", 0) > 0 || !getDistinctDmPeers().isEmpty()) {
+        if (getMessageCount("channel", "0") > 0 || !getDistinctDmPeers().isEmpty()) {
             log.info("Messages already exist in DB, skipping JSON migration");
             return;
         }
@@ -503,22 +509,26 @@ public class MessageDbService {
                     String name = file.getFileName().toString();
                     try (var reader = Files.newBufferedReader(file)) {
                         List<JsonStoredMessage> stored = gson.fromJson(reader, msgListType);
-                        if (stored == null || stored.isEmpty()) continue;
+                        if (stored == null || stored.isEmpty()) { continue; }
 
                         String chatType;
-                        int chatKey;
+                        String chatKey;
                         if (name.startsWith("channel_")) {
                             chatType = "channel";
-                            chatKey = Integer.parseInt(name.replace("channel_", "").replace(".json", ""));
+                            chatKey = name.replace("channel_", "").replace(".json", "");
                         } else if (name.startsWith("dm_")) {
                             chatType = "dm";
-                            chatKey = (int) Long.parseLong(name.replace("dm_", "").replace(".json", ""), 16);
+                            // dm файл содержит hex nodeNum — создаём NodeData для получения nodeId
+                            int dmNodeNum = (int) Long.parseLong(name.replace("dm_", "").replace(".json", ""), 16);
+                            chatKey = new NodeData(dmNodeNum).getNodeId();
                         } else {
                             continue;
                         }
 
                         for (JsonStoredMessage s : stored) {
-                            MeshMessage msg = new MeshMessage(s.fromNum, s.toNum, s.channelIndex,
+                            String fromNodeId = new NodeData(s.fromNum).getNodeId();
+                            String toNodeId = new NodeData(s.toNum).getNodeId();
+                            MeshMessage msg = new MeshMessage(fromNodeId, toNodeId, s.channelIndex,
                                     s.text, s.timestamp, s.outgoing);
                             msg.setPacketId(s.packetId);
                             if (s.status != null) {
@@ -537,9 +547,9 @@ public class MessageDbService {
                             msg.setSenderName(s.senderName);
 
                             insertStmt.setString(1, chatType);
-                            insertStmt.setInt(2, chatKey);
-                            insertStmt.setInt(3, msg.getFromNum());
-                            insertStmt.setInt(4, msg.getToNum());
+                            insertStmt.setString(2, chatKey);
+                            insertStmt.setString(3, msg.getFromNodeId());
+                            insertStmt.setString(4, msg.getToNodeId());
                             insertStmt.setInt(5, msg.getChannelIndex());
                             insertStmt.setString(6, msg.getText());
                             insertStmt.setLong(7, msg.getTimestamp());
@@ -584,13 +594,15 @@ public class MessageDbService {
             log.info("JSON → H2 migration complete: {} messages imported", total);
         } catch (Exception e) {
             log.error("Failed to migrate JSON history to H2", e);
-            try { dbConnection.rollback(); dbConnection.setAutoCommit(true); } catch (SQLException ex) { /* ignored */ }
+            try { dbConnection.rollback(); dbConnection.setAutoCommit(true); } catch (SQLException ex) {
+                log.debug("Rollback failed during JSON migration recovery", ex);
+            }
         }
     }
 
     /** Структура JSON-файлов из MessageHistoryService */
     @SuppressWarnings("unused")
-    private static class JsonStoredMessage {
+    private static final class JsonStoredMessage {
         int fromNum;
         int toNum;
         int channelIndex;
@@ -613,8 +625,8 @@ public class MessageDbService {
 
     private static MeshMessage readMessage(ResultSet rs) throws SQLException {
         MeshMessage msg = new MeshMessage(
-                rs.getInt("from_num"),
-                rs.getInt("to_num"),
+                rs.getString("from_node_id"),
+                rs.getString("to_node_id"),
                 rs.getInt("channel_idx"),
                 rs.getString("text"),
                 rs.getLong("timestamp"),
@@ -637,6 +649,8 @@ public class MessageDbService {
         msg.setHopLimit(rs.getInt("hop_limit"));
         msg.setSenderName(rs.getString("sender_name"));
         msg.setSystemMessage(rs.getBoolean("system_msg"));
+        msg.setRxRssi(rs.getInt("rx_rssi"));
+        msg.setRxSnr(rs.getFloat("rx_snr"));
         return msg;
     }
 
@@ -645,8 +659,8 @@ public class MessageDbService {
      */
     public void close() {
         try {
-            if (insertStmt != null) insertStmt.close();
-            if (updateStatusStmt != null) updateStatusStmt.close();
+            if (insertStmt != null) { insertStmt.close(); }
+            if (updateStatusStmt != null) { updateStatusStmt.close(); }
         } catch (SQLException e) {
             log.error("Error closing message DB statements", e);
         }

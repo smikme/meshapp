@@ -8,6 +8,8 @@ import com.google.protobuf.MessageLite;
  */
 public class PacketFramer {
 
+    private PacketFramer() {} // utility class
+
     private static final byte START_BYTE_1 = (byte) 0x94;
     private static final byte START_BYTE_2 = (byte) 0xC3;
 

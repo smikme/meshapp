@@ -124,19 +124,20 @@ public class WinBle implements BlePlatform {
             switch (state) {
                 case 0 -> { // connected
                     connected = true;
-                    if (sl != null) sl.accept(new BleState.Connected());
+                    if (sl != null) { sl.accept(new BleState.Connected()); }
                 }
                 case 1 -> { // disconnected
                     connected = false;
                     stopPolling();
-                    if (sl != null) sl.accept(new BleState.Disconnected());
+                    if (sl != null) { sl.accept(new BleState.Disconnected()); }
                 }
                 case 2 -> { // error
                     connected = false;
                     stopPolling();
                     String msg = errorMsg != null ? errorMsg : "BLE error";
-                    if (sl != null) sl.accept(new BleState.Error(msg, null));
+                    if (sl != null) { sl.accept(new BleState.Error(msg, null)); }
                 }
+                default -> { /* unknown state code */ }
             }
         };
         lib.meshble_set_state_listener(stateCallback);
@@ -248,7 +249,7 @@ public class WinBle implements BlePlatform {
      * Guard drainInProgress предотвращает конкурентные чтения (как в MacOsBle).
      */
     private void pollFromRadio() {
-        if (!connected || drainInProgress) return;
+        if (!connected || drainInProgress) { return; }
         drainInProgress = true;
 
         try {
@@ -257,7 +258,7 @@ public class WinBle implements BlePlatform {
 
             for (int i = 0; i < 100; i++) { // Safety limit
                 int result = lib.meshble_read_from_radio(buffer, buffer.length, outLen);
-                if (result != 0 || outLen[0] == 0) break;
+                if (result != 0 || outLen[0] == 0) { break; }
 
                 byte[] data = new byte[outLen[0]];
                 System.arraycopy(buffer, 0, data, 0, outLen[0]);

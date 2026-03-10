@@ -21,6 +21,11 @@ import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
 import javafx.util.Duration;
 
+import com.meshtastic.client.MeshApp;
+import com.meshtastic.client.model.UpdateInfo;
+
+import java.awt.Desktop;
+import java.net.URI;
 import java.util.function.Consumer;
 
 /**
@@ -114,7 +119,7 @@ public class ModalPane extends StackPane {
      * Скрыть — контент уезжает вправо с fade-out.
      */
     public void hide() {
-        if (currentContent == null) return;
+        if (currentContent == null) { return; }
 
         // Снять scene-level фильтр
         if (getScene() != null) {
@@ -148,7 +153,7 @@ public class ModalPane extends StackPane {
      */
     public static void showConfirm(String title, String message, Consumer<Boolean> callback) {
         ModalPane pane = getInstance();
-        if (pane == null) return;
+        if (pane == null) { return; }
 
         Button btnYes = new Button("Да");
         btnYes.getStyleClass().add("accent");
@@ -171,7 +176,7 @@ public class ModalPane extends StackPane {
      */
     public static void showInfo(String title, String message) {
         ModalPane pane = getInstance();
-        if (pane == null) return;
+        if (pane == null) { return; }
 
         Button btnOk = new Button("ОК");
         btnOk.getStyleClass().add("accent");
@@ -185,7 +190,7 @@ public class ModalPane extends StackPane {
      */
     public static void showError(String title, String message) {
         ModalPane pane = getInstance();
-        if (pane == null) return;
+        if (pane == null) { return; }
 
         Button btnOk = new Button("ОК");
         btnOk.getStyleClass().add("accent");
@@ -201,7 +206,7 @@ public class ModalPane extends StackPane {
      */
     public static void showAbout() {
         ModalPane pane = getInstance();
-        if (pane == null) return;
+        if (pane == null) { return; }
 
         About about = new About();
         about.getStyleClass().add("modal-side-panel");
@@ -216,6 +221,63 @@ public class ModalPane extends StackPane {
         about.getChildren().add(btnRow);
 
         pane.show(about);
+    }
+
+    /**
+     * Диалог обновления — информация о новой версии с кнопкой скачивания.
+     */
+    public static void showUpdateAvailable(UpdateInfo info) {
+        ModalPane pane = getInstance();
+        if (pane == null) return;
+
+        VBox panel = new VBox(8);
+        panel.setPadding(new Insets(20, 30, 20, 30));
+        panel.setPrefWidth(380);
+        panel.setMaxWidth(380);
+        panel.setMaxHeight(Double.MAX_VALUE);
+        panel.getStyleClass().add("modal-side-panel");
+
+        Label lblTitle = new Label("Доступно обновление");
+        lblTitle.setFont(Font.font("Roboto", FontWeight.BOLD, 15));
+
+        Label lblCurrent = new Label("Текущая версия: " + MeshApp.APPLICATION_VERSION);
+        Label lblNew = new Label("Новая версия: " + info.getVersion());
+        lblNew.setStyle("-fx-font-weight: bold;");
+
+        VBox versionBox = new VBox(4, lblCurrent, lblNew);
+
+        Button btnDownload = new Button("Скачать");
+        btnDownload.getStyleClass().add("accent");
+        btnDownload.setOnAction(e -> {
+            pane.hide();
+            String url = info.getDownloadUrl();
+            if (url != null) {
+                Thread.ofVirtual().start(() -> {
+                    try {
+                        if (Desktop.isDesktopSupported()) {
+                            Desktop.getDesktop().browse(new URI(url));
+                        }
+                    } catch (Exception ignored) {}
+                });
+            }
+        });
+
+        Button btnLater = new Button("Позже");
+        btnLater.setOnAction(e -> pane.hide());
+
+        HBox btnRow = new HBox(10, btnLater, btnDownload);
+        btnRow.setAlignment(Pos.CENTER_RIGHT);
+        btnRow.setPadding(new Insets(10, 0, 0, 0));
+
+        if (info.getReleaseNotes() != null && !info.getReleaseNotes().isBlank()) {
+            Label lblNotes = new Label(info.getReleaseNotes());
+            lblNotes.setWrapText(true);
+            panel.getChildren().addAll(lblTitle, new Separator(), versionBox, lblNotes, btnRow);
+        } else {
+            panel.getChildren().addAll(lblTitle, new Separator(), versionBox, btnRow);
+        }
+
+        pane.show(panel);
     }
 
     // ── Построение панели ────────────────────────────────────────

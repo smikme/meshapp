@@ -12,6 +12,8 @@ import com.meshtastic.client.modal.ModalPane;
  */
 public class FormManager {
 
+    private FormManager() {}
+
     private static MainForm mainForm;
 
     public static void install(RootPane root) {
