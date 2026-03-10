@@ -235,6 +235,16 @@ public final class ConnectionManager {
         listeners.remove(listener);
     }
 
+    /**
+     * Отключает все активные соединения и освобождает ресурсы (tray icon, BLE polling и т.д.).
+     * Вызывается при завершении приложения.
+     */
+    public synchronized void shutdownAll() {
+        for (String id : new ArrayList<>(activeConnections.keySet())) {
+            disconnect(id);
+        }
+    }
+
     private synchronized void cleanupConnection(String id) {
         activeConnections.remove(id);
         DeviceState ds = deviceStates.remove(id);
