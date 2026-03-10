@@ -290,6 +290,12 @@ tasks.register('jpackage') {
 				args << '--icon'
 				args << icnsFile.absolutePath
 			}
+		} else {
+			def pngFile = file('src/main/resources/logo/icon_256.png')
+			if (pngFile.exists()) {
+				args << '--icon'
+				args << pngFile.absolutePath
+			}
 		}
 
 		if (os.isWindows()) {
