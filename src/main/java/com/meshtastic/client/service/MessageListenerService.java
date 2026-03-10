@@ -277,6 +277,35 @@ public class MessageListenerService implements FromRadioListener {
                 log.info("Received TELEMETRY_APP (environment) from !{}", Integer.toHexString(fromNum));
             }
 
+            if (telemetry.hasLocalStats()) {
+                org.meshtastic.proto.TelemetryProtos.LocalStats ls = telemetry.getLocalStats();
+                entry.setNumPacketsRx(ls.getNumPacketsRx());
+                entry.setNumPacketsRxBad(ls.getNumPacketsRxBad());
+                entry.setNumRxDupe(ls.getNumRxDupe());
+                entry.setNumPacketsTx(ls.getNumPacketsTx());
+                entry.setNumTxDropped(ls.getNumTxDropped());
+                entry.setNumTxRelay(ls.getNumTxRelay());
+                entry.setNumTxRelayCanceled(ls.getNumTxRelayCanceled());
+
+                // LocalStats also carries channel_utilization and air_util_tx
+                entry.setChannelUtilization(ls.getChannelUtilization());
+                entry.setAirUtilTx(ls.getAirUtilTx());
+                node.setChannelUtilization(ls.getChannelUtilization());
+                node.setAirUtilTx(ls.getAirUtilTx());
+
+                deviceState.fireNodeUpdateListeners(fromNum);
+                NodeCacheService.getInstance().update(node);
+                log.info("Received TELEMETRY_APP (localStats) from !{}: rx={}, bad={}, dupe={}, tx={}, dropped={}, relay={}, relayCanceled={}, chUtil={}, airUtil={}",
+                        Integer.toHexString(fromNum), ls.getNumPacketsRx(), ls.getNumPacketsRxBad(), ls.getNumRxDupe(),
+                        ls.getNumPacketsTx(), ls.getNumTxDropped(), ls.getNumTxRelay(), ls.getNumTxRelayCanceled(),
+                        ls.getChannelUtilization(), ls.getAirUtilTx());
+            }
+
+            entry.setRxSnr(packet.getRxSnr());
+            entry.setRxRssi(packet.getRxRssi());
+            entry.setHopStart(packet.getHopStart());
+            entry.setHopLimit(packet.getHopLimit());
+
             deviceState.addTelemetryEntry(entry);
             NodeCacheService.getInstance().persistTelemetry(entry);
         } catch (InvalidProtocolBufferException e) {

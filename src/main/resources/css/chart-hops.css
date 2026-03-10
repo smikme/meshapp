@@ -1,0 +1,17 @@
+/* Цвета серий: 0=оранжевый (Макс), 1=бирюзовый (Мин), 2=синий (Среднее) */
+/* Порядок: макс→мин→среднее, чтобы среднее рисовалось поверх */
+
+/* Линии */
+.default-color0.chart-series-area-line { -fx-stroke: #FF9800; -fx-stroke-width: 1; }
+.default-color1.chart-series-area-line { -fx-stroke: #00BCD4; -fx-stroke-width: 1; }
+.default-color2.chart-series-area-line { -fx-stroke: #4CAF50; -fx-stroke-width: 1.5; }
+
+/* Заливка — полупрозрачная */
+.default-color0.chart-series-area-fill { -fx-fill: rgba(255, 152, 0, 0.15); }
+.default-color1.chart-series-area-fill { -fx-fill: rgba(0, 188, 212, 0.15); }
+.default-color2.chart-series-area-fill { -fx-fill: rgba(76, 175, 80, 0.20); }
+
+/* Легенда */
+.default-color0.chart-legend-item-symbol { -fx-background-color: #FF9800; }
+.default-color1.chart-legend-item-symbol { -fx-background-color: #00BCD4; }
+.default-color2.chart-legend-item-symbol { -fx-background-color: #4CAF50; }
