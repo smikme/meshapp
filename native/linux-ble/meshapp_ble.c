@@ -780,20 +780,27 @@ static void do_connect(void* arg) {
     sd_bus_error_free(&error);
     log_msg("[meshble] Connect() returned, waiting for ServicesResolved...");
 
-    int resolved = 0;
-    get_bool_prop(g_bus, g_device_path, DEVICE_IFACE, "ServicesResolved", &resolved);
-    if (resolved) services_resolved = 1;
-
-    /* Wait for ServicesResolved — process sd-bus events on THIS (worker) thread */
+    /* Wait for ServicesResolved — poll property + process D-Bus signals */
     int64_t deadline = now_ms() + ctx->timeout_ms;
     while (!services_resolved && now_ms() < deadline) {
+        /* Process pending D-Bus events (may trigger signal handler) */
         for (;;) {
             r = sd_bus_process(g_bus, NULL);
             if (r <= 0) break;
         }
         if (services_resolved) break;
+
+        /* Also poll the property directly — signal may not fire for cached services */
+        int resolved = 0;
+        if (get_bool_prop(g_bus, g_device_path, DEVICE_IFACE, "ServicesResolved", &resolved) >= 0
+            && resolved) {
+            log_msg("[meshble] ServicesResolved=true (polled)");
+            services_resolved = 1;
+            break;
+        }
+
         struct pollfd pfd = { .fd = sd_bus_get_fd(g_bus), .events = POLLIN };
-        poll(&pfd, 1, 100);
+        poll(&pfd, 1, 200);
     }
 
     if (!services_resolved) {
