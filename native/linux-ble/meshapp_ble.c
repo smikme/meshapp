@@ -917,6 +917,89 @@ static void do_connect(void* arg) {
     ctx->result = 0;
 }
 
+/* ==================== BlueZ Agent (NoInputNoOutput) ==================== */
+
+#define AGENT_PATH "/meshapp/agent"
+#define AGENT_MGR_IFACE "org.bluez.AgentManager1"
+#define AGENT_IFACE "org.bluez.Agent1"
+
+static sd_bus_slot* g_agent_slot = NULL;
+
+static int agent_release(sd_bus_message* msg, void* userdata, sd_bus_error* err) {
+    (void)userdata; (void)err;
+    return sd_bus_reply_method_return(msg, "");
+}
+
+static int agent_request_default(sd_bus_message* msg, void* userdata, sd_bus_error* err) {
+    (void)userdata; (void)err;
+    /* Auto-accept: reply empty for RequestConfirmation, RequestAuthorization, AuthorizeService */
+    return sd_bus_reply_method_return(msg, "");
+}
+
+static int agent_cancel(sd_bus_message* msg, void* userdata, sd_bus_error* err) {
+    (void)userdata; (void)err;
+    return sd_bus_reply_method_return(msg, "");
+}
+
+static const sd_bus_vtable agent_vtable[] = {
+    SD_BUS_VTABLE_START(0),
+    SD_BUS_METHOD("Release", "", "", agent_release, SD_BUS_VTABLE_UNPRIVILEGED),
+    SD_BUS_METHOD("RequestPinCode", "o", "s", agent_request_default, SD_BUS_VTABLE_UNPRIVILEGED),
+    SD_BUS_METHOD("RequestPasskey", "o", "u", agent_request_default, SD_BUS_VTABLE_UNPRIVILEGED),
+    SD_BUS_METHOD("DisplayPinCode", "os", "", agent_request_default, SD_BUS_VTABLE_UNPRIVILEGED),
+    SD_BUS_METHOD("DisplayPasskey", "ouu", "", agent_request_default, SD_BUS_VTABLE_UNPRIVILEGED),
+    SD_BUS_METHOD("RequestConfirmation", "ou", "", agent_request_default, SD_BUS_VTABLE_UNPRIVILEGED),
+    SD_BUS_METHOD("RequestAuthorization", "o", "", agent_request_default, SD_BUS_VTABLE_UNPRIVILEGED),
+    SD_BUS_METHOD("AuthorizeService", "os", "", agent_request_default, SD_BUS_VTABLE_UNPRIVILEGED),
+    SD_BUS_METHOD("Cancel", "", "", agent_cancel, SD_BUS_VTABLE_UNPRIVILEGED),
+    SD_BUS_VTABLE_END,
+};
+
+static int register_agent(sd_bus* bus) {
+    int r = sd_bus_add_object_vtable(bus, &g_agent_slot, AGENT_PATH,
+                                      AGENT_IFACE, agent_vtable, NULL);
+    if (r < 0) {
+        log_msg("[meshble] Failed to add agent vtable: %s", strerror(-r));
+        return r;
+    }
+
+    sd_bus_error error = SD_BUS_ERROR_NULL;
+    r = sd_bus_call_method(bus, BLUEZ_BUS, "/org/bluez",
+                            AGENT_MGR_IFACE, "RegisterAgent",
+                            &error, NULL, "os", AGENT_PATH, "NoInputNoOutput");
+    if (r < 0) {
+        /* AlreadyExists is OK — agent from previous init */
+        if (error.name && strstr(error.name, "AlreadyExists")) {
+            log_msg("[meshble] Agent already registered");
+            sd_bus_error_free(&error);
+        } else {
+            log_msg("[meshble] RegisterAgent failed: %s (%s)", error.message, error.name);
+            sd_bus_error_free(&error);
+            return r;
+        }
+    } else {
+        sd_bus_error_free(&error);
+    }
+
+    r = sd_bus_call_method(bus, BLUEZ_BUS, "/org/bluez",
+                            AGENT_MGR_IFACE, "RequestDefaultAgent",
+                            NULL, NULL, "o", AGENT_PATH);
+    if (r < 0) {
+        log_msg("[meshble] RequestDefaultAgent failed (non-fatal)");
+    }
+
+    log_msg("[meshble] Agent registered (NoInputNoOutput)");
+    return 0;
+}
+
+static void unregister_agent(sd_bus* bus) {
+    if (!bus) return;
+    sd_bus_call_method(bus, BLUEZ_BUS, "/org/bluez",
+                        AGENT_MGR_IFACE, "UnregisterAgent",
+                        NULL, NULL, "o", AGENT_PATH);
+    if (g_agent_slot) { sd_bus_slot_unref(g_agent_slot); g_agent_slot = NULL; }
+}
+
 /* ==================== API — other worker-dispatched ops ==================== */
 
 typedef struct { int result; } adapter_state_ctx_t;
@@ -960,6 +1043,9 @@ MESHBLE_API int meshble_init(void) {
     }
     log_msg("[meshble] Adapter: %s", g_adapter_path);
 
+    /* Register BlueZ Agent — required for service discovery on many devices */
+    register_agent(g_bus);
+
     if (pipe(g_wake_pipe) < 0) {
         sd_bus_unref(g_bus); g_bus = NULL;
         atomic_store(&g_initialized, false);
@@ -991,6 +1077,7 @@ MESHBLE_API void meshble_cleanup(void) {
     if (g_wake_pipe[0] >= 0) { close(g_wake_pipe[0]); g_wake_pipe[0] = -1; }
     if (g_wake_pipe[1] >= 0) { close(g_wake_pipe[1]); g_wake_pipe[1] = -1; }
 
+    unregister_agent(g_bus);
     if (g_bus) { sd_bus_unref(g_bus); g_bus = NULL; }
 
     g_device_callback = NULL;
