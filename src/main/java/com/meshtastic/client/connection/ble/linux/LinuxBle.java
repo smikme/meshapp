@@ -171,19 +171,25 @@ public class LinuxBle implements BlePlatform {
         // Лatch для ожидания Connected
         CountDownLatch connectLatch = new CountDownLatch(1);
 
-        // Следим за PropertiesChanged на устройстве
+        // Следим за PropertiesChanged на устройстве (без source object —
+        // тот же паттерн что и для InterfacesAdded, фильтруем по path в хендлере)
         AutoCloseable propsHandler;
         try {
             propsHandler = dbus.addSigHandler(
-                    Properties.PropertiesChanged.class, BLUEZ_BUS, deviceProps,
+                    Properties.PropertiesChanged.class,
                     signal -> {
+                        // Фильтр по пути устройства
+                        if (!devPath.equals(signal.getPath())) return;
                         if (!DEVICE_IFACE.equals(signal.getInterfaceName())) return;
                         Map<String, Variant<?>> changed = signal.getPropertiesChanged();
                         if (changed == null) return;
 
+                        log.debug("PropertiesChanged ({}): {}", devPath, changed.keySet());
+
                         Variant<?> connVar = changed.get("Connected");
                         if (connVar != null) {
                             boolean conn = Boolean.TRUE.equals(connVar.getValue());
+                            log.info("connect: Connected={}", conn);
                             if (conn) {
                                 connectLatch.countDown();
                             } else if (connected) {
@@ -193,6 +199,7 @@ public class LinuxBle implements BlePlatform {
 
                         Variant<?> srvVar = changed.get("ServicesResolved");
                         if (srvVar != null && Boolean.TRUE.equals(srvVar.getValue())) {
+                            log.info("connect: ServicesResolved=true");
                             servicesLatch.countDown();
                         }
                     });
@@ -200,23 +207,31 @@ public class LinuxBle implements BlePlatform {
             throw new ConnectionException("Не удалось подписаться на D-Bus сигналы: " + e.getMessage());
         }
 
+        log.info("connect: вызываем Device1.Connect()...");
         try {
             device.Connect();
+            log.info("connect: Device1.Connect() вернулся");
         } catch (Exception e) {
+            log.error("connect: Device1.Connect() ошибка: {}", e.getMessage());
             closeQuietly(propsHandler);
             throw new ConnectionException("BLE подключение не удалось: " + e.getMessage());
         }
 
-        // Ждём ServicesResolved (может уже быть true, если устройство было подключено ранее)
+        // Проверяем — может ServicesResolved уже true (устройство было подключено ранее)
         try {
             Variant<?> resolved = deviceProps.Get(DEVICE_IFACE, "ServicesResolved");
+            log.info("connect: ServicesResolved текущее значение: {}", resolved.getValue());
             if (Boolean.TRUE.equals(resolved.getValue())) {
                 servicesLatch.countDown();
             }
-        } catch (Exception ignored) { /* ещё не подключено */ }
+        } catch (Exception e) {
+            log.debug("connect: не удалось прочитать ServicesResolved: {}", e.getMessage());
+        }
 
+        log.info("connect: ждём ServicesResolved (таймаут {}мс)...", BleConstants.CONNECT_TIMEOUT_MS);
         try {
             if (!servicesLatch.await(BleConstants.CONNECT_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
+                log.error("connect: ТАЙМАУТ ServicesResolved для {}", address);
                 closeQuietly(propsHandler);
                 try { device.Disconnect(); } catch (Exception ignored) {}
                 throw new ConnectionException("Таймаут обнаружения GATT-сервисов: " + address);
