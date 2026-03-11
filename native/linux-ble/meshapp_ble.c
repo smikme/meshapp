@@ -40,7 +40,7 @@
 #define TO_RADIO_UUID      "f75c76d2-129e-4dad-a1dd-7866124401e7"
 #define FROM_NUM_UUID      "ed9da18c-a800-4f66-a670-aa7547e34453"
 
-#define MAX_PATH           512
+#define MAX_PATH           1024
 #define MAX_DRAIN          100
 #define POLL_TIMEOUT_MS    100
 
@@ -105,54 +105,6 @@ static task_node_t* tq_pop(task_queue_t* q) {
         if (!q->head) q->tail = NULL;
     }
     return n;
-}
-
-/* ==================== Synchronous cross-thread call ==================== */
-
-typedef struct {
-    void (*func)(void* ctx, void* result);
-    void* ctx;
-    void* result;
-    pthread_mutex_t mutex;
-    pthread_cond_t cond;
-    bool done;
-} sync_call_t;
-
-static void sync_call_wrapper(void* arg) {
-    sync_call_t* sc = (sync_call_t*)arg;
-    sc->func(sc->ctx, &sc->result);
-    pthread_mutex_lock(&sc->mutex);
-    sc->done = true;
-    pthread_cond_signal(&sc->cond);
-    pthread_mutex_unlock(&sc->mutex);
-}
-
-/* Run func on worker thread and wait for result. result_ptr receives a void* result. */
-static void run_on_worker_sync(task_queue_t* q, int wake_fd,
-                                void (*func)(void* ctx, void* result),
-                                void* ctx, void** result_ptr) {
-    sync_call_t sc;
-    sc.func = func;
-    sc.ctx = ctx;
-    sc.result = NULL;
-    sc.done = false;
-    pthread_mutex_init(&sc.mutex, NULL);
-    pthread_cond_init(&sc.cond, NULL);
-
-    tq_push(q, sync_call_wrapper, &sc);
-    /* Wake the worker thread */
-    {
-        uint8_t b = 1;
-        (void)write(wake_fd, &b, 1);
-    }
-
-    pthread_mutex_lock(&sc.mutex);
-    while (!sc.done) pthread_cond_wait(&sc.cond, &sc.mutex);
-    pthread_mutex_unlock(&sc.mutex);
-
-    if (result_ptr) *result_ptr = sc.result;
-    pthread_mutex_destroy(&sc.mutex);
-    pthread_cond_destroy(&sc.cond);
 }
 
 /* ==================== Global State ==================== */
@@ -252,25 +204,6 @@ done:
     return r;
 }
 
-/* Read a string property via org.freedesktop.DBus.Properties.Get */
-static int get_string_prop(sd_bus* bus, const char* path, const char* iface,
-                           const char* prop, char* out, int outsize) {
-    sd_bus_message* reply = NULL;
-    int r = sd_bus_call_method(bus, BLUEZ_BUS, path,
-                               PROPS_IFACE, "Get",
-                               NULL, &reply, "ss", iface, prop);
-    if (r < 0) return r;
-
-    const char* val = NULL;
-    r = sd_bus_message_read(reply, "v", "s", &val);
-    if (r >= 0 && val) {
-        strncpy(out, val, outsize - 1);
-        out[outsize - 1] = '\0';
-    }
-    sd_bus_message_unref(reply);
-    return r;
-}
-
 /* Read a boolean property */
 static int get_bool_prop(sd_bus* bus, const char* path, const char* iface,
                          const char* prop, int* out) {
@@ -283,20 +216,6 @@ static int get_bool_prop(sd_bus* bus, const char* path, const char* iface,
     int val = 0;
     r = sd_bus_message_read(reply, "v", "b", &val);
     if (r >= 0 && out) *out = val;
-    sd_bus_message_unref(reply);
-    return r;
-}
-
-/* Read an int16 property (e.g., RSSI) */
-static int get_int16_prop(sd_bus* bus, const char* path, const char* iface,
-                          const char* prop, int16_t* out) {
-    sd_bus_message* reply = NULL;
-    int r = sd_bus_call_method(bus, BLUEZ_BUS, path,
-                               PROPS_IFACE, "Get",
-                               NULL, &reply, "ss", iface, prop);
-    if (r < 0) return r;
-
-    r = sd_bus_message_read(reply, "v", "n", out);
     sd_bus_message_unref(reply);
     return r;
 }
@@ -710,7 +629,7 @@ static void* worker_loop(void* arg) {
 /* Wake worker thread to process tasks */
 static void wake_worker(void) {
     uint8_t b = 1;
-    (void)write(g_wake_pipe[1], &b, 1);
+    if (write(g_wake_pipe[1], &b, 1) < 0) { /* ignore */ }
 }
 
 /* ==================== Internal Operations ==================== */
