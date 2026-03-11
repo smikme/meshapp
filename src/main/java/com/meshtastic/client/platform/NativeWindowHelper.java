@@ -1,5 +1,6 @@
 package com.meshtastic.client.platform;
 
+import com.meshtastic.client.utils.AppPreferences;
 import javafx.application.Platform;
 import javafx.css.PseudoClass;
 import javafx.scene.paint.Color;
@@ -30,6 +31,15 @@ public final class NativeWindowHelper {
      * Прочие ОС: по умолчанию (DECORATED).
      */
     public static void prepareStage(Stage stage) {
+        if (AppPreferences.isNativeWindow()) {
+            // Нативное управление окнами: стандартный DECORATED стиль ОС
+            return;
+        }
+        if (AppPreferences.isDisableTransparency()) {
+            // Кастомный title bar, но без прозрачности
+            stage.initStyle(StageStyle.UNDECORATED);
+            return;
+        }
         if (OsDetect.supportsSeamlessFrame()) {
             stage.initStyle(StageStyle.TRANSPARENT);
         } else if (OsDetect.isLinux()) {
@@ -43,6 +53,13 @@ public final class NativeWindowHelper {
     public static void applyNativeEffects(Stage stage, boolean isDark) {
         if (stage.getScene() == null || stage.getScene().getRoot() == null) {
             setSeamlessState(stage, false);
+            return;
+        }
+
+        // Нативное управление или отключена прозрачность — без backdrop эффектов
+        if (AppPreferences.isNativeWindow() || AppPreferences.isDisableTransparency()) {
+            setSeamlessState(stage, false);
+            setThemeState(stage, isDark);
             return;
         }
 
