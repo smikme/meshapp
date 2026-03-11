@@ -70,6 +70,8 @@ public class LinuxBle implements BlePlatform {
             });
     private volatile ScheduledFuture<?> pollFuture;
     private volatile boolean drainInProgress;
+    private volatile int consecutiveErrors;
+    private static final int MAX_CONSECUTIVE_ERRORS = 3;
 
     // D-Bus signal handlers
     private AutoCloseable interfacesAddedHandler;
@@ -212,9 +214,23 @@ public class LinuxBle implements BlePlatform {
             device.Connect();
             log.info("connect: Device1.Connect() вернулся");
         } catch (Exception e) {
-            log.error("connect: Device1.Connect() ошибка: {}", e.getMessage());
-            closeQuietly(propsHandler);
-            throw new ConnectionException("BLE подключение не удалось: " + e.getMessage());
+            // Если BlueZ удалил device object (после disconnect) — пересканируем
+            if (isObjectGone(e)) {
+                log.info("connect: устройство удалено из BlueZ, пересканируем...");
+                try {
+                    device = rediscoverDevice(address, devPath);
+                    device.Connect();
+                    log.info("connect: Device1.Connect() после rediscovery вернулся");
+                } catch (Exception e2) {
+                    log.error("connect: повторное подключение не удалось: {}", e2.getMessage());
+                    closeQuietly(propsHandler);
+                    throw new ConnectionException("BLE подключение не удалось после пересканирования: " + e2.getMessage());
+                }
+            } else {
+                log.error("connect: Device1.Connect() ошибка: {}", e.getMessage());
+                closeQuietly(propsHandler);
+                throw new ConnectionException("BLE подключение не удалось: " + e.getMessage());
+            }
         }
 
         // Проверяем — может ServicesResolved уже true (устройство было подключено ранее)
@@ -266,8 +282,12 @@ public class LinuxBle implements BlePlatform {
         devicePropsHandler = propsHandler;
         connected = true;
 
-        // Start polling с задержкой — дать BlueZ/устройству время подготовиться
-        startPolling(500);
+        // Синхронный initial drain (как macOS — мягкий, ошибки не фатальны)
+        log.info("connect: initial drain...");
+        initialDrain();
+
+        // Start polling (первый poll через 200мс после drain)
+        startPolling(200);
         log.info("BLE подключено: {}", address);
     }
 
@@ -291,6 +311,7 @@ public class LinuxBle implements BlePlatform {
         toRadioChar = null;
         fromNumChar = null;
         drainInProgress = false;
+        consecutiveErrors = 0;
         log.info("BLE отключено");
     }
 
@@ -311,10 +332,13 @@ public class LinuxBle implements BlePlatform {
         try {
             toRadio.WriteValue(protobufPayload, Map.of());
             log.debug("Отправлено {} байт в toRadio", protobufPayload.length);
+            consecutiveErrors = 0;
             scheduleDrainAfterWrite();
         } catch (Exception e) {
-            log.error("writeToRadio failed: {}", e.getMessage());
-            if (isFatalBleError(e)) {
+            consecutiveErrors++;
+            log.error("writeToRadio failed ({}/{}): {}",
+                    consecutiveErrors, MAX_CONSECUTIVE_ERRORS, e.getMessage());
+            if (isFatalBleError(e) || consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
                 onUnexpectedDisconnect();
             }
         }
@@ -347,6 +371,27 @@ public class LinuxBle implements BlePlatform {
     }
 
     // ==================== Polling ====================
+
+    /**
+     * Синхронный initial drain — вычитываем накопленные данные из fromRadio.
+     * Ошибки не фатальны — устройство может быть ещё не готово.
+     * Паттерн из MacOsBle (drainFromRadio в connect).
+     */
+    private void initialDrain() {
+        GattCharacteristic1 fromRadio = fromRadioChar;
+        if (fromRadio == null) return;
+        try {
+            for (int i = 0; i < 50; i++) {
+                byte[] data = fromRadio.ReadValue(Map.of());
+                if (data == null || data.length == 0) break;
+                Consumer<byte[]> listener = fromRadioListener;
+                if (listener != null) listener.accept(data);
+            }
+            log.info("connect: initial drain завершён");
+        } catch (Exception e) {
+            log.debug("connect: initial drain error (ожидаемо): {}", e.getMessage());
+        }
+    }
 
     private void startPolling() {
         startPolling(0);
@@ -387,14 +432,17 @@ public class LinuxBle implements BlePlatform {
                 byte[] data = fromRadio.ReadValue(Map.of());
                 if (data == null || data.length == 0) break;
 
+                consecutiveErrors = 0; // успешное чтение — сброс
                 Consumer<byte[]> listener = fromRadioListener;
                 if (listener != null) {
                     listener.accept(data);
                 }
             }
         } catch (Exception e) {
-            log.warn("Polling fromRadio error: {}", e.getMessage());
-            if (isFatalBleError(e)) {
+            consecutiveErrors++;
+            log.warn("Polling fromRadio error ({}/{}): {}",
+                    consecutiveErrors, MAX_CONSECUTIVE_ERRORS, e.getMessage());
+            if (isFatalBleError(e) || consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
                 onUnexpectedDisconnect();
             }
         } finally {
@@ -407,6 +455,43 @@ public class LinuxBle implements BlePlatform {
     }
 
     // ==================== Internal ====================
+
+    /**
+     * Пересканирует BlueZ для повторного обнаружения устройства.
+     * Используется при reconnect, когда BlueZ удалил device object после disconnect.
+     */
+    private Device1 rediscoverDevice(String address, String devPath) throws ConnectionException {
+        log.info("rediscoverDevice: запускаем сканирование для {}", address);
+        try {
+            Map<String, Variant<?>> filter = new HashMap<>();
+            filter.put("UUIDs", new Variant<>(
+                    Arrays.asList(BleConstants.SERVICE_UUID), "as"));
+            filter.put("Transport", new Variant<>("le"));
+            adapter.SetDiscoveryFilter(filter);
+            adapter.StartDiscovery();
+            Thread.sleep(3000);
+            try { adapter.StopDiscovery(); } catch (Exception ignored) {}
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new ConnectionException("Прервано при пересканировании: " + address);
+        } catch (Exception e) {
+            log.warn("rediscoverDevice: ошибка сканирования: {}", e.getMessage());
+        }
+
+        // Проверяем, появилось ли устройство в managed objects
+        var objects = objectManager.GetManagedObjects();
+        for (var entry : objects.entrySet()) {
+            if (entry.getKey().getPath().equals(devPath)) {
+                log.info("rediscoverDevice: устройство найдено в BlueZ");
+                try {
+                    return dbus.getRemoteObject(BLUEZ_BUS, devPath, Device1.class);
+                } catch (DBusException e) {
+                    throw new ConnectionException("Не удалось создать прокси устройства: " + e.getMessage());
+                }
+            }
+        }
+        throw new ConnectionException("Устройство не найдено после пересканирования: " + address);
+    }
 
     /**
      * Находит путь первого BlueZ-адаптера через GetManagedObjects.
@@ -533,14 +618,19 @@ public class LinuxBle implements BlePlatform {
         }
     }
 
+    /** D-Bus объект удалён — повторять бессмысленно (устройство отключилось). */
+    private static boolean isObjectGone(Exception e) {
+        return e.getClass().getSimpleName().contains("UnknownObject");
+    }
+
     /**
-     * Определяет, является ли D-Bus ошибка фатальной для BLE-соединения.
-     * NoReply — таймаут (устройство не отвечает), UnknownObject — характеристики удалены.
+     * Безусловно фатальная ошибка (повторять нет смысла).
+     * NoReply теперь обрабатывается через счётчик consecutiveErrors.
      */
     private static boolean isFatalBleError(Exception e) {
-        String name = e.getClass().getSimpleName();
-        return name.contains("NoReply") || name.contains("UnknownObject")
-                || name.contains("NotConnected") || name.contains("NotPermitted");
+        return isObjectGone(e)
+                || e.getClass().getSimpleName().contains("NotConnected")
+                || e.getClass().getSimpleName().contains("NotPermitted");
     }
 
     private static String getStringProp(Map<String, Variant<?>> props, String key) {
