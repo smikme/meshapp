@@ -103,21 +103,31 @@ public class LinuxBle implements BlePlatform {
     @Override
     public void startScan(Consumer<BleDevice> onDeviceFound) {
         this.scanCallback = onDeviceFound;
+        log.info("startScan: начало инициализации");
 
         try {
             // Фильтр: только LE устройства с Meshtastic-сервисом
-            Map<String, Variant<?>> filter = new HashMap<>();
-            filter.put("UUIDs", new Variant<>(new String[]{BleConstants.SERVICE_UUID}, "as"));
-            filter.put("Transport", new Variant<>("le"));
-            adapter.SetDiscoveryFilter(filter);
+            try {
+                Map<String, Variant<?>> filter = new HashMap<>();
+                filter.put("UUIDs", new Variant<>(
+                        Arrays.asList(BleConstants.SERVICE_UUID), "as"));
+                filter.put("Transport", new Variant<>("le"));
+                adapter.SetDiscoveryFilter(filter);
+                log.info("startScan: SetDiscoveryFilter установлен (UUID={})", BleConstants.SERVICE_UUID);
+            } catch (Exception e) {
+                log.warn("startScan: SetDiscoveryFilter не удался, сканируем без фильтра: {}", e.getMessage());
+            }
 
-            // Слушаем новые устройства через InterfacesAdded (без source object —
-            // BlueZ эмитит сигналы с разных путей, не только от ObjectManager "/")
+            // InterfacesAdded — новые устройства при discovery
             interfacesAddedHandler = dbus.addSigHandler(
-                    ObjectManager.InterfacesAdded.class, BLUEZ_BUS,
-                    signal -> onInterfacesAdded(signal.getObjectPath(), signal.getInterfaces()));
+                    ObjectManager.InterfacesAdded.class,
+                    signal -> {
+                        log.debug("InterfacesAdded: path={}", signal.getObjectPath());
+                        onInterfacesAdded(signal.getObjectPath(), signal.getInterfaces());
+                    });
+            log.info("startScan: InterfacesAdded handler зарегистрирован");
 
-            // Эмитим уже известные BlueZ устройства
+            // Эмитим уже известные BlueZ устройства (кэш предыдущих сканов)
             emitCachedDevices();
 
             adapter.StartDiscovery();
@@ -408,14 +418,18 @@ public class LinuxBle implements BlePlatform {
     private void emitCachedDevices() {
         try {
             var objects = objectManager.GetManagedObjects();
+            int deviceCount = 0;
             for (var entry : objects.entrySet()) {
                 Map<String, Variant<?>> deviceIface = entry.getValue().get(DEVICE_IFACE);
                 if (deviceIface != null) {
+                    deviceCount++;
                     emitDevice(deviceIface);
                 }
             }
+            log.info("emitCachedDevices: {} объектов всего, {} устройств",
+                    objects.size(), deviceCount);
         } catch (Exception e) {
-            log.debug("Не удалось получить кэшированные устройства: {}", e.getMessage());
+            log.warn("Не удалось получить кэшированные устройства: {}", e.getMessage(), e);
         }
     }
 
@@ -448,9 +462,10 @@ public class LinuxBle implements BlePlatform {
                 rssi = n.intValue();
             }
 
+            log.info("emitDevice: address={}, name={}, rssi={}", address, name, rssi);
             callback.accept(new BleDevice(address, name != null ? name : "Unknown", rssi));
         } catch (Exception e) {
-            log.debug("Ошибка разбора данных устройства: {}", e.getMessage());
+            log.warn("Ошибка разбора данных устройства: {}", e.getMessage(), e);
         }
     }
 
