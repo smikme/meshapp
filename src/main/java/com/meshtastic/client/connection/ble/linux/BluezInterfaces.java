@@ -26,11 +26,18 @@ final class BluezInterfaces {
         void SetDiscoveryFilter(Map<String, Variant<?>> filter);
     }
 
-    /** BlueZ Device1: подключение/отключение. */
+    /** BlueZ Device1: подключение/отключение/сопряжение. */
     @DBusInterfaceName("org.bluez.Device1")
     interface Device1 extends DBusInterface {
         void Connect();
         void Disconnect();
+        void Pair();
+    }
+
+    /** BlueZ Adapter1: удаление устройства из кэша. */
+    @DBusInterfaceName("org.bluez.Adapter1")
+    interface Adapter1RemoveDevice extends DBusInterface {
+        void RemoveDevice(org.freedesktop.dbus.DBusPath device);
     }
 
     /** BlueZ GattCharacteristic1: чтение/запись характеристик. */
