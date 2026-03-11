@@ -3,7 +3,6 @@ package com.meshtastic.client.connection.ble.linux;
 import com.meshtastic.client.connection.ConnectionException;
 import com.meshtastic.client.connection.ble.*;
 import com.meshtastic.client.connection.ble.linux.BluezInterfaces.Adapter1;
-import com.meshtastic.client.connection.ble.linux.BluezInterfaces.Adapter1RemoveDevice;
 import com.meshtastic.client.connection.ble.linux.BluezInterfaces.Device1;
 import com.meshtastic.client.connection.ble.linux.BluezInterfaces.GattCharacteristic1;
 import org.freedesktop.dbus.connections.impl.DBusConnection;
@@ -15,8 +14,6 @@ import org.freedesktop.dbus.types.Variant;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.freedesktop.dbus.DBusPath;
-
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.function.Consumer;
@@ -24,11 +21,12 @@ import java.util.function.Consumer;
 /**
  * Linux-реализация BLE через BlueZ D-Bus API (dbus-java).
  * <p>
- * Паттерн аналогичен {@link com.meshtastic.client.connection.ble.windows.WinBle}:
+ * Архитектура приёма данных: notification-based.
  * <ul>
- *   <li>Polling (200ms) для чтения fromRadio</li>
- *   <li>Drain guard для предотвращения конкурентных чтений</li>
- *   <li>Volatile поля для thread-safety</li>
+ *   <li>fromRadio: {@code StartNotify()} + {@code PropertiesChanged} handler
+ *       (BlueZ D-Bus {@code ReadValue} зависает — Issues #21, #947)</li>
+ *   <li>Fallback polling с {@code ReadValue} через gattExecutor (если уведомления не работают)</li>
+ *   <li>toRadio: {@code WriteValue} через gattExecutor с таймаутом</li>
  * </ul>
  *
  * @see BlePlatform
@@ -37,11 +35,15 @@ public class LinuxBle implements BlePlatform {
 
     private static final Logger log = LoggerFactory.getLogger(LinuxBle.class);
 
-    private static final int POLL_INTERVAL_MS = 200;
     private static final String BLUEZ_BUS = "org.bluez";
     private static final String ADAPTER_IFACE = "org.bluez.Adapter1";
     private static final String DEVICE_IFACE = "org.bluez.Device1";
     private static final String CHAR_IFACE = "org.bluez.GattCharacteristic1";
+
+    private static final int GATT_TIMEOUT_MS = 5000;
+    private static final int MAX_CONSECUTIVE_ERRORS = 3;
+    private static final int FALLBACK_CHECK_INTERVAL_MS = 2000;
+    private static final int FALLBACK_READ_TIMEOUT_MS = 3000;
 
     private final DBusConnection dbus;
     private final String adapterPath;
@@ -61,32 +63,32 @@ public class LinuxBle implements BlePlatform {
     private volatile GattCharacteristic1 fromRadioChar;
     private volatile GattCharacteristic1 toRadioChar;
     private volatile GattCharacteristic1 fromNumChar;
+    private volatile String fromRadioCharPath;
 
-    // Polling
-    private final ScheduledExecutorService pollScheduler =
-            Executors.newSingleThreadScheduledExecutor(r -> {
-                Thread t = new Thread(r, "ble-linux-poll");
-                t.setDaemon(true);
-                return t;
-            });
-    // Выделенный executor для GATT D-Bus вызовов.
-    // НЕ используем ForkJoinPool — зависшие ReadValue (25с D-Bus таймаут)
-    // блокировали бы общий пул и не давали запускаться новым вызовам.
+    // Выделенный executor для GATT D-Bus вызовов (WriteValue, fallback ReadValue).
+    // CachedThreadPool — зависшие вызовы не блокируют новые.
     private final ExecutorService gattExecutor =
             Executors.newCachedThreadPool(r -> {
                 Thread t = new Thread(r, "ble-linux-gatt");
                 t.setDaemon(true);
                 return t;
             });
+
+    // Fallback polling scheduler
+    private final ScheduledExecutorService pollScheduler =
+            Executors.newSingleThreadScheduledExecutor(r -> {
+                Thread t = new Thread(r, "ble-linux-poll");
+                t.setDaemon(true);
+                return t;
+            });
     private volatile ScheduledFuture<?> pollFuture;
-    private volatile boolean drainInProgress;
     private volatile int consecutiveErrors;
-    private static final int MAX_CONSECUTIVE_ERRORS = 3;
-    private static final int GATT_TIMEOUT_MS = 5000;
+    private volatile long lastDataReceivedAt;
 
     // D-Bus signal handlers
     private AutoCloseable interfacesAddedHandler;
     private AutoCloseable devicePropsHandler;
+    private AutoCloseable fromRadioHandler;
 
     public LinuxBle() {
         try {
@@ -169,7 +171,9 @@ public class LinuxBle implements BlePlatform {
     public void connect(String address) throws ConnectionException {
         // Чистим старые хэндлеры от предыдущего подключения (reconnect-safe)
         closeQuietly(devicePropsHandler);
+        closeQuietly(fromRadioHandler);
         devicePropsHandler = null;
+        fromRadioHandler = null;
 
         String devPath = adapterPath + "/dev_" + address.replace(':', '_');
         log.info("Подключение к BLE устройству: {} ({})", address, devPath);
@@ -183,7 +187,7 @@ public class LinuxBle implements BlePlatform {
             throw new ConnectionException("BLE устройство не найдено: " + address);
         }
 
-        // Устанавливаем Trusted=true — без этого BlueZ может блокировать GATT-операции
+        // Trusted=true — без этого BlueZ может блокировать GATT-операции
         try {
             deviceProps.Set(DEVICE_IFACE, "Trusted", new Variant<>(true));
             log.info("connect: Trusted=true установлено");
@@ -194,14 +198,12 @@ public class LinuxBle implements BlePlatform {
         // Latch для ожидания ServicesResolved
         CountDownLatch servicesLatch = new CountDownLatch(1);
 
-        // Следим за PropertiesChanged на устройстве (без source object —
-        // тот же паттерн что и для InterfacesAdded, фильтруем по path в хендлере)
+        // PropertiesChanged handler — фильтруем по пути устройства
         AutoCloseable propsHandler;
         try {
             propsHandler = dbus.addSigHandler(
                     Properties.PropertiesChanged.class,
                     signal -> {
-                        // Фильтр по пути устройства
                         if (!devPath.equals(signal.getPath())) return;
                         if (!DEVICE_IFACE.equals(signal.getInterfaceName())) return;
                         Map<String, Variant<?>> changed = signal.getPropertiesChanged();
@@ -228,72 +230,53 @@ public class LinuxBle implements BlePlatform {
             throw new ConnectionException("Не удалось подписаться на D-Bus сигналы: " + e.getMessage());
         }
 
-        // Пейринг: если устройство не сопряжено, BlueZ может блокировать GATT
-        try {
-            Variant<?> paired = deviceProps.Get(DEVICE_IFACE, "Paired");
-            if (!Boolean.TRUE.equals(paired.getValue())) {
-                log.info("connect: устройство не сопряжено, вызываем Pair()...");
-                try {
-                    device.Pair();
-                    log.info("connect: Pair() завершён");
-                } catch (Exception pe) {
-                    // AlreadyExists = уже сопряжено, AuthenticationCanceled/Failed = не критично
-                    log.debug("connect: Pair() результат: {}", pe.getMessage());
-                }
-            } else {
-                log.info("connect: устройство уже сопряжено");
-            }
-        } catch (Exception e) {
-            log.debug("connect: не удалось проверить Paired: {}", e.getMessage());
-        }
+        // НЕ вызываем Pair() — Meshtastic не требует пейринга.
+        // Pair() может вызвать BlueZ Issue #21: ReadValue виснет если пейринг в процессе.
 
         log.info("connect: вызываем Device1.Connect()...");
         try {
             device.Connect();
             log.info("connect: Device1.Connect() вернулся");
         } catch (Exception e) {
-            // Если BlueZ удалил device object (после disconnect) — пересканируем
             if (isObjectGone(e)) {
                 log.info("connect: устройство удалено из BlueZ, пересканируем...");
                 try {
                     device = rediscoverDevice(address, devPath);
                     deviceProps = dbus.getRemoteObject(BLUEZ_BUS, devPath, Properties.class);
-                    // Trusted и Pair для нового объекта
                     try {
                         deviceProps.Set(DEVICE_IFACE, "Trusted", new Variant<>(true));
                     } catch (Exception ignored) {}
                     device.Connect();
                     log.info("connect: Device1.Connect() после rediscovery вернулся");
                 } catch (Exception e2) {
-                    log.error("connect: повторное подключение не удалось: {}", e2.getMessage());
                     closeQuietly(propsHandler);
                     throw new ConnectionException("BLE подключение не удалось после пересканирования: " + e2.getMessage());
                 }
             } else {
-                log.error("connect: Device1.Connect() ошибка: {}", e.getMessage());
                 closeQuietly(propsHandler);
                 throw new ConnectionException("BLE подключение не удалось: " + e.getMessage());
             }
         }
 
-        // Device1.Connect() в BlueZ блокирует до завершения ACL-подключения.
-        // ServicesResolved может уже быть true к этому моменту (пришёл сигнал или кэш).
+        // Проверяем ServicesResolved — Properties.Get() в dbus-java 5.x
+        // автоматически распаковывает Variant, возвращая Boolean напрямую
         try {
-            Variant<?> resolved = deviceProps.Get(DEVICE_IFACE, "ServicesResolved");
-            log.info("connect: ServicesResolved текущее значение: {}", resolved.getValue());
-            if (Boolean.TRUE.equals(resolved.getValue())) {
+            Object resolved = deviceProps.Get(DEVICE_IFACE, "ServicesResolved");
+            log.info("connect: ServicesResolved текущее значение: {}", resolved);
+            if (Boolean.TRUE.equals(resolved)) {
+                servicesLatch.countDown();
+            } else if (resolved instanceof Variant<?> v && Boolean.TRUE.equals(v.getValue())) {
                 servicesLatch.countDown();
             }
         } catch (Exception e) {
             log.debug("connect: не удалось прочитать ServicesResolved: {}", e.getMessage());
         }
 
-        // Ждём ServicesResolved если ещё не true
+        // Ждём ServicesResolved
         if (servicesLatch.getCount() > 0) {
             log.info("connect: ждём ServicesResolved (таймаут {}мс)...", BleConstants.CONNECT_TIMEOUT_MS);
             try {
                 if (!servicesLatch.await(BleConstants.CONNECT_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
-                    log.error("connect: ТАЙМАУТ ServicesResolved для {}", address);
                     closeQuietly(propsHandler);
                     try { device.Disconnect(); } catch (Exception ignored) {}
                     throw new ConnectionException("Таймаут обнаружения GATT-сервисов: " + address);
@@ -307,17 +290,8 @@ public class LinuxBle implements BlePlatform {
             log.info("connect: ServicesResolved уже true, пропускаем ожидание");
         }
 
-        // Задержка после ServicesResolved — GATT на BlueZ не готов мгновенно.
-        // BlueZ кэширует GATT-атрибуты, но операции чтения/записи могут висеть
-        // если устройство ещё инициализирует BLE-стек после reconnect.
-        log.info("connect: ждём стабилизации GATT (2с)...");
-        try { Thread.sleep(2000); } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            closeQuietly(propsHandler);
-            throw new ConnectionException("Прервано при подключении: " + address);
-        }
-
-        // Ищем GATT-характеристики
+        // Ищем GATT-характеристики (без задержки — notification-based подход
+        // не требует немедленной готовности GATT для ReadValue)
         findGattCharacteristics(devPath);
         log.info("connect: fromRadio={}, toRadio={}, fromNum={}",
                 fromRadioChar != null, toRadioChar != null, fromNumChar != null);
@@ -328,7 +302,12 @@ public class LinuxBle implements BlePlatform {
             throw new ConnectionException("Meshtastic GATT-характеристики не найдены: " + address);
         }
 
-        // Подписка на fromNum (уведомления о новых данных)
+        // Notification-based приём данных: подписка на PropertiesChanged для fromRadio.
+        // Это КЛЮЧЕВОЕ отличие от предыдущей реализации — вместо polling ReadValue
+        // (который зависает на BlueZ D-Bus) используем StartNotify + сигналы.
+        setupFromRadioNotifications();
+
+        // Подписка на fromNum (уведомления о новых данных — для будущего использования)
         if (fromNumChar != null) {
             try {
                 fromNumChar.StartNotify();
@@ -337,26 +316,28 @@ public class LinuxBle implements BlePlatform {
             }
         }
 
-        // Сохраняем состояние — НЕ верифицируем GATT через ReadValue.
-        // fromRadio.ReadValue() блокируется если нет данных (устройство ждёт want_config_id).
-        // Верификация произойдёт естественно: protocol handler отправит want_config_id →
-        // writeToRadio → pollFromRadio получит ответ.
+        // Сохраняем состояние
         connectedDevice = device;
         connectedDevicePath = devPath;
         devicePropsHandler = propsHandler;
         connected = true;
         consecutiveErrors = 0;
+        lastDataReceivedAt = System.currentTimeMillis();
 
-        // Start polling — первый poll через 500мс (даём время на первый write)
-        startPolling(500);
+        // Fallback polling — если notifications не работают, через 2с
+        // начнёт пробовать ReadValue
+        startFallbackPolling();
         log.info("BLE подключено: {}", address);
     }
 
     @Override
     public void disconnect() {
         connected = false;
-        stopPolling();
+        stopFallbackPolling();
 
+        if (fromRadioChar != null) {
+            try { fromRadioChar.StopNotify(); } catch (Exception ignored) {}
+        }
         if (fromNumChar != null) {
             try { fromNumChar.StopNotify(); } catch (Exception ignored) {}
         }
@@ -364,14 +345,16 @@ public class LinuxBle implements BlePlatform {
             try { connectedDevice.Disconnect(); } catch (Exception ignored) {}
         }
 
+        closeQuietly(fromRadioHandler);
         closeQuietly(devicePropsHandler);
+        fromRadioHandler = null;
         devicePropsHandler = null;
         connectedDevice = null;
         connectedDevicePath = null;
         fromRadioChar = null;
         toRadioChar = null;
         fromNumChar = null;
-        drainInProgress = false;
+        fromRadioCharPath = null;
         consecutiveErrors = 0;
         log.info("BLE отключено");
     }
@@ -391,18 +374,17 @@ public class LinuxBle implements BlePlatform {
             return;
         }
         try {
-            // WriteValue через gattExecutor с таймаутом — без этого D-Bus таймаут (25с)
-            // блокирует вызывающий поток. gattExecutor = CachedThreadPool, новый поток
-            // создаётся даже если предыдущий ещё висит на D-Bus.
             Future<Void> future = gattExecutor.submit(() -> {
-                toRadio.WriteValue(protobufPayload, Map.of());
+                // "type": "request" — явный write-with-response для надёжности
+                Map<String, Variant<?>> options = new HashMap<>();
+                options.put("type", new Variant<>("request"));
+                toRadio.WriteValue(protobufPayload, options);
                 return null;
             });
             future.get(GATT_TIMEOUT_MS, TimeUnit.MILLISECONDS);
 
             log.debug("Отправлено {} байт в toRadio", protobufPayload.length);
             consecutiveErrors = 0;
-            scheduleDrainAfterWrite();
         } catch (TimeoutException te) {
             consecutiveErrors++;
             log.error("writeToRadio timeout ({}/{})",
@@ -450,15 +432,90 @@ public class LinuxBle implements BlePlatform {
         log.info("LinuxBle disposed");
     }
 
-    // ==================== Polling ====================
+    // ==================== Notification-based fromRadio ====================
 
-    private void startPolling(int initialDelayMs) {
-        stopPolling();
-        pollFuture = pollScheduler.scheduleWithFixedDelay(
-                this::triggerDrain, initialDelayMs, POLL_INTERVAL_MS, TimeUnit.MILLISECONDS);
+    /**
+     * Подписка на уведомления fromRadio через StartNotify + PropertiesChanged.
+     * <p>
+     * Это замена polling с ReadValue, который зависает на BlueZ D-Bus
+     * (Issues #21, #947). PropertiesChanged сигнал приходит асинхронно
+     * без блокировки потоков.
+     */
+    private void setupFromRadioNotifications() {
+        String charPath = fromRadioCharPath;
+        if (charPath == null || fromRadioChar == null) return;
+
+        try {
+            // Подписка на PropertiesChanged для характеристики fromRadio
+            fromRadioHandler = dbus.addSigHandler(
+                    Properties.PropertiesChanged.class,
+                    signal -> {
+                        if (!charPath.equals(signal.getPath())) return;
+                        if (!CHAR_IFACE.equals(signal.getInterfaceName())) return;
+                        Map<String, Variant<?>> changed = signal.getPropertiesChanged();
+                        if (changed == null) return;
+
+                        Variant<?> valueVar = changed.get("Value");
+                        if (valueVar == null) return;
+
+                        byte[] data = extractByteArray(valueVar);
+                        if (data != null && data.length > 0) {
+                            lastDataReceivedAt = System.currentTimeMillis();
+                            consecutiveErrors = 0;
+                            Consumer<byte[]> listener = fromRadioListener;
+                            if (listener != null) {
+                                listener.accept(data);
+                            }
+                            log.debug("fromRadio notification: {} байт", data.length);
+                        }
+                    });
+
+            // StartNotify — просим BlueZ подписаться на GATT notifications
+            fromRadioChar.StartNotify();
+            log.info("connect: fromRadio StartNotify + PropertiesChanged handler установлены");
+        } catch (Exception e) {
+            log.warn("connect: fromRadio StartNotify не удался (fallback polling): {}", e.getMessage());
+            // Не фатально — fallback polling подхватит
+        }
     }
 
-    private void stopPolling() {
+    /**
+     * Извлекает byte[] из Variant. dbus-java может возвращать данные
+     * как byte[] напрямую или обёрнутые в Variant.
+     */
+    @SuppressWarnings("unchecked")
+    private static byte[] extractByteArray(Variant<?> variant) {
+        if (variant == null) return null;
+        Object val = variant.getValue();
+        if (val instanceof byte[] bytes) return bytes;
+        // dbus-java иногда возвращает List<Byte>
+        if (val instanceof List<?> list) {
+            byte[] result = new byte[list.size()];
+            for (int i = 0; i < list.size(); i++) {
+                Object item = list.get(i);
+                if (item instanceof Number n) {
+                    result[i] = n.byteValue();
+                }
+            }
+            return result;
+        }
+        return null;
+    }
+
+    // ==================== Fallback Polling ====================
+
+    /**
+     * Fallback polling — если уведомления не работают (как на macOS),
+     * периодически проверяет, прошло ли 2с без данных, и пробует ReadValue.
+     */
+    private void startFallbackPolling() {
+        stopFallbackPolling();
+        pollFuture = pollScheduler.scheduleWithFixedDelay(
+                this::fallbackCheck, FALLBACK_CHECK_INTERVAL_MS,
+                FALLBACK_CHECK_INTERVAL_MS, TimeUnit.MILLISECONDS);
+    }
+
+    private void stopFallbackPolling() {
         ScheduledFuture<?> f = pollFuture;
         if (f != null) {
             f.cancel(false);
@@ -466,75 +523,72 @@ public class LinuxBle implements BlePlatform {
         }
     }
 
-    private void triggerDrain() {
-        if (drainInProgress) return;
-        drainInProgress = true;
-        pollFromRadio();
-    }
-
     /**
-     * Читаем fromRadio до пустого ответа (макс 100 итераций).
-     * ReadValue выполняется через gattExecutor с таймаутом 5с —
-     * без этого D-Bus таймаут (25с) блокирует poll-поток.
-     * gattExecutor = CachedThreadPool, поэтому даже если предыдущий ReadValue
-     * ещё висит, новый вызов получит свой поток.
+     * Fallback: если давно не было данных через notifications, пробуем ReadValue.
+     * Один вызов с коротким таймаутом — не блокируем надолго.
      */
-    private void pollFromRadio() {
+    private void fallbackCheck() {
+        if (!connected) return;
+
+        long silence = System.currentTimeMillis() - lastDataReceivedAt;
+        if (silence < FALLBACK_CHECK_INTERVAL_MS) return; // данные приходят через notifications
+
         GattCharacteristic1 fromRadio = fromRadioChar;
-        if (!connected || fromRadio == null) {
-            drainInProgress = false;
-            return;
-        }
+        if (fromRadio == null) return;
+
+        log.debug("fallback: нет данных {}мс, пробуем ReadValue...", silence);
+
         try {
-            for (int i = 0; i < 100; i++) {
-                Future<byte[]> future = gattExecutor.submit(() -> fromRadio.ReadValue(Map.of()));
+            Future<byte[]> future = gattExecutor.submit(() -> fromRadio.ReadValue(Map.of()));
+            byte[] data;
+            try {
+                data = future.get(FALLBACK_READ_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+            } catch (TimeoutException te) {
+                future.cancel(true);
+                log.debug("fallback: ReadValue timeout (это нормально если notifications работают)");
+                return;
+            }
 
-                byte[] data;
-                try {
-                    data = future.get(GATT_TIMEOUT_MS, TimeUnit.MILLISECONDS);
-                } catch (TimeoutException te) {
-                    future.cancel(true);
-                    consecutiveErrors++;
-                    log.warn("Polling fromRadio timeout ({}/{})",
-                            consecutiveErrors, MAX_CONSECUTIVE_ERRORS);
-                    if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
-                        onUnexpectedDisconnect();
-                    }
-                    return;
-                }
-
-                if (data == null || data.length == 0) break;
-
+            if (data != null && data.length > 0) {
+                lastDataReceivedAt = System.currentTimeMillis();
                 consecutiveErrors = 0;
                 Consumer<byte[]> listener = fromRadioListener;
                 if (listener != null) {
                     listener.accept(data);
                 }
+                log.info("fallback: ReadValue вернул {} байт (notifications не работают?)", data.length);
+
+                // Если ReadValue работает, drain оставшиеся данные
+                drainViaReadValue(fromRadio);
             }
         } catch (Exception e) {
             Throwable cause = e instanceof ExecutionException ? e.getCause() : e;
-            consecutiveErrors++;
-            log.warn("Polling fromRadio error ({}/{}): {}",
-                    consecutiveErrors, MAX_CONSECUTIVE_ERRORS,
+            log.debug("fallback: ReadValue error: {}",
                     cause != null ? cause.getMessage() : e.getMessage());
-            if (isFatalBleError(cause instanceof Exception ex ? ex : e)
-                    || consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
-                onUnexpectedDisconnect();
-            }
-        } finally {
-            drainInProgress = false;
         }
     }
 
-    private void scheduleDrainAfterWrite() {
-        pollScheduler.schedule(this::triggerDrain, POLL_INTERVAL_MS, TimeUnit.MILLISECONDS);
+    /**
+     * Вычитывает данные из fromRadio через ReadValue (используется только в fallback).
+     */
+    private void drainViaReadValue(GattCharacteristic1 fromRadio) {
+        try {
+            for (int i = 0; i < 50; i++) {
+                byte[] data = fromRadio.ReadValue(Map.of());
+                if (data == null || data.length == 0) break;
+                lastDataReceivedAt = System.currentTimeMillis();
+                Consumer<byte[]> listener = fromRadioListener;
+                if (listener != null) listener.accept(data);
+            }
+        } catch (Exception e) {
+            log.debug("fallback drain error: {}", e.getMessage());
+        }
     }
 
     // ==================== Internal ====================
 
     /**
      * Пересканирует BlueZ для повторного обнаружения устройства.
-     * Используется при reconnect, когда BlueZ удалил device object после disconnect.
      */
     private Device1 rediscoverDevice(String address, String devPath) throws ConnectionException {
         log.info("rediscoverDevice: запускаем сканирование для {}", address);
@@ -554,7 +608,6 @@ public class LinuxBle implements BlePlatform {
             log.warn("rediscoverDevice: ошибка сканирования: {}", e.getMessage());
         }
 
-        // Проверяем, появилось ли устройство в managed objects
         var objects = objectManager.GetManagedObjects();
         for (var entry : objects.entrySet()) {
             if (entry.getKey().getPath().equals(devPath)) {
@@ -569,9 +622,6 @@ public class LinuxBle implements BlePlatform {
         throw new ConnectionException("Устройство не найдено после пересканирования: " + address);
     }
 
-    /**
-     * Находит путь первого BlueZ-адаптера через GetManagedObjects.
-     */
     private String findAdapterPath() throws DBusException {
         ObjectManager om = dbus.getRemoteObject(BLUEZ_BUS, "/", ObjectManager.class);
         var objects = om.GetManagedObjects();
@@ -586,18 +636,19 @@ public class LinuxBle implements BlePlatform {
 
     private void updateAdapterState() {
         try {
-            Variant<?> powered = adapterProps.Get(ADAPTER_IFACE, "Powered");
-            adapterState = Boolean.TRUE.equals(powered.getValue())
-                    ? AdapterState.POWERED_ON
-                    : AdapterState.POWERED_OFF;
+            Object powered = adapterProps.Get(ADAPTER_IFACE, "Powered");
+            if (Boolean.TRUE.equals(powered)) {
+                adapterState = AdapterState.POWERED_ON;
+            } else if (powered instanceof Variant<?> v && Boolean.TRUE.equals(v.getValue())) {
+                adapterState = AdapterState.POWERED_ON;
+            } else {
+                adapterState = AdapterState.POWERED_OFF;
+            }
         } catch (Exception e) {
             adapterState = AdapterState.UNKNOWN;
         }
     }
 
-    /**
-     * Эмитит устройства, уже известные BlueZ (кэш предыдущих сканов).
-     */
     private void emitCachedDevices() {
         try {
             var objects = objectManager.GetManagedObjects();
@@ -625,11 +676,6 @@ public class LinuxBle implements BlePlatform {
         }
     }
 
-    /**
-     * Эмитит устройство в scanCallback.
-     * UUID-фильтрация не нужна — BlueZ уже фильтрует через SetDiscoveryFilter.
-     * При InterfacesAdded UUIDs часто ещё не заполнены.
-     */
     private void emitDevice(Map<String, Variant<?>> props) {
         Consumer<BleDevice> callback = scanCallback;
         if (callback == null) return;
@@ -654,6 +700,7 @@ public class LinuxBle implements BlePlatform {
 
     /**
      * Находит GATT-характеристики Meshtastic через GetManagedObjects.
+     * Сохраняет пути характеристик для использования в PropertiesChanged handlers.
      */
     private void findGattCharacteristics(String devicePath) {
         try {
@@ -670,13 +717,14 @@ public class LinuxBle implements BlePlatform {
 
                 if (uuid.equalsIgnoreCase(BleConstants.FROM_RADIO_UUID)) {
                     fromRadioChar = dbus.getRemoteObject(BLUEZ_BUS, path, GattCharacteristic1.class);
-                    log.debug("fromRadio характеристика: {}", path);
+                    fromRadioCharPath = path;
+                    log.info("fromRadio характеристика: {}", path);
                 } else if (uuid.equalsIgnoreCase(BleConstants.TO_RADIO_UUID)) {
                     toRadioChar = dbus.getRemoteObject(BLUEZ_BUS, path, GattCharacteristic1.class);
-                    log.debug("toRadio характеристика: {}", path);
+                    log.info("toRadio характеристика: {}", path);
                 } else if (uuid.equalsIgnoreCase(BleConstants.FROM_NUM_UUID)) {
                     fromNumChar = dbus.getRemoteObject(BLUEZ_BUS, path, GattCharacteristic1.class);
-                    log.debug("fromNum характеристика: {}", path);
+                    log.info("fromNum характеристика: {}", path);
                 }
             }
         } catch (DBusException e) {
@@ -687,22 +735,17 @@ public class LinuxBle implements BlePlatform {
     private void onUnexpectedDisconnect() {
         log.warn("BLE соединение разорвано неожиданно");
         connected = false;
-        stopPolling();
+        stopFallbackPolling();
         Consumer<BleState> sl = stateListener;
         if (sl != null) {
             sl.accept(new BleState.Disconnected());
         }
     }
 
-    /** D-Bus объект удалён — повторять бессмысленно (устройство отключилось). */
     private static boolean isObjectGone(Exception e) {
         return e.getClass().getSimpleName().contains("UnknownObject");
     }
 
-    /**
-     * Безусловно фатальная ошибка (повторять нет смысла).
-     * NoReply теперь обрабатывается через счётчик consecutiveErrors.
-     */
     private static boolean isFatalBleError(Exception e) {
         return isObjectGone(e)
                 || e.getClass().getSimpleName().contains("NotConnected")
