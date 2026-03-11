@@ -46,7 +46,7 @@ public class WinBle implements BlePlatform {
     private volatile Consumer<BleState> stateListener;
     private volatile boolean connected;
 
-    // Polling fallback (when notifications unavailable)
+    // Polling (always active — fromRadio notifications unreliable on Windows)
     private final ScheduledExecutorService pollScheduler =
             Executors.newSingleThreadScheduledExecutor(r -> {
                 Thread t = new Thread(r, "ble-win-poll");
@@ -150,11 +150,9 @@ public class WinBle implements BlePlatform {
                 connected = true;
                 log.info("BLE подключено: {}", address);
 
-                // Start polling if notifications are not active
-                if (lib.meshble_notifications_active() == 0) {
-                    log.info("Notifications недоступны, запуск polling ({}ms)", POLL_INTERVAL_MS);
-                    startPolling();
-                }
+                // Always use polling — fromRadio notifications unreliable on Windows
+                log.info("Запуск polling fromRadio ({}ms)", POLL_INTERVAL_MS);
+                startPolling();
             }
             case -1 -> throw new ConnectionException("BLE таймаут подключения: " + address);
             case -2 -> throw new ConnectionException("BLE устройство не найдено: " + address);
