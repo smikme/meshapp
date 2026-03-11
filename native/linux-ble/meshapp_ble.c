@@ -157,6 +157,7 @@ static meshble_state_cb g_state_callback = NULL;
 
 static sd_bus_slot* g_iface_added_slot = NULL;
 static sd_bus_slot* g_props_changed_slot = NULL;
+static sd_bus_slot* g_from_radio_notify_slot = NULL;
 
 /* ==================== Wake + Dispatch ==================== */
 
@@ -408,9 +409,11 @@ static int acquire_notify(sd_bus* bus, const char* char_path, uint16_t* mtu_out)
 
 /* ==================== WriteValue / ReadValue (D-Bus fallback) ==================== */
 
-/** Write data via D-Bus WriteValue (fallback when AcquireWrite not supported) */
-static int dbus_write_value(sd_bus* bus, const char* char_path,
-                             const unsigned char* data, int length) {
+/** Single WriteValue attempt via D-Bus */
+static int dbus_write_value_once(sd_bus* bus, const char* char_path,
+                                  const unsigned char* data, int length,
+                                  int* out_in_progress) {
+    *out_in_progress = 0;
     sd_bus_message* m = NULL;
     int r = sd_bus_message_new_method_call(bus, &m, BLUEZ_BUS, char_path,
                                             CHAR_IFACE, "WriteValue");
@@ -419,7 +422,7 @@ static int dbus_write_value(sd_bus* bus, const char* char_path,
     r = sd_bus_message_append_array(m, 'y', data, length);
     if (r < 0) { sd_bus_message_unref(m); return r; }
 
-    /* Options dict: {"type": "request"} for write-with-response (Meshtastic requires it) */
+    /* Options dict: {"type": "request"} for write-with-response */
     r = sd_bus_message_open_container(m, 'a', "{sv}");
     if (r >= 0) {
         sd_bus_message_open_container(m, 'e', "sv");
@@ -432,8 +435,11 @@ static int dbus_write_value(sd_bus* bus, const char* char_path,
     }
 
     sd_bus_error error = SD_BUS_ERROR_NULL;
-    r = sd_bus_call(bus, m, 5000000, &error, NULL); /* 5s timeout */
+    r = sd_bus_call(bus, m, 5000000, &error, NULL);
     if (r < 0) {
+        if (error.name && strstr(error.name, "InProgress")) {
+            *out_in_progress = 1;
+        }
         log_msg("[meshble] WriteValue failed: %s (%s)", error.message, error.name);
     } else {
         log_msg("[meshble] WriteValue OK (%d bytes)", length);
@@ -441,6 +447,22 @@ static int dbus_write_value(sd_bus* bus, const char* char_path,
     sd_bus_error_free(&error);
     sd_bus_message_unref(m);
     return r < 0 ? -1 : 0;
+}
+
+/** Write data via D-Bus WriteValue with retry on InProgress (Bleak-style) */
+static int dbus_write_value(sd_bus* bus, const char* char_path,
+                             const unsigned char* data, int length) {
+    for (int attempt = 0; attempt < 10; attempt++) {
+        int in_progress = 0;
+        int r = dbus_write_value_once(bus, char_path, data, length, &in_progress);
+        if (r >= 0) return 0;
+        if (!in_progress) return -1; /* real error, not InProgress */
+        /* InProgress — retry after 50ms (like Bleak does with 10ms) */
+        struct timespec ts = { .tv_sec = 0, .tv_nsec = 50000000 };
+        nanosleep(&ts, NULL);
+    }
+    log_msg("[meshble] WriteValue gave up after 10 InProgress retries");
+    return -1;
 }
 
 /** Read data via D-Bus ReadValue (fallback when AcquireNotify not supported) */
@@ -562,6 +584,36 @@ static int on_device_props_changed(sd_bus_message* msg, void* userdata, sd_bus_e
                 int* flag = (int*)userdata;
                 *flag = 1;
             }
+        } else {
+            sd_bus_message_skip(msg, "v");
+        }
+        sd_bus_message_exit_container(msg);
+    }
+    return 0;
+}
+
+/** PropertiesChanged handler for fromRadio characteristic — receives GATT notification data */
+static int on_from_radio_changed(sd_bus_message* msg, void* userdata, sd_bus_error* err) {
+    (void)userdata; (void)err;
+    const char* iface = NULL;
+    sd_bus_message_read(msg, "s", &iface);
+    if (!iface || strcmp(iface, CHAR_IFACE) != 0) return 0;
+
+    sd_bus_message_enter_container(msg, 'a', "{sv}");
+    while (sd_bus_message_enter_container(msg, 'e', "sv") > 0) {
+        const char* pname = NULL;
+        sd_bus_message_read(msg, "s", &pname);
+
+        if (pname && strcmp(pname, "Value") == 0) {
+            sd_bus_message_enter_container(msg, 'v', "ay");
+            const void* data = NULL;
+            size_t data_len = 0;
+            if (sd_bus_message_read_array(msg, 'y', &data, &data_len) >= 0 && data_len > 0) {
+                log_msg("[meshble] fromRadio notify: %d bytes", (int)data_len);
+                meshble_data_cb cb = g_data_callback;
+                if (cb) cb((const unsigned char*)data, (int)data_len);
+            }
+            sd_bus_message_exit_container(msg);
         } else {
             sd_bus_message_skip(msg, "v");
         }
@@ -732,6 +784,7 @@ static void do_disconnect(void) {
     if (g_from_radio_fd >= 0) { close(g_from_radio_fd); g_from_radio_fd = -1; }
     if (g_to_radio_fd >= 0) { close(g_to_radio_fd); g_to_radio_fd = -1; }
 
+    if (g_from_radio_notify_slot) { sd_bus_slot_unref(g_from_radio_notify_slot); g_from_radio_notify_slot = NULL; }
     if (g_props_changed_slot) { sd_bus_slot_unref(g_props_changed_slot); g_props_changed_slot = NULL; }
 
     if (g_device_path[0] && g_bus) {
@@ -937,32 +990,48 @@ static void do_connect(void* arg) {
         return;
     }
 
-    /* Use D-Bus WriteValue directly — AcquireWrite returns "NotSupported" on this device
-       and attempting it can leave BlueZ in a bad state */
-    log_msg("[meshble] Using WriteValue for toRadio");
+    /* toRadio: WriteValue with retry */
+    log_msg("[meshble] Using WriteValue for toRadio: %s", g_to_radio_char_path);
     atomic_store(&g_use_dbus_write, true);
     g_to_radio_fd = -1;
 
-    /* Use D-Bus ReadValue directly — AcquireNotify returns "NotSupported" but leaves
-       BlueZ in a state where ReadValue returns "InProgress" forever */
-    log_msg("[meshble] Using ReadValue for fromRadio");
-    atomic_store(&g_use_dbus_read, true);
+    /* fromRadio: StartNotify + PropertiesChanged signals.
+       ReadValue returns "InProgress" because BlueZ has notifications active
+       (auto-cached or characteristic has notify flag). Use notifications instead. */
+    log_msg("[meshble] Using StartNotify for fromRadio: %s", g_from_radio_char_path);
+    atomic_store(&g_use_dbus_read, false); /* not using ReadValue polling */
     g_from_radio_fd = -1;
 
-    /* Diagnostic: test ReadValue directly on worker thread right after connect */
-    log_msg("[meshble] Testing ReadValue on fromRadio: %s", g_from_radio_char_path);
-    log_msg("[meshble] Testing WriteValue on toRadio: %s", g_to_radio_char_path);
+    /* Subscribe to PropertiesChanged on fromRadio characteristic path */
+    r = sd_bus_match_signal(g_bus, &g_from_radio_notify_slot,
+                            BLUEZ_BUS, g_from_radio_char_path,
+                            PROPS_IFACE, "PropertiesChanged",
+                            on_from_radio_changed, NULL);
+    if (r < 0) {
+        log_msg("[meshble] Failed to subscribe fromRadio PropertiesChanged: %s", strerror(-r));
+        do_disconnect();
+        ctx->result = -3;
+        return;
+    }
+    log_msg("[meshble] Subscribed to fromRadio PropertiesChanged");
+
+    /* Call StartNotify on fromRadio to enable GATT notifications */
     {
-        unsigned char test_buf[512];
-        int test_len = 0;
-        int test_r = dbus_read_value(g_bus, g_from_radio_char_path,
-                                      test_buf, sizeof(test_buf), &test_len);
-        log_msg("[meshble] Test ReadValue: r=%d len=%d", test_r, test_len);
+        sd_bus_error sn_err = SD_BUS_ERROR_NULL;
+        r = sd_bus_call_method(g_bus, BLUEZ_BUS, g_from_radio_char_path,
+                               CHAR_IFACE, "StartNotify", &sn_err, NULL, "");
+        if (r < 0) {
+            log_msg("[meshble] StartNotify(fromRadio): %s (%s)", sn_err.message, sn_err.name);
+            /* Not fatal — notifications might already be active (cached) */
+        } else {
+            log_msg("[meshble] StartNotify(fromRadio) OK");
+        }
+        sd_bus_error_free(&sn_err);
     }
 
     atomic_store(&g_connected, true);
-    atomic_store(&g_notifications_active, false);
-    log_msg("[meshble] Connected (write=WriteValue read=ReadValue)");
+    atomic_store(&g_notifications_active, true);
+    log_msg("[meshble] Connected (write=WriteValue, read=notify)");
 
     if (g_state_callback) g_state_callback(0, NULL);
     ctx->result = 0;
@@ -1227,8 +1296,13 @@ MESHBLE_API int meshble_read_from_radio(unsigned char* buffer, int buf_size, int
     if (!atomic_load(&g_connected) || !buffer || !out_len) return -1;
     *out_len = 0;
 
+    /* When using notifications (g_notifications_active=true), data arrives via
+       g_data_callback from on_from_radio_changed. Polling returns "no data". */
+    if (atomic_load(&g_notifications_active)) {
+        return 0; /* no data from polling — notifications deliver data directly */
+    }
+
     if (atomic_load(&g_use_dbus_read)) {
-        /* D-Bus ReadValue — dispatch to worker thread */
         read_ctx_t ctx = { .buffer = buffer, .buf_size = buf_size, .out_len = 0, .result = 0 };
         run_on_worker(do_read_from_radio, &ctx);
         *out_len = ctx.out_len;
@@ -1236,7 +1310,7 @@ MESHBLE_API int meshble_read_from_radio(unsigned char* buffer, int buf_size, int
     }
 
     int fd = g_from_radio_fd;
-    if (fd < 0) return -1;
+    if (fd < 0) return 0; /* no fd, no data */
     ssize_t n = read(fd, buffer, buf_size);
     if (n < 0) {
         if (errno == EAGAIN || errno == EWOULDBLOCK) return 0;
