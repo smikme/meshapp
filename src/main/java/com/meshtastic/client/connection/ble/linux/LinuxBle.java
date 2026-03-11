@@ -156,6 +156,10 @@ public class LinuxBle implements BlePlatform {
 
     @Override
     public void connect(String address) throws ConnectionException {
+        // Чистим старые хэндлеры от предыдущего подключения (reconnect-safe)
+        closeQuietly(devicePropsHandler);
+        devicePropsHandler = null;
+
         String devPath = adapterPath + "/dev_" + address.replace(':', '_');
         log.info("Подключение к BLE устройству: {} ({})", address, devPath);
 
@@ -168,10 +172,8 @@ public class LinuxBle implements BlePlatform {
             throw new ConnectionException("BLE устройство не найдено: " + address);
         }
 
-        // Лatch для ожидания ServicesResolved
+        // Latch для ожидания ServicesResolved
         CountDownLatch servicesLatch = new CountDownLatch(1);
-        // Лatch для ожидания Connected
-        CountDownLatch connectLatch = new CountDownLatch(1);
 
         // Следим за PropertiesChanged на устройстве (без source object —
         // тот же паттерн что и для InterfacesAdded, фильтруем по path в хендлере)
@@ -184,7 +186,7 @@ public class LinuxBle implements BlePlatform {
                         if (!devPath.equals(signal.getPath())) return;
                         if (!DEVICE_IFACE.equals(signal.getInterfaceName())) return;
                         Map<String, Variant<?>> changed = signal.getPropertiesChanged();
-                        if (changed == null) return;
+                        if (changed == null || changed.isEmpty()) return;
 
                         log.debug("PropertiesChanged ({}): {}", devPath, changed.keySet());
 
@@ -192,16 +194,14 @@ public class LinuxBle implements BlePlatform {
                         if (connVar != null) {
                             boolean conn = Boolean.TRUE.equals(connVar.getValue());
                             log.info("connect: Connected={}", conn);
-                            if (conn) {
-                                connectLatch.countDown();
-                            } else if (connected) {
+                            if (!conn && connected) {
                                 onUnexpectedDisconnect();
                             }
                         }
 
                         Variant<?> srvVar = changed.get("ServicesResolved");
                         if (srvVar != null && Boolean.TRUE.equals(srvVar.getValue())) {
-                            log.info("connect: ServicesResolved=true");
+                            log.info("connect: ServicesResolved=true (сигнал)");
                             servicesLatch.countDown();
                         }
                     });
@@ -219,6 +219,7 @@ public class LinuxBle implements BlePlatform {
                 log.info("connect: устройство удалено из BlueZ, пересканируем...");
                 try {
                     device = rediscoverDevice(address, devPath);
+                    deviceProps = dbus.getRemoteObject(BLUEZ_BUS, devPath, Properties.class);
                     device.Connect();
                     log.info("connect: Device1.Connect() после rediscovery вернулся");
                 } catch (Exception e2) {
@@ -233,7 +234,8 @@ public class LinuxBle implements BlePlatform {
             }
         }
 
-        // Проверяем — может ServicesResolved уже true (устройство было подключено ранее)
+        // Device1.Connect() в BlueZ блокирует до завершения ACL-подключения.
+        // ServicesResolved может уже быть true к этому моменту (пришёл сигнал или кэш).
         try {
             Variant<?> resolved = deviceProps.Get(DEVICE_IFACE, "ServicesResolved");
             log.info("connect: ServicesResolved текущее значение: {}", resolved.getValue());
@@ -244,22 +246,29 @@ public class LinuxBle implements BlePlatform {
             log.debug("connect: не удалось прочитать ServicesResolved: {}", e.getMessage());
         }
 
-        log.info("connect: ждём ServicesResolved (таймаут {}мс)...", BleConstants.CONNECT_TIMEOUT_MS);
-        try {
-            if (!servicesLatch.await(BleConstants.CONNECT_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
-                log.error("connect: ТАЙМАУТ ServicesResolved для {}", address);
+        // Ждём ServicesResolved если ещё не true
+        if (servicesLatch.getCount() > 0) {
+            log.info("connect: ждём ServicesResolved (таймаут {}мс)...", BleConstants.CONNECT_TIMEOUT_MS);
+            try {
+                if (!servicesLatch.await(BleConstants.CONNECT_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
+                    log.error("connect: ТАЙМАУТ ServicesResolved для {}", address);
+                    closeQuietly(propsHandler);
+                    try { device.Disconnect(); } catch (Exception ignored) {}
+                    throw new ConnectionException("Таймаут обнаружения GATT-сервисов: " + address);
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
                 closeQuietly(propsHandler);
-                try { device.Disconnect(); } catch (Exception ignored) {}
-                throw new ConnectionException("Таймаут обнаружения GATT-сервисов: " + address);
+                throw new ConnectionException("Прервано при подключении: " + address);
             }
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            closeQuietly(propsHandler);
-            throw new ConnectionException("Прервано при подключении: " + address);
+        } else {
+            log.info("connect: ServicesResolved уже true, пропускаем ожидание");
         }
 
         // Ищем GATT-характеристики
         findGattCharacteristics(devPath);
+        log.info("connect: fromRadio={}, toRadio={}, fromNum={}",
+                fromRadioChar != null, toRadioChar != null, fromNumChar != null);
 
         if (toRadioChar == null || fromRadioChar == null) {
             closeQuietly(propsHandler);
