@@ -266,11 +266,8 @@ public class LinuxBle implements BlePlatform {
         devicePropsHandler = propsHandler;
         connected = true;
 
-        // Initial drain
-        pollFromRadio();
-
-        // Start polling
-        startPolling();
+        // Start polling с задержкой — дать BlueZ/устройству время подготовиться
+        startPolling(500);
         log.info("BLE подключено: {}", address);
     }
 
@@ -316,7 +313,10 @@ public class LinuxBle implements BlePlatform {
             log.debug("Отправлено {} байт в toRadio", protobufPayload.length);
             scheduleDrainAfterWrite();
         } catch (Exception e) {
-            log.error("writeToRadio failed", e);
+            log.error("writeToRadio failed: {}", e.getMessage());
+            if (isFatalBleError(e)) {
+                onUnexpectedDisconnect();
+            }
         }
     }
 
@@ -349,9 +349,13 @@ public class LinuxBle implements BlePlatform {
     // ==================== Polling ====================
 
     private void startPolling() {
+        startPolling(0);
+    }
+
+    private void startPolling(int initialDelayMs) {
         stopPolling();
         pollFuture = pollScheduler.scheduleWithFixedDelay(
-                this::triggerDrain, 0, POLL_INTERVAL_MS, TimeUnit.MILLISECONDS);
+                this::triggerDrain, initialDelayMs, POLL_INTERVAL_MS, TimeUnit.MILLISECONDS);
     }
 
     private void stopPolling() {
@@ -389,7 +393,10 @@ public class LinuxBle implements BlePlatform {
                 }
             }
         } catch (Exception e) {
-            log.warn("Polling fromRadio error", e);
+            log.warn("Polling fromRadio error: {}", e.getMessage());
+            if (isFatalBleError(e)) {
+                onUnexpectedDisconnect();
+            }
         } finally {
             drainInProgress = false;
         }
@@ -524,6 +531,16 @@ public class LinuxBle implements BlePlatform {
         if (sl != null) {
             sl.accept(new BleState.Disconnected());
         }
+    }
+
+    /**
+     * Определяет, является ли D-Bus ошибка фатальной для BLE-соединения.
+     * NoReply — таймаут (устройство не отвечает), UnknownObject — характеристики удалены.
+     */
+    private static boolean isFatalBleError(Exception e) {
+        String name = e.getClass().getSimpleName();
+        return name.contains("NoReply") || name.contains("UnknownObject")
+                || name.contains("NotConnected") || name.contains("NotPermitted");
     }
 
     private static String getStringProp(Map<String, Variant<?>> props, String key) {
