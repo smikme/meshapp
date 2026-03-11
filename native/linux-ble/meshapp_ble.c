@@ -275,11 +275,15 @@ static int find_gatt_characteristics(sd_bus* bus, const char* device_path) {
     int r = sd_bus_call_method(bus, BLUEZ_BUS, "/",
                                OBJMGR_IFACE, "GetManagedObjects",
                                NULL, &reply, "");
-    if (r < 0) return r;
+    if (r < 0) {
+        log_msg("[meshble] GetManagedObjects failed: %s", strerror(-r));
+        return r;
+    }
 
     r = sd_bus_message_enter_container(reply, 'a', "{oa{sa{sv}}}");
     if (r < 0) goto done;
 
+    int dev_objects = 0;
     while (sd_bus_message_enter_container(reply, 'e', "oa{sa{sv}}") > 0) {
         const char* path = NULL;
         sd_bus_message_read(reply, "o", &path);
@@ -288,6 +292,12 @@ static int find_gatt_characteristics(sd_bus* bus, const char* device_path) {
             sd_bus_message_skip(reply, "a{sa{sv}}");
             sd_bus_message_exit_container(reply);
             continue;
+        }
+
+        dev_objects++;
+        /* Log every object under device path for diagnostics */
+        if (strcmp(path, device_path) != 0) {
+            log_msg("[meshble] D-Bus object: %s", path);
         }
 
         sd_bus_message_enter_container(reply, 'a', "{sa{sv}}");
@@ -332,6 +342,9 @@ static int find_gatt_characteristics(sd_bus* bus, const char* device_path) {
 
 done:
     sd_bus_message_unref(reply);
+    if (dev_objects <= 1) {
+        log_msg("[meshble] No GATT objects under %s (only device itself)", device_path);
+    }
     return (g_from_radio_char_path[0] && g_to_radio_char_path[0]) ? 0 : -ENOENT;
 }
 
@@ -830,15 +843,24 @@ static void do_connect(void* arg) {
         return;
     }
 
-    /* Wait for ServicesResolved (should already be true after bluetoothctl) */
+    /* Check ServicesResolved immediately */
+    int sr_val = 0;
+    int sr_r = get_bool_prop(g_bus, g_device_path, DEVICE_IFACE, "ServicesResolved", &sr_val);
+    log_msg("[meshble] ServicesResolved after sync: r=%d val=%d", sr_r, sr_val);
+
+    /* Wait for ServicesResolved / GATT (should already be true after bluetoothctl) */
     int64_t deadline = now_ms() + 10000;
     int gatt_found = 0;
+    int loop_count = 0;
     while (now_ms() < deadline) {
         while (sd_bus_process(g_bus, NULL) > 0) {}
 
         int resolved = 0;
-        if (get_bool_prop(g_bus, g_device_path, DEVICE_IFACE, "ServicesResolved", &resolved) >= 0
-            && resolved) {
+        int rr = get_bool_prop(g_bus, g_device_path, DEVICE_IFACE, "ServicesResolved", &resolved);
+        if (loop_count % 5 == 0) {
+            log_msg("[meshble] Poll #%d: ServicesResolved r=%d val=%d", loop_count, rr, resolved);
+        }
+        if (rr >= 0 && resolved) {
             log_msg("[meshble] ServicesResolved=true");
             break;
         }
@@ -849,6 +871,7 @@ static void do_connect(void* arg) {
             break;
         }
 
+        loop_count++;
         usleep(200000); /* 200ms */
     }
 
