@@ -419,13 +419,13 @@ static int dbus_write_value(sd_bus* bus, const char* char_path,
     r = sd_bus_message_append_array(m, 'y', data, length);
     if (r < 0) { sd_bus_message_unref(m); return r; }
 
-    /* Options dict: {"type": "command"} for write-without-response */
+    /* Options dict: {"type": "request"} for write-with-response (Meshtastic requires it) */
     r = sd_bus_message_open_container(m, 'a', "{sv}");
     if (r >= 0) {
         sd_bus_message_open_container(m, 'e', "sv");
         sd_bus_message_append(m, "s", "type");
         sd_bus_message_open_container(m, 'v', "s");
-        sd_bus_message_append(m, "s", "command");
+        sd_bus_message_append(m, "s", "request");
         sd_bus_message_close_container(m);
         sd_bus_message_close_container(m);
         sd_bus_message_close_container(m);
@@ -434,7 +434,9 @@ static int dbus_write_value(sd_bus* bus, const char* char_path,
     sd_bus_error error = SD_BUS_ERROR_NULL;
     r = sd_bus_call(bus, m, 5000000, &error, NULL); /* 5s timeout */
     if (r < 0) {
-        log_msg("[meshble] WriteValue failed: %s", error.message);
+        log_msg("[meshble] WriteValue failed: %s (%s)", error.message, error.name);
+    } else {
+        log_msg("[meshble] WriteValue OK (%d bytes)", length);
     }
     sd_bus_error_free(&error);
     sd_bus_message_unref(m);
@@ -460,6 +462,7 @@ static int dbus_read_value(sd_bus* bus, const char* char_path,
     r = sd_bus_call(bus, m, 5000000, &error, &reply);
     sd_bus_message_unref(m);
     if (r < 0) {
+        log_msg("[meshble] ReadValue failed: %s (%s)", error.message, error.name);
         sd_bus_error_free(&error);
         return -1;
     }
@@ -472,6 +475,7 @@ static int dbus_read_value(sd_bus* bus, const char* char_path,
         int copy = (int)data_len < buf_size ? (int)data_len : buf_size;
         memcpy(buffer, data, copy);
         *out_len = copy;
+        log_msg("[meshble] ReadValue OK: %d bytes", copy);
     }
     sd_bus_message_unref(reply);
     return 0;
@@ -952,8 +956,15 @@ static void do_connect(void* arg) {
     }
 
     if (g_from_num_char_path[0]) {
-        sd_bus_call_method(g_bus, BLUEZ_BUS, g_from_num_char_path,
-                           CHAR_IFACE, "StartNotify", NULL, NULL, "");
+        sd_bus_error sn_err = SD_BUS_ERROR_NULL;
+        r = sd_bus_call_method(g_bus, BLUEZ_BUS, g_from_num_char_path,
+                               CHAR_IFACE, "StartNotify", &sn_err, NULL, "");
+        if (r < 0) {
+            log_msg("[meshble] StartNotify(fromNum) failed: %s", sn_err.message);
+        } else {
+            log_msg("[meshble] StartNotify(fromNum) OK");
+        }
+        sd_bus_error_free(&sn_err);
     }
 
     atomic_store(&g_connected, true);
