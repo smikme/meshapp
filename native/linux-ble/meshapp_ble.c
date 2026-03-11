@@ -465,9 +465,9 @@ static int dbus_write_value(sd_bus* bus, const char* char_path,
     return -1;
 }
 
-/** Read data via D-Bus ReadValue (fallback when AcquireNotify not supported) */
-static int dbus_read_value(sd_bus* bus, const char* char_path,
-                            unsigned char* buffer, int buf_size, int* out_len) {
+/** Single ReadValue attempt via D-Bus */
+static int dbus_read_value_once(sd_bus* bus, const char* char_path,
+                                 unsigned char* buffer, int buf_size, int* out_len) {
     *out_len = 0;
 
     sd_bus_message* m = NULL;
@@ -484,9 +484,12 @@ static int dbus_read_value(sd_bus* bus, const char* char_path,
     r = sd_bus_call(bus, m, 1000000, &error, &reply); /* 1s timeout */
     sd_bus_message_unref(m);
     if (r < 0) {
-        log_msg("[meshble] ReadValue failed: %s (%s)", error.message, error.name);
+        int is_in_progress = (error.name && strstr(error.name, "InProgress"));
+        if (!is_in_progress) {
+            log_msg("[meshble] ReadValue failed: %s (%s)", error.message, error.name);
+        }
         sd_bus_error_free(&error);
-        return -1;
+        return is_in_progress ? -2 : -1;
     }
     sd_bus_error_free(&error);
 
@@ -501,6 +504,24 @@ static int dbus_read_value(sd_bus* bus, const char* char_path,
     }
     sd_bus_message_unref(reply);
     return 0;
+}
+
+/** Read data via D-Bus ReadValue with retry on InProgress */
+static int dbus_read_value(sd_bus* bus, const char* char_path,
+                            unsigned char* buffer, int buf_size, int* out_len) {
+    *out_len = 0;
+    int r = dbus_read_value_once(bus, char_path, buffer, buf_size, out_len);
+    if (r != -2) return r; /* not InProgress — return immediately */
+
+    /* InProgress — retry a few times */
+    for (int attempt = 1; attempt < 5; attempt++) {
+        struct timespec ts = { .tv_sec = 0, .tv_nsec = 50000000 };
+        nanosleep(&ts, NULL);
+        r = dbus_read_value_once(bus, char_path, buffer, buf_size, out_len);
+        if (r != -2) return r;
+    }
+    log_msg("[meshble] ReadValue InProgress after retries");
+    return -1;
 }
 
 /* ==================== Signal Handlers (worker thread) ==================== */
@@ -990,48 +1011,19 @@ static void do_connect(void* arg) {
         return;
     }
 
-    /* toRadio: WriteValue with retry */
+    /* toRadio: WriteValue with retry on InProgress */
     log_msg("[meshble] Using WriteValue for toRadio: %s", g_to_radio_char_path);
     atomic_store(&g_use_dbus_write, true);
     g_to_radio_fd = -1;
 
-    /* fromRadio: StartNotify + PropertiesChanged signals.
-       ReadValue returns "InProgress" because BlueZ has notifications active
-       (auto-cached or characteristic has notify flag). Use notifications instead. */
-    log_msg("[meshble] Using StartNotify for fromRadio: %s", g_from_radio_char_path);
-    atomic_store(&g_use_dbus_read, false); /* not using ReadValue polling */
+    /* fromRadio: ReadValue polling (now works after pairing) */
+    log_msg("[meshble] Using ReadValue for fromRadio: %s", g_from_radio_char_path);
+    atomic_store(&g_use_dbus_read, true);
     g_from_radio_fd = -1;
 
-    /* Subscribe to PropertiesChanged on fromRadio characteristic path */
-    r = sd_bus_match_signal(g_bus, &g_from_radio_notify_slot,
-                            BLUEZ_BUS, g_from_radio_char_path,
-                            PROPS_IFACE, "PropertiesChanged",
-                            on_from_radio_changed, NULL);
-    if (r < 0) {
-        log_msg("[meshble] Failed to subscribe fromRadio PropertiesChanged: %s", strerror(-r));
-        do_disconnect();
-        ctx->result = -3;
-        return;
-    }
-    log_msg("[meshble] Subscribed to fromRadio PropertiesChanged");
-
-    /* Call StartNotify on fromRadio to enable GATT notifications */
-    {
-        sd_bus_error sn_err = SD_BUS_ERROR_NULL;
-        r = sd_bus_call_method(g_bus, BLUEZ_BUS, g_from_radio_char_path,
-                               CHAR_IFACE, "StartNotify", &sn_err, NULL, "");
-        if (r < 0) {
-            log_msg("[meshble] StartNotify(fromRadio): %s (%s)", sn_err.message, sn_err.name);
-            /* Not fatal — notifications might already be active (cached) */
-        } else {
-            log_msg("[meshble] StartNotify(fromRadio) OK");
-        }
-        sd_bus_error_free(&sn_err);
-    }
-
     atomic_store(&g_connected, true);
-    atomic_store(&g_notifications_active, true);
-    log_msg("[meshble] Connected (write=WriteValue, read=notify)");
+    atomic_store(&g_notifications_active, false);
+    log_msg("[meshble] Connected (write=WriteValue, read=ReadValue)");
 
     if (g_state_callback) g_state_callback(0, NULL);
     ctx->result = 0;
@@ -1295,12 +1287,6 @@ MESHBLE_API int meshble_write_to_radio(const unsigned char* data, int length) {
 MESHBLE_API int meshble_read_from_radio(unsigned char* buffer, int buf_size, int* out_len) {
     if (!atomic_load(&g_connected) || !buffer || !out_len) return -1;
     *out_len = 0;
-
-    /* When using notifications (g_notifications_active=true), data arrives via
-       g_data_callback from on_from_radio_changed. Polling returns "no data". */
-    if (atomic_load(&g_notifications_active)) {
-        return 0; /* no data from polling — notifications deliver data directly */
-    }
 
     if (atomic_load(&g_use_dbus_read)) {
         read_ctx_t ctx = { .buffer = buffer, .buf_size = buf_size, .out_len = 0, .result = 0 };
