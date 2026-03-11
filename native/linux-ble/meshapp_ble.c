@@ -459,7 +459,7 @@ static int dbus_read_value(sd_bus* bus, const char* char_path,
 
     sd_bus_message* reply = NULL;
     sd_bus_error error = SD_BUS_ERROR_NULL;
-    r = sd_bus_call(bus, m, 5000000, &error, &reply);
+    r = sd_bus_call(bus, m, 1000000, &error, &reply); /* 1s timeout */
     sd_bus_message_unref(m);
     if (r < 0) {
         log_msg("[meshble] ReadValue failed: %s (%s)", error.message, error.name);
@@ -947,17 +947,20 @@ static void do_connect(void* arg) {
     atomic_store(&g_use_dbus_read, true);
     g_from_radio_fd = -1;
 
-    /* StartNotify on fromNum temporarily disabled — testing if it causes
-       ReadValue "InProgress" on fromRadio */
-    if (g_from_num_char_path[0]) {
-        log_msg("[meshble] Skipping StartNotify(fromNum) — diagnostic test");
+    /* Diagnostic: test ReadValue directly on worker thread right after connect */
+    log_msg("[meshble] Testing ReadValue on fromRadio: %s", g_from_radio_char_path);
+    log_msg("[meshble] Testing WriteValue on toRadio: %s", g_to_radio_char_path);
+    {
+        unsigned char test_buf[512];
+        int test_len = 0;
+        int test_r = dbus_read_value(g_bus, g_from_radio_char_path,
+                                      test_buf, sizeof(test_buf), &test_len);
+        log_msg("[meshble] Test ReadValue: r=%d len=%d", test_r, test_len);
     }
 
     atomic_store(&g_connected, true);
-    atomic_store(&g_notifications_active, g_from_radio_fd >= 0);
-    log_msg("[meshble] Connected (write=%s read=%s)",
-            atomic_load(&g_use_dbus_write) ? "WriteValue" : "fd",
-            atomic_load(&g_use_dbus_read) ? "ReadValue" : "fd");
+    atomic_store(&g_notifications_active, false);
+    log_msg("[meshble] Connected (write=WriteValue read=ReadValue)");
 
     if (g_state_callback) g_state_callback(0, NULL);
     ctx->result = 0;
