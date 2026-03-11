@@ -90,6 +90,11 @@ public interface LinuxBleLibrary extends Library {
     /** Установка слушателя изменений состояния подключения. */
     void meshble_set_state_listener(StateCallback callback);
 
+    // ==================== Logging ====================
+
+    /** Установка callback для нативных лог-сообщений. */
+    void meshble_set_log_callback(LogCallback callback);
+
     // ==================== Info ====================
 
     /** @return 1 если notifications активны, 0 если polling */
@@ -117,5 +122,12 @@ public interface LinuxBleLibrary extends Library {
      */
     interface StateCallback extends Callback {
         void callback(int state, String errorMsg);
+    }
+
+    /**
+     * Callback для нативных лог-сообщений (перенаправление в SLF4J).
+     */
+    interface LogCallback extends Callback {
+        void invoke(String message);
     }
 }

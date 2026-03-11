@@ -118,6 +118,14 @@ typedef void (*meshble_state_cb)(int state, const char* error_msg);
 /** Set listener for connection state changes. */
 MESHBLE_API void meshble_set_state_listener(meshble_state_cb callback);
 
+/* ==================== Logging ==================== */
+
+/** Callback for native log messages (forwarded to Java SLF4J). */
+typedef void (*meshble_log_cb)(const char* message);
+
+/** Set log callback. If set, log_msg() calls this in addition to stderr. */
+MESHBLE_API void meshble_set_log_callback(meshble_log_cb callback);
+
 /* ==================== Info ==================== */
 
 /**

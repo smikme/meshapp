@@ -45,12 +45,17 @@
 
 /* ==================== Logging ==================== */
 
+static meshble_log_cb g_log_callback = NULL;
+
 static void log_msg(const char* fmt, ...) {
+    char buf[1024];
     va_list args;
     va_start(args, fmt);
-    vfprintf(stderr, fmt, args);
+    vsnprintf(buf, sizeof(buf), fmt, args);
     va_end(args);
-    fputc('\n', stderr);
+    meshble_log_cb cb = g_log_callback;
+    if (cb) cb(buf);
+    fprintf(stderr, "%s\n", buf);
     fflush(stderr);
 }
 
@@ -180,6 +185,8 @@ static void run_on_worker(void (*func)(void* ctx), void* ctx) {
 
 /* ==================== Helpers ==================== */
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wformat-truncation"
 static void make_device_path(const char* adapter, const char* address, char* out, size_t outsize) {
     char addr_underscored[18];
     strncpy(addr_underscored, address, sizeof(addr_underscored) - 1);
@@ -189,6 +196,7 @@ static void make_device_path(const char* adapter, const char* address, char* out
     int n = snprintf(out, outsize, "%s/dev_%s", adapter, addr_underscored);
     if (n < 0 || (size_t)n >= outsize) out[0] = '\0';
 }
+#pragma GCC diagnostic pop
 
 static int64_t now_ms(void) {
     struct timespec ts;
@@ -752,15 +760,21 @@ static void do_connect(void* arg) {
                         on_device_props_changed, (void*)&services_resolved);
 
     sd_bus_error error = SD_BUS_ERROR_NULL;
-    int r = sd_bus_call_method(g_bus, BLUEZ_BUS, g_device_path,
-                               DEVICE_IFACE, "Connect",
-                               &error, NULL, "");
+    sd_bus_message* conn_msg = NULL;
+    int r = sd_bus_message_new_method_call(g_bus, &conn_msg, BLUEZ_BUS, g_device_path,
+                                            DEVICE_IFACE, "Connect");
+    if (r >= 0) {
+        r = sd_bus_call(g_bus, conn_msg, (uint64_t)ctx->timeout_ms * 1000, &error, NULL);
+        sd_bus_message_unref(conn_msg);
+    }
     if (r < 0) {
         log_msg("[meshble] Connect failed: %s (%s)", error.message, error.name);
         int is_gone = (error.name && strstr(error.name, "UnknownObject"));
+        int is_denied = (error.name && (strstr(error.name, "AccessDenied") ||
+                                         strstr(error.name, "AuthenticationFailed")));
         sd_bus_error_free(&error);
         do_disconnect();
-        ctx->result = is_gone ? -2 : -3;
+        ctx->result = is_gone ? -2 : (is_denied ? -4 : -3);
         return;
     }
     sd_bus_error_free(&error);
@@ -991,4 +1005,8 @@ MESHBLE_API void meshble_set_state_listener(meshble_state_cb callback) {
 
 MESHBLE_API int meshble_notifications_active(void) {
     return atomic_load(&g_notifications_active) ? 1 : 0;
+}
+
+MESHBLE_API void meshble_set_log_callback(meshble_log_cb callback) {
+    g_log_callback = callback;
 }

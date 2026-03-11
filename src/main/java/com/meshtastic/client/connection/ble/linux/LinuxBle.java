@@ -37,6 +37,7 @@ public class LinuxBle implements BlePlatform {
     private final LinuxBleLibrary lib;
 
     // Static JNA callbacks — prevent GC (same pattern as WinBle/MacOsBle)
+    private static LinuxBleLibrary.LogCallback logCallback;
     private static LinuxBleLibrary.DeviceCallback scanCallback;
     private static LinuxBleLibrary.DataCallback dataCallback;
     private static LinuxBleLibrary.StateCallback stateCallback;
@@ -70,6 +71,11 @@ public class LinuxBle implements BlePlatform {
         if (result != 0) {
             throw new RuntimeException("BlueZ BLE инициализация не удалась: error=" + result);
         }
+
+        // Forward native log_msg() to SLF4J (static callback = GC protection)
+        logCallback = msg -> log.debug("[native] {}", msg);
+        lib.meshble_set_log_callback(logCallback);
+
         log.info("BlueZ BLE инициализирован (нативная библиотека)");
     }
 
