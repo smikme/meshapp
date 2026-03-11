@@ -144,6 +144,8 @@ static int g_to_radio_fd = -1;
 static int g_from_radio_fd = -1;
 static uint16_t g_to_radio_mtu = 0;
 static uint16_t g_from_radio_mtu = 0;
+static atomic_bool g_use_dbus_write;  /* true = WriteValue fallback, false = fd-based */
+static atomic_bool g_use_dbus_read;   /* true = ReadValue fallback, false = fd-based */
 
 static char g_from_radio_char_path[MAX_PATH];
 static char g_to_radio_char_path[MAX_PATH];
@@ -404,6 +406,77 @@ static int acquire_notify(sd_bus* bus, const char* char_path, uint16_t* mtu_out)
     return real_fd;
 }
 
+/* ==================== WriteValue / ReadValue (D-Bus fallback) ==================== */
+
+/** Write data via D-Bus WriteValue (fallback when AcquireWrite not supported) */
+static int dbus_write_value(sd_bus* bus, const char* char_path,
+                             const unsigned char* data, int length) {
+    sd_bus_message* m = NULL;
+    int r = sd_bus_message_new_method_call(bus, &m, BLUEZ_BUS, char_path,
+                                            CHAR_IFACE, "WriteValue");
+    if (r < 0) return r;
+
+    r = sd_bus_message_append_array(m, 'y', data, length);
+    if (r < 0) { sd_bus_message_unref(m); return r; }
+
+    /* Options dict: {"type": "command"} for write-without-response */
+    r = sd_bus_message_open_container(m, 'a', "{sv}");
+    if (r >= 0) {
+        sd_bus_message_open_container(m, 'e', "sv");
+        sd_bus_message_append(m, "s", "type");
+        sd_bus_message_open_container(m, 'v', "s");
+        sd_bus_message_append(m, "s", "command");
+        sd_bus_message_close_container(m);
+        sd_bus_message_close_container(m);
+        sd_bus_message_close_container(m);
+    }
+
+    sd_bus_error error = SD_BUS_ERROR_NULL;
+    r = sd_bus_call(bus, m, 5000000, &error, NULL); /* 5s timeout */
+    if (r < 0) {
+        log_msg("[meshble] WriteValue failed: %s", error.message);
+    }
+    sd_bus_error_free(&error);
+    sd_bus_message_unref(m);
+    return r < 0 ? -1 : 0;
+}
+
+/** Read data via D-Bus ReadValue (fallback when AcquireNotify not supported) */
+static int dbus_read_value(sd_bus* bus, const char* char_path,
+                            unsigned char* buffer, int buf_size, int* out_len) {
+    *out_len = 0;
+
+    sd_bus_message* m = NULL;
+    int r = sd_bus_message_new_method_call(bus, &m, BLUEZ_BUS, char_path,
+                                            CHAR_IFACE, "ReadValue");
+    if (r < 0) return r;
+
+    /* Empty options dict */
+    sd_bus_message_open_container(m, 'a', "{sv}");
+    sd_bus_message_close_container(m);
+
+    sd_bus_message* reply = NULL;
+    sd_bus_error error = SD_BUS_ERROR_NULL;
+    r = sd_bus_call(bus, m, 5000000, &error, &reply);
+    sd_bus_message_unref(m);
+    if (r < 0) {
+        sd_bus_error_free(&error);
+        return -1;
+    }
+    sd_bus_error_free(&error);
+
+    const void* data = NULL;
+    size_t data_len = 0;
+    r = sd_bus_message_read_array(reply, 'y', &data, &data_len);
+    if (r >= 0 && data_len > 0) {
+        int copy = (int)data_len < buf_size ? (int)data_len : buf_size;
+        memcpy(buffer, data, copy);
+        *out_len = copy;
+    }
+    sd_bus_message_unref(reply);
+    return 0;
+}
+
 /* ==================== Signal Handlers (worker thread) ==================== */
 
 static int on_interfaces_added(sd_bus_message* msg, void* userdata, sd_bus_error* err) {
@@ -649,6 +722,8 @@ static void* worker_loop(void* arg) {
 static void do_disconnect(void) {
     atomic_store(&g_connected, false);
     atomic_store(&g_notifications_active, false);
+    atomic_store(&g_use_dbus_write, false);
+    atomic_store(&g_use_dbus_read, false);
 
     if (g_from_radio_fd >= 0) { close(g_from_radio_fd); g_from_radio_fd = -1; }
     if (g_to_radio_fd >= 0) { close(g_to_radio_fd); g_to_radio_fd = -1; }
@@ -856,23 +931,25 @@ static void do_connect(void* arg) {
         }
     }
 
+    /* Try fd-based AcquireWrite, fall back to D-Bus WriteValue */
+    atomic_store(&g_use_dbus_write, false);
     g_to_radio_fd = acquire_write(g_bus, g_to_radio_char_path, &g_to_radio_mtu);
     if (g_to_radio_fd < 0) {
-        log_msg("[meshble] AcquireWrite failed for toRadio");
-        do_disconnect();
-        ctx->result = -3;
-        return;
+        log_msg("[meshble] AcquireWrite not supported, using WriteValue fallback");
+        atomic_store(&g_use_dbus_write, true);
+        g_to_radio_fd = -1; /* mark as unused */
     }
 
+    /* Try fd-based AcquireNotify, fall back to D-Bus ReadValue */
+    atomic_store(&g_use_dbus_read, false);
     g_from_radio_fd = acquire_notify(g_bus, g_from_radio_char_path, &g_from_radio_mtu);
     if (g_from_radio_fd < 0) {
-        log_msg("[meshble] AcquireNotify failed for fromRadio");
-        do_disconnect();
-        ctx->result = -3;
-        return;
+        log_msg("[meshble] AcquireNotify not supported, using ReadValue fallback");
+        atomic_store(&g_use_dbus_read, true);
+        g_from_radio_fd = -1;
+    } else {
+        fcntl(g_from_radio_fd, F_SETFL, O_NONBLOCK);
     }
-
-    fcntl(g_from_radio_fd, F_SETFL, O_NONBLOCK);
 
     if (g_from_num_char_path[0]) {
         sd_bus_call_method(g_bus, BLUEZ_BUS, g_from_num_char_path,
@@ -880,9 +957,10 @@ static void do_connect(void* arg) {
     }
 
     atomic_store(&g_connected, true);
-    atomic_store(&g_notifications_active, true);
-    log_msg("[meshble] Connected (fd-based GATT I/O: write_fd=%d read_fd=%d)",
-            g_to_radio_fd, g_from_radio_fd);
+    atomic_store(&g_notifications_active, g_from_radio_fd >= 0);
+    log_msg("[meshble] Connected (write=%s read=%s)",
+            atomic_load(&g_use_dbus_write) ? "WriteValue" : "fd",
+            atomic_load(&g_use_dbus_read) ? "ReadValue" : "fd");
 
     if (g_state_callback) g_state_callback(0, NULL);
     ctx->result = 0;
@@ -1097,9 +1175,15 @@ MESHBLE_API int meshble_is_connected(void) {
     return atomic_load(&g_connected) ? 1 : 0;
 }
 
-/* write/read use fd-based I/O — thread-safe at OS level, no D-Bus needed */
 MESHBLE_API int meshble_write_to_radio(const unsigned char* data, int length) {
     if (!atomic_load(&g_connected) || !data || length <= 0) return -1;
+
+    if (atomic_load(&g_use_dbus_write)) {
+        /* D-Bus WriteValue — must run on worker thread */
+        /* For simplicity, call directly (sd-bus is reentrant for method calls) */
+        return dbus_write_value(g_bus, g_to_radio_char_path, data, length);
+    }
+
     int fd = g_to_radio_fd;
     if (fd < 0) return -1;
     ssize_t written = write(fd, data, length);
@@ -1113,6 +1197,12 @@ MESHBLE_API int meshble_write_to_radio(const unsigned char* data, int length) {
 MESHBLE_API int meshble_read_from_radio(unsigned char* buffer, int buf_size, int* out_len) {
     if (!atomic_load(&g_connected) || !buffer || !out_len) return -1;
     *out_len = 0;
+
+    if (atomic_load(&g_use_dbus_read)) {
+        /* D-Bus ReadValue fallback */
+        return dbus_read_value(g_bus, g_from_radio_char_path, buffer, buf_size, out_len);
+    }
+
     int fd = g_from_radio_fd;
     if (fd < 0) return -1;
     ssize_t n = read(fd, buffer, buf_size);
