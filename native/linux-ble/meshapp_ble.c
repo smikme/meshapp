@@ -874,9 +874,11 @@ static void do_connect(void* arg) {
     sd_bus_error_free(&error);
     log_msg("[meshble] Connect() returned OK");
 
-    /* Wait for ServicesResolved — poll property + process signals */
+    /* Wait for ServicesResolved — MUST be true before GATT is usable.
+       Do NOT use find_gatt_characteristics() as early exit — cached BlueZ objects
+       may exist from previous connections but are not usable until resolved. */
     int64_t deadline = now_ms() + ctx->timeout_ms;
-    int gatt_found = 0;
+    int resolved_ok = 0;
     int loop_count = 0;
     while (now_ms() < deadline) {
         /* Process all pending D-Bus events (signals from BlueZ) */
@@ -888,6 +890,7 @@ static void do_connect(void* arg) {
         /* Check signal flag */
         if (services_resolved) {
             log_msg("[meshble] ServicesResolved=true (signal)");
+            resolved_ok = 1;
             break;
         }
 
@@ -899,20 +902,20 @@ static void do_connect(void* arg) {
         }
         if (rr >= 0 && resolved) {
             log_msg("[meshble] ServicesResolved=true (polled)");
-            break;
-        }
-
-        /* Try finding GATT objects directly */
-        if (find_gatt_characteristics(g_bus, g_device_path) == 0) {
-            log_msg("[meshble] GATT found directly");
-            gatt_found = 1;
+            resolved_ok = 1;
             break;
         }
 
         loop_count++;
-        /* Use poll() to wait for bus events instead of blind sleep */
         struct pollfd pfd = { .fd = sd_bus_get_fd(g_bus), .events = POLLIN };
         poll(&pfd, 1, 200);
+    }
+
+    if (!resolved_ok) {
+        log_msg("[meshble] ServicesResolved timeout — GATT not ready");
+        do_disconnect();
+        ctx->result = -3;
+        return;
     }
 
     /* Final check: connected? */
@@ -925,14 +928,13 @@ static void do_connect(void* arg) {
         return;
     }
 
-    if (!gatt_found) {
-        r = find_gatt_characteristics(g_bus, g_device_path);
-        if (r < 0) {
-            log_msg("[meshble] GATT characteristics not found");
-            do_disconnect();
-            ctx->result = -3;
-            return;
-        }
+    /* Now find GATT characteristics — services are resolved, objects are valid */
+    r = find_gatt_characteristics(g_bus, g_device_path);
+    if (r < 0) {
+        log_msg("[meshble] GATT characteristics not found");
+        do_disconnect();
+        ctx->result = -3;
+        return;
     }
 
     /* Use D-Bus WriteValue directly — AcquireWrite returns "NotSupported" on this device
