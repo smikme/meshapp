@@ -774,6 +774,7 @@ static int bluetoothctl_connect(const char* address, int timeout_ms) {
 
     char line[256];
     int result = -1; /* timeout by default */
+    int connected = 0;
     int64_t deadline = now_ms() + timeout_ms;
 
     while (now_ms() < deadline && fgets(line, sizeof(line), fp)) {
@@ -782,10 +783,6 @@ static int bluetoothctl_connect(const char* address, int timeout_ms) {
         if (len > 0 && line[len-1] == '\n') line[len-1] = '\0';
         log_msg("[meshble] bluetoothctl: %s", line);
 
-        if (strstr(line, "Connection successful")) {
-            result = 0;
-            break;
-        }
         if (strstr(line, "Failed to connect") || strstr(line, "not available")) {
             result = -3;
             break;
@@ -794,7 +791,23 @@ static int bluetoothctl_connect(const char* address, int timeout_ms) {
             result = -2;
             break;
         }
+        if (strstr(line, "Connection successful")) {
+            connected = 1;
+            /* Don't break — keep reading until ServicesResolved */
+        }
+        if (strstr(line, "ServicesResolved: yes")) {
+            log_msg("[meshble] bluetoothctl: services resolved!");
+            result = 0;
+            break;
+        }
     }
+
+    /* If connected but ServicesResolved never appeared, still try */
+    if (result == -1 && connected) {
+        log_msg("[meshble] bluetoothctl: connected but ServicesResolved not seen in output");
+        result = 0;
+    }
+
     pclose(fp);
     return result;
 }
