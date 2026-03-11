@@ -742,22 +742,15 @@ typedef struct {
     int result;
 } connect_ctx_t;
 
-static void do_connect(void* arg) {
-    connect_ctx_t* ctx = (connect_ctx_t*)arg;
-
-    do_disconnect();
-
-    make_device_path(g_adapter_path, ctx->address, g_device_path, sizeof(g_device_path));
-    log_msg("[meshble] Connecting to %s (%s)...", ctx->address, g_device_path);
-
-    set_bool_prop(g_bus, g_device_path, DEVICE_IFACE, "Trusted", 1);
-
+static int try_connect_and_resolve(connect_ctx_t* ctx) {
     volatile int services_resolved = 0;
 
     sd_bus_match_signal(g_bus, &g_props_changed_slot,
                         BLUEZ_BUS, g_device_path,
                         PROPS_IFACE, "PropertiesChanged",
                         on_device_props_changed, (void*)&services_resolved);
+
+    set_bool_prop(g_bus, g_device_path, DEVICE_IFACE, "Trusted", 1);
 
     sd_bus_error error = SD_BUS_ERROR_NULL;
     sd_bus_message* conn_msg = NULL;
@@ -773,9 +766,9 @@ static void do_connect(void* arg) {
         int is_denied = (error.name && (strstr(error.name, "AccessDenied") ||
                                          strstr(error.name, "AuthenticationFailed")));
         sd_bus_error_free(&error);
-        do_disconnect();
-        ctx->result = is_gone ? -2 : (is_denied ? -4 : -3);
-        return;
+        if (is_gone) return -2;
+        if (is_denied) return -4;
+        return -3;
     }
     sd_bus_error_free(&error);
     log_msg("[meshble] Connect() returned, waiting for ServicesResolved...");
@@ -783,14 +776,12 @@ static void do_connect(void* arg) {
     /* Wait for ServicesResolved — poll property + process D-Bus signals */
     int64_t deadline = now_ms() + ctx->timeout_ms;
     while (!services_resolved && now_ms() < deadline) {
-        /* Process pending D-Bus events (may trigger signal handler) */
         for (;;) {
             r = sd_bus_process(g_bus, NULL);
             if (r <= 0) break;
         }
         if (services_resolved) break;
 
-        /* Also poll the property directly — signal may not fire for cached services */
         int resolved = 0;
         if (get_bool_prop(g_bus, g_device_path, DEVICE_IFACE, "ServicesResolved", &resolved) >= 0
             && resolved) {
@@ -805,11 +796,86 @@ static void do_connect(void* arg) {
 
     if (!services_resolved) {
         log_msg("[meshble] ServicesResolved timeout");
-        do_disconnect();
-        ctx->result = -1;
-        return;
+        return -1;
     }
     log_msg("[meshble] ServicesResolved=true");
+    return 0;
+}
+
+static void do_connect(void* arg) {
+    connect_ctx_t* ctx = (connect_ctx_t*)arg;
+
+    do_disconnect();
+
+    make_device_path(g_adapter_path, ctx->address, g_device_path, sizeof(g_device_path));
+    log_msg("[meshble] Connecting to %s (%s)...", ctx->address, g_device_path);
+
+    /* Check Paired status for diagnostics */
+    int paired = 0;
+    get_bool_prop(g_bus, g_device_path, DEVICE_IFACE, "Paired", &paired);
+    log_msg("[meshble] Device Paired=%d", paired);
+
+    int r = try_connect_and_resolve(ctx);
+
+    /* If ServicesResolved timed out, remove device from BlueZ cache and retry fresh */
+    if (r == -1) {
+        log_msg("[meshble] Retrying: removing device from BlueZ cache...");
+        /* Disconnect first */
+        sd_bus_call_method(g_bus, BLUEZ_BUS, g_device_path,
+                           DEVICE_IFACE, "Disconnect", NULL, NULL, "");
+        /* Unref signal slot before removal */
+        if (g_props_changed_slot) { sd_bus_slot_unref(g_props_changed_slot); g_props_changed_slot = NULL; }
+        /* Remove device from BlueZ cache — forces fresh service discovery */
+        sd_bus_error rm_error = SD_BUS_ERROR_NULL;
+        int rm = sd_bus_call_method(g_bus, BLUEZ_BUS, g_adapter_path,
+                                     ADAPTER_IFACE, "RemoveDevice",
+                                     &rm_error, NULL, "o", g_device_path);
+        if (rm < 0) {
+            log_msg("[meshble] RemoveDevice failed: %s", rm_error.message);
+            sd_bus_error_free(&rm_error);
+        } else {
+            sd_bus_error_free(&rm_error);
+            log_msg("[meshble] Device removed, waiting for re-discovery...");
+
+            /* Wait for device to reappear via discovery (up to 5 seconds) */
+            sd_bus_call_method(g_bus, BLUEZ_BUS, g_adapter_path,
+                               ADAPTER_IFACE, "StartDiscovery", NULL, NULL, "");
+
+            int64_t rediscovery_deadline = now_ms() + 5000;
+            int found = 0;
+            while (!found && now_ms() < rediscovery_deadline) {
+                for (;;) {
+                    int pr = sd_bus_process(g_bus, NULL);
+                    if (pr <= 0) break;
+                }
+                /* Check if device path exists again */
+                int connected_val = 0;
+                if (get_bool_prop(g_bus, g_device_path, DEVICE_IFACE, "Connected", &connected_val) >= 0) {
+                    found = 1;
+                    break;
+                }
+                struct pollfd pfd = { .fd = sd_bus_get_fd(g_bus), .events = POLLIN };
+                poll(&pfd, 1, 200);
+            }
+
+            sd_bus_call_method(g_bus, BLUEZ_BUS, g_adapter_path,
+                               ADAPTER_IFACE, "StopDiscovery", NULL, NULL, "");
+
+            if (found) {
+                log_msg("[meshble] Device re-discovered, connecting fresh...");
+                r = try_connect_and_resolve(ctx);
+            } else {
+                log_msg("[meshble] Device not re-discovered within timeout");
+                r = -2;
+            }
+        }
+    }
+
+    if (r != 0) {
+        do_disconnect();
+        ctx->result = r;
+        return;
+    }
 
     r = find_gatt_characteristics(g_bus, g_device_path);
     if (r < 0) {
