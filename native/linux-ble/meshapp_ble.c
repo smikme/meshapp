@@ -947,16 +947,10 @@ static void do_connect(void* arg) {
     atomic_store(&g_use_dbus_read, true);
     g_from_radio_fd = -1;
 
+    /* StartNotify on fromNum temporarily disabled — testing if it causes
+       ReadValue "InProgress" on fromRadio */
     if (g_from_num_char_path[0]) {
-        sd_bus_error sn_err = SD_BUS_ERROR_NULL;
-        r = sd_bus_call_method(g_bus, BLUEZ_BUS, g_from_num_char_path,
-                               CHAR_IFACE, "StartNotify", &sn_err, NULL, "");
-        if (r < 0) {
-            log_msg("[meshble] StartNotify(fromNum) failed: %s", sn_err.message);
-        } else {
-            log_msg("[meshble] StartNotify(fromNum) OK");
-        }
-        sd_bus_error_free(&sn_err);
+        log_msg("[meshble] Skipping StartNotify(fromNum) — diagnostic test");
     }
 
     atomic_store(&g_connected, true);
