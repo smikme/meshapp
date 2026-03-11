@@ -111,9 +111,10 @@ public class LinuxBle implements BlePlatform {
             filter.put("Transport", new Variant<>("le"));
             adapter.SetDiscoveryFilter(filter);
 
-            // Слушаем новые устройства через InterfacesAdded
+            // Слушаем новые устройства через InterfacesAdded (без source object —
+            // BlueZ эмитит сигналы с разных путей, не только от ObjectManager "/")
             interfacesAddedHandler = dbus.addSigHandler(
-                    ObjectManager.InterfacesAdded.class, BLUEZ_BUS, objectManager,
+                    ObjectManager.InterfacesAdded.class, BLUEZ_BUS,
                     signal -> onInterfacesAdded(signal.getObjectPath(), signal.getInterfaces()));
 
             // Эмитим уже известные BlueZ устройства
@@ -427,29 +428,16 @@ public class LinuxBle implements BlePlatform {
         }
     }
 
-    @SuppressWarnings("unchecked")
+    /**
+     * Эмитит устройство в scanCallback.
+     * UUID-фильтрация не нужна — BlueZ уже фильтрует через SetDiscoveryFilter.
+     * При InterfacesAdded UUIDs часто ещё не заполнены.
+     */
     private void emitDevice(Map<String, Variant<?>> props) {
         Consumer<BleDevice> callback = scanCallback;
         if (callback == null) return;
 
         try {
-            // Проверяем наличие Meshtastic UUID в списке сервисов
-            Variant<?> uuidsVar = props.get("UUIDs");
-            if (uuidsVar != null) {
-                Object val = uuidsVar.getValue();
-                List<String> uuids;
-                if (val instanceof List<?>) {
-                    uuids = (List<String>) val;
-                } else if (val instanceof String[] arr) {
-                    uuids = Arrays.asList(arr);
-                } else {
-                    return;
-                }
-                boolean hasMeshtastic = uuids.stream()
-                        .anyMatch(u -> u.equalsIgnoreCase(BleConstants.SERVICE_UUID));
-                if (!hasMeshtastic) return;
-            }
-
             String address = getStringProp(props, "Address");
             if (address == null) return;
 
