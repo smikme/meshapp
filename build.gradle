@@ -57,6 +57,8 @@ dependencies {
 	implementation 'io.github.mkpaz:atlantafx-base:2.1.0'
 	implementation 'net.java.dev.jna:jna:5.16.0'
 	implementation 'net.java.dev.jna:jna-platform:5.16.0'
+	implementation 'com.github.hypfvieh:dbus-java-core:5.1.0'
+	implementation 'com.github.hypfvieh:dbus-java-transport-native-unixsocket:5.1.0'
 	testImplementation 'org.junit.jupiter:junit-jupiter:5.11.4'
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }

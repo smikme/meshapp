@@ -1,5 +1,6 @@
 package com.meshtastic.client.connection.ble;
 
+import com.meshtastic.client.connection.ble.linux.LinuxBle;
 import com.meshtastic.client.connection.ble.macos.MacOsBle;
 import com.meshtastic.client.connection.ble.windows.WinBle;
 import com.meshtastic.client.platform.OsDetect;
@@ -26,8 +27,10 @@ public final class BlePlatformFactory {
                 log.info("Используется CoreBluetooth (macOS)");
                 yield new MacOsBle();
             }
-            case LINUX -> throw new UnsupportedOperationException(
-                    "BLE на Linux ещё не реализован (BlueZ D-Bus)");
+            case LINUX -> {
+                log.info("Используется BlueZ D-Bus (Linux)");
+                yield new LinuxBle();
+            }
             case WINDOWS -> {
                 log.info("Используется WinRT BLE (Windows)");
                 yield new WinBle();
@@ -41,7 +44,7 @@ public final class BlePlatformFactory {
      * Проверяет, поддерживается ли BLE на текущей платформе.
      */
     public static boolean isSupported() {
-        return OsDetect.isMacOs() || OsDetect.isWindows();
+        return OsDetect.isMacOs() || OsDetect.isWindows() || OsDetect.isLinux();
     }
 
     private BlePlatformFactory() {}
