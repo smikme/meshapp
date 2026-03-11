@@ -236,7 +236,7 @@ public class EmojiTextField extends StackPane {
     private void handleKeyTyped(KeyEvent e) {
         if (disabled) { return; }
         String ch = e.getCharacter();
-        if (ch == null || ch.isEmpty() || ch.charAt(0) < ' '
+        if (ch == null || ch.isEmpty() || Character.isISOControl(ch.charAt(0))
                 || e.isControlDown() || e.isMetaDown()) {
             return;
         }
