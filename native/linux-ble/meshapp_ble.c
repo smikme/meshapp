@@ -755,63 +755,6 @@ typedef struct {
     int result;
 } connect_ctx_t;
 
-/**
- * Connect via bluetoothctl subprocess.
- * sd-bus Device1.Connect() doesn't trigger ServicesResolved on many BlueZ setups,
- * but bluetoothctl (GDBus) always works. We shell out for the connect step,
- * then use sd-bus for GATT fd I/O and disconnect detection.
- */
-static int bluetoothctl_connect(const char* address, int timeout_ms) {
-    char cmd[128];
-    snprintf(cmd, sizeof(cmd), "bluetoothctl connect %s", address);
-    log_msg("[meshble] Running: %s", cmd);
-
-    FILE* fp = popen(cmd, "r");
-    if (!fp) {
-        log_msg("[meshble] popen(bluetoothctl) failed: %s", strerror(errno));
-        return -3;
-    }
-
-    char line[256];
-    int result = -1; /* timeout by default */
-    int connected = 0;
-    int64_t deadline = now_ms() + timeout_ms;
-
-    while (now_ms() < deadline && fgets(line, sizeof(line), fp)) {
-        /* Strip newline */
-        size_t len = strlen(line);
-        if (len > 0 && line[len-1] == '\n') line[len-1] = '\0';
-        log_msg("[meshble] bluetoothctl: %s", line);
-
-        if (strstr(line, "Failed to connect") || strstr(line, "not available")) {
-            result = -3;
-            break;
-        }
-        if (strstr(line, "Device is not available")) {
-            result = -2;
-            break;
-        }
-        if (strstr(line, "Connection successful")) {
-            connected = 1;
-            /* Don't break — keep reading until ServicesResolved */
-        }
-        if (strstr(line, "ServicesResolved: yes")) {
-            log_msg("[meshble] bluetoothctl: services resolved!");
-            result = 0;
-            break;
-        }
-    }
-
-    /* If connected but ServicesResolved never appeared, still try */
-    if (result == -1 && connected) {
-        log_msg("[meshble] bluetoothctl: connected but ServicesResolved not seen in output");
-        result = 0;
-    }
-
-    pclose(fp);
-    return result;
-}
-
 static void do_connect(void* arg) {
     connect_ctx_t* ctx = (connect_ctx_t*)arg;
     int r;
@@ -821,77 +764,92 @@ static void do_connect(void* arg) {
     make_device_path(g_adapter_path, ctx->address, g_device_path, sizeof(g_device_path));
     log_msg("[meshble] Connecting to %s (%s)...", ctx->address, g_device_path);
 
-    /* Subscribe to property changes for disconnect detection */
+    /* Subscribe to property changes for disconnect detection + ServicesResolved */
+    volatile int services_resolved = 0;
     sd_bus_match_signal(g_bus, &g_props_changed_slot,
                         BLUEZ_BUS, g_device_path,
                         PROPS_IFACE, "PropertiesChanged",
-                        on_device_props_changed, NULL);
+                        on_device_props_changed, (void*)&services_resolved);
 
     set_bool_prop(g_bus, g_device_path, DEVICE_IFACE, "Trusted", 1);
 
-    /* Use bluetoothctl for the actual connect — it uses GDBus which
-     * reliably triggers ServicesResolved, unlike sd-bus on many systems. */
-    r = bluetoothctl_connect(ctx->address, ctx->timeout_ms);
-    if (r != 0) {
-        log_msg("[meshble] bluetoothctl connect failed (code=%d)", r);
+    /* Connect via sd-bus with explicit timeout */
+    sd_bus_error error = SD_BUS_ERROR_NULL;
+    sd_bus_message* conn_msg = NULL;
+    r = sd_bus_message_new_method_call(g_bus, &conn_msg, BLUEZ_BUS, g_device_path,
+                                        DEVICE_IFACE, "Connect");
+    if (r >= 0) {
+        r = sd_bus_call(g_bus, conn_msg, (uint64_t)ctx->timeout_ms * 1000, &error, NULL);
+        sd_bus_message_unref(conn_msg);
+    }
+    if (r < 0) {
+        log_msg("[meshble] Connect failed: %s (%s)", error.message, error.name);
+        int is_gone = (error.name && strstr(error.name, "UnknownObject"));
+        int is_denied = (error.name && (strstr(error.name, "AccessDenied") ||
+                                         strstr(error.name, "AuthenticationFailed")));
+        sd_bus_error_free(&error);
         do_disconnect();
-        ctx->result = r;
+        ctx->result = is_gone ? -2 : (is_denied ? -4 : -3);
         return;
     }
+    sd_bus_error_free(&error);
+    log_msg("[meshble] Connect() returned OK");
 
-    /* bluetoothctl connected successfully — process sd-bus events to sync state */
-    log_msg("[meshble] bluetoothctl connected, syncing sd-bus state...");
-    for (int i = 0; i < 20; i++) {
-        while (sd_bus_process(g_bus, NULL) > 0) {}
-        usleep(100000); /* 100ms */
-    }
-
-    /* Verify connected via sd-bus */
-    int connected_check = 0;
-    get_bool_prop(g_bus, g_device_path, DEVICE_IFACE, "Connected", &connected_check);
-    if (!connected_check) {
-        log_msg("[meshble] Device not connected after bluetoothctl (sd-bus disagrees)");
-        do_disconnect();
-        ctx->result = -3;
-        return;
-    }
-
-    /* Check ServicesResolved immediately */
-    int sr_val = 0;
-    int sr_r = get_bool_prop(g_bus, g_device_path, DEVICE_IFACE, "ServicesResolved", &sr_val);
-    log_msg("[meshble] ServicesResolved after sync: r=%d val=%d", sr_r, sr_val);
-
-    /* Wait for ServicesResolved / GATT (should already be true after bluetoothctl) */
-    int64_t deadline = now_ms() + 10000;
+    /* Wait for ServicesResolved — poll property + process signals */
+    int64_t deadline = now_ms() + ctx->timeout_ms;
     int gatt_found = 0;
     int loop_count = 0;
     while (now_ms() < deadline) {
-        while (sd_bus_process(g_bus, NULL) > 0) {}
+        /* Process all pending D-Bus events (signals from BlueZ) */
+        for (;;) {
+            r = sd_bus_process(g_bus, NULL);
+            if (r <= 0) break;
+        }
 
+        /* Check signal flag */
+        if (services_resolved) {
+            log_msg("[meshble] ServicesResolved=true (signal)");
+            break;
+        }
+
+        /* Poll property directly */
         int resolved = 0;
         int rr = get_bool_prop(g_bus, g_device_path, DEVICE_IFACE, "ServicesResolved", &resolved);
         if (loop_count % 5 == 0) {
             log_msg("[meshble] Poll #%d: ServicesResolved r=%d val=%d", loop_count, rr, resolved);
         }
         if (rr >= 0 && resolved) {
-            log_msg("[meshble] ServicesResolved=true");
+            log_msg("[meshble] ServicesResolved=true (polled)");
             break;
         }
 
+        /* Try finding GATT objects directly */
         if (find_gatt_characteristics(g_bus, g_device_path) == 0) {
-            log_msg("[meshble] GATT characteristics found directly");
+            log_msg("[meshble] GATT found directly");
             gatt_found = 1;
             break;
         }
 
         loop_count++;
-        usleep(200000); /* 200ms */
+        /* Use poll() to wait for bus events instead of blind sleep */
+        struct pollfd pfd = { .fd = sd_bus_get_fd(g_bus), .events = POLLIN };
+        poll(&pfd, 1, 200);
+    }
+
+    /* Final check: connected? */
+    int connected_check = 0;
+    get_bool_prop(g_bus, g_device_path, DEVICE_IFACE, "Connected", &connected_check);
+    if (!connected_check) {
+        log_msg("[meshble] Device disconnected during service discovery");
+        do_disconnect();
+        ctx->result = -1;
+        return;
     }
 
     if (!gatt_found) {
         r = find_gatt_characteristics(g_bus, g_device_path);
         if (r < 0) {
-            log_msg("[meshble] GATT characteristics not found after connect");
+            log_msg("[meshble] GATT characteristics not found");
             do_disconnect();
             ctx->result = -3;
             return;
@@ -1056,8 +1014,7 @@ MESHBLE_API int meshble_init(void) {
     }
     log_msg("[meshble] Adapter: %s", g_adapter_path);
 
-    /* Register BlueZ Agent — required for service discovery on many devices */
-    register_agent(g_bus);
+    /* No agent registration — let the system default agent handle pairing if needed */
 
     if (pipe(g_wake_pipe) < 0) {
         sd_bus_unref(g_bus); g_bus = NULL;
@@ -1090,7 +1047,6 @@ MESHBLE_API void meshble_cleanup(void) {
     if (g_wake_pipe[0] >= 0) { close(g_wake_pipe[0]); g_wake_pipe[0] = -1; }
     if (g_wake_pipe[1] >= 0) { close(g_wake_pipe[1]); g_wake_pipe[1] = -1; }
 
-    unregister_agent(g_bus);
     if (g_bus) { sd_bus_unref(g_bus); g_bus = NULL; }
 
     g_device_callback = NULL;
