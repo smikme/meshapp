@@ -4,10 +4,9 @@
  * Pure C implementation using sd-bus (libsystemd) for BlueZ D-Bus communication.
  * Uses AcquireNotify/AcquireWrite for fd-based GATT I/O — bypasses D-Bus for data transfer.
  *
- * Architecture mirrors the Windows WinRT implementation:
- * - Dedicated worker thread running sd-bus event loop
- * - Task queue for cross-thread operations
- * - Flat C API for JNA consumption
+ * CRITICAL: sd-bus is NOT thread-safe. ALL sd-bus calls MUST happen on the worker thread.
+ * API functions dispatch work to the worker thread via run_on_worker() and block until done.
+ * This mirrors the Windows WinRT pattern where all WinRT ops run on the MTA worker thread.
  */
 
 #include "meshapp_ble.h"
@@ -55,7 +54,7 @@ static void log_msg(const char* fmt, ...) {
     fflush(stderr);
 }
 
-/* ==================== Task Queue ==================== */
+/* ==================== Task Queue + Sync Dispatch ==================== */
 
 typedef struct task_node {
     void (*func)(void* arg);
@@ -67,13 +66,11 @@ typedef struct {
     task_node_t* head;
     task_node_t* tail;
     pthread_mutex_t mutex;
-    pthread_cond_t cond;
 } task_queue_t;
 
 static void tq_init(task_queue_t* q) {
     q->head = q->tail = NULL;
     pthread_mutex_init(&q->mutex, NULL);
-    pthread_cond_init(&q->cond, NULL);
 }
 
 static void tq_destroy(task_queue_t* q) {
@@ -83,7 +80,6 @@ static void tq_destroy(task_queue_t* q) {
     q->head = q->tail = NULL;
     pthread_mutex_unlock(&q->mutex);
     pthread_mutex_destroy(&q->mutex);
-    pthread_cond_destroy(&q->cond);
 }
 
 static void tq_push(task_queue_t* q, void (*func)(void*), void* arg) {
@@ -94,7 +90,6 @@ static void tq_push(task_queue_t* q, void (*func)(void*), void* arg) {
     pthread_mutex_lock(&q->mutex);
     if (q->tail) { q->tail->next = n; q->tail = n; }
     else { q->head = q->tail = n; }
-    pthread_cond_signal(&q->cond);
     pthread_mutex_unlock(&q->mutex);
 }
 
@@ -107,6 +102,24 @@ static task_node_t* tq_pop(task_queue_t* q) {
     return n;
 }
 
+/** Synchronous cross-thread call context */
+typedef struct {
+    void (*func)(void* ctx);
+    void* ctx;
+    pthread_mutex_t mutex;
+    pthread_cond_t cond;
+    bool done;
+} sync_call_t;
+
+static void sync_call_wrapper(void* arg) {
+    sync_call_t* sc = (sync_call_t*)arg;
+    sc->func(sc->ctx);
+    pthread_mutex_lock(&sc->mutex);
+    sc->done = true;
+    pthread_cond_signal(&sc->cond);
+    pthread_mutex_unlock(&sc->mutex);
+}
+
 /* ==================== Global State ==================== */
 
 static sd_bus* g_bus = NULL;
@@ -117,7 +130,7 @@ static atomic_bool g_connected;
 static atomic_bool g_notifications_active;
 
 static task_queue_t g_tasks;
-static int g_wake_pipe[2] = {-1, -1}; /* [0]=read, [1]=write */
+static int g_wake_pipe[2] = {-1, -1};
 
 static char g_adapter_path[MAX_PATH];
 static char g_device_path[MAX_PATH];
@@ -135,18 +148,44 @@ static meshble_device_cb g_device_callback = NULL;
 static meshble_data_cb g_data_callback = NULL;
 static meshble_state_cb g_state_callback = NULL;
 
-/* sd-bus signal match slots */
 static sd_bus_slot* g_iface_added_slot = NULL;
 static sd_bus_slot* g_props_changed_slot = NULL;
-static sd_bus_slot* g_char_props_slot = NULL;
+
+/* ==================== Wake + Dispatch ==================== */
+
+static void wake_worker(void) {
+    uint8_t b = 1;
+    if (write(g_wake_pipe[1], &b, 1) < 0) { /* ignore */ }
+}
+
+/** Post task to worker thread, block until done */
+static void run_on_worker(void (*func)(void* ctx), void* ctx) {
+    sync_call_t sc;
+    sc.func = func;
+    sc.ctx = ctx;
+    sc.done = false;
+    pthread_mutex_init(&sc.mutex, NULL);
+    pthread_cond_init(&sc.cond, NULL);
+
+    tq_push(&g_tasks, sync_call_wrapper, &sc);
+    wake_worker();
+
+    pthread_mutex_lock(&sc.mutex);
+    while (!sc.done) pthread_cond_wait(&sc.cond, &sc.mutex);
+    pthread_mutex_unlock(&sc.mutex);
+
+    pthread_mutex_destroy(&sc.mutex);
+    pthread_cond_destroy(&sc.cond);
+}
+
+/** Post task to worker thread, don't wait */
+static void post_to_worker(void (*func)(void*), void* arg) {
+    tq_push(&g_tasks, func, arg);
+    wake_worker();
+}
 
 /* ==================== Helpers ==================== */
 
-static int strcasecmp_uuid(const char* a, const char* b) {
-    return strcasecmp(a, b);
-}
-
-/* Convert "AA:BB:CC:DD:EE:FF" → "/org/bluez/hci0/dev_AA_BB_CC_DD_EE_FF" */
 static void make_device_path(const char* adapter, const char* address, char* out, int outsize) {
     char addr_underscored[18];
     strncpy(addr_underscored, address, sizeof(addr_underscored) - 1);
@@ -162,9 +201,8 @@ static int64_t now_ms(void) {
     return (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
 }
 
-/* ==================== BlueZ D-Bus Helpers ==================== */
+/* ==================== BlueZ D-Bus Helpers (worker thread only) ==================== */
 
-/* Find the first BlueZ adapter path (e.g., /org/bluez/hci0) */
 static int find_adapter(sd_bus* bus, char* out, int outsize) {
     sd_bus_message* reply = NULL;
     int r = sd_bus_call_method(bus, BLUEZ_BUS, "/",
@@ -172,7 +210,6 @@ static int find_adapter(sd_bus* bus, char* out, int outsize) {
                                NULL, &reply, "");
     if (r < 0) return r;
 
-    /* Parse a{oa{sa{sv}}} */
     r = sd_bus_message_enter_container(reply, 'a', "{oa{sa{sv}}}");
     if (r < 0) goto done;
 
@@ -180,7 +217,6 @@ static int find_adapter(sd_bus* bus, char* out, int outsize) {
         const char* path = NULL;
         sd_bus_message_read(reply, "o", &path);
 
-        /* Iterate interfaces dict */
         sd_bus_message_enter_container(reply, 'a', "{sa{sv}}");
         while (sd_bus_message_enter_container(reply, 'e', "sa{sv}") > 0) {
             const char* iface = NULL;
@@ -195,8 +231,8 @@ static int find_adapter(sd_bus* bus, char* out, int outsize) {
                 return 0;
             }
         }
-        sd_bus_message_exit_container(reply); /* a{sa{sv}} */
-        sd_bus_message_exit_container(reply); /* dict entry */
+        sd_bus_message_exit_container(reply);
+        sd_bus_message_exit_container(reply);
     }
     r = -ENODEV;
 done:
@@ -204,7 +240,6 @@ done:
     return r;
 }
 
-/* Read a boolean property */
 static int get_bool_prop(sd_bus* bus, const char* path, const char* iface,
                          const char* prop, int* out) {
     sd_bus_message* reply = NULL;
@@ -212,7 +247,6 @@ static int get_bool_prop(sd_bus* bus, const char* path, const char* iface,
                                PROPS_IFACE, "Get",
                                NULL, &reply, "ss", iface, prop);
     if (r < 0) return r;
-
     int val = 0;
     r = sd_bus_message_read(reply, "v", "b", &val);
     if (r >= 0 && out) *out = val;
@@ -220,7 +254,6 @@ static int get_bool_prop(sd_bus* bus, const char* path, const char* iface,
     return r;
 }
 
-/* Set a boolean property */
 static int set_bool_prop(sd_bus* bus, const char* path, const char* iface,
                          const char* prop, int val) {
     return sd_bus_call_method(bus, BLUEZ_BUS, path,
@@ -230,7 +263,6 @@ static int set_bool_prop(sd_bus* bus, const char* path, const char* iface,
 
 /* ==================== GATT Characteristic Discovery ==================== */
 
-/* Find Meshtastic GATT characteristic paths under a device path */
 static int find_gatt_characteristics(sd_bus* bus, const char* device_path) {
     g_from_radio_char_path[0] = '\0';
     g_to_radio_char_path[0] = '\0';
@@ -249,7 +281,6 @@ static int find_gatt_characteristics(sd_bus* bus, const char* device_path) {
         const char* path = NULL;
         sd_bus_message_read(reply, "o", &path);
 
-        /* Only look under our device path */
         if (!path || strncmp(path, device_path, strlen(device_path)) != 0) {
             sd_bus_message_skip(reply, "a{sa{sv}}");
             sd_bus_message_exit_container(reply);
@@ -262,23 +293,21 @@ static int find_gatt_characteristics(sd_bus* bus, const char* device_path) {
             sd_bus_message_read(reply, "s", &iface);
 
             if (iface && strcmp(iface, CHAR_IFACE) == 0) {
-                /* Parse properties to find UUID */
                 sd_bus_message_enter_container(reply, 'a', "{sv}");
                 while (sd_bus_message_enter_container(reply, 'e', "sv") > 0) {
                     const char* pname = NULL;
                     sd_bus_message_read(reply, "s", &pname);
-
                     if (pname && strcmp(pname, "UUID") == 0) {
                         const char* uuid = NULL;
                         sd_bus_message_read(reply, "v", "s", &uuid);
                         if (uuid) {
-                            if (strcasecmp_uuid(uuid, FROM_RADIO_UUID) == 0) {
+                            if (strcasecmp(uuid, FROM_RADIO_UUID) == 0) {
                                 strncpy(g_from_radio_char_path, path, MAX_PATH - 1);
                                 log_msg("[meshble] fromRadio: %s", path);
-                            } else if (strcasecmp_uuid(uuid, TO_RADIO_UUID) == 0) {
+                            } else if (strcasecmp(uuid, TO_RADIO_UUID) == 0) {
                                 strncpy(g_to_radio_char_path, path, MAX_PATH - 1);
                                 log_msg("[meshble] toRadio: %s", path);
-                            } else if (strcasecmp_uuid(uuid, FROM_NUM_UUID) == 0) {
+                            } else if (strcasecmp(uuid, FROM_NUM_UUID) == 0) {
                                 strncpy(g_from_num_char_path, path, MAX_PATH - 1);
                                 log_msg("[meshble] fromNum: %s", path);
                             }
@@ -286,16 +315,16 @@ static int find_gatt_characteristics(sd_bus* bus, const char* device_path) {
                     } else {
                         sd_bus_message_skip(reply, "v");
                     }
-                    sd_bus_message_exit_container(reply); /* dict entry */
+                    sd_bus_message_exit_container(reply);
                 }
-                sd_bus_message_exit_container(reply); /* a{sv} */
+                sd_bus_message_exit_container(reply);
             } else {
                 sd_bus_message_skip(reply, "a{sv}");
             }
-            sd_bus_message_exit_container(reply); /* iface dict entry */
+            sd_bus_message_exit_container(reply);
         }
-        sd_bus_message_exit_container(reply); /* a{sa{sv}} */
-        sd_bus_message_exit_container(reply); /* object dict entry */
+        sd_bus_message_exit_container(reply);
+        sd_bus_message_exit_container(reply);
     }
 
 done:
@@ -305,10 +334,6 @@ done:
 
 /* ==================== AcquireWrite / AcquireNotify ==================== */
 
-/**
- * Call AcquireWrite on a GATT characteristic.
- * Returns file descriptor for writing, or -1 on error.
- */
 static int acquire_write(sd_bus* bus, const char* char_path, uint16_t* mtu_out) {
     sd_bus_message* reply = NULL;
     sd_bus_error error = SD_BUS_ERROR_NULL;
@@ -326,26 +351,16 @@ static int acquire_write(sd_bus* bus, const char* char_path, uint16_t* mtu_out) 
 
     uint16_t mtu = 0;
     r = sd_bus_message_read(reply, "hq", &fd, &mtu);
-    if (r < 0) {
-        sd_bus_message_unref(reply);
-        return -1;
-    }
+    if (r < 0) { sd_bus_message_unref(reply); return -1; }
 
-    /* sd-bus gives us an fd that may be invalidated when the message is freed,
-       so dup it */
     int real_fd = fcntl(fd, F_DUPFD_CLOEXEC, 3);
     sd_bus_message_unref(reply);
-
     if (real_fd < 0) return -1;
     if (mtu_out) *mtu_out = mtu;
     log_msg("[meshble] AcquireWrite fd=%d mtu=%d", real_fd, mtu);
     return real_fd;
 }
 
-/**
- * Call AcquireNotify on a GATT characteristic.
- * Returns file descriptor for reading notifications, or -1 on error.
- */
 static int acquire_notify(sd_bus* bus, const char* char_path, uint16_t* mtu_out) {
     sd_bus_message* reply = NULL;
     sd_bus_error error = SD_BUS_ERROR_NULL;
@@ -363,35 +378,27 @@ static int acquire_notify(sd_bus* bus, const char* char_path, uint16_t* mtu_out)
 
     uint16_t mtu = 0;
     r = sd_bus_message_read(reply, "hq", &fd, &mtu);
-    if (r < 0) {
-        sd_bus_message_unref(reply);
-        return -1;
-    }
+    if (r < 0) { sd_bus_message_unref(reply); return -1; }
 
     int real_fd = fcntl(fd, F_DUPFD_CLOEXEC, 3);
     sd_bus_message_unref(reply);
-
     if (real_fd < 0) return -1;
     if (mtu_out) *mtu_out = mtu;
     log_msg("[meshble] AcquireNotify fd=%d mtu=%d", real_fd, mtu);
     return real_fd;
 }
 
-/* ==================== Signal Handlers ==================== */
+/* ==================== Signal Handlers (worker thread) ==================== */
 
-/* InterfacesAdded handler — emits discovered BLE devices */
 static int on_interfaces_added(sd_bus_message* msg, void* userdata, sd_bus_error* err) {
     (void)userdata; (void)err;
     meshble_device_cb cb = g_device_callback;
     if (!cb) return 0;
 
     const char* path = NULL;
-    int r = sd_bus_message_read(msg, "o", &path);
-    if (r < 0) return 0;
+    if (sd_bus_message_read(msg, "o", &path) < 0) return 0;
 
-    /* Parse interfaces dict a{sa{sv}} looking for org.bluez.Device1 */
-    r = sd_bus_message_enter_container(msg, 'a', "{sa{sv}}");
-    if (r < 0) return 0;
+    if (sd_bus_message_enter_container(msg, 'a', "{sa{sv}}") < 0) return 0;
 
     while (sd_bus_message_enter_container(msg, 'e', "sa{sv}") > 0) {
         const char* iface = NULL;
@@ -406,7 +413,6 @@ static int on_interfaces_added(sd_bus_message* msg, void* userdata, sd_bus_error
             while (sd_bus_message_enter_container(msg, 'e', "sv") > 0) {
                 const char* pname = NULL;
                 sd_bus_message_read(msg, "s", &pname);
-
                 if (pname && strcmp(pname, "Address") == 0) {
                     const char* val = NULL;
                     sd_bus_message_read(msg, "v", "s", &val);
@@ -423,10 +429,7 @@ static int on_interfaces_added(sd_bus_message* msg, void* userdata, sd_bus_error
                 sd_bus_message_exit_container(msg);
             }
             sd_bus_message_exit_container(msg);
-
-            if (address[0]) {
-                cb(address, name[0] ? name : NULL, rssi);
-            }
+            if (address[0]) cb(address, name[0] ? name : NULL, rssi);
         } else {
             sd_bus_message_skip(msg, "a{sv}");
         }
@@ -435,15 +438,12 @@ static int on_interfaces_added(sd_bus_message* msg, void* userdata, sd_bus_error
     return 0;
 }
 
-/* PropertiesChanged handler for device (Connected, ServicesResolved) */
 static int on_device_props_changed(sd_bus_message* msg, void* userdata, sd_bus_error* err) {
     (void)err;
-
     const char* iface = NULL;
     sd_bus_message_read(msg, "s", &iface);
     if (!iface || strcmp(iface, DEVICE_IFACE) != 0) return 0;
 
-    /* Parse changed properties dict a{sv} */
     sd_bus_message_enter_container(msg, 'a', "{sv}");
     while (sd_bus_message_enter_container(msg, 'e', "sv") > 0) {
         const char* pname = NULL;
@@ -465,7 +465,6 @@ static int on_device_props_changed(sd_bus_message* msg, void* userdata, sd_bus_e
             int val = 0;
             sd_bus_message_read(msg, "v", "b", &val);
             log_msg("[meshble] ServicesResolved=%d", val);
-            /* Signal is used in connect() via a flag + pipe wake */
             if (val && userdata) {
                 int* flag = (int*)userdata;
                 *flag = 1;
@@ -478,7 +477,7 @@ static int on_device_props_changed(sd_bus_message* msg, void* userdata, sd_bus_e
     return 0;
 }
 
-/* ==================== Emit Cached Devices ==================== */
+/* ==================== Emit Cached Devices (worker thread) ==================== */
 
 static void emit_cached_devices(sd_bus* bus) {
     meshble_device_cb cb = g_device_callback;
@@ -527,7 +526,6 @@ static void emit_cached_devices(sd_bus* bus) {
                     sd_bus_message_exit_container(reply);
                 }
                 sd_bus_message_exit_container(reply);
-
                 if (address[0]) cb(address, name[0] ? name : NULL, rssi_val);
             } else {
                 sd_bus_message_skip(reply, "a{sv}");
@@ -542,12 +540,25 @@ static void emit_cached_devices(sd_bus* bus) {
 
 /* ==================== Worker Thread ==================== */
 
+static void process_tasks(void) {
+    pthread_mutex_lock(&g_tasks.mutex);
+    while (g_tasks.head) {
+        task_node_t* n = tq_pop(&g_tasks);
+        pthread_mutex_unlock(&g_tasks.mutex);
+        if (n) {
+            n->func(n->arg);
+            free(n);
+        }
+        pthread_mutex_lock(&g_tasks.mutex);
+    }
+    pthread_mutex_unlock(&g_tasks.mutex);
+}
+
 static void* worker_loop(void* arg) {
     (void)arg;
     log_msg("[meshble] Worker thread started");
 
     while (atomic_load(&g_worker_running)) {
-        /* Build pollfd array: sd-bus fd + wake pipe + fromRadio fd */
         struct pollfd fds[3];
         int nfds = 0;
 
@@ -588,29 +599,20 @@ static void* worker_loop(void* arg) {
         /* Process sd-bus events */
         for (;;) {
             int r = sd_bus_process(g_bus, NULL);
-            if (r < 0) break;
-            if (r == 0) break;
+            if (r <= 0) break;
         }
 
         /* Process wake pipe — drain and execute tasks */
         if (fds[wake_idx].revents & POLLIN) {
             uint8_t buf[64];
             while (read(g_wake_pipe[0], buf, sizeof(buf)) > 0) {}
-
-            pthread_mutex_lock(&g_tasks.mutex);
-            while (g_tasks.head) {
-                task_node_t* n = tq_pop(&g_tasks);
-                pthread_mutex_unlock(&g_tasks.mutex);
-                if (n) {
-                    n->func(n->arg);
-                    free(n);
-                }
-                pthread_mutex_lock(&g_tasks.mutex);
-            }
-            pthread_mutex_unlock(&g_tasks.mutex);
+            process_tasks();
         }
 
-        /* Process fromRadio fd — notification data via AcquireNotify */
+        /* Also process tasks on every iteration (timeout-based wakeup) */
+        process_tasks();
+
+        /* Process fromRadio fd */
         if (fr_idx >= 0 && (fds[fr_idx].revents & POLLIN)) {
             unsigned char data[512];
             for (int i = 0; i < MAX_DRAIN; i++) {
@@ -626,13 +628,7 @@ static void* worker_loop(void* arg) {
     return NULL;
 }
 
-/* Wake worker thread to process tasks */
-static void wake_worker(void) {
-    uint8_t b = 1;
-    if (write(g_wake_pipe[1], &b, 1) < 0) { /* ignore */ }
-}
-
-/* ==================== Internal Operations ==================== */
+/* ==================== Internal Operations (worker thread only) ==================== */
 
 static void do_disconnect(void) {
     atomic_store(&g_connected, false);
@@ -641,15 +637,11 @@ static void do_disconnect(void) {
     if (g_from_radio_fd >= 0) { close(g_from_radio_fd); g_from_radio_fd = -1; }
     if (g_to_radio_fd >= 0) { close(g_to_radio_fd); g_to_radio_fd = -1; }
 
-    /* Unsubscribe from signals */
     if (g_props_changed_slot) { sd_bus_slot_unref(g_props_changed_slot); g_props_changed_slot = NULL; }
-    if (g_char_props_slot) { sd_bus_slot_unref(g_char_props_slot); g_char_props_slot = NULL; }
 
-    /* Disconnect BlueZ device */
     if (g_device_path[0] && g_bus) {
         sd_bus_call_method(g_bus, BLUEZ_BUS, g_device_path,
-                           DEVICE_IFACE, "Disconnect",
-                           NULL, NULL, "");
+                           DEVICE_IFACE, "Disconnect", NULL, NULL, "");
     }
 
     g_device_path[0] = '\0';
@@ -658,7 +650,6 @@ static void do_disconnect(void) {
     g_from_num_char_path[0] = '\0';
     g_to_radio_mtu = 0;
     g_from_radio_mtu = 0;
-
     log_msg("[meshble] Disconnected");
 }
 
@@ -666,18 +657,211 @@ static void do_stop_scan(void) {
     if (g_iface_added_slot) { sd_bus_slot_unref(g_iface_added_slot); g_iface_added_slot = NULL; }
     if (g_bus && g_adapter_path[0]) {
         sd_bus_call_method(g_bus, BLUEZ_BUS, g_adapter_path,
-                           ADAPTER_IFACE, "StopDiscovery",
-                           NULL, NULL, "");
+                           ADAPTER_IFACE, "StopDiscovery", NULL, NULL, "");
     }
     g_device_callback = NULL;
     log_msg("[meshble] Scan stopped");
 }
 
-/* ==================== API Implementation ==================== */
+/* ==================== API — scan (runs on worker thread) ==================== */
+
+typedef struct {
+    meshble_device_cb callback;
+    int result;
+} scan_ctx_t;
+
+static void do_start_scan(void* arg) {
+    scan_ctx_t* ctx = (scan_ctx_t*)arg;
+
+    do_stop_scan();
+    g_device_callback = ctx->callback;
+
+    /* SetDiscoveryFilter */
+    sd_bus_message* m = NULL;
+    int r = sd_bus_message_new_method_call(g_bus, &m, BLUEZ_BUS, g_adapter_path,
+                                            ADAPTER_IFACE, "SetDiscoveryFilter");
+    if (r >= 0) {
+        sd_bus_message_open_container(m, 'a', "{sv}");
+        sd_bus_message_open_container(m, 'e', "sv");
+        sd_bus_message_append(m, "s", "UUIDs");
+        sd_bus_message_open_container(m, 'v', "as");
+        sd_bus_message_open_container(m, 'a', "s");
+        sd_bus_message_append(m, "s", SERVICE_UUID);
+        sd_bus_message_close_container(m);
+        sd_bus_message_close_container(m);
+        sd_bus_message_close_container(m);
+        sd_bus_message_open_container(m, 'e', "sv");
+        sd_bus_message_append(m, "s", "Transport");
+        sd_bus_message_open_container(m, 'v', "s");
+        sd_bus_message_append(m, "s", "le");
+        sd_bus_message_close_container(m);
+        sd_bus_message_close_container(m);
+        sd_bus_message_close_container(m);
+
+        sd_bus_error error = SD_BUS_ERROR_NULL;
+        r = sd_bus_call(g_bus, m, 0, &error, NULL);
+        if (r < 0) log_msg("[meshble] SetDiscoveryFilter: %s", error.message);
+        sd_bus_error_free(&error);
+        sd_bus_message_unref(m);
+    }
+
+    /* Subscribe to InterfacesAdded */
+    r = sd_bus_match_signal(g_bus, &g_iface_added_slot,
+                            BLUEZ_BUS, "/",
+                            OBJMGR_IFACE, "InterfacesAdded",
+                            on_interfaces_added, NULL);
+    if (r < 0) log_msg("[meshble] InterfacesAdded subscribe failed: %s", strerror(-r));
+
+    /* Emit cached devices */
+    emit_cached_devices(g_bus);
+
+    /* StartDiscovery */
+    sd_bus_error error = SD_BUS_ERROR_NULL;
+    r = sd_bus_call_method(g_bus, BLUEZ_BUS, g_adapter_path,
+                           ADAPTER_IFACE, "StartDiscovery",
+                           &error, NULL, "");
+    if (r < 0) {
+        log_msg("[meshble] StartDiscovery failed: %s", error.message);
+        sd_bus_error_free(&error);
+        ctx->result = -1;
+        return;
+    }
+    sd_bus_error_free(&error);
+    log_msg("[meshble] Scan started");
+    ctx->result = 0;
+}
+
+/* ==================== API — connect (runs on worker thread) ==================== */
+
+typedef struct {
+    char address[32];
+    int timeout_ms;
+    int result;
+} connect_ctx_t;
+
+static void do_connect(void* arg) {
+    connect_ctx_t* ctx = (connect_ctx_t*)arg;
+
+    do_disconnect();
+
+    make_device_path(g_adapter_path, ctx->address, g_device_path, sizeof(g_device_path));
+    log_msg("[meshble] Connecting to %s (%s)...", ctx->address, g_device_path);
+
+    set_bool_prop(g_bus, g_device_path, DEVICE_IFACE, "Trusted", 1);
+
+    volatile int services_resolved = 0;
+
+    sd_bus_match_signal(g_bus, &g_props_changed_slot,
+                        BLUEZ_BUS, g_device_path,
+                        PROPS_IFACE, "PropertiesChanged",
+                        on_device_props_changed, (void*)&services_resolved);
+
+    sd_bus_error error = SD_BUS_ERROR_NULL;
+    int r = sd_bus_call_method(g_bus, BLUEZ_BUS, g_device_path,
+                               DEVICE_IFACE, "Connect",
+                               &error, NULL, "");
+    if (r < 0) {
+        log_msg("[meshble] Connect failed: %s (%s)", error.message, error.name);
+        int is_gone = (error.name && strstr(error.name, "UnknownObject"));
+        sd_bus_error_free(&error);
+        do_disconnect();
+        ctx->result = is_gone ? -2 : -3;
+        return;
+    }
+    sd_bus_error_free(&error);
+    log_msg("[meshble] Connect() returned, waiting for ServicesResolved...");
+
+    int resolved = 0;
+    get_bool_prop(g_bus, g_device_path, DEVICE_IFACE, "ServicesResolved", &resolved);
+    if (resolved) services_resolved = 1;
+
+    /* Wait for ServicesResolved — process sd-bus events on THIS (worker) thread */
+    int64_t deadline = now_ms() + ctx->timeout_ms;
+    while (!services_resolved && now_ms() < deadline) {
+        for (;;) {
+            r = sd_bus_process(g_bus, NULL);
+            if (r <= 0) break;
+        }
+        if (services_resolved) break;
+        struct pollfd pfd = { .fd = sd_bus_get_fd(g_bus), .events = POLLIN };
+        poll(&pfd, 1, 100);
+    }
+
+    if (!services_resolved) {
+        log_msg("[meshble] ServicesResolved timeout");
+        do_disconnect();
+        ctx->result = -1;
+        return;
+    }
+    log_msg("[meshble] ServicesResolved=true");
+
+    r = find_gatt_characteristics(g_bus, g_device_path);
+    if (r < 0) {
+        log_msg("[meshble] GATT characteristics not found");
+        do_disconnect();
+        ctx->result = -3;
+        return;
+    }
+
+    g_to_radio_fd = acquire_write(g_bus, g_to_radio_char_path, &g_to_radio_mtu);
+    if (g_to_radio_fd < 0) {
+        log_msg("[meshble] AcquireWrite failed for toRadio");
+        do_disconnect();
+        ctx->result = -3;
+        return;
+    }
+
+    g_from_radio_fd = acquire_notify(g_bus, g_from_radio_char_path, &g_from_radio_mtu);
+    if (g_from_radio_fd < 0) {
+        log_msg("[meshble] AcquireNotify failed for fromRadio");
+        do_disconnect();
+        ctx->result = -3;
+        return;
+    }
+
+    fcntl(g_from_radio_fd, F_SETFL, O_NONBLOCK);
+
+    if (g_from_num_char_path[0]) {
+        sd_bus_call_method(g_bus, BLUEZ_BUS, g_from_num_char_path,
+                           CHAR_IFACE, "StartNotify", NULL, NULL, "");
+    }
+
+    atomic_store(&g_connected, true);
+    atomic_store(&g_notifications_active, true);
+    log_msg("[meshble] Connected (fd-based GATT I/O: write_fd=%d read_fd=%d)",
+            g_to_radio_fd, g_from_radio_fd);
+
+    if (g_state_callback) g_state_callback(0, NULL);
+    ctx->result = 0;
+}
+
+/* ==================== API — other worker-dispatched ops ==================== */
+
+typedef struct { int result; } adapter_state_ctx_t;
+
+static void do_get_adapter_state(void* arg) {
+    adapter_state_ctx_t* ctx = (adapter_state_ctx_t*)arg;
+    int powered = 0;
+    int r = get_bool_prop(g_bus, g_adapter_path, ADAPTER_IFACE, "Powered", &powered);
+    ctx->result = (r < 0) ? 0 : (powered ? 2 : 1);
+}
+
+static void do_stop_scan_wrapper(void* arg) {
+    (void)arg;
+    do_stop_scan();
+}
+
+static void do_disconnect_wrapper(void* arg) {
+    (void)arg;
+    do_disconnect();
+}
+
+/* ==================== Public API ==================== */
 
 MESHBLE_API int meshble_init(void) {
     if (atomic_exchange(&g_initialized, true)) return 0;
 
+    /* Open bus BEFORE worker starts — init is single-threaded */
     int r = sd_bus_open_system(&g_bus);
     if (r < 0) {
         log_msg("[meshble] Failed to open system bus: %s", strerror(-r));
@@ -688,14 +872,12 @@ MESHBLE_API int meshble_init(void) {
     r = find_adapter(g_bus, g_adapter_path, sizeof(g_adapter_path));
     if (r < 0) {
         log_msg("[meshble] No BlueZ adapter found: %s", strerror(-r));
-        sd_bus_unref(g_bus);
-        g_bus = NULL;
+        sd_bus_unref(g_bus); g_bus = NULL;
         atomic_store(&g_initialized, false);
         return -1;
     }
     log_msg("[meshble] Adapter: %s", g_adapter_path);
 
-    /* Create wake pipe (non-blocking) */
     if (pipe(g_wake_pipe) < 0) {
         sd_bus_unref(g_bus); g_bus = NULL;
         atomic_store(&g_initialized, false);
@@ -715,8 +897,9 @@ MESHBLE_API int meshble_init(void) {
 MESHBLE_API void meshble_cleanup(void) {
     if (!atomic_load(&g_initialized)) return;
 
-    do_disconnect();
-    do_stop_scan();
+    /* Dispatch cleanup to worker thread */
+    run_on_worker(do_disconnect_wrapper, NULL);
+    run_on_worker(do_stop_scan_wrapper, NULL);
 
     atomic_store(&g_worker_running, false);
     wake_worker();
@@ -732,217 +915,55 @@ MESHBLE_API void meshble_cleanup(void) {
     g_data_callback = NULL;
     g_state_callback = NULL;
     atomic_store(&g_initialized, false);
-
     log_msg("[meshble] Cleanup done");
 }
 
 MESHBLE_API int meshble_get_adapter_state(void) {
     if (!atomic_load(&g_initialized) || !g_bus) return 0;
-    int powered = 0;
-    int r = get_bool_prop(g_bus, g_adapter_path, ADAPTER_IFACE, "Powered", &powered);
-    if (r < 0) return 0;
-    return powered ? 2 : 1;
+    adapter_state_ctx_t ctx = { .result = 0 };
+    run_on_worker(do_get_adapter_state, &ctx);
+    return ctx.result;
 }
 
 MESHBLE_API int meshble_start_scan(meshble_device_cb callback) {
     if (!atomic_load(&g_initialized) || !callback) return -1;
-
-    do_stop_scan();
-    g_device_callback = callback;
-
-    /* Set discovery filter for Meshtastic UUID + LE transport */
-    sd_bus_message* m = NULL;
-    int r = sd_bus_message_new_method_call(g_bus, &m, BLUEZ_BUS, g_adapter_path,
-                                            ADAPTER_IFACE, "SetDiscoveryFilter");
-    if (r >= 0) {
-        sd_bus_message_open_container(m, 'a', "{sv}");
-        /* UUIDs */
-        sd_bus_message_open_container(m, 'e', "sv");
-        sd_bus_message_append(m, "s", "UUIDs");
-        sd_bus_message_open_container(m, 'v', "as");
-        sd_bus_message_open_container(m, 'a', "s");
-        sd_bus_message_append(m, "s", SERVICE_UUID);
-        sd_bus_message_close_container(m);
-        sd_bus_message_close_container(m);
-        sd_bus_message_close_container(m);
-        /* Transport */
-        sd_bus_message_open_container(m, 'e', "sv");
-        sd_bus_message_append(m, "s", "Transport");
-        sd_bus_message_open_container(m, 'v', "s");
-        sd_bus_message_append(m, "s", "le");
-        sd_bus_message_close_container(m);
-        sd_bus_message_close_container(m);
-        sd_bus_message_close_container(m);
-
-        sd_bus_error error = SD_BUS_ERROR_NULL;
-        r = sd_bus_call(g_bus, m, 0, &error, NULL);
-        if (r < 0) log_msg("[meshble] SetDiscoveryFilter: %s", error.message);
-        sd_bus_error_free(&error);
-        sd_bus_message_unref(m);
-    }
-
-    /* Subscribe to InterfacesAdded for new devices */
-    r = sd_bus_match_signal(g_bus, &g_iface_added_slot,
-                            BLUEZ_BUS, "/",
-                            OBJMGR_IFACE, "InterfacesAdded",
-                            on_interfaces_added, NULL);
-    if (r < 0) log_msg("[meshble] Failed to subscribe InterfacesAdded: %s", strerror(-r));
-
-    /* Emit already-known devices */
-    emit_cached_devices(g_bus);
-
-    /* Start discovery */
-    sd_bus_error error = SD_BUS_ERROR_NULL;
-    r = sd_bus_call_method(g_bus, BLUEZ_BUS, g_adapter_path,
-                           ADAPTER_IFACE, "StartDiscovery",
-                           &error, NULL, "");
-    if (r < 0) {
-        log_msg("[meshble] StartDiscovery failed: %s", error.message);
-        sd_bus_error_free(&error);
-        return -1;
-    }
-    sd_bus_error_free(&error);
-
-    log_msg("[meshble] Scan started");
-    return 0;
+    scan_ctx_t ctx = { .callback = callback, .result = 0 };
+    run_on_worker(do_start_scan, &ctx);
+    return ctx.result;
 }
 
 MESHBLE_API void meshble_stop_scan(void) {
     if (!atomic_load(&g_initialized)) return;
-    do_stop_scan();
+    run_on_worker(do_stop_scan_wrapper, NULL);
 }
 
 MESHBLE_API int meshble_connect(const char* address, int timeout_ms) {
     if (!atomic_load(&g_initialized) || !address) return -1;
-
-    do_disconnect();
-
-    make_device_path(g_adapter_path, address, g_device_path, sizeof(g_device_path));
-    log_msg("[meshble] Connecting to %s (%s)...", address, g_device_path);
-
-    /* Set Trusted=true */
-    set_bool_prop(g_bus, g_device_path, DEVICE_IFACE, "Trusted", 1);
-
-    /* Flag for ServicesResolved signal */
-    volatile int services_resolved = 0;
-
-    /* Subscribe to PropertiesChanged for disconnect + ServicesResolved */
-    sd_bus_match_signal(g_bus, &g_props_changed_slot,
-                        BLUEZ_BUS, g_device_path,
-                        PROPS_IFACE, "PropertiesChanged",
-                        on_device_props_changed, (void*)&services_resolved);
-
-    /* Call Device1.Connect() */
-    sd_bus_error error = SD_BUS_ERROR_NULL;
-    int r = sd_bus_call_method(g_bus, BLUEZ_BUS, g_device_path,
-                               DEVICE_IFACE, "Connect",
-                               &error, NULL, "");
-    if (r < 0) {
-        log_msg("[meshble] Connect failed: %s (%s)", error.message, error.name);
-        sd_bus_error_free(&error);
-
-        /* Try rediscovery if device was removed */
-        if (error.name && strstr(error.name, "UnknownObject")) {
-            sd_bus_error_free(&error);
-            do_disconnect();
-            return -2;
-        }
-        sd_bus_error_free(&error);
-        do_disconnect();
-        return -3;
-    }
-    sd_bus_error_free(&error);
-    log_msg("[meshble] Connect() returned, waiting for ServicesResolved...");
-
-    /* Check if ServicesResolved is already true */
-    int resolved = 0;
-    get_bool_prop(g_bus, g_device_path, DEVICE_IFACE, "ServicesResolved", &resolved);
-    if (resolved) services_resolved = 1;
-
-    /* Wait for ServicesResolved with timeout */
-    int64_t deadline = now_ms() + timeout_ms;
-    while (!services_resolved && now_ms() < deadline) {
-        /* Process sd-bus events to receive signals */
-        for (;;) {
-            r = sd_bus_process(g_bus, NULL);
-            if (r <= 0) break;
-        }
-        if (services_resolved) break;
-
-        /* Short poll */
-        struct pollfd pfd = { .fd = sd_bus_get_fd(g_bus), .events = POLLIN };
-        poll(&pfd, 1, 100);
-    }
-
-    if (!services_resolved) {
-        log_msg("[meshble] ServicesResolved timeout");
-        do_disconnect();
-        return -1;
-    }
-    log_msg("[meshble] ServicesResolved=true");
-
-    /* Find GATT characteristics */
-    r = find_gatt_characteristics(g_bus, g_device_path);
-    if (r < 0) {
-        log_msg("[meshble] GATT characteristics not found");
-        do_disconnect();
-        return -3;
-    }
-
-    /* AcquireWrite on toRadio */
-    g_to_radio_fd = acquire_write(g_bus, g_to_radio_char_path, &g_to_radio_mtu);
-    if (g_to_radio_fd < 0) {
-        log_msg("[meshble] AcquireWrite failed for toRadio");
-        do_disconnect();
-        return -3;
-    }
-
-    /* AcquireNotify on fromRadio */
-    g_from_radio_fd = acquire_notify(g_bus, g_from_radio_char_path, &g_from_radio_mtu);
-    if (g_from_radio_fd < 0) {
-        log_msg("[meshble] AcquireNotify failed for fromRadio");
-        do_disconnect();
-        return -3;
-    }
-
-    /* Set fromRadio fd to non-blocking */
-    fcntl(g_from_radio_fd, F_SETFL, O_NONBLOCK);
-
-    /* fromNum: StartNotify (optional, for extra notification hint) */
-    if (g_from_num_char_path[0]) {
-        sd_bus_call_method(g_bus, BLUEZ_BUS, g_from_num_char_path,
-                           CHAR_IFACE, "StartNotify",
-                           NULL, NULL, "");
-    }
-
-    atomic_store(&g_connected, true);
-    atomic_store(&g_notifications_active, true);
-    log_msg("[meshble] Connected (fd-based GATT I/O: write_fd=%d read_fd=%d)",
-            g_to_radio_fd, g_from_radio_fd);
-
-    /* Wake worker to include fromRadio fd in poll */
-    wake_worker();
-
-    if (g_state_callback) g_state_callback(0, NULL);
-    return 0;
+    connect_ctx_t ctx;
+    strncpy(ctx.address, address, sizeof(ctx.address) - 1);
+    ctx.address[sizeof(ctx.address) - 1] = '\0';
+    ctx.timeout_ms = timeout_ms;
+    ctx.result = 0;
+    run_on_worker(do_connect, &ctx);
+    return ctx.result;
 }
 
 MESHBLE_API void meshble_disconnect(void) {
     if (!atomic_load(&g_initialized)) return;
     atomic_store(&g_connected, false);
     atomic_store(&g_notifications_active, false);
-    do_disconnect();
+    run_on_worker(do_disconnect_wrapper, NULL);
 }
 
 MESHBLE_API int meshble_is_connected(void) {
     return atomic_load(&g_connected) ? 1 : 0;
 }
 
+/* write/read use fd-based I/O — thread-safe at OS level, no D-Bus needed */
 MESHBLE_API int meshble_write_to_radio(const unsigned char* data, int length) {
     if (!atomic_load(&g_connected) || !data || length <= 0) return -1;
     int fd = g_to_radio_fd;
     if (fd < 0) return -1;
-
     ssize_t written = write(fd, data, length);
     if (written < 0) {
         log_msg("[meshble] write_to_radio failed: %s", strerror(errno));
@@ -956,10 +977,9 @@ MESHBLE_API int meshble_read_from_radio(unsigned char* buffer, int buf_size, int
     *out_len = 0;
     int fd = g_from_radio_fd;
     if (fd < 0) return -1;
-
     ssize_t n = read(fd, buffer, buf_size);
     if (n < 0) {
-        if (errno == EAGAIN || errno == EWOULDBLOCK) return 0; /* No data */
+        if (errno == EAGAIN || errno == EWOULDBLOCK) return 0;
         return -1;
     }
     *out_len = (int)n;
