@@ -935,25 +935,17 @@ static void do_connect(void* arg) {
         }
     }
 
-    /* Try fd-based AcquireWrite, fall back to D-Bus WriteValue */
-    atomic_store(&g_use_dbus_write, false);
-    g_to_radio_fd = acquire_write(g_bus, g_to_radio_char_path, &g_to_radio_mtu);
-    if (g_to_radio_fd < 0) {
-        log_msg("[meshble] AcquireWrite not supported, using WriteValue fallback");
-        atomic_store(&g_use_dbus_write, true);
-        g_to_radio_fd = -1; /* mark as unused */
-    }
+    /* Use D-Bus WriteValue directly — AcquireWrite returns "NotSupported" on this device
+       and attempting it can leave BlueZ in a bad state */
+    log_msg("[meshble] Using WriteValue for toRadio");
+    atomic_store(&g_use_dbus_write, true);
+    g_to_radio_fd = -1;
 
-    /* Try fd-based AcquireNotify, fall back to D-Bus ReadValue */
-    atomic_store(&g_use_dbus_read, false);
-    g_from_radio_fd = acquire_notify(g_bus, g_from_radio_char_path, &g_from_radio_mtu);
-    if (g_from_radio_fd < 0) {
-        log_msg("[meshble] AcquireNotify not supported, using ReadValue fallback");
-        atomic_store(&g_use_dbus_read, true);
-        g_from_radio_fd = -1;
-    } else {
-        fcntl(g_from_radio_fd, F_SETFL, O_NONBLOCK);
-    }
+    /* Use D-Bus ReadValue directly — AcquireNotify returns "NotSupported" but leaves
+       BlueZ in a state where ReadValue returns "InProgress" forever */
+    log_msg("[meshble] Using ReadValue for fromRadio");
+    atomic_store(&g_use_dbus_read, true);
+    g_from_radio_fd = -1;
 
     if (g_from_num_char_path[0]) {
         sd_bus_error sn_err = SD_BUS_ERROR_NULL;
