@@ -1175,13 +1175,40 @@ MESHBLE_API int meshble_is_connected(void) {
     return atomic_load(&g_connected) ? 1 : 0;
 }
 
+/* Worker-thread wrappers for D-Bus WriteValue/ReadValue */
+
+typedef struct {
+    const unsigned char* data;
+    int length;
+    int result;
+} write_ctx_t;
+
+static void do_write_to_radio(void* arg) {
+    write_ctx_t* ctx = (write_ctx_t*)arg;
+    ctx->result = dbus_write_value(g_bus, g_to_radio_char_path, ctx->data, ctx->length);
+}
+
+typedef struct {
+    unsigned char* buffer;
+    int buf_size;
+    int out_len;
+    int result;
+} read_ctx_t;
+
+static void do_read_from_radio(void* arg) {
+    read_ctx_t* ctx = (read_ctx_t*)arg;
+    ctx->result = dbus_read_value(g_bus, g_from_radio_char_path,
+                                   ctx->buffer, ctx->buf_size, &ctx->out_len);
+}
+
 MESHBLE_API int meshble_write_to_radio(const unsigned char* data, int length) {
     if (!atomic_load(&g_connected) || !data || length <= 0) return -1;
 
     if (atomic_load(&g_use_dbus_write)) {
-        /* D-Bus WriteValue — must run on worker thread */
-        /* For simplicity, call directly (sd-bus is reentrant for method calls) */
-        return dbus_write_value(g_bus, g_to_radio_char_path, data, length);
+        /* D-Bus WriteValue — dispatch to worker thread (sd-bus not thread-safe) */
+        write_ctx_t ctx = { .data = data, .length = length, .result = 0 };
+        run_on_worker(do_write_to_radio, &ctx);
+        return ctx.result;
     }
 
     int fd = g_to_radio_fd;
@@ -1199,8 +1226,11 @@ MESHBLE_API int meshble_read_from_radio(unsigned char* buffer, int buf_size, int
     *out_len = 0;
 
     if (atomic_load(&g_use_dbus_read)) {
-        /* D-Bus ReadValue fallback */
-        return dbus_read_value(g_bus, g_from_radio_char_path, buffer, buf_size, out_len);
+        /* D-Bus ReadValue — dispatch to worker thread */
+        read_ctx_t ctx = { .buffer = buffer, .buf_size = buf_size, .out_len = 0, .result = 0 };
+        run_on_worker(do_read_from_radio, &ctx);
+        *out_len = ctx.out_len;
+        return ctx.result;
     }
 
     int fd = g_from_radio_fd;
