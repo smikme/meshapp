@@ -178,21 +178,16 @@ static void run_on_worker(void (*func)(void* ctx), void* ctx) {
     pthread_cond_destroy(&sc.cond);
 }
 
-/** Post task to worker thread, don't wait */
-static void post_to_worker(void (*func)(void*), void* arg) {
-    tq_push(&g_tasks, func, arg);
-    wake_worker();
-}
-
 /* ==================== Helpers ==================== */
 
-static void make_device_path(const char* adapter, const char* address, char* out, int outsize) {
+static void make_device_path(const char* adapter, const char* address, char* out, size_t outsize) {
     char addr_underscored[18];
     strncpy(addr_underscored, address, sizeof(addr_underscored) - 1);
     addr_underscored[17] = '\0';
     for (int i = 0; addr_underscored[i]; i++)
         if (addr_underscored[i] == ':') addr_underscored[i] = '_';
-    snprintf(out, outsize, "%s/dev_%s", adapter, addr_underscored);
+    int n = snprintf(out, outsize, "%s/dev_%s", adapter, addr_underscored);
+    if (n < 0 || (size_t)n >= outsize) out[0] = '\0';
 }
 
 static int64_t now_ms(void) {
