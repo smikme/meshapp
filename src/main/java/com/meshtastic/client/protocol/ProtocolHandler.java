@@ -7,8 +7,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.List;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executors;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
@@ -34,6 +36,11 @@ public class ProtocolHandler {
     private final MeshtasticConnection connection;
     private final List<FromRadioListener> listeners = new CopyOnWriteArrayList<>();
 
+    /** Очередь входящих пакетов — разделяет reader-поток и обработку,
+     *  чтобы reader не блокировался на listeners и не терял данные из serial-буфера. */
+    private final BlockingQueue<byte[]> incomingQueue = new LinkedBlockingQueue<>(256);
+    private final Thread dispatcherThread;
+
     private final ScheduledExecutorService heartbeatScheduler =
             Executors.newSingleThreadScheduledExecutor(r -> {
                 Thread t = new Thread(r, "heartbeat");
@@ -46,6 +53,9 @@ public class ProtocolHandler {
     public ProtocolHandler(MeshtasticConnection connection) {
         this.connection = connection;
         connection.setDataListener(this::handleRawPacket);
+        dispatcherThread = new Thread(this::dispatchLoop, "proto-dispatcher");
+        dispatcherThread.setDaemon(true);
+        dispatcherThread.start();
     }
 
     /**
@@ -114,21 +124,36 @@ public class ProtocolHandler {
         }
     }
 
-    /** Останавливает heartbeat и освобождает scheduler. */
+    /** Останавливает heartbeat, dispatcher и освобождает scheduler. */
     public void shutdown() {
         stopHeartbeat();
         heartbeatScheduler.shutdownNow();
+        dispatcherThread.interrupt();
     }
 
     private void handleRawPacket(byte[] data) {
-        try {
-            MeshProtos.FromRadio fromRadio = MeshProtos.FromRadio.parseFrom(data);
-            dispatchFromRadio(fromRadio);
-        } catch (InvalidProtocolBufferException e) {
-            log.warn("Failed to parse FromRadio ({} bytes): {}", data.length, e.getMessage());
-        } catch (Exception e) {
-            log.error("Error processing FromRadio ({} bytes)", data.length, e);
+        if (!incomingQueue.offer(data)) {
+            log.warn("Incoming queue full, dropping packet ({} bytes)", data.length);
         }
+    }
+
+    private void dispatchLoop() {
+        log.debug("Proto dispatcher thread started");
+        while (!Thread.currentThread().isInterrupted()) {
+            try {
+                byte[] data = incomingQueue.take();
+                MeshProtos.FromRadio fromRadio = MeshProtos.FromRadio.parseFrom(data);
+                dispatchFromRadio(fromRadio);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            } catch (InvalidProtocolBufferException e) {
+                log.warn("Failed to parse FromRadio: {}", e.getMessage());
+            } catch (Exception e) {
+                log.error("Error processing FromRadio", e);
+            }
+        }
+        log.debug("Proto dispatcher thread exiting");
     }
 
     private void dispatchFromRadio(MeshProtos.FromRadio fromRadio) {
