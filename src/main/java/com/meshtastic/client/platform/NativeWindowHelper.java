@@ -60,6 +60,14 @@ public final class NativeWindowHelper {
         if (AppPreferences.isNativeWindow() || AppPreferences.isDisableTransparency()) {
             setSeamlessState(stage, false);
             setThemeState(stage, isDark);
+            // Windows: установить тёмный title bar даже в нативном режиме
+            if (OsDetect.isWindows() && isDark) {
+                try {
+                    new NativeWinWindowControl(stage).setDarkMode(true);
+                } catch (Throwable t) {
+                    log.warn("Не удалось установить тёмный title bar", t);
+                }
+            }
             return;
         }
 
