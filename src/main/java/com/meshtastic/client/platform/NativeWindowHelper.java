@@ -63,11 +63,9 @@ public final class NativeWindowHelper {
             // Windows: установить тёмный/светлый title bar в нативном режиме
             if (OsDetect.isWindows()) {
                 try {
-                    new NativeWinWindowControl(stage).setDarkMode(isDark);
-                    // Resize nudge — заставить DWM перерисовать title bar
-                    double w = stage.getWidth();
-                    stage.setWidth(w - 1);
-                    Platform.runLater(() -> stage.setWidth(w));
+                    var ctrl = new NativeWinWindowControl(stage);
+                    ctrl.setDarkMode(isDark);
+                    ctrl.redrawFrame();
                 } catch (Throwable t) {
                     log.warn("Не удалось установить тёмный title bar", t);
                 }
@@ -121,10 +119,7 @@ public final class NativeWindowHelper {
                 case WINDOWS -> {
                     var ctrl = new NativeWinWindowControl(stage);
                     ctrl.setDarkMode(isDark);
-                    // Resize nudge для перерисовки DWM title bar
-                    double w = stage.getWidth();
-                    stage.setWidth(w - 1);
-                    Platform.runLater(() -> stage.setWidth(w));
+                    ctrl.redrawFrame();
                 }
                 case MACOS -> {
                     var ctrl = new NativeMacOsWindowControl(stage);

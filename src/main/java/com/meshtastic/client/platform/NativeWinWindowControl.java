@@ -6,8 +6,10 @@ import com.sun.jna.Native;
 import com.sun.jna.Pointer;
 import com.sun.jna.PointerType;
 import com.sun.jna.Structure;
+import com.sun.jna.platform.win32.User32;
 import com.sun.jna.platform.win32.WinDef;
 import com.sun.jna.platform.win32.WinNT;
+import com.sun.jna.platform.win32.WinUser;
 import javafx.stage.Window;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -129,6 +131,22 @@ public class NativeWinWindowControl {
         } catch (Exception e) {
             log.error("Не удалось установить dark mode", e);
             return false;
+        }
+    }
+
+    /**
+     * Принудительная перерисовка non-client area (title bar).
+     * SetWindowPos с SWP_FRAMECHANGED заставляет DWM пересчитать и перерисовать рамку.
+     */
+    public void redrawFrame() {
+        if (hwnd == null) { return; }
+        try {
+            User32.INSTANCE.SetWindowPos(
+                    hwnd, null, 0, 0, 0, 0,
+                    WinUser.SWP_NOMOVE | WinUser.SWP_NOSIZE
+                            | WinUser.SWP_NOZORDER | WinUser.SWP_FRAMECHANGED);
+        } catch (Exception e) {
+            log.warn("redrawFrame failed", e);
         }
     }
 
