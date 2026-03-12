@@ -42,6 +42,9 @@ public class NativeWinWindowControl {
     private static final int DWMWA_SYSTEMBACKDROP_TYPE = 38;           // Win11 22H2+
     private static final int DWMWCP_DOROUND = 2;
 
+    // Win32 message constants
+    private static final int WM_NCACTIVATE = 0x0086;
+
     // SetWindowCompositionAttribute constants (Windows 10 fallback)
     private static final int WCA_ACCENT_POLICY = 19;
     private static final int ACCENT_ENABLE_ACRYLICBLURBEHIND = 4;
@@ -236,15 +239,18 @@ public class NativeWinWindowControl {
 
     /**
      * Принудительная перерисовка non-client area (title bar).
-     * SetWindowPos с SWP_FRAMECHANGED заставляет DWM пересчитать и перерисовать рамку.
+     * <p>
+     * WM_NCACTIVATE deactivate→activate заставляет Windows полностью перерисовать
+     * title bar с новыми DWM-атрибутами (dark mode). SWP_FRAMECHANGED одного
+     * недостаточно на Win10 — он пересчитывает рамку, но не перерисовывает caption.
      */
     public void redrawFrame() {
         if (hwnd == null) { return; }
         try {
-            User32.INSTANCE.SetWindowPos(
-                    hwnd, null, 0, 0, 0, 0,
-                    WinUser.SWP_NOMOVE | WinUser.SWP_NOSIZE
-                            | WinUser.SWP_NOZORDER | WinUser.SWP_FRAMECHANGED);
+            // WM_NCACTIVATE: деактивировать → активировать non-client area
+            // lParam = -1 предотвращает обновление client area (только title bar)
+            User32.INSTANCE.SendMessage(hwnd, WM_NCACTIVATE, new WinDef.WPARAM(0), new WinDef.LPARAM(-1));
+            User32.INSTANCE.SendMessage(hwnd, WM_NCACTIVATE, new WinDef.WPARAM(1), new WinDef.LPARAM(-1));
         } catch (Exception e) {
             log.warn("redrawFrame failed", e);
         }
