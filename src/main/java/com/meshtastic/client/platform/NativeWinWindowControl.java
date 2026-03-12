@@ -32,6 +32,7 @@ public class NativeWinWindowControl {
 
     // DWM attribute constants (Windows 11 22H2+)
     private static final int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
+    private static final int DWMWA_USE_IMMERSIVE_DARK_MODE_OLD = 19; // Win10 1809–18985
     private static final int DWMWA_WINDOW_CORNER_PREFERENCE = 33;
     private static final int DWMWA_SYSTEMBACKDROP_TYPE = 38;
     private static final int DWMWCP_DOROUND = 2;
@@ -113,14 +114,18 @@ public class NativeWinWindowControl {
         }
     }
 
-    /** Тёмный режим title bar */
+    /** Тёмный режим title bar (Win10 1809+, Win11) */
     public boolean setDarkMode(boolean dark) {
         if (hwnd == null) { return false; }
         try {
+            var val = new WinDef.BOOLByReference(new WinDef.BOOL(dark));
             WinNT.HRESULT hr = Dwm.INSTANCE.DwmSetWindowAttribute(
-                    hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE,
-                    new WinDef.BOOLByReference(new WinDef.BOOL(dark)),
-                    WinDef.DWORD.SIZE);
+                    hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, val, WinDef.DWORD.SIZE);
+            if (hr.longValue() != 0) {
+                // Fallback for Windows 10 builds before 18985
+                hr = Dwm.INSTANCE.DwmSetWindowAttribute(
+                        hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE_OLD, val, WinDef.DWORD.SIZE);
+            }
             return hr.longValue() == 0;
         } catch (Exception e) {
             log.error("Не удалось установить dark mode", e);
