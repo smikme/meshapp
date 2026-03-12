@@ -119,14 +119,13 @@ public class NativeWinWindowControl {
         if (hwnd == null) { return false; }
         try {
             var val = new WinDef.BOOLByReference(new WinDef.BOOL(dark));
-            WinNT.HRESULT hr = Dwm.INSTANCE.DwmSetWindowAttribute(
+            // Ставим оба атрибута — на некоторых билдах Win10 один из них
+            // может вернуть «успех» но не иметь визуального эффекта
+            WinNT.HRESULT hr20 = Dwm.INSTANCE.DwmSetWindowAttribute(
                     hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, val, WinDef.DWORD.SIZE);
-            if (hr.longValue() != 0) {
-                // Fallback for Windows 10 builds before 18985
-                hr = Dwm.INSTANCE.DwmSetWindowAttribute(
-                        hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE_OLD, val, WinDef.DWORD.SIZE);
-            }
-            return hr.longValue() == 0;
+            WinNT.HRESULT hr19 = Dwm.INSTANCE.DwmSetWindowAttribute(
+                    hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE_OLD, val, WinDef.DWORD.SIZE);
+            return hr20.longValue() == 0 || hr19.longValue() == 0;
         } catch (Exception e) {
             log.error("Не удалось установить dark mode", e);
             return false;
