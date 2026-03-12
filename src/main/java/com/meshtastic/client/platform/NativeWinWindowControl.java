@@ -157,15 +157,17 @@ public class NativeWinWindowControl {
      * ACCENT_POLICY: {AccentState, AccentFlags, GradientColor(ABGR), AnimationId} — 16 байт.
      * WINDOWCOMPOSITIONATTRIBDATA: {Attribute(int), pad, pData(ptr), cbData(size_t)}.
      *
+     * @param isDark тёмная тема — тинт тёмный, иначе светлый
      * @return true если acrylic blur успешно применён
      */
-    public boolean setAcrylicViaCompositionAttribute() {
+    public boolean setAcrylicViaCompositionAttribute(boolean isDark) {
         if (hwnd == null) { return false; }
         try {
             ACCENT_POLICY accent = new ACCENT_POLICY();
             accent.accentState = ACCENT_ENABLE_ACRYLICBLURBEHIND;
             accent.accentFlags = 2;
-            accent.gradientColor = 0x01000000; // ABGR: near-transparent black
+            // ABGR: dark theme → semi-opaque black, light theme → near-transparent
+            accent.gradientColor = isDark ? 0xCC000000 : 0x01000000;
             accent.animationId = 0;
             accent.write();
 
@@ -217,7 +219,7 @@ public class NativeWinWindowControl {
         boolean backdropOk = setWindowBackdrop(DwmSystemBackdropType.MICA);
         if (!backdropOk) {
             log.info("DWMWA_SYSTEMBACKDROP_TYPE недоступен, пробуем SetWindowCompositionAttribute...");
-            backdropOk = setAcrylicViaCompositionAttribute();
+            backdropOk = setAcrylicViaCompositionAttribute(isDark);
         }
 
         // 4. Скруглённые углы (Win11+, non-fatal на Win10)
