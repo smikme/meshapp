@@ -41,10 +41,12 @@ public class LinuxBle implements BlePlatform {
     private static LinuxBleLibrary.DeviceCallback scanCallback;
     private static LinuxBleLibrary.DataCallback dataCallback;
     private static LinuxBleLibrary.StateCallback stateCallback;
+    private static LinuxBleLibrary.PasskeyRequestCallback passkeyCallback;
 
     private volatile Consumer<BleDevice> scanConsumer;
     private volatile Consumer<byte[]> fromRadioListener;
     private volatile Consumer<BleState> stateListener;
+    private volatile Consumer<String> passkeyRequestHandler;
     private volatile boolean connected;
 
     // Polling (fromRadio data also comes via fd notifications in native code,
@@ -75,6 +77,15 @@ public class LinuxBle implements BlePlatform {
         // Forward native log_msg() to SLF4J (static callback = GC protection)
         logCallback = msg -> log.debug("[native] {}", msg);
         lib.meshble_set_log_callback(logCallback);
+
+        // Passkey request callback (static, prevent GC)
+        passkeyCallback = address -> {
+            Consumer<String> handler = passkeyRequestHandler;
+            if (handler != null && address != null) {
+                handler.accept(address);
+            }
+        };
+        lib.meshble_set_passkey_request_callback(passkeyCallback);
 
         log.info("BlueZ BLE инициализирован (нативная библиотека)");
     }
@@ -207,6 +218,23 @@ public class LinuxBle implements BlePlatform {
     @Override
     public void setStateListener(Consumer<BleState> listener) {
         this.stateListener = listener;
+    }
+
+    // ==================== BlePlatform: Pairing ====================
+
+    @Override
+    public void setPasskeyRequestHandler(Consumer<String> handler) {
+        this.passkeyRequestHandler = handler;
+    }
+
+    public void respondPasskey(int passkey) {
+        log.info("Responding to passkey request with PIN");
+        lib.meshble_respond_passkey(passkey);
+    }
+
+    public void cancelPasskey() {
+        log.info("Cancelling passkey request");
+        lib.meshble_cancel_passkey();
     }
 
     // ==================== BlePlatform: State ====================

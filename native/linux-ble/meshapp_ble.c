@@ -159,6 +159,11 @@ static sd_bus_slot* g_iface_added_slot = NULL;
 static sd_bus_slot* g_props_changed_slot = NULL;
 static sd_bus_slot* g_from_radio_notify_slot = NULL;
 
+/* Pairing agent */
+static meshble_passkey_request_cb g_passkey_callback = NULL;
+static sd_bus_message* g_pending_passkey_msg = NULL;
+static sd_bus_slot* g_agent_slot = NULL;
+
 /* ==================== Wake + Dispatch ==================== */
 
 static void wake_worker(void) {
@@ -926,27 +931,64 @@ static void do_connect(void* arg) {
 
     set_bool_prop(g_bus, g_device_path, DEVICE_IFACE, "Trusted", 1);
 
-    /* Connect via sd-bus with explicit timeout */
-    sd_bus_error error = SD_BUS_ERROR_NULL;
+    /* Connect via async sd_bus_call — allows agent RequestPasskey to be
+       processed on the worker thread during the Connect call */
+    volatile int connect_done = 0;
+    volatile int connect_result = 0;
+    volatile const char* connect_error_name = NULL;
+    volatile const char* connect_error_msg = NULL;
+
+    /* Async callback for Connect reply */
+    typedef struct { volatile int* done; volatile int* result;
+                     volatile const char** err_name; volatile const char** err_msg; } connect_async_t;
+    connect_async_t async_ctx = { &connect_done, &connect_result,
+                                   &connect_error_name, &connect_error_msg };
+
     sd_bus_message* conn_msg = NULL;
     r = sd_bus_message_new_method_call(g_bus, &conn_msg, BLUEZ_BUS, g_device_path,
                                         DEVICE_IFACE, "Connect");
-    if (r >= 0) {
-        r = sd_bus_call(g_bus, conn_msg, (uint64_t)ctx->timeout_ms * 1000, &error, NULL);
-        sd_bus_message_unref(conn_msg);
-    }
     if (r < 0) {
-        log_msg("[meshble] Connect failed: %s (%s)", error.message, error.name);
-        int is_gone = (error.name && strstr(error.name, "UnknownObject"));
-        int is_denied = (error.name && (strstr(error.name, "AccessDenied") ||
-                                         strstr(error.name, "AuthenticationFailed")));
-        sd_bus_error_free(&error);
+        log_msg("[meshble] Connect msg failed: %s", strerror(-r));
         do_disconnect();
-        ctx->result = is_gone ? -2 : (is_denied ? -4 : -3);
+        ctx->result = -3;
         return;
     }
-    sd_bus_error_free(&error);
-    log_msg("[meshble] Connect() returned OK");
+
+    sd_bus_slot* connect_slot = NULL;
+    r = sd_bus_call_async(g_bus, &connect_slot, conn_msg,
+        /* inline callback: */ NULL, NULL, (uint64_t)ctx->timeout_ms * 1000);
+    sd_bus_message_unref(conn_msg);
+
+    /* sd_bus_call_async with NULL callback doesn't work — use polling approach instead */
+    if (connect_slot) sd_bus_slot_unref(connect_slot);
+
+    /* Poll-based async Connect: process bus events until we see Connected=1 or timeout */
+    int64_t connect_deadline = now_ms() + ctx->timeout_ms;
+    int connected_ok = 0;
+    while (now_ms() < connect_deadline) {
+        for (;;) {
+            r = sd_bus_process(g_bus, NULL);
+            if (r <= 0) break;
+        }
+
+        /* Check if Connected property is set */
+        int conn_val = 0;
+        if (get_bool_prop(g_bus, g_device_path, DEVICE_IFACE, "Connected", &conn_val) >= 0 && conn_val) {
+            connected_ok = 1;
+            break;
+        }
+
+        struct pollfd pfd = { .fd = sd_bus_get_fd(g_bus), .events = POLLIN };
+        poll(&pfd, 1, 200);
+    }
+
+    if (!connected_ok) {
+        log_msg("[meshble] Connect timeout — device not connected");
+        do_disconnect();
+        ctx->result = -1;
+        return;
+    }
+    log_msg("[meshble] Connect() — device connected");
 
     /* Wait for ServicesResolved — MUST be true before GATT is usable.
        Do NOT use find_gatt_characteristics() as early exit — cached BlueZ objects
@@ -1029,40 +1071,88 @@ static void do_connect(void* arg) {
     ctx->result = 0;
 }
 
-/* ==================== BlueZ Agent (NoInputNoOutput) ==================== */
+/* ==================== BlueZ Pairing Agent (KeyboardOnly) ==================== */
 
 #define AGENT_PATH "/meshapp/agent"
 #define AGENT_MGR_IFACE "org.bluez.AgentManager1"
 #define AGENT_IFACE "org.bluez.Agent1"
 
-static sd_bus_slot* g_agent_slot = NULL;
-
 static int agent_release(sd_bus_message* msg, void* userdata, sd_bus_error* err) {
     (void)userdata; (void)err;
+    log_msg("[meshble] Agent: Release");
     return sd_bus_reply_method_return(msg, "");
 }
 
-static int agent_request_default(sd_bus_message* msg, void* userdata, sd_bus_error* err) {
+/** Extract device address from D-Bus object path */
+static void extract_address_from_path(const char* path, char* addr, int addr_size) {
+    /* Path: /org/bluez/hci0/dev_AA_BB_CC_DD_EE_FF → AA:BB:CC:DD:EE:FF */
+    const char* dev = strstr(path, "dev_");
+    if (dev) {
+        dev += 4;
+        int i = 0;
+        while (*dev && i < addr_size - 1) {
+            addr[i++] = (*dev == '_') ? ':' : *dev;
+            dev++;
+        }
+        addr[i] = '\0';
+    } else {
+        strncpy(addr, path, addr_size - 1);
+        addr[addr_size - 1] = '\0';
+    }
+}
+
+/** BlueZ calls this when it needs a passkey for pairing.
+ *  We save the message and notify Java — reply comes later via meshble_respond_passkey. */
+static int agent_request_passkey(sd_bus_message* msg, void* userdata, sd_bus_error* err) {
     (void)userdata; (void)err;
-    /* Auto-accept: reply empty for RequestConfirmation, RequestAuthorization, AuthorizeService */
+    const char* device_path = NULL;
+    sd_bus_message_read(msg, "o", &device_path);
+    log_msg("[meshble] Agent: RequestPasskey for %s", device_path ? device_path : "?");
+
+    if (!g_passkey_callback) {
+        log_msg("[meshble] Agent: No passkey callback — rejecting");
+        return sd_bus_reply_method_errorf(msg, "org.bluez.Error.Rejected", "No passkey handler");
+    }
+
+    /* Save the D-Bus message — we'll reply asynchronously */
+    if (g_pending_passkey_msg) {
+        sd_bus_message_unref(g_pending_passkey_msg);
+    }
+    g_pending_passkey_msg = sd_bus_message_ref(msg);
+
+    /* Notify Java to show PIN dialog */
+    char addr[32] = {0};
+    if (device_path) extract_address_from_path(device_path, addr, sizeof(addr));
+    g_passkey_callback(addr);
+
+    return 1; /* positive = we'll reply later (async) */
+}
+
+static int agent_auto_accept(sd_bus_message* msg, void* userdata, sd_bus_error* err) {
+    (void)userdata; (void)err;
     return sd_bus_reply_method_return(msg, "");
 }
 
 static int agent_cancel(sd_bus_message* msg, void* userdata, sd_bus_error* err) {
     (void)userdata; (void)err;
+    log_msg("[meshble] Agent: Cancel");
+    if (g_pending_passkey_msg) {
+        sd_bus_message_unref(g_pending_passkey_msg);
+        g_pending_passkey_msg = NULL;
+    }
     return sd_bus_reply_method_return(msg, "");
 }
 
 static const sd_bus_vtable agent_vtable[] = {
     SD_BUS_VTABLE_START(0),
     SD_BUS_METHOD("Release", "", "", agent_release, SD_BUS_VTABLE_UNPRIVILEGED),
-    SD_BUS_METHOD("RequestPinCode", "o", "s", agent_request_default, SD_BUS_VTABLE_UNPRIVILEGED),
-    SD_BUS_METHOD("RequestPasskey", "o", "u", agent_request_default, SD_BUS_VTABLE_UNPRIVILEGED),
-    SD_BUS_METHOD("DisplayPinCode", "os", "", agent_request_default, SD_BUS_VTABLE_UNPRIVILEGED),
-    SD_BUS_METHOD("DisplayPasskey", "ouu", "", agent_request_default, SD_BUS_VTABLE_UNPRIVILEGED),
-    SD_BUS_METHOD("RequestConfirmation", "ou", "", agent_request_default, SD_BUS_VTABLE_UNPRIVILEGED),
-    SD_BUS_METHOD("RequestAuthorization", "o", "", agent_request_default, SD_BUS_VTABLE_UNPRIVILEGED),
-    SD_BUS_METHOD("AuthorizeService", "os", "", agent_request_default, SD_BUS_VTABLE_UNPRIVILEGED),
+    SD_BUS_METHOD("RequestPinCode", "o", "s", agent_auto_accept, SD_BUS_VTABLE_UNPRIVILEGED),
+    SD_BUS_METHOD("RequestPasskey", "o", "u", agent_request_passkey, SD_BUS_VTABLE_UNPRIVILEGED),
+    SD_BUS_METHOD("DisplayPinCode", "os", "", agent_auto_accept, SD_BUS_VTABLE_UNPRIVILEGED),
+    SD_BUS_METHOD("DisplayPasskey", "ouu", "", agent_auto_accept, SD_BUS_VTABLE_UNPRIVILEGED),
+    SD_BUS_METHOD("RequestConfirmation", "ou", "", agent_auto_accept, SD_BUS_VTABLE_UNPRIVILEGED),
+    SD_BUS_METHOD("RequestAuthorization", "o", "", agent_auto_accept, SD_BUS_VTABLE_UNPRIVILEGED),
+    SD_BUS_METHOD("AuthorizeService", "os", "", agent_auto_accept, SD_BUS_VTABLE_UNPRIVILEGED),
     SD_BUS_METHOD("Cancel", "", "", agent_cancel, SD_BUS_VTABLE_UNPRIVILEGED),
     SD_BUS_VTABLE_END,
 };
@@ -1078,29 +1168,23 @@ static int register_agent(sd_bus* bus) {
     sd_bus_error error = SD_BUS_ERROR_NULL;
     r = sd_bus_call_method(bus, BLUEZ_BUS, "/org/bluez",
                             AGENT_MGR_IFACE, "RegisterAgent",
-                            &error, NULL, "os", AGENT_PATH, "NoInputNoOutput");
+                            &error, NULL, "os", AGENT_PATH, "KeyboardOnly");
     if (r < 0) {
-        /* AlreadyExists is OK — agent from previous init */
         if (error.name && strstr(error.name, "AlreadyExists")) {
             log_msg("[meshble] Agent already registered");
-            sd_bus_error_free(&error);
         } else {
             log_msg("[meshble] RegisterAgent failed: %s (%s)", error.message, error.name);
             sd_bus_error_free(&error);
             return r;
         }
-    } else {
-        sd_bus_error_free(&error);
     }
+    sd_bus_error_free(&error);
 
-    r = sd_bus_call_method(bus, BLUEZ_BUS, "/org/bluez",
-                            AGENT_MGR_IFACE, "RequestDefaultAgent",
-                            NULL, NULL, "o", AGENT_PATH);
-    if (r < 0) {
-        log_msg("[meshble] RequestDefaultAgent failed (non-fatal)");
-    }
+    sd_bus_call_method(bus, BLUEZ_BUS, "/org/bluez",
+                        AGENT_MGR_IFACE, "RequestDefaultAgent",
+                        NULL, NULL, "o", AGENT_PATH);
 
-    log_msg("[meshble] Agent registered (NoInputNoOutput)");
+    log_msg("[meshble] Agent registered (KeyboardOnly)");
     return 0;
 }
 
@@ -1110,6 +1194,7 @@ static void unregister_agent(sd_bus* bus) {
                         AGENT_MGR_IFACE, "UnregisterAgent",
                         NULL, NULL, "o", AGENT_PATH);
     if (g_agent_slot) { sd_bus_slot_unref(g_agent_slot); g_agent_slot = NULL; }
+    if (g_pending_passkey_msg) { sd_bus_message_unref(g_pending_passkey_msg); g_pending_passkey_msg = NULL; }
 }
 
 /* ==================== API — other worker-dispatched ops ==================== */
@@ -1155,7 +1240,8 @@ MESHBLE_API int meshble_init(void) {
     }
     log_msg("[meshble] Adapter: %s", g_adapter_path);
 
-    /* No agent registration — let the system default agent handle pairing if needed */
+    /* Register pairing agent before worker thread starts (bus not shared yet) */
+    register_agent(g_bus);
 
     if (pipe(g_wake_pipe) < 0) {
         sd_bus_unref(g_bus); g_bus = NULL;
@@ -1188,11 +1274,13 @@ MESHBLE_API void meshble_cleanup(void) {
     if (g_wake_pipe[0] >= 0) { close(g_wake_pipe[0]); g_wake_pipe[0] = -1; }
     if (g_wake_pipe[1] >= 0) { close(g_wake_pipe[1]); g_wake_pipe[1] = -1; }
 
+    unregister_agent(g_bus);
     if (g_bus) { sd_bus_unref(g_bus); g_bus = NULL; }
 
     g_device_callback = NULL;
     g_data_callback = NULL;
     g_state_callback = NULL;
+    g_passkey_callback = NULL;
     atomic_store(&g_initialized, false);
     log_msg("[meshble] Cleanup done");
 }
@@ -1320,4 +1408,38 @@ MESHBLE_API int meshble_notifications_active(void) {
 
 MESHBLE_API void meshble_set_log_callback(meshble_log_cb callback) {
     g_log_callback = callback;
+}
+
+MESHBLE_API void meshble_set_passkey_request_callback(meshble_passkey_request_cb callback) {
+    g_passkey_callback = callback;
+}
+
+static void do_respond_passkey(void* arg) {
+    uint32_t passkey = *(uint32_t*)arg;
+    if (g_pending_passkey_msg) {
+        log_msg("[meshble] Responding to passkey request: %u", passkey);
+        sd_bus_reply_method_return(g_pending_passkey_msg, "u", passkey);
+        sd_bus_message_unref(g_pending_passkey_msg);
+        g_pending_passkey_msg = NULL;
+    }
+}
+
+MESHBLE_API void meshble_respond_passkey(uint32_t passkey) {
+    static uint32_t pk;
+    pk = passkey;
+    run_on_worker(do_respond_passkey, &pk);
+}
+
+static void do_cancel_passkey(void* arg) {
+    (void)arg;
+    if (g_pending_passkey_msg) {
+        log_msg("[meshble] Cancelling passkey request");
+        sd_bus_reply_method_errorf(g_pending_passkey_msg, "org.bluez.Error.Rejected", "User cancelled");
+        sd_bus_message_unref(g_pending_passkey_msg);
+        g_pending_passkey_msg = NULL;
+    }
+}
+
+MESHBLE_API void meshble_cancel_passkey(void) {
+    run_on_worker(do_cancel_passkey, NULL);
 }

@@ -12,6 +12,8 @@
 #ifndef MESHAPP_BLE_H
 #define MESHAPP_BLE_H
 
+#include <stdint.h>
+
 #ifdef MESHBLE_EXPORTS
 #define MESHBLE_API __attribute__((visibility("default")))
 #else
@@ -125,6 +127,23 @@ typedef void (*meshble_log_cb)(const char* message);
 
 /** Set log callback. If set, log_msg() calls this in addition to stderr. */
 MESHBLE_API void meshble_set_log_callback(meshble_log_cb callback);
+
+/* ==================== Pairing ==================== */
+
+/**
+ * Callback when BlueZ requests a passkey during pairing.
+ * @param device_address  MAC address of the device requesting pairing
+ */
+typedef void (*meshble_passkey_request_cb)(const char* device_address);
+
+/** Set callback for passkey requests. Called from worker thread. */
+MESHBLE_API void meshble_set_passkey_request_callback(meshble_passkey_request_cb callback);
+
+/** Respond to a pending passkey request with the user-provided PIN. */
+MESHBLE_API void meshble_respond_passkey(uint32_t passkey);
+
+/** Cancel a pending passkey request (user declined pairing). */
+MESHBLE_API void meshble_cancel_passkey(void);
 
 /* ==================== Info ==================== */
 

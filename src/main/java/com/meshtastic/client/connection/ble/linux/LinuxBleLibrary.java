@@ -95,6 +95,17 @@ public interface LinuxBleLibrary extends Library {
     /** Установка callback для нативных лог-сообщений. */
     void meshble_set_log_callback(LogCallback callback);
 
+    // ==================== Pairing ====================
+
+    /** Установка callback для запроса passkey при pairing. */
+    void meshble_set_passkey_request_callback(PasskeyRequestCallback callback);
+
+    /** Ответить на запрос passkey. */
+    void meshble_respond_passkey(int passkey);
+
+    /** Отменить запрос passkey (пользователь отказался). */
+    void meshble_cancel_passkey();
+
     // ==================== Info ====================
 
     /** @return 1 если notifications активны, 0 если polling */
@@ -129,5 +140,12 @@ public interface LinuxBleLibrary extends Library {
      */
     interface LogCallback extends Callback {
         void invoke(String message);
+    }
+
+    /**
+     * Callback запроса passkey при BLE pairing.
+     */
+    interface PasskeyRequestCallback extends Callback {
+        void invoke(String deviceAddress);
     }
 }
