@@ -8,6 +8,11 @@ import org.slf4j.LoggerFactory;
 
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Диспетчер протокола Meshtastic. Принимает сырые protobuf-payload из
@@ -21,8 +26,22 @@ public class ProtocolHandler {
 
     private static final Logger log = LoggerFactory.getLogger(ProtocolHandler.class);
 
+    /** Интервал heartbeat (секунды). Прошивка Meshtastic закрывает TCP при idle (~5-7 сек). */
+    private static final int HEARTBEAT_INTERVAL_SEC = 5;
+    /** Задержка перед первым heartbeat (секунды). 0 = отправить сразу после config exchange. */
+    private static final int HEARTBEAT_INITIAL_DELAY_SEC = 0;
+
     private final MeshtasticConnection connection;
     private final List<FromRadioListener> listeners = new CopyOnWriteArrayList<>();
+
+    private final ScheduledExecutorService heartbeatScheduler =
+            Executors.newSingleThreadScheduledExecutor(r -> {
+                Thread t = new Thread(r, "heartbeat");
+                t.setDaemon(true);
+                return t;
+            });
+    private volatile ScheduledFuture<?> heartbeatFuture;
+    private final AtomicInteger heartbeatNonce = new AtomicInteger(0);
 
     public ProtocolHandler(MeshtasticConnection connection) {
         this.connection = connection;
@@ -57,6 +76,48 @@ public class ProtocolHandler {
         byte[] frame = PacketFramer.frame(toRadio);
         log.debug("Sending ToRadio: {} ({} bytes framed)", toRadio.getPayloadVariantCase(), frame.length);
         connection.sendBytes(frame);
+    }
+
+    /**
+     * Запускает периодическую отправку heartbeat на устройство.
+     * Прошивка Meshtastic закрывает TCP-соединение при отсутствии активности.
+     * Вызывать после успешного config exchange.
+     */
+    public void startHeartbeat() {
+        stopHeartbeat();
+        heartbeatFuture = heartbeatScheduler.scheduleWithFixedDelay(() -> {
+            try {
+                if (connection.isConnected()) {
+                    MeshProtos.ToRadio heartbeat = MeshProtos.ToRadio.newBuilder()
+                            .setHeartbeat(MeshProtos.Heartbeat.newBuilder()
+                                    .setNonce(heartbeatNonce.incrementAndGet())
+                                    .build())
+                            .build();
+                    sendToRadio(heartbeat);
+                } else {
+                    log.debug("Heartbeat skipped: connection not active");
+                }
+            } catch (Exception e) {
+                log.warn("Heartbeat send failed", e);
+            }
+        }, HEARTBEAT_INITIAL_DELAY_SEC, HEARTBEAT_INTERVAL_SEC, TimeUnit.SECONDS);
+        log.info("Heartbeat started (initialDelay={}s, interval={}s)", HEARTBEAT_INITIAL_DELAY_SEC, HEARTBEAT_INTERVAL_SEC);
+    }
+
+    /** Останавливает отправку heartbeat. */
+    public void stopHeartbeat() {
+        ScheduledFuture<?> f = heartbeatFuture;
+        if (f != null) {
+            f.cancel(false);
+            heartbeatFuture = null;
+            log.info("Heartbeat stopped");
+        }
+    }
+
+    /** Останавливает heartbeat и освобождает scheduler. */
+    public void shutdown() {
+        stopHeartbeat();
+        heartbeatScheduler.shutdownNow();
     }
 
     private void handleRawPacket(byte[] data) {

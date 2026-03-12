@@ -128,7 +128,6 @@ public class ConfigExchangeService implements FromRadioListener {
         // Синхронизация избранного с устройства (без fire listeners — будет один раз в onConfigComplete)
         FavoriteNodeService.getInstance().setFavoriteQuiet(node.getNodeId(), nodeInfo.getIsFavorite());
 
-
         if (nodeInfo.hasDeviceMetrics()) {
             TelemetryProtos.DeviceMetrics dm = nodeInfo.getDeviceMetrics();
             if (dm.getBatteryLevel() != 0) { node.setBatteryLevel(dm.getBatteryLevel()); }

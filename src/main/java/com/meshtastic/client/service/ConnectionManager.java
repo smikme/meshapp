@@ -171,6 +171,10 @@ public final class ConnectionManager {
 
         ProtocolHandler protocolHandler = new ProtocolHandler(conn);
         protocolHandlers.put(id, protocolHandler);
+
+        // Heartbeat сразу после connect — устройство закрывает idle TCP через ~7 сек
+        protocolHandler.startHeartbeat();
+
         DeviceState deviceState = new DeviceState();
         deviceStates.put(id, deviceState);
 
@@ -256,7 +260,10 @@ public final class ConnectionManager {
         if (mls != null) {
             mls.getNotificationManager().dispose();
         }
-        protocolHandlers.remove(id);
+        ProtocolHandler ph = protocolHandlers.remove(id);
+        if (ph != null) {
+            ph.shutdown();
+        }
         configFutures.remove(id);
     }
 
