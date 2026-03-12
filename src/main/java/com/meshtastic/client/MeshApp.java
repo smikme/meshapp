@@ -6,6 +6,7 @@ import com.meshtastic.client.platform.OsDetect;
 import com.meshtastic.client.service.DatabaseProvider;
 import com.meshtastic.client.service.MessageDbService;
 import com.meshtastic.client.service.NodeCacheService;
+import com.meshtastic.client.service.ConnectionManager;
 import com.meshtastic.client.service.UpdateCheckService;
 import com.meshtastic.client.system.FormManager;
 import com.meshtastic.client.system.RootPane;
@@ -169,6 +170,12 @@ public class MeshApp extends Application {
         }
 
         AppPreferences.saveWindowBounds(x, y, w, h, maximized);
+    }
+
+    @Override
+    public void stop() {
+        ConnectionManager.getInstance().shutdownAll();
+        System.exit(0);
     }
 
     public static Stage getPrimaryStage() {

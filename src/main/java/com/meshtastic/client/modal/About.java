@@ -170,7 +170,12 @@ public class About extends VBox {
     private Hyperlink createLink(String text, String url) {
         Hyperlink link = new Hyperlink(text);
         link.setPadding(new Insets(0));
-        link.setOnAction(e -> {
+        link.setOnAction(e -> openUrl(url));
+        return link;
+    }
+
+    private static void openUrl(String url) {
+        Thread.ofVirtual().start(() -> {
             try {
                 if (Desktop.isDesktopSupported()) {
                     Desktop.getDesktop().browse(new URI(url));
@@ -178,6 +183,5 @@ public class About extends VBox {
             } catch (Exception ignored) {
             }
         });
-        return link;
     }
 }

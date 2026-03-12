@@ -23,14 +23,17 @@ public final class NativeWindowHelper {
     private static boolean seamlessActive = false;
 
     /**
-     * Вызвать ДО stage.show(). Устанавливает StageStyle.TRANSPARENT для кастомного title bar.
+     * Вызвать ДО stage.show(). Устанавливает StageStyle для кастомного title bar.
      * <p>
-     * Windows и macOS: TRANSPARENT — кастомный title bar, идентичный дизайн.
-     * Linux: по умолчанию (DECORATED).
+     * Windows и macOS: TRANSPARENT — кастомный title bar + нативный backdrop.
+     * Linux: UNDECORATED — убирает нативную рамку ОС, оставляя только кастомный title bar.
+     * Прочие ОС: по умолчанию (DECORATED).
      */
     public static void prepareStage(Stage stage) {
         if (OsDetect.supportsSeamlessFrame()) {
             stage.initStyle(StageStyle.TRANSPARENT);
+        } else if (OsDetect.isLinux()) {
+            stage.initStyle(StageStyle.UNDECORATED);
         }
     }
 
@@ -59,7 +62,7 @@ public final class NativeWindowHelper {
                     // Повторить с задержкой — JavaFX может перезаписывать свойства NSWindow
                     Platform.runLater(ctrl::makeVisibleInAppSwitcher);
                 }
-                default -> { /* Linux/unknown: без нативных эффектов */ }
+                default -> { /* Unknown OS / Linux: без нативных эффектов */ }
             }
         } catch (Throwable t) {
             log.warn("Не удалось применить нативные эффекты окна", t);

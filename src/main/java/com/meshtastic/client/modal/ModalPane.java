@@ -252,11 +252,13 @@ public class ModalPane extends StackPane {
             pane.hide();
             String url = info.getDownloadUrl();
             if (url != null) {
-                try {
-                    if (Desktop.isDesktopSupported()) {
-                        Desktop.getDesktop().browse(new URI(url));
-                    }
-                } catch (Exception ignored) {}
+                Thread.ofVirtual().start(() -> {
+                    try {
+                        if (Desktop.isDesktopSupported()) {
+                            Desktop.getDesktop().browse(new URI(url));
+                        }
+                    } catch (Exception ignored) {}
+                });
             }
         });
 
