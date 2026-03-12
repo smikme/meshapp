@@ -32,11 +32,12 @@ public class NativeWinWindowControl {
     private static final Logger log = LoggerFactory.getLogger(NativeWinWindowControl.class);
     private final WinDef.HWND hwnd;
 
-    // DWM attribute constants (Windows 11 22H2+)
-    private static final int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
-    private static final int DWMWA_USE_IMMERSIVE_DARK_MODE_OLD = 19; // Win10 1809–18985
-    private static final int DWMWA_WINDOW_CORNER_PREFERENCE = 33;
-    private static final int DWMWA_SYSTEMBACKDROP_TYPE = 38;
+    // DWM attribute constants
+    private static final int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;       // Win10 20H1+ / Win11
+    private static final int DWMWA_USE_IMMERSIVE_DARK_MODE_OLD = 19;   // Win10 1809–18985
+    private static final int DWMWA_WINDOW_CORNER_PREFERENCE = 33;      // Win11+
+    private static final int DWMWA_CAPTION_COLOR = 35;                 // Win11 22000+
+    private static final int DWMWA_SYSTEMBACKDROP_TYPE = 38;           // Win11 22H2+
     private static final int DWMWCP_DOROUND = 2;
 
     // SetWindowCompositionAttribute constants (Windows 10 fallback)
@@ -116,21 +117,59 @@ public class NativeWinWindowControl {
         }
     }
 
-    /** Тёмный режим title bar (Win10 1809+, Win11) */
+    /**
+     * Тёмный режим title bar.
+     * <p>
+     * Стратегия (от надёжного к фоллбэкам):
+     * 1. DWMWA_USE_IMMERSIVE_DARK_MODE (attr 20) — Win10 20H1+, Win11
+     * 2. DWMWA_USE_IMMERSIVE_DARK_MODE (attr 19) — Win10 1809–18985
+     * 3. DWMWA_CAPTION_COLOR (attr 35) — Win11 22000+ (явный цвет caption)
+     * <p>
+     * Используем raw Pointer + Memory вместо BOOLByReference чтобы гарантировать
+     * корректную передачу LPCVOID в DwmSetWindowAttribute.
+     */
     public boolean setDarkMode(boolean dark) {
         if (hwnd == null) { return false; }
         try {
-            var val = new WinDef.BOOLByReference(new WinDef.BOOL(dark));
-            // Ставим оба атрибута — на некоторых билдах Win10 один из них
-            // может вернуть «успех» но не иметь визуального эффекта
-            WinNT.HRESULT hr20 = Dwm.INSTANCE.DwmSetWindowAttribute(
-                    hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, val, WinDef.DWORD.SIZE);
-            WinNT.HRESULT hr19 = Dwm.INSTANCE.DwmSetWindowAttribute(
-                    hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE_OLD, val, WinDef.DWORD.SIZE);
-            return hr20.longValue() == 0 || hr19.longValue() == 0;
+            // BOOL как raw 4 байта — гарантированно корректный layout для LPCVOID
+            Memory val = new Memory(4);
+            val.setInt(0, dark ? 1 : 0);
+
+            long hr20 = DwmRaw.INSTANCE.DwmSetWindowAttribute(
+                    hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, val, 4).longValue();
+            long hr19 = DwmRaw.INSTANCE.DwmSetWindowAttribute(
+                    hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE_OLD, val, 4).longValue();
+
+            log.info("setDarkMode({}): attr20=0x{} attr19=0x{}",
+                    dark, Long.toHexString(hr20), Long.toHexString(hr19));
+
+            // Fallback: явный цвет caption (Win11 22000+, non-fatal на Win10)
+            if (hr20 != 0 && hr19 != 0) {
+                setCaptionColor(dark ? 0x00202020 : 0x00FFFFFF);
+            }
+
+            return hr20 == 0 || hr19 == 0;
         } catch (Exception e) {
             log.error("Не удалось установить dark mode", e);
             return false;
+        }
+    }
+
+    /**
+     * Установить цвет caption bar напрямую. COLORREF формат: 0x00BBGGRR.
+     * Win11 22000+, non-fatal на Win10.
+     */
+    private void setCaptionColor(int colorRef) {
+        if (hwnd == null) { return; }
+        try {
+            Memory val = new Memory(4);
+            val.setInt(0, colorRef);
+            long hr = DwmRaw.INSTANCE.DwmSetWindowAttribute(
+                    hwnd, DWMWA_CAPTION_COLOR, val, 4).longValue();
+            log.info("setCaptionColor(0x{}): HRESULT=0x{}",
+                    Integer.toHexString(colorRef), Long.toHexString(hr));
+        } catch (Exception e) {
+            log.warn("setCaptionColor недоступен", e);
         }
     }
 
@@ -280,7 +319,7 @@ public class NativeWinWindowControl {
         public int animationId;
     }
 
-    /** JNA-интерфейс к dwmapi.dll */
+    /** JNA-интерфейс к dwmapi.dll (typed params — для backdrop, corners и пр.) */
     public interface Dwm extends Library {
         Dwm INSTANCE = Native.load("dwmapi", Dwm.class);
 
@@ -290,6 +329,15 @@ public class NativeWinWindowControl {
 
         WinNT.HRESULT DwmExtendFrameIntoClientArea(
                 WinDef.HWND hwnd, MARGINS pMarInset);
+    }
+
+    /** JNA-интерфейс к dwmapi.dll (raw Pointer — для dark mode, caption color) */
+    public interface DwmRaw extends Library {
+        DwmRaw INSTANCE = Native.load("dwmapi", DwmRaw.class);
+
+        WinNT.HRESULT DwmSetWindowAttribute(
+                WinDef.HWND hwnd, int dwAttribute,
+                Pointer pvAttribute, int cbAttribute);
     }
 
     /** JNA-интерфейс к user32.dll — SetWindowCompositionAttribute (Windows 10+) */
