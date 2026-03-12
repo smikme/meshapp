@@ -208,8 +208,8 @@ public class NativeWinWindowControl {
         // 2. Dark mode (Win10 1903+)
         setDarkMode(isDark);
 
-        // 3. Backdrop: Win11 API → Win10 fallback
-        boolean backdropOk = setWindowBackdrop(DwmSystemBackdropType.ACRYLIC);
+        // 3. Backdrop: Win11 API (Mica) → Win10 fallback (Acrylic)
+        boolean backdropOk = setWindowBackdrop(DwmSystemBackdropType.MICA);
         if (!backdropOk) {
             log.info("DWMWA_SYSTEMBACKDROP_TYPE недоступен, пробуем SetWindowCompositionAttribute...");
             backdropOk = setAcrylicViaCompositionAttribute();
