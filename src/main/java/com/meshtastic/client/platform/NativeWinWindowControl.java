@@ -1,8 +1,10 @@
 package com.meshtastic.client.platform;
 
+import com.sun.jna.Function;
 import com.sun.jna.Library;
 import com.sun.jna.Memory;
 import com.sun.jna.Native;
+import com.sun.jna.NativeLibrary;
 import com.sun.jna.Pointer;
 import com.sun.jna.PointerType;
 import com.sun.jna.Structure;
@@ -44,6 +46,13 @@ public class NativeWinWindowControl {
     private static final int WCA_ACCENT_POLICY = 19;
     private static final int ACCENT_ENABLE_ACRYLICBLURBEHIND = 4;
 
+    // UxTheme undocumented ordinals (Win10 dark title bar support)
+    private static final int APP_MODE_ALLOW_DARK = 1;
+    private static volatile boolean uxThemeInitialized = false;
+    private static Function uxSetPreferredAppMode;        // ordinal 135
+    private static Function uxAllowDarkModeForWindow;     // ordinal 133
+    private static Function uxRefreshImmersiveColorPolicy; // ordinal 104
+
     public NativeWinWindowControl(Window window) {
         this.hwnd = extractHwnd(window);
     }
@@ -69,6 +78,37 @@ public class NativeWinWindowControl {
         } catch (Exception e) {
             log.error("Не удалось получить HWND окна", e);
             return null;
+        }
+    }
+
+    // ==================== UxTheme Dark Mode (Win10) ====================
+
+    /**
+     * Инициализация поддержки тёмного режима на Windows 10.
+     * Вызвать один раз до создания окна.
+     * <p>
+     * На Win10 {@code DWMWA_USE_IMMERSIVE_DARK_MODE} игнорируется без предварительного
+     * вызова undocumented uxtheme.dll ordinal 135 ({@code SetPreferredAppMode}).
+     * На Win11 эти вызовы безвредны (non-fatal).
+     */
+    public static void initDarkModeSupport() {
+        if (uxThemeInitialized) { return; }
+        uxThemeInitialized = true;
+
+        try {
+            NativeLibrary uxTheme = NativeLibrary.getInstance("uxtheme");
+            uxSetPreferredAppMode = uxTheme.getFunction("#135");
+            uxAllowDarkModeForWindow = uxTheme.getFunction("#133");
+            uxRefreshImmersiveColorPolicy = uxTheme.getFunction("#104");
+
+            // SetPreferredAppMode(AllowDark) — разрешить тёмный режим на уровне процесса
+            int result = uxSetPreferredAppMode.invokeInt(new Object[]{APP_MODE_ALLOW_DARK});
+            log.info("UxTheme: SetPreferredAppMode(AllowDark) = {}", result);
+        } catch (Exception e) {
+            log.warn("UxTheme ordinals недоступны (ожидаемо на Win11/Server): {}", e.getMessage());
+            uxSetPreferredAppMode = null;
+            uxAllowDarkModeForWindow = null;
+            uxRefreshImmersiveColorPolicy = null;
         }
     }
 
@@ -131,7 +171,19 @@ public class NativeWinWindowControl {
     public boolean setDarkMode(boolean dark) {
         if (hwnd == null) { return false; }
         try {
-            // BOOL как raw 4 байта — гарантированно корректный layout для LPCVOID
+            // 1. AllowDarkModeForWindow (ordinal 133) — per-window, до DWM-атрибутов
+            if (uxAllowDarkModeForWindow != null) {
+                try {
+                    long hwndVal = Pointer.nativeValue(hwnd.getPointer());
+                    int res = uxAllowDarkModeForWindow.invokeInt(
+                            new Object[]{new Pointer(hwndVal), dark ? 1 : 0});
+                    log.info("AllowDarkModeForWindow({}): {}", dark, res);
+                } catch (Exception e) {
+                    log.warn("AllowDarkModeForWindow failed: {}", e.getMessage());
+                }
+            }
+
+            // 2. DWM атрибуты (attr 20 для Win10 20H1+/Win11, attr 19 для старых билдов)
             Memory val = new Memory(4);
             val.setInt(0, dark ? 1 : 0);
 
@@ -143,7 +195,16 @@ public class NativeWinWindowControl {
             log.info("setDarkMode({}): attr20=0x{} attr19=0x{}",
                     dark, Long.toHexString(hr20), Long.toHexString(hr19));
 
-            // Fallback: явный цвет caption (Win11 22000+, non-fatal на Win10)
+            // 3. RefreshImmersiveColorPolicyState (ordinal 104) — принудительное обновление
+            if (uxRefreshImmersiveColorPolicy != null) {
+                try {
+                    uxRefreshImmersiveColorPolicy.invokeVoid(new Object[]{});
+                } catch (Exception e) {
+                    log.warn("RefreshImmersiveColorPolicyState failed: {}", e.getMessage());
+                }
+            }
+
+            // 4. Fallback: явный цвет caption (Win11 22000+, non-fatal на Win10)
             if (hr20 != 0 && hr19 != 0) {
                 setCaptionColor(dark ? 0x00202020 : 0x00FFFFFF);
             }

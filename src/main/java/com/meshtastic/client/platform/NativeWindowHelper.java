@@ -31,6 +31,13 @@ public final class NativeWindowHelper {
      * Прочие ОС: по умолчанию (DECORATED).
      */
     public static void prepareStage(Stage stage) {
+        // Windows 10: инициализировать undocumented uxtheme dark mode support
+        // Должен быть вызван один раз до создания окна
+        if (OsDetect.isWindows()) {
+            try { NativeWinWindowControl.initDarkModeSupport(); }
+            catch (Throwable t) { log.warn("initDarkModeSupport failed", t); }
+        }
+
         if (AppPreferences.isNativeWindow()) {
             // Нативное управление окнами: стандартный DECORATED стиль ОС
             return;
