@@ -118,6 +118,9 @@ public class FormConnections extends Form {
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
 
+        boolean anyConnected = ConnectionManager.getInstance().getEntries().stream()
+                .anyMatch(e -> e.isConnected() || e.isReconnecting());
+
         Button btnConnect = new Button(connected || reconnecting ? "Отключить" : "Подключить");
         btnConnect.setOnAction(e -> {
             if (entry.isConnected() || entry.isReconnecting()) {
@@ -126,6 +129,10 @@ public class FormConnections extends Form {
                 doConnect(entry);
             }
         });
+
+        if (!connected && !reconnecting && anyConnected) {
+            btnConnect.setDisable(true);
+        }
 
         Button btnDelete = new Button("Удалить");
         btnDelete.setOnAction(e -> doDelete(entry));

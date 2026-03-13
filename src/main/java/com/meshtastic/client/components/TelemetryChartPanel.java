@@ -280,12 +280,15 @@ public class TelemetryChartPanel extends VBox {
         long sinceEpoch = selectedPeriodSeconds > 0 ? now - selectedPeriodSeconds : 0;
         long maxTs = now + 300; // допуск 5 мин на рассинхронизацию часов
 
+        String ownerNodeId = state.getMyNodeNum() != 0
+                ? String.format("!%08x", state.getMyNodeNum()) : "";
+
         filteredEntries = NodeCacheService.getInstance()
-                .loadTelemetryForNode(nodeId, sinceEpoch, maxTs);
+                .loadTelemetryForNode(nodeId, sinceEpoch, maxTs, ownerNodeId);
 
         List<TelemetryEntry> qualityEntries = basicOnly
                 ? Collections.emptyList()
-                : NodeCacheService.getInstance().loadTelemetryQuality(sinceEpoch, maxTs);
+                : NodeCacheService.getInstance().loadTelemetryQuality(sinceEpoch, maxTs, ownerNodeId);
 
         updateChart(filteredEntries, qualityEntries);
 

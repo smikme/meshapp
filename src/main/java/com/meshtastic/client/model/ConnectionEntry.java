@@ -24,6 +24,7 @@ public class ConnectionEntry {
     private int baudRate;
     private String bleAddress;
     private String bleDeviceName;
+    private String nodeId;
     private transient boolean connected;
     private transient boolean reconnecting;
 
@@ -137,6 +138,14 @@ public class ConnectionEntry {
 
     public void setBleDeviceName(String bleDeviceName) {
         this.bleDeviceName = bleDeviceName;
+    }
+
+    public String getNodeId() {
+        return nodeId;
+    }
+
+    public void setNodeId(String nodeId) {
+        this.nodeId = nodeId;
     }
 
     public boolean isConnected() {

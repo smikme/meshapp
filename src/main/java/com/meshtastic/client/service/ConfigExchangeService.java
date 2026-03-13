@@ -149,7 +149,8 @@ public class ConfigExchangeService implements FromRadioListener {
                 entry.setChannelUtilization(dm.getChannelUtilization());
                 entry.setAirUtilTx(dm.getAirUtilTx());
                 deviceState.addTelemetryEntry(entry);
-                NodeCacheService.getInstance().persistTelemetry(entry);
+                String ownerNodeId = String.format("!%08x", deviceState.getMyNodeNum());
+                NodeCacheService.getInstance().persistTelemetry(entry, ownerNodeId);
             }
         }
 
@@ -189,8 +190,9 @@ public class ConfigExchangeService implements FromRadioListener {
             }
 
             // Загрузить архив телеметрии из H2 + подчистить старые записи
-            ncs.pruneTelemetryHistory(30);
-            var archived = ncs.loadTelemetryHistory(200);
+            String ownerNodeId = String.format("!%08x", deviceState.getMyNodeNum());
+            ncs.pruneTelemetryHistory(30, ownerNodeId);
+            var archived = ncs.loadTelemetryHistory(200, ownerNodeId);
             deviceState.prependTelemetryHistory(archived);
             log.info("Loaded {} archived telemetry entries from DB", archived.size());
 
