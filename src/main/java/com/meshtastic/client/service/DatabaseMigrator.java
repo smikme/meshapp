@@ -21,7 +21,7 @@ public final class DatabaseMigrator {
     private static final Logger log = LoggerFactory.getLogger(DatabaseMigrator.class);
 
     /** Текущая версия схемы. Увеличивается при каждом изменении схемы. */
-    static final int CURRENT_VERSION = 2;
+    static final int CURRENT_VERSION = 4;
 
     private DatabaseMigrator() {}
 
@@ -51,6 +51,8 @@ public final class DatabaseMigrator {
 
             // Последовательные миграции: v0→v1, v1→v2, ...
             if (version < 2) { migrateToV2(connection); version = 2; }
+            if (version < 3) { migrateToV3(connection); version = 3; }
+            if (version < 4) { migrateToV4(connection); version = 4; }
 
             setVersion(connection, CURRENT_VERSION);
             log.info("Database migration complete, schema version = {}", CURRENT_VERSION);
@@ -91,6 +93,32 @@ public final class DatabaseMigrator {
             ps.setInt(1, version);
             ps.executeUpdate();
         }
+    }
+
+    /** v3: колонка owner_node_id для изоляции данных между устройствами. */
+    private static void migrateToV3(Connection connection) throws SQLException {
+        try (Statement stmt = connection.createStatement()) {
+            stmt.execute("DELETE FROM messages");
+            stmt.execute("DELETE FROM chat_read_counts");
+            stmt.execute("ALTER TABLE messages ADD COLUMN IF NOT EXISTS owner_node_id VARCHAR(20) NOT NULL DEFAULT ''");
+            stmt.execute("ALTER TABLE chat_read_counts ADD COLUMN IF NOT EXISTS owner_node_id VARCHAR(20) NOT NULL DEFAULT ''");
+            stmt.execute("ALTER TABLE chat_read_counts DROP PRIMARY KEY");
+            stmt.execute("ALTER TABLE chat_read_counts ADD PRIMARY KEY (owner_node_id, chat_type, chat_key)");
+            stmt.execute("DROP INDEX IF EXISTS idx_msg_chat");
+            stmt.execute("CREATE INDEX idx_msg_chat ON messages (owner_node_id, chat_type, chat_key, id)");
+        }
+        log.info("Migration v3: added 'owner_node_id' column, cleared old messages and read counts");
+    }
+
+    /** v4: колонка owner_node_id для изоляции телеметрии между устройствами. */
+    private static void migrateToV4(Connection connection) throws SQLException {
+        try (Statement stmt = connection.createStatement()) {
+            stmt.execute("DELETE FROM telemetry_history");
+            stmt.execute("ALTER TABLE telemetry_history ADD COLUMN IF NOT EXISTS owner_node_id VARCHAR(20) NOT NULL DEFAULT ''");
+            stmt.execute("DROP INDEX IF EXISTS idx_telemetry_node_ts");
+            stmt.execute("CREATE INDEX idx_telemetry_node_ts ON telemetry_history (owner_node_id, node_id, ts)");
+        }
+        log.info("Migration v4: added 'owner_node_id' to telemetry_history, cleared old telemetry data");
     }
 
     /** v2: колонка favorite для избранных нод. */

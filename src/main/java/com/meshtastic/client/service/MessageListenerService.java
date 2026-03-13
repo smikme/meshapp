@@ -106,10 +106,11 @@ public class MessageListenerService implements FromRadioListener {
             msg.setSenderName(fromNode.getLongName());
         }
 
+        String ownerNodeId = String.format("!%08x", deviceState.getMyNodeNum());
         boolean isDirect = to != 0xFFFFFFFF;
         if (isDirect) {
             msg.setStatus(MeshMessage.DeliveryStatus.DELIVERED);
-            MessageDbService.getInstance().save(msg, "dm", fromNodeId);
+            MessageDbService.getInstance().save(msg, "dm", fromNodeId, ownerNodeId);
             deviceState.addDirectMessage(msg, fromNodeId);
             log.info("Received DM from {}: {}", fromNodeId, text);
             try {
@@ -119,7 +120,7 @@ public class MessageListenerService implements FromRadioListener {
             }
         } else {
             msg.setStatus(MeshMessage.DeliveryStatus.DELIVERED);
-            MessageDbService.getInstance().save(msg, "channel", String.valueOf(channel));
+            MessageDbService.getInstance().save(msg, "channel", String.valueOf(channel), ownerNodeId);
             deviceState.addMessage(msg);
             log.info("Received channel {} message from {}: {}", channel, fromNodeId, text);
             try {
@@ -307,7 +308,8 @@ public class MessageListenerService implements FromRadioListener {
             entry.setHopLimit(packet.getHopLimit());
 
             deviceState.addTelemetryEntry(entry);
-            NodeCacheService.getInstance().persistTelemetry(entry);
+            String ownerNodeId = String.format("!%08x", deviceState.getMyNodeNum());
+            NodeCacheService.getInstance().persistTelemetry(entry, ownerNodeId);
         } catch (InvalidProtocolBufferException e) {
             log.warn("Failed to parse Telemetry from TELEMETRY_APP packet from !{}", Integer.toHexString(fromNum), e);
         }

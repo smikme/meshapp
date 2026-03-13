@@ -24,7 +24,6 @@ import javafx.scene.control.CheckBox;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
-import javafx.scene.control.ScrollPane;
 import javafx.scene.control.Tab;
 import javafx.scene.control.TabPane;
 import javafx.scene.control.TableColumn;
@@ -210,11 +209,19 @@ public class FormSetting extends Form {
         cacheTable.getColumns().addAll(colLongName, colShortName, colNodeId, colHwModel, colLat, colLon);
         cacheTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
 
-        // Scroll-based pagination
-        cacheTable.setOnScroll(event -> {
-            ScrollPane sp = (ScrollPane) cacheTable.lookup(".scroll-pane");
-            if (sp != null && sp.getVvalue() > 0.9) {
-                loadNextCachePage();
+        // Lazy-load: слушаем вертикальный ScrollBar таблицы
+        cacheTable.skinProperty().addListener((obs, oldSkin, newSkin) -> {
+            if (newSkin != null) {
+                cacheTable.lookupAll(".scroll-bar").stream()
+                        .filter(n -> n instanceof javafx.scene.control.ScrollBar)
+                        .map(n -> (javafx.scene.control.ScrollBar) n)
+                        .filter(sb -> sb.getOrientation() == javafx.geometry.Orientation.VERTICAL)
+                        .findFirst()
+                        .ifPresent(sb -> sb.valueProperty().addListener((o, oldVal, newVal) -> {
+                            if (newVal.doubleValue() > 0.9) {
+                                loadNextCachePage();
+                            }
+                        }));
             }
         });
 
