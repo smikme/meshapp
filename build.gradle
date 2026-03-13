@@ -415,6 +415,23 @@ tasks.register('jpackage') {
 				logger.lifecycle("jpackage: Assets.car скопирован в бандл")
 			}
 
+			// Ad-hoc подпись: убирает ошибку «Приложение повреждено» на macOS.
+			// Без Apple Developer ID пользователи увидят «неизвестный разработчик»
+			// и смогут открыть через правый клик → Открыть.
+			def codesignArgs = [
+				'codesign', '--force', '--deep', '--sign', '-',
+				appDir.absolutePath
+			]
+			def codesignProc = new ProcessBuilder(codesignArgs).redirectErrorStream(true).start()
+			def codesignOutput = codesignProc.inputStream.text
+			codesignProc.waitFor()
+			if (codesignOutput) logger.lifecycle(codesignOutput.trim())
+			if (codesignProc.exitValue() != 0) {
+				logger.warn("jpackage: ad-hoc codesign failed (exit ${codesignProc.exitValue()}), продолжаем без подписи")
+			} else {
+				logger.lifecycle("jpackage: ad-hoc подпись применена к ${appDir.name}")
+			}
+
 			// Собрать DMG
 			def dmgFile = new File(outputDir, "MeshApp-${appVersion}.dmg")
 			if (dmgFile.exists()) dmgFile.delete()
