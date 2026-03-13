@@ -20,9 +20,14 @@ import javafx.scene.text.Font;
 import javafx.stage.Screen;
 import javafx.stage.Stage;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.util.Objects;
 
 public class MeshApp extends Application {
+
+    private static final Logger log = LoggerFactory.getLogger(MeshApp.class);
 
     public static final String APPLICATION_VERSION = resolveVersion();
     public static final int VERSION_CODE = resolveVersionCode();
@@ -183,6 +188,8 @@ public class MeshApp extends Application {
     }
 
     public static void main(String[] args) {
+        Thread.setDefaultUncaughtExceptionHandler((thread, throwable) ->
+                log.error("Uncaught exception in thread '{}'", thread.getName(), throwable));
         launch(args);
     }
 }

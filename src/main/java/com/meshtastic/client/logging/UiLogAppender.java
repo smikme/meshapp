@@ -4,8 +4,10 @@ import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.UnsynchronizedAppenderBase;
 import com.meshtastic.client.model.LogEntry;
 
+import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ConcurrentLinkedDeque;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
 /**
@@ -16,8 +18,8 @@ public class UiLogAppender extends UnsynchronizedAppenderBase<ILoggingEvent> {
 
     private static final int MAX_ENTRIES = 5000;
 
-    @SuppressWarnings("PMD.LooseCoupling")
-    private static final List<LogEntry> buffer = new CopyOnWriteArrayList<>();
+    private static final ConcurrentLinkedDeque<LogEntry> buffer = new ConcurrentLinkedDeque<>();
+    private static final AtomicInteger size = new AtomicInteger(0);
     private static volatile Consumer<LogEntry> liveListener;
 
     @Override
@@ -28,10 +30,12 @@ public class UiLogAppender extends UnsynchronizedAppenderBase<ILoggingEvent> {
                 event.getFormattedMessage()
         );
 
-        if (buffer.size() >= MAX_ENTRIES) {
-            buffer.remove(0);
+        buffer.addLast(entry);
+        if (size.incrementAndGet() > MAX_ENTRIES) {
+            if (buffer.pollFirst() != null) {
+                size.decrementAndGet();
+            }
         }
-        buffer.add(entry);
 
         Consumer<LogEntry> listener = liveListener;
         if (listener != null) {
@@ -41,7 +45,7 @@ public class UiLogAppender extends UnsynchronizedAppenderBase<ILoggingEvent> {
 
     /** Все накопленные записи */
     public static List<LogEntry> getBuffer() {
-        return List.copyOf(buffer);
+        return new ArrayList<>(buffer);
     }
 
     /** Подписаться на новые события в реальном времени */
@@ -57,5 +61,6 @@ public class UiLogAppender extends UnsynchronizedAppenderBase<ILoggingEvent> {
     /** Очистить буфер */
     public static void clearBuffer() {
         buffer.clear();
+        size.set(0);
     }
 }

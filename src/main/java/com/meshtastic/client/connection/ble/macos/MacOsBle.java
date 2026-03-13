@@ -15,6 +15,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
 import static com.meshtastic.client.connection.ble.macos.ObjCRuntime.*;
@@ -91,7 +92,7 @@ public class MacOsBle implements BlePlatform {
                 return t;
             });
     private volatile ScheduledFuture<?> pollFuture;
-    private volatile boolean drainInProgress;
+    private final AtomicBoolean drainInProgress = new AtomicBoolean(false);
 
     public MacOsBle() {
         initCentralManager();
@@ -256,7 +257,7 @@ public class MacOsBle implements BlePlatform {
 
             // Drain stale fromRadio data
             log.info("[BLE] Step 6: initial drain of fromRadio...");
-            drainInProgress = true;
+            drainInProgress.set(true);
             drainLatch = new CountDownLatch(1);
             drainFromRadio();
             drainLatch.await(3, TimeUnit.SECONDS);
@@ -289,7 +290,7 @@ public class MacOsBle implements BlePlatform {
         fromRadioCharacteristic = 0;
         toRadioCharacteristic = 0;
         fromNumCharacteristic = 0;
-        drainInProgress = false;
+        drainInProgress.set(false);
         log.info("BLE disconnected");
     }
 
@@ -304,7 +305,7 @@ public class MacOsBle implements BlePlatform {
             log.warn("Cannot write: BLE not connected or toRadio characteristic missing");
             return;
         }
-        log.info("[BLE] writeToRadio: {} bytes", protobufPayload.length);
+        log.debug("[BLE] writeToRadio: {} bytes", protobufPayload.length);
         long nsData = nsData(protobufPayload);
         writeValueForCharacteristic(connectedPeripheral, nsData,
                 toRadioCharacteristic, CB_WRITE_WITH_RESPONSE);
@@ -380,14 +381,13 @@ public class MacOsBle implements BlePlatform {
 
     /** Запускает drain если ещё не активен (вызывается poll-таймером и fromNum). */
     private void triggerDrain() {
-        if (drainInProgress) { return; }
-        drainInProgress = true;
+        if (!drainInProgress.compareAndSet(false, true)) { return; }
         drainFromRadio();
     }
 
     private void drainFromRadio() {
         if (connectedPeripheral == 0 || fromRadioCharacteristic == 0) {
-            drainInProgress = false;
+            drainInProgress.set(false);
             return;
         }
         msgSend(connectedPeripheral, "readValueForCharacteristic:", fromRadioCharacteristic);
@@ -585,40 +585,33 @@ public class MacOsBle implements BlePlatform {
             MacOsBle me = resolve(self);
             if (me == null) { return; }
 
-            long uuid = msgSend(characteristic, "UUID");
-            long uuidStr = msgSend(uuid, "UUIDString");
-            String uuidJava = toJavaString(uuidStr);
-
-            long value = msgSend(characteristic, "value");
-            byte[] data = toBytes(value);
-
-            log.info("[BLE] didUpdateValue: uuid={} dataLen={}", uuidJava, data.length);
-
-            if (uuidJava != null) {
-                String lower = uuidJava.toLowerCase(Locale.ROOT);
-                if (lower.equals(BleConstants.FROM_NUM_UUID)) {
-                    log.info("[BLE] fromNum notification → triggering drain...");
-                    me.triggerDrain();
-                } else if (lower.equals(BleConstants.FROM_RADIO_UUID)) {
-                    if (data.length > 0) {
-                        log.info("[BLE] Received {} bytes from fromRadio", data.length);
-                        Consumer<byte[]> listener = me.fromRadioListener;
-                        if (listener != null) {
-                            try {
-                                listener.accept(data);
-                            } catch (Exception e) {
-                                log.error("[BLE] Error in fromRadioListener", e);
-                            }
+            // Сравнение по pointer характеристики — без ObjC-аллокаций на hot path
+            if (characteristic == me.fromNumCharacteristic) {
+                log.debug("[BLE] fromNum notification → triggering drain...");
+                me.triggerDrain();
+            } else if (characteristic == me.fromRadioCharacteristic) {
+                long value = msgSend(characteristic, "value");
+                byte[] data = toBytes(value);
+                if (data.length > 0) {
+                    log.debug("[BLE] Received {} bytes from fromRadio", data.length);
+                    Consumer<byte[]> listener = me.fromRadioListener;
+                    if (listener != null) {
+                        try {
+                            listener.accept(data);
+                        } catch (Exception e) {
+                            log.error("[BLE] Error in fromRadioListener", e);
                         }
-                        // Продолжаем чтение — chain drain (без guard, мы уже в drain)
-                        me.drainFromRadio();
-                    } else {
-                        log.debug("[BLE] fromRadio empty — drain complete");
-                        me.drainInProgress = false;
-                        CountDownLatch latch = me.drainLatch;
-                        if (latch != null) { latch.countDown(); }
                     }
+                    // Продолжаем чтение — chain drain (без guard, мы уже в drain)
+                    me.drainFromRadio();
+                } else {
+                    log.debug("[BLE] fromRadio empty — drain complete");
+                    me.drainInProgress.set(false);
+                    CountDownLatch latch = me.drainLatch;
+                    if (latch != null) { latch.countDown(); }
                 }
+            } else {
+                log.debug("[BLE] didUpdateValue for unknown characteristic: {}", characteristic);
             }
         };
         addMethod(cls, "peripheral:didUpdateValueForCharacteristic:error:",
