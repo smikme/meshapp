@@ -95,7 +95,8 @@ public final class MessageService {
             msg.setSenderName(myNode.getLongName());
         }
 
-        MessageDbService.getInstance().save(msg, "channel", String.valueOf(channelIndex));
+        String ownerNodeId = String.format("!%08x", state.getMyNodeNum());
+        MessageDbService.getInstance().save(msg, "channel", String.valueOf(channelIndex), ownerNodeId);
         state.addMessage(msg);
         state.registerPendingAck(packetId, msg);
         return msg;
@@ -163,7 +164,8 @@ public final class MessageService {
             msg.setSenderName(myNode.getLongName());
         }
 
-        MessageDbService.getInstance().save(msg, "dm", peerNodeId);
+        String ownerNodeId = String.format("!%08x", state.getMyNodeNum());
+        MessageDbService.getInstance().save(msg, "dm", peerNodeId, ownerNodeId);
         state.addDirectMessage(msg, peerNodeId);
         state.registerPendingAck(packetId, msg);
         return msg;

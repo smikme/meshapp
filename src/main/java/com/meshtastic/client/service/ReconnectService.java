@@ -115,11 +115,19 @@ public final class ReconnectService {
             return;
         }
 
+        // Не реконнектить если пользователь подключил другое устройство
+        ConnectionManager mgr = ConnectionManager.getInstance();
+        if (mgr.hasActiveConnection()) {
+            log.info("Another connection is active, cancelling reconnect for '{}'", entry.getName());
+            cancelReconnect(id);
+            return;
+        }
+
         int attempt = attemptCounts.getOrDefault(id, 0) + 1;
         log.info("Reconnect attempt #{} for '{}'", attempt, entry.getName());
 
         try {
-            ConnectionManager.getInstance().connect(id);
+            mgr.connect(id);
 
             // Успех — очищаем состояние reconnect
             pendingReconnects.remove(id);

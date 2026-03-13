@@ -94,6 +94,7 @@ public final class NodeCacheService {
                         id                  BIGINT AUTO_INCREMENT PRIMARY KEY,
                         ts                  BIGINT NOT NULL,
                         node_id             VARCHAR(20) NOT NULL,
+                        owner_node_id       VARCHAR(20) NOT NULL DEFAULT '',
                         battery_level       INT,
                         voltage             REAL,
                         channel_utilization REAL,
@@ -136,7 +137,7 @@ public final class NodeCacheService {
                     """);
 
                 stmt.execute("""
-                    CREATE INDEX IF NOT EXISTS idx_telemetry_node_ts ON telemetry_history (node_id, ts)
+                    CREATE INDEX IF NOT EXISTS idx_telemetry_node_ts ON telemetry_history (owner_node_id, node_id, ts)
                     """);
             }
 
@@ -152,8 +153,8 @@ public final class NodeCacheService {
                     channel_utilization, air_util_tx, temperature, relative_humidity, barometric_pressure,
                     num_packets_rx, num_packets_rx_bad, num_rx_dupe,
                     num_packets_tx, num_tx_dropped, num_tx_relay, num_tx_relay_canceled,
-                    rx_snr, rx_rssi, hop_start, hop_limit)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    rx_snr, rx_rssi, hop_start, hop_limit, owner_node_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """);
 
             log.info("Node cache DB initialized");
@@ -457,7 +458,7 @@ public final class NodeCacheService {
     /**
      * Сохраняет одну запись телеметрии в H2.
      */
-    public synchronized void persistTelemetry(TelemetryEntry entry) {
+    public synchronized void persistTelemetry(TelemetryEntry entry, String ownerNodeId) {
         if (insertTelemetryStmt == null || entry == null) { return; }
         try {
             insertTelemetryStmt.setLong(1, entry.getTimestamp());
@@ -480,6 +481,7 @@ public final class NodeCacheService {
             insertTelemetryStmt.setInt(18, entry.getRxRssi());
             insertTelemetryStmt.setInt(19, entry.getHopStart());
             insertTelemetryStmt.setInt(20, entry.getHopLimit());
+            insertTelemetryStmt.setString(21, ownerNodeId != null ? ownerNodeId : "");
             insertTelemetryStmt.executeUpdate();
         } catch (SQLException e) {
             log.error("Failed to persist telemetry entry", e);
@@ -493,13 +495,14 @@ public final class NodeCacheService {
      * @param limit максимальное количество записей
      * @return список записей (может быть пустым)
      */
-    public List<TelemetryEntry> loadTelemetryHistory(int limit) {
+    public List<TelemetryEntry> loadTelemetryHistory(int limit, String ownerNodeId) {
         List<TelemetryEntry> result = new ArrayList<>();
         if (dbConnection == null) { return result; }
         // Подзапрос берёт последние N записей (DESC), внешний сортирует ASC
-        String sql = "SELECT * FROM (SELECT * FROM telemetry_history ORDER BY ts DESC LIMIT ?) ORDER BY ts ASC";
+        String sql = "SELECT * FROM (SELECT * FROM telemetry_history WHERE owner_node_id = ? ORDER BY ts DESC LIMIT ?) ORDER BY ts ASC";
         try (PreparedStatement ps = dbConnection.prepareStatement(sql)) {
-            ps.setInt(1, limit);
+            ps.setString(1, ownerNodeId != null ? ownerNodeId : "");
+            ps.setInt(2, limit);
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
                     result.add(readTelemetryRow(rs));
@@ -518,14 +521,15 @@ public final class NodeCacheService {
      * @param sinceEpoch метка времени начала периода (epoch seconds), 0 = без ограничений
      * @return список записей (может быть пустым)
      */
-    public List<TelemetryEntry> loadTelemetrySince(long sinceEpoch) {
+    public List<TelemetryEntry> loadTelemetrySince(long sinceEpoch, String ownerNodeId) {
         List<TelemetryEntry> result = new ArrayList<>();
         if (dbConnection == null) { return result; }
         String sql = sinceEpoch > 0
-                ? "SELECT * FROM telemetry_history WHERE ts >= ? ORDER BY ts ASC"
-                : "SELECT * FROM telemetry_history ORDER BY ts ASC";
+                ? "SELECT * FROM telemetry_history WHERE owner_node_id = ? AND ts >= ? ORDER BY ts ASC"
+                : "SELECT * FROM telemetry_history WHERE owner_node_id = ? ORDER BY ts ASC";
         try (PreparedStatement ps = dbConnection.prepareStatement(sql)) {
-            if (sinceEpoch > 0) { ps.setLong(1, sinceEpoch); }
+            ps.setString(1, ownerNodeId != null ? ownerNodeId : "");
+            if (sinceEpoch > 0) { ps.setLong(2, sinceEpoch); }
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
                     result.add(readTelemetryRow(rs));
@@ -546,13 +550,14 @@ public final class NodeCacheService {
      * @param maxFutureTs  максимально допустимая метка времени (для фильтрации будущих дат)
      * @return список записей, отсортированных по времени ASC (может быть пустым)
      */
-    public List<TelemetryEntry> loadTelemetryForNode(String nodeId, long sinceEpoch, long maxFutureTs) {
+    public List<TelemetryEntry> loadTelemetryForNode(String nodeId, long sinceEpoch, long maxFutureTs, String ownerNodeId) {
         List<TelemetryEntry> result = new ArrayList<>();
         if (dbConnection == null || nodeId == null) { return result; }
 
         String sql = """
             SELECT * FROM telemetry_history
-            WHERE node_id = ?
+            WHERE owner_node_id = ?
+              AND node_id = ?
               AND ts <= ?
               AND (battery_level <> 0 OR channel_utilization <> 0 OR air_util_tx <> 0 OR voltage <> 0 OR num_packets_rx <> 0 OR num_packets_tx <> 0 OR rx_snr <> 0 OR hop_start <> 0)
             """ + (sinceEpoch > 0 ? "  AND ts >= ?\n" : "") + """
@@ -560,10 +565,11 @@ public final class NodeCacheService {
             """;
 
         try (PreparedStatement ps = dbConnection.prepareStatement(sql)) {
-            ps.setString(1, nodeId);
-            ps.setLong(2, maxFutureTs);
+            ps.setString(1, ownerNodeId != null ? ownerNodeId : "");
+            ps.setString(2, nodeId);
+            ps.setLong(3, maxFutureTs);
             if (sinceEpoch > 0) {
-                ps.setLong(3, sinceEpoch);
+                ps.setLong(4, sinceEpoch);
             }
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
@@ -579,22 +585,24 @@ public final class NodeCacheService {
     /**
      * Загружает записи телеметрии по всем нодам, содержащие данные о качестве соединения (SNR/RSSI/hops).
      */
-    public List<TelemetryEntry> loadTelemetryQuality(long sinceEpoch, long maxFutureTs) {
+    public List<TelemetryEntry> loadTelemetryQuality(long sinceEpoch, long maxFutureTs, String ownerNodeId) {
         List<TelemetryEntry> result = new ArrayList<>();
         if (dbConnection == null) { return result; }
 
         String sql = """
             SELECT * FROM telemetry_history
-            WHERE ts <= ?
+            WHERE owner_node_id = ?
+              AND ts <= ?
               AND (rx_snr <> 0 OR hop_start <> 0)
             """ + (sinceEpoch > 0 ? "  AND ts >= ?\n" : "") + """
             ORDER BY ts ASC
             """;
 
         try (PreparedStatement ps = dbConnection.prepareStatement(sql)) {
-            ps.setLong(1, maxFutureTs);
+            ps.setString(1, ownerNodeId != null ? ownerNodeId : "");
+            ps.setLong(2, maxFutureTs);
             if (sinceEpoch > 0) {
-                ps.setLong(2, sinceEpoch);
+                ps.setLong(3, sinceEpoch);
             }
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
@@ -610,11 +618,14 @@ public final class NodeCacheService {
     /**
      * Возвращает общее количество записей телеметрии в БД.
      */
-    public int countTelemetryEntries() {
+    public int countTelemetryEntries(String ownerNodeId) {
         if (dbConnection == null) { return 0; }
-        try (Statement stmt = dbConnection.createStatement();
-             ResultSet rs = stmt.executeQuery("SELECT COUNT(*) FROM telemetry_history")) {
-            if (rs.next()) { return rs.getInt(1); }
+        try (PreparedStatement ps = dbConnection.prepareStatement(
+                "SELECT COUNT(*) FROM telemetry_history WHERE owner_node_id = ?")) {
+            ps.setString(1, ownerNodeId != null ? ownerNodeId : "");
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) { return rs.getInt(1); }
+            }
         } catch (SQLException e) {
             log.error("Failed to count telemetry entries", e);
         }
@@ -650,12 +661,13 @@ public final class NodeCacheService {
      * @param days количество дней (записи старше этого срока удаляются)
      * @return количество удалённых записей
      */
-    public int pruneTelemetryHistory(int days) {
+    public int pruneTelemetryHistory(int days, String ownerNodeId) {
         if (dbConnection == null) { return 0; }
         long cutoff = System.currentTimeMillis() / 1000 - (long) days * 86400;
         try (PreparedStatement ps = dbConnection.prepareStatement(
-                "DELETE FROM telemetry_history WHERE ts < ?")) {
-            ps.setLong(1, cutoff);
+                "DELETE FROM telemetry_history WHERE owner_node_id = ? AND ts < ?")) {
+            ps.setString(1, ownerNodeId != null ? ownerNodeId : "");
+            ps.setLong(2, cutoff);
             int deleted = ps.executeUpdate();
             if (deleted > 0) { log.info("Pruned {} old telemetry entries (older than {} days)", deleted, days); }
             return deleted;
