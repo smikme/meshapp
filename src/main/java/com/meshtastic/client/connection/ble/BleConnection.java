@@ -1,8 +1,11 @@
 package com.meshtastic.client.connection.ble;
 
+import com.meshtastic.client.components.PasskeyDialog;
 import com.meshtastic.client.connection.ConnectionException;
 import com.meshtastic.client.connection.ConnectionListener;
 import com.meshtastic.client.connection.MeshtasticConnection;
+import com.meshtastic.client.connection.ble.linux.LinuxBle;
+import javafx.application.Platform;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -68,6 +71,15 @@ public class BleConnection implements MeshtasticConnection {
                 }
             }
         });
+
+        // Passkey handler для Linux BLE pairing
+        if (platform instanceof LinuxBle linuxBle) {
+            platform.setPasskeyRequestHandler(deviceAddress ->
+                    Platform.runLater(() ->
+                            PasskeyDialog.show(deviceAddress,
+                                    pin -> linuxBle.respondPasskey(pin),
+                                    linuxBle::cancelPasskey)));
+        }
 
         platform.connect(address);
         connected = true;

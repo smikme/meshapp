@@ -18,6 +18,8 @@ public class AppPreferences {
     public static final String KEY_WINDOW_HEIGHT = "windowHeight";
     public static final String KEY_WINDOW_MAXIMIZED = "windowMaximized";
     public static final String KEY_NOTIFICATIONS_ENABLED = "notificationsEnabled";
+    public static final String KEY_NATIVE_WINDOW = "nativeWindow";
+    public static final String KEY_DISABLE_TRANSPARENCY = "disableTransparency";
 
     private static Preferences state;
 
@@ -43,6 +45,22 @@ public class AppPreferences {
 
     public static void setNotificationsEnabled(boolean enabled) {
         state.putBoolean(KEY_NOTIFICATIONS_ENABLED, enabled);
+    }
+
+    public static boolean isNativeWindow() {
+        return state.getBoolean(KEY_NATIVE_WINDOW, false);
+    }
+
+    public static void setNativeWindow(boolean value) {
+        state.putBoolean(KEY_NATIVE_WINDOW, value);
+    }
+
+    public static boolean isDisableTransparency() {
+        return state.getBoolean(KEY_DISABLE_TRANSPARENCY, false);
+    }
+
+    public static void setDisableTransparency(boolean value) {
+        state.putBoolean(KEY_DISABLE_TRANSPARENCY, value);
     }
 
     public static List<String> getRecentSearch(boolean favorite) {

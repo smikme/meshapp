@@ -1,17 +1,22 @@
 package com.meshtastic.client.utils;
 
+import com.meshtastic.client.components.EmojiImageCache;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.service.NodeCacheService;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.collections.ObservableList;
+import javafx.geometry.Pos;
 import javafx.scene.control.ContextMenu;
+import javafx.scene.control.Label;
 import javafx.scene.control.MenuItem;
 import javafx.scene.control.TableCell;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableView;
+import javafx.scene.image.ImageView;
 import javafx.scene.input.Clipboard;
 import javafx.scene.input.ClipboardContent;
+import javafx.scene.layout.HBox;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -106,43 +111,75 @@ public final class NodeUtils {
         return base * 0.6; // 4+
     }
 
-    /** Заполнить строки таблицы деталей ноды (13 ключ-значение) */
+    /**
+     * Заполнить строки таблицы деталей ноды (13 ключ-значение).
+     * Формат: {@code String[]{emoji, label, value}} — emoji рендерится как PNG-картинка.
+     */
     public static void fillDetailRows(ObservableList<String[]> rows, NodeData node) {
-        rows.add(new String[]{"\uD83D\uDC64  Имя", node.getLongName()});
-        rows.add(new String[]{"\uD83C\uDFF7  Короткое имя", node.getShortName()});
-        rows.add(new String[]{"\uD83D\uDD11  ID ноды", node.getNodeId()});
-        rows.add(new String[]{"\u2699  Роль", node.getRole() != null ? NodeData.translateRole(node.getRole()) : null});
-        rows.add(new String[]{"\uD83D\uDCDF  Модель", node.getHwModel()});
-        rows.add(new String[]{"\uD83D\uDCF6  SNR", node.getSnr() != 0 ? String.valueOf(node.getSnr()) : null});
-        rows.add(new String[]{"\uD83D\uDD00  Хопы", String.valueOf(node.getHopsAway())});
+        rows.add(new String[]{"\uD83D\uDC64", "Имя", node.getLongName()});
+        rows.add(new String[]{"\uD83C\uDFF7", "Короткое имя", node.getShortName()});
+        rows.add(new String[]{"\uD83D\uDD11", "ID ноды", node.getNodeId()});
+        rows.add(new String[]{"\u2699", "Роль", node.getRole() != null ? NodeData.translateRole(node.getRole()) : null});
+        rows.add(new String[]{"\uD83D\uDCDF", "Модель", node.getHwModel()});
+        rows.add(new String[]{"\uD83D\uDCF6", "SNR", node.getSnr() != 0 ? String.valueOf(node.getSnr()) : null});
+        rows.add(new String[]{"\uD83D\uDD00", "Хопы", String.valueOf(node.getHopsAway())});
 
         int level = node.getBatteryLevel();
         String battery = null;
         if (level > 0 && level <= 100) { battery = level + "%"; }
         else if (level == 101) { battery = "Внешнее питание"; }
-        rows.add(new String[]{"\uD83D\uDD0B  Батарея", battery});
+        rows.add(new String[]{"\uD83D\uDD0B", "Батарея", battery});
 
-        rows.add(new String[]{"\u26A1  Напряжение", node.getVoltage() > 0 ? String.format("%.2f В", node.getVoltage()) : null});
-        rows.add(new String[]{"\uD83D\uDD50  Последний", node.getLastHeard() > 0 ? NodeData.formatTime(node.getLastHeard()) : null});
-        rows.add(new String[]{"\uD83C\uDF0D  Широта", node.getLatitude() != 0 ? String.format("%.6f", node.getLatitude()) : null});
-        rows.add(new String[]{"\uD83C\uDF0D  Долгота", node.getLongitude() != 0 ? String.format("%.6f", node.getLongitude()) : null});
-        rows.add(new String[]{"\uD83D\uDCD0  Высота", node.getAltitude() != 0 ? node.getAltitude() + " м" : null});
+        rows.add(new String[]{"\u26A1", "Напряжение", node.getVoltage() > 0 ? String.format("%.2f В", node.getVoltage()) : null});
+        rows.add(new String[]{"\uD83D\uDD50", "Последний", node.getLastHeard() > 0 ? NodeData.formatTime(node.getLastHeard()) : null});
+        rows.add(new String[]{"\uD83C\uDF0D", "Широта", node.getLatitude() != 0 ? String.format("%.6f", node.getLatitude()) : null});
+        rows.add(new String[]{"\uD83C\uDF0D", "Долгота", node.getLongitude() != 0 ? String.format("%.6f", node.getLongitude()) : null});
+        rows.add(new String[]{"\uD83D\uDCD0", "Высота", node.getAltitude() != 0 ? node.getAltitude() + " м" : null});
     }
 
-    /** Создать TableView для деталей ноды (2 колонки, без заголовков) */
+    /**
+     * Создать TableView для деталей ноды (2 колонки, без заголовков).
+     * Формат строк: {@code String[]{emoji, label, value}}.
+     */
     public static TableView<String[]> createDetailTable(ObservableList<String[]> rows) {
         TableView<String[]> table = new TableView<>(rows);
         table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
         table.setSelectionModel(null);
 
+        // Колонка ключей: PNG-иконка + текст метки
         TableColumn<String[], String> keyCol = new TableColumn<>();
-        keyCol.setCellValueFactory(cd -> new SimpleStringProperty(cd.getValue()[0]));
+        keyCol.setCellValueFactory(cd -> new SimpleStringProperty(cd.getValue()[1]));
         keyCol.setPrefWidth(180);
         keyCol.setSortable(false);
+        keyCol.setCellFactory(col -> new TableCell<>() {
+            @Override
+            protected void updateItem(String label, boolean empty) {
+                super.updateItem(label, empty);
+                if (empty || label == null) {
+                    setText(null);
+                    setGraphic(null);
+                    return;
+                }
+                String[] row = getTableView().getItems().get(getIndex());
+                String emoji = row[0];
+                ImageView iv = EmojiImageCache.createImageView(emoji, 16);
+                if (iv != null) {
+                    HBox box = new HBox(6, iv, new Label(label));
+                    box.setAlignment(Pos.CENTER_LEFT);
+                    setGraphic(box);
+                    setText(null);
+                } else {
+                    // Fallback: просто текст без иконки
+                    setText(label);
+                    setGraphic(null);
+                }
+            }
+        });
 
+        // Колонка значений
         TableColumn<String[], String> valCol = new TableColumn<>();
         valCol.setCellValueFactory(cd -> {
-            String v = cd.getValue()[1];
+            String v = cd.getValue()[2];
             return new SimpleStringProperty(v != null && !v.isEmpty() ? v : "\u2014");
         });
         valCol.setSortable(false);

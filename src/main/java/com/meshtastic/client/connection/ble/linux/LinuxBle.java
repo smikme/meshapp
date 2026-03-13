@@ -1,4 +1,4 @@
-package com.meshtastic.client.connection.ble.windows;
+package com.meshtastic.client.connection.ble.linux;
 
 import com.meshtastic.client.connection.ConnectionException;
 import com.meshtastic.client.connection.ble.*;
@@ -12,64 +12,82 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
 /**
- * Windows-реализация BLE через WinRT (нативная DLL meshapp-ble.dll + JNA).
+ * Linux-реализация BLE через BlueZ (нативная SO libmeshapp-ble.so + JNA).
  * <p>
- * Делегирует все BLE-операции в {@link WinBleLibrary}, которая загружает
- * {@code meshapp-ble.dll} — маленький C++/WinRT модуль с плоским C API.
+ * Делегирует все BLE-операции в {@link LinuxBleLibrary}, которая загружает
+ * {@code libmeshapp-ble.so} — C-модуль с sd-bus + AcquireNotify/AcquireWrite.
  * <p>
- * Паттерн аналогичен {@link com.meshtastic.client.connection.ble.macos.MacOsBle}:
+ * Паттерн аналогичен {@link com.meshtastic.client.connection.ble.windows.WinBle}:
  * <ul>
  *   <li>Static JNA callbacks для защиты от GC</li>
- *   <li>Polling fallback (200ms) при недоступности notifications</li>
+ *   <li>Polling fallback (200ms) для вычитки fromRadio</li>
  *   <li>Drain chain после каждой записи</li>
  * </ul>
  *
- * @see WinBleLibrary
+ * @see LinuxBleLibrary
  * @see BlePlatform
  */
-public class WinBle implements BlePlatform {
+public class LinuxBle implements BlePlatform {
 
-    private static final Logger log = LoggerFactory.getLogger(WinBle.class);
+    private static final Logger log = LoggerFactory.getLogger(LinuxBle.class);
 
     private static final int POLL_INTERVAL_MS = 200;
     private static final int READ_BUFFER_SIZE = 512;
 
-    private final WinBleLibrary lib;
+    private final LinuxBleLibrary lib;
 
-    // Static JNA callbacks — prevent GC (same pattern as MacOsBle)
-    private static WinBleLibrary.DeviceCallback scanCallback;
-    private static WinBleLibrary.DataCallback dataCallback;
-    private static WinBleLibrary.StateCallback stateCallback;
+    // Static JNA callbacks — prevent GC (same pattern as WinBle/MacOsBle)
+    private static LinuxBleLibrary.LogCallback logCallback;
+    private static LinuxBleLibrary.DeviceCallback scanCallback;
+    private static LinuxBleLibrary.DataCallback dataCallback;
+    private static LinuxBleLibrary.StateCallback stateCallback;
+    private static LinuxBleLibrary.PasskeyRequestCallback passkeyCallback;
 
     private volatile Consumer<BleDevice> scanConsumer;
     private volatile Consumer<byte[]> fromRadioListener;
     private volatile Consumer<BleState> stateListener;
+    private volatile Consumer<String> passkeyRequestHandler;
     private volatile boolean connected;
 
-    // Polling (always active — fromRadio notifications unreliable on Windows)
+    // Polling (fromRadio data also comes via fd notifications in native code,
+    // but polling ensures nothing is missed — same approach as Windows/macOS)
     private final ScheduledExecutorService pollScheduler =
             Executors.newSingleThreadScheduledExecutor(r -> {
-                Thread t = new Thread(r, "ble-win-poll");
+                Thread t = new Thread(r, "ble-linux-poll");
                 t.setDaemon(true);
                 return t;
             });
     private volatile ScheduledFuture<?> pollFuture;
     private volatile boolean drainInProgress;
 
-    public WinBle() {
+    public LinuxBle() {
         try {
-            lib = WinBleLibrary.INSTANCE;
+            lib = LinuxBleLibrary.INSTANCE;
         } catch (UnsatisfiedLinkError e) {
-            log.error("Не удалось загрузить meshapp-ble.dll: {}", e.getMessage());
+            log.error("Не удалось загрузить libmeshapp-ble.so: {}", e.getMessage());
             throw new UnsupportedOperationException(
-                    "meshapp-ble.dll не найден. BLE на Windows недоступен.", e);
+                    "libmeshapp-ble.so не найден. BLE на Linux недоступен.", e);
         }
 
         int result = lib.meshble_init();
         if (result != 0) {
-            throw new RuntimeException("WinRT BLE инициализация не удалась: error=" + result);
+            throw new RuntimeException("BlueZ BLE инициализация не удалась: error=" + result);
         }
-        log.info("WinRT BLE инициализирован");
+
+        // Forward native log_msg() to SLF4J (static callback = GC protection)
+        logCallback = msg -> log.debug("[native] {}", msg);
+        lib.meshble_set_log_callback(logCallback);
+
+        // Passkey request callback (static, prevent GC)
+        passkeyCallback = address -> {
+            Consumer<String> handler = passkeyRequestHandler;
+            if (handler != null && address != null) {
+                handler.accept(address);
+            }
+        };
+        lib.meshble_set_passkey_request_callback(passkeyCallback);
+
+        log.info("BlueZ BLE инициализирован (нативная библиотека)");
     }
 
     // ==================== BlePlatform: Scanning ====================
@@ -149,8 +167,6 @@ public class WinBle implements BlePlatform {
             case 0 -> {
                 connected = true;
                 log.info("BLE подключено: {}", address);
-
-                // Always use polling — fromRadio notifications unreliable on Windows
                 log.info("Запуск polling fromRadio ({}ms)", POLL_INTERVAL_MS);
                 startPolling();
             }
@@ -158,7 +174,7 @@ public class WinBle implements BlePlatform {
             case -2 -> throw new ConnectionException("BLE устройство не найдено: " + address);
             case -3 -> throw new ConnectionException("GATT ошибка при подключении к: " + address);
             case -4 -> throw new ConnectionException(
-                    "Доступ запрещён. Выполните сопряжение устройства в настройках Bluetooth Windows: " + address);
+                    "Доступ запрещён. Выполните сопряжение: bluetoothctl pair " + address);
             default -> throw new ConnectionException("BLE ошибка подключения (code=" + result + "): " + address);
         }
     }
@@ -189,7 +205,7 @@ public class WinBle implements BlePlatform {
             log.error("writeToRadio failed: error={}", result);
         } else {
             log.debug("Отправлено {} байт в toRadio", protobufPayload.length);
-            // Schedule extra drain after write (same pattern as MacOsBle)
+            // Schedule extra drain after write (same pattern as WinBle/MacOsBle)
             scheduleDrainAfterWrite();
         }
     }
@@ -202,6 +218,23 @@ public class WinBle implements BlePlatform {
     @Override
     public void setStateListener(Consumer<BleState> listener) {
         this.stateListener = listener;
+    }
+
+    // ==================== BlePlatform: Pairing ====================
+
+    @Override
+    public void setPasskeyRequestHandler(Consumer<String> handler) {
+        this.passkeyRequestHandler = handler;
+    }
+
+    public void respondPasskey(int passkey) {
+        log.info("Responding to passkey request with PIN");
+        lib.meshble_respond_passkey(passkey);
+    }
+
+    public void cancelPasskey() {
+        log.info("Cancelling passkey request");
+        lib.meshble_cancel_passkey();
     }
 
     // ==================== BlePlatform: State ====================
@@ -223,7 +256,7 @@ public class WinBle implements BlePlatform {
         stopPolling();
         pollScheduler.shutdownNow();
         lib.meshble_cleanup();
-        log.info("WinBle disposed");
+        log.info("LinuxBle disposed");
     }
 
     // ==================== Polling Fallback ====================
@@ -244,7 +277,7 @@ public class WinBle implements BlePlatform {
 
     /**
      * Polling: читаем fromRadio до получения пустого ответа.
-     * Guard drainInProgress предотвращает конкурентные чтения (как в MacOsBle).
+     * Guard drainInProgress предотвращает конкурентные чтения (как в WinBle/MacOsBle).
      */
     private void pollFromRadio() {
         if (!connected || drainInProgress) { return; }
@@ -275,7 +308,7 @@ public class WinBle implements BlePlatform {
 
     /**
      * После каждого writeToRadio — дополнительный drain через 200ms.
-     * Паттерн из MacOsBle: ускоряет получение ответа на отправленный запрос.
+     * Паттерн из WinBle/MacOsBle: ускоряет получение ответа на отправленный запрос.
      */
     private void scheduleDrainAfterWrite() {
         pollScheduler.schedule(this::pollFromRadio, POLL_INTERVAL_MS, TimeUnit.MILLISECONDS);

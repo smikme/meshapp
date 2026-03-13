@@ -439,17 +439,11 @@ MESHBLE_API int meshble_connect(const char* address, int timeout_ms) {
                     do_disconnect(); return -3;
                 }
 
-                // Notifications
+                // fromRadio notifications unreliable on many Windows BLE adapters:
+                // subscription succeeds but notifications are never delivered.
+                // Always use Java-side polling (same approach as macOS).
                 g_notifications_active = false;
-                try {
-                    auto nr = g_ble->from_radio.WriteClientCharacteristicConfigurationDescriptorAsync(
-                        GattClientCharacteristicConfigurationDescriptorValue::Notify).get();
-                    if (nr == GattCommunicationStatus::Success) {
-                        g_ble->from_radio_notify_token = g_ble->from_radio.ValueChanged(on_from_radio_value_changed);
-                        g_notifications_active = true;
-                        log_msg("[meshble] fromRadio notifications ON");
-                    }
-                } catch (...) { log_msg("[meshble] fromRadio notifications failed, using polling"); }
+                log_msg("[meshble] fromRadio: using polling (notifications skipped)");
 
                 if (g_ble->from_num != nullptr) {
                     try {

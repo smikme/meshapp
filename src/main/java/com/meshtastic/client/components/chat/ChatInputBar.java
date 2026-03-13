@@ -77,6 +77,7 @@ public class ChatInputBar extends VBox {
         // Поле ввода (кастомное с emoji-картинками)
         messageInput = new EmojiTextField();
         messageInput.setPromptText("Сообщение...");
+        messageInput.setMaxBytesSupplier(this::getMaxTextBytes);
         HBox.setHgrow(messageInput, Priority.ALWAYS);
 
         // Кнопка отправки с кольцевым индикатором заполненности

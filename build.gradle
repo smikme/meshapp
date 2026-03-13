@@ -146,6 +146,53 @@ if (org.gradle.internal.os.OperatingSystem.current().isWindows()) {
 	tasks.named('processResources') { dependsOn 'buildBleNative' }
 }
 
+// ============================================================
+// Linux BLE: сборка libmeshapp-ble.so из native/linux-ble/
+// Использование: ./gradlew buildBleNative (или автоматически при processResources на Linux)
+// Требует: libsystemd-dev (Ubuntu/Debian) или systemd-devel (Fedora/RHEL)
+// ============================================================
+if (org.gradle.internal.os.OperatingSystem.current().isLinux()) {
+	tasks.register('buildBleNative') {
+		group = 'build'
+		description = 'Собрать libmeshapp-ble.so (BlueZ BLE) через CMake'
+
+		def nativeDir = file('native/linux-ble')
+		def buildDir = new File(nativeDir, 'build')
+		def soOutput = new File(buildDir, 'libmeshapp-ble.so')
+		def soDest = file('src/main/resources/linux-x86-64/libmeshapp-ble.so')
+
+		inputs.files(fileTree(nativeDir) { include '*.c', '*.h', 'CMakeLists.txt' })
+		outputs.file(soDest)
+
+		doLast {
+			// CMake configure
+			if (!new File(buildDir, 'CMakeCache.txt').exists()) {
+				def cfg = new ProcessBuilder('cmake', '-B', 'build', '-DCMAKE_BUILD_TYPE=Release')
+					.directory(nativeDir).redirectErrorStream(true).start()
+				def cfgOut = cfg.inputStream.text
+				cfg.waitFor()
+				if (cfgOut) logger.lifecycle(cfgOut.trim())
+				if (cfg.exitValue() != 0) throw new GradleException("CMake configure failed (exit ${cfg.exitValue()})")
+			}
+			// CMake build
+			def bld = new ProcessBuilder('cmake', '--build', 'build')
+				.directory(nativeDir).redirectErrorStream(true).start()
+			def bldOut = bld.inputStream.text
+			bld.waitFor()
+			if (bldOut) logger.lifecycle(bldOut.trim())
+			if (bld.exitValue() != 0) throw new GradleException("CMake build failed (exit ${bld.exitValue()})")
+			// Copy SO to resources
+			soDest.parentFile.mkdirs()
+			java.nio.file.Files.copy(
+				soOutput.toPath(), soDest.toPath(),
+				java.nio.file.StandardCopyOption.REPLACE_EXISTING
+			)
+			logger.lifecycle("buildBleNative: SO скопирован в ${soDest}")
+		}
+	}
+	tasks.named('processResources') { dependsOn 'buildBleNative' }
+}
+
 tasks.withType(JavaCompile).configureEach {
 	options.encoding = 'UTF-8'
 }
@@ -247,6 +294,17 @@ tasks.register('jpackage') {
 			}
 		}
 
+		// Linux: скопировать libmeshapp-ble.so (BlueZ BLE) в lib/ для jpackage
+		if (os.isLinux()) {
+			def bleSo = file('src/main/resources/linux-x86-64/libmeshapp-ble.so')
+			if (bleSo.exists()) {
+				java.nio.file.Files.copy(bleSo.toPath(),
+					new File(libDir, bleSo.name).toPath(),
+					java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+				logger.lifecycle("jpackage: libmeshapp-ble.so скопирован в lib/")
+			}
+		}
+
 		def jvmArgsList = application.applicationDefaultJvmArgs.collect()
 		// $APPDIR — токен jpackage, заменяется на реальную директорию приложения при запуске.
 		// Абсолютные пути билд-машины не работают на других компьютерах.
@@ -304,6 +362,15 @@ tasks.register('jpackage') {
 			args << '--win-menu'
 			args << '--win-upgrade-uuid'
 			args << 'd5765678-89ab-4def-8123-456789abcdef'
+		}
+
+		if (!os.isWindows() && !macBuild) {
+			// Ubuntu 24.04+ переименовал libasound2 → libasound2t64 (64-bit time_t).
+			// jpackage по умолчанию добавляет libasound2, что ломает установку.
+			// Указываем libasound2t64 | libasound2 для совместимости со старыми и новыми дистрибутивами.
+			args << '--linux-package-deps'
+			args << 'libasound2t64 | libasound2'
+			args << '--linux-shortcut'
 		}
 
 		if (macBuild) {

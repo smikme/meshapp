@@ -13,6 +13,9 @@ import javafx.geometry.Point2D;
 import javafx.scene.Cursor;
 import javafx.scene.Node;
 import javafx.scene.image.ImageView;
+import javafx.scene.control.ContextMenu;
+import javafx.scene.control.MenuItem;
+import javafx.scene.control.SeparatorMenuItem;
 import javafx.scene.input.Clipboard;
 import javafx.scene.input.ClipboardContent;
 import javafx.scene.input.KeyEvent;
@@ -24,9 +27,11 @@ import javafx.scene.text.Text;
 import javafx.scene.text.TextFlow;
 import javafx.util.Duration;
 
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
+import java.util.function.IntSupplier;
 
 /**
  * Кастомное многострочное текстовое поле с отображением эмодзи как изображений.
@@ -59,6 +64,8 @@ public class EmojiTextField extends StackPane {
     private String promptText = "";
     private Consumer<Void> onAction;
     private boolean disabled = false;
+    private IntSupplier maxBytesSupplier;
+    private ContextMenu contextMenu;
 
     // Выделение
     private int selectionAnchor = -1;
@@ -129,7 +136,10 @@ public class EmojiTextField extends StackPane {
             } else {
                 blinkTimeline.stop();
                 caret.setVisible(false);
-                clearSelection();
+                // Не снимать выделение, если открыто контекстное меню
+                if (contextMenu == null || !contextMenu.isShowing()) {
+                    clearSelection();
+                }
                 dragging = false;
                 pseudoClassStateChanged(javafx.css.PseudoClass.getPseudoClass("focused"), false);
             }
@@ -139,6 +149,7 @@ public class EmojiTextField extends StackPane {
         setOnKeyTyped(this::handleKeyTyped);
         setOnKeyPressed(this::handleKeyPressed);
         setOnMousePressed(this::handleMousePressed);
+        buildContextMenu();
 
         // Drag-обработку вешаем на Scene — гарантирует получение MOUSE_DRAGGED
         // независимо от того, как JavaFX определяет drag target.
@@ -231,12 +242,20 @@ public class EmojiTextField extends StackPane {
         super.setDisable(value);
     }
 
+    /**
+     * Устанавливает поставщик максимального количества байт UTF-8 для текста.
+     * Используется в {@link #paste()} для обрезки буфера обмена по лимиту.
+     */
+    public void setMaxBytesSupplier(IntSupplier supplier) {
+        this.maxBytesSupplier = supplier;
+    }
+
     // === Обработчики ввода ===
 
     private void handleKeyTyped(KeyEvent e) {
         if (disabled) { return; }
         String ch = e.getCharacter();
-        if (ch == null || ch.isEmpty() || ch.charAt(0) < ' '
+        if (ch == null || ch.isEmpty() || Character.isISOControl(ch.charAt(0))
                 || e.isControlDown() || e.isMetaDown()) {
             return;
         }
@@ -373,12 +392,26 @@ public class EmojiTextField extends StackPane {
 
     private void handleMousePressed(MouseEvent e) {
         if (disabled) { return; }
+
+        // Закрыть контекстное меню при любом клике на поле ввода
+        if (contextMenu != null && contextMenu.isShowing()) {
+            contextMenu.hide();
+        }
+
         requestFocus();
         int pos = hitTestCaret(e.getX(), e.getY());
+
+        // Правый клик внутри выделения — сохранить выделение для контекстного меню
+        if (e.isSecondaryButtonDown() && hasSelection()
+                && pos >= selectionStart && pos <= selectionEnd) {
+            e.consume();
+            return;
+        }
+
         clearSelection();
         caretPosition.set(pos);
         selectionAnchor = pos;
-        dragging = true;
+        dragging = e.isPrimaryButtonDown();
         e.consume();
     }
 
@@ -612,6 +645,22 @@ public class EmojiTextField extends StackPane {
         String clip = Clipboard.getSystemClipboard().getString();
         if (clip == null || clip.isEmpty()) { return; }
         clip = clip.replace("\n", " ").replace("\r", "");
+
+        // Обрезать буфер по лимиту байт, если задан
+        if (maxBytesSupplier != null) {
+            int maxBytes = maxBytesSupplier.getAsInt();
+            String current = text.get();
+            int selBytes = hasSelection()
+                    ? current.substring(selectionStart, selectionEnd)
+                             .getBytes(StandardCharsets.UTF_8).length
+                    : 0;
+            int usedBytes = current.getBytes(StandardCharsets.UTF_8).length - selBytes;
+            int availBytes = maxBytes - usedBytes;
+            if (availBytes <= 0) { return; }
+            clip = truncateToUtf8Bytes(clip, availBytes);
+            if (clip.isEmpty()) { return; }
+        }
+
         deleteSelection();
         String t = text.get();
         int pos = caretPosition.get();
@@ -622,6 +671,46 @@ public class EmojiTextField extends StackPane {
         } else {
             caretPosition.set(Math.min(pos + clip.length(), text.get().length()));
         }
+    }
+
+    /** Обрезает строку так, чтобы она укладывалась в limit байт UTF-8, не ломая символы. */
+    private static String truncateToUtf8Bytes(String s, int limit) {
+        byte[] bytes = s.getBytes(StandardCharsets.UTF_8);
+        if (bytes.length <= limit) { return s; }
+        // Декодируем обратно — обрезанные многобайтовые символы станут U+FFFD
+        return new String(bytes, 0, limit, StandardCharsets.UTF_8)
+                .replace("\uFFFD", "");
+    }
+
+    private void buildContextMenu() {
+        MenuItem cutItem = new MenuItem("Вырезать");
+        cutItem.setOnAction(e -> cutSelection());
+
+        MenuItem copyItem = new MenuItem("Копировать");
+        copyItem.setOnAction(e -> copySelection());
+
+        MenuItem pasteItem = new MenuItem("Вставить");
+        pasteItem.setOnAction(e -> paste());
+
+        MenuItem selectAllItem = new MenuItem("Выделить всё");
+        selectAllItem.setOnAction(e -> selectAll());
+
+        contextMenu = new ContextMenu(cutItem, copyItem, pasteItem,
+                new SeparatorMenuItem(), selectAllItem);
+
+        contextMenu.setOnShowing(e -> {
+            boolean hasSel = hasSelection();
+            boolean hasClip = Clipboard.getSystemClipboard().hasString();
+            cutItem.setDisable(!hasSel);
+            copyItem.setDisable(!hasSel);
+            pasteItem.setDisable(!hasClip);
+            selectAllItem.setDisable(text.get() == null || text.get().isEmpty());
+        });
+
+        setOnContextMenuRequested(e -> {
+            contextMenu.show(this, e.getScreenX(), e.getScreenY());
+            e.consume();
+        });
     }
 
     // === Визуальное построение ===
