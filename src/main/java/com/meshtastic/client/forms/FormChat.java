@@ -161,7 +161,7 @@ public class FormChat extends Form {
     public void formInit() {
         ConnectionManager.getInstance().addListener(connectionListener);
         // Загрузить сохранённые счётчики прочитанных сообщений из БД
-        lastReadCounts.putAll(MessageDbService.getInstance().loadAllReadCounts());
+        lastReadCounts.putAll(MessageDbService.getInstance().loadAllReadCounts(currentOwnerNodeId()));
         rebindState();
     }
 
@@ -440,6 +440,10 @@ public class FormChat extends Form {
                 ? String.valueOf(selectedChat.getChannelIndex()) : selectedChat.getPeerNodeId();
     }
 
+    private String currentOwnerNodeId() {
+        return state != null ? String.format("!%08x", state.getMyNodeNum()) : "";
+    }
+
     /**
      * Загрузить последние PAGE_SIZE сообщений из БД. Скролл в самый низ.
      */
@@ -451,7 +455,7 @@ public class FormChat extends Form {
         String chatType = currentChatType();
         String chatKey = currentChatKey();
 
-        List<MeshMessage> msgs = db.loadLast(chatType, chatKey, PAGE_SIZE);
+        List<MeshMessage> msgs = db.loadLast(chatType, chatKey, PAGE_SIZE, currentOwnerNodeId());
 
         messageContainer.getChildren().clear();
         for (MeshMessage msg : msgs) {
@@ -483,7 +487,7 @@ public class FormChat extends Form {
         String chatType = currentChatType();
         String chatKey = currentChatKey();
 
-        List<MeshMessage> older = db.loadBefore(chatType, chatKey, oldestLoadedDbId, PAGE_SIZE);
+        List<MeshMessage> older = db.loadBefore(chatType, chatKey, oldestLoadedDbId, PAGE_SIZE, currentOwnerNodeId());
 
         if (older.isEmpty()) {
             allHistoryLoaded = true;
@@ -534,7 +538,7 @@ public class FormChat extends Form {
         String chatType = currentChatType();
         String chatKey = currentChatKey();
 
-        List<MeshMessage> newMsgs = db.loadAfter(chatType, chatKey, newestLoadedDbId);
+        List<MeshMessage> newMsgs = db.loadAfter(chatType, chatKey, newestLoadedDbId, currentOwnerNodeId());
         if (!newMsgs.isEmpty()) {
             for (MeshMessage msg : newMsgs) {
                 messageContainer.getChildren().add(bubbleFactory.build(msg));
@@ -563,7 +567,7 @@ public class FormChat extends Form {
     private void addSystemMessageTo(String chatType, String chatKey, String text) {
         MeshMessage sysMsg = new MeshMessage("!00000000", "!00000000", 0, text, System.currentTimeMillis() / 1000, false);
         sysMsg.setSystemMessage(true);
-        MessageDbService.getInstance().save(sysMsg, chatType, chatKey);
+        MessageDbService.getInstance().save(sysMsg, chatType, chatKey, currentOwnerNodeId());
         if (isCurrentChat(chatType, chatKey)) {
             messageContainer.getChildren().add(bubbleFactory.build(sysMsg));
             newestLoadedDbId = sysMsg.getDbId();
@@ -582,7 +586,7 @@ public class FormChat extends Form {
         String text = tracerouteView.formatText(targetName, route);
         MeshMessage sysMsg = new MeshMessage("!00000000", "!00000000", 0, text, System.currentTimeMillis() / 1000, false);
         sysMsg.setSystemMessage(true);
-        MessageDbService.getInstance().save(sysMsg, chatType, chatKey);
+        MessageDbService.getInstance().save(sysMsg, chatType, chatKey, currentOwnerNodeId());
 
         if (isCurrentChat(chatType, chatKey)) {
             HBox bubble = tracerouteView.buildFromProto(targetName, route, sysMsg);
@@ -831,6 +835,10 @@ public class FormChat extends Form {
             nameResolver.setState(newState);
         }
 
+        // Перезагрузить счётчики прочитанных для нового устройства
+        lastReadCounts.clear();
+        lastReadCounts.putAll(MessageDbService.getInstance().loadAllReadCounts(currentOwnerNodeId()));
+
         if (this.state != null) {
             this.state.addMessageListener(messageListener);
 
@@ -859,8 +867,9 @@ public class FormChat extends Form {
         List<ChatItem> items = new ArrayList<>();
 
         // Последние сообщения каналов и DM из БД (одним запросом на тип)
-        Map<String, MeshMessage> channelLastMsgs = db.getLastMessagePerChat("channel");
-        Map<String, MeshMessage> dmLastMsgs = db.getLastMessagePerChat("dm");
+        String ownerId = currentOwnerNodeId();
+        Map<String, MeshMessage> channelLastMsgs = db.getLastMessagePerChat("channel", ownerId);
+        Map<String, MeshMessage> dmLastMsgs = db.getLastMessagePerChat("dm", ownerId);
 
         // 1. Каналы (не DISABLED)
         for (ChannelProtos.Channel channel : state.getChannels()) {
@@ -868,14 +877,14 @@ public class FormChat extends Form {
             String chKey = String.valueOf(channel.getIndex());
             MeshMessage lastMsg = channelLastMsgs.get(chKey);
             String readKey = "ch:" + channel.getIndex();
-            int totalCount = db.getMessageCount("channel", chKey);
+            int totalCount = db.getMessageCount("channel", chKey, ownerId);
             int lastRead = lastReadCounts.getOrDefault(readKey, 0);
             int unread = Math.max(0, totalCount - lastRead);
             items.add(ChatItem.fromChannel(channel, lastMsg, unread));
         }
 
         // 2. DM-пиры: объединение из БД + текущей сессии
-        Set<String> dmPeers = new LinkedHashSet<>(db.getDistinctDmPeers());
+        Set<String> dmPeers = new LinkedHashSet<>(db.getDistinctDmPeers(ownerId));
         dmPeers.addAll(state.getAllDirectMessages().keySet());
         for (String peerNodeId : dmPeers) {
             MeshMessage lastMsg = dmLastMsgs.get(peerNodeId);
@@ -885,7 +894,7 @@ public class FormChat extends Form {
                 peerNode = NodeCacheService.getInstance().get(peerNodeId);
             }
             String readKey = "dm:" + peerNodeId;
-            int totalCount = db.getMessageCount("dm", peerNodeId);
+            int totalCount = db.getMessageCount("dm", peerNodeId, ownerId);
             int lastRead = lastReadCounts.getOrDefault(readKey, 0);
             int unread = Math.max(0, totalCount - lastRead);
             items.add(ChatItem.fromDirectMessage(peerNodeId, peerNode, lastMsg, unread));
@@ -940,14 +949,14 @@ public class FormChat extends Form {
                 state.updateChannel(disabled);
             }
 
-            db.deleteChat("channel", String.valueOf(idx));
+            db.deleteChat("channel", String.valueOf(idx), currentOwnerNodeId());
             lastReadCounts.remove("ch:" + idx);
         } else {
             String peerNodeId = item.getPeerNodeId();
             if (state != null) {
                 state.removeDirectMessages(peerNodeId);
             }
-            db.deleteChat("dm", peerNodeId);
+            db.deleteChat("dm", peerNodeId, currentOwnerNodeId());
             lastReadCounts.remove("dm:" + peerNodeId);
         }
 
@@ -984,9 +993,10 @@ public class FormChat extends Form {
         String readKey = (isChannel ? "ch:" : "dm:") + dbKey;
 
         MessageDbService db = MessageDbService.getInstance();
-        int count = db.getMessageCount(dbType, dbKey);
+        String ownerId = currentOwnerNodeId();
+        int count = db.getMessageCount(dbType, dbKey, ownerId);
         lastReadCounts.put(readKey, count);
-        db.saveReadCount(dbType, dbKey, count);
+        db.saveReadCount(dbType, dbKey, count, ownerId);
         reloadChatList();
     }
 

@@ -138,6 +138,9 @@ public final class ConnectionManager {
         if (activeConnections.containsKey(id)) {
             return;
         }
+        if (!activeConnections.isEmpty()) {
+            throw new ConnectionException("Уже есть активное подключение. Отключитесь перед подключением к другому устройству.");
+        }
         MeshtasticConnection conn = createConnection(entry);
         conn.setConnectionListener(new ConnectionListener() {
             @Override
@@ -186,6 +189,13 @@ public final class ConnectionManager {
         CompletableFuture<DeviceState> future = configExchange.startConfigExchange();
         configFutures.put(id, future);
 
+        future.thenAccept(ds -> {
+            String nodeId = String.format("!%08x", ds.getMyNodeNum());
+            entry.setNodeId(nodeId);
+            save();
+            log.info("Learned nodeId {} for connection '{}'", nodeId, entry.getName());
+        });
+
         entry.setConnected(true);
         fireChanged();
     }
@@ -211,6 +221,10 @@ public final class ConnectionManager {
         fireChanged();
     }
 
+    public boolean hasActiveConnection() {
+        return !activeConnections.isEmpty();
+    }
+
     public List<ConnectionEntry> getEntries() {
         return new ArrayList<>(entries);
     }
@@ -229,6 +243,19 @@ public final class ConnectionManager {
 
     public CompletableFuture<DeviceState> getConfigFuture(String id) {
         return configFutures.get(id);
+    }
+
+    /**
+     * Возвращает nodeId устройства для указанного подключения.
+     * Сначала пытается получить из DeviceState (актуальный), затем из ConnectionEntry (кеш).
+     */
+    public String getOwnerNodeId(String id) {
+        DeviceState ds = deviceStates.get(id);
+        if (ds != null && ds.getMyNodeNum() != 0) {
+            return String.format("!%08x", ds.getMyNodeNum());
+        }
+        ConnectionEntry entry = findEntry(id);
+        return entry != null ? entry.getNodeId() : null;
     }
 
     public void addListener(Runnable listener) {

@@ -79,12 +79,13 @@ public final class MessageDbService {
                         sender_name    VARCHAR(100),
                         system_msg     BOOLEAN DEFAULT FALSE,
                         rx_rssi        INT DEFAULT 0,
-                        rx_snr         REAL DEFAULT 0
+                        rx_snr         REAL DEFAULT 0,
+                        owner_node_id  VARCHAR(20) NOT NULL DEFAULT ''
                     )
                     """);
 
                 stmt.execute("""
-                    CREATE INDEX IF NOT EXISTS idx_msg_chat ON messages (chat_type, chat_key, id)
+                    CREATE INDEX IF NOT EXISTS idx_msg_chat ON messages (owner_node_id, chat_type, chat_key, id)
                     """);
 
                 stmt.execute("""
@@ -93,10 +94,11 @@ public final class MessageDbService {
 
                 stmt.execute("""
                     CREATE TABLE IF NOT EXISTS chat_read_counts (
-                        chat_type  VARCHAR(10) NOT NULL,
-                        chat_key   VARCHAR(20) NOT NULL,
-                        read_count INT NOT NULL DEFAULT 0,
-                        PRIMARY KEY (chat_type, chat_key)
+                        owner_node_id VARCHAR(20) NOT NULL DEFAULT '',
+                        chat_type     VARCHAR(10) NOT NULL,
+                        chat_key      VARCHAR(20) NOT NULL,
+                        read_count    INT NOT NULL DEFAULT 0,
+                        PRIMARY KEY (owner_node_id, chat_type, chat_key)
                     )
                     """);
             }
@@ -105,8 +107,8 @@ public final class MessageDbService {
                 INSERT INTO messages (chat_type, chat_key, from_node_id, to_node_id, channel_idx,
                     text, timestamp, outgoing, packet_id, status, error_reason,
                     reply_id, reply_text, hop_start, hop_limit, sender_name, system_msg,
-                    rx_rssi, rx_snr)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    rx_rssi, rx_snr, owner_node_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, Statement.RETURN_GENERATED_KEYS);
 
             updateStatusStmt = dbConnection.prepareStatement("""
@@ -147,11 +149,12 @@ public final class MessageDbService {
     /**
      * Сохраняет сообщение в БД. Устанавливает {@code msg.setDbId()} после вставки.
      *
-     * @param msg      сообщение для сохранения
-     * @param chatType "channel" или "dm"
-     * @param chatKey  channelIndex (как строка) или peerNodeId
+     * @param msg         сообщение для сохранения
+     * @param chatType    "channel" или "dm"
+     * @param chatKey     channelIndex (как строка) или peerNodeId
+     * @param ownerNodeId nodeId устройства-владельца (например, "!9e755af0")
      */
-    public synchronized void save(MeshMessage msg, String chatType, String chatKey) {
+    public synchronized void save(MeshMessage msg, String chatType, String chatKey, String ownerNodeId) {
         if (msg == null) { return; }
         if (insertStmt == null) {
             log.warn("Message DB not initialized — message dropped (chatType={}, chatKey={})", chatType, chatKey);
@@ -177,6 +180,7 @@ public final class MessageDbService {
             insertStmt.setBoolean(17, msg.isSystemMessage());
             insertStmt.setInt(18, msg.getRxRssi());
             insertStmt.setFloat(19, msg.getRxSnr());
+            insertStmt.setString(20, ownerNodeId != null ? ownerNodeId : "");
             insertStmt.executeUpdate();
 
             try (ResultSet keys = insertStmt.getGeneratedKeys()) {
@@ -215,24 +219,26 @@ public final class MessageDbService {
     /**
      * Загружает последние N сообщений чата (в хронологическом порядке).
      *
-     * @param chatType "channel" или "dm"
-     * @param chatKey  channelIndex (как строка) или peerNodeId
-     * @param limit    максимальное количество
+     * @param chatType    "channel" или "dm"
+     * @param chatKey     channelIndex (как строка) или peerNodeId
+     * @param limit       максимальное количество
+     * @param ownerNodeId nodeId устройства-владельца
      * @return список сообщений (старые → новые)
      */
-    public List<MeshMessage> loadLast(String chatType, String chatKey, int limit) {
+    public List<MeshMessage> loadLast(String chatType, String chatKey, int limit, String ownerNodeId) {
         List<MeshMessage> result = new ArrayList<>();
         if (dbConnection == null) { return result; }
         String sql = """
             SELECT * FROM (
-                SELECT * FROM messages WHERE chat_type = ? AND chat_key = ?
+                SELECT * FROM messages WHERE owner_node_id = ? AND chat_type = ? AND chat_key = ?
                 ORDER BY id DESC LIMIT ?
             ) ORDER BY id ASC
             """;
         try (PreparedStatement ps = dbConnection.prepareStatement(sql)) {
-            ps.setString(1, chatType);
-            ps.setString(2, chatKey);
-            ps.setInt(3, limit);
+            ps.setString(1, ownerNodeId != null ? ownerNodeId : "");
+            ps.setString(2, chatType);
+            ps.setString(3, chatKey);
+            ps.setInt(4, limit);
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
                     result.add(readMessage(rs));
@@ -246,28 +252,29 @@ public final class MessageDbService {
 
     /**
      * Загружает N сообщений ДО указанного id (для скролла вверх).
-     * Возвращает в хронологическом порядке (старые → новые).
      *
-     * @param chatType   "channel" или "dm"
-     * @param chatKey    channelIndex (как строка) или peerNodeId
-     * @param beforeDbId загружать сообщения с id &lt; beforeDbId
-     * @param limit      максимальное количество
+     * @param chatType    "channel" или "dm"
+     * @param chatKey     channelIndex (как строка) или peerNodeId
+     * @param beforeDbId  загружать сообщения с id &lt; beforeDbId
+     * @param limit       максимальное количество
+     * @param ownerNodeId nodeId устройства-владельца
      * @return список сообщений (старые → новые)
      */
-    public List<MeshMessage> loadBefore(String chatType, String chatKey, long beforeDbId, int limit) {
+    public List<MeshMessage> loadBefore(String chatType, String chatKey, long beforeDbId, int limit, String ownerNodeId) {
         List<MeshMessage> result = new ArrayList<>();
         if (dbConnection == null) { return result; }
         String sql = """
             SELECT * FROM (
-                SELECT * FROM messages WHERE chat_type = ? AND chat_key = ? AND id < ?
+                SELECT * FROM messages WHERE owner_node_id = ? AND chat_type = ? AND chat_key = ? AND id < ?
                 ORDER BY id DESC LIMIT ?
             ) ORDER BY id ASC
             """;
         try (PreparedStatement ps = dbConnection.prepareStatement(sql)) {
-            ps.setString(1, chatType);
-            ps.setString(2, chatKey);
-            ps.setLong(3, beforeDbId);
-            ps.setInt(4, limit);
+            ps.setString(1, ownerNodeId != null ? ownerNodeId : "");
+            ps.setString(2, chatType);
+            ps.setString(3, chatKey);
+            ps.setLong(4, beforeDbId);
+            ps.setInt(5, limit);
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
                     result.add(readMessage(rs));
@@ -282,19 +289,21 @@ public final class MessageDbService {
     /**
      * Загружает новые сообщения ПОСЛЕ указанного id (для real-time обновления).
      *
-     * @param chatType  "channel" или "dm"
-     * @param chatKey   channelIndex (как строка) или peerNodeId
-     * @param afterDbId загружать сообщения с id > afterDbId
+     * @param chatType    "channel" или "dm"
+     * @param chatKey     channelIndex (как строка) или peerNodeId
+     * @param afterDbId   загружать сообщения с id > afterDbId
+     * @param ownerNodeId nodeId устройства-владельца
      * @return список новых сообщений (хронологический порядок)
      */
-    public List<MeshMessage> loadAfter(String chatType, String chatKey, long afterDbId) {
+    public List<MeshMessage> loadAfter(String chatType, String chatKey, long afterDbId, String ownerNodeId) {
         List<MeshMessage> result = new ArrayList<>();
         if (dbConnection == null) { return result; }
-        String sql = "SELECT * FROM messages WHERE chat_type = ? AND chat_key = ? AND id > ? ORDER BY id ASC";
+        String sql = "SELECT * FROM messages WHERE owner_node_id = ? AND chat_type = ? AND chat_key = ? AND id > ? ORDER BY id ASC";
         try (PreparedStatement ps = dbConnection.prepareStatement(sql)) {
-            ps.setString(1, chatType);
-            ps.setString(2, chatKey);
-            ps.setLong(3, afterDbId);
+            ps.setString(1, ownerNodeId != null ? ownerNodeId : "");
+            ps.setString(2, chatType);
+            ps.setString(3, chatKey);
+            ps.setLong(4, afterDbId);
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
                     result.add(readMessage(rs));
@@ -328,13 +337,14 @@ public final class MessageDbService {
     }
 
     /**
-     * Возвращает список уникальных DM-пиров (chat_key) из БД.
+     * Возвращает список уникальных DM-пиров (chat_key) из БД для данного устройства.
      */
-    public List<String> getDistinctDmPeers() {
+    public List<String> getDistinctDmPeers(String ownerNodeId) {
         List<String> peers = new ArrayList<>();
         if (dbConnection == null) { return peers; }
         try (PreparedStatement ps = dbConnection.prepareStatement(
-                "SELECT DISTINCT chat_key FROM messages WHERE chat_type = 'dm'")) {
+                "SELECT DISTINCT chat_key FROM messages WHERE owner_node_id = ? AND chat_type = 'dm'")) {
+            ps.setString(1, ownerNodeId != null ? ownerNodeId : "");
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
                     peers.add(rs.getString(1));
@@ -347,24 +357,24 @@ public final class MessageDbService {
     }
 
     /**
-     * Возвращает последнее сообщение для каждого chat_key данного типа.
+     * Возвращает последнее сообщение для каждого chat_key данного типа и устройства.
      * Ключ — chat_key, значение — последнее MeshMessage.
      */
-    public Map<String, MeshMessage> getLastMessagePerChat(String chatType) {
+    public Map<String, MeshMessage> getLastMessagePerChat(String chatType, String ownerNodeId) {
         Map<String, MeshMessage> result = new LinkedHashMap<>();
         if (dbConnection == null) { return result; }
-        // Подзапрос: максимальный id для каждого chat_key
         String sql = """
             SELECT m.* FROM messages m
             INNER JOIN (
                 SELECT chat_key, MAX(id) AS max_id
-                FROM messages WHERE chat_type = ?
+                FROM messages WHERE owner_node_id = ? AND chat_type = ?
                 GROUP BY chat_key
             ) sub ON m.id = sub.max_id
             ORDER BY m.timestamp DESC
             """;
         try (PreparedStatement ps = dbConnection.prepareStatement(sql)) {
-            ps.setString(1, chatType);
+            ps.setString(1, ownerNodeId != null ? ownerNodeId : "");
+            ps.setString(2, chatType);
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
                     MeshMessage msg = readMessage(rs);
@@ -378,14 +388,15 @@ public final class MessageDbService {
     }
 
     /**
-     * Возвращает количество сообщений в чате.
+     * Возвращает количество сообщений в чате для данного устройства.
      */
-    public int getMessageCount(String chatType, String chatKey) {
+    public int getMessageCount(String chatType, String chatKey, String ownerNodeId) {
         if (dbConnection == null) { return 0; }
         try (PreparedStatement ps = dbConnection.prepareStatement(
-                "SELECT COUNT(*) FROM messages WHERE chat_type = ? AND chat_key = ?")) {
-            ps.setString(1, chatType);
-            ps.setString(2, chatKey);
+                "SELECT COUNT(*) FROM messages WHERE owner_node_id = ? AND chat_type = ? AND chat_key = ?")) {
+            ps.setString(1, ownerNodeId != null ? ownerNodeId : "");
+            ps.setString(2, chatType);
+            ps.setString(3, chatKey);
             try (ResultSet rs = ps.executeQuery()) {
                 if (rs.next()) { return rs.getInt(1); }
             }
@@ -400,23 +411,26 @@ public final class MessageDbService {
     // ═══════════════════════════════════════════════════════════
 
     /**
-     * Удаляет все сообщения и счётчик прочитанных для указанного чата.
+     * Удаляет все сообщения и счётчик прочитанных для указанного чата и устройства.
      *
-     * @param chatType "channel" или "dm"
-     * @param chatKey  channelIndex (как строка) или peerNodeId
+     * @param chatType    "channel" или "dm"
+     * @param chatKey     channelIndex (как строка) или peerNodeId
+     * @param ownerNodeId nodeId устройства-владельца
      */
-    public synchronized void deleteChat(String chatType, String chatKey) {
+    public synchronized void deleteChat(String chatType, String chatKey, String ownerNodeId) {
         if (dbConnection == null) { return; }
         try (PreparedStatement ps1 = dbConnection.prepareStatement(
-                     "DELETE FROM messages WHERE chat_type = ? AND chat_key = ?");
+                     "DELETE FROM messages WHERE owner_node_id = ? AND chat_type = ? AND chat_key = ?");
              PreparedStatement ps2 = dbConnection.prepareStatement(
-                     "DELETE FROM chat_read_counts WHERE chat_type = ? AND chat_key = ?")) {
-            ps1.setString(1, chatType);
-            ps1.setString(2, chatKey);
+                     "DELETE FROM chat_read_counts WHERE owner_node_id = ? AND chat_type = ? AND chat_key = ?")) {
+            ps1.setString(1, ownerNodeId != null ? ownerNodeId : "");
+            ps1.setString(2, chatType);
+            ps1.setString(3, chatKey);
             ps1.executeUpdate();
 
-            ps2.setString(1, chatType);
-            ps2.setString(2, chatKey);
+            ps2.setString(1, ownerNodeId != null ? ownerNodeId : "");
+            ps2.setString(2, chatType);
+            ps2.setString(3, chatKey);
             ps2.executeUpdate();
         } catch (SQLException e) {
             log.error("Failed to delete chat ({}, {})", chatType, chatKey, e);
@@ -441,15 +455,16 @@ public final class MessageDbService {
     // ═══════════════════════════════════════════════════════════
 
     /**
-     * Сохранить количество прочитанных сообщений для чата.
+     * Сохранить количество прочитанных сообщений для чата и устройства.
      */
-    public void saveReadCount(String chatType, String chatKey, int readCount) {
+    public void saveReadCount(String chatType, String chatKey, int readCount, String ownerNodeId) {
         if (dbConnection == null) { return; }
         try (PreparedStatement ps = dbConnection.prepareStatement(
-                "MERGE INTO chat_read_counts (chat_type, chat_key, read_count) VALUES (?, ?, ?)")) {
-            ps.setString(1, chatType);
-            ps.setString(2, chatKey);
-            ps.setInt(3, readCount);
+                "MERGE INTO chat_read_counts (owner_node_id, chat_type, chat_key, read_count) VALUES (?, ?, ?, ?)")) {
+            ps.setString(1, ownerNodeId != null ? ownerNodeId : "");
+            ps.setString(2, chatType);
+            ps.setString(3, chatKey);
+            ps.setInt(4, readCount);
             ps.executeUpdate();
         } catch (SQLException e) {
             log.error("Failed to save read count ({}, {})", chatType, chatKey, e);
@@ -457,20 +472,23 @@ public final class MessageDbService {
     }
 
     /**
-     * Загрузить все счётчики прочитанных сообщений.
+     * Загрузить все счётчики прочитанных сообщений для данного устройства.
      * @return Map с ключами "ch:KEY" / "dm:KEY" → readCount
      */
-    public Map<String, Integer> loadAllReadCounts() {
+    public Map<String, Integer> loadAllReadCounts(String ownerNodeId) {
         Map<String, Integer> result = new HashMap<>();
         if (dbConnection == null) { return result; }
-        try (Statement stmt = dbConnection.createStatement();
-             ResultSet rs = stmt.executeQuery("SELECT chat_type, chat_key, read_count FROM chat_read_counts")) {
-            while (rs.next()) {
-                String type = rs.getString("chat_type");
-                String key = rs.getString("chat_key");
-                int count = rs.getInt("read_count");
-                String mapKey = ("channel".equals(type) ? "ch:" : "dm:") + key;
-                result.put(mapKey, count);
+        try (PreparedStatement ps = dbConnection.prepareStatement(
+                "SELECT chat_type, chat_key, read_count FROM chat_read_counts WHERE owner_node_id = ?")) {
+            ps.setString(1, ownerNodeId != null ? ownerNodeId : "");
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    String type = rs.getString("chat_type");
+                    String key = rs.getString("chat_key");
+                    int count = rs.getInt("read_count");
+                    String mapKey = ("channel".equals(type) ? "ch:" : "dm:") + key;
+                    result.put(mapKey, count);
+                }
             }
         } catch (SQLException e) {
             log.error("Failed to load read counts", e);
@@ -490,8 +508,8 @@ public final class MessageDbService {
         Path historyDir = Path.of(System.getProperty("user.home"), ".meshapp", "history");
         if (!Files.isDirectory(historyDir)) { return; }
 
-        // Проверяем, есть ли уже данные
-        if (getMessageCount("channel", "0") > 0 || !getDistinctDmPeers().isEmpty()) {
+        // Проверяем, есть ли уже данные (legacy check без ownerNodeId)
+        if (getMessageCount("channel", "0", "") > 0 || !getDistinctDmPeers("").isEmpty()) {
             log.info("Messages already exist in DB, skipping JSON migration");
             return;
         }
@@ -563,6 +581,9 @@ public final class MessageDbService {
                             insertStmt.setInt(15, msg.getHopLimit());
                             insertStmt.setString(16, msg.getSenderName());
                             insertStmt.setBoolean(17, msg.isSystemMessage());
+                            insertStmt.setInt(18, 0);
+                            insertStmt.setFloat(19, 0);
+                            insertStmt.setString(20, "");
                             insertStmt.addBatch();
                             total++;
 
