@@ -125,6 +125,8 @@ public class ConfigExchangeService implements FromRadioListener {
 
         if (nodeInfo.getHopsAway() != 0) { node.setHopsAway(nodeInfo.getHopsAway()); }
 
+        // Синхронизация избранного с устройства (без fire listeners — будет один раз в onConfigComplete)
+        FavoriteNodeService.getInstance().setFavoriteQuiet(node.getNodeId(), nodeInfo.getIsFavorite());
 
         if (nodeInfo.hasDeviceMetrics()) {
             TelemetryProtos.DeviceMetrics dm = nodeInfo.getDeviceMetrics();
@@ -188,6 +190,9 @@ public class ConfigExchangeService implements FromRadioListener {
             for (NodeData node : deviceState.getNodeDb().values()) {
                 ncs.enrichFromCache(node);
             }
+
+            // Уведомить UI об обновлённых избранных (один раз после всех нод)
+            FavoriteNodeService.getInstance().fireListeners();
 
             // Загрузить архив телеметрии из H2 + подчистить старые записи
             String ownerNodeId = String.format("!%08x", deviceState.getMyNodeNum());

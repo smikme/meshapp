@@ -11,6 +11,7 @@ import com.meshtastic.client.service.ConnectionManager;
 import com.meshtastic.client.service.MessageService;
 import com.meshtastic.client.service.NodeCacheService;
 import com.meshtastic.client.system.Form;
+import com.meshtastic.client.utils.AppPreferences;
 import com.meshtastic.client.utils.ProtobufTreeBuilder;
 import com.meshtastic.client.utils.SystemForm;
 import javafx.application.Platform;
@@ -24,6 +25,8 @@ import javafx.scene.control.CheckBox;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
+import javafx.scene.control.ScrollPane;
+import javafx.scene.control.Separator;
 import javafx.scene.control.Tab;
 import javafx.scene.control.TabPane;
 import javafx.scene.control.TableColumn;
@@ -68,6 +71,7 @@ public class FormSetting extends Form {
     private int cacheTotalInDb = 0;
 
     private Tab cacheTab;
+    private Tab appearanceTab;
 
     // Config tab
     private TreeTableView<ConfigTreeItem> configTree;
@@ -98,8 +102,9 @@ public class FormSetting extends Form {
 
         cacheTab = new Tab("Кэш", createCachePanel());
         configTab = new Tab("Конфигурация", createConfigPanel());
+        appearanceTab = new Tab("Оформление", createAppearancePanel());
 
-        tabPane.getTabs().addAll(configTab, cacheTab);
+        tabPane.getTabs().addAll(configTab, cacheTab, appearanceTab);
         tabPane.getSelectionModel().selectedItemProperty().addListener((obs, oldTab, newTab) -> {
             if (newTab == cacheTab) {
                 reloadCacheTable();
@@ -153,6 +158,32 @@ public class FormSetting extends Form {
         }
         return null;
     }
+
+    // ==================== Оформление ====================
+
+    private VBox createAppearancePanel() {
+        VBox panel = new VBox(12);
+        panel.setPadding(new Insets(15));
+
+        CheckBox nativeWindowCb = new CheckBox("Нативное управление окнами");
+        nativeWindowCb.setSelected(AppPreferences.isNativeWindow());
+        nativeWindowCb.selectedProperty().addListener((obs, old, val) ->
+                AppPreferences.setNativeWindow(val));
+
+        CheckBox disableTransparencyCb = new CheckBox("Отключить прозрачность");
+        disableTransparencyCb.setSelected(AppPreferences.isDisableTransparency());
+        disableTransparencyCb.selectedProperty().addListener((obs, old, val) ->
+                AppPreferences.setDisableTransparency(val));
+
+        Label restartNote = new Label("Изменения вступят в силу после перезапуска приложения");
+        restartNote.setStyle("-fx-opacity: 0.6; -fx-font-size: 11;");
+
+        panel.getChildren().addAll(nativeWindowCb, disableTransparencyCb,
+                new Separator(), restartNote);
+        return panel;
+    }
+
+    // ==================== Кэш ====================
 
     @SuppressWarnings("unchecked")
     private VBox createCachePanel() {

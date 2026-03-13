@@ -165,7 +165,7 @@ public class SerialConnection implements MeshtasticConnection {
         String errorMessage = null;
         Throwable errorCause = null;
 
-        byte[] buf = new byte[256];
+        byte[] buf = new byte[1024];
         try {
             SerialPort sp = serialPort;
             if (sp == null || !sp.isOpen()) {

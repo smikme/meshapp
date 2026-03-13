@@ -75,6 +75,15 @@ public interface BlePlatform {
      */
     AdapterState getAdapterState();
 
+    /**
+     * Устанавливает обработчик запроса passkey при BLE pairing.
+     * Вызывается когда устройство требует PIN-код для сопряжения.
+     * По умолчанию — noop (платформы без поддержки pairing не реагируют).
+     *
+     * @param handler callback с MAC-адресом устройства
+     */
+    default void setPasskeyRequestHandler(Consumer<String> handler) {}
+
     /** Освобождает все нативные ресурсы. */
     void dispose();
 }

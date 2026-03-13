@@ -12,6 +12,7 @@ import javafx.scene.control.Button;
 import javafx.scene.control.CheckBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.Separator;
+import javafx.scene.control.Slider;
 import javafx.scene.control.TextField;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
@@ -31,6 +32,14 @@ import java.util.List;
  * <p>Вызывается статическим методом {@link #show(DeviceState, ProtocolHandler, int, Runnable)}.
  */
 public final class ChannelPropertiesDialog {
+
+    private static final int[] PRECISION_BITS = {10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 32};
+    private static final String[] PRECISION_LABELS = {
+            "В пределах 23 км", "В пределах 12 км", "В пределах 5.8 км",
+            "В пределах 2.9 км", "В пределах 1.5 км", "В пределах 700 м",
+            "В пределах 350 м", "В пределах 200 м", "В пределах 90 м",
+            "В пределах 50 м", "Точная позиция"
+    };
 
     private ChannelPropertiesDialog() {}
 
@@ -118,8 +127,40 @@ public final class ChannelPropertiesDialog {
         downlinkCheck.setSelected(currentSettings.getDownlinkEnabled());
 
         CheckBox positionCheck = new CheckBox("Позиция");
-        positionCheck.setSelected(currentSettings.hasModuleSettings()
-                && currentSettings.getModuleSettings().getPositionPrecision() > 0);
+        int currentPrecisionVal = currentSettings.hasModuleSettings()
+                ? currentSettings.getModuleSettings().getPositionPrecision() : 0;
+        positionCheck.setSelected(currentPrecisionVal > 0);
+
+        // Слайдер точности позиции
+        int initIndex = 4; // default: 14 бит (~1.5 км)
+        if (currentPrecisionVal > 0) {
+            for (int i = 0; i < PRECISION_BITS.length; i++) {
+                if (PRECISION_BITS[i] >= currentPrecisionVal) {
+                    initIndex = i;
+                    break;
+                }
+            }
+        }
+
+        Label precisionLabel = new Label(PRECISION_LABELS[initIndex]);
+        precisionLabel.setStyle("-fx-opacity: 0.7;");
+
+        Slider precisionSlider = new Slider(0, PRECISION_BITS.length - 1, initIndex);
+        precisionSlider.setMajorTickUnit(1);
+        precisionSlider.setMinorTickCount(0);
+        precisionSlider.setSnapToTicks(true);
+        precisionSlider.setMaxWidth(280);
+        precisionSlider.valueProperty().addListener((obs, oldVal, newVal) ->
+                precisionLabel.setText(PRECISION_LABELS[newVal.intValue()]));
+
+        VBox precisionBox = new VBox(4, precisionSlider, precisionLabel);
+        precisionBox.setPadding(new Insets(0, 0, 0, 24));
+        precisionBox.setVisible(positionCheck.isSelected());
+        precisionBox.setManaged(positionCheck.isSelected());
+        positionCheck.selectedProperty().addListener((obs, oldVal, newVal) -> {
+            precisionBox.setVisible(newVal);
+            precisionBox.setManaged(newVal);
+        });
 
         // Статус
         Label statusLabel = new Label("");
@@ -138,7 +179,7 @@ public final class ChannelPropertiesDialog {
         btnRow.setPadding(new Insets(10, 0, 0, 0));
 
         panel.getChildren().addAll(title, sep, nameLabel, nameField, encLabel, pskRow,
-                uplinkCheck, downlinkCheck, positionCheck, statusLabel, btnRow);
+                uplinkCheck, downlinkCheck, positionCheck, precisionBox, statusLabel, btnRow);
 
         // === Обработка «Сохранить» ===
         saveBtn.setOnAction(e -> {
@@ -171,11 +212,10 @@ public final class ChannelPropertiesDialog {
                             .setDownlinkEnabled(downlinkCheck.isSelected());
 
             if (positionCheck.isSelected()) {
-                int currentPrecision = currentSettings.hasModuleSettings()
-                        ? currentSettings.getModuleSettings().getPositionPrecision() : 0;
+                int bits = PRECISION_BITS[(int) precisionSlider.getValue()];
                 settingsBuilder.setModuleSettings(
                         ChannelProtos.ModuleSettings.newBuilder()
-                                .setPositionPrecision(currentPrecision > 0 ? currentPrecision : 32)
+                                .setPositionPrecision(bits)
                                 .build());
             } else {
                 settingsBuilder.setModuleSettings(

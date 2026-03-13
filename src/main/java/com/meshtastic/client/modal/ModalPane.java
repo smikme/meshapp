@@ -14,7 +14,10 @@ import javafx.scene.control.Separator;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyEvent;
 import javafx.scene.input.MouseEvent;
+import javafx.scene.control.ScrollPane;
 import javafx.scene.layout.HBox;
+import javafx.scene.layout.Priority;
+import javafx.scene.layout.Region;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 import javafx.scene.text.Font;
@@ -22,6 +25,7 @@ import javafx.scene.text.FontWeight;
 import javafx.util.Duration;
 
 import com.meshtastic.client.MeshApp;
+import com.meshtastic.client.components.EmojiTextFlow;
 import com.meshtastic.client.model.UpdateInfo;
 
 import java.awt.Desktop;
@@ -270,9 +274,14 @@ public class ModalPane extends StackPane {
         btnRow.setPadding(new Insets(10, 0, 0, 0));
 
         if (info.getReleaseNotes() != null && !info.getReleaseNotes().isBlank()) {
-            Label lblNotes = new Label(info.getReleaseNotes());
-            lblNotes.setWrapText(true);
-            panel.getChildren().addAll(lblTitle, new Separator(), versionBox, lblNotes, btnRow);
+            EmojiTextFlow notesFlow = new EmojiTextFlow(info.getReleaseNotes(), 16);
+            notesFlow.setMinHeight(Region.USE_PREF_SIZE);
+            ScrollPane notesScroll = new ScrollPane(notesFlow);
+            notesScroll.setFitToWidth(true);
+            notesScroll.setMaxHeight(300);
+            notesScroll.getStyleClass().add("edge-to-edge");
+            VBox.setVgrow(notesScroll, Priority.ALWAYS);
+            panel.getChildren().addAll(lblTitle, new Separator(), versionBox, notesScroll, btnRow);
         } else {
             panel.getChildren().addAll(lblTitle, new Separator(), versionBox, btnRow);
         }

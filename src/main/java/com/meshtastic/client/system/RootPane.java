@@ -4,6 +4,7 @@ import com.meshtastic.client.MeshApp;
 import com.meshtastic.client.modal.ModalPane;
 import com.meshtastic.client.modal.Toast;
 import com.meshtastic.client.platform.OsDetect;
+import com.meshtastic.client.utils.AppPreferences;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.geometry.Rectangle2D;
@@ -74,31 +75,34 @@ public class RootPane extends BorderPane {
         toastOverlay = new StackPane();
         toastOverlay.setPickOnBounds(false);
 
-        // Title bar — на всю ширину окна, прозрачный (frosted glass просвечивает)
-        HBox titleBar = createTitleBar();
-
         StackPane centerStack = new StackPane(mainForm, modalPane, toastOverlay);
-        setTop(titleBar);
+
+        if (!AppPreferences.isNativeWindow()) {
+            // Кастомный title bar — на всю ширину окна, прозрачный (frosted glass просвечивает)
+            HBox titleBar = createTitleBar();
+            setTop(titleBar);
+
+            // Windows + StageStyle.TRANSPARENT: ОС пропускает mouse events сквозь
+            // полностью прозрачные пиксели (hit-test по альфа-каналу).
+            // Минимальный фон (alpha=1/255 ≈ 0.4%) невидим глазу, но делает
+            // все пиксели RootPane «непрозрачными» для Windows hit-test.
+            // На macOS это не нужно — NSVisualEffectView рисует backdrop под JavaFX.
+            if (OsDetect.isWindows()) {
+                setStyle("-fx-background-color: rgba(0,0,0,0.004);");
+            }
+
+            // На macOS ресайз обрабатывает нативный NSWindowStyleMaskResizable,
+            // кастомные хэндлеры нужны только для Windows/Linux
+            if (!OsDetect.isMacOs()) {
+                initResizeHandlers();
+            }
+        }
+
         setLeft(drawerPane);
         setCenter(centerStack);
 
         Toast.setOverlay(toastOverlay);
         ModalPane.install(modalPane);
-
-        // Windows + StageStyle.TRANSPARENT: ОС пропускает mouse events сквозь
-        // полностью прозрачные пиксели (hit-test по альфа-каналу).
-        // Минимальный фон (alpha=1/255 ≈ 0.4%) невидим глазу, но делает
-        // все пиксели RootPane «непрозрачными» для Windows hit-test.
-        // На macOS это не нужно — NSVisualEffectView рисует backdrop под JavaFX.
-        if (OsDetect.isWindows()) {
-            setStyle("-fx-background-color: rgba(0,0,0,0.004);");
-        }
-
-        // На macOS ресайз обрабатывает нативный NSWindowStyleMaskResizable,
-        // кастомные хэндлеры нужны только для Windows/Linux
-        if (!OsDetect.isMacOs()) {
-            initResizeHandlers();
-        }
     }
 
     /**

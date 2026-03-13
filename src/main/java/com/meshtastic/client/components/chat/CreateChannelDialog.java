@@ -12,6 +12,7 @@ import javafx.scene.control.Button;
 import javafx.scene.control.CheckBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.Separator;
+import javafx.scene.control.Slider;
 import javafx.scene.control.TextField;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
@@ -31,6 +32,14 @@ import java.util.concurrent.ThreadLocalRandom;
  * <p>Вызывается статическим методом {@link #show(DeviceState, ProtocolHandler, Runnable)}.
  */
 public final class CreateChannelDialog {
+
+    private static final int[] PRECISION_BITS = {10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 32};
+    private static final String[] PRECISION_LABELS = {
+            "В пределах 23 км", "В пределах 12 км", "В пределах 5.8 км",
+            "В пределах 2.9 км", "В пределах 1.5 км", "В пределах 700 м",
+            "В пределах 350 м", "В пределах 200 м", "В пределах 90 м",
+            "В пределах 50 м", "Точная позиция"
+    };
 
     private CreateChannelDialog() {}
 
@@ -107,6 +116,27 @@ public final class CreateChannelDialog {
         CheckBox downlinkCheck = new CheckBox("Downlink");
         CheckBox positionCheck = new CheckBox("Позиция");
 
+        // Слайдер точности позиции
+        Label precisionLabel = new Label(PRECISION_LABELS[4]);
+        precisionLabel.setStyle("-fx-opacity: 0.7;");
+
+        Slider precisionSlider = new Slider(0, PRECISION_BITS.length - 1, 4);
+        precisionSlider.setMajorTickUnit(1);
+        precisionSlider.setMinorTickCount(0);
+        precisionSlider.setSnapToTicks(true);
+        precisionSlider.setMaxWidth(280);
+        precisionSlider.valueProperty().addListener((obs, oldVal, newVal) ->
+                precisionLabel.setText(PRECISION_LABELS[newVal.intValue()]));
+
+        VBox precisionBox = new VBox(4, precisionSlider, precisionLabel);
+        precisionBox.setPadding(new Insets(0, 0, 0, 24));
+        precisionBox.setVisible(false);
+        precisionBox.setManaged(false);
+        positionCheck.selectedProperty().addListener((obs, oldVal, newVal) -> {
+            precisionBox.setVisible(newVal);
+            precisionBox.setManaged(newVal);
+        });
+
         // Статус
         Label statusLabel = new Label("");
         statusLabel.setStyle("-fx-opacity: 0.7;");
@@ -124,7 +154,7 @@ public final class CreateChannelDialog {
         btnRow.setPadding(new Insets(10, 0, 0, 0));
 
         panel.getChildren().addAll(title, sep, nameLabel, nameField, encLabel, pskRow,
-                uplinkCheck, downlinkCheck, positionCheck, statusLabel, btnRow);
+                uplinkCheck, downlinkCheck, positionCheck, precisionBox, statusLabel, btnRow);
 
         // === Обработка «Создать» ===
         createBtn.setOnAction(e -> {
@@ -162,9 +192,10 @@ public final class CreateChannelDialog {
                             .setDownlinkEnabled(downlinkCheck.isSelected());
 
             if (positionCheck.isSelected()) {
+                int bits = PRECISION_BITS[(int) precisionSlider.getValue()];
                 settingsBuilder.setModuleSettings(
                         ChannelProtos.ModuleSettings.newBuilder()
-                                .setPositionPrecision(32)
+                                .setPositionPrecision(bits)
                                 .build());
             }
 

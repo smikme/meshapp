@@ -451,6 +451,32 @@ public final class MessageService {
     }
 
     /**
+     * Отправляет AdminMessage.set_favorite_node на устройство.
+     */
+    public static void setFavoriteNode(ProtocolHandler handler, DeviceState state, int nodeNum) {
+        AdminProtos.AdminMessage.Builder adminBuilder = AdminProtos.AdminMessage.newBuilder()
+                .setSetFavoriteNode(nodeNum);
+        ByteString passkey = state.getSessionPasskey();
+        if (passkey != null) {
+            adminBuilder.setSessionPasskey(passkey);
+        }
+        sendAdminMessage(handler, state, adminBuilder.build());
+    }
+
+    /**
+     * Отправляет AdminMessage.remove_favorite_node на устройство.
+     */
+    public static void removeFavoriteNode(ProtocolHandler handler, DeviceState state, int nodeNum) {
+        AdminProtos.AdminMessage.Builder adminBuilder = AdminProtos.AdminMessage.newBuilder()
+                .setRemoveFavoriteNode(nodeNum);
+        ByteString passkey = state.getSessionPasskey();
+        if (passkey != null) {
+            adminBuilder.setSessionPasskey(passkey);
+        }
+        sendAdminMessage(handler, state, adminBuilder.build());
+    }
+
+    /**
      * Вспомогательный метод для отправки AdminMessage на локальное устройство.
      */
     private static void sendAdminMessage(ProtocolHandler handler, DeviceState state,
