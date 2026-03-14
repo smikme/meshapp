@@ -21,10 +21,14 @@ public class WindowsNotificationService implements NotificationService {
 
     private volatile TrayIcon trayIcon;
 
+    public WindowsNotificationService() {
+        initTrayIcon();
+    }
+
     @Override
     public void showNotification(String title, String message) {
         try {
-            TrayIcon icon = getOrCreateTrayIcon();
+            TrayIcon icon = trayIcon;
             if (icon != null) {
                 icon.displayMessage(
                         title != null ? title : "MeshApp",
@@ -36,26 +40,20 @@ public class WindowsNotificationService implements NotificationService {
         }
     }
 
-    private TrayIcon getOrCreateTrayIcon() {
-        if (trayIcon != null) { return trayIcon; }
-        synchronized (this) {
-            if (trayIcon != null) { return trayIcon; }
-            if (!SystemTray.isSupported()) {
-                log.warn("SystemTray not supported on this system");
-                return null;
-            }
-            try {
-                Image image = Toolkit.getDefaultToolkit().getImage(
-                        getClass().getResource("/logo/icon_32.png"));
-                trayIcon = new TrayIcon(image, "MeshApp");
-                trayIcon.setImageAutoSize(true);
-                SystemTray.getSystemTray().add(trayIcon);
-            } catch (AWTException e) {
-                log.error("Failed to add tray icon", e);
-                return null;
-            }
+    private void initTrayIcon() {
+        if (!SystemTray.isSupported()) {
+            log.warn("SystemTray not supported on this system");
+            return;
         }
-        return trayIcon;
+        try {
+            Image image = Toolkit.getDefaultToolkit().getImage(
+                    getClass().getResource("/logo/icon_32.png"));
+            trayIcon = new TrayIcon(image, "MeshApp");
+            trayIcon.setImageAutoSize(true);
+            SystemTray.getSystemTray().add(trayIcon);
+        } catch (AWTException e) {
+            log.error("Failed to add tray icon", e);
+        }
     }
 
     @Override

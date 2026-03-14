@@ -300,10 +300,10 @@ public class MacOsBle implements BlePlatform {
     }
 
     @Override
-    public void writeToRadio(byte[] protobufPayload) {
+    public boolean writeToRadio(byte[] protobufPayload) {
         if (!isConnected() || toRadioCharacteristic == 0) {
             log.warn("Cannot write: BLE not connected or toRadio characteristic missing");
-            return;
+            return false;
         }
         log.debug("[BLE] writeToRadio: {} bytes", protobufPayload.length);
         long nsData = nsData(protobufPayload);
@@ -312,6 +312,7 @@ public class MacOsBle implements BlePlatform {
 
         // Kickstart drain after write — не ждём poll cycle
         pollScheduler.schedule(this::triggerDrain, 200, TimeUnit.MILLISECONDS);
+        return true;
     }
 
     @Override
@@ -605,7 +606,6 @@ public class MacOsBle implements BlePlatform {
                     // Продолжаем чтение — chain drain (без guard, мы уже в drain)
                     me.drainFromRadio();
                 } else {
-                    log.debug("[BLE] fromRadio empty — drain complete");
                     me.drainInProgress.set(false);
                     CountDownLatch latch = me.drainLatch;
                     if (latch != null) { latch.countDown(); }
