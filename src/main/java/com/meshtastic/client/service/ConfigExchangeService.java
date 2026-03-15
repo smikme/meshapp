@@ -9,6 +9,8 @@ import com.meshtastic.client.protocol.ProtocolHandler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ThreadLocalRandom;
 
@@ -36,6 +38,7 @@ public class ConfigExchangeService implements FromRadioListener {
     private final DeviceState deviceState;
     private int sentConfigId;
     private CompletableFuture<DeviceState> future;
+    private final Map<String, Boolean> favoriteFlags = new HashMap<>();
 
     public ConfigExchangeService(ProtocolHandler protocolHandler, DeviceState deviceState) {
         this.protocolHandler = protocolHandler;
@@ -125,8 +128,10 @@ public class ConfigExchangeService implements FromRadioListener {
 
         if (nodeInfo.getHopsAway() != 0) { node.setHopsAway(nodeInfo.getHopsAway()); }
 
-        // Синхронизация избранного с устройства (без fire listeners — будет один раз в onConfigComplete)
-        FavoriteNodeService.getInstance().setFavoriteQuiet(node.getNodeId(), nodeInfo.getIsFavorite());
+        // Запомнить флаг избранного — применим после записи нод в БД (onConfigComplete)
+        if (node.getNodeId() != null) {
+            favoriteFlags.put(node.getNodeId(), nodeInfo.getIsFavorite());
+        }
 
         if (nodeInfo.hasDeviceMetrics()) {
             TelemetryProtos.DeviceMetrics dm = nodeInfo.getDeviceMetrics();
@@ -185,6 +190,11 @@ public class ConfigExchangeService implements FromRadioListener {
             deviceState.clearPendingFixedPosition();
             NodeCacheService ncs = NodeCacheService.getInstance();
             ncs.updateAll(deviceState.getNodeDb());
+
+            // Применить флаги избранного — теперь ноды есть в БД
+            for (Map.Entry<String, Boolean> e : favoriteFlags.entrySet()) {
+                ncs.setFavorite(e.getKey(), e.getValue());
+            }
 
             // Обогатить bare-ноды (только телеметрия) кэшированными именами из H2
             for (NodeData node : deviceState.getNodeDb().values()) {

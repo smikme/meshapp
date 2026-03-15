@@ -415,6 +415,73 @@ tasks.register('jpackage') {
 				logger.lifecycle("jpackage: Assets.car скопирован в бандл")
 			}
 
+			// Ad-hoc подпись (inside-out): после патча Info.plist и Assets.car
+			// подпись jpackage сломана — переподписываем каждый компонент отдельно.
+			// Без Developer ID пользователи увидят «неизвестный разработчик»
+			// и смогут открыть через правый клик → Открыть.
+			def entitlements = file('src/main/resources/macos/entitlements.plist')
+
+			def signFile = { File target, boolean withEntitlements ->
+				def signArgs = ['codesign', '--force', '--sign', '-', '--timestamp=none']
+				if (withEntitlements && entitlements.exists()) {
+					signArgs << '--entitlements'
+					signArgs << entitlements.absolutePath
+				}
+				signArgs << target.absolutePath
+				def p = new ProcessBuilder(signArgs).redirectErrorStream(true).start()
+				def out = p.inputStream.text
+				p.waitFor()
+				if (p.exitValue() != 0) {
+					throw new GradleException("codesign failed for ${target.name}: ${out}")
+				}
+			}
+
+			// 1. Подписать все dylib/jnilib в runtime (рекурсивно)
+			def runtimeLib = new File(appDir, 'Contents/runtime/Contents/Home/lib')
+			if (runtimeLib.exists()) {
+				runtimeLib.eachFileRecurse { f ->
+					if (f.name.endsWith('.dylib') || f.name.endsWith('.jnilib')) {
+						signFile(f, false)
+					}
+				}
+			}
+
+			// 2. Подписать libjli.dylib в runtime/Contents/MacOS
+			def runtimeMacOs = new File(appDir, 'Contents/runtime/Contents/MacOS')
+			if (runtimeMacOs.exists()) {
+				runtimeMacOs.listFiles()?.each { f ->
+					if (f.name.endsWith('.dylib')) {
+						signFile(f, false)
+					}
+				}
+			}
+
+			// 3. Подписать sub-bundle runtime
+			def runtimeBundle = new File(appDir, 'Contents/runtime')
+			if (runtimeBundle.exists()) {
+				signFile(runtimeBundle, false)
+			}
+
+			// 4. Подписать главный исполняемый файл (с entitlements для JIT)
+			def mainExe = new File(appDir, 'Contents/MacOS/MeshApp')
+			if (mainExe.exists()) {
+				signFile(mainExe, true)
+			}
+
+			// 5. Подписать .app бандл (с entitlements)
+			signFile(appDir, true)
+
+			// 6. Верификация
+			def verifyProc = new ProcessBuilder(
+				'codesign', '--verify', '--deep', '--strict', appDir.absolutePath
+			).redirectErrorStream(true).start()
+			def verifyOut = verifyProc.inputStream.text
+			verifyProc.waitFor()
+			if (verifyProc.exitValue() != 0) {
+				throw new GradleException("Signature verification failed: ${verifyOut}")
+			}
+			logger.lifecycle("jpackage: ad-hoc подпись применена и верифицирована")
+
 			// Собрать DMG
 			def dmgFile = new File(outputDir, "MeshApp-${appVersion}.dmg")
 			if (dmgFile.exists()) dmgFile.delete()

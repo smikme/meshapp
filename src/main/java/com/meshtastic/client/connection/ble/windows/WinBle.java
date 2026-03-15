@@ -55,6 +55,7 @@ public class WinBle implements BlePlatform {
             });
     private volatile ScheduledFuture<?> pollFuture;
     private volatile boolean drainInProgress;
+    private volatile int consecutiveWriteFailures;
 
     public WinBle() {
         try {
@@ -179,18 +180,26 @@ public class WinBle implements BlePlatform {
     // ==================== BlePlatform: Data ====================
 
     @Override
-    public void writeToRadio(byte[] protobufPayload) {
+    public boolean writeToRadio(byte[] protobufPayload) {
         if (!isConnected()) {
             log.warn("writeToRadio: не подключено");
-            return;
+            return false;
         }
         int result = lib.meshble_write_to_radio(protobufPayload, protobufPayload.length);
         if (result != 0) {
-            log.error("writeToRadio failed: error={}", result);
+            int failures = ++consecutiveWriteFailures;
+            if (failures == 5) {
+                log.warn("writeToRadio: {} consecutive failures. " +
+                        "Убедитесь, что устройство сопряжено в настройках Bluetooth Windows", failures);
+            } else if (failures <= 5) {
+                log.error("writeToRadio failed: error={}", result);
+            }
+            return false;
         } else {
+            consecutiveWriteFailures = 0;
             log.debug("Отправлено {} байт в toRadio", protobufPayload.length);
-            // Schedule extra drain after write (same pattern as MacOsBle)
             scheduleDrainAfterWrite();
+            return true;
         }
     }
 

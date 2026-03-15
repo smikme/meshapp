@@ -111,6 +111,8 @@ static BleState* g_ble = nullptr;
 static std::atomic<bool> g_initialized{false};
 static std::atomic<bool> g_connected{false};
 static std::atomic<bool> g_notifications_active{false};
+// Write option auto-detection: -1=unknown, 0=WriteWithResponse, 1=WriteWithoutResponse
+static std::atomic<int> g_write_option{-1};
 static meshble_device_cb g_device_callback = nullptr;
 static meshble_data_cb g_data_callback = nullptr;
 static meshble_state_cb g_state_callback = nullptr;
@@ -189,8 +191,18 @@ static IBuffer bytes_to_buffer(const unsigned char* data, int length) {
     return writer.DetachBuffer();
 }
 
+static const char* gatt_status_str(GattCommunicationStatus s) {
+    switch (s) {
+        case GattCommunicationStatus::Success:       return "Success";
+        case GattCommunicationStatus::Unreachable:   return "Unreachable";
+        case GattCommunicationStatus::ProtocolError:  return "ProtocolError";
+        case GattCommunicationStatus::AccessDenied:  return "AccessDenied";
+        default:                                     return "Unknown";
+    }
+}
+
 static GattCharacteristic find_characteristic(GattDeviceService const& service, guid const& uuid) {
-    auto result = service.GetCharacteristicsForUuidAsync(uuid).get();
+    auto result = service.GetCharacteristicsForUuidAsync(uuid, BluetoothCacheMode::Uncached).get();
     if (result.Status() == GattCommunicationStatus::Success) {
         auto chars = result.Characteristics();
         if (chars.Size() > 0) return chars.GetAt(0);
@@ -254,6 +266,7 @@ static void do_stop_scan() {
 static void do_disconnect() {
     g_connected = false;
     g_notifications_active = false;
+    g_write_option = -1;
     if (!g_ble) return;
 
     try {
@@ -422,7 +435,7 @@ MESHBLE_API int meshble_connect(const char* address, int timeout_ms) {
                 g_ble->connection_status_token = g_ble->device.ConnectionStatusChanged(on_connection_status_changed);
 
                 log_msg("[meshble] Discovering GATT services...");
-                auto svc_result = g_ble->device.GetGattServicesForUuidAsync(to_guid(SVC_UUID)).get();
+                auto svc_result = g_ble->device.GetGattServicesForUuidAsync(to_guid(SVC_UUID), BluetoothCacheMode::Uncached).get();
                 if (svc_result.Status() == GattCommunicationStatus::AccessDenied) { do_disconnect(); return -4; }
                 if (svc_result.Status() != GattCommunicationStatus::Success || svc_result.Services().Size() == 0) {
                     do_disconnect(); return -3;
@@ -489,9 +502,47 @@ MESHBLE_API int meshble_write_to_radio(const unsigned char* data, int length) {
             if (!g_connected || !g_ble || g_ble->to_radio == nullptr) return -1;
             try {
                 auto buf = bytes_to_buffer(copy.data(), (int)copy.size());
-                auto r = g_ble->to_radio.WriteValueAsync(buf, GattWriteOption::WriteWithResponse).get();
-                return (r == GattCommunicationStatus::Success) ? 0 : -1;
-            } catch (...) { return -1; }
+                int opt = g_write_option.load();
+
+                if (opt <= 0) {
+                    // Try WriteWithResponse first (or if already known to work)
+                    auto r = g_ble->to_radio.WriteValueAsync(buf, GattWriteOption::WriteWithResponse).get();
+                    if (r == GattCommunicationStatus::Success) {
+                        if (opt == -1) {
+                            g_write_option = 0;
+                            log_msg("[meshble] writeToRadio: WriteWithResponse works");
+                        }
+                        return 0;
+                    }
+                    if (opt == 0) {
+                        // Previously worked but now failed
+                        log_msg("[meshble] writeToRadio failed: %s", gatt_status_str(r));
+                        return -1;
+                    }
+                    // opt == -1: first attempt failed, try WriteWithoutResponse
+                    log_msg("[meshble] writeToRadio WriteWithResponse failed: %s, trying WriteWithoutResponse",
+                            gatt_status_str(r));
+                    buf = bytes_to_buffer(copy.data(), (int)copy.size());
+                }
+
+                // Try WriteWithoutResponse
+                auto r2 = g_ble->to_radio.WriteValueAsync(buf, GattWriteOption::WriteWithoutResponse).get();
+                if (r2 == GattCommunicationStatus::Success) {
+                    if (g_write_option.load() != 1) {
+                        g_write_option = 1;
+                        log_msg("[meshble] writeToRadio: WriteWithoutResponse works");
+                    }
+                    return 0;
+                }
+                log_msg("[meshble] writeToRadio WriteWithoutResponse failed: %s", gatt_status_str(r2));
+                return -1;
+            } catch (const hresult_error& e) {
+                log_msg("[meshble] writeToRadio exception: %ls", e.message().c_str());
+                return -1;
+            } catch (...) {
+                log_msg("[meshble] writeToRadio unknown exception");
+                return -1;
+            }
         });
     } catch (...) { return -1; }
 }

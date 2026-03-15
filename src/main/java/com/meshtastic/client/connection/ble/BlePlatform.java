@@ -52,8 +52,9 @@ public interface BlePlatform {
      * Данные передаются без serial-фрейминга (без заголовка 0x94 0xC3).
      *
      * @param protobufPayload сериализованный protobuf ToRadio
+     * @return true при успешной записи, false при ошибке
      */
-    void writeToRadio(byte[] protobufPayload);
+    boolean writeToRadio(byte[] protobufPayload);
 
     /**
      * Устанавливает слушателя входящих FromRadio protobuf.
