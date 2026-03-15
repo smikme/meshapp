@@ -133,8 +133,11 @@ public class BleConnection implements MeshtasticConnection {
         byte[] payload = new byte[data.length - BleConstants.SERIAL_FRAME_HEADER_SIZE];
         System.arraycopy(data, BleConstants.SERIAL_FRAME_HEADER_SIZE, payload, 0, payload.length);
 
-        platform.writeToRadio(payload);
-        log.debug("Sent {} bytes to BLE device {}", payload.length, address);
+        if (platform.writeToRadio(payload)) {
+            log.debug("Sent {} bytes to BLE device {}", payload.length, address);
+        } else {
+            log.warn("Failed to send {} bytes to BLE device {}", payload.length, address);
+        }
     }
 
     @Override

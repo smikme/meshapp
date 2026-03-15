@@ -195,18 +195,19 @@ public class LinuxBle implements BlePlatform {
     // ==================== BlePlatform: Data ====================
 
     @Override
-    public void writeToRadio(byte[] protobufPayload) {
+    public boolean writeToRadio(byte[] protobufPayload) {
         if (!isConnected()) {
             log.warn("writeToRadio: не подключено");
-            return;
+            return false;
         }
         int result = lib.meshble_write_to_radio(protobufPayload, protobufPayload.length);
         if (result != 0) {
             log.error("writeToRadio failed: error={}", result);
+            return false;
         } else {
             log.debug("Отправлено {} байт в toRadio", protobufPayload.length);
-            // Schedule extra drain after write (same pattern as WinBle/MacOsBle)
             scheduleDrainAfterWrite();
+            return true;
         }
     }
 

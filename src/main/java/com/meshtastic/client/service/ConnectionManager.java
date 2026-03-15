@@ -194,6 +194,7 @@ public final class ConnectionManager {
             entry.setNodeId(nodeId);
             save();
             log.info("Learned nodeId {} for connection '{}'", nodeId, entry.getName());
+            fireChanged();
         });
 
         entry.setConnected(true);
