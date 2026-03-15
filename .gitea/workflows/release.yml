@@ -8,16 +8,33 @@ jobs:
   create-release:
     runs-on: ubuntu
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: Create Gitea Release
         env:
           GITEA_TOKEN: ${{ secrets.RELEASE_TOKEN }}
         run: |
           TAG="${GITHUB_REF##refs/tags/}"
           API="${GITHUB_SERVER_URL}/api/v1/repos/${GITHUB_REPOSITORY}"
+
+          # Проверяем, указывает ли тег на коммит в main
+          MAIN_SHA=$(git rev-parse origin/main 2>/dev/null || echo "")
+          TAG_SHA=$(git rev-parse HEAD)
+
+          if [ "$MAIN_SHA" = "$TAG_SHA" ]; then
+            PRERELEASE=false
+            NAME="MeshApp ${TAG}"
+          else
+            PRERELEASE=true
+            NAME="MeshApp ${TAG} (unstable)"
+          fi
+
           curl -sf -X POST \
             -H "Authorization: token ${GITEA_TOKEN}" \
             -H "Content-Type: application/json" \
-            -d "{\"tag_name\":\"${TAG}\",\"name\":\"MeshApp ${TAG}\",\"body\":\"Release ${TAG}\",\"draft\":true}" \
+            -d "{\"tag_name\":\"${TAG}\",\"name\":\"${NAME}\",\"body\":\"Release ${TAG}\",\"draft\":true,\"prerelease\":${PRERELEASE}}" \
             "${API}/releases"
 
   build-linux:
