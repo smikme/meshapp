@@ -1,0 +1,145 @@
+name: Release
+on:
+  push:
+    tags: ['v*.*.*']
+  workflow_dispatch:
+
+jobs:
+  create-release:
+    runs-on: ubuntu
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create Gitea Release
+        env:
+          GITEA_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: |
+          TAG="${GITHUB_REF##refs/tags/}"
+          API="${GITHUB_SERVER_URL}/api/v1/repos/${GITHUB_REPOSITORY}"
+
+          # Проверяем, указывает ли тег на коммит в main
+          MAIN_SHA=$(git rev-parse origin/main 2>/dev/null || echo "")
+          TAG_SHA=$(git rev-parse HEAD)
+
+          if [ "$MAIN_SHA" = "$TAG_SHA" ]; then
+            PRERELEASE=false
+            NAME="MeshApp ${TAG}"
+          else
+            PRERELEASE=true
+            NAME="MeshApp ${TAG} (unstable)"
+          fi
+
+          curl -sf -X POST \
+            -H "Authorization: token ${GITEA_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "{\"tag_name\":\"${TAG}\",\"name\":\"${NAME}\",\"body\":\"Release ${TAG}\",\"draft\":true,\"prerelease\":${PRERELEASE}}" \
+            "${API}/releases"
+
+  build-linux:
+    needs: create-release
+    runs-on: ubuntu
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - run: ./gradlew jpackage --no-daemon
+
+      - name: Upload to Gitea Release
+        env:
+          GITEA_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: |
+          TAG="${GITHUB_REF##refs/tags/}"
+          API="${GITHUB_SERVER_URL}/api/v1/repos/${GITHUB_REPOSITORY}"
+          RELEASE_ID=$(curl -sf \
+            -H "Authorization: token ${GITEA_TOKEN}" \
+            "${API}/releases/tags/${TAG}" | jq -r '.id')
+          for file in build/jpackage/*.deb; do
+            [ -f "$file" ] || continue
+            echo "Uploading $(basename "$file")..."
+            curl -sf -X POST \
+              -H "Authorization: token ${GITEA_TOKEN}" \
+              -H "Content-Type: application/octet-stream" \
+              --data-binary "@${file}" \
+              "${API}/releases/${RELEASE_ID}/assets?name=$(basename "$file")"
+          done
+
+  build-windows:
+    needs: create-release
+    runs-on: windows
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - run: .\gradlew.bat jpackage --no-daemon
+
+      - name: Upload to Gitea Release
+        shell: bash
+        env:
+          GITEA_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: |
+          TAG="${GITHUB_REF##refs/tags/}"
+          API="${GITHUB_SERVER_URL}/api/v1/repos/${GITHUB_REPOSITORY}"
+          RELEASE_ID=$(curl -sf \
+            -H "Authorization: token ${GITEA_TOKEN}" \
+            "${API}/releases/tags/${TAG}" | jq -r '.id')
+          for file in build/jpackage/*.msi; do
+            [ -f "$file" ] || continue
+            echo "Uploading $(basename "$file")..."
+            curl -sf -X POST \
+              -H "Authorization: token ${GITEA_TOKEN}" \
+              -H "Content-Type: application/octet-stream" \
+              --data-binary "@${file}" \
+              "${API}/releases/${RELEASE_ID}/assets?name=$(basename "$file")"
+          done
+
+  build-macos:
+    needs: create-release
+    runs-on: macos
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - run: ./gradlew jpackage --no-daemon
+
+      - name: Upload to Gitea Release
+        env:
+          GITEA_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: |
+          TAG="${GITHUB_REF##refs/tags/}"
+          API="${GITHUB_SERVER_URL}/api/v1/repos/${GITHUB_REPOSITORY}"
+          RELEASE_ID=$(curl -sf \
+            -H "Authorization: token ${GITEA_TOKEN}" \
+            "${API}/releases/tags/${TAG}" | jq -r '.id')
+          for file in build/jpackage/*.dmg; do
+            [ -f "$file" ] || continue
+            echo "Uploading $(basename "$file")..."
+            curl -sf -X POST \
+              -H "Authorization: token ${GITEA_TOKEN}" \
+              -H "Content-Type: application/octet-stream" \
+              --data-binary "@${file}" \
+              "${API}/releases/${RELEASE_ID}/assets?name=$(basename "$file")"
+          done
+
+  publish-release:
+    needs: [build-linux, build-windows, build-macos]
+    runs-on: ubuntu
+    steps:
+      - name: Publish release (remove draft)
+        env:
+          GITEA_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: |
+          TAG="${GITHUB_REF##refs/tags/}"
+          API="${GITHUB_SERVER_URL}/api/v1/repos/${GITHUB_REPOSITORY}"
+          RELEASE_ID=$(curl -sf \
+            -H "Authorization: token ${GITEA_TOKEN}" \
+            "${API}/releases/tags/${TAG}" | jq -r '.id')
+          curl -sf -X PATCH \
+            -H "Authorization: token ${GITEA_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d '{"draft":false}' \
+            "${API}/releases/${RELEASE_ID}"
