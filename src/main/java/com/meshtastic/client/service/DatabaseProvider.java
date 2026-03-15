@@ -35,6 +35,11 @@ public final class DatabaseProvider {
             Files.createDirectories(dbDir);
             String dbPath = dbDir.resolve("nodedb").toString();
 
+            Path dbFile = dbDir.resolve("nodedb.mv.db");
+            boolean existed = Files.exists(dbFile);
+            long sizeBytes = existed ? Files.size(dbFile) : 0;
+            log.info("DB file {}: exists={}, size={} bytes", dbFile, existed, sizeBytes);
+
             connection = DriverManager.getConnection("jdbc:h2:" + dbPath + ";AUTO_SERVER=FALSE");
             log.info("Database connection established: {}", dbPath);
             DatabaseMigrator.migrate(connection);
