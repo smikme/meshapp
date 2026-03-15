@@ -31,10 +31,20 @@ jobs:
             NAME="MeshApp ${TAG} (unstable)"
           fi
 
+          # Release notes из коммитов с предыдущего тега
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          if [ -n "$PREV_TAG" ]; then
+            NOTES=$(git log --pretty=format:"- %s" "${PREV_TAG}..HEAD")
+          else
+            NOTES=$(git log --pretty=format:"- %s" -20)
+          fi
+          # Экранируем для JSON
+          NOTES_JSON=$(echo "$NOTES" | jq -sR .)
+
           curl -sf -X POST \
             -H "Authorization: token ${GITEA_TOKEN}" \
             -H "Content-Type: application/json" \
-            -d "{\"tag_name\":\"${TAG}\",\"name\":\"${NAME}\",\"body\":\"Release ${TAG}\",\"draft\":true,\"prerelease\":${PRERELEASE}}" \
+            -d "{\"tag_name\":\"${TAG}\",\"name\":\"${NAME}\",\"body\":${NOTES_JSON},\"draft\":true,\"prerelease\":${PRERELEASE}}" \
             "${API}/releases"
 
   build-linux:
