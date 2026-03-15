@@ -1,0 +1,78 @@
+name: Release
+on:
+  push:
+    tags: ['v*.*.*']
+
+jobs:
+  build-linux:
+    runs-on: ubuntu
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - run: ./gradlew jpackage --no-daemon
+
+      - uses: actions/upload-artifact@v3
+        with:
+          name: linux-deb
+          path: build/jpackage/*.deb
+
+  build-windows:
+    runs-on: windows
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - run: .\gradlew.bat jpackage --no-daemon
+
+      - uses: actions/upload-artifact@v3
+        with:
+          name: windows-msi
+          path: build/jpackage/*.msi
+
+  build-macos:
+    runs-on: macos
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - run: ./gradlew jpackage --no-daemon
+
+      - uses: actions/upload-artifact@v3
+        with:
+          name: macos-dmg
+          path: build/jpackage/*.dmg
+
+  release:
+    needs: [build-linux, build-windows, build-macos]
+    runs-on: ubuntu
+    steps:
+      - uses: actions/download-artifact@v3
+        with:
+          path: artifacts/
+
+      - name: Create Gitea Release and upload assets
+        env:
+          GITEA_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: |
+          TAG="${GITHUB_REF##refs/tags/}"
+          API="${GITHUB_SERVER_URL}/api/v1/repos/${GITHUB_REPOSITORY}"
+
+          RELEASE_ID=$(curl -sf -X POST \
+            -H "Authorization: token ${GITEA_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "{\"tag_name\":\"${TAG}\",\"name\":\"MeshApp ${TAG}\",\"body\":\"Release ${TAG}\"}" \
+            "${API}/releases" | jq -r '.id')
+
+          for file in artifacts/**/*.{deb,msi,dmg}; do
+            [ -f "$file" ] || continue
+            echo "Uploading $(basename "$file")..."
+            curl -sf -X POST \
+              -H "Authorization: token ${GITEA_TOKEN}" \
+              -H "Content-Type: application/octet-stream" \
+              --data-binary "@${file}" \
+              "${API}/releases/${RELEASE_ID}/assets?name=$(basename "$file")"
+          done
