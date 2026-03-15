@@ -4,6 +4,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.sql.*;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Централизованное версионирование и миграция схемы H2 БД.
@@ -33,7 +35,12 @@ public final class DatabaseMigrator {
     public static void migrate(Connection connection) {
         try {
             if (!schemaVersionTableExists(connection)) {
-                log.info("schema_version table not found — resetting database");
+                List<String> tables = listAllTables(connection);
+                if (tables.isEmpty()) {
+                    log.info("schema_version not found — database is empty (fresh install or incompatible H2 file)");
+                } else {
+                    log.info("schema_version not found — legacy database with tables: {}", tables);
+                }
                 dropAll(connection);
                 createSchemaVersionTable(connection);
                 setVersion(connection, CURRENT_VERSION);
@@ -43,7 +50,7 @@ public final class DatabaseMigrator {
 
             int version = getCurrentVersion(connection);
             if (version == CURRENT_VERSION) {
-                log.debug("Database schema is up to date (version {})", version);
+                log.info("Database schema is up to date (version {})", version);
                 return;
             }
 
@@ -127,6 +134,15 @@ public final class DatabaseMigrator {
             stmt.execute("ALTER TABLE nodes ADD COLUMN IF NOT EXISTS favorite BOOLEAN DEFAULT FALSE");
         }
         log.info("Migration v2: added 'favorite' column to nodes");
+    }
+
+    private static List<String> listAllTables(Connection connection) throws SQLException {
+        List<String> tables = new ArrayList<>();
+        try (ResultSet rs = connection.getMetaData()
+                .getTables(null, null, "%", new String[]{"TABLE"})) {
+            while (rs.next()) { tables.add(rs.getString("TABLE_NAME")); }
+        }
+        return tables;
     }
 
     private static void dropAll(Connection connection) throws SQLException {
