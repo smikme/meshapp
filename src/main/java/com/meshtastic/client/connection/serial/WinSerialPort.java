@@ -89,6 +89,7 @@ class WinSerialPort implements NativeSerialPort {
 
     private volatile Pointer handle;
     private volatile boolean open;
+    private volatile int readDiagCount;
 
     // Отдельные event-объекты для read и write — позволяют работать параллельно
     private Pointer readEvent;
@@ -207,8 +208,13 @@ class WinSerialPort implements NativeSerialPort {
         boolean ok = K32.INSTANCE.ReadFile(h, buf, len, bytesRead, ovl);
 
         if (ok) {
-            // Данные уже доступны
-            return bytesRead.getValue();
+            int n = bytesRead.getValue();
+            if (n > 0) log.debug("ReadFile immediate: {} bytes", n);
+            else if (readDiagCount < 5) {
+                readDiagCount++;
+                log.debug("ReadFile returned TRUE with 0 bytes (diag #{}/5)", readDiagCount);
+            }
+            return n;
         }
 
         int err = K32.INSTANCE.GetLastError();
@@ -217,13 +223,22 @@ class WinSerialPort implements NativeSerialPort {
             return -1;
         }
 
+        if (readDiagCount < 5) {
+            readDiagCount++;
+            log.debug("ReadFile IO_PENDING, waiting {}ms (diag #{}/5)", timeoutMs, readDiagCount);
+        }
+
         // Ждём завершения операции с таймаутом
         int waitResult = K32.INSTANCE.WaitForSingleObject(readEvent, timeoutMs);
         if (waitResult == WAIT_OBJECT_0) {
             // Операция завершена — получаем количество прочитанных байт
             if (K32.INSTANCE.GetOverlappedResult(h, ovl, bytesRead, false)) {
-                return bytesRead.getValue();
+                int n = bytesRead.getValue();
+                if (n > 0) log.debug("ReadFile overlapped: {} bytes", n);
+                return n;
             }
+            int gorErr = K32.INSTANCE.GetLastError();
+            log.debug("GetOverlappedResult failed: error {}", gorErr);
             return -1;
         }
 
@@ -232,9 +247,13 @@ class WinSerialPort implements NativeSerialPort {
             K32.INSTANCE.CancelIo(h);
             // Дождаться завершения отмены
             K32.INSTANCE.GetOverlappedResult(h, ovl, bytesRead, true);
+            if (readDiagCount <= 5) {
+                log.debug("Read timeout ({}ms), no data from device", timeoutMs);
+            }
             return 0;
         }
 
+        log.debug("WaitForSingleObject unexpected: 0x{}", Integer.toHexString(waitResult));
         return -1; // ошибка wait
     }
 
