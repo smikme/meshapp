@@ -278,21 +278,15 @@ public final class NodeCacheService {
         if (fresh == null) { return; }
         String nodeId = fresh.getNodeId();
         if (nodeId == null || nodeId.isEmpty()) { return; }
-        log.info("CACHE_DEBUG update: nodeId={}, fresh.hasName={}, fresh.longName='{}'",
-                nodeId, fresh.hasName(), fresh.getLongName());
         cache.compute(nodeId, (key, existing) -> {
             if (existing == null) {
                 existing = loadFromDb(nodeId);
-                log.info("CACHE_DEBUG compute: loadFromDb={}", existing != null);
             }
             if (existing == null) {
                 existing = new NodeData(fresh.getNodeNum());
                 existing.setNodeId(nodeId);
-                log.info("CACHE_DEBUG compute: created new NodeData");
             }
             merge(existing, fresh);
-            log.info("CACHE_DEBUG compute: after merge hasName={}, longName='{}'",
-                    existing.hasName(), existing.getLongName());
             return existing;
         });
         persistNode(nodeId);
@@ -927,15 +921,12 @@ public final class NodeCacheService {
      */
     private synchronized void persistNode(String nodeId) {
         NodeData node = cache.get(nodeId);
-        log.info("CACHE_DEBUG persistNode: nodeId={}, inCache={}, mergeStmt={}, hasName={}",
-                nodeId, node != null, mergeStmt != null, node != null && node.hasName());
         if (node == null || mergeStmt == null) { return; }
         try {
             bindNode(mergeStmt, node);
-            int rows = mergeStmt.executeUpdate();
-            log.info("CACHE_DEBUG persistNode: OK, rows={}", rows);
+            mergeStmt.executeUpdate();
         } catch (SQLException e) {
-            log.error("CACHE_DEBUG persistNode FAILED for {}", nodeId, e);
+            log.error("Failed to persist node {}", nodeId, e);
         }
     }
 
