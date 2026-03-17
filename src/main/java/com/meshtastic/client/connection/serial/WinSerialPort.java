@@ -69,9 +69,9 @@ class WinSerialPort implements NativeSerialPort {
         boolean GetCommState(Pointer hFile, Pointer lpDCB);
         boolean SetCommState(Pointer hFile, Pointer lpDCB);
         boolean SetCommTimeouts(Pointer hFile, Pointer lpCommTimeouts);
-        boolean ReadFile(Pointer hFile, byte[] lpBuffer, int nNumberOfBytesToRead,
+        boolean ReadFile(Pointer hFile, Pointer lpBuffer, int nNumberOfBytesToRead,
                          IntByReference lpNumberOfBytesRead, Pointer lpOverlapped);
-        boolean WriteFile(Pointer hFile, byte[] lpBuffer, int nNumberOfBytesToWrite,
+        boolean WriteFile(Pointer hFile, Pointer lpBuffer, int nNumberOfBytesToWrite,
                           IntByReference lpNumberOfBytesWritten, Pointer lpOverlapped);
         boolean GetOverlappedResult(Pointer hFile, Pointer lpOverlapped,
                                     IntByReference lpNumberOfBytesTransferred, boolean bWait);
@@ -89,7 +89,6 @@ class WinSerialPort implements NativeSerialPort {
 
     private volatile Pointer handle;
     private volatile boolean open;
-    private volatile int readDiagCount;
 
     // Отдельные event-объекты для read и write — позволяют работать параллельно
     private Pointer readEvent;
@@ -199,21 +198,23 @@ class WinSerialPort implements NativeSerialPort {
         Pointer h = handle;
         if (h == null || !open) return -1;
 
+        // Нативный буфер (Memory) живёт до конца метода — ReadFile пишет в него
+        // асинхронно, и данные будут на месте когда GetOverlappedResult вернёт управление.
+        // Нельзя передавать byte[] в overlapped ReadFile — JNA освободит временный
+        // нативный буфер до завершения I/O, и данные пропадут (все нули).
+        Memory nativeBuf = new Memory(len);
+
         Memory ovl = new Memory(OVERLAPPED_SIZE);
         ovl.clear();
         ovl.setPointer(OVERLAPPED_EVENT_OFFSET, readEvent);
         K32.INSTANCE.ResetEvent(readEvent);
 
         IntByReference bytesRead = new IntByReference(0);
-        boolean ok = K32.INSTANCE.ReadFile(h, buf, len, bytesRead, ovl);
+        boolean ok = K32.INSTANCE.ReadFile(h, nativeBuf, len, bytesRead, ovl);
 
         if (ok) {
             int n = bytesRead.getValue();
-            if (n > 0) log.debug("ReadFile immediate: {} bytes", n);
-            else if (readDiagCount < 5) {
-                readDiagCount++;
-                log.debug("ReadFile returned TRUE with 0 bytes (diag #{}/5)", readDiagCount);
-            }
+            if (n > 0) nativeBuf.read(0, buf, 0, n);
             return n;
         }
 
@@ -223,22 +224,15 @@ class WinSerialPort implements NativeSerialPort {
             return -1;
         }
 
-        if (readDiagCount < 5) {
-            readDiagCount++;
-            log.debug("ReadFile IO_PENDING, waiting {}ms (diag #{}/5)", timeoutMs, readDiagCount);
-        }
-
         // Ждём завершения операции с таймаутом
         int waitResult = K32.INSTANCE.WaitForSingleObject(readEvent, timeoutMs);
         if (waitResult == WAIT_OBJECT_0) {
             // Операция завершена — получаем количество прочитанных байт
             if (K32.INSTANCE.GetOverlappedResult(h, ovl, bytesRead, false)) {
                 int n = bytesRead.getValue();
-                if (n > 0) log.debug("ReadFile overlapped: {} bytes", n);
+                if (n > 0) nativeBuf.read(0, buf, 0, n);
                 return n;
             }
-            int gorErr = K32.INSTANCE.GetLastError();
-            log.debug("GetOverlappedResult failed: error {}", gorErr);
             return -1;
         }
 
@@ -247,9 +241,6 @@ class WinSerialPort implements NativeSerialPort {
             K32.INSTANCE.CancelIo(h);
             // Дождаться завершения отмены
             K32.INSTANCE.GetOverlappedResult(h, ovl, bytesRead, true);
-            if (readDiagCount <= 5) {
-                log.debug("Read timeout ({}ms), no data from device", timeoutMs);
-            }
             return 0;
         }
 
@@ -264,13 +255,10 @@ class WinSerialPort implements NativeSerialPort {
             throw new ConnectionException("Port is closed");
         }
 
-        byte[] toWrite;
-        if (offset == 0 && len == data.length) {
-            toWrite = data;
-        } else {
-            toWrite = new byte[len];
-            System.arraycopy(data, offset, toWrite, 0, len);
-        }
+        // Нативный буфер для overlapped WriteFile — аналогично read(),
+        // byte[] нельзя передавать в асинхронную операцию.
+        Memory nativeBuf = new Memory(len);
+        nativeBuf.write(0, data, offset, len);
 
         Memory ovl = new Memory(OVERLAPPED_SIZE);
         ovl.clear();
@@ -278,7 +266,7 @@ class WinSerialPort implements NativeSerialPort {
         K32.INSTANCE.ResetEvent(writeEvent);
 
         IntByReference bytesWritten = new IntByReference(0);
-        boolean ok = K32.INSTANCE.WriteFile(h, toWrite, len, bytesWritten, ovl);
+        boolean ok = K32.INSTANCE.WriteFile(h, nativeBuf, len, bytesWritten, ovl);
 
         if (!ok) {
             int err = K32.INSTANCE.GetLastError();
