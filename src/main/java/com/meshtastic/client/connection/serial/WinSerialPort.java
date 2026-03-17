@@ -176,14 +176,17 @@ class WinSerialPort implements NativeSerialPort {
     private void configureTimeouts() throws ConnectionException {
         Memory ct = new Memory(CT_SIZE);
         ct.clear();
-        // Для overlapped I/O: ReadFile возвращает немедленно (IO_PENDING),
-        // реальный таймаут контролируем через WaitForSingleObject.
-        // Но COMMTIMEOUTS всё равно нужны как fallback.
-        ct.setInt(0, 0xFFFFFFFF);  // ReadIntervalTimeout = MAXDWORD
-        ct.setInt(4, 0xFFFFFFFF);  // ReadTotalTimeoutMultiplier = MAXDWORD
-        ct.setInt(8, 500);         // ReadTotalTimeoutConstant = 500ms
-        ct.setInt(12, 0);          // WriteTotalTimeoutMultiplier
-        ct.setInt(16, 5000);       // WriteTotalTimeoutConstant = 5s
+        // Для overlapped I/O все таймауты = 0:
+        // ReadFile/WriteFile возвращают IO_PENDING, реальный таймаут
+        // контролируется через WaitForSingleObject на event-объектах.
+        // Если задать MAXDWORD/MAXDWORD/N — драйвер завершает операцию
+        // с 0 байтами немедленно при пустом буфере, event сигнализируется
+        // сразу, и WaitForSingleObject никогда не ждёт реальных данных.
+        ct.setInt(0, 0);   // ReadIntervalTimeout = 0
+        ct.setInt(4, 0);   // ReadTotalTimeoutMultiplier = 0
+        ct.setInt(8, 0);   // ReadTotalTimeoutConstant = 0
+        ct.setInt(12, 0);  // WriteTotalTimeoutMultiplier = 0
+        ct.setInt(16, 0);  // WriteTotalTimeoutConstant = 0
 
         if (!K32.INSTANCE.SetCommTimeouts(handle, ct)) {
             throw new ConnectionException("SetCommTimeouts failed (error " + K32.INSTANCE.GetLastError() + ")");
