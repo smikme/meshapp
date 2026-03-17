@@ -91,4 +91,31 @@ public class AppPreferences {
 
     // ==================== Recent Search ====================
 
+    // ==================== Nodes Sort & Filter ====================
+
+    public static final String KEY_NODES_SORT = "nodesSort";
+    public static final String KEY_NODES_FILTER_UNKNOWN = "nodesFilterUnknown";
+    public static final String KEY_NODES_FILTER_DETAILS = "nodesFilterDetails";
+    public static final String KEY_NODES_FILTER_HIDE_OFFLINE = "nodesFilterHideOffline";
+    public static final String KEY_NODES_FILTER_FAVORITES = "nodesFilterFavorites";
+    public static final String KEY_NODES_FILTER_DIRECT = "nodesFilterDirect";
+
+    public static String getNodesSort() { return state.get(KEY_NODES_SORT, "LAST_HEARD_NEW"); }
+    public static void setNodesSort(String sort) { state.put(KEY_NODES_SORT, sort); }
+
+    public static boolean isNodesFilterUnknown() { return state.getBoolean(KEY_NODES_FILTER_UNKNOWN, false); }
+    public static void setNodesFilterUnknown(boolean v) { state.putBoolean(KEY_NODES_FILTER_UNKNOWN, v); }
+
+    public static boolean isNodesFilterDetails() { return state.getBoolean(KEY_NODES_FILTER_DETAILS, false); }
+    public static void setNodesFilterDetails(boolean v) { state.putBoolean(KEY_NODES_FILTER_DETAILS, v); }
+
+    public static boolean isNodesFilterHideOffline() { return state.getBoolean(KEY_NODES_FILTER_HIDE_OFFLINE, false); }
+    public static void setNodesFilterHideOffline(boolean v) { state.putBoolean(KEY_NODES_FILTER_HIDE_OFFLINE, v); }
+
+    public static boolean isNodesFilterFavorites() { return state.getBoolean(KEY_NODES_FILTER_FAVORITES, false); }
+    public static void setNodesFilterFavorites(boolean v) { state.putBoolean(KEY_NODES_FILTER_FAVORITES, v); }
+
+    public static boolean isNodesFilterDirect() { return state.getBoolean(KEY_NODES_FILTER_DIRECT, false); }
+    public static void setNodesFilterDirect(boolean v) { state.putBoolean(KEY_NODES_FILTER_DIRECT, v); }
+
 }

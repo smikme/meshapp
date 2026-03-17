@@ -53,6 +53,15 @@ public class MessageListenerService implements FromRadioListener {
     public void onMeshPacket(MeshProtos.MeshPacket packet) {
         if (!packet.hasDecoded()) { return; }
 
+        // Track channel index per node from incoming packets
+        int fromNum = packet.getFrom();
+        if (fromNum != 0 && fromNum != deviceState.getMyNodeNum() && packet.getChannel() != 0) {
+            NodeData channelNode = deviceState.getNodeDb().get(fromNum);
+            if (channelNode != null) {
+                channelNode.setChannel(packet.getChannel());
+            }
+        }
+
         MeshProtos.Data data = packet.getDecoded();
 
         if (data.getPortnum() == Portnums.PortNum.TEXT_MESSAGE_APP) {

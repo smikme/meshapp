@@ -36,6 +36,7 @@ public class NodeData {
     private float relativeHumidity;
     private float barometricPressure;
     private int hopsAway;
+    private int channel;
     private String role;
     private String hwModel;
     private byte[] publicKey;
@@ -103,6 +104,9 @@ public class NodeData {
 
     public int getHopsAway() { return hopsAway; }
     public void setHopsAway(int hopsAway) { this.hopsAway = hopsAway; }
+
+    public int getChannel() { return channel; }
+    public void setChannel(int channel) { this.channel = channel; }
 
     public String getRole() { return role; }
     public void setRole(String role) { this.role = role; }

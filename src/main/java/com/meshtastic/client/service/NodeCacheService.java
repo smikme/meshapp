@@ -85,6 +85,7 @@ public final class NodeCacheService {
                         battery_level INT,
                         voltage       REAL,
                         hops_away     INT,
+                        channel       INT DEFAULT 0,
                         favorite      BOOLEAN DEFAULT FALSE
                     )
                     """);
@@ -131,6 +132,8 @@ public final class NodeCacheService {
                 // Migration: hop columns
                 try { stmt.execute("ALTER TABLE telemetry_history ADD COLUMN hop_start INT DEFAULT 0"); } catch (SQLException ignored) {}
                 try { stmt.execute("ALTER TABLE telemetry_history ADD COLUMN hop_limit INT DEFAULT 0"); } catch (SQLException ignored) {}
+                // Migration: channel column in nodes table
+                try { stmt.execute("ALTER TABLE nodes ADD COLUMN channel INT DEFAULT 0"); } catch (SQLException ignored) {}
 
                 stmt.execute("""
                     CREATE INDEX IF NOT EXISTS idx_telemetry_ts ON telemetry_history (ts)
@@ -144,8 +147,8 @@ public final class NodeCacheService {
             mergeStmt = dbConnection.prepareStatement("""
                 MERGE INTO nodes (node_id, node_num, long_name, short_name, role, hw_model,
                                   latitude, longitude, altitude, snr, last_heard,
-                                  battery_level, voltage, hops_away)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                  battery_level, voltage, hops_away, channel)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """);
 
             insertTelemetryStmt = dbConnection.prepareStatement("""
@@ -883,6 +886,8 @@ public final class NodeCacheService {
 
         if (src.getHopsAway() != 0) { dst.setHopsAway(src.getHopsAway()); }
 
+        if (src.getChannel() != 0) { dst.setChannel(src.getChannel()); }
+
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -979,6 +984,7 @@ public final class NodeCacheService {
         ps.setInt(12, n.getBatteryLevel());
         ps.setFloat(13, n.getVoltage());
         ps.setInt(14, n.getHopsAway());
+        ps.setInt(15, n.getChannel());
     }
 
     /**
@@ -1000,6 +1006,7 @@ public final class NodeCacheService {
         node.setBatteryLevel(rs.getInt("battery_level"));
         node.setVoltage(rs.getFloat("voltage"));
         node.setHopsAway(rs.getInt("hops_away"));
+        node.setChannel(rs.getInt("channel"));
         return node;
     }
 }
