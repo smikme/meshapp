@@ -24,6 +24,10 @@ public class SerialConnection implements MeshtasticConnection {
     private static final int READ_TIMEOUT_MS = 500;
     private static final int PORT_INIT_DELAY_MS = 500;
 
+    /** Задержка для USB-Serial мостов (CH340/CH341/CH9102 и т.п.), которые сбрасывают
+     *  ESP32 через DTR при открытии порта. ESP32 грузится ~2-3 сек после сброса. */
+    private static final int PORT_INIT_DELAY_USB_BRIDGE_MS = 3000;
+
     private final String portName;
     private final int baudRate;
 
@@ -67,9 +71,19 @@ public class SerialConnection implements MeshtasticConnection {
             serialPort.clearRTS();
 
             // Пауза для стабилизации устройства после открытия порта.
-            // macOS: без неё может вернуть ошибку при первом чтении из cu.usbmodem* портов.
-            // Windows/CH340: устройству нужно время для выхода из сброса после toggleDTR.
-            Thread.sleep(PORT_INIT_DELAY_MS);
+            // USB-Serial мосты (CH340, CH9102 и др.) сбрасывают ESP32 при активации DTR
+            // в момент openPort(). ESP32 требуется ~2-3 сек на загрузку после сброса.
+            // Для нативных USB CDC (cu.usbmodem*) достаточно короткой паузы.
+            String desc = serialPort.getDescriptivePortName().toUpperCase();
+            boolean isUsbBridge = desc.contains("CH340") || desc.contains("CH341")
+                    || desc.contains("CH9102") || desc.contains("CP210")
+                    || desc.contains("FTDI") || desc.contains("PL2303");
+            int initDelay = isUsbBridge ? PORT_INIT_DELAY_USB_BRIDGE_MS : PORT_INIT_DELAY_MS;
+            if (isUsbBridge) {
+                log.info("USB-Serial bridge detected ({}), waiting {}ms for device boot",
+                        serialPort.getDescriptivePortName(), initDelay);
+            }
+            Thread.sleep(initDelay);
 
             // Сбросить входной буфер — отбросить мусорные байты от предыдущей сессии
             if (serialPort.bytesAvailable() > 0) {

@@ -12,7 +12,12 @@ import org.slf4j.LoggerFactory;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Сервис обмена конфигурацией с Meshtastic-устройством.
@@ -34,11 +39,24 @@ public class ConfigExchangeService implements FromRadioListener {
 
     private static final Logger log = LoggerFactory.getLogger(ConfigExchangeService.class);
 
+    /** Интервал повтора want_config_id если устройство не ответило (мс).
+     *  Покрывает случай когда USB-Serial мост (CH340) сбросил устройство при openPort(),
+     *  и первый want_config_id был отправлен до завершения загрузки ESP32. */
+    private static final int RETRY_INTERVAL_MS = 3000;
+    private static final int MAX_RETRIES = 3;
+
     private final ProtocolHandler protocolHandler;
     private final DeviceState deviceState;
     private int sentConfigId;
     private CompletableFuture<DeviceState> future;
     private final Map<String, Boolean> favoriteFlags = new HashMap<>();
+    private final AtomicBoolean receivedAny = new AtomicBoolean(false);
+    private volatile ScheduledFuture<?> retryFuture;
+    private final ScheduledExecutorService retryScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+        Thread t = new Thread(r, "config-retry");
+        t.setDaemon(true);
+        return t;
+    });
 
     public ConfigExchangeService(ProtocolHandler protocolHandler, DeviceState deviceState) {
         this.protocolHandler = protocolHandler;
@@ -63,16 +81,49 @@ public class ConfigExchangeService implements FromRadioListener {
 
         protocolHandler.addListener(this);
 
-        MeshProtos.ToRadio toRadio = MeshProtos.ToRadio.newBuilder()
-                .setWantConfigId(sentConfigId)
-                .build();
-        protocolHandler.sendToRadio(toRadio);
+        sendWantConfig();
+        scheduleRetry(1);
 
         return future;
     }
 
+    private void sendWantConfig() {
+        MeshProtos.ToRadio toRadio = MeshProtos.ToRadio.newBuilder()
+                .setWantConfigId(sentConfigId)
+                .build();
+        protocolHandler.sendToRadio(toRadio);
+    }
+
+    /**
+     * Планирует повторную отправку want_config_id, если устройство не ответило.
+     * Покрывает случай, когда USB-Serial мост (CH340/CH9102) сбросил ESP32 при
+     * открытии порта и первый want_config_id был потерян во время загрузки.
+     */
+    private void scheduleRetry(int attempt) {
+        if (attempt > MAX_RETRIES) return;
+        retryFuture = retryScheduler.schedule(() -> {
+            if (!receivedAny.get() && !future.isDone()) {
+                log.info("No response from device, retrying want_config_id (attempt {}/{})", attempt, MAX_RETRIES);
+                deviceState.clear();
+                sentConfigId = ThreadLocalRandom.current().nextInt(1, Integer.MAX_VALUE);
+                sendWantConfig();
+                scheduleRetry(attempt + 1);
+            }
+        }, RETRY_INTERVAL_MS, TimeUnit.MILLISECONDS);
+    }
+
+    private void cancelRetry() {
+        ScheduledFuture<?> f = retryFuture;
+        if (f != null) {
+            f.cancel(false);
+            retryFuture = null;
+        }
+        retryScheduler.shutdownNow();
+    }
+
     @Override
     public void onMyNodeInfo(MeshProtos.MyNodeInfo myInfo) {
+        receivedAny.set(true);
         deviceState.setMyNodeNum(myInfo.getMyNodeNum());
         log.info("My node number: {}", myInfo.getMyNodeNum());
     }
@@ -186,6 +237,7 @@ public class ConfigExchangeService implements FromRadioListener {
                     deviceState.getNodeCount(),
                     deviceState.getChannels().size(),
                     deviceState.getConfigs().size());
+            cancelRetry();
             protocolHandler.removeListener(this);
             deviceState.clearPendingFixedPosition();
             NodeCacheService ncs = NodeCacheService.getInstance();
