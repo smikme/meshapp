@@ -63,25 +63,27 @@ public class SerialConnection implements MeshtasticConnection {
             serialPort.setFlowControl(SerialPort.FLOW_CONTROL_DISABLED);
             serialPort.setComPortTimeouts(SerialPort.TIMEOUT_READ_SEMI_BLOCKING, READ_TIMEOUT_MS, 0);
 
-            // Сбросить DTR/RTS — на чипах CH340 линии DTR/RTS подключены к цепи сброса
-            // микроконтроллера (ESP32 EN/RST), и их активация при openPort() вызывает
-            // перезагрузку устройства. Meshtastic не использует аппаратный flow control,
-            // поэтому DTR/RTS не нужны для передачи данных.
-            serialPort.clearDTR();
-            serialPort.clearRTS();
-
-            // Пауза для стабилизации устройства после открытия порта.
-            // USB-Serial мосты (CH340, CH9102 и др.) сбрасывают ESP32 при активации DTR
-            // в момент openPort(). ESP32 требуется ~2-3 сек на загрузку после сброса.
-            // Для нативных USB CDC (cu.usbmodem*) достаточно короткой паузы.
+            // Определяем тип USB-адаптера по описанию порта.
+            // USB-Serial мосты (CH340, CH9102 и др.) активируют DTR при openPort(),
+            // что сбрасывает ESP32 через цепь EN/RST. Для них нужно:
+            //   1) Сбросить DTR/RTS чтобы снять удержание сброса
+            //   2) Подождать ~3 сек пока ESP32 загрузится после ресета
+            // Нативный USB CDC (Heltec V4, T-Beam S3 и др.) НЕ сбрасывает устройство,
+            // но использует DTR как сигнал "хост подключён" — clearDTR() нарушит связь.
             String desc = serialPort.getDescriptivePortName().toUpperCase();
             boolean isUsbBridge = desc.contains("CH340") || desc.contains("CH341")
                     || desc.contains("CH9102") || desc.contains("CP210")
                     || desc.contains("FTDI") || desc.contains("PL2303");
-            int initDelay = isUsbBridge ? PORT_INIT_DELAY_USB_BRIDGE_MS : PORT_INIT_DELAY_MS;
+
+            int initDelay;
             if (isUsbBridge) {
-                log.info("USB-Serial bridge detected ({}), waiting {}ms for device boot",
+                serialPort.clearDTR();
+                serialPort.clearRTS();
+                initDelay = PORT_INIT_DELAY_USB_BRIDGE_MS;
+                log.info("USB-Serial bridge detected ({}), cleared DTR/RTS, waiting {}ms for device boot",
                         serialPort.getDescriptivePortName(), initDelay);
+            } else {
+                initDelay = PORT_INIT_DELAY_MS;
             }
             Thread.sleep(initDelay);
 
