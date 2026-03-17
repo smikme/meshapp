@@ -3,7 +3,7 @@ package com.meshtastic.client.connection.serial;
 import com.meshtastic.client.connection.ConnectionException;
 import com.meshtastic.client.platform.OsDetect;
 import com.sun.jna.*;
-import com.sun.jna.ptr.IntByReference;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -58,11 +58,24 @@ class PosixSerialPort implements NativeSerialPort {
     private static final long ISIG_LINUX = 0x00000001L;
     private static final long IEXTEN_LINUX = 0x00008000L;
 
-    // c_iflag bits
+    // c_iflag bits (macOS)
     private static final long IXON_MAC = 0x00000200L;
     private static final long IXOFF_MAC = 0x00000400L;
+    private static final long BRKINT_MAC = 0x00000002L;
+    private static final long ICRNL_MAC = 0x00000100L;
+    private static final long INLCR_MAC = 0x00000040L;
+    private static final long PARMRK_MAC = 0x00000008L;
+    private static final long INPCK_MAC = 0x00000010L;
+    private static final long ISTRIP_MAC = 0x00000020L;
+    // c_iflag bits (Linux)
     private static final long IXON_LINUX = 0x00000400L;
     private static final long IXOFF_LINUX = 0x00001000L;
+    private static final long BRKINT_LINUX = 0x00000002L;
+    private static final long ICRNL_LINUX = 0x00000100L;
+    private static final long INLCR_LINUX = 0x00000040L;
+    private static final long PARMRK_LINUX = 0x00000008L;
+    private static final long INPCK_LINUX = 0x00000010L;
+    private static final long ISTRIP_LINUX = 0x00000020L;
 
     // c_oflag bits
     private static final long OPOST_MAC = 0x00000001L;
@@ -75,9 +88,14 @@ class PosixSerialPort implements NativeSerialPort {
     // poll
     private static final short POLLIN = 0x0001;
 
-    // ioctl: установить modem control bits (TIOCMBIS = set specified bits)
-    private static final long TIOCMBIS_MAC = 0x8004746CL;   // IOW('t', 108, int)
+    // ioctl: modem control
+    private static final long TIOCMBIS_MAC = 0x8004746CL;   // IOW('t', 108, int) — set specified bits
     private static final long TIOCMBIS_LINUX = 0x5416L;
+    private static final long TIOCMGET_MAC = 0x4004746AL;   // IOR('t', 106, int) — get all bits
+    private static final long TIOCMGET_LINUX = 0x5415L;
+    // TIOCSDTR/TIOCCDTR не используем — _IO ioctls без аргумента
+    // крашат JVM на ARM64 при вызове через JNA variadic ioctl()
+    private static final int TIOCM_DTR = 0x0002;
     private static final int TIOCM_RTS = 0x0004;
 
     // --- Termios layout ---
@@ -122,7 +140,7 @@ class PosixSerialPort implements NativeSerialPort {
         int tcflush(int fd, int queue_selector);
         int fcntl(int fd, int cmd, int arg);
         int poll(Pointer fds, int nfds, int timeout);
-        int ioctl(int fd, long request, IntByReference arg);
+        int ioctl(int fd, long request, Pointer arg);
         String strerror(int errnum);
     }
 
@@ -135,7 +153,7 @@ class PosixSerialPort implements NativeSerialPort {
     private volatile boolean open;
 
     @Override
-    public void open(String portName, int baudRate) throws ConnectionException {
+    public void open(String portName, int baudRate, boolean assertDtr) throws ConnectionException {
         // Дополняем путь /dev/ если нужно
         String path = portName.startsWith("/dev/") ? portName : "/dev/" + portName;
         boolean isMac = OsDetect.isMacOs();
@@ -152,14 +170,32 @@ class PosixSerialPort implements NativeSerialPort {
         try {
             configureTermios(baudRate, isMac);
 
-            // Явно активировать RTS (но не DTR) — на CH340 это держит Q1 OFF → EN HIGH.
-            // Без этого CLOCAL не активирует modem-сигналы, RTS остаётся HIGH → Q1 ON → EN LOW → сброс.
-            long tiocmbis = isMac ? TIOCMBIS_MAC : TIOCMBIS_LINUX;
-            IntByReference modemBits = new IntByReference(TIOCM_RTS);
-            CLib.INSTANCE.ioctl(fd, tiocmbis, modemBits);
-
-            // Убираем O_NONBLOCK — теперь блокирующий read (таймаут через poll)
+            // Убираем O_NONBLOCK перед установкой modem lines
             CLib.INSTANCE.fcntl(fd, F_SETFL, 0);
+
+            // RTS всегда активируем (на CH340 держит Q1 OFF → EN HIGH).
+            // DTR активируем только для native USB CDC (сигнал "хост подключён").
+            int modemFlags = TIOCM_RTS;
+            if (assertDtr) modemFlags |= TIOCM_DTR;
+            Memory modemBits = new Memory(4);
+            modemBits.setInt(0, modemFlags);
+            long tiocmbis = isMac ? TIOCMBIS_MAC : TIOCMBIS_LINUX;
+            int r = CLib.INSTANCE.ioctl(fd, tiocmbis, modemBits);
+            if (r != 0) log.warn("ioctl TIOCMBIS failed: errno={}", errno());
+
+            // Верификация
+            long tiocmget = isMac ? TIOCMGET_MAC : TIOCMGET_LINUX;
+            Memory actualBits = new Memory(4);
+            actualBits.setInt(0, 0);
+            if (CLib.INSTANCE.ioctl(fd, tiocmget, actualBits) == 0) {
+                int bits = actualBits.getInt(0);
+                log.debug("Modem lines after setup: DTR={}, RTS={}, raw=0x{}",
+                        (bits & TIOCM_DTR) != 0 ? "ON" : "OFF",
+                        (bits & TIOCM_RTS) != 0 ? "ON" : "OFF",
+                        Integer.toHexString(bits));
+            } else {
+                log.debug("TIOCMGET failed: errno={}", errno());
+            }
         } catch (Exception e) {
             CLib.INSTANCE.close(fd);
             fd = -1;
@@ -167,7 +203,8 @@ class PosixSerialPort implements NativeSerialPort {
         }
 
         open = true;
-        log.debug("PosixSerialPort opened {} at {} baud (DTR=off, RTS=asserted)", portName, baudRate);
+        log.debug("PosixSerialPort opened {} at {} baud (DTR={}, RTS=asserted)",
+                portName, baudRate, assertDtr ? "on" : "off");
     }
 
     private void configureTermios(int baudRate, boolean isMac) throws ConnectionException {
@@ -196,9 +233,9 @@ class PosixSerialPort implements NativeSerialPort {
     }
 
     private void configureMac(Memory t) {
-        // c_iflag: отключить software flow control
+        // c_iflag: raw input (как jSerialComm)
         long iflag = t.getLong(OFF_IFLAG_MAC);
-        iflag &= ~(IXON_MAC | IXOFF_MAC);
+        iflag &= ~(IXON_MAC | IXOFF_MAC | BRKINT_MAC | ICRNL_MAC | INLCR_MAC | PARMRK_MAC | INPCK_MAC | ISTRIP_MAC);
         t.setLong(OFF_IFLAG_MAC, iflag);
 
         // c_oflag: raw output
@@ -206,10 +243,10 @@ class PosixSerialPort implements NativeSerialPort {
         oflag &= ~OPOST_MAC;
         t.setLong(OFF_OFLAG_MAC, oflag);
 
-        // c_cflag: 8N1, CLOCAL, CREAD, без HUPCL (не дёргать DTR при close)
+        // c_cflag: 8N1, CLOCAL, CREAD, HUPCL (как jSerialComm)
         long cflag = t.getLong(OFF_CFLAG_MAC);
-        cflag &= ~(CSIZE | PARENB | CSTOPB | HUPCL);
-        cflag |= CS8 | CLOCAL | CREAD;
+        cflag &= ~(CSIZE | PARENB | CSTOPB);
+        cflag |= CS8 | CLOCAL | CREAD | HUPCL;
         t.setLong(OFF_CFLAG_MAC, cflag);
 
         // c_lflag: raw mode
@@ -223,9 +260,11 @@ class PosixSerialPort implements NativeSerialPort {
     }
 
     private void configureLinux(Memory t) {
-        // c_iflag
+        // c_iflag: raw input (как jSerialComm)
         int iflag = t.getInt(OFF_IFLAG_LINUX);
-        iflag &= ~((int) IXON_LINUX | (int) IXOFF_LINUX);
+        iflag &= ~((int) IXON_LINUX | (int) IXOFF_LINUX | (int) BRKINT_LINUX
+                | (int) ICRNL_LINUX | (int) INLCR_LINUX | (int) PARMRK_LINUX
+                | (int) INPCK_LINUX | (int) ISTRIP_LINUX);
         t.setInt(OFF_IFLAG_LINUX, iflag);
 
         // c_oflag
@@ -233,10 +272,10 @@ class PosixSerialPort implements NativeSerialPort {
         oflag &= ~(int) OPOST_LINUX;
         t.setInt(OFF_OFLAG_LINUX, oflag);
 
-        // c_cflag: 8N1, CLOCAL, CREAD, без HUPCL
+        // c_cflag: 8N1, CLOCAL, CREAD, HUPCL (как jSerialComm)
         int cflag = t.getInt(OFF_CFLAG_LINUX);
-        cflag &= ~((int) CSIZE_LINUX | (int) PARENB_LINUX | (int) CSTOPB_LINUX | (int) HUPCL_LINUX);
-        cflag |= (int) CS8_LINUX | (int) CLOCAL_LINUX | (int) CREAD_LINUX;
+        cflag &= ~((int) CSIZE_LINUX | (int) PARENB_LINUX | (int) CSTOPB_LINUX);
+        cflag |= (int) CS8_LINUX | (int) CLOCAL_LINUX | (int) CREAD_LINUX | (int) HUPCL_LINUX;
         t.setInt(OFF_CFLAG_LINUX, cflag);
 
         // c_lflag

@@ -18,12 +18,19 @@ import com.meshtastic.client.connection.ConnectionException;
 public interface NativeSerialPort {
 
     /**
-     * Открывает порт с заданной скоростью (8N1, без flow control, DTR не активируется).
+     * Открывает порт с заданной скоростью (8N1, без flow control).
+     * <p>
+     * RTS всегда активируется (LOW). DTR активируется только если {@code assertDtr=true}.
+     * <ul>
+     *   <li>Native USB CDC (ESP32-S3/S2): {@code assertDtr=true} — DTR = сигнал "хост подключён"</li>
+     *   <li>USB-serial bridge (CH340/CP210x): {@code assertDtr=false} — DTR вызывает сброс ESP32</li>
+     * </ul>
      *
-     * @param portName системное имя порта ("COM3", "cu.usbserial-1234", "ttyUSB0")
-     * @param baudRate скорость (напр. 115200)
+     * @param portName  системное имя порта ("COM3", "cu.usbserial-1234", "ttyUSB0")
+     * @param baudRate  скорость (напр. 115200)
+     * @param assertDtr true = активировать DTR (native USB CDC), false = не трогать (USB bridge)
      */
-    void open(String portName, int baudRate) throws ConnectionException;
+    void open(String portName, int baudRate, boolean assertDtr) throws ConnectionException;
 
     /**
      * Чтение с таймаутом.

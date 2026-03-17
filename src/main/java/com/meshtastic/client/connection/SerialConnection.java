@@ -51,18 +51,19 @@ public class SerialConnection implements MeshtasticConnection {
             String desc = getDescriptivePortName(portName);
             log.info("Opening serial port: {} ({})", portName, desc);
 
+            // USB-serial bridge (CH340/CP210x/FTDI): DTR нельзя → вызывает сброс ESP32
+            // Native USB CDC (ESP32-S3/S2): DTR нужен → сигнал "хост подключён"
+            boolean isUsbBridge = isUsbSerialBridge(portName, desc);
+            boolean assertDtr = !isUsbBridge;
+
             NativeSerialPort port = NativeSerialPortFactory.create();
-            port.open(portName, baudRate);
+            port.open(portName, baudRate, assertDtr);
             this.nativePort = port;
 
-            // Пауза для стабилизации устройства после открытия порта.
-            // Нативные USB CDC (Heltec V4, T-Beam S3): достаточно 500мс.
-            // DTR не активируется при открытии → устройство не сбрасывается.
             Thread.sleep(PORT_INIT_DELAY_MS);
-
-            // Сбросить входной буфер — отбросить мусорные байты от предыдущей сессии
             port.drainInput();
-            log.info("Connected to serial port {} at {} baud (native JNA, DTR not asserted)", portName, baudRate);
+            log.info("Connected to serial port {} at {} baud (native JNA, DTR={})",
+                    portName, baudRate, assertDtr ? "on" : "off");
 
             running = true;
             readerThread = new Thread(this::readLoop, "serial-reader-" + portName);
@@ -227,6 +228,18 @@ public class SerialConnection implements MeshtasticConnection {
             log.debug("Failed to get descriptive name for {}", systemName, e);
         }
         return systemName;
+    }
+
+    /**
+     * Определяет USB-serial мост по имени порта и описанию.
+     * Мосты (CH340/CP210x/FTDI): DTR вызывает сброс ESP32 через auto-reset circuit.
+     * Native USB CDC (usbmodem/ttyACM): DTR = сигнал "хост подключён".
+     */
+    private static boolean isUsbSerialBridge(String portName, String desc) {
+        String lower = (portName + " " + desc).toLowerCase(java.util.Locale.ROOT);
+        return lower.contains("usbserial") || lower.contains("ttyusb")
+                || lower.contains("ch340") || lower.contains("ch341") || lower.contains("ch9102")
+                || lower.contains("cp210") || lower.contains("ftdi");
     }
 
     private void closePort() {

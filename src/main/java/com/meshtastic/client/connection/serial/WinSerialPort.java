@@ -40,6 +40,7 @@ class WinSerialPort implements NativeSerialPort {
 
     // DCB fFlags bitfield (DWORD at offset 8)
     private static final int FBINARY_BIT = 0x0001;         // bit 0
+    private static final int DTR_CONTROL_ENABLE = 0x0010;   // bits 4-5 = 01
     private static final int RTS_CONTROL_ENABLE = 0x1000;   // bits 12-13 = 01
 
     // DCB layout
@@ -94,8 +95,11 @@ class WinSerialPort implements NativeSerialPort {
     private Pointer readEvent;
     private Pointer writeEvent;
 
+    private boolean assertDtr;
+
     @Override
-    public void open(String portName, int baudRate) throws ConnectionException {
+    public void open(String portName, int baudRate, boolean assertDtr) throws ConnectionException {
+        this.assertDtr = assertDtr;
         String path = portName.startsWith("\\\\.\\") ? portName : "\\\\.\\" + portName;
 
         // FILE_FLAG_OVERLAPPED — критично для параллельного read/write.
@@ -124,8 +128,8 @@ class WinSerialPort implements NativeSerialPort {
         }
 
         open = true;
-        log.debug("WinSerialPort opened {} at {} baud (DTR=disabled, RTS=enabled, overlapped)",
-                portName, baudRate);
+        log.debug("WinSerialPort opened {} at {} baud (DTR={}, RTS=enabled, overlapped)",
+                portName, baudRate, assertDtr ? "enabled" : "disabled");
     }
 
     private Pointer createEvent() throws ConnectionException {
@@ -154,13 +158,10 @@ class WinSerialPort implements NativeSerialPort {
         // Критично: драйвер CH340 может оставить fAbortOnError=1 по умолчанию,
         // что блокирует ВСЁ I/O после любой ошибки на порту.
         //
-        // DTR=DISABLE: не активируем DTR → нет импульса сброса ESP32 через cap
-        // RTS=ENABLE: активируем RTS (LOW) → Q1 OFF → EN не удерживается в LOW
+        // RTS=ENABLE: всегда (на CH340 держит Q1 OFF → EN HIGH)
+        // DTR: ENABLE для native USB CDC (сигнал "хост подключён"), DISABLE для мостов (сброс ESP32)
         int flags = FBINARY_BIT | RTS_CONTROL_ENABLE;
-        // Все остальные биты = 0:
-        //   fParity=0, fOutxCtsFlow=0, fOutxDsrFlow=0, fDtrControl=00(DISABLE),
-        //   fDsrSensitivity=0, fTXContinueOnXoff=0, fOutX=0, fInX=0,
-        //   fErrorChar=0, fNull=0, fAbortOnError=0
+        if (assertDtr) flags |= DTR_CONTROL_ENABLE;
         dcb.setInt(DCB_OFF_FLAGS, flags);
 
         dcb.setShort(DCB_OFF_XONLIM, (short) 2048);
