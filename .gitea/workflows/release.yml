@@ -80,7 +80,8 @@ jobs:
     needs: create-release
     runs-on: windows
     steps:
-      - run: |
+      - shell: bash
+        run: |
           git clone "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git" .
           git checkout "${GITHUB_SHA}"
 
