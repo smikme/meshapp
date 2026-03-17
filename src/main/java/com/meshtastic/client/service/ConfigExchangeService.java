@@ -43,7 +43,7 @@ public class ConfigExchangeService implements FromRadioListener {
      *  Покрывает случай когда USB-Serial мост (CH340) сбросил устройство при openPort(),
      *  и первый want_config_id был отправлен до завершения загрузки ESP32. */
     private static final int RETRY_INTERVAL_MS = 3000;
-    private static final int MAX_RETRIES = 3;
+    private static final int MAX_RETRIES = 5;
 
     private final ProtocolHandler protocolHandler;
     private final DeviceState deviceState;

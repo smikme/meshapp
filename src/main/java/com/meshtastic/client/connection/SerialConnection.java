@@ -77,10 +77,17 @@ public class SerialConnection implements MeshtasticConnection {
 
             int initDelay;
             if (isUsbBridge) {
-                serialPort.clearDTR();
-                serialPort.clearRTS();
+                // Порядок критичен! На схеме автосброса CH340 → ESP32:
+                //   DTR → EN (reset), RTS → GPIO0 (boot mode select)
+                // openPort() активировал оба → EN LOW (сброс), GPIO0 LOW (download mode).
+                // Если отпустить EN (clearDTR) раньше GPIO0 (clearRTS), ESP32 стартует
+                // с GPIO0=LOW и входит в download mode (~10 сек таймаут перед нормальным бутом).
+                // Правильно: сначала GPIO0 → HIGH (normal boot), затем EN → HIGH (старт).
+                serialPort.clearRTS();   // GPIO0 → HIGH (normal boot mode)
+                Thread.sleep(50);        // стабилизация сигнала
+                serialPort.clearDTR();   // EN → HIGH (устройство стартует с GPIO0=HIGH)
                 initDelay = PORT_INIT_DELAY_USB_BRIDGE_MS;
-                log.info("USB-Serial bridge detected ({}), cleared DTR/RTS, waiting {}ms for device boot",
+                log.info("USB-Serial bridge detected ({}), cleared RTS→DTR, waiting {}ms for device boot",
                         serialPort.getDescriptivePortName(), initDelay);
             } else {
                 initDelay = PORT_INIT_DELAY_MS;
