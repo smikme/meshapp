@@ -73,6 +73,11 @@ public class FrameParser {
                     state = State.WAIT_START1;
                     byte[] result = payloadBuffer;
                     payloadBuffer = null;
+                    if (!isValidProtobufTag(result[0])) {
+                        log.debug("Discarding false frame ({} bytes): invalid protobuf tag 0x{}",
+                                result.length, String.format("%02X", result[0] & 0xFF));
+                        return null;
+                    }
                     return result;
                 }
                 return null;
@@ -81,6 +86,18 @@ public class FrameParser {
                 state = State.WAIT_START1;
                 return null;
         }
+    }
+
+    /**
+     * Проверяет что первый байт payload — валидный protobuf field tag.
+     * Wire type (биты 0-2) должен быть 0-5, field number (биты 3+) должен быть > 0.
+     * Отсеивает ложные фреймы от debug-вывода устройства на том же UART.
+     */
+    private static boolean isValidProtobufTag(byte firstByte) {
+        int tag = firstByte & 0xFF;
+        int wireType = tag & 0x07;
+        int fieldNumber = tag >>> 3;
+        return wireType <= 5 && fieldNumber > 0;
     }
 
     /**

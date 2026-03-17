@@ -150,7 +150,6 @@ public class SerialConnection implements MeshtasticConnection {
 
         String errorMessage = null;
         Throwable errorCause = null;
-        int rawDumpCount = 0; // диагностика: дамп первых чтений
 
         byte[] buf = new byte[1024];
         try {
@@ -178,17 +177,6 @@ public class SerialConnection implements MeshtasticConnection {
                         break;
                     }
                     continue;
-                }
-                // Диагностика: дамп первых 3 чтений с данными
-                if (rawDumpCount < 3) {
-                    rawDumpCount++;
-                    StringBuilder sb = new StringBuilder();
-                    int dumpLen = Math.min(bytesRead, 32);
-                    for (int i = 0; i < dumpLen; i++) {
-                        sb.append(String.format("%02X ", buf[i] & 0xFF));
-                    }
-                    if (bytesRead > 32) sb.append("...");
-                    log.info("RAW serial #{}: {} bytes: {}", rawDumpCount, bytesRead, sb.toString().trim());
                 }
                 for (int i = 0; i < bytesRead; i++) {
                     byte[] packet = parser.processByte(buf[i]);

@@ -76,7 +76,7 @@ class FrameParserTest {
 
     @Test
     void testParseValidMultiBytePayload() {
-        byte[] payload = {0x01, 0x02, 0x03, 0x04, 0x05};
+        byte[] payload = {0x08, 0x02, 0x03, 0x04, 0x05}; // 0x08 = field 1, varint
         byte[] frame = buildFrame(payload);
 
         byte[] result = feedBytes(frame);
@@ -88,7 +88,8 @@ class FrameParserTest {
     @Test
     void testParseMaxSizePayload() {
         byte[] payload = new byte[FrameParser.MAX_PACKET_SIZE]; // 512
-        for (int i = 0; i < payload.length; i++) {
+        payload[0] = 0x08; // valid protobuf tag: field 1, varint
+        for (int i = 1; i < payload.length; i++) {
             payload[i] = (byte) (i & 0xFF);
         }
         byte[] frame = buildFrame(payload);
@@ -167,7 +168,7 @@ class FrameParserTest {
     @Test
     void testGarbageBytesBeforeValidFrame() {
         byte[] garbage = {0x01, (byte) 0xFF, 0x00, 0x55, 0x7F};
-        byte[] payload = {0x0E, 0x0F};
+        byte[] payload = {0x0A, 0x0F}; // 0x0A = field 1, length-delimited
         byte[] data = concat(garbage, buildFrame(payload));
 
         byte[] result = feedBytes(data);
@@ -197,13 +198,38 @@ class FrameParserTest {
     @Test
     void testStartByteInPayloadDoesNotConfuse() {
         // Payload содержит последовательность start bytes [0x94, 0xC3]
-        byte[] payload = {0x01, FrameParser.START_BYTE_1, FrameParser.START_BYTE_2, 0x02};
+        byte[] payload = {0x08, FrameParser.START_BYTE_1, FrameParser.START_BYTE_2, 0x02};
         byte[] frame = buildFrame(payload);
 
         byte[] result = feedBytes(frame);
 
         assertNotNull(result);
         assertArrayEquals(payload, result, "Start bytes inside payload should not confuse parser");
+    }
+
+    @Test
+    void testDiscardFrameWithInvalidProtobufTag() {
+        // Первый байт 0x00 — невалидный protobuf tag (fieldNumber=0)
+        byte[] badPayload = {0x00, 0x01, 0x02};
+        byte[] badFrame = buildFrame(badPayload);
+        byte[] result = feedBytes(badFrame);
+        assertNull(result, "Frame with invalid protobuf tag should be discarded");
+
+        // Парсер должен восстановиться
+        byte[] goodPayload = {0x08, 0x01}; // field 1, varint
+        byte[] goodFrame = buildFrame(goodPayload);
+        result = feedBytes(goodFrame);
+        assertNotNull(result, "Parser should recover after discarding invalid frame");
+        assertArrayEquals(goodPayload, result);
+    }
+
+    @Test
+    void testDiscardFrameWithInvalidWireType() {
+        // Первый байт 0x0E — wireType=6 (невалидный, допустимо 0-5)
+        byte[] badPayload = {0x0E, 0x01};
+        byte[] badFrame = buildFrame(badPayload);
+        byte[] result = feedBytes(badFrame);
+        assertNull(result, "Frame with invalid wire type should be discarded");
     }
 
     @Test
