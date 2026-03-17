@@ -8,9 +8,9 @@ jobs:
   create-release:
     runs-on: ubuntu
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+      - run: |
+          git clone --depth=0 "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git" .
+          git checkout "${GITHUB_SHA}"
 
       - name: Create Gitea Release
         env:
@@ -51,9 +51,9 @@ jobs:
     needs: create-release
     runs-on: ubuntu
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+      - run: |
+          git clone --depth=0 "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git" .
+          git checkout "${GITHUB_SHA}"
 
       - run: ./gradlew jpackage --no-daemon
 
@@ -80,9 +80,9 @@ jobs:
     needs: create-release
     runs-on: windows
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+      - run: |
+          git clone --depth=0 "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git" .
+          git checkout "${GITHUB_SHA}"
 
       - run: .\gradlew.bat jpackage --no-daemon
 
@@ -110,9 +110,9 @@ jobs:
     needs: create-release
     runs-on: macos
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+      - run: |
+          git clone --depth=0 "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git" .
+          git checkout "${GITHUB_SHA}"
 
       - run: ./gradlew jpackage --no-daemon
 
