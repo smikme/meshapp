@@ -59,12 +59,17 @@ public class SerialConnection implements MeshtasticConnection {
             serialPort.setFlowControl(SerialPort.FLOW_CONTROL_DISABLED);
             serialPort.setComPortTimeouts(SerialPort.TIMEOUT_READ_SEMI_BLOCKING, READ_TIMEOUT_MS, 0);
 
-            // Пауза для стабилизации USB CDC ACM устройства после открытия порта.
-            // Без неё macOS может вернуть ошибку при первом чтении из cu.usbmodem* портов.
-            // На Windows задержка не нужна — драйверы инициализируются синхронно при openPort().
-            if (OsDetect.isMacOs()) {
-                Thread.sleep(PORT_INIT_DELAY_MS);
-            }
+            // Сбросить DTR/RTS — на чипах CH340 линии DTR/RTS подключены к цепи сброса
+            // микроконтроллера (ESP32 EN/RST), и их активация при openPort() вызывает
+            // перезагрузку устройства. Meshtastic не использует аппаратный flow control,
+            // поэтому DTR/RTS не нужны для передачи данных.
+            serialPort.clearDTR();
+            serialPort.clearRTS();
+
+            // Пауза для стабилизации устройства после открытия порта.
+            // macOS: без неё может вернуть ошибку при первом чтении из cu.usbmodem* портов.
+            // Windows/CH340: устройству нужно время для выхода из сброса после toggleDTR.
+            Thread.sleep(PORT_INIT_DELAY_MS);
 
             // Сбросить входной буфер — отбросить мусорные байты от предыдущей сессии
             if (serialPort.bytesAvailable() > 0) {
