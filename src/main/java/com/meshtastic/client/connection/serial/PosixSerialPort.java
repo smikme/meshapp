@@ -3,6 +3,7 @@ package com.meshtastic.client.connection.serial;
 import com.meshtastic.client.connection.ConnectionException;
 import com.meshtastic.client.platform.OsDetect;
 import com.sun.jna.*;
+import com.sun.jna.ptr.IntByReference;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -74,6 +75,11 @@ class PosixSerialPort implements NativeSerialPort {
     // poll
     private static final short POLLIN = 0x0001;
 
+    // ioctl: установить modem control bits (TIOCMBIS = set specified bits)
+    private static final long TIOCMBIS_MAC = 0x8004746CL;   // IOW('t', 108, int)
+    private static final long TIOCMBIS_LINUX = 0x5416L;
+    private static final int TIOCM_RTS = 0x0004;
+
     // --- Termios layout ---
     // macOS (64-bit): c_iflag(8) + c_oflag(8) + c_cflag(8) + c_lflag(8) + c_cc(20) + c_ispeed(8) + c_ospeed(8) = 68
     // Linux (64-bit): c_iflag(4) + c_oflag(4) + c_cflag(4) + c_lflag(4) + c_line(1) + c_cc(32) + padding(3) + c_ispeed(4) + c_ospeed(4) = 60
@@ -116,6 +122,7 @@ class PosixSerialPort implements NativeSerialPort {
         int tcflush(int fd, int queue_selector);
         int fcntl(int fd, int cmd, int arg);
         int poll(Pointer fds, int nfds, int timeout);
+        int ioctl(int fd, long request, IntByReference arg);
         String strerror(int errnum);
     }
 
@@ -144,6 +151,13 @@ class PosixSerialPort implements NativeSerialPort {
 
         try {
             configureTermios(baudRate, isMac);
+
+            // Явно активировать RTS (но не DTR) — на CH340 это держит Q1 OFF → EN HIGH.
+            // Без этого CLOCAL не активирует modem-сигналы, RTS остаётся HIGH → Q1 ON → EN LOW → сброс.
+            long tiocmbis = isMac ? TIOCMBIS_MAC : TIOCMBIS_LINUX;
+            IntByReference modemBits = new IntByReference(TIOCM_RTS);
+            CLib.INSTANCE.ioctl(fd, tiocmbis, modemBits);
+
             // Убираем O_NONBLOCK — теперь блокирующий read (таймаут через poll)
             CLib.INSTANCE.fcntl(fd, F_SETFL, 0);
         } catch (Exception e) {
@@ -153,7 +167,7 @@ class PosixSerialPort implements NativeSerialPort {
         }
 
         open = true;
-        log.debug("PosixSerialPort opened {} at {} baud (DTR not asserted)", portName, baudRate);
+        log.debug("PosixSerialPort opened {} at {} baud (DTR=off, RTS=asserted)", portName, baudRate);
     }
 
     private void configureTermios(int baudRate, boolean isMac) throws ConnectionException {

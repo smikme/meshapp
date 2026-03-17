@@ -104,7 +104,7 @@ class WinSerialPort implements NativeSerialPort {
         }
 
         open = true;
-        log.debug("WinSerialPort opened {} at {} baud (DTR disabled)", portName, baudRate);
+        log.debug("WinSerialPort opened {} at {} baud (DTR=disabled, RTS=enabled)", portName, baudRate);
     }
 
     private void configureDcb(int baudRate) throws ConnectionException {
@@ -121,14 +121,22 @@ class WinSerialPort implements NativeSerialPort {
         dcb.setByte(DCB_OFF_PARITY, (byte) 0);   // NOPARITY
         dcb.setByte(DCB_OFF_STOPBITS, (byte) 0);  // ONESTOPBIT
 
-        // Модифицируем fFlags: DTR_CONTROL_DISABLE, RTS_CONTROL_DISABLE,
-        // отключаем аппаратный flow control, включаем binary mode
+        // Модифицируем fFlags: DTR_CONTROL_DISABLE, RTS_CONTROL_ENABLE,
+        // отключаем аппаратный flow control, включаем binary mode.
+        //
+        // На схеме автосброса CH340 → ESP32:
+        //   RTS asserted (LOW) → Q1 OFF → EN свободен (HIGH через pullup) → работает
+        //   RTS not asserted (HIGH) → Q1 ON → EN LOW → устройство в сбросе!
+        //   DTR disabled (HIGH) → Q2 ON → GPIO0 LOW — не влияет на работу (только при ресете)
+        //   DTR enabled (LOW) → переход float→LOW даёт импульс сброса через cap → ресет!
+        //
+        // Итого: DTR=DISABLE (нет импульса сброса), RTS=ENABLE (EN не удерживается в LOW).
         int flags = dcb.getInt(DCB_OFF_FLAGS);
-        flags |= FBINARY_BIT;                     // fBinary = 1
-        flags &= ~DTR_CONTROL_MASK;               // fDtrControl = 00 (DTR_CONTROL_DISABLE)
-        flags &= ~RTS_CONTROL_MASK;               // fRtsControl = 00 (RTS_CONTROL_DISABLE)
-        flags &= ~FOUTXCTSFLOW_BIT;               // fOutxCtsFlow = 0
-        flags &= ~FOUTXDSRFLOW_BIT;               // fOutxDsrFlow = 0
+        flags |= FBINARY_BIT;                            // fBinary = 1
+        flags &= ~DTR_CONTROL_MASK;                      // fDtrControl = 00 (DTR_CONTROL_DISABLE)
+        flags = (flags & ~RTS_CONTROL_MASK) | 0x1000;    // fRtsControl = 01 (RTS_CONTROL_ENABLE)
+        flags &= ~FOUTXCTSFLOW_BIT;                      // fOutxCtsFlow = 0
+        flags &= ~FOUTXDSRFLOW_BIT;                      // fOutxDsrFlow = 0
         dcb.setInt(DCB_OFF_FLAGS, flags);
 
         if (!K32.INSTANCE.SetCommState(handle, dcb)) {
