@@ -9,9 +9,13 @@ import org.slf4j.LoggerFactory;
 /**
  * Windows-реализация serial-порта через kernel32.dll (JNA).
  * <p>
- * Открывает COM-порт через {@code CreateFileW} и настраивает DCB с
- * {@code fDtrControl = DTR_CONTROL_DISABLE} — DTR не активируется,
- * ESP32 на CH340/CP210x не сбрасывается.
+ * Открывает COM-порт через {@code CreateFileW} с {@code FILE_FLAG_OVERLAPPED}
+ * для параллельного чтения и записи, и настраивает DCB с
+ * {@code fDtrControl = DTR_CONTROL_DISABLE}, {@code fRtsControl = RTS_CONTROL_ENABLE}.
+ * <p>
+ * DTR не активируется → ESP32 на CH340/CP210x не сбрасывается.
+ * RTS активируется (LOW) → Q1 OFF → EN не удерживается в LOW.
+ * {@code fAbortOnError = 0} → I/O не блокируется при ошибках драйвера.
  */
 class WinSerialPort implements NativeSerialPort {
 
@@ -21,15 +25,38 @@ class WinSerialPort implements NativeSerialPort {
     private static final int GENERIC_READ = 0x80000000;
     private static final int GENERIC_WRITE = 0x40000000;
     private static final int OPEN_EXISTING = 3;
+    private static final int FILE_FLAG_OVERLAPPED = 0x40000000;
     private static final long INVALID_HANDLE_VALUE = -1L;
     private static final int PURGE_RXCLEAR = 0x0008;
+    private static final int WAIT_OBJECT_0 = 0x00000000;
+    private static final int WAIT_TIMEOUT = 0x00000102;
+    private static final int INFINITE = 0xFFFFFFFF;
 
-    // DCB fFlags bitmask positions
-    private static final int DTR_CONTROL_MASK = 0x0030;   // bits 4-5
-    private static final int RTS_CONTROL_MASK = 0x3000;   // bits 12-13
-    private static final int FOUTXCTSFLOW_BIT = 0x0004;   // bit 2
-    private static final int FOUTXDSRFLOW_BIT = 0x0008;   // bit 3
-    private static final int FBINARY_BIT = 0x0001;        // bit 0
+    // OVERLAPPED structure: 5 fields (Internal, InternalHigh, Offset, OffsetHigh, hEvent)
+    // На 64-bit Windows: ULONG_PTR (8) + ULONG_PTR (8) + DWORD (4) + DWORD (4) + HANDLE (8) = 32 bytes
+    // На 32-bit: ULONG_PTR (4) + ULONG_PTR (4) + DWORD (4) + DWORD (4) + HANDLE (4) = 20 bytes
+    private static final int OVERLAPPED_SIZE = Native.POINTER_SIZE == 8 ? 32 : 20;
+    private static final int OVERLAPPED_EVENT_OFFSET = Native.POINTER_SIZE == 8 ? 24 : 16;
+
+    // DCB fFlags bitfield (DWORD at offset 8)
+    private static final int FBINARY_BIT = 0x0001;         // bit 0
+    private static final int RTS_CONTROL_ENABLE = 0x1000;   // bits 12-13 = 01
+
+    // DCB layout
+    private static final int DCB_SIZE = 28;
+    private static final int DCB_OFF_LENGTH = 0;
+    private static final int DCB_OFF_BAUDRATE = 4;
+    private static final int DCB_OFF_FLAGS = 8;
+    private static final int DCB_OFF_XONLIM = 14;
+    private static final int DCB_OFF_XOFFLIM = 16;
+    private static final int DCB_OFF_BYTESIZE = 18;
+    private static final int DCB_OFF_PARITY = 19;
+    private static final int DCB_OFF_STOPBITS = 20;
+    private static final int DCB_OFF_XONCHAR = 21;
+    private static final int DCB_OFF_XOFFCHAR = 22;
+
+    // COMMTIMEOUTS layout (20 bytes)
+    private static final int CT_SIZE = 20;
 
     // --- JNA kernel32 interface ---
     interface K32 extends Library {
@@ -46,47 +73,37 @@ class WinSerialPort implements NativeSerialPort {
                          IntByReference lpNumberOfBytesRead, Pointer lpOverlapped);
         boolean WriteFile(Pointer hFile, byte[] lpBuffer, int nNumberOfBytesToWrite,
                           IntByReference lpNumberOfBytesWritten, Pointer lpOverlapped);
+        boolean GetOverlappedResult(Pointer hFile, Pointer lpOverlapped,
+                                    IntByReference lpNumberOfBytesTransferred, boolean bWait);
+        Pointer CreateEventW(Pointer lpEventAttributes, boolean bManualReset,
+                             boolean bInitialState, WString lpName);
+        int WaitForSingleObject(Pointer hHandle, int dwMilliseconds);
+        boolean ResetEvent(Pointer hEvent);
         boolean PurgeComm(Pointer hFile, int dwFlags);
+        boolean CancelIo(Pointer hFile);
         boolean CloseHandle(Pointer hObject);
         int GetLastError();
     }
 
-    // --- DCB layout (28 bytes) ---
-    // offset 0:  DWORD DCBlength
-    // offset 4:  DWORD BaudRate
-    // offset 8:  DWORD fFlags (bitfield: fBinary, fParity, fOutxCtsFlow, fOutxDsrFlow,
-    //                          fDtrControl[2], fDsrSensitivity, fTXContinueOnXoff,
-    //                          fOutX, fInX, fErrorChar, fNull, fRtsControl[2], fAbortOnError, fDummy2[17])
-    // offset 12: WORD  wReserved
-    // offset 14: WORD  XonLim
-    // offset 16: WORD  XoffLim
-    // offset 18: BYTE  ByteSize
-    // offset 19: BYTE  Parity
-    // offset 20: BYTE  StopBits
-    // ... (остальные поля)
-    private static final int DCB_SIZE = 28;
-    private static final int DCB_OFF_LENGTH = 0;
-    private static final int DCB_OFF_BAUDRATE = 4;
-    private static final int DCB_OFF_FLAGS = 8;
-    private static final int DCB_OFF_BYTESIZE = 18;
-    private static final int DCB_OFF_PARITY = 19;
-    private static final int DCB_OFF_STOPBITS = 20;
-
-    // COMMTIMEOUTS layout (20 bytes)
-    private static final int CT_SIZE = 20;
+    private static final int ERROR_IO_PENDING = 997;
 
     private volatile Pointer handle;
     private volatile boolean open;
 
+    // Отдельные event-объекты для read и write — позволяют работать параллельно
+    private Pointer readEvent;
+    private Pointer writeEvent;
+
     @Override
     public void open(String portName, int baudRate) throws ConnectionException {
-        // COM-порт на Windows открывается как \\.\COMn
         String path = portName.startsWith("\\\\.\\") ? portName : "\\\\.\\" + portName;
 
+        // FILE_FLAG_OVERLAPPED — критично для параллельного read/write.
+        // Без этого ReadFile блокирует WriteFile на ~500мс (read timeout).
         Pointer h = K32.INSTANCE.CreateFileW(
                 new WString(path),
                 GENERIC_READ | GENERIC_WRITE,
-                0, null, OPEN_EXISTING, 0, null);
+                0, null, OPEN_EXISTING, FILE_FLAG_OVERLAPPED, null);
 
         if (Pointer.nativeValue(h) == INVALID_HANDLE_VALUE) {
             throw new ConnectionException("Cannot open " + portName
@@ -95,16 +112,28 @@ class WinSerialPort implements NativeSerialPort {
         this.handle = h;
 
         try {
+            readEvent = createEvent();
+            writeEvent = createEvent();
             configureDcb(baudRate);
             configureTimeouts();
         } catch (Exception e) {
+            closeEvents();
             K32.INSTANCE.CloseHandle(h);
             this.handle = null;
             throw new ConnectionException("Failed to configure " + portName + ": " + e.getMessage(), e);
         }
 
         open = true;
-        log.debug("WinSerialPort opened {} at {} baud (DTR=disabled, RTS=enabled)", portName, baudRate);
+        log.debug("WinSerialPort opened {} at {} baud (DTR=disabled, RTS=enabled, overlapped)",
+                portName, baudRate);
+    }
+
+    private Pointer createEvent() throws ConnectionException {
+        Pointer evt = K32.INSTANCE.CreateEventW(null, true, false, null);
+        if (evt == null || Pointer.nativeValue(evt) == 0) {
+            throw new ConnectionException("CreateEvent failed (error " + K32.INSTANCE.GetLastError() + ")");
+        }
+        return evt;
     }
 
     private void configureDcb(int baudRate) throws ConnectionException {
@@ -121,23 +150,23 @@ class WinSerialPort implements NativeSerialPort {
         dcb.setByte(DCB_OFF_PARITY, (byte) 0);   // NOPARITY
         dcb.setByte(DCB_OFF_STOPBITS, (byte) 0);  // ONESTOPBIT
 
-        // Модифицируем fFlags: DTR_CONTROL_DISABLE, RTS_CONTROL_ENABLE,
-        // отключаем аппаратный flow control, включаем binary mode.
+        // fFlags: выставляем ВСЕ биты явно (не read-modify-write!).
+        // Критично: драйвер CH340 может оставить fAbortOnError=1 по умолчанию,
+        // что блокирует ВСЁ I/O после любой ошибки на порту.
         //
-        // На схеме автосброса CH340 → ESP32:
-        //   RTS asserted (LOW) → Q1 OFF → EN свободен (HIGH через pullup) → работает
-        //   RTS not asserted (HIGH) → Q1 ON → EN LOW → устройство в сбросе!
-        //   DTR disabled (HIGH) → Q2 ON → GPIO0 LOW — не влияет на работу (только при ресете)
-        //   DTR enabled (LOW) → переход float→LOW даёт импульс сброса через cap → ресет!
-        //
-        // Итого: DTR=DISABLE (нет импульса сброса), RTS=ENABLE (EN не удерживается в LOW).
-        int flags = dcb.getInt(DCB_OFF_FLAGS);
-        flags |= FBINARY_BIT;                            // fBinary = 1
-        flags &= ~DTR_CONTROL_MASK;                      // fDtrControl = 00 (DTR_CONTROL_DISABLE)
-        flags = (flags & ~RTS_CONTROL_MASK) | 0x1000;    // fRtsControl = 01 (RTS_CONTROL_ENABLE)
-        flags &= ~FOUTXCTSFLOW_BIT;                      // fOutxCtsFlow = 0
-        flags &= ~FOUTXDSRFLOW_BIT;                      // fOutxDsrFlow = 0
+        // DTR=DISABLE: не активируем DTR → нет импульса сброса ESP32 через cap
+        // RTS=ENABLE: активируем RTS (LOW) → Q1 OFF → EN не удерживается в LOW
+        int flags = FBINARY_BIT | RTS_CONTROL_ENABLE;
+        // Все остальные биты = 0:
+        //   fParity=0, fOutxCtsFlow=0, fOutxDsrFlow=0, fDtrControl=00(DISABLE),
+        //   fDsrSensitivity=0, fTXContinueOnXoff=0, fOutX=0, fInX=0,
+        //   fErrorChar=0, fNull=0, fAbortOnError=0
         dcb.setInt(DCB_OFF_FLAGS, flags);
+
+        dcb.setShort(DCB_OFF_XONLIM, (short) 2048);
+        dcb.setShort(DCB_OFF_XOFFLIM, (short) 512);
+        dcb.setByte(DCB_OFF_XONCHAR, (byte) 17);
+        dcb.setByte(DCB_OFF_XOFFCHAR, (byte) 19);
 
         if (!K32.INSTANCE.SetCommState(handle, dcb)) {
             throw new ConnectionException("SetCommState failed (error " + K32.INSTANCE.GetLastError() + ")");
@@ -145,17 +174,16 @@ class WinSerialPort implements NativeSerialPort {
     }
 
     private void configureTimeouts() throws ConnectionException {
-        // COMMTIMEOUTS: ReadIntervalTimeout, ReadTotalTimeoutMultiplier,
-        //               ReadTotalTimeoutConstant, WriteTotalTimeoutMultiplier, WriteTotalTimeoutConstant
         Memory ct = new Memory(CT_SIZE);
         ct.clear();
-        // Semi-blocking: ReadIntervalTimeout=MAXDWORD, Multiplier=MAXDWORD, Constant=500ms
-        // Это заставляет ReadFile вернуть имеющиеся данные или подождать до 500мс
+        // Для overlapped I/O: ReadFile возвращает немедленно (IO_PENDING),
+        // реальный таймаут контролируем через WaitForSingleObject.
+        // Но COMMTIMEOUTS всё равно нужны как fallback.
         ct.setInt(0, 0xFFFFFFFF);  // ReadIntervalTimeout = MAXDWORD
         ct.setInt(4, 0xFFFFFFFF);  // ReadTotalTimeoutMultiplier = MAXDWORD
         ct.setInt(8, 500);         // ReadTotalTimeoutConstant = 500ms
         ct.setInt(12, 0);          // WriteTotalTimeoutMultiplier
-        ct.setInt(16, 1000);       // WriteTotalTimeoutConstant = 1s
+        ct.setInt(16, 5000);       // WriteTotalTimeoutConstant = 5s
 
         if (!K32.INSTANCE.SetCommTimeouts(handle, ct)) {
             throw new ConnectionException("SetCommTimeouts failed (error " + K32.INSTANCE.GetLastError() + ")");
@@ -167,13 +195,44 @@ class WinSerialPort implements NativeSerialPort {
         Pointer h = handle;
         if (h == null || !open) return -1;
 
+        Memory ovl = new Memory(OVERLAPPED_SIZE);
+        ovl.clear();
+        ovl.setPointer(OVERLAPPED_EVENT_OFFSET, readEvent);
+        K32.INSTANCE.ResetEvent(readEvent);
+
         IntByReference bytesRead = new IntByReference(0);
-        boolean ok = K32.INSTANCE.ReadFile(h, buf, len, bytesRead, null);
-        if (!ok) {
-            log.debug("ReadFile error: {}", K32.INSTANCE.GetLastError());
+        boolean ok = K32.INSTANCE.ReadFile(h, buf, len, bytesRead, ovl);
+
+        if (ok) {
+            // Данные уже доступны
+            return bytesRead.getValue();
+        }
+
+        int err = K32.INSTANCE.GetLastError();
+        if (err != ERROR_IO_PENDING) {
+            if (open) log.debug("ReadFile error: {}", err);
             return -1;
         }
-        return bytesRead.getValue();
+
+        // Ждём завершения операции с таймаутом
+        int waitResult = K32.INSTANCE.WaitForSingleObject(readEvent, timeoutMs);
+        if (waitResult == WAIT_OBJECT_0) {
+            // Операция завершена — получаем количество прочитанных байт
+            if (K32.INSTANCE.GetOverlappedResult(h, ovl, bytesRead, false)) {
+                return bytesRead.getValue();
+            }
+            return -1;
+        }
+
+        if (waitResult == WAIT_TIMEOUT) {
+            // Таймаут — отменяем операцию
+            K32.INSTANCE.CancelIo(h);
+            // Дождаться завершения отмены
+            K32.INSTANCE.GetOverlappedResult(h, ovl, bytesRead, true);
+            return 0;
+        }
+
+        return -1; // ошибка wait
     }
 
     @Override
@@ -191,10 +250,27 @@ class WinSerialPort implements NativeSerialPort {
             System.arraycopy(data, offset, toWrite, 0, len);
         }
 
+        Memory ovl = new Memory(OVERLAPPED_SIZE);
+        ovl.clear();
+        ovl.setPointer(OVERLAPPED_EVENT_OFFSET, writeEvent);
+        K32.INSTANCE.ResetEvent(writeEvent);
+
         IntByReference bytesWritten = new IntByReference(0);
-        if (!K32.INSTANCE.WriteFile(h, toWrite, len, bytesWritten, null)) {
-            throw new ConnectionException("WriteFile failed (error " + K32.INSTANCE.GetLastError() + ")");
+        boolean ok = K32.INSTANCE.WriteFile(h, toWrite, len, bytesWritten, ovl);
+
+        if (!ok) {
+            int err = K32.INSTANCE.GetLastError();
+            if (err != ERROR_IO_PENDING) {
+                throw new ConnectionException("WriteFile failed (error " + err + ")");
+            }
+            // Ждём завершения записи
+            K32.INSTANCE.WaitForSingleObject(writeEvent, INFINITE);
+            if (!K32.INSTANCE.GetOverlappedResult(h, ovl, bytesWritten, false)) {
+                throw new ConnectionException("Write GetOverlappedResult failed (error "
+                        + K32.INSTANCE.GetLastError() + ")");
+            }
         }
+
         if (bytesWritten.getValue() != len) {
             throw new ConnectionException("Incomplete write: " + bytesWritten.getValue() + "/" + len);
         }
@@ -219,8 +295,21 @@ class WinSerialPort implements NativeSerialPort {
         Pointer h = handle;
         handle = null;
         if (h != null) {
+            K32.INSTANCE.CancelIo(h);
             K32.INSTANCE.CloseHandle(h);
-            log.debug("WinSerialPort closed");
+        }
+        closeEvents();
+        log.debug("WinSerialPort closed");
+    }
+
+    private void closeEvents() {
+        if (readEvent != null) {
+            K32.INSTANCE.CloseHandle(readEvent);
+            readEvent = null;
+        }
+        if (writeEvent != null) {
+            K32.INSTANCE.CloseHandle(writeEvent);
+            writeEvent = null;
         }
     }
 }
