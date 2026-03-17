@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu
     steps:
       - run: |
-          git clone --depth=0 "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git" .
+          git clone "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git" .
           git checkout "${GITHUB_SHA}"
 
       - name: Create Gitea Release
@@ -52,7 +52,7 @@ jobs:
     runs-on: ubuntu
     steps:
       - run: |
-          git clone --depth=0 "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git" .
+          git clone "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git" .
           git checkout "${GITHUB_SHA}"
 
       - run: ./gradlew jpackage --no-daemon
@@ -81,7 +81,7 @@ jobs:
     runs-on: windows
     steps:
       - run: |
-          git clone --depth=0 "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git" .
+          git clone "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git" .
           git checkout "${GITHUB_SHA}"
 
       - run: .\gradlew.bat jpackage --no-daemon
@@ -111,7 +111,7 @@ jobs:
     runs-on: macos
     steps:
       - run: |
-          git clone --depth=0 "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git" .
+          git clone "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git" .
           git checkout "${GITHUB_SHA}"
 
       - run: ./gradlew jpackage --no-daemon
