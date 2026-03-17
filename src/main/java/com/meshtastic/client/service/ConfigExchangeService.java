@@ -179,6 +179,8 @@ public class ConfigExchangeService implements FromRadioListener {
 
         if (nodeInfo.getHopsAway() != 0) { node.setHopsAway(nodeInfo.getHopsAway()); }
 
+        if (nodeInfo.getChannel() != 0) { node.setChannel((int) nodeInfo.getChannel()); }
+
         // Запомнить флаг избранного — применим после записи нод в БД (onConfigComplete)
         if (node.getNodeId() != null) {
             favoriteFlags.put(node.getNodeId(), nodeInfo.getIsFavorite());
