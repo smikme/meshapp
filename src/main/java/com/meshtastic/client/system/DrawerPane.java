@@ -177,6 +177,9 @@ public class DrawerPane extends StackPane {
     public void setSelectedItemClass(Class<?> cls) {
         this.selectedItemClass = cls;
         updateSelection();
+        if (cls == FormChat.class && chatBadgeDot != null) {
+            chatBadgeDot.setVisible(false);
+        }
     }
 
     private void updateSelection() {
@@ -197,7 +200,7 @@ public class DrawerPane extends StackPane {
 
     public void setChatUnreadDot(boolean visible) {
         if (chatBadgeDot != null) {
-            chatBadgeDot.setVisible(visible);
+            chatBadgeDot.setVisible(visible && selectedItemClass != FormChat.class);
         }
     }
 
