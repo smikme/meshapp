@@ -52,6 +52,7 @@ public class ConfigExchangeService implements FromRadioListener {
     private int sentConfigId;
     private CompletableFuture<DeviceState> future;
     private final Map<String, Boolean> favoriteFlags = new HashMap<>();
+    private final Map<String, Boolean> ignoredFlags = new HashMap<>();
     private final AtomicBoolean receivedAny = new AtomicBoolean(false);
     private volatile ScheduledFuture<?> retryFuture;
     private final ScheduledExecutorService retryScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
@@ -183,9 +184,10 @@ public class ConfigExchangeService implements FromRadioListener {
 
         if (nodeInfo.getChannel() != 0) { node.setChannel((int) nodeInfo.getChannel()); }
 
-        // Запомнить флаг избранного — применим после записи нод в БД (onConfigComplete)
+        // Запомнить флаги избранного и игнорирования — применим после записи нод в БД (onConfigComplete)
         if (node.getNodeId() != null) {
             favoriteFlags.put(node.getNodeId(), nodeInfo.getIsFavorite());
+            ignoredFlags.put(node.getNodeId(), nodeInfo.getIsIgnored());
         }
 
         if (nodeInfo.hasDeviceMetrics()) {
@@ -277,13 +279,19 @@ public class ConfigExchangeService implements FromRadioListener {
                 ncs.setFavorite(e.getKey(), e.getValue());
             }
 
+            // Применить флаги игнорирования
+            for (Map.Entry<String, Boolean> e : ignoredFlags.entrySet()) {
+                ncs.setIgnored(e.getKey(), e.getValue());
+            }
+
             // Обогатить bare-ноды (только телеметрия) кэшированными именами из H2
             for (NodeData node : deviceState.getNodeDb().values()) {
                 ncs.enrichFromCache(node);
             }
 
-            // Уведомить UI об обновлённых избранных (один раз после всех нод)
+            // Уведомить UI об обновлённых избранных и игнорируемых (один раз после всех нод)
             FavoriteNodeService.getInstance().fireListeners();
+            IgnoredNodeService.getInstance().fireListeners();
 
             // Загрузить архив телеметрии из H2 + подчистить старые записи
             String ownerNodeId = String.format("!%08x", deviceState.getMyNodeNum());

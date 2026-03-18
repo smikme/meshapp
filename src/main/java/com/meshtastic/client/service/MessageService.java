@@ -477,6 +477,32 @@ public final class MessageService {
     }
 
     /**
+     * Отправляет AdminMessage.set_ignored_node на устройство.
+     */
+    public static void setIgnoredNode(ProtocolHandler handler, DeviceState state, int nodeNum) {
+        AdminProtos.AdminMessage.Builder adminBuilder = AdminProtos.AdminMessage.newBuilder()
+                .setSetIgnoredNode(nodeNum);
+        ByteString passkey = state.getSessionPasskey();
+        if (passkey != null) {
+            adminBuilder.setSessionPasskey(passkey);
+        }
+        sendAdminMessage(handler, state, adminBuilder.build());
+    }
+
+    /**
+     * Отправляет AdminMessage.remove_ignored_node на устройство.
+     */
+    public static void removeIgnoredNode(ProtocolHandler handler, DeviceState state, int nodeNum) {
+        AdminProtos.AdminMessage.Builder adminBuilder = AdminProtos.AdminMessage.newBuilder()
+                .setRemoveIgnoredNode(nodeNum);
+        ByteString passkey = state.getSessionPasskey();
+        if (passkey != null) {
+            adminBuilder.setSessionPasskey(passkey);
+        }
+        sendAdminMessage(handler, state, adminBuilder.build());
+    }
+
+    /**
      * Вспомогательный метод для отправки AdminMessage на локальное устройство.
      */
     private static void sendAdminMessage(ProtocolHandler handler, DeviceState state,

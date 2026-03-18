@@ -148,6 +148,7 @@ public class FormChat extends Form {
     }
 
     private boolean suppressSelectionListener;
+    private boolean formVisible;
 
     private final Runnable messageListener = () -> Platform.runLater(() -> {
         reloadChatList();
@@ -169,7 +170,17 @@ public class FormChat extends Form {
 
     @Override
     public void formOpen() {
+        formVisible = true;
         rebindState();
+        // Пометить текущий открытый чат как прочитанный при возврате на форму
+        if (selectedChat != null) {
+            markAsRead(selectedChat);
+        }
+    }
+
+    @Override
+    public void formClose() {
+        formVisible = false;
     }
 
     @Override
@@ -549,7 +560,9 @@ public class FormChat extends Form {
             }
             newestLoadedDbId = newMsgs.getLast().getDbId();
             scrollToBottom();
-            markAsRead(selectedChat);
+            if (formVisible) {
+                markAsRead(selectedChat);
+            }
         }
     }
 
