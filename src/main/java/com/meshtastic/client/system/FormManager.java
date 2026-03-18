@@ -15,6 +15,7 @@ public class FormManager {
     private FormManager() {}
 
     private static MainForm mainForm;
+    private static Form currentForm;
 
     public static void install(RootPane root) {
         mainForm = root.getMainForm();
@@ -33,8 +34,12 @@ public class FormManager {
         if (modal != null && modal.isVisible()) {
             return;
         }
+        if (currentForm != null && currentForm != form) {
+            currentForm.formClose();
+        }
         form.formOpen();
         mainForm.setForm(form);
+        currentForm = form;
         DrawerManager.setSelectedItemClass(form.getClass());
     }
 

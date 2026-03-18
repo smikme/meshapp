@@ -17,6 +17,8 @@ import javafx.scene.shape.Line;
 import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
 
+import com.meshtastic.client.components.MemoryBar;
+
 import java.awt.Desktop;
 import java.net.URI;
 
@@ -107,7 +109,10 @@ public class About extends VBox {
         Label sysJava = new Label("Java: " + java);
         Label sysOs = new Label("System: " + system);
 
-        sysInfo.getChildren().addAll(sysTitle, sysVersion, sysJava, sysOs);
+        Label memTitle = new Label("Память:");
+        MemoryBar memoryBar = new MemoryBar();
+
+        sysInfo.getChildren().addAll(sysTitle, sysVersion, sysJava, sysOs, memTitle, memoryBar);
 
         getChildren().addAll(title, projectBox, partnerBox, sysInfo);
     }

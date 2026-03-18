@@ -8,9 +8,9 @@ jobs:
   create-release:
     runs-on: ubuntu
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+      - run: |
+          git clone "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git" .
+          git checkout "${GITHUB_SHA}"
 
       - name: Create Gitea Release
         env:
@@ -31,19 +31,29 @@ jobs:
             NAME="MeshApp ${TAG} (unstable)"
           fi
 
+          # Release notes из коммитов с предыдущего тега
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          if [ -n "$PREV_TAG" ]; then
+            NOTES=$(git log --pretty=format:"- %s" "${PREV_TAG}..HEAD")
+          else
+            NOTES=$(git log --pretty=format:"- %s" -20)
+          fi
+          # Экранируем для JSON
+          NOTES_JSON=$(echo "$NOTES" | jq -sR .)
+
           curl -sf -X POST \
             -H "Authorization: token ${GITEA_TOKEN}" \
             -H "Content-Type: application/json" \
-            -d "{\"tag_name\":\"${TAG}\",\"name\":\"${NAME}\",\"body\":\"Release ${TAG}\",\"draft\":true,\"prerelease\":${PRERELEASE}}" \
+            -d "{\"tag_name\":\"${TAG}\",\"name\":\"${NAME}\",\"body\":${NOTES_JSON},\"draft\":true,\"prerelease\":${PRERELEASE}}" \
             "${API}/releases"
 
   build-linux:
     needs: create-release
     runs-on: ubuntu
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+      - run: |
+          git clone "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git" .
+          git checkout "${GITHUB_SHA}"
 
       - run: ./gradlew jpackage --no-daemon
 
@@ -70,9 +80,10 @@ jobs:
     needs: create-release
     runs-on: windows
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+      - shell: bash
+        run: |
+          git clone "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git" .
+          git checkout "${GITHUB_SHA}"
 
       - run: .\gradlew.bat jpackage --no-daemon
 
@@ -100,9 +111,9 @@ jobs:
     needs: create-release
     runs-on: macos
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+      - run: |
+          git clone "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git" .
+          git checkout "${GITHUB_SHA}"
 
       - run: ./gradlew jpackage --no-daemon
 

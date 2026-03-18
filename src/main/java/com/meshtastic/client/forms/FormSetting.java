@@ -102,7 +102,7 @@ public class FormSetting extends Form {
 
         cacheTab = new Tab("Кэш", createCachePanel());
         configTab = new Tab("Конфигурация", createConfigPanel());
-        appearanceTab = new Tab("Оформление", createAppearancePanel());
+        appearanceTab = new Tab("Настройки приложения", createAppSettingsPanel());
 
         tabPane.getTabs().addAll(configTab, cacheTab, appearanceTab);
         tabPane.getSelectionModel().selectedItemProperty().addListener((obs, oldTab, newTab) -> {
@@ -159,27 +159,38 @@ public class FormSetting extends Form {
         return null;
     }
 
-    // ==================== Оформление ====================
+    // ==================== Настройки приложения ====================
 
-    private VBox createAppearancePanel() {
-        VBox panel = new VBox(12);
+    private VBox createAppSettingsPanel() {
+        VBox panel = new VBox(16);
         panel.setPadding(new Insets(15));
 
-        CheckBox nativeWindowCb = new CheckBox("Нативное управление окнами");
-        nativeWindowCb.setSelected(AppPreferences.isNativeWindow());
-        nativeWindowCb.selectedProperty().addListener((obs, old, val) ->
-                AppPreferences.setNativeWindow(val));
+        // --- Группа «Оформление» ---
+        Label appearanceHeader = new Label("Оформление");
+        appearanceHeader.setFont(Font.font("Roboto", FontWeight.BOLD, 13));
 
-        CheckBox disableTransparencyCb = new CheckBox("Отключить прозрачность");
-        disableTransparencyCb.setSelected(AppPreferences.isDisableTransparency());
-        disableTransparencyCb.selectedProperty().addListener((obs, old, val) ->
-                AppPreferences.setDisableTransparency(val));
+        CheckBox disableEffectsCb = new CheckBox("Выключить эффекты оформления");
+        disableEffectsCb.setSelected(AppPreferences.isDisableEffects());
+        disableEffectsCb.selectedProperty().addListener((obs, old, val) ->
+                AppPreferences.setDisableEffects(val));
 
         Label restartNote = new Label("Изменения вступят в силу после перезапуска приложения");
         restartNote.setStyle("-fx-opacity: 0.6; -fx-font-size: 11;");
 
-        panel.getChildren().addAll(nativeWindowCb, disableTransparencyCb,
-                new Separator(), restartNote);
+        VBox appearanceGroup = new VBox(8, appearanceHeader, disableEffectsCb, restartNote);
+
+        // --- Группа «Интеграции» ---
+        Label integrationsHeader = new Label("Интеграции");
+        integrationsHeader.setFont(Font.font("Roboto", FontWeight.BOLD, 13));
+
+        CheckBox checkUpdatesCb = new CheckBox("Проверять обновления при старте приложения");
+        checkUpdatesCb.setSelected(AppPreferences.isCheckUpdates());
+        checkUpdatesCb.selectedProperty().addListener((obs, old, val) ->
+                AppPreferences.setCheckUpdates(val));
+
+        VBox integrationsGroup = new VBox(8, integrationsHeader, checkUpdatesCb);
+
+        panel.getChildren().addAll(appearanceGroup, new Separator(), integrationsGroup);
         return panel;
     }
 

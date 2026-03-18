@@ -6,6 +6,7 @@ import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.protocol.ProtocolHandler;
 import com.meshtastic.client.service.FavoriteNodeService;
+import com.meshtastic.client.service.IgnoredNodeService;
 import com.meshtastic.client.service.MessageService;
 import com.meshtastic.client.service.NodeCacheService;
 import com.meshtastic.client.system.AllForms;
@@ -159,7 +160,31 @@ public class NodeDetailContent extends HBox {
             favoriteBtn.getTooltip().setText(nowFav ? "Убрать из избранного" : "Добавить в избранное");
         });
 
-        actionToolbar.getItems().addAll(privateChatBtn, favoriteBtn, refreshBtn, deleteBtn);
+        // Кнопка «Игнорировать»
+        SVGPath ignoredIcon = SvgIconLoader.load("/icons/eye-off.svg", 22);
+        Button ignoredBtn = new Button();
+        ignoredBtn.setGraphic(ignoredIcon);
+        ignoredBtn.setContentDisplay(ContentDisplay.GRAPHIC_ONLY);
+        ignoredBtn.getStyleClass().add("drawer-toolbar-button");
+
+        IgnoredNodeService ignService = IgnoredNodeService.getInstance();
+        boolean initIgn = ignService.isIgnored(nodeId);
+        if (initIgn) {
+            ignoredBtn.getStyleClass().add("ignored-btn-active");
+        }
+        ignoredBtn.setTooltip(new Tooltip(initIgn ? "Убрать из игнорируемых" : "Добавить в игнорируемые"));
+
+        ignoredBtn.setOnAction(e -> {
+            boolean nowIgn = ignService.toggleIgnored(nodeId);
+            if (nowIgn) {
+                ignoredBtn.getStyleClass().add("ignored-btn-active");
+            } else {
+                ignoredBtn.getStyleClass().remove("ignored-btn-active");
+            }
+            ignoredBtn.getTooltip().setText(nowIgn ? "Убрать из игнорируемых" : "Добавить в игнорируемые");
+        });
+
+        actionToolbar.getItems().addAll(privateChatBtn, favoriteBtn, ignoredBtn, refreshBtn, deleteBtn);
 
         VBox toolbarContainer = new VBox(actionToolbar);
         toolbarContainer.setAlignment(Pos.TOP_CENTER);

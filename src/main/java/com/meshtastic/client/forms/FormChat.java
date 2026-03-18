@@ -9,6 +9,7 @@ import com.meshtastic.client.components.chat.CreateChannelDialog;
 import com.meshtastic.client.components.chat.MessageBubbleFactory;
 import com.meshtastic.client.components.chat.NodeInfoFormatter;
 import com.meshtastic.client.components.chat.TracerouteView;
+import com.meshtastic.client.utils.AppPreferences;
 import com.meshtastic.client.modal.ModalPane;
 import com.meshtastic.client.modal.Toast;
 import com.meshtastic.client.model.ChatItem;
@@ -22,6 +23,7 @@ import com.meshtastic.client.service.MessageDbService;
 import com.meshtastic.client.service.MessageListenerService;
 import com.meshtastic.client.service.MessageService;
 import com.meshtastic.client.service.NodeCacheService;
+import com.meshtastic.client.system.DrawerManager;
 import com.meshtastic.client.system.Form;
 import com.meshtastic.client.utils.NodeUtils;
 import com.meshtastic.client.utils.SystemForm;
@@ -47,6 +49,7 @@ import javafx.scene.control.TextField;
 import javafx.scene.control.Tooltip;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
+import javafx.scene.layout.Region;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 import javafx.scene.text.Font;
@@ -96,6 +99,8 @@ public class FormChat extends Form {
     private VBox messageContainer;
     private StackPane messageArea; // обёртка: scrollPane + кнопка «вниз»
     private Button scrollDownBtn;
+    private Label scrollDownBadge;
+    private int newMessageWhileScrolled = 0;
 
     // Панель ввода
     private ChatInputBar chatInputBar;
@@ -146,6 +151,7 @@ public class FormChat extends Form {
     }
 
     private boolean suppressSelectionListener;
+    private boolean formVisible;
 
     private final Runnable messageListener = () -> Platform.runLater(() -> {
         reloadChatList();
@@ -167,7 +173,17 @@ public class FormChat extends Form {
 
     @Override
     public void formOpen() {
+        formVisible = true;
         rebindState();
+        // Пометить текущий открытый чат как прочитанный при возврате на форму
+        if (selectedChat != null) {
+            markAsRead(selectedChat);
+        }
+    }
+
+    @Override
+    public void formClose() {
+        formVisible = false;
     }
 
     @Override
@@ -239,9 +255,11 @@ public class FormChat extends Form {
 
         // --- SplitPane ---
         SplitPane splitPane = new SplitPane(leftPane, detailPane);
-        splitPane.setDividerPositions(0.35);
+        splitPane.setDividerPositions(AppPreferences.getChatDividerPos());
         splitPane.getStyleClass().add("chat-split-pane");
         SplitPane.setResizableWithParent(leftPane, false);
+        splitPane.getDividers().get(0).positionProperty().addListener((obs, oldVal, newVal) ->
+                AppPreferences.setChatDividerPos(newVal.doubleValue()));
 
         getChildren().add(splitPane);
 
@@ -317,12 +335,28 @@ public class FormChat extends Form {
         scrollDownBtn = new Button("↓");
         scrollDownBtn.getStyleClass().add("chat-scroll-down-btn");
         scrollDownBtn.setVisible(false);
-        scrollDownBtn.setOnAction(e -> scrollToBottom());
-        StackPane.setAlignment(scrollDownBtn, Pos.BOTTOM_RIGHT);
-        StackPane.setMargin(scrollDownBtn, new Insets(0, 20, 15, 0));
+        scrollDownBtn.setOnAction(e -> {
+            scrollToBottom();
+            newMessageWhileScrolled = 0;
+            updateScrollDownBadge();
+            if (formVisible && selectedChat != null) { markAsRead(selectedChat); }
+        });
+
+        // Бейдж с количеством новых сообщений поверх кнопки
+        scrollDownBadge = new Label();
+        scrollDownBadge.getStyleClass().add("chat-scroll-down-badge");
+        scrollDownBadge.setVisible(false);
+        scrollDownBadge.setMouseTransparent(true);
+
+        StackPane scrollDownWrapper = new StackPane(scrollDownBtn, scrollDownBadge);
+        scrollDownWrapper.setPickOnBounds(false);
+        scrollDownWrapper.setMaxSize(Region.USE_PREF_SIZE, Region.USE_PREF_SIZE);
+        StackPane.setAlignment(scrollDownBadge, Pos.TOP_RIGHT);
+        StackPane.setAlignment(scrollDownWrapper, Pos.BOTTOM_RIGHT);
+        StackPane.setMargin(scrollDownWrapper, new Insets(0, 20, 15, 0));
 
         // Обёртка: scrollPane + кнопка «вниз» (кнопка поверх содержимого)
-        messageArea = new StackPane(messageScrollPane, scrollDownBtn);
+        messageArea = new StackPane(messageScrollPane, scrollDownWrapper);
         VBox.setVgrow(messageArea, Priority.ALWAYS);
 
         // Подгрузка старых сообщений при скролле наверх + показ/скрытие кнопки «вниз»
@@ -330,7 +364,16 @@ public class FormChat extends Form {
             if (newVal.doubleValue() < 0.1 && !allHistoryLoaded && !loadingOlderMessages) {
                 loadOlderMessages();
             }
-            scrollDownBtn.setVisible(newVal.doubleValue() < 0.95);
+            boolean atBottom = newVal.doubleValue() >= 0.95;
+            scrollDownBtn.setVisible(!atBottom);
+            if (!atBottom) {
+                scrollDownBadge.setVisible(newMessageWhileScrolled > 0);
+            }
+            if (atBottom && newMessageWhileScrolled > 0) {
+                newMessageWhileScrolled = 0;
+                updateScrollDownBadge();
+                if (formVisible && selectedChat != null) { markAsRead(selectedChat); }
+            }
         });
 
         // При изменении высоты контента (перенос строк при ресайзе) —
@@ -471,6 +514,8 @@ public class FormChat extends Form {
         }
         allHistoryLoaded = msgs.size() < PAGE_SIZE;
         loadingOlderMessages = false;
+        newMessageWhileScrolled = 0;
+        updateScrollDownBadge();
 
         // Автоскролл вниз (последнее сообщение видно)
         scrollToBottom();
@@ -544,8 +589,26 @@ public class FormChat extends Form {
                 messageContainer.getChildren().add(bubbleFactory.build(msg));
             }
             newestLoadedDbId = newMsgs.getLast().getDbId();
-            scrollToBottom();
-            markAsRead(selectedChat);
+            if (isScrolledToBottom()) {
+                scrollToBottom();
+                if (formVisible) { markAsRead(selectedChat); }
+            } else {
+                newMessageWhileScrolled += newMsgs.size();
+                updateScrollDownBadge();
+            }
+        }
+    }
+
+    private boolean isScrolledToBottom() {
+        return messageScrollPane.getVvalue() >= 0.95;
+    }
+
+    private void updateScrollDownBadge() {
+        if (newMessageWhileScrolled > 0) {
+            scrollDownBadge.setText(String.valueOf(newMessageWhileScrolled));
+            scrollDownBadge.setVisible(true);
+        } else {
+            scrollDownBadge.setVisible(false);
         }
     }
 
@@ -817,6 +880,8 @@ public class FormChat extends Form {
         }
 
         if (newState == this.state) {
+            lastReadCounts.clear();
+            lastReadCounts.putAll(MessageDbService.getInstance().loadAllReadCounts(currentOwnerNodeId()));
             reloadChatList();
             return;
         }
@@ -913,6 +978,10 @@ public class FormChat extends Form {
         } finally {
             suppressSelectionListener = false;
         }
+
+        // Обновить красную точку на иконке "Чаты" в боковой панели
+        boolean hasUnread = chatItems.stream().anyMatch(c -> c.getUnreadCount() > 0);
+        DrawerManager.setChatUnreadDot(hasUnread);
     }
 
     /**

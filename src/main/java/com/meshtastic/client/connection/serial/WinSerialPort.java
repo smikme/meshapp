@@ -1,0 +1,326 @@
+package com.meshtastic.client.connection.serial;
+
+import com.meshtastic.client.connection.ConnectionException;
+import com.sun.jna.*;
+import com.sun.jna.ptr.IntByReference;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+/**
+ * Windows-реализация serial-порта через kernel32.dll (JNA).
+ * <p>
+ * Открывает COM-порт через {@code CreateFileW} с {@code FILE_FLAG_OVERLAPPED}
+ * для параллельного чтения и записи, и настраивает DCB с
+ * {@code fDtrControl = DTR_CONTROL_DISABLE}, {@code fRtsControl = RTS_CONTROL_ENABLE}.
+ * <p>
+ * DTR не активируется → ESP32 на CH340/CP210x не сбрасывается.
+ * RTS активируется (LOW) → Q1 OFF → EN не удерживается в LOW.
+ * {@code fAbortOnError = 0} → I/O не блокируется при ошибках драйвера.
+ */
+class WinSerialPort implements NativeSerialPort {
+
+    private static final Logger log = LoggerFactory.getLogger(WinSerialPort.class);
+
+    // --- Win32 constants ---
+    private static final int GENERIC_READ = 0x80000000;
+    private static final int GENERIC_WRITE = 0x40000000;
+    private static final int OPEN_EXISTING = 3;
+    private static final int FILE_FLAG_OVERLAPPED = 0x40000000;
+    private static final long INVALID_HANDLE_VALUE = -1L;
+    private static final int PURGE_RXCLEAR = 0x0008;
+    private static final int WAIT_OBJECT_0 = 0x00000000;
+    private static final int WAIT_TIMEOUT = 0x00000102;
+    private static final int INFINITE = 0xFFFFFFFF;
+
+    // OVERLAPPED structure: 5 fields (Internal, InternalHigh, Offset, OffsetHigh, hEvent)
+    // На 64-bit Windows: ULONG_PTR (8) + ULONG_PTR (8) + DWORD (4) + DWORD (4) + HANDLE (8) = 32 bytes
+    // На 32-bit: ULONG_PTR (4) + ULONG_PTR (4) + DWORD (4) + DWORD (4) + HANDLE (4) = 20 bytes
+    private static final int OVERLAPPED_SIZE = Native.POINTER_SIZE == 8 ? 32 : 20;
+    private static final int OVERLAPPED_EVENT_OFFSET = Native.POINTER_SIZE == 8 ? 24 : 16;
+
+    // DCB fFlags bitfield (DWORD at offset 8)
+    private static final int FBINARY_BIT = 0x0001;         // bit 0
+    private static final int DTR_CONTROL_ENABLE = 0x0010;   // bits 4-5 = 01
+    private static final int RTS_CONTROL_ENABLE = 0x1000;   // bits 12-13 = 01
+
+    // DCB layout
+    private static final int DCB_SIZE = 28;
+    private static final int DCB_OFF_LENGTH = 0;
+    private static final int DCB_OFF_BAUDRATE = 4;
+    private static final int DCB_OFF_FLAGS = 8;
+    private static final int DCB_OFF_XONLIM = 14;
+    private static final int DCB_OFF_XOFFLIM = 16;
+    private static final int DCB_OFF_BYTESIZE = 18;
+    private static final int DCB_OFF_PARITY = 19;
+    private static final int DCB_OFF_STOPBITS = 20;
+    private static final int DCB_OFF_XONCHAR = 21;
+    private static final int DCB_OFF_XOFFCHAR = 22;
+
+    // COMMTIMEOUTS layout (20 bytes)
+    private static final int CT_SIZE = 20;
+
+    // --- JNA kernel32 interface ---
+    interface K32 extends Library {
+        K32 INSTANCE = Native.load("kernel32", K32.class);
+
+        Pointer CreateFileW(WString lpFileName, int dwDesiredAccess, int dwShareMode,
+                            Pointer lpSecurityAttributes, int dwCreationDisposition,
+                            int dwFlagsAndAttributes, Pointer hTemplateFile);
+
+        boolean GetCommState(Pointer hFile, Pointer lpDCB);
+        boolean SetCommState(Pointer hFile, Pointer lpDCB);
+        boolean SetCommTimeouts(Pointer hFile, Pointer lpCommTimeouts);
+        boolean ReadFile(Pointer hFile, Pointer lpBuffer, int nNumberOfBytesToRead,
+                         IntByReference lpNumberOfBytesRead, Pointer lpOverlapped);
+        boolean WriteFile(Pointer hFile, Pointer lpBuffer, int nNumberOfBytesToWrite,
+                          IntByReference lpNumberOfBytesWritten, Pointer lpOverlapped);
+        boolean GetOverlappedResult(Pointer hFile, Pointer lpOverlapped,
+                                    IntByReference lpNumberOfBytesTransferred, boolean bWait);
+        Pointer CreateEventW(Pointer lpEventAttributes, boolean bManualReset,
+                             boolean bInitialState, WString lpName);
+        int WaitForSingleObject(Pointer hHandle, int dwMilliseconds);
+        boolean ResetEvent(Pointer hEvent);
+        boolean PurgeComm(Pointer hFile, int dwFlags);
+        boolean CancelIo(Pointer hFile);
+        boolean CloseHandle(Pointer hObject);
+        int GetLastError();
+    }
+
+    private static final int ERROR_IO_PENDING = 997;
+
+    private volatile Pointer handle;
+    private volatile boolean open;
+
+    // Отдельные event-объекты для read и write — позволяют работать параллельно
+    private Pointer readEvent;
+    private Pointer writeEvent;
+
+    private boolean assertDtr;
+
+    @Override
+    public void open(String portName, int baudRate, boolean assertDtr) throws ConnectionException {
+        this.assertDtr = assertDtr;
+        String path = portName.startsWith("\\\\.\\") ? portName : "\\\\.\\" + portName;
+
+        // FILE_FLAG_OVERLAPPED — критично для параллельного read/write.
+        // Без этого ReadFile блокирует WriteFile на ~500мс (read timeout).
+        Pointer h = K32.INSTANCE.CreateFileW(
+                new WString(path),
+                GENERIC_READ | GENERIC_WRITE,
+                0, null, OPEN_EXISTING, FILE_FLAG_OVERLAPPED, null);
+
+        if (Pointer.nativeValue(h) == INVALID_HANDLE_VALUE) {
+            throw new ConnectionException("Cannot open " + portName
+                    + " (error " + K32.INSTANCE.GetLastError() + ")");
+        }
+        this.handle = h;
+
+        try {
+            readEvent = createEvent();
+            writeEvent = createEvent();
+            configureDcb(baudRate);
+            configureTimeouts();
+        } catch (Exception e) {
+            closeEvents();
+            K32.INSTANCE.CloseHandle(h);
+            this.handle = null;
+            throw new ConnectionException("Failed to configure " + portName + ": " + e.getMessage(), e);
+        }
+
+        open = true;
+        log.debug("WinSerialPort opened {} at {} baud (DTR={}, RTS=enabled, overlapped)",
+                portName, baudRate, assertDtr ? "enabled" : "disabled");
+    }
+
+    private Pointer createEvent() throws ConnectionException {
+        Pointer evt = K32.INSTANCE.CreateEventW(null, true, false, null);
+        if (evt == null || Pointer.nativeValue(evt) == 0) {
+            throw new ConnectionException("CreateEvent failed (error " + K32.INSTANCE.GetLastError() + ")");
+        }
+        return evt;
+    }
+
+    private void configureDcb(int baudRate) throws ConnectionException {
+        Memory dcb = new Memory(DCB_SIZE);
+        dcb.clear();
+        dcb.setInt(DCB_OFF_LENGTH, DCB_SIZE);
+
+        if (!K32.INSTANCE.GetCommState(handle, dcb)) {
+            throw new ConnectionException("GetCommState failed (error " + K32.INSTANCE.GetLastError() + ")");
+        }
+
+        dcb.setInt(DCB_OFF_BAUDRATE, baudRate);
+        dcb.setByte(DCB_OFF_BYTESIZE, (byte) 8);
+        dcb.setByte(DCB_OFF_PARITY, (byte) 0);   // NOPARITY
+        dcb.setByte(DCB_OFF_STOPBITS, (byte) 0);  // ONESTOPBIT
+
+        // fFlags: выставляем ВСЕ биты явно (не read-modify-write!).
+        // Критично: драйвер CH340 может оставить fAbortOnError=1 по умолчанию,
+        // что блокирует ВСЁ I/O после любой ошибки на порту.
+        //
+        // RTS=ENABLE: всегда (на CH340 держит Q1 OFF → EN HIGH)
+        // DTR: ENABLE для native USB CDC (сигнал "хост подключён"), DISABLE для мостов (сброс ESP32)
+        int flags = FBINARY_BIT | RTS_CONTROL_ENABLE;
+        if (assertDtr) flags |= DTR_CONTROL_ENABLE;
+        dcb.setInt(DCB_OFF_FLAGS, flags);
+
+        dcb.setShort(DCB_OFF_XONLIM, (short) 2048);
+        dcb.setShort(DCB_OFF_XOFFLIM, (short) 512);
+        dcb.setByte(DCB_OFF_XONCHAR, (byte) 17);
+        dcb.setByte(DCB_OFF_XOFFCHAR, (byte) 19);
+
+        if (!K32.INSTANCE.SetCommState(handle, dcb)) {
+            throw new ConnectionException("SetCommState failed (error " + K32.INSTANCE.GetLastError() + ")");
+        }
+    }
+
+    private void configureTimeouts() throws ConnectionException {
+        Memory ct = new Memory(CT_SIZE);
+        ct.clear();
+        // Для overlapped I/O все таймауты = 0:
+        // ReadFile/WriteFile возвращают IO_PENDING, реальный таймаут
+        // контролируется через WaitForSingleObject на event-объектах.
+        // Если задать MAXDWORD/MAXDWORD/N — драйвер завершает операцию
+        // с 0 байтами немедленно при пустом буфере, event сигнализируется
+        // сразу, и WaitForSingleObject никогда не ждёт реальных данных.
+        ct.setInt(0, 0);   // ReadIntervalTimeout = 0
+        ct.setInt(4, 0);   // ReadTotalTimeoutMultiplier = 0
+        ct.setInt(8, 0);   // ReadTotalTimeoutConstant = 0
+        ct.setInt(12, 0);  // WriteTotalTimeoutMultiplier = 0
+        ct.setInt(16, 0);  // WriteTotalTimeoutConstant = 0
+
+        if (!K32.INSTANCE.SetCommTimeouts(handle, ct)) {
+            throw new ConnectionException("SetCommTimeouts failed (error " + K32.INSTANCE.GetLastError() + ")");
+        }
+    }
+
+    @Override
+    public int read(byte[] buf, int len, int timeoutMs) {
+        Pointer h = handle;
+        if (h == null || !open) return -1;
+
+        // Нативный буфер (Memory) живёт до конца метода — ReadFile пишет в него
+        // асинхронно, и данные будут на месте когда GetOverlappedResult вернёт управление.
+        // Нельзя передавать byte[] в overlapped ReadFile — JNA освободит временный
+        // нативный буфер до завершения I/O, и данные пропадут (все нули).
+        Memory nativeBuf = new Memory(len);
+
+        Memory ovl = new Memory(OVERLAPPED_SIZE);
+        ovl.clear();
+        ovl.setPointer(OVERLAPPED_EVENT_OFFSET, readEvent);
+        K32.INSTANCE.ResetEvent(readEvent);
+
+        IntByReference bytesRead = new IntByReference(0);
+        boolean ok = K32.INSTANCE.ReadFile(h, nativeBuf, len, bytesRead, ovl);
+
+        if (ok) {
+            int n = bytesRead.getValue();
+            if (n > 0) nativeBuf.read(0, buf, 0, n);
+            return n;
+        }
+
+        int err = K32.INSTANCE.GetLastError();
+        if (err != ERROR_IO_PENDING) {
+            if (open) log.debug("ReadFile error: {}", err);
+            return -1;
+        }
+
+        // Ждём завершения операции с таймаутом
+        int waitResult = K32.INSTANCE.WaitForSingleObject(readEvent, timeoutMs);
+        if (waitResult == WAIT_OBJECT_0) {
+            // Операция завершена — получаем количество прочитанных байт
+            if (K32.INSTANCE.GetOverlappedResult(h, ovl, bytesRead, false)) {
+                int n = bytesRead.getValue();
+                if (n > 0) nativeBuf.read(0, buf, 0, n);
+                return n;
+            }
+            return -1;
+        }
+
+        if (waitResult == WAIT_TIMEOUT) {
+            // Таймаут — отменяем операцию
+            K32.INSTANCE.CancelIo(h);
+            // Дождаться завершения отмены
+            K32.INSTANCE.GetOverlappedResult(h, ovl, bytesRead, true);
+            return 0;
+        }
+
+        log.debug("WaitForSingleObject unexpected: 0x{}", Integer.toHexString(waitResult));
+        return -1; // ошибка wait
+    }
+
+    @Override
+    public void write(byte[] data, int offset, int len) throws ConnectionException {
+        Pointer h = handle;
+        if (h == null || !open) {
+            throw new ConnectionException("Port is closed");
+        }
+
+        // Нативный буфер для overlapped WriteFile — аналогично read(),
+        // byte[] нельзя передавать в асинхронную операцию.
+        Memory nativeBuf = new Memory(len);
+        nativeBuf.write(0, data, offset, len);
+
+        Memory ovl = new Memory(OVERLAPPED_SIZE);
+        ovl.clear();
+        ovl.setPointer(OVERLAPPED_EVENT_OFFSET, writeEvent);
+        K32.INSTANCE.ResetEvent(writeEvent);
+
+        IntByReference bytesWritten = new IntByReference(0);
+        boolean ok = K32.INSTANCE.WriteFile(h, nativeBuf, len, bytesWritten, ovl);
+
+        if (!ok) {
+            int err = K32.INSTANCE.GetLastError();
+            if (err != ERROR_IO_PENDING) {
+                throw new ConnectionException("WriteFile failed (error " + err + ")");
+            }
+            // Ждём завершения записи
+            K32.INSTANCE.WaitForSingleObject(writeEvent, INFINITE);
+            if (!K32.INSTANCE.GetOverlappedResult(h, ovl, bytesWritten, false)) {
+                throw new ConnectionException("Write GetOverlappedResult failed (error "
+                        + K32.INSTANCE.GetLastError() + ")");
+            }
+        }
+
+        if (bytesWritten.getValue() != len) {
+            throw new ConnectionException("Incomplete write: " + bytesWritten.getValue() + "/" + len);
+        }
+    }
+
+    @Override
+    public void drainInput() {
+        Pointer h = handle;
+        if (h != null && open) {
+            K32.INSTANCE.PurgeComm(h, PURGE_RXCLEAR);
+        }
+    }
+
+    @Override
+    public boolean isOpen() {
+        return open && handle != null;
+    }
+
+    @Override
+    public void close() {
+        open = false;
+        Pointer h = handle;
+        handle = null;
+        if (h != null) {
+            K32.INSTANCE.CancelIo(h);
+            K32.INSTANCE.CloseHandle(h);
+        }
+        closeEvents();
+        log.debug("WinSerialPort closed");
+    }
+
+    private void closeEvents() {
+        if (readEvent != null) {
+            K32.INSTANCE.CloseHandle(readEvent);
+            readEvent = null;
+        }
+        if (writeEvent != null) {
+            K32.INSTANCE.CloseHandle(writeEvent);
+            writeEvent = null;
+        }
+    }
+}

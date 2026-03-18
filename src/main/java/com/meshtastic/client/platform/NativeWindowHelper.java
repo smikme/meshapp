@@ -38,13 +38,8 @@ public final class NativeWindowHelper {
             catch (Throwable t) { log.warn("initDarkModeSupport failed", t); }
         }
 
-        if (AppPreferences.isNativeWindow()) {
-            // Нативное управление окнами: стандартный DECORATED стиль ОС
-            return;
-        }
-        if (AppPreferences.isDisableTransparency()) {
-            // Кастомный title bar, но без прозрачности
-            stage.initStyle(StageStyle.UNDECORATED);
+        if (AppPreferences.isDisableEffects()) {
+            // Выключены эффекты оформления: стандартный DECORATED стиль ОС
             return;
         }
         if (OsDetect.supportsSeamlessFrame()) {
@@ -63,8 +58,8 @@ public final class NativeWindowHelper {
             return;
         }
 
-        // Нативное управление или отключена прозрачность — без backdrop эффектов
-        if (AppPreferences.isNativeWindow() || AppPreferences.isDisableTransparency()) {
+        // Выключены эффекты оформления — без backdrop эффектов
+        if (AppPreferences.isDisableEffects()) {
             setSeamlessState(stage, false);
             setThemeState(stage, isDark);
             // Windows: установить тёмный/светлый title bar в нативном режиме

@@ -85,6 +85,7 @@ public final class NodeCacheService {
                         battery_level INT,
                         voltage       REAL,
                         hops_away     INT,
+                        channel       INT DEFAULT 0,
                         favorite      BOOLEAN DEFAULT FALSE
                     )
                     """);
@@ -131,6 +132,8 @@ public final class NodeCacheService {
                 // Migration: hop columns
                 try { stmt.execute("ALTER TABLE telemetry_history ADD COLUMN hop_start INT DEFAULT 0"); } catch (SQLException ignored) {}
                 try { stmt.execute("ALTER TABLE telemetry_history ADD COLUMN hop_limit INT DEFAULT 0"); } catch (SQLException ignored) {}
+                // Migration: channel column in nodes table
+                try { stmt.execute("ALTER TABLE nodes ADD COLUMN channel INT DEFAULT 0"); } catch (SQLException ignored) {}
 
                 stmt.execute("""
                     CREATE INDEX IF NOT EXISTS idx_telemetry_ts ON telemetry_history (ts)
@@ -144,8 +147,8 @@ public final class NodeCacheService {
             mergeStmt = dbConnection.prepareStatement("""
                 MERGE INTO nodes (node_id, node_num, long_name, short_name, role, hw_model,
                                   latitude, longitude, altitude, snr, last_heard,
-                                  battery_level, voltage, hops_away)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                  battery_level, voltage, hops_away, channel)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """);
 
             insertTelemetryStmt = dbConnection.prepareStatement("""
@@ -278,21 +281,15 @@ public final class NodeCacheService {
         if (fresh == null) { return; }
         String nodeId = fresh.getNodeId();
         if (nodeId == null || nodeId.isEmpty()) { return; }
-        log.info("CACHE_DEBUG update: nodeId={}, fresh.hasName={}, fresh.longName='{}'",
-                nodeId, fresh.hasName(), fresh.getLongName());
         cache.compute(nodeId, (key, existing) -> {
             if (existing == null) {
                 existing = loadFromDb(nodeId);
-                log.info("CACHE_DEBUG compute: loadFromDb={}", existing != null);
             }
             if (existing == null) {
                 existing = new NodeData(fresh.getNodeNum());
                 existing.setNodeId(nodeId);
-                log.info("CACHE_DEBUG compute: created new NodeData");
             }
             merge(existing, fresh);
-            log.info("CACHE_DEBUG compute: after merge hasName={}, longName='{}'",
-                    existing.hasName(), existing.getLongName());
             return existing;
         });
         persistNode(nodeId);
@@ -449,6 +446,61 @@ public final class NodeCacheService {
             log.error("Failed to load favorite nodes from DB", e);
         }
         return favorites;
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    //  Игнорируемые ноды
+    // ═══════════════════════════════════════════════════════════
+
+    /**
+     * Устанавливает флаг игнорирования для ноды.
+     */
+    public synchronized void setIgnored(String nodeId, boolean ignored) {
+        if (dbConnection == null || nodeId == null) { return; }
+        try (PreparedStatement ps = dbConnection.prepareStatement(
+                "UPDATE nodes SET ignored = ? WHERE node_id = ?")) {
+            ps.setBoolean(1, ignored);
+            ps.setString(2, nodeId);
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            log.error("Failed to set ignored for node {}", nodeId, e);
+        }
+    }
+
+    /**
+     * Проверяет, является ли нода игнорируемой.
+     */
+    public boolean isIgnored(String nodeId) {
+        if (dbConnection == null || nodeId == null) { return false; }
+        try (PreparedStatement ps = dbConnection.prepareStatement(
+                "SELECT ignored FROM nodes WHERE node_id = ?")) {
+            ps.setString(1, nodeId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) { return rs.getBoolean("ignored"); }
+            }
+        } catch (SQLException e) {
+            log.error("Failed to check ignored for node {}", nodeId, e);
+        }
+        return false;
+    }
+
+    /**
+     * Загружает все игнорируемые ноды из БД.
+     */
+    public List<NodeData> loadIgnoredNodes() {
+        List<NodeData> ignored = new ArrayList<>();
+        if (dbConnection == null) { return ignored; }
+        try (PreparedStatement ps = dbConnection.prepareStatement(
+                "SELECT * FROM nodes WHERE ignored = TRUE")) {
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    ignored.add(readNode(rs));
+                }
+            }
+        } catch (SQLException e) {
+            log.error("Failed to load ignored nodes from DB", e);
+        }
+        return ignored;
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -889,6 +941,8 @@ public final class NodeCacheService {
 
         if (src.getHopsAway() != 0) { dst.setHopsAway(src.getHopsAway()); }
 
+        if (src.getChannel() != 0) { dst.setChannel(src.getChannel()); }
+
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -927,15 +981,12 @@ public final class NodeCacheService {
      */
     private synchronized void persistNode(String nodeId) {
         NodeData node = cache.get(nodeId);
-        log.info("CACHE_DEBUG persistNode: nodeId={}, inCache={}, mergeStmt={}, hasName={}",
-                nodeId, node != null, mergeStmt != null, node != null && node.hasName());
         if (node == null || mergeStmt == null) { return; }
         try {
             bindNode(mergeStmt, node);
-            int rows = mergeStmt.executeUpdate();
-            log.info("CACHE_DEBUG persistNode: OK, rows={}", rows);
+            mergeStmt.executeUpdate();
         } catch (SQLException e) {
-            log.error("CACHE_DEBUG persistNode FAILED for {}", nodeId, e);
+            log.error("Failed to persist node {}", nodeId, e);
         }
     }
 
@@ -988,6 +1039,7 @@ public final class NodeCacheService {
         ps.setInt(12, n.getBatteryLevel());
         ps.setFloat(13, n.getVoltage());
         ps.setInt(14, n.getHopsAway());
+        ps.setInt(15, n.getChannel());
     }
 
     /**
@@ -1009,6 +1061,7 @@ public final class NodeCacheService {
         node.setBatteryLevel(rs.getInt("battery_level"));
         node.setVoltage(rs.getFloat("voltage"));
         node.setHopsAway(rs.getInt("hops_away"));
+        node.setChannel(rs.getInt("channel"));
         return node;
     }
 }

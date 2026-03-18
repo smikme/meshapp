@@ -7,8 +7,10 @@ import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.protocol.ProtocolHandler;
 import com.meshtastic.client.service.ConnectionManager;
 import com.meshtastic.client.service.FavoriteNodeService;
+import com.meshtastic.client.service.IgnoredNodeService;
 import com.meshtastic.client.service.NodeCacheService;
 import com.meshtastic.client.system.Form;
+import com.meshtastic.client.utils.AppPreferences;
 import com.meshtastic.client.utils.NodeUtils;
 import com.meshtastic.client.utils.SvgIconLoader;
 import com.meshtastic.client.utils.SystemForm;
@@ -47,7 +49,14 @@ public class FormNodes extends Form {
 
     private boolean suppressSelectionListener;
     private boolean showFavoritesOnly;
+    private boolean showDetails;
+    private boolean hideOffline;
+    private boolean includeUnknownNames;
+    private boolean showDirectOnly;
+    private boolean showIgnoredOnly;
     private Button favFilterBtn;
+    private CheckMenuItem filterFavorites;
+    private CheckMenuItem filterIgnored;
     private SortedList<NodeData> sortedNodes;
 
     private DeviceState state;
@@ -101,6 +110,14 @@ public class FormNodes extends Form {
         nodeListView.refresh();
     });
 
+    private final Runnable ignoredListener = () -> Platform.runLater(() -> {
+        if (showIgnoredOnly) {
+            injectOfflineIgnored();
+            updateFilterPredicate();
+        }
+        nodeListView.refresh();
+    });
+
     public FormNodes() {
         initComponents();
     }
@@ -109,6 +126,7 @@ public class FormNodes extends Form {
     public void formInit() {
         ConnectionManager.getInstance().addListener(connectionListener);
         FavoriteNodeService.getInstance().addListener(favoritesListener);
+        IgnoredNodeService.getInstance().addListener(ignoredListener);
         rebindState();
     }
 
@@ -144,49 +162,156 @@ public class FormNodes extends Form {
         favFilterBtn.setTooltip(new Tooltip("Только избранные"));
         favFilterBtn.setOnAction(e -> {
             showFavoritesOnly = !showFavoritesOnly;
-            if (showFavoritesOnly) {
-                favFilterBtn.getStyleClass().add("favorite-btn-active");
-                favFilterBtn.getTooltip().setText("Показать все");
-                injectOfflineFavorites();
-            } else {
-                favFilterBtn.getStyleClass().remove("favorite-btn-active");
-                favFilterBtn.getTooltip().setText("Только избранные");
-                removeOfflineNodes();
-            }
-            updateFilterPredicate();
+            syncFavoritesState();
+            AppPreferences.setNodesFilterFavorites(showFavoritesOnly);
+            if (filterFavorites != null) { filterFavorites.setSelected(showFavoritesOnly); }
         });
 
-        // Кнопка сортировки
+        // Кнопка сортировки и фильтров
         SVGPath sortIcon = SvgIconLoader.load("/icons/sort.svg", 16);
         Button sortBtn = new Button();
         sortBtn.setGraphic(sortIcon);
         sortBtn.setContentDisplay(ContentDisplay.GRAPHIC_ONLY);
         sortBtn.getStyleClass().add("chat-new-btn");
-        sortBtn.setTooltip(new Tooltip("Сортировка"));
+        sortBtn.setTooltip(new Tooltip("Сортировка и фильтры"));
 
+        // --- Сортировки ---
         ToggleGroup sortGroup = new ToggleGroup();
-        RadioMenuItem sortByTime = new RadioMenuItem("По времени в сети");
-        RadioMenuItem sortByNameAsc = new RadioMenuItem("По алфавиту (А→Я)");
-        RadioMenuItem sortByNameDesc = new RadioMenuItem("По алфавиту (Я→А)");
-        RadioMenuItem sortByAdded = new RadioMenuItem("По порядку добавления");
-        sortByTime.setToggleGroup(sortGroup);
-        sortByNameAsc.setToggleGroup(sortGroup);
-        sortByNameDesc.setToggleGroup(sortGroup);
-        sortByAdded.setToggleGroup(sortGroup);
-        sortByTime.setSelected(true);
+        RadioMenuItem sortLastHeardNew = new RadioMenuItem("Последний отклик (новые)");
+        RadioMenuItem sortLastHeardOld = new RadioMenuItem("Последний отклик (старые)");
+        RadioMenuItem sortDistance = new RadioMenuItem("Расстояние");
+        RadioMenuItem sortSignal = new RadioMenuItem("Сигнал (SNR)");
+        RadioMenuItem sortHops = new RadioMenuItem("Количество хопов");
+        RadioMenuItem sortChannel = new RadioMenuItem("Канал");
+        sortLastHeardNew.setToggleGroup(sortGroup);
+        sortLastHeardOld.setToggleGroup(sortGroup);
+        sortDistance.setToggleGroup(sortGroup);
+        sortSignal.setToggleGroup(sortGroup);
+        sortHops.setToggleGroup(sortGroup);
+        sortChannel.setToggleGroup(sortGroup);
 
-        ContextMenu sortMenu = new ContextMenu(sortByTime, sortByNameAsc, sortByNameDesc, sortByAdded);
-        sortBtn.setOnAction(e -> sortMenu.show(sortBtn, javafx.geometry.Side.BOTTOM, 0, 0));
+        // --- Фильтры ---
+        CheckMenuItem filterUnknown = new CheckMenuItem("Показывать неизвестные ноды");
+        CheckMenuItem filterDetails = new CheckMenuItem("Показать детали");
+        CheckMenuItem filterHideOffline = new CheckMenuItem("Скрыть офлайн-ноды");
+        filterFavorites = new CheckMenuItem("Только избранные");
+        CheckMenuItem filterDirect = new CheckMenuItem("Только прямые (0 хопов)");
+        filterIgnored = new CheckMenuItem("Игнорируемые");
 
+        ContextMenu sortMenu = new ContextMenu(
+                sortLastHeardNew, sortLastHeardOld, sortDistance, sortSignal, sortHops, sortChannel,
+                new SeparatorMenuItem(),
+                filterUnknown, filterDetails, filterHideOffline, filterFavorites, filterDirect, filterIgnored
+        );
+        // Не закрывать меню при клике на чекбоксы — переоткрыть
+        for (MenuItem item : sortMenu.getItems()) {
+            if (item instanceof CheckMenuItem) {
+                item.addEventHandler(javafx.event.ActionEvent.ACTION, ev -> {
+                    Platform.runLater(() -> {
+                        if (!sortMenu.isShowing()) {
+                            sortMenu.show(sortBtn, javafx.geometry.Side.BOTTOM, 0, 0);
+                        }
+                    });
+                });
+            }
+        }
+        sortBtn.setOnAction(e -> {
+            if (sortMenu.isShowing()) {
+                sortMenu.hide();
+            } else {
+                sortMenu.show(sortBtn, javafx.geometry.Side.BOTTOM, 0, 0);
+            }
+        });
+
+        // Компараторы сортировки
         Comparator<NodeData> defaultSort = Comparator.comparingInt(NodeData::getLastHeard).reversed()
                 .thenComparing(n -> n.getLongName() != null ? n.getLongName() : "");
 
-        sortByTime.setOnAction(e -> sortedNodes.setComparator(defaultSort));
-        sortByNameAsc.setOnAction(e -> sortedNodes.setComparator(
-                Comparator.comparing(n -> n.getLongName() != null ? n.getLongName().toLowerCase(Locale.ROOT) : "\uffff")));
-        sortByNameDesc.setOnAction(e -> sortedNodes.setComparator(
-                Comparator.comparing((NodeData n) -> n.getLongName() != null ? n.getLongName().toLowerCase(Locale.ROOT) : "").reversed()));
-        sortByAdded.setOnAction(e -> sortedNodes.setComparator(null));
+        // Map sort keys → RadioMenuItems и Comparators
+        Map<String, RadioMenuItem> sortKeyToItem = new LinkedHashMap<>();
+        sortKeyToItem.put("LAST_HEARD_NEW", sortLastHeardNew);
+        sortKeyToItem.put("LAST_HEARD_OLD", sortLastHeardOld);
+        sortKeyToItem.put("DISTANCE", sortDistance);
+        sortKeyToItem.put("SIGNAL", sortSignal);
+        sortKeyToItem.put("HOPS", sortHops);
+        sortKeyToItem.put("CHANNEL", sortChannel);
+
+        sortLastHeardNew.setOnAction(e -> { sortedNodes.setComparator(defaultSort); AppPreferences.setNodesSort("LAST_HEARD_NEW"); });
+        sortLastHeardOld.setOnAction(e -> {
+            sortedNodes.setComparator(Comparator.comparingInt(NodeData::getLastHeard)
+                    .thenComparing(n -> n.getLongName() != null ? n.getLongName() : ""));
+            AppPreferences.setNodesSort("LAST_HEARD_OLD");
+        });
+        sortDistance.setOnAction(e -> { sortedNodes.setComparator(buildDistanceComparator()); AppPreferences.setNodesSort("DISTANCE"); });
+        sortSignal.setOnAction(e -> { sortedNodes.setComparator(Comparator.comparingDouble(NodeData::getSnr).reversed()); AppPreferences.setNodesSort("SIGNAL"); });
+        sortHops.setOnAction(e -> {
+            sortedNodes.setComparator(Comparator.comparingInt(NodeData::getHopsAway)
+                    .thenComparing(Comparator.comparingInt(NodeData::getLastHeard).reversed()));
+            AppPreferences.setNodesSort("HOPS");
+        });
+        sortChannel.setOnAction(e -> {
+            sortedNodes.setComparator(Comparator.comparingInt(NodeData::getChannel)
+                    .thenComparing(Comparator.comparingInt(NodeData::getLastHeard).reversed()));
+            AppPreferences.setNodesSort("CHANNEL");
+        });
+
+        // Обработчики фильтров
+        filterUnknown.setOnAction(e -> {
+            includeUnknownNames = filterUnknown.isSelected();
+            AppPreferences.setNodesFilterUnknown(includeUnknownNames);
+            updateFilterPredicate();
+        });
+        filterDetails.setOnAction(e -> {
+            showDetails = filterDetails.isSelected();
+            AppPreferences.setNodesFilterDetails(showDetails);
+            nodeListView.refresh();
+        });
+        filterHideOffline.setOnAction(e -> {
+            hideOffline = filterHideOffline.isSelected();
+            AppPreferences.setNodesFilterHideOffline(hideOffline);
+            updateFilterPredicate();
+        });
+        filterFavorites.setOnAction(e -> {
+            showFavoritesOnly = filterFavorites.isSelected();
+            AppPreferences.setNodesFilterFavorites(showFavoritesOnly);
+            syncFavoritesState();
+        });
+        filterDirect.setOnAction(e -> {
+            showDirectOnly = filterDirect.isSelected();
+            AppPreferences.setNodesFilterDirect(showDirectOnly);
+            updateFilterPredicate();
+        });
+        filterIgnored.setOnAction(e -> {
+            showIgnoredOnly = filterIgnored.isSelected();
+            AppPreferences.setNodesFilterIgnored(showIgnoredOnly);
+            syncIgnoredState();
+        });
+
+        // --- Восстановить настройки из Preferences ---
+        includeUnknownNames = AppPreferences.isNodesFilterUnknown();
+        showDetails = AppPreferences.isNodesFilterDetails();
+        hideOffline = AppPreferences.isNodesFilterHideOffline();
+        showFavoritesOnly = AppPreferences.isNodesFilterFavorites();
+        showDirectOnly = AppPreferences.isNodesFilterDirect();
+        showIgnoredOnly = AppPreferences.isNodesFilterIgnored();
+
+        filterUnknown.setSelected(includeUnknownNames);
+        filterDetails.setSelected(showDetails);
+        filterHideOffline.setSelected(hideOffline);
+        filterFavorites.setSelected(showFavoritesOnly);
+        filterDirect.setSelected(showDirectOnly);
+        filterIgnored.setSelected(showIgnoredOnly);
+
+        // Синхронизировать favFilterBtn
+        if (showFavoritesOnly) {
+            favFilterBtn.getStyleClass().add("favorite-btn-active");
+            favFilterBtn.getTooltip().setText("Показать все");
+        }
+
+        // Восстановить сортировку
+        String savedSort = AppPreferences.getNodesSort();
+        RadioMenuItem savedSortItem = sortKeyToItem.getOrDefault(savedSort, sortLastHeardNew);
+        savedSortItem.setSelected(true);
 
         HBox searchBox = new HBox(8, searchField, favFilterBtn, sortBtn);
         searchBox.setPadding(new Insets(8));
@@ -196,7 +321,9 @@ public class FormNodes extends Form {
         filteredNodes = new FilteredList<>(nodeData, n -> true);
         searchField.textProperty().addListener((obs, oldVal, newVal) -> updateFilterPredicate());
 
-        sortedNodes = new SortedList<>(filteredNodes, defaultSort);
+        // Инициализировать компаратор по сохранённой сортировке
+        Comparator<NodeData> initialComparator = resolveComparator(savedSort, defaultSort);
+        sortedNodes = new SortedList<>(filteredNodes, initialComparator);
 
         nodeListView = new ListView<>(sortedNodes);
         nodeListView.getStyleClass().add("node-list-view");
@@ -241,15 +368,98 @@ public class FormNodes extends Form {
 
         // --- SplitPane ---
         SplitPane splitPane = new SplitPane(leftPane, detailPane);
-        splitPane.setDividerPositions(0.38);
+        splitPane.setDividerPositions(AppPreferences.getNodesDividerPos());
         splitPane.getStyleClass().add("node-split-pane");
         SplitPane.setResizableWithParent(leftPane, false);
+        splitPane.getDividers().get(0).positionProperty().addListener((obs, oldVal, newVal) ->
+                AppPreferences.setNodesDividerPos(newVal.doubleValue()));
 
         getChildren().add(splitPane);
 
         // Растянуть SplitPane на всю форму
         splitPane.prefWidthProperty().bind(widthProperty());
         splitPane.prefHeightProperty().bind(heightProperty());
+
+        // Применить фильтры при старте
+        updateFilterPredicate();
+    }
+
+    /** Возвращает компаратор по строковому ключу сортировки. */
+    private Comparator<NodeData> resolveComparator(String sortKey, Comparator<NodeData> defaultSort) {
+        return switch (sortKey) {
+            case "LAST_HEARD_OLD" -> Comparator.comparingInt(NodeData::getLastHeard)
+                    .thenComparing(n -> n.getLongName() != null ? n.getLongName() : "");
+            case "DISTANCE" -> buildDistanceComparator();
+            case "SIGNAL" -> Comparator.comparingDouble(NodeData::getSnr).reversed();
+            case "HOPS" -> Comparator.comparingInt(NodeData::getHopsAway)
+                    .thenComparing(Comparator.comparingInt(NodeData::getLastHeard).reversed());
+            case "CHANNEL" -> Comparator.comparingInt(NodeData::getChannel)
+                    .thenComparing(Comparator.comparingInt(NodeData::getLastHeard).reversed());
+            default -> defaultSort;
+        };
+    }
+
+    /** Синхронизирует визуальное состояние кнопки favFilterBtn и применяет фильтр. */
+    private void syncFavoritesState() {
+        if (showFavoritesOnly) {
+            favFilterBtn.getStyleClass().add("favorite-btn-active");
+            favFilterBtn.getTooltip().setText("Показать все");
+            injectOfflineFavorites();
+        } else {
+            favFilterBtn.getStyleClass().remove("favorite-btn-active");
+            favFilterBtn.getTooltip().setText("Только избранные");
+            removeOfflineNodes();
+        }
+        updateFilterPredicate();
+    }
+
+    /** Синхронизирует состояние фильтра игнорируемых и применяет фильтр. */
+    private void syncIgnoredState() {
+        if (showIgnoredOnly) {
+            injectOfflineIgnored();
+        } else {
+            removeOfflineNodes();
+        }
+        updateFilterPredicate();
+    }
+
+    // ==================== Distance ====================
+
+    private static final double EARTH_RADIUS_KM = 6371.0;
+
+    /** Comparator по расстоянию от своей ноды. Ноды без GPS — в конец. */
+    private Comparator<NodeData> buildDistanceComparator() {
+        double myLat = 0, myLon = 0;
+        if (state != null) {
+            NodeData myNode = state.getNodeDb().get(state.getMyNodeNum());
+            if (myNode != null) {
+                myLat = myNode.getLatitude();
+                myLon = myNode.getLongitude();
+            }
+        }
+        final double lat1 = myLat;
+        final double lon1 = myLon;
+        boolean hasMyPos = lat1 != 0 || lon1 != 0;
+
+        if (!hasMyPos) {
+            // Нет своей позиции — fallback на lastHeard DESC
+            return Comparator.comparingInt(NodeData::getLastHeard).reversed()
+                    .thenComparing(n -> n.getLongName() != null ? n.getLongName() : "");
+        }
+
+        return Comparator.comparingDouble((NodeData n) -> {
+            if (n.getLatitude() == 0 && n.getLongitude() == 0) { return Double.MAX_VALUE; }
+            return haversine(lat1, lon1, n.getLatitude(), n.getLongitude());
+        }).thenComparing(Comparator.comparingInt(NodeData::getLastHeard).reversed());
+    }
+
+    private static double haversine(double lat1, double lon1, double lat2, double lon2) {
+        double dLat = Math.toRadians(lat2 - lat1);
+        double dLon = Math.toRadians(lon2 - lon1);
+        double a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2)) *
+                Math.sin(dLon / 2) * Math.sin(dLon / 2);
+        return EARTH_RADIUS_KM * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     }
 
     // ==================== Filter ====================
@@ -266,6 +476,18 @@ public class FormNodes extends Form {
         }
     }
 
+    /** Подгрузить игнорируемые ноды из БД, которых нет в текущем живом списке. */
+    private void injectOfflineIgnored() {
+        List<NodeData> dbIgnored = NodeCacheService.getInstance().loadIgnoredNodes();
+        Set<Integer> existingNums = new HashSet<>();
+        for (NodeData n : nodeData) { existingNums.add(n.getNodeNum()); }
+        for (NodeData dbNode : dbIgnored) {
+            if (!existingNums.contains(dbNode.getNodeNum())) {
+                nodeData.add(dbNode);
+            }
+        }
+    }
+
     /** Убрать ноды, которых нет в DeviceState (были подгружены из БД). */
     private void removeOfflineNodes() {
         if (state == null) { return; }
@@ -276,10 +498,30 @@ public class FormNodes extends Form {
     private void updateFilterPredicate() {
         String query = searchField.getText() == null ? "" : searchField.getText().trim().toLowerCase(Locale.ROOT);
         FavoriteNodeService favService = FavoriteNodeService.getInstance();
+        IgnoredNodeService ignService = IgnoredNodeService.getInstance();
+        long now = System.currentTimeMillis() / 1000;
         filteredNodes.setPredicate(node -> {
+            // Фильтр неизвестных нод (без имени)
+            if (!includeUnknownNames && !node.hasName()) {
+                return false;
+            }
+            // Фильтр офлайн-нод (не слышны более 2 часов)
+            if (hideOffline && node.getLastHeard() > 0 && (now - node.getLastHeard()) > 7200) {
+                return false;
+            }
+            // Фильтр только избранные
             if (showFavoritesOnly && !favService.isFavorite(node.getNodeId())) {
                 return false;
             }
+            // Фильтр только прямые (0 хопов)
+            if (showDirectOnly && node.getHopsAway() != 0) {
+                return false;
+            }
+            // Фильтр только игнорируемые
+            if (showIgnoredOnly && !ignService.isIgnored(node.getNodeId())) {
+                return false;
+            }
+            // Текстовый поиск
             if (query.isEmpty()) { return true; }
             if (node.getLongName() != null && node.getLongName().toLowerCase(Locale.ROOT).contains(query)) { return true; }
             if (node.getShortName() != null && node.getShortName().toLowerCase(Locale.ROOT).contains(query)) { return true; }
@@ -297,6 +539,7 @@ public class FormNodes extends Form {
         private final VBox textBox = new VBox(2);
         private final Label nameLabel = new Label();
         private final Label subtitleLabel = new Label();
+        private final Label detailsLabel = new Label();
         private final StackPane starPane = new StackPane();
 
         NodeListCell() {
@@ -316,6 +559,9 @@ public class FormNodes extends Form {
 
             subtitleLabel.getStyleClass().add("node-subtitle-label");
 
+            detailsLabel.getStyleClass().add("node-subtitle-label");
+            detailsLabel.setStyle("-fx-opacity: 0.7; -fx-font-size: 11px;");
+
             textBox.getChildren().addAll(nameLabel, subtitleLabel);
             HBox.setHgrow(textBox, Priority.ALWAYS);
 
@@ -334,7 +580,10 @@ public class FormNodes extends Form {
             // Контекстное меню
             MenuItem addFavItem = new MenuItem("Добавить в избранное");
             MenuItem removeFavItem = new MenuItem("Убрать из избранного");
-            ContextMenu ctxMenu = new ContextMenu(addFavItem, removeFavItem);
+            MenuItem addIgnItem = new MenuItem("Добавить в игнорируемые");
+            MenuItem removeIgnItem = new MenuItem("Убрать из игнорируемых");
+            ContextMenu ctxMenu = new ContextMenu(addFavItem, removeFavItem,
+                    new SeparatorMenuItem(), addIgnItem, removeIgnItem);
             setContextMenu(ctxMenu);
 
             ctxMenu.setOnShowing(ev -> {
@@ -342,6 +591,9 @@ public class FormNodes extends Form {
                 boolean fav = nd != null && FavoriteNodeService.getInstance().isFavorite(nd.getNodeId());
                 addFavItem.setVisible(!fav);
                 removeFavItem.setVisible(fav);
+                boolean ign = nd != null && IgnoredNodeService.getInstance().isIgnored(nd.getNodeId());
+                addIgnItem.setVisible(!ign);
+                removeIgnItem.setVisible(ign);
             });
 
             addFavItem.setOnAction(ev -> {
@@ -352,6 +604,16 @@ public class FormNodes extends Form {
             removeFavItem.setOnAction(ev -> {
                 NodeData nd = getItem();
                 if (nd != null) { FavoriteNodeService.getInstance().removeFavorite(nd.getNodeId()); }
+            });
+
+            addIgnItem.setOnAction(ev -> {
+                NodeData nd = getItem();
+                if (nd != null) { IgnoredNodeService.getInstance().addIgnored(nd.getNodeId()); }
+            });
+
+            removeIgnItem.setOnAction(ev -> {
+                NodeData nd = getItem();
+                if (nd != null) { IgnoredNodeService.getInstance().removeIgnored(nd.getNodeId()); }
             });
         }
 
@@ -390,6 +652,41 @@ public class FormNodes extends Form {
                 subtitle += " · " + node.getHopsAway() + " хоп";
             }
             subtitleLabel.setText(subtitle);
+
+            // Расширенные детали
+            if (showDetails) {
+                StringBuilder sb = new StringBuilder();
+                if (node.getSnr() != 0) { sb.append("SNR: ").append(String.format("%.1f", node.getSnr())).append(" дБ"); }
+                if (node.getHopsAway() > 0) {
+                    if (!sb.isEmpty()) { sb.append(" · "); }
+                    sb.append(node.getHopsAway()).append(" хоп");
+                }
+                if (node.getBatteryLevel() > 0 && node.getBatteryLevel() <= 100) {
+                    if (!sb.isEmpty()) { sb.append(" · "); }
+                    sb.append("Бат: ").append(node.getBatteryLevel()).append("%");
+                } else if (node.getBatteryLevel() == 101) {
+                    if (!sb.isEmpty()) { sb.append(" · "); }
+                    sb.append("Бат: USB");
+                }
+                if (node.getVoltage() > 0) {
+                    if (!sb.isEmpty()) { sb.append(" · "); }
+                    sb.append(String.format("%.1fV", node.getVoltage()));
+                }
+                if (node.getChannel() > 0) {
+                    if (!sb.isEmpty()) { sb.append(" · "); }
+                    sb.append("Кан: ").append(node.getChannel());
+                }
+                detailsLabel.setText(sb.toString());
+                if (!textBox.getChildren().contains(detailsLabel)) {
+                    textBox.getChildren().add(detailsLabel);
+                }
+                detailsLabel.setVisible(true);
+                detailsLabel.setManaged(true);
+            } else {
+                textBox.getChildren().remove(detailsLabel);
+                detailsLabel.setVisible(false);
+                detailsLabel.setManaged(false);
+            }
 
             // Звёздочка избранного
             boolean isFav = FavoriteNodeService.getInstance().isFavorite(node.getNodeId());

@@ -148,7 +148,7 @@ public class ProtocolHandler {
                 Thread.currentThread().interrupt();
                 break;
             } catch (InvalidProtocolBufferException e) {
-                log.warn("Failed to parse FromRadio: {}", e.getMessage());
+                log.debug("Failed to parse FromRadio: {}", e.getMessage());
             } catch (Exception e) {
                 log.error("Error processing FromRadio", e);
             }

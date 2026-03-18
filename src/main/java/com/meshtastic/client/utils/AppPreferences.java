@@ -20,6 +20,8 @@ public class AppPreferences {
     public static final String KEY_NOTIFICATIONS_ENABLED = "notificationsEnabled";
     public static final String KEY_NATIVE_WINDOW = "nativeWindow";
     public static final String KEY_DISABLE_TRANSPARENCY = "disableTransparency";
+    public static final String KEY_DISABLE_EFFECTS = "disableEffects";
+    public static final String KEY_CHECK_UPDATES = "checkUpdates";
 
     private static Preferences state;
 
@@ -63,6 +65,22 @@ public class AppPreferences {
         state.putBoolean(KEY_DISABLE_TRANSPARENCY, value);
     }
 
+    public static boolean isDisableEffects() {
+        return state.getBoolean(KEY_DISABLE_EFFECTS, false);
+    }
+
+    public static void setDisableEffects(boolean value) {
+        state.putBoolean(KEY_DISABLE_EFFECTS, value);
+    }
+
+    public static boolean isCheckUpdates() {
+        return state.getBoolean(KEY_CHECK_UPDATES, true);
+    }
+
+    public static void setCheckUpdates(boolean value) {
+        state.putBoolean(KEY_CHECK_UPDATES, value);
+    }
+
     public static List<String> getRecentSearch(boolean favorite) {
         String stringArr = state.get(favorite ? KEY_RECENT_SEARCH_FAVORITE : KEY_RECENT_SEARCH, null);
         if (stringArr == null || stringArr.trim().isEmpty()) { return Collections.emptyList(); }
@@ -90,5 +108,47 @@ public class AppPreferences {
     }
 
     // ==================== Recent Search ====================
+
+    // ==================== Nodes Sort & Filter ====================
+
+    public static final String KEY_NODES_SORT = "nodesSort";
+    public static final String KEY_NODES_FILTER_UNKNOWN = "nodesFilterUnknown";
+    public static final String KEY_NODES_FILTER_DETAILS = "nodesFilterDetails";
+    public static final String KEY_NODES_FILTER_HIDE_OFFLINE = "nodesFilterHideOffline";
+    public static final String KEY_NODES_FILTER_FAVORITES = "nodesFilterFavorites";
+    public static final String KEY_NODES_FILTER_DIRECT = "nodesFilterDirect";
+    public static final String KEY_NODES_FILTER_IGNORED = "nodesFilterIgnored";
+
+    public static String getNodesSort() { return state.get(KEY_NODES_SORT, "LAST_HEARD_NEW"); }
+    public static void setNodesSort(String sort) { state.put(KEY_NODES_SORT, sort); }
+
+    public static boolean isNodesFilterUnknown() { return state.getBoolean(KEY_NODES_FILTER_UNKNOWN, false); }
+    public static void setNodesFilterUnknown(boolean v) { state.putBoolean(KEY_NODES_FILTER_UNKNOWN, v); }
+
+    public static boolean isNodesFilterDetails() { return state.getBoolean(KEY_NODES_FILTER_DETAILS, false); }
+    public static void setNodesFilterDetails(boolean v) { state.putBoolean(KEY_NODES_FILTER_DETAILS, v); }
+
+    public static boolean isNodesFilterHideOffline() { return state.getBoolean(KEY_NODES_FILTER_HIDE_OFFLINE, false); }
+    public static void setNodesFilterHideOffline(boolean v) { state.putBoolean(KEY_NODES_FILTER_HIDE_OFFLINE, v); }
+
+    public static boolean isNodesFilterFavorites() { return state.getBoolean(KEY_NODES_FILTER_FAVORITES, false); }
+    public static void setNodesFilterFavorites(boolean v) { state.putBoolean(KEY_NODES_FILTER_FAVORITES, v); }
+
+    public static boolean isNodesFilterDirect() { return state.getBoolean(KEY_NODES_FILTER_DIRECT, false); }
+    public static void setNodesFilterDirect(boolean v) { state.putBoolean(KEY_NODES_FILTER_DIRECT, v); }
+
+    public static boolean isNodesFilterIgnored() { return state.getBoolean(KEY_NODES_FILTER_IGNORED, false); }
+    public static void setNodesFilterIgnored(boolean v) { state.putBoolean(KEY_NODES_FILTER_IGNORED, v); }
+
+    // ==================== SplitPane Divider Positions ====================
+
+    public static final String KEY_CHAT_DIVIDER = "chatDividerPos";
+    public static final String KEY_NODES_DIVIDER = "nodesDividerPos";
+
+    public static double getChatDividerPos() { return state.getDouble(KEY_CHAT_DIVIDER, 0.35); }
+    public static void setChatDividerPos(double pos) { state.putDouble(KEY_CHAT_DIVIDER, pos); }
+
+    public static double getNodesDividerPos() { return state.getDouble(KEY_NODES_DIVIDER, 0.38); }
+    public static void setNodesDividerPos(double pos) { state.putDouble(KEY_NODES_DIVIDER, pos); }
 
 }

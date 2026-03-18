@@ -6,13 +6,20 @@ import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.model.TelemetryEntry;
 import com.meshtastic.client.protocol.FromRadioListener;
 import com.meshtastic.client.protocol.ProtocolHandler;
+import com.meshtastic.client.system.DrawerManager;
+import javafx.application.Platform;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Сервис обмена конфигурацией с Meshtastic-устройством.
@@ -34,11 +41,25 @@ public class ConfigExchangeService implements FromRadioListener {
 
     private static final Logger log = LoggerFactory.getLogger(ConfigExchangeService.class);
 
+    /** Интервал повтора want_config_id если устройство не ответило (мс).
+     *  Покрывает случай когда USB-Serial мост (CH340) сбросил устройство при openPort(),
+     *  и первый want_config_id был отправлен до завершения загрузки ESP32. */
+    private static final int RETRY_INTERVAL_MS = 3000;
+    private static final int MAX_RETRIES = 5;
+
     private final ProtocolHandler protocolHandler;
     private final DeviceState deviceState;
     private int sentConfigId;
     private CompletableFuture<DeviceState> future;
     private final Map<String, Boolean> favoriteFlags = new HashMap<>();
+    private final Map<String, Boolean> ignoredFlags = new HashMap<>();
+    private final AtomicBoolean receivedAny = new AtomicBoolean(false);
+    private volatile ScheduledFuture<?> retryFuture;
+    private final ScheduledExecutorService retryScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+        Thread t = new Thread(r, "config-retry");
+        t.setDaemon(true);
+        return t;
+    });
 
     public ConfigExchangeService(ProtocolHandler protocolHandler, DeviceState deviceState) {
         this.protocolHandler = protocolHandler;
@@ -63,16 +84,49 @@ public class ConfigExchangeService implements FromRadioListener {
 
         protocolHandler.addListener(this);
 
-        MeshProtos.ToRadio toRadio = MeshProtos.ToRadio.newBuilder()
-                .setWantConfigId(sentConfigId)
-                .build();
-        protocolHandler.sendToRadio(toRadio);
+        sendWantConfig();
+        scheduleRetry(1);
 
         return future;
     }
 
+    private void sendWantConfig() {
+        MeshProtos.ToRadio toRadio = MeshProtos.ToRadio.newBuilder()
+                .setWantConfigId(sentConfigId)
+                .build();
+        protocolHandler.sendToRadio(toRadio);
+    }
+
+    /**
+     * Планирует повторную отправку want_config_id, если устройство не ответило.
+     * Покрывает случай, когда USB-Serial мост (CH340/CH9102) сбросил ESP32 при
+     * открытии порта и первый want_config_id был потерян во время загрузки.
+     */
+    private void scheduleRetry(int attempt) {
+        if (attempt > MAX_RETRIES) return;
+        retryFuture = retryScheduler.schedule(() -> {
+            if (!receivedAny.get() && !future.isDone()) {
+                log.info("No response from device, retrying want_config_id (attempt {}/{})", attempt, MAX_RETRIES);
+                deviceState.clear();
+                sentConfigId = ThreadLocalRandom.current().nextInt(1, Integer.MAX_VALUE);
+                sendWantConfig();
+                scheduleRetry(attempt + 1);
+            }
+        }, RETRY_INTERVAL_MS, TimeUnit.MILLISECONDS);
+    }
+
+    private void cancelRetry() {
+        ScheduledFuture<?> f = retryFuture;
+        if (f != null) {
+            f.cancel(false);
+            retryFuture = null;
+        }
+        retryScheduler.shutdownNow();
+    }
+
     @Override
     public void onMyNodeInfo(MeshProtos.MyNodeInfo myInfo) {
+        receivedAny.set(true);
         deviceState.setMyNodeNum(myInfo.getMyNodeNum());
         log.info("My node number: {}", myInfo.getMyNodeNum());
     }
@@ -128,9 +182,12 @@ public class ConfigExchangeService implements FromRadioListener {
 
         if (nodeInfo.getHopsAway() != 0) { node.setHopsAway(nodeInfo.getHopsAway()); }
 
-        // Запомнить флаг избранного — применим после записи нод в БД (onConfigComplete)
+        if (nodeInfo.getChannel() != 0) { node.setChannel((int) nodeInfo.getChannel()); }
+
+        // Запомнить флаги избранного и игнорирования — применим после записи нод в БД (onConfigComplete)
         if (node.getNodeId() != null) {
             favoriteFlags.put(node.getNodeId(), nodeInfo.getIsFavorite());
+            ignoredFlags.put(node.getNodeId(), nodeInfo.getIsIgnored());
         }
 
         if (nodeInfo.hasDeviceMetrics()) {
@@ -179,6 +236,31 @@ public class ConfigExchangeService implements FromRadioListener {
         deviceState.addChannel(channel);
     }
 
+    private void checkUnreadMessages(String ownerNodeId) {
+        MessageDbService db = MessageDbService.getInstance();
+        Map<String, Integer> readCounts = db.loadAllReadCounts(ownerNodeId);
+        boolean hasUnread = false;
+
+        for (ChannelProtos.Channel channel : deviceState.getChannels()) {
+            if (channel.getRole() == ChannelProtos.Channel.Role.DISABLED) { continue; }
+            String chKey = String.valueOf(channel.getIndex());
+            int total = db.getMessageCount("channel", chKey, ownerNodeId);
+            int read = readCounts.getOrDefault("ch:" + channel.getIndex(), 0);
+            if (total > read) { hasUnread = true; break; }
+        }
+
+        if (!hasUnread) {
+            for (String peerNodeId : db.getDistinctDmPeers(ownerNodeId)) {
+                int total = db.getMessageCount("dm", peerNodeId, ownerNodeId);
+                int read = readCounts.getOrDefault("dm:" + peerNodeId, 0);
+                if (total > read) { hasUnread = true; break; }
+            }
+        }
+
+        boolean show = hasUnread;
+        Platform.runLater(() -> DrawerManager.setChatUnreadDot(show));
+    }
+
     @Override
     public void onConfigComplete(int configCompleteId) {
         if (configCompleteId == sentConfigId) {
@@ -186,6 +268,7 @@ public class ConfigExchangeService implements FromRadioListener {
                     deviceState.getNodeCount(),
                     deviceState.getChannels().size(),
                     deviceState.getConfigs().size());
+            cancelRetry();
             protocolHandler.removeListener(this);
             deviceState.clearPendingFixedPosition();
             NodeCacheService ncs = NodeCacheService.getInstance();
@@ -196,13 +279,19 @@ public class ConfigExchangeService implements FromRadioListener {
                 ncs.setFavorite(e.getKey(), e.getValue());
             }
 
+            // Применить флаги игнорирования
+            for (Map.Entry<String, Boolean> e : ignoredFlags.entrySet()) {
+                ncs.setIgnored(e.getKey(), e.getValue());
+            }
+
             // Обогатить bare-ноды (только телеметрия) кэшированными именами из H2
             for (NodeData node : deviceState.getNodeDb().values()) {
                 ncs.enrichFromCache(node);
             }
 
-            // Уведомить UI об обновлённых избранных (один раз после всех нод)
+            // Уведомить UI об обновлённых избранных и игнорируемых (один раз после всех нод)
             FavoriteNodeService.getInstance().fireListeners();
+            IgnoredNodeService.getInstance().fireListeners();
 
             // Загрузить архив телеметрии из H2 + подчистить старые записи
             String ownerNodeId = String.format("!%08x", deviceState.getMyNodeNum());
@@ -210,6 +299,9 @@ public class ConfigExchangeService implements FromRadioListener {
             var archived = ncs.loadTelemetryHistory(200, ownerNodeId);
             deviceState.prependTelemetryHistory(archived);
             log.info("Loaded {} archived telemetry entries from DB", archived.size());
+
+            // Проверить наличие непрочитанных сообщений и обновить badge
+            checkUnreadMessages(ownerNodeId);
 
             if (future != null) {
                 future.complete(deviceState);

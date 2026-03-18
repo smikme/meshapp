@@ -42,6 +42,8 @@ public class DeviceState {
     private static final long ACK_TIMEOUT_MS = 240_000;
     /** Интервал проверки просроченных pending ACK */
     private static final long ACK_SWEEP_INTERVAL_MS = 10_000;
+    /** Максимум сообщений в памяти на канал/DM (история загружается из БД) */
+    private static final int MAX_MESSAGES_IN_MEMORY = 100;
 
     /** Запись в очереди ожидающих ACK: сообщение + время регистрации */
     private record PendingAckEntry(MeshMessage message, long registeredAtMillis) {}
@@ -245,16 +247,18 @@ public class DeviceState {
     public void addMessage(MeshMessage msg) {
         List<MeshMessage> list = messagesByChannel
                 .computeIfAbsent(msg.getChannelIndex(), k -> Collections.synchronizedList(new ArrayList<>()));
-        // Дедупликация по packetId (радио может ретранслировать пакеты)
-        if (msg.getPacketId() != 0) {
-            synchronized (list) {
+        synchronized (list) {
+            // Дедупликация по packetId (радио может ретранслировать пакеты)
+            if (msg.getPacketId() != 0) {
                 for (MeshMessage existing : list) {
                     if (existing.getPacketId() == msg.getPacketId()) { return; }
-
                 }
             }
+            list.add(msg);
+            while (list.size() > MAX_MESSAGES_IN_MEMORY) {
+                list.remove(0);
+            }
         }
-        list.add(msg);
         fireMessageListeners();
     }
 
@@ -274,16 +278,18 @@ public class DeviceState {
     public void addDirectMessage(MeshMessage msg, String peerNodeId) {
         List<MeshMessage> list = directMessages
                 .computeIfAbsent(peerNodeId, k -> Collections.synchronizedList(new ArrayList<>()));
-        // Дедупликация по packetId (радио может ретранслировать пакеты)
-        if (msg.getPacketId() != 0) {
-            synchronized (list) {
+        synchronized (list) {
+            // Дедупликация по packetId (радио может ретранслировать пакеты)
+            if (msg.getPacketId() != 0) {
                 for (MeshMessage existing : list) {
                     if (existing.getPacketId() == msg.getPacketId()) { return; }
-
                 }
             }
+            list.add(msg);
+            while (list.size() > MAX_MESSAGES_IN_MEMORY) {
+                list.remove(0);
+            }
         }
-        list.add(msg);
         fireMessageListeners();
     }
 
