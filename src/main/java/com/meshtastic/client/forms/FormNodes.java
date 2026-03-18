@@ -202,7 +202,13 @@ public class FormNodes extends Form {
                 });
             }
         }
-        sortBtn.setOnAction(e -> sortMenu.show(sortBtn, javafx.geometry.Side.BOTTOM, 0, 0));
+        sortBtn.setOnAction(e -> {
+            if (sortMenu.isShowing()) {
+                sortMenu.hide();
+            } else {
+                sortMenu.show(sortBtn, javafx.geometry.Side.BOTTOM, 0, 0);
+            }
+        });
 
         // Компараторы сортировки
         Comparator<NodeData> defaultSort = Comparator.comparingInt(NodeData::getLastHeard).reversed()
@@ -342,9 +348,11 @@ public class FormNodes extends Form {
 
         // --- SplitPane ---
         SplitPane splitPane = new SplitPane(leftPane, detailPane);
-        splitPane.setDividerPositions(0.38);
+        splitPane.setDividerPositions(AppPreferences.getNodesDividerPos());
         splitPane.getStyleClass().add("node-split-pane");
         SplitPane.setResizableWithParent(leftPane, false);
+        splitPane.getDividers().get(0).positionProperty().addListener((obs, oldVal, newVal) ->
+                AppPreferences.setNodesDividerPos(newVal.doubleValue()));
 
         getChildren().add(splitPane);
 

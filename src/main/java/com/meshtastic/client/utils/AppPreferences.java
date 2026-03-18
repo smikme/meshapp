@@ -118,4 +118,15 @@ public class AppPreferences {
     public static boolean isNodesFilterDirect() { return state.getBoolean(KEY_NODES_FILTER_DIRECT, false); }
     public static void setNodesFilterDirect(boolean v) { state.putBoolean(KEY_NODES_FILTER_DIRECT, v); }
 
+    // ==================== SplitPane Divider Positions ====================
+
+    public static final String KEY_CHAT_DIVIDER = "chatDividerPos";
+    public static final String KEY_NODES_DIVIDER = "nodesDividerPos";
+
+    public static double getChatDividerPos() { return state.getDouble(KEY_CHAT_DIVIDER, 0.35); }
+    public static void setChatDividerPos(double pos) { state.putDouble(KEY_CHAT_DIVIDER, pos); }
+
+    public static double getNodesDividerPos() { return state.getDouble(KEY_NODES_DIVIDER, 0.38); }
+    public static void setNodesDividerPos(double pos) { state.putDouble(KEY_NODES_DIVIDER, pos); }
+
 }

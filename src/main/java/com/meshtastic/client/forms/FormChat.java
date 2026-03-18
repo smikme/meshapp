@@ -9,6 +9,7 @@ import com.meshtastic.client.components.chat.CreateChannelDialog;
 import com.meshtastic.client.components.chat.MessageBubbleFactory;
 import com.meshtastic.client.components.chat.NodeInfoFormatter;
 import com.meshtastic.client.components.chat.TracerouteView;
+import com.meshtastic.client.utils.AppPreferences;
 import com.meshtastic.client.modal.ModalPane;
 import com.meshtastic.client.modal.Toast;
 import com.meshtastic.client.model.ChatItem;
@@ -239,9 +240,11 @@ public class FormChat extends Form {
 
         // --- SplitPane ---
         SplitPane splitPane = new SplitPane(leftPane, detailPane);
-        splitPane.setDividerPositions(0.35);
+        splitPane.setDividerPositions(AppPreferences.getChatDividerPos());
         splitPane.getStyleClass().add("chat-split-pane");
         SplitPane.setResizableWithParent(leftPane, false);
+        splitPane.getDividers().get(0).positionProperty().addListener((obs, oldVal, newVal) ->
+                AppPreferences.setChatDividerPos(newVal.doubleValue()));
 
         getChildren().add(splitPane);
 
