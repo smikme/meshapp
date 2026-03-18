@@ -127,7 +127,9 @@ public class MeshApp extends Application {
         stage.setOnHiding(e -> saveWindowState(stage, rootPane));
 
         // Проверка обновлений (асинхронно, не блокирует запуск)
-        UpdateCheckService.checkAsync(ModalPane::showUpdateAvailable);
+        if (AppPreferences.isCheckUpdates()) {
+            UpdateCheckService.checkAsync(ModalPane::showUpdateAvailable);
+        }
     }
 
     private void restoreWindowBounds(Stage stage) {
