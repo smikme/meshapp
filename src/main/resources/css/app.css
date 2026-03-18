@@ -802,6 +802,20 @@
     -fx-background-color: rgba(255, 255, 255, 0.9);
 }
 
+/* Бейдж с количеством новых сообщений на кнопке «вниз» */
+.chat-scroll-down-badge {
+    -fx-background-color: #e74c3c;
+    -fx-text-fill: white;
+    -fx-font-size: 10px;
+    -fx-font-weight: bold;
+    -fx-min-width: 18;
+    -fx-min-height: 18;
+    -fx-max-height: 18;
+    -fx-background-radius: 9;
+    -fx-padding: 0 4;
+    -fx-alignment: center;
+}
+
 /* Пузыри сообщений — входящее (используем lookup-цвет, авто-адаптация light/dark) */
 .chat-bubble-incoming {
     -fx-background-color: -color-bg-subtle;
