@@ -12,9 +12,11 @@ import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
+import javafx.scene.shape.Circle;
 import javafx.scene.shape.SVGPath;
 
 import com.meshtastic.client.MeshApp;
+import com.meshtastic.client.forms.FormChat;
 import com.meshtastic.client.menu.MyDrawerBuilder;
 import com.meshtastic.client.themes.ThemeManager;
 import com.meshtastic.client.utils.AppPreferences;
@@ -30,6 +32,7 @@ public class DrawerPane extends StackPane {
     private final Button themeButton;
     private final Button notifButton;
     private Class<?> selectedItemClass;
+    private Circle chatBadgeDot;
 
     public DrawerPane() {
         getStyleClass().add("drawer-pane");
@@ -112,6 +115,17 @@ public class DrawerPane extends StackPane {
                 item.action().run();
             }
         });
+
+        // Красная точка для кнопки "Чаты"
+        if (item.formClass() == FormChat.class && btn.getGraphic() != null) {
+            chatBadgeDot = new Circle(4);
+            chatBadgeDot.getStyleClass().add("drawer-chat-badge-dot");
+            chatBadgeDot.setVisible(false);
+            StackPane wrapper = new StackPane(btn.getGraphic(), chatBadgeDot);
+            StackPane.setAlignment(chatBadgeDot, Pos.TOP_RIGHT);
+            btn.setGraphic(wrapper);
+        }
+
         return btn;
     }
 
@@ -178,6 +192,12 @@ public class DrawerPane extends StackPane {
                     btn.getStyleClass().remove("drawer-toolbar-button-selected");
                 }
             }
+        }
+    }
+
+    public void setChatUnreadDot(boolean visible) {
+        if (chatBadgeDot != null) {
+            chatBadgeDot.setVisible(visible);
         }
     }
 

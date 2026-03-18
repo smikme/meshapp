@@ -6,6 +6,8 @@ import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.model.TelemetryEntry;
 import com.meshtastic.client.protocol.FromRadioListener;
 import com.meshtastic.client.protocol.ProtocolHandler;
+import com.meshtastic.client.system.DrawerManager;
+import javafx.application.Platform;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -232,6 +234,31 @@ public class ConfigExchangeService implements FromRadioListener {
         deviceState.addChannel(channel);
     }
 
+    private void checkUnreadMessages(String ownerNodeId) {
+        MessageDbService db = MessageDbService.getInstance();
+        Map<String, Integer> readCounts = db.loadAllReadCounts(ownerNodeId);
+        boolean hasUnread = false;
+
+        for (ChannelProtos.Channel channel : deviceState.getChannels()) {
+            if (channel.getRole() == ChannelProtos.Channel.Role.DISABLED) { continue; }
+            String chKey = String.valueOf(channel.getIndex());
+            int total = db.getMessageCount("channel", chKey, ownerNodeId);
+            int read = readCounts.getOrDefault("ch:" + channel.getIndex(), 0);
+            if (total > read) { hasUnread = true; break; }
+        }
+
+        if (!hasUnread) {
+            for (String peerNodeId : db.getDistinctDmPeers(ownerNodeId)) {
+                int total = db.getMessageCount("dm", peerNodeId, ownerNodeId);
+                int read = readCounts.getOrDefault("dm:" + peerNodeId, 0);
+                if (total > read) { hasUnread = true; break; }
+            }
+        }
+
+        boolean show = hasUnread;
+        Platform.runLater(() -> DrawerManager.setChatUnreadDot(show));
+    }
+
     @Override
     public void onConfigComplete(int configCompleteId) {
         if (configCompleteId == sentConfigId) {
@@ -264,6 +291,9 @@ public class ConfigExchangeService implements FromRadioListener {
             var archived = ncs.loadTelemetryHistory(200, ownerNodeId);
             deviceState.prependTelemetryHistory(archived);
             log.info("Loaded {} archived telemetry entries from DB", archived.size());
+
+            // Проверить наличие непрочитанных сообщений и обновить badge
+            checkUnreadMessages(ownerNodeId);
 
             if (future != null) {
                 future.complete(deviceState);

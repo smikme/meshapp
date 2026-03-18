@@ -22,6 +22,12 @@ public class DrawerManager {
         }
     }
 
+    public static void setChatUnreadDot(boolean visible) {
+        if (drawerPane != null) {
+            drawerPane.setChatUnreadDot(visible);
+        }
+    }
+
     public static DrawerPane getDrawerPane() {
         return drawerPane;
     }

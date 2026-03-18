@@ -117,6 +117,10 @@
     -fx-fill: rgba(0, 0, 0, 0.9);
 }
 
+.drawer-chat-badge-dot {
+    -fx-fill: #e53935;
+}
+
 /* Кастомный title bar (полная ширина окна) */
 .custom-title-bar {
     -fx-background-color: transparent;

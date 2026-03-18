@@ -11,6 +11,8 @@ import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.model.TelemetryEntry;
 import com.meshtastic.client.notification.NotificationManager;
 import com.meshtastic.client.protocol.FromRadioListener;
+import com.meshtastic.client.system.DrawerManager;
+import javafx.application.Platform;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -138,6 +140,9 @@ public class MessageListenerService implements FromRadioListener {
                 log.error("Notification error", t);
             }
         }
+
+        // Показать красную точку на иконке "Чаты"
+        Platform.runLater(() -> DrawerManager.setChatUnreadDot(true));
     }
 
     private void handleRoutingAck(MeshProtos.MeshPacket packet, MeshProtos.Data data) {

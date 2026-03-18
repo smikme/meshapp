@@ -23,6 +23,7 @@ import com.meshtastic.client.service.MessageDbService;
 import com.meshtastic.client.service.MessageListenerService;
 import com.meshtastic.client.service.MessageService;
 import com.meshtastic.client.service.NodeCacheService;
+import com.meshtastic.client.system.DrawerManager;
 import com.meshtastic.client.system.Form;
 import com.meshtastic.client.utils.NodeUtils;
 import com.meshtastic.client.utils.SystemForm;
@@ -916,6 +917,10 @@ public class FormChat extends Form {
         } finally {
             suppressSelectionListener = false;
         }
+
+        // Обновить красную точку на иконке "Чаты" в боковой панели
+        boolean hasUnread = chatItems.stream().anyMatch(c -> c.getUnreadCount() > 0);
+        DrawerManager.setChatUnreadDot(hasUnread);
     }
 
     /**
