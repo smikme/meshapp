@@ -517,25 +517,34 @@ MESHBLE_API int meshble_write_to_radio(const unsigned char* data, int length) {
                     if (opt == 0) {
                         // Previously worked but now failed
                         log_msg("[meshble] writeToRadio failed: %s", gatt_status_str(r));
-                        return -1;
+                        return (r == GattCommunicationStatus::AccessDenied) ? -2 : -1;
                     }
                     // opt == -1: first attempt failed, try WriteWithoutResponse
                     log_msg("[meshble] writeToRadio WriteWithResponse failed: %s, trying WriteWithoutResponse",
                             gatt_status_str(r));
+                    // Remember AccessDenied from first attempt
+                    bool first_access_denied = (r == GattCommunicationStatus::AccessDenied);
                     buf = bytes_to_buffer(copy.data(), (int)copy.size());
-                }
 
-                // Try WriteWithoutResponse
-                auto r2 = g_ble->to_radio.WriteValueAsync(buf, GattWriteOption::WriteWithoutResponse).get();
-                if (r2 == GattCommunicationStatus::Success) {
-                    if (g_write_option.load() != 1) {
+                    // Try WriteWithoutResponse
+                    auto r2 = g_ble->to_radio.WriteValueAsync(buf, GattWriteOption::WriteWithoutResponse).get();
+                    if (r2 == GattCommunicationStatus::Success) {
                         g_write_option = 1;
                         log_msg("[meshble] writeToRadio: WriteWithoutResponse works");
+                        return 0;
                     }
+                    log_msg("[meshble] writeToRadio WriteWithoutResponse failed: %s", gatt_status_str(r2));
+                    if (r2 == GattCommunicationStatus::AccessDenied || first_access_denied) return -2;
+                    return -1;
+                }
+
+                // opt == 1: WriteWithoutResponse known to work
+                auto r2 = g_ble->to_radio.WriteValueAsync(buf, GattWriteOption::WriteWithoutResponse).get();
+                if (r2 == GattCommunicationStatus::Success) {
                     return 0;
                 }
                 log_msg("[meshble] writeToRadio WriteWithoutResponse failed: %s", gatt_status_str(r2));
-                return -1;
+                return (r2 == GattCommunicationStatus::AccessDenied) ? -2 : -1;
             } catch (const hresult_error& e) {
                 log_msg("[meshble] writeToRadio exception: %ls", e.message().c_str());
                 return -1;
