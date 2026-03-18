@@ -86,7 +86,8 @@ public final class NodeCacheService {
                         voltage       REAL,
                         hops_away     INT,
                         channel       INT DEFAULT 0,
-                        favorite      BOOLEAN DEFAULT FALSE
+                        favorite      BOOLEAN DEFAULT FALSE,
+                        ignored       BOOLEAN DEFAULT FALSE
                     )
                     """);
 
@@ -134,6 +135,8 @@ public final class NodeCacheService {
                 try { stmt.execute("ALTER TABLE telemetry_history ADD COLUMN hop_limit INT DEFAULT 0"); } catch (SQLException ignored) {}
                 // Migration: channel column in nodes table
                 try { stmt.execute("ALTER TABLE nodes ADD COLUMN channel INT DEFAULT 0"); } catch (SQLException ignored) {}
+                // Migration: ignored column (v5 migration may not have run on fresh-install DBs)
+                try { stmt.execute("ALTER TABLE nodes ADD COLUMN IF NOT EXISTS ignored BOOLEAN DEFAULT FALSE"); } catch (SQLException ignored) {}
 
                 stmt.execute("""
                     CREATE INDEX IF NOT EXISTS idx_telemetry_ts ON telemetry_history (ts)

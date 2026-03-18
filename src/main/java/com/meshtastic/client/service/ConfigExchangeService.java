@@ -279,9 +279,11 @@ public class ConfigExchangeService implements FromRadioListener {
                 ncs.setFavorite(e.getKey(), e.getValue());
             }
 
-            // Применить флаги игнорирования
+            // Применить флаги игнорирования (только true — дефолт уже FALSE)
             for (Map.Entry<String, Boolean> e : ignoredFlags.entrySet()) {
-                ncs.setIgnored(e.getKey(), e.getValue());
+                if (e.getValue()) {
+                    ncs.setIgnored(e.getKey(), true);
+                }
             }
 
             // Обогатить bare-ноды (только телеметрия) кэшированными именами из H2

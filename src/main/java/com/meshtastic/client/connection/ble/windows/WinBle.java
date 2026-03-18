@@ -5,6 +5,9 @@ import com.meshtastic.client.connection.ble.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.meshtastic.client.modal.Toast;
+import javafx.application.Platform;
+
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -187,10 +190,22 @@ public class WinBle implements BlePlatform {
         }
         int result = lib.meshble_write_to_radio(protobufPayload, protobufPayload.length);
         if (result != 0) {
+            if (result == -2) {
+                // AccessDenied — устройство не сопряжено
+                log.error("writeToRadio: AccessDenied — требуется сопряжение устройства в настройках Bluetooth Windows");
+                Platform.runLater(() -> Toast.show(Toast.Type.ERROR,
+                        "BLE: доступ запрещён. Выполните сопряжение устройства в настройках Bluetooth Windows"));
+                // Disconnect — нет смысла повторять без сопряжения
+                Consumer<BleState> sl = stateListener;
+                if (sl != null) {
+                    sl.accept(new BleState.Error(
+                            "Доступ запрещён. Выполните сопряжение устройства в настройках Bluetooth Windows", null));
+                }
+                return false;
+            }
             int failures = ++consecutiveWriteFailures;
             if (failures == 5) {
-                log.warn("writeToRadio: {} consecutive failures. " +
-                        "Убедитесь, что устройство сопряжено в настройках Bluetooth Windows", failures);
+                log.warn("writeToRadio: {} consecutive failures", failures);
             } else if (failures <= 5) {
                 log.error("writeToRadio failed: error={}", result);
             }
