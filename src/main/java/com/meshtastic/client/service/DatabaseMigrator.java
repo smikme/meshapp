@@ -23,7 +23,7 @@ public final class DatabaseMigrator {
     private static final Logger log = LoggerFactory.getLogger(DatabaseMigrator.class);
 
     /** Текущая версия схемы. Увеличивается при каждом изменении схемы. */
-    static final int CURRENT_VERSION = 4;
+    static final int CURRENT_VERSION = 5;
 
     private DatabaseMigrator() {}
 
@@ -60,6 +60,7 @@ public final class DatabaseMigrator {
             if (version < 2) { migrateToV2(connection); version = 2; }
             if (version < 3) { migrateToV3(connection); version = 3; }
             if (version < 4) { migrateToV4(connection); version = 4; }
+            if (version < 5) { migrateToV5(connection); version = 5; }
 
             setVersion(connection, CURRENT_VERSION);
             log.info("Database migration complete, schema version = {}", CURRENT_VERSION);
@@ -126,6 +127,14 @@ public final class DatabaseMigrator {
             stmt.execute("CREATE INDEX idx_telemetry_node_ts ON telemetry_history (owner_node_id, node_id, ts)");
         }
         log.info("Migration v4: added 'owner_node_id' to telemetry_history, cleared old telemetry data");
+    }
+
+    /** v5: колонка ignored для игнорируемых нод. */
+    private static void migrateToV5(Connection connection) throws SQLException {
+        try (Statement stmt = connection.createStatement()) {
+            stmt.execute("ALTER TABLE nodes ADD COLUMN IF NOT EXISTS ignored BOOLEAN DEFAULT FALSE");
+        }
+        log.info("Migration v5: added 'ignored' column to nodes");
     }
 
     /** v2: колонка favorite для избранных нод. */

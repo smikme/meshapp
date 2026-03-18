@@ -21,6 +21,11 @@ public class Form extends StackPane {
         // no-op
     }
 
+    /** Вызывается при уходе с формы (переключение на другую форму). */
+    public void formClose() {
+        // no-op
+    }
+
     /** Обновление данных формы. Вызывается при изменении состояния устройства. */
     public void formRefresh() {
         // no-op

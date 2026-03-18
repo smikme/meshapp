@@ -1349,3 +1349,23 @@
     -fx-fill: #F9A825;
 }
 
+/* ============================================================
+   Игнорируемые ноды — кнопка (активное состояние)
+   ============================================================ */
+
+.ignored-btn-active .svg-icon {
+    -fx-fill: #FF6B6B;
+}
+
+.ignored-btn-active:hover .svg-icon {
+    -fx-fill: #FF5252;
+}
+
+.light-theme .ignored-btn-active .svg-icon {
+    -fx-fill: #E53935;
+}
+
+.light-theme .ignored-btn-active:hover .svg-icon {
+    -fx-fill: #C62828;
+}
+

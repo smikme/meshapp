@@ -99,6 +99,7 @@ public class AppPreferences {
     public static final String KEY_NODES_FILTER_HIDE_OFFLINE = "nodesFilterHideOffline";
     public static final String KEY_NODES_FILTER_FAVORITES = "nodesFilterFavorites";
     public static final String KEY_NODES_FILTER_DIRECT = "nodesFilterDirect";
+    public static final String KEY_NODES_FILTER_IGNORED = "nodesFilterIgnored";
 
     public static String getNodesSort() { return state.get(KEY_NODES_SORT, "LAST_HEARD_NEW"); }
     public static void setNodesSort(String sort) { state.put(KEY_NODES_SORT, sort); }
@@ -117,6 +118,9 @@ public class AppPreferences {
 
     public static boolean isNodesFilterDirect() { return state.getBoolean(KEY_NODES_FILTER_DIRECT, false); }
     public static void setNodesFilterDirect(boolean v) { state.putBoolean(KEY_NODES_FILTER_DIRECT, v); }
+
+    public static boolean isNodesFilterIgnored() { return state.getBoolean(KEY_NODES_FILTER_IGNORED, false); }
+    public static void setNodesFilterIgnored(boolean v) { state.putBoolean(KEY_NODES_FILTER_IGNORED, v); }
 
     // ==================== SplitPane Divider Positions ====================
 

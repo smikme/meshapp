@@ -7,6 +7,7 @@ import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.protocol.ProtocolHandler;
 import com.meshtastic.client.service.ConnectionManager;
 import com.meshtastic.client.service.FavoriteNodeService;
+import com.meshtastic.client.service.IgnoredNodeService;
 import com.meshtastic.client.service.NodeCacheService;
 import com.meshtastic.client.system.Form;
 import com.meshtastic.client.utils.AppPreferences;
@@ -52,8 +53,10 @@ public class FormNodes extends Form {
     private boolean hideOffline;
     private boolean includeUnknownNames;
     private boolean showDirectOnly;
+    private boolean showIgnoredOnly;
     private Button favFilterBtn;
     private CheckMenuItem filterFavorites;
+    private CheckMenuItem filterIgnored;
     private SortedList<NodeData> sortedNodes;
 
     private DeviceState state;
@@ -107,6 +110,14 @@ public class FormNodes extends Form {
         nodeListView.refresh();
     });
 
+    private final Runnable ignoredListener = () -> Platform.runLater(() -> {
+        if (showIgnoredOnly) {
+            injectOfflineIgnored();
+            updateFilterPredicate();
+        }
+        nodeListView.refresh();
+    });
+
     public FormNodes() {
         initComponents();
     }
@@ -115,6 +126,7 @@ public class FormNodes extends Form {
     public void formInit() {
         ConnectionManager.getInstance().addListener(connectionListener);
         FavoriteNodeService.getInstance().addListener(favoritesListener);
+        IgnoredNodeService.getInstance().addListener(ignoredListener);
         rebindState();
     }
 
@@ -184,11 +196,12 @@ public class FormNodes extends Form {
         CheckMenuItem filterHideOffline = new CheckMenuItem("Скрыть офлайн-ноды");
         filterFavorites = new CheckMenuItem("Только избранные");
         CheckMenuItem filterDirect = new CheckMenuItem("Только прямые (0 хопов)");
+        filterIgnored = new CheckMenuItem("Игнорируемые");
 
         ContextMenu sortMenu = new ContextMenu(
                 sortLastHeardNew, sortLastHeardOld, sortDistance, sortSignal, sortHops, sortChannel,
                 new SeparatorMenuItem(),
-                filterUnknown, filterDetails, filterHideOffline, filterFavorites, filterDirect
+                filterUnknown, filterDetails, filterHideOffline, filterFavorites, filterDirect, filterIgnored
         );
         // Не закрывать меню при клике на чекбоксы — переоткрыть
         for (MenuItem item : sortMenu.getItems()) {
@@ -268,6 +281,11 @@ public class FormNodes extends Form {
             AppPreferences.setNodesFilterDirect(showDirectOnly);
             updateFilterPredicate();
         });
+        filterIgnored.setOnAction(e -> {
+            showIgnoredOnly = filterIgnored.isSelected();
+            AppPreferences.setNodesFilterIgnored(showIgnoredOnly);
+            syncIgnoredState();
+        });
 
         // --- Восстановить настройки из Preferences ---
         includeUnknownNames = AppPreferences.isNodesFilterUnknown();
@@ -275,12 +293,14 @@ public class FormNodes extends Form {
         hideOffline = AppPreferences.isNodesFilterHideOffline();
         showFavoritesOnly = AppPreferences.isNodesFilterFavorites();
         showDirectOnly = AppPreferences.isNodesFilterDirect();
+        showIgnoredOnly = AppPreferences.isNodesFilterIgnored();
 
         filterUnknown.setSelected(includeUnknownNames);
         filterDetails.setSelected(showDetails);
         filterHideOffline.setSelected(hideOffline);
         filterFavorites.setSelected(showFavoritesOnly);
         filterDirect.setSelected(showDirectOnly);
+        filterIgnored.setSelected(showIgnoredOnly);
 
         // Синхронизировать favFilterBtn
         if (showFavoritesOnly) {
@@ -393,6 +413,16 @@ public class FormNodes extends Form {
         updateFilterPredicate();
     }
 
+    /** Синхронизирует состояние фильтра игнорируемых и применяет фильтр. */
+    private void syncIgnoredState() {
+        if (showIgnoredOnly) {
+            injectOfflineIgnored();
+        } else {
+            removeOfflineNodes();
+        }
+        updateFilterPredicate();
+    }
+
     // ==================== Distance ====================
 
     private static final double EARTH_RADIUS_KM = 6371.0;
@@ -446,6 +476,18 @@ public class FormNodes extends Form {
         }
     }
 
+    /** Подгрузить игнорируемые ноды из БД, которых нет в текущем живом списке. */
+    private void injectOfflineIgnored() {
+        List<NodeData> dbIgnored = NodeCacheService.getInstance().loadIgnoredNodes();
+        Set<Integer> existingNums = new HashSet<>();
+        for (NodeData n : nodeData) { existingNums.add(n.getNodeNum()); }
+        for (NodeData dbNode : dbIgnored) {
+            if (!existingNums.contains(dbNode.getNodeNum())) {
+                nodeData.add(dbNode);
+            }
+        }
+    }
+
     /** Убрать ноды, которых нет в DeviceState (были подгружены из БД). */
     private void removeOfflineNodes() {
         if (state == null) { return; }
@@ -456,6 +498,7 @@ public class FormNodes extends Form {
     private void updateFilterPredicate() {
         String query = searchField.getText() == null ? "" : searchField.getText().trim().toLowerCase(Locale.ROOT);
         FavoriteNodeService favService = FavoriteNodeService.getInstance();
+        IgnoredNodeService ignService = IgnoredNodeService.getInstance();
         long now = System.currentTimeMillis() / 1000;
         filteredNodes.setPredicate(node -> {
             // Фильтр неизвестных нод (без имени)
@@ -472,6 +515,10 @@ public class FormNodes extends Form {
             }
             // Фильтр только прямые (0 хопов)
             if (showDirectOnly && node.getHopsAway() != 0) {
+                return false;
+            }
+            // Фильтр только игнорируемые
+            if (showIgnoredOnly && !ignService.isIgnored(node.getNodeId())) {
                 return false;
             }
             // Текстовый поиск
@@ -533,7 +580,10 @@ public class FormNodes extends Form {
             // Контекстное меню
             MenuItem addFavItem = new MenuItem("Добавить в избранное");
             MenuItem removeFavItem = new MenuItem("Убрать из избранного");
-            ContextMenu ctxMenu = new ContextMenu(addFavItem, removeFavItem);
+            MenuItem addIgnItem = new MenuItem("Добавить в игнорируемые");
+            MenuItem removeIgnItem = new MenuItem("Убрать из игнорируемых");
+            ContextMenu ctxMenu = new ContextMenu(addFavItem, removeFavItem,
+                    new SeparatorMenuItem(), addIgnItem, removeIgnItem);
             setContextMenu(ctxMenu);
 
             ctxMenu.setOnShowing(ev -> {
@@ -541,6 +591,9 @@ public class FormNodes extends Form {
                 boolean fav = nd != null && FavoriteNodeService.getInstance().isFavorite(nd.getNodeId());
                 addFavItem.setVisible(!fav);
                 removeFavItem.setVisible(fav);
+                boolean ign = nd != null && IgnoredNodeService.getInstance().isIgnored(nd.getNodeId());
+                addIgnItem.setVisible(!ign);
+                removeIgnItem.setVisible(ign);
             });
 
             addFavItem.setOnAction(ev -> {
@@ -551,6 +604,16 @@ public class FormNodes extends Form {
             removeFavItem.setOnAction(ev -> {
                 NodeData nd = getItem();
                 if (nd != null) { FavoriteNodeService.getInstance().removeFavorite(nd.getNodeId()); }
+            });
+
+            addIgnItem.setOnAction(ev -> {
+                NodeData nd = getItem();
+                if (nd != null) { IgnoredNodeService.getInstance().addIgnored(nd.getNodeId()); }
+            });
+
+            removeIgnItem.setOnAction(ev -> {
+                NodeData nd = getItem();
+                if (nd != null) { IgnoredNodeService.getInstance().removeIgnored(nd.getNodeId()); }
             });
         }
 

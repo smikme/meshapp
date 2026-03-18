@@ -449,6 +449,61 @@ public final class NodeCacheService {
     }
 
     // ═══════════════════════════════════════════════════════════
+    //  Игнорируемые ноды
+    // ═══════════════════════════════════════════════════════════
+
+    /**
+     * Устанавливает флаг игнорирования для ноды.
+     */
+    public synchronized void setIgnored(String nodeId, boolean ignored) {
+        if (dbConnection == null || nodeId == null) { return; }
+        try (PreparedStatement ps = dbConnection.prepareStatement(
+                "UPDATE nodes SET ignored = ? WHERE node_id = ?")) {
+            ps.setBoolean(1, ignored);
+            ps.setString(2, nodeId);
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            log.error("Failed to set ignored for node {}", nodeId, e);
+        }
+    }
+
+    /**
+     * Проверяет, является ли нода игнорируемой.
+     */
+    public boolean isIgnored(String nodeId) {
+        if (dbConnection == null || nodeId == null) { return false; }
+        try (PreparedStatement ps = dbConnection.prepareStatement(
+                "SELECT ignored FROM nodes WHERE node_id = ?")) {
+            ps.setString(1, nodeId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) { return rs.getBoolean("ignored"); }
+            }
+        } catch (SQLException e) {
+            log.error("Failed to check ignored for node {}", nodeId, e);
+        }
+        return false;
+    }
+
+    /**
+     * Загружает все игнорируемые ноды из БД.
+     */
+    public List<NodeData> loadIgnoredNodes() {
+        List<NodeData> ignored = new ArrayList<>();
+        if (dbConnection == null) { return ignored; }
+        try (PreparedStatement ps = dbConnection.prepareStatement(
+                "SELECT * FROM nodes WHERE ignored = TRUE")) {
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    ignored.add(readNode(rs));
+                }
+            }
+        } catch (SQLException e) {
+            log.error("Failed to load ignored nodes from DB", e);
+        }
+        return ignored;
+    }
+
+    // ═══════════════════════════════════════════════════════════
     //  Телеметрия — персистентная история
     // ═══════════════════════════════════════════════════════════
 
