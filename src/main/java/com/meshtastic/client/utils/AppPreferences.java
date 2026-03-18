@@ -20,6 +20,8 @@ public class AppPreferences {
     public static final String KEY_NOTIFICATIONS_ENABLED = "notificationsEnabled";
     public static final String KEY_NATIVE_WINDOW = "nativeWindow";
     public static final String KEY_DISABLE_TRANSPARENCY = "disableTransparency";
+    public static final String KEY_DISABLE_EFFECTS = "disableEffects";
+    public static final String KEY_CHECK_UPDATES = "checkUpdates";
 
     private static Preferences state;
 
@@ -61,6 +63,22 @@ public class AppPreferences {
 
     public static void setDisableTransparency(boolean value) {
         state.putBoolean(KEY_DISABLE_TRANSPARENCY, value);
+    }
+
+    public static boolean isDisableEffects() {
+        return state.getBoolean(KEY_DISABLE_EFFECTS, false);
+    }
+
+    public static void setDisableEffects(boolean value) {
+        state.putBoolean(KEY_DISABLE_EFFECTS, value);
+    }
+
+    public static boolean isCheckUpdates() {
+        return state.getBoolean(KEY_CHECK_UPDATES, true);
+    }
+
+    public static void setCheckUpdates(boolean value) {
+        state.putBoolean(KEY_CHECK_UPDATES, value);
     }
 
     public static List<String> getRecentSearch(boolean favorite) {

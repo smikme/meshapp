@@ -8,6 +8,8 @@ import com.meshtastic.client.protocol.ProtocolHandler;
 import org.meshtastic.proto.*;
 import org.junit.jupiter.api.*;
 
+import javafx.application.Platform;
+
 import java.lang.reflect.Field;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -36,6 +38,7 @@ class ConfigExchangeServiceTest {
 
     @BeforeAll
     static void setUpTempHome() throws Exception {
+        try { Platform.startup(() -> {}); } catch (IllegalStateException ignored) {}
         originalHome = System.getProperty("user.home");
         tempDir = Files.createTempDirectory("meshapp-test-");
         System.setProperty("user.home", tempDir.toString());

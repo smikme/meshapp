@@ -880,6 +880,8 @@ public class FormChat extends Form {
         }
 
         if (newState == this.state) {
+            lastReadCounts.clear();
+            lastReadCounts.putAll(MessageDbService.getInstance().loadAllReadCounts(currentOwnerNodeId()));
             reloadChatList();
             return;
         }

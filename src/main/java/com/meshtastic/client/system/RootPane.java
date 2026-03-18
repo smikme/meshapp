@@ -77,7 +77,7 @@ public class RootPane extends BorderPane {
 
         StackPane centerStack = new StackPane(mainForm, modalPane, toastOverlay);
 
-        if (!AppPreferences.isNativeWindow()) {
+        if (!AppPreferences.isDisableEffects()) {
             // Кастомный title bar — на всю ширину окна, прозрачный (frosted glass просвечивает)
             HBox titleBar = createTitleBar();
             setTop(titleBar);
