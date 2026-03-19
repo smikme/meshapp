@@ -58,6 +58,9 @@ class WinSerialPort implements NativeSerialPort {
 
     // COMMTIMEOUTS layout (20 bytes)
     private static final int CT_SIZE = 20;
+    // COMSTAT layout: flags DWORD + cbInQue DWORD + cbOutQue DWORD
+    private static final int COMSTAT_SIZE = 12;
+    private static final int COMSTAT_OFF_IN_QUEUE = 4;
 
     // --- JNA kernel32 interface ---
     interface K32 extends Library {
@@ -70,6 +73,7 @@ class WinSerialPort implements NativeSerialPort {
         boolean GetCommState(Pointer hFile, Pointer lpDCB);
         boolean SetCommState(Pointer hFile, Pointer lpDCB);
         boolean SetCommTimeouts(Pointer hFile, Pointer lpCommTimeouts);
+        boolean ClearCommError(Pointer hFile, IntByReference lpErrors, Pointer lpStat);
         boolean ReadFile(Pointer hFile, Pointer lpBuffer, int nNumberOfBytesToRead,
                          IntByReference lpNumberOfBytesRead, Pointer lpOverlapped);
         boolean WriteFile(Pointer hFile, Pointer lpBuffer, int nNumberOfBytesToWrite,
@@ -200,6 +204,44 @@ class WinSerialPort implements NativeSerialPort {
         Pointer h = handle;
         if (h == null || !open) return -1;
 
+        // Повторяем семантику jSerialComm TIMEOUT_READ_SEMI_BLOCKING:
+        // ждём первый байт до timeout, затем сразу дочитываем уже накопившийся хвост.
+        // Это безопаснее для Meshtastic frame parser, чем держать один long-pending read
+        // на 1024 байта и регулярно рвать его через CancelIo().
+        int totalRead = readChunk(h, buf, 0, 1, timeoutMs);
+        if (totalRead <= 0) {
+            return totalRead;
+        }
+
+        while (totalRead < len) {
+            int available = bytesAvailable(h);
+            if (available <= 0) {
+                break;
+            }
+
+            int chunkRead = readChunk(h, buf, totalRead, Math.min(len - totalRead, available), 0);
+            if (chunkRead <= 0) {
+                break;
+            }
+            totalRead += chunkRead;
+        }
+
+        return totalRead;
+    }
+
+    private static int copyCompletedRead(Memory nativeBuf, byte[] buf, int offset, IntByReference bytesRead) {
+        int n = bytesRead.getValue();
+        if (n > 0) {
+            nativeBuf.read(0, buf, offset, n);
+        }
+        return n;
+    }
+
+    /**
+     * Выполняет один overlapped read для указанного чанка.
+     * timeoutMs=0 используется только для уже накопившегося хвоста после первого байта.
+     */
+    private int readChunk(Pointer h, byte[] buf, int offset, int len, int timeoutMs) {
         // Нативный буфер (Memory) живёт до конца метода — ReadFile пишет в него
         // асинхронно, и данные будут на месте когда GetOverlappedResult вернёт управление.
         // Нельзя передавать byte[] в overlapped ReadFile — JNA освободит временный
@@ -215,7 +257,7 @@ class WinSerialPort implements NativeSerialPort {
         boolean ok = K32.INSTANCE.ReadFile(h, nativeBuf, len, bytesRead, ovl);
 
         if (ok) {
-            return copyCompletedRead(nativeBuf, buf, bytesRead);
+            return copyCompletedRead(nativeBuf, buf, offset, bytesRead);
         }
 
         int err = K32.INSTANCE.GetLastError();
@@ -224,30 +266,37 @@ class WinSerialPort implements NativeSerialPort {
             return -1;
         }
 
-        // Ждём завершения операции с таймаутом
         int waitResult = K32.INSTANCE.WaitForSingleObject(readEvent, timeoutMs);
         if (waitResult == WAIT_OBJECT_0) {
-            // Операция завершена — получаем количество прочитанных байт
             if (K32.INSTANCE.GetOverlappedResult(h, ovl, bytesRead, false)) {
-                return copyCompletedRead(nativeBuf, buf, bytesRead);
+                return copyCompletedRead(nativeBuf, buf, offset, bytesRead);
             }
             return -1;
         }
 
         if (waitResult == WAIT_TIMEOUT) {
-            return finishTimedOutRead(h, ovl, nativeBuf, buf, bytesRead);
+            return finishTimedOutRead(h, ovl, nativeBuf, buf, offset, bytesRead);
         }
 
         log.debug("WaitForSingleObject unexpected: 0x{}", Integer.toHexString(waitResult));
-        return -1; // ошибка wait
+        return -1;
     }
 
-    private static int copyCompletedRead(Memory nativeBuf, byte[] buf, IntByReference bytesRead) {
-        int n = bytesRead.getValue();
-        if (n > 0) {
-            nativeBuf.read(0, buf, 0, n);
+    /**
+     * Возвращает количество входящих байт, уже буферизованных драйвером.
+     * Нужен для быстрого дочитывания хвоста после первого успешного байта.
+     */
+    private int bytesAvailable(Pointer h) {
+        Memory stat = new Memory(COMSTAT_SIZE);
+        stat.clear();
+        IntByReference errors = new IntByReference();
+        if (!K32.INSTANCE.ClearCommError(h, errors, stat)) {
+            if (open) {
+                log.debug("ClearCommError failed: {}", K32.INSTANCE.GetLastError());
+            }
+            return 0;
         }
-        return n;
+        return Math.max(stat.getInt(COMSTAT_OFF_IN_QUEUE), 0);
     }
 
     /**
@@ -259,11 +308,11 @@ class WinSerialPort implements NativeSerialPort {
      * даёт protobuf parse errors / потерю ACK при рабочем канале записи.
      */
     private int finishTimedOutRead(Pointer h, Memory ovl, Memory nativeBuf,
-                                   byte[] buf, IntByReference bytesRead) {
+                                   byte[] buf, int offset, IntByReference bytesRead) {
         K32.INSTANCE.CancelIo(h);
 
         boolean completed = K32.INSTANCE.GetOverlappedResult(h, ovl, bytesRead, true);
-        int n = copyCompletedRead(nativeBuf, buf, bytesRead);
+        int n = copyCompletedRead(nativeBuf, buf, offset, bytesRead);
         if (n > 0) {
             log.debug("Timed-out ReadFile returned {} bytes after cancel", n);
             return n;

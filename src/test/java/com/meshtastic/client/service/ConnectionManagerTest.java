@@ -5,6 +5,7 @@ import com.meshtastic.client.TestEnvironmentSupport;
 import com.meshtastic.client.connection.ConnectionException;
 import com.meshtastic.client.connection.FrameParser;
 import com.meshtastic.client.model.ConnectionEntry;
+import com.meshtastic.client.model.ConnectionType;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.protocol.PacketFramer;
 import org.junit.jupiter.api.AfterEach;
@@ -96,6 +97,17 @@ class ConnectionManagerTest {
 
             manager.disconnect(first.getId());
         }
+    }
+
+    @Test
+    void shouldStartHeartbeatOnlyForTcpConnections() {
+        ConnectionEntry tcp = new ConnectionEntry("tcp", "127.0.0.1", 4403);
+        ConnectionEntry serial = new ConnectionEntry("serial", "COM3", 115200, ConnectionType.SERIAL);
+        ConnectionEntry ble = new ConnectionEntry("ble", "AA:BB:CC:DD:EE:FF", "test");
+
+        assertTrue(ConnectionManager.shouldStartHeartbeat(tcp));
+        assertFalse(ConnectionManager.shouldStartHeartbeat(serial));
+        assertFalse(ConnectionManager.shouldStartHeartbeat(ble));
     }
 
     private static final class TcpMeshtasticStubServer implements AutoCloseable {

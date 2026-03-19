@@ -6,6 +6,7 @@ import com.google.gson.reflect.TypeToken;
 import com.meshtastic.client.connection.*;
 import com.meshtastic.client.connection.ble.BleConnection;
 import com.meshtastic.client.model.ConnectionEntry;
+import com.meshtastic.client.model.ConnectionType;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.protocol.ProtocolHandler;
 import org.slf4j.Logger;
@@ -175,8 +176,12 @@ public final class ConnectionManager {
         ProtocolHandler protocolHandler = new ProtocolHandler(conn);
         protocolHandlers.put(id, protocolHandler);
 
-        // Heartbeat сразу после connect — устройство закрывает idle TCP через ~7 сек
-        protocolHandler.startHeartbeat();
+        // Heartbeat нужен только для TCP transport.
+        // Для Serial/BLE это лишний фоновый трафик, который не держит соединение живым,
+        // но может вмешиваться в очередь пользовательских пакетов и диагностику ACK.
+        if (shouldStartHeartbeat(entry)) {
+            protocolHandler.startHeartbeat();
+        }
 
         DeviceState deviceState = new DeviceState();
         deviceStates.put(id, deviceState);
@@ -305,6 +310,14 @@ public final class ConnectionManager {
             case BLE -> new BleConnection(entry.getBleAddress(),
                     BleDeviceDiscoveryService.getInstance().getPlatform());
         };
+    }
+
+    /**
+     * Возвращает {@code true} только для transport-ов, которым действительно нужен heartbeat.
+     * В текущем протоколе это только TCP: Serial/BLE не закрываются по idle так же, как TCP.
+     */
+    static boolean shouldStartHeartbeat(ConnectionEntry entry) {
+        return entry.getEffectiveType() == ConnectionType.TCP;
     }
 
     ConnectionEntry findEntry(String id) {
