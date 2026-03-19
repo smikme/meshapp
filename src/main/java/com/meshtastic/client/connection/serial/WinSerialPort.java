@@ -87,6 +87,7 @@ class WinSerialPort implements NativeSerialPort {
     }
 
     private static final int ERROR_IO_PENDING = 997;
+    private static final int ERROR_OPERATION_ABORTED = 995;
 
     private volatile Pointer handle;
     private volatile boolean open;
@@ -214,9 +215,7 @@ class WinSerialPort implements NativeSerialPort {
         boolean ok = K32.INSTANCE.ReadFile(h, nativeBuf, len, bytesRead, ovl);
 
         if (ok) {
-            int n = bytesRead.getValue();
-            if (n > 0) nativeBuf.read(0, buf, 0, n);
-            return n;
+            return copyCompletedRead(nativeBuf, buf, bytesRead);
         }
 
         int err = K32.INSTANCE.GetLastError();
@@ -230,23 +229,54 @@ class WinSerialPort implements NativeSerialPort {
         if (waitResult == WAIT_OBJECT_0) {
             // Операция завершена — получаем количество прочитанных байт
             if (K32.INSTANCE.GetOverlappedResult(h, ovl, bytesRead, false)) {
-                int n = bytesRead.getValue();
-                if (n > 0) nativeBuf.read(0, buf, 0, n);
-                return n;
+                return copyCompletedRead(nativeBuf, buf, bytesRead);
             }
             return -1;
         }
 
         if (waitResult == WAIT_TIMEOUT) {
-            // Таймаут — отменяем операцию
-            K32.INSTANCE.CancelIo(h);
-            // Дождаться завершения отмены
-            K32.INSTANCE.GetOverlappedResult(h, ovl, bytesRead, true);
-            return 0;
+            return finishTimedOutRead(h, ovl, nativeBuf, buf, bytesRead);
         }
 
         log.debug("WaitForSingleObject unexpected: 0x{}", Integer.toHexString(waitResult));
         return -1; // ошибка wait
+    }
+
+    private static int copyCompletedRead(Memory nativeBuf, byte[] buf, IntByReference bytesRead) {
+        int n = bytesRead.getValue();
+        if (n > 0) {
+            nativeBuf.read(0, buf, 0, n);
+        }
+        return n;
+    }
+
+    /**
+     * Завершает timed-out overlapped read.
+     * <p>
+     * На Windows отмена может вернуть уже полученные байты, если устройство успело
+     * дописать их между {@code WAIT_TIMEOUT} и фактической отменой операции.
+     * Их нельзя терять: выпадение даже нескольких байт рвёт Meshtastic frame и
+     * даёт protobuf parse errors / потерю ACK при рабочем канале записи.
+     */
+    private int finishTimedOutRead(Pointer h, Memory ovl, Memory nativeBuf,
+                                   byte[] buf, IntByReference bytesRead) {
+        K32.INSTANCE.CancelIo(h);
+
+        boolean completed = K32.INSTANCE.GetOverlappedResult(h, ovl, bytesRead, true);
+        int n = copyCompletedRead(nativeBuf, buf, bytesRead);
+        if (n > 0) {
+            log.debug("Timed-out ReadFile returned {} bytes after cancel", n);
+            return n;
+        }
+
+        if (!completed) {
+            int err = K32.INSTANCE.GetLastError();
+            if (err != ERROR_OPERATION_ABORTED) {
+                log.debug("Timed-out ReadFile completion failed: {}", err);
+                return -1;
+            }
+        }
+        return 0;
     }
 
     @Override
