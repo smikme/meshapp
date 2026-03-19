@@ -90,6 +90,17 @@ public interface WinBleLibrary extends Library {
     /** Установка слушателя изменений состояния подключения. */
     void meshble_set_state_listener(StateCallback callback);
 
+    // ==================== Pairing ====================
+
+    /** Установка callback запроса passkey при app-managed BLE pairing. */
+    void meshble_set_passkey_request_callback(PasskeyRequestCallback callback);
+
+    /** Передаёт введённый пользователем BLE passkey в pending pairing request. */
+    void meshble_respond_passkey(int passkey);
+
+    /** Отменяет pending BLE pairing request. */
+    void meshble_cancel_passkey();
+
     // ==================== Info ====================
 
     /** @return 1 если notifications активны, 0 если polling */
@@ -117,5 +128,13 @@ public interface WinBleLibrary extends Library {
      */
     interface StateCallback extends Callback {
         void callback(int state, String errorMsg);
+    }
+
+    /**
+     * Callback запроса BLE passkey. Вызывается только когда WinRT pairing
+     * реально требует ввод PIN-кода со стороны приложения.
+     */
+    interface PasskeyRequestCallback extends Callback {
+        void callback(String address);
     }
 }

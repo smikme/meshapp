@@ -6,6 +6,8 @@ import com.sun.jna.ptr.IntByReference;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.concurrent.TimeUnit;
+
 /**
  * Windows-реализация serial-порта через kernel32.dll (JNA).
  * <p>
@@ -92,6 +94,7 @@ class WinSerialPort implements NativeSerialPort {
 
     private static final int ERROR_IO_PENDING = 997;
     private static final int ERROR_OPERATION_ABORTED = 995;
+    private static final int FIRST_BYTE_POLL_INTERVAL_MS = 10;
 
     private volatile Pointer handle;
     private volatile boolean open;
@@ -205,25 +208,30 @@ class WinSerialPort implements NativeSerialPort {
         if (h == null || !open) return -1;
 
         // Повторяем семантику jSerialComm TIMEOUT_READ_SEMI_BLOCKING:
-        // ждём первый байт до timeout, затем сразу дочитываем уже накопившийся хвост.
-        // Это безопаснее для Meshtastic frame parser, чем держать один long-pending read
-        // на 1024 байта и регулярно рвать его через CancelIo().
-        int totalRead = readChunk(h, buf, 0, 1, timeoutMs);
-        if (totalRead <= 0) {
-            return totalRead;
+        // ждём появления первого байта до timeout, затем сразу дочитываем уже
+        // накопившийся хвост. На длинных Windows USB-сессиях это устойчивее,
+        // чем держать pending ReadFile на пустом порту: polling через COMSTAT
+        // одновременно очищает comm errors и лучше повторяет поведение jSerialComm.
+        int available = waitForAvailableBytes(h, timeoutMs);
+        if (available <= 0) {
+            return available;
         }
 
+        int totalRead = 0;
         while (totalRead < len) {
-            int available = bytesAvailable(h);
             if (available <= 0) {
                 break;
             }
 
             int chunkRead = readChunk(h, buf, totalRead, Math.min(len - totalRead, available), 0);
-            if (chunkRead <= 0) {
+            if (chunkRead < 0) {
+                return totalRead > 0 ? totalRead : -1;
+            }
+            if (chunkRead == 0) {
                 break;
             }
             totalRead += chunkRead;
+            available = bytesAvailable(h);
         }
 
         return totalRead;
@@ -279,6 +287,44 @@ class WinSerialPort implements NativeSerialPort {
         }
 
         log.debug("WaitForSingleObject unexpected: 0x{}", Integer.toHexString(waitResult));
+        return -1;
+    }
+
+    /**
+     * Ждёт появления входящих байт в драйверном буфере до timeout.
+     * <p>
+     * В отличие от pending ReadFile на пустом порту, этот polling путь регулярно
+     * проходит через {@link #bytesAvailable(Pointer)} и тем самым не оставляет
+     * COM-сессию в подвисшем состоянии после длительной работы с USB bridge.
+     */
+    private int waitForAvailableBytes(Pointer h, int timeoutMs) {
+        int available = bytesAvailable(h);
+        if (available > 0 || timeoutMs <= 0) {
+            return available;
+        }
+
+        long deadlineNanos = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs);
+        while (open && handle == h) {
+            available = bytesAvailable(h);
+            if (available > 0) {
+                return available;
+            }
+
+            long remainingNanos = deadlineNanos - System.nanoTime();
+            if (remainingNanos <= 0) {
+                return 0;
+            }
+
+            long remainingMillis = Math.max(1L, TimeUnit.NANOSECONDS.toMillis(remainingNanos));
+            long sleepMillis = Math.min(FIRST_BYTE_POLL_INTERVAL_MS, remainingMillis);
+            try {
+                Thread.sleep(sleepMillis);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return -1;
+            }
+        }
+
         return -1;
     }
 

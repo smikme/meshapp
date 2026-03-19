@@ -4,7 +4,6 @@ import com.meshtastic.client.components.PasskeyDialog;
 import com.meshtastic.client.connection.ConnectionException;
 import com.meshtastic.client.connection.ConnectionListener;
 import com.meshtastic.client.connection.MeshtasticConnection;
-import com.meshtastic.client.connection.ble.linux.LinuxBle;
 import javafx.application.Platform;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -89,14 +88,13 @@ public class BleConnection implements MeshtasticConnection {
             }
         });
 
-        // Passkey handler для Linux BLE pairing
-        if (platform instanceof LinuxBle linuxBle) {
-            platform.setPasskeyRequestHandler(deviceAddress ->
-                    Platform.runLater(() ->
-                            PasskeyDialog.show(deviceAddress,
-                                    pin -> linuxBle.respondPasskey(pin),
-                                    linuxBle::cancelPasskey)));
-        }
+        // Pairing UI поднимается в общий BLE-контракт: Linux/Windows могут запросить passkey
+        // из native backend, а macOS просто никогда не вызовет этот handler.
+        platform.setPasskeyRequestHandler(deviceAddress ->
+                Platform.runLater(() ->
+                        PasskeyDialog.show(deviceAddress,
+                                platform::respondPasskey,
+                                platform::cancelPasskey)));
 
         platform.connect(address);
         // Fallback for platforms that complete connect() successfully but do not emit Connected state.

@@ -43,10 +43,12 @@ public class WinBle implements BlePlatform {
     private static WinBleLibrary.DeviceCallback scanCallback;
     private static WinBleLibrary.DataCallback dataCallback;
     private static WinBleLibrary.StateCallback stateCallback;
+    private static WinBleLibrary.PasskeyRequestCallback passkeyCallback;
 
     private volatile Consumer<BleDevice> scanConsumer;
     private volatile Consumer<byte[]> fromRadioListener;
     private volatile Consumer<BleState> stateListener;
+    private volatile Consumer<String> passkeyRequestHandler;
     private volatile boolean connected;
 
     // Polling (always active — fromRadio notifications unreliable on Windows)
@@ -73,6 +75,16 @@ public class WinBle implements BlePlatform {
         if (result != 0) {
             throw new RuntimeException("WinRT BLE инициализация не удалась: error=" + result);
         }
+
+        // Passkey callback поднимает BLE pairing в Java/UI слой, как на Linux:
+        // WinRT сам знает когда требуется PIN, а приложение отвечает через dialog.
+        passkeyCallback = address -> {
+            Consumer<String> handler = passkeyRequestHandler;
+            if (handler != null && address != null) {
+                handler.accept(address);
+            }
+        };
+        lib.meshble_set_passkey_request_callback(passkeyCallback);
         log.info("WinRT BLE инициализирован");
     }
 
@@ -162,7 +174,7 @@ public class WinBle implements BlePlatform {
             case -2 -> throw new ConnectionException("BLE устройство не найдено: " + address);
             case -3 -> throw new ConnectionException("GATT ошибка при подключении к: " + address);
             case -4 -> throw new ConnectionException(
-                    "Доступ запрещён. Выполните сопряжение устройства в настройках Bluetooth Windows: " + address);
+                    "BLE сопряжение не завершено или отклонено: " + address);
             default -> throw new ConnectionException("BLE ошибка подключения (code=" + result + "): " + address);
         }
     }
@@ -191,15 +203,19 @@ public class WinBle implements BlePlatform {
         int result = lib.meshble_write_to_radio(protobufPayload, protobufPayload.length);
         if (result != 0) {
             if (result == -2) {
-                // AccessDenied — устройство не сопряжено
-                log.error("writeToRadio: AccessDenied — требуется сопряжение устройства в настройках Bluetooth Windows");
+                // AccessDenied означает, что текущая GATT-сессия не получила pairing/auth.
+                // Оставаться в connected=true нельзя: приложение иначе будет бесконечно
+                // пытаться писать в нерабочее соединение.
+                connected = false;
+                stopPolling();
+                lib.meshble_disconnect();
+                log.error("writeToRadio: AccessDenied — BLE pairing is required or incomplete");
                 Platform.runLater(() -> Toast.show(Toast.Type.ERROR,
-                        "BLE: доступ запрещён. Выполните сопряжение устройства в настройках Bluetooth Windows"));
-                // Disconnect — нет смысла повторять без сопряжения
+                        "BLE: сопряжение не завершено. Подключитесь заново и подтвердите pairing"));
                 Consumer<BleState> sl = stateListener;
                 if (sl != null) {
                     sl.accept(new BleState.Error(
-                            "Доступ запрещён. Выполните сопряжение устройства в настройках Bluetooth Windows", null));
+                            "BLE сопряжение не завершено. Подключитесь заново и подтвердите pairing", null));
                 }
                 return false;
             }
@@ -226,6 +242,23 @@ public class WinBle implements BlePlatform {
     @Override
     public void setStateListener(Consumer<BleState> listener) {
         this.stateListener = listener;
+    }
+
+    @Override
+    public void setPasskeyRequestHandler(Consumer<String> handler) {
+        this.passkeyRequestHandler = handler;
+    }
+
+    @Override
+    public void respondPasskey(int passkey) {
+        log.info("Responding to Windows BLE passkey request");
+        lib.meshble_respond_passkey(passkey);
+    }
+
+    @Override
+    public void cancelPasskey() {
+        log.info("Cancelling Windows BLE passkey request");
+        lib.meshble_cancel_passkey();
     }
 
     // ==================== BlePlatform: State ====================

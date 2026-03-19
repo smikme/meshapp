@@ -11,6 +11,8 @@
 #ifndef MESHAPP_BLE_H
 #define MESHAPP_BLE_H
 
+#include <stdint.h>
+
 #ifdef MESHBLE_EXPORTS
 #define MESHBLE_API __declspec(dllexport)
 #else
@@ -116,6 +118,23 @@ typedef void (*meshble_state_cb)(int state, const char* error_msg);
 
 /** Set listener for connection state changes. */
 MESHBLE_API void meshble_set_state_listener(meshble_state_cb callback);
+
+/* ==================== Pairing ==================== */
+
+/**
+ * Callback when WinRT custom pairing needs a BLE passkey from the application.
+ * @param device_address MAC address of the device requesting pairing
+ */
+typedef void (*meshble_passkey_request_cb)(const char* device_address);
+
+/** Set callback for BLE passkey requests. */
+MESHBLE_API void meshble_set_passkey_request_callback(meshble_passkey_request_cb callback);
+
+/** Respond to a pending BLE passkey request with the user-provided PIN. */
+MESHBLE_API void meshble_respond_passkey(uint32_t passkey);
+
+/** Cancel a pending BLE passkey request (user declined pairing). */
+MESHBLE_API void meshble_cancel_passkey(void);
 
 /* ==================== Info ==================== */
 

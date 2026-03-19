@@ -8,6 +8,7 @@ import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class BleConnectionTest {
@@ -77,9 +78,22 @@ class BleConnectionTest {
         assertFalse(connection.isConnected());
     }
 
+    @Test
+    void connectInstallsPasskeyHandlerBeforePlatformConnect() throws ConnectionException {
+        FakePlatform platform = new FakePlatform();
+        platform.connectAction = p -> {
+            assertNotNull(p.passkeyRequestHandler);
+            p.connected = true;
+        };
+
+        BleConnection connection = new BleConnection("device", platform);
+        connection.connect();
+    }
+
     private static final class FakePlatform implements BlePlatform {
         private Consumer<byte[]> fromRadioListener;
         private Consumer<BleState> stateListener;
+        private Consumer<String> passkeyRequestHandler;
         private boolean connected;
         private ConnectAction connectAction = p -> p.connected = true;
 
@@ -119,6 +133,11 @@ class BleConnectionTest {
         @Override
         public void setStateListener(Consumer<BleState> listener) {
             this.stateListener = listener;
+        }
+
+        @Override
+        public void setPasskeyRequestHandler(Consumer<String> handler) {
+            this.passkeyRequestHandler = handler;
         }
 
         @Override

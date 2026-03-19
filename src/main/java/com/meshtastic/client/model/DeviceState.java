@@ -83,7 +83,7 @@ public class DeviceState {
     private volatile long pendingFixedSetAt; // epoch millis, 0 = none
 
     public DeviceState() {
-        ackTimeoutExecutor.scheduleWithFixedDelay(this::sweepExpiredAcks,
+        ackTimeoutExecutor.scheduleWithFixedDelay(this::runAckSweepSafely,
                 ACK_SWEEP_INTERVAL_MS, ACK_SWEEP_INTERVAL_MS, TimeUnit.MILLISECONDS);
     }
 
@@ -446,6 +446,22 @@ public class DeviceState {
         for (Runnable r : ownerInfoListeners) {
             try { r.run(); }
             catch (Exception e) { log.error("Exception in owner info listener", e); }
+        }
+    }
+
+    /**
+     * Периодическая проверка просроченных pending ACK.
+     * Сообщения, ожидающие ACK дольше {@link #ACK_TIMEOUT_MS},
+     * помечаются как {@code FAILED} с причиной {@code TIMEOUT}.
+     */
+    private void runAckSweepSafely() {
+        try {
+            sweepExpiredAcks();
+        } catch (Throwable t) {
+            // scheduleWithFixedDelay прекращает будущие запуски после uncaught exception.
+            // Таймер ACK должен переживать локальные сбои и продолжать переводить
+            // зависшие "часы" в FAILED, иначе UI залипает в SENDING навсегда.
+            log.error("ACK sweep crashed", t);
         }
     }
 
