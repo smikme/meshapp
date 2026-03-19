@@ -83,6 +83,11 @@ public class MacOsBle implements BlePlatform {
     private volatile CountDownLatch characteristicDiscoveryLatch;
     private volatile CountDownLatch notifyLatch;
     private volatile CountDownLatch drainLatch;
+    // connect() advances through several async CoreBluetooth phases; callbacks store the first
+    // terminal error here so the blocking connect() method can fail fast instead of reporting success.
+    private volatile String connectErrorMessage;
+    private volatile String serviceDiscoveryErrorMessage;
+    private volatile String characteristicDiscoveryErrorMessage;
 
     // Polling: fromRadio не поддерживает notifications, поэтому опрашиваем периодически
     private final ScheduledExecutorService pollScheduler =
@@ -150,6 +155,9 @@ public class MacOsBle implements BlePlatform {
         log.info("[BLE] Step 1: waitForPoweredOn...");
         waitForPoweredOn();
         log.info("[BLE] Step 1 done, adapter state: {}", adapterState);
+        if (adapterState != AdapterState.POWERED_ON) {
+            throw new ConnectionException("BLE adapter is not ready: " + adapterState);
+        }
 
         Long peripheralPtr = discoveredPeripherals.get(address);
         if (peripheralPtr == null) {
@@ -177,6 +185,9 @@ public class MacOsBle implements BlePlatform {
         connectLatch = new CountDownLatch(1);
         serviceDiscoveryLatch = new CountDownLatch(1);
         characteristicDiscoveryLatch = new CountDownLatch(1);
+        connectErrorMessage = null;
+        serviceDiscoveryErrorMessage = null;
+        characteristicDiscoveryErrorMessage = null;
 
         log.info("[BLE] Step 2: connectPeripheral...");
         msgSend(centralManager, "connectPeripheral:options:", peripheral, 0L);
@@ -187,6 +198,7 @@ public class MacOsBle implements BlePlatform {
                 throw new ConnectionException("BLE connect timeout (" +
                         BleConstants.CONNECT_TIMEOUT_MS + "ms): " + address);
             }
+            failIfConnectErrored();
             log.info("[BLE] Step 2 done: peripheral connected");
 
             connectedPeripheral = peripheral;
@@ -205,6 +217,12 @@ public class MacOsBle implements BlePlatform {
                 disconnect();
                 throw new ConnectionException("BLE service discovery timeout (" +
                         BleConstants.SERVICE_DISCOVERY_TIMEOUT_MS + "ms): " + address);
+            }
+            failIfConnectErrored();
+            if (serviceDiscoveryErrorMessage != null) {
+                disconnect();
+                throw new ConnectionException("BLE service discovery failed: "
+                        + serviceDiscoveryErrorMessage);
             }
             log.info("[BLE] Step 3 done: services discovered");
 
@@ -233,6 +251,12 @@ public class MacOsBle implements BlePlatform {
                 throw new ConnectionException("BLE characteristic discovery timeout (" +
                         BleConstants.SERVICE_DISCOVERY_TIMEOUT_MS + "ms): " + address);
             }
+            failIfConnectErrored();
+            if (characteristicDiscoveryErrorMessage != null) {
+                disconnect();
+                throw new ConnectionException("BLE characteristic discovery failed: "
+                        + characteristicDiscoveryErrorMessage);
+            }
             log.info("[BLE] Step 4 done: fromRadio={}, toRadio={}, fromNum={}",
                     fromRadioCharacteristic != 0, toRadioCharacteristic != 0,
                     fromNumCharacteristic != 0);
@@ -253,6 +277,7 @@ public class MacOsBle implements BlePlatform {
                 if (!notifyLatch.await(5, TimeUnit.SECONDS)) {
                     log.warn("[BLE] fromNum notification subscription timeout");
                 }
+                failIfConnectErrored();
             }
 
             // Drain stale fromRadio data
@@ -261,10 +286,12 @@ public class MacOsBle implements BlePlatform {
             drainLatch = new CountDownLatch(1);
             drainFromRadio();
             drainLatch.await(3, TimeUnit.SECONDS);
+            failIfConnectErrored();
             log.info("[BLE] Step 6 done: initial drain complete");
 
             // Step 7: start periodic polling of fromRadio
             startPolling();
+            failIfConnectErrored();
 
             connected = true;
             log.info("[BLE] connect() DONE — fully connected to {}", address);
@@ -356,6 +383,37 @@ public class MacOsBle implements BlePlatform {
 
     private static final com.sun.jna.Function OBJC_MSG_SEND =
             com.sun.jna.NativeLibrary.getInstance("objc").getFunction("objc_msgSend");
+
+    /**
+     * Извлекает human-readable описание из NSError.
+     *
+     * @param error pointer на NSError или {@code 0}
+     * @param fallback запасное сообщение, если NSError пуст или недоступен
+     * @return локализованное описание ошибки либо {@code fallback}
+     */
+    private static String localizedError(long error, String fallback) {
+        if (error == 0) { return fallback; }
+        long desc = msgSend(error, "localizedDescription");
+        String message = toJavaString(desc);
+        if (message == null || message.isBlank()) {
+            return fallback;
+        }
+        return message;
+    }
+
+    /**
+     * Прерывает блокирующий connect-flow, если один из async CoreBluetooth callbacks
+     * уже сообщил об ошибке или разрыве соединения.
+     *
+     * @throws ConnectionException если в процессе подключения накопилась terminal error
+     */
+    private void failIfConnectErrored() throws ConnectionException {
+        if (connectErrorMessage != null) {
+            // Tear down partial CoreBluetooth state before surfacing the error to the Java caller.
+            disconnect();
+            throw new ConnectionException("BLE connect failed: " + connectErrorMessage);
+        }
+    }
 
     private void setNotify(long peripheral, boolean enabled, long characteristic) {
         OBJC_MSG_SEND.invokeLong(new Object[]{
@@ -492,8 +550,38 @@ public class MacOsBle implements BlePlatform {
             MacOsBle me = resolve(self);
             if (me == null) { return; }
             log.info("CBCentralManager: didDisconnectPeripheral");
+            boolean wasConnected = me.connected;
+            String disconnectMessage = localizedError(error, "Peripheral disconnected");
             me.connected = false;
+            me.stopPolling();
             me.connectedPeripheral = 0;
+            me.fromRadioCharacteristic = 0;
+            me.toRadioCharacteristic = 0;
+            me.fromNumCharacteristic = 0;
+            me.drainInProgress.set(false);
+            if (!wasConnected) {
+                // Disconnect during connect/discovery must wake the waiting thread so it cannot
+                // continue into a false-positive "connected" state after the peripheral is gone.
+                if (me.connectErrorMessage == null) {
+                    me.connectErrorMessage = disconnectMessage;
+                }
+                if (me.serviceDiscoveryErrorMessage == null) {
+                    me.serviceDiscoveryErrorMessage = disconnectMessage;
+                }
+                if (me.characteristicDiscoveryErrorMessage == null) {
+                    me.characteristicDiscoveryErrorMessage = disconnectMessage;
+                }
+                CountDownLatch connectLatch = me.connectLatch;
+                if (connectLatch != null) { connectLatch.countDown(); }
+                CountDownLatch serviceLatch = me.serviceDiscoveryLatch;
+                if (serviceLatch != null) { serviceLatch.countDown(); }
+                CountDownLatch characteristicLatch = me.characteristicDiscoveryLatch;
+                if (characteristicLatch != null) { characteristicLatch.countDown(); }
+                CountDownLatch notifyLatch = me.notifyLatch;
+                if (notifyLatch != null) { notifyLatch.countDown(); }
+            }
+            CountDownLatch drainLatch = me.drainLatch;
+            if (drainLatch != null) { drainLatch.countDown(); }
             Consumer<BleState> listener = me.stateListener;
             if (listener != null) {
                 listener.accept(new BleState.Disconnected());
@@ -504,12 +592,9 @@ public class MacOsBle implements BlePlatform {
         cbDidFailToConnect = (CentralDidDisconnectCallback) (self, cmd, central, peripheral, error) -> {
             MacOsBle me = resolve(self);
             if (me == null) { return; }
-            String msg = "Failed to connect";
-            if (error != 0) {
-                long desc = msgSend(error, "localizedDescription");
-                msg = toJavaString(desc);
-            }
+            String msg = localizedError(error, "Failed to connect");
             log.error("CBCentralManager: didFailToConnect — {}", msg);
+            me.connectErrorMessage = msg;
             CountDownLatch latch = me.connectLatch;
             if (latch != null) { latch.countDown(); }
             Consumer<BleState> listener = me.stateListener;
@@ -532,8 +617,8 @@ public class MacOsBle implements BlePlatform {
             MacOsBle me = resolve(self);
             if (me == null) { return; }
             if (arg != 0) {
-                long desc = msgSend(arg, "localizedDescription");
-                log.error("GATT service discovery error: {}", toJavaString(desc));
+                me.serviceDiscoveryErrorMessage = localizedError(arg, "Unknown service discovery error");
+                log.error("GATT service discovery error: {}", me.serviceDiscoveryErrorMessage);
             } else {
                 long services = msgSend(peripheral, "services");
                 long count = msgSend(services, "count");
@@ -544,13 +629,21 @@ public class MacOsBle implements BlePlatform {
         };
         addMethod(cls, "peripheral:didDiscoverServices:", cbDidDiscoverServices, "v@:@@");
 
-        cbDidDiscoverCharacteristics = (PeripheralDelegateCallback)
-                (self, cmd, peripheral, service) -> {
+        cbDidDiscoverCharacteristics = (PeripheralServiceDelegateWithErrorCallback)
+                (self, cmd, peripheral, service, error) -> {
             MacOsBle me = resolve(self);
             if (me == null) { return; }
-            // Третий аргумент — service (не error); error идёт как 4-й, но наш callback
-            // interface имеет только 4 аргумента, поэтому error не доступен здесь.
-            // Для didDiscoverCharacteristicsForService:error: нужен 5-arg callback.
+            // This selector has five native arguments; using a 4-arg callback here corrupts the
+            // JNA/Objective-C call boundary on arm64 and can abort the JVM.
+            if (error != 0) {
+                me.characteristicDiscoveryErrorMessage =
+                        localizedError(error, "Unknown characteristic discovery error");
+                log.error("GATT characteristic discovery error: {}",
+                        me.characteristicDiscoveryErrorMessage);
+                CountDownLatch latch = me.characteristicDiscoveryLatch;
+                if (latch != null) { latch.countDown(); }
+                return;
+            }
             long characteristics = msgSend(service, "characteristics");
             long count = msgSend(characteristics, "count");
             log.info("Discovered {} characteristics for service", count);
@@ -581,10 +674,18 @@ public class MacOsBle implements BlePlatform {
         addMethod(cls, "peripheral:didDiscoverCharacteristicsForService:error:",
                 cbDidDiscoverCharacteristics, "v@:@@@");
 
-        cbDidUpdateValue = (PeripheralDelegateCallback)
-                (self, cmd, peripheral, characteristic) -> {
+        cbDidUpdateValue = (PeripheralDelegateWithErrorCallback)
+                (self, cmd, peripheral, characteristic, error) -> {
             MacOsBle me = resolve(self);
             if (me == null) { return; }
+            if (error != 0) {
+                String message = localizedError(error, "Unknown read error");
+                log.error("[BLE] Read error: {}", message);
+                me.drainInProgress.set(false);
+                CountDownLatch latch = me.drainLatch;
+                if (latch != null) { latch.countDown(); }
+                return;
+            }
 
             // Сравнение по pointer характеристики — без ObjC-аллокаций на hot path
             if (characteristic == me.fromNumCharacteristic) {
@@ -674,6 +775,11 @@ public class MacOsBle implements BlePlatform {
     /** General peripheral delegate callback: self, _cmd, peripheral, arg (service/characteristic/error). */
     interface PeripheralDelegateCallback extends Callback {
         void callback(long self, long cmd, long peripheral, long arg);
+    }
+
+    /** Peripheral delegate callback with service and error: self, _cmd, peripheral, service, error. */
+    interface PeripheralServiceDelegateWithErrorCallback extends Callback {
+        void callback(long self, long cmd, long peripheral, long service, long error);
     }
 
     /** Peripheral delegate callback with error: self, _cmd, peripheral, characteristic, error. */

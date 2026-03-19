@@ -28,7 +28,7 @@ public interface NativeSerialPort {
      *
      * @param portName  системное имя порта ("COM3", "cu.usbserial-1234", "ttyUSB0")
      * @param baudRate  скорость (напр. 115200)
-     * @param assertDtr true = активировать DTR (native USB CDC), false = не трогать (USB bridge)
+     * @param assertDtr true = активировать DTR (native USB CDC), false = оставить DTR неактивным (USB bridge)
      */
     void open(String portName, int baudRate, boolean assertDtr) throws ConnectionException;
 
