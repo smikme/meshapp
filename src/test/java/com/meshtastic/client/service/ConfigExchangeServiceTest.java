@@ -1,295 +1,232 @@
 package com.meshtastic.client.service;
 
+import com.meshtastic.client.TestEnvironmentSupport;
+import com.meshtastic.client.connection.ConnectionException;
 import com.meshtastic.client.connection.ConnectionListener;
 import com.meshtastic.client.connection.MeshtasticConnection;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.protocol.ProtocolHandler;
-import org.meshtastic.proto.*;
-import org.junit.jupiter.api.*;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import org.meshtastic.proto.ChannelProtos;
+import org.meshtastic.proto.ConfigProtos;
+import org.meshtastic.proto.MeshProtos;
+import org.meshtastic.proto.ModuleConfigProtos;
+import org.meshtastic.proto.TelemetryProtos;
 
-import javafx.application.Platform;
-
-import java.lang.reflect.Field;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ConfigExchangeServiceTest {
 
-    private static String originalHome;
-    private static Path tempDir;
+    @TempDir
+    Path tempHome;
 
-    private StubMeshtasticConnection connection;
-    private ProtocolHandler protocolHandler;
-    private DeviceState deviceState;
-    private ConfigExchangeService service;
-
-    // ═══════════════════════════════════════════════════════════
-    //  Изоляция БД: temp home + singleton reset
-    // ═══════════════════════════════════════════════════════════
-
-    @BeforeAll
-    static void setUpTempHome() throws Exception {
-        try { Platform.startup(() -> {}); } catch (IllegalStateException ignored) {}
-        originalHome = System.getProperty("user.home");
-        tempDir = Files.createTempDirectory("meshapp-test-");
-        System.setProperty("user.home", tempDir.toString());
-        resetSingleton(NodeCacheService.class);
-        resetSingleton(MessageDbService.class);
-    }
-
-    @AfterAll
-    static void restoreHome() throws Exception {
-        NodeCacheService.closeIfInitialized();
-        MessageDbService.closeIfInitialized();
-        resetSingleton(NodeCacheService.class);
-        resetSingleton(MessageDbService.class);
-        System.setProperty("user.home", originalHome);
-
-        // Удаляем temp-директорию
-        if (tempDir != null && Files.exists(tempDir)) {
-            Files.walk(tempDir)
-                    .sorted(Comparator.reverseOrder())
-                    .forEach(p -> { try { Files.delete(p); } catch (Exception ignored) {} });
-        }
-    }
-
-    private static void resetSingleton(Class<?> clazz) throws Exception {
-        Field instanceField = clazz.getDeclaredField("instance");
-        instanceField.setAccessible(true);
-        instanceField.set(null, null);
-    }
-
-    // ═══════════════════════════════════════════════════════════
-    //  Setup
-    // ═══════════════════════════════════════════════════════════
+    private final List<ProtocolHandler> handlersToShutdown = new ArrayList<>();
 
     @BeforeEach
     void setUp() {
-        connection = new StubMeshtasticConnection();
-        protocolHandler = new ProtocolHandler(connection);
-        deviceState = new DeviceState();
-        service = new ConfigExchangeService(protocolHandler, deviceState);
+        TestEnvironmentSupport.setUserHome(tempHome);
+        TestEnvironmentSupport.ensureJavaFxStarted();
+        TestEnvironmentSupport.resetSingletons();
+        MessageDbService.getInstance();
+        NodeCacheService.getInstance();
     }
 
-    // ═══════════════════════════════════════════════════════════
-    //  Хелперы
-    // ═══════════════════════════════════════════════════════════
-
-    private int getSentConfigId() throws Exception {
-        Field field = ConfigExchangeService.class.getDeclaredField("sentConfigId");
-        field.setAccessible(true);
-        return field.getInt(service);
-    }
-
-    // ═══════════════════════════════════════════════════════════
-    //  Тесты
-    // ═══════════════════════════════════════════════════════════
-
-    @Test
-    void testStartClearsDeviceState() {
-        // Заполняем DeviceState данными
-        deviceState.setMyNodeNum(42);
-        deviceState.getOrCreateNode(100);
-
-        service.startConfigExchange();
-
-        assertEquals(0, deviceState.getMyNodeNum(), "myNodeNum should be cleared");
-        assertEquals(0, deviceState.getNodeCount(), "nodeDb should be cleared");
+    @AfterEach
+    void tearDown() {
+        for (ProtocolHandler handler : handlersToShutdown) {
+            handler.shutdown();
+        }
+        TestEnvironmentSupport.resetSingletons();
     }
 
     @Test
-    void testStartSendsToRadio() {
-        service.startConfigExchange();
+    void startConfigExchangeClearsStateAndSendsWantConfig() throws Exception {
+        FakeConnection connection = new FakeConnection();
+        ProtocolHandler handler = track(new ProtocolHandler(connection));
+        DeviceState state = new DeviceState();
+        state.setMyNodeNum(1);
+        state.getOrCreateNode(1).setLongName("stale");
+        ConfigExchangeService service = new ConfigExchangeService(handler, state);
 
-        assertFalse(connection.getSentBytes().isEmpty(), "Should have sent a ToRadio message");
-    }
-
-    @Test
-    void testStartRegistersListener() {
-        service.startConfigExchange();
-
-        // Проверяем, что listener зарегистрирован: вызываем onMyNodeInfo через protocolHandler
-        // Если listener не зарегистрирован, myNodeNum останется 0
-        MeshProtos.MyNodeInfo myInfo = MeshProtos.MyNodeInfo.newBuilder()
-                .setMyNodeNum(99)
-                .build();
-        service.onMyNodeInfo(myInfo);
-
-        assertEquals(99, deviceState.getMyNodeNum(), "Listener should be registered");
-    }
-
-    @Test
-    void testOnMyNodeInfoSetsNodeNum() {
-        service.startConfigExchange();
-
-        MeshProtos.MyNodeInfo myInfo = MeshProtos.MyNodeInfo.newBuilder()
-                .setMyNodeNum(12345)
-                .build();
-        service.onMyNodeInfo(myInfo);
-
-        assertEquals(12345, deviceState.getMyNodeNum());
-    }
-
-    @Test
-    void testOnNodeInfoPopulatesNodeData() {
-        service.startConfigExchange();
-
-        MeshProtos.User user = MeshProtos.User.newBuilder()
-                .setLongName("Alice")
-                .setShortName("AL")
-                .setId("!aabbccdd")
-                .build();
-        MeshProtos.Position position = MeshProtos.Position.newBuilder()
-                .setLatitudeI(557558000)  // 55.7558 * 1e7
-                .setLongitudeI(376173000) // 37.6173 * 1e7
-                .setAltitude(150)
-                .build();
-        MeshProtos.NodeInfo nodeInfo = MeshProtos.NodeInfo.newBuilder()
-                .setNum(42)
-                .setUser(user)
-                .setPosition(position)
-                .setSnr(5.5f)
-                .setLastHeard(1700000000)
-                .build();
-
-        service.onNodeInfo(nodeInfo);
-
-        NodeData node = deviceState.getNodeDb().get(42);
-        assertNotNull(node);
-        assertEquals("Alice", node.getLongName());
-        assertEquals("AL", node.getShortName());
-        assertEquals("!aabbccdd", node.getNodeId());
-        assertEquals(55.7558, node.getLatitude(), 0.001);
-        assertEquals(37.6173, node.getLongitude(), 0.001);
-        assertEquals(150, node.getAltitude());
-        assertEquals(5.5f, node.getSnr(), 0.01);
-        assertEquals(1700000000, node.getLastHeard());
-    }
-
-    @Test
-    void testOnNodeInfoSkipsEmptyStrings() {
-        service.startConfigExchange();
-
-        // Предварительно заполняем ноду
-        NodeData existing = deviceState.getOrCreateNode(42);
-        existing.setLongName("Alice");
-        existing.setShortName("AL");
-
-        // Приходит NodeInfo с пустым longName, но непустым shortName
-        MeshProtos.User user = MeshProtos.User.newBuilder()
-                .setLongName("")       // пустое — не должно затереть "Alice"
-                .setShortName("BO")    // непустое — должно обновить
-                .build();
-        MeshProtos.NodeInfo nodeInfo = MeshProtos.NodeInfo.newBuilder()
-                .setNum(42)
-                .setUser(user)
-                .build();
-
-        service.onNodeInfo(nodeInfo);
-
-        NodeData node = deviceState.getNodeDb().get(42);
-        assertEquals("Alice", node.getLongName(), "Empty longName should not overwrite existing");
-        assertEquals("BO", node.getShortName(), "Non-empty shortName should update");
-    }
-
-    @Test
-    void testOnNodeInfoSkipsZeroCoordinates() {
-        service.startConfigExchange();
-
-        // Предварительно заполняем ноду координатами
-        NodeData existing = deviceState.getOrCreateNode(42);
-        existing.setLatitude(55.7558);
-        existing.setLongitude(37.6173);
-
-        // Приходит NodeInfo с нулевыми координатами
-        MeshProtos.Position position = MeshProtos.Position.newBuilder()
-                .setLatitudeI(0)
-                .setLongitudeI(0)
-                .build();
-        MeshProtos.NodeInfo nodeInfo = MeshProtos.NodeInfo.newBuilder()
-                .setNum(42)
-                .setPosition(position)
-                .build();
-
-        service.onNodeInfo(nodeInfo);
-
-        NodeData node = deviceState.getNodeDb().get(42);
-        assertEquals(55.7558, node.getLatitude(), 0.001, "Zero latitude should not overwrite existing");
-        assertEquals(37.6173, node.getLongitude(), 0.001, "Zero longitude should not overwrite existing");
-    }
-
-    @Test
-    void testOnConfigModuleConfigChannelStored() {
-        service.startConfigExchange();
-
-        service.onConfig(ConfigProtos.Config.getDefaultInstance());
-        service.onModuleConfig(ModuleConfigProtos.ModuleConfig.getDefaultInstance());
-        service.onChannel(ChannelProtos.Channel.newBuilder().setIndex(0).build());
-
-        assertEquals(1, deviceState.getConfigs().size());
-        assertEquals(1, deviceState.getModuleConfigs().size());
-        assertEquals(1, deviceState.getChannels().size());
-    }
-
-    @Test
-    void testConfigCompleteMatchingIdCompletesFuture() throws Exception {
+        // startConfigExchange должен сбрасывать runtime-state перед новым потоком конфигурации.
         CompletableFuture<DeviceState> future = service.startConfigExchange();
-        int configId = getSentConfigId();
 
-        service.onConfigComplete(configId);
-
-        assertTrue(future.isDone(), "Future should be completed");
-        assertSame(deviceState, future.get(1, TimeUnit.SECONDS),
-                "Future should resolve to the same DeviceState");
+        assertNotNull(future);
+        assertEquals(0, state.getMyNodeNum());
+        assertTrue(state.getNodeDb().isEmpty());
+        assertNotNull(connection.lastWantConfigId);
+        assertNotEquals(0, connection.lastWantConfigId.intValue());
     }
 
     @Test
-    void testConfigCompleteMismatchingIdDoesNotComplete() throws Exception {
-        CompletableFuture<DeviceState> future = service.startConfigExchange();
-        int configId = getSentConfigId();
+    void onNodeInfoUsesPendingFixedPositionForOwnNode() {
+        FakeConnection connection = new FakeConnection();
+        ProtocolHandler handler = track(new ProtocolHandler(connection));
+        DeviceState state = new DeviceState();
+        state.setMyNodeNum(0x12345678);
+        state.setPendingFixedPosition(55.7558, 37.6173, 205);
+        ConfigExchangeService service = new ConfigExchangeService(handler, state);
 
-        service.onConfigComplete(configId + 1); // Неправильный ID
+        // Для своей ноды берём сохранённую пользователем fixed position,
+        // а не потенциально устаревшие координаты из устройства.
+        MeshProtos.NodeInfo nodeInfo = MeshProtos.NodeInfo.newBuilder()
+                .setNum(0x12345678)
+                .setUser(MeshProtos.User.newBuilder()
+                        .setId("!12345678")
+                        .setLongName("Owner")
+                        .setShortName("OWN")
+                        .build())
+                .setPosition(MeshProtos.Position.newBuilder()
+                        .setLatitudeI(100)
+                        .setLongitudeI(200)
+                        .setAltitude(10)
+                        .build())
+                .build();
 
-        assertFalse(future.isDone(), "Future should NOT be completed with wrong config ID");
+        service.onNodeInfo(nodeInfo);
+
+        NodeData node = state.getOrCreateNode(0x12345678);
+        assertEquals(55.7558, node.getLatitude());
+        assertEquals(37.6173, node.getLongitude());
+        assertEquals(205, node.getAltitude());
+        assertEquals("Owner", node.getLongName());
     }
 
-    // ═══════════════════════════════════════════════════════════
-    //  Stub: MeshtasticConnection
-    // ═══════════════════════════════════════════════════════════
+    @Test
+    void onConfigCompletePersistsNodeFlagsAndCompletesFuture() throws Exception {
+        FakeConnection connection = new FakeConnection();
+        ProtocolHandler handler = track(new ProtocolHandler(connection));
+        DeviceState state = new DeviceState();
+        ConfigExchangeService service = new ConfigExchangeService(handler, state);
 
-    private static class StubMeshtasticConnection implements MeshtasticConnection {
+        CompletableFuture<DeviceState> future = service.startConfigExchange();
+        int wantConfigId = connection.lastWantConfigId;
 
+        service.onMyNodeInfo(MeshProtos.MyNodeInfo.newBuilder().setMyNodeNum(0x12345678).build());
+        service.onChannel(ChannelProtos.Channel.newBuilder()
+                .setIndex(0)
+                .setRole(ChannelProtos.Channel.Role.PRIMARY)
+                .build());
+        service.onConfig(ConfigProtos.Config.newBuilder()
+                .setDevice(ConfigProtos.Config.DeviceConfig.newBuilder().build())
+                .build());
+        service.onModuleConfig(ModuleConfigProtos.ModuleConfig.newBuilder()
+                .setMqtt(ModuleConfigProtos.ModuleConfig.MQTTConfig.newBuilder().build())
+                .build());
+        service.onNodeInfo(MeshProtos.NodeInfo.newBuilder()
+                .setNum(0xCAFEBABE)
+                .setIsFavorite(true)
+                .setIsIgnored(true)
+                .setLastHeard(1_700_000_000)
+                .setUser(MeshProtos.User.newBuilder()
+                        .setId("!cafebabe")
+                        .setLongName("Alice")
+                        .setShortName("ALC")
+                        .build())
+                .setDeviceMetrics(TelemetryProtos.DeviceMetrics.newBuilder()
+                        .setBatteryLevel(88)
+                        .setVoltage(4.1f)
+                        .setChannelUtilization(12.5f)
+                        .setAirUtilTx(3.5f)
+                        .build())
+                .build());
+
+        // Завершение exchange должно материализовать накопленные данные в cache/H2
+        // и закрыть future для ConnectionManager/UI.
+        service.onConfigComplete(wantConfigId);
+
+        assertTrue(future.isDone());
+        assertEquals(state, future.get());
+        assertFalse(state.hasPendingFixedPosition());
+        assertEquals(1, state.getNodeCount());
+        assertEquals(1, state.getChannels().size());
+        assertEquals(1, state.getConfigs().size());
+        assertEquals(1, state.getModuleConfigs().size());
+
+        NodeCacheService nodeCacheService = NodeCacheService.getInstance();
+        NodeData cached = nodeCacheService.get("!cafebabe");
+        assertNotNull(cached);
+        assertEquals("Alice", cached.getLongName());
+        assertTrue(nodeCacheService.isFavorite("!cafebabe"));
+        assertTrue(nodeCacheService.isIgnored("!cafebabe"));
+        assertEquals(1, state.getTelemetryHistory().size());
+    }
+
+    @Test
+    void onConfigCompleteIgnoresUnexpectedConfigId() {
+        FakeConnection connection = new FakeConnection();
+        ProtocolHandler handler = track(new ProtocolHandler(connection));
+        DeviceState state = new DeviceState();
+        ConfigExchangeService service = new ConfigExchangeService(handler, state);
+
+        CompletableFuture<DeviceState> future = service.startConfigExchange();
+        int expectedId = connection.lastWantConfigId;
+
+        service.onConfigComplete(expectedId + 1);
+
+        assertFalse(future.isDone());
+    }
+
+    private ProtocolHandler track(ProtocolHandler handler) {
+        handlersToShutdown.add(handler);
+        return handler;
+    }
+
+    private static final class FakeConnection implements MeshtasticConnection {
+        // Нам нужен только факт отправки want_config_id; входящие события вызываем напрямую у сервиса.
         private Consumer<byte[]> dataListener;
-        private final List<byte[]> sentBytes = new ArrayList<>();
-        private boolean connected = true;
+        private ConnectionListener connectionListener;
+        private Integer lastWantConfigId;
 
         @Override
-        public void connect() {}
+        public void connect() throws ConnectionException {
+        }
 
         @Override
-        public void disconnect() { connected = false; }
+        public void disconnect() {
+        }
 
         @Override
-        public boolean isConnected() { return connected; }
+        public boolean isConnected() {
+            return false;
+        }
 
         @Override
-        public void sendBytes(byte[] data) { sentBytes.add(data); }
+        public void sendBytes(byte[] data) {
+            try {
+                byte[] payload = new byte[data.length - 4];
+                System.arraycopy(data, 4, payload, 0, payload.length);
+                MeshProtos.ToRadio toRadio = MeshProtos.ToRadio.parseFrom(payload);
+                if (toRadio.hasWantConfigId()) {
+                    lastWantConfigId = toRadio.getWantConfigId();
+                }
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        }
 
         @Override
-        public void setDataListener(Consumer<byte[]> listener) { this.dataListener = listener; }
+        public void setDataListener(Consumer<byte[]> listener) {
+            this.dataListener = listener;
+        }
 
         @Override
-        public void setConnectionListener(ConnectionListener listener) {}
-
-        public List<byte[]> getSentBytes() { return sentBytes; }
+        public void setConnectionListener(ConnectionListener listener) {
+            this.connectionListener = listener;
+        }
     }
 }

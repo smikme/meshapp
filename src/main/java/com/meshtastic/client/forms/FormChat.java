@@ -399,6 +399,11 @@ public class FormChat extends Form {
                         selectedChat.getPeerNodeId(),
                         request.text(), request.replyId());
             }
+
+            // Локально уже сохранили исходящее сообщение в БД и DeviceState.
+            // Подтягиваем его в открытую беседу сразу, не дожидаясь асинхронного
+            // messageListener, чтобы UI не выглядел "немым" при проблемах с RX/ACK.
+            refreshCurrentChatAfterLocalSend();
         });
     }
 
@@ -597,6 +602,17 @@ public class FormChat extends Form {
                 updateScrollDownBadge();
             }
         }
+    }
+
+    /**
+     * Сразу отражает локально отправленное сообщение в открытом чате.
+     * Использует тот же DB-backed путь, что и обычный messageListener,
+     * чтобы не плодить отдельную логику рендера и не расходиться со статусами.
+     */
+    private void refreshCurrentChatAfterLocalSend() {
+        reloadChatList();
+        refreshCurrentChat();
+        scrollToBottom();
     }
 
     private boolean isScrolledToBottom() {

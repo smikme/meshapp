@@ -41,6 +41,7 @@ using namespace Windows::Foundation;
 using namespace Windows::Devices::Bluetooth;
 using namespace Windows::Devices::Bluetooth::Advertisement;
 using namespace Windows::Devices::Bluetooth::GenericAttributeProfile;
+using namespace Windows::Devices::Enumeration;
 using namespace Windows::Devices::Radios;
 using namespace Windows::Storage::Streams;
 
@@ -116,6 +117,14 @@ static std::atomic<int> g_write_option{-1};
 static meshble_device_cb g_device_callback = nullptr;
 static meshble_data_cb g_data_callback = nullptr;
 static meshble_state_cb g_state_callback = nullptr;
+static meshble_passkey_request_cb g_passkey_request_callback = nullptr;
+
+static std::mutex g_pairing_mutex;
+static std::condition_variable g_pairing_cv;
+static bool g_pairing_request_active = false;
+static bool g_pairing_response_ready = false;
+static bool g_pairing_request_cancelled = false;
+static std::string g_pairing_request_pin;
 
 /* ==================== Worker Thread ==================== */
 
@@ -201,6 +210,146 @@ static const char* gatt_status_str(GattCommunicationStatus s) {
     }
 }
 
+static void clear_pending_pairing_request_locked() {
+    g_pairing_request_active = false;
+    g_pairing_response_ready = false;
+    g_pairing_request_cancelled = false;
+    g_pairing_request_pin.clear();
+}
+
+static void cancel_pending_pairing_request() {
+    std::lock_guard<std::mutex> lock(g_pairing_mutex);
+    if (!g_pairing_request_active) {
+        return;
+    }
+    g_pairing_request_active = false;
+    g_pairing_response_ready = false;
+    g_pairing_request_cancelled = true;
+    g_pairing_request_pin.clear();
+    g_pairing_cv.notify_all();
+}
+
+/**
+ * Waits for the application to provide a BLE passkey.
+ * Uses a dedicated condition variable instead of run_on_worker(), because the
+ * worker thread is already blocked inside PairAsync() while WinRT is waiting
+ * for the PairingRequested handler to complete.
+ */
+static bool await_user_passkey(std::string const& address, std::string& out_pin) {
+    constexpr auto PASSKEY_RESPONSE_TIMEOUT = std::chrono::minutes(2);
+
+    meshble_passkey_request_cb callback = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(g_pairing_mutex);
+        clear_pending_pairing_request_locked();
+        g_pairing_request_active = true;
+        callback = g_passkey_request_callback;
+    }
+
+    if (!callback) {
+        log_msg("[meshble] PairingRequested ProvidePin for %s, but no Java callback is registered",
+                address.c_str());
+        cancel_pending_pairing_request();
+        return false;
+    }
+
+    callback(address.c_str());
+
+    std::unique_lock<std::mutex> lock(g_pairing_mutex);
+    bool ready = g_pairing_cv.wait_for(lock, PASSKEY_RESPONSE_TIMEOUT, [] {
+        return !g_pairing_request_active || g_pairing_response_ready || g_pairing_request_cancelled;
+    });
+    if (!ready || g_pairing_request_cancelled || !g_pairing_response_ready) {
+        clear_pending_pairing_request_locked();
+        return false;
+    }
+
+    out_pin = g_pairing_request_pin;
+    clear_pending_pairing_request_locked();
+    return !out_pin.empty();
+}
+
+/**
+ * Ensures the device is paired before GATT discovery/write.
+ * Windows can return a BluetoothLEDevice and even expose services for an
+ * unpaired device, but the first WriteValueAsync then fails with AccessDenied.
+ * Pairing up front keeps connect() and first write on the same contract.
+ */
+static bool ensure_paired(BluetoothLEDevice const& device, std::string const& address) {
+    auto device_info = device.DeviceInformation();
+    if (device_info == nullptr) {
+        log_msg("[meshble] DeviceInformation is unavailable for %s", address.c_str());
+        return true;
+    }
+
+    auto pairing = device_info.Pairing();
+    if (pairing.IsPaired()) {
+        return true;
+    }
+
+    // Do not fail closed here: some devices report CanPair=false but still allow
+    // unencrypted access, and we do not want to break already-working hardware.
+    if (!pairing.CanPair()) {
+        log_msg("[meshble] %s is not paired and cannot be custom-paired here; continuing without pairing",
+                address.c_str());
+        return true;
+    }
+
+    log_msg("[meshble] %s is not paired; starting custom pairing", address.c_str());
+
+    auto custom_pairing = pairing.Custom();
+    auto pairing_revoker = custom_pairing.PairingRequested(winrt::auto_revoke,
+        [address](DeviceInformationCustomPairing const&,
+                  DevicePairingRequestedEventArgs const& args) {
+            auto deferral = args.GetDeferral();
+            try {
+                switch (args.PairingKind()) {
+                    case DevicePairingKinds::ConfirmOnly:
+                        log_msg("[meshble] PairingRequested ConfirmOnly for %s", address.c_str());
+                        args.Accept();
+                        break;
+
+                    case DevicePairingKinds::ProvidePin: {
+                        log_msg("[meshble] PairingRequested ProvidePin for %s", address.c_str());
+                        std::string pin;
+                        if (await_user_passkey(address, pin)) {
+                            args.Accept(to_hstring(pin));
+                        } else {
+                            log_msg("[meshble] PairingRequested ProvidePin cancelled/timed out for %s",
+                                    address.c_str());
+                        }
+                        break;
+                    }
+
+                    default:
+                        log_msg("[meshble] Unsupported PairingKind %d for %s",
+                                (int)args.PairingKind(), address.c_str());
+                        break;
+                }
+            } catch (const hresult_error& e) {
+                log_msg("[meshble] PairingRequested handler failed: %ls", e.message().c_str());
+            } catch (...) {
+                log_msg("[meshble] PairingRequested handler failed: unknown");
+            }
+            deferral.Complete();
+        });
+
+    auto result = custom_pairing.PairAsync(
+            DevicePairingKinds::ConfirmOnly | DevicePairingKinds::ProvidePin).get();
+
+    switch (result.Status()) {
+        case DevicePairingResultStatus::Paired:
+        case DevicePairingResultStatus::AlreadyPaired:
+            log_msg("[meshble] Pairing completed for %s", address.c_str());
+            return true;
+
+        default:
+            log_msg("[meshble] PairAsync failed for %s: status=%d",
+                    address.c_str(), (int)result.Status());
+            return false;
+    }
+}
+
 static GattCharacteristic find_characteristic(GattDeviceService const& service, guid const& uuid) {
     auto result = service.GetCharacteristicsForUuidAsync(uuid, BluetoothCacheMode::Uncached).get();
     if (result.Status() == GattCommunicationStatus::Success) {
@@ -267,6 +416,7 @@ static void do_disconnect() {
     g_connected = false;
     g_notifications_active = false;
     g_write_option = -1;
+    cancel_pending_pairing_request();
     if (!g_ble) return;
 
     try {
@@ -319,6 +469,8 @@ MESHBLE_API int meshble_init(void) {
 MESHBLE_API void meshble_cleanup(void) {
     if (!g_initialized) return;
 
+    cancel_pending_pairing_request();
+
     try {
         run_on_worker([] {
             do_disconnect();
@@ -331,6 +483,7 @@ MESHBLE_API void meshble_cleanup(void) {
     g_device_callback = nullptr;
     g_data_callback = nullptr;
     g_state_callback = nullptr;
+    g_passkey_request_callback = nullptr;
 
     g_worker_running = false;
     g_queue_cv.notify_one();
@@ -421,7 +574,7 @@ MESHBLE_API int meshble_connect(const char* address, int timeout_ms) {
     std::string addr(address);
 
     try {
-        return run_on_worker([addr, timeout_ms]() -> int {
+        return run_on_worker([addr]() -> int {
             do_disconnect();
             uint64_t mac = string_to_mac(addr.c_str());
             if (mac == 0) return -2;
@@ -431,6 +584,19 @@ MESHBLE_API int meshble_connect(const char* address, int timeout_ms) {
 
                 auto dev = BluetoothLEDevice::FromBluetoothAddressAsync(mac).get();
                 if (dev == nullptr) { log_msg("[meshble] Device not found"); return -2; }
+
+                if (!ensure_paired(dev, addr)) {
+                    try { dev.Close(); } catch (...) {}
+                    do_disconnect();
+                    return -4;
+                }
+
+                // Re-open after pairing so the next GATT requests run against a fresh
+                // WinRT device object with updated authentication state.
+                try { dev.Close(); } catch (...) {}
+                dev = BluetoothLEDevice::FromBluetoothAddressAsync(mac).get();
+                if (dev == nullptr) { log_msg("[meshble] Device not found after pairing"); return -2; }
+
                 g_ble->device = dev;
                 g_ble->connection_status_token = g_ble->device.ConnectionStatusChanged(on_connection_status_changed);
 
@@ -487,6 +653,7 @@ MESHBLE_API void meshble_disconnect(void) {
     if (!g_initialized) return;
     g_connected = false;
     g_notifications_active = false;
+    cancel_pending_pairing_request();
     post_to_worker([] { do_disconnect(); });
 }
 
@@ -578,4 +745,29 @@ MESHBLE_API int meshble_read_from_radio(unsigned char* buffer, int buf_size, int
 
 MESHBLE_API void meshble_set_from_radio_listener(meshble_data_cb callback) { g_data_callback = callback; }
 MESHBLE_API void meshble_set_state_listener(meshble_state_cb callback) { g_state_callback = callback; }
+MESHBLE_API void meshble_set_passkey_request_callback(meshble_passkey_request_cb callback) {
+    g_passkey_request_callback = callback;
+}
+
+MESHBLE_API void meshble_respond_passkey(uint32_t passkey) {
+    char pin_buf[7];
+    snprintf(pin_buf, sizeof(pin_buf), "%06u", (unsigned)(passkey % 1000000U));
+
+    {
+        std::lock_guard<std::mutex> lock(g_pairing_mutex);
+        if (!g_pairing_request_active) {
+            return;
+        }
+        g_pairing_request_pin = pin_buf;
+        g_pairing_response_ready = true;
+        g_pairing_request_cancelled = false;
+        g_pairing_request_active = false;
+    }
+    g_pairing_cv.notify_all();
+}
+
+MESHBLE_API void meshble_cancel_passkey(void) {
+    cancel_pending_pairing_request();
+}
+
 MESHBLE_API int meshble_notifications_active(void) { return g_notifications_active.load() ? 1 : 0; }

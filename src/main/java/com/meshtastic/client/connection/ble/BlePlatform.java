@@ -79,11 +79,27 @@ public interface BlePlatform {
     /**
      * Устанавливает обработчик запроса passkey при BLE pairing.
      * Вызывается когда устройство требует PIN-код для сопряжения.
+     * Платформы с app-managed pairing затем принимают ответ через
+     * {@link #respondPasskey(int)} или {@link #cancelPasskey()}.
      * По умолчанию — noop (платформы без поддержки pairing не реагируют).
      *
      * @param handler callback с MAC-адресом устройства
      */
     default void setPasskeyRequestHandler(Consumer<String> handler) {}
+
+    /**
+     * Передаёт платформенному backend введённый пользователем BLE PIN-код.
+     * Используется только реализациями с app-managed pairing.
+     *
+     * @param passkey шестизначный BLE passkey
+     */
+    default void respondPasskey(int passkey) {}
+
+    /**
+     * Отменяет pending BLE pairing request.
+     * По умолчанию — noop для платформ без app-managed pairing.
+     */
+    default void cancelPasskey() {}
 
     /** Освобождает все нативные ресурсы. */
     void dispose();

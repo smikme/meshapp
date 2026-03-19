@@ -31,22 +31,24 @@
 
 
 
-## O проекте
+## О проекте
 
-**MeshApp** — полнофункциональный десктопный клиент для управления устройствами и общения в mesh-сети [Meshtastic](https://meshtastic.org). Приложение заменяет мобильные клиенты на ПК и предоставляет расширенные возможности мониторинга, визуализации телеметрии и настройки радиомодулей.
+**MeshApp** — полнофункциональный кроссплатформенный десктопный клиент для [Meshtastic](https://meshtastic.org), работающий по **TCP**, **Serial / USB** и **BLE**. Приложение предназначено для управления устройствами, обмена сообщениями, мониторинга сети и редактирования конфигурации радиомодулей с ПК на Windows, macOS и Linux.
 
 Meshtastic — открытый проект, превращающий недорогие LoRa-модули в узлы децентрализованной mesh-сети. Сообщения передаются на расстояние от сотен метров до десятков километров — без интернета, вышек сотовой связи и какой-либо инфраструктуры.
 
 ```
-                       +-----------------------------------------------+
-                       |                  MeshApp                      |
-                       |                                               |
-  +--------+   TCP     |  +----------+  +---------+  +------------+    |
-  |  LoRa  |<--------->|  | Protocol |->|  Model  |->|     UI     |    |
-  | Device |   USB     |  | Handler  |  |  State  |  |  (JavaFX)  |    |
-  +--------+<--------->|  +----------+  +---------+  +------------+    |
-                       |                                               |
-                       +-----------------------------------------------+
+                     +------------------------------------------------------+
+                     |                       MeshApp                         |
+                     |                                                      |
+ TCP (IP:4403) ----->|  +----------------+  +-----------+  +-------------+  |
+ USB Serial -------->|  |   Transport    |->| Protocol  |->|  UI / Forms |  |
+ BLE / GATT -------->|  | TCP / USB / BLE|  |  Handler  |  |   JavaFX    |  |
+                     |  +----------------+  +-----------+  +-------------+  |
+                     |           |                 |               |         |
+                     |           v                 v               v         |
+                     |   Native serial / BLE   DeviceState      H2 / Logs   |
+                     +------------------------------------------------------+
 ```
 
 ---
@@ -107,10 +109,13 @@ Meshtastic — открытый проект, превращающий недо�
   <img src="docs/screenshots/connections-w.png" width="49%" alt="Подключения — светлая тема"/>
 </p>
 
-- **TCP и Serial** — подключение по сети или USB
-- **Несколько устройств** — одновременная работа с несколькими радиомодулями
-- **Профили подключений** — сохранение и быстрое переключение
+- **TCP, Serial / USB и BLE** — подключение по сети, через COM/tty-порт или Bluetooth LE
+- **Поиск устройств** — автопоиск serial-портов и BLE-сканирование Meshtastic-устройств
+- **Профили подключений** — сохранение адресов, портов и BLE-устройств для быстрого повторного подключения
+- **Одно активное подключение** — в каждый момент времени приложение работает с одним выбранным устройством
+- **BLE-сопряжение** — passkey/pairing flow, когда этого требует устройство или платформа
 - **Автообмен конфигурацией** — автоматическое получение параметров устройства при подключении
+- **Автопереподключение** — повторные попытки восстановления соединения после разрыва
 
 ---
 
@@ -148,8 +153,15 @@ Meshtastic — открытый проект, превращающий недо�
 
 ### Требования
 
+Для сборки и запуска из исходников:
+
 - **JDK 21+** (скачивается автоматически через Gradle Toolchain)
 - **Git** для клонирования репозитория
+- **macOS**: Xcode Command Line Tools (`cc`) для сборки `libmeshapp-serial.dylib`
+- **Windows**: CMake + MSVC Build Tools для сборки `meshapp-ble.dll`
+- **Linux**: CMake + C/C++ toolchain + `libsystemd-dev` / `systemd-devel` для сборки `libmeshapp-ble.so`
+
+Для готовых релизных пакетов (`.dmg`, `.msi`, `.deb`) эти build-зависимости не нужны.
 
 ### Сборка и запуск
 
@@ -167,10 +179,12 @@ cd meshapp
 
 ### Подключение к устройству
 
-1. Подключите Meshtastic-устройство по USB или убедитесь, что оно доступно по TCP
-2. В разделе **Подключения** добавьте новое подключение (IP:порт или COM-порт)
-3. Нажмите **Подключить** — MeshApp автоматически обменяется конфигурацией с устройством
-4. Переключитесь в **Чат** для обмена сообщениями или в **Узлы** для мониторинга сети
+1. Подключите Meshtastic-устройство по USB, убедитесь, что оно доступно по TCP, или включите на нём BLE
+2. В разделе **Подключения** добавьте новый профиль и выберите тип: **TCP**, **Serial / USB** или **BLE**
+3. Для **Serial / USB** выберите найденный порт, для **BLE** запустите сканирование и выберите устройство из списка
+4. Если платформа или устройство требуют сопряжения, подтвердите pairing / введите passkey
+5. Нажмите **Подключить** — MeshApp автоматически обменяется конфигурацией с устройством
+6. Переключитесь в **Чат** для обмена сообщениями, **Узлы** для мониторинга сети или **Настройки** для конфигурации устройства
 
 ---
 
@@ -181,9 +195,11 @@ cd meshapp
 | UI | JavaFX 21 + AtlantaFX | Интерфейс с нативным оформлением |
 | Протокол | Protobuf 4.33 | Сериализация mesh-пакетов |
 | База данных | H2 (embedded) | Локальное хранение сообщений и телеметрии |
-| Serial | jSerialComm | USB-подключение к устройствам |
-| Нативные эффекты | JNA | Mica (Win), vibrancy (macOS) |
-| Сборка | Gradle 8.13 | Компиляция, jpackage-инсталляторы |
+| TCP | `java.net.Socket` | Подключение к Meshtastic TCP API |
+| Serial | Native JNA backends + jSerialComm discovery | Нативный доступ к COM/tty без jSerialComm I/O |
+| BLE | CoreBluetooth / WinRT / BlueZ через JNA | BLE-сканирование, GATT и pairing на поддерживаемых платформах |
+| Нативные интеграции | JNA | Mica (Win), vibrancy (macOS), системные bridge-слои |
+| Сборка | Gradle 8.13 + Protobuf + CMake + jpackage | Компиляция Java/native слоёв и сборка инсталляторов |
 
 ---
 
@@ -193,15 +209,21 @@ cd meshapp
 meshapp/
 |-- src/main/java/com/meshtastic/client/
 |   |-- MeshApp.java              # Entry point (JavaFX Application)
-|   |-- connection/               # Transport layer (TCP, Serial)
+|   |-- connection/               # TCP transport и общие connection API
+|   |   |-- ble/                  # BLE transport + platform backends
+|   |   \-- serial/               # Native serial I/O (Win/macOS/Linux)
 |   |-- protocol/                 # Meshtastic protocol parsing
-|   |-- model/                    # Data models (thread-safe)
-|   |-- service/                  # Business logic & persistence
-|   |-- forms/                    # Application screens
+|   |-- model/                    # Data models и runtime state
+|   |-- service/                  # Persistence, discovery, reconnect, config exchange
+|   |-- forms/                    # Основные экраны приложения
 |   |-- components/               # Reusable UI components
+|   |-- platform/                 # OS-specific UI / system integration
 |   |-- system/                   # App framework (FormManager, RootPane)
-|   |-- platform/                 # OS-specific code (Win/Mac/Linux)
 |   \-- themes/                   # Theme management
+|-- native/
+|   |-- windows-ble/              # WinRT BLE DLL
+|   |-- linux-ble/                # BlueZ BLE shared library
+|   \-- macos-serial/             # macOS serial helper dylib
 |-- src/main/proto/meshtastic/    # Meshtastic protobuf schemas
 |-- src/main/resources/           # CSS, fonts, icons, logos
 \-- build.gradle                  # Build configuration
@@ -218,6 +240,12 @@ MeshApp собирается в нативные пакеты через `jpacka
 | Windows | `.msi` | `./gradlew jpackage` |
 | macOS | `.dmg` | `./gradlew jpackage` |
 | Linux | `.deb` | `./gradlew jpackage` |
+
+Во время `processResources` Gradle автоматически собирает платформенные native-компоненты:
+
+- **Windows** — `meshapp-ble.dll` для BLE через WinRT
+- **Linux** — `libmeshapp-ble.so` для BLE через BlueZ
+- **macOS** — `libmeshapp-serial.dylib` для безопасного управления serial modem lines
 
 ### Установка на macOS
 
@@ -248,5 +276,4 @@ xattr -cr /Applications/MeshApp.app
   <img src="https://img.shields.io/badge/Telegram-2CA5E0?style=for-the-badge&logo=telegram&logoColor=white" alt="Telegram">
 </a>
 </p>
-
 

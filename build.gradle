@@ -102,6 +102,60 @@ tasks.register('generateVersionProperties') {
 sourceSets.main.resources.srcDir(layout.buildDirectory.dir('generated/resources'))
 tasks.named('processResources') { dependsOn 'generateVersionProperties' }
 
+def macOsJnaResourcePrefix = {
+	def arch = System.getProperty('os.arch').toLowerCase(java.util.Locale.ROOT)
+	switch (arch) {
+		case ['amd64', 'x86_64']:
+			return 'darwin-x86-64'
+		case ['aarch64', 'arm64']:
+			return 'darwin-aarch64'
+		default:
+			return "darwin-${arch}"
+	}
+}
+
+// ============================================================
+// macOS Serial: сборка libmeshapp-serial.dylib для безопасного ioctl wrapper
+// Использование: ./gradlew buildSerialNative (или автоматически при processResources на macOS)
+// ============================================================
+if (org.gradle.internal.os.OperatingSystem.current().isMacOsX()) {
+	tasks.register('buildSerialNative') {
+		group = 'build'
+		description = 'Собрать libmeshapp-serial.dylib для macOS serial modem-line control'
+
+		def nativeDir = file('native/macos-serial')
+		def resourcePrefix = macOsJnaResourcePrefix()
+		def outputDir = layout.buildDirectory.dir("generated/resources/${resourcePrefix}").get().asFile
+		def dylibDest = new File(outputDir, 'libmeshapp-serial.dylib')
+
+		inputs.files(fileTree(nativeDir) { include '*.c', '*.h' })
+		outputs.file(dylibDest)
+
+		doLast {
+			outputDir.mkdirs()
+			def compile = new ProcessBuilder(
+				'cc',
+				'-dynamiclib',
+				'-std=c11',
+				'-O2',
+				'-Wall',
+				'-Wextra',
+				'-fvisibility=hidden',
+				'meshapp_serial.c',
+				'-o', dylibDest.absolutePath
+			).directory(nativeDir).redirectErrorStream(true).start()
+			def compileOutput = compile.inputStream.text
+			compile.waitFor()
+			if (compileOutput) logger.lifecycle(compileOutput.trim())
+			if (compile.exitValue() != 0) {
+				throw new GradleException("macOS serial native build failed (exit ${compile.exitValue()})")
+			}
+			logger.lifecycle("buildSerialNative: dylib собран в ${dylibDest}")
+		}
+	}
+	tasks.named('processResources') { dependsOn 'buildSerialNative' }
+}
+
 // ============================================================
 // Windows BLE: сборка meshapp-ble.dll из native/windows-ble/
 // Использование: ./gradlew buildBleNative (или автоматически при processResources на Windows)
