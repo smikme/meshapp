@@ -3,6 +3,7 @@ package com.meshtastic.client.connection.serial;
 import com.meshtastic.client.connection.ConnectionException;
 import com.meshtastic.client.platform.OsDetect;
 import com.sun.jna.*;
+import com.sun.jna.ptr.IntByReference;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -11,9 +12,14 @@ import org.slf4j.LoggerFactory;
  * POSIX-реализация serial-порта через libc (macOS + Linux).
  * <p>
  * Открывает устройство через {@code open()} с {@code O_NOCTTY} и настраивает termios
- * с {@code CLOCAL} (игнорировать modem control) и без {@code HUPCL}
- * (не дёргать DTR при close). Результат — DTR не активируется ни при открытии,
- * ни при закрытии порта.
+ * с {@code CLOCAL} (игнорировать auto-modem control) и без {@code HUPCL}
+ * (не дёргать DTR при close). Явное управление DTR/RTS выполняется отдельным шагом
+ * после {@code tcsetattr()}, чтобы порт не менял линии самопроизвольно.
+ * <p>
+ * Linux дополнительно управляет RTS/DTR через прямой вызов {@code ioctl()} из libc.
+ * На macOS для modem lines используется отдельный native shim: системный
+ * {@code ioctl()} variadic, и его прямой вызов через JNA на Apple Silicon
+ * может abort'ить JVM.
  */
 class PosixSerialPort implements NativeSerialPort {
 
@@ -89,12 +95,8 @@ class PosixSerialPort implements NativeSerialPort {
     private static final short POLLIN = 0x0001;
 
     // ioctl: modem control
-    private static final long TIOCMBIS_MAC = 0x8004746CL;   // IOW('t', 108, int) — set specified bits
     private static final long TIOCMBIS_LINUX = 0x5416L;
-    private static final long TIOCMGET_MAC = 0x4004746AL;   // IOR('t', 106, int) — get all bits
     private static final long TIOCMGET_LINUX = 0x5415L;
-    // TIOCSDTR/TIOCCDTR не используем — _IO ioctls без аргумента
-    // крашат JVM на ARM64 при вызове через JNA variadic ioctl()
     private static final int TIOCM_DTR = 0x0002;
     private static final int TIOCM_RTS = 0x0004;
 
@@ -110,8 +112,8 @@ class PosixSerialPort implements NativeSerialPort {
     private static final int OFF_CFLAG_MAC = 16;
     private static final int OFF_LFLAG_MAC = 24;
     private static final int OFF_CC_MAC = 32;     // c_cc[20]
-    private static final int OFF_ISPEED_MAC = 52;
-    private static final int OFF_OSPEED_MAC = 60;
+    private static final int OFF_ISPEED_MAC = 56;
+    private static final int OFF_OSPEED_MAC = 64;
     private static final int VMIN_MAC = 16;        // c_cc index
     private static final int VTIME_MAC = 17;
 
@@ -169,33 +171,8 @@ class PosixSerialPort implements NativeSerialPort {
 
         try {
             configureTermios(baudRate, isMac);
-
-            // Убираем O_NONBLOCK перед установкой modem lines
             CLib.INSTANCE.fcntl(fd, F_SETFL, 0);
-
-            // RTS всегда активируем (на CH340 держит Q1 OFF → EN HIGH).
-            // DTR активируем только для native USB CDC (сигнал "хост подключён").
-            int modemFlags = TIOCM_RTS;
-            if (assertDtr) modemFlags |= TIOCM_DTR;
-            Memory modemBits = new Memory(4);
-            modemBits.setInt(0, modemFlags);
-            long tiocmbis = isMac ? TIOCMBIS_MAC : TIOCMBIS_LINUX;
-            int r = CLib.INSTANCE.ioctl(fd, tiocmbis, modemBits);
-            if (r != 0) log.warn("ioctl TIOCMBIS failed: errno={}", errno());
-
-            // Верификация
-            long tiocmget = isMac ? TIOCMGET_MAC : TIOCMGET_LINUX;
-            Memory actualBits = new Memory(4);
-            actualBits.setInt(0, 0);
-            if (CLib.INSTANCE.ioctl(fd, tiocmget, actualBits) == 0) {
-                int bits = actualBits.getInt(0);
-                log.debug("Modem lines after setup: DTR={}, RTS={}, raw=0x{}",
-                        (bits & TIOCM_DTR) != 0 ? "ON" : "OFF",
-                        (bits & TIOCM_RTS) != 0 ? "ON" : "OFF",
-                        Integer.toHexString(bits));
-            } else {
-                log.debug("TIOCMGET failed: errno={}", errno());
-            }
+            configureModemLines(isMac, assertDtr);
         } catch (Exception e) {
             CLib.INSTANCE.close(fd);
             fd = -1;
@@ -205,6 +182,96 @@ class PosixSerialPort implements NativeSerialPort {
         open = true;
         log.debug("PosixSerialPort opened {} at {} baud (DTR={}, RTS=asserted)",
                 portName, baudRate, assertDtr ? "on" : "off");
+    }
+
+    /**
+     * Настраивает RTS/DTR после termios-конфигурации.
+     * Linux использует прямой вызов libc. macOS идёт через отдельный shim с фиксированной ABI,
+     * чтобы не вызывать variadic {@code ioctl()} из JNA на Apple Silicon.
+     */
+    private void configureModemLines(boolean isMac, boolean assertDtr) throws ConnectionException {
+        if (isMac) {
+            configureMacModemLines(assertDtr);
+            return;
+        }
+        configureLinuxModemLines(assertDtr);
+    }
+
+    /**
+     * macOS modem-line control через маленькую native-библиотеку с фиксированными сигнатурами.
+     * Это сохраняет полный контроль над DTR/RTS, но избегает прямого JNA-вызова variadic
+     * {@code ioctl()}, который на arm64 может аварийно завершить JVM.
+     */
+    private void configureMacModemLines(boolean assertDtr) throws ConnectionException {
+        MacOsSerialLibrary.Api serialLib = MacOsSerialLibrary.instance();
+
+        if (!assertDtr) {
+            int clearResult = serialLib.meshserial_clear_modem_bits(fd, TIOCM_DTR);
+            if (clearResult != 0) {
+                throw modemLineError("TIOCMBIC(DTR)", clearResult);
+            }
+        }
+
+        int setBits = TIOCM_RTS;
+        if (assertDtr) {
+            setBits |= TIOCM_DTR;
+        }
+
+        int setResult = serialLib.meshserial_set_modem_bits(fd, setBits);
+        if (setResult != 0) {
+            throw modemLineError("TIOCMBIS", setResult);
+        }
+
+        IntByReference actualBits = new IntByReference();
+        int getResult = serialLib.meshserial_get_modem_bits(fd, actualBits);
+        if (getResult == 0) {
+            logModemLines(actualBits.getValue());
+        } else {
+            log.debug("TIOCMGET failed: {}", describeNativeError(getResult));
+        }
+    }
+
+    private void configureLinuxModemLines(boolean assertDtr) {
+        // RTS всегда активируем (на CH340 держит Q1 OFF → EN HIGH).
+        // DTR активируем только для native USB CDC (сигнал "хост подключён").
+        int modemFlags = TIOCM_RTS;
+        if (assertDtr) {
+            modemFlags |= TIOCM_DTR;
+        }
+
+        Memory modemBits = new Memory(4);
+        modemBits.setInt(0, modemFlags);
+        int r = CLib.INSTANCE.ioctl(fd, TIOCMBIS_LINUX, modemBits);
+        if (r != 0) {
+            log.warn("ioctl TIOCMBIS failed: errno={}", errno());
+        }
+
+        Memory actualBits = new Memory(4);
+        actualBits.setInt(0, 0);
+        if (CLib.INSTANCE.ioctl(fd, TIOCMGET_LINUX, actualBits) == 0) {
+            logModemLines(actualBits.getInt(0));
+        } else {
+            log.debug("TIOCMGET failed: errno={}", errno());
+        }
+    }
+
+    private void logModemLines(int bits) {
+        log.debug("Modem lines after setup: DTR={}, RTS={}, raw=0x{}",
+                (bits & TIOCM_DTR) != 0 ? "ON" : "OFF",
+                (bits & TIOCM_RTS) != 0 ? "ON" : "OFF",
+                Integer.toHexString(bits));
+    }
+
+    /**
+     * Преобразует код возврата native shim в диагностическое сообщение с errno.
+     */
+    private ConnectionException modemLineError(String operation, int nativeResult) {
+        return new ConnectionException(operation + " failed: " + describeNativeError(nativeResult));
+    }
+
+    private String describeNativeError(int nativeResult) {
+        int err = nativeResult < 0 ? -nativeResult : nativeResult;
+        return CLib.INSTANCE.strerror(err) + " (" + err + ")";
     }
 
     private void configureTermios(int baudRate, boolean isMac) throws ConnectionException {
@@ -243,10 +310,11 @@ class PosixSerialPort implements NativeSerialPort {
         oflag &= ~OPOST_MAC;
         t.setLong(OFF_OFLAG_MAC, oflag);
 
-        // c_cflag: 8N1, CLOCAL, CREAD, HUPCL (как jSerialComm)
+        // c_cflag: 8N1, CLOCAL, CREAD, без HUPCL
+        // На macOS не хотим опускать DTR при close, иначе часть USB-UART мостов ресетит ESP32.
         long cflag = t.getLong(OFF_CFLAG_MAC);
-        cflag &= ~(CSIZE | PARENB | CSTOPB);
-        cflag |= CS8 | CLOCAL | CREAD | HUPCL;
+        cflag &= ~(CSIZE | PARENB | CSTOPB | HUPCL);
+        cflag |= CS8 | CLOCAL | CREAD;
         t.setLong(OFF_CFLAG_MAC, cflag);
 
         // c_lflag: raw mode

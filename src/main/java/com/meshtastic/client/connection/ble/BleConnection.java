@@ -9,6 +9,7 @@ import javafx.application.Platform;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
 /**
@@ -39,9 +40,21 @@ public class BleConnection implements MeshtasticConnection {
         this.platform = platform;
     }
 
+    /**
+     * Подключает BLE transport, нормализуя различия платформенных backends:
+     * часть реализаций шлёт {@link BleState.Connected} из native callbacks,
+     * а часть считает успешным сам факт завершения {@link BlePlatform#connect(String)}.
+     *
+     * @throws ConnectionException если платформенный backend не смог завершить подключение
+     */
     @Override
     public void connect() throws ConnectionException {
         log.info("Connecting to BLE device: {}", address);
+        // Linux/Windows already emit BleState.Connected from native callbacks, while macOS
+        // currently relies on connect() returning successfully. Keep one onConnected() for both.
+        AtomicBoolean connectedEventDelivered = new AtomicBoolean(false);
+        // If connect() synchronously surfaces Disconnected/Error, do not backfill success afterwards.
+        AtomicBoolean terminalStateObserved = new AtomicBoolean(false);
 
         // Устанавливаем слушатели перед подключением — при reconnect они могут быть stale
         platform.setFromRadioListener(data -> {
@@ -55,16 +68,20 @@ public class BleConnection implements MeshtasticConnection {
             switch (state) {
                 case BleState.Connected ignored -> {
                     connected = true;
-                    ConnectionListener listener = connectionListener;
-                    if (listener != null) { listener.onConnected(); }
+                    if (connectedEventDelivered.compareAndSet(false, true)) {
+                        ConnectionListener listener = connectionListener;
+                        if (listener != null) { listener.onConnected(); }
+                    }
                 }
                 case BleState.Disconnected ignored -> {
                     connected = false;
+                    terminalStateObserved.set(true);
                     ConnectionListener listener = connectionListener;
                     if (listener != null) { listener.onDisconnected(); }
                 }
                 case BleState.Error e -> {
                     connected = false;
+                    terminalStateObserved.set(true);
                     log.error("BLE error: {}", e.message(), e.cause());
                     ConnectionListener listener = connectionListener;
                     if (listener != null) { listener.onConnectionError(e.message(), e.cause()); }
@@ -82,13 +99,15 @@ public class BleConnection implements MeshtasticConnection {
         }
 
         platform.connect(address);
-        connected = true;
-        log.info("Connected to BLE device: {}", address);
-
-        ConnectionListener listener = connectionListener;
-        if (listener != null) {
-            listener.onConnected();
+        // Fallback for platforms that complete connect() successfully but do not emit Connected state.
+        if (!terminalStateObserved.get() && connectedEventDelivered.compareAndSet(false, true)) {
+            connected = true;
+            ConnectionListener listener = connectionListener;
+            if (listener != null) {
+                listener.onConnected();
+            }
         }
+        log.info("Connected to BLE device: {}", address);
     }
 
     @Override
