@@ -16,6 +16,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.nio.charset.StandardCharsets;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ThreadLocalRandom;
 
 /**
@@ -343,8 +344,10 @@ public final class MessageService {
     /**
      * Отправляет begin_edit_settings для начала транзакции изменения настроек.
      * Предотвращает перезагрузку устройства между отдельными set_config/set_module_config.
+     *
+     * @return future с routing ACK/NAK для отправленного admin-пакета
      */
-    public static void beginEditSettings(ProtocolHandler handler, DeviceState state) {
+    public static CompletableFuture<MeshProtos.Routing.Error> beginEditSettings(ProtocolHandler handler, DeviceState state) {
         AdminProtos.AdminMessage.Builder adminBuilder = AdminProtos.AdminMessage.newBuilder()
                 .setBeginEditSettings(true);
         ByteString passkey = state.getSessionPasskey();
@@ -352,14 +355,16 @@ public final class MessageService {
             adminBuilder.setSessionPasskey(passkey);
         }
 
-        sendAdminMessage(handler, state, adminBuilder.build());
+        return sendAdminMessage(handler, state, adminBuilder.build());
     }
 
     /**
      * Отправляет commit_edit_settings для завершения транзакции настроек.
      * Устройство применит все изменения и перезагрузится.
+     *
+     * @return future с routing ACK/NAK для отправленного admin-пакета
      */
-    public static void commitEditSettings(ProtocolHandler handler, DeviceState state) {
+    public static CompletableFuture<MeshProtos.Routing.Error> commitEditSettings(ProtocolHandler handler, DeviceState state) {
         AdminProtos.AdminMessage.Builder adminBuilder = AdminProtos.AdminMessage.newBuilder()
                 .setCommitEditSettings(true);
         ByteString passkey = state.getSessionPasskey();
@@ -367,13 +372,15 @@ public final class MessageService {
             adminBuilder.setSessionPasskey(passkey);
         }
 
-        sendAdminMessage(handler, state, adminBuilder.build());
+        return sendAdminMessage(handler, state, adminBuilder.build());
     }
 
     /**
      * Отправляет set_config (одна секция Config) на устройство.
+     *
+     * @return future с routing ACK/NAK для отправленного admin-пакета
      */
-    public static void setConfig(ProtocolHandler handler, DeviceState state, ConfigProtos.Config config) {
+    public static CompletableFuture<MeshProtos.Routing.Error> setConfig(ProtocolHandler handler, DeviceState state, ConfigProtos.Config config) {
         AdminProtos.AdminMessage.Builder adminBuilder = AdminProtos.AdminMessage.newBuilder()
                 .setSetConfig(config);
         ByteString passkey = state.getSessionPasskey();
@@ -381,13 +388,15 @@ public final class MessageService {
             adminBuilder.setSessionPasskey(passkey);
         }
 
-        sendAdminMessage(handler, state, adminBuilder.build());
+        return sendAdminMessage(handler, state, adminBuilder.build());
     }
 
     /**
      * Отправляет set_module_config (одна секция ModuleConfig) на устройство.
+     *
+     * @return future с routing ACK/NAK для отправленного admin-пакета
      */
-    public static void setModuleConfig(ProtocolHandler handler, DeviceState state,
+    public static CompletableFuture<MeshProtos.Routing.Error> setModuleConfig(ProtocolHandler handler, DeviceState state,
                                         ModuleConfigProtos.ModuleConfig moduleConfig) {
         AdminProtos.AdminMessage.Builder adminBuilder = AdminProtos.AdminMessage.newBuilder()
                 .setSetModuleConfig(moduleConfig);
@@ -396,7 +405,7 @@ public final class MessageService {
             adminBuilder.setSessionPasskey(passkey);
         }
 
-        sendAdminMessage(handler, state, adminBuilder.build());
+        return sendAdminMessage(handler, state, adminBuilder.build());
     }
 
     /**
@@ -504,8 +513,10 @@ public final class MessageService {
 
     /**
      * Вспомогательный метод для отправки AdminMessage на локальное устройство.
+     *
+     * @return future с routing ACK/NAK для отправленного admin-пакета
      */
-    private static void sendAdminMessage(ProtocolHandler handler, DeviceState state,
+    private static CompletableFuture<MeshProtos.Routing.Error> sendAdminMessage(ProtocolHandler handler, DeviceState state,
                                           AdminProtos.AdminMessage adminMsg) {
         MeshProtos.Data data = MeshProtos.Data.newBuilder()
                 .setPortnum(Portnums.PortNum.ADMIN_APP)
@@ -527,7 +538,9 @@ public final class MessageService {
                 .setPacket(packet)
                 .build();
 
+        CompletableFuture<MeshProtos.Routing.Error> ackFuture = state.registerPendingPacketAck(packetId);
         handler.sendToRadio(toRadio);
+        return ackFuture;
     }
 
     private static String bytesToHex(byte[] bytes) {

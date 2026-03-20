@@ -43,6 +43,7 @@ import javafx.scene.layout.VBox;
 import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
 import org.meshtastic.proto.ConfigProtos;
+import org.meshtastic.proto.MeshProtos;
 import org.meshtastic.proto.ModuleConfigProtos;
 
 import org.slf4j.Logger;
@@ -51,9 +52,11 @@ import org.slf4j.LoggerFactory;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 @SystemForm(name = "Настройки", description = "Настройки клиента", tags = {"settings", "options"})
 public class FormSetting extends Form {
@@ -78,6 +81,8 @@ public class FormSetting extends Form {
      */
     private static final long CONFIG_SAVE_REBOOT_HANDOFF_DELAY_MS = 1_000;
     private static final long BLE_CONFIG_SAVE_REBOOT_HANDOFF_DELAY_MS = 4_000;
+    /** Таймаут ожидания routing ACK для admin-пакета при BLE сохранении. */
+    private static final long BLE_CONFIG_SAVE_ACK_TIMEOUT_MS = 5_000;
 
     private DeviceState state;
     private ProtocolHandler handler;
@@ -179,6 +184,30 @@ public class FormSetting extends Form {
             }
         }
         return null;
+    }
+
+    /**
+     * Для BLE сохранение конфигурации опирается не только на задержки, но и на
+     * routing ACK устройства. Это снижает вероятность гонки, когда следующий
+     * admin-пакет или disconnect прилетает раньше, чем прошивка обработала commit.
+     */
+    private void waitForBleAdminAckIfNeeded(ConnectionType transport,
+                                            CompletableFuture<MeshProtos.Routing.Error> ackFuture,
+                                            String stepName) {
+        if (transport != ConnectionType.BLE || ackFuture == null) {
+            return;
+        }
+
+        try {
+            MeshProtos.Routing.Error error = ackFuture
+                    .orTimeout(BLE_CONFIG_SAVE_ACK_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+                    .get();
+            if (error != MeshProtos.Routing.Error.NONE) {
+                throw new IllegalStateException("Config save step '" + stepName + "' failed with " + error);
+            }
+        } catch (Exception e) {
+            throw new IllegalStateException("Config save step '" + stepName + "' ACK failed", e);
+        }
     }
 
     // ==================== Настройки приложения ====================
@@ -811,27 +840,36 @@ public class FormSetting extends Form {
         // поэтому каждое admin-сообщение отправляется с transport-aware интервалом.
         if (!configs.isEmpty() || !moduleConfigs.isEmpty()) {
             List<Runnable> tasks = new ArrayList<>();
+            AtomicBoolean saveFailed = new AtomicBoolean(false);
             tasks.add(() -> {
                 log.info("Config save: beginEditSettings");
-                MessageService.beginEditSettings(handler, state);
+                waitForBleAdminAckIfNeeded(activeTransport,
+                        MessageService.beginEditSettings(handler, state),
+                        "beginEditSettings");
             });
             for (ConfigProtos.Config c : configs) {
                 tasks.add(() -> {
                     log.info("Config save: setConfig variant={} size={}",
                             c.getPayloadVariantCase(), c.getSerializedSize());
-                    MessageService.setConfig(handler, state, c);
+                    waitForBleAdminAckIfNeeded(activeTransport,
+                            MessageService.setConfig(handler, state, c),
+                            "setConfig/" + c.getPayloadVariantCase());
                 });
             }
             for (ModuleConfigProtos.ModuleConfig mc : moduleConfigs) {
                 tasks.add(() -> {
                     log.info("Config save: setModuleConfig variant={} size={}",
                             mc.getPayloadVariantCase(), mc.getSerializedSize());
-                    MessageService.setModuleConfig(handler, state, mc);
+                    waitForBleAdminAckIfNeeded(activeTransport,
+                            MessageService.setModuleConfig(handler, state, mc),
+                            "setModuleConfig/" + mc.getPayloadVariantCase());
                 });
             }
             tasks.add(() -> {
                 log.info("Config save: commitEditSettings");
-                MessageService.commitEditSettings(handler, state);
+                waitForBleAdminAckIfNeeded(activeTransport,
+                        MessageService.commitEditSettings(handler, state),
+                        "commitEditSettings");
             });
 
             ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
@@ -848,10 +886,19 @@ public class FormSetting extends Form {
             for (int i = 0; i < tasks.size(); i++) {
                 final int idx = i;
                 scheduler.schedule(() -> {
+                    if (saveFailed.get()) {
+                        return;
+                    }
                     try {
                         tasks.get(idx).run();
                     } catch (Exception e) {
+                        saveFailed.set(true);
                         log.error("Config save task {} failed", idx, e);
+                        Platform.runLater(() -> {
+                            saveConfigBtn.setDisable(false);
+                            configStatusLabel.setText("Ошибка сохранения: " +
+                                    (e.getMessage() != null ? e.getMessage() : "см. лог"));
+                        });
                     }
                 }, (long) i * messageDelayMs, TimeUnit.MILLISECONDS);
             }
@@ -859,6 +906,9 @@ public class FormSetting extends Form {
             // Последний task обновляет UI
             long uiDelay = (long) tasks.size() * messageDelayMs;
             scheduler.schedule(() -> Platform.runLater(() -> {
+                if (saveFailed.get()) {
+                    return;
+                }
                 resetModifiedFlags(fullConfigRoot != null ? fullConfigRoot : configTree.getRoot());
                 saveConfigBtn.setDisable(false);
                 String reconnectMessage = activeTransport == ConnectionType.BLE
@@ -876,6 +926,9 @@ public class FormSetting extends Form {
                     : CONFIG_SAVE_REBOOT_HANDOFF_DELAY_MS);
             scheduler.schedule(() -> {
                 try {
+                    if (saveFailed.get()) {
+                        return;
+                    }
                     if (activeEntry != null) {
                         log.info("Config save: handoff to reboot reconnect flow (transport={})",
                                 activeTransport);

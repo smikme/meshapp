@@ -153,14 +153,21 @@ public class MessageListenerService implements FromRadioListener {
             return;
         }
 
-        MeshMessage pending = deviceState.resolvePendingAck(requestId);
-        if (pending == null) {
-            log.debug("No pending message found for ACK requestId={}", requestId);
-            return;
-        }
-
         try {
             MeshProtos.Routing routing = MeshProtos.Routing.parseFrom(data.getPayload());
+            MeshMessage pending = deviceState.resolvePendingAck(requestId);
+            boolean completedPacketAck = deviceState.completePendingPacketAck(requestId, routing.getErrorReason());
+
+            if (pending == null && !completedPacketAck) {
+                log.debug("No pending message or packet ACK waiter found for requestId={}", requestId);
+                return;
+            }
+
+            if (pending == null) {
+                log.debug("Routing ACK received for non-message packet {}", requestId);
+                return;
+            }
+
             if (routing.getErrorReason() == MeshProtos.Routing.Error.NONE) {
                 pending.setStatus(MeshMessage.DeliveryStatus.DELIVERED);
                 MessageDbService.getInstance().updateStatus(requestId, pending.getStatus(), null);

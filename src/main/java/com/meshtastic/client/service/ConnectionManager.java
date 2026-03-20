@@ -320,6 +320,7 @@ public final class ConnectionManager {
         DeviceState ds = deviceStates.remove(id);
         if (ds != null) {
             ds.failAllPendingAcks("DISCONNECTED");
+            ds.failAllPendingPacketAcks("DISCONNECTED");
             ds.shutdown();
         }
         MessageListenerService mls = messageListenerServices.remove(id);
