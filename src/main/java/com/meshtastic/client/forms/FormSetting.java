@@ -81,8 +81,8 @@ public class FormSetting extends Form {
      */
     private static final long CONFIG_SAVE_REBOOT_HANDOFF_DELAY_MS = 1_000;
     private static final long BLE_CONFIG_SAVE_REBOOT_HANDOFF_DELAY_MS = 4_000;
-    /** Таймаут ожидания routing ACK для admin-пакета при BLE сохранении. */
-    private static final long BLE_CONFIG_SAVE_ACK_TIMEOUT_MS = 5_000;
+    /** Таймаут ожидания routing ACK для шага сохранения конфигурации. */
+    private static final long CONFIG_SAVE_ACK_TIMEOUT_MS = 8_000;
 
     private DeviceState state;
     private ProtocolHandler handler;
@@ -187,20 +187,21 @@ public class FormSetting extends Form {
     }
 
     /**
-     * Для BLE сохранение конфигурации опирается не только на задержки, но и на
-     * routing ACK устройства. Это снижает вероятность гонки, когда следующий
-     * admin-пакет или disconnect прилетает раньше, чем прошивка обработала commit.
+     * Ждёт routing ACK для шага сохранения конфигурации.
+     * <p>
+     * Теперь это делается не только для BLE: begin_edit_settings и промежуточные
+     * set_config/set_module_config должны завершиться подтверждением до отправки
+     * следующего шага, иначе commit может догнать ещё не обработанную транзакцию.
      */
-    private void waitForBleAdminAckIfNeeded(ConnectionType transport,
-                                            CompletableFuture<MeshProtos.Routing.Error> ackFuture,
-                                            String stepName) {
-        if (transport != ConnectionType.BLE || ackFuture == null) {
+    private void waitForRequiredConfigSaveAck(CompletableFuture<MeshProtos.Routing.Error> ackFuture,
+                                              String stepName) {
+        if (ackFuture == null) {
             return;
         }
 
         try {
             MeshProtos.Routing.Error error = ackFuture
-                    .orTimeout(BLE_CONFIG_SAVE_ACK_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+                    .orTimeout(CONFIG_SAVE_ACK_TIMEOUT_MS, TimeUnit.MILLISECONDS)
                     .get();
             if (error != MeshProtos.Routing.Error.NONE) {
                 throw new IllegalStateException("Config save step '" + stepName + "' failed with " + error);
@@ -208,6 +209,31 @@ public class FormSetting extends Form {
         } catch (Exception e) {
             throw new IllegalStateException("Config save step '" + stepName + "' ACK failed", e);
         }
+    }
+
+    /**
+     * Подключает диагностику к ACK, который не должен блокировать commit/reconnect flow.
+     * <p>
+     * Последний mutating step и BLE commit не должны держать транзакцию открытой в UI:
+     * некоторые устройства рвут линк почти сразу после применения шага, и если ждать
+     * этот ACK синхронно, commit просто не будет отправлен.
+     */
+    private void observeDeferredConfigSaveAck(CompletableFuture<MeshProtos.Routing.Error> ackFuture,
+                                              String stepName) {
+        if (ackFuture == null) {
+            return;
+        }
+
+        ackFuture.whenComplete((error, ex) -> {
+            if (ex != null) {
+                log.info("Config save: deferred ACK for '{}' completed exceptionally: {}",
+                        stepName, ex.getMessage());
+            } else if (error != null && error != MeshProtos.Routing.Error.NONE) {
+                log.warn("Config save: deferred ACK for '{}' returned {}", stepName, error);
+            } else {
+                log.debug("Config save: deferred ACK received for '{}'", stepName);
+            }
+        });
     }
 
     // ==================== Настройки приложения ====================
@@ -843,33 +869,59 @@ public class FormSetting extends Form {
             AtomicBoolean saveFailed = new AtomicBoolean(false);
             tasks.add(() -> {
                 log.info("Config save: beginEditSettings");
-                waitForBleAdminAckIfNeeded(activeTransport,
+                waitForRequiredConfigSaveAck(
                         MessageService.beginEditSettings(handler, state),
                         "beginEditSettings");
             });
+            int totalMutatingSteps = configs.size() + moduleConfigs.size();
+            int mutatingStepIndex = 0;
             for (ConfigProtos.Config c : configs) {
+                boolean waitForAckBeforeCommit = ++mutatingStepIndex < totalMutatingSteps;
                 tasks.add(() -> {
+                    String stepName = "setConfig/" + c.getPayloadVariantCase();
                     log.info("Config save: setConfig variant={} size={}",
                             c.getPayloadVariantCase(), c.getSerializedSize());
-                    waitForBleAdminAckIfNeeded(activeTransport,
-                            MessageService.setConfig(handler, state, c),
-                            "setConfig/" + c.getPayloadVariantCase());
+                    CompletableFuture<MeshProtos.Routing.Error> ackFuture =
+                            MessageService.setConfig(handler, state, c);
+                    if (waitForAckBeforeCommit) {
+                        waitForRequiredConfigSaveAck(ackFuture, stepName);
+                    } else {
+                        // The final payload step is followed only by commit. Requiring its routing
+                        // ACK here can block commit entirely on nodes that reboot or drop the link
+                        // immediately after applying the last config section.
+                        observeDeferredConfigSaveAck(ackFuture, stepName);
+                    }
                 });
             }
             for (ModuleConfigProtos.ModuleConfig mc : moduleConfigs) {
+                boolean waitForAckBeforeCommit = ++mutatingStepIndex < totalMutatingSteps;
                 tasks.add(() -> {
+                    String stepName = "setModuleConfig/" + mc.getPayloadVariantCase();
                     log.info("Config save: setModuleConfig variant={} size={}",
                             mc.getPayloadVariantCase(), mc.getSerializedSize());
-                    waitForBleAdminAckIfNeeded(activeTransport,
-                            MessageService.setModuleConfig(handler, state, mc),
-                            "setModuleConfig/" + mc.getPayloadVariantCase());
+                    CompletableFuture<MeshProtos.Routing.Error> ackFuture =
+                            MessageService.setModuleConfig(handler, state, mc);
+                    if (waitForAckBeforeCommit) {
+                        waitForRequiredConfigSaveAck(ackFuture, stepName);
+                    } else {
+                        // MQTT and other reboot-sensitive module updates should not prevent the
+                        // trailing commit from being sent just because their routing ACK is late.
+                        observeDeferredConfigSaveAck(ackFuture, stepName);
+                    }
                 });
             }
             tasks.add(() -> {
+                String stepName = "commitEditSettings";
                 log.info("Config save: commitEditSettings");
-                waitForBleAdminAckIfNeeded(activeTransport,
-                        MessageService.commitEditSettings(handler, state),
-                        "commitEditSettings");
+                CompletableFuture<MeshProtos.Routing.Error> ackFuture =
+                        MessageService.commitEditSettings(handler, state);
+                if (activeTransport == ConnectionType.BLE) {
+                    // BLE devices often reboot/disconnect immediately after commit, so the save
+                    // flow must hand off to reconnect even if the routing ACK never comes back.
+                    observeDeferredConfigSaveAck(ackFuture, stepName);
+                } else {
+                    waitForRequiredConfigSaveAck(ackFuture, stepName);
+                }
             });
 
             ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
