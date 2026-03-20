@@ -110,6 +110,24 @@ class ConnectionManagerTest {
         assertFalse(ConnectionManager.shouldStartHeartbeat(ble));
     }
 
+    @Test
+    void disconnectForDeviceRebootKeepsReconnectEnabled() throws Exception {
+        try (TcpMeshtasticStubServer server = new TcpMeshtasticStubServer(0xCAFEBABE)) {
+            ConnectionManager manager = ConnectionManager.getInstance();
+            ConnectionEntry entry = new ConnectionEntry("stub", "127.0.0.1", server.port());
+            manager.addEntry(entry);
+
+            manager.connect(entry.getId());
+            manager.getConfigFuture(entry.getId()).get(5, TimeUnit.SECONDS);
+
+            manager.disconnectForDeviceReboot(entry.getId());
+
+            assertFalse(entry.isConnected());
+            assertTrue(entry.isReconnecting());
+            assertFalse(manager.hasActiveConnection());
+        }
+    }
+
     private static final class TcpMeshtasticStubServer implements AutoCloseable {
         private final ServerSocket serverSocket;
         private final int myNodeNum;

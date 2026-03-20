@@ -6,7 +6,8 @@ import java.util.UUID;
  * Профиль подключения к Meshtastic-устройству.
  * <p>
  * Сериализуется в JSON ({@code ~/.meshapp/connections.json}) через Gson.
- * Поддерживает два типа транспорта: TCP (host + port) и Serial (portName + baudRate).
+ * Поддерживает три типа транспорта: TCP (host + port), Serial (portName + baudRate)
+ * и BLE (address + deviceName).
  * <p>
  * Поле {@code type} может быть {@code null} для legacy-записей —
  * в этом случае {@link #getEffectiveType()} возвращает {@link ConnectionType#TCP}.

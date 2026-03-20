@@ -26,7 +26,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 /**
  * Менеджер соединений с Meshtastic-устройствами (singleton).
  * <p>
- * Управляет жизненным циклом соединений (TCP и Serial): хранит профили подключений
+ * Управляет жизненным циклом соединений (TCP, Serial и BLE): хранит профили подключений
  * ({@link ConnectionEntry}) в JSON-файле {@code ~/.meshapp/connections.json},
  * создаёт/разрывает соединения, инициирует config exchange
  * и предоставляет доступ к {@link DeviceState} и {@link ProtocolHandler}
@@ -124,7 +124,7 @@ public final class ConnectionManager {
 
     /**
      * Устанавливает соединение по идентификатору профиля.
-     * Создаёт транспорт (TCP или Serial), {@link ProtocolHandler}, {@link DeviceState}
+     * Создаёт transport (TCP, Serial или BLE), {@link ProtocolHandler}, {@link DeviceState}
      * и запускает config exchange. Если соединение с этим id уже активно, вызов игнорируется.
      *
      * @param id идентификатор профиля подключения
@@ -225,6 +225,39 @@ public final class ConnectionManager {
             entry.setConnected(false);
         }
         fireChanged();
+    }
+
+    /**
+     * Разрывает соединение как ожидаемую часть reboot/restart цикла устройства.
+     * <p>
+     * В отличие от {@link #disconnect(String)}, такой разрыв не считается
+     * пользовательским отключением: transport освобождается, но auto-reconnect
+     * остаётся разрешённым. Это нужно после сохранения конфигурации, когда
+     * радио само перезагружается и BLE/TCP/Serial-сессия становится stale.
+     *
+     * @param id идентификатор профиля подключения
+     */
+    public synchronized void disconnectForDeviceReboot(String id) {
+        userDisconnectedIds.remove(id);
+
+        ConnectionEntry entry = findEntry(id);
+        if (entry == null) {
+            return;
+        }
+
+        MeshtasticConnection conn = activeConnections.get(id);
+        if (conn != null) {
+            // Не вызываем cleanupConnection() здесь: нам нужно, чтобы normal
+            // onDisconnected()/onConnectionError() path запустил auto-reconnect.
+            conn.disconnect();
+            return;
+        }
+
+        if (!entry.isReconnecting()) {
+            entry.setConnected(false);
+            fireChanged();
+            ReconnectService.getInstance().startReconnect(id);
+        }
     }
 
     public boolean hasActiveConnection() {

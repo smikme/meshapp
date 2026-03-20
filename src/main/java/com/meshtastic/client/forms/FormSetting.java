@@ -4,6 +4,7 @@ import com.google.protobuf.Descriptors.EnumValueDescriptor;
 import com.meshtastic.client.modal.ModalPane;
 import com.meshtastic.client.model.ConfigTreeItem;
 import com.meshtastic.client.model.ConnectionEntry;
+import com.meshtastic.client.model.ConnectionType;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.protocol.ProtocolHandler;
@@ -58,6 +59,25 @@ import java.util.concurrent.TimeUnit;
 public class FormSetting extends Form {
 
     private static final Logger log = LoggerFactory.getLogger(FormSetting.class);
+    /**
+     * Базовая пауза между admin-пакетами при сохранении конфигурации.
+     * Для Serial/TCP 200ms обычно достаточно, чтобы прошивка успела обработать
+     * begin/set/commit без "слипания" сообщений.
+     */
+    private static final long CONFIG_SAVE_MESSAGE_DELAY_MS = 200;
+    /**
+     * BLE получает более длинную паузу между admin-пакетами: Heltec V3 и похожие
+     * устройства иногда успевают уйти в reboot прямо после commit, и короткие интервалы
+     * повышают шанс гонки между последними GATT write и закрытием сессии.
+     */
+    private static final long BLE_CONFIG_SAVE_MESSAGE_DELAY_MS = 350;
+    /**
+     * Сколько ждём после последнего admin-пакета перед handoff в reconnect flow.
+     * Для BLE оставляем больше времени, чтобы commit успел дойти и устройство
+     * начало собственный disconnect/reboot без одновременного ручного разрыва.
+     */
+    private static final long CONFIG_SAVE_REBOOT_HANDOFF_DELAY_MS = 1_000;
+    private static final long BLE_CONFIG_SAVE_REBOOT_HANDOFF_DELAY_MS = 4_000;
 
     private DeviceState state;
     private ProtocolHandler handler;
@@ -147,13 +167,15 @@ public class FormSetting extends Form {
     }
 
     /**
-     * Возвращает ID активного подключения или null, если нет подключённых устройств.
+     * Возвращает активный профиль подключения целиком.
+     * Нужен save-flow, чтобы выбрать transport-aware pacing и корректно передать
+     * соединение в reconnect path после reboot устройства.
      */
-    private String findActiveConnectionId() {
+    private ConnectionEntry findActiveConnectionEntry() {
         ConnectionManager mgr = ConnectionManager.getInstance();
         for (ConnectionEntry entry : mgr.getEntries()) {
             if (entry.isConnected()) {
-                return entry.getId();
+                return entry;
             }
         }
         return null;
@@ -751,6 +773,10 @@ public class FormSetting extends Form {
                                     boolean positionModified, double newLat, double newLon, int newAlt,
                                     int totalChanges) {
         configStatusLabel.setText("Отправка настроек...");
+        ConnectionEntry activeEntry = findActiveConnectionEntry();
+        ConnectionType activeTransport = activeEntry != null
+                ? activeEntry.getEffectiveType()
+                : ConnectionType.TCP;
 
         // Виртуальные секции — отправить напрямую
         if (ownerModified && newLongName != null && newShortName != null) {
@@ -782,7 +808,7 @@ public class FormSetting extends Form {
 
         // Protobuf-секции — через begin/commit edit с задержками между сообщениями.
         // Прошивка может не успеть обработать сообщение до прихода следующего,
-        // поэтому каждое admin-сообщение отправляется с интервалом 200ms.
+        // поэтому каждое admin-сообщение отправляется с transport-aware интервалом.
         if (!configs.isEmpty() || !moduleConfigs.isEmpty()) {
             List<Runnable> tasks = new ArrayList<>();
             tasks.add(() -> {
@@ -808,12 +834,14 @@ public class FormSetting extends Form {
                 MessageService.commitEditSettings(handler, state);
             });
 
-            long delayMs = 200;
             ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
                 Thread t = new Thread(r, "config-save-sender");
                 t.setDaemon(true);
                 return t;
             });
+            long messageDelayMs = activeTransport == ConnectionType.BLE
+                    ? BLE_CONFIG_SAVE_MESSAGE_DELAY_MS
+                    : CONFIG_SAVE_MESSAGE_DELAY_MS;
 
             // Каждый task оборачиваем в try-catch — ScheduledExecutorService
             // тихо проглатывает исключения
@@ -825,28 +853,35 @@ public class FormSetting extends Form {
                     } catch (Exception e) {
                         log.error("Config save task {} failed", idx, e);
                     }
-                }, (long) i * delayMs, TimeUnit.MILLISECONDS);
+                }, (long) i * messageDelayMs, TimeUnit.MILLISECONDS);
             }
 
             // Последний task обновляет UI
-            long uiDelay = (long) tasks.size() * delayMs;
+            long uiDelay = (long) tasks.size() * messageDelayMs;
             scheduler.schedule(() -> Platform.runLater(() -> {
                 resetModifiedFlags(fullConfigRoot != null ? fullConfigRoot : configTree.getRoot());
                 saveConfigBtn.setDisable(false);
-                configStatusLabel.setText("Отправлено секций: " + totalChanges
-                        + ". Устройство перезагрузится. Отключение...");
+                String reconnectMessage = activeTransport == ConnectionType.BLE
+                        ? "Отправлено секций: " + totalChanges + ". Ожидание переподключения по BLE..."
+                        : "Отправлено секций: " + totalChanges + ". Устройство перезагрузится. Переподключение...";
+                configStatusLabel.setText(reconnectMessage);
             }), uiDelay, TimeUnit.MILLISECONDS);
 
-            // Disconnect через 1с после последнего сообщения — НЕЗАВИСИМО от результата tasks
-            long disconnectDelay = uiDelay + 1000;
+            // После commit переводим соединение в reboot-aware reconnect path.
+            // Обычный user disconnect здесь вреден: он помечает разрыв как ручной
+            // и запрещает auto-reconnect, а BLE как раз нуждается в мягком handoff
+            // на время device reboot / повторной рекламы.
+            long rebootHandoffDelay = uiDelay + (activeTransport == ConnectionType.BLE
+                    ? BLE_CONFIG_SAVE_REBOOT_HANDOFF_DELAY_MS
+                    : CONFIG_SAVE_REBOOT_HANDOFF_DELAY_MS);
             scheduler.schedule(() -> {
                 try {
-                    String connId = findActiveConnectionId();
-                    if (connId != null) {
-                        log.info("Config save: disconnecting after commit (device will reboot)");
-                        ConnectionManager.getInstance().disconnect(connId);
+                    if (activeEntry != null) {
+                        log.info("Config save: handoff to reboot reconnect flow (transport={})",
+                                activeTransport);
+                        ConnectionManager.getInstance().disconnectForDeviceReboot(activeEntry.getId());
                     } else {
-                        log.warn("Config save: no active connection to disconnect");
+                        log.warn("Config save: no active connection to hand off after commit");
                     }
                     Platform.runLater(() -> {
                         state = null;
@@ -858,7 +893,7 @@ public class FormSetting extends Form {
                 } finally {
                     scheduler.shutdown();
                 }
-            }, disconnectDelay, TimeUnit.MILLISECONDS);
+            }, rebootHandoffDelay, TimeUnit.MILLISECONDS);
 
         } else {
             // Только виртуальные секции — завершить сразу (устройство не перезагружается)
