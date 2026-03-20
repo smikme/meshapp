@@ -238,28 +238,21 @@ public final class MessageService {
         AdminProtos.AdminMessage adminMsg = AdminProtos.AdminMessage.newBuilder()
                 .setGetOwnerRequest(true)
                 .build();
+        sendAdminMessage(handler, state, adminMsg, true);
+    }
 
-        MeshProtos.Data data = MeshProtos.Data.newBuilder()
-                .setPortnum(Portnums.PortNum.ADMIN_APP)
-                .setPayload(adminMsg.toByteString())
-                .setWantResponse(true)
+    /**
+     * Запрашивает только {@code session_passkey} у подключённого радио.
+     * <p>
+     * Использует {@code get_config_request = SESSIONKEY_CONFIG}, потому что часть
+     * устройств/прошивок не отвечает на {@code get_owner_request}, но при этом
+     * корректно возвращает session key вместе с config-response.
+     */
+    public static void requestSessionPasskey(ProtocolHandler handler, DeviceState state) {
+        AdminProtos.AdminMessage adminMsg = AdminProtos.AdminMessage.newBuilder()
+                .setGetConfigRequest(AdminProtos.AdminMessage.ConfigType.SESSIONKEY_CONFIG)
                 .build();
-
-        int packetId = ThreadLocalRandom.current().nextInt(1, Integer.MAX_VALUE);
-
-        MeshProtos.MeshPacket packet = MeshProtos.MeshPacket.newBuilder()
-                .setFrom(state.getMyNodeNum())
-                .setTo(state.getMyNodeNum())
-                .setDecoded(data)
-                .setId(packetId)
-                .setWantAck(true)
-                .build();
-
-        MeshProtos.ToRadio toRadio = MeshProtos.ToRadio.newBuilder()
-                .setPacket(packet)
-                .build();
-
-        handler.sendToRadio(toRadio);
+        sendAdminMessage(handler, state, adminMsg, true);
     }
 
     /**
@@ -280,27 +273,7 @@ public final class MessageService {
         }
         AdminProtos.AdminMessage adminMsg = adminBuilder.build();
 
-        MeshProtos.Data data = MeshProtos.Data.newBuilder()
-                .setPortnum(Portnums.PortNum.ADMIN_APP)
-                .setPayload(adminMsg.toByteString())
-                .setWantResponse(true)
-                .build();
-
-        int packetId = ThreadLocalRandom.current().nextInt(1, Integer.MAX_VALUE);
-
-        MeshProtos.MeshPacket packet = MeshProtos.MeshPacket.newBuilder()
-                .setFrom(state.getMyNodeNum())
-                .setTo(state.getMyNodeNum())
-                .setDecoded(data)
-                .setId(packetId)
-                .setWantAck(true)
-                .build();
-
-        MeshProtos.ToRadio toRadio = MeshProtos.ToRadio.newBuilder()
-                .setPacket(packet)
-                .build();
-
-        handler.sendToRadio(toRadio);
+        sendAdminMessage(handler, state, adminMsg);
     }
 
     /**
@@ -316,27 +289,7 @@ public final class MessageService {
         }
         AdminProtos.AdminMessage adminMsg = adminBuilder.build();
 
-        MeshProtos.Data data = MeshProtos.Data.newBuilder()
-                .setPortnum(Portnums.PortNum.ADMIN_APP)
-                .setPayload(adminMsg.toByteString())
-                .setWantResponse(true)
-                .build();
-
-        int packetId = ThreadLocalRandom.current().nextInt(1, Integer.MAX_VALUE);
-
-        MeshProtos.MeshPacket packet = MeshProtos.MeshPacket.newBuilder()
-                .setFrom(state.getMyNodeNum())
-                .setTo(state.getMyNodeNum())
-                .setDecoded(data)
-                .setId(packetId)
-                .setWantAck(true)
-                .build();
-
-        MeshProtos.ToRadio toRadio = MeshProtos.ToRadio.newBuilder()
-                .setPacket(packet)
-                .build();
-
-        handler.sendToRadio(toRadio);
+        sendAdminMessage(handler, state, adminMsg);
     }
 
     // ==================== Config Admin Methods ====================
@@ -516,12 +469,36 @@ public final class MessageService {
      *
      * @return future с routing ACK/NAK для отправленного admin-пакета
      */
-    private static CompletableFuture<MeshProtos.Routing.Error> sendAdminMessage(ProtocolHandler handler, DeviceState state,
-                                          AdminProtos.AdminMessage adminMsg) {
+    /**
+     * Отправляет mutating admin-команду на локальное устройство.
+     * <p>
+     * Для begin/set/commit и прочих write-операций нам нужен только routing ACK.
+     * Запрашивать ещё и ADMIN_APP response здесь вредно: часть прошивок рвёт BLE-сессию
+     * уже на шаге обработки set_module_config(MQTT), хотя service-response клиент всё
+     * равно не использует.
+     */
+    private static CompletableFuture<MeshProtos.Routing.Error> sendAdminMessage(ProtocolHandler handler,
+                                                                                DeviceState state,
+                                                                                AdminProtos.AdminMessage adminMsg) {
+        return sendAdminMessage(handler, state, adminMsg, false);
+    }
+
+    /**
+     * Отправляет AdminMessage на локальное устройство.
+     *
+     * @param wantResponse {@code true} только для read/query-запросов, где клиент реально
+     *                     ждёт ADMIN_APP response; для mutating команд используем {@code false}
+     *                     и опираемся на routing ACK.
+     * @return future с routing ACK/NAK для отправленного admin-пакета
+     */
+    private static CompletableFuture<MeshProtos.Routing.Error> sendAdminMessage(ProtocolHandler handler,
+                                          DeviceState state,
+                                          AdminProtos.AdminMessage adminMsg,
+                                          boolean wantResponse) {
         MeshProtos.Data data = MeshProtos.Data.newBuilder()
                 .setPortnum(Portnums.PortNum.ADMIN_APP)
                 .setPayload(adminMsg.toByteString())
-                .setWantResponse(true)
+                .setWantResponse(wantResponse)
                 .build();
 
         int packetId = ThreadLocalRandom.current().nextInt(1, Integer.MAX_VALUE);

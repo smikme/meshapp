@@ -483,13 +483,17 @@ public class DeviceState {
         }
     }
 
-    // --- Owner info (admin) ---
+    // --- Owner info / session passkey (admin) ---
     public MeshProtos.User getOwnerInfo() { return ownerInfo; }
     public void setOwnerInfo(MeshProtos.User ownerInfo) { this.ownerInfo = ownerInfo; }
 
     public ByteString getSessionPasskey() { return sessionPasskey; }
     public void setSessionPasskey(ByteString sessionPasskey) { this.sessionPasskey = sessionPasskey; }
 
+    /**
+     * Listeners are notified when admin owner info arrives or when a fresh
+     * {@code session_passkey} is received via any ADMIN_APP response.
+     */
     public void addOwnerInfoListener(Runnable listener) { ownerInfoListeners.add(listener); }
     public void removeOwnerInfoListener(Runnable listener) { ownerInfoListeners.remove(listener); }
     public void fireOwnerInfoListeners() {

@@ -53,8 +53,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -81,6 +79,12 @@ public class FormSetting extends Form {
      */
     private static final long CONFIG_SAVE_REBOOT_HANDOFF_DELAY_MS = 1_000;
     private static final long BLE_CONFIG_SAVE_REBOOT_HANDOFF_DELAY_MS = 4_000;
+    /**
+     * Последний BLE set_config/set_module_config отправляется асинхронно на уровне GATT write.
+     * Перед commit даём дополнительное время, чтобы write с response успел физически дойти
+     * до устройства до того, как commit поставит reboot-triggering пакет в ту же очередь.
+     */
+    private static final long BLE_CONFIG_SAVE_PRE_COMMIT_SETTLE_DELAY_MS = 1_000;
     /** Таймаут ожидания routing ACK для шага сохранения конфигурации. */
     private static final long CONFIG_SAVE_ACK_TIMEOUT_MS = 8_000;
 
@@ -106,6 +110,7 @@ public class FormSetting extends Form {
     private Button saveConfigBtn;
     private Button refreshConfigBtn;
     private Tab configTab;
+    private volatile CompletableFuture<DeviceState> observedConfigLoadFuture;
 
     // Оригинальные protobuf-объекты для пересборки при сохранении
     private List<ConfigProtos.Config> originalConfigs = new ArrayList<>();
@@ -187,6 +192,41 @@ public class FormSetting extends Form {
     }
 
     /**
+     * Возвращает {@code true}, если для активного подключения ещё идёт initial config exchange.
+     * Пока не пришёл {@code config_complete_id}, дерево может быть заполнено лишь частично,
+     * и запуск save-flow в этот момент конфликтует с продолжающимся чтением конфигурации.
+     */
+    private boolean isConfigExchangeInProgress(ConnectionEntry entry) {
+        if (entry == null) {
+            return false;
+        }
+        CompletableFuture<DeviceState> future = ConnectionManager.getInstance().getConfigFuture(entry.getId());
+        return future != null && !future.isDone();
+    }
+
+    /**
+     * Подписывается на завершение текущего config exchange, чтобы автоматически
+     * перевести форму из "идёт загрузка" в обычный режим без ручного refresh.
+     */
+    private void watchConfigExchangeCompletion(ConnectionEntry entry) {
+        if (entry == null) {
+            observedConfigLoadFuture = null;
+            return;
+        }
+        CompletableFuture<DeviceState> future = ConnectionManager.getInstance().getConfigFuture(entry.getId());
+        if (future == null || future.isDone() || future == observedConfigLoadFuture) {
+            return;
+        }
+        observedConfigLoadFuture = future;
+        future.whenComplete((ds, ex) -> Platform.runLater(() -> {
+            if (observedConfigLoadFuture == future) {
+                observedConfigLoadFuture = null;
+            }
+            reloadConfigTree();
+        }));
+    }
+
+    /**
      * Ждёт routing ACK для шага сохранения конфигурации.
      * <p>
      * Теперь это делается не только для BLE: begin_edit_settings и промежуточные
@@ -234,6 +274,49 @@ public class FormSetting extends Form {
                 log.debug("Config save: deferred ACK received for '{}'", stepName);
             }
         });
+    }
+
+    /**
+     * Возвращает паузу между двумя шагами save-flow.
+     * <p>
+     * Для BLE обычной межшаговой задержки недостаточно перед {@code commitEditSettings},
+     * потому что {@code writeToRadio()} возвращается раньше фактического завершения
+     * CoreBluetooth write-with-response. Поэтому перед commit добавляется отдельное
+     * settle-окно после последнего mutating шага.
+     */
+    private long getConfigSaveInterTaskDelayMs(ConnectionType transport, int taskIndex, int totalTaskCount) {
+        long delayMs = transport == ConnectionType.BLE
+                ? BLE_CONFIG_SAVE_MESSAGE_DELAY_MS
+                : CONFIG_SAVE_MESSAGE_DELAY_MS;
+        boolean nextTaskIsCommit = taskIndex + 1 == totalTaskCount - 1;
+        if (transport == ConnectionType.BLE && nextTaskIsCommit) {
+            delayMs += BLE_CONFIG_SAVE_PRE_COMMIT_SETTLE_DELAY_MS;
+        }
+        return delayMs;
+    }
+
+    /**
+     * Некоторые BLE-устройства рвут линк сразу после {@code set_module_config(MQTT)},
+     * не дожидаясь {@code commit_edit_settings}, даже если {@code begin_edit_settings}
+     * был принят. Для такого узкого кейса транзакционная обёртка только мешает:
+     * save уже стартовал на стороне устройства, а commit гарантированно не успевает.
+     * <p>
+     * Поэтому для одиночного BLE-save секции MQTT используется implicit save path:
+     * отправляется только {@code set_module_config}, после чего приложение ждёт
+     * reboot/disconnect и передаёт соединение в reconnect flow.
+     */
+    static boolean shouldUseImplicitBleModuleSave(ConnectionType transport,
+                                                  boolean ownerModified,
+                                                  boolean positionModified,
+                                                  List<ConfigProtos.Config> configs,
+                                                  List<ModuleConfigProtos.ModuleConfig> moduleConfigs) {
+        return transport == ConnectionType.BLE
+                && !ownerModified
+                && !positionModified
+                && configs.isEmpty()
+                && moduleConfigs.size() == 1
+                && moduleConfigs.get(0).getPayloadVariantCase()
+                == ModuleConfigProtos.ModuleConfig.PayloadVariantCase.MQTT;
     }
 
     // ==================== Настройки приложения ====================
@@ -510,6 +593,8 @@ public class FormSetting extends Form {
         }
 
         NodeData myNode = state.getNodeDb().get(state.getMyNodeNum());
+        ConnectionEntry activeEntry = findActiveConnectionEntry();
+        boolean configExchangeInProgress = isConfigExchangeInProgress(activeEntry);
 
         // Сохраняем оригинальные protobuf для пересборки
         List<ConfigProtos.Config> stateConfigs;
@@ -573,7 +658,11 @@ public class FormSetting extends Form {
         configTree.setRoot(root);
         configSearchField.clear();
 
-        if (originalConfigs.isEmpty() && originalModuleConfigs.isEmpty()) {
+        if (configExchangeInProgress) {
+            watchConfigExchangeCompletion(activeEntry);
+            configStatusLabel.setText("Идёт чтение конфигурации с устройства...");
+            saveConfigBtn.setDisable(true);
+        } else if (originalConfigs.isEmpty() && originalModuleConfigs.isEmpty()) {
             configStatusLabel.setText("Конфигурация не получена от устройства");
             saveConfigBtn.setDisable(true);
         } else {
@@ -692,6 +781,13 @@ public class FormSetting extends Form {
     private void onSaveConfig() {
         if (state == null || handler == null) {
             configStatusLabel.setText("Нет подключения к радио");
+            return;
+        }
+        ConnectionEntry activeEntry = findActiveConnectionEntry();
+        if (isConfigExchangeInProgress(activeEntry)) {
+            watchConfigExchangeCompletion(activeEntry);
+            configStatusLabel.setText("Дождитесь завершения чтения конфигурации");
+            saveConfigBtn.setDisable(true);
             return;
         }
 
@@ -820,7 +916,7 @@ public class FormSetting extends Form {
         timeoutThread.setDaemon(true);
         timeoutThread.start();
 
-        MessageService.requestOwnerInfo(handler, state);
+        MessageService.requestSessionPasskey(handler, state);
     }
 
     /**
@@ -867,123 +963,144 @@ public class FormSetting extends Form {
             }
         }
 
-        // Protobuf-секции — через begin/commit edit с задержками между сообщениями.
-        // Прошивка может не успеть обработать сообщение до прихода следующего,
-        // поэтому каждое admin-сообщение отправляется с transport-aware интервалом.
+        // Protobuf-секции обычно идут через begin/commit edit с задержками между сообщениями.
+        // Исключение ниже — одиночный BLE-save MQTT, где некоторые устройства reboot/disconnect
+        // уже на set_module_config и не дают commit дойти до firmware.
         if (!configs.isEmpty() || !moduleConfigs.isEmpty()) {
             List<Runnable> tasks = new ArrayList<>();
             AtomicBoolean saveFailed = new AtomicBoolean(false);
-            tasks.add(() -> {
-                log.info("Config save: beginEditSettings");
-                waitForRequiredConfigSaveAck(
-                        MessageService.beginEditSettings(handler, state),
-                        "beginEditSettings");
-            });
-            int totalMutatingSteps = configs.size() + moduleConfigs.size();
-            int mutatingStepIndex = 0;
-            for (ConfigProtos.Config c : configs) {
-                boolean waitForAckBeforeCommit = ++mutatingStepIndex < totalMutatingSteps;
+            AtomicBoolean saveCompletionAnnounced = new AtomicBoolean(false);
+            boolean useImplicitBleModuleSave = shouldUseImplicitBleModuleSave(
+                    activeTransport, ownerModified, positionModified, configs, moduleConfigs);
+
+            if (useImplicitBleModuleSave) {
+                ModuleConfigProtos.ModuleConfig mqttConfig = moduleConfigs.get(0);
                 tasks.add(() -> {
-                    String stepName = "setConfig/" + c.getPayloadVariantCase();
-                    log.info("Config save: setConfig variant={} size={}",
-                            c.getPayloadVariantCase(), c.getSerializedSize());
+                    String stepName = "setModuleConfig/" + mqttConfig.getPayloadVariantCase();
+                    log.info("Config save: implicit BLE {} variant={} size={}",
+                            stepName, mqttConfig.getPayloadVariantCase(), mqttConfig.getSerializedSize());
                     CompletableFuture<MeshProtos.Routing.Error> ackFuture =
-                            MessageService.setConfig(handler, state, c);
-                    if (waitForAckBeforeCommit) {
-                        waitForRequiredConfigSaveAck(ackFuture, stepName);
-                    } else {
-                        // The final payload step is followed only by commit. Requiring its routing
-                        // ACK here can block commit entirely on nodes that reboot or drop the link
-                        // immediately after applying the last config section.
-                        observeDeferredConfigSaveAck(ackFuture, stepName);
-                    }
-                });
-            }
-            for (ModuleConfigProtos.ModuleConfig mc : moduleConfigs) {
-                boolean waitForAckBeforeCommit = ++mutatingStepIndex < totalMutatingSteps;
-                tasks.add(() -> {
-                    String stepName = "setModuleConfig/" + mc.getPayloadVariantCase();
-                    log.info("Config save: setModuleConfig variant={} size={}",
-                            mc.getPayloadVariantCase(), mc.getSerializedSize());
-                    CompletableFuture<MeshProtos.Routing.Error> ackFuture =
-                            MessageService.setModuleConfig(handler, state, mc);
-                    if (waitForAckBeforeCommit) {
-                        waitForRequiredConfigSaveAck(ackFuture, stepName);
-                    } else {
-                        // MQTT and other reboot-sensitive module updates should not prevent the
-                        // trailing commit from being sent just because their routing ACK is late.
-                        observeDeferredConfigSaveAck(ackFuture, stepName);
-                    }
-                });
-            }
-            tasks.add(() -> {
-                String stepName = "commitEditSettings";
-                log.info("Config save: commitEditSettings");
-                CompletableFuture<MeshProtos.Routing.Error> ackFuture =
-                        MessageService.commitEditSettings(handler, state);
-                if (activeTransport == ConnectionType.BLE) {
-                    // BLE devices often reboot/disconnect immediately after commit, so the save
-                    // flow must hand off to reconnect even if the routing ACK never comes back.
+                            MessageService.setModuleConfig(handler, state, mqttConfig);
                     observeDeferredConfigSaveAck(ackFuture, stepName);
-                } else {
-                    waitForRequiredConfigSaveAck(ackFuture, stepName);
+                });
+            } else {
+                tasks.add(() -> {
+                    log.info("Config save: beginEditSettings");
+                    waitForRequiredConfigSaveAck(
+                            MessageService.beginEditSettings(handler, state),
+                            "beginEditSettings");
+                });
+                int totalMutatingSteps = configs.size() + moduleConfigs.size();
+                int mutatingStepIndex = 0;
+                for (ConfigProtos.Config c : configs) {
+                    boolean waitForAckBeforeCommit = ++mutatingStepIndex < totalMutatingSteps;
+                    tasks.add(() -> {
+                        String stepName = "setConfig/" + c.getPayloadVariantCase();
+                        log.info("Config save: setConfig variant={} size={}",
+                                c.getPayloadVariantCase(), c.getSerializedSize());
+                        CompletableFuture<MeshProtos.Routing.Error> ackFuture =
+                                MessageService.setConfig(handler, state, c);
+                        if (waitForAckBeforeCommit) {
+                            waitForRequiredConfigSaveAck(ackFuture, stepName);
+                        } else {
+                            // The final payload step is followed only by commit. Requiring its routing
+                            // ACK here can block commit entirely on nodes that reboot or drop the link
+                            // immediately after applying the last config section.
+                            observeDeferredConfigSaveAck(ackFuture, stepName);
+                        }
+                    });
                 }
-            });
+                for (ModuleConfigProtos.ModuleConfig mc : moduleConfigs) {
+                    boolean waitForAckBeforeCommit = ++mutatingStepIndex < totalMutatingSteps;
+                    tasks.add(() -> {
+                        String stepName = "setModuleConfig/" + mc.getPayloadVariantCase();
+                        log.info("Config save: setModuleConfig variant={} size={}",
+                                mc.getPayloadVariantCase(), mc.getSerializedSize());
+                        CompletableFuture<MeshProtos.Routing.Error> ackFuture =
+                                MessageService.setModuleConfig(handler, state, mc);
+                        if (waitForAckBeforeCommit) {
+                            waitForRequiredConfigSaveAck(ackFuture, stepName);
+                        } else {
+                            // MQTT and other reboot-sensitive module updates should not prevent the
+                            // trailing commit from being sent just because their routing ACK is late.
+                            observeDeferredConfigSaveAck(ackFuture, stepName);
+                        }
+                    });
+                }
+                tasks.add(() -> {
+                    String stepName = "commitEditSettings";
+                    log.info("Config save: commitEditSettings");
+                    CompletableFuture<MeshProtos.Routing.Error> ackFuture =
+                            MessageService.commitEditSettings(handler, state);
+                    if (activeTransport == ConnectionType.BLE) {
+                        // BLE devices often reboot/disconnect immediately after commit, so the save
+                        // flow must hand off to reconnect even if the routing ACK never comes back.
+                        observeDeferredConfigSaveAck(ackFuture, stepName);
+                    } else {
+                        waitForRequiredConfigSaveAck(ackFuture, stepName);
+                    }
+                });
+            }
 
-            ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
-                Thread t = new Thread(r, "config-save-sender");
-                t.setDaemon(true);
-                return t;
-            });
-            long messageDelayMs = activeTransport == ConnectionType.BLE
-                    ? BLE_CONFIG_SAVE_MESSAGE_DELAY_MS
-                    : CONFIG_SAVE_MESSAGE_DELAY_MS;
+            long rebootHandoffDelay = activeTransport == ConnectionType.BLE
+                    ? BLE_CONFIG_SAVE_REBOOT_HANDOFF_DELAY_MS
+                    : CONFIG_SAVE_REBOOT_HANDOFF_DELAY_MS;
 
-            // Каждый task оборачиваем в try-catch — ScheduledExecutorService
-            // тихо проглатывает исключения
-            for (int i = 0; i < tasks.size(); i++) {
-                final int idx = i;
-                scheduler.schedule(() -> {
+            Thread saveThread = new Thread(() -> {
+                try {
+                    // Steps must be delayed relative to the completion of the previous step.
+                    // The previous absolute scheduler caused set/commit to collapse into the same
+                    // moment whenever beginEditSettings spent time waiting for its ACK.
+                    for (int i = 0; i < tasks.size(); i++) {
+                        if (saveFailed.get()) {
+                            return;
+                        }
+                        try {
+                            tasks.get(i).run();
+                        } catch (Exception e) {
+                            if (saveCompletionAnnounced.get()) {
+                                log.warn("Config save task {} failed after completion was announced", i, e);
+                                return;
+                            }
+                            saveFailed.set(true);
+                            log.error("Config save task {} failed", i, e);
+                            Platform.runLater(() -> {
+                                saveConfigBtn.setDisable(false);
+                                configStatusLabel.setText("Ошибка сохранения: " +
+                                        (e.getMessage() != null ? e.getMessage() : "см. лог"));
+                            });
+                            return;
+                        }
+
+                        if (i + 1 < tasks.size()) {
+                            long interTaskDelayMs =
+                                    getConfigSaveInterTaskDelayMs(activeTransport, i, tasks.size());
+                            log.debug("Config save: waiting {}ms before {}",
+                                    interTaskDelayMs,
+                                    i + 1 == tasks.size() - 1 ? "commitEditSettings" : "next step");
+                            Thread.sleep(interTaskDelayMs);
+                        }
+                    }
+
                     if (saveFailed.get()) {
                         return;
                     }
-                    try {
-                        tasks.get(idx).run();
-                    } catch (Exception e) {
-                        saveFailed.set(true);
-                        log.error("Config save task {} failed", idx, e);
-                        Platform.runLater(() -> {
-                            saveConfigBtn.setDisable(false);
-                            configStatusLabel.setText("Ошибка сохранения: " +
-                                    (e.getMessage() != null ? e.getMessage() : "см. лог"));
-                        });
-                    }
-                }, (long) i * messageDelayMs, TimeUnit.MILLISECONDS);
-            }
 
-            // Последний task обновляет UI
-            long uiDelay = (long) tasks.size() * messageDelayMs;
-            scheduler.schedule(() -> Platform.runLater(() -> {
-                if (saveFailed.get()) {
-                    return;
-                }
-                resetModifiedFlags(fullConfigRoot != null ? fullConfigRoot : configTree.getRoot());
-                saveConfigBtn.setDisable(false);
-                String reconnectMessage = activeTransport == ConnectionType.BLE
-                        ? "Отправлено секций: " + totalChanges + ". Ожидание переподключения по BLE..."
-                        : "Отправлено секций: " + totalChanges + ". Устройство перезагрузится. Переподключение...";
-                configStatusLabel.setText(reconnectMessage);
-            }), uiDelay, TimeUnit.MILLISECONDS);
+                    saveCompletionAnnounced.set(true);
+                    Platform.runLater(() -> {
+                        resetModifiedFlags(fullConfigRoot != null ? fullConfigRoot : configTree.getRoot());
+                        saveConfigBtn.setDisable(false);
+                        String reconnectMessage = activeTransport == ConnectionType.BLE
+                                ? "Отправлено секций: " + totalChanges + ". Ожидание переподключения по BLE..."
+                                : "Отправлено секций: " + totalChanges + ". Устройство перезагрузится. Переподключение...";
+                        configStatusLabel.setText(reconnectMessage);
+                    });
 
-            // После commit переводим соединение в reboot-aware reconnect path.
-            // Обычный user disconnect здесь вреден: он помечает разрыв как ручной
-            // и запрещает auto-reconnect, а BLE как раз нуждается в мягком handoff
-            // на время device reboot / повторной рекламы.
-            long rebootHandoffDelay = uiDelay + (activeTransport == ConnectionType.BLE
-                    ? BLE_CONFIG_SAVE_REBOOT_HANDOFF_DELAY_MS
-                    : CONFIG_SAVE_REBOOT_HANDOFF_DELAY_MS);
-            scheduler.schedule(() -> {
-                try {
+                    // После commit переводим соединение в reboot-aware reconnect path.
+                    // Обычный user disconnect здесь вреден: он помечает разрыв как ручной
+                    // и запрещает auto-reconnect, а BLE как раз нуждается в мягком handoff
+                    // на время device reboot / повторной рекламы.
+                    Thread.sleep(rebootHandoffDelay);
                     if (saveFailed.get()) {
                         return;
                     }
@@ -999,12 +1116,15 @@ public class FormSetting extends Form {
                         handler = null;
                         reloadConfigTree();
                     });
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    log.warn("Config save thread interrupted");
                 } catch (Exception e) {
                     log.error("Config save: disconnect failed", e);
-                } finally {
-                    scheduler.shutdown();
                 }
-            }, rebootHandoffDelay, TimeUnit.MILLISECONDS);
+            }, "config-save-sender");
+            saveThread.setDaemon(true);
+            saveThread.start();
 
         } else {
             // Только виртуальные секции — завершить сразу (устройство не перезагружается)

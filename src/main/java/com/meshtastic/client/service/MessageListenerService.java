@@ -340,16 +340,23 @@ public class MessageListenerService implements FromRadioListener {
     private void handleAdminResponse(MeshProtos.MeshPacket packet, MeshProtos.Data data) {
         try {
             AdminProtos.AdminMessage adminMsg = AdminProtos.AdminMessage.parseFrom(data.getPayload());
+            boolean hasSessionPasskey = !adminMsg.getSessionPasskey().isEmpty();
+            if (hasSessionPasskey) {
+                deviceState.setSessionPasskey(adminMsg.getSessionPasskey());
+            }
 
             if (adminMsg.hasGetOwnerResponse()) {
                 MeshProtos.User owner = adminMsg.getGetOwnerResponse();
                 deviceState.setOwnerInfo(owner);
-                if (!adminMsg.getSessionPasskey().isEmpty()) {
-                    deviceState.setSessionPasskey(adminMsg.getSessionPasskey());
-                }
                 deviceState.fireOwnerInfoListeners();
                 log.info("Received owner info: longName='{}', shortName='{}'",
                         owner.getLongName(), owner.getShortName());
+            } else if (hasSessionPasskey) {
+                // Session passkey is attached to get_x_response packets, not only owner info.
+                // Save/channel edit flows wait on the same listener to unblock when the key arrives.
+                deviceState.fireOwnerInfoListeners();
+                log.debug("Received session passkey via ADMIN_APP response: {}",
+                        adminMsg.getPayloadVariantCase());
             } else {
                 log.debug("Received ADMIN_APP response: {}", adminMsg.getPayloadVariantCase());
             }

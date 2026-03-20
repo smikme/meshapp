@@ -251,7 +251,7 @@ public final class CreateChannelDialog {
             timeout.setDaemon(true);
             timeout.start();
 
-            MessageService.requestOwnerInfo(protocolHandler, state);
+            MessageService.requestSessionPasskey(protocolHandler, state);
         });
 
         modalPane.show(panel);
