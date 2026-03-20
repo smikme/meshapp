@@ -95,6 +95,19 @@ class WinSerialPort implements NativeSerialPort {
     private static final int ERROR_IO_PENDING = 997;
     private static final int ERROR_OPERATION_ABORTED = 995;
     private static final int FIRST_BYTE_POLL_INTERVAL_MS = 10;
+    private static final long COMM_ERROR_LOG_INTERVAL_MS = 1_000L;
+
+    private static final int CE_RXOVER = 0x0001;
+    private static final int CE_OVERRUN = 0x0002;
+    private static final int CE_RXPARITY = 0x0004;
+    private static final int CE_FRAME = 0x0008;
+    private static final int CE_BREAK = 0x0010;
+    private static final int CE_TXFULL = 0x0100;
+    private static final int CE_PTO = 0x0200;
+    private static final int CE_IOE = 0x0400;
+    private static final int CE_DNS = 0x0800;
+    private static final int CE_OOP = 0x1000;
+    private static final int CE_MODE = 0x8000;
 
     private volatile Pointer handle;
     private volatile boolean open;
@@ -104,6 +117,8 @@ class WinSerialPort implements NativeSerialPort {
     private Pointer writeEvent;
 
     private boolean assertDtr;
+    private volatile int lastLoggedCommErrorMask;
+    private volatile long lastLoggedCommErrorAtMillis;
 
     @Override
     public void open(String portName, int baudRate, boolean assertDtr) throws ConnectionException {
@@ -342,7 +357,15 @@ class WinSerialPort implements NativeSerialPort {
             }
             return 0;
         }
-        return Math.max(stat.getInt(COMSTAT_OFF_IN_QUEUE), 0);
+        int inQueue = Math.max(stat.getInt(COMSTAT_OFF_IN_QUEUE), 0);
+        int errorMask = errors.getValue();
+        if (errorMask != 0) {
+            maybeLogCommError(errorMask, inQueue);
+        } else {
+            lastLoggedCommErrorMask = 0;
+            lastLoggedCommErrorAtMillis = 0;
+        }
+        return inQueue;
     }
 
     /**
@@ -447,5 +470,55 @@ class WinSerialPort implements NativeSerialPort {
             K32.INSTANCE.CloseHandle(writeEvent);
             writeEvent = null;
         }
+    }
+
+    private void maybeLogCommError(int errorMask, int inQueue) {
+        long now = System.currentTimeMillis();
+        if (errorMask != lastLoggedCommErrorMask
+                || (now - lastLoggedCommErrorAtMillis) >= COMM_ERROR_LOG_INTERVAL_MS) {
+            log.warn("ClearCommError reported {} on serial port (inQueue={})",
+                    formatCommErrors(errorMask), inQueue);
+            lastLoggedCommErrorMask = errorMask;
+            lastLoggedCommErrorAtMillis = now;
+        }
+    }
+
+    static String formatCommErrors(int mask) {
+        if (mask == 0) {
+            return "none";
+        }
+
+        StringBuilder sb = new StringBuilder();
+        int remaining = mask;
+        remaining = appendCommError(sb, remaining, CE_RXOVER, "RXOVER");
+        remaining = appendCommError(sb, remaining, CE_OVERRUN, "OVERRUN");
+        remaining = appendCommError(sb, remaining, CE_RXPARITY, "RXPARITY");
+        remaining = appendCommError(sb, remaining, CE_FRAME, "FRAME");
+        remaining = appendCommError(sb, remaining, CE_BREAK, "BREAK");
+        remaining = appendCommError(sb, remaining, CE_TXFULL, "TXFULL");
+        remaining = appendCommError(sb, remaining, CE_PTO, "PTO");
+        remaining = appendCommError(sb, remaining, CE_IOE, "IOE");
+        remaining = appendCommError(sb, remaining, CE_DNS, "DNS");
+        remaining = appendCommError(sb, remaining, CE_OOP, "OOP");
+        remaining = appendCommError(sb, remaining, CE_MODE, "MODE");
+        if (remaining != 0) {
+            appendCommErrorName(sb, String.format("0x%04X", remaining));
+        }
+        return sb.toString();
+    }
+
+    private static int appendCommError(StringBuilder sb, int remaining, int flag, String name) {
+        if ((remaining & flag) != 0) {
+            appendCommErrorName(sb, name);
+            remaining &= ~flag;
+        }
+        return remaining;
+    }
+
+    private static void appendCommErrorName(StringBuilder sb, String name) {
+        if (!sb.isEmpty()) {
+            sb.append('|');
+        }
+        sb.append(name);
     }
 }

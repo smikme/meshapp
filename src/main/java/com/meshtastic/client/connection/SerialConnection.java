@@ -6,7 +6,9 @@ import com.meshtastic.client.connection.serial.NativeSerialPortFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.function.LongSupplier;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 
 /**
  * Подключение к Meshtastic-устройству через serial-порт (USB / Bluetooth SPP).
@@ -24,25 +26,50 @@ public class SerialConnection implements MeshtasticConnection {
     private static final Logger log = LoggerFactory.getLogger(SerialConnection.class);
 
     public static final int DEFAULT_BAUD_RATE = 115200;
-    private static final int READ_TIMEOUT_MS = 500;
-    private static final int PORT_INIT_DELAY_MS = 500;
+    private static final int DEFAULT_READ_TIMEOUT_MS = 500;
+    private static final int DEFAULT_PORT_INIT_DELAY_MS = 500;
+    private static final long DEFAULT_WRITE_RESPONSE_TIMEOUT_MS = 15_000L;
 
     private final String portName;
     private final int baudRate;
+    private final Supplier<NativeSerialPort> portFactory;
+    private final LongSupplier currentTimeMillis;
+    private final int readTimeoutMs;
+    private final int portInitDelayMs;
+    private final long writeResponseTimeoutMs;
 
     private volatile NativeSerialPort nativePort;
     private volatile Consumer<byte[]> dataListener;
     private volatile ConnectionListener connectionListener;
     private volatile boolean running;
+    private volatile long lastReceiveAtMillis;
+    private volatile long lastWriteAtMillis;
+    private volatile boolean awaitingResponseAfterWrite;
+    private volatile int readTimeoutsSinceWrite;
     private Thread readerThread;
 
     public SerialConnection(String portName, int baudRate) {
-        this.portName = portName;
-        this.baudRate = baudRate;
+        this(portName, baudRate, NativeSerialPortFactory::create, System::currentTimeMillis,
+                DEFAULT_READ_TIMEOUT_MS, DEFAULT_PORT_INIT_DELAY_MS, DEFAULT_WRITE_RESPONSE_TIMEOUT_MS);
     }
 
     public SerialConnection(String portName) {
         this(portName, DEFAULT_BAUD_RATE);
+    }
+
+    SerialConnection(String portName, int baudRate,
+                     Supplier<NativeSerialPort> portFactory,
+                     LongSupplier currentTimeMillis,
+                     int readTimeoutMs,
+                     int portInitDelayMs,
+                     long writeResponseTimeoutMs) {
+        this.portName = portName;
+        this.baudRate = baudRate;
+        this.portFactory = portFactory;
+        this.currentTimeMillis = currentTimeMillis;
+        this.readTimeoutMs = readTimeoutMs;
+        this.portInitDelayMs = portInitDelayMs;
+        this.writeResponseTimeoutMs = writeResponseTimeoutMs;
     }
 
     @Override
@@ -56,16 +83,21 @@ public class SerialConnection implements MeshtasticConnection {
             boolean isUsbBridge = isUsbSerialBridge(portName, desc);
             boolean assertDtr = !isUsbBridge;
 
-            NativeSerialPort port = NativeSerialPortFactory.create();
+            NativeSerialPort port = portFactory.get();
             port.open(portName, baudRate, assertDtr);
             this.nativePort = port;
 
-            Thread.sleep(PORT_INIT_DELAY_MS);
+            Thread.sleep(portInitDelayMs);
             port.drainInput();
             log.info("Connected to serial port {} at {} baud (native JNA, DTR={})",
                     portName, baudRate, assertDtr ? "on" : "off");
 
             running = true;
+            long now = currentTimeMillis.getAsLong();
+            lastReceiveAtMillis = now;
+            lastWriteAtMillis = 0;
+            awaitingResponseAfterWrite = false;
+            readTimeoutsSinceWrite = 0;
             readerThread = new Thread(this::readLoop, "serial-reader-" + portName);
             readerThread.setDaemon(true);
             readerThread.start();
@@ -116,10 +148,15 @@ public class SerialConnection implements MeshtasticConnection {
             log.warn("Cannot send: serial port {} not connected", portName);
             return;
         }
+        long writeStartedAt = currentTimeMillis.getAsLong();
+        lastWriteAtMillis = writeStartedAt;
+        awaitingResponseAfterWrite = true;
+        readTimeoutsSinceWrite = 0;
         try {
             nativePort.write(data, 0, data.length);
             log.debug("Sent {} bytes to serial {}", data.length, portName);
         } catch (ConnectionException e) {
+            awaitingResponseAfterWrite = false;
             log.error("Write failed to serial {}", portName, e);
             ConnectionListener listener = connectionListener;
             if (listener != null) {
@@ -160,7 +197,7 @@ public class SerialConnection implements MeshtasticConnection {
             }
             log.debug("Serial reader ready, starting read loop for {}", portName);
             while (running && !Thread.currentThread().isInterrupted()) {
-                int bytesRead = port.read(buf, buf.length, READ_TIMEOUT_MS);
+                int bytesRead = port.read(buf, buf.length, readTimeoutMs);
                 if (bytesRead < 0) {
                     if (running) {
                         log.info("Serial port {} read error (returned {})", portName, bytesRead);
@@ -177,8 +214,19 @@ public class SerialConnection implements MeshtasticConnection {
                         }
                         break;
                     }
+                    noteReadTimeoutWhileAwaitingResponse();
+                    if (isReceiveStalledAfterWrite()) {
+                        long now = currentTimeMillis.getAsLong();
+                        long silentForMs = Math.max(0L, now - lastWriteAtMillis);
+                        long sinceLastRxMs = Math.max(0L, now - lastReceiveAtMillis);
+                        log.warn("Serial receive stalled on {} after write: silentFor={} ms, sinceLastRx={} ms, readTimeouts={}, portOpen={}",
+                                portName, silentForMs, sinceLastRxMs, readTimeoutsSinceWrite, port.isOpen());
+                        errorMessage = "Serial receive stalled after write: " + portName;
+                        break;
+                    }
                     continue;
                 }
+                markReceiveProgress();
                 for (int i = 0; i < bytesRead; i++) {
                     byte[] packet = parser.processByte(buf[i]);
                     if (packet != null) {
@@ -211,6 +259,34 @@ public class SerialConnection implements MeshtasticConnection {
         }
 
         log.debug("Serial reader thread exiting for {}", portName);
+    }
+
+    private void markReceiveProgress() {
+        lastReceiveAtMillis = currentTimeMillis.getAsLong();
+        awaitingResponseAfterWrite = false;
+        readTimeoutsSinceWrite = 0;
+    }
+
+    private boolean isReceiveStalledAfterWrite() {
+        if (!awaitingResponseAfterWrite) {
+            return false;
+        }
+        long writeAt = lastWriteAtMillis;
+        if (writeAt <= 0) {
+            return false;
+        }
+        long lastReceiveAt = lastReceiveAtMillis;
+        if (lastReceiveAt > writeAt) {
+            awaitingResponseAfterWrite = false;
+            return false;
+        }
+        return currentTimeMillis.getAsLong() - writeAt >= writeResponseTimeoutMs;
+    }
+
+    private void noteReadTimeoutWhileAwaitingResponse() {
+        if (awaitingResponseAfterWrite) {
+            readTimeoutsSinceWrite++;
+        }
     }
 
     /**
