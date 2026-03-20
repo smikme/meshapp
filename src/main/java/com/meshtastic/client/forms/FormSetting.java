@@ -786,14 +786,20 @@ public class FormSetting extends Form {
         final double fLon = newLon;
         final int fAlt = newAlt;
 
-        // Запрашиваем session key → отправляем настройки
+        // Запрашиваем session key → отправляем настройки.
+        // OwnerInfo listener и timeout fallback работают параллельно, поэтому нужен
+        // single-shot guard: повторный begin/set/commit через ~5 секунд ломает save-flow
+        // на любом транспорте, если owner info уже успел прийти раньше таймаута.
+        AtomicBoolean saveDispatchStarted = new AtomicBoolean(false);
         Runnable[] listenerHolder = new Runnable[1];
         listenerHolder[0] = () -> Platform.runLater(() -> {
             state.removeOwnerInfoListener(listenerHolder[0]);
-            sendConfigChanges(modifiedConfigs, modifiedModuleConfigs,
-                    fOwnerModified, fLongName, fShortName,
-                    fPositionModified, fLat, fLon, fAlt,
-                    totalChanges);
+            if (saveDispatchStarted.compareAndSet(false, true)) {
+                sendConfigChanges(modifiedConfigs, modifiedModuleConfigs,
+                        fOwnerModified, fLongName, fShortName,
+                        fPositionModified, fLat, fLon, fAlt,
+                        totalChanges);
+            }
         });
         state.addOwnerInfoListener(listenerHolder[0]);
 
@@ -802,7 +808,7 @@ public class FormSetting extends Form {
             try { Thread.sleep(5000); } catch (InterruptedException ignored) { return; }
             Platform.runLater(() -> {
                 state.removeOwnerInfoListener(listenerHolder[0]);
-                if (saveConfigBtn.isDisable()) {
+                if (saveDispatchStarted.compareAndSet(false, true)) {
                     configStatusLabel.setText("Отправка без session key...");
                     sendConfigChanges(modifiedConfigs, modifiedModuleConfigs,
                             fOwnerModified, fLongName, fShortName,
