@@ -4,12 +4,15 @@ import com.meshtastic.client.connection.serial.NativeSerialPort;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class SerialConnectionTest {
@@ -98,6 +101,45 @@ class SerialConnectionTest {
 
         assertTrue(errorLatch.await(1, TimeUnit.SECONDS));
         assertFalse(connection.isConnected());
+        assertTrue(port.awaitClose());
+    }
+
+    @Test
+    void readTimeoutResetsPartialFrameAndAllowsNextValidPacket() throws Exception {
+        FakeSerialPort port = new FakeSerialPort();
+        CountDownLatch packetLatch = new CountDownLatch(1);
+        CountDownLatch errorLatch = new CountDownLatch(1);
+        AtomicReference<byte[]> packetRef = new AtomicReference<>();
+        SerialConnection connection = new SerialConnection(
+                "COM3", 115200, () -> port, System::currentTimeMillis, 5, 0, 80);
+        connection.setConnectionListener(new TestConnectionListener(errorLatch));
+        connection.setDataListener(packet -> {
+            packetRef.set(packet);
+            packetLatch.countDown();
+        });
+
+        connection.connect();
+        port.enqueueIncoming(
+                FrameParser.START_BYTE_1, FrameParser.START_BYTE_2,
+                (byte) 0x00, (byte) 0x10, (byte) 0x08
+        );
+        Thread feeder = new Thread(() -> {
+            try {
+                Thread.sleep(25);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            port.enqueueIncoming(validFrame((byte) 0x08, (byte) 0x01));
+        });
+        feeder.start();
+
+        assertTrue(packetLatch.await(1, TimeUnit.SECONDS));
+        assertNotNull(packetRef.get());
+        assertArrayEquals(new byte[]{0x08, 0x01}, packetRef.get());
+        assertFalse(errorLatch.await(50, TimeUnit.MILLISECONDS));
+
+        feeder.join(1000);
+        connection.disconnect();
         assertTrue(port.awaitClose());
     }
 

@@ -248,6 +248,11 @@ public class SerialConnection implements MeshtasticConnection {
                     break;
                 }
                 if (bytesRead == 0) {
+                    if (parser.hasPartialFrame()) {
+                        log.debug("Resetting serial frame parser on {} after {} ms inter-byte gap",
+                                portName, readTimeoutMs);
+                        parser.reset();
+                    }
                     // Таймаут — данных нет, проверяем что порт ещё открыт
                     if (!port.isOpen()) {
                         if (running) {
