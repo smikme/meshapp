@@ -1,9 +1,11 @@
 package com.meshtastic.client.service;
 
 import com.meshtastic.client.connection.ConnectionException;
+import com.meshtastic.client.connection.ble.BleDevice;
 import com.meshtastic.client.menu.MyDrawerBuilder;
 import com.meshtastic.client.modal.Toast;
 import com.meshtastic.client.model.ConnectionEntry;
+import com.meshtastic.client.model.ConnectionType;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.NodeData;
 import javafx.application.Platform;
@@ -26,7 +28,18 @@ public final class ReconnectService {
     private static final Logger log = LoggerFactory.getLogger(ReconnectService.class);
 
     private static final long INITIAL_DELAY_SECONDS = 2;
+    /**
+     * BLE-устройствам после reboot обычно нужно больше времени, чем TCP/Serial,
+     * чтобы снова начать рекламироваться и принять GATT connect.
+     */
+    private static final long BLE_INITIAL_DELAY_SECONDS = 5;
     private static final long MAX_DELAY_SECONDS = 30;
+    /**
+     * Перед BLE reconnect даём короткое scan window, чтобы прогреть discovery cache
+     * и не стучаться в устройство, которое ещё не вернулось в advertising state.
+     */
+    private static final long BLE_RESCAN_WINDOW_MS = 4_000;
+    private static final long BLE_RESCAN_POLL_MS = 250;
 
     private static ReconnectService instance;
 
@@ -90,9 +103,10 @@ public final class ReconnectService {
 
     private void scheduleNextAttempt(String id) {
         int attempt = attemptCounts.getOrDefault(id, 0);
-        long delaySec = Math.min(INITIAL_DELAY_SECONDS * (1L << attempt), MAX_DELAY_SECONDS);
 
         ConnectionEntry entry = ConnectionManager.getInstance().findEntry(id);
+        long initialDelaySeconds = initialDelaySeconds(entry);
+        long delaySec = Math.min(initialDelaySeconds * (1L << attempt), MAX_DELAY_SECONDS);
         String name = entry != null ? entry.getName() : id;
 
         Platform.runLater(() ->
@@ -127,6 +141,7 @@ public final class ReconnectService {
         log.info("Reconnect attempt #{} for '{}'", attempt, entry.getName());
 
         try {
+            prepareBleReconnect(entry);
             mgr.connect(id);
 
             // Успех — очищаем состояние reconnect
@@ -143,6 +158,65 @@ public final class ReconnectService {
             log.warn("Reconnect failed for '{}': {}", entry.getName(), e.getMessage());
             attemptCounts.put(id, attempt);
             scheduleNextAttempt(id);
+        }
+    }
+
+    /**
+     * Возвращает начальную задержку reconnect для выбранного транспорта.
+     * BLE получает больший grace period, потому что после reboot устройство может
+     * появиться в advertising state только через несколько секунд.
+     */
+    private static long initialDelaySeconds(ConnectionEntry entry) {
+        if (entry != null && entry.getEffectiveType() == ConnectionType.BLE) {
+            return BLE_INITIAL_DELAY_SECONDS;
+        }
+        return INITIAL_DELAY_SECONDS;
+    }
+
+    /**
+     * Для BLE перед reconnect открываем короткое scan window.
+     * Это помогает платформенным backends обновить discovery/system cache и
+     * уменьшает число ложных "device not found" сразу после reboot.
+     */
+    private void prepareBleReconnect(ConnectionEntry entry) {
+        if (entry.getEffectiveType() != ConnectionType.BLE) {
+            return;
+        }
+
+        BleDeviceDiscoveryService discovery = BleDeviceDiscoveryService.getInstance();
+        if (!discovery.isSupported()) {
+            return;
+        }
+
+        String address = entry.getBleAddress();
+        if (address == null || address.isBlank()) {
+            return;
+        }
+
+        boolean scanStarted = false;
+        try {
+            discovery.startScanning();
+            scanStarted = true;
+
+            long deadline = System.currentTimeMillis() + BLE_RESCAN_WINDOW_MS;
+            while (System.currentTimeMillis() < deadline) {
+                for (BleDevice device : discovery.getDiscoveredDevices()) {
+                    if (address.equalsIgnoreCase(device.address())) {
+                        log.info("BLE reconnect warmup found {} before connect", address);
+                        return;
+                    }
+                }
+                Thread.sleep(BLE_RESCAN_POLL_MS);
+            }
+
+            log.info("BLE reconnect warmup timed out for {}, trying direct connect anyway", address);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.warn("BLE reconnect warmup interrupted for {}", address);
+        } finally {
+            if (scanStarted) {
+                discovery.stopScanning();
+            }
         }
     }
 
