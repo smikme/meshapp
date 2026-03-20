@@ -52,6 +52,7 @@ public class SerialConnection implements MeshtasticConnection {
     private volatile ConnectionListener connectionListener;
     private volatile boolean running;
     private volatile long lastReceiveAtMillis;
+    private volatile long lastPacketReceiveAtMillis;
     private volatile long lastWriteAtMillis;
     private volatile boolean awaitingResponseAfterWrite;
     private volatile int readTimeoutsSinceWrite;
@@ -124,6 +125,7 @@ public class SerialConnection implements MeshtasticConnection {
             running = true;
             long now = currentTimeMillis.getAsLong();
             lastReceiveAtMillis = now;
+            lastPacketReceiveAtMillis = now;
             lastWriteAtMillis = 0;
             awaitingResponseAfterWrite = false;
             readTimeoutsSinceWrite = 0;
@@ -258,18 +260,20 @@ public class SerialConnection implements MeshtasticConnection {
                     if (isReceiveStalledAfterWrite()) {
                         long now = currentTimeMillis.getAsLong();
                         long silentForMs = Math.max(0L, now - lastWriteAtMillis);
-                        long sinceLastRxMs = Math.max(0L, now - lastReceiveAtMillis);
-                        log.warn("Serial receive stalled on {} after write: silentFor={} ms, sinceLastRx={} ms, readTimeouts={}, portOpen={}",
-                                portName, silentForMs, sinceLastRxMs, readTimeoutsSinceWrite, port.isOpen());
+                        long sinceLastByteRxMs = Math.max(0L, now - lastReceiveAtMillis);
+                        long sinceLastPacketRxMs = Math.max(0L, now - lastPacketReceiveAtMillis);
+                        log.warn("Serial receive stalled on {} after write: silentFor={} ms, sinceLastByteRx={} ms, sinceLastPacketRx={} ms, readTimeouts={}, portOpen={}",
+                                portName, silentForMs, sinceLastByteRxMs, sinceLastPacketRxMs, readTimeoutsSinceWrite, port.isOpen());
                         errorMessage = "Serial receive stalled after write: " + portName;
                         break;
                     }
                     continue;
                 }
-                markReceiveProgress();
+                markByteReceiveProgress();
                 for (int i = 0; i < bytesRead; i++) {
                     byte[] packet = parser.processByte(buf[i]);
                     if (packet != null) {
+                        markPacketReceiveProgress();
                         Consumer<byte[]> listener = dataListener;
                         if (listener != null) {
                             listener.accept(packet);
@@ -296,8 +300,14 @@ public class SerialConnection implements MeshtasticConnection {
         log.debug("Serial reader thread exiting for {}", portName);
     }
 
-    private void markReceiveProgress() {
+    private void markByteReceiveProgress() {
         lastReceiveAtMillis = currentTimeMillis.getAsLong();
+    }
+
+    private void markPacketReceiveProgress() {
+        long now = currentTimeMillis.getAsLong();
+        lastReceiveAtMillis = now;
+        lastPacketReceiveAtMillis = now;
         awaitingResponseAfterWrite = false;
         readTimeoutsSinceWrite = 0;
     }
@@ -310,8 +320,8 @@ public class SerialConnection implements MeshtasticConnection {
         if (writeAt <= 0) {
             return false;
         }
-        long lastReceiveAt = lastReceiveAtMillis;
-        if (lastReceiveAt > writeAt) {
+        long lastPacketReceiveAt = lastPacketReceiveAtMillis;
+        if (lastPacketReceiveAt > writeAt) {
             awaitingResponseAfterWrite = false;
             return false;
         }
@@ -385,12 +395,13 @@ public class SerialConnection implements MeshtasticConnection {
             return;
         }
 
-        long sinceLastRxMs = Math.max(0L, now - lastReceiveAtMillis);
+        long sinceLastByteRxMs = Math.max(0L, now - lastReceiveAtMillis);
+        long sinceLastPacketRxMs = Math.max(0L, now - lastPacketReceiveAtMillis);
         long sinceLastWriteMs = lastWriteAtMillis > 0 ? Math.max(0L, now - lastWriteAtMillis) : -1L;
         Thread thread = readerThread;
         String threadState = thread != null ? thread.getState().name() : "null";
-        log.warn("Serial read call appears stuck on {}: blockedFor={} ms, sinceLastRx={} ms, sinceLastWrite={} ms, threadState={}",
-                portName, blockedForMs, sinceLastRxMs, sinceLastWriteMs, threadState);
+        log.warn("Serial read call appears stuck on {}: blockedFor={} ms, sinceLastByteRx={} ms, sinceLastPacketRx={} ms, sinceLastWrite={} ms, threadState={}",
+                portName, blockedForMs, sinceLastByteRxMs, sinceLastPacketRxMs, sinceLastWriteMs, threadState);
         forceConnectionErrorFromWatchdog("Serial read loop stalled: " + portName);
     }
 

@@ -152,20 +152,34 @@ public final class ConnectionManager {
 
             @Override
             public void onDisconnected() {
+                boolean userInitiated = userDisconnectedIds.contains(id);
+                if (userInitiated) {
+                    log.info("Connection '{}' disconnected by user", entry.getName());
+                } else {
+                    log.warn("Connection '{}' disconnected unexpectedly", entry.getName());
+                }
                 entry.setConnected(false);
                 cleanupConnection(id);
                 fireChanged();
-                if (!userDisconnectedIds.contains(id)) {
+                if (!userInitiated) {
+                    log.info("Scheduling auto-reconnect for '{}' after disconnect", entry.getName());
                     ReconnectService.getInstance().startReconnect(id);
                 }
             }
 
             @Override
             public void onConnectionError(String message, Throwable cause) {
+                boolean userInitiated = userDisconnectedIds.contains(id);
+                if (cause != null) {
+                    log.warn("Connection '{}' error: {}", entry.getName(), message, cause);
+                } else {
+                    log.warn("Connection '{}' error: {}", entry.getName(), message);
+                }
                 entry.setConnected(false);
                 cleanupConnection(id);
                 fireChanged();
-                if (!userDisconnectedIds.contains(id)) {
+                if (!userInitiated) {
+                    log.info("Scheduling auto-reconnect for '{}' after connection error", entry.getName());
                     ReconnectService.getInstance().startReconnect(id);
                 }
             }

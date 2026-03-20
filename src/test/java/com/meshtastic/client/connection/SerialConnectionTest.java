@@ -58,13 +58,31 @@ class SerialConnectionTest {
 
         connection.connect();
         connection.sendBytes(new byte[]{0x01, 0x02});
-        port.enqueueIncoming((byte) 0x55);
+        port.enqueueIncoming(validFrame((byte) 0x08));
 
         Thread.sleep(140);
 
         assertFalse(errorLatch.await(50, TimeUnit.MILLISECONDS));
 
         connection.disconnect();
+        assertTrue(port.awaitClose());
+    }
+
+    @Test
+    void partialIncomingBytesAfterWriteDoNotClearStallDetector() throws Exception {
+        FakeSerialPort port = new FakeSerialPort();
+        CountDownLatch errorLatch = new CountDownLatch(1);
+        SerialConnection connection = new SerialConnection(
+                "COM3", 115200, () -> port, System::currentTimeMillis, 5, 0, 80);
+        connection.setConnectionListener(new TestConnectionListener(errorLatch));
+
+        connection.connect();
+        connection.sendBytes(new byte[]{0x01, 0x02});
+        port.enqueueIncoming((byte) 0x94);
+        port.enqueueIncoming((byte) 0xC3);
+
+        assertTrue(errorLatch.await(1, TimeUnit.SECONDS));
+        assertFalse(connection.isConnected());
         assertTrue(port.awaitClose());
     }
 
@@ -102,6 +120,16 @@ class SerialConnectionTest {
         public void onConnectionError(String message, Throwable cause) {
             errorLatch.countDown();
         }
+    }
+
+    private static byte[] validFrame(byte... payload) {
+        byte[] frame = new byte[4 + payload.length];
+        frame[0] = (byte) 0x94;
+        frame[1] = (byte) 0xC3;
+        frame[2] = (byte) ((payload.length >>> 8) & 0xFF);
+        frame[3] = (byte) (payload.length & 0xFF);
+        System.arraycopy(payload, 0, frame, 4, payload.length);
+        return frame;
     }
 
     private static final class FakeSerialPort implements NativeSerialPort {
