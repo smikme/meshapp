@@ -6,8 +6,6 @@ import com.sun.jna.ptr.IntByReference;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.concurrent.TimeUnit;
-
 /**
  * Windows-реализация serial-порта через kernel32.dll (JNA).
  * <p>
@@ -29,9 +27,13 @@ class WinSerialPort implements NativeSerialPort {
     private static final int OPEN_EXISTING = 3;
     private static final int FILE_FLAG_OVERLAPPED = 0x40000000;
     private static final long INVALID_HANDLE_VALUE = -1L;
+    private static final int PURGE_TXABORT = 0x0001;
+    private static final int PURGE_RXABORT = 0x0002;
+    private static final int PURGE_TXCLEAR = 0x0004;
     private static final int PURGE_RXCLEAR = 0x0008;
     private static final int WAIT_OBJECT_0 = 0x00000000;
     private static final int WAIT_TIMEOUT = 0x00000102;
+    private static final int WAIT_FAILED = 0xFFFFFFFF;
     private static final int INFINITE = 0xFFFFFFFF;
 
     // OVERLAPPED structure: 5 fields (Internal, InternalHigh, Offset, OffsetHigh, hEvent)
@@ -88,14 +90,16 @@ class WinSerialPort implements NativeSerialPort {
         boolean ResetEvent(Pointer hEvent);
         boolean PurgeComm(Pointer hFile, int dwFlags);
         boolean CancelIo(Pointer hFile);
+        boolean CancelIoEx(Pointer hFile, Pointer lpOverlapped);
         boolean CloseHandle(Pointer hObject);
         int GetLastError();
     }
 
     private static final int ERROR_IO_PENDING = 997;
     private static final int ERROR_OPERATION_ABORTED = 995;
-    private static final int FIRST_BYTE_POLL_INTERVAL_MS = 10;
+    private static final int ERROR_NOT_FOUND = 1168;
     private static final long COMM_ERROR_LOG_INTERVAL_MS = 1_000L;
+    private static final int WRITE_TIMEOUT_MS = 5_000;
 
     private static final int CE_RXOVER = 0x0001;
     private static final int CE_OVERRUN = 0x0002;
@@ -222,18 +226,15 @@ class WinSerialPort implements NativeSerialPort {
         Pointer h = handle;
         if (h == null || !open) return -1;
 
-        // Повторяем семантику jSerialComm TIMEOUT_READ_SEMI_BLOCKING:
-        // ждём появления первого байта до timeout, затем сразу дочитываем уже
-        // накопившийся хвост. На длинных Windows USB-сессиях это устойчивее,
-        // чем держать pending ReadFile на пустом порту: polling через COMSTAT
-        // одновременно очищает comm errors и лучше повторяет поведение jSerialComm.
-        int available = waitForAvailableBytes(h, timeoutMs);
-        if (available <= 0) {
-            return available;
+        // Первый байт ждём одним overlapped ReadFile с timeout.
+        // Это убирает постоянный polling через ClearCommError на пустом порту.
+        int totalRead = readChunk(h, buf, 0, 1, timeoutMs);
+        if (totalRead <= 0) {
+            return totalRead;
         }
 
-        int totalRead = 0;
         while (totalRead < len) {
+            int available = bytesAvailable(h);
             if (available <= 0) {
                 break;
             }
@@ -306,44 +307,6 @@ class WinSerialPort implements NativeSerialPort {
     }
 
     /**
-     * Ждёт появления входящих байт в драйверном буфере до timeout.
-     * <p>
-     * В отличие от pending ReadFile на пустом порту, этот polling путь регулярно
-     * проходит через {@link #bytesAvailable(Pointer)} и тем самым не оставляет
-     * COM-сессию в подвисшем состоянии после длительной работы с USB bridge.
-     */
-    private int waitForAvailableBytes(Pointer h, int timeoutMs) {
-        int available = bytesAvailable(h);
-        if (available > 0 || timeoutMs <= 0) {
-            return available;
-        }
-
-        long deadlineNanos = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs);
-        while (open && handle == h) {
-            available = bytesAvailable(h);
-            if (available > 0) {
-                return available;
-            }
-
-            long remainingNanos = deadlineNanos - System.nanoTime();
-            if (remainingNanos <= 0) {
-                return 0;
-            }
-
-            long remainingMillis = Math.max(1L, TimeUnit.NANOSECONDS.toMillis(remainingNanos));
-            long sleepMillis = Math.min(FIRST_BYTE_POLL_INTERVAL_MS, remainingMillis);
-            try {
-                Thread.sleep(sleepMillis);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                return -1;
-            }
-        }
-
-        return -1;
-    }
-
-    /**
      * Возвращает количество входящих байт, уже буферизованных драйвером.
      * Нужен для быстрого дочитывания хвоста после первого успешного байта.
      */
@@ -378,7 +341,7 @@ class WinSerialPort implements NativeSerialPort {
      */
     private int finishTimedOutRead(Pointer h, Memory ovl, Memory nativeBuf,
                                    byte[] buf, int offset, IntByReference bytesRead) {
-        K32.INSTANCE.CancelIo(h);
+        cancelPendingIo(h, ovl);
 
         boolean completed = K32.INSTANCE.GetOverlappedResult(h, ovl, bytesRead, true);
         int n = copyCompletedRead(nativeBuf, buf, offset, bytesRead);
@@ -422,8 +385,18 @@ class WinSerialPort implements NativeSerialPort {
             if (err != ERROR_IO_PENDING) {
                 throw new ConnectionException("WriteFile failed (error " + err + ")");
             }
-            // Ждём завершения записи
-            K32.INSTANCE.WaitForSingleObject(writeEvent, INFINITE);
+            int waitResult = K32.INSTANCE.WaitForSingleObject(writeEvent, WRITE_TIMEOUT_MS);
+            if (waitResult == WAIT_TIMEOUT) {
+                cancelPendingIo(h, ovl);
+                K32.INSTANCE.GetOverlappedResult(h, ovl, bytesWritten, true);
+                throw new ConnectionException("Write timed out after " + WRITE_TIMEOUT_MS + " ms");
+            }
+            if (waitResult == WAIT_FAILED) {
+                throw new ConnectionException("Write wait failed (error " + K32.INSTANCE.GetLastError() + ")");
+            }
+            if (waitResult != WAIT_OBJECT_0) {
+                throw new ConnectionException("Write wait returned 0x" + Integer.toHexString(waitResult));
+            }
             if (!K32.INSTANCE.GetOverlappedResult(h, ovl, bytesWritten, false)) {
                 throw new ConnectionException("Write GetOverlappedResult failed (error "
                         + K32.INSTANCE.GetLastError() + ")");
@@ -454,7 +427,8 @@ class WinSerialPort implements NativeSerialPort {
         Pointer h = handle;
         handle = null;
         if (h != null) {
-            K32.INSTANCE.CancelIo(h);
+            abortComm(h);
+            cancelPendingIo(h, null);
             K32.INSTANCE.CloseHandle(h);
         }
         closeEvents();
@@ -520,5 +494,34 @@ class WinSerialPort implements NativeSerialPort {
             sb.append('|');
         }
         sb.append(name);
+    }
+
+    private void abortComm(Pointer h) {
+        int flags = PURGE_RXABORT | PURGE_TXABORT | PURGE_RXCLEAR | PURGE_TXCLEAR;
+        if (!K32.INSTANCE.PurgeComm(h, flags) && open) {
+            log.debug("PurgeComm abort failed: {}", K32.INSTANCE.GetLastError());
+        }
+    }
+
+    private void cancelPendingIo(Pointer h, Pointer ovl) {
+        if (h == null) {
+            return;
+        }
+        if (K32.INSTANCE.CancelIoEx(h, ovl)) {
+            return;
+        }
+
+        int err = K32.INSTANCE.GetLastError();
+        if (err == ERROR_NOT_FOUND || err == ERROR_OPERATION_ABORTED) {
+            return;
+        }
+
+        if (ovl == null && K32.INSTANCE.CancelIo(h)) {
+            return;
+        }
+
+        if (open) {
+            log.debug("CancelIoEx failed: {}", err);
+        }
     }
 }

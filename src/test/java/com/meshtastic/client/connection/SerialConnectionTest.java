@@ -68,6 +68,21 @@ class SerialConnectionTest {
         assertTrue(port.awaitClose());
     }
 
+    @Test
+    void blockedReadCallTriggersConnectionErrorWithoutWrite() throws Exception {
+        BlockingReadSerialPort port = new BlockingReadSerialPort();
+        CountDownLatch errorLatch = new CountDownLatch(1);
+        SerialConnection connection = new SerialConnection(
+                "COM3", 115200, () -> port, System::currentTimeMillis, 5, 0, 80, 40, 10);
+        connection.setConnectionListener(new TestConnectionListener(errorLatch));
+
+        connection.connect();
+
+        assertTrue(errorLatch.await(1, TimeUnit.SECONDS));
+        assertFalse(connection.isConnected());
+        assertTrue(port.awaitClose());
+    }
+
     private static final class TestConnectionListener implements ConnectionListener {
         private final CountDownLatch errorLatch;
 
@@ -146,6 +161,49 @@ class SerialConnectionTest {
 
         void enqueueIncoming(byte... chunk) {
             incoming.offer(Arrays.copyOf(chunk, chunk.length));
+        }
+
+        boolean awaitClose() throws InterruptedException {
+            return closedLatch.await(1, TimeUnit.SECONDS);
+        }
+    }
+
+    private static final class BlockingReadSerialPort implements NativeSerialPort {
+        private final CountDownLatch closedLatch = new CountDownLatch(1);
+        private volatile boolean open;
+
+        @Override
+        public void open(String portName, int baudRate, boolean assertDtr) {
+            open = true;
+        }
+
+        @Override
+        public int read(byte[] buf, int len, int timeoutMs) {
+            try {
+                closedLatch.await();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            return -1;
+        }
+
+        @Override
+        public void write(byte[] data, int offset, int len) {
+        }
+
+        @Override
+        public void drainInput() {
+        }
+
+        @Override
+        public boolean isOpen() {
+            return open;
+        }
+
+        @Override
+        public void close() {
+            open = false;
+            closedLatch.countDown();
         }
 
         boolean awaitClose() throws InterruptedException {
