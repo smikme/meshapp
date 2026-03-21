@@ -2,11 +2,17 @@ com.meshtastic.client
 com.meshtastic.client.components
 com.meshtastic.client.components.chat
 com.meshtastic.client.connection
+com.meshtastic.client.connection.ble
+com.meshtastic.client.connection.ble.linux
+com.meshtastic.client.connection.ble.macos
+com.meshtastic.client.connection.ble.windows
+com.meshtastic.client.connection.serial
 com.meshtastic.client.forms
 com.meshtastic.client.logging
 com.meshtastic.client.menu
 com.meshtastic.client.modal
 com.meshtastic.client.model
+com.meshtastic.client.notification
 com.meshtastic.client.platform
 com.meshtastic.client.protocol
 com.meshtastic.client.service
