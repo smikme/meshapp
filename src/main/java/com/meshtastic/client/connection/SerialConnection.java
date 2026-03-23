@@ -307,12 +307,19 @@ public class SerialConnection implements MeshtasticConnection {
 
     private void markByteReceiveProgress() {
         lastReceiveAtMillis = currentTimeMillis.getAsLong();
+        if (awaitingResponseAfterWrite) {
+            clearAwaitingResponseAfterWrite();
+        }
     }
 
     private void markPacketReceiveProgress() {
         long now = currentTimeMillis.getAsLong();
         lastReceiveAtMillis = now;
         lastPacketReceiveAtMillis = now;
+        clearAwaitingResponseAfterWrite();
+    }
+
+    private void clearAwaitingResponseAfterWrite() {
         awaitingResponseAfterWrite = false;
         readTimeoutsSinceWrite = 0;
     }
@@ -325,9 +332,9 @@ public class SerialConnection implements MeshtasticConnection {
         if (writeAt <= 0) {
             return false;
         }
-        long lastPacketReceiveAt = lastPacketReceiveAtMillis;
-        if (lastPacketReceiveAt > writeAt) {
-            awaitingResponseAfterWrite = false;
+        long lastReceiveAt = lastReceiveAtMillis;
+        if (lastReceiveAt > writeAt) {
+            clearAwaitingResponseAfterWrite();
             return false;
         }
         return currentTimeMillis.getAsLong() - writeAt >= writeResponseTimeoutMs;

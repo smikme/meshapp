@@ -72,7 +72,7 @@ class SerialConnectionTest {
     }
 
     @Test
-    void partialIncomingBytesAfterWriteDoNotClearStallDetector() throws Exception {
+    void partialIncomingBytesAfterWriteKeepConnectionAlive() throws Exception {
         FakeSerialPort port = new FakeSerialPort();
         CountDownLatch errorLatch = new CountDownLatch(1);
         SerialConnection connection = new SerialConnection(
@@ -84,8 +84,11 @@ class SerialConnectionTest {
         port.enqueueIncoming((byte) 0x94);
         port.enqueueIncoming((byte) 0xC3);
 
-        assertTrue(errorLatch.await(1, TimeUnit.SECONDS));
-        assertFalse(connection.isConnected());
+        Thread.sleep(140);
+
+        assertFalse(errorLatch.await(50, TimeUnit.MILLISECONDS));
+
+        connection.disconnect();
         assertTrue(port.awaitClose());
     }
 
