@@ -180,7 +180,11 @@ public class ConfigExchangeService implements FromRadioListener {
 
         if (nodeInfo.getLastHeard() != 0) { node.setLastHeard(nodeInfo.getLastHeard()); }
 
-        if (nodeInfo.getHopsAway() != 0) { node.setHopsAway(nodeInfo.getHopsAway()); }
+        if (nodeInfo.hasHopsAway()) {
+            node.setHopsAway((int) nodeInfo.getHopsAway());
+        } else {
+            node.clearHopsAway();
+        }
 
         if (nodeInfo.getChannel() != 0) { node.setChannel((int) nodeInfo.getChannel()); }
 

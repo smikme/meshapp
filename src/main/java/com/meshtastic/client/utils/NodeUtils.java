@@ -122,7 +122,8 @@ public final class NodeUtils {
         rows.add(new String[]{"\u2699", "Роль", node.getRole() != null ? NodeData.translateRole(node.getRole()) : null});
         rows.add(new String[]{"\uD83D\uDCDF", "Модель", node.getHwModel()});
         rows.add(new String[]{"\uD83D\uDCF6", "SNR", node.getSnr() != 0 ? String.valueOf(node.getSnr()) : null});
-        rows.add(new String[]{"\uD83D\uDD00", "Хопы", String.valueOf(node.getHopsAway())});
+        rows.add(new String[]{"\uD83D\uDD00", "Хопы",
+                node.hasHopsAway() ? String.valueOf(node.getHopsAway()) : null});
 
         int level = node.getBatteryLevel();
         String battery = null;

@@ -36,6 +36,7 @@ public class NodeData {
     private float relativeHumidity;
     private float barometricPressure;
     private int hopsAway;
+    private boolean hasHopsAway;
     private int channel;
     private String role;
     private String hwModel;
@@ -103,7 +104,16 @@ public class NodeData {
     public void setBarometricPressure(float barometricPressure) { this.barometricPressure = barometricPressure; }
 
     public int getHopsAway() { return hopsAway; }
-    public void setHopsAway(int hopsAway) { this.hopsAway = hopsAway; }
+    public void setHopsAway(int hopsAway) {
+        this.hopsAway = hopsAway;
+        this.hasHopsAway = true;
+    }
+    public boolean hasHopsAway() { return hasHopsAway; }
+    public void clearHopsAway() {
+        this.hopsAway = 0;
+        this.hasHopsAway = false;
+    }
+    public boolean isDirectNeighbor() { return hasHopsAway && hopsAway == 0; }
 
     public int getChannel() { return channel; }
     public void setChannel(int channel) { this.channel = channel; }

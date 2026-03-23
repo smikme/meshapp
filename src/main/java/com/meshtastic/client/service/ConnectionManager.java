@@ -47,6 +47,7 @@ public final class ConnectionManager {
     private final Map<String, MessageListenerService> messageListenerServices = new ConcurrentHashMap<>();
     private final Map<String, CompletableFuture<DeviceState>> configFutures = new ConcurrentHashMap<>();
     private final Set<String> userDisconnectedIds = ConcurrentHashMap.newKeySet();
+    private final Map<String, String> userDisconnectReasons = new ConcurrentHashMap<>();
     private final List<Runnable> listeners = new CopyOnWriteArrayList<>();
     private final Gson gson = new GsonBuilder().setPrettyPrinting().create();
     private final Path configPath;
@@ -116,7 +117,7 @@ public final class ConnectionManager {
      */
     public void removeEntry(String id) {
         ReconnectService.getInstance().cancelReconnect(id);
-        disconnect(id);
+        disconnect(id, "entry removal");
         entries.removeIf(e -> e.getId().equals(id));
         save();
         fireChanged();
@@ -132,6 +133,7 @@ public final class ConnectionManager {
      */
     public synchronized void connect(String id) throws ConnectionException {
         userDisconnectedIds.remove(id);
+        userDisconnectReasons.remove(id);
         ConnectionEntry entry = findEntry(id);
         if (entry == null) {
             throw new ConnectionException("Connection entry not found: " + id);
@@ -153,8 +155,13 @@ public final class ConnectionManager {
             @Override
             public void onDisconnected() {
                 boolean userInitiated = userDisconnectedIds.contains(id);
+                String disconnectReason = userDisconnectReasons.get(id);
                 if (userInitiated) {
-                    log.info("Connection '{}' disconnected by user", entry.getName());
+                    if (disconnectReason != null && !disconnectReason.isBlank()) {
+                        log.info("Connection '{}' disconnected by user ({})", entry.getName(), disconnectReason);
+                    } else {
+                        log.info("Connection '{}' disconnected by user", entry.getName());
+                    }
                 } else {
                     log.warn("Connection '{}' disconnected unexpectedly", entry.getName());
                 }
@@ -165,15 +172,27 @@ public final class ConnectionManager {
                     log.info("Scheduling auto-reconnect for '{}' after disconnect", entry.getName());
                     ReconnectService.getInstance().startReconnect(id);
                 }
+                clearUserDisconnectState(id);
             }
 
             @Override
             public void onConnectionError(String message, Throwable cause) {
                 boolean userInitiated = userDisconnectedIds.contains(id);
+                String disconnectReason = userDisconnectReasons.get(id);
                 if (cause != null) {
-                    log.warn("Connection '{}' error: {}", entry.getName(), message, cause);
+                    if (userInitiated && disconnectReason != null && !disconnectReason.isBlank()) {
+                        log.warn("Connection '{}' error during requested disconnect ({}): {}",
+                                entry.getName(), disconnectReason, message, cause);
+                    } else {
+                        log.warn("Connection '{}' error: {}", entry.getName(), message, cause);
+                    }
                 } else {
-                    log.warn("Connection '{}' error: {}", entry.getName(), message);
+                    if (userInitiated && disconnectReason != null && !disconnectReason.isBlank()) {
+                        log.warn("Connection '{}' error during requested disconnect ({}): {}",
+                                entry.getName(), disconnectReason, message);
+                    } else {
+                        log.warn("Connection '{}' error: {}", entry.getName(), message);
+                    }
                 }
                 entry.setConnected(false);
                 cleanupConnection(id);
@@ -182,6 +201,7 @@ public final class ConnectionManager {
                     log.info("Scheduling auto-reconnect for '{}' after connection error", entry.getName());
                     ReconnectService.getInstance().startReconnect(id);
                 }
+                clearUserDisconnectState(id);
             }
         });
         conn.connect();
@@ -227,14 +247,23 @@ public final class ConnectionManager {
      * @param id идентификатор профиля подключения
      */
     public synchronized void disconnect(String id) {
+        disconnect(id, "manual disconnect");
+    }
+
+    private synchronized void disconnect(String id, String reason) {
         userDisconnectedIds.add(id);
+        userDisconnectReasons.put(id, reason);
         ReconnectService.getInstance().cancelReconnect(id);
+        ConnectionEntry entry = findEntry(id);
+        String connectionName = entry != null ? entry.getName() : id;
+        log.info("Disconnect requested for '{}' ({})", connectionName, reason);
         MeshtasticConnection conn = activeConnections.get(id);
         cleanupConnection(id);
         if (conn != null) {
             conn.disconnect();
+        } else {
+            clearUserDisconnectState(id);
         }
-        ConnectionEntry entry = findEntry(id);
         if (entry != null) {
             entry.setConnected(false);
         }
@@ -253,6 +282,7 @@ public final class ConnectionManager {
      */
     public synchronized void disconnectForDeviceReboot(String id) {
         userDisconnectedIds.remove(id);
+        userDisconnectReasons.remove(id);
 
         ConnectionEntry entry = findEntry(id);
         if (entry == null) {
@@ -325,8 +355,13 @@ public final class ConnectionManager {
      */
     public synchronized void shutdownAll() {
         for (String id : new ArrayList<>(activeConnections.keySet())) {
-            disconnect(id);
+            disconnect(id, "application shutdown");
         }
+    }
+
+    private void clearUserDisconnectState(String id) {
+        userDisconnectedIds.remove(id);
+        userDisconnectReasons.remove(id);
     }
 
     private synchronized void cleanupConnection(String id) {

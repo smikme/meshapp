@@ -245,8 +245,7 @@ public class FormNodes extends Form {
         sortDistance.setOnAction(e -> { sortedNodes.setComparator(buildDistanceComparator()); AppPreferences.setNodesSort("DISTANCE"); });
         sortSignal.setOnAction(e -> { sortedNodes.setComparator(Comparator.comparingDouble(NodeData::getSnr).reversed()); AppPreferences.setNodesSort("SIGNAL"); });
         sortHops.setOnAction(e -> {
-            sortedNodes.setComparator(Comparator.comparingInt(NodeData::getHopsAway)
-                    .thenComparing(Comparator.comparingInt(NodeData::getLastHeard).reversed()));
+            sortedNodes.setComparator(buildHopsComparator());
             AppPreferences.setNodesSort("HOPS");
         });
         sortChannel.setOnAction(e -> {
@@ -391,12 +390,16 @@ public class FormNodes extends Form {
                     .thenComparing(n -> n.getLongName() != null ? n.getLongName() : "");
             case "DISTANCE" -> buildDistanceComparator();
             case "SIGNAL" -> Comparator.comparingDouble(NodeData::getSnr).reversed();
-            case "HOPS" -> Comparator.comparingInt(NodeData::getHopsAway)
-                    .thenComparing(Comparator.comparingInt(NodeData::getLastHeard).reversed());
+            case "HOPS" -> buildHopsComparator();
             case "CHANNEL" -> Comparator.comparingInt(NodeData::getChannel)
                     .thenComparing(Comparator.comparingInt(NodeData::getLastHeard).reversed());
             default -> defaultSort;
         };
+    }
+
+    private Comparator<NodeData> buildHopsComparator() {
+        return Comparator.comparingInt((NodeData node) -> node.hasHopsAway() ? node.getHopsAway() : Integer.MAX_VALUE)
+                .thenComparing(Comparator.comparingInt(NodeData::getLastHeard).reversed());
     }
 
     /** Синхронизирует визуальное состояние кнопки favFilterBtn и применяет фильтр. */
@@ -514,7 +517,7 @@ public class FormNodes extends Form {
                 return false;
             }
             // Фильтр только прямые (0 хопов)
-            if (showDirectOnly && node.getHopsAway() != 0) {
+            if (showDirectOnly && !node.isDirectNeighbor()) {
                 return false;
             }
             // Фильтр только игнорируемые
@@ -648,7 +651,7 @@ public class FormNodes extends Form {
 
             // Подстрока
             String subtitle = formatLastHeardRelative(node.getLastHeard());
-            if (node.getHopsAway() > 0) {
+            if (node.hasHopsAway() && node.getHopsAway() > 0) {
                 subtitle += " · " + node.getHopsAway() + " хоп";
             }
             subtitleLabel.setText(subtitle);
@@ -657,7 +660,7 @@ public class FormNodes extends Form {
             if (showDetails) {
                 StringBuilder sb = new StringBuilder();
                 if (node.getSnr() != 0) { sb.append("SNR: ").append(String.format("%.1f", node.getSnr())).append(" дБ"); }
-                if (node.getHopsAway() > 0) {
+                if (node.hasHopsAway() && node.getHopsAway() > 0) {
                     if (!sb.isEmpty()) { sb.append(" · "); }
                     sb.append(node.getHopsAway()).append(" хоп");
                 }

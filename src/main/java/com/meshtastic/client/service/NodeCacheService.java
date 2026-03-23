@@ -317,6 +317,9 @@ public final class NodeCacheService {
                     existing = new NodeData(fresh.getNodeNum());
                     existing.setNodeId(nodeId);
                 }
+                if (!fresh.hasHopsAway()) {
+                    existing.clearHopsAway();
+                }
                 merge(existing, fresh);
                 return existing;
             });
@@ -942,7 +945,7 @@ public final class NodeCacheService {
 
         if (src.getBarometricPressure() != 0) { dst.setBarometricPressure(src.getBarometricPressure()); }
 
-        if (src.getHopsAway() != 0) { dst.setHopsAway(src.getHopsAway()); }
+        if (src.hasHopsAway()) { dst.setHopsAway(src.getHopsAway()); }
 
         if (src.getChannel() != 0) { dst.setChannel(src.getChannel()); }
 
@@ -1041,7 +1044,11 @@ public final class NodeCacheService {
         ps.setInt(11, n.getLastHeard());
         ps.setInt(12, n.getBatteryLevel());
         ps.setFloat(13, n.getVoltage());
-        ps.setInt(14, n.getHopsAway());
+        if (n.hasHopsAway()) {
+            ps.setInt(14, n.getHopsAway());
+        } else {
+            ps.setNull(14, Types.INTEGER);
+        }
         ps.setInt(15, n.getChannel());
     }
 
@@ -1063,7 +1070,12 @@ public final class NodeCacheService {
         node.setLastHeard(rs.getInt("last_heard"));
         node.setBatteryLevel(rs.getInt("battery_level"));
         node.setVoltage(rs.getFloat("voltage"));
-        node.setHopsAway(rs.getInt("hops_away"));
+        int hopsAway = rs.getInt("hops_away");
+        if (rs.wasNull()) {
+            node.clearHopsAway();
+        } else {
+            node.setHopsAway(hopsAway);
+        }
         node.setChannel(rs.getInt("channel"));
         return node;
     }

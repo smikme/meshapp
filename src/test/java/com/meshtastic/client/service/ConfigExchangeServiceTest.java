@@ -107,6 +107,62 @@ class ConfigExchangeServiceTest {
     }
 
     @Test
+    void onNodeInfoTreatsExplicitZeroHopsAsKnownDirectNeighbor() {
+        FakeConnection connection = new FakeConnection();
+        ProtocolHandler handler = track(new ProtocolHandler(connection));
+        DeviceState state = new DeviceState();
+        ConfigExchangeService service = new ConfigExchangeService(handler, state);
+
+        service.onNodeInfo(MeshProtos.NodeInfo.newBuilder()
+                .setNum(0x12345678)
+                .setHopsAway(0)
+                .build());
+
+        NodeData node = state.getOrCreateNode(0x12345678);
+        assertTrue(node.hasHopsAway());
+        assertTrue(node.isDirectNeighbor());
+        assertEquals(0, node.getHopsAway());
+    }
+
+    @Test
+    void onConfigCompleteClearsStaleCachedDirectHopWhenHopsAreUnknown() throws Exception {
+        NodeCacheService nodeCacheService = NodeCacheService.getInstance();
+        NodeData stale = new NodeData(0xCAFEBABE);
+        stale.setNodeId("!cafebabe");
+        stale.setLongName("Stale");
+        stale.setHopsAway(0);
+        nodeCacheService.update(stale);
+        assertTrue(nodeCacheService.get("!cafebabe").isDirectNeighbor());
+
+        FakeConnection connection = new FakeConnection();
+        ProtocolHandler handler = track(new ProtocolHandler(connection));
+        DeviceState state = new DeviceState();
+        ConfigExchangeService service = new ConfigExchangeService(handler, state);
+
+        CompletableFuture<DeviceState> future = service.startConfigExchange();
+        int wantConfigId = connection.lastWantConfigId;
+
+        service.onNodeInfo(MeshProtos.NodeInfo.newBuilder()
+                .setNum(0xCAFEBABE)
+                .setUser(MeshProtos.User.newBuilder()
+                        .setId("!cafebabe")
+                        .setLongName("Fresh")
+                        .build())
+                .build());
+        service.onConfigComplete(wantConfigId);
+
+        assertTrue(future.isDone());
+        NodeData runtimeNode = state.getOrCreateNode(0xCAFEBABE);
+        assertFalse(runtimeNode.hasHopsAway());
+
+        TestEnvironmentSupport.resetSingletons();
+        NodeCacheService reloadedCache = NodeCacheService.getInstance();
+        NodeData reloaded = reloadedCache.get("!cafebabe");
+        assertNotNull(reloaded);
+        assertFalse(reloaded.hasHopsAway());
+    }
+
+    @Test
     void onConfigCompletePersistsNodeFlagsAndCompletesFuture() throws Exception {
         FakeConnection connection = new FakeConnection();
         ProtocolHandler handler = track(new ProtocolHandler(connection));

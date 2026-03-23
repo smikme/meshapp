@@ -592,6 +592,7 @@ public class FormChat extends Form {
             if (updated != null && updated.getStatus() != null
                     && updated.getStatus() != MeshMessage.DeliveryStatus.SENDING) {
                 MessageBubbleFactory.updateStatusLabel(entry.getValue(), updated.getStatus());
+                syncLoadedMessageDeliveryStatus(updated);
                 return true;
             }
             return false;
@@ -615,6 +616,19 @@ public class FormChat extends Form {
         }
 
         refreshLoadedMessageRows();
+    }
+
+    private void syncLoadedMessageDeliveryStatus(MeshMessage updated) {
+        if (updated == null || updated.getPacketId() == 0) {
+            return;
+        }
+        for (MeshMessage loaded : loadedMessages) {
+            if (loaded.getPacketId() == updated.getPacketId()) {
+                loaded.setStatus(updated.getStatus());
+                loaded.setErrorReason(updated.getErrorReason());
+                return;
+            }
+        }
     }
 
     /**
