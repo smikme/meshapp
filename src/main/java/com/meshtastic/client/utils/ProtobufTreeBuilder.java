@@ -135,7 +135,8 @@ public final class ProtobufTreeBuilder {
             if (fd.getType() == FieldDescriptor.Type.MESSAGE) {
                 // Вложенная группа — рекурсия
                 Message subMsg = (Message) value;
-                ConfigTreeItem groupData = new ConfigTreeItem(displayName, configType, variantNumber);
+                ConfigTreeItem groupData = new ConfigTreeItem(
+                        displayName, fieldName, fd, configType, variantNumber);
                 TreeItem<ConfigTreeItem> groupItem = new TreeItem<>(groupData);
                 addFieldsToTree(groupItem, subMsg, configType, variantNumber);
                 if (!groupItem.getChildren().isEmpty()) {
@@ -273,7 +274,21 @@ public final class ProtobufTreeBuilder {
         for (TreeItem<ConfigTreeItem> child : treeItem.getChildren()) {
             ConfigTreeItem item = child.getValue();
             if (item.isCategory()) {
-                // Вложенная группа (sub-message) — не поддерживается для записи пока
+                FieldDescriptor groupFd = item.getFieldDescriptor();
+                if (groupFd == null || groupFd.isRepeated() || groupFd.getType() != FieldDescriptor.Type.MESSAGE) {
+                    continue;
+                }
+                FieldDescriptor builderFd = builder.getDescriptorForType().findFieldByName(groupFd.getName());
+                if (builderFd == null || builderFd.getType() != FieldDescriptor.Type.MESSAGE) {
+                    continue;
+                }
+
+                Message currentSubMessage = builder.hasField(builderFd)
+                        ? (Message) builder.getField(builderFd)
+                        : builder.newBuilderForField(builderFd).build();
+                Message.Builder subBuilder = currentSubMessage.toBuilder();
+                applyTreeValues(child, subBuilder);
+                builder.setField(builderFd, subBuilder.build());
                 continue;
             }
             if (item.getFieldDescriptor() == null || item.getValue() == null) { continue; }
@@ -336,5 +351,63 @@ public final class ProtobufTreeBuilder {
                 log.trace("Skipping field '{}': {}", builderFd.getName(), e.getMessage());
             }
         }
+    }
+
+    /**
+     * Применяет значения protobuf Message к уже построенному дереву.
+     * Используется при импорте конфигурации из файла поверх текущего редактора.
+     */
+    public static void applyMessageToTree(TreeItem<ConfigTreeItem> treeItem, Message message) {
+        if (treeItem == null || message == null) {
+            return;
+        }
+
+        for (TreeItem<ConfigTreeItem> child : treeItem.getChildren()) {
+            ConfigTreeItem item = child.getValue();
+            if (item == null) {
+                continue;
+            }
+
+            if (item.isCategory()) {
+                FieldDescriptor fd = item.getFieldDescriptor();
+                if (fd == null || fd.isRepeated() || fd.getType() != FieldDescriptor.Type.MESSAGE) {
+                    continue;
+                }
+                FieldDescriptor messageFd = message.getDescriptorForType().findFieldByName(fd.getName());
+                if (messageFd == null || messageFd.getType() != FieldDescriptor.Type.MESSAGE || !message.hasField(messageFd)) {
+                    continue;
+                }
+                applyMessageToTree(child, (Message) message.getField(messageFd));
+                continue;
+            }
+
+            String fieldName = item.getFieldName();
+            if (fieldName == null || fieldName.isEmpty()) {
+                continue;
+            }
+            FieldDescriptor messageFd = message.getDescriptorForType().findFieldByName(fieldName);
+            if (messageFd == null) {
+                continue;
+            }
+            item.setValue(toTreeValue(messageFd, message.getField(messageFd)));
+        }
+    }
+
+    private static Object toTreeValue(FieldDescriptor fd, Object value) {
+        if (value == null) {
+            return null;
+        }
+        if (fd.getType() == FieldDescriptor.Type.BYTES) {
+            if (fd.isRepeated()) {
+                @SuppressWarnings("unchecked")
+                List<ByteString> bytesList = (List<ByteString>) value;
+                return bytesList.stream()
+                        .map(bs -> Base64.getEncoder().encodeToString(bs.toByteArray()))
+                        .collect(Collectors.joining(", "));
+            }
+            ByteString bs = (ByteString) value;
+            return Base64.getEncoder().encodeToString(bs.toByteArray());
+        }
+        return value;
     }
 }
