@@ -125,6 +125,8 @@ public class FormChat extends Form {
     private long newestLoadedDbId = 0;
     private boolean allHistoryLoaded = false;
     private boolean loadingOlderMessages = false;
+    private final List<MeshMessage> loadedMessages = new ArrayList<>();
+    private final Map<Long, HBox> loadedMessageRows = new HashMap<>();
     // Трекинг статусов исходящих сообщений для обновления при ACK/NAK
     private final Map<Integer, Label> pendingStatusLabels = new HashMap<>();
 
@@ -184,6 +186,9 @@ public class FormChat extends Form {
     @Override
     public void formClose() {
         formVisible = false;
+        if (bubbleFactory != null) {
+            bubbleFactory.hideOpenReactionPopup();
+        }
     }
 
     @Override
@@ -318,6 +323,7 @@ public class FormChat extends Form {
                     @Override public void startReply(MeshMessage msg) { FormChat.this.startReply(msg); }
                     @Override public void requestTraceroute(MeshMessage msg) { FormChat.this.requestTraceroute(msg); }
                     @Override public void requestNodeInfo(MeshMessage msg) { FormChat.this.requestNodeInfo(msg); }
+                    @Override public void sendReaction(MeshMessage msg, String emoji) { FormChat.this.sendReaction(msg, emoji); }
                     @Override public void confirmDeleteMessage(MeshMessage msg, HBox row) { FormChat.this.confirmDeleteMessage(msg, row); }
                 },
                 pendingStatusLabels);
@@ -440,6 +446,7 @@ public class FormChat extends Form {
     }
 
     private void openChat(ChatItem chat) {
+        bubbleFactory.hideOpenReactionPopup();
         this.selectedChat = chat;
 
         // Обновить заголовок
@@ -469,7 +476,9 @@ public class FormChat extends Form {
     }
 
     private void closeChat() {
+        bubbleFactory.hideOpenReactionPopup();
         this.selectedChat = null;
+        clearLoadedMessageState();
         detailPane.getChildren().clear();
         detailPane.getChildren().add(placeholderBox);
     }
@@ -504,10 +513,12 @@ public class FormChat extends Form {
         String chatKey = currentChatKey();
 
         List<MeshMessage> msgs = db.loadLast(chatType, chatKey, PAGE_SIZE, currentOwnerNodeId());
+        attachReactions(msgs);
 
+        clearLoadedMessageState();
         messageContainer.getChildren().clear();
         for (MeshMessage msg : msgs) {
-            messageContainer.getChildren().add(bubbleFactory.build(msg));
+            appendLoadedMessageRow(msg);
         }
 
         if (!msgs.isEmpty()) {
@@ -549,11 +560,11 @@ public class FormChat extends Form {
         double scrollHeight = messageContainer.getBoundsInLocal().getHeight();
 
         // Prepend: older уже в хронологическом порядке (старые → новые)
+        attachReactions(older);
         for (int i = older.size() - 1; i >= 0; i--) {
-            messageContainer.getChildren().addFirst(bubbleFactory.build(older.get(i)));
+            prependLoadedMessageRow(older.get(i));
         }
-
-        oldestLoadedDbId = older.getFirst().getDbId();
+        recalcLoadedBounds();
         allHistoryLoaded = older.size() < PAGE_SIZE;
 
         // Восстановить позицию скролла
@@ -591,7 +602,7 @@ public class FormChat extends Form {
         List<MeshMessage> newMsgs = db.loadAfter(chatType, chatKey, newestLoadedDbId, currentOwnerNodeId());
         if (!newMsgs.isEmpty()) {
             for (MeshMessage msg : newMsgs) {
-                messageContainer.getChildren().add(bubbleFactory.build(msg));
+                appendLoadedMessageRow(msg);
             }
             newestLoadedDbId = newMsgs.getLast().getDbId();
             if (isScrolledToBottom()) {
@@ -602,6 +613,8 @@ public class FormChat extends Form {
                 updateScrollDownBadge();
             }
         }
+
+        refreshLoadedMessageRows();
     }
 
     /**
@@ -613,6 +626,75 @@ public class FormChat extends Form {
         reloadChatList();
         refreshCurrentChat();
         scrollToBottom();
+    }
+
+    private void refreshCurrentChatAfterLocalReaction() {
+        refreshLoadedMessageRows();
+    }
+
+    private void clearLoadedMessageState() {
+        loadedMessages.clear();
+        loadedMessageRows.clear();
+    }
+
+    private void appendLoadedMessageRow(MeshMessage msg) {
+        loadedMessages.add(msg);
+        HBox row = bubbleFactory.build(msg);
+        loadedMessageRows.put(msg.getDbId(), row);
+        messageContainer.getChildren().add(row);
+    }
+
+    private void prependLoadedMessageRow(MeshMessage msg) {
+        loadedMessages.add(0, msg);
+        HBox row = bubbleFactory.build(msg);
+        loadedMessageRows.put(msg.getDbId(), row);
+        messageContainer.getChildren().addFirst(row);
+    }
+
+    private void recalcLoadedBounds() {
+        if (loadedMessages.isEmpty()) {
+            oldestLoadedDbId = Long.MAX_VALUE;
+            newestLoadedDbId = 0;
+            return;
+        }
+        oldestLoadedDbId = loadedMessages.getFirst().getDbId();
+        newestLoadedDbId = loadedMessages.getLast().getDbId();
+    }
+
+    private void attachReactions(List<MeshMessage> messages) {
+        if (messages == null || messages.isEmpty() || selectedChat == null) {
+            return;
+        }
+        Map<Integer, List<com.meshtastic.client.model.MessageReaction>> reactionsByTarget =
+                MessageDbService.getInstance().loadReactionsByTargetPacketIds(
+                        currentChatType(),
+                        currentChatKey(),
+                        currentOwnerNodeId(),
+                        messages.stream().map(MeshMessage::getPacketId).toList());
+        for (MeshMessage message : messages) {
+            message.setReactions(reactionsByTarget.get(message.getPacketId()));
+        }
+    }
+
+    private void refreshLoadedMessageRows() {
+        if (loadedMessages.isEmpty() || selectedChat == null) {
+            return;
+        }
+
+        attachReactions(loadedMessages);
+        for (MeshMessage message : loadedMessages) {
+            HBox oldRow = loadedMessageRows.get(message.getDbId());
+            if (oldRow == null) {
+                continue;
+            }
+            int index = messageContainer.getChildren().indexOf(oldRow);
+            if (index < 0) {
+                continue;
+            }
+            HBox newRow = bubbleFactory.build(message);
+            messageContainer.getChildren().set(index, newRow);
+            loadedMessageRows.put(message.getDbId(), newRow);
+        }
     }
 
     private boolean isScrolledToBottom() {
@@ -756,6 +838,33 @@ public class FormChat extends Form {
     /** Включить режим ответа на сообщение */
     private void startReply(MeshMessage msg) {
         chatInputBar.startReply(msg, nameResolver.resolveSenderName(msg));
+    }
+
+    private void sendReaction(MeshMessage msg, String emoji) {
+        if (msg == null || emoji == null || emoji.isEmpty()) { return; }
+        if (selectedChat == null || state == null || protocolHandler == null) {
+            Toast.show(Toast.Type.WARNING, "Нет подключения к радио");
+            return;
+        }
+        if (msg.getPacketId() == 0) {
+            Toast.show(Toast.Type.WARNING, "Реакция недоступна: у сообщения нет packet id");
+            return;
+        }
+
+        boolean saved;
+        if (selectedChat.getType() == ChatItem.ChatType.CHANNEL) {
+            saved = MessageService.sendChannelReaction(
+                    protocolHandler, state, selectedChat.getChannelIndex(), msg, emoji);
+        } else {
+            saved = MessageService.sendDirectReaction(
+                    protocolHandler, state, selectedChat.getPeerNodeId(), msg, emoji);
+        }
+
+        if (!saved) {
+            Toast.show(Toast.Type.ERROR, "Не удалось сохранить реакцию локально");
+            return;
+        }
+        refreshCurrentChatAfterLocalReaction();
     }
 
     // ==================== Traceroute / Node Info ====================
@@ -1065,6 +1174,9 @@ public class FormChat extends Form {
                 confirmed -> {
                     if (!confirmed) { return; }
                     MessageDbService.getInstance().deleteMessage(msg.getDbId());
+                    loadedMessages.removeIf(loaded -> loaded.getDbId() == msg.getDbId());
+                    loadedMessageRows.remove(msg.getDbId());
+                    recalcLoadedBounds();
                     messageContainer.getChildren().remove(bubbleRow);
                     reloadChatList();
                 }

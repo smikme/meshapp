@@ -1,5 +1,8 @@
 package com.meshtastic.client.model;
 
+import java.util.Collections;
+import java.util.List;
+
 /**
  * Сообщение Meshtastic-чата (канальное или личное).
  * <p>
@@ -42,6 +45,7 @@ public class MeshMessage {
     private String senderName;
     private boolean systemMessage;
     private long dbId;
+    private List<MessageReaction> reactions = Collections.emptyList();
 
     /**
      * Создаёт сообщение с основными полями.
@@ -104,6 +108,14 @@ public class MeshMessage {
 
     public long getDbId() { return dbId; }
     public void setDbId(long dbId) { this.dbId = dbId; }
+
+    public List<MessageReaction> getReactions() { return reactions; }
+    public void setReactions(List<MessageReaction> reactions) {
+        this.reactions = reactions == null || reactions.isEmpty()
+                ? Collections.emptyList()
+                : List.copyOf(reactions);
+    }
+    public boolean hasReactions() { return !reactions.isEmpty(); }
 
     /**
      * Вычисляет количество хопов, которое прошло сообщение.

@@ -6,6 +6,7 @@ import org.meshtastic.proto.MeshProtos;
 import org.meshtastic.proto.Portnums;
 import com.google.protobuf.InvalidProtocolBufferException;
 import com.meshtastic.client.model.DeviceState;
+import com.meshtastic.client.model.MessageReaction;
 import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.model.TelemetryEntry;
@@ -92,6 +93,10 @@ public class MessageListenerService implements FromRadioListener {
         boolean outgoing = from == deviceState.getMyNodeNum();
 
         if (outgoing) { return; } // outgoing messages are already added by MessageService
+        if (isReactionPacket(data)) {
+            handleReactionPacket(packet, data, timestamp, to == 0xFFFFFFFF);
+            return;
+        }
 
         // Lookup nodeId через NodeData (не математическая конвертация)
         NodeData fromNode = deviceState.getOrCreateNode(from);
@@ -145,6 +150,47 @@ public class MessageListenerService implements FromRadioListener {
         Platform.runLater(() -> DrawerManager.setChatUnreadDot(true));
     }
 
+    private boolean isReactionPacket(MeshProtos.Data data) {
+        return data.getReplyId() != 0 && data.getEmoji() != 0;
+    }
+
+    private void handleReactionPacket(MeshProtos.MeshPacket packet,
+                                      MeshProtos.Data data,
+                                      long timestamp,
+                                      boolean channelMessage) {
+        String emoji = data.getPayload().toString(StandardCharsets.UTF_8);
+        if (emoji == null || emoji.isEmpty()) {
+            log.debug("Ignoring reaction packet {} with empty payload", packet.getId());
+            return;
+        }
+
+        NodeData fromNode = deviceState.getOrCreateNode(packet.getFrom());
+        String fromNodeId = fromNode.getNodeId();
+
+        MessageReaction reaction = new MessageReaction(
+                data.getReplyId(),
+                fromNodeId,
+                emoji,
+                timestamp,
+                false
+        );
+        reaction.setPacketId(packet.getId());
+        reaction.setStatus(MeshMessage.DeliveryStatus.DELIVERED);
+        if (fromNode.getLongName() != null) {
+            reaction.setSenderName(fromNode.getLongName());
+        }
+
+        String ownerNodeId = String.format("!%08x", deviceState.getMyNodeNum());
+        if (channelMessage) {
+            MessageDbService.getInstance().saveReaction(
+                    reaction, "channel", String.valueOf(packet.getChannel()), ownerNodeId);
+        } else {
+            MessageDbService.getInstance().saveReaction(reaction, "dm", fromNodeId, ownerNodeId);
+        }
+
+        deviceState.fireMessageListeners();
+    }
+
     private void handleRoutingAck(MeshProtos.MeshPacket packet, MeshProtos.Data data) {
         int requestId = data.getRequestId();
         if (requestId == 0) {
@@ -157,14 +203,28 @@ public class MessageListenerService implements FromRadioListener {
             MeshProtos.Routing routing = MeshProtos.Routing.parseFrom(data.getPayload());
             MeshMessage pending = deviceState.resolvePendingAck(requestId);
             boolean completedPacketAck = deviceState.completePendingPacketAck(requestId, routing.getErrorReason());
+            MeshMessage.DeliveryStatus reactionStatus =
+                    routing.getErrorReason() == MeshProtos.Routing.Error.NONE
+                            ? MeshMessage.DeliveryStatus.DELIVERED
+                            : MeshMessage.DeliveryStatus.FAILED;
+            String reactionError = routing.getErrorReason() == MeshProtos.Routing.Error.NONE
+                    ? null
+                    : routing.getErrorReason().name();
+            boolean updatedReaction = MessageDbService.getInstance()
+                    .updateReactionStatus(requestId, reactionStatus, reactionError);
 
-            if (pending == null && !completedPacketAck) {
+            if (pending == null && !completedPacketAck && !updatedReaction) {
                 log.debug("No pending message or packet ACK waiter found for requestId={}", requestId);
                 return;
             }
 
             if (pending == null) {
-                log.debug("Routing ACK received for non-message packet {}", requestId);
+                if (updatedReaction) {
+                    deviceState.fireMessageListeners();
+                    log.debug("Routing ACK received for reaction packet {}", requestId);
+                } else {
+                    log.debug("Routing ACK received for non-message packet {}", requestId);
+                }
                 return;
             }
 

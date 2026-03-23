@@ -993,6 +993,94 @@
     -fx-padding: 2 0 0 0;
 }
 
+.chat-bubble-footer {
+    -fx-padding: 2 0 0 0;
+}
+
+.chat-bubble-reactions {
+    -fx-padding: 4 0 0 0;
+}
+
+.chat-reaction-chip {
+    -fx-background-color: rgba(255, 255, 255, 0.08);
+    -fx-background-radius: 10;
+    -fx-padding: 2 8;
+}
+
+.chat-reaction-chip-own {
+    -fx-background-color: rgba(91, 141, 239, 0.22);
+    -fx-border-color: rgba(91, 141, 239, 0.5);
+    -fx-border-radius: 10;
+    -fx-border-width: 1;
+}
+
+.chat-reaction-chip-count {
+    -fx-text-fill: -color-fg-muted;
+    -fx-font-size: 10px;
+}
+
+.chat-reaction-btn {
+    -fx-background-color: transparent;
+    -fx-padding: 0;
+    -fx-min-width: 20;
+    -fx-min-height: 20;
+    -fx-max-width: 20;
+    -fx-max-height: 20;
+    -fx-cursor: hand;
+    -fx-opacity: 0.72;
+}
+
+.chat-reaction-btn:hover {
+    -fx-opacity: 1.0;
+}
+
+.chat-reaction-btn-disabled {
+    -fx-opacity: 0.3;
+}
+
+.chat-reaction-btn-disabled:hover {
+    -fx-opacity: 0.3;
+}
+
+.chat-reaction-picker {
+    -fx-padding: 4;
+    -fx-background-color: transparent;
+    -fx-alignment: center-left;
+}
+
+.chat-reaction-popup {
+    -fx-background-color: -color-bg-default;
+    -fx-border-color: -color-border-default;
+    -fx-border-width: 1;
+    -fx-border-radius: 12;
+    -fx-background-radius: 12;
+    -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.28), 10, 0, 0, 3);
+}
+
+.chat-reaction-picker-btn {
+    -fx-background-color: transparent;
+    -fx-background-radius: 8;
+    -fx-padding: 4;
+    -fx-cursor: hand;
+}
+
+.chat-reaction-picker-btn:hover {
+    -fx-background-color: rgba(255, 255, 255, 0.12);
+}
+
+.light-theme .chat-reaction-chip {
+    -fx-background-color: rgba(0, 0, 0, 0.06);
+}
+
+.light-theme .chat-reaction-chip-own {
+    -fx-background-color: rgba(91, 141, 239, 0.12);
+    -fx-border-color: rgba(91, 141, 239, 0.35);
+}
+
+.light-theme .chat-reaction-picker-btn:hover {
+    -fx-background-color: rgba(0, 0, 0, 0.08);
+}
+
 /* Время и хопы — lookup-цвет, авто-адаптация */
 .chat-bubble-time {
     -fx-text-fill: -color-fg-muted;

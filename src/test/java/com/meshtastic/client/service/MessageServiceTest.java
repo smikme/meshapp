@@ -1,33 +1,52 @@
 package com.meshtastic.client.service;
 
 import com.google.protobuf.ByteString;
+import com.meshtastic.client.TestEnvironmentSupport;
 import com.meshtastic.client.connection.ConnectionException;
 import com.meshtastic.client.connection.ConnectionListener;
 import com.meshtastic.client.connection.MeshtasticConnection;
 import com.meshtastic.client.model.DeviceState;
+import com.meshtastic.client.model.MessageReaction;
+import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.protocol.ProtocolHandler;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.meshtastic.proto.AdminProtos;
 import org.meshtastic.proto.MeshProtos;
 import org.meshtastic.proto.ModuleConfigProtos;
+import org.meshtastic.proto.Portnums;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
+import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class MessageServiceTest {
 
+    @TempDir
+    Path tempHome;
+
     private final List<ProtocolHandler> handlersToShutdown = new ArrayList<>();
+
+    @BeforeEach
+    void setUp() {
+        TestEnvironmentSupport.setUserHome(tempHome);
+        TestEnvironmentSupport.resetSingletons();
+        MessageDbService.getInstance();
+    }
 
     @AfterEach
     void tearDown() {
         for (ProtocolHandler handler : handlersToShutdown) {
             handler.shutdown();
         }
+        TestEnvironmentSupport.resetSingletons();
     }
 
     @Test
@@ -68,6 +87,52 @@ class MessageServiceTest {
                 AdminProtos.AdminMessage.parseFrom(sent.getPacket().getDecoded().getPayload());
         assertTrue(admin.hasSetModuleConfig());
         assertFalse(admin.getSessionPasskey().isEmpty());
+    }
+
+    @Test
+    void sendChannelReactionSetsReplyIdAndEmojiFlagAndPersistsReaction() throws Exception {
+        RecordingConnection connection = new RecordingConnection();
+        ProtocolHandler handler = track(new ProtocolHandler(connection));
+        DeviceState state = new DeviceState();
+        state.setMyNodeNum(0x04c5b420);
+        state.getOrCreateNode(state.getMyNodeNum()).setNodeId("!04c5b420");
+
+        MeshMessage targetMessage = new MeshMessage("!11111111", "!ffffffff", 0, "hello", 1_700_000_000L, false);
+        targetMessage.setPacketId(12345);
+
+        assertTrue(MessageService.sendChannelReaction(handler, state, 3, targetMessage, "💪"));
+
+        MeshProtos.ToRadio sent = parseLastToRadio(connection);
+        assertEquals(Portnums.PortNum.TEXT_MESSAGE_APP, sent.getPacket().getDecoded().getPortnum());
+        assertEquals(12345, sent.getPacket().getDecoded().getReplyId());
+        assertEquals(1, sent.getPacket().getDecoded().getEmoji());
+        assertEquals("💪", sent.getPacket().getDecoded().getPayload().toStringUtf8());
+
+        MessageReaction stored = MessageDbService.getInstance()
+                .loadReactionsByTargetPacketIds("channel", "3", "!04c5b420", List.of(12345))
+                .get(12345).getFirst();
+        assertEquals("💪", stored.getEmoji());
+        assertEquals(MeshMessage.DeliveryStatus.SENDING, stored.getStatus());
+        state.shutdown();
+    }
+
+    @Test
+    void sendChannelReactionFallsBackToOwnerNodeIdWhenOwnNodeMissingInState() throws Exception {
+        RecordingConnection connection = new RecordingConnection();
+        ProtocolHandler handler = track(new ProtocolHandler(connection));
+        DeviceState state = new DeviceState();
+        state.setMyNodeNum(0x04c5b420);
+
+        MeshMessage targetMessage = new MeshMessage("!11111111", "!ffffffff", 0, "hello", 1_700_000_000L, false);
+        targetMessage.setPacketId(22222);
+
+        assertTrue(MessageService.sendChannelReaction(handler, state, 0, targetMessage, "👍"));
+
+        MessageReaction stored = MessageDbService.getInstance()
+                .loadReactionsByTargetPacketIds("channel", "0", "!04c5b420", List.of(22222))
+                .get(22222).getFirst();
+        assertEquals("!04c5b420", stored.getFromNodeId());
+        state.shutdown();
     }
 
     private ProtocolHandler track(ProtocolHandler handler) {
