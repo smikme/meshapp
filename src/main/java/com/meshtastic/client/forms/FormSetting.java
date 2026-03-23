@@ -2,6 +2,7 @@ package com.meshtastic.client.forms;
 
 import com.google.protobuf.Descriptors.EnumValueDescriptor;
 import com.meshtastic.client.modal.ModalPane;
+import com.meshtastic.client.modal.Toast;
 import com.meshtastic.client.model.ConfigTreeItem;
 import com.meshtastic.client.model.ConnectionEntry;
 import com.meshtastic.client.model.ConnectionType;
@@ -9,21 +10,25 @@ import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.protocol.ProtocolHandler;
 import com.meshtastic.client.service.ConnectionManager;
+import com.meshtastic.client.service.ConfigSnapshotService;
 import com.meshtastic.client.service.MessageService;
 import com.meshtastic.client.service.NodeCacheService;
 import com.meshtastic.client.system.Form;
 import com.meshtastic.client.utils.AppPreferences;
 import com.meshtastic.client.utils.ProtobufTreeBuilder;
+import com.meshtastic.client.utils.SvgIconLoader;
 import com.meshtastic.client.utils.SystemForm;
 import javafx.application.Platform;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import javafx.geometry.Insets;
+import javafx.geometry.Orientation;
 import javafx.geometry.Pos;
 import javafx.scene.control.Button;
 import javafx.scene.control.CheckBox;
 import javafx.scene.control.ComboBox;
+import javafx.scene.control.ContentDisplay;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
 import javafx.scene.control.ScrollPane;
@@ -33,6 +38,8 @@ import javafx.scene.control.TabPane;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableView;
 import javafx.scene.control.TextField;
+import javafx.scene.control.ToolBar;
+import javafx.scene.control.Tooltip;
 import javafx.scene.control.TreeItem;
 import javafx.scene.control.TreeTableCell;
 import javafx.scene.control.TreeTableColumn;
@@ -40,8 +47,12 @@ import javafx.scene.control.TreeTableView;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
+import javafx.scene.shape.SVGPath;
 import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
+import javafx.stage.FileChooser;
+import javafx.stage.Window;
+import org.meshtastic.proto.ChannelProtos;
 import org.meshtastic.proto.ConfigProtos;
 import org.meshtastic.proto.MeshProtos;
 import org.meshtastic.proto.ModuleConfigProtos;
@@ -49,9 +60,12 @@ import org.meshtastic.proto.ModuleConfigProtos;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.File;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
+import java.util.TreeSet;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -115,6 +129,8 @@ public class FormSetting extends Form {
     // Оригинальные protobuf-объекты для пересборки при сохранении
     private List<ConfigProtos.Config> originalConfigs = new ArrayList<>();
     private List<ModuleConfigProtos.ModuleConfig> originalModuleConfigs = new ArrayList<>();
+    private List<ChannelProtos.Channel> originalChannels = new ArrayList<>();
+    private List<ChannelProtos.Channel> workingChannels = new ArrayList<>();
 
     public FormSetting() {
         init();
@@ -511,21 +527,61 @@ public class FormSetting extends Form {
         configSearchField.setPromptText("Поиск параметров...");
         configSearchField.textProperty().addListener((obs, oldVal, newVal) -> filterConfigTree(newVal));
 
-        // Кнопки
-        HBox btnRow = new HBox(8);
-        btnRow.setAlignment(Pos.CENTER_LEFT);
+        // Toolbar действий
+        ToolBar actionToolbar = new ToolBar();
+        actionToolbar.getStyleClass().add("config-toolbar");
 
-        refreshConfigBtn = new Button("Обновить");
-        refreshConfigBtn.setOnAction(e -> reloadConfigTree());
+        refreshConfigBtn = createConfigToolbarButton(
+                "Обновить конфигурацию",
+                "Запросить актуальные параметры у подключенного радио",
+                "/icons/refresh.svg",
+                this::reloadConfigTree);
 
-        saveConfigBtn = new Button("Сохранить на радио");
+        saveConfigBtn = createConfigToolbarButton(
+                "Сохранить на радио",
+                "Отправить изменённые параметры на устройство и применить их",
+                "/icons/save-radio.svg",
+                this::onSaveConfig);
         saveConfigBtn.setDisable(true);
-        saveConfigBtn.setOnAction(e -> onSaveConfig());
+
+        Button exportConfigBtn = createConfigToolbarButton(
+                "Сохранить конфигурацию",
+                "Сохранить текущую конфигурацию в файл .mcf",
+                "/icons/save-config.svg",
+                () -> onExportSnapshot(ConfigSnapshotService.SnapshotKind.CONFIG));
+
+        Button importConfigBtn = createConfigToolbarButton(
+                "Загрузить конфигурацию",
+                "Загрузить конфигурацию из файла .mcf в редактор",
+                "/icons/load-config.svg",
+                () -> onImportSnapshot(ConfigSnapshotService.SnapshotKind.CONFIG));
+
+        Button exportTemplateBtn = createConfigToolbarButton(
+                "Сохранить шаблон",
+                "Сохранить шаблон без персональных и секретных данных в файл .mtp",
+                "/icons/save-template.svg",
+                () -> onExportSnapshot(ConfigSnapshotService.SnapshotKind.TEMPLATE));
+
+        Button importTemplateBtn = createConfigToolbarButton(
+                "Загрузить шаблон",
+                "Загрузить шаблон из файла .mtp в редактор",
+                "/icons/load-template.svg",
+                () -> onImportSnapshot(ConfigSnapshotService.SnapshotKind.TEMPLATE));
+
+        actionToolbar.getItems().addAll(
+                refreshConfigBtn,
+                saveConfigBtn,
+                new Separator(Orientation.VERTICAL),
+                exportConfigBtn,
+                importConfigBtn,
+                new Separator(Orientation.VERTICAL),
+                exportTemplateBtn,
+                importTemplateBtn
+        );
 
         configStatusLabel = new Label("");
-        configStatusLabel.setStyle("-fx-opacity: 0.7;");
-
-        btnRow.getChildren().addAll(refreshConfigBtn, saveConfigBtn, configStatusLabel);
+        configStatusLabel.getStyleClass().add("config-status-label");
+        configStatusLabel.setWrapText(true);
 
         // TreeTableView
         configTree = new TreeTableView<>();
@@ -570,8 +626,563 @@ public class FormSetting extends Form {
 
         VBox.setVgrow(configTree, Priority.ALWAYS);
 
-        panel.getChildren().addAll(configSearchField, btnRow, configTree);
+        panel.getChildren().addAll(configSearchField, actionToolbar, configStatusLabel, configTree);
         return panel;
+    }
+
+    private Button createConfigToolbarButton(String title, String description, String iconPath, Runnable action) {
+        SVGPath icon = SvgIconLoader.load(iconPath, 18);
+
+        Button button = new Button();
+        button.getStyleClass().add("config-toolbar-button");
+        button.setMinSize(34, 34);
+        button.setPrefSize(34, 34);
+        button.setMaxSize(34, 34);
+        if (icon != null) {
+            button.setGraphic(icon);
+            button.setContentDisplay(ContentDisplay.GRAPHIC_ONLY);
+        } else {
+            button.setText(title);
+        }
+        button.setTooltip(new Tooltip(title + "\n" + description));
+        button.setOnAction(e -> action.run());
+        return button;
+    }
+
+    private void onExportSnapshot(ConfigSnapshotService.SnapshotKind kind) {
+        if (!ensureEditorAvailableForSnapshotOperation()) {
+            return;
+        }
+
+        TreeItem<ConfigTreeItem> root = currentEditorRoot();
+        if (root == null) {
+            return;
+        }
+
+        try {
+            ConfigSnapshotService.ConfigSnapshot snapshot = ConfigSnapshotService.createSnapshot(
+                    kind,
+                    extractOwnerInfo(root),
+                    extractFixedPosition(root),
+                    collectCurrentConfigMessages(root),
+                    collectCurrentModuleConfigMessages(root),
+                    getWorkingChannelsSnapshot()
+            );
+
+            FileChooser chooser = createSnapshotFileChooser(kind, true);
+            File target = chooser.showSaveDialog(getCurrentWindow());
+            if (target == null) {
+                return;
+            }
+
+            File outputFile = ensureSnapshotExtension(target, kind);
+            ConfigSnapshotService.writeSnapshot(outputFile.toPath(), snapshot);
+            Toast.show(Toast.Type.SUCCESS, switch (kind) {
+                case CONFIG -> "Конфигурация сохранена: " + outputFile.getName();
+                case TEMPLATE -> "Шаблон сохранён: " + outputFile.getName();
+            });
+        } catch (Exception e) {
+            log.error("Snapshot export failed", e);
+            ModalPane.showError(
+                    kind == ConfigSnapshotService.SnapshotKind.CONFIG
+                            ? "Ошибка сохранения конфигурации"
+                            : "Ошибка сохранения шаблона",
+                    e.getMessage() != null ? e.getMessage() : "Не удалось сохранить файл"
+            );
+        }
+    }
+
+    private void onImportSnapshot(ConfigSnapshotService.SnapshotKind kind) {
+        if (!ensureEditorAvailableForSnapshotOperation()) {
+            return;
+        }
+
+        FileChooser chooser = createSnapshotFileChooser(kind, false);
+        File source = chooser.showOpenDialog(getCurrentWindow());
+        if (source == null) {
+            return;
+        }
+
+        Runnable importAction = () -> importSnapshot(source, kind);
+        if (hasPendingEditorChanges()) {
+            ModalPane.showConfirm(
+                    kind == ConfigSnapshotService.SnapshotKind.CONFIG
+                            ? "Загрузить конфигурацию?"
+                            : "Загрузить шаблон?",
+                    "Текущие несохранённые изменения будут потеряны. Продолжить?",
+                    confirmed -> {
+                        if (confirmed) {
+                            importAction.run();
+                        }
+                    });
+        } else {
+            importAction.run();
+        }
+    }
+
+    private void importSnapshot(File source, ConfigSnapshotService.SnapshotKind expectedKind) {
+        try {
+            reloadConfigTree();
+            TreeItem<ConfigTreeItem> root = currentEditorRoot();
+            if (root == null) {
+                throw new IllegalStateException("Конфигурация не загружена в редактор");
+            }
+
+            ConfigSnapshotService.ConfigSnapshot snapshot = ConfigSnapshotService.readSnapshot(source.toPath());
+            if (snapshot.kind() != expectedKind) {
+                throw new IllegalArgumentException("Выбран файл другого типа: ожидался ." + expectedKind.extension());
+            }
+
+            applySnapshotToEditor(snapshot);
+            configTree.refresh();
+            saveConfigBtn.setDisable(false);
+            String fileKind = expectedKind == ConfigSnapshotService.SnapshotKind.CONFIG ? "Конфигурация" : "Шаблон";
+            configStatusLabel.setText(fileKind + " загружен из файла: " + source.getName());
+            Toast.show(Toast.Type.SUCCESS, fileKind + " загружен: " + source.getName());
+        } catch (Exception e) {
+            log.error("Snapshot import failed", e);
+            ModalPane.showError(
+                    expectedKind == ConfigSnapshotService.SnapshotKind.CONFIG
+                            ? "Ошибка загрузки конфигурации"
+                            : "Ошибка загрузки шаблона",
+                    e.getMessage() != null ? e.getMessage() : "Не удалось прочитать файл"
+            );
+        }
+    }
+
+    private boolean ensureEditorAvailableForSnapshotOperation() {
+        if (currentEditorRoot() == null) {
+            reloadConfigTree();
+        }
+
+        ConnectionEntry activeEntry = findActiveConnectionEntry();
+        if (isConfigExchangeInProgress(activeEntry)) {
+            watchConfigExchangeCompletion(activeEntry);
+            Toast.show(Toast.Type.WARNING, "Дождитесь завершения чтения конфигурации с устройства");
+            return false;
+        }
+
+        if (currentEditorRoot() == null) {
+            Toast.show(Toast.Type.WARNING, "Сначала загрузите конфигурацию с подключённого радио");
+            return false;
+        }
+        return true;
+    }
+
+    private FileChooser createSnapshotFileChooser(ConfigSnapshotService.SnapshotKind kind, boolean saveMode) {
+        FileChooser chooser = new FileChooser();
+        chooser.setTitle(switch (kind) {
+            case CONFIG -> saveMode ? "Сохранить конфигурацию" : "Загрузить конфигурацию";
+            case TEMPLATE -> saveMode ? "Сохранить шаблон" : "Загрузить шаблон";
+        });
+        chooser.getExtensionFilters().add(new FileChooser.ExtensionFilter(
+                kind == ConfigSnapshotService.SnapshotKind.CONFIG
+                        ? "MeshApp Config (*." + kind.extension() + ")"
+                        : "MeshApp Template (*." + kind.extension() + ")",
+                "*." + kind.extension()
+        ));
+        if (saveMode) {
+            chooser.setInitialFileName(buildSuggestedSnapshotName(kind));
+        }
+        return chooser;
+    }
+
+    private String buildSuggestedSnapshotName(ConfigSnapshotService.SnapshotKind kind) {
+        String baseName = "mesh-config";
+        if (state != null) {
+            NodeData myNode = state.getNodeDb().get(state.getMyNodeNum());
+            if (myNode != null) {
+                if (myNode.getLongName() != null && !myNode.getLongName().isBlank()) {
+                    baseName = myNode.getLongName().trim();
+                } else if (myNode.getNodeId() != null && !myNode.getNodeId().isBlank()) {
+                    baseName = myNode.getNodeId().trim();
+                }
+            }
+        }
+        baseName = baseName.replaceAll("[\\\\/:*?\"<>|]+", "_").replaceAll("\\s+", "_");
+        if (baseName.isBlank()) {
+            baseName = "mesh-config";
+        }
+        if (kind == ConfigSnapshotService.SnapshotKind.TEMPLATE) {
+            baseName += "-template";
+        }
+        return baseName;
+    }
+
+    private File ensureSnapshotExtension(File file, ConfigSnapshotService.SnapshotKind kind) {
+        String expectedSuffix = "." + kind.extension();
+        String fileName = file.getName();
+        String lowerName = fileName.toLowerCase(Locale.ROOT);
+        String duplicateSuffix = expectedSuffix + expectedSuffix;
+
+        if (lowerName.endsWith(duplicateSuffix)) {
+            fileName = fileName.substring(0, fileName.length() - expectedSuffix.length());
+            lowerName = fileName.toLowerCase(Locale.ROOT);
+        }
+
+        if (lowerName.endsWith(expectedSuffix)) {
+            File parent = file.getParentFile();
+            return parent != null ? new File(parent, fileName) : new File(fileName);
+        }
+        File parent = file.getParentFile();
+        return parent != null
+                ? new File(parent, fileName + expectedSuffix)
+                : new File(fileName + expectedSuffix);
+    }
+
+    private Window getCurrentWindow() {
+        return getScene() != null ? getScene().getWindow() : null;
+    }
+
+    private TreeItem<ConfigTreeItem> currentEditorRoot() {
+        return fullConfigRoot != null ? fullConfigRoot : configTree != null ? configTree.getRoot() : null;
+    }
+
+    private ConfigSnapshotService.OwnerInfo extractOwnerInfo(TreeItem<ConfigTreeItem> root) {
+        TreeItem<ConfigTreeItem> ownerSection = findTopLevelSection(root, "owner_info");
+        if (ownerSection == null) {
+            return null;
+        }
+        return new ConfigSnapshotService.OwnerInfo(
+                stringValue(ownerSection, "long_name"),
+                stringValue(ownerSection, "short_name")
+        );
+    }
+
+    private ConfigSnapshotService.FixedPosition extractFixedPosition(TreeItem<ConfigTreeItem> root) {
+        TreeItem<ConfigTreeItem> positionSection = findTopLevelSection(root, "fixed_position");
+        if (positionSection == null) {
+            return null;
+        }
+        return new ConfigSnapshotService.FixedPosition(
+                doubleValue(positionSection, "latitude"),
+                doubleValue(positionSection, "longitude"),
+                intValue(positionSection, "altitude")
+        );
+    }
+
+    private List<ConfigProtos.Config> collectCurrentConfigMessages(TreeItem<ConfigTreeItem> root) {
+        TreeItem<ConfigTreeItem> configRoot = findTopLevelSection(root, "config");
+        List<ConfigProtos.Config> result = new ArrayList<>();
+        if (configRoot == null) {
+            return result;
+        }
+
+        for (TreeItem<ConfigTreeItem> section : configRoot.getChildren()) {
+            ConfigTreeItem sectionData = section.getValue();
+            if (sectionData == null) {
+                continue;
+            }
+            ConfigProtos.Config original = findOriginalConfig(sectionData.getConfigVariantNumber());
+            if (original == null) {
+                continue;
+            }
+            ConfigProtos.Config rebuilt = ProtobufTreeBuilder.rebuildConfig(section, original);
+            if (rebuilt != null) {
+                result.add(rebuilt);
+            }
+        }
+        return result;
+    }
+
+    private List<ModuleConfigProtos.ModuleConfig> collectCurrentModuleConfigMessages(TreeItem<ConfigTreeItem> root) {
+        TreeItem<ConfigTreeItem> moduleRoot = findTopLevelSection(root, "module_config");
+        List<ModuleConfigProtos.ModuleConfig> result = new ArrayList<>();
+        if (moduleRoot == null) {
+            return result;
+        }
+
+        for (TreeItem<ConfigTreeItem> section : moduleRoot.getChildren()) {
+            ConfigTreeItem sectionData = section.getValue();
+            if (sectionData == null) {
+                continue;
+            }
+            ModuleConfigProtos.ModuleConfig original = findOriginalModuleConfig(sectionData.getConfigVariantNumber());
+            if (original == null) {
+                continue;
+            }
+            ModuleConfigProtos.ModuleConfig rebuilt = ProtobufTreeBuilder.rebuildModuleConfig(section, original);
+            if (rebuilt != null) {
+                result.add(rebuilt);
+            }
+        }
+        return result;
+    }
+
+    private void applySnapshotToEditor(ConfigSnapshotService.ConfigSnapshot snapshot) {
+        TreeItem<ConfigTreeItem> root = currentEditorRoot();
+        if (root == null) {
+            return;
+        }
+
+        if (configSearchField != null) {
+            configSearchField.clear();
+        }
+
+        applyOwnerInfo(snapshot.ownerInfo(), root);
+        applyFixedPosition(snapshot.fixedPosition(), root);
+        applyConfigSnapshot(snapshot.configs(), root);
+        applyModuleConfigSnapshot(snapshot.moduleConfigs(), root);
+        applyChannelSnapshot(snapshot.channels());
+    }
+
+    private void applyOwnerInfo(ConfigSnapshotService.OwnerInfo ownerInfo, TreeItem<ConfigTreeItem> root) {
+        if (ownerInfo == null) {
+            return;
+        }
+        TreeItem<ConfigTreeItem> ownerSection = findTopLevelSection(root, "owner_info");
+        if (ownerSection == null) {
+            return;
+        }
+        setTreeFieldValue(ownerSection, "long_name", ownerInfo.longName());
+        setTreeFieldValue(ownerSection, "short_name", ownerInfo.shortName());
+    }
+
+    private void applyFixedPosition(ConfigSnapshotService.FixedPosition fixedPosition, TreeItem<ConfigTreeItem> root) {
+        if (fixedPosition == null) {
+            return;
+        }
+        TreeItem<ConfigTreeItem> positionSection = findTopLevelSection(root, "fixed_position");
+        if (positionSection == null) {
+            return;
+        }
+        setTreeFieldValue(positionSection, "latitude", fixedPosition.latitude());
+        setTreeFieldValue(positionSection, "longitude", fixedPosition.longitude());
+        setTreeFieldValue(positionSection, "altitude", fixedPosition.altitude());
+    }
+
+    private void applyConfigSnapshot(List<com.google.gson.JsonObject> configs, TreeItem<ConfigTreeItem> root) {
+        TreeItem<ConfigTreeItem> configRoot = findTopLevelSection(root, "config");
+        if (configRoot == null) {
+            return;
+        }
+
+        for (com.google.gson.JsonObject configJson : configs) {
+            String variantField = ConfigSnapshotService.detectActiveVariantField(configJson);
+            if (variantField == null) {
+                continue;
+            }
+            int variantNumber = resolveVariantNumber(ConfigProtos.Config.getDescriptor().findFieldByName(variantField));
+            if (variantNumber < 0) {
+                continue;
+            }
+            ConfigProtos.Config baseConfig = findOriginalConfig(variantNumber);
+            if (baseConfig == null) {
+                baseConfig = ConfigProtos.Config.getDefaultInstance();
+            }
+            ConfigProtos.Config mergedConfig = ConfigSnapshotService.mergeJsonIntoMessage(baseConfig, configJson);
+            TreeItem<ConfigTreeItem> section = findSectionByVariant(configRoot, variantNumber);
+            if (section != null) {
+                var payload = getActiveConfigPayload(mergedConfig);
+                if (payload != null) {
+                    ProtobufTreeBuilder.applyMessageToTree(section, payload);
+                }
+            }
+        }
+    }
+
+    private void applyModuleConfigSnapshot(List<com.google.gson.JsonObject> moduleConfigs, TreeItem<ConfigTreeItem> root) {
+        TreeItem<ConfigTreeItem> moduleRoot = findTopLevelSection(root, "module_config");
+        if (moduleRoot == null) {
+            return;
+        }
+
+        for (com.google.gson.JsonObject moduleJson : moduleConfigs) {
+            String variantField = ConfigSnapshotService.detectActiveVariantField(moduleJson);
+            if (variantField == null) {
+                continue;
+            }
+            int variantNumber = resolveVariantNumber(ModuleConfigProtos.ModuleConfig.getDescriptor().findFieldByName(variantField));
+            if (variantNumber < 0) {
+                continue;
+            }
+            ModuleConfigProtos.ModuleConfig baseConfig = findOriginalModuleConfig(variantNumber);
+            if (baseConfig == null) {
+                baseConfig = ModuleConfigProtos.ModuleConfig.getDefaultInstance();
+            }
+            ModuleConfigProtos.ModuleConfig mergedConfig =
+                    ConfigSnapshotService.mergeJsonIntoMessage(baseConfig, moduleJson);
+            TreeItem<ConfigTreeItem> section = findSectionByVariant(moduleRoot, variantNumber);
+            if (section != null) {
+                var payload = getActiveModulePayload(mergedConfig);
+                if (payload != null) {
+                    ProtobufTreeBuilder.applyMessageToTree(section, payload);
+                }
+            }
+        }
+    }
+
+    private void applyChannelSnapshot(List<com.google.gson.JsonObject> channelPatches) {
+        if (channelPatches == null || channelPatches.isEmpty()) {
+            return;
+        }
+
+        List<ChannelProtos.Channel> importedChannels = new ArrayList<>();
+        for (com.google.gson.JsonObject channelJson : channelPatches) {
+            if (!channelJson.has("index")) {
+                continue;
+            }
+            int channelIndex = channelJson.get("index").getAsInt();
+            ChannelProtos.Channel baseChannel = findChannelByIndex(originalChannels, channelIndex);
+            if (baseChannel == null) {
+                baseChannel = disabledChannel(channelIndex);
+            }
+            importedChannels.add(ConfigSnapshotService.mergeJsonIntoMessage(baseChannel, channelJson));
+        }
+
+        importedChannels.sort(Comparator.comparingInt(ChannelProtos.Channel::getIndex));
+        workingChannels = importedChannels;
+    }
+
+    private boolean hasPendingEditorChanges() {
+        TreeItem<ConfigTreeItem> root = currentEditorRoot();
+        return (root != null && hasMoifiedFields(root)) || !collectModifiedChannels().isEmpty();
+    }
+
+    private List<ChannelProtos.Channel> collectModifiedChannels() {
+        List<ChannelProtos.Channel> targetChannels = getWorkingChannelsSnapshot();
+        TreeSet<Integer> allIndexes = new TreeSet<>();
+        for (ChannelProtos.Channel channel : originalChannels) {
+            allIndexes.add(channel.getIndex());
+        }
+        for (ChannelProtos.Channel channel : targetChannels) {
+            allIndexes.add(channel.getIndex());
+        }
+
+        List<ChannelProtos.Channel> modified = new ArrayList<>();
+        for (Integer index : allIndexes) {
+            ChannelProtos.Channel original = findChannelByIndex(originalChannels, index);
+            ChannelProtos.Channel target = findChannelByIndex(targetChannels, index);
+            ChannelProtos.Channel originalNormalized = original != null ? original : disabledChannel(index);
+            ChannelProtos.Channel targetNormalized = target != null ? target : disabledChannel(index);
+            if (!originalNormalized.equals(targetNormalized)) {
+                modified.add(targetNormalized);
+            }
+        }
+        modified.sort(Comparator.comparingInt(ChannelProtos.Channel::getIndex));
+        return modified;
+    }
+
+    private List<ChannelProtos.Channel> getWorkingChannelsSnapshot() {
+        List<ChannelProtos.Channel> source = !workingChannels.isEmpty() ? workingChannels : originalChannels;
+        return new ArrayList<>(source);
+    }
+
+    private TreeItem<ConfigTreeItem> findTopLevelSection(TreeItem<ConfigTreeItem> root, String configType) {
+        for (TreeItem<ConfigTreeItem> child : root.getChildren()) {
+            ConfigTreeItem data = child.getValue();
+            if (data != null && configType.equals(data.getConfigType())) {
+                return child;
+            }
+        }
+        return null;
+    }
+
+    private TreeItem<ConfigTreeItem> findSectionByVariant(TreeItem<ConfigTreeItem> sectionRoot, int variantNumber) {
+        for (TreeItem<ConfigTreeItem> child : sectionRoot.getChildren()) {
+            ConfigTreeItem data = child.getValue();
+            if (data != null && data.getConfigVariantNumber() == variantNumber) {
+                return child;
+            }
+        }
+        return null;
+    }
+
+    private void setTreeFieldValue(TreeItem<ConfigTreeItem> section, String fieldName, Object value) {
+        for (TreeItem<ConfigTreeItem> child : section.getChildren()) {
+            ConfigTreeItem data = child.getValue();
+            if (data != null && fieldName.equals(data.getFieldName())) {
+                data.setValue(value);
+                return;
+            }
+        }
+    }
+
+    private String stringValue(TreeItem<ConfigTreeItem> section, String fieldName) {
+        Object value = findTreeFieldValue(section, fieldName);
+        return value != null ? value.toString() : "";
+    }
+
+    private double doubleValue(TreeItem<ConfigTreeItem> section, String fieldName) {
+        Object value = findTreeFieldValue(section, fieldName);
+        return value instanceof Number number ? number.doubleValue() : 0;
+    }
+
+    private int intValue(TreeItem<ConfigTreeItem> section, String fieldName) {
+        Object value = findTreeFieldValue(section, fieldName);
+        return value instanceof Number number ? number.intValue() : 0;
+    }
+
+    private Object findTreeFieldValue(TreeItem<ConfigTreeItem> section, String fieldName) {
+        for (TreeItem<ConfigTreeItem> child : section.getChildren()) {
+            ConfigTreeItem data = child.getValue();
+            if (data != null && fieldName.equals(data.getFieldName())) {
+                return data.getValue();
+            }
+        }
+        return null;
+    }
+
+    private int resolveVariantNumber(com.google.protobuf.Descriptors.FieldDescriptor fieldDescriptor) {
+        return fieldDescriptor != null ? fieldDescriptor.getNumber() : -1;
+    }
+
+    private ConfigProtos.Config findOriginalConfig(int variantNumber) {
+        for (ConfigProtos.Config config : originalConfigs) {
+            if (getActiveOneofFieldNumber(config) == variantNumber) {
+                return config;
+            }
+        }
+        return null;
+    }
+
+    private ModuleConfigProtos.ModuleConfig findOriginalModuleConfig(int variantNumber) {
+        for (ModuleConfigProtos.ModuleConfig config : originalModuleConfigs) {
+            if (getActiveModuleOneofFieldNumber(config) == variantNumber) {
+                return config;
+            }
+        }
+        return null;
+    }
+
+    private ChannelProtos.Channel findChannelByIndex(List<ChannelProtos.Channel> channels, int index) {
+        for (ChannelProtos.Channel channel : channels) {
+            if (channel.getIndex() == index) {
+                return channel;
+            }
+        }
+        return null;
+    }
+
+    private ChannelProtos.Channel disabledChannel(int index) {
+        return ChannelProtos.Channel.newBuilder()
+                .setIndex(index)
+                .setRole(ChannelProtos.Channel.Role.DISABLED)
+                .build();
+    }
+
+    private com.google.protobuf.Message getActiveConfigPayload(ConfigProtos.Config config) {
+        var oneof = config.getDescriptorForType().getOneofs().stream()
+                .filter(o -> "payload_variant".equals(o.getName()))
+                .findFirst()
+                .orElse(null);
+        if (oneof == null) {
+            return null;
+        }
+        var field = config.getOneofFieldDescriptor(oneof);
+        return field != null ? (com.google.protobuf.Message) config.getField(field) : null;
+    }
+
+    private com.google.protobuf.Message getActiveModulePayload(ModuleConfigProtos.ModuleConfig config) {
+        var oneof = config.getDescriptorForType().getOneofs().stream()
+                .filter(o -> "payload_variant".equals(o.getName()))
+                .findFirst()
+                .orElse(null);
+        if (oneof == null) {
+            return null;
+        }
+        var field = config.getOneofFieldDescriptor(oneof);
+        return field != null ? (com.google.protobuf.Message) config.getField(field) : null;
     }
 
     /**
@@ -588,6 +1199,8 @@ public class FormSetting extends Form {
         if (!connected) {
             configStatusLabel.setText("Нет подключения к радио");
             saveConfigBtn.setDisable(true);
+            originalChannels = new ArrayList<>();
+            workingChannels = new ArrayList<>();
             configTree.setRoot(null);
             return;
         }
@@ -599,14 +1212,20 @@ public class FormSetting extends Form {
         // Сохраняем оригинальные protobuf для пересборки
         List<ConfigProtos.Config> stateConfigs;
         List<ModuleConfigProtos.ModuleConfig> stateModuleConfigs;
+        List<ChannelProtos.Channel> stateChannels;
         synchronized (state.getConfigs()) {
             stateConfigs = new ArrayList<>(state.getConfigs());
         }
         synchronized (state.getModuleConfigs()) {
             stateModuleConfigs = new ArrayList<>(state.getModuleConfigs());
         }
+        synchronized (state.getChannels()) {
+            stateChannels = new ArrayList<>(state.getChannels());
+        }
         originalConfigs = stateConfigs;
         originalModuleConfigs = stateModuleConfigs;
+        originalChannels = stateChannels;
+        workingChannels = new ArrayList<>(stateChannels);
 
         // Корневой элемент (невидимый)
         TreeItem<ConfigTreeItem> root = new TreeItem<>(new ConfigTreeItem("Корень", null, 0));
@@ -862,13 +1481,17 @@ public class FormSetting extends Form {
             }
         }
 
+        List<ChannelProtos.Channel> modifiedChannels = collectModifiedChannels();
+
         if (!ownerModified && !positionModified
-                && modifiedConfigs.isEmpty() && modifiedModuleConfigs.isEmpty()) {
+                && modifiedConfigs.isEmpty() && modifiedModuleConfigs.isEmpty()
+                && modifiedChannels.isEmpty()) {
             configStatusLabel.setText("Нет изменений для сохранения");
             return;
         }
 
         int totalChanges = modifiedConfigs.size() + modifiedModuleConfigs.size()
+                + modifiedChannels.size()
                 + (ownerModified ? 1 : 0) + (positionModified ? 1 : 0);
         saveConfigBtn.setDisable(true);
         configStatusLabel.setText("Запрос session key...");
@@ -891,7 +1514,7 @@ public class FormSetting extends Form {
         listenerHolder[0] = () -> Platform.runLater(() -> {
             state.removeOwnerInfoListener(listenerHolder[0]);
             if (saveDispatchStarted.compareAndSet(false, true)) {
-                sendConfigChanges(modifiedConfigs, modifiedModuleConfigs,
+                sendConfigChanges(modifiedConfigs, modifiedModuleConfigs, modifiedChannels,
                         fOwnerModified, fLongName, fShortName,
                         fPositionModified, fLat, fLon, fAlt,
                         totalChanges);
@@ -906,7 +1529,7 @@ public class FormSetting extends Form {
                 state.removeOwnerInfoListener(listenerHolder[0]);
                 if (saveDispatchStarted.compareAndSet(false, true)) {
                     configStatusLabel.setText("Отправка без session key...");
-                    sendConfigChanges(modifiedConfigs, modifiedModuleConfigs,
+                    sendConfigChanges(modifiedConfigs, modifiedModuleConfigs, modifiedChannels,
                             fOwnerModified, fLongName, fShortName,
                             fPositionModified, fLat, fLon, fAlt,
                             totalChanges);
@@ -926,6 +1549,7 @@ public class FormSetting extends Form {
      */
     private void sendConfigChanges(List<ConfigProtos.Config> configs,
                                     List<ModuleConfigProtos.ModuleConfig> moduleConfigs,
+                                    List<ChannelProtos.Channel> channels,
                                     boolean ownerModified, String newLongName, String newShortName,
                                     boolean positionModified, double newLat, double newLon, int newAlt,
                                     int totalChanges) {
@@ -966,12 +1590,26 @@ public class FormSetting extends Form {
         // Protobuf-секции обычно идут через begin/commit edit с задержками между сообщениями.
         // Исключение ниже — одиночный BLE-save MQTT, где некоторые устройства reboot/disconnect
         // уже на set_module_config и не дают commit дойти до firmware.
-        if (!configs.isEmpty() || !moduleConfigs.isEmpty()) {
+        if (!channels.isEmpty() || !configs.isEmpty() || !moduleConfigs.isEmpty()) {
             List<Runnable> tasks = new ArrayList<>();
             AtomicBoolean saveFailed = new AtomicBoolean(false);
             AtomicBoolean saveCompletionAnnounced = new AtomicBoolean(false);
+            boolean requiresReconnect = !configs.isEmpty() || !moduleConfigs.isEmpty();
             boolean useImplicitBleModuleSave = shouldUseImplicitBleModuleSave(
-                    activeTransport, ownerModified, positionModified, configs, moduleConfigs);
+                    activeTransport, ownerModified, positionModified, configs, moduleConfigs)
+                    && channels.isEmpty();
+
+            for (ChannelProtos.Channel channel : channels) {
+                tasks.add(() -> {
+                    String stepName = "setChannel/" + channel.getIndex();
+                    log.info("Config save: setChannel index={} role={}",
+                            channel.getIndex(), channel.getRole());
+                    waitForRequiredConfigSaveAck(
+                            MessageService.setChannel(handler, state, channel, state.getSessionPasskey()),
+                            stepName);
+                    state.updateChannel(channel);
+                });
+            }
 
             if (useImplicitBleModuleSave) {
                 ModuleConfigProtos.ModuleConfig mqttConfig = moduleConfigs.get(0);
@@ -983,7 +1621,7 @@ public class FormSetting extends Form {
                             MessageService.setModuleConfig(handler, state, mqttConfig);
                     observeDeferredConfigSaveAck(ackFuture, stepName);
                 });
-            } else {
+            } else if (requiresReconnect) {
                 tasks.add(() -> {
                     log.info("Config save: beginEditSettings");
                     waitForRequiredConfigSaveAck(
@@ -1089,17 +1727,25 @@ public class FormSetting extends Form {
                     saveCompletionAnnounced.set(true);
                     Platform.runLater(() -> {
                         resetModifiedFlags(fullConfigRoot != null ? fullConfigRoot : configTree.getRoot());
+                        originalChannels = getWorkingChannelsSnapshot();
                         saveConfigBtn.setDisable(false);
-                        String reconnectMessage = activeTransport == ConnectionType.BLE
-                                ? "Отправлено секций: " + totalChanges + ". Ожидание переподключения по BLE..."
-                                : "Отправлено секций: " + totalChanges + ". Устройство перезагрузится. Переподключение...";
-                        configStatusLabel.setText(reconnectMessage);
+                        if (requiresReconnect) {
+                            String reconnectMessage = activeTransport == ConnectionType.BLE
+                                    ? "Отправлено секций: " + totalChanges + ". Ожидание переподключения по BLE..."
+                                    : "Отправлено секций: " + totalChanges + ". Устройство перезагрузится. Переподключение...";
+                            configStatusLabel.setText(reconnectMessage);
+                        } else {
+                            configStatusLabel.setText("Отправлено секций: " + totalChanges);
+                        }
                     });
 
                     // После commit переводим соединение в reboot-aware reconnect path.
                     // Обычный user disconnect здесь вреден: он помечает разрыв как ручной
                     // и запрещает auto-reconnect, а BLE как раз нуждается в мягком handoff
                     // на время device reboot / повторной рекламы.
+                    if (!requiresReconnect) {
+                        return;
+                    }
                     Thread.sleep(rebootHandoffDelay);
                     if (saveFailed.get()) {
                         return;
@@ -1129,6 +1775,7 @@ public class FormSetting extends Form {
         } else {
             // Только виртуальные секции — завершить сразу (устройство не перезагружается)
             resetModifiedFlags(fullConfigRoot != null ? fullConfigRoot : configTree.getRoot());
+            originalChannels = getWorkingChannelsSnapshot();
             saveConfigBtn.setDisable(false);
             configStatusLabel.setText("Отправлено секций: " + totalChanges);
         }

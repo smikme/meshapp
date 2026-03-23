@@ -280,7 +280,7 @@ public final class MessageService {
      * Создаёт/обновляет канал на подключённом радио через AdminMessage.set_channel.
      * Требует session_passkey для защищённых устройств (может быть null для локальных).
      */
-    public static void setChannel(ProtocolHandler handler, DeviceState state,
+    public static CompletableFuture<MeshProtos.Routing.Error> setChannel(ProtocolHandler handler, DeviceState state,
                                    ChannelProtos.Channel channel, ByteString sessionPasskey) {
         AdminProtos.AdminMessage.Builder adminBuilder = AdminProtos.AdminMessage.newBuilder()
                 .setSetChannel(channel);
@@ -289,7 +289,7 @@ public final class MessageService {
         }
         AdminProtos.AdminMessage adminMsg = adminBuilder.build();
 
-        sendAdminMessage(handler, state, adminMsg);
+        return sendAdminMessage(handler, state, adminMsg);
     }
 
     // ==================== Config Admin Methods ====================
