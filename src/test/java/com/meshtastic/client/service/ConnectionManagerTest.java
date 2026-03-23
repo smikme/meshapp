@@ -100,13 +100,13 @@ class ConnectionManagerTest {
     }
 
     @Test
-    void shouldStartHeartbeatOnlyForTcpConnections() {
+    void shouldStartHeartbeatForTcpAndSerialConnections() {
         ConnectionEntry tcp = new ConnectionEntry("tcp", "127.0.0.1", 4403);
         ConnectionEntry serial = new ConnectionEntry("serial", "COM3", 115200, ConnectionType.SERIAL);
         ConnectionEntry ble = new ConnectionEntry("ble", "AA:BB:CC:DD:EE:FF", "test");
 
         assertTrue(ConnectionManager.shouldStartHeartbeat(tcp));
-        assertFalse(ConnectionManager.shouldStartHeartbeat(serial));
+        assertTrue(ConnectionManager.shouldStartHeartbeat(serial));
         assertFalse(ConnectionManager.shouldStartHeartbeat(ble));
     }
 

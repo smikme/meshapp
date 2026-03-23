@@ -39,6 +39,21 @@ public interface MeshtasticConnection {
     void sendBytes(byte[] data);
 
     /**
+     * Отправляет фрейм данных на устройство с указанием, нужно ли ожидать
+     * входящую активность как признак "живого" транспорта после записи.
+     * <p>
+     * Для transport-ов без отдельного stall-detector поведение совпадает
+     * с обычным {@link #sendBytes(byte[])}.
+     *
+     * @param data байтовый массив с фреймированными данными
+     * @param expectResponseAfterWrite {@code true}, если эта запись должна arm-ить
+     *                                 receive-stall watchdog; {@code false} для keepalive/heartbeat
+     */
+    default void sendBytes(byte[] data, boolean expectResponseAfterWrite) {
+        sendBytes(data);
+    }
+
+    /**
      * Устанавливает слушателя входящих данных. Callback вызывается из потока чтения
      * с декодированным protobuf-payload (без заголовка фрейма).
      *

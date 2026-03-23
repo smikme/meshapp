@@ -210,9 +210,9 @@ public final class ConnectionManager {
         ProtocolHandler protocolHandler = new ProtocolHandler(conn);
         protocolHandlers.put(id, protocolHandler);
 
-        // Heartbeat нужен только для TCP transport.
-        // Для Serial/BLE это лишний фоновый трафик, который не держит соединение живым,
-        // но может вмешиваться в очередь пользовательских пакетов и диагностику ACK.
+        // Heartbeat нужен для transport-ов, которые либо закрываются по idle (TCP),
+        // либо требуют периодического keepalive на serial-соединении.
+        // В mesh.proto heartbeat отдельно помечен как keepalive для serial.
         if (shouldStartHeartbeat(entry)) {
             protocolHandler.startHeartbeat();
         }
@@ -397,10 +397,11 @@ public final class ConnectionManager {
 
     /**
      * Возвращает {@code true} только для transport-ов, которым действительно нужен heartbeat.
-     * В текущем протоколе это только TCP: Serial/BLE не закрываются по idle так же, как TCP.
+     * В текущем протоколе heartbeat нужен для TCP и Serial, но не для BLE.
      */
     static boolean shouldStartHeartbeat(ConnectionEntry entry) {
-        return entry.getEffectiveType() == ConnectionType.TCP;
+        ConnectionType type = entry.getEffectiveType();
+        return type == ConnectionType.TCP || type == ConnectionType.SERIAL;
     }
 
     ConnectionEntry findEntry(String id) {

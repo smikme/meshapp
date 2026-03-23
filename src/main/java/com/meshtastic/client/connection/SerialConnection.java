@@ -180,19 +180,28 @@ public class SerialConnection implements MeshtasticConnection {
 
     @Override
     public synchronized void sendBytes(byte[] data) {
+        sendBytes(data, true);
+    }
+
+    @Override
+    public synchronized void sendBytes(byte[] data, boolean expectResponseAfterWrite) {
         if (!isConnected()) {
             log.warn("Cannot send: serial port {} not connected", portName);
             return;
         }
-        long writeStartedAt = currentTimeMillis.getAsLong();
-        lastWriteAtMillis = writeStartedAt;
-        awaitingResponseAfterWrite = true;
-        readTimeoutsSinceWrite = 0;
+        if (expectResponseAfterWrite) {
+            long writeStartedAt = currentTimeMillis.getAsLong();
+            lastWriteAtMillis = writeStartedAt;
+            awaitingResponseAfterWrite = true;
+            readTimeoutsSinceWrite = 0;
+        }
         try {
             nativePort.write(data, 0, data.length);
             log.debug("Sent {} bytes to serial {}", data.length, portName);
         } catch (ConnectionException e) {
-            awaitingResponseAfterWrite = false;
+            if (expectResponseAfterWrite) {
+                awaitingResponseAfterWrite = false;
+            }
             log.error("Write failed to serial {}", portName, e);
             ConnectionListener listener = connectionListener;
             if (listener != null) {

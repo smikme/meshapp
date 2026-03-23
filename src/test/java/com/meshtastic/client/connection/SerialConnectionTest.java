@@ -52,6 +52,25 @@ class SerialConnectionTest {
     }
 
     @Test
+    void keepaliveWriteDoesNotArmReceiveStallDetector() throws Exception {
+        FakeSerialPort port = new FakeSerialPort();
+        CountDownLatch errorLatch = new CountDownLatch(1);
+        SerialConnection connection = new SerialConnection(
+                "COM3", 115200, () -> port, System::currentTimeMillis, 5, 0, 40);
+        connection.setConnectionListener(new TestConnectionListener(errorLatch));
+
+        connection.connect();
+        connection.sendBytes(new byte[]{0x01, 0x02}, false);
+
+        Thread.sleep(120);
+
+        assertFalse(errorLatch.await(50, TimeUnit.MILLISECONDS));
+
+        connection.disconnect();
+        assertTrue(port.awaitClose());
+    }
+
+    @Test
     void incomingBytesAfterWriteClearStallDetector() throws Exception {
         FakeSerialPort port = new FakeSerialPort();
         CountDownLatch errorLatch = new CountDownLatch(1);
