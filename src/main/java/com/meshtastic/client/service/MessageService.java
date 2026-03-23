@@ -8,6 +8,7 @@ import org.meshtastic.proto.ModuleConfigProtos;
 import org.meshtastic.proto.Portnums;
 import com.google.protobuf.ByteString;
 import com.meshtastic.client.model.DeviceState;
+import com.meshtastic.client.model.MessageReaction;
 import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.protocol.ProtocolHandler;
@@ -170,6 +171,79 @@ public final class MessageService {
         state.addDirectMessage(msg, peerNodeId);
         state.registerPendingAck(packetId, msg);
         return msg;
+    }
+
+    /**
+     * Отправляет emoji-реакцию на канальное сообщение.
+     * Реакция хранится отдельно от обычных сообщений и не попадает в preview чатов.
+     */
+    public static boolean sendChannelReaction(ProtocolHandler handler,
+                                              DeviceState state,
+                                              int channelIndex,
+                                              MeshMessage targetMessage,
+                                              String emoji) {
+        if (targetMessage == null || targetMessage.getPacketId() == 0 || emoji == null || emoji.isEmpty()) {
+            return false;
+        }
+
+        int packetId = ThreadLocalRandom.current().nextInt(1, Integer.MAX_VALUE);
+        long now = System.currentTimeMillis() / 1000;
+
+        MeshProtos.Data data = MeshProtos.Data.newBuilder()
+                .setPortnum(Portnums.PortNum.TEXT_MESSAGE_APP)
+                .setPayload(ByteString.copyFrom(emoji, StandardCharsets.UTF_8))
+                .setReplyId(targetMessage.getPacketId())
+                .setEmoji(1)
+                .build();
+
+        MeshProtos.MeshPacket packet = MeshProtos.MeshPacket.newBuilder()
+                .setFrom(state.getMyNodeNum())
+                .setTo(0xFFFFFFFF)
+                .setChannel(channelIndex)
+                .setDecoded(data)
+                .setId(packetId)
+                .setWantAck(true)
+                .build();
+
+        handler.sendToRadio(MeshProtos.ToRadio.newBuilder().setPacket(packet).build());
+        return saveOutgoingReaction(state, "channel", String.valueOf(channelIndex), targetMessage, emoji, now, packetId);
+    }
+
+    /**
+     * Отправляет emoji-реакцию на личное сообщение.
+     */
+    public static boolean sendDirectReaction(ProtocolHandler handler,
+                                             DeviceState state,
+                                             String peerNodeId,
+                                             MeshMessage targetMessage,
+                                             String emoji) {
+        if (targetMessage == null || targetMessage.getPacketId() == 0 || emoji == null || emoji.isEmpty()) {
+            return false;
+        }
+
+        int packetId = ThreadLocalRandom.current().nextInt(1, Integer.MAX_VALUE);
+        long now = System.currentTimeMillis() / 1000;
+
+        NodeData peerNode = state.getNodeByNodeId(peerNodeId);
+        int peerNodeNum = peerNode != null ? peerNode.getNodeNum() : 0;
+
+        MeshProtos.Data data = MeshProtos.Data.newBuilder()
+                .setPortnum(Portnums.PortNum.TEXT_MESSAGE_APP)
+                .setPayload(ByteString.copyFrom(emoji, StandardCharsets.UTF_8))
+                .setReplyId(targetMessage.getPacketId())
+                .setEmoji(1)
+                .build();
+
+        MeshProtos.MeshPacket packet = MeshProtos.MeshPacket.newBuilder()
+                .setFrom(state.getMyNodeNum())
+                .setTo(peerNodeNum)
+                .setDecoded(data)
+                .setId(packetId)
+                .setWantAck(true)
+                .build();
+
+        handler.sendToRadio(MeshProtos.ToRadio.newBuilder().setPacket(packet).build());
+        return saveOutgoingReaction(state, "dm", peerNodeId, targetMessage, emoji, now, packetId);
     }
 
     /**
@@ -518,6 +592,35 @@ public final class MessageService {
         CompletableFuture<MeshProtos.Routing.Error> ackFuture = state.registerPendingPacketAck(packetId);
         handler.sendToRadio(toRadio);
         return ackFuture;
+    }
+
+    private static boolean saveOutgoingReaction(DeviceState state,
+                                                String chatType,
+                                                String chatKey,
+                                                MeshMessage targetMessage,
+                                                String emoji,
+                                                long now,
+                                                int packetId) {
+        NodeData myNode = state.getNodeDb().get(state.getMyNodeNum());
+        String ownerNodeId = String.format("!%08x", state.getMyNodeNum());
+        String myNodeId = myNode != null && myNode.getNodeId() != null && !myNode.getNodeId().isEmpty()
+                ? myNode.getNodeId()
+                : ownerNodeId;
+
+        MessageReaction reaction = new MessageReaction(
+                targetMessage.getPacketId(),
+                myNodeId,
+                emoji,
+                now,
+                true
+        );
+        reaction.setPacketId(packetId);
+        reaction.setStatus(MeshMessage.DeliveryStatus.SENDING);
+        if (myNode != null && myNode.getLongName() != null) {
+            reaction.setSenderName(myNode.getLongName());
+        }
+
+        return MessageDbService.getInstance().saveReaction(reaction, chatType, chatKey, ownerNodeId);
     }
 
     private static String bytesToHex(byte[] bytes) {

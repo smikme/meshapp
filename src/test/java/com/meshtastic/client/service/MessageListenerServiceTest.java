@@ -3,6 +3,7 @@ package com.meshtastic.client.service;
 import com.google.protobuf.ByteString;
 import com.meshtastic.client.TestEnvironmentSupport;
 import com.meshtastic.client.model.DeviceState;
+import com.meshtastic.client.model.MessageReaction;
 import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.model.NodeData;
 import org.junit.jupiter.api.AfterEach;
@@ -15,10 +16,13 @@ import org.meshtastic.proto.Portnums;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class MessageListenerServiceTest {
 
@@ -101,6 +105,35 @@ class MessageListenerServiceTest {
     }
 
     @Test
+    void onMeshPacketStoresIncomingReactionSeparatelyFromMessages() {
+        MeshProtos.MeshPacket packet = MeshProtos.MeshPacket.newBuilder()
+                .setFrom(0x11111111)
+                .setTo(0xFFFFFFFF)
+                .setChannel(2)
+                .setId(7003)
+                .setRxTime(1_700_000_101)
+                .setDecoded(MeshProtos.Data.newBuilder()
+                        .setPortnum(Portnums.PortNum.TEXT_MESSAGE_APP)
+                        .setReplyId(42)
+                        .setEmoji(1)
+                        .setPayload(ByteString.copyFrom("👍", StandardCharsets.UTF_8))
+                        .build())
+                .build();
+
+        service.onMeshPacket(packet);
+
+        assertTrue(state.getMessages(2).isEmpty());
+        assertNull(MessageDbService.getInstance().findByPacketId(7003));
+
+        Map<Integer, List<MessageReaction>> reactions = MessageDbService.getInstance()
+                .loadReactionsByTargetPacketIds("channel", "2", "!12345678", List.of(42));
+        MessageReaction stored = reactions.get(42).getFirst();
+        assertEquals("👍", stored.getEmoji());
+        assertEquals(MeshMessage.DeliveryStatus.DELIVERED, stored.getStatus());
+        assertEquals("!11111111", stored.getFromNodeId());
+    }
+
+    @Test
     void onMeshPacketMarksPendingMessageDeliveredWhenAckArrives() {
         MeshMessage pending = new MeshMessage("!12345678", "!ffffffff", 0, "pending", 1_700_000_000L, true);
         pending.setPacketId(42);
@@ -161,6 +194,33 @@ class MessageListenerServiceTest {
         assertNotNull(persisted);
         assertEquals(MeshMessage.DeliveryStatus.FAILED, persisted.getStatus());
         assertEquals("NO_ROUTE", persisted.getErrorReason());
+    }
+
+    @Test
+    void onMeshPacketUpdatesOutgoingReactionStatusWhenAckArrives() {
+        MessageReaction reaction = new MessageReaction(42, "!12345678", "🎉", 1_700_000_000L, true);
+        reaction.setPacketId(8080);
+        reaction.setStatus(MeshMessage.DeliveryStatus.SENDING);
+        MessageDbService.getInstance().saveReaction(reaction, "channel", "0", "!12345678");
+
+        MeshProtos.Routing routing = MeshProtos.Routing.newBuilder()
+                .setErrorReason(MeshProtos.Routing.Error.NONE)
+                .build();
+        MeshProtos.MeshPacket ackPacket = MeshProtos.MeshPacket.newBuilder()
+                .setFrom(0x11111111)
+                .setDecoded(MeshProtos.Data.newBuilder()
+                        .setPortnum(Portnums.PortNum.ROUTING_APP)
+                        .setRequestId(8080)
+                        .setPayload(routing.toByteString())
+                        .build())
+                .build();
+
+        service.onMeshPacket(ackPacket);
+
+        MessageReaction stored = MessageDbService.getInstance()
+                .loadReactionsByTargetPacketIds("channel", "0", "!12345678", List.of(42))
+                .get(42).getFirst();
+        assertEquals(MeshMessage.DeliveryStatus.DELIVERED, stored.getStatus());
     }
 
     @Test

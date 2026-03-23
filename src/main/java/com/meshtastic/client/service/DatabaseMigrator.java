@@ -23,7 +23,7 @@ public final class DatabaseMigrator {
     private static final Logger log = LoggerFactory.getLogger(DatabaseMigrator.class);
 
     /** Текущая версия схемы. Увеличивается при каждом изменении схемы. */
-    static final int CURRENT_VERSION = 5;
+    static final int CURRENT_VERSION = 6;
 
     private DatabaseMigrator() {}
 
@@ -61,6 +61,7 @@ public final class DatabaseMigrator {
             if (version < 3) { migrateToV3(connection); version = 3; }
             if (version < 4) { migrateToV4(connection); version = 4; }
             if (version < 5) { migrateToV5(connection); version = 5; }
+            if (version < 6) { migrateToV6(connection); version = 6; }
 
             setVersion(connection, CURRENT_VERSION);
             log.info("Database migration complete, schema version = {}", CURRENT_VERSION);
@@ -135,6 +136,38 @@ public final class DatabaseMigrator {
             stmt.execute("ALTER TABLE nodes ADD COLUMN IF NOT EXISTS ignored BOOLEAN DEFAULT FALSE");
         }
         log.info("Migration v5: added 'ignored' column to nodes");
+    }
+
+    /** v6: отдельная таблица реакций на сообщения. */
+    private static void migrateToV6(Connection connection) throws SQLException {
+        try (Statement stmt = connection.createStatement()) {
+            stmt.execute("""
+                    CREATE TABLE IF NOT EXISTS message_reactions (
+                        id                 BIGINT AUTO_INCREMENT PRIMARY KEY,
+                        owner_node_id      VARCHAR(20) NOT NULL DEFAULT '',
+                        chat_type          VARCHAR(10) NOT NULL,
+                        chat_key           VARCHAR(20) NOT NULL,
+                        target_packet_id   INT NOT NULL,
+                        reaction_packet_id INT DEFAULT 0,
+                        from_node_id       VARCHAR(20) NOT NULL,
+                        emoji              VARCHAR(16) NOT NULL,
+                        timestamp          BIGINT NOT NULL,
+                        outgoing           BOOLEAN NOT NULL,
+                        status             VARCHAR(20),
+                        error_reason       VARCHAR(100),
+                        sender_name        VARCHAR(100)
+                    )
+                    """);
+            stmt.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_reaction_chat_target
+                    ON message_reactions (owner_node_id, chat_type, chat_key, target_packet_id, id)
+                    """);
+            stmt.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_reaction_packet
+                    ON message_reactions (reaction_packet_id)
+                    """);
+        }
+        log.info("Migration v6: created 'message_reactions' table and indexes");
     }
 
     /** v2: колонка favorite для избранных нод. */

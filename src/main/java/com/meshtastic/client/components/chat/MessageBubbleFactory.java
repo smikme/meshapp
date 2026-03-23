@@ -4,18 +4,22 @@ import com.meshtastic.client.components.EmojiImageCache;
 import com.meshtastic.client.components.EmojiTextFlow;
 import com.meshtastic.client.components.NodeDetailPanel;
 import com.meshtastic.client.model.DeviceState;
+import com.meshtastic.client.model.MessageReaction;
 import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.service.MessageDbService;
 import com.meshtastic.client.service.NodeCacheService;
 import com.meshtastic.client.utils.NodeUtils;
 import javafx.beans.property.ReadOnlyDoubleProperty;
+import javafx.geometry.Bounds;
 import javafx.geometry.Pos;
 import javafx.scene.Cursor;
+import javafx.scene.control.Button;
 import javafx.scene.control.ContextMenu;
 import javafx.scene.control.Label;
 import javafx.scene.control.MenuItem;
 import javafx.scene.control.SeparatorMenuItem;
+import javafx.scene.control.Tooltip;
 import javafx.scene.image.ImageView;
 import javafx.scene.input.Clipboard;
 import javafx.scene.input.ClipboardContent;
@@ -26,7 +30,10 @@ import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
+import javafx.stage.Popup;
 
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -39,6 +46,9 @@ public class MessageBubbleFactory {
     private static final String[] AVATAR_COLORS = {
             "#5B8DEF", "#E57C23", "#9B59B6", "#1EA97C",
             "#E74C3C", "#3498DB", "#F39C12", "#1ABC9C"
+    };
+    private static final String[] REACTION_EMOJIS = {
+            "😀", "🙁", "😂", "😉", "🥶", "💩", "👋", "🙏", "👍", "👎", "💪", "💓", "🎉"
     };
 
     /**
@@ -55,6 +65,9 @@ public class MessageBubbleFactory {
         /** Запросить информацию о ноде-отправителе. */
         void requestNodeInfo(MeshMessage msg);
 
+        /** Отправить emoji-реакцию на сообщение. */
+        void sendReaction(MeshMessage msg, String emoji);
+
         /** Подтвердить и удалить сообщение. */
         void confirmDeleteMessage(MeshMessage msg, HBox bubbleRow);
     }
@@ -64,6 +77,7 @@ public class MessageBubbleFactory {
     private final BubbleActions actions;
     private final Map<Integer, Label> pendingStatusLabels;
     private TracerouteView tracerouteView;
+    private Popup openReactionPopup;
 
     /**
      * @param state              текущее состояние устройства (может быть {@code null})
@@ -89,6 +103,14 @@ public class MessageBubbleFactory {
     /** Установить TracerouteView для визуализации traceroute-пузырей. */
     public void setTracerouteView(TracerouteView tracerouteView) {
         this.tracerouteView = tracerouteView;
+    }
+
+    /** Закрыть открытый picker реакций, если он есть. */
+    public void hideOpenReactionPopup() {
+        if (openReactionPopup != null) {
+            openReactionPopup.hide();
+            openReactionPopup = null;
+        }
     }
 
     /** Построить пузырь сообщения — делегирует к incoming/outgoing/system. */
@@ -167,40 +189,18 @@ public class MessageBubbleFactory {
 
         addQuoteIfPresent(content, msg);
         addTextLabel(content, msg);
+        addReactionsIfPresent(content, msg);
 
-        // Мета: хопы + время
-        HBox meta = new HBox(6);
-        meta.setAlignment(Pos.CENTER_RIGHT);
-        meta.getStyleClass().add("chat-bubble-meta");
+        HBox meta = buildIncomingMeta(msg);
+        HBox footer = new HBox(8);
+        footer.setAlignment(Pos.CENTER_LEFT);
+        footer.getStyleClass().add("chat-bubble-footer");
 
-        int hops = msg.getHopsTraveled();
-        if (hops > 0) {
-            HBox hopBox = new HBox(2);
-            hopBox.setAlignment(Pos.CENTER);
-            hopBox.getStyleClass().add("chat-bubble-hops");
-            ImageView hopImg = EmojiImageCache.createImageView("\uD83D\uDC07", 12);
-            if (hopImg != null) {
-                hopBox.getChildren().add(hopImg);
-            }
-            hopBox.getChildren().add(new Label(String.valueOf(hops)));
-            meta.getChildren().add(hopBox);
-        } else if (msg.getRxRssi() != 0 || msg.getRxSnr() != 0) {
-            HBox signalBox = new HBox(2);
-            signalBox.setAlignment(Pos.CENTER);
-            signalBox.getStyleClass().add("chat-bubble-hops");
-            ImageView sigImg = EmojiImageCache.createImageView("\uD83D\uDCF6", 12);
-            if (sigImg != null) {
-                signalBox.getChildren().add(sigImg);
-            }
-            String snrStr = msg.getRxSnr() == (int) msg.getRxSnr()
-                    ? String.valueOf((int) msg.getRxSnr())
-                    : String.format("%.1f", msg.getRxSnr());
-            signalBox.getChildren().add(new Label(msg.getRxRssi() + "dBm/" + snrStr + "dB"));
-            meta.getChildren().add(signalBox);
-        }
-
-        addTimeToMeta(meta, msg);
-        content.getChildren().add(meta);
+        Button reactionButton = buildReactionButton(msg);
+        Region footerSpacer = new Region();
+        HBox.setHgrow(footerSpacer, Priority.ALWAYS);
+        footer.getChildren().addAll(reactionButton, footerSpacer, meta);
+        content.getChildren().add(footer);
 
         HBox row = new HBox(6, avatar, content);
         row.setAlignment(Pos.BOTTOM_LEFT);
@@ -228,6 +228,7 @@ public class MessageBubbleFactory {
 
         addQuoteIfPresent(content, msg);
         addTextLabel(content, msg);
+        addReactionsIfPresent(content, msg);
 
         HBox meta = new HBox(6);
         meta.setAlignment(Pos.CENTER_RIGHT);
@@ -431,6 +432,195 @@ public class MessageBubbleFactory {
         textFlow.getStyleClass().add("chat-bubble-text");
         textFlow.setMinHeight(Region.USE_PREF_SIZE);
         content.getChildren().add(textFlow);
+    }
+
+    private void addReactionsIfPresent(VBox content, MeshMessage msg) {
+        if (!msg.hasReactions()) {
+            return;
+        }
+
+        record ReactionAggregate(String emoji, boolean own, int count) {}
+
+        Map<String, ReactionAggregate> aggregates = new LinkedHashMap<>();
+        for (MessageReaction reaction : msg.getReactions()) {
+            if (reaction == null || !reaction.isVisible()) {
+                continue;
+            }
+            ReactionAggregate current = aggregates.get(reaction.getEmoji());
+            if (current == null) {
+                aggregates.put(reaction.getEmoji(),
+                        new ReactionAggregate(reaction.getEmoji(), reaction.isOutgoing(), 1));
+            } else {
+                aggregates.put(reaction.getEmoji(),
+                        new ReactionAggregate(
+                                reaction.getEmoji(),
+                                current.own() || reaction.isOutgoing(),
+                                current.count() + 1));
+            }
+        }
+
+        if (aggregates.isEmpty()) {
+            return;
+        }
+
+        HBox reactionBar = new HBox(6);
+        reactionBar.setAlignment(Pos.CENTER_LEFT);
+        reactionBar.getStyleClass().add("chat-bubble-reactions");
+
+        for (ReactionAggregate aggregate : aggregates.values()) {
+            HBox chip = new HBox(4);
+            chip.setAlignment(Pos.CENTER);
+            chip.getStyleClass().add("chat-reaction-chip");
+            if (aggregate.own()) {
+                chip.getStyleClass().add("chat-reaction-chip-own");
+            }
+
+            chip.getChildren().add(createEmojiNode(aggregate.emoji(), 14));
+            if (aggregate.count() > 1) {
+                Label count = new Label(String.valueOf(aggregate.count()));
+                count.getStyleClass().add("chat-reaction-chip-count");
+                chip.getChildren().add(count);
+            }
+            reactionBar.getChildren().add(chip);
+        }
+
+        content.getChildren().add(reactionBar);
+    }
+
+    private HBox buildIncomingMeta(MeshMessage msg) {
+        HBox meta = new HBox(6);
+        meta.setAlignment(Pos.CENTER_RIGHT);
+        meta.getStyleClass().add("chat-bubble-meta");
+
+        int hops = msg.getHopsTraveled();
+        if (hops > 0) {
+            HBox hopBox = new HBox(2);
+            hopBox.setAlignment(Pos.CENTER);
+            hopBox.getStyleClass().add("chat-bubble-hops");
+            ImageView hopImg = EmojiImageCache.createImageView("\uD83D\uDC07", 12);
+            if (hopImg != null) {
+                hopBox.getChildren().add(hopImg);
+            }
+            hopBox.getChildren().add(new Label(String.valueOf(hops)));
+            meta.getChildren().add(hopBox);
+        } else if (msg.getRxRssi() != 0 || msg.getRxSnr() != 0) {
+            HBox signalBox = new HBox(2);
+            signalBox.setAlignment(Pos.CENTER);
+            signalBox.getStyleClass().add("chat-bubble-hops");
+            ImageView sigImg = EmojiImageCache.createImageView("\uD83D\uDCF6", 12);
+            if (sigImg != null) {
+                signalBox.getChildren().add(sigImg);
+            }
+            String snrStr = msg.getRxSnr() == (int) msg.getRxSnr()
+                    ? String.valueOf((int) msg.getRxSnr())
+                    : String.format("%.1f", msg.getRxSnr());
+            signalBox.getChildren().add(new Label(msg.getRxRssi() + "dBm/" + snrStr + "dB"));
+            meta.getChildren().add(signalBox);
+        }
+
+        addTimeToMeta(meta, msg);
+        return meta;
+    }
+
+    private Button buildReactionButton(MeshMessage msg) {
+        Button reactionButton = new Button();
+        reactionButton.getStyleClass().add("chat-reaction-btn");
+        reactionButton.setGraphic(createEmojiNode("😀", 14));
+        reactionButton.setFocusTraversable(false);
+        boolean reactionAvailable = msg.getPacketId() != 0;
+        if (!reactionAvailable) {
+            reactionButton.getStyleClass().add("chat-reaction-btn-disabled");
+            reactionButton.setCursor(Cursor.DEFAULT);
+            reactionButton.setTooltip(new Tooltip("Реакция недоступна: у сообщения нет packet id"));
+        }
+
+        Popup reactionPopup = reactionAvailable ? buildReactionPopup(msg) : null;
+        reactionButton.setOnAction(e -> {
+            if (!reactionAvailable) {
+                e.consume();
+                return;
+            }
+            if (reactionPopup.isShowing()) {
+                reactionPopup.hide();
+            } else {
+                showReactionPopup(reactionButton, reactionPopup);
+            }
+            e.consume();
+        });
+        return reactionButton;
+    }
+
+    private Popup buildReactionPopup(MeshMessage msg) {
+        HBox picker = new HBox(4);
+        picker.setAlignment(Pos.CENTER_LEFT);
+        picker.getStyleClass().add("chat-reaction-picker");
+
+        StackPane popupRoot = new StackPane(picker);
+        popupRoot.getStyleClass().add("chat-reaction-popup");
+
+        Popup popup = new Popup();
+        popup.setAutoFix(true);
+        popup.setAutoHide(true);
+        popup.setHideOnEscape(true);
+        popup.getContent().add(popupRoot);
+        popup.setOnHidden(e -> {
+            if (openReactionPopup == popup) {
+                openReactionPopup = null;
+            }
+        });
+
+        for (String emoji : REACTION_EMOJIS) {
+            Button emojiButton = new Button();
+            emojiButton.getStyleClass().add("chat-reaction-picker-btn");
+            emojiButton.setGraphic(createEmojiNode(emoji, 18));
+            emojiButton.setFocusTraversable(false);
+            emojiButton.setOnAction(e -> {
+                popup.hide();
+                actions.sendReaction(msg, emoji);
+                e.consume();
+            });
+            picker.getChildren().add(emojiButton);
+        }
+
+        return popup;
+    }
+
+    private void showReactionPopup(Button anchor, Popup popup) {
+        if (openReactionPopup != null && openReactionPopup != popup) {
+            openReactionPopup.hide();
+        }
+
+        Bounds bounds = anchor.localToScreen(anchor.getBoundsInLocal());
+        if (bounds == null) {
+            return;
+        }
+
+        syncReactionPopupTheme(anchor, popup);
+        popup.show(anchor, bounds.getMinX(), bounds.getMaxY() + 6);
+        openReactionPopup = popup;
+    }
+
+    private void syncReactionPopupTheme(Button anchor, Popup popup) {
+        if (popup.getContent().isEmpty() || anchor.getScene() == null || anchor.getScene().getRoot() == null) {
+            return;
+        }
+        javafx.scene.Node popupRoot = popup.getContent().get(0);
+        boolean isLight = anchor.getScene().getRoot().getStyleClass().contains("light-theme");
+        if (isLight && !popupRoot.getStyleClass().contains("light-theme")) {
+            popupRoot.getStyleClass().add("light-theme");
+        } else if (!isLight) {
+            popupRoot.getStyleClass().remove("light-theme");
+        }
+    }
+
+    private javafx.scene.Node createEmojiNode(String emoji, double size) {
+        ImageView image = EmojiImageCache.createImageView(emoji, size);
+        if (image != null) {
+            return image;
+        }
+        Label fallback = new Label(emoji);
+        fallback.setFont(Font.font(size));
+        return fallback;
     }
 
     private void addTimeToMeta(HBox meta, MeshMessage msg) {
