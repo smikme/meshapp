@@ -4,7 +4,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 SOURCE_SVG="$ROOT_DIR/src/main/resources/logo/meshapp-official.svg"
-LINUX_TRAY_SOURCE_SVG="$ROOT_DIR/src/main/resources/tray/linux/meshapp-tray-linux.svg"
+LINUX_TRAY_SOURCE_PNG="$ROOT_DIR/src/main/resources/tray/linux/source.png"
 LOGO_DIR="$ROOT_DIR/src/main/resources/logo"
 MACOS_DIR="$ROOT_DIR/src/main/resources/macos"
 DOCS_DIR="$ROOT_DIR/docs/logo"
@@ -42,6 +42,23 @@ render_png() {
   render_png_from "$SOURCE_SVG" "$size" "$output"
 }
 
+render_linux_tray_png() {
+  local size="$1"
+  local output="$2"
+  local inner_size=$(( size * 3 / 4 ))
+  if [[ "$inner_size" -lt 1 ]]; then
+    inner_size=1
+  fi
+  magick \
+    "$LINUX_TRAY_SOURCE_PNG" \
+    -filter Lanczos \
+    -resize "${inner_size}x${inner_size}" \
+    -background none \
+    -gravity center \
+    -extent "${size}x${size}" \
+    "$output"
+}
+
 render_png 16 "$LOGO_DIR/icon_16.png"
 render_png 32 "$LOGO_DIR/icon_32.png"
 render_png 64 "$LOGO_DIR/icon_64.png"
@@ -53,7 +70,7 @@ render_png 256 "$DOCS_DIR/MeshApp.png"
 
 mkdir -p "$LINUX_TRAY_DIR"
 for size in 16 20 22 24 32 48 64; do
-  render_png_from "$LINUX_TRAY_SOURCE_SVG" "$size" "$LINUX_TRAY_DIR/icon_${size}.png"
+  render_linux_tray_png "$size" "$LINUX_TRAY_DIR/icon_${size}.png"
 done
 
 tmp_dir="$(mktemp -d)"

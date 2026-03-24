@@ -21,20 +21,19 @@ class TrayIconResourcesTest {
     }
 
     @Test
-    void choosesLinuxTraySourceIconFromDedicatedSizeSet() {
-        assertEquals(16, TrayIconResources.chooseLinuxTraySourceIconSize(16));
-        assertEquals(20, TrayIconResources.chooseLinuxTraySourceIconSize(18));
-        assertEquals(22, TrayIconResources.chooseLinuxTraySourceIconSize(22));
-        assertEquals(24, TrayIconResources.chooseLinuxTraySourceIconSize(24));
-        assertEquals(32, TrayIconResources.chooseLinuxTraySourceIconSize(28));
-        assertEquals(64, TrayIconResources.chooseLinuxTraySourceIconSize(128));
-    }
-
-    @Test
     void scalesImageToRequestedTraySlotSize() throws IOException {
         BufferedImage image = TrayIconResources.loadScaledImage(24, 22);
 
         assertEquals(24, image.getWidth());
         assertEquals(22, image.getHeight());
+    }
+
+    @Test
+    void loadsLinuxTrayImageWithTransparentMargins() throws IOException {
+        BufferedImage image = TrayIconResources.loadLinuxTrayImage(24, 24);
+
+        assertEquals(24, image.getWidth());
+        assertEquals(24, image.getHeight());
+        assertEquals(0, (image.getRGB(0, 0) >>> 24));
     }
 }
