@@ -436,6 +436,44 @@ public final class MessageService {
     }
 
     /**
+     * Отправляет команду перезапуска устройства через {@code reboot_seconds}.
+     *
+     * @param delaySeconds задержка перед перезапуском в секундах
+     * @return future с routing ACK/NAK для отправленного admin-пакета
+     */
+    public static CompletableFuture<MeshProtos.Routing.Error> rebootDevice(ProtocolHandler handler,
+                                                                           DeviceState state,
+                                                                           int delaySeconds) {
+        AdminProtos.AdminMessage.Builder adminBuilder = AdminProtos.AdminMessage.newBuilder()
+                .setRebootSeconds(delaySeconds);
+        ByteString passkey = state.getSessionPasskey();
+        if (passkey != null) {
+            adminBuilder.setSessionPasskey(passkey);
+        }
+
+        return sendAdminMessage(handler, state, adminBuilder.build());
+    }
+
+    /**
+     * Отправляет команду выключения устройства через {@code shutdown_seconds}.
+     *
+     * @param delaySeconds задержка перед выключением в секундах
+     * @return future с routing ACK/NAK для отправленного admin-пакета
+     */
+    public static CompletableFuture<MeshProtos.Routing.Error> shutdownDevice(ProtocolHandler handler,
+                                                                             DeviceState state,
+                                                                             int delaySeconds) {
+        AdminProtos.AdminMessage.Builder adminBuilder = AdminProtos.AdminMessage.newBuilder()
+                .setShutdownSeconds(delaySeconds);
+        ByteString passkey = state.getSessionPasskey();
+        if (passkey != null) {
+            adminBuilder.setSessionPasskey(passkey);
+        }
+
+        return sendAdminMessage(handler, state, adminBuilder.build());
+    }
+
+    /**
      * Устанавливает фиксированную позицию на устройстве.
      * Отправляет AdminMessage.set_fixed_position с координатами.
      * Прошивка автоматически установит position.fixed_position = true.
