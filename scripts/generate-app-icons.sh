@@ -4,7 +4,6 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 SOURCE_SVG="$ROOT_DIR/src/main/resources/logo/meshapp-official.svg"
-LINUX_TRAY_SOURCE_PNG="$ROOT_DIR/src/main/resources/tray/linux/source.png"
 LOGO_DIR="$ROOT_DIR/src/main/resources/logo"
 MACOS_DIR="$ROOT_DIR/src/main/resources/macos"
 DOCS_DIR="$ROOT_DIR/docs/logo"
@@ -45,18 +44,20 @@ render_png() {
 render_linux_tray_png() {
   local size="$1"
   local output="$2"
-  local inner_size=$(( size * 3 / 4 ))
+  local inner_size=$(( size * 11 / 16 ))
   if [[ "$inner_size" -lt 1 ]]; then
     inner_size=1
   fi
   magick \
-    "$LINUX_TRAY_SOURCE_PNG" \
+    "$LOGO_DIR/icon_512.png" \
+    -alpha on \
+    -type TrueColorAlpha \
     -filter Lanczos \
     -resize "${inner_size}x${inner_size}" \
     -background none \
     -gravity center \
     -extent "${size}x${size}" \
-    "$output"
+    "PNG32:$output"
 }
 
 render_png 16 "$LOGO_DIR/icon_16.png"
