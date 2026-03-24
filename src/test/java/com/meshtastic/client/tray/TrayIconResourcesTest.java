@@ -29,11 +29,11 @@ class TrayIconResourcesTest {
     }
 
     @Test
-    void loadsLinuxTrayImageWithTransparentMargins() throws IOException {
-        BufferedImage image = TrayIconResources.loadLinuxTrayImage(24, 24);
+    void loadsFixedLinuxTrayImage() throws IOException {
+        BufferedImage image = TrayIconResources.loadLinuxTrayImage();
 
-        assertEquals(24, image.getWidth());
-        assertEquals(24, image.getHeight());
+        assertEquals(16, image.getWidth());
+        assertEquals(16, image.getHeight());
         assertEquals(0, (image.getRGB(0, 0) >>> 24));
     }
 }

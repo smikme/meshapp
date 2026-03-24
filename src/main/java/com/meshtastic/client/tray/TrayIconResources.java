@@ -44,9 +44,11 @@ final class TrayIconResources {
     }
 
     static Image loadAwtTrayImage(SystemTray tray) throws IOException {
+        if (OsDetect.isLinux()) {
+            return loadLinuxTrayImage();
+        }
         Dimension size = tray != null ? tray.getTrayIconSize() : new Dimension(DEFAULT_TRAY_SIZE, DEFAULT_TRAY_SIZE);
-        TrayAsset asset = OsDetect.isLinux() ? TrayAsset.LINUX_TRAY : TrayAsset.APP;
-        return loadScaledImage(size.width, size.height, asset);
+        return loadScaledImage(size.width, size.height, TrayAsset.APP);
     }
 
     static Path extractMacOsTrayIcon() {
@@ -65,8 +67,8 @@ final class TrayIconResources {
         return loadScaledImage(width, height, TrayAsset.APP);
     }
 
-    static BufferedImage loadLinuxTrayImage(int width, int height) throws IOException {
-        return loadScaledImage(width, height, TrayAsset.LINUX_TRAY);
+    static BufferedImage loadLinuxTrayImage() throws IOException {
+        return loadBaseImage(DEFAULT_TRAY_SIZE, TrayAsset.LINUX_TRAY);
     }
 
     private static BufferedImage loadScaledImage(int width, int height, TrayAsset asset) throws IOException {
