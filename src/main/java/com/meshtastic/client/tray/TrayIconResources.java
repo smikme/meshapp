@@ -24,6 +24,7 @@ final class TrayIconResources {
     static final int[] BASE_ICON_SIZES = {16, 32, 64, 128, 256};
     static final int[] LINUX_TRAY_ICON_SIZES = {16, 20, 22, 24, 32, 48, 64};
     private static final int DEFAULT_TRAY_SIZE = 16;
+    private static final int LINUX_AWT_TRAY_TARGET_SIZE = 16;
     private static final int MACOS_STATUS_ICON_SIZE = 36;
 
     private enum TrayAsset {
@@ -44,9 +45,12 @@ final class TrayIconResources {
     }
 
     static Image loadAwtTrayImage(SystemTray tray) throws IOException {
+        if (OsDetect.isLinux()) {
+            return loadScaledImage(LINUX_AWT_TRAY_TARGET_SIZE, LINUX_AWT_TRAY_TARGET_SIZE, TrayAsset.LINUX);
+        }
+
         Dimension size = tray != null ? tray.getTrayIconSize() : new Dimension(DEFAULT_TRAY_SIZE, DEFAULT_TRAY_SIZE);
-        TrayAsset asset = OsDetect.isLinux() ? TrayAsset.LINUX : TrayAsset.APP;
-        return loadScaledImage(size.width, size.height, asset);
+        return loadScaledImage(size.width, size.height, TrayAsset.APP);
     }
 
     static Path extractMacOsTrayIcon() {
