@@ -216,7 +216,8 @@ public final class AppTrayManager {
     private AppTrayService createService() {
         return switch (OsDetect.current()) {
             case MACOS -> new MacOsNativeTrayService();
-            case WINDOWS, LINUX -> new AwtAppTrayService();
+            case WINDOWS -> new AwtAppTrayService();
+            case LINUX -> new LinuxGtkTrayService();
             default -> new NoOpTrayService();
         };
     }

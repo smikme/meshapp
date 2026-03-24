@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="256" height="256" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <title>MeshApp Linux tray icon</title>
+  <line x1="16" y1="6" x2="6" y2="26" stroke="#A29BFE" stroke-width="2.8" stroke-linecap="round"/>
+  <line x1="16" y1="6" x2="26" y2="26" stroke="#A29BFE" stroke-width="2.8" stroke-linecap="round"/>
+  <line x1="6" y1="26" x2="26" y2="26" stroke="#A29BFE" stroke-width="2.8" stroke-linecap="round"/>
+  <circle cx="16" cy="6" r="3.4" fill="#A29BFE"/>
+  <circle cx="6" cy="26" r="3.4" fill="#A29BFE"/>
+  <circle cx="26" cy="26" r="3.4" fill="#A29BFE"/>
+  <circle cx="26" cy="14" r="2.3" fill="#A29BFE"/>
+  <circle cx="6" cy="14" r="2.3" fill="#A29BFE"/>
+  <circle cx="16" cy="28" r="2.3" fill="#A29BFE"/>
+</svg>

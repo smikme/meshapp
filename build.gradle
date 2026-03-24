@@ -418,6 +418,36 @@ tasks.register('jpackage') {
 
 		// macOS: app-image → копируем Icon Composer ресурсы → DMG
 		def macBuild = os.isMacOsX()
+		File linuxResourceDir = null
+
+		if (os.isLinux()) {
+			linuxResourceDir = layout.buildDirectory.dir("jpackage/linux-resources").get().asFile
+			if (linuxResourceDir.exists()) {
+				linuxResourceDir.deleteDir()
+			}
+			linuxResourceDir.mkdirs()
+
+			def linuxLauncherIcon = new File(linuxResourceDir, 'MeshApp.png')
+			java.nio.file.Files.copy(
+				file('src/main/resources/logo/icon_512.png').toPath(),
+				linuxLauncherIcon.toPath(),
+				java.nio.file.StandardCopyOption.REPLACE_EXISTING
+			)
+
+			def linuxScriptsDir = file('src/jpackage/linux')
+			['postinstall', 'postrm'].each { scriptName ->
+				def source = new File(linuxScriptsDir, scriptName)
+				if (source.exists()) {
+					def target = new File(linuxResourceDir, scriptName)
+					java.nio.file.Files.copy(
+						source.toPath(),
+						target.toPath(),
+						java.nio.file.StandardCopyOption.REPLACE_EXISTING
+					)
+					target.setExecutable(true, false)
+				}
+			}
+		}
 
 		def args = [
 			jpackageBin,
@@ -451,7 +481,7 @@ tasks.register('jpackage') {
 				args << icnsFile.absolutePath
 			}
 		} else {
-			def pngFile = file('src/main/resources/logo/icon_256.png')
+			def pngFile = file('src/main/resources/logo/icon_512.png')
 			if (pngFile.exists()) {
 				args << '--icon'
 				args << pngFile.absolutePath
@@ -473,6 +503,10 @@ tasks.register('jpackage') {
 			args << '--linux-package-deps'
 			args << 'libasound2t64 | libasound2'
 			args << '--linux-shortcut'
+			if (linuxResourceDir != null) {
+				args << '--resource-dir'
+				args << linuxResourceDir.absolutePath
+			}
 		}
 
 		if (macBuild) {
