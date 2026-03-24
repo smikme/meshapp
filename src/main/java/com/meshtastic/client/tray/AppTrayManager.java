@@ -1,5 +1,6 @@
 package com.meshtastic.client.tray;
 
+import com.meshtastic.client.platform.NativeWindowHelper;
 import com.meshtastic.client.platform.OsDetect;
 import com.meshtastic.client.utils.AppPreferences;
 import javafx.application.Platform;
@@ -166,6 +167,9 @@ public final class AppTrayManager {
             Platform.runLater(() -> {
                 if (exiting.get()) {
                     return;
+                }
+                if (OsDetect.isWindows()) {
+                    NativeWindowHelper.applyNativeEffects(stage, AppPreferences.isDarkMode());
                 }
                 stage.toFront();
                 stage.requestFocus();
