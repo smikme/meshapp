@@ -84,7 +84,7 @@ final class MacOsTrayBridge {
         }
 
         try {
-            Path extracted = NativeResourceLoader.extractResource("/logo/icon_16.png", "meshapp-tray-icon-", ".png");
+            Path extracted = TrayIconResources.extractMacOsTrayIcon();
             trayIconPath = extracted;
             return extracted.toAbsolutePath().toString();
         } catch (RuntimeException e) {

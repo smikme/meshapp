@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="1024" height="1024" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <title>MeshApp official icon</title>
+  <line x1="16" y1="6" x2="26" y2="14" stroke="#A29BFE" stroke-width="1" opacity="0.3"/>
+  <line x1="16" y1="6" x2="6" y2="14" stroke="#A29BFE" stroke-width="1" opacity="0.3"/>
+  <line x1="6" y1="14" x2="6" y2="26" stroke="#A29BFE" stroke-width="1" opacity="0.3"/>
+  <line x1="26" y1="14" x2="26" y2="26" stroke="#A29BFE" stroke-width="1" opacity="0.3"/>
+  <line x1="6" y1="26" x2="16" y2="28" stroke="#A29BFE" stroke-width="1" opacity="0.3"/>
+  <line x1="26" y1="26" x2="16" y2="28" stroke="#A29BFE" stroke-width="1" opacity="0.3"/>
+  <line x1="16" y1="6" x2="6" y2="26" stroke="#A29BFE" stroke-width="1.5" opacity="0.4"/>
+  <line x1="16" y1="6" x2="26" y2="26" stroke="#A29BFE" stroke-width="1.5" opacity="0.4"/>
+  <line x1="6" y1="26" x2="26" y2="26" stroke="#A29BFE" stroke-width="1.5" opacity="0.4"/>
+  <circle cx="16" cy="6" r="3" fill="#A29BFE"/>
+  <circle cx="6" cy="26" r="3" fill="#A29BFE"/>
+  <circle cx="26" cy="26" r="3" fill="#A29BFE"/>
+  <circle cx="26" cy="14" r="2.5" fill="#A29BFE" opacity="0.6"/>
+  <circle cx="6" cy="14" r="2.5" fill="#A29BFE" opacity="0.6"/>
+  <circle cx="16" cy="28" r="2.5" fill="#A29BFE" opacity="0.6"/>
+</svg>

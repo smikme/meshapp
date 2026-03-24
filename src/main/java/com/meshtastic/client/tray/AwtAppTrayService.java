@@ -3,7 +3,6 @@ package com.meshtastic.client.tray;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.imageio.ImageIO;
 import java.awt.AWTException;
 import java.awt.Image;
 import java.awt.MenuItem;
@@ -11,7 +10,6 @@ import java.awt.PopupMenu;
 import java.awt.SystemTray;
 import java.awt.TrayIcon;
 import java.io.IOException;
-import java.util.Objects;
 
 /**
  * Tray icon для Windows/Linux через AWT {@link SystemTray}.
@@ -33,9 +31,8 @@ public class AwtAppTrayService implements AppTrayService {
         }
 
         try {
-            Image image = ImageIO.read(Objects.requireNonNull(
-                    getClass().getResourceAsStream("/logo/icon_32.png"),
-                    "Tray icon resource /logo/icon_32.png is missing"));
+            SystemTray systemTray = SystemTray.getSystemTray();
+            Image image = TrayIconResources.loadAwtTrayImage(systemTray);
 
             PopupMenu menu = new PopupMenu();
             MenuItem openItem = new MenuItem("Открыть");
@@ -50,7 +47,7 @@ public class AwtAppTrayService implements AppTrayService {
             icon.setImageAutoSize(true);
             icon.addActionListener(e -> onActivate.run());
 
-            SystemTray.getSystemTray().add(icon);
+            systemTray.add(icon);
             trayIcon = icon;
             return true;
         } catch (AWTException | IOException e) {

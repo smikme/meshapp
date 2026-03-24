@@ -80,21 +80,21 @@ static NSString *meshapp_tray_to_ns_string(JNIEnv *env, jstring value) {
 }
 
 static NSImage *meshapp_tray_load_image(NSString *iconPath) {
-    if (@available(macOS 11.0, *)) {
-        NSImage *symbol = [NSImage imageWithSystemSymbolName:@"antenna.radiowaves.left.and.right"
-                                      accessibilityDescription:@"MeshApp"];
-        if (symbol != nil) {
-            symbol.template = YES;
-            return symbol;
-        }
-    }
-
     if (iconPath != nil && iconPath.length > 0) {
         NSImage *image = [[NSImage alloc] initWithContentsOfFile:iconPath];
         if (image != nil) {
             image.template = YES;
             [image setSize:NSMakeSize(18.0, 18.0)];
             return image;
+        }
+    }
+
+    if (@available(macOS 11.0, *)) {
+        NSImage *symbol = [NSImage imageWithSystemSymbolName:@"antenna.radiowaves.left.and.right"
+                                      accessibilityDescription:@"MeshApp"];
+        if (symbol != nil) {
+            symbol.template = YES;
+            return symbol;
         }
     }
 
