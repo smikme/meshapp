@@ -4,6 +4,7 @@ import com.meshtastic.client.MeshApp;
 import com.meshtastic.client.modal.ModalPane;
 import com.meshtastic.client.modal.Toast;
 import com.meshtastic.client.platform.OsDetect;
+import com.meshtastic.client.tray.AppTrayManager;
 import com.meshtastic.client.utils.AppPreferences;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
@@ -125,10 +126,7 @@ public class RootPane extends BorderPane {
         });
 
         Button minimizeBtn = createWindowButton("window-btn-minimize");
-        minimizeBtn.setOnAction(e -> {
-            Stage stage = MeshApp.getPrimaryStage();
-            if (stage != null) { stage.setIconified(true); }
-        });
+        minimizeBtn.setOnAction(e -> AppTrayManager.getInstance().requestMinimize());
 
         Button maximizeBtn = createWindowButton("window-btn-maximize");
         maximizeBtn.setOnAction(e -> toggleMaximize());

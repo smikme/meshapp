@@ -154,6 +154,52 @@ if (org.gradle.internal.os.OperatingSystem.current().isMacOsX()) {
 		}
 	}
 	tasks.named('processResources') { dependsOn 'buildSerialNative' }
+
+	tasks.register('buildTrayNative') {
+		group = 'build'
+		description = 'Собрать libmeshapp-tray.dylib для macOS status item'
+
+		def nativeDir = file('native/macos-tray')
+		def resourcePrefix = macOsJnaResourcePrefix()
+		def outputDir = layout.buildDirectory.dir("generated/resources/${resourcePrefix}").get().asFile
+		def dylibDest = new File(outputDir, 'libmeshapp-tray.dylib')
+
+		inputs.files(fileTree(nativeDir) { include '*.m', '*.h' })
+		outputs.file(dylibDest)
+
+		doLast {
+			outputDir.mkdirs()
+
+			def javaLauncher = javaToolchains.launcherFor {
+				languageVersion = JavaLanguageVersion.of(21)
+			}.get()
+			def javaHome = javaLauncher.executablePath.asFile.parentFile.parentFile.absolutePath
+
+			def compile = new ProcessBuilder(
+				'cc',
+				'-dynamiclib',
+				'-fobjc-arc',
+				'-fblocks',
+				'-O2',
+				'-Wall',
+				'-Wextra',
+				'-fvisibility=hidden',
+				'-I', "${javaHome}/include",
+				'-I', "${javaHome}/include/darwin",
+				'-framework', 'Cocoa',
+				'meshapp_tray.m',
+				'-o', dylibDest.absolutePath
+			).directory(nativeDir).redirectErrorStream(true).start()
+			def compileOutput = compile.inputStream.text
+			compile.waitFor()
+			if (compileOutput) logger.lifecycle(compileOutput.trim())
+			if (compile.exitValue() != 0) {
+				throw new GradleException("macOS tray native build failed (exit ${compile.exitValue()})")
+			}
+			logger.lifecycle("buildTrayNative: dylib собран в ${dylibDest}")
+		}
+	}
+	tasks.named('processResources') { dependsOn 'buildTrayNative' }
 }
 
 // ============================================================
@@ -642,6 +688,25 @@ ${jvmArgsStr} \\
     ${application.mainClass.get()}
 """
 			script.setExecutable(true)
+
+			def signArgs = ['codesign', '--force', '--deep', '--sign', '-', appDir.absolutePath]
+			def signProc = new ProcessBuilder(signArgs).redirectErrorStream(true).start()
+			def signOut = signProc.inputStream.text
+			signProc.waitFor()
+			if (signOut) logger.lifecycle(signOut.trim())
+			if (signProc.exitValue() != 0) {
+				throw new GradleException("runMac codesign failed with exit code ${signProc.exitValue()}")
+			}
+
+			def verifyProc = new ProcessBuilder(
+				'codesign', '--verify', '--deep', '--strict', appDir.absolutePath
+			).redirectErrorStream(true).start()
+			def verifyOut = verifyProc.inputStream.text
+			verifyProc.waitFor()
+			if (verifyOut) logger.lifecycle(verifyOut.trim())
+			if (verifyProc.exitValue() != 0) {
+				throw new GradleException("runMac signature verification failed with exit code ${verifyProc.exitValue()}")
+			}
 
 			// Запустить .app через 'open -W' (ждём завершения)
 			def proc = ['open', '-W', appDir.absolutePath].execute()

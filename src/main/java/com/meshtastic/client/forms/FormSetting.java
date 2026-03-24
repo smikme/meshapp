@@ -350,10 +350,15 @@ public class FormSetting extends Form {
         disableEffectsCb.selectedProperty().addListener((obs, old, val) ->
                 AppPreferences.setDisableEffects(val));
 
+        CheckBox minimizeToTrayCb = new CheckBox("Минимизация в трей");
+        minimizeToTrayCb.setSelected(AppPreferences.isMinimizeToTray());
+        minimizeToTrayCb.selectedProperty().addListener((obs, old, val) ->
+                AppPreferences.setMinimizeToTray(val));
+
         Label restartNote = new Label("Изменения вступят в силу после перезапуска приложения");
         restartNote.setStyle("-fx-opacity: 0.6; -fx-font-size: 11;");
 
-        VBox appearanceGroup = new VBox(8, appearanceHeader, disableEffectsCb, restartNote);
+        VBox appearanceGroup = new VBox(8, appearanceHeader, disableEffectsCb, minimizeToTrayCb, restartNote);
 
         // --- Группа «Интеграции» ---
         Label integrationsHeader = new Label("Интеграции");

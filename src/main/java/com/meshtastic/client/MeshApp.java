@@ -11,6 +11,7 @@ import com.meshtastic.client.service.UpdateCheckService;
 import com.meshtastic.client.system.FormManager;
 import com.meshtastic.client.system.RootPane;
 import com.meshtastic.client.themes.ThemeManager;
+import com.meshtastic.client.tray.AppTrayManager;
 import com.meshtastic.client.utils.AppPreferences;
 import javafx.application.Application;
 import javafx.collections.ObservableList;
@@ -109,6 +110,7 @@ public class MeshApp extends Application {
 
         stage.setScene(scene);
         stage.show();
+        AppTrayManager.getInstance().initialize(stage);
 
         // Восстановить maximize ПОСЛЕ show()
         if (AppPreferences.isWindowMaximized()) {
@@ -124,6 +126,7 @@ public class MeshApp extends Application {
 
         // Сохранять состояние окна при закрытии (setOnHiding срабатывает и при
         // программном stage.close() из кастомного title bar, и при нативном закрытии)
+        stage.setOnCloseRequest(e -> javafx.application.Platform.setImplicitExit(true));
         stage.setOnHiding(e -> saveWindowState(stage, rootPane));
 
         // Проверка обновлений (асинхронно, не блокирует запуск)
@@ -181,6 +184,7 @@ public class MeshApp extends Application {
 
     @Override
     public void stop() {
+        AppTrayManager.getInstance().dispose();
         ConnectionManager.getInstance().shutdownAll();
         System.exit(0);
     }
