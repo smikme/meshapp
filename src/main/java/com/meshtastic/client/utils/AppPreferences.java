@@ -22,6 +22,7 @@ public class AppPreferences {
     public static final String KEY_DISABLE_TRANSPARENCY = "disableTransparency";
     public static final String KEY_DISABLE_EFFECTS = "disableEffects";
     public static final String KEY_CHECK_UPDATES = "checkUpdates";
+    public static final String KEY_MINIMIZE_TO_TRAY = "minimizeToTray";
 
     private static Preferences state;
 
@@ -79,6 +80,14 @@ public class AppPreferences {
 
     public static void setCheckUpdates(boolean value) {
         state.putBoolean(KEY_CHECK_UPDATES, value);
+    }
+
+    public static boolean isMinimizeToTray() {
+        return state.getBoolean(KEY_MINIMIZE_TO_TRAY, false);
+    }
+
+    public static void setMinimizeToTray(boolean value) {
+        state.putBoolean(KEY_MINIMIZE_TO_TRAY, value);
     }
 
     public static List<String> getRecentSearch(boolean favorite) {

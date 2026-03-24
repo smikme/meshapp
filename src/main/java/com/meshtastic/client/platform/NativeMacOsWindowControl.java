@@ -1,11 +1,14 @@
 package com.meshtastic.client.platform;
 
+import com.meshtastic.client.connection.ble.macos.ObjCRuntime;
 import com.sun.jna.*;
 import javafx.stage.Window;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.lang.reflect.Method;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * macOS: NSVisualEffectView через JNA + Objective-C runtime (libobjc.dylib).
@@ -20,13 +23,24 @@ import java.lang.reflect.Method;
 public class NativeMacOsWindowControl {
 
     private static final Logger log = LoggerFactory.getLogger(NativeMacOsWindowControl.class);
+    private static final String MINIATURIZE_OBSERVER_CLASS_NAME = "MeshAppTrayMiniaturizeObserver";
+    private static final String MINIATURIZE_NOTIFICATION_NAME = "NSWindowDidMiniaturizeNotification";
 
     private static final NativeLibrary OBJC = NativeLibrary.getInstance("objc");
     private static final Function OBJC_MSG_SEND = OBJC.getFunction("objc_msgSend");
     private static final Function GET_CLASS = OBJC.getFunction("objc_getClass");
     private static final Function SEL_REGISTER = OBJC.getFunction("sel_registerName");
 
+    private static final Map<Long, Runnable> MINIATURIZE_HANDLERS = new ConcurrentHashMap<>();
+
+    private static long miniaturizeObserverClass;
+    private static Callback miniaturizeCallback;
+
     private final long nsWindow;
+
+    static {
+        initMiniaturizeObserverClass();
+    }
 
     public NativeMacOsWindowControl(Window window) {
         this.nsWindow = extractNsWindow(window);
@@ -231,6 +245,97 @@ public class NativeMacOsWindowControl {
     }
 
     /**
+     * Скрыть окно из window list, не вводя его предварительно в native miniaturized-state.
+     */
+    public void hideToTray() {
+        if (nsWindow == 0) { return; }
+        try {
+            msgSendId(nsWindow, "orderOut:", 0L);
+        } catch (Throwable t) {
+            log.error("Не удалось скрыть NSWindow в tray-state", t);
+        }
+    }
+
+    /**
+     * Увести уже miniaturized окно в tray-state, чтобы оно не оставалось в Dock.
+     */
+    public void hideMiniaturizedToTray() {
+        if (nsWindow == 0) { return; }
+        try {
+            msgSendId(nsWindow, "deminiaturize:", 0L);
+            msgSendId(nsWindow, "orderOut:", 0L);
+        } catch (Throwable t) {
+            log.error("Не удалось перевести miniaturized NSWindow в tray-state", t);
+        }
+    }
+
+    /**
+     * Вернуть ранее скрытое через orderOut окно на экран.
+     */
+    public void restoreFromTray() {
+        if (nsWindow == 0) { return; }
+        try {
+            msgSendId(nsWindow, "deminiaturize:", 0L);
+            msgSendId(nsWindow, "makeKeyAndOrderFront:", 0L);
+            msgSend(nsWindow, "orderFrontRegardless");
+        } catch (Throwable t) {
+            log.error("Не удалось восстановить NSWindow из tray", t);
+        }
+    }
+
+    /**
+     * Нативный перехват минимизации окна macOS.
+     * Нужен для DECORATED окна, где native traffic-light minimise может не дойти до JavaFX iconifiedProperty.
+     */
+    public long installMiniaturizeObserver(Runnable onMiniaturize) {
+        if (nsWindow == 0 || onMiniaturize == null) {
+            return 0;
+        }
+
+        try {
+            long observer = ObjCRuntime.allocInitClass(miniaturizeObserverClass);
+            if (observer == 0) {
+                return 0;
+            }
+
+            MINIATURIZE_HANDLERS.put(observer, onMiniaturize);
+
+            long center = msgSend(cls("NSNotificationCenter"), "defaultCenter");
+            long name = createNSString(MINIATURIZE_NOTIFICATION_NAME);
+            OBJC_MSG_SEND.invokeLong(new Object[]{
+                    center,
+                    sel("addObserver:selector:name:object:"),
+                    observer,
+                    sel("windowDidMiniaturize:"),
+                    name,
+                    nsWindow
+            });
+            return observer;
+        } catch (Throwable t) {
+            log.error("Не удалось установить observer минимизации NSWindow", t);
+            return 0;
+        }
+    }
+
+    public static void removeMiniaturizeObserver(long observer) {
+        if (observer == 0) {
+            return;
+        }
+
+        MINIATURIZE_HANDLERS.remove(observer);
+        try {
+            long center = msgSend(cls("NSNotificationCenter"), "defaultCenter");
+            OBJC_MSG_SEND.invokeLong(new Object[]{
+                    center,
+                    sel("removeObserver:"),
+                    observer
+            });
+        } catch (Throwable t) {
+            log.warn("Не удалось удалить observer минимизации NSWindow", t);
+        }
+    }
+
+    /**
      * Скрыть NSTitlebarContainerView — контейнер нативных кнопок и иконки в titlebar.
      * Ищем его среди subviews contentView.superview (themeFrame).
      */
@@ -325,5 +430,26 @@ public class NativeMacOsWindowControl {
         return OBJC_MSG_SEND.invokeLong(new Object[]{
                 alloc, sel("initWithUTF8String:"), javaString
         });
+    }
+
+    private static synchronized void initMiniaturizeObserverClass() {
+        if (miniaturizeObserverClass != 0) {
+            return;
+        }
+
+        miniaturizeCallback = (MiniaturizeObserverCallback) (self, cmd, notification) -> {
+            Runnable handler = MINIATURIZE_HANDLERS.get(self);
+            if (handler != null) {
+                handler.run();
+            }
+        };
+
+        miniaturizeObserverClass = ObjCRuntime.createClass(MINIATURIZE_OBSERVER_CLASS_NAME, "NSObject");
+        ObjCRuntime.addMethod(miniaturizeObserverClass, "windowDidMiniaturize:", miniaturizeCallback, "v@:@");
+        ObjCRuntime.registerClass(miniaturizeObserverClass);
+    }
+
+    private interface MiniaturizeObserverCallback extends Callback {
+        void invoke(long self, long cmd, long notification);
     }
 }
