@@ -1,6 +1,5 @@
 package com.meshtastic.client.tray;
 
-import com.meshtastic.client.platform.OsDetect;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -45,7 +44,7 @@ public class AwtAppTrayService implements AppTrayService {
             menu.add(exitItem);
 
             TrayIcon icon = new TrayIcon(image, "MeshApp", menu);
-            icon.setImageAutoSize(!OsDetect.isLinux());
+            icon.setImageAutoSize(true);
             icon.addActionListener(e -> onActivate.run());
 
             systemTray.add(icon);
