@@ -144,11 +144,67 @@ public class AppPreferences {
 
     public static final String KEY_CHAT_DIVIDER = "chatDividerPos";
     public static final String KEY_NODES_DIVIDER = "nodesDividerPos";
+    private static final String NODE_CHAT_SCROLL = "chatScroll";
 
     public static double getChatDividerPos() { return state.getDouble(KEY_CHAT_DIVIDER, 0.35); }
     public static void setChatDividerPos(double pos) { state.putDouble(KEY_CHAT_DIVIDER, pos); }
 
     public static double getNodesDividerPos() { return state.getDouble(KEY_NODES_DIVIDER, 0.38); }
     public static void setNodesDividerPos(double pos) { state.putDouble(KEY_NODES_DIVIDER, pos); }
+
+    public static final class ChatScrollState {
+        private final long anchorDbId;
+        private final double anchorOffset;
+        private final boolean atBottom;
+
+        public ChatScrollState(long anchorDbId, double anchorOffset, boolean atBottom) {
+            this.anchorDbId = anchorDbId;
+            this.anchorOffset = anchorOffset;
+            this.atBottom = atBottom;
+        }
+
+        public long getAnchorDbId() { return anchorDbId; }
+        public double getAnchorOffset() { return anchorOffset; }
+        public boolean isAtBottom() { return atBottom; }
+    }
+
+    public static void saveChatScrollState(String ownerId, String chatId,
+                                           long anchorDbId, double anchorOffset, boolean atBottom) {
+        chatScrollNode().put(composeChatScrollKey(ownerId, chatId),
+                anchorDbId + "|" + anchorOffset + "|" + (atBottom ? "1" : "0"));
+    }
+
+    public static ChatScrollState loadChatScrollState(String ownerId, String chatId) {
+        String raw = chatScrollNode().get(composeChatScrollKey(ownerId, chatId), null);
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+
+        String[] parts = raw.split("\\|", -1);
+        if (parts.length != 3) {
+            return null;
+        }
+
+        try {
+            long anchorDbId = Long.parseLong(parts[0]);
+            double anchorOffset = Double.parseDouble(parts[1]);
+            boolean atBottom = "1".equals(parts[2]);
+            return new ChatScrollState(anchorDbId, anchorOffset, atBottom);
+        } catch (NumberFormatException ignored) {
+            return null;
+        }
+    }
+
+    public static void removeChatScrollState(String ownerId, String chatId) {
+        chatScrollNode().remove(composeChatScrollKey(ownerId, chatId));
+    }
+
+    private static Preferences chatScrollNode() {
+        return state.node(NODE_CHAT_SCROLL);
+    }
+
+    private static String composeChatScrollKey(String ownerId, String chatId) {
+        return (ownerId != null ? ownerId : "") + "|" + (chatId != null ? chatId : "");
+    }
 
 }
