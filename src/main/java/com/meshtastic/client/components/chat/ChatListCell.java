@@ -47,7 +47,7 @@ public class ChatListCell extends ListCell<ChatItem> {
         avatarPane.setMinSize(40, 40);
         avatarPane.setMaxSize(40, 40);
         avatarPane.getStyleClass().add("chat-avatar");
-        avatarLabel.setStyle("-fx-text-fill: white; -fx-font-weight: bold;");
+        avatarLabel.setStyle("-fx-text-fill: white; -fx-font-weight: bold; -fx-padding: 0;");
         avatarPane.getChildren().add(avatarLabel);
 
         nameLabel.setFont(Font.font("Roboto", FontWeight.BOLD, 14));
@@ -132,7 +132,7 @@ public class ChatListCell extends ListCell<ChatItem> {
 
         avatarLabel.setText(item.getAvatarText());
         avatarLabel.setFont(Font.font("Roboto", FontWeight.BOLD,
-                NodeUtils.avatarFontSize(item.getAvatarText().length(), 40)));
+                NodeUtils.avatarFontSize(item.getAvatarText(), 40)));
         avatarPane.setStyle("-fx-background-color: " + item.getAvatarColor()
                 + "; -fx-background-radius: 20;");
 

@@ -361,8 +361,8 @@ public class MessageBubbleFactory {
         }
         Label label = new Label(text);
         label.setFont(Font.font("Roboto", FontWeight.BOLD,
-                NodeUtils.avatarFontSize(text.length(), 28)));
-        label.setStyle("-fx-text-fill: white;");
+                NodeUtils.avatarFontSize(text, 28)));
+        label.setStyle("-fx-text-fill: white; -fx-padding: 0;");
         avatar.setStyle("-fx-background-color: " + color
                 + "; -fx-background-radius: 14;");
         avatar.getChildren().add(label);

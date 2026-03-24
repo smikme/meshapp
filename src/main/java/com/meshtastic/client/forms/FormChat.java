@@ -316,7 +316,7 @@ public class FormChat extends Form {
         headerAvatarPane.setMinSize(36, 36);
         headerAvatarPane.setMaxSize(36, 36);
         headerAvatarLabel = new Label();
-        headerAvatarLabel.setStyle("-fx-text-fill: white; -fx-font-weight: bold;");
+        headerAvatarLabel.setStyle("-fx-text-fill: white; -fx-font-weight: bold; -fx-padding: 0;");
         headerAvatarPane.getChildren().add(headerAvatarLabel);
 
         headerNameLabel = new Label();
@@ -488,7 +488,7 @@ public class FormChat extends Form {
         // Обновить заголовок
         headerAvatarLabel.setText(chat.getAvatarText());
         headerAvatarLabel.setFont(Font.font("Roboto", FontWeight.BOLD,
-                NodeUtils.avatarFontSize(chat.getAvatarText().length(), 36)));
+                NodeUtils.avatarFontSize(chat.getAvatarText(), 36)));
         headerAvatarPane.setStyle("-fx-background-color: " + chat.getAvatarColor() +
                 "; -fx-background-radius: 18;");
         headerNameLabel.setText(chat.getDisplayName());

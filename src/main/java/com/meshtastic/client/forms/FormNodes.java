@@ -554,7 +554,7 @@ public class FormNodes extends Form {
             avatarPane.setMinSize(40, 40);
             avatarPane.setMaxSize(40, 40);
             avatarPane.getStyleClass().add("node-avatar");
-            avatarLabel.setStyle("-fx-text-fill: white; -fx-font-weight: bold;");
+            avatarLabel.setStyle("-fx-text-fill: white; -fx-font-weight: bold; -fx-padding: 0;");
             avatarPane.getChildren().add(avatarLabel);
 
             nameLabel.setFont(Font.font("Roboto", FontWeight.BOLD, 14));
@@ -644,7 +644,7 @@ public class FormNodes extends Form {
                         : displayName.toUpperCase(Locale.ROOT);
             }
             avatarLabel.setText(avatarText);
-            avatarLabel.setFont(Font.font("Roboto", FontWeight.BOLD, NodeUtils.avatarFontSize(avatarText.length(), 40)));
+            avatarLabel.setFont(Font.font("Roboto", FontWeight.BOLD, NodeUtils.avatarFontSize(avatarText, 40)));
 
             String color = NodeUtils.roleColor(node.getRole());
             avatarPane.setStyle("-fx-background-color: " + color + "; -fx-background-radius: 20;");

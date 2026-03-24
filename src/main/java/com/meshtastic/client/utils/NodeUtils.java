@@ -17,6 +17,9 @@ import javafx.scene.image.ImageView;
 import javafx.scene.input.Clipboard;
 import javafx.scene.input.ClipboardContent;
 import javafx.scene.layout.HBox;
+import javafx.scene.text.Font;
+import javafx.scene.text.FontWeight;
+import javafx.scene.text.Text;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -109,6 +112,35 @@ public final class NodeUtils {
         if (charCount == 2) { return base * 0.85; }
         if (charCount == 3) { return base * 0.7; }
         return base * 0.6; // 4+
+    }
+
+    /**
+     * Размер шрифта аватара с учётом реальной ширины текста.
+     * Это убирает platform-specific clipping/ellipsis у 4-символьных аватаров
+     * вроде {@code #GAM} в фиксированном круге.
+     */
+    public static double avatarFontSize(String text, int circleSize) {
+        if (text == null || text.isEmpty()) {
+            return avatarFontSize(1, circleSize);
+        }
+
+        double size = avatarFontSize(text.length(), circleSize);
+        double minSize = Math.max(8.0, circleSize * 0.24);
+        double targetWidth = circleSize * 0.78;
+        double targetHeight = circleSize * 0.44;
+
+        while (size > minSize) {
+            Text probe = new Text(text);
+            probe.setFont(Font.font("Roboto", FontWeight.BOLD, size));
+
+            if (probe.getLayoutBounds().getWidth() <= targetWidth
+                    && probe.getLayoutBounds().getHeight() <= targetHeight) {
+                return size;
+            }
+            size -= 0.5;
+        }
+
+        return minSize;
     }
 
     /**
