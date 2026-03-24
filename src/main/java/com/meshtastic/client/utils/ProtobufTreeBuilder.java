@@ -27,6 +27,7 @@ import java.util.stream.Collectors;
 public final class ProtobufTreeBuilder {
 
     private static final Logger log = LoggerFactory.getLogger(ProtobufTreeBuilder.class);
+    private static final int MIN_VISIBLE_REPEATED_BYTES_SLOTS = 3;
 
     /** Русские названия секций конфига */
     private static final Map<String, String> SECTION_NAMES = Map.ofEntries(
@@ -125,12 +126,16 @@ public final class ProtobufTreeBuilder {
     private static void addFieldsToTree(TreeItem<ConfigTreeItem> parent, Message message,
                                           String configType, int variantNumber) {
         for (FieldDescriptor fd : message.getDescriptorForType().getFields()) {
-            // Пропускаем repeated поля (кроме repeated bytes — для ключей шифрования)
-            if (fd.isRepeated() && fd.getType() != FieldDescriptor.Type.BYTES) { continue; }
-
             String fieldName = fd.getName();
             String displayName = humanize(fieldName);
             Object value = message.getField(fd);
+
+            if (fd.isRepeated()) {
+                if (fd.getType() == FieldDescriptor.Type.BYTES) {
+                    parent.getChildren().add(buildRepeatedBytesGroup(fd, value, configType, variantNumber, displayName));
+                }
+                continue;
+            }
 
             if (fd.getType() == FieldDescriptor.Type.MESSAGE) {
                 // Вложенная группа — рекурсия
@@ -188,23 +193,56 @@ public final class ProtobufTreeBuilder {
                         null, fd, configType, variantNumber);
                 parent.getChildren().add(new TreeItem<>(item));
             } else if (fd.getType() == FieldDescriptor.Type.BYTES) {
-                String base64Value;
-                if (fd.isRepeated()) {
-                    @SuppressWarnings("unchecked")
-                    List<ByteString> bytesList = (List<ByteString>) value;
-                    base64Value = bytesList.stream()
-                            .map(bs -> Base64.getEncoder().encodeToString(bs.toByteArray()))
-                            .collect(Collectors.joining(", "));
-                } else {
-                    ByteString bs = (ByteString) value;
-                    base64Value = Base64.getEncoder().encodeToString(bs.toByteArray());
-                }
+                ByteString bs = (ByteString) value;
+                String base64Value = Base64.getEncoder().encodeToString(bs.toByteArray());
                 ConfigTreeItem item = new ConfigTreeItem(
                         displayName, fieldName, base64Value, String.class,
                         null, fd, configType, variantNumber);
                 parent.getChildren().add(new TreeItem<>(item));
             }
         }
+    }
+
+    private static TreeItem<ConfigTreeItem> buildRepeatedBytesGroup(FieldDescriptor fd,
+                                                                    Object value,
+                                                                    String configType,
+                                                                    int variantNumber,
+                                                                    String displayName) {
+        ConfigTreeItem groupData = new ConfigTreeItem(displayName, fd.getName(), fd, configType, variantNumber);
+        TreeItem<ConfigTreeItem> groupItem = new TreeItem<>(groupData);
+        groupItem.setExpanded(true);
+        syncRepeatedBytesGroup(groupItem, fd, value, configType, variantNumber, displayName);
+        return groupItem;
+    }
+
+    private static void syncRepeatedBytesGroup(TreeItem<ConfigTreeItem> groupItem,
+                                               FieldDescriptor fd,
+                                               Object value,
+                                               String configType,
+                                               int variantNumber,
+                                               String displayName) {
+        List<String> base64Values = toBase64Values(value);
+        int slotCount = Math.max(base64Values.size() + 1, MIN_VISIBLE_REPEATED_BYTES_SLOTS);
+        groupItem.getChildren().clear();
+        for (int i = 0; i < slotCount; i++) {
+            String slotValue = i < base64Values.size() ? base64Values.get(i) : "";
+            String slotName = displayName + " " + (i + 1);
+            ConfigTreeItem item = new ConfigTreeItem(
+                    slotName, fd.getName(), slotValue, String.class,
+                    null, fd, configType, variantNumber);
+            groupItem.getChildren().add(new TreeItem<>(item));
+        }
+    }
+
+    private static List<String> toBase64Values(Object value) {
+        if (!(value instanceof List<?>)) {
+            return List.of();
+        }
+        @SuppressWarnings("unchecked")
+        List<ByteString> bytesList = (List<ByteString>) value;
+        return bytesList.stream()
+                .map(bs -> Base64.getEncoder().encodeToString(bs.toByteArray()))
+                .collect(Collectors.toList());
     }
 
     /**
@@ -275,6 +313,10 @@ public final class ProtobufTreeBuilder {
             ConfigTreeItem item = child.getValue();
             if (item.isCategory()) {
                 FieldDescriptor groupFd = item.getFieldDescriptor();
+                if (groupFd != null && groupFd.isRepeated() && groupFd.getType() == FieldDescriptor.Type.BYTES) {
+                    applyRepeatedBytesValues(child, builder, groupFd);
+                    continue;
+                }
                 if (groupFd == null || groupFd.isRepeated() || groupFd.getType() != FieldDescriptor.Type.MESSAGE) {
                     continue;
                 }
@@ -353,6 +395,32 @@ public final class ProtobufTreeBuilder {
         }
     }
 
+    private static void applyRepeatedBytesValues(TreeItem<ConfigTreeItem> groupItem,
+                                                 Message.Builder builder,
+                                                 FieldDescriptor fieldDescriptor) {
+        FieldDescriptor builderFd = builder.getDescriptorForType().findFieldByName(fieldDescriptor.getName());
+        if (builderFd == null || !builderFd.isRepeated() || builderFd.getType() != FieldDescriptor.Type.BYTES) {
+            return;
+        }
+
+        builder.clearField(builderFd);
+        for (TreeItem<ConfigTreeItem> child : groupItem.getChildren()) {
+            ConfigTreeItem valueItem = child.getValue();
+            if (valueItem == null || valueItem.getValue() == null) {
+                continue;
+            }
+            String base64Str = valueItem.getValue().toString().trim();
+            if (base64Str.isEmpty()) {
+                continue;
+            }
+            try {
+                builder.addRepeatedField(builderFd, ByteString.copyFrom(Base64.getDecoder().decode(base64Str)));
+            } catch (IllegalArgumentException e) {
+                log.trace("Skipping invalid repeated bytes field '{}': {}", builderFd.getName(), e.getMessage());
+            }
+        }
+    }
+
     /**
      * Применяет значения protobuf Message к уже построенному дереву.
      * Используется при импорте конфигурации из файла поверх текущего редактора.
@@ -370,6 +438,15 @@ public final class ProtobufTreeBuilder {
 
             if (item.isCategory()) {
                 FieldDescriptor fd = item.getFieldDescriptor();
+                if (fd != null && fd.isRepeated() && fd.getType() == FieldDescriptor.Type.BYTES) {
+                    FieldDescriptor messageFd = message.getDescriptorForType().findFieldByName(fd.getName());
+                    if (messageFd == null || !messageFd.isRepeated() || messageFd.getType() != FieldDescriptor.Type.BYTES) {
+                        continue;
+                    }
+                    syncRepeatedBytesGroup(child, messageFd, message.getField(messageFd),
+                            item.getConfigType(), item.getConfigVariantNumber(), item.getName());
+                    continue;
+                }
                 if (fd == null || fd.isRepeated() || fd.getType() != FieldDescriptor.Type.MESSAGE) {
                     continue;
                 }
