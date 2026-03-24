@@ -1,5 +1,7 @@
 package com.meshtastic.client.tray;
 
+import com.meshtastic.client.platform.OsDetect;
+
 import javax.imageio.ImageIO;
 import java.awt.AlphaComposite;
 import java.awt.Dimension;
@@ -20,17 +22,36 @@ import java.util.Objects;
 final class TrayIconResources {
 
     static final int[] BASE_ICON_SIZES = {16, 32, 64, 128, 256};
+    static final int[] LINUX_TRAY_ICON_SIZES = {16, 20, 22, 24, 32, 48, 64};
     private static final int DEFAULT_TRAY_SIZE = 16;
     private static final int MACOS_STATUS_ICON_SIZE = 36;
 
+    private enum TrayAsset {
+        APP("/logo/icon_%d.png", BASE_ICON_SIZES),
+        LINUX("/tray/linux/icon_%d.png", LINUX_TRAY_ICON_SIZES);
+
+        private final String pathTemplate;
+        private final int[] sizes;
+
+        TrayAsset(String pathTemplate, int[] sizes) {
+            this.pathTemplate = pathTemplate;
+            this.sizes = sizes;
+        }
+
+        String resourcePath(int size) {
+            return pathTemplate.formatted(size);
+        }
+    }
+
     static Image loadAwtTrayImage(SystemTray tray) throws IOException {
         Dimension size = tray != null ? tray.getTrayIconSize() : new Dimension(DEFAULT_TRAY_SIZE, DEFAULT_TRAY_SIZE);
-        return loadScaledImage(size.width, size.height);
+        TrayAsset asset = OsDetect.isLinux() ? TrayAsset.LINUX : TrayAsset.APP;
+        return loadScaledImage(size.width, size.height, asset);
     }
 
     static Path extractMacOsTrayIcon() {
         try {
-            BufferedImage image = loadScaledImage(MACOS_STATUS_ICON_SIZE, MACOS_STATUS_ICON_SIZE);
+            BufferedImage image = loadScaledImage(MACOS_STATUS_ICON_SIZE, MACOS_STATUS_ICON_SIZE, TrayAsset.APP);
             Path extracted = Files.createTempFile("meshapp-tray-icon-", ".png");
             ImageIO.write(image, "png", extracted.toFile());
             extracted.toFile().deleteOnExit();
@@ -41,10 +62,18 @@ final class TrayIconResources {
     }
 
     static BufferedImage loadScaledImage(int width, int height) throws IOException {
+        return loadScaledImage(width, height, TrayAsset.APP);
+    }
+
+    static int chooseLinuxTraySourceIconSize(int targetSize) {
+        return chooseSourceIconSize(targetSize, TrayAsset.LINUX);
+    }
+
+    private static BufferedImage loadScaledImage(int width, int height, TrayAsset asset) throws IOException {
         int safeWidth = sanitizeDimension(width);
         int safeHeight = sanitizeDimension(height);
-        int sourceSize = chooseSourceIconSize(Math.max(safeWidth, safeHeight));
-        BufferedImage source = loadBaseImage(sourceSize);
+        int sourceSize = chooseSourceIconSize(Math.max(safeWidth, safeHeight), asset);
+        BufferedImage source = loadBaseImage(sourceSize, asset);
         if (source.getWidth() == safeWidth && source.getHeight() == safeHeight) {
             return source;
         }
@@ -64,17 +93,21 @@ final class TrayIconResources {
     }
 
     static int chooseSourceIconSize(int targetSize) {
+        return chooseSourceIconSize(targetSize, TrayAsset.APP);
+    }
+
+    private static int chooseSourceIconSize(int targetSize, TrayAsset asset) {
         int safeTarget = sanitizeDimension(targetSize);
-        for (int size : BASE_ICON_SIZES) {
+        for (int size : asset.sizes) {
             if (size >= safeTarget) {
                 return size;
             }
         }
-        return BASE_ICON_SIZES[BASE_ICON_SIZES.length - 1];
+        return asset.sizes[asset.sizes.length - 1];
     }
 
-    private static BufferedImage loadBaseImage(int size) throws IOException {
-        String resourcePath = "/logo/icon_" + size + ".png";
+    private static BufferedImage loadBaseImage(int size, TrayAsset asset) throws IOException {
+        String resourcePath = asset.resourcePath(size);
         try (InputStream input = TrayIconResources.class.getResourceAsStream(resourcePath)) {
             BufferedImage image = ImageIO.read(Objects.requireNonNull(
                     input, "Tray icon resource " + resourcePath + " is missing"));

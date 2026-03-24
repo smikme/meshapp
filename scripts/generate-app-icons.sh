@@ -4,9 +4,11 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 SOURCE_SVG="$ROOT_DIR/src/main/resources/logo/meshapp-official.svg"
+LINUX_TRAY_SOURCE_SVG="$ROOT_DIR/src/main/resources/tray/linux/meshapp-tray-linux.svg"
 LOGO_DIR="$ROOT_DIR/src/main/resources/logo"
 MACOS_DIR="$ROOT_DIR/src/main/resources/macos"
 DOCS_DIR="$ROOT_DIR/docs/logo"
+LINUX_TRAY_DIR="$ROOT_DIR/src/main/resources/tray/linux"
 
 require_tool() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -19,18 +21,25 @@ require_tool rsvg-convert
 require_tool magick
 require_tool sips
 
-render_png() {
-  local size="$1"
-  local output="$2"
+render_png_from() {
+  local source_svg="$1"
+  local size="$2"
+  local output="$3"
   local raw_output="${output%.png}.raw.png"
   rsvg-convert \
     --keep-aspect-ratio \
     --width "$size" \
     --height "$size" \
     --output "$raw_output" \
-    "$SOURCE_SVG"
+    "$source_svg"
   sips -s format png "$raw_output" --out "$output" >/dev/null
   rm -f "$raw_output"
+}
+
+render_png() {
+  local size="$1"
+  local output="$2"
+  render_png_from "$SOURCE_SVG" "$size" "$output"
 }
 
 render_png 16 "$LOGO_DIR/icon_16.png"
@@ -41,6 +50,11 @@ render_png 256 "$LOGO_DIR/icon_256.png"
 render_png 512 "$LOGO_DIR/icon_512.png"
 render_png 1024 "$LOGO_DIR/icon_1024.png"
 render_png 256 "$DOCS_DIR/MeshApp.png"
+
+mkdir -p "$LINUX_TRAY_DIR"
+for size in 16 20 22 24 32 48 64; do
+  render_png_from "$LINUX_TRAY_SOURCE_SVG" "$size" "$LINUX_TRAY_DIR/icon_${size}.png"
+done
 
 tmp_dir="$(mktemp -d)"
 python3 - <<'PY' "$LOGO_DIR/MeshApp.icns" "$LOGO_DIR"
