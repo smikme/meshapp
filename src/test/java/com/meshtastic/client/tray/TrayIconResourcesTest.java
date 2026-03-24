@@ -34,6 +34,7 @@ class TrayIconResourcesTest {
 
         assertEquals(16, image.getWidth());
         assertEquals(16, image.getHeight());
+        assertEquals(BufferedImage.TYPE_INT_ARGB, image.getType());
         assertEquals(0, (image.getRGB(0, 0) >>> 24));
     }
 }

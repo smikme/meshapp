@@ -116,8 +116,27 @@ final class TrayIconResources {
             if (image == null) {
                 throw new IOException("Unable to decode tray icon resource " + resourcePath);
             }
-            return image;
+            return normalizeImage(image);
         }
+    }
+
+    private static BufferedImage normalizeImage(BufferedImage source) {
+        if (source.getType() == BufferedImage.TYPE_INT_ARGB) {
+            return source;
+        }
+
+        BufferedImage normalized = new BufferedImage(
+                source.getWidth(),
+                source.getHeight(),
+                BufferedImage.TYPE_INT_ARGB);
+        Graphics2D graphics = normalized.createGraphics();
+        try {
+            graphics.setComposite(AlphaComposite.Src);
+            graphics.drawImage(source, 0, 0, null);
+        } finally {
+            graphics.dispose();
+        }
+        return normalized;
     }
 
     private static int sanitizeDimension(int value) {
