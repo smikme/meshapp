@@ -68,6 +68,7 @@ import java.util.Locale;
 import java.util.TreeSet;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 @SystemForm(name = "Настройки", description = "Настройки клиента", tags = {"settings", "options"})
@@ -101,6 +102,10 @@ public class FormSetting extends Form {
     private static final long BLE_CONFIG_SAVE_PRE_COMMIT_SETTLE_DELAY_MS = 1_000;
     /** Таймаут ожидания routing ACK для шага сохранения конфигурации. */
     private static final long CONFIG_SAVE_ACK_TIMEOUT_MS = 8_000;
+    /** Короткая задержка перед reboot/shutdown, чтобы routing ACK успел вернуться до разрыва линка. */
+    private static final int DEVICE_POWER_ACTION_DELAY_SECONDS = 1;
+    /** Сколько максимум ждём routing ACK для reboot/shutdown перед fallback-поведением. */
+    private static final long DEVICE_POWER_ACTION_ACK_TIMEOUT_MS = 2_500;
 
     private DeviceState state;
     private ProtocolHandler handler;
@@ -123,6 +128,8 @@ public class FormSetting extends Form {
     private Label configStatusLabel;
     private Button saveConfigBtn;
     private Button refreshConfigBtn;
+    private Button restartHardwareBtn;
+    private Button shutdownHardwareBtn;
     private Tab configTab;
     private volatile CompletableFuture<DeviceState> observedConfigLoadFuture;
 
@@ -549,6 +556,20 @@ public class FormSetting extends Form {
                 this::onSaveConfig);
         saveConfigBtn.setDisable(true);
 
+        restartHardwareBtn = createConfigToolbarButton(
+                "Перезапуск оборудования",
+                "Перезапустить подключенное устройство",
+                "/icons/restart-radio.svg",
+                this::onRestartHardware);
+        restartHardwareBtn.setDisable(true);
+
+        shutdownHardwareBtn = createConfigToolbarButton(
+                "Выключение оборудования",
+                "Выключить подключенное устройство",
+                "/icons/shutdown-radio.svg",
+                this::onShutdownHardware);
+        shutdownHardwareBtn.setDisable(true);
+
         Button exportConfigBtn = createConfigToolbarButton(
                 "Сохранить конфигурацию",
                 "Сохранить текущую конфигурацию в файл .mcf",
@@ -576,6 +597,9 @@ public class FormSetting extends Form {
         actionToolbar.getItems().addAll(
                 refreshConfigBtn,
                 saveConfigBtn,
+                new Separator(Orientation.VERTICAL),
+                restartHardwareBtn,
+                shutdownHardwareBtn,
                 new Separator(Orientation.VERTICAL),
                 exportConfigBtn,
                 importConfigBtn,
@@ -652,6 +676,190 @@ public class FormSetting extends Form {
         button.setTooltip(new Tooltip(title + "\n" + description));
         button.setOnAction(e -> action.run());
         return button;
+    }
+
+    private void setDevicePowerButtonsDisabled(boolean disabled) {
+        if (restartHardwareBtn != null) {
+            restartHardwareBtn.setDisable(disabled);
+        }
+        if (shutdownHardwareBtn != null) {
+            shutdownHardwareBtn.setDisable(disabled);
+        }
+    }
+
+    private void onRestartHardware() {
+        ModalPane.showConfirm(
+                "Перезапуск оборудования",
+                "Вы уверены, что хотите перезапустить оборудование? Соединение с устройством будет временно разорвано.",
+                confirmed -> {
+                    if (confirmed) {
+                        requestDevicePowerAction(true);
+                    }
+                });
+    }
+
+    private void onShutdownHardware() {
+        ModalPane.showConfirm(
+                "Выключение оборудования",
+                "Вы уверены, что хотите выключить оборудование? Для повторного подключения устройство нужно будет включить вручную.",
+                confirmed -> {
+                    if (confirmed) {
+                        requestDevicePowerAction(false);
+                    }
+                });
+    }
+
+    private void requestDevicePowerAction(boolean reboot) {
+        refreshConnection();
+        if (state == null || handler == null) {
+            configStatusLabel.setText("Нет подключения к радио");
+            setDevicePowerButtonsDisabled(true);
+            return;
+        }
+
+        ConnectionEntry activeEntry = findActiveConnectionEntry();
+        if (activeEntry == null) {
+            configStatusLabel.setText("Нет активного подключения к радио");
+            setDevicePowerButtonsDisabled(true);
+            return;
+        }
+
+        DeviceState actionState = state;
+        ProtocolHandler actionHandler = handler;
+        String actionLabel = reboot ? "перезапуска" : "выключения";
+
+        setDevicePowerButtonsDisabled(true);
+        configStatusLabel.setText("Запрос session key для " + actionLabel + "...");
+
+        AtomicBoolean dispatchStarted = new AtomicBoolean(false);
+        Runnable[] listenerHolder = new Runnable[1];
+        listenerHolder[0] = () -> Platform.runLater(() -> {
+            actionState.removeOwnerInfoListener(listenerHolder[0]);
+            if (dispatchStarted.compareAndSet(false, true)) {
+                sendDevicePowerAction(activeEntry, actionState, actionHandler, reboot);
+            }
+        });
+        actionState.addOwnerInfoListener(listenerHolder[0]);
+
+        Thread timeoutThread = new Thread(() -> {
+            try {
+                Thread.sleep(5000);
+            } catch (InterruptedException ignored) {
+                return;
+            }
+            Platform.runLater(() -> {
+                actionState.removeOwnerInfoListener(listenerHolder[0]);
+                if (dispatchStarted.compareAndSet(false, true)) {
+                    configStatusLabel.setText("Отправка команды " + actionLabel + " без session key...");
+                    sendDevicePowerAction(activeEntry, actionState, actionHandler, reboot);
+                }
+            });
+        }, reboot ? "device-restart-timeout" : "device-shutdown-timeout");
+        timeoutThread.setDaemon(true);
+        timeoutThread.start();
+
+        MessageService.requestSessionPasskey(actionHandler, actionState);
+    }
+
+    private void sendDevicePowerAction(ConnectionEntry activeEntry,
+                                       DeviceState actionState,
+                                       ProtocolHandler actionHandler,
+                                       boolean reboot) {
+        String actionLabel = reboot ? "перезапуска" : "выключения";
+        String stepName = reboot ? "rebootDevice" : "shutdownDevice";
+        ConnectionType transport = activeEntry.getEffectiveType();
+
+        configStatusLabel.setText("Отправка команды " + actionLabel + "...");
+
+        CompletableFuture<MeshProtos.Routing.Error> ackFuture;
+        try {
+            ackFuture = reboot
+                    ? MessageService.rebootDevice(actionHandler, actionState, DEVICE_POWER_ACTION_DELAY_SECONDS)
+                    : MessageService.shutdownDevice(actionHandler, actionState, DEVICE_POWER_ACTION_DELAY_SECONDS);
+        } catch (Exception e) {
+            log.error("Device {} command send failed", stepName, e);
+            setDevicePowerButtonsDisabled(false);
+            configStatusLabel.setText("Ошибка отправки команды " + actionLabel);
+            return;
+        }
+
+        observeDevicePowerActionAck(ackFuture, stepName);
+
+        Thread actionThread = new Thread(() -> {
+            boolean ackConfirmed = false;
+            try {
+                try {
+                    MeshProtos.Routing.Error error = ackFuture.get(
+                            DEVICE_POWER_ACTION_ACK_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+                    if (error != null && error != MeshProtos.Routing.Error.NONE) {
+                        throw new IllegalStateException(stepName + " failed with " + error);
+                    }
+                    ackConfirmed = true;
+                } catch (TimeoutException e) {
+                    log.info("Device power action '{}' ACK timed out, proceeding with fallback flow", stepName);
+                }
+
+                Platform.runLater(() -> configStatusLabel.setText(reboot
+                        ? "Команда перезапуска отправлена. Ожидание переподключения..."
+                        : "Команда выключения отправлена. Ожидание отключения устройства..."));
+
+                Thread.sleep(getDevicePowerActionHandoffDelayMs(transport));
+
+                if (reboot) {
+                    ConnectionManager.getInstance().disconnectForDeviceReboot(activeEntry.getId());
+                    Platform.runLater(() -> {
+                        state = null;
+                        handler = null;
+                        reloadConfigTree();
+                    });
+                } else if (ackConfirmed) {
+                    ConnectionManager.getInstance().disconnect(activeEntry.getId());
+                    Platform.runLater(() -> {
+                        state = null;
+                        handler = null;
+                        reloadConfigTree();
+                    });
+                } else {
+                    Platform.runLater(() -> setDevicePowerButtonsDisabled(false));
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                log.warn("Device power action thread interrupted: {}", stepName);
+                Platform.runLater(() -> setDevicePowerButtonsDisabled(false));
+            } catch (Exception e) {
+                log.error("Device power action '{}' failed", stepName, e);
+                Platform.runLater(() -> {
+                    setDevicePowerButtonsDisabled(false);
+                    configStatusLabel.setText("Ошибка отправки команды " + actionLabel + ": " +
+                            (e.getMessage() != null ? e.getMessage() : "см. лог"));
+                });
+            }
+        }, reboot ? "device-restart-sender" : "device-shutdown-sender");
+        actionThread.setDaemon(true);
+        actionThread.start();
+    }
+
+    private void observeDevicePowerActionAck(CompletableFuture<MeshProtos.Routing.Error> ackFuture,
+                                             String stepName) {
+        if (ackFuture == null) {
+            return;
+        }
+
+        ackFuture.whenComplete((error, ex) -> {
+            if (ex != null) {
+                log.info("Device power action '{}' ACK completed exceptionally: {}", stepName, ex.getMessage());
+            } else if (error != null && error != MeshProtos.Routing.Error.NONE) {
+                log.warn("Device power action '{}' returned {}", stepName, error);
+            } else {
+                log.debug("Device power action '{}' ACK received", stepName);
+            }
+        });
+    }
+
+    private long getDevicePowerActionHandoffDelayMs(ConnectionType transport) {
+        return transport == ConnectionType.BLE
+                ? BLE_CONFIG_SAVE_REBOOT_HANDOFF_DELAY_MS
+                : CONFIG_SAVE_REBOOT_HANDOFF_DELAY_MS;
     }
 
     private void onExportSnapshot(ConfigSnapshotService.SnapshotKind kind) {
@@ -1200,6 +1408,7 @@ public class FormSetting extends Form {
         }
 
         boolean connected = state != null && handler != null;
+        setDevicePowerButtonsDisabled(!connected);
 
         if (!connected) {
             configStatusLabel.setText("Нет подключения к радио");
