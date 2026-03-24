@@ -133,11 +133,18 @@ public final class LinuxGtkTrayService implements AppTrayService {
             gtk.gtk_widget_show_all(gtkMenu);
             menu = gtkMenu;
 
-            statusActivateCallback = (widget, userData) -> onActivate.run();
-            statusPopupMenuCallback = (widget, button, activateTime, userData) ->
-                    gtk.gtk_menu_popup_at_pointer(menu, null);
-            openItemActivateCallback = (widget, userData) -> onActivate.run();
-            exitItemActivateCallback = (widget, userData) -> onExit.run();
+            statusActivateCallback = (widget, userData) -> dispatch("tray-activate", onActivate);
+            statusPopupMenuCallback = (widget, button, activateTime, userData) -> {
+                try {
+                    if (menu != null) {
+                        gtk.gtk_menu_popup_at_pointer(menu, null);
+                    }
+                } catch (Throwable t) {
+                    log.error("Failed to show GTK tray menu", t);
+                }
+            };
+            openItemActivateCallback = (widget, userData) -> dispatch("tray-open", onActivate);
+            exitItemActivateCallback = (widget, userData) -> dispatch("tray-exit", onExit);
             disposeCallback = userData -> {
                 try {
                     if (statusIcon != null) {
@@ -185,6 +192,18 @@ public final class LinuxGtkTrayService implements AppTrayService {
         usingFallback = true;
         gtkThread = null;
         return fallback.install(onActivate, onExit);
+    }
+
+    private void dispatch(String actionName, Runnable action) {
+        Thread thread = new Thread(() -> {
+            try {
+                action.run();
+            } catch (Throwable t) {
+                log.error("GTK tray action failed: {}", actionName, t);
+            }
+        }, "meshapp-" + actionName);
+        thread.setDaemon(true);
+        thread.start();
     }
 
     private GtkLibrary loadGtk() {
