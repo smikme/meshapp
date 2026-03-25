@@ -37,9 +37,9 @@ public class FormManager {
         if (currentForm != null && currentForm != form) {
             currentForm.formClose();
         }
-        form.formOpen();
         mainForm.setForm(form);
         currentForm = form;
+        form.formOpen();
         DrawerManager.setSelectedItemClass(form.getClass());
     }
 
