@@ -93,14 +93,18 @@ public class MessageListenerService implements FromRadioListener {
         boolean outgoing = from == deviceState.getMyNodeNum();
 
         if (outgoing) { return; } // outgoing messages are already added by MessageService
+        NodeData fromNode = deviceState.getOrCreateNode(from);
+        String fromNodeId = fromNode.getNodeId();
+        if (IgnoredNodeService.getInstance().isIgnored(fromNodeId)) {
+            log.info("Dropping incoming {} from ignored node {}",
+                    isReactionPacket(data) ? "reaction" : "message", fromNodeId);
+            return;
+        }
         if (isReactionPacket(data)) {
-            handleReactionPacket(packet, data, timestamp, to == 0xFFFFFFFF);
+            handleReactionPacket(packet, data, timestamp, to == 0xFFFFFFFF, fromNode);
             return;
         }
 
-        // Lookup nodeId через NodeData (не математическая конвертация)
-        NodeData fromNode = deviceState.getOrCreateNode(from);
-        String fromNodeId = fromNode.getNodeId();
         String toNodeId = (to == 0xFFFFFFFF) ? "!ffffffff" : deviceState.getOrCreateNode(to).getNodeId();
 
         MeshMessage msg = new MeshMessage(fromNodeId, toNodeId, channel, text, timestamp, false);
@@ -157,14 +161,14 @@ public class MessageListenerService implements FromRadioListener {
     private void handleReactionPacket(MeshProtos.MeshPacket packet,
                                       MeshProtos.Data data,
                                       long timestamp,
-                                      boolean channelMessage) {
+                                      boolean channelMessage,
+                                      NodeData fromNode) {
         String emoji = data.getPayload().toString(StandardCharsets.UTF_8);
         if (emoji == null || emoji.isEmpty()) {
             log.debug("Ignoring reaction packet {} with empty payload", packet.getId());
             return;
         }
 
-        NodeData fromNode = deviceState.getOrCreateNode(packet.getFrom());
         String fromNodeId = fromNode.getNodeId();
 
         MessageReaction reaction = new MessageReaction(

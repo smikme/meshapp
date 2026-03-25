@@ -573,6 +573,7 @@ public class FormChat extends Form {
         loadingOlderMessages = false;
         newMessageWhileScrolled = 0;
         updateScrollDownBadge();
+        requestMessageViewportLayout();
 
         if (restoreSavedScrollPosition()) {
             openingChatUnreadCount = 0;
@@ -649,6 +650,7 @@ public class FormChat extends Form {
                 appendLoadedMessageRow(msg);
             }
             newestLoadedDbId = newMsgs.getLast().getDbId();
+            requestMessageViewportLayout();
             if (shouldAutoscroll) {
                 newMessageWhileScrolled = 0;
                 updateScrollDownBadge();
@@ -768,6 +770,44 @@ public class FormChat extends Form {
             messageContainer.getChildren().set(index, newRow);
             loadedMessageRows.put(message.getDbId(), newRow);
         }
+        requestMessageViewportLayout();
+    }
+
+    /**
+     * После переключения DM -> channel ScrollPane иногда остаётся в геометрии
+     * предыдущего короткого чата до следующего resize/pulse. Принудительно
+     * инвалидируем и пересчитываем viewport, чтобы сообщения появились сразу.
+     */
+    private void requestMessageViewportLayout() {
+        relayoutMessageViewport();
+        Platform.runLater(() -> {
+            relayoutMessageViewport();
+            Platform.runLater(this::relayoutMessageViewport);
+        });
+    }
+
+    private void relayoutMessageViewport() {
+        if (detailPane == null || messageArea == null || messageScrollPane == null || messageContainer == null) {
+            return;
+        }
+
+        detailPane.requestLayout();
+        messageArea.requestLayout();
+        messageScrollPane.requestLayout();
+        messageContainer.requestLayout();
+
+        if (messageScrollPane.getScene() == null) {
+            return;
+        }
+
+        detailPane.applyCss();
+        detailPane.layout();
+        messageArea.applyCss();
+        messageArea.layout();
+        messageScrollPane.applyCss();
+        messageScrollPane.layout();
+        messageContainer.applyCss();
+        messageContainer.layout();
     }
 
     private boolean isScrolledToBottom() {
