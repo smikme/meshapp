@@ -134,6 +134,57 @@ class MessageListenerServiceTest {
     }
 
     @Test
+    void onMeshPacketDropsIncomingChannelMessageFromIgnoredNode() {
+        NodeCacheService.getInstance().setIgnored("!11111111", true);
+        assertTrue(NodeCacheService.getInstance().isIgnored("!11111111"));
+
+        MeshProtos.MeshPacket packet = MeshProtos.MeshPacket.newBuilder()
+                .setFrom(0x11111111)
+                .setTo(0xFFFFFFFF)
+                .setChannel(2)
+                .setId(7004)
+                .setRxTime(1_700_000_102)
+                .setDecoded(MeshProtos.Data.newBuilder()
+                        .setPortnum(Portnums.PortNum.TEXT_MESSAGE_APP)
+                        .setPayload(ByteString.copyFrom("ignore me", StandardCharsets.UTF_8))
+                        .build())
+                .build();
+
+        service.onMeshPacket(packet);
+
+        assertTrue(state.getMessages(2).isEmpty());
+        assertNull(MessageDbService.getInstance().findByPacketId(7004));
+    }
+
+    @Test
+    void onMeshPacketDropsIncomingReactionFromIgnoredNode() {
+        NodeCacheService.getInstance().setIgnored("!11111111", true);
+        assertTrue(NodeCacheService.getInstance().isIgnored("!11111111"));
+
+        MeshProtos.MeshPacket packet = MeshProtos.MeshPacket.newBuilder()
+                .setFrom(0x11111111)
+                .setTo(0xFFFFFFFF)
+                .setChannel(2)
+                .setId(7005)
+                .setRxTime(1_700_000_103)
+                .setDecoded(MeshProtos.Data.newBuilder()
+                        .setPortnum(Portnums.PortNum.TEXT_MESSAGE_APP)
+                        .setReplyId(42)
+                        .setEmoji(1)
+                        .setPayload(ByteString.copyFrom("👍", StandardCharsets.UTF_8))
+                        .build())
+                .build();
+
+        service.onMeshPacket(packet);
+
+        assertTrue(state.getMessages(2).isEmpty());
+        assertNull(MessageDbService.getInstance().findByPacketId(7005));
+        assertTrue(MessageDbService.getInstance()
+                .loadReactionsByTargetPacketIds("channel", "2", "!12345678", List.of(42))
+                .isEmpty());
+    }
+
+    @Test
     void onMeshPacketMarksPendingMessageDeliveredWhenAckArrives() {
         MeshMessage pending = new MeshMessage("!12345678", "!ffffffff", 0, "pending", 1_700_000_000L, true);
         pending.setPacketId(42);

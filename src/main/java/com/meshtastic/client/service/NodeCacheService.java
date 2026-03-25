@@ -408,6 +408,7 @@ public final class NodeCacheService {
      */
     public synchronized void setFavorite(String nodeId, boolean favorite) {
         if (dbConnection == null || nodeId == null) { return; }
+        ensureNodeRowExists(nodeId);
         try (PreparedStatement ps = dbConnection.prepareStatement(
                 "UPDATE nodes SET favorite = ? WHERE node_id = ?")) {
             ps.setBoolean(1, favorite);
@@ -463,6 +464,7 @@ public final class NodeCacheService {
      */
     public synchronized void setIgnored(String nodeId, boolean ignored) {
         if (dbConnection == null || nodeId == null) { return; }
+        ensureNodeRowExists(nodeId);
         try (PreparedStatement ps = dbConnection.prepareStatement(
                 "UPDATE nodes SET ignored = ? WHERE node_id = ?")) {
             ps.setBoolean(1, ignored);
@@ -507,6 +509,29 @@ public final class NodeCacheService {
             log.error("Failed to load ignored nodes from DB", e);
         }
         return ignored;
+    }
+
+    /**
+     * Создаёт placeholder-строку для ноды, если флаг меняется раньше,
+     * чем нода была записана в кэш/H2 полноценным update().
+     */
+    private void ensureNodeRowExists(String nodeId) {
+        if (mergeStmt == null || loadFromDb(nodeId) != null) { return; }
+
+        int nodeNum;
+        try {
+            nodeNum = parseNodeNum(nodeId);
+        } catch (IllegalArgumentException e) {
+            log.warn("Skipping placeholder node creation for invalid nodeId {}", nodeId, e);
+            return;
+        }
+
+        cache.computeIfAbsent(nodeId, key -> {
+            NodeData placeholder = new NodeData(nodeNum);
+            placeholder.setNodeId(key);
+            return placeholder;
+        });
+        persistNode(nodeId);
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -1050,6 +1075,13 @@ public final class NodeCacheService {
             ps.setNull(14, Types.INTEGER);
         }
         ps.setInt(15, n.getChannel());
+    }
+
+    private static int parseNodeNum(String nodeId) {
+        if (nodeId == null || nodeId.length() < 2 || nodeId.charAt(0) != '!') {
+            throw new IllegalArgumentException("Invalid nodeId: " + nodeId);
+        }
+        return (int) Long.parseUnsignedLong(nodeId.substring(1), 16);
     }
 
     /**
