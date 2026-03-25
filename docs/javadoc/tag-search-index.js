@@ -1,1 +1,1 @@
-tagSearchIndex = [{"l":"Constant Field Values","h":"","u":"constant-values.html"},{"l":"Serialized Form","h":"","u":"serialized-form.html"}];updateSearchResults();
+tagSearchIndex = [{"l":"CBManagerState","h":"class com.meshtastic.client.connection.ble.macos.MacOsBle","d":"Section","u":"com/meshtastic/client/connection/ble/macos/MacOsBle.html#cbmanagerstate-heading"},{"l":"Constant Field Values","h":"","u":"constant-values.html"},{"l":"Serialized Form","h":"","u":"serialized-form.html"}];updateSearchResults();

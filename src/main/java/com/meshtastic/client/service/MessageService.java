@@ -8,6 +8,7 @@ import org.meshtastic.proto.ModuleConfigProtos;
 import org.meshtastic.proto.Portnums;
 import com.google.protobuf.ByteString;
 import com.meshtastic.client.model.DeviceState;
+import com.meshtastic.client.model.MessageReaction;
 import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.protocol.ProtocolHandler;
@@ -16,6 +17,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.nio.charset.StandardCharsets;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ThreadLocalRandom;
 
 /**
@@ -172,6 +174,79 @@ public final class MessageService {
     }
 
     /**
+     * Отправляет emoji-реакцию на канальное сообщение.
+     * Реакция хранится отдельно от обычных сообщений и не попадает в preview чатов.
+     */
+    public static boolean sendChannelReaction(ProtocolHandler handler,
+                                              DeviceState state,
+                                              int channelIndex,
+                                              MeshMessage targetMessage,
+                                              String emoji) {
+        if (targetMessage == null || targetMessage.getPacketId() == 0 || emoji == null || emoji.isEmpty()) {
+            return false;
+        }
+
+        int packetId = ThreadLocalRandom.current().nextInt(1, Integer.MAX_VALUE);
+        long now = System.currentTimeMillis() / 1000;
+
+        MeshProtos.Data data = MeshProtos.Data.newBuilder()
+                .setPortnum(Portnums.PortNum.TEXT_MESSAGE_APP)
+                .setPayload(ByteString.copyFrom(emoji, StandardCharsets.UTF_8))
+                .setReplyId(targetMessage.getPacketId())
+                .setEmoji(1)
+                .build();
+
+        MeshProtos.MeshPacket packet = MeshProtos.MeshPacket.newBuilder()
+                .setFrom(state.getMyNodeNum())
+                .setTo(0xFFFFFFFF)
+                .setChannel(channelIndex)
+                .setDecoded(data)
+                .setId(packetId)
+                .setWantAck(true)
+                .build();
+
+        handler.sendToRadio(MeshProtos.ToRadio.newBuilder().setPacket(packet).build());
+        return saveOutgoingReaction(state, "channel", String.valueOf(channelIndex), targetMessage, emoji, now, packetId);
+    }
+
+    /**
+     * Отправляет emoji-реакцию на личное сообщение.
+     */
+    public static boolean sendDirectReaction(ProtocolHandler handler,
+                                             DeviceState state,
+                                             String peerNodeId,
+                                             MeshMessage targetMessage,
+                                             String emoji) {
+        if (targetMessage == null || targetMessage.getPacketId() == 0 || emoji == null || emoji.isEmpty()) {
+            return false;
+        }
+
+        int packetId = ThreadLocalRandom.current().nextInt(1, Integer.MAX_VALUE);
+        long now = System.currentTimeMillis() / 1000;
+
+        NodeData peerNode = state.getNodeByNodeId(peerNodeId);
+        int peerNodeNum = peerNode != null ? peerNode.getNodeNum() : 0;
+
+        MeshProtos.Data data = MeshProtos.Data.newBuilder()
+                .setPortnum(Portnums.PortNum.TEXT_MESSAGE_APP)
+                .setPayload(ByteString.copyFrom(emoji, StandardCharsets.UTF_8))
+                .setReplyId(targetMessage.getPacketId())
+                .setEmoji(1)
+                .build();
+
+        MeshProtos.MeshPacket packet = MeshProtos.MeshPacket.newBuilder()
+                .setFrom(state.getMyNodeNum())
+                .setTo(peerNodeNum)
+                .setDecoded(data)
+                .setId(packetId)
+                .setWantAck(true)
+                .build();
+
+        handler.sendToRadio(MeshProtos.ToRadio.newBuilder().setPacket(packet).build());
+        return saveOutgoingReaction(state, "dm", peerNodeId, targetMessage, emoji, now, packetId);
+    }
+
+    /**
      * Запрашивает информацию о ноде, отправляя NODEINFO_APP пакет с want_response=true.
      * Удалённая нода ответит пакетом NODEINFO_APP с данными User.
      */
@@ -237,28 +312,21 @@ public final class MessageService {
         AdminProtos.AdminMessage adminMsg = AdminProtos.AdminMessage.newBuilder()
                 .setGetOwnerRequest(true)
                 .build();
+        sendAdminMessage(handler, state, adminMsg, true);
+    }
 
-        MeshProtos.Data data = MeshProtos.Data.newBuilder()
-                .setPortnum(Portnums.PortNum.ADMIN_APP)
-                .setPayload(adminMsg.toByteString())
-                .setWantResponse(true)
+    /**
+     * Запрашивает только {@code session_passkey} у подключённого радио.
+     * <p>
+     * Использует {@code get_config_request = SESSIONKEY_CONFIG}, потому что часть
+     * устройств/прошивок не отвечает на {@code get_owner_request}, но при этом
+     * корректно возвращает session key вместе с config-response.
+     */
+    public static void requestSessionPasskey(ProtocolHandler handler, DeviceState state) {
+        AdminProtos.AdminMessage adminMsg = AdminProtos.AdminMessage.newBuilder()
+                .setGetConfigRequest(AdminProtos.AdminMessage.ConfigType.SESSIONKEY_CONFIG)
                 .build();
-
-        int packetId = ThreadLocalRandom.current().nextInt(1, Integer.MAX_VALUE);
-
-        MeshProtos.MeshPacket packet = MeshProtos.MeshPacket.newBuilder()
-                .setFrom(state.getMyNodeNum())
-                .setTo(state.getMyNodeNum())
-                .setDecoded(data)
-                .setId(packetId)
-                .setWantAck(true)
-                .build();
-
-        MeshProtos.ToRadio toRadio = MeshProtos.ToRadio.newBuilder()
-                .setPacket(packet)
-                .build();
-
-        handler.sendToRadio(toRadio);
+        sendAdminMessage(handler, state, adminMsg, true);
     }
 
     /**
@@ -279,34 +347,14 @@ public final class MessageService {
         }
         AdminProtos.AdminMessage adminMsg = adminBuilder.build();
 
-        MeshProtos.Data data = MeshProtos.Data.newBuilder()
-                .setPortnum(Portnums.PortNum.ADMIN_APP)
-                .setPayload(adminMsg.toByteString())
-                .setWantResponse(true)
-                .build();
-
-        int packetId = ThreadLocalRandom.current().nextInt(1, Integer.MAX_VALUE);
-
-        MeshProtos.MeshPacket packet = MeshProtos.MeshPacket.newBuilder()
-                .setFrom(state.getMyNodeNum())
-                .setTo(state.getMyNodeNum())
-                .setDecoded(data)
-                .setId(packetId)
-                .setWantAck(true)
-                .build();
-
-        MeshProtos.ToRadio toRadio = MeshProtos.ToRadio.newBuilder()
-                .setPacket(packet)
-                .build();
-
-        handler.sendToRadio(toRadio);
+        sendAdminMessage(handler, state, adminMsg);
     }
 
     /**
      * Создаёт/обновляет канал на подключённом радио через AdminMessage.set_channel.
      * Требует session_passkey для защищённых устройств (может быть null для локальных).
      */
-    public static void setChannel(ProtocolHandler handler, DeviceState state,
+    public static CompletableFuture<MeshProtos.Routing.Error> setChannel(ProtocolHandler handler, DeviceState state,
                                    ChannelProtos.Channel channel, ByteString sessionPasskey) {
         AdminProtos.AdminMessage.Builder adminBuilder = AdminProtos.AdminMessage.newBuilder()
                 .setSetChannel(channel);
@@ -315,27 +363,7 @@ public final class MessageService {
         }
         AdminProtos.AdminMessage adminMsg = adminBuilder.build();
 
-        MeshProtos.Data data = MeshProtos.Data.newBuilder()
-                .setPortnum(Portnums.PortNum.ADMIN_APP)
-                .setPayload(adminMsg.toByteString())
-                .setWantResponse(true)
-                .build();
-
-        int packetId = ThreadLocalRandom.current().nextInt(1, Integer.MAX_VALUE);
-
-        MeshProtos.MeshPacket packet = MeshProtos.MeshPacket.newBuilder()
-                .setFrom(state.getMyNodeNum())
-                .setTo(state.getMyNodeNum())
-                .setDecoded(data)
-                .setId(packetId)
-                .setWantAck(true)
-                .build();
-
-        MeshProtos.ToRadio toRadio = MeshProtos.ToRadio.newBuilder()
-                .setPacket(packet)
-                .build();
-
-        handler.sendToRadio(toRadio);
+        return sendAdminMessage(handler, state, adminMsg);
     }
 
     // ==================== Config Admin Methods ====================
@@ -343,8 +371,10 @@ public final class MessageService {
     /**
      * Отправляет begin_edit_settings для начала транзакции изменения настроек.
      * Предотвращает перезагрузку устройства между отдельными set_config/set_module_config.
+     *
+     * @return future с routing ACK/NAK для отправленного admin-пакета
      */
-    public static void beginEditSettings(ProtocolHandler handler, DeviceState state) {
+    public static CompletableFuture<MeshProtos.Routing.Error> beginEditSettings(ProtocolHandler handler, DeviceState state) {
         AdminProtos.AdminMessage.Builder adminBuilder = AdminProtos.AdminMessage.newBuilder()
                 .setBeginEditSettings(true);
         ByteString passkey = state.getSessionPasskey();
@@ -352,14 +382,16 @@ public final class MessageService {
             adminBuilder.setSessionPasskey(passkey);
         }
 
-        sendAdminMessage(handler, state, adminBuilder.build());
+        return sendAdminMessage(handler, state, adminBuilder.build());
     }
 
     /**
      * Отправляет commit_edit_settings для завершения транзакции настроек.
      * Устройство применит все изменения и перезагрузится.
+     *
+     * @return future с routing ACK/NAK для отправленного admin-пакета
      */
-    public static void commitEditSettings(ProtocolHandler handler, DeviceState state) {
+    public static CompletableFuture<MeshProtos.Routing.Error> commitEditSettings(ProtocolHandler handler, DeviceState state) {
         AdminProtos.AdminMessage.Builder adminBuilder = AdminProtos.AdminMessage.newBuilder()
                 .setCommitEditSettings(true);
         ByteString passkey = state.getSessionPasskey();
@@ -367,13 +399,15 @@ public final class MessageService {
             adminBuilder.setSessionPasskey(passkey);
         }
 
-        sendAdminMessage(handler, state, adminBuilder.build());
+        return sendAdminMessage(handler, state, adminBuilder.build());
     }
 
     /**
      * Отправляет set_config (одна секция Config) на устройство.
+     *
+     * @return future с routing ACK/NAK для отправленного admin-пакета
      */
-    public static void setConfig(ProtocolHandler handler, DeviceState state, ConfigProtos.Config config) {
+    public static CompletableFuture<MeshProtos.Routing.Error> setConfig(ProtocolHandler handler, DeviceState state, ConfigProtos.Config config) {
         AdminProtos.AdminMessage.Builder adminBuilder = AdminProtos.AdminMessage.newBuilder()
                 .setSetConfig(config);
         ByteString passkey = state.getSessionPasskey();
@@ -381,13 +415,15 @@ public final class MessageService {
             adminBuilder.setSessionPasskey(passkey);
         }
 
-        sendAdminMessage(handler, state, adminBuilder.build());
+        return sendAdminMessage(handler, state, adminBuilder.build());
     }
 
     /**
      * Отправляет set_module_config (одна секция ModuleConfig) на устройство.
+     *
+     * @return future с routing ACK/NAK для отправленного admin-пакета
      */
-    public static void setModuleConfig(ProtocolHandler handler, DeviceState state,
+    public static CompletableFuture<MeshProtos.Routing.Error> setModuleConfig(ProtocolHandler handler, DeviceState state,
                                         ModuleConfigProtos.ModuleConfig moduleConfig) {
         AdminProtos.AdminMessage.Builder adminBuilder = AdminProtos.AdminMessage.newBuilder()
                 .setSetModuleConfig(moduleConfig);
@@ -396,7 +432,45 @@ public final class MessageService {
             adminBuilder.setSessionPasskey(passkey);
         }
 
-        sendAdminMessage(handler, state, adminBuilder.build());
+        return sendAdminMessage(handler, state, adminBuilder.build());
+    }
+
+    /**
+     * Отправляет команду перезапуска устройства через {@code reboot_seconds}.
+     *
+     * @param delaySeconds задержка перед перезапуском в секундах
+     * @return future с routing ACK/NAK для отправленного admin-пакета
+     */
+    public static CompletableFuture<MeshProtos.Routing.Error> rebootDevice(ProtocolHandler handler,
+                                                                           DeviceState state,
+                                                                           int delaySeconds) {
+        AdminProtos.AdminMessage.Builder adminBuilder = AdminProtos.AdminMessage.newBuilder()
+                .setRebootSeconds(delaySeconds);
+        ByteString passkey = state.getSessionPasskey();
+        if (passkey != null) {
+            adminBuilder.setSessionPasskey(passkey);
+        }
+
+        return sendAdminMessage(handler, state, adminBuilder.build());
+    }
+
+    /**
+     * Отправляет команду выключения устройства через {@code shutdown_seconds}.
+     *
+     * @param delaySeconds задержка перед выключением в секундах
+     * @return future с routing ACK/NAK для отправленного admin-пакета
+     */
+    public static CompletableFuture<MeshProtos.Routing.Error> shutdownDevice(ProtocolHandler handler,
+                                                                             DeviceState state,
+                                                                             int delaySeconds) {
+        AdminProtos.AdminMessage.Builder adminBuilder = AdminProtos.AdminMessage.newBuilder()
+                .setShutdownSeconds(delaySeconds);
+        ByteString passkey = state.getSessionPasskey();
+        if (passkey != null) {
+            adminBuilder.setSessionPasskey(passkey);
+        }
+
+        return sendAdminMessage(handler, state, adminBuilder.build());
     }
 
     /**
@@ -504,13 +578,39 @@ public final class MessageService {
 
     /**
      * Вспомогательный метод для отправки AdminMessage на локальное устройство.
+     *
+     * @return future с routing ACK/NAK для отправленного admin-пакета
      */
-    private static void sendAdminMessage(ProtocolHandler handler, DeviceState state,
-                                          AdminProtos.AdminMessage adminMsg) {
+    /**
+     * Отправляет mutating admin-команду на локальное устройство.
+     * <p>
+     * Для begin/set/commit и прочих write-операций нам нужен только routing ACK.
+     * Запрашивать ещё и ADMIN_APP response здесь вредно: часть прошивок рвёт BLE-сессию
+     * уже на шаге обработки set_module_config(MQTT), хотя service-response клиент всё
+     * равно не использует.
+     */
+    private static CompletableFuture<MeshProtos.Routing.Error> sendAdminMessage(ProtocolHandler handler,
+                                                                                DeviceState state,
+                                                                                AdminProtos.AdminMessage adminMsg) {
+        return sendAdminMessage(handler, state, adminMsg, false);
+    }
+
+    /**
+     * Отправляет AdminMessage на локальное устройство.
+     *
+     * @param wantResponse {@code true} только для read/query-запросов, где клиент реально
+     *                     ждёт ADMIN_APP response; для mutating команд используем {@code false}
+     *                     и опираемся на routing ACK.
+     * @return future с routing ACK/NAK для отправленного admin-пакета
+     */
+    private static CompletableFuture<MeshProtos.Routing.Error> sendAdminMessage(ProtocolHandler handler,
+                                          DeviceState state,
+                                          AdminProtos.AdminMessage adminMsg,
+                                          boolean wantResponse) {
         MeshProtos.Data data = MeshProtos.Data.newBuilder()
                 .setPortnum(Portnums.PortNum.ADMIN_APP)
                 .setPayload(adminMsg.toByteString())
-                .setWantResponse(true)
+                .setWantResponse(wantResponse)
                 .build();
 
         int packetId = ThreadLocalRandom.current().nextInt(1, Integer.MAX_VALUE);
@@ -527,7 +627,38 @@ public final class MessageService {
                 .setPacket(packet)
                 .build();
 
+        CompletableFuture<MeshProtos.Routing.Error> ackFuture = state.registerPendingPacketAck(packetId);
         handler.sendToRadio(toRadio);
+        return ackFuture;
+    }
+
+    private static boolean saveOutgoingReaction(DeviceState state,
+                                                String chatType,
+                                                String chatKey,
+                                                MeshMessage targetMessage,
+                                                String emoji,
+                                                long now,
+                                                int packetId) {
+        NodeData myNode = state.getNodeDb().get(state.getMyNodeNum());
+        String ownerNodeId = String.format("!%08x", state.getMyNodeNum());
+        String myNodeId = myNode != null && myNode.getNodeId() != null && !myNode.getNodeId().isEmpty()
+                ? myNode.getNodeId()
+                : ownerNodeId;
+
+        MessageReaction reaction = new MessageReaction(
+                targetMessage.getPacketId(),
+                myNodeId,
+                emoji,
+                now,
+                true
+        );
+        reaction.setPacketId(packetId);
+        reaction.setStatus(MeshMessage.DeliveryStatus.SENDING);
+        if (myNode != null && myNode.getLongName() != null) {
+            reaction.setSenderName(myNode.getLongName());
+        }
+
+        return MessageDbService.getInstance().saveReaction(reaction, chatType, chatKey, ownerNodeId);
     }
 
     private static String bytesToHex(byte[] bytes) {

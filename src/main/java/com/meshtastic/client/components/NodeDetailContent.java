@@ -209,8 +209,8 @@ public class NodeDetailContent extends HBox {
         bigAvatar.setStyle("-fx-background-color: " + color + "; -fx-background-radius: 28;");
         Label avatarLabel = new Label(avatarText);
         avatarLabel.setFont(Font.font("Roboto", FontWeight.BOLD,
-                NodeUtils.avatarFontSize(avatarText.length(), 56)));
-        avatarLabel.setStyle("-fx-text-fill: white;");
+                NodeUtils.avatarFontSize(avatarText, 56)));
+        avatarLabel.setStyle("-fx-text-fill: white; -fx-padding: 0;");
         bigAvatar.getChildren().add(avatarLabel);
 
         Label nameLabel = new Label(displayName);

@@ -83,9 +83,21 @@ public class ProtocolHandler {
      * @param toRadio сообщение для отправки
      */
     public void sendToRadio(MeshProtos.ToRadio toRadio) {
+        sendToRadio(toRadio, true);
+    }
+
+    /**
+     * Отправляет {@code ToRadio} сообщение на устройство с возможностью не arm-ить
+     * transport-level receive watchdog для keepalive/heartbeat-пакетов.
+     *
+     * @param toRadio сообщение для отправки
+     * @param expectResponseAfterWrite {@code true} для обычных запросов/пакетов,
+     *                                 {@code false} для keepalive
+     */
+    public void sendToRadio(MeshProtos.ToRadio toRadio, boolean expectResponseAfterWrite) {
         byte[] frame = PacketFramer.frame(toRadio);
         log.debug("Sending ToRadio: {} ({} bytes framed)", toRadio.getPayloadVariantCase(), frame.length);
-        connection.sendBytes(frame);
+        connection.sendBytes(frame, expectResponseAfterWrite);
     }
 
     /**
@@ -103,7 +115,7 @@ public class ProtocolHandler {
                                     .setNonce(heartbeatNonce.incrementAndGet())
                                     .build())
                             .build();
-                    sendToRadio(heartbeat);
+                    sendToRadio(heartbeat, false);
                 } else {
                     log.debug("Heartbeat skipped: connection not active");
                 }

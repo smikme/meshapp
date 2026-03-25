@@ -23,7 +23,7 @@ public final class DatabaseMigrator {
     private static final Logger log = LoggerFactory.getLogger(DatabaseMigrator.class);
 
     /** Текущая версия схемы. Увеличивается при каждом изменении схемы. */
-    static final int CURRENT_VERSION = 5;
+    static final int CURRENT_VERSION = 7;
 
     private DatabaseMigrator() {}
 
@@ -61,6 +61,8 @@ public final class DatabaseMigrator {
             if (version < 3) { migrateToV3(connection); version = 3; }
             if (version < 4) { migrateToV4(connection); version = 4; }
             if (version < 5) { migrateToV5(connection); version = 5; }
+            if (version < 6) { migrateToV6(connection); version = 6; }
+            if (version < 7) { migrateToV7(connection); version = 7; }
 
             setVersion(connection, CURRENT_VERSION);
             log.info("Database migration complete, schema version = {}", CURRENT_VERSION);
@@ -76,6 +78,20 @@ public final class DatabaseMigrator {
     private static boolean schemaVersionTableExists(Connection connection) throws SQLException {
         try (ResultSet rs = connection.getMetaData()
                 .getTables(null, null, "SCHEMA_VERSION", null)) {
+            return rs.next();
+        }
+    }
+
+    private static boolean tableExists(Connection connection, String tableName) throws SQLException {
+        try (ResultSet rs = connection.getMetaData()
+                .getTables(null, null, tableName, new String[]{"TABLE"})) {
+            return rs.next();
+        }
+    }
+
+    private static boolean columnExists(Connection connection, String tableName, String columnName) throws SQLException {
+        try (ResultSet rs = connection.getMetaData()
+                .getColumns(null, null, tableName, columnName)) {
             return rs.next();
         }
     }
@@ -135,6 +151,59 @@ public final class DatabaseMigrator {
             stmt.execute("ALTER TABLE nodes ADD COLUMN IF NOT EXISTS ignored BOOLEAN DEFAULT FALSE");
         }
         log.info("Migration v5: added 'ignored' column to nodes");
+    }
+
+    /** v6: отдельная таблица реакций на сообщения. */
+    private static void migrateToV6(Connection connection) throws SQLException {
+        try (Statement stmt = connection.createStatement()) {
+            stmt.execute("""
+                    CREATE TABLE IF NOT EXISTS message_reactions (
+                        id                 BIGINT AUTO_INCREMENT PRIMARY KEY,
+                        owner_node_id      VARCHAR(20) NOT NULL DEFAULT '',
+                        chat_type          VARCHAR(10) NOT NULL,
+                        chat_key           VARCHAR(20) NOT NULL,
+                        target_packet_id   INT NOT NULL,
+                        reaction_packet_id INT DEFAULT 0,
+                        from_node_id       VARCHAR(20) NOT NULL,
+                        emoji              VARCHAR(16) NOT NULL,
+                        timestamp          BIGINT NOT NULL,
+                        outgoing           BOOLEAN NOT NULL,
+                        status             VARCHAR(20),
+                        error_reason       VARCHAR(100),
+                        sender_name        VARCHAR(100)
+                    )
+                    """);
+            stmt.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_reaction_chat_target
+                    ON message_reactions (owner_node_id, chat_type, chat_key, target_packet_id, id)
+                    """);
+            stmt.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_reaction_packet
+                    ON message_reactions (reaction_packet_id)
+                    """);
+        }
+        log.info("Migration v6: created 'message_reactions' table and indexes");
+    }
+
+    /**
+     * v7: нормализация legacy-кэша hops_away.
+     * <p>
+     * До v7 приложение сохраняло {@code hops_away = 0} и для прямых соседей,
+     * и для нод с неизвестным hop count, потому что presence optional-поля
+     * терялся при сериализации в {@link com.meshtastic.client.model.NodeData}.
+     * Старые записи невозможно восстановить точно, поэтому переводим все
+     * legacy-ноли в {@code NULL}. Актуальные direct-neighbor значения будут
+     * заново заполнены на следующем config exchange.
+     */
+    private static void migrateToV7(Connection connection) throws SQLException {
+        if (!tableExists(connection, "NODES") || !columnExists(connection, "NODES", "HOPS_AWAY")) {
+            log.info("Migration v7: skipped legacy hops normalization because nodes.hops_away is absent");
+            return;
+        }
+        try (Statement stmt = connection.createStatement()) {
+            stmt.executeUpdate("UPDATE nodes SET hops_away = NULL WHERE hops_away = 0");
+        }
+        log.info("Migration v7: normalized legacy nodes.hops_away=0 values to NULL");
     }
 
     /** v2: колонка favorite для избранных нод. */

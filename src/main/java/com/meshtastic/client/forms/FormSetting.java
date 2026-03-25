@@ -2,27 +2,33 @@ package com.meshtastic.client.forms;
 
 import com.google.protobuf.Descriptors.EnumValueDescriptor;
 import com.meshtastic.client.modal.ModalPane;
+import com.meshtastic.client.modal.Toast;
 import com.meshtastic.client.model.ConfigTreeItem;
 import com.meshtastic.client.model.ConnectionEntry;
+import com.meshtastic.client.model.ConnectionType;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.protocol.ProtocolHandler;
 import com.meshtastic.client.service.ConnectionManager;
+import com.meshtastic.client.service.ConfigSnapshotService;
 import com.meshtastic.client.service.MessageService;
 import com.meshtastic.client.service.NodeCacheService;
 import com.meshtastic.client.system.Form;
 import com.meshtastic.client.utils.AppPreferences;
 import com.meshtastic.client.utils.ProtobufTreeBuilder;
+import com.meshtastic.client.utils.SvgIconLoader;
 import com.meshtastic.client.utils.SystemForm;
 import javafx.application.Platform;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import javafx.geometry.Insets;
+import javafx.geometry.Orientation;
 import javafx.geometry.Pos;
 import javafx.scene.control.Button;
 import javafx.scene.control.CheckBox;
 import javafx.scene.control.ComboBox;
+import javafx.scene.control.ContentDisplay;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
 import javafx.scene.control.ScrollPane;
@@ -32,6 +38,8 @@ import javafx.scene.control.TabPane;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableView;
 import javafx.scene.control.TextField;
+import javafx.scene.control.ToolBar;
+import javafx.scene.control.Tooltip;
 import javafx.scene.control.TreeItem;
 import javafx.scene.control.TreeTableCell;
 import javafx.scene.control.TreeTableColumn;
@@ -39,25 +47,65 @@ import javafx.scene.control.TreeTableView;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
+import javafx.scene.shape.SVGPath;
 import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
+import javafx.stage.FileChooser;
+import javafx.stage.Window;
+import org.meshtastic.proto.ChannelProtos;
 import org.meshtastic.proto.ConfigProtos;
+import org.meshtastic.proto.MeshProtos;
 import org.meshtastic.proto.ModuleConfigProtos;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.File;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
+import java.util.TreeSet;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 @SystemForm(name = "Настройки", description = "Настройки клиента", tags = {"settings", "options"})
 public class FormSetting extends Form {
 
     private static final Logger log = LoggerFactory.getLogger(FormSetting.class);
+    /**
+     * Базовая пауза между admin-пакетами при сохранении конфигурации.
+     * Для Serial/TCP 200ms обычно достаточно, чтобы прошивка успела обработать
+     * begin/set/commit без "слипания" сообщений.
+     */
+    private static final long CONFIG_SAVE_MESSAGE_DELAY_MS = 200;
+    /**
+     * BLE получает более длинную паузу между admin-пакетами: Heltec V3 и похожие
+     * устройства иногда успевают уйти в reboot прямо после commit, и короткие интервалы
+     * повышают шанс гонки между последними GATT write и закрытием сессии.
+     */
+    private static final long BLE_CONFIG_SAVE_MESSAGE_DELAY_MS = 350;
+    /**
+     * Сколько ждём после последнего admin-пакета перед handoff в reconnect flow.
+     * Для BLE оставляем больше времени, чтобы commit успел дойти и устройство
+     * начало собственный disconnect/reboot без одновременного ручного разрыва.
+     */
+    private static final long CONFIG_SAVE_REBOOT_HANDOFF_DELAY_MS = 1_000;
+    private static final long BLE_CONFIG_SAVE_REBOOT_HANDOFF_DELAY_MS = 4_000;
+    /**
+     * Последний BLE set_config/set_module_config отправляется асинхронно на уровне GATT write.
+     * Перед commit даём дополнительное время, чтобы write с response успел физически дойти
+     * до устройства до того, как commit поставит reboot-triggering пакет в ту же очередь.
+     */
+    private static final long BLE_CONFIG_SAVE_PRE_COMMIT_SETTLE_DELAY_MS = 1_000;
+    /** Таймаут ожидания routing ACK для шага сохранения конфигурации. */
+    private static final long CONFIG_SAVE_ACK_TIMEOUT_MS = 8_000;
+    /** Короткая задержка перед reboot/shutdown, чтобы routing ACK успел вернуться до разрыва линка. */
+    private static final int DEVICE_POWER_ACTION_DELAY_SECONDS = 1;
+    /** Сколько максимум ждём routing ACK для reboot/shutdown перед fallback-поведением. */
+    private static final long DEVICE_POWER_ACTION_ACK_TIMEOUT_MS = 2_500;
 
     private DeviceState state;
     private ProtocolHandler handler;
@@ -80,11 +128,16 @@ public class FormSetting extends Form {
     private Label configStatusLabel;
     private Button saveConfigBtn;
     private Button refreshConfigBtn;
+    private Button restartHardwareBtn;
+    private Button shutdownHardwareBtn;
     private Tab configTab;
+    private volatile CompletableFuture<DeviceState> observedConfigLoadFuture;
 
     // Оригинальные protobuf-объекты для пересборки при сохранении
     private List<ConfigProtos.Config> originalConfigs = new ArrayList<>();
     private List<ModuleConfigProtos.ModuleConfig> originalModuleConfigs = new ArrayList<>();
+    private List<ChannelProtos.Channel> originalChannels = new ArrayList<>();
+    private List<ChannelProtos.Channel> workingChannels = new ArrayList<>();
 
     public FormSetting() {
         init();
@@ -147,16 +200,146 @@ public class FormSetting extends Form {
     }
 
     /**
-     * Возвращает ID активного подключения или null, если нет подключённых устройств.
+     * Возвращает активный профиль подключения целиком.
+     * Нужен save-flow, чтобы выбрать transport-aware pacing и корректно передать
+     * соединение в reconnect path после reboot устройства.
      */
-    private String findActiveConnectionId() {
+    private ConnectionEntry findActiveConnectionEntry() {
         ConnectionManager mgr = ConnectionManager.getInstance();
         for (ConnectionEntry entry : mgr.getEntries()) {
             if (entry.isConnected()) {
-                return entry.getId();
+                return entry;
             }
         }
         return null;
+    }
+
+    /**
+     * Возвращает {@code true}, если для активного подключения ещё идёт initial config exchange.
+     * Пока не пришёл {@code config_complete_id}, дерево может быть заполнено лишь частично,
+     * и запуск save-flow в этот момент конфликтует с продолжающимся чтением конфигурации.
+     */
+    private boolean isConfigExchangeInProgress(ConnectionEntry entry) {
+        if (entry == null) {
+            return false;
+        }
+        CompletableFuture<DeviceState> future = ConnectionManager.getInstance().getConfigFuture(entry.getId());
+        return future != null && !future.isDone();
+    }
+
+    /**
+     * Подписывается на завершение текущего config exchange, чтобы автоматически
+     * перевести форму из "идёт загрузка" в обычный режим без ручного refresh.
+     */
+    private void watchConfigExchangeCompletion(ConnectionEntry entry) {
+        if (entry == null) {
+            observedConfigLoadFuture = null;
+            return;
+        }
+        CompletableFuture<DeviceState> future = ConnectionManager.getInstance().getConfigFuture(entry.getId());
+        if (future == null || future.isDone() || future == observedConfigLoadFuture) {
+            return;
+        }
+        observedConfigLoadFuture = future;
+        future.whenComplete((ds, ex) -> Platform.runLater(() -> {
+            if (observedConfigLoadFuture == future) {
+                observedConfigLoadFuture = null;
+            }
+            reloadConfigTree();
+        }));
+    }
+
+    /**
+     * Ждёт routing ACK для шага сохранения конфигурации.
+     * <p>
+     * Теперь это делается не только для BLE: begin_edit_settings и промежуточные
+     * set_config/set_module_config должны завершиться подтверждением до отправки
+     * следующего шага, иначе commit может догнать ещё не обработанную транзакцию.
+     */
+    private void waitForRequiredConfigSaveAck(CompletableFuture<MeshProtos.Routing.Error> ackFuture,
+                                              String stepName) {
+        if (ackFuture == null) {
+            return;
+        }
+
+        try {
+            MeshProtos.Routing.Error error = ackFuture
+                    .orTimeout(CONFIG_SAVE_ACK_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+                    .get();
+            if (error != MeshProtos.Routing.Error.NONE) {
+                throw new IllegalStateException("Config save step '" + stepName + "' failed with " + error);
+            }
+        } catch (Exception e) {
+            throw new IllegalStateException("Config save step '" + stepName + "' ACK failed", e);
+        }
+    }
+
+    /**
+     * Подключает диагностику к ACK, который не должен блокировать commit/reconnect flow.
+     * <p>
+     * Последний mutating step и BLE commit не должны держать транзакцию открытой в UI:
+     * некоторые устройства рвут линк почти сразу после применения шага, и если ждать
+     * этот ACK синхронно, commit просто не будет отправлен.
+     */
+    private void observeDeferredConfigSaveAck(CompletableFuture<MeshProtos.Routing.Error> ackFuture,
+                                              String stepName) {
+        if (ackFuture == null) {
+            return;
+        }
+
+        ackFuture.whenComplete((error, ex) -> {
+            if (ex != null) {
+                log.info("Config save: deferred ACK for '{}' completed exceptionally: {}",
+                        stepName, ex.getMessage());
+            } else if (error != null && error != MeshProtos.Routing.Error.NONE) {
+                log.warn("Config save: deferred ACK for '{}' returned {}", stepName, error);
+            } else {
+                log.debug("Config save: deferred ACK received for '{}'", stepName);
+            }
+        });
+    }
+
+    /**
+     * Возвращает паузу между двумя шагами save-flow.
+     * <p>
+     * Для BLE обычной межшаговой задержки недостаточно перед {@code commitEditSettings},
+     * потому что {@code writeToRadio()} возвращается раньше фактического завершения
+     * CoreBluetooth write-with-response. Поэтому перед commit добавляется отдельное
+     * settle-окно после последнего mutating шага.
+     */
+    private long getConfigSaveInterTaskDelayMs(ConnectionType transport, int taskIndex, int totalTaskCount) {
+        long delayMs = transport == ConnectionType.BLE
+                ? BLE_CONFIG_SAVE_MESSAGE_DELAY_MS
+                : CONFIG_SAVE_MESSAGE_DELAY_MS;
+        boolean nextTaskIsCommit = taskIndex + 1 == totalTaskCount - 1;
+        if (transport == ConnectionType.BLE && nextTaskIsCommit) {
+            delayMs += BLE_CONFIG_SAVE_PRE_COMMIT_SETTLE_DELAY_MS;
+        }
+        return delayMs;
+    }
+
+    /**
+     * Некоторые BLE-устройства рвут линк сразу после {@code set_module_config(MQTT)},
+     * не дожидаясь {@code commit_edit_settings}, даже если {@code begin_edit_settings}
+     * был принят. Для такого узкого кейса транзакционная обёртка только мешает:
+     * save уже стартовал на стороне устройства, а commit гарантированно не успевает.
+     * <p>
+     * Поэтому для одиночного BLE-save секции MQTT используется implicit save path:
+     * отправляется только {@code set_module_config}, после чего приложение ждёт
+     * reboot/disconnect и передаёт соединение в reconnect flow.
+     */
+    static boolean shouldUseImplicitBleModuleSave(ConnectionType transport,
+                                                  boolean ownerModified,
+                                                  boolean positionModified,
+                                                  List<ConfigProtos.Config> configs,
+                                                  List<ModuleConfigProtos.ModuleConfig> moduleConfigs) {
+        return transport == ConnectionType.BLE
+                && !ownerModified
+                && !positionModified
+                && configs.isEmpty()
+                && moduleConfigs.size() == 1
+                && moduleConfigs.get(0).getPayloadVariantCase()
+                == ModuleConfigProtos.ModuleConfig.PayloadVariantCase.MQTT;
     }
 
     // ==================== Настройки приложения ====================
@@ -174,10 +357,15 @@ public class FormSetting extends Form {
         disableEffectsCb.selectedProperty().addListener((obs, old, val) ->
                 AppPreferences.setDisableEffects(val));
 
+        CheckBox minimizeToTrayCb = new CheckBox("Минимизация в трей");
+        minimizeToTrayCb.setSelected(AppPreferences.isMinimizeToTray());
+        minimizeToTrayCb.selectedProperty().addListener((obs, old, val) ->
+                AppPreferences.setMinimizeToTray(val));
+
         Label restartNote = new Label("Изменения вступят в силу после перезапуска приложения");
         restartNote.setStyle("-fx-opacity: 0.6; -fx-font-size: 11;");
 
-        VBox appearanceGroup = new VBox(8, appearanceHeader, disableEffectsCb, restartNote);
+        VBox appearanceGroup = new VBox(8, appearanceHeader, disableEffectsCb, minimizeToTrayCb, restartNote);
 
         // --- Группа «Интеграции» ---
         Label integrationsHeader = new Label("Интеграции");
@@ -351,21 +539,78 @@ public class FormSetting extends Form {
         configSearchField.setPromptText("Поиск параметров...");
         configSearchField.textProperty().addListener((obs, oldVal, newVal) -> filterConfigTree(newVal));
 
-        // Кнопки
-        HBox btnRow = new HBox(8);
-        btnRow.setAlignment(Pos.CENTER_LEFT);
+        // Toolbar действий
+        ToolBar actionToolbar = new ToolBar();
+        actionToolbar.getStyleClass().add("config-toolbar");
 
-        refreshConfigBtn = new Button("Обновить");
-        refreshConfigBtn.setOnAction(e -> reloadConfigTree());
+        refreshConfigBtn = createConfigToolbarButton(
+                "Обновить конфигурацию",
+                "Запросить актуальные параметры у подключенного радио",
+                "/icons/refresh.svg",
+                this::reloadConfigTree);
 
-        saveConfigBtn = new Button("Сохранить на радио");
+        saveConfigBtn = createConfigToolbarButton(
+                "Сохранить на радио",
+                "Отправить изменённые параметры на устройство и применить их",
+                "/icons/save-radio.svg",
+                this::onSaveConfig);
         saveConfigBtn.setDisable(true);
-        saveConfigBtn.setOnAction(e -> onSaveConfig());
+
+        restartHardwareBtn = createConfigToolbarButton(
+                "Перезапуск оборудования",
+                "Перезапустить подключенное устройство",
+                "/icons/restart-radio.svg",
+                this::onRestartHardware);
+        restartHardwareBtn.setDisable(true);
+
+        shutdownHardwareBtn = createConfigToolbarButton(
+                "Выключение оборудования",
+                "Выключить подключенное устройство",
+                "/icons/shutdown-radio.svg",
+                this::onShutdownHardware);
+        shutdownHardwareBtn.setDisable(true);
+
+        Button exportConfigBtn = createConfigToolbarButton(
+                "Сохранить конфигурацию",
+                "Сохранить текущую конфигурацию в файл .mcf",
+                "/icons/save-config.svg",
+                () -> onExportSnapshot(ConfigSnapshotService.SnapshotKind.CONFIG));
+
+        Button importConfigBtn = createConfigToolbarButton(
+                "Загрузить конфигурацию",
+                "Загрузить конфигурацию из файла .mcf в редактор",
+                "/icons/load-config.svg",
+                () -> onImportSnapshot(ConfigSnapshotService.SnapshotKind.CONFIG));
+
+        Button exportTemplateBtn = createConfigToolbarButton(
+                "Сохранить шаблон",
+                "Сохранить шаблон без персональных и секретных данных в файл .mtp",
+                "/icons/save-template.svg",
+                () -> onExportSnapshot(ConfigSnapshotService.SnapshotKind.TEMPLATE));
+
+        Button importTemplateBtn = createConfigToolbarButton(
+                "Загрузить шаблон",
+                "Загрузить шаблон из файла .mtp в редактор",
+                "/icons/load-template.svg",
+                () -> onImportSnapshot(ConfigSnapshotService.SnapshotKind.TEMPLATE));
+
+        actionToolbar.getItems().addAll(
+                refreshConfigBtn,
+                saveConfigBtn,
+                new Separator(Orientation.VERTICAL),
+                restartHardwareBtn,
+                shutdownHardwareBtn,
+                new Separator(Orientation.VERTICAL),
+                exportConfigBtn,
+                importConfigBtn,
+                new Separator(Orientation.VERTICAL),
+                exportTemplateBtn,
+                importTemplateBtn
+        );
 
         configStatusLabel = new Label("");
-        configStatusLabel.setStyle("-fx-opacity: 0.7;");
-
-        btnRow.getChildren().addAll(refreshConfigBtn, saveConfigBtn, configStatusLabel);
+        configStatusLabel.getStyleClass().add("config-status-label");
+        configStatusLabel.setWrapText(true);
 
         // TreeTableView
         configTree = new TreeTableView<>();
@@ -410,8 +655,747 @@ public class FormSetting extends Form {
 
         VBox.setVgrow(configTree, Priority.ALWAYS);
 
-        panel.getChildren().addAll(configSearchField, btnRow, configTree);
+        panel.getChildren().addAll(configSearchField, actionToolbar, configStatusLabel, configTree);
         return panel;
+    }
+
+    private Button createConfigToolbarButton(String title, String description, String iconPath, Runnable action) {
+        SVGPath icon = SvgIconLoader.load(iconPath, 18);
+
+        Button button = new Button();
+        button.getStyleClass().add("config-toolbar-button");
+        button.setMinSize(34, 34);
+        button.setPrefSize(34, 34);
+        button.setMaxSize(34, 34);
+        if (icon != null) {
+            button.setGraphic(icon);
+            button.setContentDisplay(ContentDisplay.GRAPHIC_ONLY);
+        } else {
+            button.setText(title);
+        }
+        button.setTooltip(new Tooltip(title + "\n" + description));
+        button.setOnAction(e -> action.run());
+        return button;
+    }
+
+    private void setDevicePowerButtonsDisabled(boolean disabled) {
+        if (restartHardwareBtn != null) {
+            restartHardwareBtn.setDisable(disabled);
+        }
+        if (shutdownHardwareBtn != null) {
+            shutdownHardwareBtn.setDisable(disabled);
+        }
+    }
+
+    private void onRestartHardware() {
+        ModalPane.showConfirm(
+                "Перезапуск оборудования",
+                "Вы уверены, что хотите перезапустить оборудование? Соединение с устройством будет временно разорвано.",
+                confirmed -> {
+                    if (confirmed) {
+                        requestDevicePowerAction(true);
+                    }
+                });
+    }
+
+    private void onShutdownHardware() {
+        ModalPane.showConfirm(
+                "Выключение оборудования",
+                "Вы уверены, что хотите выключить оборудование? Для повторного подключения устройство нужно будет включить вручную.",
+                confirmed -> {
+                    if (confirmed) {
+                        requestDevicePowerAction(false);
+                    }
+                });
+    }
+
+    private void requestDevicePowerAction(boolean reboot) {
+        refreshConnection();
+        if (state == null || handler == null) {
+            configStatusLabel.setText("Нет подключения к радио");
+            setDevicePowerButtonsDisabled(true);
+            return;
+        }
+
+        ConnectionEntry activeEntry = findActiveConnectionEntry();
+        if (activeEntry == null) {
+            configStatusLabel.setText("Нет активного подключения к радио");
+            setDevicePowerButtonsDisabled(true);
+            return;
+        }
+
+        DeviceState actionState = state;
+        ProtocolHandler actionHandler = handler;
+        String actionLabel = reboot ? "перезапуска" : "выключения";
+
+        setDevicePowerButtonsDisabled(true);
+        configStatusLabel.setText("Запрос session key для " + actionLabel + "...");
+
+        AtomicBoolean dispatchStarted = new AtomicBoolean(false);
+        Runnable[] listenerHolder = new Runnable[1];
+        listenerHolder[0] = () -> Platform.runLater(() -> {
+            actionState.removeOwnerInfoListener(listenerHolder[0]);
+            if (dispatchStarted.compareAndSet(false, true)) {
+                sendDevicePowerAction(activeEntry, actionState, actionHandler, reboot);
+            }
+        });
+        actionState.addOwnerInfoListener(listenerHolder[0]);
+
+        Thread timeoutThread = new Thread(() -> {
+            try {
+                Thread.sleep(5000);
+            } catch (InterruptedException ignored) {
+                return;
+            }
+            Platform.runLater(() -> {
+                actionState.removeOwnerInfoListener(listenerHolder[0]);
+                if (dispatchStarted.compareAndSet(false, true)) {
+                    configStatusLabel.setText("Отправка команды " + actionLabel + " без session key...");
+                    sendDevicePowerAction(activeEntry, actionState, actionHandler, reboot);
+                }
+            });
+        }, reboot ? "device-restart-timeout" : "device-shutdown-timeout");
+        timeoutThread.setDaemon(true);
+        timeoutThread.start();
+
+        MessageService.requestSessionPasskey(actionHandler, actionState);
+    }
+
+    private void sendDevicePowerAction(ConnectionEntry activeEntry,
+                                       DeviceState actionState,
+                                       ProtocolHandler actionHandler,
+                                       boolean reboot) {
+        String actionLabel = reboot ? "перезапуска" : "выключения";
+        String stepName = reboot ? "rebootDevice" : "shutdownDevice";
+        ConnectionType transport = activeEntry.getEffectiveType();
+
+        configStatusLabel.setText("Отправка команды " + actionLabel + "...");
+
+        CompletableFuture<MeshProtos.Routing.Error> ackFuture;
+        try {
+            ackFuture = reboot
+                    ? MessageService.rebootDevice(actionHandler, actionState, DEVICE_POWER_ACTION_DELAY_SECONDS)
+                    : MessageService.shutdownDevice(actionHandler, actionState, DEVICE_POWER_ACTION_DELAY_SECONDS);
+        } catch (Exception e) {
+            log.error("Device {} command send failed", stepName, e);
+            setDevicePowerButtonsDisabled(false);
+            configStatusLabel.setText("Ошибка отправки команды " + actionLabel);
+            return;
+        }
+
+        observeDevicePowerActionAck(ackFuture, stepName);
+
+        Thread actionThread = new Thread(() -> {
+            boolean ackConfirmed = false;
+            try {
+                try {
+                    MeshProtos.Routing.Error error = ackFuture.get(
+                            DEVICE_POWER_ACTION_ACK_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+                    if (error != null && error != MeshProtos.Routing.Error.NONE) {
+                        throw new IllegalStateException(stepName + " failed with " + error);
+                    }
+                    ackConfirmed = true;
+                } catch (TimeoutException e) {
+                    log.info("Device power action '{}' ACK timed out, proceeding with fallback flow", stepName);
+                }
+
+                Platform.runLater(() -> configStatusLabel.setText(reboot
+                        ? "Команда перезапуска отправлена. Ожидание переподключения..."
+                        : "Команда выключения отправлена. Ожидание отключения устройства..."));
+
+                Thread.sleep(getDevicePowerActionHandoffDelayMs(transport));
+
+                if (reboot) {
+                    ConnectionManager.getInstance().disconnectForDeviceReboot(activeEntry.getId());
+                    Platform.runLater(() -> {
+                        state = null;
+                        handler = null;
+                        reloadConfigTree();
+                    });
+                } else if (ackConfirmed) {
+                    ConnectionManager.getInstance().disconnect(activeEntry.getId());
+                    Platform.runLater(() -> {
+                        state = null;
+                        handler = null;
+                        reloadConfigTree();
+                    });
+                } else {
+                    Platform.runLater(() -> setDevicePowerButtonsDisabled(false));
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                log.warn("Device power action thread interrupted: {}", stepName);
+                Platform.runLater(() -> setDevicePowerButtonsDisabled(false));
+            } catch (Exception e) {
+                log.error("Device power action '{}' failed", stepName, e);
+                Platform.runLater(() -> {
+                    setDevicePowerButtonsDisabled(false);
+                    configStatusLabel.setText("Ошибка отправки команды " + actionLabel + ": " +
+                            (e.getMessage() != null ? e.getMessage() : "см. лог"));
+                });
+            }
+        }, reboot ? "device-restart-sender" : "device-shutdown-sender");
+        actionThread.setDaemon(true);
+        actionThread.start();
+    }
+
+    private void observeDevicePowerActionAck(CompletableFuture<MeshProtos.Routing.Error> ackFuture,
+                                             String stepName) {
+        if (ackFuture == null) {
+            return;
+        }
+
+        ackFuture.whenComplete((error, ex) -> {
+            if (ex != null) {
+                log.info("Device power action '{}' ACK completed exceptionally: {}", stepName, ex.getMessage());
+            } else if (error != null && error != MeshProtos.Routing.Error.NONE) {
+                log.warn("Device power action '{}' returned {}", stepName, error);
+            } else {
+                log.debug("Device power action '{}' ACK received", stepName);
+            }
+        });
+    }
+
+    private long getDevicePowerActionHandoffDelayMs(ConnectionType transport) {
+        return transport == ConnectionType.BLE
+                ? BLE_CONFIG_SAVE_REBOOT_HANDOFF_DELAY_MS
+                : CONFIG_SAVE_REBOOT_HANDOFF_DELAY_MS;
+    }
+
+    private void onExportSnapshot(ConfigSnapshotService.SnapshotKind kind) {
+        if (!ensureEditorAvailableForSnapshotOperation()) {
+            return;
+        }
+
+        TreeItem<ConfigTreeItem> root = currentEditorRoot();
+        if (root == null) {
+            return;
+        }
+
+        try {
+            ConfigSnapshotService.ConfigSnapshot snapshot = ConfigSnapshotService.createSnapshot(
+                    kind,
+                    extractOwnerInfo(root),
+                    extractFixedPosition(root),
+                    collectCurrentConfigMessages(root),
+                    collectCurrentModuleConfigMessages(root),
+                    getWorkingChannelsSnapshot()
+            );
+
+            FileChooser chooser = createSnapshotFileChooser(kind, true);
+            File target = chooser.showSaveDialog(getCurrentWindow());
+            if (target == null) {
+                return;
+            }
+
+            File outputFile = ensureSnapshotExtension(target, kind);
+            ConfigSnapshotService.writeSnapshot(outputFile.toPath(), snapshot);
+            Toast.show(Toast.Type.SUCCESS, switch (kind) {
+                case CONFIG -> "Конфигурация сохранена: " + outputFile.getName();
+                case TEMPLATE -> "Шаблон сохранён: " + outputFile.getName();
+            });
+        } catch (Exception e) {
+            log.error("Snapshot export failed", e);
+            ModalPane.showError(
+                    kind == ConfigSnapshotService.SnapshotKind.CONFIG
+                            ? "Ошибка сохранения конфигурации"
+                            : "Ошибка сохранения шаблона",
+                    e.getMessage() != null ? e.getMessage() : "Не удалось сохранить файл"
+            );
+        }
+    }
+
+    private void onImportSnapshot(ConfigSnapshotService.SnapshotKind kind) {
+        if (!ensureEditorAvailableForSnapshotOperation()) {
+            return;
+        }
+
+        FileChooser chooser = createSnapshotFileChooser(kind, false);
+        File source = chooser.showOpenDialog(getCurrentWindow());
+        if (source == null) {
+            return;
+        }
+
+        Runnable importAction = () -> importSnapshot(source, kind);
+        if (hasPendingEditorChanges()) {
+            ModalPane.showConfirm(
+                    kind == ConfigSnapshotService.SnapshotKind.CONFIG
+                            ? "Загрузить конфигурацию?"
+                            : "Загрузить шаблон?",
+                    "Текущие несохранённые изменения будут потеряны. Продолжить?",
+                    confirmed -> {
+                        if (confirmed) {
+                            importAction.run();
+                        }
+                    });
+        } else {
+            importAction.run();
+        }
+    }
+
+    private void importSnapshot(File source, ConfigSnapshotService.SnapshotKind expectedKind) {
+        try {
+            reloadConfigTree();
+            TreeItem<ConfigTreeItem> root = currentEditorRoot();
+            if (root == null) {
+                throw new IllegalStateException("Конфигурация не загружена в редактор");
+            }
+
+            ConfigSnapshotService.ConfigSnapshot snapshot = ConfigSnapshotService.readSnapshot(source.toPath());
+            if (snapshot.kind() != expectedKind) {
+                throw new IllegalArgumentException("Выбран файл другого типа: ожидался ." + expectedKind.extension());
+            }
+
+            applySnapshotToEditor(snapshot);
+            configTree.refresh();
+            saveConfigBtn.setDisable(false);
+            String fileKind = expectedKind == ConfigSnapshotService.SnapshotKind.CONFIG ? "Конфигурация" : "Шаблон";
+            configStatusLabel.setText(fileKind + " загружен из файла: " + source.getName());
+            Toast.show(Toast.Type.SUCCESS, fileKind + " загружен: " + source.getName());
+        } catch (Exception e) {
+            log.error("Snapshot import failed", e);
+            ModalPane.showError(
+                    expectedKind == ConfigSnapshotService.SnapshotKind.CONFIG
+                            ? "Ошибка загрузки конфигурации"
+                            : "Ошибка загрузки шаблона",
+                    e.getMessage() != null ? e.getMessage() : "Не удалось прочитать файл"
+            );
+        }
+    }
+
+    private boolean ensureEditorAvailableForSnapshotOperation() {
+        if (currentEditorRoot() == null) {
+            reloadConfigTree();
+        }
+
+        ConnectionEntry activeEntry = findActiveConnectionEntry();
+        if (isConfigExchangeInProgress(activeEntry)) {
+            watchConfigExchangeCompletion(activeEntry);
+            Toast.show(Toast.Type.WARNING, "Дождитесь завершения чтения конфигурации с устройства");
+            return false;
+        }
+
+        if (currentEditorRoot() == null) {
+            Toast.show(Toast.Type.WARNING, "Сначала загрузите конфигурацию с подключённого радио");
+            return false;
+        }
+        return true;
+    }
+
+    private FileChooser createSnapshotFileChooser(ConfigSnapshotService.SnapshotKind kind, boolean saveMode) {
+        FileChooser chooser = new FileChooser();
+        chooser.setTitle(switch (kind) {
+            case CONFIG -> saveMode ? "Сохранить конфигурацию" : "Загрузить конфигурацию";
+            case TEMPLATE -> saveMode ? "Сохранить шаблон" : "Загрузить шаблон";
+        });
+        chooser.getExtensionFilters().add(new FileChooser.ExtensionFilter(
+                kind == ConfigSnapshotService.SnapshotKind.CONFIG
+                        ? "MeshApp Config (*." + kind.extension() + ")"
+                        : "MeshApp Template (*." + kind.extension() + ")",
+                "*." + kind.extension()
+        ));
+        if (saveMode) {
+            chooser.setInitialFileName(buildSuggestedSnapshotName(kind));
+        }
+        return chooser;
+    }
+
+    private String buildSuggestedSnapshotName(ConfigSnapshotService.SnapshotKind kind) {
+        String baseName = "mesh-config";
+        if (state != null) {
+            NodeData myNode = state.getNodeDb().get(state.getMyNodeNum());
+            if (myNode != null) {
+                if (myNode.getLongName() != null && !myNode.getLongName().isBlank()) {
+                    baseName = myNode.getLongName().trim();
+                } else if (myNode.getNodeId() != null && !myNode.getNodeId().isBlank()) {
+                    baseName = myNode.getNodeId().trim();
+                }
+            }
+        }
+        baseName = baseName.replaceAll("[\\\\/:*?\"<>|]+", "_").replaceAll("\\s+", "_");
+        if (baseName.isBlank()) {
+            baseName = "mesh-config";
+        }
+        if (kind == ConfigSnapshotService.SnapshotKind.TEMPLATE) {
+            baseName += "-template";
+        }
+        return baseName;
+    }
+
+    private File ensureSnapshotExtension(File file, ConfigSnapshotService.SnapshotKind kind) {
+        String expectedSuffix = "." + kind.extension();
+        String fileName = file.getName();
+        String lowerName = fileName.toLowerCase(Locale.ROOT);
+        String duplicateSuffix = expectedSuffix + expectedSuffix;
+
+        if (lowerName.endsWith(duplicateSuffix)) {
+            fileName = fileName.substring(0, fileName.length() - expectedSuffix.length());
+            lowerName = fileName.toLowerCase(Locale.ROOT);
+        }
+
+        if (lowerName.endsWith(expectedSuffix)) {
+            File parent = file.getParentFile();
+            return parent != null ? new File(parent, fileName) : new File(fileName);
+        }
+        File parent = file.getParentFile();
+        return parent != null
+                ? new File(parent, fileName + expectedSuffix)
+                : new File(fileName + expectedSuffix);
+    }
+
+    private Window getCurrentWindow() {
+        return getScene() != null ? getScene().getWindow() : null;
+    }
+
+    private TreeItem<ConfigTreeItem> currentEditorRoot() {
+        return fullConfigRoot != null ? fullConfigRoot : configTree != null ? configTree.getRoot() : null;
+    }
+
+    private ConfigSnapshotService.OwnerInfo extractOwnerInfo(TreeItem<ConfigTreeItem> root) {
+        TreeItem<ConfigTreeItem> ownerSection = findTopLevelSection(root, "owner_info");
+        if (ownerSection == null) {
+            return null;
+        }
+        return new ConfigSnapshotService.OwnerInfo(
+                stringValue(ownerSection, "long_name"),
+                stringValue(ownerSection, "short_name")
+        );
+    }
+
+    private ConfigSnapshotService.FixedPosition extractFixedPosition(TreeItem<ConfigTreeItem> root) {
+        TreeItem<ConfigTreeItem> positionSection = findTopLevelSection(root, "fixed_position");
+        if (positionSection == null) {
+            return null;
+        }
+        return new ConfigSnapshotService.FixedPosition(
+                doubleValue(positionSection, "latitude"),
+                doubleValue(positionSection, "longitude"),
+                intValue(positionSection, "altitude")
+        );
+    }
+
+    private List<ConfigProtos.Config> collectCurrentConfigMessages(TreeItem<ConfigTreeItem> root) {
+        TreeItem<ConfigTreeItem> configRoot = findTopLevelSection(root, "config");
+        List<ConfigProtos.Config> result = new ArrayList<>();
+        if (configRoot == null) {
+            return result;
+        }
+
+        for (TreeItem<ConfigTreeItem> section : configRoot.getChildren()) {
+            ConfigTreeItem sectionData = section.getValue();
+            if (sectionData == null) {
+                continue;
+            }
+            ConfigProtos.Config original = findOriginalConfig(sectionData.getConfigVariantNumber());
+            if (original == null) {
+                continue;
+            }
+            ConfigProtos.Config rebuilt = ProtobufTreeBuilder.rebuildConfig(section, original);
+            if (rebuilt != null) {
+                result.add(rebuilt);
+            }
+        }
+        return result;
+    }
+
+    private List<ModuleConfigProtos.ModuleConfig> collectCurrentModuleConfigMessages(TreeItem<ConfigTreeItem> root) {
+        TreeItem<ConfigTreeItem> moduleRoot = findTopLevelSection(root, "module_config");
+        List<ModuleConfigProtos.ModuleConfig> result = new ArrayList<>();
+        if (moduleRoot == null) {
+            return result;
+        }
+
+        for (TreeItem<ConfigTreeItem> section : moduleRoot.getChildren()) {
+            ConfigTreeItem sectionData = section.getValue();
+            if (sectionData == null) {
+                continue;
+            }
+            ModuleConfigProtos.ModuleConfig original = findOriginalModuleConfig(sectionData.getConfigVariantNumber());
+            if (original == null) {
+                continue;
+            }
+            ModuleConfigProtos.ModuleConfig rebuilt = ProtobufTreeBuilder.rebuildModuleConfig(section, original);
+            if (rebuilt != null) {
+                result.add(rebuilt);
+            }
+        }
+        return result;
+    }
+
+    private void applySnapshotToEditor(ConfigSnapshotService.ConfigSnapshot snapshot) {
+        TreeItem<ConfigTreeItem> root = currentEditorRoot();
+        if (root == null) {
+            return;
+        }
+
+        if (configSearchField != null) {
+            configSearchField.clear();
+        }
+
+        applyOwnerInfo(snapshot.ownerInfo(), root);
+        applyFixedPosition(snapshot.fixedPosition(), root);
+        applyConfigSnapshot(snapshot.configs(), root);
+        applyModuleConfigSnapshot(snapshot.moduleConfigs(), root);
+        applyChannelSnapshot(snapshot.channels());
+    }
+
+    private void applyOwnerInfo(ConfigSnapshotService.OwnerInfo ownerInfo, TreeItem<ConfigTreeItem> root) {
+        if (ownerInfo == null) {
+            return;
+        }
+        TreeItem<ConfigTreeItem> ownerSection = findTopLevelSection(root, "owner_info");
+        if (ownerSection == null) {
+            return;
+        }
+        setTreeFieldValue(ownerSection, "long_name", ownerInfo.longName());
+        setTreeFieldValue(ownerSection, "short_name", ownerInfo.shortName());
+    }
+
+    private void applyFixedPosition(ConfigSnapshotService.FixedPosition fixedPosition, TreeItem<ConfigTreeItem> root) {
+        if (fixedPosition == null) {
+            return;
+        }
+        TreeItem<ConfigTreeItem> positionSection = findTopLevelSection(root, "fixed_position");
+        if (positionSection == null) {
+            return;
+        }
+        setTreeFieldValue(positionSection, "latitude", fixedPosition.latitude());
+        setTreeFieldValue(positionSection, "longitude", fixedPosition.longitude());
+        setTreeFieldValue(positionSection, "altitude", fixedPosition.altitude());
+    }
+
+    private void applyConfigSnapshot(List<com.google.gson.JsonObject> configs, TreeItem<ConfigTreeItem> root) {
+        TreeItem<ConfigTreeItem> configRoot = findTopLevelSection(root, "config");
+        if (configRoot == null) {
+            return;
+        }
+
+        for (com.google.gson.JsonObject configJson : configs) {
+            String variantField = ConfigSnapshotService.detectActiveVariantField(configJson);
+            if (variantField == null) {
+                continue;
+            }
+            int variantNumber = resolveVariantNumber(ConfigProtos.Config.getDescriptor().findFieldByName(variantField));
+            if (variantNumber < 0) {
+                continue;
+            }
+            ConfigProtos.Config baseConfig = findOriginalConfig(variantNumber);
+            if (baseConfig == null) {
+                baseConfig = ConfigProtos.Config.getDefaultInstance();
+            }
+            ConfigProtos.Config mergedConfig = ConfigSnapshotService.mergeJsonIntoMessage(baseConfig, configJson);
+            TreeItem<ConfigTreeItem> section = findSectionByVariant(configRoot, variantNumber);
+            if (section != null) {
+                var payload = getActiveConfigPayload(mergedConfig);
+                if (payload != null) {
+                    ProtobufTreeBuilder.applyMessageToTree(section, payload);
+                }
+            }
+        }
+    }
+
+    private void applyModuleConfigSnapshot(List<com.google.gson.JsonObject> moduleConfigs, TreeItem<ConfigTreeItem> root) {
+        TreeItem<ConfigTreeItem> moduleRoot = findTopLevelSection(root, "module_config");
+        if (moduleRoot == null) {
+            return;
+        }
+
+        for (com.google.gson.JsonObject moduleJson : moduleConfigs) {
+            String variantField = ConfigSnapshotService.detectActiveVariantField(moduleJson);
+            if (variantField == null) {
+                continue;
+            }
+            int variantNumber = resolveVariantNumber(ModuleConfigProtos.ModuleConfig.getDescriptor().findFieldByName(variantField));
+            if (variantNumber < 0) {
+                continue;
+            }
+            ModuleConfigProtos.ModuleConfig baseConfig = findOriginalModuleConfig(variantNumber);
+            if (baseConfig == null) {
+                baseConfig = ModuleConfigProtos.ModuleConfig.getDefaultInstance();
+            }
+            ModuleConfigProtos.ModuleConfig mergedConfig =
+                    ConfigSnapshotService.mergeJsonIntoMessage(baseConfig, moduleJson);
+            TreeItem<ConfigTreeItem> section = findSectionByVariant(moduleRoot, variantNumber);
+            if (section != null) {
+                var payload = getActiveModulePayload(mergedConfig);
+                if (payload != null) {
+                    ProtobufTreeBuilder.applyMessageToTree(section, payload);
+                }
+            }
+        }
+    }
+
+    private void applyChannelSnapshot(List<com.google.gson.JsonObject> channelPatches) {
+        if (channelPatches == null || channelPatches.isEmpty()) {
+            return;
+        }
+
+        List<ChannelProtos.Channel> importedChannels = new ArrayList<>();
+        for (com.google.gson.JsonObject channelJson : channelPatches) {
+            if (!channelJson.has("index")) {
+                continue;
+            }
+            int channelIndex = channelJson.get("index").getAsInt();
+            ChannelProtos.Channel baseChannel = findChannelByIndex(originalChannels, channelIndex);
+            if (baseChannel == null) {
+                baseChannel = disabledChannel(channelIndex);
+            }
+            importedChannels.add(ConfigSnapshotService.mergeJsonIntoMessage(baseChannel, channelJson));
+        }
+
+        importedChannels.sort(Comparator.comparingInt(ChannelProtos.Channel::getIndex));
+        workingChannels = importedChannels;
+    }
+
+    private boolean hasPendingEditorChanges() {
+        TreeItem<ConfigTreeItem> root = currentEditorRoot();
+        return (root != null && hasMoifiedFields(root)) || !collectModifiedChannels().isEmpty();
+    }
+
+    private List<ChannelProtos.Channel> collectModifiedChannels() {
+        List<ChannelProtos.Channel> targetChannels = getWorkingChannelsSnapshot();
+        TreeSet<Integer> allIndexes = new TreeSet<>();
+        for (ChannelProtos.Channel channel : originalChannels) {
+            allIndexes.add(channel.getIndex());
+        }
+        for (ChannelProtos.Channel channel : targetChannels) {
+            allIndexes.add(channel.getIndex());
+        }
+
+        List<ChannelProtos.Channel> modified = new ArrayList<>();
+        for (Integer index : allIndexes) {
+            ChannelProtos.Channel original = findChannelByIndex(originalChannels, index);
+            ChannelProtos.Channel target = findChannelByIndex(targetChannels, index);
+            ChannelProtos.Channel originalNormalized = original != null ? original : disabledChannel(index);
+            ChannelProtos.Channel targetNormalized = target != null ? target : disabledChannel(index);
+            if (!originalNormalized.equals(targetNormalized)) {
+                modified.add(targetNormalized);
+            }
+        }
+        modified.sort(Comparator.comparingInt(ChannelProtos.Channel::getIndex));
+        return modified;
+    }
+
+    private List<ChannelProtos.Channel> getWorkingChannelsSnapshot() {
+        List<ChannelProtos.Channel> source = !workingChannels.isEmpty() ? workingChannels : originalChannels;
+        return new ArrayList<>(source);
+    }
+
+    private TreeItem<ConfigTreeItem> findTopLevelSection(TreeItem<ConfigTreeItem> root, String configType) {
+        for (TreeItem<ConfigTreeItem> child : root.getChildren()) {
+            ConfigTreeItem data = child.getValue();
+            if (data != null && configType.equals(data.getConfigType())) {
+                return child;
+            }
+        }
+        return null;
+    }
+
+    private TreeItem<ConfigTreeItem> findSectionByVariant(TreeItem<ConfigTreeItem> sectionRoot, int variantNumber) {
+        for (TreeItem<ConfigTreeItem> child : sectionRoot.getChildren()) {
+            ConfigTreeItem data = child.getValue();
+            if (data != null && data.getConfigVariantNumber() == variantNumber) {
+                return child;
+            }
+        }
+        return null;
+    }
+
+    private void setTreeFieldValue(TreeItem<ConfigTreeItem> section, String fieldName, Object value) {
+        for (TreeItem<ConfigTreeItem> child : section.getChildren()) {
+            ConfigTreeItem data = child.getValue();
+            if (data != null && fieldName.equals(data.getFieldName())) {
+                data.setValue(value);
+                return;
+            }
+        }
+    }
+
+    private String stringValue(TreeItem<ConfigTreeItem> section, String fieldName) {
+        Object value = findTreeFieldValue(section, fieldName);
+        return value != null ? value.toString() : "";
+    }
+
+    private double doubleValue(TreeItem<ConfigTreeItem> section, String fieldName) {
+        Object value = findTreeFieldValue(section, fieldName);
+        return value instanceof Number number ? number.doubleValue() : 0;
+    }
+
+    private int intValue(TreeItem<ConfigTreeItem> section, String fieldName) {
+        Object value = findTreeFieldValue(section, fieldName);
+        return value instanceof Number number ? number.intValue() : 0;
+    }
+
+    private Object findTreeFieldValue(TreeItem<ConfigTreeItem> section, String fieldName) {
+        for (TreeItem<ConfigTreeItem> child : section.getChildren()) {
+            ConfigTreeItem data = child.getValue();
+            if (data != null && fieldName.equals(data.getFieldName())) {
+                return data.getValue();
+            }
+        }
+        return null;
+    }
+
+    private int resolveVariantNumber(com.google.protobuf.Descriptors.FieldDescriptor fieldDescriptor) {
+        return fieldDescriptor != null ? fieldDescriptor.getNumber() : -1;
+    }
+
+    private ConfigProtos.Config findOriginalConfig(int variantNumber) {
+        for (ConfigProtos.Config config : originalConfigs) {
+            if (getActiveOneofFieldNumber(config) == variantNumber) {
+                return config;
+            }
+        }
+        return null;
+    }
+
+    private ModuleConfigProtos.ModuleConfig findOriginalModuleConfig(int variantNumber) {
+        for (ModuleConfigProtos.ModuleConfig config : originalModuleConfigs) {
+            if (getActiveModuleOneofFieldNumber(config) == variantNumber) {
+                return config;
+            }
+        }
+        return null;
+    }
+
+    private ChannelProtos.Channel findChannelByIndex(List<ChannelProtos.Channel> channels, int index) {
+        for (ChannelProtos.Channel channel : channels) {
+            if (channel.getIndex() == index) {
+                return channel;
+            }
+        }
+        return null;
+    }
+
+    private ChannelProtos.Channel disabledChannel(int index) {
+        return ChannelProtos.Channel.newBuilder()
+                .setIndex(index)
+                .setRole(ChannelProtos.Channel.Role.DISABLED)
+                .build();
+    }
+
+    private com.google.protobuf.Message getActiveConfigPayload(ConfigProtos.Config config) {
+        var oneof = config.getDescriptorForType().getOneofs().stream()
+                .filter(o -> "payload_variant".equals(o.getName()))
+                .findFirst()
+                .orElse(null);
+        if (oneof == null) {
+            return null;
+        }
+        var field = config.getOneofFieldDescriptor(oneof);
+        return field != null ? (com.google.protobuf.Message) config.getField(field) : null;
+    }
+
+    private com.google.protobuf.Message getActiveModulePayload(ModuleConfigProtos.ModuleConfig config) {
+        var oneof = config.getDescriptorForType().getOneofs().stream()
+                .filter(o -> "payload_variant".equals(o.getName()))
+                .findFirst()
+                .orElse(null);
+        if (oneof == null) {
+            return null;
+        }
+        var field = config.getOneofFieldDescriptor(oneof);
+        return field != null ? (com.google.protobuf.Message) config.getField(field) : null;
     }
 
     /**
@@ -424,27 +1408,38 @@ public class FormSetting extends Form {
         }
 
         boolean connected = state != null && handler != null;
+        setDevicePowerButtonsDisabled(!connected);
 
         if (!connected) {
             configStatusLabel.setText("Нет подключения к радио");
             saveConfigBtn.setDisable(true);
+            originalChannels = new ArrayList<>();
+            workingChannels = new ArrayList<>();
             configTree.setRoot(null);
             return;
         }
 
         NodeData myNode = state.getNodeDb().get(state.getMyNodeNum());
+        ConnectionEntry activeEntry = findActiveConnectionEntry();
+        boolean configExchangeInProgress = isConfigExchangeInProgress(activeEntry);
 
         // Сохраняем оригинальные protobuf для пересборки
         List<ConfigProtos.Config> stateConfigs;
         List<ModuleConfigProtos.ModuleConfig> stateModuleConfigs;
+        List<ChannelProtos.Channel> stateChannels;
         synchronized (state.getConfigs()) {
             stateConfigs = new ArrayList<>(state.getConfigs());
         }
         synchronized (state.getModuleConfigs()) {
             stateModuleConfigs = new ArrayList<>(state.getModuleConfigs());
         }
+        synchronized (state.getChannels()) {
+            stateChannels = new ArrayList<>(state.getChannels());
+        }
         originalConfigs = stateConfigs;
         originalModuleConfigs = stateModuleConfigs;
+        originalChannels = stateChannels;
+        workingChannels = new ArrayList<>(stateChannels);
 
         // Корневой элемент (невидимый)
         TreeItem<ConfigTreeItem> root = new TreeItem<>(new ConfigTreeItem("Корень", null, 0));
@@ -496,7 +1491,11 @@ public class FormSetting extends Form {
         configTree.setRoot(root);
         configSearchField.clear();
 
-        if (originalConfigs.isEmpty() && originalModuleConfigs.isEmpty()) {
+        if (configExchangeInProgress) {
+            watchConfigExchangeCompletion(activeEntry);
+            configStatusLabel.setText("Идёт чтение конфигурации с устройства...");
+            saveConfigBtn.setDisable(true);
+        } else if (originalConfigs.isEmpty() && originalModuleConfigs.isEmpty()) {
             configStatusLabel.setText("Конфигурация не получена от устройства");
             saveConfigBtn.setDisable(true);
         } else {
@@ -617,6 +1616,13 @@ public class FormSetting extends Form {
             configStatusLabel.setText("Нет подключения к радио");
             return;
         }
+        ConnectionEntry activeEntry = findActiveConnectionEntry();
+        if (isConfigExchangeInProgress(activeEntry)) {
+            watchConfigExchangeCompletion(activeEntry);
+            configStatusLabel.setText("Дождитесь завершения чтения конфигурации");
+            saveConfigBtn.setDisable(true);
+            return;
+        }
 
         TreeItem<ConfigTreeItem> root = fullConfigRoot != null ? fullConfigRoot : configTree.getRoot();
         if (root == null) { return; }
@@ -689,13 +1695,17 @@ public class FormSetting extends Form {
             }
         }
 
+        List<ChannelProtos.Channel> modifiedChannels = collectModifiedChannels();
+
         if (!ownerModified && !positionModified
-                && modifiedConfigs.isEmpty() && modifiedModuleConfigs.isEmpty()) {
+                && modifiedConfigs.isEmpty() && modifiedModuleConfigs.isEmpty()
+                && modifiedChannels.isEmpty()) {
             configStatusLabel.setText("Нет изменений для сохранения");
             return;
         }
 
         int totalChanges = modifiedConfigs.size() + modifiedModuleConfigs.size()
+                + modifiedChannels.size()
                 + (ownerModified ? 1 : 0) + (positionModified ? 1 : 0);
         saveConfigBtn.setDisable(true);
         configStatusLabel.setText("Запрос session key...");
@@ -709,14 +1719,20 @@ public class FormSetting extends Form {
         final double fLon = newLon;
         final int fAlt = newAlt;
 
-        // Запрашиваем session key → отправляем настройки
+        // Запрашиваем session key → отправляем настройки.
+        // OwnerInfo listener и timeout fallback работают параллельно, поэтому нужен
+        // single-shot guard: повторный begin/set/commit через ~5 секунд ломает save-flow
+        // на любом транспорте, если owner info уже успел прийти раньше таймаута.
+        AtomicBoolean saveDispatchStarted = new AtomicBoolean(false);
         Runnable[] listenerHolder = new Runnable[1];
         listenerHolder[0] = () -> Platform.runLater(() -> {
             state.removeOwnerInfoListener(listenerHolder[0]);
-            sendConfigChanges(modifiedConfigs, modifiedModuleConfigs,
-                    fOwnerModified, fLongName, fShortName,
-                    fPositionModified, fLat, fLon, fAlt,
-                    totalChanges);
+            if (saveDispatchStarted.compareAndSet(false, true)) {
+                sendConfigChanges(modifiedConfigs, modifiedModuleConfigs, modifiedChannels,
+                        fOwnerModified, fLongName, fShortName,
+                        fPositionModified, fLat, fLon, fAlt,
+                        totalChanges);
+            }
         });
         state.addOwnerInfoListener(listenerHolder[0]);
 
@@ -725,9 +1741,9 @@ public class FormSetting extends Form {
             try { Thread.sleep(5000); } catch (InterruptedException ignored) { return; }
             Platform.runLater(() -> {
                 state.removeOwnerInfoListener(listenerHolder[0]);
-                if (saveConfigBtn.isDisable()) {
+                if (saveDispatchStarted.compareAndSet(false, true)) {
                     configStatusLabel.setText("Отправка без session key...");
-                    sendConfigChanges(modifiedConfigs, modifiedModuleConfigs,
+                    sendConfigChanges(modifiedConfigs, modifiedModuleConfigs, modifiedChannels,
                             fOwnerModified, fLongName, fShortName,
                             fPositionModified, fLat, fLon, fAlt,
                             totalChanges);
@@ -737,7 +1753,7 @@ public class FormSetting extends Form {
         timeoutThread.setDaemon(true);
         timeoutThread.start();
 
-        MessageService.requestOwnerInfo(handler, state);
+        MessageService.requestSessionPasskey(handler, state);
     }
 
     /**
@@ -747,10 +1763,15 @@ public class FormSetting extends Form {
      */
     private void sendConfigChanges(List<ConfigProtos.Config> configs,
                                     List<ModuleConfigProtos.ModuleConfig> moduleConfigs,
+                                    List<ChannelProtos.Channel> channels,
                                     boolean ownerModified, String newLongName, String newShortName,
                                     boolean positionModified, double newLat, double newLon, int newAlt,
                                     int totalChanges) {
         configStatusLabel.setText("Отправка настроек...");
+        ConnectionEntry activeEntry = findActiveConnectionEntry();
+        ConnectionType activeTransport = activeEntry != null
+                ? activeEntry.getEffectiveType()
+                : ConnectionType.TCP;
 
         // Виртуальные секции — отправить напрямую
         if (ownerModified && newLongName != null && newShortName != null) {
@@ -780,89 +1801,195 @@ public class FormSetting extends Form {
             }
         }
 
-        // Protobuf-секции — через begin/commit edit с задержками между сообщениями.
-        // Прошивка может не успеть обработать сообщение до прихода следующего,
-        // поэтому каждое admin-сообщение отправляется с интервалом 200ms.
-        if (!configs.isEmpty() || !moduleConfigs.isEmpty()) {
+        // Protobuf-секции обычно идут через begin/commit edit с задержками между сообщениями.
+        // Исключение ниже — одиночный BLE-save MQTT, где некоторые устройства reboot/disconnect
+        // уже на set_module_config и не дают commit дойти до firmware.
+        if (!channels.isEmpty() || !configs.isEmpty() || !moduleConfigs.isEmpty()) {
             List<Runnable> tasks = new ArrayList<>();
-            tasks.add(() -> {
-                log.info("Config save: beginEditSettings");
-                MessageService.beginEditSettings(handler, state);
-            });
-            for (ConfigProtos.Config c : configs) {
+            AtomicBoolean saveFailed = new AtomicBoolean(false);
+            AtomicBoolean saveCompletionAnnounced = new AtomicBoolean(false);
+            boolean requiresReconnect = !configs.isEmpty() || !moduleConfigs.isEmpty();
+            boolean useImplicitBleModuleSave = shouldUseImplicitBleModuleSave(
+                    activeTransport, ownerModified, positionModified, configs, moduleConfigs)
+                    && channels.isEmpty();
+
+            for (ChannelProtos.Channel channel : channels) {
                 tasks.add(() -> {
-                    log.info("Config save: setConfig variant={} size={}",
-                            c.getPayloadVariantCase(), c.getSerializedSize());
-                    MessageService.setConfig(handler, state, c);
+                    String stepName = "setChannel/" + channel.getIndex();
+                    log.info("Config save: setChannel index={} role={}",
+                            channel.getIndex(), channel.getRole());
+                    waitForRequiredConfigSaveAck(
+                            MessageService.setChannel(handler, state, channel, state.getSessionPasskey()),
+                            stepName);
+                    state.updateChannel(channel);
                 });
             }
-            for (ModuleConfigProtos.ModuleConfig mc : moduleConfigs) {
+
+            if (useImplicitBleModuleSave) {
+                ModuleConfigProtos.ModuleConfig mqttConfig = moduleConfigs.get(0);
                 tasks.add(() -> {
-                    log.info("Config save: setModuleConfig variant={} size={}",
-                            mc.getPayloadVariantCase(), mc.getSerializedSize());
-                    MessageService.setModuleConfig(handler, state, mc);
+                    String stepName = "setModuleConfig/" + mqttConfig.getPayloadVariantCase();
+                    log.info("Config save: implicit BLE {} variant={} size={}",
+                            stepName, mqttConfig.getPayloadVariantCase(), mqttConfig.getSerializedSize());
+                    CompletableFuture<MeshProtos.Routing.Error> ackFuture =
+                            MessageService.setModuleConfig(handler, state, mqttConfig);
+                    observeDeferredConfigSaveAck(ackFuture, stepName);
                 });
-            }
-            tasks.add(() -> {
-                log.info("Config save: commitEditSettings");
-                MessageService.commitEditSettings(handler, state);
-            });
-
-            long delayMs = 200;
-            ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
-                Thread t = new Thread(r, "config-save-sender");
-                t.setDaemon(true);
-                return t;
-            });
-
-            // Каждый task оборачиваем в try-catch — ScheduledExecutorService
-            // тихо проглатывает исключения
-            for (int i = 0; i < tasks.size(); i++) {
-                final int idx = i;
-                scheduler.schedule(() -> {
-                    try {
-                        tasks.get(idx).run();
-                    } catch (Exception e) {
-                        log.error("Config save task {} failed", idx, e);
-                    }
-                }, (long) i * delayMs, TimeUnit.MILLISECONDS);
-            }
-
-            // Последний task обновляет UI
-            long uiDelay = (long) tasks.size() * delayMs;
-            scheduler.schedule(() -> Platform.runLater(() -> {
-                resetModifiedFlags(fullConfigRoot != null ? fullConfigRoot : configTree.getRoot());
-                saveConfigBtn.setDisable(false);
-                configStatusLabel.setText("Отправлено секций: " + totalChanges
-                        + ". Устройство перезагрузится. Отключение...");
-            }), uiDelay, TimeUnit.MILLISECONDS);
-
-            // Disconnect через 1с после последнего сообщения — НЕЗАВИСИМО от результата tasks
-            long disconnectDelay = uiDelay + 1000;
-            scheduler.schedule(() -> {
-                try {
-                    String connId = findActiveConnectionId();
-                    if (connId != null) {
-                        log.info("Config save: disconnecting after commit (device will reboot)");
-                        ConnectionManager.getInstance().disconnect(connId);
+            } else if (requiresReconnect) {
+                tasks.add(() -> {
+                    log.info("Config save: beginEditSettings");
+                    waitForRequiredConfigSaveAck(
+                            MessageService.beginEditSettings(handler, state),
+                            "beginEditSettings");
+                });
+                int totalMutatingSteps = configs.size() + moduleConfigs.size();
+                int mutatingStepIndex = 0;
+                for (ConfigProtos.Config c : configs) {
+                    boolean waitForAckBeforeCommit = ++mutatingStepIndex < totalMutatingSteps;
+                    tasks.add(() -> {
+                        String stepName = "setConfig/" + c.getPayloadVariantCase();
+                        log.info("Config save: setConfig variant={} size={}",
+                                c.getPayloadVariantCase(), c.getSerializedSize());
+                        CompletableFuture<MeshProtos.Routing.Error> ackFuture =
+                                MessageService.setConfig(handler, state, c);
+                        if (waitForAckBeforeCommit) {
+                            waitForRequiredConfigSaveAck(ackFuture, stepName);
+                        } else {
+                            // The final payload step is followed only by commit. Requiring its routing
+                            // ACK here can block commit entirely on nodes that reboot or drop the link
+                            // immediately after applying the last config section.
+                            observeDeferredConfigSaveAck(ackFuture, stepName);
+                        }
+                    });
+                }
+                for (ModuleConfigProtos.ModuleConfig mc : moduleConfigs) {
+                    boolean waitForAckBeforeCommit = ++mutatingStepIndex < totalMutatingSteps;
+                    tasks.add(() -> {
+                        String stepName = "setModuleConfig/" + mc.getPayloadVariantCase();
+                        log.info("Config save: setModuleConfig variant={} size={}",
+                                mc.getPayloadVariantCase(), mc.getSerializedSize());
+                        CompletableFuture<MeshProtos.Routing.Error> ackFuture =
+                                MessageService.setModuleConfig(handler, state, mc);
+                        if (waitForAckBeforeCommit) {
+                            waitForRequiredConfigSaveAck(ackFuture, stepName);
+                        } else {
+                            // MQTT and other reboot-sensitive module updates should not prevent the
+                            // trailing commit from being sent just because their routing ACK is late.
+                            observeDeferredConfigSaveAck(ackFuture, stepName);
+                        }
+                    });
+                }
+                tasks.add(() -> {
+                    String stepName = "commitEditSettings";
+                    log.info("Config save: commitEditSettings");
+                    CompletableFuture<MeshProtos.Routing.Error> ackFuture =
+                            MessageService.commitEditSettings(handler, state);
+                    if (activeTransport == ConnectionType.BLE) {
+                        // BLE devices often reboot/disconnect immediately after commit, so the save
+                        // flow must hand off to reconnect even if the routing ACK never comes back.
+                        observeDeferredConfigSaveAck(ackFuture, stepName);
                     } else {
-                        log.warn("Config save: no active connection to disconnect");
+                        waitForRequiredConfigSaveAck(ackFuture, stepName);
+                    }
+                });
+            }
+
+            long rebootHandoffDelay = activeTransport == ConnectionType.BLE
+                    ? BLE_CONFIG_SAVE_REBOOT_HANDOFF_DELAY_MS
+                    : CONFIG_SAVE_REBOOT_HANDOFF_DELAY_MS;
+
+            Thread saveThread = new Thread(() -> {
+                try {
+                    // Steps must be delayed relative to the completion of the previous step.
+                    // The previous absolute scheduler caused set/commit to collapse into the same
+                    // moment whenever beginEditSettings spent time waiting for its ACK.
+                    for (int i = 0; i < tasks.size(); i++) {
+                        if (saveFailed.get()) {
+                            return;
+                        }
+                        try {
+                            tasks.get(i).run();
+                        } catch (Exception e) {
+                            if (saveCompletionAnnounced.get()) {
+                                log.warn("Config save task {} failed after completion was announced", i, e);
+                                return;
+                            }
+                            saveFailed.set(true);
+                            log.error("Config save task {} failed", i, e);
+                            Platform.runLater(() -> {
+                                saveConfigBtn.setDisable(false);
+                                configStatusLabel.setText("Ошибка сохранения: " +
+                                        (e.getMessage() != null ? e.getMessage() : "см. лог"));
+                            });
+                            return;
+                        }
+
+                        if (i + 1 < tasks.size()) {
+                            long interTaskDelayMs =
+                                    getConfigSaveInterTaskDelayMs(activeTransport, i, tasks.size());
+                            log.debug("Config save: waiting {}ms before {}",
+                                    interTaskDelayMs,
+                                    i + 1 == tasks.size() - 1 ? "commitEditSettings" : "next step");
+                            Thread.sleep(interTaskDelayMs);
+                        }
+                    }
+
+                    if (saveFailed.get()) {
+                        return;
+                    }
+
+                    saveCompletionAnnounced.set(true);
+                    Platform.runLater(() -> {
+                        resetModifiedFlags(fullConfigRoot != null ? fullConfigRoot : configTree.getRoot());
+                        originalChannels = getWorkingChannelsSnapshot();
+                        saveConfigBtn.setDisable(false);
+                        if (requiresReconnect) {
+                            String reconnectMessage = activeTransport == ConnectionType.BLE
+                                    ? "Отправлено секций: " + totalChanges + ". Ожидание переподключения по BLE..."
+                                    : "Отправлено секций: " + totalChanges + ". Устройство перезагрузится. Переподключение...";
+                            configStatusLabel.setText(reconnectMessage);
+                        } else {
+                            configStatusLabel.setText("Отправлено секций: " + totalChanges);
+                        }
+                    });
+
+                    // После commit переводим соединение в reboot-aware reconnect path.
+                    // Обычный user disconnect здесь вреден: он помечает разрыв как ручной
+                    // и запрещает auto-reconnect, а BLE как раз нуждается в мягком handoff
+                    // на время device reboot / повторной рекламы.
+                    if (!requiresReconnect) {
+                        return;
+                    }
+                    Thread.sleep(rebootHandoffDelay);
+                    if (saveFailed.get()) {
+                        return;
+                    }
+                    if (activeEntry != null) {
+                        log.info("Config save: handoff to reboot reconnect flow (transport={})",
+                                activeTransport);
+                        ConnectionManager.getInstance().disconnectForDeviceReboot(activeEntry.getId());
+                    } else {
+                        log.warn("Config save: no active connection to hand off after commit");
                     }
                     Platform.runLater(() -> {
                         state = null;
                         handler = null;
                         reloadConfigTree();
                     });
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    log.warn("Config save thread interrupted");
                 } catch (Exception e) {
                     log.error("Config save: disconnect failed", e);
-                } finally {
-                    scheduler.shutdown();
                 }
-            }, disconnectDelay, TimeUnit.MILLISECONDS);
+            }, "config-save-sender");
+            saveThread.setDaemon(true);
+            saveThread.start();
 
         } else {
             // Только виртуальные секции — завершить сразу (устройство не перезагружается)
             resetModifiedFlags(fullConfigRoot != null ? fullConfigRoot : configTree.getRoot());
+            originalChannels = getWorkingChannelsSnapshot();
             saveConfigBtn.setDisable(false);
             configStatusLabel.setText("Отправлено секций: " + totalChanges);
         }

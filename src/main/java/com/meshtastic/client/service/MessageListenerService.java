@@ -6,6 +6,7 @@ import org.meshtastic.proto.MeshProtos;
 import org.meshtastic.proto.Portnums;
 import com.google.protobuf.InvalidProtocolBufferException;
 import com.meshtastic.client.model.DeviceState;
+import com.meshtastic.client.model.MessageReaction;
 import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.model.TelemetryEntry;
@@ -92,6 +93,10 @@ public class MessageListenerService implements FromRadioListener {
         boolean outgoing = from == deviceState.getMyNodeNum();
 
         if (outgoing) { return; } // outgoing messages are already added by MessageService
+        if (isReactionPacket(data)) {
+            handleReactionPacket(packet, data, timestamp, to == 0xFFFFFFFF);
+            return;
+        }
 
         // Lookup nodeId через NodeData (не математическая конвертация)
         NodeData fromNode = deviceState.getOrCreateNode(from);
@@ -145,6 +150,47 @@ public class MessageListenerService implements FromRadioListener {
         Platform.runLater(() -> DrawerManager.setChatUnreadDot(true));
     }
 
+    private boolean isReactionPacket(MeshProtos.Data data) {
+        return data.getReplyId() != 0 && data.getEmoji() != 0;
+    }
+
+    private void handleReactionPacket(MeshProtos.MeshPacket packet,
+                                      MeshProtos.Data data,
+                                      long timestamp,
+                                      boolean channelMessage) {
+        String emoji = data.getPayload().toString(StandardCharsets.UTF_8);
+        if (emoji == null || emoji.isEmpty()) {
+            log.debug("Ignoring reaction packet {} with empty payload", packet.getId());
+            return;
+        }
+
+        NodeData fromNode = deviceState.getOrCreateNode(packet.getFrom());
+        String fromNodeId = fromNode.getNodeId();
+
+        MessageReaction reaction = new MessageReaction(
+                data.getReplyId(),
+                fromNodeId,
+                emoji,
+                timestamp,
+                false
+        );
+        reaction.setPacketId(packet.getId());
+        reaction.setStatus(MeshMessage.DeliveryStatus.DELIVERED);
+        if (fromNode.getLongName() != null) {
+            reaction.setSenderName(fromNode.getLongName());
+        }
+
+        String ownerNodeId = String.format("!%08x", deviceState.getMyNodeNum());
+        if (channelMessage) {
+            MessageDbService.getInstance().saveReaction(
+                    reaction, "channel", String.valueOf(packet.getChannel()), ownerNodeId);
+        } else {
+            MessageDbService.getInstance().saveReaction(reaction, "dm", fromNodeId, ownerNodeId);
+        }
+
+        deviceState.fireMessageListeners();
+    }
+
     private void handleRoutingAck(MeshProtos.MeshPacket packet, MeshProtos.Data data) {
         int requestId = data.getRequestId();
         if (requestId == 0) {
@@ -153,14 +199,35 @@ public class MessageListenerService implements FromRadioListener {
             return;
         }
 
-        MeshMessage pending = deviceState.resolvePendingAck(requestId);
-        if (pending == null) {
-            log.debug("No pending message found for ACK requestId={}", requestId);
-            return;
-        }
-
         try {
             MeshProtos.Routing routing = MeshProtos.Routing.parseFrom(data.getPayload());
+            MeshMessage pending = deviceState.resolvePendingAck(requestId);
+            boolean completedPacketAck = deviceState.completePendingPacketAck(requestId, routing.getErrorReason());
+            MeshMessage.DeliveryStatus reactionStatus =
+                    routing.getErrorReason() == MeshProtos.Routing.Error.NONE
+                            ? MeshMessage.DeliveryStatus.DELIVERED
+                            : MeshMessage.DeliveryStatus.FAILED;
+            String reactionError = routing.getErrorReason() == MeshProtos.Routing.Error.NONE
+                    ? null
+                    : routing.getErrorReason().name();
+            boolean updatedReaction = MessageDbService.getInstance()
+                    .updateReactionStatus(requestId, reactionStatus, reactionError);
+
+            if (pending == null && !completedPacketAck && !updatedReaction) {
+                log.debug("No pending message or packet ACK waiter found for requestId={}", requestId);
+                return;
+            }
+
+            if (pending == null) {
+                if (updatedReaction) {
+                    deviceState.fireMessageListeners();
+                    log.debug("Routing ACK received for reaction packet {}", requestId);
+                } else {
+                    log.debug("Routing ACK received for non-message packet {}", requestId);
+                }
+                return;
+            }
+
             if (routing.getErrorReason() == MeshProtos.Routing.Error.NONE) {
                 pending.setStatus(MeshMessage.DeliveryStatus.DELIVERED);
                 MessageDbService.getInstance().updateStatus(requestId, pending.getStatus(), null);
@@ -333,16 +400,23 @@ public class MessageListenerService implements FromRadioListener {
     private void handleAdminResponse(MeshProtos.MeshPacket packet, MeshProtos.Data data) {
         try {
             AdminProtos.AdminMessage adminMsg = AdminProtos.AdminMessage.parseFrom(data.getPayload());
+            boolean hasSessionPasskey = !adminMsg.getSessionPasskey().isEmpty();
+            if (hasSessionPasskey) {
+                deviceState.setSessionPasskey(adminMsg.getSessionPasskey());
+            }
 
             if (adminMsg.hasGetOwnerResponse()) {
                 MeshProtos.User owner = adminMsg.getGetOwnerResponse();
                 deviceState.setOwnerInfo(owner);
-                if (!adminMsg.getSessionPasskey().isEmpty()) {
-                    deviceState.setSessionPasskey(adminMsg.getSessionPasskey());
-                }
                 deviceState.fireOwnerInfoListeners();
                 log.info("Received owner info: longName='{}', shortName='{}'",
                         owner.getLongName(), owner.getShortName());
+            } else if (hasSessionPasskey) {
+                // Session passkey is attached to get_x_response packets, not only owner info.
+                // Save/channel edit flows wait on the same listener to unblock when the key arrives.
+                deviceState.fireOwnerInfoListeners();
+                log.debug("Received session passkey via ADMIN_APP response: {}",
+                        adminMsg.getPayloadVariantCase());
             } else {
                 log.debug("Received ADMIN_APP response: {}", adminMsg.getPayloadVariantCase());
             }

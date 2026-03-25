@@ -1,5 +1,6 @@
 package com.meshtastic.client.service;
 
+import com.meshtastic.client.model.MessageReaction;
 import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.model.NodeData;
 import org.slf4j.Logger;
@@ -31,6 +32,8 @@ public final class MessageDbService {
     private Connection dbConnection;
     private PreparedStatement insertStmt;
     private PreparedStatement updateStatusStmt;
+    private PreparedStatement insertReactionStmt;
+    private PreparedStatement updateReactionStatusStmt;
 
     private MessageDbService() {
         initDb();
@@ -93,6 +96,33 @@ public final class MessageDbService {
                     """);
 
                 stmt.execute("""
+                    CREATE TABLE IF NOT EXISTS message_reactions (
+                        id                 BIGINT AUTO_INCREMENT PRIMARY KEY,
+                        owner_node_id      VARCHAR(20) NOT NULL DEFAULT '',
+                        chat_type          VARCHAR(10) NOT NULL,
+                        chat_key           VARCHAR(20) NOT NULL,
+                        target_packet_id   INT NOT NULL,
+                        reaction_packet_id INT DEFAULT 0,
+                        from_node_id       VARCHAR(20) NOT NULL,
+                        emoji              VARCHAR(16) NOT NULL,
+                        timestamp          BIGINT NOT NULL,
+                        outgoing           BOOLEAN NOT NULL,
+                        status             VARCHAR(20),
+                        error_reason       VARCHAR(100),
+                        sender_name        VARCHAR(100)
+                    )
+                    """);
+
+                stmt.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_reaction_chat_target
+                    ON message_reactions (owner_node_id, chat_type, chat_key, target_packet_id, id)
+                    """);
+
+                stmt.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_reaction_packet ON message_reactions (reaction_packet_id)
+                    """);
+
+                stmt.execute("""
                     CREATE TABLE IF NOT EXISTS chat_read_counts (
                         owner_node_id VARCHAR(20) NOT NULL DEFAULT '',
                         chat_type     VARCHAR(10) NOT NULL,
@@ -115,6 +145,20 @@ public final class MessageDbService {
                 UPDATE messages SET status = ?, error_reason = ? WHERE packet_id = ? AND packet_id <> 0
                 """);
 
+            insertReactionStmt = dbConnection.prepareStatement("""
+                INSERT INTO message_reactions (
+                    owner_node_id, chat_type, chat_key, target_packet_id, reaction_packet_id,
+                    from_node_id, emoji, timestamp, outgoing, status, error_reason, sender_name
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, Statement.RETURN_GENERATED_KEYS);
+
+            updateReactionStatusStmt = dbConnection.prepareStatement("""
+                UPDATE message_reactions
+                SET status = ?, error_reason = ?
+                WHERE reaction_packet_id = ? AND reaction_packet_id <> 0
+                """);
+
             log.info("Message DB initialized (table 'messages' in nodedb)");
         } catch (Exception e) {
             log.error("Failed to initialize message DB", e);
@@ -133,9 +177,19 @@ public final class MessageDbService {
                 "UPDATE messages SET status = ?, error_reason = ? WHERE status = 'SENDING'")) {
             ps.setString(1, MeshMessage.DeliveryStatus.FAILED.name());
             ps.setString(2, "STALE");
-            int updated = ps.executeUpdate();
-            if (updated > 0) {
-                log.info("Marked {} stale SENDING messages as FAILED on startup", updated);
+            int updatedMessages = ps.executeUpdate();
+
+            int updatedReactions = 0;
+            try (PreparedStatement reactionPs = dbConnection.prepareStatement(
+                    "UPDATE message_reactions SET status = ?, error_reason = ? WHERE status = 'SENDING'")) {
+                reactionPs.setString(1, MeshMessage.DeliveryStatus.FAILED.name());
+                reactionPs.setString(2, "STALE");
+                updatedReactions = reactionPs.executeUpdate();
+            }
+
+            if (updatedMessages > 0 || updatedReactions > 0) {
+                log.info("Marked {} stale messages and {} stale reactions as FAILED on startup",
+                        updatedMessages, updatedReactions);
             }
         } catch (SQLException e) {
             log.error("Failed to mark stale SENDING messages as FAILED", e);
@@ -194,6 +248,46 @@ public final class MessageDbService {
     }
 
     /**
+     * Сохраняет реакцию на сообщение в отдельной таблице, чтобы она не влияла
+     * на preview чатов, unread-счётчики и обычную историю сообщений.
+     */
+    public synchronized boolean saveReaction(MessageReaction reaction,
+                                             String chatType,
+                                             String chatKey,
+                                             String ownerNodeId) {
+        if (reaction == null) { return false; }
+        if (insertReactionStmt == null) {
+            log.warn("Reaction DB not initialized — reaction dropped (chatType={}, chatKey={})", chatType, chatKey);
+            return false;
+        }
+        try {
+            insertReactionStmt.setString(1, ownerNodeId != null ? ownerNodeId : "");
+            insertReactionStmt.setString(2, chatType);
+            insertReactionStmt.setString(3, chatKey);
+            insertReactionStmt.setInt(4, reaction.getTargetPacketId());
+            insertReactionStmt.setInt(5, reaction.getPacketId());
+            insertReactionStmt.setString(6, reaction.getFromNodeId());
+            insertReactionStmt.setString(7, reaction.getEmoji());
+            insertReactionStmt.setLong(8, reaction.getTimestamp());
+            insertReactionStmt.setBoolean(9, reaction.isOutgoing());
+            insertReactionStmt.setString(10, reaction.getStatus() != null ? reaction.getStatus().name() : null);
+            insertReactionStmt.setString(11, reaction.getErrorReason());
+            insertReactionStmt.setString(12, reaction.getSenderName());
+            insertReactionStmt.executeUpdate();
+
+            try (ResultSet keys = insertReactionStmt.getGeneratedKeys()) {
+                if (keys.next()) {
+                    reaction.setDbId(keys.getLong(1));
+                }
+            }
+            return true;
+        } catch (SQLException e) {
+            log.error("Failed to save reaction to DB", e);
+            return false;
+        }
+    }
+
+    /**
      * Обновляет статус доставки сообщения по packetId.
      */
     public synchronized void updateStatus(int packetId, MeshMessage.DeliveryStatus status, String errorReason) {
@@ -209,6 +303,30 @@ public final class MessageDbService {
             updateStatusStmt.executeUpdate();
         } catch (SQLException e) {
             log.error("Failed to update message status for packetId {}", packetId, e);
+        }
+    }
+
+    /**
+     * Обновляет статус доставки реакции по packetId.
+     *
+     * @return {@code true}, если найдена и обновлена хотя бы одна запись
+     */
+    public synchronized boolean updateReactionStatus(int packetId,
+                                                     MeshMessage.DeliveryStatus status,
+                                                     String errorReason) {
+        if (packetId == 0) { return false; }
+        if (updateReactionStatusStmt == null) {
+            log.warn("Reaction DB not initialized — status update dropped (packetId={})", packetId);
+            return false;
+        }
+        try {
+            updateReactionStatusStmt.setString(1, status != null ? status.name() : null);
+            updateReactionStatusStmt.setString(2, errorReason);
+            updateReactionStatusStmt.setInt(3, packetId);
+            return updateReactionStatusStmt.executeUpdate() > 0;
+        } catch (SQLException e) {
+            log.error("Failed to update reaction status for packetId {}", packetId, e);
+            return false;
         }
     }
 
@@ -337,6 +455,52 @@ public final class MessageDbService {
     }
 
     /**
+     * Загружает реакции для набора packetId сообщений, сгруппированные по target_packet_id.
+     */
+    public Map<Integer, List<MessageReaction>> loadReactionsByTargetPacketIds(String chatType,
+                                                                              String chatKey,
+                                                                              String ownerNodeId,
+                                                                              Collection<Integer> targetPacketIds) {
+        Map<Integer, List<MessageReaction>> result = new HashMap<>();
+        if (dbConnection == null || targetPacketIds == null || targetPacketIds.isEmpty()) {
+            return result;
+        }
+
+        List<Integer> ids = targetPacketIds.stream()
+                .filter(Objects::nonNull)
+                .filter(id -> id != 0)
+                .distinct()
+                .toList();
+        if (ids.isEmpty()) { return result; }
+
+        String placeholders = String.join(", ", Collections.nCopies(ids.size(), "?"));
+        String sql = """
+            SELECT * FROM message_reactions
+            WHERE owner_node_id = ? AND chat_type = ? AND chat_key = ?
+              AND target_packet_id IN (%s)
+            ORDER BY target_packet_id ASC, id ASC
+            """.formatted(placeholders);
+        try (PreparedStatement ps = dbConnection.prepareStatement(sql)) {
+            ps.setString(1, ownerNodeId != null ? ownerNodeId : "");
+            ps.setString(2, chatType);
+            ps.setString(3, chatKey);
+            for (int i = 0; i < ids.size(); i++) {
+                ps.setInt(4 + i, ids.get(i));
+            }
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    MessageReaction reaction = readReaction(rs);
+                    result.computeIfAbsent(reaction.getTargetPacketId(), ignored -> new ArrayList<>())
+                            .add(reaction);
+                }
+            }
+        } catch (SQLException e) {
+            log.error("Failed to load reactions ({}, {}, {})", chatType, chatKey, ids.size(), e);
+        }
+        return result;
+    }
+
+    /**
      * Возвращает список уникальных DM-пиров (chat_key) из БД для данного устройства.
      */
     public List<String> getDistinctDmPeers(String ownerNodeId) {
@@ -421,12 +585,19 @@ public final class MessageDbService {
         if (dbConnection == null) { return; }
         try (PreparedStatement ps1 = dbConnection.prepareStatement(
                      "DELETE FROM messages WHERE owner_node_id = ? AND chat_type = ? AND chat_key = ?");
+             PreparedStatement psReactions = dbConnection.prepareStatement(
+                     "DELETE FROM message_reactions WHERE owner_node_id = ? AND chat_type = ? AND chat_key = ?");
              PreparedStatement ps2 = dbConnection.prepareStatement(
                      "DELETE FROM chat_read_counts WHERE owner_node_id = ? AND chat_type = ? AND chat_key = ?")) {
             ps1.setString(1, ownerNodeId != null ? ownerNodeId : "");
             ps1.setString(2, chatType);
             ps1.setString(3, chatKey);
             ps1.executeUpdate();
+
+            psReactions.setString(1, ownerNodeId != null ? ownerNodeId : "");
+            psReactions.setString(2, chatType);
+            psReactions.setString(3, chatKey);
+            psReactions.executeUpdate();
 
             ps2.setString(1, ownerNodeId != null ? ownerNodeId : "");
             ps2.setString(2, chatType);
@@ -442,11 +613,46 @@ public final class MessageDbService {
      */
     public synchronized void deleteMessage(long dbId) {
         if (dbConnection == null || dbId <= 0) { return; }
+        String ownerNodeId = null;
+        String chatType = null;
+        String chatKey = null;
+        int packetId = 0;
+
+        try (PreparedStatement lookup = dbConnection.prepareStatement(
+                "SELECT owner_node_id, chat_type, chat_key, packet_id FROM messages WHERE id = ?")) {
+            lookup.setLong(1, dbId);
+            try (ResultSet rs = lookup.executeQuery()) {
+                if (rs.next()) {
+                    ownerNodeId = rs.getString("owner_node_id");
+                    chatType = rs.getString("chat_type");
+                    chatKey = rs.getString("chat_key");
+                    packetId = rs.getInt("packet_id");
+                }
+            }
+        } catch (SQLException e) {
+            log.error("Failed to look up message id={}", dbId, e);
+        }
+
         try (PreparedStatement ps = dbConnection.prepareStatement("DELETE FROM messages WHERE id = ?")) {
             ps.setLong(1, dbId);
             ps.executeUpdate();
         } catch (SQLException e) {
             log.error("Failed to delete message id={}", dbId, e);
+        }
+
+        if (packetId != 0 && ownerNodeId != null && chatType != null && chatKey != null) {
+            try (PreparedStatement ps = dbConnection.prepareStatement("""
+                    DELETE FROM message_reactions
+                    WHERE owner_node_id = ? AND chat_type = ? AND chat_key = ? AND target_packet_id = ?
+                    """)) {
+                ps.setString(1, ownerNodeId);
+                ps.setString(2, chatType);
+                ps.setString(3, chatKey);
+                ps.setInt(4, packetId);
+                ps.executeUpdate();
+            } catch (SQLException e) {
+                log.error("Failed to delete reactions for message id={}", dbId, e);
+            }
         }
     }
 
@@ -682,8 +888,33 @@ public final class MessageDbService {
         try {
             if (insertStmt != null) { insertStmt.close(); }
             if (updateStatusStmt != null) { updateStatusStmt.close(); }
+            if (insertReactionStmt != null) { insertReactionStmt.close(); }
+            if (updateReactionStatusStmt != null) { updateReactionStatusStmt.close(); }
         } catch (SQLException e) {
             log.error("Error closing message DB statements", e);
         }
+    }
+
+    private static MessageReaction readReaction(ResultSet rs) throws SQLException {
+        MessageReaction reaction = new MessageReaction(
+                rs.getInt("target_packet_id"),
+                rs.getString("from_node_id"),
+                rs.getString("emoji"),
+                rs.getLong("timestamp"),
+                rs.getBoolean("outgoing")
+        );
+        reaction.setDbId(rs.getLong("id"));
+        reaction.setPacketId(rs.getInt("reaction_packet_id"));
+
+        String statusStr = rs.getString("status");
+        if (statusStr != null) {
+            try {
+                reaction.setStatus(MeshMessage.DeliveryStatus.valueOf(statusStr));
+            } catch (IllegalArgumentException ignored) {}
+        }
+
+        reaction.setErrorReason(rs.getString("error_reason"));
+        reaction.setSenderName(rs.getString("sender_name"));
+        return reaction;
     }
 }

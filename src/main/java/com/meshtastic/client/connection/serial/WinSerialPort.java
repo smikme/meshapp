@@ -6,8 +6,6 @@ import com.sun.jna.ptr.IntByReference;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.concurrent.TimeUnit;
-
 /**
  * Windows-реализация serial-порта через kernel32.dll (JNA).
  * <p>
@@ -29,9 +27,13 @@ class WinSerialPort implements NativeSerialPort {
     private static final int OPEN_EXISTING = 3;
     private static final int FILE_FLAG_OVERLAPPED = 0x40000000;
     private static final long INVALID_HANDLE_VALUE = -1L;
+    private static final int PURGE_TXABORT = 0x0001;
+    private static final int PURGE_RXABORT = 0x0002;
+    private static final int PURGE_TXCLEAR = 0x0004;
     private static final int PURGE_RXCLEAR = 0x0008;
     private static final int WAIT_OBJECT_0 = 0x00000000;
     private static final int WAIT_TIMEOUT = 0x00000102;
+    private static final int WAIT_FAILED = 0xFFFFFFFF;
     private static final int INFINITE = 0xFFFFFFFF;
 
     // OVERLAPPED structure: 5 fields (Internal, InternalHigh, Offset, OffsetHigh, hEvent)
@@ -88,13 +90,28 @@ class WinSerialPort implements NativeSerialPort {
         boolean ResetEvent(Pointer hEvent);
         boolean PurgeComm(Pointer hFile, int dwFlags);
         boolean CancelIo(Pointer hFile);
+        boolean CancelIoEx(Pointer hFile, Pointer lpOverlapped);
         boolean CloseHandle(Pointer hObject);
         int GetLastError();
     }
 
     private static final int ERROR_IO_PENDING = 997;
     private static final int ERROR_OPERATION_ABORTED = 995;
-    private static final int FIRST_BYTE_POLL_INTERVAL_MS = 10;
+    private static final int ERROR_NOT_FOUND = 1168;
+    private static final long COMM_ERROR_LOG_INTERVAL_MS = 1_000L;
+    private static final int WRITE_TIMEOUT_MS = 5_000;
+
+    private static final int CE_RXOVER = 0x0001;
+    private static final int CE_OVERRUN = 0x0002;
+    private static final int CE_RXPARITY = 0x0004;
+    private static final int CE_FRAME = 0x0008;
+    private static final int CE_BREAK = 0x0010;
+    private static final int CE_TXFULL = 0x0100;
+    private static final int CE_PTO = 0x0200;
+    private static final int CE_IOE = 0x0400;
+    private static final int CE_DNS = 0x0800;
+    private static final int CE_OOP = 0x1000;
+    private static final int CE_MODE = 0x8000;
 
     private volatile Pointer handle;
     private volatile boolean open;
@@ -104,6 +121,8 @@ class WinSerialPort implements NativeSerialPort {
     private Pointer writeEvent;
 
     private boolean assertDtr;
+    private volatile int lastLoggedCommErrorMask;
+    private volatile long lastLoggedCommErrorAtMillis;
 
     @Override
     public void open(String portName, int baudRate, boolean assertDtr) throws ConnectionException {
@@ -207,18 +226,15 @@ class WinSerialPort implements NativeSerialPort {
         Pointer h = handle;
         if (h == null || !open) return -1;
 
-        // Повторяем семантику jSerialComm TIMEOUT_READ_SEMI_BLOCKING:
-        // ждём появления первого байта до timeout, затем сразу дочитываем уже
-        // накопившийся хвост. На длинных Windows USB-сессиях это устойчивее,
-        // чем держать pending ReadFile на пустом порту: polling через COMSTAT
-        // одновременно очищает comm errors и лучше повторяет поведение jSerialComm.
-        int available = waitForAvailableBytes(h, timeoutMs);
-        if (available <= 0) {
-            return available;
+        // Первый байт ждём одним overlapped ReadFile с timeout.
+        // Это убирает постоянный polling через ClearCommError на пустом порту.
+        int totalRead = readChunk(h, buf, 0, 1, timeoutMs);
+        if (totalRead <= 0) {
+            return totalRead;
         }
 
-        int totalRead = 0;
         while (totalRead < len) {
+            int available = bytesAvailable(h);
             if (available <= 0) {
                 break;
             }
@@ -291,44 +307,6 @@ class WinSerialPort implements NativeSerialPort {
     }
 
     /**
-     * Ждёт появления входящих байт в драйверном буфере до timeout.
-     * <p>
-     * В отличие от pending ReadFile на пустом порту, этот polling путь регулярно
-     * проходит через {@link #bytesAvailable(Pointer)} и тем самым не оставляет
-     * COM-сессию в подвисшем состоянии после длительной работы с USB bridge.
-     */
-    private int waitForAvailableBytes(Pointer h, int timeoutMs) {
-        int available = bytesAvailable(h);
-        if (available > 0 || timeoutMs <= 0) {
-            return available;
-        }
-
-        long deadlineNanos = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs);
-        while (open && handle == h) {
-            available = bytesAvailable(h);
-            if (available > 0) {
-                return available;
-            }
-
-            long remainingNanos = deadlineNanos - System.nanoTime();
-            if (remainingNanos <= 0) {
-                return 0;
-            }
-
-            long remainingMillis = Math.max(1L, TimeUnit.NANOSECONDS.toMillis(remainingNanos));
-            long sleepMillis = Math.min(FIRST_BYTE_POLL_INTERVAL_MS, remainingMillis);
-            try {
-                Thread.sleep(sleepMillis);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                return -1;
-            }
-        }
-
-        return -1;
-    }
-
-    /**
      * Возвращает количество входящих байт, уже буферизованных драйвером.
      * Нужен для быстрого дочитывания хвоста после первого успешного байта.
      */
@@ -342,7 +320,15 @@ class WinSerialPort implements NativeSerialPort {
             }
             return 0;
         }
-        return Math.max(stat.getInt(COMSTAT_OFF_IN_QUEUE), 0);
+        int inQueue = Math.max(stat.getInt(COMSTAT_OFF_IN_QUEUE), 0);
+        int errorMask = errors.getValue();
+        if (errorMask != 0) {
+            maybeLogCommError(errorMask, inQueue);
+        } else {
+            lastLoggedCommErrorMask = 0;
+            lastLoggedCommErrorAtMillis = 0;
+        }
+        return inQueue;
     }
 
     /**
@@ -355,7 +341,7 @@ class WinSerialPort implements NativeSerialPort {
      */
     private int finishTimedOutRead(Pointer h, Memory ovl, Memory nativeBuf,
                                    byte[] buf, int offset, IntByReference bytesRead) {
-        K32.INSTANCE.CancelIo(h);
+        cancelPendingIo(h, ovl);
 
         boolean completed = K32.INSTANCE.GetOverlappedResult(h, ovl, bytesRead, true);
         int n = copyCompletedRead(nativeBuf, buf, offset, bytesRead);
@@ -399,8 +385,18 @@ class WinSerialPort implements NativeSerialPort {
             if (err != ERROR_IO_PENDING) {
                 throw new ConnectionException("WriteFile failed (error " + err + ")");
             }
-            // Ждём завершения записи
-            K32.INSTANCE.WaitForSingleObject(writeEvent, INFINITE);
+            int waitResult = K32.INSTANCE.WaitForSingleObject(writeEvent, WRITE_TIMEOUT_MS);
+            if (waitResult == WAIT_TIMEOUT) {
+                cancelPendingIo(h, ovl);
+                K32.INSTANCE.GetOverlappedResult(h, ovl, bytesWritten, true);
+                throw new ConnectionException("Write timed out after " + WRITE_TIMEOUT_MS + " ms");
+            }
+            if (waitResult == WAIT_FAILED) {
+                throw new ConnectionException("Write wait failed (error " + K32.INSTANCE.GetLastError() + ")");
+            }
+            if (waitResult != WAIT_OBJECT_0) {
+                throw new ConnectionException("Write wait returned 0x" + Integer.toHexString(waitResult));
+            }
             if (!K32.INSTANCE.GetOverlappedResult(h, ovl, bytesWritten, false)) {
                 throw new ConnectionException("Write GetOverlappedResult failed (error "
                         + K32.INSTANCE.GetLastError() + ")");
@@ -431,7 +427,8 @@ class WinSerialPort implements NativeSerialPort {
         Pointer h = handle;
         handle = null;
         if (h != null) {
-            K32.INSTANCE.CancelIo(h);
+            abortComm(h);
+            cancelPendingIo(h, null);
             K32.INSTANCE.CloseHandle(h);
         }
         closeEvents();
@@ -446,6 +443,85 @@ class WinSerialPort implements NativeSerialPort {
         if (writeEvent != null) {
             K32.INSTANCE.CloseHandle(writeEvent);
             writeEvent = null;
+        }
+    }
+
+    private void maybeLogCommError(int errorMask, int inQueue) {
+        long now = System.currentTimeMillis();
+        if (errorMask != lastLoggedCommErrorMask
+                || (now - lastLoggedCommErrorAtMillis) >= COMM_ERROR_LOG_INTERVAL_MS) {
+            log.warn("ClearCommError reported {} on serial port (inQueue={})",
+                    formatCommErrors(errorMask), inQueue);
+            lastLoggedCommErrorMask = errorMask;
+            lastLoggedCommErrorAtMillis = now;
+        }
+    }
+
+    static String formatCommErrors(int mask) {
+        if (mask == 0) {
+            return "none";
+        }
+
+        StringBuilder sb = new StringBuilder();
+        int remaining = mask;
+        remaining = appendCommError(sb, remaining, CE_RXOVER, "RXOVER");
+        remaining = appendCommError(sb, remaining, CE_OVERRUN, "OVERRUN");
+        remaining = appendCommError(sb, remaining, CE_RXPARITY, "RXPARITY");
+        remaining = appendCommError(sb, remaining, CE_FRAME, "FRAME");
+        remaining = appendCommError(sb, remaining, CE_BREAK, "BREAK");
+        remaining = appendCommError(sb, remaining, CE_TXFULL, "TXFULL");
+        remaining = appendCommError(sb, remaining, CE_PTO, "PTO");
+        remaining = appendCommError(sb, remaining, CE_IOE, "IOE");
+        remaining = appendCommError(sb, remaining, CE_DNS, "DNS");
+        remaining = appendCommError(sb, remaining, CE_OOP, "OOP");
+        remaining = appendCommError(sb, remaining, CE_MODE, "MODE");
+        if (remaining != 0) {
+            appendCommErrorName(sb, String.format("0x%04X", remaining));
+        }
+        return sb.toString();
+    }
+
+    private static int appendCommError(StringBuilder sb, int remaining, int flag, String name) {
+        if ((remaining & flag) != 0) {
+            appendCommErrorName(sb, name);
+            remaining &= ~flag;
+        }
+        return remaining;
+    }
+
+    private static void appendCommErrorName(StringBuilder sb, String name) {
+        if (!sb.isEmpty()) {
+            sb.append('|');
+        }
+        sb.append(name);
+    }
+
+    private void abortComm(Pointer h) {
+        int flags = PURGE_RXABORT | PURGE_TXABORT | PURGE_RXCLEAR | PURGE_TXCLEAR;
+        if (!K32.INSTANCE.PurgeComm(h, flags) && open) {
+            log.debug("PurgeComm abort failed: {}", K32.INSTANCE.GetLastError());
+        }
+    }
+
+    private void cancelPendingIo(Pointer h, Pointer ovl) {
+        if (h == null) {
+            return;
+        }
+        if (K32.INSTANCE.CancelIoEx(h, ovl)) {
+            return;
+        }
+
+        int err = K32.INSTANCE.GetLastError();
+        if (err == ERROR_NOT_FOUND || err == ERROR_OPERATION_ABORTED) {
+            return;
+        }
+
+        if (ovl == null && K32.INSTANCE.CancelIo(h)) {
+            return;
+        }
+
+        if (open) {
+            log.debug("CancelIoEx failed: {}", err);
         }
     }
 }

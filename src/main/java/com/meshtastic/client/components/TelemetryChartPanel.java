@@ -52,9 +52,19 @@ public class TelemetryChartPanel extends VBox {
     /** Максимальное количество точек на графике для плавного отображения */
     private static final int MAX_CHART_POINTS = 100;
 
+    /** Период-заглушка для пустого режима, когда пользователь выбрал "Всё" */
+    private static final long EMPTY_PERIOD_FALLBACK = PERIOD_24H;
+
     /** Диапазон LiPo аккумулятора для нормализации напряжения в % (0–100) */
     private static final float VOLTAGE_MIN = 3.0f;
     private static final float VOLTAGE_MAX = 4.2f;
+
+    private static final String TITLE_BASIC = "Базовые метрики";
+    private static final String TITLE_RX = "Статистика эфира";
+    private static final String TITLE_RATE = "Скорость приема";
+    private static final String TITLE_TX = "Скорость передачи";
+    private static final String TITLE_QUALITY = "Качество соединения";
+    private static final String TITLE_HOPS = "Прыжки";
 
     private final boolean basicOnly;
     private final AreaChart<Number, Number> chart;
@@ -75,6 +85,8 @@ public class TelemetryChartPanel extends VBox {
 
     /** Последние отфильтрованные записи (для использования в таблице логов) */
     private List<TelemetryEntry> filteredEntries = Collections.emptyList();
+
+    private record AxisRange(long lowerBound, long upperBound, long tickUnit) {}
 
     public TelemetryChartPanel() {
         this(false);
@@ -157,6 +169,8 @@ public class TelemetryChartPanel extends VBox {
             HBox periodBar = createPeriodBar();
             getChildren().addAll(topRow, middleRow, bottomRow, periodBar);
         }
+
+        updateChart(Collections.emptyList(), Collections.emptyList());
     }
 
     // ==================== Публичный API ====================
@@ -201,34 +215,7 @@ public class TelemetryChartPanel extends VBox {
         this.state = null;
         this.nodeId = null;
         this.filteredEntries = Collections.emptyList();
-        chart.getData().clear();
-        chart.setTitle(null);
-        ((NumberAxis) chart.getXAxis()).setAutoRanging(true);
-        if (rxChart != null) {
-            rxChart.getData().clear();
-            rxChart.setTitle(null);
-            ((NumberAxis) rxChart.getXAxis()).setAutoRanging(true);
-        }
-        if (rateChart != null) {
-            rateChart.getData().clear();
-            rateChart.setTitle(null);
-            ((NumberAxis) rateChart.getXAxis()).setAutoRanging(true);
-        }
-        if (txChart != null) {
-            txChart.getData().clear();
-            txChart.setTitle(null);
-            ((NumberAxis) txChart.getXAxis()).setAutoRanging(true);
-        }
-        if (qualityChart != null) {
-            qualityChart.getData().clear();
-            qualityChart.setTitle(null);
-            ((NumberAxis) qualityChart.getXAxis()).setAutoRanging(true);
-        }
-        if (hopsChart != null) {
-            hopsChart.getData().clear();
-            hopsChart.setTitle(null);
-            ((NumberAxis) hopsChart.getXAxis()).setAutoRanging(true);
-        }
+        updateChart(Collections.emptyList(), Collections.emptyList());
     }
 
     /**
@@ -243,35 +230,8 @@ public class TelemetryChartPanel extends VBox {
 
     private void refresh() {
         if (state == null || nodeId == null) {
-            chart.getData().clear();
-            chart.setTitle("Нет подключения");
-            ((NumberAxis) chart.getXAxis()).setAutoRanging(true);
-            if (rxChart != null) {
-                rxChart.getData().clear();
-                rxChart.setTitle(null);
-                ((NumberAxis) rxChart.getXAxis()).setAutoRanging(true);
-            }
-            if (rateChart != null) {
-                rateChart.getData().clear();
-                rateChart.setTitle(null);
-                ((NumberAxis) rateChart.getXAxis()).setAutoRanging(true);
-            }
-            if (txChart != null) {
-                txChart.getData().clear();
-                txChart.setTitle(null);
-                ((NumberAxis) txChart.getXAxis()).setAutoRanging(true);
-            }
-            if (qualityChart != null) {
-                qualityChart.getData().clear();
-                qualityChart.setTitle(null);
-                ((NumberAxis) qualityChart.getXAxis()).setAutoRanging(true);
-            }
-            if (hopsChart != null) {
-                hopsChart.getData().clear();
-                hopsChart.setTitle(null);
-                ((NumberAxis) hopsChart.getXAxis()).setAutoRanging(true);
-            }
             filteredEntries = Collections.emptyList();
+            updateChart(filteredEntries, Collections.emptyList());
             return;
         }
 
@@ -365,6 +325,57 @@ public class TelemetryChartPanel extends VBox {
         return Math.max(0, Math.min(100, pct));
     }
 
+    private static XYChart.Series<Number, Number> createSeries(String name) {
+        XYChart.Series<Number, Number> series = new XYChart.Series<>();
+        series.setName(name);
+        return series;
+    }
+
+    @SafeVarargs
+    private static void setChartSeries(AreaChart<Number, Number> areaChart, String title,
+                                       XYChart.Series<Number, Number>... series) {
+        areaChart.setTitle(title);
+        areaChart.getData().setAll(series);
+    }
+
+    private void setXAxisRange(NumberAxis axis, AxisRange range) {
+        axis.setAutoRanging(false);
+        axis.setLowerBound(range.lowerBound());
+        axis.setUpperBound(range.upperBound());
+        axis.setTickUnit(range.tickUnit());
+    }
+
+    private AxisRange createPlaceholderAxisRange() {
+        long now = System.currentTimeMillis() / 1000;
+        long visibleRange = selectedPeriodSeconds > 0 ? selectedPeriodSeconds : EMPTY_PERIOD_FALLBACK;
+        long padding = Math.max(visibleRange / 20, 60);
+        long totalRange = visibleRange + 2 * padding;
+        return new AxisRange(now - visibleRange - padding, now + padding, Math.max(totalRange / 8, 60));
+    }
+
+    private AxisRange buildAxisRange(List<TelemetryEntry> entries, List<TelemetryEntry> qualityEntries) {
+        long minTs = Long.MAX_VALUE;
+        long maxTs = Long.MIN_VALUE;
+
+        if (!entries.isEmpty()) {
+            minTs = Math.min(minTs, entries.getFirst().getTimestamp());
+            maxTs = Math.max(maxTs, entries.getLast().getTimestamp());
+        }
+        if (!qualityEntries.isEmpty()) {
+            minTs = Math.min(minTs, qualityEntries.getFirst().getTimestamp());
+            maxTs = Math.max(maxTs, qualityEntries.getLast().getTimestamp());
+        }
+
+        if (minTs == Long.MAX_VALUE || maxTs == Long.MIN_VALUE) {
+            return createPlaceholderAxisRange();
+        }
+
+        long range = Math.max(maxTs - minTs, 1);
+        long padding = Math.max(range / 20, 60);
+        long totalRange = range + 2 * padding;
+        return new AxisRange(minTs - padding, maxTs + padding, Math.max(totalRange / 8, 60));
+    }
+
     private void updateChart(List<TelemetryEntry> entries, List<TelemetryEntry> qualityEntries) {
         chart.getData().clear();
         NumberAxis xAxis = (NumberAxis) chart.getXAxis();
@@ -383,34 +394,10 @@ public class TelemetryChartPanel extends VBox {
             hopsXAxis = (NumberAxis) hopsChart.getXAxis();
         }
 
-        if (entries.isEmpty()) {
-            chart.setTitle("Нет данных");
-            xAxis.setAutoRanging(true);
-            if (!basicOnly) {
-                rxChart.setTitle(null);
-                rxXAxis.setAutoRanging(true);
-                rateChart.setTitle(null);
-                rateXAxis.setAutoRanging(true);
-                txChart.setTitle(null);
-                txXAxis.setAutoRanging(true);
-                qualityChart.setTitle(null);
-                qualityXAxis.setAutoRanging(true);
-                hopsChart.setTitle(null);
-                hopsXAxis.setAutoRanging(true);
-            }
-            return;
-        }
-
-        chart.setTitle("Базовые метрики");
-
-        XYChart.Series<Number, Number> batterySeries = new XYChart.Series<>();
-        batterySeries.setName("Battery %");
-        XYChart.Series<Number, Number> voltageSeries = new XYChart.Series<>();
-        voltageSeries.setName("Voltage В");
-        XYChart.Series<Number, Number> chUtilSeries = new XYChart.Series<>();
-        chUtilSeries.setName("ChUtil %");
-        XYChart.Series<Number, Number> airUtilSeries = new XYChart.Series<>();
-        airUtilSeries.setName("AirUtil %");
+        XYChart.Series<Number, Number> batterySeries = createSeries("Battery %");
+        XYChart.Series<Number, Number> voltageSeries = createSeries("Voltage В");
+        XYChart.Series<Number, Number> chUtilSeries = createSeries("ChUtil %");
+        XYChart.Series<Number, Number> airUtilSeries = createSeries("AirUtil %");
         XYChart.Series<Number, Number> goodRxSeries = null, badRxSeries = null, dupeRxSeries = null;
         XYChart.Series<Number, Number> pktRxSeries = null, pktBadSeries = null, pktDupeSeries = null;
         XYChart.Series<Number, Number> txSeries = null, txDroppedSeries = null, txRelaySeries = null, txRelayCanceledSeries = null;
@@ -418,48 +405,32 @@ public class TelemetryChartPanel extends VBox {
         XYChart.Series<Number, Number> avgHopsSeries = null, maxHopsSeries = null, minHopsSeries = null;
 
         if (!basicOnly) {
-            goodRxSeries = new XYChart.Series<>();
-            goodRxSeries.setName("Good RX %");
-            badRxSeries = new XYChart.Series<>();
-            badRxSeries.setName("Bad RX %");
-            dupeRxSeries = new XYChart.Series<>();
-            dupeRxSeries.setName("Dupe RX %");
+            goodRxSeries = createSeries("Good RX %");
+            badRxSeries = createSeries("Bad RX %");
+            dupeRxSeries = createSeries("Dupe RX %");
 
-            pktRxSeries = new XYChart.Series<>();
-            pktRxSeries.setName("Packets Received");
-            pktBadSeries = new XYChart.Series<>();
-            pktBadSeries.setName("Bad Packets");
-            pktDupeSeries = new XYChart.Series<>();
-            pktDupeSeries.setName("Duplicates");
+            pktRxSeries = createSeries("Packets Received");
+            pktBadSeries = createSeries("Bad Packets");
+            pktDupeSeries = createSeries("Duplicates");
 
-            txSeries = new XYChart.Series<>();
-            txSeries.setName("Packets Transmitted");
-            txDroppedSeries = new XYChart.Series<>();
-            txDroppedSeries.setName("Dropped");
-            txRelaySeries = new XYChart.Series<>();
-            txRelaySeries.setName("Relayed");
-            txRelayCanceledSeries = new XYChart.Series<>();
-            txRelayCanceledSeries.setName("Relay Canceled");
+            txSeries = createSeries("Packets Transmitted");
+            txDroppedSeries = createSeries("Dropped");
+            txRelaySeries = createSeries("Relayed");
+            txRelayCanceledSeries = createSeries("Relay Canceled");
 
-            snrSeries = new XYChart.Series<>();
-            snrSeries.setName("SNR (dB)");
-            rssiSeries = new XYChart.Series<>();
-            rssiSeries.setName("RSSI (dBm)");
+            snrSeries = createSeries("SNR (dB)");
+            rssiSeries = createSeries("RSSI (dBm)");
 
-            avgHopsSeries = new XYChart.Series<>();
-            avgHopsSeries.setName("Среднее");
-            maxHopsSeries = new XYChart.Series<>();
-            maxHopsSeries.setName("Макс");
-            minHopsSeries = new XYChart.Series<>();
-            minHopsSeries.setName("Мин");
+            avgHopsSeries = createSeries("Среднее");
+            maxHopsSeries = createSeries("Макс");
+            minHopsSeries = createSeries("Мин");
         }
-
-        long minTs = entries.getFirst().getTimestamp();
-        long maxTs = entries.getLast().getTimestamp();
 
         // Предыдущие значения кумулятивных счётчиков для вычисления дельты
         int prevPktRx = -1, prevBadRx = -1, prevDupeRx = -1;
         int prevTx = -1, prevTxDropped = -1, prevTxRelay = -1, prevTxCanceled = -1;
+        long minTs = entries.isEmpty() ? 0 : entries.getFirst().getTimestamp();
+        long maxTs = entries.isEmpty() ? 0 : entries.getLast().getTimestamp();
 
         if (entries.size() <= MAX_CHART_POINTS) {
             for (TelemetryEntry e : entries) {
@@ -681,104 +652,23 @@ public class TelemetryChartPanel extends VBox {
             }
         }
 
-        // Синхронизируем границы оси X на обоих графиках
-        long range = maxTs - minTs;
-        long padding = Math.max(range / 20, 60);
-        long lowerBound = minTs - padding;
-        long upperBound = maxTs + padding;
-        long tickUnit = Math.max((range + 2 * padding) / 8, 60);
+        AxisRange axisRange = buildAxisRange(entries, qualityEntries);
 
-        xAxis.setAutoRanging(false);
-        xAxis.setLowerBound(lowerBound);
-        xAxis.setUpperBound(upperBound);
-        xAxis.setTickUnit(tickUnit);
-
-        // Базовые метрики
-        if (!batterySeries.getData().isEmpty()) { chart.getData().add(batterySeries); }
-        if (!voltageSeries.getData().isEmpty()) { chart.getData().add(voltageSeries); }
-        chart.getData().add(chUtilSeries);
-        chart.getData().add(airUtilSeries);
+        setXAxisRange(xAxis, axisRange);
+        setChartSeries(chart, TITLE_BASIC, batterySeries, voltageSeries, chUtilSeries, airUtilSeries);
 
         if (!basicOnly) {
-            rxXAxis.setAutoRanging(false);
-            rxXAxis.setLowerBound(lowerBound);
-            rxXAxis.setUpperBound(upperBound);
-            rxXAxis.setTickUnit(tickUnit);
+            setXAxisRange(rxXAxis, axisRange);
+            setXAxisRange(rateXAxis, axisRange);
+            setXAxisRange(txXAxis, axisRange);
+            setXAxisRange(qualityXAxis, axisRange);
+            setXAxisRange(hopsXAxis, axisRange);
 
-            rateXAxis.setAutoRanging(false);
-            rateXAxis.setLowerBound(lowerBound);
-            rateXAxis.setUpperBound(upperBound);
-            rateXAxis.setTickUnit(tickUnit);
-
-            txXAxis.setAutoRanging(false);
-            txXAxis.setLowerBound(lowerBound);
-            txXAxis.setUpperBound(upperBound);
-            txXAxis.setTickUnit(tickUnit);
-
-            // Статистика эфира (Good=зеленый, Bad=красный, Dupe=желтый)
-            boolean hasRxData = !goodRxSeries.getData().isEmpty();
-            if (hasRxData) {
-                rxChart.setTitle("Статистика эфира");
-                rxChart.getData().add(goodRxSeries);
-                rxChart.getData().add(badRxSeries);
-                rxChart.getData().add(dupeRxSeries);
-            } else {
-                rxChart.setTitle(null);
-            }
-
-            // Скорость приема (Received=зеленый, Bad=красный, Duplicates=желтый)
-            boolean hasRateData = !pktRxSeries.getData().isEmpty();
-            if (hasRateData) {
-                rateChart.setTitle("Скорость приема");
-                rateChart.getData().add(pktRxSeries);
-                rateChart.getData().add(pktBadSeries);
-                rateChart.getData().add(pktDupeSeries);
-            } else {
-                rateChart.setTitle(null);
-            }
-
-            // Скорость передачи (Transmitted=зеленый, Dropped=красный, Relayed=желтый, Canceled=фиолетовый)
-            boolean hasTxData = !txSeries.getData().isEmpty();
-            if (hasTxData) {
-                txChart.setTitle("Скорость передачи");
-                txChart.getData().add(txSeries);
-                txChart.getData().add(txDroppedSeries);
-                txChart.getData().add(txRelaySeries);
-                txChart.getData().add(txRelayCanceledSeries);
-            } else {
-                txChart.setTitle(null);
-            }
-
-            // Качество соединения (SNR=зеленый, RSSI=красный)
-            qualityXAxis.setAutoRanging(false);
-            qualityXAxis.setLowerBound(lowerBound);
-            qualityXAxis.setUpperBound(upperBound);
-            qualityXAxis.setTickUnit(tickUnit);
-
-            boolean hasQualityData = !snrSeries.getData().isEmpty();
-            if (hasQualityData) {
-                qualityChart.setTitle("Качество соединения");
-                qualityChart.getData().add(snrSeries);
-                qualityChart.getData().add(rssiSeries);
-            } else {
-                qualityChart.setTitle(null);
-            }
-
-            // Прыжки (Среднее=синий, Макс=оранжевый, Мин=бирюзовый)
-            hopsXAxis.setAutoRanging(false);
-            hopsXAxis.setLowerBound(lowerBound);
-            hopsXAxis.setUpperBound(upperBound);
-            hopsXAxis.setTickUnit(tickUnit);
-
-            boolean hasHopsData = !avgHopsSeries.getData().isEmpty();
-            if (hasHopsData) {
-                hopsChart.setTitle("Прыжки");
-                hopsChart.getData().add(maxHopsSeries);
-                hopsChart.getData().add(minHopsSeries);
-                hopsChart.getData().add(avgHopsSeries);
-            } else {
-                hopsChart.setTitle(null);
-            }
+            setChartSeries(rxChart, TITLE_RX, goodRxSeries, badRxSeries, dupeRxSeries);
+            setChartSeries(rateChart, TITLE_RATE, pktRxSeries, pktBadSeries, pktDupeSeries);
+            setChartSeries(txChart, TITLE_TX, txSeries, txDroppedSeries, txRelaySeries, txRelayCanceledSeries);
+            setChartSeries(qualityChart, TITLE_QUALITY, snrSeries, rssiSeries);
+            setChartSeries(hopsChart, TITLE_HOPS, maxHopsSeries, minHopsSeries, avgHopsSeries);
         }
     }
 
@@ -880,7 +770,12 @@ public class TelemetryChartPanel extends VBox {
 
     private void showCrosshair(double localX, AreaChart<Number, Number> areaChart,
                                Line crosshair, Label valueLabel, StackPane wrapper, Region plotArea) {
-        if (areaChart.getData().isEmpty()) return;
+        boolean hasData = areaChart.getData().stream().anyMatch(series -> !series.getData().isEmpty());
+        if (!hasData) {
+            crosshair.setVisible(false);
+            valueLabel.setVisible(false);
+            return;
+        }
 
         NumberAxis xAxis = (NumberAxis) areaChart.getXAxis();
         long epoch = xAxis.getValueForDisplay(localX).longValue();

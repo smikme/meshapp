@@ -17,6 +17,9 @@ import javafx.scene.image.ImageView;
 import javafx.scene.input.Clipboard;
 import javafx.scene.input.ClipboardContent;
 import javafx.scene.layout.HBox;
+import javafx.scene.text.Font;
+import javafx.scene.text.FontWeight;
+import javafx.scene.text.Text;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -112,6 +115,35 @@ public final class NodeUtils {
     }
 
     /**
+     * Размер шрифта аватара с учётом реальной ширины текста.
+     * Это убирает platform-specific clipping/ellipsis у 4-символьных аватаров
+     * вроде {@code #GAM} в фиксированном круге.
+     */
+    public static double avatarFontSize(String text, int circleSize) {
+        if (text == null || text.isEmpty()) {
+            return avatarFontSize(1, circleSize);
+        }
+
+        double size = avatarFontSize(text.length(), circleSize);
+        double minSize = Math.max(8.0, circleSize * 0.24);
+        double targetWidth = circleSize * 0.78;
+        double targetHeight = circleSize * 0.44;
+
+        while (size > minSize) {
+            Text probe = new Text(text);
+            probe.setFont(Font.font("Roboto", FontWeight.BOLD, size));
+
+            if (probe.getLayoutBounds().getWidth() <= targetWidth
+                    && probe.getLayoutBounds().getHeight() <= targetHeight) {
+                return size;
+            }
+            size -= 0.5;
+        }
+
+        return minSize;
+    }
+
+    /**
      * Заполнить строки таблицы деталей ноды (13 ключ-значение).
      * Формат: {@code String[]{emoji, label, value}} — emoji рендерится как PNG-картинка.
      */
@@ -122,7 +154,8 @@ public final class NodeUtils {
         rows.add(new String[]{"\u2699", "Роль", node.getRole() != null ? NodeData.translateRole(node.getRole()) : null});
         rows.add(new String[]{"\uD83D\uDCDF", "Модель", node.getHwModel()});
         rows.add(new String[]{"\uD83D\uDCF6", "SNR", node.getSnr() != 0 ? String.valueOf(node.getSnr()) : null});
-        rows.add(new String[]{"\uD83D\uDD00", "Хопы", String.valueOf(node.getHopsAway())});
+        rows.add(new String[]{"\uD83D\uDD00", "Хопы",
+                node.hasHopsAway() ? String.valueOf(node.getHopsAway()) : null});
 
         int level = node.getBatteryLevel();
         String battery = null;

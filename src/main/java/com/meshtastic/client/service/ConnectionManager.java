@@ -26,7 +26,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 /**
  * Менеджер соединений с Meshtastic-устройствами (singleton).
  * <p>
- * Управляет жизненным циклом соединений (TCP и Serial): хранит профили подключений
+ * Управляет жизненным циклом соединений (TCP, Serial и BLE): хранит профили подключений
  * ({@link ConnectionEntry}) в JSON-файле {@code ~/.meshapp/connections.json},
  * создаёт/разрывает соединения, инициирует config exchange
  * и предоставляет доступ к {@link DeviceState} и {@link ProtocolHandler}
@@ -47,6 +47,7 @@ public final class ConnectionManager {
     private final Map<String, MessageListenerService> messageListenerServices = new ConcurrentHashMap<>();
     private final Map<String, CompletableFuture<DeviceState>> configFutures = new ConcurrentHashMap<>();
     private final Set<String> userDisconnectedIds = ConcurrentHashMap.newKeySet();
+    private final Map<String, String> userDisconnectReasons = new ConcurrentHashMap<>();
     private final List<Runnable> listeners = new CopyOnWriteArrayList<>();
     private final Gson gson = new GsonBuilder().setPrettyPrinting().create();
     private final Path configPath;
@@ -116,7 +117,7 @@ public final class ConnectionManager {
      */
     public void removeEntry(String id) {
         ReconnectService.getInstance().cancelReconnect(id);
-        disconnect(id);
+        disconnect(id, "entry removal");
         entries.removeIf(e -> e.getId().equals(id));
         save();
         fireChanged();
@@ -124,7 +125,7 @@ public final class ConnectionManager {
 
     /**
      * Устанавливает соединение по идентификатору профиля.
-     * Создаёт транспорт (TCP или Serial), {@link ProtocolHandler}, {@link DeviceState}
+     * Создаёт transport (TCP, Serial или BLE), {@link ProtocolHandler}, {@link DeviceState}
      * и запускает config exchange. Если соединение с этим id уже активно, вызов игнорируется.
      *
      * @param id идентификатор профиля подключения
@@ -132,6 +133,7 @@ public final class ConnectionManager {
      */
     public synchronized void connect(String id) throws ConnectionException {
         userDisconnectedIds.remove(id);
+        userDisconnectReasons.remove(id);
         ConnectionEntry entry = findEntry(id);
         if (entry == null) {
             throw new ConnectionException("Connection entry not found: " + id);
@@ -152,22 +154,54 @@ public final class ConnectionManager {
 
             @Override
             public void onDisconnected() {
+                boolean userInitiated = userDisconnectedIds.contains(id);
+                String disconnectReason = userDisconnectReasons.get(id);
+                if (userInitiated) {
+                    if (disconnectReason != null && !disconnectReason.isBlank()) {
+                        log.info("Connection '{}' disconnected by user ({})", entry.getName(), disconnectReason);
+                    } else {
+                        log.info("Connection '{}' disconnected by user", entry.getName());
+                    }
+                } else {
+                    log.warn("Connection '{}' disconnected unexpectedly", entry.getName());
+                }
                 entry.setConnected(false);
                 cleanupConnection(id);
                 fireChanged();
-                if (!userDisconnectedIds.contains(id)) {
+                if (!userInitiated) {
+                    log.info("Scheduling auto-reconnect for '{}' after disconnect", entry.getName());
                     ReconnectService.getInstance().startReconnect(id);
                 }
+                clearUserDisconnectState(id);
             }
 
             @Override
             public void onConnectionError(String message, Throwable cause) {
+                boolean userInitiated = userDisconnectedIds.contains(id);
+                String disconnectReason = userDisconnectReasons.get(id);
+                if (cause != null) {
+                    if (userInitiated && disconnectReason != null && !disconnectReason.isBlank()) {
+                        log.warn("Connection '{}' error during requested disconnect ({}): {}",
+                                entry.getName(), disconnectReason, message, cause);
+                    } else {
+                        log.warn("Connection '{}' error: {}", entry.getName(), message, cause);
+                    }
+                } else {
+                    if (userInitiated && disconnectReason != null && !disconnectReason.isBlank()) {
+                        log.warn("Connection '{}' error during requested disconnect ({}): {}",
+                                entry.getName(), disconnectReason, message);
+                    } else {
+                        log.warn("Connection '{}' error: {}", entry.getName(), message);
+                    }
+                }
                 entry.setConnected(false);
                 cleanupConnection(id);
                 fireChanged();
-                if (!userDisconnectedIds.contains(id)) {
+                if (!userInitiated) {
+                    log.info("Scheduling auto-reconnect for '{}' after connection error", entry.getName());
                     ReconnectService.getInstance().startReconnect(id);
                 }
+                clearUserDisconnectState(id);
             }
         });
         conn.connect();
@@ -176,9 +210,9 @@ public final class ConnectionManager {
         ProtocolHandler protocolHandler = new ProtocolHandler(conn);
         protocolHandlers.put(id, protocolHandler);
 
-        // Heartbeat нужен только для TCP transport.
-        // Для Serial/BLE это лишний фоновый трафик, который не держит соединение живым,
-        // но может вмешиваться в очередь пользовательских пакетов и диагностику ACK.
+        // Heartbeat нужен для transport-ов, которые либо закрываются по idle (TCP),
+        // либо требуют периодического keepalive на serial-соединении.
+        // В mesh.proto heartbeat отдельно помечен как keepalive для serial.
         if (shouldStartHeartbeat(entry)) {
             protocolHandler.startHeartbeat();
         }
@@ -213,18 +247,61 @@ public final class ConnectionManager {
      * @param id идентификатор профиля подключения
      */
     public synchronized void disconnect(String id) {
+        disconnect(id, "manual disconnect");
+    }
+
+    private synchronized void disconnect(String id, String reason) {
         userDisconnectedIds.add(id);
+        userDisconnectReasons.put(id, reason);
         ReconnectService.getInstance().cancelReconnect(id);
+        ConnectionEntry entry = findEntry(id);
+        String connectionName = entry != null ? entry.getName() : id;
+        log.info("Disconnect requested for '{}' ({})", connectionName, reason);
         MeshtasticConnection conn = activeConnections.get(id);
         cleanupConnection(id);
         if (conn != null) {
             conn.disconnect();
+        } else {
+            clearUserDisconnectState(id);
         }
-        ConnectionEntry entry = findEntry(id);
         if (entry != null) {
             entry.setConnected(false);
         }
         fireChanged();
+    }
+
+    /**
+     * Разрывает соединение как ожидаемую часть reboot/restart цикла устройства.
+     * <p>
+     * В отличие от {@link #disconnect(String)}, такой разрыв не считается
+     * пользовательским отключением: transport освобождается, но auto-reconnect
+     * остаётся разрешённым. Это нужно после сохранения конфигурации, когда
+     * радио само перезагружается и BLE/TCP/Serial-сессия становится stale.
+     *
+     * @param id идентификатор профиля подключения
+     */
+    public synchronized void disconnectForDeviceReboot(String id) {
+        userDisconnectedIds.remove(id);
+        userDisconnectReasons.remove(id);
+
+        ConnectionEntry entry = findEntry(id);
+        if (entry == null) {
+            return;
+        }
+
+        MeshtasticConnection conn = activeConnections.get(id);
+        if (conn != null) {
+            // Не вызываем cleanupConnection() здесь: нам нужно, чтобы normal
+            // onDisconnected()/onConnectionError() path запустил auto-reconnect.
+            conn.disconnect();
+            return;
+        }
+
+        if (!entry.isReconnecting()) {
+            entry.setConnected(false);
+            fireChanged();
+            ReconnectService.getInstance().startReconnect(id);
+        }
     }
 
     public boolean hasActiveConnection() {
@@ -278,8 +355,13 @@ public final class ConnectionManager {
      */
     public synchronized void shutdownAll() {
         for (String id : new ArrayList<>(activeConnections.keySet())) {
-            disconnect(id);
+            disconnect(id, "application shutdown");
         }
+    }
+
+    private void clearUserDisconnectState(String id) {
+        userDisconnectedIds.remove(id);
+        userDisconnectReasons.remove(id);
     }
 
     private synchronized void cleanupConnection(String id) {
@@ -287,6 +369,7 @@ public final class ConnectionManager {
         DeviceState ds = deviceStates.remove(id);
         if (ds != null) {
             ds.failAllPendingAcks("DISCONNECTED");
+            ds.failAllPendingPacketAcks("DISCONNECTED");
             ds.shutdown();
         }
         MessageListenerService mls = messageListenerServices.remove(id);
@@ -314,10 +397,11 @@ public final class ConnectionManager {
 
     /**
      * Возвращает {@code true} только для transport-ов, которым действительно нужен heartbeat.
-     * В текущем протоколе это только TCP: Serial/BLE не закрываются по idle так же, как TCP.
+     * В текущем протоколе heartbeat нужен для TCP и Serial, но не для BLE.
      */
     static boolean shouldStartHeartbeat(ConnectionEntry entry) {
-        return entry.getEffectiveType() == ConnectionType.TCP;
+        ConnectionType type = entry.getEffectiveType();
+        return type == ConnectionType.TCP || type == ConnectionType.SERIAL;
     }
 
     ConnectionEntry findEntry(String id) {

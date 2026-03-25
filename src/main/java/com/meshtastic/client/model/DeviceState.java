@@ -14,6 +14,7 @@ import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executors;
@@ -56,6 +57,8 @@ public class DeviceState {
     private final Map<Integer, List<MeshMessage>> messagesByChannel = new ConcurrentHashMap<>();
     private final Map<String, List<MeshMessage>> directMessages = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<Integer, PendingAckEntry> pendingAcks = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<Integer, CompletableFuture<MeshProtos.Routing.Error>> pendingPacketAcks =
+            new ConcurrentHashMap<>();
 
     private final ScheduledExecutorService ackTimeoutExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
         Thread t = new Thread(r, "ack-timeout-sweeper");
@@ -359,6 +362,35 @@ public class DeviceState {
     }
 
     /**
+     * Регистрирует generic ACK waiter для не-чатовых пакетов
+     * (например, ADMIN_APP при сохранении конфигурации).
+     *
+     * @param packetId идентификатор исходящего пакета
+     * @return future, который завершится routing ACK/NAK от устройства
+     */
+    public CompletableFuture<MeshProtos.Routing.Error> registerPendingPacketAck(int packetId) {
+        CompletableFuture<MeshProtos.Routing.Error> future = new CompletableFuture<>();
+        pendingPacketAcks.put(packetId, future);
+        return future;
+    }
+
+    /**
+     * Завершает generic ACK waiter для не-чатового пакета.
+     *
+     * @param packetId идентификатор исходящего пакета
+     * @param error    routing result от устройства
+     * @return {@code true}, если waiter существовал и был завершён
+     */
+    public boolean completePendingPacketAck(int packetId, MeshProtos.Routing.Error error) {
+        CompletableFuture<MeshProtos.Routing.Error> future = pendingPacketAcks.remove(packetId);
+        if (future == null) {
+            return false;
+        }
+        future.complete(error);
+        return true;
+    }
+
+    /**
      * Помечает все ожидающие ACK сообщения как {@code FAILED} с указанной причиной.
      * Обновляет статус в БД и оповещает слушателей.
      * Вызывается при отключении от устройства.
@@ -387,6 +419,24 @@ public class DeviceState {
         if (count > 0) {
             log.info("Marked {} pending messages as FAILED (reason: {})", count, reason);
             fireMessageListeners();
+        }
+    }
+
+    /**
+     * Завершает все generic ACK waiter-ы ошибкой disconnect/cleanup.
+     * Нужен для admin save-flow, чтобы BLE/TCP/Serial disconnect не оставлял
+     * ожидающие future висеть до таймаута.
+     *
+     * @param reason причина очистки waiters
+     */
+    public void failAllPendingPacketAcks(String reason) {
+        if (pendingPacketAcks.isEmpty()) { return; }
+        var iterator = pendingPacketAcks.entrySet().iterator();
+        while (iterator.hasNext()) {
+            var entry = iterator.next();
+            iterator.remove();
+            entry.getValue().completeExceptionally(
+                    new IllegalStateException("Packet ACK waiter aborted: " + reason));
         }
     }
 
@@ -433,13 +483,17 @@ public class DeviceState {
         }
     }
 
-    // --- Owner info (admin) ---
+    // --- Owner info / session passkey (admin) ---
     public MeshProtos.User getOwnerInfo() { return ownerInfo; }
     public void setOwnerInfo(MeshProtos.User ownerInfo) { this.ownerInfo = ownerInfo; }
 
     public ByteString getSessionPasskey() { return sessionPasskey; }
     public void setSessionPasskey(ByteString sessionPasskey) { this.sessionPasskey = sessionPasskey; }
 
+    /**
+     * Listeners are notified when admin owner info arrives or when a fresh
+     * {@code session_passkey} is received via any ADMIN_APP response.
+     */
     public void addOwnerInfoListener(Runnable listener) { ownerInfoListeners.add(listener); }
     public void removeOwnerInfoListener(Runnable listener) { ownerInfoListeners.remove(listener); }
     public void fireOwnerInfoListeners() {
@@ -540,6 +594,7 @@ public class DeviceState {
         messagesByChannel.clear();
         directMessages.clear();
         pendingAcks.clear();
+        failAllPendingPacketAcks("STATE_CLEARED");
         ownerInfo = null;
         sessionPasskey = null;
         synchronized (telemetryHistory) {

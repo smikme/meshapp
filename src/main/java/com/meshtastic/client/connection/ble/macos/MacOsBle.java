@@ -6,9 +6,10 @@ import com.sun.jna.Callback;
 import com.sun.jna.Pointer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import java.util.HashSet;
 import java.util.Locale;
-
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
@@ -75,6 +76,13 @@ public class MacOsBle implements BlePlatform {
     private volatile Consumer<byte[]> fromRadioListener;
     private volatile Consumer<BleState> stateListener;
 
+    /**
+     * Retained CBPeripheral instances keyed by CoreBluetooth identifier (UUID string).
+     * <p>
+     * macOS can hand back a new CBPeripheral object for the same logical device after
+     * a disconnect or reboot, so the cache must retain replacements and release stale
+     * instances explicitly instead of assuming the pointer is stable forever.
+     */
     private final Map<String, Long> discoveredPeripherals = new ConcurrentHashMap<>();
 
     private volatile CountDownLatch poweredOnLatch = new CountDownLatch(1);
@@ -170,8 +178,7 @@ public class MacOsBle implements BlePlatform {
             long count = msgSend(peripherals, "count");
             if (count > 0) {
                 long p = msgSend(peripherals, "objectAtIndex:", 0L);
-                msgSend(p, "retain");
-                discoveredPeripherals.put(address, p);
+                cacheDiscoveredPeripheral(address, p);
                 peripheralPtr = p;
                 log.info("[BLE] Retrieved peripheral from system cache");
             } else {
@@ -312,6 +319,9 @@ public class MacOsBle implements BlePlatform {
                 setNotify(peripheral, false, fromNumCharacteristic);
             }
             msgSend(centralManager, "cancelPeripheralConnection:", peripheral);
+            // Once a session is torn down, the cached CBPeripheral can become stale after a
+            // device reboot. Force the next connect() to reacquire a fresh object.
+            evictCachedPeripheral(peripheral);
         }
         connectedPeripheral = 0;
         fromRadioCharacteristic = 0;
@@ -364,7 +374,7 @@ public class MacOsBle implements BlePlatform {
         pollScheduler.shutdown();
         DELEGATE_MAP.remove(delegateInstance);
         DELEGATE_MAP.remove(peripheralDelegateInstance);
-        discoveredPeripherals.clear();
+        clearCachedPeripherals();
         log.info("MacOsBle disposed");
     }
 
@@ -412,6 +422,66 @@ public class MacOsBle implements BlePlatform {
             // Tear down partial CoreBluetooth state before surfacing the error to the Java caller.
             disconnect();
             throw new ConnectionException("BLE connect failed: " + connectErrorMessage);
+        }
+    }
+
+    /**
+     * Caches a CoreBluetooth peripheral under its stable identifier.
+     * <p>
+     * Re-scans after reboot can return a different CBPeripheral pointer for the same UUID.
+     * The cache therefore retains replacements and releases the previous retained object so
+     * reconnect does not reuse stale native pointers.
+     */
+    private void cacheDiscoveredPeripheral(String address, long peripheral) {
+        if (address == null || address.isBlank() || peripheral == 0) {
+            return;
+        }
+        discoveredPeripherals.compute(address, (key, existing) -> {
+            if (existing != null && existing == peripheral) {
+                return existing;
+            }
+            msgSend(peripheral, "retain");
+            if (existing != null && existing != peripheral) {
+                msgSend(existing, "release");
+                log.info("[BLE] Replaced cached peripheral for {}", address);
+            }
+            return peripheral;
+        });
+    }
+
+    /**
+     * Evicts a disconnected peripheral from the local cache and releases the retain held by Java.
+     * <p>
+     * This is essential after device reboot: the next connect must reacquire a fresh
+     * CBPeripheral from scan results or CoreBluetooth system cache instead of reusing a
+     * disconnected object from a previous session.
+     */
+    private void evictCachedPeripheral(long peripheral) {
+        if (peripheral == 0) {
+            return;
+        }
+        for (Map.Entry<String, Long> entry : discoveredPeripherals.entrySet()) {
+            Long cachedPeripheral = entry.getValue();
+            if (cachedPeripheral != null
+                    && cachedPeripheral == peripheral
+                    && discoveredPeripherals.remove(entry.getKey(), cachedPeripheral)) {
+                msgSend(peripheral, "release");
+                log.info("[BLE] Evicted cached peripheral {} after disconnect", entry.getKey());
+                return;
+            }
+        }
+    }
+
+    /**
+     * Releases all retained peripherals cached by this BLE backend.
+     */
+    private void clearCachedPeripherals() {
+        Set<Long> retainedPeripherals = new HashSet<>(discoveredPeripherals.values());
+        discoveredPeripherals.clear();
+        for (Long peripheral : retainedPeripherals) {
+            if (peripheral != null && peripheral != 0) {
+                msgSend(peripheral, "release");
+            }
         }
     }
 
@@ -521,11 +591,9 @@ public class MacOsBle implements BlePlatform {
 
             int rssiValue = (int) msgSend(rssi, "intValue");
 
-            // Retain (CoreBluetooth может освободить peripheral после scan callback)
-            Long prev = me.discoveredPeripherals.put(address, peripheral);
-            if (prev == null) {
-                msgSend(peripheral, "retain");
-            }
+            // The same logical device can surface as a fresh CBPeripheral after reboot or
+            // re-scan; cacheDiscoveredPeripheral() retains replacements and drops stale ones.
+            me.cacheDiscoveredPeripheral(address, peripheral);
 
             log.info("Discovered BLE: {} ({}) RSSI: {}", name, address, rssiValue);
 
@@ -552,6 +620,7 @@ public class MacOsBle implements BlePlatform {
             log.info("CBCentralManager: didDisconnectPeripheral");
             boolean wasConnected = me.connected;
             String disconnectMessage = localizedError(error, "Peripheral disconnected");
+            me.evictCachedPeripheral(peripheral);
             me.connected = false;
             me.stopPolling();
             me.connectedPeripheral = 0;

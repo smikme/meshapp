@@ -122,6 +122,7 @@ class ProtocolHandlerTest {
         MeshProtos.ToRadio sent = MeshProtos.ToRadio.parseFrom(unframe(connection.lastSentBytes()));
         assertTrue(sent.hasHeartbeat());
         assertTrue(sent.getHeartbeat().getNonce() >= 1);
+        assertFalse(connection.lastExpectResponseAfterWrite);
     }
 
     @Test
@@ -154,6 +155,7 @@ class ProtocolHandlerTest {
         private volatile Consumer<byte[]> dataListener;
         private volatile ConnectionListener connectionListener;
         private volatile byte[] lastSentBytes;
+        private volatile boolean lastExpectResponseAfterWrite = true;
         private volatile boolean connected;
         private final AtomicInteger sendCount = new AtomicInteger();
         private final CountDownLatch firstSendLatch = new CountDownLatch(1);
@@ -181,7 +183,13 @@ class ProtocolHandlerTest {
 
         @Override
         public void sendBytes(byte[] data) {
+            sendBytes(data, true);
+        }
+
+        @Override
+        public void sendBytes(byte[] data, boolean expectResponseAfterWrite) {
             lastSentBytes = data;
+            lastExpectResponseAfterWrite = expectResponseAfterWrite;
             sendCount.incrementAndGet();
             firstSendLatch.countDown();
         }

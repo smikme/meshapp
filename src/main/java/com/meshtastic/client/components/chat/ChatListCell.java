@@ -17,6 +17,8 @@ import javafx.scene.layout.VBox;
 import javafx.scene.shape.Rectangle;
 import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
+import javafx.scene.text.Text;
+import javafx.scene.paint.Color;
 
 import java.util.function.Consumer;
 
@@ -27,7 +29,7 @@ public class ChatListCell extends ListCell<ChatItem> {
 
     private final HBox root = new HBox(10);
     private final StackPane avatarPane = new StackPane();
-    private final Label avatarLabel = new Label();
+    private final Text avatarText = new Text();
     private final VBox textBox = new VBox(2);
     private final Label nameLabel = new Label();
     private final EmojiTextFlow messagePreview = new EmojiTextFlow();
@@ -47,8 +49,9 @@ public class ChatListCell extends ListCell<ChatItem> {
         avatarPane.setMinSize(40, 40);
         avatarPane.setMaxSize(40, 40);
         avatarPane.getStyleClass().add("chat-avatar");
-        avatarLabel.setStyle("-fx-text-fill: white; -fx-font-weight: bold;");
-        avatarPane.getChildren().add(avatarLabel);
+        avatarText.setStyle("-fx-font-weight: bold;");
+        avatarText.setFill(Color.WHITE);
+        avatarPane.getChildren().add(avatarText);
 
         nameLabel.setFont(Font.font("Roboto", FontWeight.BOLD, 14));
         nameLabel.getStyleClass().add("chat-name-label");
@@ -130,9 +133,9 @@ public class ChatListCell extends ListCell<ChatItem> {
             return;
         }
 
-        avatarLabel.setText(item.getAvatarText());
-        avatarLabel.setFont(Font.font("Roboto", FontWeight.BOLD,
-                NodeUtils.avatarFontSize(item.getAvatarText().length(), 40)));
+        avatarText.setText(item.getAvatarText());
+        avatarText.setFont(Font.font("Roboto", FontWeight.BOLD,
+                NodeUtils.avatarFontSize(item.getAvatarText(), 40)));
         avatarPane.setStyle("-fx-background-color: " + item.getAvatarColor()
                 + "; -fx-background-radius: 20;");
 

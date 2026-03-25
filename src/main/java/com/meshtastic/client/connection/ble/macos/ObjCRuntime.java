@@ -40,7 +40,6 @@ public final class ObjCRuntime {
 
     // libdispatch
     private static final Function DISPATCH_QUEUE_CREATE = DISPATCH.getFunction("dispatch_queue_create");
-
     // ====== Класс и селектор ======
 
     /** objc_getClass(name) → Class pointer */

@@ -1,67 +1,14 @@
 package com.meshtastic.client.notification;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import java.awt.AWTException;
-import java.awt.Image;
-import java.awt.SystemTray;
-import java.awt.Toolkit;
-import java.awt.TrayIcon;
+import com.meshtastic.client.tray.AppTrayManager;
 
 /**
- * Windows toast-уведомления через {@link java.awt.SystemTray}.
- * <p>
- * Создаёт единственный {@link TrayIcon} при первом использовании (lazy init).
- * {@code displayMessage()} показывает Windows Toast (Win10+) или Balloon (Win7/8).
+ * Windows-уведомления через уже созданный tray icon приложения.
  */
 public class WindowsNotificationService implements NotificationService {
 
-    private static final Logger log = LoggerFactory.getLogger(WindowsNotificationService.class);
-
-    private volatile TrayIcon trayIcon;
-
-    public WindowsNotificationService() {
-        initTrayIcon();
-    }
-
     @Override
     public void showNotification(String title, String message) {
-        try {
-            TrayIcon icon = trayIcon;
-            if (icon != null) {
-                icon.displayMessage(
-                        title != null ? title : "MeshApp",
-                        message != null ? message : "",
-                        TrayIcon.MessageType.INFO);
-            }
-        } catch (Exception e) {
-            log.warn("Failed to show Windows notification", e);
-        }
-    }
-
-    private void initTrayIcon() {
-        if (!SystemTray.isSupported()) {
-            log.warn("SystemTray not supported on this system");
-            return;
-        }
-        try {
-            Image image = Toolkit.getDefaultToolkit().getImage(
-                    getClass().getResource("/logo/icon_32.png"));
-            trayIcon = new TrayIcon(image, "MeshApp");
-            trayIcon.setImageAutoSize(true);
-            SystemTray.getSystemTray().add(trayIcon);
-        } catch (AWTException e) {
-            log.error("Failed to add tray icon", e);
-        }
-    }
-
-    @Override
-    public void dispose() {
-        TrayIcon icon = trayIcon;
-        if (icon != null) {
-            SystemTray.getSystemTray().remove(icon);
-            trayIcon = null;
-        }
+        AppTrayManager.getInstance().showNotification(title, message);
     }
 }

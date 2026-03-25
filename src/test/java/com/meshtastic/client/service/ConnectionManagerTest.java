@@ -100,14 +100,32 @@ class ConnectionManagerTest {
     }
 
     @Test
-    void shouldStartHeartbeatOnlyForTcpConnections() {
+    void shouldStartHeartbeatForTcpAndSerialConnections() {
         ConnectionEntry tcp = new ConnectionEntry("tcp", "127.0.0.1", 4403);
         ConnectionEntry serial = new ConnectionEntry("serial", "COM3", 115200, ConnectionType.SERIAL);
         ConnectionEntry ble = new ConnectionEntry("ble", "AA:BB:CC:DD:EE:FF", "test");
 
         assertTrue(ConnectionManager.shouldStartHeartbeat(tcp));
-        assertFalse(ConnectionManager.shouldStartHeartbeat(serial));
+        assertTrue(ConnectionManager.shouldStartHeartbeat(serial));
         assertFalse(ConnectionManager.shouldStartHeartbeat(ble));
+    }
+
+    @Test
+    void disconnectForDeviceRebootKeepsReconnectEnabled() throws Exception {
+        try (TcpMeshtasticStubServer server = new TcpMeshtasticStubServer(0xCAFEBABE)) {
+            ConnectionManager manager = ConnectionManager.getInstance();
+            ConnectionEntry entry = new ConnectionEntry("stub", "127.0.0.1", server.port());
+            manager.addEntry(entry);
+
+            manager.connect(entry.getId());
+            manager.getConfigFuture(entry.getId()).get(5, TimeUnit.SECONDS);
+
+            manager.disconnectForDeviceReboot(entry.getId());
+
+            assertFalse(entry.isConnected());
+            assertTrue(entry.isReconnecting());
+            assertFalse(manager.hasActiveConnection());
+        }
     }
 
     private static final class TcpMeshtasticStubServer implements AutoCloseable {

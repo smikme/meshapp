@@ -89,6 +89,14 @@ public class FrameParser {
     }
 
     /**
+     * Возвращает {@code true}, если парсер находится внутри частично прочитанного фрейма
+     * и ожидает оставшиеся байты заголовка или payload.
+     */
+    public boolean hasPartialFrame() {
+        return state != State.WAIT_START1;
+    }
+
+    /**
      * Проверяет что первый байт payload — валидный protobuf field tag.
      * Wire type (биты 0-2) должен быть 0-5, field number (биты 3+) должен быть > 0.
      * Отсеивает ложные фреймы от debug-вывода устройства на том же UART.

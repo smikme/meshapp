@@ -28,15 +28,23 @@ public class ConfigTreeItem {
      * Конструктор для категории (секции).
      */
     public ConfigTreeItem(String name, String configType, int configVariantNumber) {
+        this(name, null, null, configType, configVariantNumber);
+    }
+
+    /**
+     * Конструктор для категории (секции/вложенной группы) с привязкой к protobuf-полю.
+     */
+    public ConfigTreeItem(String name, String fieldName, Descriptors.FieldDescriptor fieldDescriptor,
+                          String configType, int configVariantNumber) {
         this.name = name;
-        this.fieldName = null;
+        this.fieldName = fieldName;
         this.value = null;
         this.originalValue = null;
         this.valueType = null;
         this.enumValues = null;
         this.editable = false;
         this.category = true;
-        this.fieldDescriptor = null;
+        this.fieldDescriptor = fieldDescriptor;
         this.configType = configType;
         this.configVariantNumber = configVariantNumber;
     }
