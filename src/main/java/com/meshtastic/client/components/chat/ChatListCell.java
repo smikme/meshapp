@@ -14,11 +14,10 @@ import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
+import javafx.scene.paint.Color;
 import javafx.scene.shape.Rectangle;
 import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
-import javafx.scene.text.Text;
-import javafx.scene.paint.Color;
 
 import java.util.function.Consumer;
 
@@ -29,7 +28,7 @@ public class ChatListCell extends ListCell<ChatItem> {
 
     private final HBox root = new HBox(10);
     private final StackPane avatarPane = new StackPane();
-    private final Text avatarText = new Text();
+    private final Label avatarLabel = new Label();
     private final VBox textBox = new VBox(2);
     private final Label nameLabel = new Label();
     private final EmojiTextFlow messagePreview = new EmojiTextFlow();
@@ -47,11 +46,12 @@ public class ChatListCell extends ListCell<ChatItem> {
         root.getStyleClass().add("chat-list-cell-root");
 
         avatarPane.setMinSize(40, 40);
+        avatarPane.setPrefSize(40, 40);
         avatarPane.setMaxSize(40, 40);
         avatarPane.getStyleClass().add("chat-avatar");
-        avatarText.setStyle("-fx-font-weight: bold;");
-        avatarText.setFill(Color.WHITE);
-        avatarPane.getChildren().add(avatarText);
+        avatarLabel.setTextFill(Color.WHITE);
+        avatarLabel.setPadding(Insets.EMPTY);
+        avatarPane.getChildren().add(avatarLabel);
 
         nameLabel.setFont(Font.font("Roboto", FontWeight.BOLD, 14));
         nameLabel.getStyleClass().add("chat-name-label");
@@ -133,9 +133,9 @@ public class ChatListCell extends ListCell<ChatItem> {
             return;
         }
 
-        avatarText.setText(item.getAvatarText());
-        avatarText.setFont(Font.font("Roboto", FontWeight.BOLD,
-                NodeUtils.avatarFontSize(item.getAvatarText(), 40)));
+        avatarLabel.setText(item.getAvatarText());
+        avatarLabel.setFont(Font.font("Roboto", FontWeight.BOLD,
+                NodeUtils.chatAvatarFontSize(item.getAvatarText().length(), 40)));
         avatarPane.setStyle("-fx-background-color: " + item.getAvatarColor()
                 + "; -fx-background-radius: 20;");
 

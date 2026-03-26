@@ -115,6 +115,19 @@ public final class NodeUtils {
     }
 
     /**
+     * Стабильный размер шрифта для аватаров списка чатов и заголовка чата.
+     * Чуть крупнее общего правила, но без динамического перерасчёта по layout bounds,
+     * чтобы текст не "прыгал" при смене selection/focus состояния.
+     */
+    public static double chatAvatarFontSize(int charCount, int circleSize) {
+        double base = circleSize * 0.5;
+        if (charCount <= 1) { return base * 1.05; }
+        if (charCount == 2) { return base * 0.92; }
+        if (charCount == 3) { return base * 0.78; }
+        return base * 0.675; // 4+
+    }
+
+    /**
      * Размер шрифта аватара с учётом реальной ширины текста.
      * Это убирает platform-specific clipping/ellipsis у 4-символьных аватаров
      * вроде {@code #GAM} в фиксированном круге.
