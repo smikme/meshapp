@@ -56,7 +56,6 @@ import javafx.scene.layout.VBox;
 import javafx.scene.paint.Color;
 import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
-import javafx.scene.text.Text;
 import javafx.util.Duration;
 import org.meshtastic.proto.ChannelProtos;
 import org.meshtastic.proto.MeshProtos;
@@ -95,7 +94,7 @@ public class FormChat extends Form {
     // Заголовок чата
     private HBox chatHeader;
     private StackPane headerAvatarPane;
-    private Text headerAvatarText;
+    private Label headerAvatarLabel;
     private Label headerNameLabel;
     private Separator headerSep;
 
@@ -322,11 +321,12 @@ public class FormChat extends Form {
         // Заголовок
         headerAvatarPane = new StackPane();
         headerAvatarPane.setMinSize(36, 36);
+        headerAvatarPane.setPrefSize(36, 36);
         headerAvatarPane.setMaxSize(36, 36);
-        headerAvatarText = new Text();
-        headerAvatarText.setStyle("-fx-font-weight: bold;");
-        headerAvatarText.setFill(Color.WHITE);
-        headerAvatarPane.getChildren().add(headerAvatarText);
+        headerAvatarLabel = new Label();
+        headerAvatarLabel.setTextFill(Color.WHITE);
+        headerAvatarLabel.setPadding(Insets.EMPTY);
+        headerAvatarPane.getChildren().add(headerAvatarLabel);
 
         headerNameLabel = new Label();
         headerNameLabel.setFont(Font.font("Roboto", FontWeight.BOLD, 16));
@@ -495,9 +495,9 @@ public class FormChat extends Form {
         this.selectedChat = chat;
 
         // Обновить заголовок
-        headerAvatarText.setText(chat.getAvatarText());
-        headerAvatarText.setFont(Font.font("Roboto", FontWeight.BOLD,
-                NodeUtils.avatarFontSize(chat.getAvatarText(), 36)));
+        headerAvatarLabel.setText(chat.getAvatarText());
+        headerAvatarLabel.setFont(Font.font("Roboto", FontWeight.BOLD,
+                NodeUtils.chatAvatarFontSize(chat.getAvatarText().length(), 36)));
         headerAvatarPane.setStyle("-fx-background-color: " + chat.getAvatarColor() +
                 "; -fx-background-radius: 18;");
         headerNameLabel.setText(chat.getDisplayName());
