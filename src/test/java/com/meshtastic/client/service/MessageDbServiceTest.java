@@ -93,6 +93,37 @@ class MessageDbServiceTest {
     }
 
     @Test
+    void unreadEligibleCountIncludesIncomingSystemMessagesButExcludesOutgoing() {
+        MeshMessage incoming = message("incoming", 10, 10);
+        MeshMessage outgoing = new MeshMessage("!00000001", "!ffffffff", 0, "outgoing", 20, true);
+        outgoing.setPacketId(11);
+        MeshMessage systemIncoming = message("system", 12, 30);
+        systemIncoming.setSystemMessage(true);
+
+        service.save(incoming, "channel", "0", "!owner");
+        service.save(outgoing, "channel", "0", "!owner");
+        service.save(systemIncoming, "channel", "0", "!owner");
+
+        assertEquals(2, service.getUnreadEligibleMessageCount("channel", "0", "!owner"));
+    }
+
+    @Test
+    void loadAllReadCountsNormalizesLegacyCountsToUnreadEligibleMessages() {
+        MeshMessage incoming = message("incoming", 21, 10);
+        MeshMessage outgoing = new MeshMessage("!00000001", "!ffffffff", 0, "outgoing", 20, true);
+        outgoing.setPacketId(22);
+        MeshMessage systemIncoming = message("system", 23, 30);
+        systemIncoming.setSystemMessage(true);
+
+        service.save(incoming, "channel", "0", "!owner");
+        service.save(outgoing, "channel", "0", "!owner");
+        service.save(systemIncoming, "channel", "0", "!owner");
+        service.saveReadCount("channel", "0", 3, "!owner");
+
+        assertEquals(2, service.loadAllReadCounts("!owner").get("ch:0"));
+    }
+
+    @Test
     void updateStatusAndFindByPacketIdReturnPersistedMetadata() {
         MeshMessage message = message("payload", 777, 10);
         message.setStatus(MeshMessage.DeliveryStatus.SENDING);

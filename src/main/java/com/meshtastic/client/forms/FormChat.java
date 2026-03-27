@@ -181,8 +181,8 @@ public class FormChat extends Form {
     private int scrollStateSyncSuspendCount;
 
     private final Runnable messageListener = () -> Platform.runLater(() -> {
-        reloadChatList();
         refreshCurrentChat();
+        reloadChatList();
     });
     private final Runnable connectionListener = () -> Platform.runLater(this::rebindState);
 
@@ -703,6 +703,7 @@ public class FormChat extends Form {
     private void refreshCurrentChat() {
         if (selectedChat == null) { return; }
         ChatScrollState preservedScrollState = !formVisible ? captureViewportAnchor() : null;
+        boolean wasAtLiveTail = formVisible && isAtLiveTail();
 
         // Обновить статусы доставки для отправленных сообщений (ACK/NAK)
         MessageDbService db = MessageDbService.getInstance();
@@ -723,7 +724,9 @@ public class FormChat extends Form {
         if (!newMsgs.isEmpty()) {
             latestKnownDbId = newMsgs.getLast().getDbId();
             boolean shouldAppendToViewport = allNewerHistoryLoaded;
-            boolean shouldAutoscroll = shouldAppendToViewport && formVisible && isScrolledToBottom();
+            boolean shouldAutoscroll = shouldAppendToViewport && wasAtLiveTail;
+            boolean shouldMarkReadImmediately =
+                    shouldMarkNewMessagesReadImmediately(formVisible, wasAtLiveTail, newMsgs);
 
             if (shouldAppendToViewport) {
                 appendNewerMessages(newMsgs);
@@ -734,7 +737,8 @@ public class FormChat extends Form {
                     newMessageWhileScrolled = 0;
                     updateScrollDownBadge();
                     scrollToBottom();
-                    if (formVisible) { markAsRead(selectedChat); }
+                    if (shouldMarkReadImmediately) { markAsRead(selectedChat); }
+                    markCurrentChatAsReadIfViewingTailLater();
                 } else {
                     if (!formVisible) {
                         restoreViewportAnchorLater(preservedScrollState);
@@ -748,6 +752,27 @@ public class FormChat extends Form {
         }
 
         refreshLoadedMessageRows();
+    }
+
+    static boolean shouldMarkNewMessagesReadImmediately(boolean formVisible,
+                                                        boolean wasAtLiveTail,
+                                                        List<MeshMessage> newMessages) {
+        return formVisible
+                && wasAtLiveTail
+                && newMessages != null
+                && newMessages.stream().anyMatch(FormChat::isUnreadEligible);
+    }
+
+    private void markCurrentChatAsReadIfViewingTailLater() {
+        if (!formVisible || selectedChat == null) {
+            return;
+        }
+        ChatItem chat = selectedChat;
+        Platform.runLater(() -> {
+            if (chat == selectedChat && formVisible && isAtLiveTail() && getUnreadCount(chat) > 0) {
+                markAsRead(chat);
+            }
+        });
     }
 
     private void syncLoadedMessageDeliveryStatus(MeshMessage updated) {
@@ -1146,9 +1171,44 @@ public class FormChat extends Form {
         String dbType = isChannel ? "channel" : "dm";
         String dbKey = isChannel ? String.valueOf(item.getChannelIndex()) : item.getPeerNodeId();
         String readKey = (isChannel ? "ch:" : "dm:") + dbKey;
-        int totalCount = MessageDbService.getInstance().getMessageCount(dbType, dbKey, currentOwnerNodeId());
+        int totalCount = MessageDbService.getInstance().getUnreadEligibleMessageCount(
+                dbType, dbKey, currentOwnerNodeId());
         int lastRead = lastReadCounts.getOrDefault(readKey, 0);
         return Math.max(0, totalCount - lastRead);
+    }
+
+    private static boolean isUnreadEligible(MeshMessage message) {
+        return message != null && !message.isOutgoing();
+    }
+
+    private int countUnreadEligibleMessagesInLoadedWindow() {
+        int count = 0;
+        for (MeshMessage message : loadedMessages) {
+            if (isUnreadEligible(message)) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    private int findFirstUnreadLoadedIndex(int unreadCount) {
+        if (unreadCount <= 0 || loadedMessages.isEmpty()) {
+            return -1;
+        }
+
+        int unreadSeen = 0;
+        int firstUnreadIndex = -1;
+        for (int i = loadedMessages.size() - 1; i >= 0; i--) {
+            if (!isUnreadEligible(loadedMessages.get(i))) {
+                continue;
+            }
+            unreadSeen++;
+            firstUnreadIndex = i;
+            if (unreadSeen >= unreadCount) {
+                break;
+            }
+        }
+        return firstUnreadIndex;
     }
 
     private void positionInitialMessages(int unreadCount) {
@@ -1165,8 +1225,10 @@ public class FormChat extends Form {
         if (unreadCount < UNREAD_FOCUS_THRESHOLD || loadedMessages.isEmpty()) {
             return false;
         }
-        int unreadInLoadedWindow = Math.min(unreadCount, loadedMessages.size());
-        int firstUnreadIndex = loadedMessages.size() - unreadInLoadedWindow;
+        int firstUnreadIndex = findFirstUnreadLoadedIndex(unreadCount);
+        if (firstUnreadIndex < 0) {
+            return false;
+        }
         scrollToMessage(firstUnreadIndex);
         return true;
     }
@@ -1214,16 +1276,24 @@ public class FormChat extends Form {
         double currentOffset = Math.max(0, Math.min(maxOffset, messageScrollPane.getVvalue() * maxOffset));
         double viewportBottom = currentOffset + viewportHeight - 1;
 
-        int unreadInLoadedWindow = Math.min(totalUnread, loadedMessages.size());
-        int firstUnreadIndex = loadedMessages.size() - unreadInLoadedWindow;
+        int firstUnreadIndex = findFirstUnreadLoadedIndex(totalUnread);
+        if (firstUnreadIndex < 0) {
+            return totalUnread;
+        }
+
         int unreadBelow = 0;
         for (int i = firstUnreadIndex; i < loadedMessages.size(); i++) {
-            HBox row = loadedMessageRows.get(loadedMessages.get(i).getDbId());
+            MeshMessage message = loadedMessages.get(i);
+            if (!isUnreadEligible(message)) {
+                continue;
+            }
+            HBox row = loadedMessageRows.get(message.getDbId());
             if (row != null && row.getBoundsInParent().getMinY() >= viewportBottom) {
                 unreadBelow++;
             }
         }
-        return unreadBelow;
+        int loadedUnread = Math.min(totalUnread, countUnreadEligibleMessagesInLoadedWindow());
+        return unreadBelow + Math.max(0, totalUnread - loadedUnread);
     }
 
     private void updateScrollDownBadge() {
@@ -1647,7 +1717,7 @@ public class FormChat extends Form {
             String chKey = String.valueOf(channel.getIndex());
             MeshMessage lastMsg = channelLastMsgs.get(chKey);
             String readKey = "ch:" + channel.getIndex();
-            int totalCount = db.getMessageCount("channel", chKey, ownerId);
+            int totalCount = db.getUnreadEligibleMessageCount("channel", chKey, ownerId);
             int lastRead = lastReadCounts.getOrDefault(readKey, 0);
             int unread = Math.max(0, totalCount - lastRead);
             items.add(ChatItem.fromChannel(channel, lastMsg, unread));
@@ -1664,7 +1734,7 @@ public class FormChat extends Form {
                 peerNode = NodeCacheService.getInstance().get(peerNodeId);
             }
             String readKey = "dm:" + peerNodeId;
-            int totalCount = db.getMessageCount("dm", peerNodeId, ownerId);
+            int totalCount = db.getUnreadEligibleMessageCount("dm", peerNodeId, ownerId);
             int lastRead = lastReadCounts.getOrDefault(readKey, 0);
             int unread = Math.max(0, totalCount - lastRead);
             items.add(ChatItem.fromDirectMessage(peerNodeId, peerNode, lastMsg, unread));
@@ -1774,7 +1844,10 @@ public class FormChat extends Form {
 
         MessageDbService db = MessageDbService.getInstance();
         String ownerId = currentOwnerNodeId();
-        int count = db.getMessageCount(dbType, dbKey, ownerId);
+        int count = db.getUnreadEligibleMessageCount(dbType, dbKey, ownerId);
+        if (lastReadCounts.getOrDefault(readKey, -1) == count) {
+            return;
+        }
         lastReadCounts.put(readKey, count);
         db.saveReadCount(dbType, dbKey, count, ownerId);
         reloadChatList();

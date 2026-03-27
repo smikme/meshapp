@@ -248,14 +248,14 @@ public class ConfigExchangeService implements FromRadioListener {
         for (ChannelProtos.Channel channel : deviceState.getChannels()) {
             if (channel.getRole() == ChannelProtos.Channel.Role.DISABLED) { continue; }
             String chKey = String.valueOf(channel.getIndex());
-            int total = db.getMessageCount("channel", chKey, ownerNodeId);
+            int total = db.getUnreadEligibleMessageCount("channel", chKey, ownerNodeId);
             int read = readCounts.getOrDefault("ch:" + channel.getIndex(), 0);
             if (total > read) { hasUnread = true; break; }
         }
 
         if (!hasUnread) {
             for (String peerNodeId : db.getDistinctDmPeers(ownerNodeId)) {
-                int total = db.getMessageCount("dm", peerNodeId, ownerNodeId);
+                int total = db.getUnreadEligibleMessageCount("dm", peerNodeId, ownerNodeId);
                 int read = readCounts.getOrDefault("dm:" + peerNodeId, 0);
                 if (total > read) { hasUnread = true; break; }
             }

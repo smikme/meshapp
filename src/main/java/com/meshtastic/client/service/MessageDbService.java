@@ -594,6 +594,29 @@ public final class MessageDbService {
         return 0;
     }
 
+    /**
+     * Возвращает количество сообщений, которые могут считаться непрочитанными:
+     * любые не-исходящие сообщения, включая системные.
+     */
+    public int getUnreadEligibleMessageCount(String chatType, String chatKey, String ownerNodeId) {
+        if (dbConnection == null) { return 0; }
+        try (PreparedStatement ps = dbConnection.prepareStatement("""
+                SELECT COUNT(*) FROM messages
+                WHERE owner_node_id = ? AND chat_type = ? AND chat_key = ?
+                  AND outgoing = FALSE
+                """)) {
+            ps.setString(1, ownerNodeId != null ? ownerNodeId : "");
+            ps.setString(2, chatType);
+            ps.setString(3, chatKey);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) { return rs.getInt(1); }
+            }
+        } catch (SQLException e) {
+            log.error("Failed to count unread-eligible messages ({}, {})", chatType, chatKey, e);
+        }
+        return 0;
+    }
+
     // ═══════════════════════════════════════════════════════════
     //  Удаление
     // ═══════════════════════════════════════════════════════════
@@ -708,6 +731,7 @@ public final class MessageDbService {
     public Map<String, Integer> loadAllReadCounts(String ownerNodeId) {
         Map<String, Integer> result = new HashMap<>();
         if (dbConnection == null) { return result; }
+        List<String[]> normalizations = new ArrayList<>();
         try (PreparedStatement ps = dbConnection.prepareStatement(
                 "SELECT chat_type, chat_key, read_count FROM chat_read_counts WHERE owner_node_id = ?")) {
             ps.setString(1, ownerNodeId != null ? ownerNodeId : "");
@@ -716,12 +740,21 @@ public final class MessageDbService {
                     String type = rs.getString("chat_type");
                     String key = rs.getString("chat_key");
                     int count = rs.getInt("read_count");
+                    int totalMessages = getMessageCount(type, key, ownerNodeId);
+                    int eligibleCount = getUnreadEligibleMessageCount(type, key, ownerNodeId);
+                    if (totalMessages > 0 && count > eligibleCount) {
+                        count = eligibleCount;
+                        normalizations.add(new String[]{type, key, String.valueOf(count)});
+                    }
                     String mapKey = ("channel".equals(type) ? "ch:" : "dm:") + key;
                     result.put(mapKey, count);
                 }
             }
         } catch (SQLException e) {
             log.error("Failed to load read counts", e);
+        }
+        for (String[] normalization : normalizations) {
+            saveReadCount(normalization[0], normalization[1], Integer.parseInt(normalization[2]), ownerNodeId);
         }
         return result;
     }
