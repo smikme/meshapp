@@ -71,6 +71,28 @@ class MessageDbServiceTest {
     }
 
     @Test
+    void loadAfterSupportsForwardPaginationWithLimit() {
+        MeshMessage first = message("first", 1, 10);
+        MeshMessage second = message("second", 2, 20);
+        MeshMessage third = message("third", 3, 30);
+        MeshMessage fourth = message("fourth", 4, 40);
+
+        service.save(first, "channel", "7", "!owner");
+        service.save(second, "channel", "7", "!owner");
+        service.save(third, "channel", "7", "!owner");
+        service.save(fourth, "channel", "7", "!owner");
+
+        List<MeshMessage> page = service.loadAfter("channel", "7", first.getDbId(), 2, "!owner");
+
+        assertEquals(List.of("second", "third"), page.stream().map(MeshMessage::getText).toList());
+        assertEquals(List.of("fourth"),
+                service.loadAfter("channel", "7", page.getLast().getDbId(), "!owner")
+                        .stream()
+                        .map(MeshMessage::getText)
+                        .toList());
+    }
+
+    @Test
     void updateStatusAndFindByPacketIdReturnPersistedMetadata() {
         MeshMessage message = message("payload", 777, 10);
         message.setStatus(MeshMessage.DeliveryStatus.SENDING);

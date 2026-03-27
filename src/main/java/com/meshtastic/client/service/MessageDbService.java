@@ -414,21 +414,45 @@ public final class MessageDbService {
      * @return список новых сообщений (хронологический порядок)
      */
     public List<MeshMessage> loadAfter(String chatType, String chatKey, long afterDbId, String ownerNodeId) {
+        return loadAfter(chatType, chatKey, afterDbId, 0, ownerNodeId);
+    }
+
+    /**
+     * Загружает новые сообщения ПОСЛЕ указанного id (для real-time обновления и
+     * постраничной навигации вниз).
+     *
+     * @param chatType    "channel" или "dm"
+     * @param chatKey     channelIndex (как строка) или peerNodeId
+     * @param afterDbId   загружать сообщения с id > afterDbId
+     * @param limit       максимальное количество; {@code <= 0} означает без лимита
+     * @param ownerNodeId nodeId устройства-владельца
+     * @return список новых сообщений (хронологический порядок)
+     */
+    public List<MeshMessage> loadAfter(String chatType,
+                                       String chatKey,
+                                       long afterDbId,
+                                       int limit,
+                                       String ownerNodeId) {
         List<MeshMessage> result = new ArrayList<>();
         if (dbConnection == null) { return result; }
-        String sql = "SELECT * FROM messages WHERE owner_node_id = ? AND chat_type = ? AND chat_key = ? AND id > ? ORDER BY id ASC";
+        String sql = limit > 0
+                ? "SELECT * FROM messages WHERE owner_node_id = ? AND chat_type = ? AND chat_key = ? AND id > ? ORDER BY id ASC LIMIT ?"
+                : "SELECT * FROM messages WHERE owner_node_id = ? AND chat_type = ? AND chat_key = ? AND id > ? ORDER BY id ASC";
         try (PreparedStatement ps = dbConnection.prepareStatement(sql)) {
             ps.setString(1, ownerNodeId != null ? ownerNodeId : "");
             ps.setString(2, chatType);
             ps.setString(3, chatKey);
             ps.setLong(4, afterDbId);
+            if (limit > 0) {
+                ps.setInt(5, limit);
+            }
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
                     result.add(readMessage(rs));
                 }
             }
         } catch (SQLException e) {
-            log.error("Failed to loadAfter({}, {}, {})", chatType, chatKey, afterDbId, e);
+            log.error("Failed to loadAfter({}, {}, {}, {})", chatType, chatKey, afterDbId, limit, e);
         }
         return result;
     }
