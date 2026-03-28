@@ -12,6 +12,7 @@ import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.model.TelemetryEntry;
 import com.meshtastic.client.notification.NotificationManager;
 import com.meshtastic.client.protocol.FromRadioListener;
+import com.meshtastic.client.protocol.ProtocolHandler;
 import com.meshtastic.client.system.DrawerManager;
 import javafx.application.Platform;
 import org.slf4j.Logger;
@@ -42,10 +43,16 @@ public class MessageListenerService implements FromRadioListener {
 
     private final DeviceState deviceState;
     private final NotificationManager notificationManager;
+    private final ProtocolHandler protocolHandler;
 
     public MessageListenerService(DeviceState deviceState) {
+        this(deviceState, null);
+    }
+
+    public MessageListenerService(DeviceState deviceState, ProtocolHandler protocolHandler) {
         this.deviceState = deviceState;
         this.notificationManager = new NotificationManager(deviceState);
+        this.protocolHandler = protocolHandler;
     }
 
     public NotificationManager getNotificationManager() {
@@ -270,12 +277,31 @@ public class MessageListenerService implements FromRadioListener {
             if (!user.getPublicKey().isEmpty()) {
                 node.setPublicKey(user.getPublicKey().toByteArray());
             }
+            if (user.hasIsUnmessagable()) {
+                node.setUnmessagable(user.getIsUnmessagable());
+            }
             deviceState.fireNodeUpdateListeners(fromNum);
             NodeCacheService.getInstance().update(node);
-            log.info("Received NODEINFO_APP from !{}: {}", Integer.toHexString(fromNum), user.getLongName());
+            maybeSeedDirectContactFromNodeInfo(packet, node);
+            log.info("Received NODEINFO_APP from !{}: {} (unmessagable={})",
+                    Integer.toHexString(fromNum), user.getLongName(),
+                    user.hasIsUnmessagable() ? user.getIsUnmessagable() : null);
         } catch (InvalidProtocolBufferException e) {
             log.warn("Failed to parse User from NODEINFO_APP packet from !{}", Integer.toHexString(fromNum), e);
         }
+    }
+
+    private void maybeSeedDirectContactFromNodeInfo(MeshProtos.MeshPacket packet, NodeData node) {
+        if (protocolHandler == null || node == null) { return; }
+        if (packet.getFrom() == 0 || packet.getFrom() == deviceState.getMyNodeNum()) { return; }
+        if (packet.getTo() != deviceState.getMyNodeNum()) { return; }
+
+        byte[] publicKey = node.getPublicKey();
+        if (publicKey == null || publicKey.length == 0) { return; }
+
+        deviceState.ensureDirectMessageThread(node.getNodeId());
+        MessageService.seedPeerContactForPki(protocolHandler, deviceState, node);
+        log.debug("Prepared local PKI contact for {} after directed NODEINFO_APP", node.getNodeId());
     }
 
     private void handlePositionResponse(MeshProtos.MeshPacket packet, MeshProtos.Data data) {
@@ -412,6 +438,7 @@ public class MessageListenerService implements FromRadioListener {
             if (adminMsg.hasGetOwnerResponse()) {
                 MeshProtos.User owner = adminMsg.getGetOwnerResponse();
                 deviceState.setOwnerInfo(owner);
+                mergeOwnerInfoIntoLocalNode(owner);
                 deviceState.fireOwnerInfoListeners();
                 log.info("Received owner info: longName='{}', shortName='{}'",
                         owner.getLongName(), owner.getShortName());
@@ -427,6 +454,30 @@ public class MessageListenerService implements FromRadioListener {
         } catch (InvalidProtocolBufferException e) {
             log.warn("Failed to parse AdminMessage from ADMIN_APP packet", e);
         }
+    }
+
+    private void mergeOwnerInfoIntoLocalNode(MeshProtos.User owner) {
+        int myNodeNum = deviceState.getMyNodeNum();
+        if (myNodeNum == 0 || owner == null) { return; }
+
+        NodeData node = deviceState.getOrCreateNode(myNodeNum);
+        if (!owner.getLongName().isEmpty()) { node.setLongName(owner.getLongName()); }
+        if (!owner.getShortName().isEmpty()) { node.setShortName(owner.getShortName()); }
+        if (!owner.getId().isEmpty()) { node.setNodeId(owner.getId()); }
+        if (owner.getRole() != ConfigProtos.Config.DeviceConfig.Role.CLIENT || node.getRole() == null) {
+            node.setRole(owner.getRole().name());
+        }
+        if (owner.getHwModel() != MeshProtos.HardwareModel.UNSET || node.getHwModel() == null) {
+            node.setHwModel(owner.getHwModel().name());
+        }
+        if (!owner.getPublicKey().isEmpty()) {
+            node.setPublicKey(owner.getPublicKey().toByteArray());
+        }
+        if (owner.hasIsUnmessagable()) {
+            node.setUnmessagable(owner.getIsUnmessagable());
+        }
+        deviceState.fireNodeUpdateListeners(myNodeNum);
+        NodeCacheService.getInstance().update(node);
     }
 
     private void handleTracerouteResponse(MeshProtos.MeshPacket packet, MeshProtos.Data data) {

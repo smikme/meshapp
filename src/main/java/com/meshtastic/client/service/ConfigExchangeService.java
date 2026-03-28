@@ -151,6 +151,9 @@ public class ConfigExchangeService implements FromRadioListener {
             if (!user.getPublicKey().isEmpty()) {
                 node.setPublicKey(user.getPublicKey().toByteArray());
             }
+            if (user.hasIsUnmessagable()) {
+                node.setUnmessagable(user.getIsUnmessagable());
+            }
         }
 
         if (nodeInfo.hasPosition()) {

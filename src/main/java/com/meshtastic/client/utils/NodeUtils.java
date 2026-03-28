@@ -42,7 +42,7 @@ public final class NodeUtils {
      */
     public static NodeData resolveNode(DeviceState state, int nodeNum) {
         NodeData node = state != null ? state.getNodeDb().get(nodeNum) : null;
-        if (node != null && !node.hasName()) {
+        if (node != null) {
             NodeCacheService.getInstance().enrichFromCache(node);
             if (node.hasName()) {
                 log.debug("resolveNode: enriched {} from cache → '{}'",
@@ -68,7 +68,7 @@ public final class NodeUtils {
      */
     public static NodeData resolveNode(DeviceState state, String nodeId) {
         NodeData node = state != null ? state.getNodeByNodeId(nodeId) : null;
-        if (node != null && !node.hasName()) {
+        if (node != null) {
             NodeCacheService.getInstance().enrichFromCache(node);
             if (node.hasName()) {
                 log.debug("resolveNode: enriched {} from cache → '{}'",
@@ -166,6 +166,8 @@ public final class NodeUtils {
         rows.add(new String[]{"\uD83D\uDD11", "ID ноды", node.getNodeId()});
         rows.add(new String[]{"\u2699", "Роль", node.getRole() != null ? NodeData.translateRole(node.getRole()) : null});
         rows.add(new String[]{"\uD83D\uDCDF", "Модель", node.getHwModel()});
+        rows.add(new String[]{"\uD83D\uDCAC", "Личные сообщения",
+                node.getUnmessagable() == null ? null : node.isUnmessagable() ? "Недоступны" : "Доступны"});
         rows.add(new String[]{"\uD83D\uDCF6", "SNR", node.getSnr() != 0 ? String.valueOf(node.getSnr()) : null});
         rows.add(new String[]{"\uD83D\uDD00", "Хопы",
                 node.hasHopsAway() ? String.valueOf(node.getHopsAway()) : null});

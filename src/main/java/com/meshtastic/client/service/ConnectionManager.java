@@ -220,7 +220,7 @@ public final class ConnectionManager {
         DeviceState deviceState = new DeviceState();
         deviceStates.put(id, deviceState);
 
-        MessageListenerService messageListener = new MessageListenerService(deviceState);
+        MessageListenerService messageListener = new MessageListenerService(deviceState, protocolHandler);
         messageListenerServices.put(id, messageListener);
         protocolHandler.addListener(messageListener);
 

@@ -37,7 +37,7 @@ public class ChatListCell extends ListCell<ChatItem> {
     private final Label unreadBadge = new Label();
 
     /**
-     * @param onDeleteChat      колбэк удаления чата (вызывается из контекстного меню «Закрыть»)
+     * @param onDeleteChat      колбэк удаления чата (вызывается из контекстного меню удаления/отключения)
      * @param onShowProperties  колбэк свойств канала (вызывается из контекстного меню «Свойства»)
      */
     public ChatListCell(Consumer<ChatItem> onDeleteChat, Consumer<ChatItem> onShowProperties) {
@@ -95,7 +95,7 @@ public class ChatListCell extends ListCell<ChatItem> {
             }
         });
 
-        MenuItem closeItem = new MenuItem("Закрыть");
+        MenuItem closeItem = new MenuItem("Удалить локально");
         ContextMenu ctxMenu = new ContextMenu(propertiesItem, closeItem);
         setContextMenu(ctxMenu);
 
@@ -105,6 +105,7 @@ public class ChatListCell extends ListCell<ChatItem> {
             boolean isChannel = chatItem != null
                     && chatItem.getType() == ChatItem.ChatType.CHANNEL;
             propertiesItem.setVisible(isChannel);
+            closeItem.setText(isChannel ? "Отключить канал" : "Удалить локально");
         });
 
         closeItem.setOnAction(ev -> {
@@ -113,8 +114,13 @@ public class ChatListCell extends ListCell<ChatItem> {
                 return;
             }
             ModalPane.showConfirm(
-                    "Удалить «" + chatItem.getDisplayName() + "»?",
-                    "Все сообщения будут удалены.",
+                    (chatItem.getType() == ChatItem.ChatType.CHANNEL
+                            ? "Отключить канал «"
+                            : "Удалить локально «")
+                            + chatItem.getDisplayName() + "»?",
+                    chatItem.getType() == ChatItem.ChatType.CHANNEL
+                            ? "Канал будет отключён на устройстве, а сообщения удалены локально."
+                            : "История этого DM будет удалена только на этом клиенте.",
                     confirmed -> {
                         if (confirmed) {
                             onDeleteChat.accept(chatItem);

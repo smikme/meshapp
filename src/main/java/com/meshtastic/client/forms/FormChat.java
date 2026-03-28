@@ -458,10 +458,23 @@ public class FormChat extends Form {
                         selectedChat.getChannelIndex(),
                         request.text(), request.replyId());
             } else {
-                MessageService.sendDirectMessage(
+                NodeData peerNode = NodeUtils.resolveNode(state, selectedChat.getPeerNodeId());
+                if (peerNode != null && peerNode.isUnmessagable()) {
+                    Toast.show(Toast.Type.WARNING, "Нода объявила, что не принимает личные сообщения");
+                    return;
+                }
+                MeshMessage sent = MessageService.sendDirectMessage(
                         protocolHandler, state,
                         selectedChat.getPeerNodeId(),
                         request.text(), request.replyId());
+                if (sent == null) {
+                    if (peerNode != null && peerNode.isUnmessagable()) {
+                        Toast.show(Toast.Type.WARNING, "Нода объявила, что не принимает личные сообщения");
+                    } else {
+                    Toast.show(Toast.Type.ERROR, "Не удалось определить ноду для DM");
+                    }
+                    return;
+                }
             }
 
             // Локально уже сохранили исходящее сообщение в БД и DeviceState.

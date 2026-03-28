@@ -296,6 +296,15 @@ public class DeviceState {
         fireMessageListeners();
     }
 
+    public void ensureDirectMessageThread(String peerNodeId) {
+        if (peerNodeId == null || peerNodeId.isEmpty()) { return; }
+        List<MeshMessage> existing = directMessages.putIfAbsent(
+                peerNodeId, Collections.synchronizedList(new ArrayList<>()));
+        if (existing == null) {
+            fireMessageListeners();
+        }
+    }
+
     public List<MeshMessage> getDirectMessages(String peerNodeId) {
         List<MeshMessage> list = directMessages.get(peerNodeId);
         return list != null ? list : Collections.emptyList();
