@@ -4,6 +4,7 @@ import javafx.application.Platform;
 
 import java.lang.reflect.Field;
 import java.nio.file.Path;
+import java.util.Locale;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -21,6 +22,7 @@ public final class TestEnvironmentSupport {
     }
 
     public static void ensureJavaFxStarted() {
+        configureHeadlessJavaFxIfNeeded();
         if (FX_STARTED.compareAndSet(false, true)) {
             CountDownLatch latch = new CountDownLatch(1);
             try {
@@ -38,6 +40,36 @@ public final class TestEnvironmentSupport {
         CountDownLatch latch = new CountDownLatch(1);
         Platform.runLater(latch::countDown);
         await(latch);
+    }
+
+    private static void configureHeadlessJavaFxIfNeeded() {
+        if (!isLinuxHeadlessEnvironment()) {
+            return;
+        }
+
+        setIfMissing("java.awt.headless", "true");
+        setIfMissing("glass.platform", "Monocle");
+        setIfMissing("monocle.platform", "Headless");
+        setIfMissing("prism.order", "sw");
+        setIfMissing("testfx.robot", "glass");
+        setIfMissing("testfx.headless", "true");
+    }
+
+    private static boolean isLinuxHeadlessEnvironment() {
+        String osName = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
+        return osName.contains("linux")
+                && isBlank(System.getenv("DISPLAY"))
+                && isBlank(System.getenv("WAYLAND_DISPLAY"));
+    }
+
+    private static boolean isBlank(String value) {
+        return value == null || value.isBlank();
+    }
+
+    private static void setIfMissing(String key, String value) {
+        if (System.getProperty(key) == null) {
+            System.setProperty(key, value);
+        }
     }
 
     public static void resetSingletons() {
