@@ -109,6 +109,7 @@ public class FormSetting extends Form {
 
     private DeviceState state;
     private ProtocolHandler handler;
+    private final Runnable connectionListener = () -> Platform.runLater(this::reloadConfigTree);
 
     // Cache tab
     private TableView<NodeData> cacheTable;
@@ -141,6 +142,12 @@ public class FormSetting extends Form {
 
     public FormSetting() {
         init();
+    }
+
+    @Override
+    public void formInit() {
+        ConnectionManager.getInstance().addListener(connectionListener);
+        reloadConfigTree();
     }
 
     private void init() {
@@ -197,6 +204,27 @@ public class FormSetting extends Form {
         }
         this.state = newState;
         this.handler = newHandler;
+    }
+
+    /**
+     * Сбрасывает локальный UI-контекст текущего устройства.
+     * Нужен при disconnect, чтобы редактор не держал stale-конфигурацию.
+     */
+    private void clearConfigContext() {
+        state = null;
+        handler = null;
+        observedConfigLoadFuture = null;
+        fullConfigRoot = null;
+        originalConfigs = new ArrayList<>();
+        originalModuleConfigs = new ArrayList<>();
+        originalChannels = new ArrayList<>();
+        workingChannels = new ArrayList<>();
+        if (configTree != null) {
+            configTree.setRoot(null);
+        }
+        if (configSearchField != null) {
+            configSearchField.clear();
+        }
     }
 
     /**
@@ -1408,20 +1436,15 @@ public class FormSetting extends Form {
      * Загружает конфигурацию из DeviceState и строит дерево.
      */
     private void reloadConfigTree() {
-        // Обновить ссылку на state если не установлена
-        if (state == null || handler == null) {
-            refreshConnection();
-        }
+        refreshConnection();
 
         boolean connected = state != null && handler != null;
         setDevicePowerButtonsDisabled(!connected);
 
         if (!connected) {
+            clearConfigContext();
             configStatusLabel.setText("Нет подключения к радио");
             saveConfigBtn.setDisable(true);
-            originalChannels = new ArrayList<>();
-            workingChannels = new ArrayList<>();
-            configTree.setRoot(null);
             return;
         }
 
