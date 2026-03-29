@@ -7,7 +7,7 @@ plugins {
 }
 
 application {
-	mainClass = 'com.meshtastic.client.MeshApp'
+	mainClass = 'com.meshtastic.client.MeshAppLauncher'
 	def jvmArgs = [
 		'-Xmx256m',
 		'-Xms256m',
