@@ -194,6 +194,10 @@ public class MeshApp extends Application {
     }
 
     public static void main(String[] args) {
+        AppPreferences.init();
+        if (System.getProperty("prism.order") == null && AppPreferences.isSoftwareRendering()) {
+            System.setProperty("prism.order", "sw");
+        }
         Thread.setDefaultUncaughtExceptionHandler((thread, throwable) ->
                 log.error("Uncaught exception in thread '{}'", thread.getName(), throwable));
         launch(args);

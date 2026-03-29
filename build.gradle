@@ -11,6 +11,7 @@ application {
 	def jvmArgs = [
 		'-Xmx256m',
 		'-Xms256m',
+//		'-Dprism.order=sw',
 		'--add-opens', 'javafx.graphics/javafx.stage=ALL-UNNAMED',
 		'--add-opens', 'javafx.graphics/com.sun.javafx.tk=ALL-UNNAMED',
 		'--add-opens', 'javafx.graphics/com.sun.javafx.tk.quantum=ALL-UNNAMED',

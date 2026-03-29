@@ -357,6 +357,11 @@ public class FormSetting extends Form {
         disableEffectsCb.selectedProperty().addListener((obs, old, val) ->
                 AppPreferences.setDisableEffects(val));
 
+        CheckBox softwareRenderingCb = new CheckBox("Включить программный рендеринг");
+        softwareRenderingCb.setSelected(AppPreferences.isSoftwareRendering());
+        softwareRenderingCb.selectedProperty().addListener((obs, old, val) ->
+                AppPreferences.setSoftwareRendering(val));
+
         CheckBox minimizeToTrayCb = new CheckBox("Минимизация в трей");
         minimizeToTrayCb.setSelected(AppPreferences.isMinimizeToTray());
         minimizeToTrayCb.selectedProperty().addListener((obs, old, val) ->
@@ -365,7 +370,8 @@ public class FormSetting extends Form {
         Label restartNote = new Label("Изменения вступят в силу после перезапуска приложения");
         restartNote.setStyle("-fx-opacity: 0.6; -fx-font-size: 11;");
 
-        VBox appearanceGroup = new VBox(8, appearanceHeader, disableEffectsCb, minimizeToTrayCb, restartNote);
+        VBox appearanceGroup = new VBox(8, appearanceHeader, disableEffectsCb, softwareRenderingCb,
+                minimizeToTrayCb, restartNote);
 
         // --- Группа «Интеграции» ---
         Label integrationsHeader = new Label("Интеграции");
