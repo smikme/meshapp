@@ -2,13 +2,20 @@ package com.meshtastic.client.utils;
 
 import com.google.protobuf.Descriptors.FieldDescriptor;
 import com.meshtastic.client.model.ConfigTreeItem;
+import org.meshtastic.proto.ConfigProtos;
+import org.meshtastic.proto.PowerMonProtos;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 
 /**
  * Преобразует машинные protobuf-значения к более понятному для пользователя виду
- * и обратно. Сейчас используется для IPv4-адресов, которые в protobuf хранятся
- * как fixed32 little-endian числа.
+ * и обратно. Используется для IPv4-адресов, которые в protobuf хранятся
+ * как fixed32 little-endian числа, и для bitmask-полей, которые удобнее
+ * редактировать как набор флагов, а не как сырое число.
  */
 public final class ConfigValueFormatter {
 
@@ -20,8 +27,69 @@ public final class ConfigValueFormatter {
             "meshtastic.Config.NetworkConfig.IpV4Config.dns",
             "meshtastic.NetworkConnectionStatus.ip_address"
     );
+    private static final Set<String> HUMAN_READABLE_NODE_ID_FIELDS = Set.of(
+            "meshtastic.Config.LoRaConfig.ignore_incoming"
+    );
+    private static final Set<String> HUMAN_READABLE_HEX_FIELDS = Set.of(
+            "meshtastic.Config.PowerConfig.device_battery_ina_address"
+    );
+    private static final Map<String, BitmaskFieldSpec> BITMASK_FIELD_SPECS = Map.of(
+            "meshtastic.Config.NetworkConfig.enabled_protocols",
+            new BitmaskFieldSpec("Отключено", List.of(
+                    new BitmaskOption(ConfigProtos.Config.NetworkConfig.ProtocolFlags.UDP_BROADCAST.getNumber(),
+                            "UDP broadcast (локальная сеть)")
+            )),
+            "meshtastic.Config.PositionConfig.position_flags",
+            new BitmaskFieldSpec("Не выбрано", List.of(
+                    new BitmaskOption(ConfigProtos.Config.PositionConfig.PositionFlags.ALTITUDE.getNumber(),
+                            "Высота"),
+                    new BitmaskOption(ConfigProtos.Config.PositionConfig.PositionFlags.ALTITUDE_MSL.getNumber(),
+                            "Высота MSL"),
+                    new BitmaskOption(ConfigProtos.Config.PositionConfig.PositionFlags.GEOIDAL_SEPARATION.getNumber(),
+                            "Разделение геоида"),
+                    new BitmaskOption(ConfigProtos.Config.PositionConfig.PositionFlags.DOP.getNumber(),
+                            "DOP"),
+                    new BitmaskOption(ConfigProtos.Config.PositionConfig.PositionFlags.HVDOP.getNumber(),
+                            "HDOP/VDOP"),
+                    new BitmaskOption(ConfigProtos.Config.PositionConfig.PositionFlags.SATINVIEW.getNumber(),
+                            "Спутники в видимости"),
+                    new BitmaskOption(ConfigProtos.Config.PositionConfig.PositionFlags.SEQ_NO.getNumber(),
+                            "Порядковый номер"),
+                    new BitmaskOption(ConfigProtos.Config.PositionConfig.PositionFlags.TIMESTAMP.getNumber(),
+                            "Временная метка"),
+                    new BitmaskOption(ConfigProtos.Config.PositionConfig.PositionFlags.HEADING.getNumber(),
+                            "Курс"),
+                    new BitmaskOption(ConfigProtos.Config.PositionConfig.PositionFlags.SPEED.getNumber(),
+                            "Скорость")
+            )),
+            "meshtastic.Config.PowerConfig.powermon_enables",
+            new BitmaskFieldSpec("Выключено", List.of(
+                    new BitmaskOption(PowerMonProtos.PowerMon.State.CPU_DeepSleep.getNumber(), "CPU Deep Sleep"),
+                    new BitmaskOption(PowerMonProtos.PowerMon.State.CPU_LightSleep.getNumber(), "CPU Light Sleep"),
+                    new BitmaskOption(PowerMonProtos.PowerMon.State.Vext1_On.getNumber(), "Vext1 On"),
+                    new BitmaskOption(PowerMonProtos.PowerMon.State.Lora_RXOn.getNumber(), "LoRa RX On"),
+                    new BitmaskOption(PowerMonProtos.PowerMon.State.Lora_TXOn.getNumber(), "LoRa TX On"),
+                    new BitmaskOption(PowerMonProtos.PowerMon.State.Lora_RXActive.getNumber(), "LoRa RX Active"),
+                    new BitmaskOption(PowerMonProtos.PowerMon.State.BT_On.getNumber(), "Bluetooth On"),
+                    new BitmaskOption(PowerMonProtos.PowerMon.State.LED_On.getNumber(), "LED On"),
+                    new BitmaskOption(PowerMonProtos.PowerMon.State.Screen_On.getNumber(), "Screen On"),
+                    new BitmaskOption(PowerMonProtos.PowerMon.State.Screen_Drawing.getNumber(), "Screen Drawing"),
+                    new BitmaskOption(PowerMonProtos.PowerMon.State.Wifi_On.getNumber(), "WiFi On"),
+                    new BitmaskOption(PowerMonProtos.PowerMon.State.GPS_Active.getNumber(), "GPS Active")
+            ))
+    );
 
     private ConfigValueFormatter() {}
+
+    /**
+     * Набор флагов, из которых собирается целочисленное значение bitmask-поля.
+     *
+     * @param mask числовая маска флага
+     * @param label пользовательское имя флага
+     */
+    public record BitmaskOption(long mask, String label) {}
+
+    private record BitmaskFieldSpec(String zeroLabel, List<BitmaskOption> options) {}
 
     /**
      * Форматирует значение поля дерева для отображения в UI.
@@ -48,8 +116,18 @@ public final class ConfigValueFormatter {
         if (value == null) {
             return "";
         }
+        BitmaskFieldSpec bitmaskSpec = bitmaskFieldSpec(fieldDescriptor);
+        if (bitmaskSpec != null && value instanceof Number number) {
+            return formatBitmaskValue(bitmaskSpec, toUnsignedLong(number));
+        }
         if (isHumanReadableIpv4Field(fieldDescriptor) && value instanceof Number number) {
             return formatIpv4(number.intValue());
+        }
+        if (isHumanReadableNodeIdField(fieldDescriptor) && value instanceof Number number) {
+            return formatNodeId(number.intValue());
+        }
+        if (isHumanReadableHexField(fieldDescriptor) && value instanceof Number number) {
+            return formatHex(number.intValue());
         }
         return value.toString();
     }
@@ -87,6 +165,12 @@ public final class ConfigValueFormatter {
             if (isHumanReadableIpv4Field(fieldDescriptor)) {
                 return parseIpv4(candidate);
             }
+            if (isHumanReadableNodeIdField(fieldDescriptor)) {
+                return parseNodeId(candidate);
+            }
+            if (isHumanReadableHexField(fieldDescriptor)) {
+                return parseHexInt(candidate);
+            }
             return Integer.parseInt(candidate);
         }
         if (valueType == Long.class) {
@@ -102,15 +186,84 @@ public final class ConfigValueFormatter {
     }
 
     /**
+     * Проверяет, есть ли у поля набор выбираемых bitmask-флагов вместо ручного ввода числа.
+     *
+     * @param item узел дерева конфигурации
+     * @return {@code true}, если поле нужно редактировать через выбор флагов
+     */
+    public static boolean hasBitmaskOptions(ConfigTreeItem item) {
+        return item != null && bitmaskFieldSpec(item.getFieldDescriptor()) != null;
+    }
+
+    /**
+     * Возвращает список битовых опций для поля.
+     *
+     * @param item узел дерева конфигурации
+     * @return список доступных флагов; пустой, если поле не является bitmask
+     */
+    public static List<BitmaskOption> bitmaskOptions(ConfigTreeItem item) {
+        BitmaskFieldSpec spec = item != null ? bitmaskFieldSpec(item.getFieldDescriptor()) : null;
+        return spec != null ? spec.options() : List.of();
+    }
+
+    /**
+     * Проверяет, включён ли конкретный флаг в текущем значении поля.
+     *
+     * @param item узел дерева конфигурации
+     * @param option опция bitmask
+     * @return {@code true}, если флаг выбран
+     */
+    public static boolean isBitmaskOptionSelected(ConfigTreeItem item, BitmaskOption option) {
+        if (item == null || option == null || !(item.getValue() instanceof Number number)) {
+            return false;
+        }
+        long mask = toUnsignedLong(number);
+        return (mask & option.mask()) == option.mask();
+    }
+
+    /**
+     * Собирает новое значение bitmask-поля из списка выбранных флагов.
+     *
+     * @param item узел дерева конфигурации
+     * @param selectedOptions выбранные пользователем флаги
+     * @return значение в типе, совместимом с полем дерева
+     */
+    public static Object buildBitmaskValue(ConfigTreeItem item, List<BitmaskOption> selectedOptions) {
+        long mask = 0L;
+        for (BitmaskOption option : selectedOptions) {
+            if (option != null) {
+                mask |= option.mask();
+            }
+        }
+
+        Class<?> valueType = item != null ? item.getValueType() : null;
+        if (valueType == Long.class) {
+            return mask;
+        }
+        return (int) mask;
+    }
+
+    /**
      * Возвращает пример значения для placeholder у полей со специальным форматом ввода.
      *
      * @param item узел дерева конфигурации
      * @return пример пользовательского ввода или {@code null}, если подсказка не нужна
      */
     public static String promptText(ConfigTreeItem item) {
-        return item != null && isHumanReadableIpv4Field(item.getFieldDescriptor())
-                ? "192.168.1.10"
-                : null;
+        if (item == null) {
+            return null;
+        }
+        FieldDescriptor fieldDescriptor = item.getFieldDescriptor();
+        if (isHumanReadableIpv4Field(fieldDescriptor)) {
+            return "192.168.1.10";
+        }
+        if (isHumanReadableNodeIdField(fieldDescriptor)) {
+            return "!1234abcd";
+        }
+        if (isHumanReadableHexField(fieldDescriptor)) {
+            return "0x40";
+        }
+        return null;
     }
 
     /**
@@ -120,9 +273,20 @@ public final class ConfigValueFormatter {
      * @return текст подсказки или {@code null}, если подсказка не нужна
      */
     public static String validationHint(ConfigTreeItem item) {
-        return item != null && isHumanReadableIpv4Field(item.getFieldDescriptor())
-                ? "Введите IPv4-адрес в формате 192.168.1.10"
-                : null;
+        if (item == null) {
+            return null;
+        }
+        FieldDescriptor fieldDescriptor = item.getFieldDescriptor();
+        if (isHumanReadableIpv4Field(fieldDescriptor)) {
+            return "Введите IPv4-адрес в формате 192.168.1.10";
+        }
+        if (isHumanReadableNodeIdField(fieldDescriptor)) {
+            return "Введите node ID в формате !1234abcd или uint32-значение";
+        }
+        if (isHumanReadableHexField(fieldDescriptor)) {
+            return "Введите I2C-адрес в формате 0x40 или десятичное значение";
+        }
+        return null;
     }
 
     /**
@@ -138,6 +302,34 @@ public final class ConfigValueFormatter {
     }
 
     /**
+     * Проверяет, нужно ли отображать значение поля как node ID.
+     *
+     * @param fieldDescriptor protobuf-descriptor поля
+     * @return {@code true}, если поле должно показываться в формате {@code !XXXXXXXX}
+     */
+    static boolean isHumanReadableNodeIdField(FieldDescriptor fieldDescriptor) {
+        return fieldDescriptor != null
+                && isUint32LikeField(fieldDescriptor)
+                && HUMAN_READABLE_NODE_ID_FIELDS.contains(fieldDescriptor.getFullName());
+    }
+
+    /**
+     * Проверяет, нужно ли отображать значение поля в шестнадцатеричном виде.
+     *
+     * @param fieldDescriptor protobuf-descriptor поля
+     * @return {@code true}, если поле должно показываться в формате {@code 0x..}
+     */
+    static boolean isHumanReadableHexField(FieldDescriptor fieldDescriptor) {
+        return fieldDescriptor != null
+                && isUint32LikeField(fieldDescriptor)
+                && HUMAN_READABLE_HEX_FIELDS.contains(fieldDescriptor.getFullName());
+    }
+
+    private static BitmaskFieldSpec bitmaskFieldSpec(FieldDescriptor fieldDescriptor) {
+        return fieldDescriptor != null ? BITMASK_FIELD_SPECS.get(fieldDescriptor.getFullName()) : null;
+    }
+
+    /**
      * Преобразует little-endian fixed32 IPv4 в dotted-decimal строку.
      *
      * @param rawValue исходное protobuf-значение IPv4
@@ -150,6 +342,26 @@ public final class ConfigValueFormatter {
         long octet3 = (unsigned >>> 16) & 0xFF;
         long octet4 = (unsigned >>> 24) & 0xFF;
         return "%d.%d.%d.%d".formatted(octet1, octet2, octet3, octet4);
+    }
+
+    /**
+     * Преобразует номер ноды в стандартный Meshtastic node ID.
+     *
+     * @param rawValue номер ноды
+     * @return node ID в формате {@code !XXXXXXXX}
+     */
+    static String formatNodeId(int rawValue) {
+        return String.format("!%08x", rawValue);
+    }
+
+    /**
+     * Преобразует числовой адрес шины в hex-строку.
+     *
+     * @param rawValue числовой адрес
+     * @return адрес в формате {@code 0x40}
+     */
+    static String formatHex(int rawValue) {
+        return String.format("0x%02X", Integer.toUnsignedLong(rawValue));
     }
 
     /**
@@ -197,6 +409,59 @@ public final class ConfigValueFormatter {
     }
 
     /**
+     * Разбирает пользовательский node ID или uint32-значение в номер ноды.
+     *
+     * @param text node ID в формате {@code !XXXXXXXX}, hex или uint32
+     * @return номер ноды как int
+     * @throws IllegalArgumentException если значение не удалось разобрать
+     */
+    static int parseNodeId(String text) {
+        if (text == null || text.isBlank()) {
+            throw new IllegalArgumentException("Node ID не может быть пустым");
+        }
+
+        String candidate = text.trim();
+        try {
+            if (candidate.startsWith("!")) {
+                return (int) Long.parseUnsignedLong(candidate.substring(1), 16);
+            }
+            if (candidate.startsWith("0x") || candidate.startsWith("0X")) {
+                return (int) Long.parseUnsignedLong(candidate.substring(2), 16);
+            }
+            long value = Long.parseLong(candidate);
+            if (value < 0 || value > UINT32_MAX) {
+                throw new IllegalArgumentException("Номер ноды вне диапазона uint32");
+            }
+            return (int) value;
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("Введите node ID в формате !1234abcd или uint32-значение", e);
+        }
+    }
+
+    /**
+     * Разбирает hex-строку или десятичное значение в uint32-поле.
+     *
+     * @param text hex или decimal строка
+     * @return int-значение для protobuf uint32-поля
+     * @throws IllegalArgumentException если значение не удалось разобрать
+     */
+    static int parseHexInt(String text) {
+        if (text == null || text.isBlank()) {
+            throw new IllegalArgumentException("Значение не может быть пустым");
+        }
+
+        String candidate = text.trim();
+        try {
+            if (candidate.startsWith("0x") || candidate.startsWith("0X")) {
+                return (int) Long.parseUnsignedLong(candidate.substring(2), 16);
+            }
+            return Integer.parseInt(candidate);
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("Введите hex-значение в формате 0x40 или десятичное число", e);
+        }
+    }
+
+    /**
      * Поддерживает старый способ ввода IPv4 как uint32, чтобы импорт и ручное редактирование
      * уже сохранённых значений оставались обратно совместимыми.
      *
@@ -221,5 +486,40 @@ public final class ConfigValueFormatter {
                     e
             );
         }
+    }
+
+    private static String formatBitmaskValue(BitmaskFieldSpec spec, long mask) {
+        if (mask == 0) {
+            return spec.zeroLabel();
+        }
+
+        long remainingMask = mask;
+        List<String> selectedLabels = new ArrayList<>();
+        for (BitmaskOption option : spec.options()) {
+            if ((mask & option.mask()) == option.mask()) {
+                selectedLabels.add(option.label());
+                remainingMask &= ~option.mask();
+            }
+        }
+
+        if (remainingMask != 0) {
+            selectedLabels.add("0x" + Long.toHexString(remainingMask).toUpperCase(Locale.ROOT));
+        }
+
+        return selectedLabels.isEmpty() ? spec.zeroLabel() : String.join(", ", selectedLabels);
+    }
+
+    private static long toUnsignedLong(Number number) {
+        return number instanceof Long
+                ? number.longValue()
+                : Integer.toUnsignedLong(number.intValue());
+    }
+
+    private static boolean isUint32LikeField(FieldDescriptor fieldDescriptor) {
+        return fieldDescriptor.getType() == FieldDescriptor.Type.UINT32
+                || fieldDescriptor.getType() == FieldDescriptor.Type.INT32
+                || fieldDescriptor.getType() == FieldDescriptor.Type.SINT32
+                || fieldDescriptor.getType() == FieldDescriptor.Type.FIXED32
+                || fieldDescriptor.getType() == FieldDescriptor.Type.SFIXED32;
     }
 }

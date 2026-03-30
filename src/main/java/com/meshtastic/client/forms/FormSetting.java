@@ -32,6 +32,8 @@ import javafx.scene.control.ComboBox;
 import javafx.scene.control.ContentDisplay;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
+import javafx.scene.control.MenuButton;
+import javafx.scene.control.CheckMenuItem;
 import javafx.scene.control.ScrollPane;
 import javafx.scene.control.Separator;
 import javafx.scene.control.Tab;
@@ -2101,7 +2103,9 @@ public class FormSetting extends Form {
 
             Class<?> type = item.getValueType();
 
-            if (type == Boolean.class) {
+            if (ConfigValueFormatter.hasBitmaskOptions(item)) {
+                setGraphic(createBitmaskEditor(item));
+            } else if (type == Boolean.class) {
                 CheckBox checkBox = new CheckBox();
                 checkBox.setSelected(item.getValue() instanceof Boolean b && b);
                 checkBox.selectedProperty().addListener((obs, oldVal, newVal) -> item.setValue(newVal));
@@ -2176,11 +2180,53 @@ public class FormSetting extends Form {
         }
 
         /**
+         * Создаёт selector для bitmask-полей, которые хранятся как число,
+         * но по смыслу состоят из набора включаемых флагов.
+         */
+        private static MenuButton createBitmaskEditor(ConfigTreeItem item) {
+            MenuButton menuButton = new MenuButton();
+            menuButton.setMaxWidth(Double.MAX_VALUE);
+            menuButton.setText(ConfigValueFormatter.formatValue(item));
+
+            List<ConfigValueFormatter.BitmaskOption> options = ConfigValueFormatter.bitmaskOptions(item);
+            List<CheckMenuItem> menuItems = new ArrayList<>();
+            for (ConfigValueFormatter.BitmaskOption option : options) {
+                CheckMenuItem menuItem = new CheckMenuItem(option.label());
+                menuItem.setSelected(ConfigValueFormatter.isBitmaskOptionSelected(item, option));
+                menuItems.add(menuItem);
+                menuButton.getItems().add(menuItem);
+            }
+
+            for (int i = 0; i < menuItems.size(); i++) {
+                menuItems.get(i).selectedProperty().addListener((obs, oldVal, newVal) -> {
+                    List<ConfigValueFormatter.BitmaskOption> selectedOptions = new ArrayList<>();
+                    for (int j = 0; j < menuItems.size(); j++) {
+                        if (menuItems.get(j).isSelected()) {
+                            selectedOptions.add(options.get(j));
+                        }
+                    }
+                    item.setValue(ConfigValueFormatter.buildBitmaskValue(item, selectedOptions));
+                    menuButton.setText(ConfigValueFormatter.formatValue(item));
+                });
+            }
+
+            return menuButton;
+        }
+
+        /**
          * Применяет текст из редактора к модели поля. При успешном парсинге
          * нормализует отображение значения, при ошибке подсвечивает поле.
          */
         private static void commitTextValue(ConfigTreeItem item, TextField textField) {
             try {
+                if (item.getFieldDescriptor() != null
+                        && item.getFieldDescriptor().isRepeated()
+                        && textField.getText().trim().isEmpty()) {
+                    item.setValue(null);
+                    textField.setText("");
+                    textField.setStyle("");
+                    return;
+                }
                 item.setValue(ConfigValueFormatter.parseTextValue(item, textField.getText()));
                 textField.setText(ConfigValueFormatter.formatValue(item));
                 textField.setStyle("");
