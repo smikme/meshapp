@@ -13,6 +13,7 @@ import com.meshtastic.client.service.ConnectionManager;
 import com.meshtastic.client.service.ConfigSnapshotService;
 import com.meshtastic.client.service.MessageService;
 import com.meshtastic.client.service.NodeCacheService;
+import com.meshtastic.client.utils.ConfigValueFormatter;
 import com.meshtastic.client.system.Form;
 import com.meshtastic.client.utils.AppPreferences;
 import com.meshtastic.client.utils.ProtobufTreeBuilder;
@@ -2094,7 +2095,7 @@ public class FormSetting extends Form {
             }
 
             if (!item.isEditable()) {
-                setText(item.getValue() != null ? item.getValue().toString() : "");
+                setText(ConfigValueFormatter.formatValue(item));
                 return;
             }
 
@@ -2134,79 +2135,57 @@ public class FormSetting extends Form {
                 comboBox.setMaxWidth(Double.MAX_VALUE);
                 comboBox.valueProperty().addListener((obs, oldVal, newVal) -> item.setValue(newVal));
                 setGraphic(comboBox);
-            } else if (type == String.class) {
-                TextField textField = new TextField(item.getValue() != null ? item.getValue().toString() : "");
-                textField.setMaxWidth(Double.MAX_VALUE);
-                textField.focusedProperty().addListener((obs, wasFocused, isFocused) -> {
-                    if (!isFocused) { item.setValue(textField.getText()); }
-                });
-                textField.setOnAction(e -> item.setValue(textField.getText()));
-                setGraphic(textField);
-            } else if (type == Integer.class || type == Long.class) {
-                String val = item.getValue() != null ? item.getValue().toString() : "0";
-                TextField textField = new TextField(val);
-                textField.setMaxWidth(Double.MAX_VALUE);
-                textField.focusedProperty().addListener((obs, wasFocused, isFocused) -> {
-                    if (!isFocused) {
-                        try {
-                            if (type == Integer.class) {
-                                item.setValue(Integer.parseInt(textField.getText()));
-                            } else {
-                                item.setValue(Long.parseLong(textField.getText()));
-                            }
-                            textField.setStyle("");
-                        } catch (NumberFormatException ex) {
-                            textField.setStyle("-fx-border-color: #E53935;");
-                        }
-                    }
-                });
-                textField.setOnAction(e -> {
-                    try {
-                        if (type == Integer.class) {
-                            item.setValue(Integer.parseInt(textField.getText()));
-                        } else {
-                            item.setValue(Long.parseLong(textField.getText()));
-                        }
-                        textField.setStyle("");
-                    } catch (NumberFormatException ex) {
-                        textField.setStyle("-fx-border-color: #E53935;");
-                    }
-                });
-                setGraphic(textField);
-            } else if (type == Float.class || type == Double.class) {
-                String val = item.getValue() != null ? item.getValue().toString() : "0.0";
-                TextField textField = new TextField(val);
-                textField.setMaxWidth(Double.MAX_VALUE);
-                textField.focusedProperty().addListener((obs, wasFocused, isFocused) -> {
-                    if (!isFocused) {
-                        try {
-                            if (type == Float.class) {
-                                item.setValue(Float.parseFloat(textField.getText()));
-                            } else {
-                                item.setValue(Double.parseDouble(textField.getText()));
-                            }
-                            textField.setStyle("");
-                        } catch (NumberFormatException ex) {
-                            textField.setStyle("-fx-border-color: #E53935;");
-                        }
-                    }
-                });
-                textField.setOnAction(e -> {
-                    try {
-                        if (type == Float.class) {
-                            item.setValue(Float.parseFloat(textField.getText()));
-                        } else {
-                            item.setValue(Double.parseDouble(textField.getText()));
-                        }
-                        textField.setStyle("");
-                    } catch (NumberFormatException ex) {
-                        textField.setStyle("-fx-border-color: #E53935;");
-                    }
-                });
-                setGraphic(textField);
+            } else if (type == String.class
+                    || type == Integer.class
+                    || type == Long.class
+                    || type == Float.class
+                    || type == Double.class) {
+                setGraphic(createTextEditor(item));
             } else {
                 // Fallback — просто текст
-                setText(item.getValue() != null ? item.getValue().toString() : "");
+                setText(ConfigValueFormatter.formatValue(item));
+            }
+        }
+
+        /**
+         * Создаёт текстовый редактор для строковых и числовых полей.
+         * Если для поля подключён форматтер, в текстовое поле подставляется
+         * уже человекочитаемое представление значения.
+         */
+        private static TextField createTextEditor(ConfigTreeItem item) {
+            TextField textField = new TextField(ConfigValueFormatter.formatValue(item));
+            textField.setMaxWidth(Double.MAX_VALUE);
+
+            String prompt = ConfigValueFormatter.promptText(item);
+            if (prompt != null && !prompt.isBlank()) {
+                textField.setPromptText(prompt);
+            }
+
+            String hint = ConfigValueFormatter.validationHint(item);
+            if (hint != null && !hint.isBlank()) {
+                textField.setTooltip(new Tooltip(hint));
+            }
+
+            textField.focusedProperty().addListener((obs, wasFocused, isFocused) -> {
+                if (!isFocused) {
+                    commitTextValue(item, textField);
+                }
+            });
+            textField.setOnAction(e -> commitTextValue(item, textField));
+            return textField;
+        }
+
+        /**
+         * Применяет текст из редактора к модели поля. При успешном парсинге
+         * нормализует отображение значения, при ошибке подсвечивает поле.
+         */
+        private static void commitTextValue(ConfigTreeItem item, TextField textField) {
+            try {
+                item.setValue(ConfigValueFormatter.parseTextValue(item, textField.getText()));
+                textField.setText(ConfigValueFormatter.formatValue(item));
+                textField.setStyle("");
+            } catch (IllegalArgumentException ex) {
+                textField.setStyle("-fx-border-color: #E53935;");
             }
         }
     }
