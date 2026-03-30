@@ -90,6 +90,25 @@ class MessageServiceTest {
     }
 
     @Test
+    void setTimeOnlyUsesRoutingAckWithoutAdminResponse() throws Exception {
+        RecordingConnection connection = new RecordingConnection();
+        ProtocolHandler handler = track(new ProtocolHandler(connection));
+        DeviceState state = new DeviceState();
+        state.setMyNodeNum(0x04c5b420);
+        state.setSessionPasskey(ByteString.copyFromUtf8("passkey"));
+
+        MessageService.setTimeOnly(handler, state, 1_775_000_123L);
+
+        MeshProtos.ToRadio sent = parseLastToRadio(connection);
+        assertFalse(sent.getPacket().getDecoded().getWantResponse());
+        AdminProtos.AdminMessage admin =
+                AdminProtos.AdminMessage.parseFrom(sent.getPacket().getDecoded().getPayload());
+        assertTrue(admin.hasSetTimeOnly());
+        assertEquals(1_775_000_123L, Integer.toUnsignedLong(admin.getSetTimeOnly()));
+        assertFalse(admin.getSessionPasskey().isEmpty());
+    }
+
+    @Test
     void sendChannelReactionSetsReplyIdAndEmojiFlagAndPersistsReaction() throws Exception {
         RecordingConnection connection = new RecordingConnection();
         ProtocolHandler handler = track(new ProtocolHandler(connection));
