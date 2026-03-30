@@ -1,6 +1,7 @@
 package com.meshtastic.client.service;
 
 import com.meshtastic.client.model.DeviceState;
+import com.meshtastic.client.utils.ConfigDebugFormatter;
 import org.meshtastic.proto.*;
 import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.model.TelemetryEntry;
@@ -230,6 +231,9 @@ public class ConfigExchangeService implements FromRadioListener {
 
     @Override
     public void onConfig(ConfigProtos.Config config) {
+        if (config.getPayloadVariantCase() == ConfigProtos.Config.PayloadVariantCase.LORA) {
+            log.debug("onConfig LORA ignore_incoming {}", ConfigDebugFormatter.describeIgnoreIncoming(config));
+        }
         deviceState.addConfig(config);
     }
 

@@ -12,6 +12,7 @@ import com.meshtastic.client.model.MessageReaction;
 import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.protocol.ProtocolHandler;
+import com.meshtastic.client.utils.ConfigDebugFormatter;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -470,6 +471,9 @@ public final class MessageService {
      * @return future с routing ACK/NAK для отправленного admin-пакета
      */
     public static CompletableFuture<MeshProtos.Routing.Error> setConfig(ProtocolHandler handler, DeviceState state, ConfigProtos.Config config) {
+        if (config.getPayloadVariantCase() == ConfigProtos.Config.PayloadVariantCase.LORA) {
+            log.debug("setConfig LORA ignore_incoming {}", ConfigDebugFormatter.describeIgnoreIncoming(config));
+        }
         AdminProtos.AdminMessage.Builder adminBuilder = AdminProtos.AdminMessage.newBuilder()
                 .setSetConfig(config);
         ByteString passkey = state.getSessionPasskey();

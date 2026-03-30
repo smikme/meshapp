@@ -183,6 +183,42 @@ public final class ProtobufTreeBuilder {
         return groupItem;
     }
 
+    /**
+     * Поддерживает repeated-группу в редактируемом состоянии:
+     * оставляет минимум видимых слотов и гарантирует хотя бы один свободный
+     * слот для добавления следующего значения без полной пересборки узлов.
+     */
+    public static void adjustRepeatedGroupAfterEdit(TreeItem<ConfigTreeItem> groupItem) {
+        if (groupItem == null || groupItem.getValue() == null) {
+            return;
+        }
+
+        ConfigTreeItem groupData = groupItem.getValue();
+        FieldDescriptor fd = groupData.getFieldDescriptor();
+        if (fd == null || !fd.isRepeated()) {
+            return;
+        }
+
+        int minVisibleSlots;
+        if (fd.getType() == FieldDescriptor.Type.BYTES) {
+            minVisibleSlots = MIN_VISIBLE_REPEATED_BYTES_SLOTS;
+        } else if (isSupportedRepeatedScalar(fd)) {
+            minVisibleSlots = MIN_VISIBLE_REPEATED_SCALAR_SLOTS;
+        } else {
+            return;
+        }
+
+        trimTrailingEmptyRepeatedSlots(groupItem, minVisibleSlots);
+        if (!hasEmptyRepeatedSlot(groupItem)) {
+            appendEmptyRepeatedSlot(
+                    groupItem,
+                    fd,
+                    groupData.getConfigType(),
+                    groupData.getConfigVariantNumber(),
+                    groupData.getName());
+        }
+    }
+
     private static void syncRepeatedBytesGroup(TreeItem<ConfigTreeItem> groupItem,
                                                FieldDescriptor fd,
                                                Object value,
@@ -211,6 +247,48 @@ public final class ProtobufTreeBuilder {
         return bytesList.stream()
                 .map(bs -> Base64.getEncoder().encodeToString(bs.toByteArray()))
                 .collect(Collectors.toList());
+    }
+
+    private static void trimTrailingEmptyRepeatedSlots(TreeItem<ConfigTreeItem> groupItem, int minVisibleSlots) {
+        while (groupItem.getChildren().size() > minVisibleSlots && hasMultipleTrailingEmptySlots(groupItem)) {
+            groupItem.getChildren().remove(groupItem.getChildren().size() - 1);
+        }
+    }
+
+    private static boolean hasMultipleTrailingEmptySlots(TreeItem<ConfigTreeItem> groupItem) {
+        int size = groupItem.getChildren().size();
+        return size >= 2
+                && isEmptyRepeatedSlot(groupItem.getChildren().get(size - 1))
+                && isEmptyRepeatedSlot(groupItem.getChildren().get(size - 2));
+    }
+
+    private static boolean hasEmptyRepeatedSlot(TreeItem<ConfigTreeItem> groupItem) {
+        for (TreeItem<ConfigTreeItem> child : groupItem.getChildren()) {
+            if (isEmptyRepeatedSlot(child)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean isEmptyRepeatedSlot(TreeItem<ConfigTreeItem> item) {
+        if (item == null || item.getValue() == null) {
+            return true;
+        }
+        Object value = item.getValue().getValue();
+        return value == null || (value instanceof String text && text.trim().isEmpty());
+    }
+
+    private static void appendEmptyRepeatedSlot(TreeItem<ConfigTreeItem> groupItem,
+                                                FieldDescriptor fd,
+                                                String configType,
+                                                int variantNumber,
+                                                String displayName) {
+        String slotName = displayName + " " + (groupItem.getChildren().size() + 1);
+        ConfigTreeItem item = createValueItem(slotName, fd.getName(), null, fd, configType, variantNumber);
+        if (item != null) {
+            groupItem.getChildren().add(new TreeItem<>(item));
+        }
     }
 
     private static void syncRepeatedScalarGroup(TreeItem<ConfigTreeItem> groupItem,
@@ -268,9 +346,15 @@ public final class ProtobufTreeBuilder {
 
         applyTreeValues(sectionItem, sectionBuilder);
 
-        return ConfigProtos.Config.newBuilder()
+        ConfigProtos.Config rebuilt = ConfigProtos.Config.newBuilder()
                 .setField(oneofField, sectionBuilder.build())
                 .build();
+        if (rebuilt.getPayloadVariantCase() == ConfigProtos.Config.PayloadVariantCase.LORA) {
+            log.debug("rebuildConfig LORA ignore_incoming: original {} -> rebuilt {}",
+                    ConfigDebugFormatter.describeIgnoreIncoming(originalConfig),
+                    ConfigDebugFormatter.describeIgnoreIncoming(rebuilt));
+        }
+        return rebuilt;
     }
 
     /**
@@ -378,21 +462,74 @@ public final class ProtobufTreeBuilder {
             return;
         }
 
+        boolean debugIgnoreIncoming = isIgnoreIncomingField(builderFd);
+        if (debugIgnoreIncoming) {
+            log.debug("applyRepeatedScalarValues ignore_incoming tree slots: {}",
+                    describeRepeatedScalarSlots(groupItem));
+        }
+
         builder.clearField(builderFd);
+        int slotIndex = 0;
         for (TreeItem<ConfigTreeItem> child : groupItem.getChildren()) {
+            slotIndex++;
             ConfigTreeItem valueItem = child.getValue();
             if (valueItem == null || valueItem.getValue() == null) {
+                if (debugIgnoreIncoming) {
+                    log.debug("applyRepeatedScalarValues ignore_incoming slot {} skipped: empty", slotIndex);
+                }
                 continue;
             }
             try {
                 Object builderValue = toBuilderValue(builderFd, valueItem.getValue());
                 if (builderValue != null) {
                     builder.addRepeatedField(builderFd, builderValue);
+                    if (debugIgnoreIncoming) {
+                        log.debug("applyRepeatedScalarValues ignore_incoming slot {} raw={} -> {}",
+                                slotIndex,
+                                valueItem.getValue(),
+                                ConfigDebugFormatter.formatObjectNodeNum(builderValue));
+                    }
+                } else if (debugIgnoreIncoming) {
+                    log.debug("applyRepeatedScalarValues ignore_incoming slot {} skipped: builderValue=null raw={}",
+                            slotIndex, valueItem.getValue());
                 }
             } catch (Exception e) { //NOPMD - invalid repeated entry should not break whole save
-                log.trace("Skipping invalid repeated scalar field '{}': {}", builderFd.getName(), e.getMessage());
+                if (debugIgnoreIncoming) {
+                    log.warn("Skipping invalid repeated scalar field '{}' slot {} raw={}: {}",
+                            builderFd.getName(), slotIndex,
+                            valueItem.getValue(), e.getMessage());
+                } else {
+                    log.trace("Skipping invalid repeated scalar field '{}': {}", builderFd.getName(), e.getMessage());
+                }
             }
         }
+
+        if (debugIgnoreIncoming) {
+            @SuppressWarnings("unchecked")
+            List<Object> builtValues = (List<Object>) builder.getField(builderFd);
+            log.debug("applyRepeatedScalarValues ignore_incoming result: {}",
+                    ConfigDebugFormatter.describeNodeNumObjects(builtValues));
+        }
+    }
+
+    private static boolean isIgnoreIncomingField(FieldDescriptor fieldDescriptor) {
+        return fieldDescriptor != null
+                && "meshtastic.Config.LoRaConfig.ignore_incoming".equals(fieldDescriptor.getFullName());
+    }
+
+    private static String describeRepeatedScalarSlots(TreeItem<ConfigTreeItem> groupItem) {
+        if (groupItem == null || groupItem.getChildren().isEmpty()) {
+            return "count=0 []";
+        }
+        List<String> slots = new ArrayList<>();
+        int index = 0;
+        for (TreeItem<ConfigTreeItem> child : groupItem.getChildren()) {
+            index++;
+            ConfigTreeItem valueItem = child.getValue();
+            Object value = valueItem != null ? valueItem.getValue() : null;
+            slots.add(index + "=" + (value == null ? "<empty>" : ConfigDebugFormatter.formatObjectNodeNum(value)));
+        }
+        return "count=" + groupItem.getChildren().size() + " [" + String.join(", ", slots) + "]";
     }
 
     /**

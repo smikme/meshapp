@@ -96,6 +96,25 @@ class FormSettingTest {
     }
 
     @Test
+    void shouldAddExtraSettleDelayBeforeCommitForAllTransports() {
+        FormSetting form = onFxThread(FormSetting::new);
+
+        long tcpDelay = onFxThread(() -> (Long) invokeReturning(
+                form,
+                "getConfigSaveInterTaskDelayMs",
+                new Class<?>[] { ConnectionType.class, int.class, int.class },
+                ConnectionType.TCP, 0, 2));
+        long bleDelay = onFxThread(() -> (Long) invokeReturning(
+                form,
+                "getConfigSaveInterTaskDelayMs",
+                new Class<?>[] { ConnectionType.class, int.class, int.class },
+                ConnectionType.BLE, 0, 2));
+
+        assertEquals(1_200L, tcpDelay);
+        assertEquals(1_350L, bleDelay);
+    }
+
+    @Test
     void clearsLoadedConfigWhenConnectionIsDisconnected() throws Exception {
         ConnectionManager manager = ConnectionManager.getInstance();
         ConnectionEntry entry = new ConnectionEntry("Test radio", "localhost", 4403);
@@ -190,6 +209,16 @@ class FormSettingTest {
             Method method = target.getClass().getDeclaredMethod(methodName, parameterTypes);
             method.setAccessible(true);
             method.invoke(target, args);
+        } catch (ReflectiveOperationException e) {
+            throw new AssertionError("Failed to invoke method " + methodName, e);
+        }
+    }
+
+    private static Object invokeReturning(Object target, String methodName, Class<?>[] parameterTypes, Object... args) {
+        try {
+            Method method = target.getClass().getDeclaredMethod(methodName, parameterTypes);
+            method.setAccessible(true);
+            return method.invoke(target, args);
         } catch (ReflectiveOperationException e) {
             throw new AssertionError("Failed to invoke method " + methodName, e);
         }

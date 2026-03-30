@@ -94,6 +94,12 @@ public class FormSetting extends Form {
      */
     private static final long BLE_CONFIG_SAVE_MESSAGE_DELAY_MS = 350;
     /**
+     * Дополнительная пауза перед commit после последнего mutating шага.
+     * Даже на TCP/Serial прошивке может потребоваться время, чтобы применить
+     * финальный set_config/set_module_config до reboot-triggering commit.
+     */
+    private static final long CONFIG_SAVE_PRE_COMMIT_SETTLE_DELAY_MS = 1_000;
+    /**
      * Сколько ждём после последнего admin-пакета перед handoff в reconnect flow.
      * Для BLE оставляем больше времени, чтобы commit успел дойти и устройство
      * начало собственный disconnect/reboot без одновременного ручного разрыва.
@@ -312,7 +318,7 @@ public class FormSetting extends Form {
     /**
      * Подключает диагностику к ACK, который не должен блокировать commit/reconnect flow.
      * <p>
-     * Последний mutating step и BLE commit не должны держать транзакцию открытой в UI:
+     * Финальный mutating step и BLE commit не должны держать транзакцию открытой в UI:
      * некоторые устройства рвут линк почти сразу после применения шага, и если ждать
      * этот ACK синхронно, commit просто не будет отправлен.
      */
@@ -337,16 +343,18 @@ public class FormSetting extends Form {
     /**
      * Возвращает паузу между двумя шагами save-flow.
      * <p>
-     * Для BLE обычной межшаговой задержки недостаточно перед {@code commitEditSettings},
-     * потому что {@code writeToRadio()} возвращается раньше фактического завершения
-     * CoreBluetooth write-with-response. Поэтому перед commit добавляется отдельное
-     * settle-окно после последнего mutating шага.
+     * Перед {@code commitEditSettings} любому транспорту даём отдельное settle-окно
+     * после последнего mutating шага. Для BLE оно длиннее, потому что
+     * {@code writeToRadio()} возвращается раньше фактического завершения
+     * CoreBluetooth write-with-response.
      */
     private long getConfigSaveInterTaskDelayMs(ConnectionType transport, int taskIndex, int totalTaskCount) {
         long delayMs = baseConfigMessageDelayMs(transport);
         boolean nextTaskIsCommit = taskIndex + 1 == totalTaskCount - 1;
-        if (transport == ConnectionType.BLE && nextTaskIsCommit) {
-            delayMs += BLE_CONFIG_SAVE_PRE_COMMIT_SETTLE_DELAY_MS;
+        if (nextTaskIsCommit) {
+            delayMs += transport == ConnectionType.BLE
+                    ? BLE_CONFIG_SAVE_PRE_COMMIT_SETTLE_DELAY_MS
+                    : CONFIG_SAVE_PRE_COMMIT_SETTLE_DELAY_MS;
         }
         return delayMs;
     }
@@ -2127,9 +2135,8 @@ public class FormSetting extends Form {
                         if (waitForAckBeforeCommit) {
                             waitForRequiredConfigSaveAck(ackFuture, stepName);
                         } else {
-                            // The final payload step is followed only by commit. Requiring its routing
-                            // ACK here can block commit entirely on nodes that reboot or drop the link
-                            // immediately after applying the last config section.
+                            // On BLE the final payload step can trigger a disconnect before its routing
+                            // ACK is observed, so commit must still be allowed to proceed.
                             observeDeferredConfigSaveAck(ackFuture, stepName);
                         }
                     });
@@ -2187,7 +2194,8 @@ public class FormSetting extends Form {
                                 return;
                             }
                             saveFailed.set(true);
-                            log.error("Config save task {} failed", i, e);
+                            log.error("Config save task {} failed: {}", i,
+                                    e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName(), e);
                             Platform.runLater(() -> {
                                 saveConfigBtn.setDisable(false);
                                 configStatusLabel.setText("Ошибка сохранения: " +
@@ -2290,6 +2298,52 @@ public class FormSetting extends Form {
         }
     }
 
+    private void syncRepeatedEditorSlots(ConfigTreeItem editedItem) {
+        if (editedItem == null || editedItem.getFieldDescriptor() == null || !editedItem.getFieldDescriptor().isRepeated()) {
+            return;
+        }
+
+        TreeItem<ConfigTreeItem> root = currentEditorRoot();
+        if (root == null) {
+            return;
+        }
+
+        TreeItem<ConfigTreeItem> valueItem = findTreeItemByValue(root, editedItem);
+        if (valueItem == null || valueItem.getParent() == null) {
+            return;
+        }
+
+        ProtobufTreeBuilder.adjustRepeatedGroupAfterEdit(valueItem.getParent());
+        refreshConfigTreeView();
+    }
+
+    private TreeItem<ConfigTreeItem> findTreeItemByValue(TreeItem<ConfigTreeItem> root, ConfigTreeItem target) {
+        if (root == null || target == null) {
+            return null;
+        }
+        if (root.getValue() == target) {
+            return root;
+        }
+        for (TreeItem<ConfigTreeItem> child : root.getChildren()) {
+            TreeItem<ConfigTreeItem> match = findTreeItemByValue(child, target);
+            if (match != null) {
+                return match;
+            }
+        }
+        return null;
+    }
+
+    private void refreshConfigTreeView() {
+        if (configTree == null) {
+            return;
+        }
+        if (fullConfigRoot != null && configTree.getRoot() != fullConfigRoot) {
+            filterConfigTree(configSearchField != null ? configSearchField.getText() : null);
+            return;
+        }
+        configTree.refresh();
+    }
+
     /**
      * Получает номер активного oneof-поля у Config.
      */
@@ -2320,7 +2374,7 @@ public class FormSetting extends Form {
      * Кастомная ячейка для колонки «Значение» в TreeTableView.
      * Отображает CheckBox для boolean, ComboBox для enum, TextField для строк/чисел.
      */
-    private static final class ConfigValueCell extends TreeTableCell<ConfigTreeItem, ConfigTreeItem> {
+    private final class ConfigValueCell extends TreeTableCell<ConfigTreeItem, ConfigTreeItem> {
 
         @Override
         protected void updateItem(ConfigTreeItem item, boolean empty) {
@@ -2396,7 +2450,7 @@ public class FormSetting extends Form {
          * Если для поля подключён форматтер, в текстовое поле подставляется
          * уже человекочитаемое представление значения.
          */
-        private static TextField createTextEditor(ConfigTreeItem item) {
+        private TextField createTextEditor(ConfigTreeItem item) {
             TextField textField = new TextField(ConfigValueFormatter.formatValue(item));
             textField.setMaxWidth(Double.MAX_VALUE);
 
@@ -2423,7 +2477,7 @@ public class FormSetting extends Form {
          * Создаёт selector для bitmask-полей, которые хранятся как число,
          * но по смыслу состоят из набора включаемых флагов.
          */
-        private static MenuButton createBitmaskEditor(ConfigTreeItem item) {
+        private MenuButton createBitmaskEditor(ConfigTreeItem item) {
             MenuButton menuButton = new MenuButton();
             menuButton.setMaxWidth(Double.MAX_VALUE);
             menuButton.setText(ConfigValueFormatter.formatValue(item));
@@ -2457,17 +2511,19 @@ public class FormSetting extends Form {
          * Применяет текст из редактора к модели поля. При успешном парсинге
          * нормализует отображение значения, при ошибке подсвечивает поле.
          */
-        private static void commitTextValue(ConfigTreeItem item, TextField textField) {
+        private void commitTextValue(ConfigTreeItem item, TextField textField) {
             try {
                 if (item.getFieldDescriptor() != null
                         && item.getFieldDescriptor().isRepeated()
                         && textField.getText().trim().isEmpty()) {
                     item.setValue(null);
+                    syncRepeatedEditorSlots(item);
                     textField.setText("");
                     textField.setStyle("");
                     return;
                 }
                 item.setValue(ConfigValueFormatter.parseTextValue(item, textField.getText()));
+                syncRepeatedEditorSlots(item);
                 textField.setText(ConfigValueFormatter.formatValue(item));
                 textField.setStyle("");
             } catch (IllegalArgumentException ex) {
