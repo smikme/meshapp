@@ -19,6 +19,7 @@ import com.meshtastic.client.utils.AppPreferences;
 import com.meshtastic.client.utils.ProtobufTreeBuilder;
 import com.meshtastic.client.utils.SvgIconLoader;
 import com.meshtastic.client.utils.SystemForm;
+import com.meshtastic.client.utils.TimeZoneSyncUtil;
 import javafx.application.Platform;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.collections.FXCollections;
@@ -64,6 +65,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.File;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -132,6 +135,7 @@ public class FormSetting extends Form {
     private Label configStatusLabel;
     private Button saveConfigBtn;
     private Button refreshConfigBtn;
+    private Button syncDateTimeBtn;
     private Button restartHardwareBtn;
     private Button shutdownHardwareBtn;
     private Tab configTab;
@@ -339,14 +343,18 @@ public class FormSetting extends Form {
      * settle-окно после последнего mutating шага.
      */
     private long getConfigSaveInterTaskDelayMs(ConnectionType transport, int taskIndex, int totalTaskCount) {
-        long delayMs = transport == ConnectionType.BLE
-                ? BLE_CONFIG_SAVE_MESSAGE_DELAY_MS
-                : CONFIG_SAVE_MESSAGE_DELAY_MS;
+        long delayMs = baseConfigMessageDelayMs(transport);
         boolean nextTaskIsCommit = taskIndex + 1 == totalTaskCount - 1;
         if (transport == ConnectionType.BLE && nextTaskIsCommit) {
             delayMs += BLE_CONFIG_SAVE_PRE_COMMIT_SETTLE_DELAY_MS;
         }
         return delayMs;
+    }
+
+    private long baseConfigMessageDelayMs(ConnectionType transport) {
+        return transport == ConnectionType.BLE
+                ? BLE_CONFIG_SAVE_MESSAGE_DELAY_MS
+                : CONFIG_SAVE_MESSAGE_DELAY_MS;
     }
 
     /**
@@ -586,6 +594,13 @@ public class FormSetting extends Form {
                 "/icons/refresh.svg",
                 this::reloadConfigTree);
 
+        syncDateTimeBtn = createConfigToolbarButton(
+                "Синхронизировать дату и время",
+                "Установить на ноде текущее время ПК и при необходимости обновить GMT",
+                "/icons/sync-time.svg",
+                this::onSyncDateTimeWithPc);
+        syncDateTimeBtn.setDisable(true);
+
         saveConfigBtn = createConfigToolbarButton(
                 "Сохранить на радио",
                 "Отправить изменённые параметры на устройство и применить их",
@@ -633,6 +648,7 @@ public class FormSetting extends Form {
 
         actionToolbar.getItems().addAll(
                 refreshConfigBtn,
+                syncDateTimeBtn,
                 saveConfigBtn,
                 new Separator(Orientation.VERTICAL),
                 restartHardwareBtn,
@@ -722,6 +738,226 @@ public class FormSetting extends Form {
         if (shutdownHardwareBtn != null) {
             shutdownHardwareBtn.setDisable(disabled);
         }
+    }
+
+    private void setSyncDateTimeButtonDisabled(boolean disabled) {
+        if (syncDateTimeBtn != null) {
+            syncDateTimeBtn.setDisable(disabled);
+        }
+    }
+
+    private void onSyncDateTimeWithPc() {
+        refreshConnection();
+        if (state == null || handler == null) {
+            configStatusLabel.setText("Нет подключения к радио");
+            setSyncDateTimeButtonDisabled(true);
+            return;
+        }
+
+        ConnectionEntry activeEntry = findActiveConnectionEntry();
+        if (activeEntry == null) {
+            configStatusLabel.setText("Нет активного подключения к радио");
+            setSyncDateTimeButtonDisabled(true);
+            return;
+        }
+        if (isConfigExchangeInProgress(activeEntry)) {
+            watchConfigExchangeCompletion(activeEntry);
+            configStatusLabel.setText("Дождитесь завершения чтения конфигурации");
+            return;
+        }
+
+        ConfigProtos.Config deviceConfig = findLoadedDeviceConfig();
+        if (deviceConfig == null || !deviceConfig.hasDevice()) {
+            configStatusLabel.setText("Секция device ещё не загружена. Сначала обновите конфигурацию.");
+            return;
+        }
+
+        DeviceState actionState = state;
+        ProtocolHandler actionHandler = handler;
+        Instant now = Instant.now();
+        ZoneOffset systemOffset = TimeZoneSyncUtil.systemOffset(now);
+        ZoneOffset nodeOffset = TimeZoneSyncUtil.resolveCurrentOffset(deviceConfig.getDevice().getTzdef(), now)
+                .orElse(null);
+        boolean gmtMatches = systemOffset.equals(nodeOffset);
+        String targetTzDef = TimeZoneSyncUtil.buildFixedGmtTzDef(systemOffset);
+        String systemGmtLabel = TimeZoneSyncUtil.formatGmtOffset(systemOffset);
+
+        Runnable startSync = () -> requestDateTimeSync(activeEntry, actionState, actionHandler,
+                deviceConfig, gmtMatches, targetTzDef, systemGmtLabel);
+
+        if (!gmtMatches) {
+            String nodeGmtLabel = nodeOffset != null
+                    ? TimeZoneSyncUtil.formatGmtOffset(nodeOffset)
+                    : "не определён";
+            StringBuilder message = new StringBuilder()
+                    .append("GMT ноды не совпадает с GMT ПК.")
+                    .append(" Нода: ").append(nodeGmtLabel).append(".")
+                    .append(" ПК: ").append(systemGmtLabel).append(".")
+                    .append(" Для обновления GMT будет изменён параметр device.tzdef, после чего устройство перезагрузится.");
+            if (hasPendingEditorChanges()) {
+                message.append(" Несохранённые изменения в редакторе будут потеряны.");
+            }
+            message.append(" Продолжить?");
+            ModalPane.showConfirm("Синхронизация времени и GMT", message.toString(), confirmed -> {
+                if (confirmed) {
+                    startSync.run();
+                }
+            });
+            return;
+        }
+
+        startSync.run();
+    }
+
+    private void requestDateTimeSync(ConnectionEntry activeEntry,
+                                     DeviceState actionState,
+                                     ProtocolHandler actionHandler,
+                                     ConfigProtos.Config deviceConfig,
+                                     boolean gmtMatches,
+                                     String targetTzDef,
+                                     String systemGmtLabel) {
+        String actionLabel = gmtMatches ? "синхронизации времени" : "синхронизации времени и GMT";
+        setSyncDateTimeButtonDisabled(true);
+        configStatusLabel.setText("Запрос session key для " + actionLabel + "...");
+
+        AtomicBoolean dispatchStarted = new AtomicBoolean(false);
+        Runnable[] listenerHolder = new Runnable[1];
+        listenerHolder[0] = () -> Platform.runLater(() -> {
+            actionState.removeOwnerInfoListener(listenerHolder[0]);
+            if (dispatchStarted.compareAndSet(false, true)) {
+                sendDateTimeSync(activeEntry, actionState, actionHandler,
+                        deviceConfig, gmtMatches, targetTzDef, systemGmtLabel);
+            }
+        });
+        actionState.addOwnerInfoListener(listenerHolder[0]);
+
+        Thread timeoutThread = new Thread(() -> {
+            try {
+                Thread.sleep(5000);
+            } catch (InterruptedException ignored) {
+                return;
+            }
+            Platform.runLater(() -> {
+                actionState.removeOwnerInfoListener(listenerHolder[0]);
+                if (dispatchStarted.compareAndSet(false, true)) {
+                    configStatusLabel.setText("Отправка синхронизации без session key...");
+                    sendDateTimeSync(activeEntry, actionState, actionHandler,
+                            deviceConfig, gmtMatches, targetTzDef, systemGmtLabel);
+                }
+            });
+        }, "time-sync-timeout");
+        timeoutThread.setDaemon(true);
+        timeoutThread.start();
+
+        MessageService.requestSessionPasskey(actionHandler, actionState);
+    }
+
+    private void sendDateTimeSync(ConnectionEntry activeEntry,
+                                  DeviceState actionState,
+                                  ProtocolHandler actionHandler,
+                                  ConfigProtos.Config deviceConfig,
+                                  boolean gmtMatches,
+                                  String targetTzDef,
+                                  String systemGmtLabel) {
+        configStatusLabel.setText(gmtMatches
+                ? "Синхронизация времени с ПК..."
+                : "Синхронизация времени и GMT с ПК...");
+
+        ConnectionType transport = activeEntry != null
+                ? activeEntry.getEffectiveType()
+                : ConnectionType.TCP;
+
+        Thread syncThread = new Thread(() -> {
+            try {
+                long epochSeconds = Instant.now().getEpochSecond();
+                waitForRequiredConfigSaveAck(
+                        MessageService.setTimeOnly(actionHandler, actionState, epochSeconds),
+                        "setTimeOnly");
+
+                if (!gmtMatches) {
+                    ConfigProtos.Config deviceTzConfig = buildDeviceTimeZoneConfig(deviceConfig, targetTzDef);
+
+                    Thread.sleep(baseConfigMessageDelayMs(transport));
+                    waitForRequiredConfigSaveAck(
+                            MessageService.beginEditSettings(actionHandler, actionState),
+                            "beginEditSettings");
+
+                    Thread.sleep(getConfigSaveInterTaskDelayMs(transport, 0, 3));
+                    CompletableFuture<MeshProtos.Routing.Error> setConfigAck =
+                            MessageService.setConfig(actionHandler, actionState, deviceTzConfig);
+                    observeDeferredConfigSaveAck(setConfigAck, "setConfig/DEVICE");
+
+                    Thread.sleep(getConfigSaveInterTaskDelayMs(transport, 1, 3));
+                    CompletableFuture<MeshProtos.Routing.Error> commitAck =
+                            MessageService.commitEditSettings(actionHandler, actionState);
+                    if (transport == ConnectionType.BLE) {
+                        observeDeferredConfigSaveAck(commitAck, "commitEditSettings");
+                    } else {
+                        waitForRequiredConfigSaveAck(commitAck, "commitEditSettings");
+                    }
+
+                    Platform.runLater(() -> configStatusLabel.setText(
+                            "Время и GMT синхронизированы с ПК. Устройство перезагрузится. Переподключение..."));
+
+                    Thread.sleep(getDevicePowerActionHandoffDelayMs(transport));
+                    if (activeEntry != null) {
+                        ConnectionManager.getInstance().disconnectForDeviceReboot(activeEntry.getId());
+                        Platform.runLater(() -> {
+                            state = null;
+                            handler = null;
+                            reloadConfigTree();
+                        });
+                    } else {
+                        Platform.runLater(() -> {
+                            setSyncDateTimeButtonDisabled(false);
+                            configStatusLabel.setText("Время и GMT синхронизированы с ПК (" + systemGmtLabel + ").");
+                        });
+                    }
+                    return;
+                }
+
+                Platform.runLater(() -> {
+                    setSyncDateTimeButtonDisabled(false);
+                    configStatusLabel.setText("Время ноды синхронизировано с ПК (" + systemGmtLabel + ").");
+                    Toast.show(Toast.Type.SUCCESS, "Время ноды синхронизировано с ПК");
+                });
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                log.warn("Time sync thread interrupted");
+                Platform.runLater(() -> setSyncDateTimeButtonDisabled(false));
+            } catch (Exception e) {
+                log.error("Time sync failed", e);
+                Platform.runLater(() -> {
+                    setSyncDateTimeButtonDisabled(false);
+                    configStatusLabel.setText("Ошибка синхронизации: "
+                            + (e.getMessage() != null ? e.getMessage() : "см. лог"));
+                });
+            }
+        }, "time-sync-sender");
+        syncThread.setDaemon(true);
+        syncThread.start();
+    }
+
+    private ConfigProtos.Config findLoadedDeviceConfig() {
+        for (ConfigProtos.Config config : originalConfigs) {
+            if (config.hasDevice()) {
+                return config;
+            }
+        }
+        return null;
+    }
+
+    private ConfigProtos.Config buildDeviceTimeZoneConfig(ConfigProtos.Config originalDeviceConfig, String tzdef) {
+        ConfigProtos.Config baseConfig = originalDeviceConfig != null
+                ? originalDeviceConfig
+                : ConfigProtos.Config.newBuilder().setDevice(ConfigProtos.Config.DeviceConfig.getDefaultInstance()).build();
+        ConfigProtos.Config.DeviceConfig.Builder deviceBuilder = baseConfig.hasDevice()
+                ? baseConfig.getDevice().toBuilder()
+                : ConfigProtos.Config.DeviceConfig.newBuilder();
+        deviceBuilder.setTzdef(tzdef);
+        return ConfigProtos.Config.newBuilder(baseConfig)
+                .setDevice(deviceBuilder.build())
+                .build();
     }
 
     private void onRestartHardware() {
@@ -1443,6 +1679,7 @@ public class FormSetting extends Form {
 
         boolean connected = state != null && handler != null;
         setDevicePowerButtonsDisabled(!connected);
+        setSyncDateTimeButtonDisabled(!connected);
 
         if (!connected) {
             clearConfigContext();
@@ -1527,11 +1764,14 @@ public class FormSetting extends Form {
             watchConfigExchangeCompletion(activeEntry);
             configStatusLabel.setText("Идёт чтение конфигурации с устройства...");
             saveConfigBtn.setDisable(true);
+            setSyncDateTimeButtonDisabled(true);
         } else if (originalConfigs.isEmpty() && originalModuleConfigs.isEmpty()) {
             configStatusLabel.setText("Конфигурация не получена от устройства");
             saveConfigBtn.setDisable(true);
+            setSyncDateTimeButtonDisabled(true);
         } else {
             saveConfigBtn.setDisable(false);
+            setSyncDateTimeButtonDisabled(findLoadedDeviceConfig() == null);
             int totalFields = countFields(root);
             configStatusLabel.setText("Загружено: %d секций, %d параметров".formatted(
                     originalConfigs.size() + originalModuleConfigs.size(), totalFields));

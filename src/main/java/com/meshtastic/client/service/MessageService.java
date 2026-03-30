@@ -373,6 +373,25 @@ public final class MessageService {
     }
 
     /**
+     * Устанавливает только текущее Unix-время на ноде без изменения других полей Position.
+     *
+     * @param epochSeconds текущее время в секундах Unix epoch
+     * @return future с routing ACK/NAK для отправленного admin-пакета
+     */
+    public static CompletableFuture<MeshProtos.Routing.Error> setTimeOnly(ProtocolHandler handler,
+                                                                          DeviceState state,
+                                                                          long epochSeconds) {
+        AdminProtos.AdminMessage.Builder adminBuilder = AdminProtos.AdminMessage.newBuilder()
+                .setSetTimeOnly((int) epochSeconds);
+        ByteString passkey = state.getSessionPasskey();
+        if (passkey != null) {
+            adminBuilder.setSessionPasskey(passkey);
+        }
+
+        return sendAdminMessage(handler, state, adminBuilder.build());
+    }
+
+    /**
      * Устанавливает owner info (longName, shortName) на подключённом радио.
      * Требует session_passkey, полученный из предварительного get_owner_request.
      */
