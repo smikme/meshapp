@@ -8,7 +8,9 @@ import com.meshtastic.client.connection.ble.BleConnection;
 import com.meshtastic.client.model.ConnectionEntry;
 import com.meshtastic.client.model.ConnectionType;
 import com.meshtastic.client.model.DeviceState;
+import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.protocol.ProtocolHandler;
+import org.meshtastic.proto.MeshProtos;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -148,6 +150,8 @@ public final class ConnectionManager {
         conn.setConnectionListener(new ConnectionListener() {
             @Override
             public void onConnected() {
+                log.info("Connection '{}' transport connected ({})",
+                        entry.getName(), formatConnectionParams(entry));
                 entry.setConnected(true);
                 fireChanged();
             }
@@ -229,10 +233,11 @@ public final class ConnectionManager {
         configFutures.put(id, future);
 
         future.thenAccept(ds -> {
-            String nodeId = String.format("!%08x", ds.getMyNodeNum());
+            String nodeId = resolveLocalNodeId(ds);
             entry.setNodeId(nodeId);
             save();
-            log.info("Learned nodeId {} for connection '{}'", nodeId, entry.getName());
+            logNodeConnectionContext(entry, ds);
+            requestAndLogDeviceMetadata(entry, protocolHandler, ds);
             fireChanged();
         });
 
@@ -381,6 +386,108 @@ public final class ConnectionManager {
             ph.shutdown();
         }
         configFutures.remove(id);
+    }
+
+    private void requestAndLogDeviceMetadata(ConnectionEntry entry,
+                                             ProtocolHandler protocolHandler,
+                                             DeviceState deviceState) {
+        if (protocolHandler == null || deviceState == null || deviceState.getMyNodeNum() == 0) {
+            return;
+        }
+
+        Runnable[] listenerHolder = new Runnable[1];
+        listenerHolder[0] = () -> {
+            MeshProtos.DeviceMetadata metadata = deviceState.getDeviceMetadata();
+            if (metadata == null) {
+                return;
+            }
+            deviceState.removeDeviceMetadataListener(listenerHolder[0]);
+            log.info("Connection '{}' firmware identified: name='{}', nodeId={}, firmware='{}', params={}",
+                    entry.getName(),
+                    resolveLocalNodeName(deviceState),
+                    resolveLocalNodeId(deviceState),
+                    safeText(metadata.getFirmwareVersion()),
+                    formatConnectionParams(entry));
+        };
+
+        deviceState.addDeviceMetadataListener(listenerHolder[0]);
+        if (deviceState.getDeviceMetadata() != null) {
+            listenerHolder[0].run();
+            return;
+        }
+
+        MessageService.requestDeviceMetadata(protocolHandler, deviceState)
+                .whenComplete((routingError, throwable) -> {
+                    if (throwable != null) {
+                        deviceState.removeDeviceMetadataListener(listenerHolder[0]);
+                        log.debug("Device metadata request failed for '{}'", entry.getName(), throwable);
+                    } else if (routingError != null && routingError != MeshProtos.Routing.Error.NONE) {
+                        deviceState.removeDeviceMetadataListener(listenerHolder[0]);
+                        log.debug("Device metadata request for '{}' completed with {}",
+                                entry.getName(), routingError);
+                    }
+                });
+    }
+
+    private void logNodeConnectionContext(ConnectionEntry entry, DeviceState deviceState) {
+        NodeData node = resolveLocalNode(deviceState);
+        log.info("Connection '{}' node identified: name='{}', short='{}', nodeId={}, hwModel={}, params={}",
+                entry.getName(),
+                resolveLocalNodeName(deviceState),
+                node != null ? safeText(node.getShortName()) : "?",
+                resolveLocalNodeId(deviceState),
+                node != null ? safeText(node.getHwModel()) : "?",
+                formatConnectionParams(entry));
+    }
+
+    private static NodeData resolveLocalNode(DeviceState deviceState) {
+        if (deviceState == null || deviceState.getMyNodeNum() == 0) {
+            return null;
+        }
+        return deviceState.getNodeDb().get(deviceState.getMyNodeNum());
+    }
+
+    private static String resolveLocalNodeName(DeviceState deviceState) {
+        NodeData node = resolveLocalNode(deviceState);
+        if (node == null) {
+            return resolveLocalNodeId(deviceState);
+        }
+        if (node.getLongName() != null && !node.getLongName().isBlank()) {
+            return node.getLongName().trim();
+        }
+        if (node.getShortName() != null && !node.getShortName().isBlank()) {
+            return node.getShortName().trim();
+        }
+        if (node.getNodeId() != null && !node.getNodeId().isBlank()) {
+            return node.getNodeId().trim();
+        }
+        return resolveLocalNodeId(deviceState);
+    }
+
+    private static String resolveLocalNodeId(DeviceState deviceState) {
+        NodeData node = resolveLocalNode(deviceState);
+        if (node != null && node.getNodeId() != null && !node.getNodeId().isBlank()) {
+            return node.getNodeId().trim();
+        }
+        int myNodeNum = deviceState != null ? deviceState.getMyNodeNum() : 0;
+        return myNodeNum != 0 ? String.format("!%08x", myNodeNum) : "?";
+    }
+
+    private static String formatConnectionParams(ConnectionEntry entry) {
+        ConnectionType type = entry.getEffectiveType();
+        return switch (type) {
+            case TCP -> String.format("type=TCP, host=%s, port=%d",
+                    safeText(entry.getHost()), entry.getPort());
+            case SERIAL -> String.format("type=SERIAL, port=%s, baud=%d",
+                    safeText(entry.getPortName()),
+                    entry.getBaudRate() > 0 ? entry.getBaudRate() : SerialConnection.DEFAULT_BAUD_RATE);
+            case BLE -> String.format("type=BLE, address=%s, deviceName=%s",
+                    safeText(entry.getBleAddress()), safeText(entry.getBleDeviceName()));
+        };
+    }
+
+    private static String safeText(String value) {
+        return value == null || value.isBlank() ? "?" : value.trim();
     }
 
     private MeshtasticConnection createConnection(ConnectionEntry entry) {
