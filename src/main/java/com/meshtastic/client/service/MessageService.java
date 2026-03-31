@@ -374,6 +374,18 @@ public final class MessageService {
     }
 
     /**
+     * Запрашивает metadata устройства (включая версию прошивки) у подключённого радио.
+     * Ответ придёт как AdminMessage.get_device_metadata_response через ADMIN_APP.
+     */
+    public static CompletableFuture<MeshProtos.Routing.Error> requestDeviceMetadata(ProtocolHandler handler,
+                                                                                    DeviceState state) {
+        AdminProtos.AdminMessage adminMsg = AdminProtos.AdminMessage.newBuilder()
+                .setGetDeviceMetadataRequest(true)
+                .build();
+        return sendAdminMessage(handler, state, adminMsg, true);
+    }
+
+    /**
      * Устанавливает только текущее Unix-время на ноде без изменения других полей Position.
      *
      * @param epochSeconds текущее время в секундах Unix epoch

@@ -442,6 +442,12 @@ public class MessageListenerService implements FromRadioListener {
                 deviceState.fireOwnerInfoListeners();
                 log.info("Received owner info: longName='{}', shortName='{}'",
                         owner.getLongName(), owner.getShortName());
+            } else if (adminMsg.hasGetDeviceMetadataResponse()) {
+                MeshProtos.DeviceMetadata metadata = adminMsg.getGetDeviceMetadataResponse();
+                deviceState.setDeviceMetadata(metadata);
+                deviceState.fireDeviceMetadataListeners();
+                log.debug("Received device metadata: firmwareVersion='{}', role={}",
+                        metadata.getFirmwareVersion(), metadata.getRole());
             } else if (hasSessionPasskey) {
                 // Session passkey is attached to get_x_response packets, not only owner info.
                 // Save/channel edit flows wait on the same listener to unblock when the key arrives.
