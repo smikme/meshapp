@@ -3,6 +3,7 @@ package com.meshtastic.client.connection;
 import com.fazecast.jSerialComm.SerialPort;
 import com.meshtastic.client.connection.serial.NativeSerialPort;
 import com.meshtastic.client.connection.serial.NativeSerialPortFactory;
+import com.meshtastic.client.platform.OsDetect;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -108,10 +109,7 @@ public class SerialConnection implements MeshtasticConnection {
             String desc = getDescriptivePortName(portName);
             log.info("Opening serial port: {} ({})", portName, desc);
 
-            // USB-serial bridge (CH340/CP210x/FTDI): DTR нельзя → вызывает сброс ESP32
-            // Native USB CDC (ESP32-S3/S2): DTR нужен → сигнал "хост подключён"
-            boolean isUsbBridge = isUsbSerialBridge(portName, desc);
-            boolean assertDtr = !isUsbBridge;
+            boolean assertDtr = shouldAssertDtr(portName, desc, OsDetect.isWindows());
 
             NativeSerialPort port = portFactory.get();
             port.open(portName, baudRate, assertDtr);
@@ -481,6 +479,19 @@ public class SerialConnection implements MeshtasticConnection {
         return lower.contains("usbserial") || lower.contains("ttyusb")
                 || lower.contains("ch340") || lower.contains("ch341") || lower.contains("ch9102")
                 || lower.contains("cp210") || lower.contains("ftdi");
+    }
+
+    static boolean shouldAssertDtr(String portName, String desc, boolean isWindows) {
+        boolean isUsbBridge = isUsbSerialBridge(portName, desc);
+        if (!isUsbBridge) {
+            return true;
+        }
+
+        String lower = (portName + " " + desc).toLowerCase(java.util.Locale.ROOT);
+        // Windows + CP210x: некоторые драйверы держат RX "тихим", пока DTR не asserted.
+        // Для Heltec V3 это выглядит как "порт открыт, запись идёт, но ответов нет вообще".
+        // Разрешаем DTR именно для CP210x на Windows, а для CH340/FTDI сохраняем старое поведение.
+        return isWindows && (lower.contains("cp210") || lower.contains("silicon labs"));
     }
 
     private void closePort() {
