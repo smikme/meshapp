@@ -6,18 +6,25 @@ import com.meshtastic.client.modal.ModalPane;
 import com.meshtastic.client.modal.Toast;
 import com.meshtastic.client.model.LogEntry;
 import com.meshtastic.client.system.Form;
+import com.meshtastic.client.utils.SvgIconLoader;
 import com.meshtastic.client.utils.SystemForm;
 import javafx.application.Platform;
+import javafx.beans.binding.Bindings;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
+import javafx.geometry.Orientation;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.control.Button;
+import javafx.scene.control.ContentDisplay;
 import javafx.scene.control.Label;
+import javafx.scene.control.Separator;
 import javafx.scene.control.TableCell;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableRow;
 import javafx.scene.control.TableView;
+import javafx.scene.control.ToolBar;
+import javafx.scene.control.Tooltip;
 import javafx.scene.control.cell.PropertyValueFactory;
 import javafx.scene.image.ImageView;
 import javafx.scene.input.Clipboard;
@@ -26,6 +33,7 @@ import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
+import javafx.scene.shape.SVGPath;
 import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
 import javafx.stage.FileChooser;
@@ -43,6 +51,8 @@ import java.time.format.DateTimeFormatter;
 public class FormLogs extends Form {
 
     private static final Logger log = LoggerFactory.getLogger(FormLogs.class);
+    private static final String ICON_PAUSE = "/icons/pause.svg";
+    private static final String ICON_PLAY = "/icons/play.svg";
     private static final DateTimeFormatter EXPORT_FILE_TIME =
             DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss");
 
@@ -51,6 +61,7 @@ public class FormLogs extends Form {
 
     private TableView<LogEntry> logTable;
     private Button btnPause;
+    private Tooltip btnPauseTooltip;
 
     public FormLogs() {
         init();
@@ -61,7 +72,7 @@ public class FormLogs extends Form {
         VBox content = new VBox(10);
         content.setPadding(new Insets(10));
 
-        // Заголовок + кнопка очистки
+        // Заголовок + панель действий
         HBox titleRow = new HBox(10);
         titleRow.setAlignment(Pos.CENTER_LEFT);
 
@@ -71,23 +82,55 @@ public class FormLogs extends Form {
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
 
-        btnPause = new Button();
-        updatePauseButtonText();
-        btnPause.setOnAction(e -> toggleAutoScroll());
+        ToolBar actionToolbar = new ToolBar();
+        actionToolbar.getStyleClass().add("logs-toolbar");
 
-        Button btnSave = new Button("Сохранить в файл");
-        btnSave.setOnAction(e -> saveLogsToFile());
+        btnPause = createToolbarButton(
+                "Пауза автопрокрутки",
+                "Приостановить автоматическую прокрутку к новым логам",
+                ICON_PAUSE,
+                this::toggleAutoScroll
+        );
+        btnPauseTooltip = btnPause.getTooltip();
+        updatePauseButtonState();
 
-        Button btnCopy = new Button("Копировать");
-        btnCopy.setOnAction(e -> copyLogsToClipboard());
+        Button btnSave = createToolbarButton(
+                "Сохранить в файл",
+                "Экспортировать текущие логи в файл",
+                "/icons/save-config.svg",
+                this::saveLogsToFile
+        );
 
-        Button btnClear = new Button("Очистить");
-        btnClear.setOnAction(e -> {
-            UiLogAppender.clearBuffer();
-            logData.clear();
-        });
+        Button btnCopy = createToolbarButton(
+                "Копировать",
+                "Скопировать текущие логи в буфер обмена",
+                "/icons/copy.svg",
+                this::copyLogsToClipboard
+        );
 
-        titleRow.getChildren().addAll(title, spacer, btnPause, btnSave, btnCopy, btnClear);
+        Button btnClear = createToolbarButton(
+                "Очистить",
+                "Удалить логи из таблицы и внутреннего буфера",
+                "/icons/clear.svg",
+                () -> {
+                    UiLogAppender.clearBuffer();
+                    logData.clear();
+                });
+
+        var noLogsBinding = Bindings.isEmpty(logData);
+        btnSave.disableProperty().bind(noLogsBinding);
+        btnCopy.disableProperty().bind(noLogsBinding);
+        btnClear.disableProperty().bind(noLogsBinding);
+
+        actionToolbar.getItems().addAll(
+                btnPause,
+                new Separator(Orientation.VERTICAL),
+                btnSave,
+                btnCopy,
+                btnClear
+        );
+
+        titleRow.getChildren().addAll(title, spacer, actionToolbar);
 
         // Таблица логов
         logTable = new TableView<>(logData);
@@ -193,7 +236,7 @@ public class FormLogs extends Form {
 
     private void toggleAutoScroll() {
         autoScrollEnabled = !autoScrollEnabled;
-        updatePauseButtonText();
+        updatePauseButtonState();
         if (autoScrollEnabled) {
             scrollToBottom();
             Toast.show(Toast.Type.INFO, "Автопрокрутка логов включена");
@@ -202,9 +245,44 @@ public class FormLogs extends Form {
         }
     }
 
-    private void updatePauseButtonText() {
+    private void updatePauseButtonState() {
         if (btnPause != null) {
-            btnPause.setText(autoScrollEnabled ? "Пауза" : "Продолжить");
+            String title = autoScrollEnabled ? "Пауза автопрокрутки" : "Продолжить автопрокрутку";
+            String description = autoScrollEnabled
+                    ? "Остановить автоматическую прокрутку таблицы при новых сообщениях"
+                    : "Снова автоматически прокручивать таблицу к новым логам";
+            setToolbarButtonGraphic(btnPause, autoScrollEnabled ? ICON_PAUSE : ICON_PLAY, title);
+            btnPause.setAccessibleText(title);
+            if (btnPauseTooltip != null) {
+                btnPauseTooltip.setText(title + "\n" + description);
+            }
+        }
+    }
+
+    private Button createToolbarButton(String title, String description, String iconPath, Runnable action) {
+        Button button = new Button();
+        button.getStyleClass().add("logs-toolbar-button");
+        button.setMinSize(34, 34);
+        button.setPrefSize(34, 34);
+        button.setMaxSize(34, 34);
+        button.setFocusTraversable(false);
+        button.setAccessibleText(title);
+        setToolbarButtonGraphic(button, iconPath, title);
+        button.setTooltip(new Tooltip(title + "\n" + description));
+        button.setOnAction(e -> action.run());
+        return button;
+    }
+
+    private void setToolbarButtonGraphic(Button button, String iconPath, String fallbackText) {
+        SVGPath icon = SvgIconLoader.load(iconPath, 18);
+        if (icon != null) {
+            button.setGraphic(icon);
+            button.setText(null);
+            button.setContentDisplay(ContentDisplay.GRAPHIC_ONLY);
+        } else {
+            button.setGraphic(null);
+            button.setText(fallbackText);
+            button.setContentDisplay(ContentDisplay.TEXT_ONLY);
         }
     }
 
