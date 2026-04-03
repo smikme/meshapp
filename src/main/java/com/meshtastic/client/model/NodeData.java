@@ -41,6 +41,7 @@ public class NodeData {
     private String role;
     private String hwModel;
     private byte[] publicKey;
+    private Boolean unmessagable;
 
     /**
      * Создаёт ноду с указанным номером. Автоматически генерирует {@code nodeId}
@@ -126,6 +127,10 @@ public class NodeData {
 
     public byte[] getPublicKey() { return publicKey; }
     public void setPublicKey(byte[] publicKey) { this.publicKey = publicKey; }
+
+    public Boolean getUnmessagable() { return unmessagable; }
+    public void setUnmessagable(Boolean unmessagable) { this.unmessagable = unmessagable; }
+    public boolean isUnmessagable() { return Boolean.TRUE.equals(unmessagable); }
 
     /**
      * Проверяет, есть ли у ноды хотя бы одно непустое имя (longName или shortName).

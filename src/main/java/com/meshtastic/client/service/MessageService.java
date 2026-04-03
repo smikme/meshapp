@@ -12,13 +12,17 @@ import com.meshtastic.client.model.MessageReaction;
 import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.protocol.ProtocolHandler;
+import com.meshtastic.client.utils.ConfigDebugFormatter;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Сервис отправки сообщений и admin-команд на Meshtastic-устройство.
@@ -35,6 +39,8 @@ import java.util.concurrent.ThreadLocalRandom;
 public final class MessageService {
 
     private static final Logger log = LoggerFactory.getLogger(MessageService.class);
+    private static final long OWNER_INFO_EXCHANGE_WAIT_MS = 2_500;
+    private static final long PKI_PREP_ACK_WAIT_MS = 10_000;
 
     private MessageService() {}
 
@@ -120,9 +126,16 @@ public final class MessageService {
         int packetId = ThreadLocalRandom.current().nextInt(1, Integer.MAX_VALUE);
         long now = System.currentTimeMillis() / 1000;
 
-        // Для протокола нужен int nodeNum — получаем через lookup NodeData
-        NodeData peerNode = state.getNodeByNodeId(peerNodeId);
-        int peerNodeNum = peerNode != null ? peerNode.getNodeNum() : 0;
+        NodeData peerNode = resolvePeerNode(state, peerNodeId);
+        if (peerNode == null) {
+            log.warn("Cannot send DM: failed to resolve peer '{}' to nodeNum", peerNodeId);
+            return null;
+        }
+        if (peerNode.isUnmessagable()) {
+            log.warn("Cannot send DM to '{}': peer declared is_unmessagable", peerNodeId);
+            return null;
+        }
+        int peerNodeNum = peerNode.getNodeNum();
 
         MeshProtos.Data.Builder dataBuilder = MeshProtos.Data.newBuilder()
                 .setPortnum(Portnums.PortNum.TEXT_MESSAGE_APP)
@@ -136,24 +149,13 @@ public final class MessageService {
                     replyId, Integer.toHexString(replyId), bytesToHex(dataBytes));
         }
 
-        MeshProtos.MeshPacket packet = MeshProtos.MeshPacket.newBuilder()
-                .setFrom(state.getMyNodeNum())
-                .setTo(peerNodeNum)
-                .setDecoded(data)
-                .setId(packetId)
-                .setWantAck(true)
-                .build();
-
-        MeshProtos.ToRadio toRadio = MeshProtos.ToRadio.newBuilder()
-                .setPacket(packet)
-                .build();
-
-        handler.sendToRadio(toRadio);
+        boolean usePkiTransport = shouldUsePkiDirectMessage(state, peerNodeId, peerNode);
+        int directChannel = usePkiTransport ? 0 : resolveDirectMessageChannel(state, peerNodeId, peerNode);
 
         NodeData myNode = state.getNodeDb().get(state.getMyNodeNum());
         String myNodeId = myNode != null ? myNode.getNodeId() : null;
 
-        MeshMessage msg = new MeshMessage(myNodeId, peerNodeId, 0, text, now, true);
+        MeshMessage msg = new MeshMessage(myNodeId, peerNodeId, directChannel, text, now, true);
         msg.setStatus(MeshMessage.DeliveryStatus.SENDING);
         msg.setPacketId(packetId);
         if (replyId != 0) {
@@ -169,7 +171,28 @@ public final class MessageService {
         String ownerNodeId = String.format("!%08x", state.getMyNodeNum());
         MessageDbService.getInstance().save(msg, "dm", peerNodeId, ownerNodeId);
         state.addDirectMessage(msg, peerNodeId);
-        state.registerPendingAck(packetId, msg);
+        if (usePkiTransport) {
+            preparePeerForPkiDirectMessage(handler, state, peerNode)
+                    .completeOnTimeout(MeshProtos.Routing.Error.TIMEOUT, PKI_PREP_ACK_WAIT_MS, TimeUnit.MILLISECONDS)
+                    .whenComplete((routingError, throwable) -> {
+                        if (throwable != null) {
+                            log.debug("PKI preparation for {} failed before DM send", peerNodeId, throwable);
+                        } else if (routingError == MeshProtos.Routing.Error.TIMEOUT) {
+                            log.debug("PKI preparation for {} timed out after {} ms, sending DM anyway",
+                                    peerNodeId, PKI_PREP_ACK_WAIT_MS);
+                        } else if (routingError != null && routingError != MeshProtos.Routing.Error.NONE) {
+                            log.debug("PKI preparation for {} completed with {}, sending DM anyway",
+                                    peerNodeId, routingError);
+                        } else {
+                            log.debug("PKI preparation for {} acknowledged, sending DM", peerNodeId);
+                        }
+                        dispatchDirectMessagePacket(handler, state, peerNodeId, peerNode, peerNodeNum, data,
+                                packetId, directChannel, true, msg);
+                    });
+        } else {
+            dispatchDirectMessagePacket(handler, state, peerNodeId, peerNode, peerNodeNum, data,
+                    packetId, directChannel, false, msg);
+        }
         return msg;
     }
 
@@ -224,8 +247,16 @@ public final class MessageService {
         int packetId = ThreadLocalRandom.current().nextInt(1, Integer.MAX_VALUE);
         long now = System.currentTimeMillis() / 1000;
 
-        NodeData peerNode = state.getNodeByNodeId(peerNodeId);
-        int peerNodeNum = peerNode != null ? peerNode.getNodeNum() : 0;
+        NodeData peerNode = resolvePeerNode(state, peerNodeId);
+        if (peerNode == null) {
+            log.warn("Cannot send DM reaction: failed to resolve peer '{}' to nodeNum", peerNodeId);
+            return false;
+        }
+        if (peerNode.isUnmessagable()) {
+            log.warn("Cannot send DM reaction to '{}': peer declared is_unmessagable", peerNodeId);
+            return false;
+        }
+        int peerNodeNum = peerNode.getNodeNum();
 
         MeshProtos.Data data = MeshProtos.Data.newBuilder()
                 .setPortnum(Portnums.PortNum.TEXT_MESSAGE_APP)
@@ -234,13 +265,24 @@ public final class MessageService {
                 .setEmoji(1)
                 .build();
 
-        MeshProtos.MeshPacket packet = MeshProtos.MeshPacket.newBuilder()
+        boolean usePkiTransport = shouldUsePkiDirectMessage(state, peerNodeId, peerNode);
+        int directChannel = usePkiTransport ? 0 : resolveDirectMessageChannel(state, peerNodeId, peerNode);
+        if (usePkiTransport) {
+            preparePeerForPkiDirectMessage(handler, state, peerNode);
+        }
+
+        MeshProtos.MeshPacket.Builder packetBuilder = MeshProtos.MeshPacket.newBuilder()
                 .setFrom(state.getMyNodeNum())
                 .setTo(peerNodeNum)
                 .setDecoded(data)
                 .setId(packetId)
-                .setWantAck(true)
-                .build();
+                .setWantAck(true);
+        if (usePkiTransport) {
+            packetBuilder.setPkiEncrypted(true);
+        } else if (directChannel > 0) {
+            packetBuilder.setChannel(directChannel);
+        }
+        MeshProtos.MeshPacket packet = packetBuilder.build();
 
         handler.sendToRadio(MeshProtos.ToRadio.newBuilder().setPacket(packet).build());
         return saveOutgoingReaction(state, "dm", peerNodeId, targetMessage, emoji, now, packetId);
@@ -251,26 +293,28 @@ public final class MessageService {
      * Удалённая нода ответит пакетом NODEINFO_APP с данными User.
      */
     public static void requestNodeInfo(ProtocolHandler handler, DeviceState state, int targetNodeNum) {
-        MeshProtos.Data data = MeshProtos.Data.newBuilder()
-                .setPortnum(Portnums.PortNum.NODEINFO_APP)
-                .setWantResponse(true)
-                .build();
+        sendNodeInfoPacket(handler, state, targetNodeNum, null, true);
+    }
 
-        int packetId = ThreadLocalRandom.current().nextInt(1, Integer.MAX_VALUE);
+    /**
+     * Обменивается пользовательской информацией с выбранной нодой:
+     * сначала отправляет ей наши локальные User-данные, затем запрашивает
+     * актуальный NODEINFO_APP-ответ от неё.
+     */
+    public static void exchangeNodeUserInfo(ProtocolHandler handler, DeviceState state, int targetNodeNum) {
+        if (handler == null || state == null || targetNodeNum == 0) { return; }
+        if (targetNodeNum == state.getMyNodeNum()) {
+            requestNodeInfo(handler, state, targetNodeNum);
+            return;
+        }
 
-        MeshProtos.MeshPacket packet = MeshProtos.MeshPacket.newBuilder()
-                .setFrom(state.getMyNodeNum())
-                .setTo(targetNodeNum)
-                .setDecoded(data)
-                .setId(packetId)
-                .setWantAck(true)
-                .build();
+        MeshProtos.User localUser = buildLocalUserInfo(state);
+        if (shouldRefreshOwnerInfoBeforeExchange(state, localUser)) {
+            requestOwnerInfoThenExchange(handler, state, targetNodeNum);
+            return;
+        }
 
-        MeshProtos.ToRadio toRadio = MeshProtos.ToRadio.newBuilder()
-                .setPacket(packet)
-                .build();
-
-        handler.sendToRadio(toRadio);
+        continueNodeUserInfoExchange(handler, state, targetNodeNum, localUser);
     }
 
     /**
@@ -327,6 +371,37 @@ public final class MessageService {
                 .setGetConfigRequest(AdminProtos.AdminMessage.ConfigType.SESSIONKEY_CONFIG)
                 .build();
         sendAdminMessage(handler, state, adminMsg, true);
+    }
+
+    /**
+     * Запрашивает metadata устройства (включая версию прошивки) у подключённого радио.
+     * Ответ придёт как AdminMessage.get_device_metadata_response через ADMIN_APP.
+     */
+    public static CompletableFuture<MeshProtos.Routing.Error> requestDeviceMetadata(ProtocolHandler handler,
+                                                                                    DeviceState state) {
+        AdminProtos.AdminMessage adminMsg = AdminProtos.AdminMessage.newBuilder()
+                .setGetDeviceMetadataRequest(true)
+                .build();
+        return sendAdminMessage(handler, state, adminMsg, true);
+    }
+
+    /**
+     * Устанавливает только текущее Unix-время на ноде без изменения других полей Position.
+     *
+     * @param epochSeconds текущее время в секундах Unix epoch
+     * @return future с routing ACK/NAK для отправленного admin-пакета
+     */
+    public static CompletableFuture<MeshProtos.Routing.Error> setTimeOnly(ProtocolHandler handler,
+                                                                          DeviceState state,
+                                                                          long epochSeconds) {
+        AdminProtos.AdminMessage.Builder adminBuilder = AdminProtos.AdminMessage.newBuilder()
+                .setSetTimeOnly((int) epochSeconds);
+        ByteString passkey = state.getSessionPasskey();
+        if (passkey != null) {
+            adminBuilder.setSessionPasskey(passkey);
+        }
+
+        return sendAdminMessage(handler, state, adminBuilder.build());
     }
 
     /**
@@ -408,6 +483,9 @@ public final class MessageService {
      * @return future с routing ACK/NAK для отправленного admin-пакета
      */
     public static CompletableFuture<MeshProtos.Routing.Error> setConfig(ProtocolHandler handler, DeviceState state, ConfigProtos.Config config) {
+        if (config.getPayloadVariantCase() == ConfigProtos.Config.PayloadVariantCase.LORA) {
+            log.debug("setConfig LORA ignore_incoming {}", ConfigDebugFormatter.describeIgnoreIncoming(config));
+        }
         AdminProtos.AdminMessage.Builder adminBuilder = AdminProtos.AdminMessage.newBuilder()
                 .setSetConfig(config);
         ByteString passkey = state.getSessionPasskey();
@@ -630,6 +708,465 @@ public final class MessageService {
         CompletableFuture<MeshProtos.Routing.Error> ackFuture = state.registerPendingPacketAck(packetId);
         handler.sendToRadio(toRadio);
         return ackFuture;
+    }
+
+    private static void requestOwnerInfoThenExchange(ProtocolHandler handler, DeviceState state, int targetNodeNum) {
+        AtomicBoolean completed = new AtomicBoolean(false);
+        Runnable[] holder = new Runnable[1];
+        holder[0] = () -> {
+            if (completed.compareAndSet(false, true)) {
+                state.removeOwnerInfoListener(holder[0]);
+                continueNodeUserInfoExchange(handler, state, targetNodeNum, buildLocalUserInfo(state));
+            }
+        };
+
+        state.addOwnerInfoListener(holder[0]);
+        CompletableFuture.delayedExecutor(OWNER_INFO_EXCHANGE_WAIT_MS, TimeUnit.MILLISECONDS).execute(() -> {
+            if (completed.compareAndSet(false, true)) {
+                state.removeOwnerInfoListener(holder[0]);
+                log.debug("Owner info request timed out, continuing NODEINFO_APP exchange with current local state");
+                continueNodeUserInfoExchange(handler, state, targetNodeNum, buildLocalUserInfo(state));
+            }
+        });
+        requestOwnerInfo(handler, state);
+    }
+
+    private static CompletableFuture<MeshProtos.Routing.Error> preparePeerForPkiDirectMessage(ProtocolHandler handler,
+                                                                                                DeviceState state,
+                                                                                                NodeData peerNode) {
+        CompletableFuture<MeshProtos.Routing.Error> shareFuture = shareLocalUserInfoForPki(handler, state, peerNode);
+        seedPeerContactForPki(handler, state, peerNode);
+        return shareFuture;
+    }
+
+    private static CompletableFuture<MeshProtos.Routing.Error> shareLocalUserInfoForPki(ProtocolHandler handler,
+                                                                                         DeviceState state,
+                                                                                         NodeData peerNode) {
+        if (handler == null || state == null || peerNode == null || peerNode.getNodeNum() == 0) {
+            return CompletableFuture.completedFuture(MeshProtos.Routing.Error.NONE);
+        }
+        MeshProtos.User localUser = buildLocalUserInfo(state);
+        if (localUser == null) {
+            log.debug("Skipping outgoing NODEINFO_APP before PKI DM: local user info is unavailable");
+            return CompletableFuture.completedFuture(MeshProtos.Routing.Error.NONE);
+        }
+        log.debug("Sharing local user info with {} before PKI DM", peerNode.getNodeId());
+        return sendNodeInfoPacketAwaitRoutingAck(handler, state, peerNode.getNodeNum(), localUser.toByteString(), false);
+    }
+
+    static void seedPeerContactForPki(ProtocolHandler handler, DeviceState state, NodeData peerNode) {
+        if (handler == null || state == null || peerNode == null) { return; }
+        byte[] publicKey = peerNode.getPublicKey();
+        if (publicKey == null || publicKey.length == 0) { return; }
+
+        AdminProtos.SharedContact contact = AdminProtos.SharedContact.newBuilder()
+                .setNodeNum(peerNode.getNodeNum())
+                .setUser(buildUserFromNode(peerNode))
+                .build();
+        AdminProtos.AdminMessage adminMsg = AdminProtos.AdminMessage.newBuilder()
+                .setAddContact(contact)
+                .build();
+
+        log.debug("Seeding local NodeDB with PKI contact {} (nodeNum={})",
+                peerNode.getNodeId(), Integer.toUnsignedString(peerNode.getNodeNum()));
+        sendAdminMessage(handler, state, adminMsg).whenComplete((error, throwable) -> {
+            if (throwable != null) {
+                log.debug("Failed to seed PKI contact {} into local NodeDB",
+                        peerNode.getNodeId(), throwable);
+            } else if (error != null && error != MeshProtos.Routing.Error.NONE) {
+                log.debug("Local NodeDB rejected PKI contact {} with {}",
+                        peerNode.getNodeId(), error);
+            }
+        });
+    }
+
+    private static MeshProtos.User buildUserFromNode(NodeData node) {
+        MeshProtos.User.Builder builder = MeshProtos.User.newBuilder();
+        if (node == null) { return builder.build(); }
+        if (node.getNodeId() != null && !node.getNodeId().isEmpty()) {
+            builder.setId(node.getNodeId());
+        }
+        if (node.getLongName() != null && !node.getLongName().isEmpty()) {
+            builder.setLongName(node.getLongName());
+        }
+        if (node.getShortName() != null && !node.getShortName().isEmpty()) {
+            builder.setShortName(node.getShortName());
+        }
+        if (node.getRole() != null && !node.getRole().isEmpty()) {
+            try {
+                builder.setRole(ConfigProtos.Config.DeviceConfig.Role.valueOf(node.getRole()));
+            } catch (IllegalArgumentException ignored) {
+                log.debug("Skipping unknown role '{}' for PKI contact {}", node.getRole(), node.getNodeId());
+            }
+        }
+        if (node.getHwModel() != null && !node.getHwModel().isEmpty()) {
+            try {
+                builder.setHwModel(MeshProtos.HardwareModel.valueOf(node.getHwModel()));
+            } catch (IllegalArgumentException ignored) {
+                log.debug("Skipping unknown hwModel '{}' for PKI contact {}", node.getHwModel(), node.getNodeId());
+            }
+        }
+        if (node.getPublicKey() != null && node.getPublicKey().length > 0) {
+            builder.setPublicKey(ByteString.copyFrom(node.getPublicKey()));
+        }
+        if (node.getUnmessagable() != null) {
+            builder.setIsUnmessagable(node.getUnmessagable());
+        }
+        return builder.build();
+    }
+
+    private static boolean shouldRefreshOwnerInfoBeforeExchange(DeviceState state, MeshProtos.User localUser) {
+        if (state == null || state.getOwnerInfo() != null) { return false; }
+        if (localUser == null) { return true; }
+
+        return localUser.getLongName().isEmpty() && localUser.getShortName().isEmpty();
+    }
+
+    private static void continueNodeUserInfoExchange(ProtocolHandler handler,
+                                                     DeviceState state,
+                                                     int targetNodeNum,
+                                                     MeshProtos.User localUser) {
+        if (localUser != null) {
+            sendNodeInfoPacket(handler, state, targetNodeNum, localUser.toByteString(), false);
+        } else {
+            log.debug("Skipping outgoing NODEINFO_APP exchange: local user info is unavailable");
+        }
+
+        requestNodeInfo(handler, state, targetNodeNum);
+    }
+
+    private static NodeData resolvePeerNode(DeviceState state, String peerNodeId) {
+        if (state == null || peerNodeId == null || peerNodeId.isEmpty()) { return null; }
+
+        NodeData peerNode = state.getNodeByNodeId(peerNodeId);
+        if (peerNode != null) {
+            NodeCacheService.getInstance().enrichFromCache(peerNode);
+            return peerNode;
+        }
+
+        if (peerNodeId.length() > 1 && peerNodeId.charAt(0) == '!') {
+            try {
+                int peerNodeNum = (int) Long.parseUnsignedLong(peerNodeId.substring(1), 16);
+                NodeData resolvedByNum = state.getNodeDb().get(peerNodeNum);
+                if (resolvedByNum != null) {
+                    NodeCacheService.getInstance().enrichFromCache(resolvedByNum);
+                    if (!peerNodeId.equals(resolvedByNum.getNodeId())) {
+                        NodeData cachedByLegacyId = NodeCacheService.getInstance().get(peerNodeId);
+                        mergeLegacyDirectMessageHints(resolvedByNum, cachedByLegacyId);
+                    }
+                    return resolvedByNum;
+                }
+                return NodeCacheService.getInstance().get(peerNodeId);
+            } catch (NumberFormatException e) {
+                log.debug("Peer nodeId '{}' is not a valid hex node number", peerNodeId);
+            }
+        }
+        return null;
+    }
+
+    private static void mergeLegacyDirectMessageHints(NodeData resolvedNode, NodeData legacyCachedNode) {
+        if (resolvedNode == null || legacyCachedNode == null) { return; }
+
+        if ((resolvedNode.getLongName() == null || resolvedNode.getLongName().isEmpty())
+                && legacyCachedNode.getLongName() != null
+                && !legacyCachedNode.getLongName().isEmpty()) {
+            resolvedNode.setLongName(legacyCachedNode.getLongName());
+        }
+        if ((resolvedNode.getShortName() == null || resolvedNode.getShortName().isEmpty())
+                && legacyCachedNode.getShortName() != null
+                && !legacyCachedNode.getShortName().isEmpty()) {
+            resolvedNode.setShortName(legacyCachedNode.getShortName());
+        }
+        if (resolvedNode.getChannel() == 0 && legacyCachedNode.getChannel() != 0) {
+            resolvedNode.setChannel(legacyCachedNode.getChannel());
+        }
+        if ((resolvedNode.getPublicKey() == null || resolvedNode.getPublicKey().length == 0)
+                && legacyCachedNode.getPublicKey() != null
+                && legacyCachedNode.getPublicKey().length > 0) {
+            resolvedNode.setPublicKey(legacyCachedNode.getPublicKey().clone());
+        }
+        if (resolvedNode.getUnmessagable() == null && legacyCachedNode.getUnmessagable() != null) {
+            resolvedNode.setUnmessagable(legacyCachedNode.getUnmessagable());
+        }
+    }
+
+    private static int resolveDirectMessageChannel(DeviceState state, String peerNodeId, NodeData peerNode) {
+        if (state == null) { return 0; }
+
+        for (String chatKey : directMessageChatKeys(peerNodeId, peerNode)) {
+            int recentChannel = findRecentSecondaryDirectMessageChannel(state, chatKey);
+            if (recentChannel > 0) {
+                return recentChannel;
+            }
+        }
+
+        return normalizeDirectMessageChannel(state, peerNode != null ? peerNode.getChannel() : 0);
+    }
+
+    private static boolean shouldUsePkiDirectMessage(DeviceState state, String peerNodeId, NodeData peerNode) {
+        byte[] publicKey = peerNode != null ? peerNode.getPublicKey() : null;
+        if (publicKey == null || publicKey.length == 0) {
+            log.debug("DM transport for {} stays legacy: peer public key is unavailable", peerNodeId);
+            return false;
+        }
+        log.debug("DM transport for {} switches to PKI: peer public key is available", peerNodeId);
+        return true;
+    }
+
+    private static String[] directMessageChatKeys(String peerNodeId, NodeData peerNode) {
+        if (peerNodeId == null || peerNodeId.isEmpty()) {
+            return new String[0];
+        }
+
+        String resolvedPeerNodeId = peerNode != null ? peerNode.getNodeId() : null;
+        if (resolvedPeerNodeId != null
+                && !resolvedPeerNodeId.isEmpty()
+                && !resolvedPeerNodeId.equals(peerNodeId)) {
+            return new String[] { peerNodeId, resolvedPeerNodeId };
+        }
+
+        return new String[] { peerNodeId };
+    }
+
+    private static int findRecentSecondaryDirectMessageChannel(DeviceState state, String chatKey) {
+        if (state == null || chatKey == null || chatKey.isEmpty()) { return 0; }
+
+        List<MeshMessage> recentMessages = state.getDirectMessages(chatKey);
+        synchronized (recentMessages) {
+            for (int i = recentMessages.size() - 1; i >= 0; i--) {
+                int channelIndex = normalizeDirectMessageChannel(state, recentMessages.get(i).getChannelIndex());
+                if (channelIndex > 0) {
+                    return channelIndex;
+                }
+            }
+        }
+
+        String ownerNodeId = String.format("!%08x", state.getMyNodeNum());
+        List<MeshMessage> persistedMessages = MessageDbService.getInstance().loadLast("dm", chatKey, 20, ownerNodeId);
+        for (int i = persistedMessages.size() - 1; i >= 0; i--) {
+            int channelIndex = normalizeDirectMessageChannel(state, persistedMessages.get(i).getChannelIndex());
+            if (channelIndex > 0) {
+                return channelIndex;
+            }
+        }
+
+        return 0;
+    }
+
+    private static int normalizeDirectMessageChannel(DeviceState state, int channelIndex) {
+        if (channelIndex <= 0) { return 0; }
+        if (state == null) { return channelIndex; }
+
+        List<ChannelProtos.Channel> channels = state.getChannels();
+        if (channels.isEmpty()) {
+            return channelIndex;
+        }
+
+        synchronized (channels) {
+            for (ChannelProtos.Channel channel : channels) {
+                if (channel.getIndex() == channelIndex) {
+                    return channel.getRole() == ChannelProtos.Channel.Role.DISABLED ? 0 : channelIndex;
+                }
+            }
+        }
+
+        log.debug("Ignoring stale DM channel {} because it is not present in the local channel list", channelIndex);
+        return 0;
+    }
+    private static void sendNodeInfoPacket(ProtocolHandler handler,
+                                           DeviceState state,
+                                           int targetNodeNum,
+                                           ByteString payload,
+                                           boolean wantResponse) {
+        if (handler == null || state == null || targetNodeNum == 0) { return; }
+
+        MeshProtos.Data.Builder dataBuilder = MeshProtos.Data.newBuilder()
+                .setPortnum(Portnums.PortNum.NODEINFO_APP)
+                .setWantResponse(wantResponse);
+        if (payload != null && !payload.isEmpty()) {
+            dataBuilder.setPayload(payload);
+        }
+
+        int packetId = ThreadLocalRandom.current().nextInt(1, Integer.MAX_VALUE);
+
+        MeshProtos.MeshPacket packet = MeshProtos.MeshPacket.newBuilder()
+                .setFrom(state.getMyNodeNum())
+                .setTo(targetNodeNum)
+                .setDecoded(dataBuilder.build())
+                .setId(packetId)
+                .setWantAck(true)
+                .build();
+
+        MeshProtos.ToRadio toRadio = MeshProtos.ToRadio.newBuilder()
+                .setPacket(packet)
+                .build();
+
+        handler.sendToRadio(toRadio);
+    }
+
+    private static CompletableFuture<MeshProtos.Routing.Error> sendNodeInfoPacketAwaitRoutingAck(ProtocolHandler handler,
+                                                                                                  DeviceState state,
+                                                                                                  int targetNodeNum,
+                                                                                                  ByteString payload,
+                                                                                                  boolean wantResponse) {
+        if (handler == null || state == null || targetNodeNum == 0) {
+            return CompletableFuture.completedFuture(MeshProtos.Routing.Error.BAD_REQUEST);
+        }
+
+        MeshProtos.Data.Builder dataBuilder = MeshProtos.Data.newBuilder()
+                .setPortnum(Portnums.PortNum.NODEINFO_APP)
+                .setWantResponse(wantResponse);
+        if (payload != null && !payload.isEmpty()) {
+            dataBuilder.setPayload(payload);
+        }
+
+        int packetId = ThreadLocalRandom.current().nextInt(1, Integer.MAX_VALUE);
+
+        MeshProtos.MeshPacket packet = MeshProtos.MeshPacket.newBuilder()
+                .setFrom(state.getMyNodeNum())
+                .setTo(targetNodeNum)
+                .setDecoded(dataBuilder.build())
+                .setId(packetId)
+                .setWantAck(true)
+                .build();
+
+        CompletableFuture<MeshProtos.Routing.Error> ackFuture = state.registerPendingPacketAck(packetId);
+        handler.sendToRadio(MeshProtos.ToRadio.newBuilder().setPacket(packet).build());
+        return ackFuture;
+    }
+
+    private static void dispatchDirectMessagePacket(ProtocolHandler handler,
+                                                    DeviceState state,
+                                                    String peerNodeId,
+                                                    NodeData peerNode,
+                                                    int peerNodeNum,
+                                                    MeshProtos.Data data,
+                                                    int packetId,
+                                                    int directChannel,
+                                                    boolean usePkiTransport,
+                                                    MeshMessage msg) {
+        rememberDirectMessageRoutingHint(peerNodeId, peerNode, directChannel, usePkiTransport);
+
+        MeshProtos.MeshPacket.Builder packetBuilder = MeshProtos.MeshPacket.newBuilder()
+                .setFrom(state.getMyNodeNum())
+                .setTo(peerNodeNum)
+                .setDecoded(data)
+                .setId(packetId)
+                .setWantAck(true);
+        if (usePkiTransport) {
+            packetBuilder.setPkiEncrypted(true);
+        } else if (directChannel > 0) {
+            packetBuilder.setChannel(directChannel);
+        }
+        log.debug("Sending DM to {} (nodeNum={}) via {} transport, channel={}",
+                peerNodeId, Integer.toUnsignedString(peerNodeNum), usePkiTransport ? "PKI" : "legacy", directChannel);
+        handler.sendToRadio(MeshProtos.ToRadio.newBuilder().setPacket(packetBuilder.build()).build());
+        state.registerPendingAck(packetId, msg);
+    }
+
+    private static void rememberDirectMessageRoutingHint(String peerNodeId,
+                                                         NodeData peerNode,
+                                                         int directChannel,
+                                                         boolean usePkiTransport) {
+        if (usePkiTransport || peerNode == null || directChannel <= 0) { return; }
+
+        if (peerNode.getChannel() != directChannel) {
+            peerNode.setChannel(directChannel);
+        }
+        if (peerNode.getNodeId() != null && !peerNode.getNodeId().isEmpty()) {
+            NodeCacheService.getInstance().update(peerNode);
+        }
+
+        String currentPeerNodeId = peerNode.getNodeId();
+        if (peerNodeId == null || peerNodeId.isEmpty() || peerNodeId.equals(currentPeerNodeId)) {
+            return;
+        }
+
+        NodeData legacyAlias = new NodeData(peerNode.getNodeNum());
+        legacyAlias.setNodeId(peerNodeId);
+        legacyAlias.setChannel(directChannel);
+        if (peerNode.getPublicKey() != null && peerNode.getPublicKey().length > 0) {
+            legacyAlias.setPublicKey(peerNode.getPublicKey().clone());
+        }
+        if (peerNode.getUnmessagable() != null) {
+            legacyAlias.setUnmessagable(peerNode.getUnmessagable());
+        }
+        NodeCacheService.getInstance().update(legacyAlias);
+    }
+
+    private static MeshProtos.User buildLocalUserInfo(DeviceState state) {
+        if (state == null) { return null; }
+
+        NodeData myNode = state.getNodeDb().get(state.getMyNodeNum());
+        MeshProtos.User ownerInfo = state.getOwnerInfo();
+        ByteString securityPublicKey = extractSecurityPublicKey(state);
+        if (myNode == null && ownerInfo == null && (securityPublicKey == null || securityPublicKey.isEmpty())) {
+            return null;
+        }
+
+        MeshProtos.User.Builder builder = MeshProtos.User.newBuilder();
+        boolean hasMeaningfulField = false;
+
+        String nodeId = firstNonEmpty(
+                myNode != null ? myNode.getNodeId() : null,
+                ownerInfo != null ? ownerInfo.getId() : null,
+                state.getMyNodeNum() != 0 ? String.format("!%08x", state.getMyNodeNum()) : null
+        );
+        if (nodeId != null) {
+            builder.setId(nodeId);
+        }
+
+        String longName = firstNonEmpty(
+                ownerInfo != null ? ownerInfo.getLongName() : null,
+                myNode != null ? myNode.getLongName() : null
+        );
+        if (longName != null) {
+            builder.setLongName(longName);
+            hasMeaningfulField = true;
+        }
+
+        String shortName = firstNonEmpty(
+                ownerInfo != null ? ownerInfo.getShortName() : null,
+                myNode != null ? myNode.getShortName() : null
+        );
+        if (shortName != null) {
+            builder.setShortName(shortName);
+            hasMeaningfulField = true;
+        }
+
+        if (securityPublicKey != null && !securityPublicKey.isEmpty()) {
+            builder.setPublicKey(securityPublicKey);
+            hasMeaningfulField = true;
+        }
+
+        return hasMeaningfulField ? builder.build() : null;
+    }
+
+    private static ByteString extractSecurityPublicKey(DeviceState state) {
+        if (state == null) { return null; }
+
+        List<ConfigProtos.Config> configs = state.getConfigs();
+        synchronized (configs) {
+            for (ConfigProtos.Config config : configs) {
+                if (config.getPayloadVariantCase() == ConfigProtos.Config.PayloadVariantCase.SECURITY) {
+                    ByteString publicKey = config.getSecurity().getPublicKey();
+                    if (!publicKey.isEmpty()) {
+                        return publicKey;
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    private static String firstNonEmpty(String... values) {
+        if (values == null) { return null; }
+        for (String value : values) {
+            if (value != null && !value.isEmpty()) {
+                return value;
+            }
+        }
+        return null;
     }
 
     private static boolean saveOutgoingReaction(DeviceState state,

@@ -2,23 +2,32 @@ package com.meshtastic.client.service;
 
 import com.google.protobuf.ByteString;
 import com.meshtastic.client.TestEnvironmentSupport;
+import com.meshtastic.client.connection.ConnectionException;
+import com.meshtastic.client.connection.ConnectionListener;
+import com.meshtastic.client.connection.MeshtasticConnection;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.MessageReaction;
 import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.model.NodeData;
+import com.meshtastic.client.protocol.ProtocolHandler;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.meshtastic.proto.AdminProtos;
 import org.meshtastic.proto.ConfigProtos;
 import org.meshtastic.proto.MeshProtos;
 import org.meshtastic.proto.Portnums;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -306,5 +315,90 @@ class MessageListenerServiceTest {
         assertNotNull(cached);
         assertEquals("Alice", cached.getLongName());
         assertEquals(node.getNodeId(), cached.getNodeId());
+    }
+
+    @Test
+    void onMeshPacketSeedsLocalContactAndCreatesDirectThreadFromDirectedNodeInfo() throws Exception {
+        RecordingConnection connection = new RecordingConnection();
+        ProtocolHandler handler = new ProtocolHandler(connection);
+        try {
+            service = new MessageListenerService(state, handler);
+
+            MeshProtos.User user = MeshProtos.User.newBuilder()
+                    .setId("!cafed00d")
+                    .setLongName("Bob")
+                    .setShortName("BOB")
+                    .setPublicKey(ByteString.copyFrom(new byte[] {9, 8, 7, 6}))
+                    .build();
+            MeshProtos.MeshPacket packet = MeshProtos.MeshPacket.newBuilder()
+                    .setFrom(0xCAFED00D)
+                    .setTo(state.getMyNodeNum())
+                    .setDecoded(MeshProtos.Data.newBuilder()
+                            .setPortnum(Portnums.PortNum.NODEINFO_APP)
+                            .setPayload(user.toByteString())
+                            .build())
+                    .build();
+
+            service.onMeshPacket(packet);
+
+            assertTrue(state.getAllDirectMessages().containsKey("!cafed00d"));
+            assertEquals(1, connection.sentFrames.size());
+
+            MeshProtos.ToRadio seedContact = parseToRadio(connection.sentFrames.get(0));
+            MeshProtos.MeshPacket seedPacket = seedContact.getPacket();
+            assertEquals(Portnums.PortNum.ADMIN_APP, seedPacket.getDecoded().getPortnum());
+            AdminProtos.AdminMessage adminMessage = AdminProtos.AdminMessage.parseFrom(seedPacket.getDecoded().getPayload());
+            assertEquals(0xCAFED00D, adminMessage.getAddContact().getNodeNum());
+            assertArrayEquals(new byte[] {9, 8, 7, 6},
+                    adminMessage.getAddContact().getUser().getPublicKey().toByteArray());
+        } finally {
+            handler.shutdown();
+        }
+    }
+
+    private static MeshProtos.ToRadio parseToRadio(byte[] frame) throws Exception {
+        int payloadLength = ((frame[2] & 0xFF) << 8) | (frame[3] & 0xFF);
+        byte[] payload = Arrays.copyOfRange(frame, 4, 4 + payloadLength);
+        return MeshProtos.ToRadio.parseFrom(payload);
+    }
+
+    private static final class RecordingConnection implements MeshtasticConnection {
+
+        private final List<byte[]> sentFrames = new ArrayList<>();
+
+        @Override
+        public void connect() throws ConnectionException {
+            // no-op for tests
+        }
+
+        @Override
+        public void disconnect() {
+            // no-op for tests
+        }
+
+        @Override
+        public boolean isConnected() {
+            return true;
+        }
+
+        @Override
+        public void sendBytes(byte[] data) {
+            sentFrames.add(Arrays.copyOf(data, data.length));
+        }
+
+        @Override
+        public void sendBytes(byte[] data, boolean expectResponseAfterWrite) {
+            sendBytes(data);
+        }
+
+        @Override
+        public void setDataListener(Consumer<byte[]> listener) {
+            // no-op for tests
+        }
+
+        @Override
+        public void setConnectionListener(ConnectionListener listener) {
+            // no-op for tests
+        }
     }
 }

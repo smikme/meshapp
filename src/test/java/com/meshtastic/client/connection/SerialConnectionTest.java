@@ -165,6 +165,25 @@ class SerialConnectionTest {
         assertTrue(port.awaitClose());
     }
 
+    @Test
+    void shouldAssertDtrForWindowsCp210Bridge() {
+        assertTrue(SerialConnection.shouldAssertDtr(
+                "COM3",
+                "Silicon Labs CP210x USB to UART Bridge (COM3)",
+                true
+        ));
+        assertFalse(SerialConnection.shouldAssertDtr(
+                "COM4",
+                "USB-SERIAL CH340 (COM4)",
+                true
+        ));
+        assertFalse(SerialConnection.shouldAssertDtr(
+                "ttyUSB0",
+                "CP2102 USB to UART Bridge Controller",
+                false
+        ));
+    }
+
     private static final class TestConnectionListener implements ConnectionListener {
         private final CountDownLatch errorLatch;
 

@@ -21,6 +21,7 @@ public class AppPreferences {
     public static final String KEY_NATIVE_WINDOW = "nativeWindow";
     public static final String KEY_DISABLE_TRANSPARENCY = "disableTransparency";
     public static final String KEY_DISABLE_EFFECTS = "disableEffects";
+    public static final String KEY_SOFTWARE_RENDERING = "softwareRendering";
     public static final String KEY_CHECK_UPDATES = "checkUpdates";
     public static final String KEY_MINIMIZE_TO_TRAY = "minimizeToTray";
 
@@ -30,68 +31,83 @@ public class AppPreferences {
         state = Preferences.userRoot().node(PREFERENCES_ROOT_PATH);
     }
 
-    public static Preferences getState() {
+    private static Preferences state() {
+        if (state == null) {
+            init();
+        }
         return state;
     }
 
+    public static Preferences getState() {
+        return state();
+    }
+
     public static boolean isDarkMode() {
-        return state.getBoolean(KEY_DARK_MODE, false);
+        return state().getBoolean(KEY_DARK_MODE, false);
     }
 
     public static void setDarkMode(boolean dark) {
-        state.putBoolean(KEY_DARK_MODE, dark);
+        state().putBoolean(KEY_DARK_MODE, dark);
     }
 
     public static boolean isNotificationsEnabled() {
-        return state.getBoolean(KEY_NOTIFICATIONS_ENABLED, true);
+        return state().getBoolean(KEY_NOTIFICATIONS_ENABLED, true);
     }
 
     public static void setNotificationsEnabled(boolean enabled) {
-        state.putBoolean(KEY_NOTIFICATIONS_ENABLED, enabled);
+        state().putBoolean(KEY_NOTIFICATIONS_ENABLED, enabled);
     }
 
     public static boolean isNativeWindow() {
-        return state.getBoolean(KEY_NATIVE_WINDOW, false);
+        return state().getBoolean(KEY_NATIVE_WINDOW, false);
     }
 
     public static void setNativeWindow(boolean value) {
-        state.putBoolean(KEY_NATIVE_WINDOW, value);
+        state().putBoolean(KEY_NATIVE_WINDOW, value);
     }
 
     public static boolean isDisableTransparency() {
-        return state.getBoolean(KEY_DISABLE_TRANSPARENCY, false);
+        return state().getBoolean(KEY_DISABLE_TRANSPARENCY, false);
     }
 
     public static void setDisableTransparency(boolean value) {
-        state.putBoolean(KEY_DISABLE_TRANSPARENCY, value);
+        state().putBoolean(KEY_DISABLE_TRANSPARENCY, value);
     }
 
     public static boolean isDisableEffects() {
-        return state.getBoolean(KEY_DISABLE_EFFECTS, false);
+        return state().getBoolean(KEY_DISABLE_EFFECTS, false);
     }
 
     public static void setDisableEffects(boolean value) {
-        state.putBoolean(KEY_DISABLE_EFFECTS, value);
+        state().putBoolean(KEY_DISABLE_EFFECTS, value);
+    }
+
+    public static boolean isSoftwareRendering() {
+        return state().getBoolean(KEY_SOFTWARE_RENDERING, false);
+    }
+
+    public static void setSoftwareRendering(boolean value) {
+        state().putBoolean(KEY_SOFTWARE_RENDERING, value);
     }
 
     public static boolean isCheckUpdates() {
-        return state.getBoolean(KEY_CHECK_UPDATES, true);
+        return state().getBoolean(KEY_CHECK_UPDATES, true);
     }
 
     public static void setCheckUpdates(boolean value) {
-        state.putBoolean(KEY_CHECK_UPDATES, value);
+        state().putBoolean(KEY_CHECK_UPDATES, value);
     }
 
     public static boolean isMinimizeToTray() {
-        return state.getBoolean(KEY_MINIMIZE_TO_TRAY, false);
+        return state().getBoolean(KEY_MINIMIZE_TO_TRAY, false);
     }
 
     public static void setMinimizeToTray(boolean value) {
-        state.putBoolean(KEY_MINIMIZE_TO_TRAY, value);
+        state().putBoolean(KEY_MINIMIZE_TO_TRAY, value);
     }
 
     public static List<String> getRecentSearch(boolean favorite) {
-        String stringArr = state.get(favorite ? KEY_RECENT_SEARCH_FAVORITE : KEY_RECENT_SEARCH, null);
+        String stringArr = state().get(favorite ? KEY_RECENT_SEARCH_FAVORITE : KEY_RECENT_SEARCH, null);
         if (stringArr == null || stringArr.trim().isEmpty()) { return Collections.emptyList(); }
         return List.of(stringArr.trim().split(","));
     }
@@ -99,21 +115,21 @@ public class AppPreferences {
     // ==================== Window Bounds ====================
 
     public static boolean hasWindowBounds() {
-        return !Double.isNaN(state.getDouble(KEY_WINDOW_WIDTH, Double.NaN));
+        return !Double.isNaN(state().getDouble(KEY_WINDOW_WIDTH, Double.NaN));
     }
 
-    public static double getWindowX() { return state.getDouble(KEY_WINDOW_X, Double.NaN); }
-    public static double getWindowY() { return state.getDouble(KEY_WINDOW_Y, Double.NaN); }
-    public static double getWindowWidth() { return state.getDouble(KEY_WINDOW_WIDTH, Double.NaN); }
-    public static double getWindowHeight() { return state.getDouble(KEY_WINDOW_HEIGHT, Double.NaN); }
-    public static boolean isWindowMaximized() { return state.getBoolean(KEY_WINDOW_MAXIMIZED, false); }
+    public static double getWindowX() { return state().getDouble(KEY_WINDOW_X, Double.NaN); }
+    public static double getWindowY() { return state().getDouble(KEY_WINDOW_Y, Double.NaN); }
+    public static double getWindowWidth() { return state().getDouble(KEY_WINDOW_WIDTH, Double.NaN); }
+    public static double getWindowHeight() { return state().getDouble(KEY_WINDOW_HEIGHT, Double.NaN); }
+    public static boolean isWindowMaximized() { return state().getBoolean(KEY_WINDOW_MAXIMIZED, false); }
 
     public static void saveWindowBounds(double x, double y, double w, double h, boolean maximized) {
-        state.putDouble(KEY_WINDOW_X, x);
-        state.putDouble(KEY_WINDOW_Y, y);
-        state.putDouble(KEY_WINDOW_WIDTH, w);
-        state.putDouble(KEY_WINDOW_HEIGHT, h);
-        state.putBoolean(KEY_WINDOW_MAXIMIZED, maximized);
+        state().putDouble(KEY_WINDOW_X, x);
+        state().putDouble(KEY_WINDOW_Y, y);
+        state().putDouble(KEY_WINDOW_WIDTH, w);
+        state().putDouble(KEY_WINDOW_HEIGHT, h);
+        state().putBoolean(KEY_WINDOW_MAXIMIZED, maximized);
     }
 
     // ==================== Recent Search ====================
@@ -128,26 +144,26 @@ public class AppPreferences {
     public static final String KEY_NODES_FILTER_DIRECT = "nodesFilterDirect";
     public static final String KEY_NODES_FILTER_IGNORED = "nodesFilterIgnored";
 
-    public static String getNodesSort() { return state.get(KEY_NODES_SORT, "LAST_HEARD_NEW"); }
-    public static void setNodesSort(String sort) { state.put(KEY_NODES_SORT, sort); }
+    public static String getNodesSort() { return state().get(KEY_NODES_SORT, "LAST_HEARD_NEW"); }
+    public static void setNodesSort(String sort) { state().put(KEY_NODES_SORT, sort); }
 
-    public static boolean isNodesFilterUnknown() { return state.getBoolean(KEY_NODES_FILTER_UNKNOWN, false); }
-    public static void setNodesFilterUnknown(boolean v) { state.putBoolean(KEY_NODES_FILTER_UNKNOWN, v); }
+    public static boolean isNodesFilterUnknown() { return state().getBoolean(KEY_NODES_FILTER_UNKNOWN, false); }
+    public static void setNodesFilterUnknown(boolean v) { state().putBoolean(KEY_NODES_FILTER_UNKNOWN, v); }
 
-    public static boolean isNodesFilterDetails() { return state.getBoolean(KEY_NODES_FILTER_DETAILS, false); }
-    public static void setNodesFilterDetails(boolean v) { state.putBoolean(KEY_NODES_FILTER_DETAILS, v); }
+    public static boolean isNodesFilterDetails() { return state().getBoolean(KEY_NODES_FILTER_DETAILS, false); }
+    public static void setNodesFilterDetails(boolean v) { state().putBoolean(KEY_NODES_FILTER_DETAILS, v); }
 
-    public static boolean isNodesFilterHideOffline() { return state.getBoolean(KEY_NODES_FILTER_HIDE_OFFLINE, false); }
-    public static void setNodesFilterHideOffline(boolean v) { state.putBoolean(KEY_NODES_FILTER_HIDE_OFFLINE, v); }
+    public static boolean isNodesFilterHideOffline() { return state().getBoolean(KEY_NODES_FILTER_HIDE_OFFLINE, false); }
+    public static void setNodesFilterHideOffline(boolean v) { state().putBoolean(KEY_NODES_FILTER_HIDE_OFFLINE, v); }
 
-    public static boolean isNodesFilterFavorites() { return state.getBoolean(KEY_NODES_FILTER_FAVORITES, false); }
-    public static void setNodesFilterFavorites(boolean v) { state.putBoolean(KEY_NODES_FILTER_FAVORITES, v); }
+    public static boolean isNodesFilterFavorites() { return state().getBoolean(KEY_NODES_FILTER_FAVORITES, false); }
+    public static void setNodesFilterFavorites(boolean v) { state().putBoolean(KEY_NODES_FILTER_FAVORITES, v); }
 
-    public static boolean isNodesFilterDirect() { return state.getBoolean(KEY_NODES_FILTER_DIRECT, false); }
-    public static void setNodesFilterDirect(boolean v) { state.putBoolean(KEY_NODES_FILTER_DIRECT, v); }
+    public static boolean isNodesFilterDirect() { return state().getBoolean(KEY_NODES_FILTER_DIRECT, false); }
+    public static void setNodesFilterDirect(boolean v) { state().putBoolean(KEY_NODES_FILTER_DIRECT, v); }
 
-    public static boolean isNodesFilterIgnored() { return state.getBoolean(KEY_NODES_FILTER_IGNORED, false); }
-    public static void setNodesFilterIgnored(boolean v) { state.putBoolean(KEY_NODES_FILTER_IGNORED, v); }
+    public static boolean isNodesFilterIgnored() { return state().getBoolean(KEY_NODES_FILTER_IGNORED, false); }
+    public static void setNodesFilterIgnored(boolean v) { state().putBoolean(KEY_NODES_FILTER_IGNORED, v); }
 
     // ==================== SplitPane Divider Positions ====================
 
@@ -155,11 +171,11 @@ public class AppPreferences {
     public static final String KEY_NODES_DIVIDER = "nodesDividerPos";
     private static final String NODE_CHAT_SCROLL = "chatScroll";
 
-    public static double getChatDividerPos() { return state.getDouble(KEY_CHAT_DIVIDER, 0.35); }
-    public static void setChatDividerPos(double pos) { state.putDouble(KEY_CHAT_DIVIDER, pos); }
+    public static double getChatDividerPos() { return state().getDouble(KEY_CHAT_DIVIDER, 0.35); }
+    public static void setChatDividerPos(double pos) { state().putDouble(KEY_CHAT_DIVIDER, pos); }
 
-    public static double getNodesDividerPos() { return state.getDouble(KEY_NODES_DIVIDER, 0.38); }
-    public static void setNodesDividerPos(double pos) { state.putDouble(KEY_NODES_DIVIDER, pos); }
+    public static double getNodesDividerPos() { return state().getDouble(KEY_NODES_DIVIDER, 0.38); }
+    public static void setNodesDividerPos(double pos) { state().putDouble(KEY_NODES_DIVIDER, pos); }
 
     public static final class ChatScrollState {
         private final long anchorDbId;
@@ -209,7 +225,7 @@ public class AppPreferences {
     }
 
     private static Preferences chatScrollNode() {
-        return state.node(NODE_CHAT_SCROLL);
+        return state().node(NODE_CHAT_SCROLL);
     }
 
     private static String composeChatScrollKey(String ownerId, String chatId) {

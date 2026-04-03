@@ -77,6 +77,8 @@ public class DeviceState {
     private volatile MeshProtos.User ownerInfo;
     private volatile ByteString sessionPasskey;
     private final List<Runnable> ownerInfoListeners = new CopyOnWriteArrayList<>();
+    private volatile MeshProtos.DeviceMetadata deviceMetadata;
+    private final List<Runnable> deviceMetadataListeners = new CopyOnWriteArrayList<>();
 
     // Pending fixed position — saved by user, not yet confirmed by device.
     // Survives clear() to protect against stale position from config re-exchange.
@@ -296,6 +298,15 @@ public class DeviceState {
         fireMessageListeners();
     }
 
+    public void ensureDirectMessageThread(String peerNodeId) {
+        if (peerNodeId == null || peerNodeId.isEmpty()) { return; }
+        List<MeshMessage> existing = directMessages.putIfAbsent(
+                peerNodeId, Collections.synchronizedList(new ArrayList<>()));
+        if (existing == null) {
+            fireMessageListeners();
+        }
+    }
+
     public List<MeshMessage> getDirectMessages(String peerNodeId) {
         List<MeshMessage> list = directMessages.get(peerNodeId);
         return list != null ? list : Collections.emptyList();
@@ -490,6 +501,9 @@ public class DeviceState {
     public ByteString getSessionPasskey() { return sessionPasskey; }
     public void setSessionPasskey(ByteString sessionPasskey) { this.sessionPasskey = sessionPasskey; }
 
+    public MeshProtos.DeviceMetadata getDeviceMetadata() { return deviceMetadata; }
+    public void setDeviceMetadata(MeshProtos.DeviceMetadata deviceMetadata) { this.deviceMetadata = deviceMetadata; }
+
     /**
      * Listeners are notified when admin owner info arrives or when a fresh
      * {@code session_passkey} is received via any ADMIN_APP response.
@@ -500,6 +514,15 @@ public class DeviceState {
         for (Runnable r : ownerInfoListeners) {
             try { r.run(); }
             catch (Exception e) { log.error("Exception in owner info listener", e); }
+        }
+    }
+
+    public void addDeviceMetadataListener(Runnable listener) { deviceMetadataListeners.add(listener); }
+    public void removeDeviceMetadataListener(Runnable listener) { deviceMetadataListeners.remove(listener); }
+    public void fireDeviceMetadataListeners() {
+        for (Runnable r : deviceMetadataListeners) {
+            try { r.run(); }
+            catch (Exception e) { log.error("Exception in device metadata listener", e); }
         }
     }
 
@@ -597,6 +620,7 @@ public class DeviceState {
         failAllPendingPacketAcks("STATE_CLEARED");
         ownerInfo = null;
         sessionPasskey = null;
+        deviceMetadata = null;
         synchronized (telemetryHistory) {
             telemetryHistory.clear();
         }

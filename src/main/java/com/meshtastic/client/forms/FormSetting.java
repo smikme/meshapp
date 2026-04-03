@@ -13,11 +13,13 @@ import com.meshtastic.client.service.ConnectionManager;
 import com.meshtastic.client.service.ConfigSnapshotService;
 import com.meshtastic.client.service.MessageService;
 import com.meshtastic.client.service.NodeCacheService;
+import com.meshtastic.client.utils.ConfigValueFormatter;
 import com.meshtastic.client.system.Form;
 import com.meshtastic.client.utils.AppPreferences;
 import com.meshtastic.client.utils.ProtobufTreeBuilder;
 import com.meshtastic.client.utils.SvgIconLoader;
 import com.meshtastic.client.utils.SystemForm;
+import com.meshtastic.client.utils.TimeZoneSyncUtil;
 import javafx.application.Platform;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.collections.FXCollections;
@@ -31,6 +33,8 @@ import javafx.scene.control.ComboBox;
 import javafx.scene.control.ContentDisplay;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
+import javafx.scene.control.MenuButton;
+import javafx.scene.control.CheckMenuItem;
 import javafx.scene.control.ScrollPane;
 import javafx.scene.control.Separator;
 import javafx.scene.control.Tab;
@@ -61,6 +65,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.File;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -88,6 +94,12 @@ public class FormSetting extends Form {
      */
     private static final long BLE_CONFIG_SAVE_MESSAGE_DELAY_MS = 350;
     /**
+     * Дополнительная пауза перед commit после последнего mutating шага.
+     * Даже на TCP/Serial прошивке может потребоваться время, чтобы применить
+     * финальный set_config/set_module_config до reboot-triggering commit.
+     */
+    private static final long CONFIG_SAVE_PRE_COMMIT_SETTLE_DELAY_MS = 1_000;
+    /**
      * Сколько ждём после последнего admin-пакета перед handoff в reconnect flow.
      * Для BLE оставляем больше времени, чтобы commit успел дойти и устройство
      * начало собственный disconnect/reboot без одновременного ручного разрыва.
@@ -109,6 +121,7 @@ public class FormSetting extends Form {
 
     private DeviceState state;
     private ProtocolHandler handler;
+    private final Runnable connectionListener = () -> Platform.runLater(this::reloadConfigTree);
 
     // Cache tab
     private TableView<NodeData> cacheTable;
@@ -128,6 +141,7 @@ public class FormSetting extends Form {
     private Label configStatusLabel;
     private Button saveConfigBtn;
     private Button refreshConfigBtn;
+    private Button syncDateTimeBtn;
     private Button restartHardwareBtn;
     private Button shutdownHardwareBtn;
     private Tab configTab;
@@ -141,6 +155,12 @@ public class FormSetting extends Form {
 
     public FormSetting() {
         init();
+    }
+
+    @Override
+    public void formInit() {
+        ConnectionManager.getInstance().addListener(connectionListener);
+        reloadConfigTree();
     }
 
     private void init() {
@@ -197,6 +217,27 @@ public class FormSetting extends Form {
         }
         this.state = newState;
         this.handler = newHandler;
+    }
+
+    /**
+     * Сбрасывает локальный UI-контекст текущего устройства.
+     * Нужен при disconnect, чтобы редактор не держал stale-конфигурацию.
+     */
+    private void clearConfigContext() {
+        state = null;
+        handler = null;
+        observedConfigLoadFuture = null;
+        fullConfigRoot = null;
+        originalConfigs = new ArrayList<>();
+        originalModuleConfigs = new ArrayList<>();
+        originalChannels = new ArrayList<>();
+        workingChannels = new ArrayList<>();
+        if (configTree != null) {
+            configTree.setRoot(null);
+        }
+        if (configSearchField != null) {
+            configSearchField.clear();
+        }
     }
 
     /**
@@ -277,7 +318,7 @@ public class FormSetting extends Form {
     /**
      * Подключает диагностику к ACK, который не должен блокировать commit/reconnect flow.
      * <p>
-     * Последний mutating step и BLE commit не должны держать транзакцию открытой в UI:
+     * Финальный mutating step и BLE commit не должны держать транзакцию открытой в UI:
      * некоторые устройства рвут линк почти сразу после применения шага, и если ждать
      * этот ACK синхронно, commit просто не будет отправлен.
      */
@@ -302,20 +343,26 @@ public class FormSetting extends Form {
     /**
      * Возвращает паузу между двумя шагами save-flow.
      * <p>
-     * Для BLE обычной межшаговой задержки недостаточно перед {@code commitEditSettings},
-     * потому что {@code writeToRadio()} возвращается раньше фактического завершения
-     * CoreBluetooth write-with-response. Поэтому перед commit добавляется отдельное
-     * settle-окно после последнего mutating шага.
+     * Перед {@code commitEditSettings} любому транспорту даём отдельное settle-окно
+     * после последнего mutating шага. Для BLE оно длиннее, потому что
+     * {@code writeToRadio()} возвращается раньше фактического завершения
+     * CoreBluetooth write-with-response.
      */
     private long getConfigSaveInterTaskDelayMs(ConnectionType transport, int taskIndex, int totalTaskCount) {
-        long delayMs = transport == ConnectionType.BLE
-                ? BLE_CONFIG_SAVE_MESSAGE_DELAY_MS
-                : CONFIG_SAVE_MESSAGE_DELAY_MS;
+        long delayMs = baseConfigMessageDelayMs(transport);
         boolean nextTaskIsCommit = taskIndex + 1 == totalTaskCount - 1;
-        if (transport == ConnectionType.BLE && nextTaskIsCommit) {
-            delayMs += BLE_CONFIG_SAVE_PRE_COMMIT_SETTLE_DELAY_MS;
+        if (nextTaskIsCommit) {
+            delayMs += transport == ConnectionType.BLE
+                    ? BLE_CONFIG_SAVE_PRE_COMMIT_SETTLE_DELAY_MS
+                    : CONFIG_SAVE_PRE_COMMIT_SETTLE_DELAY_MS;
         }
         return delayMs;
+    }
+
+    private long baseConfigMessageDelayMs(ConnectionType transport) {
+        return transport == ConnectionType.BLE
+                ? BLE_CONFIG_SAVE_MESSAGE_DELAY_MS
+                : CONFIG_SAVE_MESSAGE_DELAY_MS;
     }
 
     /**
@@ -357,6 +404,11 @@ public class FormSetting extends Form {
         disableEffectsCb.selectedProperty().addListener((obs, old, val) ->
                 AppPreferences.setDisableEffects(val));
 
+        CheckBox softwareRenderingCb = new CheckBox("Включить программный рендеринг");
+        softwareRenderingCb.setSelected(AppPreferences.isSoftwareRendering());
+        softwareRenderingCb.selectedProperty().addListener((obs, old, val) ->
+                AppPreferences.setSoftwareRendering(val));
+
         CheckBox minimizeToTrayCb = new CheckBox("Минимизация в трей");
         minimizeToTrayCb.setSelected(AppPreferences.isMinimizeToTray());
         minimizeToTrayCb.selectedProperty().addListener((obs, old, val) ->
@@ -365,7 +417,8 @@ public class FormSetting extends Form {
         Label restartNote = new Label("Изменения вступят в силу после перезапуска приложения");
         restartNote.setStyle("-fx-opacity: 0.6; -fx-font-size: 11;");
 
-        VBox appearanceGroup = new VBox(8, appearanceHeader, disableEffectsCb, minimizeToTrayCb, restartNote);
+        VBox appearanceGroup = new VBox(8, appearanceHeader, disableEffectsCb, softwareRenderingCb,
+                minimizeToTrayCb, restartNote);
 
         // --- Группа «Интеграции» ---
         Label integrationsHeader = new Label("Интеграции");
@@ -549,6 +602,13 @@ public class FormSetting extends Form {
                 "/icons/refresh.svg",
                 this::reloadConfigTree);
 
+        syncDateTimeBtn = createConfigToolbarButton(
+                "Синхронизировать дату и время",
+                "Установить на ноде текущее время ПК и при необходимости обновить GMT",
+                "/icons/sync-time.svg",
+                this::onSyncDateTimeWithPc);
+        syncDateTimeBtn.setDisable(true);
+
         saveConfigBtn = createConfigToolbarButton(
                 "Сохранить на радио",
                 "Отправить изменённые параметры на устройство и применить их",
@@ -596,6 +656,7 @@ public class FormSetting extends Form {
 
         actionToolbar.getItems().addAll(
                 refreshConfigBtn,
+                syncDateTimeBtn,
                 saveConfigBtn,
                 new Separator(Orientation.VERTICAL),
                 restartHardwareBtn,
@@ -685,6 +746,226 @@ public class FormSetting extends Form {
         if (shutdownHardwareBtn != null) {
             shutdownHardwareBtn.setDisable(disabled);
         }
+    }
+
+    private void setSyncDateTimeButtonDisabled(boolean disabled) {
+        if (syncDateTimeBtn != null) {
+            syncDateTimeBtn.setDisable(disabled);
+        }
+    }
+
+    private void onSyncDateTimeWithPc() {
+        refreshConnection();
+        if (state == null || handler == null) {
+            configStatusLabel.setText("Нет подключения к радио");
+            setSyncDateTimeButtonDisabled(true);
+            return;
+        }
+
+        ConnectionEntry activeEntry = findActiveConnectionEntry();
+        if (activeEntry == null) {
+            configStatusLabel.setText("Нет активного подключения к радио");
+            setSyncDateTimeButtonDisabled(true);
+            return;
+        }
+        if (isConfigExchangeInProgress(activeEntry)) {
+            watchConfigExchangeCompletion(activeEntry);
+            configStatusLabel.setText("Дождитесь завершения чтения конфигурации");
+            return;
+        }
+
+        ConfigProtos.Config deviceConfig = findLoadedDeviceConfig();
+        if (deviceConfig == null || !deviceConfig.hasDevice()) {
+            configStatusLabel.setText("Секция device ещё не загружена. Сначала обновите конфигурацию.");
+            return;
+        }
+
+        DeviceState actionState = state;
+        ProtocolHandler actionHandler = handler;
+        Instant now = Instant.now();
+        ZoneOffset systemOffset = TimeZoneSyncUtil.systemOffset(now);
+        ZoneOffset nodeOffset = TimeZoneSyncUtil.resolveCurrentOffset(deviceConfig.getDevice().getTzdef(), now)
+                .orElse(null);
+        boolean gmtMatches = systemOffset.equals(nodeOffset);
+        String targetTzDef = TimeZoneSyncUtil.buildFixedGmtTzDef(systemOffset);
+        String systemGmtLabel = TimeZoneSyncUtil.formatGmtOffset(systemOffset);
+
+        Runnable startSync = () -> requestDateTimeSync(activeEntry, actionState, actionHandler,
+                deviceConfig, gmtMatches, targetTzDef, systemGmtLabel);
+
+        if (!gmtMatches) {
+            String nodeGmtLabel = nodeOffset != null
+                    ? TimeZoneSyncUtil.formatGmtOffset(nodeOffset)
+                    : "не определён";
+            StringBuilder message = new StringBuilder()
+                    .append("GMT ноды не совпадает с GMT ПК.")
+                    .append(" Нода: ").append(nodeGmtLabel).append(".")
+                    .append(" ПК: ").append(systemGmtLabel).append(".")
+                    .append(" Для обновления GMT будет изменён параметр device.tzdef, после чего устройство перезагрузится.");
+            if (hasPendingEditorChanges()) {
+                message.append(" Несохранённые изменения в редакторе будут потеряны.");
+            }
+            message.append(" Продолжить?");
+            ModalPane.showConfirm("Синхронизация времени и GMT", message.toString(), confirmed -> {
+                if (confirmed) {
+                    startSync.run();
+                }
+            });
+            return;
+        }
+
+        startSync.run();
+    }
+
+    private void requestDateTimeSync(ConnectionEntry activeEntry,
+                                     DeviceState actionState,
+                                     ProtocolHandler actionHandler,
+                                     ConfigProtos.Config deviceConfig,
+                                     boolean gmtMatches,
+                                     String targetTzDef,
+                                     String systemGmtLabel) {
+        String actionLabel = gmtMatches ? "синхронизации времени" : "синхронизации времени и GMT";
+        setSyncDateTimeButtonDisabled(true);
+        configStatusLabel.setText("Запрос session key для " + actionLabel + "...");
+
+        AtomicBoolean dispatchStarted = new AtomicBoolean(false);
+        Runnable[] listenerHolder = new Runnable[1];
+        listenerHolder[0] = () -> Platform.runLater(() -> {
+            actionState.removeOwnerInfoListener(listenerHolder[0]);
+            if (dispatchStarted.compareAndSet(false, true)) {
+                sendDateTimeSync(activeEntry, actionState, actionHandler,
+                        deviceConfig, gmtMatches, targetTzDef, systemGmtLabel);
+            }
+        });
+        actionState.addOwnerInfoListener(listenerHolder[0]);
+
+        Thread timeoutThread = new Thread(() -> {
+            try {
+                Thread.sleep(5000);
+            } catch (InterruptedException ignored) {
+                return;
+            }
+            Platform.runLater(() -> {
+                actionState.removeOwnerInfoListener(listenerHolder[0]);
+                if (dispatchStarted.compareAndSet(false, true)) {
+                    configStatusLabel.setText("Отправка синхронизации без session key...");
+                    sendDateTimeSync(activeEntry, actionState, actionHandler,
+                            deviceConfig, gmtMatches, targetTzDef, systemGmtLabel);
+                }
+            });
+        }, "time-sync-timeout");
+        timeoutThread.setDaemon(true);
+        timeoutThread.start();
+
+        MessageService.requestSessionPasskey(actionHandler, actionState);
+    }
+
+    private void sendDateTimeSync(ConnectionEntry activeEntry,
+                                  DeviceState actionState,
+                                  ProtocolHandler actionHandler,
+                                  ConfigProtos.Config deviceConfig,
+                                  boolean gmtMatches,
+                                  String targetTzDef,
+                                  String systemGmtLabel) {
+        configStatusLabel.setText(gmtMatches
+                ? "Синхронизация времени с ПК..."
+                : "Синхронизация времени и GMT с ПК...");
+
+        ConnectionType transport = activeEntry != null
+                ? activeEntry.getEffectiveType()
+                : ConnectionType.TCP;
+
+        Thread syncThread = new Thread(() -> {
+            try {
+                long epochSeconds = Instant.now().getEpochSecond();
+                waitForRequiredConfigSaveAck(
+                        MessageService.setTimeOnly(actionHandler, actionState, epochSeconds),
+                        "setTimeOnly");
+
+                if (!gmtMatches) {
+                    ConfigProtos.Config deviceTzConfig = buildDeviceTimeZoneConfig(deviceConfig, targetTzDef);
+
+                    Thread.sleep(baseConfigMessageDelayMs(transport));
+                    waitForRequiredConfigSaveAck(
+                            MessageService.beginEditSettings(actionHandler, actionState),
+                            "beginEditSettings");
+
+                    Thread.sleep(getConfigSaveInterTaskDelayMs(transport, 0, 3));
+                    CompletableFuture<MeshProtos.Routing.Error> setConfigAck =
+                            MessageService.setConfig(actionHandler, actionState, deviceTzConfig);
+                    observeDeferredConfigSaveAck(setConfigAck, "setConfig/DEVICE");
+
+                    Thread.sleep(getConfigSaveInterTaskDelayMs(transport, 1, 3));
+                    CompletableFuture<MeshProtos.Routing.Error> commitAck =
+                            MessageService.commitEditSettings(actionHandler, actionState);
+                    if (transport == ConnectionType.BLE) {
+                        observeDeferredConfigSaveAck(commitAck, "commitEditSettings");
+                    } else {
+                        waitForRequiredConfigSaveAck(commitAck, "commitEditSettings");
+                    }
+
+                    Platform.runLater(() -> configStatusLabel.setText(
+                            "Время и GMT синхронизированы с ПК. Устройство перезагрузится. Переподключение..."));
+
+                    Thread.sleep(getDevicePowerActionHandoffDelayMs(transport));
+                    if (activeEntry != null) {
+                        ConnectionManager.getInstance().disconnectForDeviceReboot(activeEntry.getId());
+                        Platform.runLater(() -> {
+                            state = null;
+                            handler = null;
+                            reloadConfigTree();
+                        });
+                    } else {
+                        Platform.runLater(() -> {
+                            setSyncDateTimeButtonDisabled(false);
+                            configStatusLabel.setText("Время и GMT синхронизированы с ПК (" + systemGmtLabel + ").");
+                        });
+                    }
+                    return;
+                }
+
+                Platform.runLater(() -> {
+                    setSyncDateTimeButtonDisabled(false);
+                    configStatusLabel.setText("Время ноды синхронизировано с ПК (" + systemGmtLabel + ").");
+                    Toast.show(Toast.Type.SUCCESS, "Время ноды синхронизировано с ПК");
+                });
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                log.warn("Time sync thread interrupted");
+                Platform.runLater(() -> setSyncDateTimeButtonDisabled(false));
+            } catch (Exception e) {
+                log.error("Time sync failed", e);
+                Platform.runLater(() -> {
+                    setSyncDateTimeButtonDisabled(false);
+                    configStatusLabel.setText("Ошибка синхронизации: "
+                            + (e.getMessage() != null ? e.getMessage() : "см. лог"));
+                });
+            }
+        }, "time-sync-sender");
+        syncThread.setDaemon(true);
+        syncThread.start();
+    }
+
+    private ConfigProtos.Config findLoadedDeviceConfig() {
+        for (ConfigProtos.Config config : originalConfigs) {
+            if (config.hasDevice()) {
+                return config;
+            }
+        }
+        return null;
+    }
+
+    private ConfigProtos.Config buildDeviceTimeZoneConfig(ConfigProtos.Config originalDeviceConfig, String tzdef) {
+        ConfigProtos.Config baseConfig = originalDeviceConfig != null
+                ? originalDeviceConfig
+                : ConfigProtos.Config.newBuilder().setDevice(ConfigProtos.Config.DeviceConfig.getDefaultInstance()).build();
+        ConfigProtos.Config.DeviceConfig.Builder deviceBuilder = baseConfig.hasDevice()
+                ? baseConfig.getDevice().toBuilder()
+                : ConfigProtos.Config.DeviceConfig.newBuilder();
+        deviceBuilder.setTzdef(tzdef);
+        return ConfigProtos.Config.newBuilder(baseConfig)
+                .setDevice(deviceBuilder.build())
+                .build();
     }
 
     private void onRestartHardware() {
@@ -1402,20 +1683,16 @@ public class FormSetting extends Form {
      * Загружает конфигурацию из DeviceState и строит дерево.
      */
     private void reloadConfigTree() {
-        // Обновить ссылку на state если не установлена
-        if (state == null || handler == null) {
-            refreshConnection();
-        }
+        refreshConnection();
 
         boolean connected = state != null && handler != null;
         setDevicePowerButtonsDisabled(!connected);
+        setSyncDateTimeButtonDisabled(!connected);
 
         if (!connected) {
+            clearConfigContext();
             configStatusLabel.setText("Нет подключения к радио");
             saveConfigBtn.setDisable(true);
-            originalChannels = new ArrayList<>();
-            workingChannels = new ArrayList<>();
-            configTree.setRoot(null);
             return;
         }
 
@@ -1495,11 +1772,14 @@ public class FormSetting extends Form {
             watchConfigExchangeCompletion(activeEntry);
             configStatusLabel.setText("Идёт чтение конфигурации с устройства...");
             saveConfigBtn.setDisable(true);
+            setSyncDateTimeButtonDisabled(true);
         } else if (originalConfigs.isEmpty() && originalModuleConfigs.isEmpty()) {
             configStatusLabel.setText("Конфигурация не получена от устройства");
             saveConfigBtn.setDisable(true);
+            setSyncDateTimeButtonDisabled(true);
         } else {
             saveConfigBtn.setDisable(false);
+            setSyncDateTimeButtonDisabled(findLoadedDeviceConfig() == null);
             int totalFields = countFields(root);
             configStatusLabel.setText("Загружено: %d секций, %d параметров".formatted(
                     originalConfigs.size() + originalModuleConfigs.size(), totalFields));
@@ -1855,9 +2135,8 @@ public class FormSetting extends Form {
                         if (waitForAckBeforeCommit) {
                             waitForRequiredConfigSaveAck(ackFuture, stepName);
                         } else {
-                            // The final payload step is followed only by commit. Requiring its routing
-                            // ACK here can block commit entirely on nodes that reboot or drop the link
-                            // immediately after applying the last config section.
+                            // On BLE the final payload step can trigger a disconnect before its routing
+                            // ACK is observed, so commit must still be allowed to proceed.
                             observeDeferredConfigSaveAck(ackFuture, stepName);
                         }
                     });
@@ -1915,7 +2194,8 @@ public class FormSetting extends Form {
                                 return;
                             }
                             saveFailed.set(true);
-                            log.error("Config save task {} failed", i, e);
+                            log.error("Config save task {} failed: {}", i,
+                                    e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName(), e);
                             Platform.runLater(() -> {
                                 saveConfigBtn.setDisable(false);
                                 configStatusLabel.setText("Ошибка сохранения: " +
@@ -2018,6 +2298,52 @@ public class FormSetting extends Form {
         }
     }
 
+    private void syncRepeatedEditorSlots(ConfigTreeItem editedItem) {
+        if (editedItem == null || editedItem.getFieldDescriptor() == null || !editedItem.getFieldDescriptor().isRepeated()) {
+            return;
+        }
+
+        TreeItem<ConfigTreeItem> root = currentEditorRoot();
+        if (root == null) {
+            return;
+        }
+
+        TreeItem<ConfigTreeItem> valueItem = findTreeItemByValue(root, editedItem);
+        if (valueItem == null || valueItem.getParent() == null) {
+            return;
+        }
+
+        ProtobufTreeBuilder.adjustRepeatedGroupAfterEdit(valueItem.getParent());
+        refreshConfigTreeView();
+    }
+
+    private TreeItem<ConfigTreeItem> findTreeItemByValue(TreeItem<ConfigTreeItem> root, ConfigTreeItem target) {
+        if (root == null || target == null) {
+            return null;
+        }
+        if (root.getValue() == target) {
+            return root;
+        }
+        for (TreeItem<ConfigTreeItem> child : root.getChildren()) {
+            TreeItem<ConfigTreeItem> match = findTreeItemByValue(child, target);
+            if (match != null) {
+                return match;
+            }
+        }
+        return null;
+    }
+
+    private void refreshConfigTreeView() {
+        if (configTree == null) {
+            return;
+        }
+        if (fullConfigRoot != null && configTree.getRoot() != fullConfigRoot) {
+            filterConfigTree(configSearchField != null ? configSearchField.getText() : null);
+            return;
+        }
+        configTree.refresh();
+    }
+
     /**
      * Получает номер активного oneof-поля у Config.
      */
@@ -2048,7 +2374,7 @@ public class FormSetting extends Form {
      * Кастомная ячейка для колонки «Значение» в TreeTableView.
      * Отображает CheckBox для boolean, ComboBox для enum, TextField для строк/чисел.
      */
-    private static final class ConfigValueCell extends TreeTableCell<ConfigTreeItem, ConfigTreeItem> {
+    private final class ConfigValueCell extends TreeTableCell<ConfigTreeItem, ConfigTreeItem> {
 
         @Override
         protected void updateItem(ConfigTreeItem item, boolean empty) {
@@ -2065,13 +2391,15 @@ public class FormSetting extends Form {
             }
 
             if (!item.isEditable()) {
-                setText(item.getValue() != null ? item.getValue().toString() : "");
+                setText(ConfigValueFormatter.formatValue(item));
                 return;
             }
 
             Class<?> type = item.getValueType();
 
-            if (type == Boolean.class) {
+            if (ConfigValueFormatter.hasBitmaskOptions(item)) {
+                setGraphic(createBitmaskEditor(item));
+            } else if (type == Boolean.class) {
                 CheckBox checkBox = new CheckBox();
                 checkBox.setSelected(item.getValue() instanceof Boolean b && b);
                 checkBox.selectedProperty().addListener((obs, oldVal, newVal) -> item.setValue(newVal));
@@ -2105,79 +2433,101 @@ public class FormSetting extends Form {
                 comboBox.setMaxWidth(Double.MAX_VALUE);
                 comboBox.valueProperty().addListener((obs, oldVal, newVal) -> item.setValue(newVal));
                 setGraphic(comboBox);
-            } else if (type == String.class) {
-                TextField textField = new TextField(item.getValue() != null ? item.getValue().toString() : "");
-                textField.setMaxWidth(Double.MAX_VALUE);
-                textField.focusedProperty().addListener((obs, wasFocused, isFocused) -> {
-                    if (!isFocused) { item.setValue(textField.getText()); }
-                });
-                textField.setOnAction(e -> item.setValue(textField.getText()));
-                setGraphic(textField);
-            } else if (type == Integer.class || type == Long.class) {
-                String val = item.getValue() != null ? item.getValue().toString() : "0";
-                TextField textField = new TextField(val);
-                textField.setMaxWidth(Double.MAX_VALUE);
-                textField.focusedProperty().addListener((obs, wasFocused, isFocused) -> {
-                    if (!isFocused) {
-                        try {
-                            if (type == Integer.class) {
-                                item.setValue(Integer.parseInt(textField.getText()));
-                            } else {
-                                item.setValue(Long.parseLong(textField.getText()));
-                            }
-                            textField.setStyle("");
-                        } catch (NumberFormatException ex) {
-                            textField.setStyle("-fx-border-color: #E53935;");
-                        }
-                    }
-                });
-                textField.setOnAction(e -> {
-                    try {
-                        if (type == Integer.class) {
-                            item.setValue(Integer.parseInt(textField.getText()));
-                        } else {
-                            item.setValue(Long.parseLong(textField.getText()));
-                        }
-                        textField.setStyle("");
-                    } catch (NumberFormatException ex) {
-                        textField.setStyle("-fx-border-color: #E53935;");
-                    }
-                });
-                setGraphic(textField);
-            } else if (type == Float.class || type == Double.class) {
-                String val = item.getValue() != null ? item.getValue().toString() : "0.0";
-                TextField textField = new TextField(val);
-                textField.setMaxWidth(Double.MAX_VALUE);
-                textField.focusedProperty().addListener((obs, wasFocused, isFocused) -> {
-                    if (!isFocused) {
-                        try {
-                            if (type == Float.class) {
-                                item.setValue(Float.parseFloat(textField.getText()));
-                            } else {
-                                item.setValue(Double.parseDouble(textField.getText()));
-                            }
-                            textField.setStyle("");
-                        } catch (NumberFormatException ex) {
-                            textField.setStyle("-fx-border-color: #E53935;");
-                        }
-                    }
-                });
-                textField.setOnAction(e -> {
-                    try {
-                        if (type == Float.class) {
-                            item.setValue(Float.parseFloat(textField.getText()));
-                        } else {
-                            item.setValue(Double.parseDouble(textField.getText()));
-                        }
-                        textField.setStyle("");
-                    } catch (NumberFormatException ex) {
-                        textField.setStyle("-fx-border-color: #E53935;");
-                    }
-                });
-                setGraphic(textField);
+            } else if (type == String.class
+                    || type == Integer.class
+                    || type == Long.class
+                    || type == Float.class
+                    || type == Double.class) {
+                setGraphic(createTextEditor(item));
             } else {
                 // Fallback — просто текст
-                setText(item.getValue() != null ? item.getValue().toString() : "");
+                setText(ConfigValueFormatter.formatValue(item));
+            }
+        }
+
+        /**
+         * Создаёт текстовый редактор для строковых и числовых полей.
+         * Если для поля подключён форматтер, в текстовое поле подставляется
+         * уже человекочитаемое представление значения.
+         */
+        private TextField createTextEditor(ConfigTreeItem item) {
+            TextField textField = new TextField(ConfigValueFormatter.formatValue(item));
+            textField.setMaxWidth(Double.MAX_VALUE);
+
+            String prompt = ConfigValueFormatter.promptText(item);
+            if (prompt != null && !prompt.isBlank()) {
+                textField.setPromptText(prompt);
+            }
+
+            String hint = ConfigValueFormatter.validationHint(item);
+            if (hint != null && !hint.isBlank()) {
+                textField.setTooltip(new Tooltip(hint));
+            }
+
+            textField.focusedProperty().addListener((obs, wasFocused, isFocused) -> {
+                if (!isFocused) {
+                    commitTextValue(item, textField);
+                }
+            });
+            textField.setOnAction(e -> commitTextValue(item, textField));
+            return textField;
+        }
+
+        /**
+         * Создаёт selector для bitmask-полей, которые хранятся как число,
+         * но по смыслу состоят из набора включаемых флагов.
+         */
+        private MenuButton createBitmaskEditor(ConfigTreeItem item) {
+            MenuButton menuButton = new MenuButton();
+            menuButton.setMaxWidth(Double.MAX_VALUE);
+            menuButton.setText(ConfigValueFormatter.formatValue(item));
+
+            List<ConfigValueFormatter.BitmaskOption> options = ConfigValueFormatter.bitmaskOptions(item);
+            List<CheckMenuItem> menuItems = new ArrayList<>();
+            for (ConfigValueFormatter.BitmaskOption option : options) {
+                CheckMenuItem menuItem = new CheckMenuItem(option.label());
+                menuItem.setSelected(ConfigValueFormatter.isBitmaskOptionSelected(item, option));
+                menuItems.add(menuItem);
+                menuButton.getItems().add(menuItem);
+            }
+
+            for (int i = 0; i < menuItems.size(); i++) {
+                menuItems.get(i).selectedProperty().addListener((obs, oldVal, newVal) -> {
+                    List<ConfigValueFormatter.BitmaskOption> selectedOptions = new ArrayList<>();
+                    for (int j = 0; j < menuItems.size(); j++) {
+                        if (menuItems.get(j).isSelected()) {
+                            selectedOptions.add(options.get(j));
+                        }
+                    }
+                    item.setValue(ConfigValueFormatter.buildBitmaskValue(item, selectedOptions));
+                    menuButton.setText(ConfigValueFormatter.formatValue(item));
+                });
+            }
+
+            return menuButton;
+        }
+
+        /**
+         * Применяет текст из редактора к модели поля. При успешном парсинге
+         * нормализует отображение значения, при ошибке подсвечивает поле.
+         */
+        private void commitTextValue(ConfigTreeItem item, TextField textField) {
+            try {
+                if (item.getFieldDescriptor() != null
+                        && item.getFieldDescriptor().isRepeated()
+                        && textField.getText().trim().isEmpty()) {
+                    item.setValue(null);
+                    syncRepeatedEditorSlots(item);
+                    textField.setText("");
+                    textField.setStyle("");
+                    return;
+                }
+                item.setValue(ConfigValueFormatter.parseTextValue(item, textField.getText()));
+                syncRepeatedEditorSlots(item);
+                textField.setText(ConfigValueFormatter.formatValue(item));
+                textField.setStyle("");
+            } catch (IllegalArgumentException ex) {
+                textField.setStyle("-fx-border-color: #E53935;");
             }
         }
     }

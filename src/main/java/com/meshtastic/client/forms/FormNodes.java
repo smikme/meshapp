@@ -500,12 +500,18 @@ public class FormNodes extends Form {
 
     private void updateFilterPredicate() {
         String query = searchField.getText() == null ? "" : searchField.getText().trim().toLowerCase(Locale.ROOT);
+        boolean hasQuery = !query.isEmpty();
         FavoriteNodeService favService = FavoriteNodeService.getInstance();
         IgnoredNodeService ignService = IgnoredNodeService.getInstance();
         long now = System.currentTimeMillis() / 1000;
         filteredNodes.setPredicate(node -> {
+            // Текстовый поиск применяем первым, чтобы во время поиска
+            // можно было находить ноды даже без имени.
+            if (!matchesSearchQuery(node, query)) {
+                return false;
+            }
             // Фильтр неизвестных нод (без имени)
-            if (!includeUnknownNames && !node.hasName()) {
+            if (!includeUnknownNames && !node.hasName() && !hasQuery) {
                 return false;
             }
             // Фильтр офлайн-нод (не слышны более 2 часов)
@@ -524,13 +530,28 @@ public class FormNodes extends Form {
             if (showIgnoredOnly && !ignService.isIgnored(node.getNodeId())) {
                 return false;
             }
-            // Текстовый поиск
-            if (query.isEmpty()) { return true; }
-            if (node.getLongName() != null && node.getLongName().toLowerCase(Locale.ROOT).contains(query)) { return true; }
-            if (node.getShortName() != null && node.getShortName().toLowerCase(Locale.ROOT).contains(query)) { return true; }
-            if (node.getNodeId() != null && node.getNodeId().toLowerCase(Locale.ROOT).contains(query)) { return true; }
-            return String.valueOf(node.getNodeNum()).contains(query);
+            return true;
         });
+        countBadge.setText(String.valueOf(filteredNodes.size()));
+    }
+
+    static boolean matchesSearchQuery(NodeData node, String query) {
+        if (node == null) { return false; }
+        if (query == null || query.isBlank()) { return true; }
+
+        String normalized = query.trim().toLowerCase(Locale.ROOT);
+        String legacyNodeId = String.format(Locale.ROOT, "!%08x", node.getNodeNum());
+        String hexNodeNum = String.format(Locale.ROOT, "%08x", node.getNodeNum());
+        String decimalNodeNum = String.valueOf(node.getNodeNum());
+
+        return containsIgnoreCase(node.getLongName(), normalized)
+                || containsIgnoreCase(node.getShortName(), normalized)
+                || containsIgnoreCase(node.getNodeId(), normalized)
+                || containsIgnoreCase(legacyNodeId, normalized)
+                || containsIgnoreCase(hexNodeNum, normalized)
+                || containsIgnoreCase(decimalNodeNum, normalized)
+                || containsIgnoreCase(node.getRole(), normalized)
+                || containsIgnoreCase(node.getHwModel(), normalized);
     }
 
     // ==================== Node list cell ====================
@@ -859,5 +880,9 @@ public class FormNodes extends Form {
         if (n1 == 1) { return "день"; }
         if (n1 >= 2 && n1 <= 4) { return "дня"; }
         return "дней";
+    }
+
+    private static boolean containsIgnoreCase(String text, String query) {
+        return text != null && query != null && text.toLowerCase(Locale.ROOT).contains(query);
     }
 }

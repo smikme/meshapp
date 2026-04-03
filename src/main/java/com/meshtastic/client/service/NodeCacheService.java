@@ -86,6 +86,8 @@ public final class NodeCacheService {
                         voltage       REAL,
                         hops_away     INT,
                         channel       INT DEFAULT 0,
+                        public_key    VARBINARY,
+                        unmessagable  BOOLEAN,
                         favorite      BOOLEAN DEFAULT FALSE,
                         ignored       BOOLEAN DEFAULT FALSE
                     )
@@ -135,6 +137,10 @@ public final class NodeCacheService {
                 try { stmt.execute("ALTER TABLE telemetry_history ADD COLUMN hop_limit INT DEFAULT 0"); } catch (SQLException ignored) {}
                 // Migration: channel column in nodes table
                 try { stmt.execute("ALTER TABLE nodes ADD COLUMN channel INT DEFAULT 0"); } catch (SQLException ignored) {}
+                // Migration: public_key column in nodes table
+                try { stmt.execute("ALTER TABLE nodes ADD COLUMN public_key VARBINARY"); } catch (SQLException ignored) {}
+                // Migration: is_unmessagable flag in nodes table
+                try { stmt.execute("ALTER TABLE nodes ADD COLUMN unmessagable BOOLEAN"); } catch (SQLException ignored) {}
                 // Migration: ignored column (v5 migration may not have run on fresh-install DBs)
                 try { stmt.execute("ALTER TABLE nodes ADD COLUMN IF NOT EXISTS ignored BOOLEAN DEFAULT FALSE"); } catch (SQLException ignored) {}
 
@@ -150,8 +156,8 @@ public final class NodeCacheService {
             mergeStmt = dbConnection.prepareStatement("""
                 MERGE INTO nodes (node_id, node_num, long_name, short_name, role, hw_model,
                                   latitude, longitude, altitude, snr, last_heard,
-                                  battery_level, voltage, hops_away, channel)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                  battery_level, voltage, hops_away, channel, public_key, unmessagable)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """);
 
             insertTelemetryStmt = dbConnection.prepareStatement("""
@@ -330,14 +336,21 @@ public final class NodeCacheService {
 
     /**
      * Обогащает bare-ноду (без имени) данными из кэша/H2.
-     * Заполняет только identity-поля (longName, shortName, role, hwModel),
+     * Заполняет только identity-поля (longName, shortName, role, hwModel, publicKey),
      * если они отсутствуют у ноды. Телеметрию и позицию не трогает —
      * у ноды уже есть свежие данные от устройства.
      *
      * @param node нода из DeviceState для обогащения
      */
     public void enrichFromCache(NodeData node) {
-        if (node == null || node.hasName()) { return; }
+        if (node == null) { return; }
+        boolean needsIdentity = !node.hasName()
+                || node.getRole() == null
+                || node.getHwModel() == null
+                || node.getPublicKey() == null
+                || node.getPublicKey().length == 0
+                || node.getUnmessagable() == null;
+        if (!needsIdentity) { return; }
 
         String nodeId = node.getNodeId();
         NodeData cached = cache.get(nodeId);
@@ -349,7 +362,7 @@ public final class NodeCacheService {
                 log.debug("enrichFromCache: {} not found in H2", nodeId);
             }
         }
-        if (cached == null || !cached.hasName()) { return; }
+        if (cached == null) { return; }
 
         if ((node.getLongName() == null || node.getLongName().isEmpty())
                 && cached.getLongName() != null && !cached.getLongName().isEmpty()) {
@@ -364,6 +377,13 @@ public final class NodeCacheService {
         }
         if (node.getHwModel() == null && cached.getHwModel() != null) {
             node.setHwModel(cached.getHwModel());
+        }
+        if ((node.getPublicKey() == null || node.getPublicKey().length == 0)
+                && cached.getPublicKey() != null && cached.getPublicKey().length > 0) {
+            node.setPublicKey(cached.getPublicKey().clone());
+        }
+        if (node.getUnmessagable() == null && cached.getUnmessagable() != null) {
+            node.setUnmessagable(cached.getUnmessagable());
         }
     }
 
@@ -974,6 +994,13 @@ public final class NodeCacheService {
 
         if (src.getChannel() != 0) { dst.setChannel(src.getChannel()); }
 
+        if (src.getPublicKey() != null && src.getPublicKey().length > 0) {
+            dst.setPublicKey(src.getPublicKey().clone());
+        }
+        if (src.getUnmessagable() != null) {
+            dst.setUnmessagable(src.getUnmessagable());
+        }
+
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -1075,6 +1102,17 @@ public final class NodeCacheService {
             ps.setNull(14, Types.INTEGER);
         }
         ps.setInt(15, n.getChannel());
+        byte[] publicKey = n.getPublicKey();
+        if (publicKey != null && publicKey.length > 0) {
+            ps.setBytes(16, publicKey);
+        } else {
+            ps.setNull(16, Types.VARBINARY);
+        }
+        if (n.getUnmessagable() != null) {
+            ps.setBoolean(17, n.getUnmessagable());
+        } else {
+            ps.setNull(17, Types.BOOLEAN);
+        }
     }
 
     private static int parseNodeNum(String nodeId) {
@@ -1109,6 +1147,14 @@ public final class NodeCacheService {
             node.setHopsAway(hopsAway);
         }
         node.setChannel(rs.getInt("channel"));
+        byte[] publicKey = rs.getBytes("public_key");
+        if (publicKey != null && publicKey.length > 0) {
+            node.setPublicKey(publicKey);
+        }
+        boolean unmessagable = rs.getBoolean("unmessagable");
+        if (!rs.wasNull()) {
+            node.setUnmessagable(unmessagable);
+        }
         return node;
     }
 }

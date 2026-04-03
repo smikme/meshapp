@@ -71,6 +71,59 @@ class MessageDbServiceTest {
     }
 
     @Test
+    void loadAfterSupportsForwardPaginationWithLimit() {
+        MeshMessage first = message("first", 1, 10);
+        MeshMessage second = message("second", 2, 20);
+        MeshMessage third = message("third", 3, 30);
+        MeshMessage fourth = message("fourth", 4, 40);
+
+        service.save(first, "channel", "7", "!owner");
+        service.save(second, "channel", "7", "!owner");
+        service.save(third, "channel", "7", "!owner");
+        service.save(fourth, "channel", "7", "!owner");
+
+        List<MeshMessage> page = service.loadAfter("channel", "7", first.getDbId(), 2, "!owner");
+
+        assertEquals(List.of("second", "third"), page.stream().map(MeshMessage::getText).toList());
+        assertEquals(List.of("fourth"),
+                service.loadAfter("channel", "7", page.getLast().getDbId(), "!owner")
+                        .stream()
+                        .map(MeshMessage::getText)
+                        .toList());
+    }
+
+    @Test
+    void unreadEligibleCountIncludesIncomingSystemMessagesButExcludesOutgoing() {
+        MeshMessage incoming = message("incoming", 10, 10);
+        MeshMessage outgoing = new MeshMessage("!00000001", "!ffffffff", 0, "outgoing", 20, true);
+        outgoing.setPacketId(11);
+        MeshMessage systemIncoming = message("system", 12, 30);
+        systemIncoming.setSystemMessage(true);
+
+        service.save(incoming, "channel", "0", "!owner");
+        service.save(outgoing, "channel", "0", "!owner");
+        service.save(systemIncoming, "channel", "0", "!owner");
+
+        assertEquals(2, service.getUnreadEligibleMessageCount("channel", "0", "!owner"));
+    }
+
+    @Test
+    void loadAllReadCountsNormalizesLegacyCountsToUnreadEligibleMessages() {
+        MeshMessage incoming = message("incoming", 21, 10);
+        MeshMessage outgoing = new MeshMessage("!00000001", "!ffffffff", 0, "outgoing", 20, true);
+        outgoing.setPacketId(22);
+        MeshMessage systemIncoming = message("system", 23, 30);
+        systemIncoming.setSystemMessage(true);
+
+        service.save(incoming, "channel", "0", "!owner");
+        service.save(outgoing, "channel", "0", "!owner");
+        service.save(systemIncoming, "channel", "0", "!owner");
+        service.saveReadCount("channel", "0", 3, "!owner");
+
+        assertEquals(2, service.loadAllReadCounts("!owner").get("ch:0"));
+    }
+
+    @Test
     void updateStatusAndFindByPacketIdReturnPersistedMetadata() {
         MeshMessage message = message("payload", 777, 10);
         message.setStatus(MeshMessage.DeliveryStatus.SENDING);

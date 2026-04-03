@@ -62,6 +62,29 @@ public class MeshApp extends Application {
         return 0;
     }
 
+    private static String resolveOperatingSystemName() {
+        return System.getProperty("os.name", "unknown").trim();
+    }
+
+    private static String resolveOperatingSystemVersion() {
+        return System.getProperty("os.version", "unknown").trim();
+    }
+
+    private static String resolveOperatingSystemArch() {
+        return System.getProperty("os.arch", "unknown").trim();
+    }
+
+    private static void logStartupContext() {
+        log.info(
+                "Starting MeshApp version {} (build {}) on {} {} ({})",
+                APPLICATION_VERSION,
+                VERSION_CODE,
+                resolveOperatingSystemName(),
+                resolveOperatingSystemVersion(),
+                resolveOperatingSystemArch()
+        );
+    }
+
     private static Stage primaryStage;
 
     @Override
@@ -194,8 +217,13 @@ public class MeshApp extends Application {
     }
 
     public static void main(String[] args) {
+        AppPreferences.init();
+        if (System.getProperty("prism.order") == null && AppPreferences.isSoftwareRendering()) {
+            System.setProperty("prism.order", "sw");
+        }
         Thread.setDefaultUncaughtExceptionHandler((thread, throwable) ->
                 log.error("Uncaught exception in thread '{}'", thread.getName(), throwable));
+        logStartupContext();
         launch(args);
     }
 }

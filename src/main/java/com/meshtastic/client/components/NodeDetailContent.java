@@ -74,10 +74,15 @@ public class NodeDetailContent extends HBox {
         privateChatBtn.setGraphic(privateChatIcon);
         privateChatBtn.setContentDisplay(ContentDisplay.GRAPHIC_ONLY);
         privateChatBtn.getStyleClass().add("drawer-toolbar-button");
-        privateChatBtn.setTooltip(new Tooltip("Приватный чат"));
-
         boolean hasPublicKey = node.getPublicKey() != null && node.getPublicKey().length > 0;
-        privateChatBtn.setDisable(!hasPublicKey);
+        boolean canDirectMessage = hasPublicKey && !node.isUnmessagable();
+        String privateChatTooltip = node.isUnmessagable()
+                ? "Нода объявила, что не принимает личные сообщения"
+                : hasPublicKey
+                ? "Приватный чат"
+                : "Приватный чат недоступен: у ноды нет публичного ключа";
+        privateChatBtn.setTooltip(new Tooltip(privateChatTooltip));
+        privateChatBtn.setDisable(!canDirectMessage);
 
         privateChatBtn.setOnAction(e -> {
             if (onBeforeNavigate != null) {
@@ -88,22 +93,23 @@ public class NodeDetailContent extends HBox {
             formChat.openDirectChat(node.getNodeId(), node);
         });
 
-        // Кнопка «Обновить ноду» — запрос информации по радио
+        // Кнопка «Обновить ноду» — запрос информации по радио + обмен User-данными
         SVGPath refreshIcon = SvgIconLoader.load("/drawer/icon/refresh-node.svg", 22);
         Button refreshBtn = new Button();
         refreshBtn.setGraphic(refreshIcon);
         refreshBtn.setContentDisplay(ContentDisplay.GRAPHIC_ONLY);
         refreshBtn.getStyleClass().add("drawer-toolbar-button");
-        refreshBtn.setTooltip(new Tooltip("Обновить информацию о ноде"));
+        refreshBtn.setTooltip(new Tooltip("Обновить информацию о ноде и обменяться данными пользователя"));
         refreshBtn.setDisable(handler == null || state == null);
         refreshBtn.setOnAction(e -> {
             if (protocolHandler != null && this.state != null) {
                 ModalPane.showConfirm(
                         "Обновить информацию?",
-                        "Запросить обновление информации о ноде \"" + displayName + "\" по радио?",
+                        "Запросить обновление информации о ноде \"" + displayName
+                                + "\" и обменяться пользовательскими данными по радио?",
                         confirmed -> {
                             if (confirmed) {
-                                MessageService.requestNodeInfo(protocolHandler, this.state, nodeNum);
+                                MessageService.exchangeNodeUserInfo(protocolHandler, this.state, nodeNum);
                             }
                         }
                 );

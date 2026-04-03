@@ -1,6 +1,7 @@
 package com.meshtastic.client.service;
 
 import com.meshtastic.client.model.DeviceState;
+import com.meshtastic.client.utils.ConfigDebugFormatter;
 import org.meshtastic.proto.*;
 import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.model.TelemetryEntry;
@@ -151,6 +152,9 @@ public class ConfigExchangeService implements FromRadioListener {
             if (!user.getPublicKey().isEmpty()) {
                 node.setPublicKey(user.getPublicKey().toByteArray());
             }
+            if (user.hasIsUnmessagable()) {
+                node.setUnmessagable(user.getIsUnmessagable());
+            }
         }
 
         if (nodeInfo.hasPosition()) {
@@ -227,6 +231,9 @@ public class ConfigExchangeService implements FromRadioListener {
 
     @Override
     public void onConfig(ConfigProtos.Config config) {
+        if (config.getPayloadVariantCase() == ConfigProtos.Config.PayloadVariantCase.LORA) {
+            log.debug("onConfig LORA ignore_incoming {}", ConfigDebugFormatter.describeIgnoreIncoming(config));
+        }
         deviceState.addConfig(config);
     }
 
@@ -248,14 +255,14 @@ public class ConfigExchangeService implements FromRadioListener {
         for (ChannelProtos.Channel channel : deviceState.getChannels()) {
             if (channel.getRole() == ChannelProtos.Channel.Role.DISABLED) { continue; }
             String chKey = String.valueOf(channel.getIndex());
-            int total = db.getMessageCount("channel", chKey, ownerNodeId);
+            int total = db.getUnreadEligibleMessageCount("channel", chKey, ownerNodeId);
             int read = readCounts.getOrDefault("ch:" + channel.getIndex(), 0);
             if (total > read) { hasUnread = true; break; }
         }
 
         if (!hasUnread) {
             for (String peerNodeId : db.getDistinctDmPeers(ownerNodeId)) {
-                int total = db.getMessageCount("dm", peerNodeId, ownerNodeId);
+                int total = db.getUnreadEligibleMessageCount("dm", peerNodeId, ownerNodeId);
                 int read = readCounts.getOrDefault("dm:" + peerNodeId, 0);
                 if (total > read) { hasUnread = true; break; }
             }

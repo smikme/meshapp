@@ -12,6 +12,8 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ProtobufTreeBuilderTest {
@@ -70,6 +72,107 @@ class ProtobufTreeBuilderTest {
         assertEquals("", adminKeysGroup.getChildren().get(3).getValue().getValue());
     }
 
+    @Test
+    void buildConfigTreeShowsIgnoreIncomingAsSeparateSlots() {
+        ConfigProtos.Config config = loraConfig(0x9E755AF0L, 0x12345678L);
+
+        TreeItem<ConfigTreeItem> root = ProtobufTreeBuilder.buildConfigTree(List.of(config));
+        TreeItem<ConfigTreeItem> loraSection = root.getChildren().get(0);
+        TreeItem<ConfigTreeItem> ignoreIncomingGroup = findChildByFieldName(loraSection, "ignore_incoming");
+
+        assertNotNull(ignoreIncomingGroup);
+        assertTrue(ignoreIncomingGroup.getValue().isCategory());
+        assertTrue(ignoreIncomingGroup.getChildren().size() >= 3);
+        assertEquals((int) 0x9E755AF0L, ignoreIncomingGroup.getChildren().get(0).getValue().getValue());
+        assertEquals(0x12345678, ignoreIncomingGroup.getChildren().get(1).getValue().getValue());
+        assertNull(ignoreIncomingGroup.getChildren().get(2).getValue().getValue());
+    }
+
+    @Test
+    void rebuildConfigAppliesIgnoreIncomingAdditionsAndRemovals() {
+        ConfigProtos.Config config = loraConfig(0x9E755AF0L, 0x12345678L);
+
+        TreeItem<ConfigTreeItem> root = ProtobufTreeBuilder.buildConfigTree(List.of(config));
+        TreeItem<ConfigTreeItem> loraSection = root.getChildren().get(0);
+        TreeItem<ConfigTreeItem> ignoreIncomingGroup = findChildByFieldName(loraSection, "ignore_incoming");
+        assertNotNull(ignoreIncomingGroup);
+
+        ignoreIncomingGroup.getChildren().get(0).getValue().setValue(null);
+        ignoreIncomingGroup.getChildren().get(2).getValue().setValue((int) 0xCAFEBABEL);
+
+        ConfigProtos.Config rebuilt = ProtobufTreeBuilder.rebuildConfig(loraSection, config);
+        assertEquals(List.of(0x12345678, (int) 0xCAFEBABEL), rebuilt.getLora().getIgnoreIncomingList());
+    }
+
+    @Test
+    void applyMessageToTreeResizesIgnoreIncomingSlots() {
+        ConfigProtos.Config baseConfig = loraConfig(0x9E755AF0L);
+        ConfigProtos.Config updatedConfig = loraConfig(0x9E755AF0L, 0x12345678L, 0xCAFEBABEL);
+
+        TreeItem<ConfigTreeItem> root = ProtobufTreeBuilder.buildConfigTree(List.of(baseConfig));
+        TreeItem<ConfigTreeItem> loraSection = root.getChildren().get(0);
+        TreeItem<ConfigTreeItem> ignoreIncomingGroup = findChildByFieldName(loraSection, "ignore_incoming");
+        assertNotNull(ignoreIncomingGroup);
+
+        ProtobufTreeBuilder.applyMessageToTree(loraSection, updatedConfig.getLora());
+
+        assertTrue(ignoreIncomingGroup.getChildren().size() >= 4);
+        assertEquals((int) 0x9E755AF0L, ignoreIncomingGroup.getChildren().get(0).getValue().getValue());
+        assertEquals(0x12345678, ignoreIncomingGroup.getChildren().get(1).getValue().getValue());
+        assertEquals((int) 0xCAFEBABEL, ignoreIncomingGroup.getChildren().get(2).getValue().getValue());
+        assertNull(ignoreIncomingGroup.getChildren().get(3).getValue().getValue());
+    }
+
+    @Test
+    void adjustRepeatedGroupAfterEditAppendsIgnoreIncomingSlotWithoutResettingModificationState() {
+        ConfigProtos.Config config = loraConfig(0x9E755AF0L);
+
+        TreeItem<ConfigTreeItem> root = ProtobufTreeBuilder.buildConfigTree(List.of(config));
+        TreeItem<ConfigTreeItem> loraSection = root.getChildren().get(0);
+        TreeItem<ConfigTreeItem> ignoreIncomingGroup = findChildByFieldName(loraSection, "ignore_incoming");
+        assertNotNull(ignoreIncomingGroup);
+        assertEquals(2, ignoreIncomingGroup.getChildren().size());
+
+        ConfigTreeItem editedSlot = ignoreIncomingGroup.getChildren().get(1).getValue();
+        editedSlot.setValue(0x12345678);
+
+        ProtobufTreeBuilder.adjustRepeatedGroupAfterEdit(ignoreIncomingGroup);
+
+        assertEquals(3, ignoreIncomingGroup.getChildren().size());
+        assertEquals((int) 0x9E755AF0L, ignoreIncomingGroup.getChildren().get(0).getValue().getValue());
+        assertEquals(0x12345678, editedSlot.getValue());
+        assertTrue(editedSlot.isModified());
+        assertSame(editedSlot, ignoreIncomingGroup.getChildren().get(1).getValue());
+        assertNull(ignoreIncomingGroup.getChildren().get(2).getValue().getValue());
+    }
+
+    @Test
+    void adjustRepeatedGroupAfterEditTrimsExtraTrailingIgnoreIncomingSlots() {
+        ConfigProtos.Config config = loraConfig(0x9E755AF0L);
+
+        TreeItem<ConfigTreeItem> root = ProtobufTreeBuilder.buildConfigTree(List.of(config));
+        TreeItem<ConfigTreeItem> loraSection = root.getChildren().get(0);
+        TreeItem<ConfigTreeItem> ignoreIncomingGroup = findChildByFieldName(loraSection, "ignore_incoming");
+        assertNotNull(ignoreIncomingGroup);
+
+        ignoreIncomingGroup.getChildren().add(new TreeItem<>(new ConfigTreeItem(
+                "Ignore incoming 3",
+                "ignore_incoming",
+                null,
+                Integer.class,
+                null,
+                ignoreIncomingGroup.getValue().getFieldDescriptor(),
+                "config",
+                ignoreIncomingGroup.getValue().getConfigVariantNumber())));
+
+        assertEquals(3, ignoreIncomingGroup.getChildren().size());
+
+        ProtobufTreeBuilder.adjustRepeatedGroupAfterEdit(ignoreIncomingGroup);
+
+        assertEquals(2, ignoreIncomingGroup.getChildren().size());
+        assertNull(ignoreIncomingGroup.getChildren().get(1).getValue().getValue());
+    }
+
     private static TreeItem<ConfigTreeItem> findChildByFieldName(TreeItem<ConfigTreeItem> parent, String fieldName) {
         for (TreeItem<ConfigTreeItem> child : parent.getChildren()) {
             ConfigTreeItem item = child.getValue();
@@ -87,6 +190,16 @@ class ProtobufTreeBuilderTest {
         }
         return ConfigProtos.Config.newBuilder()
                 .setSecurity(security.build())
+                .build();
+    }
+
+    private static ConfigProtos.Config loraConfig(long... ignoredNodeNums) {
+        ConfigProtos.Config.LoRaConfig.Builder lora = ConfigProtos.Config.LoRaConfig.newBuilder();
+        for (long ignoredNodeNum : ignoredNodeNums) {
+            lora.addIgnoreIncoming((int) ignoredNodeNum);
+        }
+        return ConfigProtos.Config.newBuilder()
+                .setLora(lora.build())
                 .build();
     }
 

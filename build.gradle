@@ -7,10 +7,11 @@ plugins {
 }
 
 application {
-	mainClass = 'com.meshtastic.client.MeshApp'
+	mainClass = 'com.meshtastic.client.MeshAppLauncher'
 	def jvmArgs = [
 		'-Xmx256m',
 		'-Xms256m',
+//		'-Dprism.order=sw',
 		'--add-opens', 'javafx.graphics/javafx.stage=ALL-UNNAMED',
 		'--add-opens', 'javafx.graphics/com.sun.javafx.tk=ALL-UNNAMED',
 		'--add-opens', 'javafx.graphics/com.sun.javafx.tk.quantum=ALL-UNNAMED',
@@ -26,7 +27,7 @@ application {
 }
 
 javafx {
-	version = "21.0.7"
+	version = "21.0.10"
 	modules = ['javafx.controls']
 }
 
@@ -60,6 +61,7 @@ dependencies {
 	implementation 'net.java.dev.jna:jna:5.16.0'
 	implementation 'net.java.dev.jna:jna-platform:5.16.0'
 	testImplementation 'org.junit.jupiter:junit-jupiter:5.11.4'
+	testRuntimeOnly 'org.testfx:openjfx-monocle:21.0.2'
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
@@ -301,6 +303,16 @@ tasks.withType(JavaCompile).configureEach {
 
 tasks.named('test') {
 	useJUnitPlatform()
+	if (org.gradle.internal.os.OperatingSystem.current().isLinux()
+			&& !System.getenv('DISPLAY')?.trim()
+			&& !System.getenv('WAYLAND_DISPLAY')?.trim()) {
+		systemProperty 'java.awt.headless', 'true'
+		systemProperty 'glass.platform', 'Monocle'
+		systemProperty 'monocle.platform', 'Headless'
+		systemProperty 'prism.order', 'sw'
+		systemProperty 'testfx.robot', 'glass'
+		systemProperty 'testfx.headless', 'true'
+	}
 }
 
 // ============================================================

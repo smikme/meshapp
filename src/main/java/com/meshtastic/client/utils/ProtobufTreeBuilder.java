@@ -28,6 +28,7 @@ public final class ProtobufTreeBuilder {
 
     private static final Logger log = LoggerFactory.getLogger(ProtobufTreeBuilder.class);
     private static final int MIN_VISIBLE_REPEATED_BYTES_SLOTS = 3;
+    private static final int MIN_VISIBLE_REPEATED_SCALAR_SLOTS = 1;
 
     /** Русские названия секций конфига */
     private static final Map<String, String> SECTION_NAMES = Map.ofEntries(
@@ -133,6 +134,8 @@ public final class ProtobufTreeBuilder {
             if (fd.isRepeated()) {
                 if (fd.getType() == FieldDescriptor.Type.BYTES) {
                     parent.getChildren().add(buildRepeatedBytesGroup(fd, value, configType, variantNumber, displayName));
+                } else if (isSupportedRepeatedScalar(fd)) {
+                    parent.getChildren().add(buildRepeatedScalarGroup(fd, value, configType, variantNumber, displayName));
                 }
                 continue;
             }
@@ -147,58 +150,11 @@ public final class ProtobufTreeBuilder {
                 if (!groupItem.getChildren().isEmpty()) {
                     parent.getChildren().add(groupItem);
                 }
-            } else if (fd.getType() == FieldDescriptor.Type.ENUM) {
-                EnumValueDescriptor enumVal = (EnumValueDescriptor) value;
-                List<EnumValueDescriptor> enumValues = new ArrayList<>(fd.getEnumType().getValues());
-                ConfigTreeItem item = new ConfigTreeItem(
-                        displayName, fieldName, enumVal, EnumValueDescriptor.class,
-                        enumValues, fd, configType, variantNumber);
-                parent.getChildren().add(new TreeItem<>(item));
-            } else if (fd.getType() == FieldDescriptor.Type.BOOL) {
-                ConfigTreeItem item = new ConfigTreeItem(
-                        displayName, fieldName, value, Boolean.class,
-                        null, fd, configType, variantNumber);
-                parent.getChildren().add(new TreeItem<>(item));
-            } else if (fd.getType() == FieldDescriptor.Type.STRING) {
-                ConfigTreeItem item = new ConfigTreeItem(
-                        displayName, fieldName, value, String.class,
-                        null, fd, configType, variantNumber);
-                parent.getChildren().add(new TreeItem<>(item));
-            } else if (fd.getType() == FieldDescriptor.Type.FLOAT) {
-                ConfigTreeItem item = new ConfigTreeItem(
-                        displayName, fieldName, value, Float.class,
-                        null, fd, configType, variantNumber);
-                parent.getChildren().add(new TreeItem<>(item));
-            } else if (fd.getType() == FieldDescriptor.Type.DOUBLE) {
-                ConfigTreeItem item = new ConfigTreeItem(
-                        displayName, fieldName, value, Double.class,
-                        null, fd, configType, variantNumber);
-                parent.getChildren().add(new TreeItem<>(item));
-            } else if (fd.getType() == FieldDescriptor.Type.UINT32
-                    || fd.getType() == FieldDescriptor.Type.INT32
-                    || fd.getType() == FieldDescriptor.Type.SINT32
-                    || fd.getType() == FieldDescriptor.Type.FIXED32
-                    || fd.getType() == FieldDescriptor.Type.SFIXED32) {
-                ConfigTreeItem item = new ConfigTreeItem(
-                        displayName, fieldName, value, Integer.class,
-                        null, fd, configType, variantNumber);
-                parent.getChildren().add(new TreeItem<>(item));
-            } else if (fd.getType() == FieldDescriptor.Type.UINT64
-                    || fd.getType() == FieldDescriptor.Type.INT64
-                    || fd.getType() == FieldDescriptor.Type.SINT64
-                    || fd.getType() == FieldDescriptor.Type.FIXED64
-                    || fd.getType() == FieldDescriptor.Type.SFIXED64) {
-                ConfigTreeItem item = new ConfigTreeItem(
-                        displayName, fieldName, value, Long.class,
-                        null, fd, configType, variantNumber);
-                parent.getChildren().add(new TreeItem<>(item));
-            } else if (fd.getType() == FieldDescriptor.Type.BYTES) {
-                ByteString bs = (ByteString) value;
-                String base64Value = Base64.getEncoder().encodeToString(bs.toByteArray());
-                ConfigTreeItem item = new ConfigTreeItem(
-                        displayName, fieldName, base64Value, String.class,
-                        null, fd, configType, variantNumber);
-                parent.getChildren().add(new TreeItem<>(item));
+            } else {
+                ConfigTreeItem item = createValueItem(displayName, fieldName, value, fd, configType, variantNumber);
+                if (item != null) {
+                    parent.getChildren().add(new TreeItem<>(item));
+                }
             }
         }
     }
@@ -213,6 +169,54 @@ public final class ProtobufTreeBuilder {
         groupItem.setExpanded(true);
         syncRepeatedBytesGroup(groupItem, fd, value, configType, variantNumber, displayName);
         return groupItem;
+    }
+
+    private static TreeItem<ConfigTreeItem> buildRepeatedScalarGroup(FieldDescriptor fd,
+                                                                     Object value,
+                                                                     String configType,
+                                                                     int variantNumber,
+                                                                     String displayName) {
+        ConfigTreeItem groupData = new ConfigTreeItem(displayName, fd.getName(), fd, configType, variantNumber);
+        TreeItem<ConfigTreeItem> groupItem = new TreeItem<>(groupData);
+        groupItem.setExpanded(true);
+        syncRepeatedScalarGroup(groupItem, fd, value, configType, variantNumber, displayName);
+        return groupItem;
+    }
+
+    /**
+     * Поддерживает repeated-группу в редактируемом состоянии:
+     * оставляет минимум видимых слотов и гарантирует хотя бы один свободный
+     * слот для добавления следующего значения без полной пересборки узлов.
+     */
+    public static void adjustRepeatedGroupAfterEdit(TreeItem<ConfigTreeItem> groupItem) {
+        if (groupItem == null || groupItem.getValue() == null) {
+            return;
+        }
+
+        ConfigTreeItem groupData = groupItem.getValue();
+        FieldDescriptor fd = groupData.getFieldDescriptor();
+        if (fd == null || !fd.isRepeated()) {
+            return;
+        }
+
+        int minVisibleSlots;
+        if (fd.getType() == FieldDescriptor.Type.BYTES) {
+            minVisibleSlots = MIN_VISIBLE_REPEATED_BYTES_SLOTS;
+        } else if (isSupportedRepeatedScalar(fd)) {
+            minVisibleSlots = MIN_VISIBLE_REPEATED_SCALAR_SLOTS;
+        } else {
+            return;
+        }
+
+        trimTrailingEmptyRepeatedSlots(groupItem, minVisibleSlots);
+        if (!hasEmptyRepeatedSlot(groupItem)) {
+            appendEmptyRepeatedSlot(
+                    groupItem,
+                    fd,
+                    groupData.getConfigType(),
+                    groupData.getConfigVariantNumber(),
+                    groupData.getName());
+        }
     }
 
     private static void syncRepeatedBytesGroup(TreeItem<ConfigTreeItem> groupItem,
@@ -243,6 +247,67 @@ public final class ProtobufTreeBuilder {
         return bytesList.stream()
                 .map(bs -> Base64.getEncoder().encodeToString(bs.toByteArray()))
                 .collect(Collectors.toList());
+    }
+
+    private static void trimTrailingEmptyRepeatedSlots(TreeItem<ConfigTreeItem> groupItem, int minVisibleSlots) {
+        while (groupItem.getChildren().size() > minVisibleSlots && hasMultipleTrailingEmptySlots(groupItem)) {
+            groupItem.getChildren().remove(groupItem.getChildren().size() - 1);
+        }
+    }
+
+    private static boolean hasMultipleTrailingEmptySlots(TreeItem<ConfigTreeItem> groupItem) {
+        int size = groupItem.getChildren().size();
+        return size >= 2
+                && isEmptyRepeatedSlot(groupItem.getChildren().get(size - 1))
+                && isEmptyRepeatedSlot(groupItem.getChildren().get(size - 2));
+    }
+
+    private static boolean hasEmptyRepeatedSlot(TreeItem<ConfigTreeItem> groupItem) {
+        for (TreeItem<ConfigTreeItem> child : groupItem.getChildren()) {
+            if (isEmptyRepeatedSlot(child)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean isEmptyRepeatedSlot(TreeItem<ConfigTreeItem> item) {
+        if (item == null || item.getValue() == null) {
+            return true;
+        }
+        Object value = item.getValue().getValue();
+        return value == null || (value instanceof String text && text.trim().isEmpty());
+    }
+
+    private static void appendEmptyRepeatedSlot(TreeItem<ConfigTreeItem> groupItem,
+                                                FieldDescriptor fd,
+                                                String configType,
+                                                int variantNumber,
+                                                String displayName) {
+        String slotName = displayName + " " + (groupItem.getChildren().size() + 1);
+        ConfigTreeItem item = createValueItem(slotName, fd.getName(), null, fd, configType, variantNumber);
+        if (item != null) {
+            groupItem.getChildren().add(new TreeItem<>(item));
+        }
+    }
+
+    private static void syncRepeatedScalarGroup(TreeItem<ConfigTreeItem> groupItem,
+                                                FieldDescriptor fd,
+                                                Object value,
+                                                String configType,
+                                                int variantNumber,
+                                                String displayName) {
+        List<?> values = value instanceof List<?> list ? list : List.of();
+        int slotCount = Math.max(values.size() + 1, MIN_VISIBLE_REPEATED_SCALAR_SLOTS);
+        groupItem.getChildren().clear();
+        for (int i = 0; i < slotCount; i++) {
+            Object slotValue = i < values.size() ? toTreeValue(fd, values.get(i)) : null;
+            String slotName = displayName + " " + (i + 1);
+            ConfigTreeItem item = createValueItem(slotName, fd.getName(), slotValue, fd, configType, variantNumber);
+            if (item != null) {
+                groupItem.getChildren().add(new TreeItem<>(item));
+            }
+        }
     }
 
     /**
@@ -281,9 +346,15 @@ public final class ProtobufTreeBuilder {
 
         applyTreeValues(sectionItem, sectionBuilder);
 
-        return ConfigProtos.Config.newBuilder()
+        ConfigProtos.Config rebuilt = ConfigProtos.Config.newBuilder()
                 .setField(oneofField, sectionBuilder.build())
                 .build();
+        if (rebuilt.getPayloadVariantCase() == ConfigProtos.Config.PayloadVariantCase.LORA) {
+            log.debug("rebuildConfig LORA ignore_incoming: original {} -> rebuilt {}",
+                    ConfigDebugFormatter.describeIgnoreIncoming(originalConfig),
+                    ConfigDebugFormatter.describeIgnoreIncoming(rebuilt));
+        }
+        return rebuilt;
     }
 
     /**
@@ -317,6 +388,10 @@ public final class ProtobufTreeBuilder {
                     applyRepeatedBytesValues(child, builder, groupFd);
                     continue;
                 }
+                if (groupFd != null && groupFd.isRepeated() && isSupportedRepeatedScalar(groupFd)) {
+                    applyRepeatedScalarValues(child, builder, groupFd);
+                    continue;
+                }
                 if (groupFd == null || groupFd.isRepeated() || groupFd.getType() != FieldDescriptor.Type.MESSAGE) {
                     continue;
                 }
@@ -343,51 +418,9 @@ public final class ProtobufTreeBuilder {
             Object value = item.getValue();
             log.debug("applyTreeValues: field='{}' value={} (type={})", builderFd.getName(), value, builderFd.getType());
             try {
-                if (builderFd.getType() == FieldDescriptor.Type.ENUM) {
-                    if (value instanceof EnumValueDescriptor evd) {
-                        builder.setField(builderFd, evd);
-                    }
-                } else if (builderFd.getType() == FieldDescriptor.Type.BOOL) {
-                    builder.setField(builderFd, value);
-                } else if (builderFd.getType() == FieldDescriptor.Type.STRING) {
-                    builder.setField(builderFd, value.toString());
-                } else if (builderFd.getType() == FieldDescriptor.Type.FLOAT) {
-                    builder.setField(builderFd, ((Number) value).floatValue());
-                } else if (builderFd.getType() == FieldDescriptor.Type.DOUBLE) {
-                    builder.setField(builderFd, ((Number) value).doubleValue());
-                } else if (builderFd.getType() == FieldDescriptor.Type.UINT32
-                        || builderFd.getType() == FieldDescriptor.Type.INT32
-                        || builderFd.getType() == FieldDescriptor.Type.SINT32
-                        || builderFd.getType() == FieldDescriptor.Type.FIXED32
-                        || builderFd.getType() == FieldDescriptor.Type.SFIXED32) {
-                    builder.setField(builderFd, ((Number) value).intValue());
-                } else if (builderFd.getType() == FieldDescriptor.Type.UINT64
-                        || builderFd.getType() == FieldDescriptor.Type.INT64
-                        || builderFd.getType() == FieldDescriptor.Type.SINT64
-                        || builderFd.getType() == FieldDescriptor.Type.FIXED64
-                        || builderFd.getType() == FieldDescriptor.Type.SFIXED64) {
-                    builder.setField(builderFd, ((Number) value).longValue());
-                } else if (builderFd.getType() == FieldDescriptor.Type.BYTES) {
-                    String base64Str = value.toString().trim();
-                    if (builderFd.isRepeated()) {
-                        builder.clearField(builderFd);
-                        if (!base64Str.isEmpty()) {
-                            for (String part : base64Str.split(",")) {
-                                String trimmed = part.trim();
-                                if (!trimmed.isEmpty()) {
-                                    builder.addRepeatedField(builderFd,
-                                            ByteString.copyFrom(Base64.getDecoder().decode(trimmed)));
-                                }
-                            }
-                        }
-                    } else {
-                        if (base64Str.isEmpty()) {
-                            builder.setField(builderFd, ByteString.EMPTY);
-                        } else {
-                            builder.setField(builderFd,
-                                    ByteString.copyFrom(Base64.getDecoder().decode(base64Str)));
-                        }
-                    }
+                Object builderValue = toBuilderValue(builderFd, value);
+                if (builderValue != null) {
+                    builder.setField(builderFd, builderValue);
                 }
             } catch (Exception e) { //NOPMD - field type mismatch is expected and safely skipped
                 log.trace("Skipping field '{}': {}", builderFd.getName(), e.getMessage());
@@ -421,6 +454,84 @@ public final class ProtobufTreeBuilder {
         }
     }
 
+    private static void applyRepeatedScalarValues(TreeItem<ConfigTreeItem> groupItem,
+                                                  Message.Builder builder,
+                                                  FieldDescriptor fieldDescriptor) {
+        FieldDescriptor builderFd = builder.getDescriptorForType().findFieldByName(fieldDescriptor.getName());
+        if (builderFd == null || !builderFd.isRepeated() || !isSupportedRepeatedScalar(builderFd)) {
+            return;
+        }
+
+        boolean debugIgnoreIncoming = isIgnoreIncomingField(builderFd);
+        if (debugIgnoreIncoming) {
+            log.debug("applyRepeatedScalarValues ignore_incoming tree slots: {}",
+                    describeRepeatedScalarSlots(groupItem));
+        }
+
+        builder.clearField(builderFd);
+        int slotIndex = 0;
+        for (TreeItem<ConfigTreeItem> child : groupItem.getChildren()) {
+            slotIndex++;
+            ConfigTreeItem valueItem = child.getValue();
+            if (valueItem == null || valueItem.getValue() == null) {
+                if (debugIgnoreIncoming) {
+                    log.debug("applyRepeatedScalarValues ignore_incoming slot {} skipped: empty", slotIndex);
+                }
+                continue;
+            }
+            try {
+                Object builderValue = toBuilderValue(builderFd, valueItem.getValue());
+                if (builderValue != null) {
+                    builder.addRepeatedField(builderFd, builderValue);
+                    if (debugIgnoreIncoming) {
+                        log.debug("applyRepeatedScalarValues ignore_incoming slot {} raw={} -> {}",
+                                slotIndex,
+                                valueItem.getValue(),
+                                ConfigDebugFormatter.formatObjectNodeNum(builderValue));
+                    }
+                } else if (debugIgnoreIncoming) {
+                    log.debug("applyRepeatedScalarValues ignore_incoming slot {} skipped: builderValue=null raw={}",
+                            slotIndex, valueItem.getValue());
+                }
+            } catch (Exception e) { //NOPMD - invalid repeated entry should not break whole save
+                if (debugIgnoreIncoming) {
+                    log.warn("Skipping invalid repeated scalar field '{}' slot {} raw={}: {}",
+                            builderFd.getName(), slotIndex,
+                            valueItem.getValue(), e.getMessage());
+                } else {
+                    log.trace("Skipping invalid repeated scalar field '{}': {}", builderFd.getName(), e.getMessage());
+                }
+            }
+        }
+
+        if (debugIgnoreIncoming) {
+            @SuppressWarnings("unchecked")
+            List<Object> builtValues = (List<Object>) builder.getField(builderFd);
+            log.debug("applyRepeatedScalarValues ignore_incoming result: {}",
+                    ConfigDebugFormatter.describeNodeNumObjects(builtValues));
+        }
+    }
+
+    private static boolean isIgnoreIncomingField(FieldDescriptor fieldDescriptor) {
+        return fieldDescriptor != null
+                && "meshtastic.Config.LoRaConfig.ignore_incoming".equals(fieldDescriptor.getFullName());
+    }
+
+    private static String describeRepeatedScalarSlots(TreeItem<ConfigTreeItem> groupItem) {
+        if (groupItem == null || groupItem.getChildren().isEmpty()) {
+            return "count=0 []";
+        }
+        List<String> slots = new ArrayList<>();
+        int index = 0;
+        for (TreeItem<ConfigTreeItem> child : groupItem.getChildren()) {
+            index++;
+            ConfigTreeItem valueItem = child.getValue();
+            Object value = valueItem != null ? valueItem.getValue() : null;
+            slots.add(index + "=" + (value == null ? "<empty>" : ConfigDebugFormatter.formatObjectNodeNum(value)));
+        }
+        return "count=" + groupItem.getChildren().size() + " [" + String.join(", ", slots) + "]";
+    }
+
     /**
      * Применяет значения protobuf Message к уже построенному дереву.
      * Используется при импорте конфигурации из файла поверх текущего редактора.
@@ -444,6 +555,15 @@ public final class ProtobufTreeBuilder {
                         continue;
                     }
                     syncRepeatedBytesGroup(child, messageFd, message.getField(messageFd),
+                            item.getConfigType(), item.getConfigVariantNumber(), item.getName());
+                    continue;
+                }
+                if (fd != null && fd.isRepeated() && isSupportedRepeatedScalar(fd)) {
+                    FieldDescriptor messageFd = message.getDescriptorForType().findFieldByName(fd.getName());
+                    if (messageFd == null || !messageFd.isRepeated() || !isSupportedRepeatedScalar(messageFd)) {
+                        continue;
+                    }
+                    syncRepeatedScalarGroup(child, messageFd, message.getField(messageFd),
                             item.getConfigType(), item.getConfigVariantNumber(), item.getName());
                     continue;
                 }
@@ -486,5 +606,125 @@ public final class ProtobufTreeBuilder {
             return Base64.getEncoder().encodeToString(bs.toByteArray());
         }
         return value;
+    }
+
+    private static ConfigTreeItem createValueItem(String displayName,
+                                                  String fieldName,
+                                                  Object value,
+                                                  FieldDescriptor fd,
+                                                  String configType,
+                                                  int variantNumber) {
+        if (fd.getType() == FieldDescriptor.Type.ENUM) {
+            EnumValueDescriptor enumVal = value instanceof EnumValueDescriptor evd ? evd : null;
+            List<EnumValueDescriptor> enumValues = new ArrayList<>(fd.getEnumType().getValues());
+            return new ConfigTreeItem(
+                    displayName, fieldName, enumVal, EnumValueDescriptor.class,
+                    enumValues, fd, configType, variantNumber);
+        }
+        if (fd.getType() == FieldDescriptor.Type.BOOL) {
+            return new ConfigTreeItem(
+                    displayName, fieldName, value, Boolean.class,
+                    null, fd, configType, variantNumber);
+        }
+        if (fd.getType() == FieldDescriptor.Type.STRING) {
+            return new ConfigTreeItem(
+                    displayName, fieldName, value, String.class,
+                    null, fd, configType, variantNumber);
+        }
+        if (fd.getType() == FieldDescriptor.Type.FLOAT) {
+            return new ConfigTreeItem(
+                    displayName, fieldName, value, Float.class,
+                    null, fd, configType, variantNumber);
+        }
+        if (fd.getType() == FieldDescriptor.Type.DOUBLE) {
+            return new ConfigTreeItem(
+                    displayName, fieldName, value, Double.class,
+                    null, fd, configType, variantNumber);
+        }
+        if (fd.getType() == FieldDescriptor.Type.UINT32
+                || fd.getType() == FieldDescriptor.Type.INT32
+                || fd.getType() == FieldDescriptor.Type.SINT32
+                || fd.getType() == FieldDescriptor.Type.FIXED32
+                || fd.getType() == FieldDescriptor.Type.SFIXED32) {
+            return new ConfigTreeItem(
+                    displayName, fieldName, value, Integer.class,
+                    null, fd, configType, variantNumber);
+        }
+        if (fd.getType() == FieldDescriptor.Type.UINT64
+                || fd.getType() == FieldDescriptor.Type.INT64
+                || fd.getType() == FieldDescriptor.Type.SINT64
+                || fd.getType() == FieldDescriptor.Type.FIXED64
+                || fd.getType() == FieldDescriptor.Type.SFIXED64) {
+            return new ConfigTreeItem(
+                    displayName, fieldName, value, Long.class,
+                    null, fd, configType, variantNumber);
+        }
+        if (fd.getType() == FieldDescriptor.Type.BYTES) {
+            ByteString bs = value instanceof ByteString byteString ? byteString : ByteString.EMPTY;
+            String base64Value = Base64.getEncoder().encodeToString(bs.toByteArray());
+            return new ConfigTreeItem(
+                    displayName, fieldName, base64Value, String.class,
+                    null, fd, configType, variantNumber);
+        }
+        return null;
+    }
+
+    private static Object toBuilderValue(FieldDescriptor builderFd, Object value) {
+        if (builderFd.getType() == FieldDescriptor.Type.ENUM) {
+            if (value instanceof EnumValueDescriptor evd) {
+                return evd;
+            }
+            return null;
+        }
+        if (builderFd.getType() == FieldDescriptor.Type.BOOL) {
+            return value instanceof Boolean bool ? bool : Boolean.parseBoolean(value.toString());
+        }
+        if (builderFd.getType() == FieldDescriptor.Type.STRING) {
+            return value.toString();
+        }
+        if (builderFd.getType() == FieldDescriptor.Type.FLOAT) {
+            return value instanceof Number number
+                    ? number.floatValue()
+                    : Float.parseFloat(value.toString().trim());
+        }
+        if (builderFd.getType() == FieldDescriptor.Type.DOUBLE) {
+            return value instanceof Number number
+                    ? number.doubleValue()
+                    : Double.parseDouble(value.toString().trim());
+        }
+        if (builderFd.getType() == FieldDescriptor.Type.UINT32
+                || builderFd.getType() == FieldDescriptor.Type.INT32
+                || builderFd.getType() == FieldDescriptor.Type.SINT32
+                || builderFd.getType() == FieldDescriptor.Type.FIXED32
+                || builderFd.getType() == FieldDescriptor.Type.SFIXED32) {
+            if (value instanceof Number number) {
+                return number.intValue();
+            }
+            Object parsed = ConfigValueFormatter.parseTextValue(builderFd, Integer.class, value.toString());
+            return parsed instanceof Number number ? number.intValue() : null;
+        }
+        if (builderFd.getType() == FieldDescriptor.Type.UINT64
+                || builderFd.getType() == FieldDescriptor.Type.INT64
+                || builderFd.getType() == FieldDescriptor.Type.SINT64
+                || builderFd.getType() == FieldDescriptor.Type.FIXED64
+                || builderFd.getType() == FieldDescriptor.Type.SFIXED64) {
+            if (value instanceof Number number) {
+                return number.longValue();
+            }
+            Object parsed = ConfigValueFormatter.parseTextValue(builderFd, Long.class, value.toString());
+            return parsed instanceof Number number ? number.longValue() : null;
+        }
+        if (builderFd.getType() == FieldDescriptor.Type.BYTES) {
+            String base64Str = value.toString().trim();
+            if (base64Str.isEmpty()) {
+                return ByteString.EMPTY;
+            }
+            return ByteString.copyFrom(Base64.getDecoder().decode(base64Str));
+        }
+        return null;
+    }
+
+    private static boolean isSupportedRepeatedScalar(FieldDescriptor fd) {
+        return fd.getType() != FieldDescriptor.Type.MESSAGE && fd.getType() != FieldDescriptor.Type.BYTES;
     }
 }
