@@ -184,7 +184,7 @@ Meshtastic — открытый проект, превращающий недо�
 - **Windows**: CMake + MSVC Build Tools для сборки `meshapp-ble.dll`
 - **Linux**: CMake + C/C++ toolchain + `libsystemd-dev` / `systemd-devel` для сборки `libmeshapp-ble.so`
 
-Для готовых релизных пакетов (`.dmg`, `.msi`, `.deb`) эти build-зависимости не нужны.
+Для готовых релизных пакетов (`.dmg`, `.msi`, `.deb`, `.AppImage`) эти build-зависимости не нужны.
 
 ### Сборка и запуск
 
@@ -198,6 +198,9 @@ cd meshapp
 
 # Собрать нативный инсталлятор (.dmg / .msi / .deb)
 ./gradlew jpackage
+
+# Linux: собрать portable AppImage
+./gradlew appImage -Pappimagetool=/path/to/appimagetool.AppImage
 ```
 
 ### Подключение к устройству
@@ -259,13 +262,16 @@ meshapp/
 
 ## Сборка инсталляторов
 
-MeshApp собирается в нативные пакеты через `jpackage`:
+MeshApp собирается в нативные пакеты через `jpackage`, а для Linux дополнительно поддерживает portable `AppImage`:
 
 | Платформа | Формат | Команда |
 |-----------|--------|---------|
 | Windows | `.msi` | `./gradlew jpackage` |
 | macOS | `.dmg` | `./gradlew jpackage` |
 | Linux | `.deb` | `./gradlew jpackage` |
+| Linux | `.AppImage` | `./gradlew appImage -Pappimagetool=/path/to/appimagetool.AppImage` |
+
+Для `AppImage` нужен `appimagetool`: либо в `PATH`, либо через `-Pappimagetool=...` / `APPIMAGETOOL=...`. Если используется `.AppImage`-версия самого `appimagetool`, может понадобиться `APPIMAGE_EXTRACT_AND_RUN=1`.
 
 Во время `processResources` Gradle автоматически собирает платформенные native-компоненты:
 
