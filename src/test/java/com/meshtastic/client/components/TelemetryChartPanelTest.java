@@ -1,6 +1,7 @@
 package com.meshtastic.client.components;
 
 import com.meshtastic.client.TestEnvironmentSupport;
+import com.meshtastic.client.model.TelemetryEntry;
 import javafx.application.Platform;
 import javafx.scene.chart.AreaChart;
 import javafx.scene.chart.NumberAxis;
@@ -9,6 +10,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -16,6 +18,8 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class TelemetryChartPanelTest {
 
@@ -68,10 +72,46 @@ class TelemetryChartPanelTest {
         assertFalse(((NumberAxis) basicChart.getXAxis()).isAutoRanging());
     }
 
+    @Test
+    void storesActualVoltageForDisplayInsteadOfScaledPercent() {
+        TelemetryChartPanel panel = onFxThread(() -> new TelemetryChartPanel(true));
+        TelemetryEntry entry = new TelemetryEntry(1_700_000_000L, "!test");
+        entry.setVoltage(4.2f);
+
+        onFxThread(() -> {
+            invokeUpdateChart(panel, List.of(entry), List.of());
+            return null;
+        });
+
+        AreaChart<Number, Number> basicChart = chartField(panel, "chart");
+        XYChart.Series<Number, Number> voltageSeries = basicChart.getData().stream()
+                .filter(series -> "Voltage В".equals(series.getName()))
+                .findFirst()
+                .orElseThrow();
+        XYChart.Data<Number, Number> point = voltageSeries.getData().getFirst();
+
+        assertEquals(100.0, point.getYValue().doubleValue(), 0.0001);
+        Number actualVoltage = assertInstanceOf(Number.class, point.getExtraValue());
+        assertEquals(4.2, actualVoltage.doubleValue(), 0.0001);
+        assertTrue(TelemetryChartPanel.formatSeriesValue(voltageSeries.getName(), point).matches("4[,.]20V"));
+    }
+
     private static List<String> seriesNames(AreaChart<Number, Number> chart) {
         return chart.getData().stream()
                 .map(XYChart.Series::getName)
                 .toList();
+    }
+
+    private static void invokeUpdateChart(TelemetryChartPanel panel,
+                                          List<TelemetryEntry> entries,
+                                          List<TelemetryEntry> qualityEntries) {
+        try {
+            Method method = TelemetryChartPanel.class.getDeclaredMethod("updateChart", List.class, List.class);
+            method.setAccessible(true);
+            method.invoke(panel, entries, qualityEntries);
+        } catch (ReflectiveOperationException e) {
+            throw new AssertionError("Failed to invoke updateChart", e);
+        }
     }
 
     @SuppressWarnings("unchecked")
