@@ -386,6 +386,29 @@ public final class MessageService {
     }
 
     /**
+     * Проксирует MQTT payload с desktop/phone клиента на устройство.
+     * Payload всегда отправляется как bytes, чтобы не терять бинарные данные.
+     */
+    public static void sendMqttClientProxyMessage(ProtocolHandler handler,
+                                                  String topic,
+                                                  byte[] payload,
+                                                  boolean retained) {
+        if (handler == null || topic == null || topic.isBlank() || payload == null) {
+            return;
+        }
+
+        MeshProtos.MqttClientProxyMessage proxyMessage = MeshProtos.MqttClientProxyMessage.newBuilder()
+                .setTopic(topic)
+                .setData(ByteString.copyFrom(payload))
+                .setRetained(retained)
+                .build();
+
+        handler.sendToRadio(MeshProtos.ToRadio.newBuilder()
+                .setMqttClientProxyMessage(proxyMessage)
+                .build(), false);
+    }
+
+    /**
      * Устанавливает только текущее Unix-время на ноде без изменения других полей Position.
      *
      * @param epochSeconds текущее время в секундах Unix epoch
