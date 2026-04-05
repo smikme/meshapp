@@ -475,6 +475,89 @@ def resolveAppImageTool = {
 	return null
 }
 
+def normalizeDebDependencyToken = { String token ->
+	def trimmed = token?.trim()
+	if (!trimmed || trimmed.contains('|')) {
+		return trimmed
+	}
+
+	def matcher = trimmed =~ /^([A-Za-z0-9.+:-]+?)t64(\s*\([^)]+\))?$/
+	if (!matcher.matches()) {
+		return trimmed
+	}
+
+	def basePackage = matcher.group(1)
+	def versionConstraint = matcher.group(2) ?: ''
+	return "${basePackage}${versionConstraint} | ${trimmed}"
+}
+
+def normalizeDebControlDependencies = { String controlText ->
+	def separator = controlText.contains('\r\n') ? '\r\n' : '\n'
+	def endsWithNewline = controlText.endsWith('\n') || controlText.endsWith('\r\n')
+	def normalized = controlText.readLines().collect { line ->
+		if (!line.startsWith('Depends:')) {
+			return line
+		}
+		def value = line.substring('Depends:'.length()).trim()
+		if (!value) {
+			return line
+		}
+		def normalizedDepends = value
+			.split(/\s*,\s*/)
+			.collect(normalizeDebDependencyToken)
+			.join(', ')
+		return "Depends: ${normalizedDepends}"
+	}.join(separator)
+
+	return endsWithNewline ? normalized + separator : normalized
+}
+
+def patchLinuxDebControl = { File outputDir ->
+	def debFiles = outputDir.listFiles()?.findAll { it.name.endsWith('.deb') } ?: []
+	debFiles.each { debFile ->
+		def repackRoot = new File(layout.buildDirectory.dir("tmp/deb-repack/${debFile.name}").get().asFile, 'root')
+		if (repackRoot.exists()) {
+			repackRoot.deleteDir()
+		}
+		repackRoot.mkdirs()
+
+		def unpackProc = new ProcessBuilder(
+			'dpkg-deb', '-R', debFile.absolutePath, repackRoot.absolutePath
+		).redirectErrorStream(true).start()
+		def unpackOutput = unpackProc.inputStream.text
+		unpackProc.waitFor()
+		if (unpackOutput) logger.lifecycle(unpackOutput.trim())
+		if (unpackProc.exitValue() != 0) {
+			throw new GradleException("jpackage: failed to unpack ${debFile.name} for control patching")
+		}
+
+		def controlFile = new File(repackRoot, 'DEBIAN/control')
+		if (!controlFile.isFile()) {
+			throw new GradleException("jpackage: Debian control file not found: ${controlFile}")
+		}
+
+		def originalControl = controlFile.getText('UTF-8')
+		def patchedControl = normalizeDebControlDependencies(originalControl)
+		if (patchedControl != originalControl) {
+			controlFile.setText(patchedControl, 'UTF-8')
+			logger.lifecycle("jpackage: normalized Debian dependencies in ${debFile.name}")
+		}
+
+		def rebuildProc = new ProcessBuilder(
+			'dpkg-deb', '--build', '--root-owner-group',
+			repackRoot.absolutePath, debFile.absolutePath
+		).redirectErrorStream(true).start()
+		def rebuildOutput = rebuildProc.inputStream.text
+		rebuildProc.waitFor()
+		if (rebuildOutput) logger.lifecycle(rebuildOutput.trim())
+		if (rebuildProc.exitValue() != 0) {
+			throw new GradleException("jpackage: failed to rebuild ${debFile.name} after control patching")
+		}
+
+		repackRoot.parentFile?.deleteDir()
+	}
+}
+
 // ============================================================
 // JavaDoc: генерация документации в docs/javadoc/
 // Использование: ./gradlew javadoc
@@ -588,13 +671,6 @@ tasks.register('jpackage') {
 		}
 
 		if (!os.isWindows() && !macBuild) {
-			// Ubuntu 24.04+ переименовал libasound2 → libasound2t64 (64-bit time_t).
-			// Для старых Ubuntu реальный пакет — libasound2, для новых — libasound2t64.
-			// Держим старое имя первым, чтобы старые дистрибутивы не падали на
-			// "Unresolvable dependency: libasound2t64", но при этом оставляем
-			// явный fallback на t64-вариант для новых систем.
-			args << '--linux-package-deps'
-			args << 'libasound2 | libasound2t64'
 			args << '--linux-shortcut'
 			if (linuxResourceDir != null) {
 				args << '--resource-dir'
@@ -616,6 +692,14 @@ tasks.register('jpackage') {
 		proc1.waitFor()
 		if (proc1Output) logger.lifecycle(proc1Output.trim())
 		if (proc1.exitValue() != 0) throw new GradleException("jpackage failed with exit code ${proc1.exitValue()}")
+		if (os.isLinux() && !macBuild) {
+			// jpackage auto-detects Debian dependencies from the build host and appends
+			// custom deps instead of replacing them. On Ubuntu 24.04+ this bakes in
+			// t64 package names (libasound2t64, libgtk-3-0t64, etc.), which are not
+			// installable as-is on older Ubuntu. Repack the .deb and widen those deps
+			// to "old-name | new-name" alternatives.
+			patchLinuxDebControl(outputDir)
+		}
 
 		// macOS шаг 2: патчить Info.plist, скопировать Assets.car, собрать DMG
 		if (macBuild) {
