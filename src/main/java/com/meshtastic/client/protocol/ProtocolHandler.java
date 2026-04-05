@@ -202,6 +202,12 @@ public class ProtocolHandler {
                         pkt.hasDecoded() ? pkt.getDecoded().getPortnum() : "encrypted");
                 notifyListeners(l -> l.onMeshPacket(pkt));
             }
+            case MQTTCLIENTPROXYMESSAGE -> {
+                MeshProtos.MqttClientProxyMessage proxyMessage = fromRadio.getMqttClientProxyMessage();
+                log.debug("Received MqttClientProxyMessage: topic='{}' variant={} retained={}",
+                        proxyMessage.getTopic(), proxyMessage.getPayloadVariantCase(), proxyMessage.getRetained());
+                notifyListeners(l -> l.onMqttClientProxyMessage(proxyMessage));
+            }
             case LOG_RECORD -> {
                 log.trace("Received LogRecord: {}", fromRadio.getLogRecord().getMessage());
                 notifyListeners(l -> l.onLogRecord(fromRadio.getLogRecord()));

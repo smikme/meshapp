@@ -60,6 +60,7 @@ dependencies {
 	implementation 'io.github.mkpaz:atlantafx-base:2.1.0'
 	implementation 'net.java.dev.jna:jna:5.16.0'
 	implementation 'net.java.dev.jna:jna-platform:5.16.0'
+	implementation 'org.eclipse.paho:org.eclipse.paho.client.mqttv3:1.2.5'
 	testImplementation 'org.junit.jupiter:junit-jupiter:5.11.4'
 	testRuntimeOnly 'org.testfx:openjfx-monocle:21.0.2'
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
