@@ -589,10 +589,12 @@ tasks.register('jpackage') {
 
 		if (!os.isWindows() && !macBuild) {
 			// Ubuntu 24.04+ переименовал libasound2 → libasound2t64 (64-bit time_t).
-			// jpackage по умолчанию добавляет libasound2, что ломает установку.
-			// Указываем libasound2t64 | libasound2 для совместимости со старыми и новыми дистрибутивами.
+			// Для старых Ubuntu реальный пакет — libasound2, для новых — libasound2t64.
+			// Держим старое имя первым, чтобы старые дистрибутивы не падали на
+			// "Unresolvable dependency: libasound2t64", но при этом оставляем
+			// явный fallback на t64-вариант для новых систем.
 			args << '--linux-package-deps'
-			args << 'libasound2t64 | libasound2'
+			args << 'libasound2 | libasound2t64'
 			args << '--linux-shortcut'
 			if (linuxResourceDir != null) {
 				args << '--resource-dir'
