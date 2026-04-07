@@ -1,6 +1,8 @@
 package com.meshtastic.client.logging;
 
 import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.classic.spi.IThrowableProxy;
+import ch.qos.logback.classic.spi.ThrowableProxyUtil;
 import ch.qos.logback.core.UnsynchronizedAppenderBase;
 import com.meshtastic.client.model.LogEntry;
 
@@ -24,10 +26,12 @@ public class UiLogAppender extends UnsynchronizedAppenderBase<ILoggingEvent> {
 
     @Override
     protected void append(ILoggingEvent event) {
+        String fullMessage = buildFullMessage(event);
         LogEntry entry = new LogEntry(
                 event.getTimeStamp(),
                 event.getLevel().toString(),
-                event.getFormattedMessage()
+                event.getFormattedMessage(),
+                fullMessage
         );
 
         buffer.addLast(entry);
@@ -41,6 +45,20 @@ public class UiLogAppender extends UnsynchronizedAppenderBase<ILoggingEvent> {
         if (listener != null) {
             listener.accept(entry);
         }
+    }
+
+    private static String buildFullMessage(ILoggingEvent event) {
+        String message = event.getFormattedMessage();
+        IThrowableProxy throwableProxy = event.getThrowableProxy();
+        if (throwableProxy == null) {
+            return message;
+        }
+
+        String stackTrace = ThrowableProxyUtil.asString(throwableProxy);
+        if (message == null || message.isBlank()) {
+            return stackTrace;
+        }
+        return message + System.lineSeparator() + stackTrace;
     }
 
     /** Все накопленные записи */

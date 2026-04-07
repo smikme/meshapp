@@ -337,11 +337,15 @@ public class FormLogs extends Form {
     }
 
     private String formatLogs() {
+        return formatLogEntries(logData);
+    }
+
+    static String formatLogEntries(Iterable<LogEntry> entries) {
         StringBuilder sb = new StringBuilder();
-        for (LogEntry entry : logData) {
+        for (LogEntry entry : entries) {
             sb.append('[').append(entry.getTime()).append("] ")
                     .append(entry.getLevel()).append(": ")
-                    .append(entry.getMessage()).append('\n');
+                    .append(entry.getFullMessage()).append('\n');
         }
         return sb.toString();
     }
