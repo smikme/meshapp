@@ -24,6 +24,11 @@ public class AppPreferences {
     public static final String KEY_SOFTWARE_RENDERING = "softwareRendering";
     public static final String KEY_CHECK_UPDATES = "checkUpdates";
     public static final String KEY_MINIMIZE_TO_TRAY = "minimizeToTray";
+    public static final String KEY_PACKET_MONITOR_WINDOW_X = "packetMonitorWindowX";
+    public static final String KEY_PACKET_MONITOR_WINDOW_Y = "packetMonitorWindowY";
+    public static final String KEY_PACKET_MONITOR_WINDOW_WIDTH = "packetMonitorWindowWidth";
+    public static final String KEY_PACKET_MONITOR_WINDOW_HEIGHT = "packetMonitorWindowHeight";
+    public static final String KEY_PACKET_MONITOR_WINDOW_MAXIMIZED = "packetMonitorWindowMaximized";
 
     private static Preferences state;
 
@@ -132,6 +137,65 @@ public class AppPreferences {
         state().putBoolean(KEY_WINDOW_MAXIMIZED, maximized);
     }
 
+    /**
+     * @return {@code true}, если для окна мониторинга LoRa-пакетов уже сохранены координаты и размер
+     */
+    public static boolean hasPacketMonitorWindowBounds() {
+        return !Double.isNaN(state().getDouble(KEY_PACKET_MONITOR_WINDOW_WIDTH, Double.NaN));
+    }
+
+    /**
+     * @return сохранённая X-координата окна мониторинга LoRa-пакетов или {@link Double#NaN}
+     */
+    public static double getPacketMonitorWindowX() {
+        return state().getDouble(KEY_PACKET_MONITOR_WINDOW_X, Double.NaN);
+    }
+
+    /**
+     * @return сохранённая Y-координата окна мониторинга LoRa-пакетов или {@link Double#NaN}
+     */
+    public static double getPacketMonitorWindowY() {
+        return state().getDouble(KEY_PACKET_MONITOR_WINDOW_Y, Double.NaN);
+    }
+
+    /**
+     * @return сохранённая ширина окна мониторинга LoRa-пакетов или {@link Double#NaN}
+     */
+    public static double getPacketMonitorWindowWidth() {
+        return state().getDouble(KEY_PACKET_MONITOR_WINDOW_WIDTH, Double.NaN);
+    }
+
+    /**
+     * @return сохранённая высота окна мониторинга LoRa-пакетов или {@link Double#NaN}
+     */
+    public static double getPacketMonitorWindowHeight() {
+        return state().getDouble(KEY_PACKET_MONITOR_WINDOW_HEIGHT, Double.NaN);
+    }
+
+    /**
+     * @return сохранённое состояние максимизации окна мониторинга LoRa-пакетов
+     */
+    public static boolean isPacketMonitorWindowMaximized() {
+        return state().getBoolean(KEY_PACKET_MONITOR_WINDOW_MAXIMIZED, false);
+    }
+
+    /**
+     * Сохраняет положение, размер и состояние максимизации окна мониторинга LoRa-пакетов.
+     *
+     * @param x         X-координата окна
+     * @param y         Y-координата окна
+     * @param w         ширина окна
+     * @param h         высота окна
+     * @param maximized признак максимизации
+     */
+    public static void savePacketMonitorWindowBounds(double x, double y, double w, double h, boolean maximized) {
+        state().putDouble(KEY_PACKET_MONITOR_WINDOW_X, x);
+        state().putDouble(KEY_PACKET_MONITOR_WINDOW_Y, y);
+        state().putDouble(KEY_PACKET_MONITOR_WINDOW_WIDTH, w);
+        state().putDouble(KEY_PACKET_MONITOR_WINDOW_HEIGHT, h);
+        state().putBoolean(KEY_PACKET_MONITOR_WINDOW_MAXIMIZED, maximized);
+    }
+
     // ==================== Recent Search ====================
 
     // ==================== Nodes Sort & Filter ====================
@@ -169,6 +233,7 @@ public class AppPreferences {
 
     public static final String KEY_CHAT_DIVIDER = "chatDividerPos";
     public static final String KEY_NODES_DIVIDER = "nodesDividerPos";
+    public static final String KEY_PACKET_MONITOR_DIVIDER = "packetMonitorDividerPos";
     private static final String NODE_CHAT_SCROLL = "chatScroll";
 
     public static double getChatDividerPos() { return state().getDouble(KEY_CHAT_DIVIDER, 0.35); }
@@ -176,6 +241,18 @@ public class AppPreferences {
 
     public static double getNodesDividerPos() { return state().getDouble(KEY_NODES_DIVIDER, 0.38); }
     public static void setNodesDividerPos(double pos) { state().putDouble(KEY_NODES_DIVIDER, pos); }
+
+    /**
+     * @return сохранённая позиция вертикального разделителя окна мониторинга LoRa-пакетов
+     */
+    public static double getPacketMonitorDividerPos() { return state().getDouble(KEY_PACKET_MONITOR_DIVIDER, 0.58); }
+
+    /**
+     * Сохраняет позицию вертикального разделителя окна мониторинга LoRa-пакетов.
+     *
+     * @param pos позиция разделителя в диапазоне {@code 0..1}
+     */
+    public static void setPacketMonitorDividerPos(double pos) { state().putDouble(KEY_PACKET_MONITOR_DIVIDER, pos); }
 
     public static final class ChatScrollState {
         private final long anchorDbId;

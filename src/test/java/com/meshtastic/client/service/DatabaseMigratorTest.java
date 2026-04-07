@@ -165,6 +165,21 @@ class DatabaseMigratorTest {
         }
     }
 
+    @Test
+    void migrateFromV7CreatesLoraPacketMonitorTable() throws Exception {
+        try (Connection connection = openConnection("upgrade-v7")) {
+            createSchemaVersion(connection, 7);
+
+            DatabaseMigrator.migrate(connection);
+
+            assertEquals(DatabaseMigrator.CURRENT_VERSION, schemaVersion(connection));
+            assertTrue(tableExists(connection, "LORA_PACKET_LOGS"));
+            assertTrue(columnExists(connection, "LORA_PACKET_LOGS", "PACKET_BYTES"));
+            assertTrue(indexExists(connection, "IDX_LORA_OWNER_TS"));
+            assertTrue(indexExists(connection, "IDX_LORA_TYPE"));
+        }
+    }
+
     private Connection openConnection(String name) throws SQLException {
         return DriverManager.getConnection("jdbc:h2:" + tempDir.resolve(name) + ";AUTO_SERVER=FALSE;TRACE_LEVEL_FILE=0");
     }

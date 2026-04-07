@@ -1,17 +1,25 @@
 package com.meshtastic.client.protocol;
 
+import com.google.protobuf.ByteString;
+import com.meshtastic.client.TestEnvironmentSupport;
 import com.meshtastic.client.connection.ConnectionException;
 import com.meshtastic.client.connection.ConnectionListener;
 import com.meshtastic.client.connection.MeshtasticConnection;
+import com.meshtastic.client.model.PacketLogEntry;
+import com.meshtastic.client.service.PacketMonitorService;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.meshtastic.proto.ChannelProtos;
 import org.meshtastic.proto.ConfigProtos;
 import org.meshtastic.proto.MeshProtos;
 import org.meshtastic.proto.ModuleConfigProtos;
+import org.meshtastic.proto.Portnums;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.nio.file.Path;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -25,13 +33,23 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ProtocolHandlerTest {
 
+    @TempDir
+    Path tempHome;
+
     private final List<ProtocolHandler> handlersToShutdown = new ArrayList<>();
+
+    @BeforeEach
+    void setUp() {
+        TestEnvironmentSupport.setUserHome(tempHome);
+        TestEnvironmentSupport.resetSingletons();
+    }
 
     @AfterEach
     void tearDown() {
         for (ProtocolHandler handler : handlersToShutdown) {
             handler.shutdown();
         }
+        TestEnvironmentSupport.resetSingletons();
     }
 
     @Test
@@ -135,6 +153,58 @@ class ProtocolHandlerTest {
 
         Thread.sleep(200);
         assertEquals(0, connection.sendCount.get());
+    }
+
+    @Test
+    void logsIncomingAndOutgoingMeshPacketsWhenMonitorIsEnabled() throws Exception {
+        PacketMonitorService monitorService = PacketMonitorService.getInstance();
+        CountDownLatch packetLatch = new CountDownLatch(2);
+        monitorService.addListener(new PacketMonitorService.Listener() {
+            @Override
+            public void onPacketLogged(PacketLogEntry entry) {
+                packetLatch.countDown();
+            }
+        });
+        monitorService.startCapture();
+
+        FakeConnection connection = new FakeConnection();
+        ProtocolHandler handler = track(new ProtocolHandler(connection));
+
+        MeshProtos.MeshPacket outgoing = MeshProtos.MeshPacket.newBuilder()
+                .setFrom(1)
+                .setTo(0xFFFFFFFF)
+                .setId(501)
+                .setDecoded(MeshProtos.Data.newBuilder()
+                        .setPortnum(Portnums.PortNum.TEXT_MESSAGE_APP)
+                        .setPayload(ByteString.copyFromUtf8("out"))
+                        .build())
+                .build();
+
+        MeshProtos.MeshPacket incoming = MeshProtos.MeshPacket.newBuilder()
+                .setFrom(2)
+                .setTo(1)
+                .setId(502)
+                .setDecoded(MeshProtos.Data.newBuilder()
+                        .setPortnum(Portnums.PortNum.ROUTING_APP)
+                        .setRequestId(501)
+                        .setPayload(MeshProtos.Routing.newBuilder()
+                                .setErrorReason(MeshProtos.Routing.Error.NONE)
+                                .build()
+                                .toByteString())
+                        .build())
+                .build();
+
+        handler.sendToRadio(MeshProtos.ToRadio.newBuilder().setPacket(outgoing).build());
+        connection.emit(MeshProtos.FromRadio.newBuilder().setPacket(incoming).build().toByteArray());
+
+        assertTrue(packetLatch.await(1, TimeUnit.SECONDS));
+
+        List<PacketLogEntry> entries = monitorService.loadAll();
+        assertEquals(2, entries.size());
+        assertEquals(PacketLogEntry.Direction.INCOMING, entries.getFirst().getDirection());
+        assertEquals("ROUTING_APP", entries.getFirst().getPacketType());
+        assertEquals(PacketLogEntry.Direction.OUTGOING, entries.getLast().getDirection());
+        assertEquals("TEXT_MESSAGE_APP", entries.getLast().getPacketType());
     }
 
     private ProtocolHandler track(ProtocolHandler handler) {

@@ -106,6 +106,14 @@ public class MacOsBle implements BlePlatform {
             });
     private volatile ScheduledFuture<?> pollFuture;
     private final AtomicBoolean drainInProgress = new AtomicBoolean(false);
+    /**
+     * Protects stored CoreBluetooth object pointers from concurrent use-after-release.
+     * <p>
+     * The poll thread, reconnect logic and disconnect callbacks can all touch the same retained
+     * CBPeripheral/CBCharacteristic pointers. Keep outbound objc_msgSend calls and teardown
+     * under one lock so disconnect cannot release a peripheral while ble-poll is still reading.
+     */
+    private final Object connectionIoLock = new Object();
 
     public MacOsBle() {
         initCentralManager();
@@ -313,21 +321,24 @@ public class MacOsBle implements BlePlatform {
     public void disconnect() {
         connected = false;
         stopPolling();
-        long peripheral = connectedPeripheral;
-        if (peripheral != 0) {
-            if (fromNumCharacteristic != 0) {
-                setNotify(peripheral, false, fromNumCharacteristic);
+        synchronized (connectionIoLock) {
+            long peripheral = connectedPeripheral;
+            long notificationCharacteristic = fromNumCharacteristic;
+            if (peripheral != 0) {
+                if (notificationCharacteristic != 0) {
+                    setNotify(peripheral, false, notificationCharacteristic);
+                }
+                msgSend(centralManager, "cancelPeripheralConnection:", peripheral);
+                // Once a session is torn down, the cached CBPeripheral can become stale after a
+                // device reboot. Force the next connect() to reacquire a fresh object.
+                evictCachedPeripheral(peripheral);
             }
-            msgSend(centralManager, "cancelPeripheralConnection:", peripheral);
-            // Once a session is torn down, the cached CBPeripheral can become stale after a
-            // device reboot. Force the next connect() to reacquire a fresh object.
-            evictCachedPeripheral(peripheral);
+            connectedPeripheral = 0;
+            fromRadioCharacteristic = 0;
+            toRadioCharacteristic = 0;
+            fromNumCharacteristic = 0;
+            drainInProgress.set(false);
         }
-        connectedPeripheral = 0;
-        fromRadioCharacteristic = 0;
-        toRadioCharacteristic = 0;
-        fromNumCharacteristic = 0;
-        drainInProgress.set(false);
         log.info("BLE disconnected");
     }
 
@@ -338,14 +349,17 @@ public class MacOsBle implements BlePlatform {
 
     @Override
     public boolean writeToRadio(byte[] protobufPayload) {
-        if (!isConnected() || toRadioCharacteristic == 0) {
-            log.warn("Cannot write: BLE not connected or toRadio characteristic missing");
-            return false;
+        synchronized (connectionIoLock) {
+            long peripheral = connectedPeripheral;
+            long characteristic = toRadioCharacteristic;
+            if (!connected || peripheral == 0 || characteristic == 0) {
+                log.warn("Cannot write: BLE not connected or toRadio characteristic missing");
+                return false;
+            }
+            log.debug("[BLE] writeToRadio: {} bytes", protobufPayload.length);
+            long nsData = nsData(protobufPayload);
+            writeValueForCharacteristic(peripheral, nsData, characteristic, CB_WRITE_WITH_RESPONSE);
         }
-        log.debug("[BLE] writeToRadio: {} bytes", protobufPayload.length);
-        long nsData = nsData(protobufPayload);
-        writeValueForCharacteristic(connectedPeripheral, nsData,
-                toRadioCharacteristic, CB_WRITE_WITH_RESPONSE);
 
         // Kickstart drain after write — не ждём poll cycle
         pollScheduler.schedule(this::triggerDrain, 200, TimeUnit.MILLISECONDS);
@@ -515,11 +529,15 @@ public class MacOsBle implements BlePlatform {
     }
 
     private void drainFromRadio() {
-        if (connectedPeripheral == 0 || fromRadioCharacteristic == 0) {
-            drainInProgress.set(false);
-            return;
+        synchronized (connectionIoLock) {
+            long peripheral = connectedPeripheral;
+            long characteristic = fromRadioCharacteristic;
+            if (peripheral == 0 || characteristic == 0) {
+                drainInProgress.set(false);
+                return;
+            }
+            msgSend(peripheral, "readValueForCharacteristic:", characteristic);
         }
-        msgSend(connectedPeripheral, "readValueForCharacteristic:", fromRadioCharacteristic);
     }
 
     private void startPolling() {
@@ -618,16 +636,19 @@ public class MacOsBle implements BlePlatform {
             MacOsBle me = resolve(self);
             if (me == null) { return; }
             log.info("CBCentralManager: didDisconnectPeripheral");
-            boolean wasConnected = me.connected;
             String disconnectMessage = localizedError(error, "Peripheral disconnected");
-            me.evictCachedPeripheral(peripheral);
-            me.connected = false;
-            me.stopPolling();
-            me.connectedPeripheral = 0;
-            me.fromRadioCharacteristic = 0;
-            me.toRadioCharacteristic = 0;
-            me.fromNumCharacteristic = 0;
-            me.drainInProgress.set(false);
+            boolean wasConnected;
+            synchronized (me.connectionIoLock) {
+                wasConnected = me.connected;
+                me.evictCachedPeripheral(peripheral);
+                me.connected = false;
+                me.stopPolling();
+                me.connectedPeripheral = 0;
+                me.fromRadioCharacteristic = 0;
+                me.toRadioCharacteristic = 0;
+                me.fromNumCharacteristic = 0;
+                me.drainInProgress.set(false);
+            }
             if (!wasConnected) {
                 // Disconnect during connect/discovery must wake the waiting thread so it cannot
                 // continue into a false-positive "connected" state after the peripheral is gone.

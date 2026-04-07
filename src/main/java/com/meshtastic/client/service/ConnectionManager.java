@@ -47,6 +47,7 @@ public final class ConnectionManager {
     private final Map<String, DeviceState> deviceStates = new ConcurrentHashMap<>();
     private final Map<String, ProtocolHandler> protocolHandlers = new ConcurrentHashMap<>();
     private final Map<String, MessageListenerService> messageListenerServices = new ConcurrentHashMap<>();
+    private final Map<String, MqttProxyService> mqttProxyServices = new ConcurrentHashMap<>();
     private final Map<String, CompletableFuture<DeviceState>> configFutures = new ConcurrentHashMap<>();
     private final Set<String> userDisconnectedIds = ConcurrentHashMap.newKeySet();
     private final Map<String, String> userDisconnectReasons = new ConcurrentHashMap<>();
@@ -211,7 +212,7 @@ public final class ConnectionManager {
         conn.connect();
         activeConnections.put(id, conn);
 
-        ProtocolHandler protocolHandler = new ProtocolHandler(conn);
+        ProtocolHandler protocolHandler = new ProtocolHandler(id, conn);
         protocolHandlers.put(id, protocolHandler);
 
         // Heartbeat нужен для transport-ов, которые либо закрываются по idle (TCP),
@@ -228,6 +229,9 @@ public final class ConnectionManager {
         messageListenerServices.put(id, messageListener);
         protocolHandler.addListener(messageListener);
 
+        MqttProxyService mqttProxyService = new MqttProxyService(id, entry.getName(), protocolHandler, deviceState);
+        mqttProxyServices.put(id, mqttProxyService);
+
         ConfigExchangeService configExchange = new ConfigExchangeService(protocolHandler, deviceState);
         CompletableFuture<DeviceState> future = configExchange.startConfigExchange();
         configFutures.put(id, future);
@@ -237,6 +241,7 @@ public final class ConnectionManager {
             entry.setNodeId(nodeId);
             save();
             logNodeConnectionContext(entry, ds);
+            mqttProxyService.startIfEnabled();
             requestAndLogDeviceMetadata(entry, protocolHandler, ds);
             fireChanged();
         });
@@ -380,6 +385,10 @@ public final class ConnectionManager {
         MessageListenerService mls = messageListenerServices.remove(id);
         if (mls != null) {
             mls.getNotificationManager().dispose();
+        }
+        MqttProxyService mqttProxy = mqttProxyServices.remove(id);
+        if (mqttProxy != null) {
+            mqttProxy.close();
         }
         ProtocolHandler ph = protocolHandlers.remove(id);
         if (ph != null) {

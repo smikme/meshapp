@@ -191,6 +191,22 @@
     -fx-fill: rgba(0, 0, 0, 0.88);
 }
 
+.packet-monitor-toolbar-button {
+    -fx-min-width: -1;
+    -fx-max-width: -1;
+    -fx-min-height: 34;
+    -fx-max-height: 34;
+    -fx-padding: 0 12 0 10;
+    -fx-content-display: left;
+    -fx-graphic-text-gap: 8;
+    -fx-text-fill: rgba(255, 255, 255, 0.88);
+    -fx-font-size: 12px;
+}
+
+.light-theme .packet-monitor-toolbar-button {
+    -fx-text-fill: rgba(0, 0, 0, 0.82);
+}
+
 .config-status-label {
     -fx-text-fill: rgba(255, 255, 255, 0.6);
     -fx-font-size: 11px;
@@ -198,6 +214,126 @@
 
 .light-theme .config-status-label {
     -fx-text-fill: rgba(0, 0, 0, 0.55);
+}
+
+.packet-monitor-root {
+    -fx-background-color: -color-bg-default;
+}
+
+.packet-monitor-filter-bar {
+    -fx-padding: 10;
+    -fx-spacing: 10;
+    -fx-background-color: rgba(255, 255, 255, 0.04);
+    -fx-background-radius: 12;
+    -fx-border-color: rgba(255, 255, 255, 0.08);
+    -fx-border-radius: 12;
+}
+
+.light-theme .packet-monitor-filter-bar {
+    -fx-background-color: rgba(0, 0, 0, 0.03);
+    -fx-border-color: rgba(0, 0, 0, 0.1);
+}
+
+.packet-monitor-filter-label {
+    -fx-text-fill: -color-fg-muted;
+    -fx-font-size: 12px;
+}
+
+.packet-monitor-search-box {
+    -fx-alignment: center-left;
+    -fx-padding: 0 10 0 10;
+    -fx-background-color: rgba(255, 255, 255, 0.08);
+    -fx-background-radius: 8;
+}
+
+.packet-monitor-search-box .svg-icon {
+    -fx-fill: rgba(255, 255, 255, 0.5);
+}
+
+.light-theme .packet-monitor-search-box {
+    -fx-background-color: rgba(0, 0, 0, 0.06);
+}
+
+.light-theme .packet-monitor-search-box .svg-icon {
+    -fx-fill: rgba(0, 0, 0, 0.45);
+}
+
+.packet-monitor-search-field {
+    -fx-background-color: transparent;
+    -fx-background-insets: 0;
+    -fx-background-radius: 0;
+    -fx-border-width: 0;
+    -fx-padding: 8 0 8 0;
+}
+
+.packet-monitor-section {
+    -fx-background-color: -color-bg-subtle;
+    -fx-background-radius: 12;
+    -fx-border-color: -color-border-default;
+    -fx-border-radius: 12;
+    -fx-padding: 10;
+}
+
+.packet-monitor-section-title {
+    -fx-font-weight: bold;
+    -fx-text-fill: -color-fg-muted;
+}
+
+.packet-monitor-side-toolbar {
+    -fx-orientation: vertical;
+    -fx-background-color: transparent;
+    -fx-padding: 0;
+}
+
+.packet-monitor-side-button {
+    -fx-min-width: 34;
+    -fx-pref-width: 34;
+    -fx-max-width: 34;
+    -fx-min-height: 34;
+    -fx-pref-height: 34;
+    -fx-max-height: 34;
+    -fx-padding: 0;
+}
+
+.packet-monitor-hex {
+    -fx-font-family: "Monospaced";
+    -fx-font-size: 12px;
+    -fx-background-color: transparent;
+    -fx-background-insets: 0;
+    -fx-background-radius: 0;
+    -fx-border-width: 0;
+    -fx-padding: 0;
+    -fx-focus-color: transparent;
+    -fx-faint-focus-color: transparent;
+}
+
+.packet-monitor-hex-grid {
+    -fx-alignment: top-left;
+    -fx-background-color: -color-bg-default;
+    -fx-background-radius: 8;
+    -fx-border-color: -color-border-default;
+    -fx-border-radius: 8;
+    -fx-padding: 4;
+}
+
+.packet-monitor-hex-address {
+    -fx-text-fill: -color-fg-muted;
+}
+
+.light-theme .packet-monitor-hex-address {
+    -fx-text-fill: -color-fg-muted;
+}
+
+.packet-monitor-hex .scroll-pane,
+.packet-monitor-hex .viewport,
+.packet-monitor-hex .content {
+    -fx-background-color: transparent;
+    -fx-background-insets: 0;
+    -fx-background-radius: 0;
+}
+
+.packet-monitor-hex .content {
+    -fx-padding: 2 0 2 0;
 }
 
 .drawer-chat-badge-dot {

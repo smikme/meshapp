@@ -65,6 +65,10 @@ public class TelemetryChartPanel extends VBox {
     private static final String TITLE_TX = "Скорость передачи";
     private static final String TITLE_QUALITY = "Качество соединения";
     private static final String TITLE_HOPS = "Прыжки";
+    private static final String SERIES_BATTERY = "Battery %";
+    private static final String SERIES_VOLTAGE = "Voltage В";
+    private static final String SERIES_CH_UTIL = "ChUtil %";
+    private static final String SERIES_AIR_UTIL = "AirUtil %";
 
     private final boolean basicOnly;
     private final AreaChart<Number, Number> chart;
@@ -331,6 +335,21 @@ public class TelemetryChartPanel extends VBox {
         return series;
     }
 
+    /**
+     * На графике напряжение рисуется по общей шкале 0-100, но для tooltip/crosshair
+     * сохраняем реальное значение вольт в extraValue.
+     */
+    private static XYChart.Data<Number, Number> createVoltageData(long ts, double voltage) {
+        return new XYChart.Data<>(ts, voltageToPercent((float) voltage), voltage);
+    }
+
+    static String formatSeriesValue(String seriesName, XYChart.Data<Number, Number> point) {
+        if (SERIES_VOLTAGE.equals(seriesName) && point.getExtraValue() instanceof Number voltage) {
+            return String.format("%.2fV", voltage.doubleValue());
+        }
+        return String.format("%.1f", point.getYValue().doubleValue());
+    }
+
     @SafeVarargs
     private static void setChartSeries(AreaChart<Number, Number> areaChart, String title,
                                        XYChart.Series<Number, Number>... series) {
@@ -394,10 +413,10 @@ public class TelemetryChartPanel extends VBox {
             hopsXAxis = (NumberAxis) hopsChart.getXAxis();
         }
 
-        XYChart.Series<Number, Number> batterySeries = createSeries("Battery %");
-        XYChart.Series<Number, Number> voltageSeries = createSeries("Voltage В");
-        XYChart.Series<Number, Number> chUtilSeries = createSeries("ChUtil %");
-        XYChart.Series<Number, Number> airUtilSeries = createSeries("AirUtil %");
+        XYChart.Series<Number, Number> batterySeries = createSeries(SERIES_BATTERY);
+        XYChart.Series<Number, Number> voltageSeries = createSeries(SERIES_VOLTAGE);
+        XYChart.Series<Number, Number> chUtilSeries = createSeries(SERIES_CH_UTIL);
+        XYChart.Series<Number, Number> airUtilSeries = createSeries(SERIES_AIR_UTIL);
         XYChart.Series<Number, Number> goodRxSeries = null, badRxSeries = null, dupeRxSeries = null;
         XYChart.Series<Number, Number> pktRxSeries = null, pktBadSeries = null, pktDupeSeries = null;
         XYChart.Series<Number, Number> txSeries = null, txDroppedSeries = null, txRelaySeries = null, txRelayCanceledSeries = null;
@@ -439,7 +458,7 @@ public class TelemetryChartPanel extends VBox {
                     batterySeries.getData().add(new XYChart.Data<>(ts, e.getBatteryLevel()));
                 }
                 if (e.getVoltage() > 0) {
-                    voltageSeries.getData().add(new XYChart.Data<>(ts, voltageToPercent(e.getVoltage())));
+                    voltageSeries.getData().add(createVoltageData(ts, e.getVoltage()));
                 }
                 chUtilSeries.getData().add(new XYChart.Data<>(ts, e.getChannelUtilization()));
                 airUtilSeries.getData().add(new XYChart.Data<>(ts, e.getAirUtilTx()));
@@ -505,7 +524,7 @@ public class TelemetryChartPanel extends VBox {
                         countBattery++;
                     }
                     if (e.getVoltage() > 0) {
-                        sumVoltage += voltageToPercent(e.getVoltage());
+                        sumVoltage += e.getVoltage();
                         countVoltage++;
                     }
                     sumChUtil += e.getChannelUtilization();
@@ -553,7 +572,7 @@ public class TelemetryChartPanel extends VBox {
                         batterySeries.getData().add(new XYChart.Data<>(bucketCenter, sumBattery / countBattery));
                     }
                     if (countVoltage > 0) {
-                        voltageSeries.getData().add(new XYChart.Data<>(bucketCenter, sumVoltage / countVoltage));
+                        voltageSeries.getData().add(createVoltageData(bucketCenter, sumVoltage / countVoltage));
                     }
                     chUtilSeries.getData().add(new XYChart.Data<>(bucketCenter, sumChUtil / count));
                     airUtilSeries.getData().add(new XYChart.Data<>(bucketCenter, sumAirUtil / count));
@@ -791,8 +810,7 @@ public class TelemetryChartPanel extends VBox {
         for (XYChart.Series<Number, Number> series : areaChart.getData()) {
             XYChart.Data<Number, Number> nearest = findNearest(series, epoch);
             if (nearest != null) {
-                double val = nearest.getYValue().doubleValue();
-                sb.append(series.getName()).append(": ").append(String.format("%.1f", val)).append("\n");
+                sb.append(series.getName()).append(": ").append(formatSeriesValue(series.getName(), nearest)).append("\n");
             }
         }
 

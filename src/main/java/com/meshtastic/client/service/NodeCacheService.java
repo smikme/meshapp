@@ -54,6 +54,10 @@ public final class NodeCacheService {
         return instance;
     }
 
+    public static synchronized NodeCacheService getIfInitialized() {
+        return instance;
+    }
+
     public static synchronized void closeIfInitialized() {
         if (instance != null) {
             instance.close();
@@ -66,6 +70,7 @@ public final class NodeCacheService {
 
     private void initDb() {
         try {
+            closeStatements();
             dbConnection = DatabaseProvider.getConnection();
 
             try (Statement stmt = dbConnection.createStatement()) {
@@ -1026,11 +1031,30 @@ public final class NodeCacheService {
      * Корректно закрывает соединение с БД. Вызывается при завершении приложения.
      */
     public void close() {
+        closeStatements();
+        dbConnection = null;
+    }
+
+    public synchronized void prepareForDatabaseReset() {
+        cache.clear();
+        closeStatements();
+        dbConnection = null;
+    }
+
+    public synchronized void reinitializeAfterDatabaseReset() {
+        cache.clear();
+        initDb();
+    }
+
+    private void closeStatements() {
         try {
             if (mergeStmt != null) { mergeStmt.close(); }
             if (insertTelemetryStmt != null) { insertTelemetryStmt.close(); }
         } catch (SQLException e) {
             log.error("Error closing node cache DB statements", e);
+        } finally {
+            mergeStmt = null;
+            insertTelemetryStmt = null;
         }
     }
 

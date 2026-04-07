@@ -34,6 +34,9 @@ public interface FromRadioListener {
     /** Получен mesh-пакет (текстовое сообщение, телеметрия, routing ACK и др.). */
     default void onMeshPacket(MeshProtos.MeshPacket packet) {}
 
+    /** Получено MQTT proxy-сообщение для публикации через клиент / desktop bridge. */
+    default void onMqttClientProxyMessage(MeshProtos.MqttClientProxyMessage proxyMessage) {}
+
     /** Получена запись лога устройства. */
     default void onLogRecord(MeshProtos.LogRecord logRecord) {}
 

@@ -3,6 +3,7 @@ package com.meshtastic.client.protocol;
 import org.meshtastic.proto.MeshProtos;
 import com.google.protobuf.InvalidProtocolBufferException;
 import com.meshtastic.client.connection.MeshtasticConnection;
+import com.meshtastic.client.service.PacketMonitorService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -34,6 +35,7 @@ public class ProtocolHandler {
     private static final int HEARTBEAT_INITIAL_DELAY_SEC = 0;
 
     private final MeshtasticConnection connection;
+    private final String connectionId;
     private final List<FromRadioListener> listeners = new CopyOnWriteArrayList<>();
 
     /** Очередь входящих пакетов — разделяет reader-поток и обработку,
@@ -51,6 +53,11 @@ public class ProtocolHandler {
     private final AtomicInteger heartbeatNonce = new AtomicInteger(0);
 
     public ProtocolHandler(MeshtasticConnection connection) {
+        this(null, connection);
+    }
+
+    public ProtocolHandler(String connectionId, MeshtasticConnection connection) {
+        this.connectionId = connectionId;
         this.connection = connection;
         connection.setDataListener(this::handleRawPacket);
         dispatcherThread = new Thread(this::dispatchLoop, "proto-dispatcher");
@@ -97,6 +104,10 @@ public class ProtocolHandler {
     public void sendToRadio(MeshProtos.ToRadio toRadio, boolean expectResponseAfterWrite) {
         byte[] frame = PacketFramer.frame(toRadio);
         log.debug("Sending ToRadio: {} ({} bytes framed)", toRadio.getPayloadVariantCase(), frame.length);
+        PacketMonitorService monitorService = PacketMonitorService.getIfInitialized();
+        if (monitorService != null && toRadio.hasPacket()) {
+            monitorService.recordOutgoing(connectionId, toRadio.getPacket());
+        }
         connection.sendBytes(frame, expectResponseAfterWrite);
     }
 
@@ -200,7 +211,17 @@ public class ProtocolHandler {
                         String.format("!%08x", pkt.getFrom()),
                         String.format("!%08x", pkt.getTo()),
                         pkt.hasDecoded() ? pkt.getDecoded().getPortnum() : "encrypted");
+                PacketMonitorService monitorService = PacketMonitorService.getIfInitialized();
+                if (monitorService != null) {
+                    monitorService.recordIncoming(connectionId, pkt);
+                }
                 notifyListeners(l -> l.onMeshPacket(pkt));
+            }
+            case MQTTCLIENTPROXYMESSAGE -> {
+                MeshProtos.MqttClientProxyMessage proxyMessage = fromRadio.getMqttClientProxyMessage();
+                log.debug("Received MqttClientProxyMessage: topic='{}' variant={} retained={}",
+                        proxyMessage.getTopic(), proxyMessage.getPayloadVariantCase(), proxyMessage.getRetained());
+                notifyListeners(l -> l.onMqttClientProxyMessage(proxyMessage));
             }
             case LOG_RECORD -> {
                 log.trace("Received LogRecord: {}", fromRadio.getLogRecord().getMessage());

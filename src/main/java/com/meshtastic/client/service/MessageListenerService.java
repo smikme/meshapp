@@ -19,6 +19,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Сервис обработки входящих mesh-пакетов ({@code MeshPacket}).
@@ -40,10 +42,15 @@ import java.nio.charset.StandardCharsets;
 public class MessageListenerService implements FromRadioListener {
 
     private static final Logger log = LoggerFactory.getLogger(MessageListenerService.class);
+    private static final int MAX_DEFERRED_MESH_PACKETS = 200;
 
     private final DeviceState deviceState;
     private final NotificationManager notificationManager;
     private final ProtocolHandler protocolHandler;
+    private final Object deferredMeshLock = new Object();
+    private final List<DeferredMeshPacket> deferredMeshPackets = new ArrayList<>();
+
+    private record DeferredMeshPacket(long channelCatalogEpoch, MeshProtos.MeshPacket packet) {}
 
     public MessageListenerService(DeviceState deviceState) {
         this(deviceState, null);
@@ -60,8 +67,22 @@ public class MessageListenerService implements FromRadioListener {
     }
 
     @Override
+    public void onMyNodeInfo(MeshProtos.MyNodeInfo myInfo) {
+        Platform.runLater(this::flushDeferredMeshPacketsIfOwnerKnown);
+    }
+
+    @Override
+    public void onConfigComplete(int configCompleteId) {
+        Platform.runLater(this::flushDeferredMeshPacketsIfOwnerKnown);
+    }
+
+    @Override
     public void onMeshPacket(MeshProtos.MeshPacket packet) {
         if (!packet.hasDecoded()) { return; }
+        if (deviceState.getMyNodeNum() == 0) {
+            deferMeshPacket(packet, "local node id is unknown");
+            return;
+        }
 
         // Track channel index per node from incoming packets
         int fromNum = packet.getFrom();
@@ -73,7 +94,10 @@ public class MessageListenerService implements FromRadioListener {
         }
 
         MeshProtos.Data data = packet.getDecoded();
+        dispatchDecodedPacket(packet, data);
+    }
 
+    private void dispatchDecodedPacket(MeshProtos.MeshPacket packet, MeshProtos.Data data) {
         if (data.getPortnum() == Portnums.PortNum.TEXT_MESSAGE_APP) {
             handleTextMessage(packet, data);
         } else if (data.getPortnum() == Portnums.PortNum.ROUTING_APP) {
@@ -94,17 +118,42 @@ public class MessageListenerService implements FromRadioListener {
     private void handleTextMessage(MeshProtos.MeshPacket packet, MeshProtos.Data data) {
         int from = packet.getFrom();
         int to = packet.getTo();
+        boolean isDirect = to != 0xFFFFFFFF;
+        if (!isDirect && !deviceState.isChannelCatalogReady()) {
+            deferMeshPacket(packet, "channel catalog is not ready");
+            return;
+        }
+
+        boolean outgoing = from == deviceState.getMyNodeNum();
+        if (outgoing) { return; } // outgoing messages are already added by MessageService
+        if (!isDirect && !deviceState.hasEnabledChannel(packet.getChannel())) {
+            log.warn("Dropping broadcast packet {}: channel {} is still unknown after deferred processing",
+                    packet.getId(), packet.getChannel());
+            return;
+        }
+
+        processIncomingTextMessage(packet, data, isDirect);
+    }
+
+    private void processIncomingTextMessage(MeshProtos.MeshPacket packet,
+                                            MeshProtos.Data data,
+                                            boolean isDirect) {
+        int from = packet.getFrom();
+        int to = packet.getTo();
         int channel = packet.getChannel();
         String text = data.getPayload().toString(StandardCharsets.UTF_8);
         long timestamp = packet.getRxTime() > 0 ? packet.getRxTime() : System.currentTimeMillis() / 1000;
-        boolean outgoing = from == deviceState.getMyNodeNum();
 
-        if (outgoing) { return; } // outgoing messages are already added by MessageService
         NodeData fromNode = deviceState.getOrCreateNode(from);
         String fromNodeId = fromNode.getNodeId();
         if (IgnoredNodeService.getInstance().isIgnored(fromNodeId)) {
             log.info("Dropping incoming {} from ignored node {}",
                     isReactionPacket(data) ? "reaction" : "message", fromNodeId);
+            return;
+        }
+        if (!isDirect && !deviceState.hasEnabledChannel(channel)) {
+            log.warn("Dropping broadcast packet {} from {}: unknown or disabled channel {}",
+                    packet.getId(), fromNodeId, channel);
             return;
         }
         if (isReactionPacket(data)) {
@@ -134,7 +183,6 @@ public class MessageListenerService implements FromRadioListener {
         }
 
         String ownerNodeId = String.format("!%08x", deviceState.getMyNodeNum());
-        boolean isDirect = to != 0xFFFFFFFF;
         if (isDirect) {
             msg.setStatus(MeshMessage.DeliveryStatus.DELIVERED);
             MessageDbService.getInstance().save(msg, "dm", fromNodeId, ownerNodeId);
@@ -159,6 +207,60 @@ public class MessageListenerService implements FromRadioListener {
 
         // Показать красную точку на иконке "Чаты"
         Platform.runLater(() -> DrawerManager.setChatUnreadDot(true));
+    }
+
+    private boolean deferMeshPacket(MeshProtos.MeshPacket packet, String reason) {
+        if (packet == null) {
+            return false;
+        }
+
+        DeferredMeshPacket dropped = null;
+        synchronized (deferredMeshLock) {
+            if (deferredMeshPackets.size() >= MAX_DEFERRED_MESH_PACKETS) {
+                dropped = deferredMeshPackets.remove(0);
+            }
+            deferredMeshPackets.add(new DeferredMeshPacket(deviceState.getChannelCatalogEpoch(), packet));
+        }
+
+        if (dropped != null) {
+            log.warn("Deferred mesh queue full, dropping oldest packet {}",
+                    dropped.packet().getId());
+        }
+        log.info("Deferring mesh packet {} on channel {} until {}",
+                packet.getId(), packet.getChannel(), reason);
+        return true;
+    }
+
+    private void flushDeferredMeshPackets() {
+        List<DeferredMeshPacket> deferred;
+        synchronized (deferredMeshLock) {
+            if (deferredMeshPackets.isEmpty()) {
+                return;
+            }
+            deferred = new ArrayList<>(deferredMeshPackets);
+            deferredMeshPackets.clear();
+        }
+
+        long currentEpoch = deviceState.getChannelCatalogEpoch();
+        for (DeferredMeshPacket queued : deferred) {
+            if (queued.channelCatalogEpoch() != currentEpoch) {
+                log.debug("Discarding deferred mesh packet {} from stale config epoch {}",
+                        queued.packet().getId(), queued.channelCatalogEpoch());
+                continue;
+            }
+            MeshProtos.MeshPacket packet = queued.packet();
+            if (!packet.hasDecoded()) {
+                continue;
+            }
+            onMeshPacket(packet);
+        }
+    }
+
+    private void flushDeferredMeshPacketsIfOwnerKnown() {
+        if (deviceState.getMyNodeNum() == 0) {
+            return;
+        }
+        flushDeferredMeshPackets();
     }
 
     private boolean isReactionPacket(MeshProtos.Data data) {

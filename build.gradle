@@ -60,6 +60,7 @@ dependencies {
 	implementation 'io.github.mkpaz:atlantafx-base:2.1.0'
 	implementation 'net.java.dev.jna:jna:5.16.0'
 	implementation 'net.java.dev.jna:jna-platform:5.16.0'
+	implementation 'org.eclipse.paho:org.eclipse.paho.client.mqttv3:1.2.5'
 	testImplementation 'org.junit.jupiter:junit-jupiter:5.11.4'
 	testRuntimeOnly 'org.testfx:openjfx-monocle:21.0.2'
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
@@ -315,6 +316,249 @@ tasks.named('test') {
 	}
 }
 
+def resolvePackageVersion = { os ->
+	try {
+		def count = 'git rev-list --count HEAD'.execute().text.trim()
+		if (os.isMacOsX()) {
+			// macOS jpackage allows 1-3 numbers only
+			return "1.2.${count}"
+		}
+		def hash = 'git rev-parse --short=4 HEAD'.execute().text.trim()
+		// Доп. разряд из хеша (0-65535) — чтобы MSI всегда считал версию новой
+		def minor = Integer.parseInt(hash, 16) % 65536
+		return "1.2.${count}.${minor}"
+	} catch (ignored) {
+		return os.isMacOsX() ? '1.2.0' : '1.2.0.0'
+	}
+}
+
+def resolvePackagingJavaHome = {
+	javaToolchains.launcherFor {
+		languageVersion = JavaLanguageVersion.of(21)
+	}.get().executablePath.asFile.parentFile.parentFile.absolutePath
+}
+
+def buildPackagingJvmArgs = {
+	def jvmArgsList = application.applicationDefaultJvmArgs.collect()
+	// $APPDIR — токен jpackage/AppImage, заменяется на реальную директорию приложения при запуске.
+	// Абсолютные пути билд-машины не работают на других компьютерах.
+	// $APPDIR/fx — только JavaFX модули, app остаётся на classpath (unnamed module).
+	jvmArgsList << "--module-path"
+	jvmArgsList << '$APPDIR/fx'
+	jvmArgsList << "--add-modules"
+	jvmArgsList << "javafx.controls"
+	return jvmArgsList
+}
+
+def preparePackagingLibDir = { os, installDir ->
+	def libDir = new File(installDir, "lib")
+
+	// Выделить JavaFX JAR в поддиректорию — только они должны быть на module path.
+	// Если $APPDIR целиком на module path, app JAR становится automatic module,
+	// и --add-opens ...=ALL-UNNAMED перестаёт действовать (рефлексия для HWND ломается).
+	def fxDir = new File(libDir, "fx")
+	fxDir.mkdirs()
+	libDir.listFiles()?.findAll { it.name.startsWith('javafx-') }?.each { jar ->
+		def target = new File(fxDir, jar.name)
+		if (target.exists()) {
+			java.nio.file.Files.delete(jar.toPath())
+		} else {
+			java.nio.file.Files.move(
+				jar.toPath(),
+				target.toPath(),
+				java.nio.file.StandardCopyOption.REPLACE_EXISTING
+			)
+		}
+	}
+
+	// Windows: скопировать meshapp-ble.dll (WinRT BLE) в lib/ для упаковки
+	if (os.isWindows()) {
+		def bleDll = file('src/main/resources/win32-x86-64/meshapp-ble.dll')
+		if (bleDll.exists()) {
+			java.nio.file.Files.copy(
+				bleDll.toPath(),
+				new File(libDir, bleDll.name).toPath(),
+				java.nio.file.StandardCopyOption.REPLACE_EXISTING
+			)
+			logger.lifecycle("packaging: meshapp-ble.dll скопирован в lib/")
+		}
+	}
+
+	// Linux: скопировать libmeshapp-ble.so (BlueZ BLE) в lib/ для упаковки
+	if (os.isLinux()) {
+		def bleSo = file('src/main/resources/linux-x86-64/libmeshapp-ble.so')
+		if (bleSo.exists()) {
+			java.nio.file.Files.copy(
+				bleSo.toPath(),
+				new File(libDir, bleSo.name).toPath(),
+				java.nio.file.StandardCopyOption.REPLACE_EXISTING
+			)
+			logger.lifecycle("packaging: libmeshapp-ble.so скопирован в lib/")
+		}
+	}
+
+	return libDir
+}
+
+def prepareLinuxPackagingResources = {
+	def linuxResourceDir = layout.buildDirectory.dir("jpackage/linux-resources").get().asFile
+	if (linuxResourceDir.exists()) {
+		linuxResourceDir.deleteDir()
+	}
+	linuxResourceDir.mkdirs()
+
+	def linuxLauncherIcon = new File(linuxResourceDir, 'MeshApp.png')
+	java.nio.file.Files.copy(
+		file('src/main/resources/logo/icon_512.png').toPath(),
+		linuxLauncherIcon.toPath(),
+		java.nio.file.StandardCopyOption.REPLACE_EXISTING
+	)
+
+	def linuxScriptsDir = file('src/jpackage/linux')
+	['postinstall', 'postrm'].each { scriptName ->
+		def source = new File(linuxScriptsDir, scriptName)
+		if (source.exists()) {
+			def target = new File(linuxResourceDir, scriptName)
+			java.nio.file.Files.copy(
+				source.toPath(),
+				target.toPath(),
+				java.nio.file.StandardCopyOption.REPLACE_EXISTING
+			)
+			target.setExecutable(true, false)
+		}
+	}
+
+	return linuxResourceDir
+}
+
+def sanitizeArtifactVersion = { value ->
+	value.replaceAll(/[^A-Za-z0-9._-]+/, '_')
+}
+
+def resolveLinuxAppImageArch = {
+	def arch = System.getProperty('os.arch').toLowerCase(java.util.Locale.ROOT)
+	switch (arch) {
+		case ['amd64', 'x86_64']:
+			return 'x86_64'
+		case ['aarch64', 'arm64']:
+			return 'aarch64'
+		default:
+			return sanitizeArtifactVersion(arch)
+	}
+}
+
+def resolveAppImageTool = {
+	def configuredPath = (findProperty('appimagetool') ?: System.getenv('APPIMAGETOOL'))?.toString()?.trim()
+	if (configuredPath) {
+		def configured = file(configuredPath)
+		if (configured.isFile() && configured.canExecute()) {
+			return configured
+		}
+		throw new GradleException("appImage: appimagetool not found or not executable: ${configured}")
+	}
+
+	def candidateNames = [
+		'appimagetool',
+		'appimagetool.AppImage',
+		"appimagetool-${resolveLinuxAppImageArch()}.AppImage"
+	]
+	def pathEntries = (System.getenv('PATH') ?: '')
+		.split(java.util.regex.Pattern.quote(File.pathSeparator))
+		.findAll { it }
+	for (entry in pathEntries) {
+		for (name in candidateNames) {
+			def candidate = new File(entry, name)
+			if (candidate.isFile() && candidate.canExecute()) {
+				return candidate
+			}
+		}
+	}
+	return null
+}
+
+def normalizeDebDependencyToken = { String token ->
+	def trimmed = token?.trim()
+	if (!trimmed || trimmed.contains('|')) {
+		return trimmed
+	}
+
+	def matcher = trimmed =~ /^([A-Za-z0-9.+:-]+?)t64(\s*\([^)]+\))?$/
+	if (!matcher.matches()) {
+		return trimmed
+	}
+
+	def basePackage = matcher.group(1)
+	def versionConstraint = matcher.group(2) ?: ''
+	return "${basePackage}${versionConstraint} | ${trimmed}"
+}
+
+def normalizeDebControlDependencies = { String controlText ->
+	def separator = controlText.contains('\r\n') ? '\r\n' : '\n'
+	def endsWithNewline = controlText.endsWith('\n') || controlText.endsWith('\r\n')
+	def normalized = controlText.readLines().collect { line ->
+		if (!line.startsWith('Depends:')) {
+			return line
+		}
+		def value = line.substring('Depends:'.length()).trim()
+		if (!value) {
+			return line
+		}
+		def normalizedDepends = value
+			.split(/\s*,\s*/)
+			.collect(normalizeDebDependencyToken)
+			.join(', ')
+		return "Depends: ${normalizedDepends}"
+	}.join(separator)
+
+	return endsWithNewline ? normalized + separator : normalized
+}
+
+def patchLinuxDebControl = { File outputDir ->
+	def debFiles = outputDir.listFiles()?.findAll { it.name.endsWith('.deb') } ?: []
+	debFiles.each { debFile ->
+		def repackRoot = new File(layout.buildDirectory.dir("tmp/deb-repack/${debFile.name}").get().asFile, 'root')
+		if (repackRoot.exists()) {
+			repackRoot.deleteDir()
+		}
+		repackRoot.mkdirs()
+
+		def unpackProc = new ProcessBuilder(
+			'dpkg-deb', '-R', debFile.absolutePath, repackRoot.absolutePath
+		).redirectErrorStream(true).start()
+		def unpackOutput = unpackProc.inputStream.text
+		unpackProc.waitFor()
+		if (unpackOutput) logger.lifecycle(unpackOutput.trim())
+		if (unpackProc.exitValue() != 0) {
+			throw new GradleException("jpackage: failed to unpack ${debFile.name} for control patching")
+		}
+
+		def controlFile = new File(repackRoot, 'DEBIAN/control')
+		if (!controlFile.isFile()) {
+			throw new GradleException("jpackage: Debian control file not found: ${controlFile}")
+		}
+
+		def originalControl = controlFile.getText('UTF-8')
+		def patchedControl = normalizeDebControlDependencies(originalControl)
+		if (patchedControl != originalControl) {
+			controlFile.setText(patchedControl, 'UTF-8')
+			logger.lifecycle("jpackage: normalized Debian dependencies in ${debFile.name}")
+		}
+
+		def rebuildProc = new ProcessBuilder(
+			'dpkg-deb', '--build', '--root-owner-group',
+			repackRoot.absolutePath, debFile.absolutePath
+		).redirectErrorStream(true).start()
+		def rebuildOutput = rebuildProc.inputStream.text
+		rebuildProc.waitFor()
+		if (rebuildOutput) logger.lifecycle(rebuildOutput.trim())
+		if (rebuildProc.exitValue() != 0) {
+			throw new GradleException("jpackage: failed to rebuild ${debFile.name} after control patching")
+		}
+
+		repackRoot.parentFile?.deleteDir()
+	}
+}
+
 // ============================================================
 // JavaDoc: генерация документации в docs/javadoc/
 // Использование: ./gradlew javadoc
@@ -347,7 +591,7 @@ tasks.named("run") {
 
 // ============================================================
 // jpackage: создание нативного инсталлятора
-// Windows: .msi, macOS: .dmg, Linux: .deb/.rpm
+// Windows: .msi, macOS: .dmg, Linux: .deb
 // Использование: ./gradlew jpackage
 // ============================================================
 tasks.register('jpackage') {
@@ -361,104 +605,23 @@ tasks.register('jpackage') {
 		def outputDir = layout.buildDirectory.dir("jpackage").get().asFile
 		if (outputDir.exists()) outputDir.deleteDir()
 		outputDir.mkdirs()
-		def appVersion = {
-			try {
-				def count = 'git rev-list --count HEAD'.execute().text.trim()
-				if (os.isMacOsX()) {
-					// macOS jpackage allows 1-3 numbers only
-					return "1.2.${count}"
-				}
-				def hash = 'git rev-parse --short=4 HEAD'.execute().text.trim()
-				// Доп. разряд из хеша (0-65535) — чтобы MSI всегда считал версию новой
-				def minor = Integer.parseInt(hash, 16) % 65536
-				return "1.2.${count}.${minor}"
-			} catch (ignored) {
-				return os.isMacOsX() ? '1.2.0' : '1.2.0.0'
-			}
-		}()
+		def appVersion = resolvePackageVersion(os)
 
-		def javaHome = javaToolchains.launcherFor {
-			languageVersion = JavaLanguageVersion.of(21)
-		}.get().executablePath.asFile.parentFile.parentFile.absolutePath
+		def javaHome = resolvePackagingJavaHome()
 
 		def jpackageBin = os.isWindows()
 			? "${javaHome}/bin/jpackage.exe"
 			: "${javaHome}/bin/jpackage"
 
-		def libDir = new File(installDir, "lib")
-
-		// Выделить JavaFX JAR в поддиректорию — только они должны быть на module path.
-		// Если $APPDIR целиком на module path, app JAR становится automatic module,
-		// и --add-opens ...=ALL-UNNAMED перестаёт действовать (рефлексия для HWND ломается).
-		def fxDir = new File(libDir, "fx")
-		fxDir.mkdirs()
-		libDir.listFiles()?.findAll { it.name.startsWith('javafx-') }?.each { jar ->
-			java.nio.file.Files.move(jar.toPath(), new File(fxDir, jar.name).toPath(),
-				java.nio.file.StandardCopyOption.REPLACE_EXISTING)
-		}
-
-		// Windows: скопировать meshapp-ble.dll (WinRT BLE) в lib/ для jpackage
-		if (os.isWindows()) {
-			def bleDll = file('src/main/resources/win32-x86-64/meshapp-ble.dll')
-			if (bleDll.exists()) {
-				java.nio.file.Files.copy(bleDll.toPath(),
-					new File(libDir, bleDll.name).toPath(),
-					java.nio.file.StandardCopyOption.REPLACE_EXISTING)
-				logger.lifecycle("jpackage: meshapp-ble.dll скопирован в lib/")
-			}
-		}
-
-		// Linux: скопировать libmeshapp-ble.so (BlueZ BLE) в lib/ для jpackage
-		if (os.isLinux()) {
-			def bleSo = file('src/main/resources/linux-x86-64/libmeshapp-ble.so')
-			if (bleSo.exists()) {
-				java.nio.file.Files.copy(bleSo.toPath(),
-					new File(libDir, bleSo.name).toPath(),
-					java.nio.file.StandardCopyOption.REPLACE_EXISTING)
-				logger.lifecycle("jpackage: libmeshapp-ble.so скопирован в lib/")
-			}
-		}
-
-		def jvmArgsList = application.applicationDefaultJvmArgs.collect()
-		// $APPDIR — токен jpackage, заменяется на реальную директорию приложения при запуске.
-		// Абсолютные пути билд-машины не работают на других компьютерах.
-		// $APPDIR/fx — только JavaFX модули, app остаётся на classpath (unnamed module).
-		jvmArgsList << "--module-path"
-		jvmArgsList << '$APPDIR/fx'
-		jvmArgsList << "--add-modules"
-		jvmArgsList << "javafx.controls"
+		def libDir = preparePackagingLibDir(os, installDir)
+		def jvmArgsList = buildPackagingJvmArgs()
 
 		// macOS: app-image → копируем Icon Composer ресурсы → DMG
 		def macBuild = os.isMacOsX()
 		File linuxResourceDir = null
 
 		if (os.isLinux()) {
-			linuxResourceDir = layout.buildDirectory.dir("jpackage/linux-resources").get().asFile
-			if (linuxResourceDir.exists()) {
-				linuxResourceDir.deleteDir()
-			}
-			linuxResourceDir.mkdirs()
-
-			def linuxLauncherIcon = new File(linuxResourceDir, 'MeshApp.png')
-			java.nio.file.Files.copy(
-				file('src/main/resources/logo/icon_512.png').toPath(),
-				linuxLauncherIcon.toPath(),
-				java.nio.file.StandardCopyOption.REPLACE_EXISTING
-			)
-
-			def linuxScriptsDir = file('src/jpackage/linux')
-			['postinstall', 'postrm'].each { scriptName ->
-				def source = new File(linuxScriptsDir, scriptName)
-				if (source.exists()) {
-					def target = new File(linuxResourceDir, scriptName)
-					java.nio.file.Files.copy(
-						source.toPath(),
-						target.toPath(),
-						java.nio.file.StandardCopyOption.REPLACE_EXISTING
-					)
-					target.setExecutable(true, false)
-				}
-			}
+			linuxResourceDir = prepareLinuxPackagingResources()
 		}
 
 		def args = [
@@ -509,11 +672,6 @@ tasks.register('jpackage') {
 		}
 
 		if (!os.isWindows() && !macBuild) {
-			// Ubuntu 24.04+ переименовал libasound2 → libasound2t64 (64-bit time_t).
-			// jpackage по умолчанию добавляет libasound2, что ломает установку.
-			// Указываем libasound2t64 | libasound2 для совместимости со старыми и новыми дистрибутивами.
-			args << '--linux-package-deps'
-			args << 'libasound2t64 | libasound2'
 			args << '--linux-shortcut'
 			if (linuxResourceDir != null) {
 				args << '--resource-dir'
@@ -535,6 +693,14 @@ tasks.register('jpackage') {
 		proc1.waitFor()
 		if (proc1Output) logger.lifecycle(proc1Output.trim())
 		if (proc1.exitValue() != 0) throw new GradleException("jpackage failed with exit code ${proc1.exitValue()}")
+		if (os.isLinux() && !macBuild) {
+			// jpackage auto-detects Debian dependencies from the build host and appends
+			// custom deps instead of replacing them. On Ubuntu 24.04+ this bakes in
+			// t64 package names (libasound2t64, libgtk-3-0t64, etc.), which are not
+			// installable as-is on older Ubuntu. Repack the .deb and widen those deps
+			// to "old-name | new-name" alternatives.
+			patchLinuxDebControl(outputDir)
+		}
 
 		// macOS шаг 2: патчить Info.plist, скопировать Assets.car, собрать DMG
 		if (macBuild) {
@@ -651,6 +817,173 @@ tasks.register('jpackage') {
 			if (proc2.exitValue() != 0) throw new GradleException("jpackage DMG failed with exit code ${proc2.exitValue()}")
 			logger.lifecycle("jpackage: DMG создан в ${outputDir}")
 		}
+	}
+}
+
+// ============================================================
+// AppImage: создание portable Linux AppImage из jpackage app-image
+// Использование: ./gradlew appImage [-Pappimagetool=/path/to/appimagetool.AppImage]
+// ============================================================
+tasks.register('appImage') {
+	dependsOn installDist
+	mustRunAfter tasks.named('jpackage')
+	group = 'distribution'
+	description = 'Собрать portable Linux AppImage'
+
+	doLast {
+		def os = org.gradle.internal.os.OperatingSystem.current()
+		if (!os.isLinux()) {
+			throw new GradleException('appImage task is supported only on Linux')
+		}
+
+		def installDir = layout.buildDirectory.dir("install/${project.name}").get().asFile
+		def outputDir = layout.buildDirectory.dir("jpackage").get().asFile
+		def workDir = layout.buildDirectory.dir("appimage").get().asFile
+		if (workDir.exists()) {
+			workDir.deleteDir()
+		}
+		workDir.mkdirs()
+		outputDir.mkdirs()
+
+		def appVersion = resolvePackageVersion(os)
+		def javaHome = resolvePackagingJavaHome()
+		def jpackageBin = "${javaHome}/bin/jpackage"
+		def libDir = preparePackagingLibDir(os, installDir)
+		def jvmArgsList = buildPackagingJvmArgs()
+		def linuxResourceDir = prepareLinuxPackagingResources()
+		def iconSource = file('src/main/resources/logo/icon_512.png')
+		if (!iconSource.exists()) {
+			throw new GradleException("appImage: icon not found: ${iconSource}")
+		}
+
+		def jpackageArgs = [
+			jpackageBin,
+			'--type', 'app-image',
+			'--name', 'MeshApp',
+			'--app-version', appVersion,
+			'--vendor', 'Meshtastic',
+			'--copyright', 'Copyright © Konstantin A. Smirnov',
+			'--dest', workDir.absolutePath,
+			'--input', libDir.absolutePath,
+			'--main-jar', "${project.name}-${project.version}.jar",
+			'--main-class', application.mainClass.get(),
+			'--resource-dir', linuxResourceDir.absolutePath
+		]
+
+		jvmArgsList.each { arg ->
+			jpackageArgs << '--java-options'
+			jpackageArgs << arg
+		}
+
+		jpackageArgs << '--icon'
+		jpackageArgs << iconSource.absolutePath
+
+		def jpackageProc = new ProcessBuilder(jpackageArgs.collect { it.toString() })
+			.redirectErrorStream(true)
+			.start()
+		def jpackageOutput = jpackageProc.inputStream.text
+		jpackageProc.waitFor()
+		if (jpackageOutput) logger.lifecycle(jpackageOutput.trim())
+		if (jpackageProc.exitValue() != 0) {
+			throw new GradleException("appImage: jpackage app-image failed with exit code ${jpackageProc.exitValue()}")
+		}
+
+		def jpackageImageDir = new File(workDir, 'MeshApp')
+		if (!jpackageImageDir.isDirectory()) {
+			throw new GradleException("appImage: jpackage image not found: ${jpackageImageDir}")
+		}
+
+		def appDir = new File(workDir, 'MeshApp.AppDir')
+		project.copy {
+			from jpackageImageDir
+			into new File(appDir, 'usr')
+		}
+
+		def launcher = new File(appDir, 'usr/bin/MeshApp')
+		if (!launcher.isFile()) {
+			throw new GradleException("appImage: launcher not found in AppDir: ${launcher}")
+		}
+
+		def desktopEntry = """\
+[Desktop Entry]
+Name=MeshApp
+Exec=MeshApp
+Icon=meshapp
+Type=Application
+Categories=Network;Utility;
+Comment=Meshtastic Desktop Client
+Terminal=false
+StartupWMClass=MeshApp
+"""
+		def desktopFile = new File(appDir, 'meshapp.desktop')
+		desktopFile.text = desktopEntry
+
+		def shareApplicationsDir = new File(appDir, 'usr/share/applications')
+		shareApplicationsDir.mkdirs()
+		new File(shareApplicationsDir, 'meshapp.desktop').text = desktopEntry
+
+		def rootIcon = new File(appDir, 'meshapp.png')
+		java.nio.file.Files.copy(
+			iconSource.toPath(),
+			rootIcon.toPath(),
+			java.nio.file.StandardCopyOption.REPLACE_EXISTING
+		)
+		java.nio.file.Files.copy(
+			iconSource.toPath(),
+			new File(appDir, '.DirIcon').toPath(),
+			java.nio.file.StandardCopyOption.REPLACE_EXISTING
+		)
+
+		def shareIconsDir = new File(appDir, 'usr/share/icons/hicolor/512x512/apps')
+		shareIconsDir.mkdirs()
+		java.nio.file.Files.copy(
+			iconSource.toPath(),
+			new File(shareIconsDir, 'meshapp.png').toPath(),
+			java.nio.file.StandardCopyOption.REPLACE_EXISTING
+		)
+
+		def appRun = new File(appDir, 'AppRun')
+		appRun.text = '''\
+#!/bin/sh
+HERE="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+exec "$HERE/usr/bin/MeshApp" "$@"
+'''
+		appRun.setExecutable(true, false)
+
+		def appImageTool = resolveAppImageTool()
+		if (appImageTool == null) {
+			throw new GradleException('appImage: appimagetool not found. Add it to PATH or pass -Pappimagetool=/path/to/appimagetool.AppImage')
+		}
+
+		def artifactName = "MeshApp-${sanitizeArtifactVersion(project.version.toString())}-${resolveLinuxAppImageArch()}.AppImage"
+		def appImageFile = new File(outputDir, artifactName)
+		if (appImageFile.exists()) {
+			appImageFile.delete()
+		}
+
+		def appImageProc = new ProcessBuilder(
+			appImageTool.absolutePath,
+			'--no-appstream',
+			appDir.absolutePath,
+			appImageFile.absolutePath
+		).redirectErrorStream(true)
+		def env = appImageProc.environment()
+		env.put('ARCH', resolveLinuxAppImageArch())
+		env.put('VERSION', project.version.toString())
+		if (appImageTool.name.endsWith('.AppImage') && !env.containsKey('APPIMAGE_EXTRACT_AND_RUN')) {
+			env.put('APPIMAGE_EXTRACT_AND_RUN', '1')
+		}
+
+		def appImageProcess = appImageProc.start()
+		def appImageOutput = appImageProcess.inputStream.text
+		appImageProcess.waitFor()
+		if (appImageOutput) logger.lifecycle(appImageOutput.trim())
+		if (appImageProcess.exitValue() != 0) {
+			throw new GradleException("appImage: appimagetool failed with exit code ${appImageProcess.exitValue()}")
+		}
+
+		appImageFile.setExecutable(true, false)
+		logger.lifecycle("appImage: AppImage создан в ${appImageFile}")
 	}
 }
 
