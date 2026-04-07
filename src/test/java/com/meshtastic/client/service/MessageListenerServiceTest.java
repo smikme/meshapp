@@ -15,9 +15,11 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.meshtastic.proto.AdminProtos;
+import org.meshtastic.proto.ChannelProtos;
 import org.meshtastic.proto.ConfigProtos;
 import org.meshtastic.proto.MeshProtos;
 import org.meshtastic.proto.Portnums;
+import org.meshtastic.proto.TelemetryProtos;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
@@ -49,6 +51,15 @@ class MessageListenerServiceTest {
         MessageDbService.getInstance();
         state = new DeviceState();
         state.setMyNodeNum(0x12345678);
+        state.addChannel(ChannelProtos.Channel.newBuilder()
+                .setIndex(0)
+                .setRole(ChannelProtos.Channel.Role.PRIMARY)
+                .build());
+        state.addChannel(ChannelProtos.Channel.newBuilder()
+                .setIndex(2)
+                .setRole(ChannelProtos.Channel.Role.SECONDARY)
+                .build());
+        state.setChannelCatalogReady(true);
         service = new MessageListenerService(state);
     }
 
@@ -92,6 +103,133 @@ class MessageListenerServiceTest {
         assertNotNull(persisted);
         assertEquals("hello channel", persisted.getText());
         assertEquals(MeshMessage.DeliveryStatus.DELIVERED, persisted.getStatus());
+    }
+
+    @Test
+    void onMeshPacketDefersDirectMessagesUntilMyNodeNumIsKnown() {
+        state.clear();
+
+        MeshProtos.MeshPacket packet = MeshProtos.MeshPacket.newBuilder()
+                .setFrom(0x11111111)
+                .setTo(0x12345678)
+                .setChannel(0)
+                .setId(7009)
+                .setDecoded(MeshProtos.Data.newBuilder()
+                        .setPortnum(Portnums.PortNum.TEXT_MESSAGE_APP)
+                        .setPayload(ByteString.copyFrom("hello dm", StandardCharsets.UTF_8))
+                        .build())
+                .build();
+
+        service.onMeshPacket(packet);
+
+        assertTrue(state.getDirectMessages("!11111111").isEmpty());
+        assertNull(MessageDbService.getInstance().findByPacketId(7009));
+
+        state.setMyNodeNum(0x12345678);
+        service.onMyNodeInfo(MeshProtos.MyNodeInfo.newBuilder().setMyNodeNum(0x12345678).build());
+        TestEnvironmentSupport.ensureJavaFxStarted();
+
+        MeshMessage flushed = state.getDirectMessages("!11111111").getFirst();
+        assertEquals("hello dm", flushed.getText());
+        assertEquals("!11111111", flushed.getFromNodeId());
+
+        MeshMessage persisted = MessageDbService.getInstance().findByPacketId(7009);
+        assertNotNull(persisted);
+        assertEquals("hello dm", persisted.getText());
+    }
+
+    @Test
+    void onMeshPacketDefersTelemetryUntilMyNodeNumIsKnown() {
+        state.clear();
+
+        TelemetryProtos.Telemetry telemetry = TelemetryProtos.Telemetry.newBuilder()
+                .setDeviceMetrics(TelemetryProtos.DeviceMetrics.newBuilder()
+                        .setBatteryLevel(77)
+                        .setVoltage(3.92f)
+                        .build())
+                .build();
+        MeshProtos.MeshPacket packet = MeshProtos.MeshPacket.newBuilder()
+                .setFrom(0xCAFEBABE)
+                .setTo(0xFFFFFFFF)
+                .setId(7012)
+                .setRxTime(1_700_000_222)
+                .setDecoded(MeshProtos.Data.newBuilder()
+                        .setPortnum(Portnums.PortNum.TELEMETRY_APP)
+                        .setPayload(telemetry.toByteString())
+                        .build())
+                .build();
+
+        service.onMeshPacket(packet);
+
+        assertTrue(state.getNodeDb().isEmpty());
+        assertEquals(0, NodeCacheService.getInstance().countTelemetryEntries("!12345678"));
+
+        state.setMyNodeNum(0x12345678);
+        service.onMyNodeInfo(MeshProtos.MyNodeInfo.newBuilder().setMyNodeNum(0x12345678).build());
+        TestEnvironmentSupport.ensureJavaFxStarted();
+
+        NodeData node = state.getOrCreateNode(0xCAFEBABE);
+        assertEquals(77, node.getBatteryLevel());
+        assertEquals(3.92f, node.getVoltage());
+        assertEquals(1, NodeCacheService.getInstance().countTelemetryEntries("!12345678"));
+    }
+
+    @Test
+    void onMeshPacketDefersBroadcastMessagesUntilChannelCatalogReady() {
+        state.clear();
+        state.setMyNodeNum(0x12345678);
+        state.addChannel(ChannelProtos.Channel.newBuilder()
+                .setIndex(0)
+                .setRole(ChannelProtos.Channel.Role.PRIMARY)
+                .build());
+        state.addChannel(ChannelProtos.Channel.newBuilder()
+                .setIndex(2)
+                .setRole(ChannelProtos.Channel.Role.SECONDARY)
+                .build());
+
+        MeshProtos.MeshPacket packet = MeshProtos.MeshPacket.newBuilder()
+                .setFrom(0x11111111)
+                .setTo(0xFFFFFFFF)
+                .setChannel(2)
+                .setId(7010)
+                .setDecoded(MeshProtos.Data.newBuilder()
+                        .setPortnum(Portnums.PortNum.TEXT_MESSAGE_APP)
+                        .setPayload(ByteString.copyFrom("deferred", StandardCharsets.UTF_8))
+                        .build())
+                .build();
+
+        service.onMeshPacket(packet);
+
+        assertTrue(state.getMessages(2).isEmpty());
+        assertNull(MessageDbService.getInstance().findByPacketId(7010));
+
+        state.setChannelCatalogReady(true);
+        service.onConfigComplete(1);
+        TestEnvironmentSupport.ensureJavaFxStarted();
+
+        MeshMessage flushed = state.getMessages(2).getFirst();
+        assertEquals("deferred", flushed.getText());
+        assertNotNull(MessageDbService.getInstance().findByPacketId(7010));
+    }
+
+    @Test
+    void onMeshPacketDropsBroadcastMessagesForUnknownChannel() {
+        MeshProtos.MeshPacket packet = MeshProtos.MeshPacket.newBuilder()
+                .setFrom(0x11111111)
+                .setTo(0xFFFFFFFF)
+                .setChannel(5)
+                .setId(7011)
+                .setDecoded(MeshProtos.Data.newBuilder()
+                        .setPortnum(Portnums.PortNum.TEXT_MESSAGE_APP)
+                        .setPayload(ByteString.copyFrom("wrong channel", StandardCharsets.UTF_8))
+                        .build())
+                .build();
+
+        service.onMeshPacket(packet);
+
+        assertTrue(state.getMessages(5).isEmpty());
+        assertTrue(state.getMessages(0).isEmpty());
+        assertNull(MessageDbService.getInstance().findByPacketId(7011));
     }
 
     @Test

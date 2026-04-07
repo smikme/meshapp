@@ -111,6 +111,7 @@ class ConfigExchangeServiceTest {
         FakeConnection connection = new FakeConnection();
         ProtocolHandler handler = track(new ProtocolHandler(connection));
         DeviceState state = new DeviceState();
+        state.setMyNodeNum(0x12345678);
         ConfigExchangeService service = new ConfigExchangeService(handler, state);
 
         service.onNodeInfo(MeshProtos.NodeInfo.newBuilder()
@@ -122,6 +123,42 @@ class ConfigExchangeServiceTest {
         assertTrue(node.hasHopsAway());
         assertTrue(node.isDirectNeighbor());
         assertEquals(0, node.getHopsAway());
+    }
+
+    @Test
+    void onNodeInfoDefersTelemetryUntilMyNodeInfoIsKnown() {
+        FakeConnection connection = new FakeConnection();
+        ProtocolHandler handler = track(new ProtocolHandler(connection));
+        DeviceState state = new DeviceState();
+        ConfigExchangeService service = new ConfigExchangeService(handler, state);
+
+        service.onNodeInfo(MeshProtos.NodeInfo.newBuilder()
+                .setNum(0xCAFEBABE)
+                .setLastHeard(1_700_000_000)
+                .setUser(MeshProtos.User.newBuilder()
+                        .setId("!cafebabe")
+                        .setLongName("Alice")
+                        .build())
+                .setDeviceMetrics(TelemetryProtos.DeviceMetrics.newBuilder()
+                        .setBatteryLevel(88)
+                        .setVoltage(4.1f)
+                        .setChannelUtilization(12.5f)
+                        .setAirUtilTx(3.5f)
+                        .build())
+                .build());
+
+        assertTrue(state.getNodeDb().isEmpty());
+        assertTrue(state.getTelemetryHistory().isEmpty());
+        assertEquals(0, NodeCacheService.getInstance().countTelemetryEntries("!12345678"));
+
+        service.onMyNodeInfo(MeshProtos.MyNodeInfo.newBuilder().setMyNodeNum(0x12345678).build());
+
+        NodeData node = state.getOrCreateNode(0xCAFEBABE);
+        assertEquals("Alice", node.getLongName());
+        assertEquals(88, node.getBatteryLevel());
+        assertEquals(4.1f, node.getVoltage());
+        assertEquals(1, state.getTelemetryHistory().size());
+        assertEquals(1, NodeCacheService.getInstance().countTelemetryEntries("!12345678"));
     }
 
     @Test
@@ -142,6 +179,7 @@ class ConfigExchangeServiceTest {
         CompletableFuture<DeviceState> future = service.startConfigExchange();
         int wantConfigId = connection.lastWantConfigId;
 
+        service.onMyNodeInfo(MeshProtos.MyNodeInfo.newBuilder().setMyNodeNum(0x12345678).build());
         service.onNodeInfo(MeshProtos.NodeInfo.newBuilder()
                 .setNum(0xCAFEBABE)
                 .setUser(MeshProtos.User.newBuilder()
@@ -160,6 +198,36 @@ class ConfigExchangeServiceTest {
         NodeData reloaded = reloadedCache.get("!cafebabe");
         assertNotNull(reloaded);
         assertFalse(reloaded.hasHopsAway());
+    }
+
+    @Test
+    void onConfigCompleteWaitsForMyNodeInfoBeforeCompletingFuture() throws Exception {
+        FakeConnection connection = new FakeConnection();
+        ProtocolHandler handler = track(new ProtocolHandler(connection));
+        DeviceState state = new DeviceState();
+        ConfigExchangeService service = new ConfigExchangeService(handler, state);
+
+        CompletableFuture<DeviceState> future = service.startConfigExchange();
+        int wantConfigId = connection.lastWantConfigId;
+
+        service.onNodeInfo(MeshProtos.NodeInfo.newBuilder()
+                .setNum(0xCAFEBABE)
+                .setUser(MeshProtos.User.newBuilder()
+                        .setId("!cafebabe")
+                        .setLongName("Alice")
+                        .build())
+                .build());
+        service.onConfigComplete(wantConfigId);
+
+        assertFalse(future.isDone());
+        assertFalse(state.isChannelCatalogReady());
+        assertTrue(state.getNodeDb().isEmpty());
+
+        service.onMyNodeInfo(MeshProtos.MyNodeInfo.newBuilder().setMyNodeNum(0x12345678).build());
+
+        assertTrue(future.isDone());
+        assertTrue(state.isChannelCatalogReady());
+        assertEquals("Alice", state.getOrCreateNode(0xCAFEBABE).getLongName());
     }
 
     @Test

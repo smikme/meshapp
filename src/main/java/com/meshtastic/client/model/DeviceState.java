@@ -20,6 +20,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BiConsumer;
 
 /**
@@ -52,6 +53,7 @@ public class DeviceState {
     private volatile int myNodeNum;
     private final ConcurrentHashMap<Integer, NodeData> nodeDb = new ConcurrentHashMap<>();
     private final List<ChannelProtos.Channel> channels = Collections.synchronizedList(new ArrayList<>());
+    private final AtomicLong channelCatalogEpoch = new AtomicLong(0);
     private final List<ConfigProtos.Config> configs = Collections.synchronizedList(new ArrayList<>());
     private final List<ModuleConfigProtos.ModuleConfig> moduleConfigs = Collections.synchronizedList(new ArrayList<>());
     private final Map<Integer, List<MeshMessage>> messagesByChannel = new ConcurrentHashMap<>();
@@ -86,6 +88,7 @@ public class DeviceState {
     private volatile double pendingFixedLon;
     private volatile int pendingFixedAlt;
     private volatile long pendingFixedSetAt; // epoch millis, 0 = none
+    private volatile boolean channelCatalogReady = false;
 
     public DeviceState() {
         ackTimeoutExecutor.scheduleWithFixedDelay(this::runAckSweepSafely,
@@ -112,7 +115,15 @@ public class DeviceState {
     public List<ChannelProtos.Channel> getChannels() { return channels; }
 
     public void addChannel(ChannelProtos.Channel channel) {
-        channels.add(channel);
+        synchronized (channels) {
+            for (int i = 0; i < channels.size(); i++) {
+                if (channels.get(i).getIndex() == channel.getIndex()) {
+                    channels.set(i, channel);
+                    return;
+                }
+            }
+            channels.add(channel);
+        }
     }
 
     /**
@@ -130,6 +141,30 @@ public class DeviceState {
             channels.add(channel);
         }
         fireMessageListeners();
+    }
+
+    public boolean isChannelCatalogReady() {
+        return channelCatalogReady;
+    }
+
+    public void setChannelCatalogReady(boolean channelCatalogReady) {
+        this.channelCatalogReady = channelCatalogReady;
+    }
+
+    public long getChannelCatalogEpoch() {
+        return channelCatalogEpoch.get();
+    }
+
+    public boolean hasEnabledChannel(int channelIndex) {
+        synchronized (channels) {
+            for (ChannelProtos.Channel channel : channels) {
+                if (channel.getIndex() == channelIndex
+                        && channel.getRole() != ChannelProtos.Channel.Role.DISABLED) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     /**
@@ -612,6 +647,8 @@ public class DeviceState {
         myNodeNum = 0;
         nodeDb.clear();
         channels.clear();
+        channelCatalogReady = false;
+        channelCatalogEpoch.incrementAndGet();
         configs.clear();
         moduleConfigs.clear();
         messagesByChannel.clear();

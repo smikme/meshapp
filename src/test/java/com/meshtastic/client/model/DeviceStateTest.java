@@ -6,6 +6,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.meshtastic.proto.ChannelProtos;
 
 import java.nio.file.Path;
 
@@ -94,10 +95,30 @@ class DeviceStateTest {
         assertTrue(state.getNodeDb().isEmpty());
         assertTrue(state.getMessages(0).isEmpty());
         assertTrue(state.getDirectMessages("!peer").isEmpty());
+        assertFalse(state.isChannelCatalogReady());
         assertTrue(state.hasPendingFixedPosition());
         assertEquals(55.75, state.getPendingFixedLat());
         assertEquals(37.61, state.getPendingFixedLon());
         assertEquals(200, state.getPendingFixedAlt());
+
+        state.shutdown();
+    }
+
+    @Test
+    void addChannelReplacesExistingChannelWithSameIndex() {
+        DeviceState state = new DeviceState();
+
+        state.addChannel(ChannelProtos.Channel.newBuilder()
+                .setIndex(2)
+                .setRole(ChannelProtos.Channel.Role.SECONDARY)
+                .build());
+        state.addChannel(ChannelProtos.Channel.newBuilder()
+                .setIndex(2)
+                .setRole(ChannelProtos.Channel.Role.DISABLED)
+                .build());
+
+        assertEquals(1, state.getChannels().size());
+        assertEquals(ChannelProtos.Channel.Role.DISABLED, state.getChannels().getFirst().getRole());
 
         state.shutdown();
     }

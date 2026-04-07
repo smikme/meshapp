@@ -12,7 +12,9 @@ import javafx.application.Platform;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executors;
@@ -55,7 +57,10 @@ public class ConfigExchangeService implements FromRadioListener {
     private final Map<String, Boolean> favoriteFlags = new HashMap<>();
     private final Map<String, Boolean> ignoredFlags = new HashMap<>();
     private final AtomicBoolean receivedAny = new AtomicBoolean(false);
+    private final Object deferredConfigLock = new Object();
+    private final List<MeshProtos.NodeInfo> deferredNodeInfos = new ArrayList<>();
     private volatile ScheduledFuture<?> retryFuture;
+    private Integer deferredConfigCompleteId;
     private final ScheduledExecutorService retryScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
         Thread t = new Thread(r, "config-retry");
         t.setDaemon(true);
@@ -79,6 +84,7 @@ public class ConfigExchangeService implements FromRadioListener {
     public CompletableFuture<DeviceState> startConfigExchange() {
         future = new CompletableFuture<>();
         deviceState.clear();
+        resetDeferredConfigState();
 
         sentConfigId = ThreadLocalRandom.current().nextInt(1, Integer.MAX_VALUE);
         log.info("Starting config exchange with want_config_id={}", sentConfigId);
@@ -109,6 +115,7 @@ public class ConfigExchangeService implements FromRadioListener {
             if (!receivedAny.get() && !future.isDone()) {
                 log.info("No response from device, retrying want_config_id (attempt {}/{})", attempt, MAX_RETRIES);
                 deviceState.clear();
+                resetDeferredConfigState();
                 sentConfigId = ThreadLocalRandom.current().nextInt(1, Integer.MAX_VALUE);
                 sendWantConfig();
                 scheduleRetry(attempt + 1);
@@ -130,10 +137,19 @@ public class ConfigExchangeService implements FromRadioListener {
         receivedAny.set(true);
         deviceState.setMyNodeNum(myInfo.getMyNodeNum());
         log.info("My node number: {}", myInfo.getMyNodeNum());
+        flushDeferredConfigState();
     }
 
     @Override
     public void onNodeInfo(MeshProtos.NodeInfo nodeInfo) {
+        if (deviceState.getMyNodeNum() == 0) {
+            deferNodeInfo(nodeInfo);
+            return;
+        }
+        processNodeInfo(nodeInfo);
+    }
+
+    private void processNodeInfo(MeshProtos.NodeInfo nodeInfo) {
         NodeData node = deviceState.getOrCreateNode(nodeInfo.getNum());
 
         if (nodeInfo.hasUser()) {
@@ -274,53 +290,107 @@ public class ConfigExchangeService implements FromRadioListener {
 
     @Override
     public void onConfigComplete(int configCompleteId) {
-        if (configCompleteId == sentConfigId) {
-            log.info("Config exchange complete. Nodes: {}, Channels: {}, Configs: {}",
-                    deviceState.getNodeCount(),
-                    deviceState.getChannels().size(),
-                    deviceState.getConfigs().size());
-            cancelRetry();
-            protocolHandler.removeListener(this);
-            deviceState.clearPendingFixedPosition();
-            NodeCacheService ncs = NodeCacheService.getInstance();
-            ncs.updateAll(deviceState.getNodeDb());
-
-            // Применить флаги избранного — теперь ноды есть в БД
-            for (Map.Entry<String, Boolean> e : favoriteFlags.entrySet()) {
-                ncs.setFavorite(e.getKey(), e.getValue());
-            }
-
-            // Применить флаги игнорирования (только true — дефолт уже FALSE)
-            for (Map.Entry<String, Boolean> e : ignoredFlags.entrySet()) {
-                if (e.getValue()) {
-                    ncs.setIgnored(e.getKey(), true);
-                }
-            }
-
-            // Обогатить bare-ноды (только телеметрия) кэшированными именами из H2
-            for (NodeData node : deviceState.getNodeDb().values()) {
-                ncs.enrichFromCache(node);
-            }
-
-            // Уведомить UI об обновлённых избранных и игнорируемых (один раз после всех нод)
-            FavoriteNodeService.getInstance().fireListeners();
-            IgnoredNodeService.getInstance().fireListeners();
-
-            // Загрузить архив телеметрии из H2 + подчистить старые записи
-            String ownerNodeId = String.format("!%08x", deviceState.getMyNodeNum());
-            ncs.pruneTelemetryHistory(30, ownerNodeId);
-            var archived = ncs.loadTelemetryHistory(200, ownerNodeId);
-            deviceState.prependTelemetryHistory(archived);
-            log.info("Loaded {} archived telemetry entries from DB", archived.size());
-
-            // Проверить наличие непрочитанных сообщений и обновить badge
-            checkUnreadMessages(ownerNodeId);
-
-            if (future != null) {
-                future.complete(deviceState);
-            }
-        } else {
+        if (configCompleteId != sentConfigId) {
             log.warn("Received config_complete_id {} but expected {}", configCompleteId, sentConfigId);
+            return;
+        }
+        if (deviceState.getMyNodeNum() == 0) {
+            deferConfigComplete(configCompleteId);
+            return;
+        }
+
+        processConfigComplete(configCompleteId);
+    }
+
+    private void processConfigComplete(int configCompleteId) {
+        log.info("Config exchange complete. Nodes: {}, Channels: {}, Configs: {}",
+                deviceState.getNodeCount(),
+                deviceState.getChannels().size(),
+                deviceState.getConfigs().size());
+        cancelRetry();
+        protocolHandler.removeListener(this);
+        deviceState.setChannelCatalogReady(true);
+        deviceState.clearPendingFixedPosition();
+        NodeCacheService ncs = NodeCacheService.getInstance();
+        ncs.updateAll(deviceState.getNodeDb());
+
+        // Применить флаги избранного — теперь ноды есть в БД
+        for (Map.Entry<String, Boolean> e : favoriteFlags.entrySet()) {
+            ncs.setFavorite(e.getKey(), e.getValue());
+        }
+
+        // Применить флаги игнорирования (только true — дефолт уже FALSE)
+        for (Map.Entry<String, Boolean> e : ignoredFlags.entrySet()) {
+            if (e.getValue()) {
+                ncs.setIgnored(e.getKey(), true);
+            }
+        }
+
+        // Обогатить bare-ноды (только телеметрия) кэшированными именами из H2
+        for (NodeData node : deviceState.getNodeDb().values()) {
+            ncs.enrichFromCache(node);
+        }
+
+        // Уведомить UI об обновлённых избранных и игнорируемых (один раз после всех нод)
+        FavoriteNodeService.getInstance().fireListeners();
+        IgnoredNodeService.getInstance().fireListeners();
+
+        // Загрузить архив телеметрии из H2 + подчистить старые записи
+        String ownerNodeId = String.format("!%08x", deviceState.getMyNodeNum());
+        ncs.pruneTelemetryHistory(30, ownerNodeId);
+        var archived = ncs.loadTelemetryHistory(200, ownerNodeId);
+        deviceState.prependTelemetryHistory(archived);
+        log.info("Loaded {} archived telemetry entries from DB", archived.size());
+
+        // Проверить наличие непрочитанных сообщений и обновить badge
+        checkUnreadMessages(ownerNodeId);
+
+        if (future != null) {
+            future.complete(deviceState);
+        }
+    }
+
+    private void deferNodeInfo(MeshProtos.NodeInfo nodeInfo) {
+        if (nodeInfo == null) {
+            return;
+        }
+        synchronized (deferredConfigLock) {
+            deferredNodeInfos.add(nodeInfo);
+        }
+        log.info("Deferring node info for {} until my node id is known", nodeInfo.getNum());
+    }
+
+    private void deferConfigComplete(int configCompleteId) {
+        synchronized (deferredConfigLock) {
+            deferredConfigCompleteId = configCompleteId;
+        }
+        log.info("Deferring config_complete_id {} until my node id is known", configCompleteId);
+    }
+
+    private void flushDeferredConfigState() {
+        List<MeshProtos.NodeInfo> nodeInfos;
+        Integer configCompleteId;
+        synchronized (deferredConfigLock) {
+            if (deferredNodeInfos.isEmpty() && deferredConfigCompleteId == null) {
+                return;
+            }
+            nodeInfos = new ArrayList<>(deferredNodeInfos);
+            deferredNodeInfos.clear();
+            configCompleteId = deferredConfigCompleteId;
+            deferredConfigCompleteId = null;
+        }
+        for (MeshProtos.NodeInfo nodeInfo : nodeInfos) {
+            processNodeInfo(nodeInfo);
+        }
+        if (configCompleteId != null) {
+            processConfigComplete(configCompleteId);
+        }
+    }
+
+    private void resetDeferredConfigState() {
+        synchronized (deferredConfigLock) {
+            deferredNodeInfos.clear();
+            deferredConfigCompleteId = null;
         }
     }
 }
