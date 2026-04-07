@@ -11,10 +11,14 @@ import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.protocol.ProtocolHandler;
 import com.meshtastic.client.service.ConnectionManager;
 import javafx.application.Platform;
+import javafx.scene.Node;
+import javafx.scene.Parent;
 import javafx.scene.control.Button;
+import javafx.scene.control.CheckBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.TreeItem;
 import javafx.scene.control.TreeTableView;
+import javafx.scene.layout.VBox;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -31,6 +35,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
@@ -152,6 +157,43 @@ class FormSettingTest {
         assertNull(onFxThread(() -> fullConfigRoot(form)));
     }
 
+    @Test
+    void databaseResetConfirmRequiresAcknowledgementBeforeConfirmIsEnabled() {
+        AtomicBoolean confirmed = new AtomicBoolean(false);
+
+        FormSetting form = onFxThread(FormSetting::new);
+        VBox panel = onFxThread(() -> (VBox) invokeReturning(
+                form,
+                "buildDatabaseResetConfirmationPanel",
+                new Class<?>[] { Runnable.class },
+                (Runnable) () -> confirmed.set(true)));
+
+        CheckBox acknowledgeCheckBox = onFxThread(() -> findFirst(panel, CheckBox.class));
+        Button confirmButton = onFxThread(() -> findButtonByText(panel, "Удалить данные"));
+
+        assertNotNull(acknowledgeCheckBox);
+        assertNotNull(confirmButton);
+        assertTrue(onFxThread(confirmButton::isDisable));
+
+        onFxThread(() -> {
+            confirmButton.fire();
+            return null;
+        });
+        assertFalse(confirmed.get());
+
+        onFxThread(() -> {
+            acknowledgeCheckBox.setSelected(true);
+            return null;
+        });
+        assertFalse(onFxThread(confirmButton::isDisable));
+
+        onFxThread(() -> {
+            confirmButton.fire();
+            return null;
+        });
+        assertTrue(confirmed.get());
+    }
+
     private ProtocolHandler track(ProtocolHandler handler) {
         handlersToShutdown.add(handler);
         return handler;
@@ -188,6 +230,41 @@ class FormSettingTest {
 
     private static Label statusLabel(FormSetting form) {
         return (Label) readField(form, "configStatusLabel");
+    }
+
+    private static Button findButtonByText(Parent root, String text) {
+        Button button = findFirst(root, Button.class);
+        if (button != null && text.equals(button.getText())) {
+            return button;
+        }
+        for (Node child : root.getChildrenUnmodifiable()) {
+            if (child instanceof Button childButton && text.equals(childButton.getText())) {
+                return childButton;
+            }
+            if (child instanceof Parent childParent) {
+                Button nested = findButtonByText(childParent, text);
+                if (nested != null) {
+                    return nested;
+                }
+            }
+        }
+        return null;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static <T extends Node> T findFirst(Parent root, Class<T> type) {
+        for (Node child : root.getChildrenUnmodifiable()) {
+            if (type.isInstance(child)) {
+                return (T) child;
+            }
+            if (child instanceof Parent childParent) {
+                T nested = findFirst(childParent, type);
+                if (nested != null) {
+                    return nested;
+                }
+            }
+        }
+        return null;
     }
 
     private static Object readField(Object target, String fieldName) {

@@ -464,17 +464,35 @@ public final class PacketMonitorService {
      * Используется при завершении приложения и при сбросе singleton в тестах.
      */
     public void close() {
+        closeStatements();
+        dbConnection = null;
+    }
+
+    public synchronized void prepareForDatabaseReset() {
+        closeStatements();
+        dbConnection = null;
+    }
+
+    public synchronized void reinitializeAfterDatabaseReset() {
+        initDb();
+        notifyCleared();
+    }
+
+    private void closeStatements() {
         try {
             if (insertStmt != null) {
                 insertStmt.close();
             }
         } catch (SQLException e) {
             log.error("Failed to close packet monitor statements", e);
+        } finally {
+            insertStmt = null;
         }
     }
 
     private void initDb() {
         try {
+            closeStatements();
             dbConnection = DatabaseProvider.getConnection();
             try (Statement stmt = dbConnection.createStatement()) {
                 stmt.execute("""

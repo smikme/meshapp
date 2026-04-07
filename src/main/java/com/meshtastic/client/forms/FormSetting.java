@@ -11,6 +11,7 @@ import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.protocol.ProtocolHandler;
 import com.meshtastic.client.service.ConnectionManager;
 import com.meshtastic.client.service.ConfigSnapshotService;
+import com.meshtastic.client.service.DatabaseResetService;
 import com.meshtastic.client.service.MessageService;
 import com.meshtastic.client.service.NodeCacheService;
 import com.meshtastic.client.utils.ConfigValueFormatter;
@@ -142,6 +143,7 @@ public class FormSetting extends Form {
     private Button saveConfigBtn;
     private Button refreshConfigBtn;
     private Button syncDateTimeBtn;
+    private Button resetDatabaseBtn;
     private Button restartHardwareBtn;
     private Button shutdownHardwareBtn;
     private Tab configTab;
@@ -630,6 +632,12 @@ public class FormSetting extends Form {
                 this::onShutdownHardware);
         shutdownHardwareBtn.setDisable(true);
 
+        resetDatabaseBtn = createConfigToolbarButton(
+                "Очистить базу данных",
+                "Удалить локальные данные H2 и пересоздать все объекты БД",
+                "/icons/clear.svg",
+                this::onResetDatabaseRequested);
+
         Button exportConfigBtn = createConfigToolbarButton(
                 "Сохранить конфигурацию",
                 "Сохранить текущую конфигурацию в файл .mcf",
@@ -661,6 +669,8 @@ public class FormSetting extends Form {
                 new Separator(Orientation.VERTICAL),
                 restartHardwareBtn,
                 shutdownHardwareBtn,
+                new Separator(Orientation.VERTICAL),
+                resetDatabaseBtn,
                 new Separator(Orientation.VERTICAL),
                 exportConfigBtn,
                 importConfigBtn,
@@ -737,6 +747,104 @@ public class FormSetting extends Form {
         button.setTooltip(new Tooltip(title + "\n" + description));
         button.setOnAction(e -> action.run());
         return button;
+    }
+
+    private void onResetDatabaseRequested() {
+        ModalPane pane = ModalPane.getInstance();
+        if (pane == null) {
+            return;
+        }
+        pane.show(buildDatabaseResetConfirmationPanel(this::performDatabaseReset));
+    }
+
+    private VBox buildDatabaseResetConfirmationPanel(Runnable onConfirm) {
+        VBox panel = new VBox(8);
+        panel.setPadding(new Insets(20, 30, 20, 30));
+        panel.setPrefWidth(380);
+        panel.setMaxWidth(380);
+        panel.setMaxHeight(Double.MAX_VALUE);
+        panel.getStyleClass().add("modal-side-panel");
+
+        Label lblTitle = new Label("Очистка базы данных");
+        lblTitle.setFont(Font.font("Roboto", FontWeight.BOLD, 15));
+
+        Label lblMessage = new Label(
+                "Будут удалены сообщения, реакции, кэш нод, телеметрия и журнал LoRa-пакетов. "
+                        + "Активные подключения будут разорваны. Это действие нельзя отменить."
+        );
+        lblMessage.setWrapText(true);
+
+        CheckBox acknowledgeCheckBox = new CheckBox("Я понимаю что все данные будут удалены");
+        acknowledgeCheckBox.setWrapText(true);
+
+        Button btnCancel = new Button("Отмена");
+        btnCancel.setOnAction(e -> {
+            ModalPane pane = ModalPane.getInstance();
+            if (pane != null) {
+                pane.hide();
+            }
+        });
+
+        Button btnConfirm = new Button("Удалить данные");
+        btnConfirm.getStyleClass().add("accent");
+        btnConfirm.disableProperty().bind(acknowledgeCheckBox.selectedProperty().not());
+        btnConfirm.setOnAction(e -> {
+            ModalPane pane = ModalPane.getInstance();
+            if (pane != null) {
+                pane.hide();
+            }
+            onConfirm.run();
+        });
+
+        HBox btnRow = new HBox(10, btnCancel, btnConfirm);
+        btnRow.setAlignment(Pos.CENTER_RIGHT);
+        btnRow.setPadding(new Insets(10, 0, 0, 0));
+
+        panel.getChildren().addAll(
+                lblTitle,
+                new Separator(),
+                lblMessage,
+                acknowledgeCheckBox,
+                btnRow
+        );
+        return panel;
+    }
+
+    private void performDatabaseReset() {
+        if (resetDatabaseBtn != null) {
+            resetDatabaseBtn.setDisable(true);
+        }
+        configStatusLabel.setText("Очистка базы данных...");
+
+        Thread resetThread = new Thread(() -> {
+            try {
+                DatabaseResetService.resetAllData();
+                Platform.runLater(() -> {
+                    reloadCacheTable();
+                    reloadConfigTree();
+                    configStatusLabel.setText("База данных очищена и пересоздана");
+                    if (resetDatabaseBtn != null) {
+                        resetDatabaseBtn.setDisable(false);
+                    }
+                    Toast.show(Toast.Type.SUCCESS, "База данных очищена");
+                });
+            } catch (Exception e) {
+                log.error("Database reset failed", e);
+                Platform.runLater(() -> {
+                    if (resetDatabaseBtn != null) {
+                        resetDatabaseBtn.setDisable(false);
+                    }
+                    configStatusLabel.setText("Ошибка очистки базы данных: "
+                            + (e.getMessage() != null ? e.getMessage() : "см. лог"));
+                    ModalPane.showError(
+                            "Ошибка очистки базы данных",
+                            e.getMessage() != null ? e.getMessage() : "Не удалось пересоздать объекты БД"
+                    );
+                });
+            }
+        }, "database-reset");
+        resetThread.setDaemon(true);
+        resetThread.start();
     }
 
     private void setDevicePowerButtonsDisabled(boolean disabled) {

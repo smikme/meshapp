@@ -7,6 +7,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.DriverManager;
+import java.sql.Statement;
 import java.sql.SQLException;
 
 /**
@@ -64,5 +65,33 @@ public final class DatabaseProvider {
             log.error("Error closing database connection", e);
         }
         connection = null;
+    }
+
+    /**
+     * Полностью удаляет все объекты текущей БД и заново подготавливает базовую схему.
+     * <p>
+     * Используется для "жёсткого" сброса локальных данных. После вызова
+     * прикладные сервисы должны заново создать свои таблицы и PreparedStatement-ы.
+     */
+    public static synchronized void resetDatabase() throws SQLException {
+        Connection activeConnection = getConnection();
+        if (activeConnection == null) {
+            throw new SQLException("Database connection is not available");
+        }
+
+        try {
+            if (!activeConnection.getAutoCommit()) {
+                activeConnection.rollback();
+                activeConnection.setAutoCommit(true);
+            }
+        } catch (SQLException e) {
+            log.debug("Failed to normalize autocommit before DB reset", e);
+        }
+
+        try (Statement stmt = activeConnection.createStatement()) {
+            stmt.execute("DROP ALL OBJECTS");
+        }
+        log.info("All database objects dropped by explicit reset request");
+        DatabaseMigrator.migrate(activeConnection);
     }
 }

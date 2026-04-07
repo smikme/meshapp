@@ -46,6 +46,10 @@ public final class MessageDbService {
         return instance;
     }
 
+    public static synchronized MessageDbService getIfInitialized() {
+        return instance;
+    }
+
     public static synchronized void closeIfInitialized() {
         if (instance != null) {
             instance.close();
@@ -58,6 +62,7 @@ public final class MessageDbService {
 
     private void initDb() {
         try {
+            closeStatements();
             dbConnection = DatabaseProvider.getConnection();
 
             try (Statement stmt = dbConnection.createStatement()) {
@@ -942,6 +947,20 @@ public final class MessageDbService {
      * Закрывает соединение с БД.
      */
     public void close() {
+        closeStatements();
+        dbConnection = null;
+    }
+
+    public synchronized void prepareForDatabaseReset() {
+        closeStatements();
+        dbConnection = null;
+    }
+
+    public synchronized void reinitializeAfterDatabaseReset() {
+        initDb();
+    }
+
+    private void closeStatements() {
         try {
             if (insertStmt != null) { insertStmt.close(); }
             if (updateStatusStmt != null) { updateStatusStmt.close(); }
@@ -949,6 +968,11 @@ public final class MessageDbService {
             if (updateReactionStatusStmt != null) { updateReactionStatusStmt.close(); }
         } catch (SQLException e) {
             log.error("Error closing message DB statements", e);
+        } finally {
+            insertStmt = null;
+            updateStatusStmt = null;
+            insertReactionStmt = null;
+            updateReactionStatusStmt = null;
         }
     }
 
