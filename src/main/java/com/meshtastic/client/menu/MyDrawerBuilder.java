@@ -1,5 +1,6 @@
 package com.meshtastic.client.menu;
 
+import com.meshtastic.client.components.PacketMonitorWindow;
 import com.meshtastic.client.forms.FormChat;
 import com.meshtastic.client.forms.FormConnections;
 import com.meshtastic.client.forms.FormDashboard;
@@ -45,11 +46,14 @@ public class MyDrawerBuilder {
                         MenuManager.MenuItem.Type.ITEM, FormConnections.class))
                 .add(new MenuManager.MenuItem("Логирование", null, "/drawer/icon/eye.svg",
                         MenuManager.MenuItem.Type.ITEM, FormLogs.class))
+                .add(new MenuManager.MenuItem("LoRa пакеты", null, "/drawer/icon/packet-monitor.svg",
+                        MenuManager.MenuItem.Type.ITEM, null))
                 .add(new MenuManager.MenuItem("Настройки", null, "/drawer/icon/setting.svg",
                         MenuManager.MenuItem.Type.ITEM, FormSetting.class))
                 .add(new MenuManager.MenuItem("Помощь", null, "/drawer/icon/about.svg",
                         MenuManager.MenuItem.Type.ITEM, null));
 
+        menuManager.registerAction("LoRa пакеты", PacketMonitorWindow::showWindow);
         menuManager.registerAction("Помощь", FormManager::showAbout);
     }
 }

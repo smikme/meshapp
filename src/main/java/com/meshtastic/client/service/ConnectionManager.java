@@ -212,7 +212,7 @@ public final class ConnectionManager {
         conn.connect();
         activeConnections.put(id, conn);
 
-        ProtocolHandler protocolHandler = new ProtocolHandler(conn);
+        ProtocolHandler protocolHandler = new ProtocolHandler(id, conn);
         protocolHandlers.put(id, protocolHandler);
 
         // Heartbeat нужен для transport-ов, которые либо закрываются по idle (TCP),

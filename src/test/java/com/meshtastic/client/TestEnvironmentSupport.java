@@ -90,6 +90,13 @@ public final class TestEnvironmentSupport {
             }
             writeStaticField(nodeCacheService, "instance", null);
 
+            Class<?> packetMonitorService = Class.forName("com.meshtastic.client.service.PacketMonitorService");
+            Object packetMonitorInstance = readStaticField(packetMonitorService, "instance");
+            if (packetMonitorInstance != null) {
+                packetMonitorService.getMethod("close").invoke(packetMonitorInstance);
+            }
+            writeStaticField(packetMonitorService, "instance", null);
+
             Class<?> databaseProvider = Class.forName("com.meshtastic.client.service.DatabaseProvider");
             databaseProvider.getMethod("close").invoke(null);
             writeStaticField(databaseProvider, "connection", null);

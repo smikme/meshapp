@@ -23,7 +23,7 @@ public final class DatabaseMigrator {
     private static final Logger log = LoggerFactory.getLogger(DatabaseMigrator.class);
 
     /** Текущая версия схемы. Увеличивается при каждом изменении схемы. */
-    static final int CURRENT_VERSION = 7;
+    static final int CURRENT_VERSION = 8;
 
     private DatabaseMigrator() {}
 
@@ -63,6 +63,7 @@ public final class DatabaseMigrator {
             if (version < 5) { migrateToV5(connection); version = 5; }
             if (version < 6) { migrateToV6(connection); version = 6; }
             if (version < 7) { migrateToV7(connection); version = 7; }
+            if (version < 8) { migrateToV8(connection); version = 8; }
 
             setVersion(connection, CURRENT_VERSION);
             log.info("Database migration complete, schema version = {}", CURRENT_VERSION);
@@ -204,6 +205,34 @@ public final class DatabaseMigrator {
             stmt.executeUpdate("UPDATE nodes SET hops_away = NULL WHERE hops_away = 0");
         }
         log.info("Migration v7: normalized legacy nodes.hops_away=0 values to NULL");
+    }
+
+    /** v8: журнал LoRa-пакетов для подсистемы мониторинга. */
+    private static void migrateToV8(Connection connection) throws SQLException {
+        try (Statement stmt = connection.createStatement()) {
+            stmt.execute("""
+                    CREATE TABLE IF NOT EXISTS lora_packet_logs (
+                        id            BIGINT AUTO_INCREMENT PRIMARY KEY,
+                        owner_node_id VARCHAR(20) NOT NULL DEFAULT '',
+                        captured_at   BIGINT NOT NULL,
+                        direction     VARCHAR(10) NOT NULL,
+                        packet_type   VARCHAR(40) NOT NULL,
+                        from_node     VARCHAR(160),
+                        to_node       VARCHAR(160),
+                        payload_text  CLOB,
+                        packet_bytes  BLOB NOT NULL
+                    )
+                    """);
+            stmt.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_lora_owner_ts
+                    ON lora_packet_logs (owner_node_id, captured_at)
+                    """);
+            stmt.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_lora_type
+                    ON lora_packet_logs (packet_type)
+                    """);
+        }
+        log.info("Migration v8: created 'lora_packet_logs' table and indexes");
     }
 
     /** v2: колонка favorite для избранных нод. */
