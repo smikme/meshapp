@@ -734,6 +734,11 @@ public class FormChat extends Form {
         String chatKey = currentChatKey();
 
         List<MeshMessage> newMsgs = db.loadAfter(chatType, chatKey, latestKnownDbId, currentOwnerNodeId());
+        if (newMsgs.isEmpty() && shouldReloadChatAfterDatabaseReset(db, chatType, chatKey)) {
+            loadInitialMessages(false);
+            refreshLoadedMessageRows();
+            return;
+        }
         if (!newMsgs.isEmpty()) {
             latestKnownDbId = newMsgs.getLast().getDbId();
             boolean shouldAppendToViewport = allNewerHistoryLoaded;
@@ -765,6 +770,31 @@ public class FormChat extends Form {
         }
 
         refreshLoadedMessageRows();
+    }
+
+    private boolean shouldReloadChatAfterDatabaseReset(MessageDbService db, String chatType, String chatKey) {
+        if (db == null || chatType == null || chatKey == null || selectedChat == null || latestKnownDbId <= 0) {
+            return false;
+        }
+
+        List<MeshMessage> latest = db.loadLast(chatType, chatKey, 1, currentOwnerNodeId());
+        return hasDatabaseRewind(latestKnownDbId, latest, loadedMessages);
+    }
+
+    static boolean hasDatabaseRewind(long latestKnownDbId,
+                                     List<MeshMessage> latestFromDb,
+                                     List<MeshMessage> loadedMessages) {
+        if (latestKnownDbId <= 0 || latestFromDb == null || latestFromDb.isEmpty()) {
+            return false;
+        }
+
+        MeshMessage newestPersisted = latestFromDb.getFirst();
+        if (newestPersisted == null || newestPersisted.getDbId() >= latestKnownDbId) {
+            return false;
+        }
+
+        return loadedMessages == null || loadedMessages.stream()
+                .noneMatch(msg -> msg.getDbId() == newestPersisted.getDbId());
     }
 
     static boolean shouldMarkNewMessagesReadImmediately(boolean formVisible,
@@ -1667,6 +1697,8 @@ public class FormChat extends Form {
             }
         }
 
+        boolean stateChanged = newState != this.state;
+
         if (newState == this.state) {
             lastReadCounts.clear();
             lastReadCounts.putAll(MessageDbService.getInstance().loadAllReadCounts(currentOwnerNodeId()));
@@ -1707,7 +1739,45 @@ public class FormChat extends Form {
         }
 
         reloadChatList();
+        if (stateChanged) {
+            reopenSelectedChatIfPossible();
+        }
         updateInputEnabled();
+    }
+
+    private void reopenSelectedChatIfPossible() {
+        if (detailPane == null) {
+            return;
+        }
+
+        if (state == null) {
+            clearLoadedMessageState();
+            detailPane.getChildren().clear();
+            detailPane.getChildren().add(placeholderBox);
+            return;
+        }
+
+        if (selectedChat == null) {
+            return;
+        }
+
+        ChatItem matched = chatListView.getItems().stream()
+                .filter(item -> chatItemMatches(item, selectedChat))
+                .findFirst()
+                .orElse(null);
+
+        if (matched == null) {
+            closeChat();
+            return;
+        }
+
+        suppressSelectionListener = true;
+        try {
+            chatListView.getSelectionModel().select(matched);
+        } finally {
+            suppressSelectionListener = false;
+        }
+        openChat(matched);
     }
 
     private void reloadChatList() {

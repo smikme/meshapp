@@ -56,6 +56,9 @@ import java.nio.file.Files;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.List;
 
 /**
  * Отдельное окно мониторинга LoRa mesh-пакетов.
@@ -156,6 +159,7 @@ public final class PacketMonitorWindow {
     private boolean bottomEdgeLoadArmed = true;
     private int matchingPacketCount;
     private int totalStoredPacketCount;
+    private String rememberedTypeFilterSelection = FILTER_ALL_TYPES;
     private PacketDebugFormatter.HexPreview currentHexPreview = PacketDebugFormatter.formatHexPreview(null);
     private ScrollBar packetTableVerticalScrollBar;
     private double normalWindowX = Double.NaN;
@@ -293,7 +297,12 @@ public final class PacketMonitorWindow {
 
         typeFilter = new ComboBox<>(packetTypeFilters);
         typeFilter.setValue(FILTER_ALL_TYPES);
-        typeFilter.valueProperty().addListener((obs, oldValue, newValue) -> onFilterChanged());
+        typeFilter.valueProperty().addListener((obs, oldValue, newValue) -> {
+            if (!suppressFilterReload) {
+                rememberTypeFilterSelection(newValue);
+            }
+            onFilterChanged();
+        });
 
         searchField = new TextField();
         searchField.setPromptText("Поиск по типу, узлам и payload");
@@ -780,17 +789,17 @@ public final class PacketMonitorWindow {
             return;
         }
 
-        String previousSelection = typeFilter.getValue();
+        String previousSelection = getActiveTypeFilterSelection();
+        List<String> refreshedOptions = buildTypeFilterOptions(
+                packetMonitorService.loadPacketTypes(buildTypeOptionsQuery()),
+                previousSelection);
+        String restoredSelection = resolveTypeFilterSelection(previousSelection, refreshedOptions);
         suppressFilterReload = true;
         try {
-            packetTypeFilters.setAll(FILTER_ALL_TYPES);
-            packetTypeFilters.addAll(packetMonitorService.loadPacketTypes(buildTypeOptionsQuery()));
-
-            if (previousSelection != null && packetTypeFilters.contains(previousSelection)) {
-                typeFilter.setValue(previousSelection);
-            } else {
-                typeFilter.setValue(FILTER_ALL_TYPES);
-            }
+            packetTypeFilters.setAll(refreshedOptions);
+            typeFilter.getSelectionModel().select(restoredSelection);
+            typeFilter.setValue(restoredSelection);
+            rememberTypeFilterSelection(restoredSelection);
         } finally {
             suppressFilterReload = false;
         }
@@ -1028,7 +1037,7 @@ public final class PacketMonitorWindow {
             direction = PacketLogEntry.Direction.OUTGOING;
         }
 
-        String selectedType = typeFilter != null ? typeFilter.getValue() : FILTER_ALL_TYPES;
+        String selectedType = getActiveTypeFilterSelection();
         String packetType = FILTER_ALL_TYPES.equals(selectedType) ? null : selectedType;
         String searchText = searchField != null ? searchField.getText() : null;
         return new PacketMonitorService.PacketQuery(direction, packetType, searchText);
@@ -1057,7 +1066,7 @@ public final class PacketMonitorWindow {
             return false;
         }
 
-        String selectedType = typeFilter != null ? typeFilter.getValue() : FILTER_ALL_TYPES;
+        String selectedType = getActiveTypeFilterSelection();
         if (selectedType != null && !FILTER_ALL_TYPES.equals(selectedType)
                 && !selectedType.equals(entry.getPacketType())) {
             return false;
@@ -1074,6 +1083,52 @@ public final class PacketMonitorWindow {
                 || containsIgnoreCase(entry.getToNode(), lowerQuery)
                 || containsIgnoreCase(entry.getPayloadText(), lowerQuery)
                 || containsIgnoreCase(entry.getDirectionText(), lowerQuery);
+    }
+
+    private String getActiveTypeFilterSelection() {
+        String selectedType = typeFilter != null ? typeFilter.getValue() : null;
+        return normalizeTypeFilterSelection(selectedType != null ? selectedType : rememberedTypeFilterSelection);
+    }
+
+    private void rememberTypeFilterSelection(String selection) {
+        rememberedTypeFilterSelection = normalizeTypeFilterSelection(selection);
+    }
+
+    static List<String> buildTypeFilterOptions(List<String> dynamicTypes, String selectedType) {
+        LinkedHashSet<String> options = new LinkedHashSet<>();
+        options.add(FILTER_ALL_TYPES);
+        if (dynamicTypes != null) {
+            for (String dynamicType : dynamicTypes) {
+                String normalizedType = normalizeDynamicTypeOption(dynamicType);
+                if (normalizedType != null) {
+                    options.add(normalizedType);
+                }
+            }
+        }
+
+        String preservedSelection = normalizeDynamicTypeOption(selectedType);
+        if (preservedSelection != null) {
+            options.add(preservedSelection);
+        }
+        return new ArrayList<>(options);
+    }
+
+    static String resolveTypeFilterSelection(String selectedType, List<String> availableOptions) {
+        String normalizedSelection = normalizeTypeFilterSelection(selectedType);
+        return availableOptions != null && availableOptions.contains(normalizedSelection)
+                ? normalizedSelection
+                : FILTER_ALL_TYPES;
+    }
+
+    private static String normalizeTypeFilterSelection(String selection) {
+        return selection == null || selection.isBlank() ? FILTER_ALL_TYPES : selection;
+    }
+
+    private static String normalizeDynamicTypeOption(String type) {
+        if (type == null || type.isBlank() || FILTER_ALL_TYPES.equals(type)) {
+            return null;
+        }
+        return type;
     }
 
     /**
