@@ -7,6 +7,7 @@ import com.meshtastic.client.service.DatabaseProvider;
 import com.meshtastic.client.service.MessageDbService;
 import com.meshtastic.client.service.NodeCacheService;
 import com.meshtastic.client.service.ConnectionManager;
+import com.meshtastic.client.service.PacketMonitorService;
 import com.meshtastic.client.service.UpdateCheckService;
 import com.meshtastic.client.system.FormManager;
 import com.meshtastic.client.system.RootPane;
@@ -101,6 +102,7 @@ public class MeshApp extends Application {
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             MessageDbService.closeIfInitialized();
             NodeCacheService.closeIfInitialized();
+            PacketMonitorService.closeIfInitialized();
             DatabaseProvider.close();
         }));
 

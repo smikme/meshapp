@@ -6,6 +6,12 @@ import com.meshtastic.client.MeshApp;
 import com.meshtastic.client.platform.NativeWindowHelper;
 import javafx.application.Application;
 import javafx.scene.Scene;
+import javafx.stage.Stage;
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Set;
+import java.util.WeakHashMap;
 
 public class ThemeManager {
 
@@ -13,6 +19,8 @@ public class ThemeManager {
 
     private static final String APP_CSS = "/css/app.css";
     private static final String LIGHT_THEME_CLASS = "light-theme";
+    private static final Set<Scene> MANAGED_SCENES =
+            Collections.newSetFromMap(new WeakHashMap<>());
 
     public static void applyTheme(Scene scene, boolean isDark) {
         // Устанавливаем тему AtlantaFX как UserAgentStylesheet
@@ -22,7 +30,50 @@ public class ThemeManager {
             Application.setUserAgentStylesheet(new CupertinoLight().getUserAgentStylesheet());
         }
 
-        // Переключить style class .light-theme на корне сцены
+        registerScene(scene);
+
+        for (Scene managedScene : snapshotManagedScenes()) {
+            applyThemeToScene(managedScene, isDark);
+            if (managedScene != null && managedScene.getWindow() instanceof Stage stage) {
+                NativeWindowHelper.updateTheme(stage, isDark);
+            }
+        }
+
+        Stage stage = scene != null && scene.getWindow() instanceof Stage s ? s : MeshApp.getPrimaryStage();
+        if (stage != null) {
+            NativeWindowHelper.updateTheme(stage, isDark);
+        }
+    }
+
+    public static void registerScene(Scene scene) {
+        if (scene == null) {
+            return;
+        }
+        synchronized (MANAGED_SCENES) {
+            MANAGED_SCENES.add(scene);
+        }
+    }
+
+    public static void unregisterScene(Scene scene) {
+        if (scene == null) {
+            return;
+        }
+        synchronized (MANAGED_SCENES) {
+            MANAGED_SCENES.remove(scene);
+        }
+    }
+
+    private static java.util.List<Scene> snapshotManagedScenes() {
+        synchronized (MANAGED_SCENES) {
+            return new ArrayList<>(MANAGED_SCENES);
+        }
+    }
+
+    private static void applyThemeToScene(Scene scene, boolean isDark) {
+        if (scene == null || scene.getRoot() == null) {
+            return;
+        }
+
         if (!isDark) {
             if (!scene.getRoot().getStyleClass().contains(LIGHT_THEME_CLASS)) {
                 scene.getRoot().getStyleClass().add(LIGHT_THEME_CLASS);
@@ -31,15 +82,11 @@ public class ThemeManager {
             scene.getRoot().getStyleClass().remove(LIGHT_THEME_CLASS);
         }
 
-        // Добавляем только кастомные стили приложения
         scene.getStylesheets().clear();
         String appCss = ThemeManager.class.getResource(APP_CSS) != null
                 ? ThemeManager.class.getResource(APP_CSS).toExternalForm() : null;
         if (appCss != null) {
             scene.getStylesheets().add(appCss);
         }
-
-        // Обновляем нативные атрибуты окна (dark mode title bar, Mica и т.д.)
-        NativeWindowHelper.updateTheme(MeshApp.getPrimaryStage(), isDark);
     }
 }
