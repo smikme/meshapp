@@ -314,6 +314,54 @@ public final class PacketMonitorService {
     }
 
     /**
+     * Загружает фиксированный фрейм таблицы по смещению в общем порядке
+     * {@code captured_at DESC, id DESC}.
+     * Используется UI-слоем для пошагового перехода между страницами одинакового размера.
+     *
+     * @param query  фильтр таблицы
+     * @param offset смещение от начала выборки; {@code 0} соответствует самой новой странице
+     * @param limit  размер одного фрейма
+     * @return страница и метаданные доступности соседних фреймов
+     */
+    public synchronized PacketPage loadPageFrame(PacketQuery query, int offset, int limit) {
+        int safeOffset = Math.max(0, offset);
+        int safeLimit = Math.max(1, limit);
+        int totalMatchingCount = countMatching(query);
+        int totalStoredCount = countAllPackets();
+        List<PacketLogEntry> entries = new ArrayList<>();
+
+        if (dbConnection == null) {
+            return new PacketPage(entries, false, false, totalMatchingCount, totalStoredCount);
+        }
+
+        SqlQuery sqlQuery = buildFilteredQuery("""
+                SELECT id, owner_node_id, captured_at, direction, packet_type, from_node, to_node, payload_text, packet_bytes
+                FROM lora_packet_logs
+                WHERE 1 = 1
+                """, query, null, null, true, false);
+        String sql = sqlQuery.sql() + "\nORDER BY captured_at DESC, id DESC\nLIMIT ? OFFSET ?";
+        List<Object> params = new ArrayList<>(sqlQuery.params());
+        params.add(safeLimit);
+        params.add(safeOffset);
+
+        try (PreparedStatement ps = dbConnection.prepareStatement(sql)) {
+            bindParams(ps, params);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    entries.add(readEntry(rs));
+                }
+            }
+        } catch (SQLException e) {
+            log.error("Failed to load packet monitor page frame", e);
+            return new PacketPage(List.of(), safeOffset > 0, false, totalMatchingCount, totalStoredCount);
+        }
+
+        boolean hasNewer = safeOffset > 0;
+        boolean hasOlder = safeOffset + entries.size() < totalMatchingCount;
+        return new PacketPage(entries, hasNewer, hasOlder, totalMatchingCount, totalStoredCount);
+    }
+
+    /**
      * Загружает следующую страницу более старых пакетов относительно нижней записи текущей страницы.
      *
      * @param query           фильтр таблицы

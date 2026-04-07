@@ -39,7 +39,6 @@ import javafx.scene.control.TreeView;
 import javafx.scene.control.cell.PropertyValueFactory;
 import javafx.scene.input.Clipboard;
 import javafx.scene.input.ClipboardContent;
-import javafx.scene.input.ScrollEvent;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
@@ -76,11 +75,15 @@ public final class PacketMonitorWindow {
     private static final String FILTER_OUTGOING = "Исходящие";
     private static final String FILTER_ALL_TYPES = "Все типы";
     private static final int PAGE_SIZE = 200;
+    private static final int PAGE_SHIFT = 80;
     private static final int HEX_PREVIEW_VISIBLE_ROWS = 16;
     private static final int HEX_PREVIEW_ADDRESS_COLUMNS = 6;
     private static final int HEX_PREVIEW_BYTES_COLUMNS = 50;
     private static final int HEX_PREVIEW_ASCII_COLUMNS = 18;
     private static final double TABLE_SCROLL_EDGE_THRESHOLD = 0.02;
+    private static final double TABLE_SCROLL_EDGE_REARM_THRESHOLD = 0.08;
+    private static final double PACKET_TABLE_FIXED_CELL_SIZE = 28;
+    private static final double PACKET_TABLE_HEADER_HEIGHT_ESTIMATE = 30;
     private static final double DEFAULT_WINDOW_WIDTH = 1260;
     private static final double DEFAULT_WINDOW_HEIGHT = 860;
     private static final double PACKET_TABLE_TIME_COLUMN_WIDTH = 190;
@@ -96,7 +99,10 @@ public final class PacketMonitorWindow {
     private final ObservableList<PacketLogEntry> packetItems = FXCollections.observableArrayList();
     private final ObservableList<String> packetTypeFilters = FXCollections.observableArrayList(FILTER_ALL_TYPES);
     private final ChangeListener<Number> packetTableScrollListener =
-            (obs, oldValue, newValue) -> handlePacketTableScroll(newValue.doubleValue());
+            (obs, oldValue, newValue) -> handlePacketTableScroll(
+                    oldValue != null ? oldValue.doubleValue() : 0.0,
+                    newValue != null ? newValue.doubleValue() : 0.0
+            );
 
     private final PacketMonitorService.Listener packetListener = new PacketMonitorService.Listener() {
         @Override
@@ -142,7 +148,10 @@ public final class PacketMonitorWindow {
     private boolean ignoreTableScrollEvents;
     private boolean currentPageHasNewer;
     private boolean currentPageHasOlder;
-    private boolean currentPageAnchoredToLatest = true;
+    private boolean latestFrameDirty;
+    private boolean topEdgeLoadArmed = true;
+    private boolean bottomEdgeLoadArmed = true;
+    private int currentPageOffset;
     private int matchingPacketCount;
     private int totalStoredPacketCount;
     private PacketDebugFormatter.HexPreview currentHexPreview = PacketDebugFormatter.formatHexPreview(null);
@@ -157,7 +166,8 @@ public final class PacketMonitorWindow {
         this.packetMonitorService = PacketMonitorService.getInstance();
         createStage();
         packetMonitorService.addListener(packetListener);
-        reloadLatestPage(true, true);
+        currentPageOffset = 0;
+        reloadCurrentFrame(true, true);
         updateToolbarState();
     }
 
@@ -454,6 +464,7 @@ public final class PacketMonitorWindow {
     private TableView<PacketLogEntry> createPacketTable() {
         TableView<PacketLogEntry> table = new TableView<>(packetItems);
         table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
+        table.setFixedCellSize(PACKET_TABLE_FIXED_CELL_SIZE);
 
         TableColumn<PacketLogEntry, String> colTime = new TableColumn<>("Дата/время");
         colTime.setCellValueFactory(new PropertyValueFactory<>("capturedAtText"));
@@ -510,7 +521,6 @@ public final class PacketMonitorWindow {
                 Platform.runLater(this::attachPacketTableScrollListener);
             }
         });
-        table.addEventFilter(ScrollEvent.SCROLL, event -> handlePacketTableWheel(event.getDeltaY()));
         VBox.setVgrow(table, Priority.ALWAYS);
         return table;
     }
@@ -591,22 +601,29 @@ public final class PacketMonitorWindow {
         if (suppressFilterReload) {
             return;
         }
-        reloadLatestPage(true, true);
+        currentPageOffset = 0;
+        latestFrameDirty = false;
+        reloadCurrentFrame(true, true);
     }
 
     /**
-     * Загружает верхнюю страницу выборки из БД.
-     * Используется при старте окна, смене фильтров и когда пользователь
-     * доскроллил до верхней границы и запросил более новые данные.
+     * Загружает текущий фрейм выборки из БД.
+     * Фрейм определяется смещением {@link #currentPageOffset} и всегда содержит
+     * не больше {@value #PAGE_SIZE} строк.
      */
-    private void reloadLatestPage(boolean preserveViewedPacket, boolean clearDetailsIfSelectionLost) {
+    private void reloadCurrentFrame(boolean preserveViewedPacket, boolean clearDetailsIfSelectionLost) {
         pageLoadInProgress = true;
         try {
             long packetIdToKeep = preserveViewedPacket ? viewedPacketId : -1L;
             refreshTypeFilters();
             PacketMonitorService.PacketPage page =
-                    packetMonitorService.loadLatestPage(buildCurrentQuery(), PAGE_SIZE);
-            applyLoadedPage(page, packetIdToKeep, clearDetailsIfSelectionLost, viewedPacketId <= 0, 0);
+                    packetMonitorService.loadPageFrame(buildCurrentQuery(), currentPageOffset, PAGE_SIZE);
+            applyLoadedPage(page,
+                    currentPageOffset,
+                    packetIdToKeep,
+                    clearDetailsIfSelectionLost,
+                    viewedPacketId <= 0,
+                    0);
         } finally {
             pageLoadInProgress = false;
         }
@@ -623,53 +640,57 @@ public final class PacketMonitorWindow {
 
         pageLoadInProgress = true;
         try {
-            PacketMonitorService.PacketPage page = packetMonitorService.loadOlderPage(
-                    buildCurrentQuery(),
-                    PacketMonitorService.PageCursor.fromEntry(packetItems.getLast()),
-                    PAGE_SIZE
-            );
+            int anchorIndex = estimateFirstVisibleRow();
+            int newOffset = currentPageOffset + PAGE_SHIFT;
+            PacketMonitorService.PacketPage page =
+                    packetMonitorService.loadPageFrame(buildCurrentQuery(), newOffset, PAGE_SIZE);
             if (page.entries().isEmpty()) {
                 currentPageHasOlder = false;
                 updateCountLabel();
                 return;
             }
-            applyLoadedPage(page, viewedPacketId, false, false, 0);
+            int shiftDelta = newOffset - currentPageOffset;
+            applyLoadedPage(page,
+                    newOffset,
+                    viewedPacketId,
+                    false,
+                    false,
+                    Math.max(0, anchorIndex - shiftDelta));
         } finally {
             pageLoadInProgress = false;
         }
     }
 
     /**
-     * Подгружает следующую страницу новых пакетов, когда пользователь дошёл до верха таблицы.
-     * Если текущая страница является устаревшим "верхним" срезом, выполняется полная
-     * синхронизация с текущим latest-page.
+     * Подгружает предыдущий фрейм более новых пакетов, когда пользователь дошёл до верха таблицы.
+     * Если текущий фрейм уже является самым новым, но был помечен грязным из-за live-вставок,
+     * выполняется переагрузка первого фрейма.
      */
     private void loadNewerPageFromScroll() {
-        if (pageLoadInProgress || !currentPageHasNewer || packetItems.isEmpty()) {
+        if (pageLoadInProgress || (!currentPageHasNewer && !latestFrameDirty) || packetItems.isEmpty()) {
             return;
         }
 
         pageLoadInProgress = true;
         try {
-            PacketMonitorService.PacketPage page;
-            int scrollToIndex;
-            if (currentPageAnchoredToLatest) {
-                page = packetMonitorService.loadLatestPage(buildCurrentQuery(), PAGE_SIZE);
-                scrollToIndex = 0;
-            } else {
-                page = packetMonitorService.loadNewerPage(
-                        buildCurrentQuery(),
-                        PacketMonitorService.PageCursor.fromEntry(packetItems.getFirst()),
-                        PAGE_SIZE
-                );
-                scrollToIndex = Math.max(0, page.entries().size() - 1);
-            }
+            int anchorIndex = estimateFirstVisibleRow();
+            int newOffset = Math.max(0, currentPageOffset - PAGE_SHIFT);
+            PacketMonitorService.PacketPage page =
+                    packetMonitorService.loadPageFrame(buildCurrentQuery(), newOffset, PAGE_SIZE);
             if (page.entries().isEmpty()) {
                 currentPageHasNewer = false;
                 updateCountLabel();
                 return;
             }
-            applyLoadedPage(page, viewedPacketId, false, false, scrollToIndex);
+            int shiftDelta = currentPageOffset - newOffset;
+            applyLoadedPage(page,
+                    newOffset,
+                    viewedPacketId,
+                    false,
+                    false,
+                    latestFrameDirty && newOffset == 0
+                            ? 0
+                            : Math.min(Math.max(0, page.entries().size() - 1), anchorIndex + shiftDelta));
         } finally {
             pageLoadInProgress = false;
         }
@@ -684,6 +705,7 @@ public final class PacketMonitorWindow {
      *   где это инициировал пользователь явно (например сменой фильтра).
      */
     private void applyLoadedPage(PacketMonitorService.PacketPage page,
+                                 int pageOffset,
                                  long packetIdToKeep,
                                  boolean clearDetailsIfSelectionLost,
                                  boolean selectFirstWhenNoViewedPacket,
@@ -691,11 +713,12 @@ public final class PacketMonitorWindow {
         ignoreTableScrollEvents = true;
         try {
             packetItems.setAll(page.entries());
+            currentPageOffset = pageOffset;
             matchingPacketCount = page.totalMatchingCount();
             totalStoredPacketCount = page.totalStoredCount();
             currentPageHasNewer = page.hasNewer();
             currentPageHasOlder = page.hasOlder();
-            currentPageAnchoredToLatest = !page.hasNewer();
+            latestFrameDirty = false;
 
             boolean restored = restoreViewedSelection(packetIdToKeep);
             if (!restored) {
@@ -748,7 +771,9 @@ public final class PacketMonitorWindow {
     }
 
     private void updateCountLabel() {
-        countLabel.setText("Показано " + packetItems.size()
+        int from = packetItems.isEmpty() ? 0 : currentPageOffset + 1;
+        int to = currentPageOffset + packetItems.size();
+        countLabel.setText("Показано " + from + "-" + to
                 + " из " + matchingPacketCount
                 + " · в памяти " + packetItems.size() + "/" + PAGE_SIZE);
     }
@@ -769,14 +794,18 @@ public final class PacketMonitorWindow {
         }
 
         matchingPacketCount++;
-        if (!currentPageAnchoredToLatest) {
+        if (currentPageOffset > 0) {
+            currentPageOffset++;
             currentPageHasNewer = true;
+            currentPageHasOlder = currentPageOffset + packetItems.size() < matchingPacketCount;
             updateToolbarState();
             return;
         }
 
         if (!isTableNearTop()) {
+            latestFrameDirty = true;
             currentPageHasNewer = true;
+            currentPageHasOlder = matchingPacketCount > packetItems.size();
             updateToolbarState();
             return;
         }
@@ -790,7 +819,9 @@ public final class PacketMonitorWindow {
         if (packetItems.size() >= PAGE_SIZE
                 && !packetItems.isEmpty()
                 && packetItems.getLast().getId() == viewedPacketId) {
+            latestFrameDirty = true;
             currentPageHasNewer = true;
+            currentPageHasOlder = matchingPacketCount > packetItems.size();
             updateToolbarState();
             return;
         }
@@ -802,6 +833,7 @@ public final class PacketMonitorWindow {
         }
         currentPageHasNewer = false;
         currentPageHasOlder = matchingPacketCount > packetItems.size();
+        latestFrameDirty = false;
 
         if (viewedPacketId > 0) {
             restoreViewedSelection(viewedPacketId);
@@ -819,11 +851,12 @@ public final class PacketMonitorWindow {
      */
     private void handleCleared() {
         packetItems.clear();
+        currentPageOffset = 0;
         matchingPacketCount = 0;
         totalStoredPacketCount = 0;
         currentPageHasNewer = false;
         currentPageHasOlder = false;
-        currentPageAnchoredToLatest = true;
+        latestFrameDirty = false;
         refreshTypeFilters();
         clearTableSelectionSilently();
         updatePacketDetails(null);
@@ -1014,25 +1047,34 @@ public final class PacketMonitorWindow {
         }
     }
 
-    private void handlePacketTableScroll(double scrollValue) {
+    private void handlePacketTableScroll(double previousValue, double scrollValue) {
         if (ignoreTableScrollEvents || pageLoadInProgress || packetItems.isEmpty()) {
             return;
         }
-        if (scrollValue >= 1.0 - TABLE_SCROLL_EDGE_THRESHOLD) {
+        rearmEdgeLoads(scrollValue);
+        if (scrollValue >= 1.0 - TABLE_SCROLL_EDGE_THRESHOLD
+                && scrollValue > previousValue
+                && bottomEdgeLoadArmed) {
+            bottomEdgeLoadArmed = false;
             loadOlderPageFromScroll();
-        } else if (scrollValue <= TABLE_SCROLL_EDGE_THRESHOLD) {
+        } else if (scrollValue <= TABLE_SCROLL_EDGE_THRESHOLD
+                && scrollValue < previousValue
+                && topEdgeLoadArmed) {
+            topEdgeLoadArmed = false;
             loadNewerPageFromScroll();
         }
     }
 
-    private void handlePacketTableWheel(double deltaY) {
-        if (ignoreTableScrollEvents || pageLoadInProgress || packetItems.isEmpty()) {
-            return;
+    /**
+     * Повторная подгрузка страницы на той же границе разрешается только после того,
+     * как пользователь реально ушёл от края scroll range и затем вернулся обратно.
+     */
+    private void rearmEdgeLoads(double scrollValue) {
+        if (scrollValue > TABLE_SCROLL_EDGE_REARM_THRESHOLD) {
+            topEdgeLoadArmed = true;
         }
-        if (deltaY < 0 && isTableNearBottom()) {
-            loadOlderPageFromScroll();
-        } else if (deltaY > 0 && isTableNearTop()) {
-            loadNewerPageFromScroll();
+        if (scrollValue < 1.0 - TABLE_SCROLL_EDGE_REARM_THRESHOLD) {
+            bottomEdgeLoadArmed = true;
         }
     }
 
@@ -1064,8 +1106,44 @@ public final class PacketMonitorWindow {
                 int targetIndex = Math.min(scrollToIndex, packetItems.size() - 1);
                 packetTable.scrollTo(targetIndex);
             }
-            Platform.runLater(() -> ignoreTableScrollEvents = false);
+            Platform.runLater(() -> {
+                disarmCurrentEdgeIfNeeded();
+                ignoreTableScrollEvents = false;
+            });
         });
+    }
+
+    private void disarmCurrentEdgeIfNeeded() {
+        if (isTableNearTop()) {
+            topEdgeLoadArmed = false;
+        }
+        if (isTableNearBottom()) {
+            bottomEdgeLoadArmed = false;
+        }
+    }
+
+    /**
+     * Приблизительно вычисляет первую видимую строку таблицы.
+     * Используется как anchor для плавного сдвига окна данных при подгрузке.
+     */
+    private int estimateFirstVisibleRow() {
+        if (packetItems.isEmpty() || packetTable == null || packetTableVerticalScrollBar == null) {
+            return 0;
+        }
+
+        int visibleRows = estimateVisibleRowCount();
+        int maxFirstVisible = Math.max(0, packetItems.size() - visibleRows);
+        double scrollValue = Math.max(0.0, Math.min(1.0, packetTableVerticalScrollBar.getValue()));
+        return (int) Math.round(scrollValue * maxFirstVisible);
+    }
+
+    private int estimateVisibleRowCount() {
+        if (packetTable == null || packetTable.getFixedCellSize() <= 0) {
+            return 12;
+        }
+        double viewportHeight = Math.max(0, packetTable.getHeight() - PACKET_TABLE_HEADER_HEIGHT_ESTIMATE);
+        int visibleRows = (int) Math.floor(viewportHeight / packetTable.getFixedCellSize());
+        return Math.max(1, visibleRows);
     }
 
     /**

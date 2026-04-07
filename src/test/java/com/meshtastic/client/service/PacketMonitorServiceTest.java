@@ -172,6 +172,48 @@ class PacketMonitorServiceTest {
         assertEquals("\"msg-61\"", newerPage.entries().getLast().getPayloadText());
     }
 
+    @Test
+    void loadsFixedFramesByOffset() {
+        service.startCapture();
+
+        for (int i = 1; i <= 430; i++) {
+            MeshProtos.MeshPacket packet = MeshProtos.MeshPacket.newBuilder()
+                    .setFrom(i)
+                    .setTo(0xFFFFFFFF)
+                    .setId(i)
+                    .setRxTime(1_720_000_000 + i)
+                    .setDecoded(MeshProtos.Data.newBuilder()
+                            .setPortnum(Portnums.PortNum.TEXT_MESSAGE_APP)
+                            .setPayload(ByteString.copyFromUtf8("frame-" + i))
+                            .build())
+                    .build();
+            service.recordPacket(PacketLogEntry.Direction.INCOMING, packet, "!owner", null);
+        }
+
+        PacketMonitorService.PacketQuery query = new PacketMonitorService.PacketQuery(null, null, null);
+
+        PacketMonitorService.PacketPage firstFrame = service.loadPageFrame(query, 0, 200);
+        assertFalse(firstFrame.hasNewer());
+        assertTrue(firstFrame.hasOlder());
+        assertEquals(200, firstFrame.entries().size());
+        assertEquals("\"frame-430\"", firstFrame.entries().getFirst().getPayloadText());
+        assertEquals("\"frame-231\"", firstFrame.entries().getLast().getPayloadText());
+
+        PacketMonitorService.PacketPage secondFrame = service.loadPageFrame(query, 200, 200);
+        assertTrue(secondFrame.hasNewer());
+        assertTrue(secondFrame.hasOlder());
+        assertEquals(200, secondFrame.entries().size());
+        assertEquals("\"frame-230\"", secondFrame.entries().getFirst().getPayloadText());
+        assertEquals("\"frame-31\"", secondFrame.entries().getLast().getPayloadText());
+
+        PacketMonitorService.PacketPage lastFrame = service.loadPageFrame(query, 400, 200);
+        assertTrue(lastFrame.hasNewer());
+        assertFalse(lastFrame.hasOlder());
+        assertEquals(30, lastFrame.entries().size());
+        assertEquals("\"frame-30\"", lastFrame.entries().getFirst().getPayloadText());
+        assertEquals("\"frame-1\"", lastFrame.entries().getLast().getPayloadText());
+    }
+
     private static DeviceState deviceState() {
         DeviceState state = new DeviceState();
         state.setMyNodeNum(0x12345678);
