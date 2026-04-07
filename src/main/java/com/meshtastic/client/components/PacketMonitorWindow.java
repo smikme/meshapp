@@ -775,16 +775,28 @@ public final class PacketMonitorWindow {
             return;
         }
 
-        boolean canAutoInsert = isTableNearTop()
-                && (packetItems.isEmpty() || packetItems.size() < PAGE_SIZE || packetItems.getLast().getId() != viewedPacketId);
-        if (!canAutoInsert) {
+        if (!isTableNearTop()) {
+            currentPageHasNewer = true;
+            updateToolbarState();
+            return;
+        }
+
+        int insertionIndex = findInsertionIndex(entry);
+        if (insertionIndex >= PAGE_SIZE) {
+            currentPageHasOlder = matchingPacketCount > packetItems.size();
+            updateToolbarState();
+            return;
+        }
+        if (packetItems.size() >= PAGE_SIZE
+                && !packetItems.isEmpty()
+                && packetItems.getLast().getId() == viewedPacketId) {
             currentPageHasNewer = true;
             updateToolbarState();
             return;
         }
 
         ignoreTableScrollEvents = true;
-        packetItems.addFirst(entry);
+        packetItems.add(insertionIndex, entry);
         if (packetItems.size() > PAGE_SIZE) {
             packetItems.removeLast();
         }
@@ -890,6 +902,29 @@ public final class PacketMonitorWindow {
                 .filter(item -> item.getId() == packetId)
                 .findFirst()
                 .orElse(null);
+    }
+
+    private int findInsertionIndex(PacketLogEntry entry) {
+        for (int i = 0; i < packetItems.size(); i++) {
+            if (comparePacketOrder(entry, packetItems.get(i)) < 0) {
+                return i;
+            }
+        }
+        return packetItems.size();
+    }
+
+    /**
+     * Сравнивает записи в том же порядке, в котором они отображаются в таблице:
+     * сначала более новое {@code capturedAt}, затем больший {@code id}.
+     *
+     * @return отрицательное значение, если {@code left} должен идти раньше {@code right}
+     */
+    private int comparePacketOrder(PacketLogEntry left, PacketLogEntry right) {
+        int byCapturedAt = Long.compare(right.getCapturedAt(), left.getCapturedAt());
+        if (byCapturedAt != 0) {
+            return byCapturedAt;
+        }
+        return Long.compare(right.getId(), left.getId());
     }
 
     private PacketMonitorService.PacketQuery buildCurrentQuery() {
