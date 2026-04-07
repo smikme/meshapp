@@ -17,6 +17,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class PacketMonitorServiceTest {
@@ -114,6 +115,61 @@ class PacketMonitorServiceTest {
         service.clear();
 
         assertTrue(service.loadAll().isEmpty());
+    }
+
+    @Test
+    void loadsPacketPagesBidirectionallyWithoutKeepingMoreThanWindowSize() {
+        service.startCapture();
+
+        for (int i = 1; i <= 260; i++) {
+            MeshProtos.MeshPacket packet = MeshProtos.MeshPacket.newBuilder()
+                    .setFrom(i)
+                    .setTo(0xFFFFFFFF)
+                    .setId(i)
+                    .setRxTime(1_710_000_000 + i)
+                    .setDecoded(MeshProtos.Data.newBuilder()
+                            .setPortnum(Portnums.PortNum.TEXT_MESSAGE_APP)
+                            .setPayload(ByteString.copyFromUtf8("msg-" + i))
+                            .build())
+                    .build();
+
+            service.recordPacket(PacketLogEntry.Direction.INCOMING, packet, "!owner", null);
+        }
+
+        PacketMonitorService.PacketQuery query = new PacketMonitorService.PacketQuery(null, null, null);
+        PacketMonitorService.PacketPage latestPage = service.loadLatestPage(query, 200);
+
+        assertEquals(200, latestPage.entries().size());
+        assertFalse(latestPage.hasNewer());
+        assertTrue(latestPage.hasOlder());
+        assertEquals(260, latestPage.totalMatchingCount());
+        assertEquals(260, latestPage.totalStoredCount());
+        assertEquals("\"msg-260\"", latestPage.entries().getFirst().getPayloadText());
+        assertEquals("\"msg-61\"", latestPage.entries().getLast().getPayloadText());
+
+        PacketMonitorService.PacketPage olderPage = service.loadOlderPage(
+                query,
+                PacketMonitorService.PageCursor.fromEntry(latestPage.entries().getLast()),
+                200
+        );
+
+        assertEquals(60, olderPage.entries().size());
+        assertTrue(olderPage.hasNewer());
+        assertFalse(olderPage.hasOlder());
+        assertEquals("\"msg-60\"", olderPage.entries().getFirst().getPayloadText());
+        assertEquals("\"msg-1\"", olderPage.entries().getLast().getPayloadText());
+
+        PacketMonitorService.PacketPage newerPage = service.loadNewerPage(
+                query,
+                PacketMonitorService.PageCursor.fromEntry(olderPage.entries().getFirst()),
+                200
+        );
+
+        assertEquals(200, newerPage.entries().size());
+        assertFalse(newerPage.hasNewer());
+        assertTrue(newerPage.hasOlder());
+        assertEquals("\"msg-260\"", newerPage.entries().getFirst().getPayloadText());
+        assertEquals("\"msg-61\"", newerPage.entries().getLast().getPayloadText());
     }
 
     private static DeviceState deviceState() {

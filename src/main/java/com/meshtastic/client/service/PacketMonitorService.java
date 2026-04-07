@@ -14,7 +14,9 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -28,6 +30,12 @@ import java.util.concurrent.atomic.AtomicBoolean;
  */
 public final class PacketMonitorService {
 
+    private enum PageRequestKind {
+        LATEST,
+        OLDER,
+        NEWER
+    }
+
     private static final Logger log = LoggerFactory.getLogger(PacketMonitorService.class);
 
     /**
@@ -40,6 +48,74 @@ public final class PacketMonitorService {
         default void onCaptureStateChanged(boolean captureEnabled) {}
         default void onCleared() {}
     }
+
+    /**
+     * Серверный фильтр таблицы пакетов.
+     * Контракт: пустые строки нормализуются к {@code null}, чтобы SQL-слой не
+     * различал "пустой фильтр" и "фильтр не задан".
+     *
+     * @param direction  направление пакета или {@code null} для обоих направлений
+     * @param packetType точный тип пакета или {@code null} для всех типов
+     * @param searchText поисковая строка по UI-полям таблицы или {@code null}
+     */
+    public record PacketQuery(PacketLogEntry.Direction direction, String packetType, String searchText) {
+
+        public PacketQuery {
+            packetType = normalizeNullableText(packetType);
+            searchText = normalizeNullableText(searchText);
+        }
+
+        /**
+         * @return нормализованный SQL-pattern для LIKE-поиска или {@code null}, если поиск выключен
+         */
+        public String searchPattern() {
+            return searchText == null ? null : "%" + searchText.toLowerCase(Locale.ROOT) + "%";
+        }
+    }
+
+    /**
+     * Курсор пагинации относительно общего порядка {@code captured_at DESC, id DESC}.
+     * Контракт: курсор всегда описывает конкретную строку текущей страницы.
+     *
+     * @param capturedAt время захвата пакета
+     * @param id         идентификатор строки в БД
+     */
+    public record PageCursor(long capturedAt, long id) {
+
+        /**
+         * @param entry запись текущей страницы
+         * @return курсор для этой записи или {@code null}, если запись отсутствует
+         */
+        public static PageCursor fromEntry(PacketLogEntry entry) {
+            if (entry == null) {
+                return null;
+            }
+            return new PageCursor(entry.getCapturedAt(), entry.getId());
+        }
+    }
+
+    /**
+     * Одна страница таблицы пакетов.
+     * Контракт:
+     * - {@link #entries()} уже отсортированы как UI-таблица: новые сверху;
+     * - флаги {@link #hasNewer()} и {@link #hasOlder()} описывают наличие
+     *   соседних страниц в той же выборке;
+     * - размер {@link #entries()} не превышает лимит, запрошенный у сервиса.
+     *
+     * @param entries            записи текущей страницы
+     * @param hasNewer           доступны ли более новые записи в той же выборке
+     * @param hasOlder           доступны ли более старые записи в той же выборке
+     * @param totalMatchingCount общее число строк, подходящих под фильтр
+     * @param totalStoredCount   общее число строк журнала безотносительно фильтра
+     */
+    public record PacketPage(List<PacketLogEntry> entries,
+                             boolean hasNewer,
+                             boolean hasOlder,
+                             int totalMatchingCount,
+                             int totalStoredCount) {
+    }
+
+    private record SqlQuery(String sql, List<Object> params) {}
 
     private static PacketMonitorService instance;
 
@@ -226,6 +302,100 @@ public final class PacketMonitorService {
     }
 
     /**
+     * Загружает первую страницу таблицы в порядке "новые сверху".
+     * Используется при открытии окна, смене фильтров и синхронизации с live-данными.
+     *
+     * @param query фильтр таблицы
+     * @param limit максимум записей в памяти окна
+     * @return страница выборки и сопутствующие метаданные пагинации
+     */
+    public synchronized PacketPage loadLatestPage(PacketQuery query, int limit) {
+        return loadPage(query, limit, null, PageRequestKind.LATEST);
+    }
+
+    /**
+     * Загружает следующую страницу более старых пакетов относительно нижней записи текущей страницы.
+     *
+     * @param query           фильтр таблицы
+     * @param oldestExclusive курсор самой старой видимой записи; сама запись в новую страницу не попадает
+     * @param limit           максимум записей в памяти окна
+     * @return страница более старых записей
+     */
+    public synchronized PacketPage loadOlderPage(PacketQuery query, PageCursor oldestExclusive, int limit) {
+        return loadPage(query, limit, oldestExclusive, PageRequestKind.OLDER);
+    }
+
+    /**
+     * Загружает следующую страницу более новых пакетов относительно верхней записи текущей страницы.
+     *
+     * @param query           фильтр таблицы
+     * @param newestExclusive курсор самой новой видимой записи; сама запись в новую страницу не попадает
+     * @param limit           максимум записей в памяти окна
+     * @return страница более новых записей
+     */
+    public synchronized PacketPage loadNewerPage(PacketQuery query, PageCursor newestExclusive, int limit) {
+        return loadPage(query, limit, newestExclusive, PageRequestKind.NEWER);
+    }
+
+    /**
+     * Загружает доступные значения фильтра по типу пакета напрямую из БД.
+     * Контракт: фильтр по типу при формировании списка не используется, чтобы
+     * combo-box оставался источником выбора, а не зеркалом уже выбранного типа.
+     *
+     * @param query фильтр по направлению и поиску
+     * @return отсортированный список типов пакетов
+     */
+    public synchronized List<String> loadPacketTypes(PacketQuery query) {
+        List<String> packetTypes = new ArrayList<>();
+        if (dbConnection == null) {
+            return packetTypes;
+        }
+
+        PacketQuery typeQuery = query != null
+                ? new PacketQuery(query.direction(), null, query.searchText())
+                : new PacketQuery(null, null, null);
+
+        SqlQuery sqlQuery = buildFilteredQuery("""
+                SELECT DISTINCT packet_type
+                FROM lora_packet_logs
+                WHERE 1 = 1
+                """, typeQuery, null, null, false, false);
+        String sql = sqlQuery.sql() + "\nORDER BY packet_type";
+
+        try (PreparedStatement ps = dbConnection.prepareStatement(sql)) {
+            bindParams(ps, sqlQuery.params());
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    String packetType = rs.getString("packet_type");
+                    if (packetType != null && !packetType.isBlank()) {
+                        packetTypes.add(packetType);
+                    }
+                }
+            }
+        } catch (SQLException e) {
+            log.error("Failed to load packet monitor packet types", e);
+        }
+
+        return packetTypes;
+    }
+
+    /**
+     * @return общее число сохранённых строк журнала без учёта UI-фильтров
+     */
+    public synchronized int countAllPackets() {
+        if (dbConnection == null) {
+            return 0;
+        }
+        try (PreparedStatement ps = dbConnection.prepareStatement("SELECT COUNT(*) FROM lora_packet_logs");
+             ResultSet rs = ps.executeQuery()) {
+            return rs.next() ? rs.getInt(1) : 0;
+        } catch (SQLException e) {
+            log.error("Failed to count packet monitor rows", e);
+            return 0;
+        }
+    }
+
+    /**
      * Полностью очищает журнал пакетов и уведомляет слушателей.
      * Контракт: после успешной очистки локальное состояние UI считается недействительным.
      */
@@ -337,5 +507,206 @@ public final class PacketMonitorService {
             return null;
         }
         return ConnectionManager.getInstance().getDeviceState(connectionId);
+    }
+
+    private PacketPage loadPage(PacketQuery query, int limit, PageCursor cursor, PageRequestKind requestKind) {
+        int safeLimit = Math.max(1, limit);
+        int totalMatchingCount = countMatching(query);
+        int totalStoredCount = countAllPackets();
+        List<PacketLogEntry> entries = new ArrayList<>();
+
+        if (dbConnection == null) {
+            return new PacketPage(entries, false, false, totalMatchingCount, totalStoredCount);
+        }
+        if ((requestKind == PageRequestKind.OLDER || requestKind == PageRequestKind.NEWER) && cursor == null) {
+            return new PacketPage(entries, false, false, totalMatchingCount, totalStoredCount);
+        }
+
+        SqlQuery sqlQuery = buildPageQuery(query, cursor, requestKind, safeLimit);
+        try (PreparedStatement ps = dbConnection.prepareStatement(sqlQuery.sql())) {
+            bindParams(ps, sqlQuery.params());
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    entries.add(readEntry(rs));
+                }
+            }
+        } catch (SQLException e) {
+            log.error("Failed to load paged LoRa packet logs", e);
+            return new PacketPage(List.of(), false, false, totalMatchingCount, totalStoredCount);
+        }
+
+        if (requestKind == PageRequestKind.NEWER) {
+            Collections.reverse(entries);
+        }
+
+        boolean hasNewer = !entries.isEmpty()
+                && existsNewerThan(query, PageCursor.fromEntry(entries.getFirst()));
+        boolean hasOlder = !entries.isEmpty()
+                && existsOlderThan(query, PageCursor.fromEntry(entries.getLast()));
+
+        return new PacketPage(entries, hasNewer, hasOlder, totalMatchingCount, totalStoredCount);
+    }
+
+    private int countMatching(PacketQuery query) {
+        if (dbConnection == null) {
+            return 0;
+        }
+
+        SqlQuery sqlQuery = buildFilteredQuery("""
+                SELECT COUNT(*)
+                FROM lora_packet_logs
+                WHERE 1 = 1
+                """, query, null, null, true, false);
+
+        try (PreparedStatement ps = dbConnection.prepareStatement(sqlQuery.sql())) {
+            bindParams(ps, sqlQuery.params());
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next() ? rs.getInt(1) : 0;
+            }
+        } catch (SQLException e) {
+            log.error("Failed to count filtered LoRa packet logs", e);
+            return 0;
+        }
+    }
+
+    private boolean existsOlderThan(PacketQuery query, PageCursor cursor) {
+        return existsRelativeTo(query, cursor, true);
+    }
+
+    private boolean existsNewerThan(PacketQuery query, PageCursor cursor) {
+        return existsRelativeTo(query, cursor, false);
+    }
+
+    private boolean existsRelativeTo(PacketQuery query, PageCursor cursor, boolean older) {
+        if (dbConnection == null || cursor == null) {
+            return false;
+        }
+
+        SqlQuery sqlQuery = buildFilteredQuery("""
+                SELECT 1
+                FROM lora_packet_logs
+                WHERE 1 = 1
+                """, query, cursor, older ? PageRequestKind.OLDER : PageRequestKind.NEWER, true, false);
+        String sql = sqlQuery.sql() + "\nLIMIT 1";
+
+        try (PreparedStatement ps = dbConnection.prepareStatement(sql)) {
+            bindParams(ps, sqlQuery.params());
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next();
+            }
+        } catch (SQLException e) {
+            log.error("Failed to probe neighbouring packet monitor page", e);
+            return false;
+        }
+    }
+
+    private SqlQuery buildPageQuery(PacketQuery query, PageCursor cursor, PageRequestKind requestKind, int limit) {
+        SqlQuery sqlQuery = buildFilteredQuery("""
+                SELECT id, owner_node_id, captured_at, direction, packet_type, from_node, to_node, payload_text, packet_bytes
+                FROM lora_packet_logs
+                WHERE 1 = 1
+                """, query, cursor, requestKind, true, true);
+
+        String orderBy = switch (requestKind) {
+            case NEWER -> "\nORDER BY captured_at ASC, id ASC";
+            case LATEST, OLDER -> "\nORDER BY captured_at DESC, id DESC";
+        };
+
+        List<Object> params = new ArrayList<>(sqlQuery.params());
+        params.add(limit);
+        return new SqlQuery(sqlQuery.sql() + orderBy + "\nLIMIT ?", params);
+    }
+
+    private SqlQuery buildFilteredQuery(String baseSql,
+                                        PacketQuery query,
+                                        PageCursor cursor,
+                                        PageRequestKind requestKind,
+                                        boolean includeTypeFilter,
+                                        boolean includeLimitPlaceholder) {
+        StringBuilder sql = new StringBuilder(baseSql);
+        List<Object> params = new ArrayList<>();
+
+        if (query != null && query.direction() != null) {
+            sql.append("\nAND direction = ?");
+            params.add(query.direction().name());
+        }
+        if (includeTypeFilter && query != null && query.packetType() != null) {
+            sql.append("\nAND packet_type = ?");
+            params.add(query.packetType());
+        }
+        if (query != null && query.searchPattern() != null) {
+            sql.append("""
+                    
+                    AND (
+                        LOWER(COALESCE(packet_type, '')) LIKE ?
+                        OR LOWER(COALESCE(from_node, '')) LIKE ?
+                        OR LOWER(COALESCE(to_node, '')) LIKE ?
+                        OR LOWER(COALESCE(CAST(payload_text AS VARCHAR), '')) LIKE ?
+                        OR LOWER(CASE direction
+                            WHEN 'INCOMING' THEN 'входящий'
+                            WHEN 'OUTGOING' THEN 'исходящий'
+                            ELSE direction
+                        END) LIKE ?
+                    )
+                    """);
+            for (int i = 0; i < 5; i++) {
+                params.add(query.searchPattern());
+            }
+        }
+
+        if (cursor != null && requestKind == PageRequestKind.OLDER) {
+            sql.append("\nAND (captured_at < ? OR (captured_at = ? AND id < ?))");
+            params.add(cursor.capturedAt());
+            params.add(cursor.capturedAt());
+            params.add(cursor.id());
+        } else if (cursor != null && requestKind == PageRequestKind.NEWER) {
+            sql.append("\nAND (captured_at > ? OR (captured_at = ? AND id > ?))");
+            params.add(cursor.capturedAt());
+            params.add(cursor.capturedAt());
+            params.add(cursor.id());
+        }
+
+        if (!includeLimitPlaceholder) {
+            return new SqlQuery(sql.toString(), params);
+        }
+        return new SqlQuery(sql.toString(), params);
+    }
+
+    private static void bindParams(PreparedStatement ps, List<Object> params) throws SQLException {
+        for (int i = 0; i < params.size(); i++) {
+            Object value = params.get(i);
+            if (value instanceof String stringValue) {
+                ps.setString(i + 1, stringValue);
+            } else if (value instanceof Integer intValue) {
+                ps.setInt(i + 1, intValue);
+            } else if (value instanceof Long longValue) {
+                ps.setLong(i + 1, longValue);
+            } else {
+                ps.setObject(i + 1, value);
+            }
+        }
+    }
+
+    private static PacketLogEntry readEntry(ResultSet rs) throws SQLException {
+        PacketLogEntry entry = new PacketLogEntry(
+                rs.getString("owner_node_id"),
+                rs.getLong("captured_at"),
+                Direction.valueOf(rs.getString("direction")),
+                rs.getString("packet_type"),
+                rs.getString("from_node"),
+                rs.getString("to_node"),
+                rs.getString("payload_text"),
+                rs.getBytes("packet_bytes")
+        );
+        entry.setId(rs.getLong("id"));
+        return entry;
+    }
+
+    private static String normalizeNullableText(String value) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed;
     }
 }
