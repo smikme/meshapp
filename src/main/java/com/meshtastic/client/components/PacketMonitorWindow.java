@@ -1613,6 +1613,13 @@ public final class PacketMonitorWindow {
         }
     }
 
+    /**
+     * Преобразует выбранное значение date/time filter-а в границу SQL-диапазона.
+     * Контракт:
+     * - отсутствие даты выключает фильтр и возвращает {@code null};
+     * - режим {@code Весь день} разворачивается в начало или конец суток;
+     * - верхняя граница включительная и поэтому доводится до последней наносекунды минуты/дня.
+     */
     private static Long resolveCapturedAtBoundary(DateTimePicker dateTimePicker, boolean lowerBound) {
         if (dateTimePicker == null || dateTimePicker.getDate() == null) {
             return null;
