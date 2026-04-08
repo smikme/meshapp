@@ -62,6 +62,20 @@ class PacketDebugFormatterTest {
     }
 
     @Test
+    void packetTreeShowsUint32FieldsAsUnsignedValues() {
+        MeshProtos.MeshPacket packet = MeshProtos.MeshPacket.newBuilder()
+                .setFrom(0xF66F82E0)
+                .setTo(0xFFFFFFFF)
+                .setId(101)
+                .build();
+
+        TreeItem<PacketTreeNode> root = PacketDebugFormatter.buildPacketTree(packet.toByteArray());
+
+        assertNotNull(findByPrefix(root, "from: 4134503136"), dumpTree(root));
+        assertNotNull(findByPrefix(root, "to: 4294967295"), dumpTree(root));
+    }
+
+    @Test
     void multilineSelectionDoesNotIncludeAddressColumn() {
         byte[] bytes = new byte[24];
         for (int i = 0; i < bytes.length; i++) {
@@ -131,8 +145,8 @@ class PacketDebugFormatterTest {
                 1_710_000_000_000L,
                 PacketLogEntry.Direction.INCOMING,
                 "TEXT_MESSAGE_APP",
-                "Peer (!12345678)",
-                "Вещание (!ffffffff)",
+                "Peer (305419896)",
+                "Вещание (4294967295)",
                 "\"" + text + "\"",
                 packet.toByteArray()
         );
@@ -154,5 +168,21 @@ class PacketDebugFormatterTest {
             }
         }
         return null;
+    }
+
+    private static String dumpTree(TreeItem<PacketTreeNode> root) {
+        StringBuilder sb = new StringBuilder();
+        appendLabels(sb, root, 0);
+        return sb.toString();
+    }
+
+    private static void appendLabels(StringBuilder sb, TreeItem<PacketTreeNode> item, int depth) {
+        if (item == null || item.getValue() == null) {
+            return;
+        }
+        sb.append("  ".repeat(Math.max(0, depth))).append(item.getValue().getLabel()).append('\n');
+        for (TreeItem<PacketTreeNode> child : item.getChildren()) {
+            appendLabels(sb, child, depth + 1);
+        }
     }
 }

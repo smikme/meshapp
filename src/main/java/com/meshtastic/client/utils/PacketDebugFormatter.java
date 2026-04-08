@@ -397,7 +397,7 @@ public final class PacketDebugFormatter {
         }
 
         parent.getChildren().add(new TreeItem<>(
-                new PacketTreeNode(fieldName + ": " + formatScalarValue(value), startByte, endByte)));
+                new PacketTreeNode(fieldName + ": " + formatScalarValue(field, value), startByte, endByte)));
     }
 
     private static int appendPackedRepeatedField(TreeItem<PacketTreeNode> parent,
@@ -422,7 +422,7 @@ public final class PacketDebugFormatter {
             localOffset = skipPackedScalarValue(field, messageBytes, localOffset, envelope.valueEnd());
             Object value = values.get(startIndex + consumed);
             packedNode.getChildren().add(new TreeItem<>(new PacketTreeNode(
-                    "[" + (startIndex + consumed) + "]: " + formatScalarValue(value),
+                    "[" + (startIndex + consumed) + "]: " + formatScalarValue(field, value),
                     absoluteOffset + itemStart,
                     absoluteOffset + localOffset)));
             consumed++;
@@ -747,25 +747,32 @@ public final class PacketDebugFormatter {
         }
     }
 
+    /**
+     * Форматирует идентификатор узла для UI мониторинга пакетов.
+     * Контракт метода намеренно отличается от остального приложения: здесь {@code nodeId}
+     * показывается как protobuf {@code uint32}, то есть в unsigned decimal-виде.
+     *
+     * @param nodeNum     raw node number из protobuf-пакета
+     * @param deviceState состояние устройства для разрешения имени узла
+     * @return имя узла с {@code uint32}-идентификатором в скобках или только {@code uint32},
+     *         {@code "-"} для нулевого адреса и строка broadcast для {@code 0xFFFFFFFF}
+     */
     private static String formatNode(int nodeNum, com.meshtastic.client.model.DeviceState deviceState) {
         long unsignedNodeNum = Integer.toUnsignedLong(nodeNum);
         if (unsignedNodeNum == BROADCAST_NODE_NUM) {
-            return "Вещание (!ffffffff)";
+            return "Вещание (" + unsignedNodeNum + ")";
         }
         if (nodeNum == 0) {
             return "-";
         }
 
-        String nodeId = String.format(Locale.ROOT, "!%08x", unsignedNodeNum);
+        String nodeId = Long.toUnsignedString(unsignedNodeNum);
         if (deviceState != null) {
             NodeData node = deviceState.getNodeDb().get(nodeNum);
             if (node != null) {
-                String name = firstNonBlank(node.getLongName(), node.getShortName(), node.getNodeId());
-                if (name != null && !name.equals(nodeId)) {
+                String name = firstNonBlank(node.getLongName(), node.getShortName());
+                if (name != null) {
                     return name + " (" + nodeId + ")";
-                }
-                if (node.getNodeId() != null && !node.getNodeId().isBlank()) {
-                    return node.getNodeId();
                 }
             }
         }
@@ -792,14 +799,24 @@ public final class PacketDebugFormatter {
         return sb.toString();
     }
 
-    private static String formatScalarValue(Object value) {
+    private static String formatScalarValue(FieldDescriptor field, Object value) {
         if (value == null) {
             return "null";
         }
         if (value instanceof String text) {
             return quote(text);
         }
-        return String.valueOf(value);
+        if (field == null) {
+            return String.valueOf(value);
+        }
+
+        return switch (field.getType()) {
+            case UINT32, FIXED32 -> Long.toUnsignedString(Integer.toUnsignedLong(((Number) value).intValue()));
+            case UINT64, FIXED64 -> Long.toUnsignedString(((Number) value).longValue());
+            case ENUM -> ((EnumValueDescriptor) value).getName();
+            case BOOL, INT32, SINT32, SFIXED32, FLOAT, DOUBLE, INT64, SINT64, SFIXED64 -> String.valueOf(value);
+            default -> String.valueOf(value);
+        };
     }
 
     private static boolean isProbablyText(ByteString bytes) {
