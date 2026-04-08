@@ -22,6 +22,7 @@ import org.meshtastic.proto.TelemetryProtos;
 
 import java.util.HashMap;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -471,10 +472,11 @@ public final class PacketDebugFormatter {
             return data.getEmoji() != 0 ? "Реакция без текста" : "Пустое текстовое сообщение";
         }
         if (data.getEmoji() != 0) {
-            return "Реакция " + quote(text) + (data.getReplyId() != 0 ? " на packet_id=" + data.getReplyId() : "");
+            return "Реакция " + quote(text)
+                    + (data.getReplyId() != 0 ? " на packet_id=" + formatUint32(data.getReplyId()) : "");
         }
         if (data.getReplyId() != 0) {
-            return quote(text) + " (reply_id=" + data.getReplyId() + ")";
+            return quote(text) + " (reply_id=" + formatUint32(data.getReplyId()) + ")";
         }
         return quote(text);
     }
@@ -482,7 +484,7 @@ public final class PacketDebugFormatter {
     private static String describeRoutingPayload(MeshProtos.Data data) {
         try {
             MeshProtos.Routing routing = MeshProtos.Routing.parseFrom(data.getPayload());
-            return "request_id=" + data.getRequestId() + ", error=" + routing.getErrorReason();
+            return "request_id=" + formatUint32(data.getRequestId()) + ", error=" + routing.getErrorReason();
         } catch (InvalidProtocolBufferException e) {
             return "ROUTING_APP: parse error (" + e.getMessage() + ")";
         }
@@ -542,7 +544,8 @@ public final class PacketDebugFormatter {
     private static String describeTraceroutePayload(MeshProtos.Data data) {
         try {
             MeshProtos.RouteDiscovery route = MeshProtos.RouteDiscovery.parseFrom(data.getPayload());
-            return "route=" + route.getRouteList() + ", back=" + route.getRouteBackList();
+            return "route=" + formatUint32List(route.getRouteList())
+                    + ", back=" + formatUint32List(route.getRouteBackList());
         } catch (InvalidProtocolBufferException e) {
             return "TRACEROUTE_APP: parse error (" + e.getMessage() + ")";
         }
@@ -574,7 +577,7 @@ public final class PacketDebugFormatter {
             return quote(truncate(data.getPayload().toString(StandardCharsets.UTF_8), TEXT_PREVIEW_LIMIT));
         }
         return "bytes=" + data.getPayload().size()
-                + ", packet_id=" + Integer.toUnsignedLong(packet.getId());
+                + ", packet_id=" + formatUint32(packet.getId());
     }
 
     private static String describeEncryptedPacket(MeshProtos.MeshPacket packet) {
@@ -817,6 +820,21 @@ public final class PacketDebugFormatter {
             case BOOL, INT32, SINT32, SFIXED32, FLOAT, DOUBLE, INT64, SINT64, SFIXED64 -> String.valueOf(value);
             default -> String.valueOf(value);
         };
+    }
+
+    private static String formatUint32(int value) {
+        return Long.toUnsignedString(Integer.toUnsignedLong(value));
+    }
+
+    private static String formatUint32List(List<Integer> values) {
+        if (values == null || values.isEmpty()) {
+            return "[]";
+        }
+        List<String> rendered = new ArrayList<>(values.size());
+        for (Integer value : values) {
+            rendered.add(formatUint32(value != null ? value : 0));
+        }
+        return rendered.toString();
     }
 
     private static boolean isProbablyText(ByteString bytes) {

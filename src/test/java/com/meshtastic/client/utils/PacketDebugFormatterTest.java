@@ -76,6 +76,42 @@ class PacketDebugFormatterTest {
     }
 
     @Test
+    void payloadTextShowsUint32FieldsAsUnsignedValues() {
+        MeshProtos.MeshPacket textPacket = MeshProtos.MeshPacket.newBuilder()
+                .setFrom(1)
+                .setTo(2)
+                .setId(0xFFFFFFFF)
+                .setDecoded(MeshProtos.Data.newBuilder()
+                        .setPortnum(Portnums.PortNum.TEXT_MESSAGE_APP)
+                        .setPayload(ByteString.copyFromUtf8("hello"))
+                        .setReplyId(0xFFFFFFFF)
+                        .build())
+                .build();
+        MeshProtos.MeshPacket routePacket = MeshProtos.MeshPacket.newBuilder()
+                .setFrom(1)
+                .setTo(2)
+                .setId(1)
+                .setDecoded(MeshProtos.Data.newBuilder()
+                        .setPortnum(Portnums.PortNum.TRACEROUTE_APP)
+                        .setRequestId(0xFFFFFFFF)
+                        .setPayload(MeshProtos.RouteDiscovery.newBuilder()
+                                .addRoute(0xF66F82E0)
+                                .addRouteBack(0xFFFFFFFF)
+                                .build()
+                                .toByteString())
+                        .build())
+                .build();
+
+        PacketDebugFormatter.PacketDetails textDetails =
+                PacketDebugFormatter.describeMeshPacket(textPacket, PacketLogEntry.Direction.INCOMING, null);
+        PacketDebugFormatter.PacketDetails routeDetails =
+                PacketDebugFormatter.describeMeshPacket(routePacket, PacketLogEntry.Direction.INCOMING, null);
+
+        assertEquals("\"hello\" (reply_id=4294967295)", textDetails.payloadText());
+        assertEquals("route=[4134503136], back=[4294967295]", routeDetails.payloadText());
+    }
+
+    @Test
     void multilineSelectionDoesNotIncludeAddressColumn() {
         byte[] bytes = new byte[24];
         for (int i = 0; i < bytes.length; i++) {
