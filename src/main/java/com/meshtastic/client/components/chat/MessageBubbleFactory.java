@@ -540,7 +540,6 @@ public class MessageBubbleFactory {
     /**
      * Добавляет quote preview только для reply-сообщений.
      *
-     * @param content bubble-контент
      * @param msg сообщение
      */
     private Optional<Node> createQuoteNode(MeshMessage msg) {
@@ -557,7 +556,6 @@ public class MessageBubbleFactory {
     /**
      * Добавляет основной текст сообщения в bubble.
      *
-     * @param content bubble-контент
      * @param msg сообщение
      */
     private Node createTextNode(MeshMessage msg) {
@@ -785,7 +783,7 @@ public class MessageBubbleFactory {
         String snrStr = msg.getRxSnr() == (int) msg.getRxSnr()
                 ? String.valueOf((int) msg.getRxSnr())
                 : String.format("%.1f", msg.getRxSnr());
-        return msg.getRxRssi() + "dBm/" + snrStr + "dB";
+        return msg.getRxRssi() + "dB/" + snrStr + "dB";
     }
 
     /**
