@@ -4,6 +4,7 @@ import com.meshtastic.client.MeshApp;
 import com.meshtastic.client.modal.Toast;
 import com.meshtastic.client.model.PacketLogEntry;
 import com.meshtastic.client.model.PacketTreeNode;
+import com.meshtastic.client.platform.OsDetect;
 import com.meshtastic.client.service.PacketMonitorService;
 import com.meshtastic.client.themes.ThemeManager;
 import com.meshtastic.client.utils.AppPreferences;
@@ -19,6 +20,7 @@ import javafx.collections.ObservableList;
 import javafx.geometry.Insets;
 import javafx.geometry.Orientation;
 import javafx.geometry.Pos;
+import javafx.geometry.Rectangle2D;
 import javafx.scene.Node;
 import javafx.scene.Scene;
 import javafx.stage.Screen;
@@ -64,6 +66,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * Отдельное окно мониторинга LoRa mesh-пакетов.
@@ -203,6 +206,7 @@ public final class PacketMonitorWindow {
         if (instance == null) {
             instance = new PacketMonitorWindow();
         }
+        instance.ensureWindowVisible();
         instance.stage.show();
         if (instance.restoreWindowMaximized) {
             instance.captureCurrentWindowBounds();
@@ -233,7 +237,7 @@ public final class PacketMonitorWindow {
         stage = new Stage();
         stage.initStyle(StageStyle.UTILITY);
         stage.setTitle("Мониторинг LoRa-пакетов");
-        if (MeshApp.getPrimaryStage() != null) {
+        if (MeshApp.getPrimaryStage() != null && !OsDetect.isMacOs()) {
             stage.initOwner(MeshApp.getPrimaryStage());
         }
         if (MeshApp.getPrimaryStage() != null && !MeshApp.getPrimaryStage().getIcons().isEmpty()) {
@@ -1530,8 +1534,8 @@ public final class PacketMonitorWindow {
 
     /**
      * Восстанавливает координаты, размер и флаг maximized.
-     * Состояние применяется только если сохранённый прямоугольник попадает хотя бы
-     * частично на один из доступных экранов.
+     * Если сохранённый прямоугольник больше не попадает на доступные экраны,
+     * окно возвращается в видимую область ближайшего дисплея.
      */
     private void restoreWindowState() {
         restoreWindowMaximized = AppPreferences.isPacketMonitorWindowMaximized();
@@ -1539,23 +1543,12 @@ public final class PacketMonitorWindow {
             return;
         }
 
-        double x = AppPreferences.getPacketMonitorWindowX();
-        double y = AppPreferences.getPacketMonitorWindowY();
-        double width = AppPreferences.getPacketMonitorWindowWidth();
-        double height = AppPreferences.getPacketMonitorWindowHeight();
-        ObservableList<Screen> screens = Screen.getScreensForRectangle(x, y, width, height);
-        if (screens.isEmpty()) {
-            return;
-        }
-
-        stage.setX(x);
-        stage.setY(y);
-        stage.setWidth(width);
-        stage.setHeight(height);
-        normalWindowX = x;
-        normalWindowY = y;
-        normalWindowWidth = width;
-        normalWindowHeight = height;
+        applyWindowBounds(resolveVisibleWindowBounds(
+                AppPreferences.getPacketMonitorWindowX(),
+                AppPreferences.getPacketMonitorWindowY(),
+                AppPreferences.getPacketMonitorWindowWidth(),
+                AppPreferences.getPacketMonitorWindowHeight()
+        ));
     }
 
     /**
@@ -1601,17 +1594,183 @@ public final class PacketMonitorWindow {
     private void saveWindowState() {
         boolean maximized = stage != null && stage.isMaximized();
         captureCurrentWindowBounds();
-        AppPreferences.savePacketMonitorWindowBounds(
+        WindowBounds visibleBounds = resolveVisibleWindowBounds(
                 Double.isNaN(normalWindowX) ? stage.getX() : normalWindowX,
                 Double.isNaN(normalWindowY) ? stage.getY() : normalWindowY,
                 normalWindowWidth > 0 ? normalWindowWidth : stage.getWidth(),
-                normalWindowHeight > 0 ? normalWindowHeight : stage.getHeight(),
+                normalWindowHeight > 0 ? normalWindowHeight : stage.getHeight()
+        );
+        AppPreferences.savePacketMonitorWindowBounds(
+                visibleBounds.x(),
+                visibleBounds.y(),
+                visibleBounds.width(),
+                visibleBounds.height(),
                 maximized
         );
         if (contentSplit != null && !contentSplit.getDividers().isEmpty()) {
             AppPreferences.setPacketMonitorDividerPos(contentSplit.getDividers().getFirst().getPosition());
         }
     }
+
+    /**
+     * Возвращает окно в видимую область, если его normal bounds ушли за пределы доступных экранов.
+     */
+    private void ensureWindowVisible() {
+        if (stage == null || stage.isMaximized()) {
+            return;
+        }
+
+        applyWindowBounds(resolveVisibleWindowBounds(
+                Double.isNaN(normalWindowX) ? stage.getX() : normalWindowX,
+                Double.isNaN(normalWindowY) ? stage.getY() : normalWindowY,
+                normalWindowWidth > 0 ? normalWindowWidth : stage.getWidth(),
+                normalWindowHeight > 0 ? normalWindowHeight : stage.getHeight()
+        ));
+    }
+
+    private void applyWindowBounds(WindowBounds bounds) {
+        if (bounds == null) {
+            return;
+        }
+
+        stage.setX(bounds.x());
+        stage.setY(bounds.y());
+        stage.setWidth(bounds.width());
+        stage.setHeight(bounds.height());
+        normalWindowX = bounds.x();
+        normalWindowY = bounds.y();
+        normalWindowWidth = bounds.width();
+        normalWindowHeight = bounds.height();
+    }
+
+    private static WindowBounds resolveVisibleWindowBounds(double x, double y, double width, double height) {
+        List<Rectangle2D> visibleAreas = Screen.getScreens().stream()
+                .map(Screen::getVisualBounds)
+                .filter(Objects::nonNull)
+                .toList();
+        Rectangle2D fallbackArea = visibleAreas.isEmpty() ? defaultVisibleArea() : visibleAreas.getFirst();
+        return normalizeWindowBounds(x, y, width, height, visibleAreas, fallbackArea);
+    }
+
+    static WindowBounds normalizeWindowBounds(double x,
+                                              double y,
+                                              double width,
+                                              double height,
+                                              List<Rectangle2D> visibleAreas,
+                                              Rectangle2D fallbackArea) {
+        Rectangle2D effectiveFallback = fallbackArea != null ? fallbackArea : defaultVisibleArea();
+        List<Rectangle2D> safeVisibleAreas = visibleAreas == null ? List.of() : visibleAreas.stream()
+                .filter(Objects::nonNull)
+                .toList();
+        Rectangle2D targetArea = selectTargetArea(x, y, width, height, safeVisibleAreas, effectiveFallback);
+
+        double safeWidth = sanitizeWindowDimension(width, DEFAULT_WINDOW_WIDTH, targetArea.getWidth());
+        double safeHeight = sanitizeWindowDimension(height, DEFAULT_WINDOW_HEIGHT, targetArea.getHeight());
+        boolean intersectsVisibleArea = intersectsAnyVisibleArea(x, y, safeWidth, safeHeight, safeVisibleAreas);
+
+        double targetX = intersectsVisibleArea && Double.isFinite(x)
+                ? clamp(x, targetArea.getMinX(), targetArea.getMaxX() - safeWidth)
+                : centerCoordinate(targetArea.getMinX(), targetArea.getWidth(), safeWidth);
+        double targetY = intersectsVisibleArea && Double.isFinite(y)
+                ? clamp(y, targetArea.getMinY(), targetArea.getMaxY() - safeHeight)
+                : centerCoordinate(targetArea.getMinY(), targetArea.getHeight(), safeHeight);
+        return new WindowBounds(targetX, targetY, safeWidth, safeHeight);
+    }
+
+    private static Rectangle2D selectTargetArea(double x,
+                                                double y,
+                                                double width,
+                                                double height,
+                                                List<Rectangle2D> visibleAreas,
+                                                Rectangle2D fallbackArea) {
+        if (visibleAreas == null || visibleAreas.isEmpty()) {
+            return fallbackArea != null ? fallbackArea : defaultVisibleArea();
+        }
+
+        Rectangle2D candidate = candidateBounds(x, y, width, height);
+        if (candidate != null) {
+            Rectangle2D overlappingArea = visibleAreas.stream()
+                    .filter(area -> intersects(area, candidate))
+                    .max((left, right) -> Double.compare(intersectionArea(left, candidate), intersectionArea(right, candidate)))
+                    .orElse(null);
+            if (overlappingArea != null) {
+                return overlappingArea;
+            }
+
+            double centerX = candidate.getMinX() + candidate.getWidth() / 2.0;
+            double centerY = candidate.getMinY() + candidate.getHeight() / 2.0;
+            return visibleAreas.stream()
+                    .min((left, right) -> Double.compare(
+                            distanceSquaredToRectangle(centerX, centerY, left),
+                            distanceSquaredToRectangle(centerX, centerY, right)))
+                    .orElse(visibleAreas.getFirst());
+        }
+
+        return fallbackArea != null ? fallbackArea : visibleAreas.getFirst();
+    }
+
+    private static Rectangle2D candidateBounds(double x, double y, double width, double height) {
+        if (!Double.isFinite(x) || !Double.isFinite(y)) {
+            return null;
+        }
+
+        double safeWidth = width > 0 && Double.isFinite(width) ? width : DEFAULT_WINDOW_WIDTH;
+        double safeHeight = height > 0 && Double.isFinite(height) ? height : DEFAULT_WINDOW_HEIGHT;
+        return new Rectangle2D(x, y, safeWidth, safeHeight);
+    }
+
+    private static boolean intersectsAnyVisibleArea(double x,
+                                                    double y,
+                                                    double width,
+                                                    double height,
+                                                    List<Rectangle2D> visibleAreas) {
+        Rectangle2D candidate = candidateBounds(x, y, width, height);
+        return candidate != null && visibleAreas.stream().anyMatch(area -> intersects(area, candidate));
+    }
+
+    private static boolean intersects(Rectangle2D left, Rectangle2D right) {
+        return left.getMaxX() > right.getMinX()
+                && right.getMaxX() > left.getMinX()
+                && left.getMaxY() > right.getMinY()
+                && right.getMaxY() > left.getMinY();
+    }
+
+    private static double intersectionArea(Rectangle2D left, Rectangle2D right) {
+        double intersectionWidth = Math.min(left.getMaxX(), right.getMaxX()) - Math.max(left.getMinX(), right.getMinX());
+        double intersectionHeight = Math.min(left.getMaxY(), right.getMaxY()) - Math.max(left.getMinY(), right.getMinY());
+        if (intersectionWidth <= 0 || intersectionHeight <= 0) {
+            return 0.0;
+        }
+        return intersectionWidth * intersectionHeight;
+    }
+
+    private static double distanceSquaredToRectangle(double x, double y, Rectangle2D area) {
+        double dx = x < area.getMinX() ? area.getMinX() - x : Math.max(0.0, x - area.getMaxX());
+        double dy = y < area.getMinY() ? area.getMinY() - y : Math.max(0.0, y - area.getMaxY());
+        return dx * dx + dy * dy;
+    }
+
+    private static double sanitizeWindowDimension(double requested, double defaultValue, double maxVisible) {
+        double preferred = requested > 0 && Double.isFinite(requested) ? requested : defaultValue;
+        return Math.min(maxVisible, Math.max(200.0, preferred));
+    }
+
+    private static double centerCoordinate(double min, double available, double size) {
+        return min + Math.max(0.0, (available - size) / 2.0);
+    }
+
+    private static double clamp(double value, double min, double max) {
+        if (max < min) {
+            return min;
+        }
+        return Math.max(min, Math.min(value, max));
+    }
+
+    private static Rectangle2D defaultVisibleArea() {
+        return new Rectangle2D(0, 0, DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT);
+    }
+
+    record WindowBounds(double x, double y, double width, double height) {}
 
     /**
      * Преобразует выбранное значение date/time filter-а в границу SQL-диапазона.
