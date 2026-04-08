@@ -49,11 +49,31 @@ import java.util.stream.Stream;
  */
 public class MessageBubbleFactory {
 
+    private static final int ZERO_VALUE = 0;
+    private static final int BASE_VERTICAL_SPACING = 2;
+    private static final int MESSAGE_ROW_SPACING = 6;
+    private static final int FOOTER_SPACING = 8;
+    private static final int REACTION_BAR_SPACING = 6;
+    private static final int REACTION_CHIP_SPACING = 4;
+    private static final int REACTION_POPUP_SPACING = 4;
+    private static final int META_INDICATOR_SPACING = 2;
+    private static final int DOUBLE_CLICK_COUNT = 2;
+    private static final int REACTION_COUNT_DISPLAY_THRESHOLD = 1;
+    private static final int META_PRESENT_THRESHOLD = 0;
+    private static final int POPUP_VERTICAL_OFFSET = 6;
+    private static final double MESSAGE_TEXT_EMOJI_SIZE = 18;
+    private static final double QUOTE_TEXT_EMOJI_SIZE = 14;
+    private static final double REACTION_BUTTON_EMOJI_SIZE = 14;
+    private static final double REACTION_POPUP_EMOJI_SIZE = 18;
+    private static final double REACTION_CHIP_EMOJI_SIZE = 14;
+    private static final double META_INDICATOR_EMOJI_SIZE = 12;
+    private static final double BOT_AVATAR_EMOJI_SIZE = 20;
     private static final double DEFAULT_BUBBLE_WIDTH_RATIO = 0.75;
     private static final double REACTION_BUBBLE_WIDTH_RATIO = 0.90;
     private static final double SYSTEM_BUBBLE_WIDTH_RATIO = 0.85;
     private static final double SMALL_AVATAR_SIZE = 28;
     private static final double SMALL_AVATAR_RADIUS = SMALL_AVATAR_SIZE / 2.0;
+    private static final String AVATAR_LABEL_STYLE = "-fx-text-fill: white; -fx-padding: 0;";
     private static final String LIGHT_THEME_STYLE_CLASS = "light-theme";
     private static final String REACTION_UNAVAILABLE_TOOLTIP = "Реакция недоступна: у сообщения нет packet id";
     private static final List<List<String>> REACTION_EMOJI_ROWS = List.of(
@@ -234,12 +254,12 @@ public class MessageBubbleFactory {
 
     private HBox createDefaultSystemBubble(MeshMessage msg) {
         StackPane botAvatar = buildBotAvatar();
-        VBox content = new VBox(2);
+        VBox content = new VBox(BASE_VERTICAL_SPACING);
         content.getStyleClass().add("chat-bubble-system");
         content.maxWidthProperty().bind(containerWidthProp.multiply(SYSTEM_BUBBLE_WIDTH_RATIO));
         content.setMinHeight(Region.USE_PREF_SIZE);
         content.getChildren().addAll(nodes(
-                createBubbleTextFlow(msg.getText(), 18, "chat-bubble-text-node", "chat-bubble-text"),
+                createBubbleTextFlow(msg.getText(), MESSAGE_TEXT_EMOJI_SIZE, "chat-bubble-text-node", "chat-bubble-text"),
                 createTimeLabel(msg.getTimestamp())
         ));
 
@@ -269,7 +289,7 @@ public class MessageBubbleFactory {
      */
     private static StackPane buildBotAvatar() {
         StackPane avatar = createAvatarPane();
-        avatar.getChildren().add(createEmojiNode("\uD83E\uDD16", 20));
+        avatar.getChildren().add(createEmojiNode("\uD83E\uDD16", BOT_AVATAR_EMOJI_SIZE));
         return avatar;
     }
 
@@ -287,7 +307,7 @@ public class MessageBubbleFactory {
 
         Label label = new Label(descriptor.text());
         label.setFont(Font.font("Roboto", FontWeight.BOLD, NodeUtils.avatarFontSize(descriptor.text(), (int) SMALL_AVATAR_SIZE)));
-        label.setStyle("-fx-text-fill: white; -fx-padding: 0;");
+        label.setStyle(AVATAR_LABEL_STYLE);
         avatar.getChildren().add(label);
         return avatar;
     }
@@ -341,7 +361,7 @@ public class MessageBubbleFactory {
     private VBox createMessageContent(String styleClass,
                                       boolean hasReactions,
                                       double defaultWidthRatio) {
-        VBox content = new VBox(2);
+        VBox content = new VBox(BASE_VERTICAL_SPACING);
         content.getStyleClass().add(styleClass);
         bindBubbleWidth(content, hasReactions, defaultWidthRatio);
         content.setMinHeight(Region.USE_PREF_SIZE);
@@ -357,7 +377,7 @@ public class MessageBubbleFactory {
      * @return готовый row container
      */
     private static HBox createMessageRow(Pos alignment, String styleClass, Node... children) {
-        HBox row = new HBox(6, children);
+        HBox row = new HBox(MESSAGE_ROW_SPACING, children);
         row.setAlignment(alignment);
         row.setMinHeight(Region.USE_PREF_SIZE);
         row.getStyleClass().add(styleClass);
@@ -394,7 +414,7 @@ public class MessageBubbleFactory {
      * @return HBox footer-контейнер
      */
     private static HBox createFooter(Pos alignment) {
-        HBox footer = new HBox(8);
+        HBox footer = new HBox(FOOTER_SPACING);
         footer.setAlignment(alignment);
         footer.getStyleClass().add("chat-bubble-footer");
         return footer;
@@ -443,7 +463,7 @@ public class MessageBubbleFactory {
      */
     private void attachReplyOnDoubleClick(VBox content, MeshMessage msg) {
         content.setOnMouseClicked(e -> {
-            if (e.getClickCount() != 2) {
+            if (e.getClickCount() != DOUBLE_CLICK_COUNT) {
                 return;
             }
             actions.startReply(msg);
@@ -488,7 +508,7 @@ public class MessageBubbleFactory {
      */
     private boolean isReplyToOutgoingMessage(MeshMessage msg) {
         return Optional.of(msg.getReplyId())
-                .filter(replyId -> replyId != 0)
+                .filter(replyId -> replyId != ZERO_VALUE)
                 .map(replyId -> MessageDbService.getInstance().findByPacketId(replyId))
                 .map(MeshMessage::isOutgoing)
                 .orElse(false);
@@ -526,7 +546,12 @@ public class MessageBubbleFactory {
     private Optional<Node> createQuoteNode(MeshMessage msg) {
         return Optional.ofNullable(msg.getReplyText())
                 .filter(replyText -> !replyText.isEmpty())
-                .map(replyText -> createBubbleTextFlow(replyText, 14, "chat-bubble-quote-node", "chat-bubble-quote"));
+                .map(replyText -> createBubbleTextFlow(
+                        replyText,
+                        QUOTE_TEXT_EMOJI_SIZE,
+                        "chat-bubble-quote-node",
+                        "chat-bubble-quote"
+                ));
     }
 
     /**
@@ -536,7 +561,7 @@ public class MessageBubbleFactory {
      * @param msg сообщение
      */
     private Node createTextNode(MeshMessage msg) {
-        return createBubbleTextFlow(msg.getText(), 18, "chat-bubble-text-node", "chat-bubble-text");
+        return createBubbleTextFlow(msg.getText(), MESSAGE_TEXT_EMOJI_SIZE, "chat-bubble-text-node", "chat-bubble-text");
     }
 
     /**
@@ -589,7 +614,7 @@ public class MessageBubbleFactory {
     private HBox createReactionBar(MeshMessage msg,
                                    List<ChatReactionHelper.ReactionSummary> reactionSummaries) {
         boolean reactionAvailable = isReactionAvailable(msg);
-        HBox reactionBar = new HBox(6);
+        HBox reactionBar = new HBox(REACTION_BAR_SPACING);
         reactionBar.setAlignment(Pos.CENTER_LEFT);
         reactionBar.getStyleClass().add("chat-bubble-reactions");
         reactionBar.getChildren().addAll(reactionSummaries.stream()
@@ -609,13 +634,13 @@ public class MessageBubbleFactory {
     private HBox buildReactionChip(MeshMessage msg,
                                    boolean reactionAvailable,
                                    ChatReactionHelper.ReactionSummary summary) {
-        HBox chip = new HBox(4);
+        HBox chip = new HBox(REACTION_CHIP_SPACING);
         chip.setAlignment(Pos.CENTER);
         chip.getStyleClass().add("chat-reaction-chip");
 
         applyReactionChipState(chip, msg, reactionAvailable, summary);
         chip.getChildren().addAll(nodes(
-                createEmojiNode(summary.emoji(), 14),
+                createEmojiNode(summary.emoji(), REACTION_CHIP_EMOJI_SIZE),
                 createReactionCountLabel(summary.count()).orElse(null)
         ));
         installTooltip(chip, summary.tooltipText());
@@ -624,7 +649,7 @@ public class MessageBubbleFactory {
 
     private Optional<Node> createReactionCountLabel(int count) {
         return Optional.of(count)
-                .filter(value -> value > 1)
+                .filter(value -> value > REACTION_COUNT_DISPLAY_THRESHOLD)
                 .map(String::valueOf)
                 .map(Label::new)
                 .map(label -> {
@@ -714,7 +739,7 @@ public class MessageBubbleFactory {
      * @return HBox для времени, статуса и route metrics
      */
     private static HBox createMetaBox() {
-        HBox meta = new HBox(6);
+        HBox meta = new HBox(MESSAGE_ROW_SPACING);
         meta.setAlignment(Pos.CENTER_RIGHT);
         meta.getStyleClass().add("chat-bubble-meta");
         return meta;
@@ -728,9 +753,9 @@ public class MessageBubbleFactory {
      */
     private Optional<HBox> createRoutingMetaNode(MeshMessage msg) {
         int hops = msg.getHopsTraveled();
-        return hops > 0
+        return hops > META_PRESENT_THRESHOLD
                 ? Optional.of(createMetaIndicator("\uD83D\uDC07", String.valueOf(hops)))
-                : msg.getRxRssi() == 0 && msg.getRxSnr() == 0
+                : msg.getRxRssi() == ZERO_VALUE && msg.getRxSnr() == ZERO_VALUE
                 ? Optional.empty()
                 : Optional.of(createMetaIndicator("\uD83D\uDCF6", formatSignalMetrics(msg)));
     }
@@ -743,10 +768,10 @@ public class MessageBubbleFactory {
      * @return HBox с иконкой и значением
      */
     private static HBox createMetaIndicator(String emoji, String value) {
-        HBox indicator = new HBox(2);
+        HBox indicator = new HBox(META_INDICATOR_SPACING);
         indicator.setAlignment(Pos.CENTER);
         indicator.getStyleClass().add("chat-bubble-hops");
-        indicator.getChildren().addAll(createEmojiNode(emoji, 12), new Label(value));
+        indicator.getChildren().addAll(createEmojiNode(emoji, META_INDICATOR_EMOJI_SIZE), new Label(value));
         return indicator;
     }
 
@@ -800,7 +825,7 @@ public class MessageBubbleFactory {
     private static Button createReactionButton() {
         Button reactionButton = new Button();
         reactionButton.getStyleClass().add("chat-reaction-btn");
-        reactionButton.setGraphic(createEmojiNode("😀", 14));
+        reactionButton.setGraphic(createEmojiNode("😀", REACTION_BUTTON_EMOJI_SIZE));
         reactionButton.setFocusTraversable(false);
         return reactionButton;
     }
@@ -823,7 +848,7 @@ public class MessageBubbleFactory {
      * @return {@code true}, если есть packet id
      */
     private static boolean isReactionAvailable(MeshMessage msg) {
-        return msg.getPacketId() != 0;
+        return msg.getPacketId() != ZERO_VALUE;
     }
 
     /**
@@ -844,7 +869,7 @@ public class MessageBubbleFactory {
      * @return настроенный popup выбора реакции
      */
     private Popup buildReactionPopup(MeshMessage msg) {
-        VBox picker = new VBox(4);
+        VBox picker = new VBox(REACTION_POPUP_SPACING);
         picker.setAlignment(Pos.CENTER_LEFT);
         picker.getStyleClass().add("chat-reaction-picker");
 
@@ -874,7 +899,7 @@ public class MessageBubbleFactory {
      * @return HBox одной строки picker-а
      */
     private HBox buildReactionPopupRow(MeshMessage msg, Popup popup, List<String> emojiRow) {
-        HBox row = new HBox(4);
+        HBox row = new HBox(REACTION_POPUP_SPACING);
         row.setAlignment(Pos.CENTER_LEFT);
         emojiRow.stream()
                 .map(emoji -> buildReactionPopupButton(msg, popup, emoji))
@@ -893,7 +918,7 @@ public class MessageBubbleFactory {
     private Button buildReactionPopupButton(MeshMessage msg, Popup popup, String emoji) {
         Button emojiButton = new Button();
         emojiButton.getStyleClass().add("chat-reaction-picker-btn");
-        emojiButton.setGraphic(createEmojiNode(emoji, 18));
+        emojiButton.setGraphic(createEmojiNode(emoji, REACTION_POPUP_EMOJI_SIZE));
         emojiButton.setFocusTraversable(false);
         emojiButton.setOnAction(e -> {
             popup.hide();
@@ -924,7 +949,7 @@ public class MessageBubbleFactory {
 
     private void showReactionPopup(Button anchor, Popup popup, Bounds bounds) {
         syncReactionPopupTheme(anchor, popup);
-        popup.show(anchor, bounds.getMinX(), bounds.getMaxY() + 6);
+        popup.show(anchor, bounds.getMinX(), bounds.getMaxY() + POPUP_VERTICAL_OFFSET);
         openReactionPopup = popup;
     }
 
@@ -1003,7 +1028,8 @@ public class MessageBubbleFactory {
                     statusLabel.getStyleClass().add("chat-bubble-status");
                     updateStatusLabel(statusLabel, status);
                     Optional.of(msg)
-                            .filter(message -> status == MeshMessage.DeliveryStatus.SENDING && message.getPacketId() != 0)
+                            .filter(message -> status == MeshMessage.DeliveryStatus.SENDING
+                                    && message.getPacketId() != ZERO_VALUE)
                             .ifPresent(message -> pendingStatusLabels.put(message.getPacketId(), statusLabel));
                     return statusLabel;
                 });

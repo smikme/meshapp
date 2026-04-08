@@ -27,6 +27,9 @@ final class ChatNodeDisplayHelper {
     private static final String SELF_AVATAR_TEXT = "Я";
     private static final String UNKNOWN_AVATAR_TEXT = "?";
     private static final int MAX_AVATAR_TEXT_LENGTH = 4;
+    private static final int MIN_NODE_ID_LENGTH = 2;
+    private static final int NODE_ID_PREFIX_LENGTH = 1;
+    private static final int NODE_ID_HEX_RADIX = 16;
     private static final List<String> AVATAR_COLORS = List.of(
             "#5B8DEF", "#E57C23", "#9B59B6", "#1EA97C",
             "#E74C3C", "#3498DB", "#F39C12", "#1ABC9C"
@@ -298,12 +301,15 @@ final class ChatNodeDisplayHelper {
      * @return bare-node после обогащения кэшем или {@code null}, если nodeId некорректен
      */
     private static NodeData createBareNodeCandidate(DeviceState state, String nodeId) {
-        if (nodeId.length() < 2) {
+        if (nodeId.length() < MIN_NODE_ID_LENGTH) {
             return null;
         }
 
         try {
-            int nodeNum = (int) Long.parseUnsignedLong(nodeId.substring(1), 16);
+            int nodeNum = (int) Long.parseUnsignedLong(
+                    nodeId.substring(NODE_ID_PREFIX_LENGTH),
+                    NODE_ID_HEX_RADIX
+            );
             NodeData bareNode = state.getOrCreateNode(nodeNum);
             NodeCacheService.getInstance().enrichFromCache(bareNode);
             return bareNode;
