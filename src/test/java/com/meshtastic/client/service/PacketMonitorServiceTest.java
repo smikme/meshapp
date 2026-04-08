@@ -82,16 +82,16 @@ class PacketMonitorServiceTest {
         PacketLogEntry first = entries.getFirst();
         assertEquals(PacketLogEntry.Direction.OUTGOING, first.getDirection());
         assertEquals("NODEINFO_APP", first.getPacketType());
-        assertEquals("Local Base (!12345678)", first.getFromNode());
-        assertEquals("Peer B (!22222222)", first.getToNode());
+        assertEquals("Local Base (305419896)", first.getFromNode());
+        assertEquals("Peer B (572662306)", first.getToNode());
         assertTrue(first.getPayloadText().contains("Relay"));
         assertArrayEquals(outgoing.toByteArray(), first.getPacketBytes());
 
         PacketLogEntry second = entries.getLast();
         assertEquals(PacketLogEntry.Direction.INCOMING, second.getDirection());
         assertEquals("TEXT_MESSAGE_APP", second.getPacketType());
-        assertEquals("Peer A (!11111111)", second.getFromNode());
-        assertEquals("Вещание (!ffffffff)", second.getToNode());
+        assertEquals("Peer A (286331153)", second.getFromNode());
+        assertEquals("Вещание (4294967295)", second.getToNode());
         assertEquals("\"hello mesh\"", second.getPayloadText());
         assertEquals(1_710_000_000_000L, second.getCapturedAt());
         assertArrayEquals(incoming.toByteArray(), second.getPacketBytes());
