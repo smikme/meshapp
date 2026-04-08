@@ -23,6 +23,7 @@ import javafx.scene.control.Tooltip;
 import javafx.scene.image.ImageView;
 import javafx.scene.input.Clipboard;
 import javafx.scene.input.ClipboardContent;
+import javafx.scene.input.MouseButton;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
@@ -43,12 +44,19 @@ import java.util.Map;
  */
 public class MessageBubbleFactory {
 
+    private static final double DEFAULT_BUBBLE_WIDTH_RATIO = 0.75;
+    private static final double REACTION_BUBBLE_WIDTH_RATIO = 0.90;
+    private static final double SYSTEM_BUBBLE_WIDTH_RATIO = 0.85;
+
     private static final String[] AVATAR_COLORS = {
             "#5B8DEF", "#E57C23", "#9B59B6", "#1EA97C",
             "#E74C3C", "#3498DB", "#F39C12", "#1ABC9C"
     };
-    private static final String[] REACTION_EMOJIS = {
-            "😀", "🙁", "😂", "😉", "🥶", "💩", "👋", "🙏", "👍", "👎", "💪", "💓", "🎉"
+    private static final String[][] REACTION_EMOJI_ROWS = {
+            {"⭐", "✅", "👍", "👋", "💯", "🔥", "🤝", "😁", "😂", "🤣", "😀"},
+            {"👌", "❎", "👎", "🤔", "👀", "👽", "🙏", "💪", "🤡", "😄", "🫡"},
+            {"😆", "💩", "😱", "🐰", "🐇", "🔆", "📡", "❤️", "🚀", "🐭", "🥶"},
+            {"0️⃣", "1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"}
     };
 
     /**
@@ -146,6 +154,7 @@ public class MessageBubbleFactory {
 
     private HBox buildIncomingBubble(MeshMessage msg) {
         StackPane avatar = buildSmallAvatar(msg);
+        HBox reactionBar = buildReactionsBar(msg);
 
         avatar.setCursor(Cursor.HAND);
         avatar.setOnMouseClicked(e -> {
@@ -175,7 +184,7 @@ public class MessageBubbleFactory {
 
         VBox content = new VBox(2);
         content.getStyleClass().add("chat-bubble-incoming");
-        content.maxWidthProperty().bind(containerWidthProp.multiply(0.75));
+        bindBubbleWidth(content, reactionBar != null, DEFAULT_BUBBLE_WIDTH_RATIO);
         content.setMinHeight(Region.USE_PREF_SIZE);
 
         if (state != null && isMentioningMe(msg)) {
@@ -189,7 +198,6 @@ public class MessageBubbleFactory {
 
         addQuoteIfPresent(content, msg);
         addTextLabel(content, msg);
-        addReactionsIfPresent(content, msg);
 
         HBox meta = buildIncomingMeta(msg);
         HBox footer = new HBox(8);
@@ -199,7 +207,11 @@ public class MessageBubbleFactory {
         Button reactionButton = buildReactionButton(msg);
         Region footerSpacer = new Region();
         HBox.setHgrow(footerSpacer, Priority.ALWAYS);
-        footer.getChildren().addAll(reactionButton, footerSpacer, meta);
+        footer.getChildren().add(reactionButton);
+        if (reactionBar != null) {
+            footer.getChildren().add(reactionBar);
+        }
+        footer.getChildren().addAll(footerSpacer, meta);
         content.getChildren().add(footer);
 
         HBox row = new HBox(6, avatar, content);
@@ -221,14 +233,14 @@ public class MessageBubbleFactory {
     // === Исходящее сообщение ===
 
     private HBox buildOutgoingBubble(MeshMessage msg) {
+        HBox reactionBar = buildReactionsBar(msg);
         VBox content = new VBox(2);
         content.getStyleClass().add("chat-bubble-outgoing");
-        content.maxWidthProperty().bind(containerWidthProp.multiply(0.75));
+        bindBubbleWidth(content, reactionBar != null, DEFAULT_BUBBLE_WIDTH_RATIO);
         content.setMinHeight(Region.USE_PREF_SIZE);
 
         addQuoteIfPresent(content, msg);
         addTextLabel(content, msg);
-        addReactionsIfPresent(content, msg);
 
         HBox meta = new HBox(6);
         meta.setAlignment(Pos.CENTER_RIGHT);
@@ -236,7 +248,18 @@ public class MessageBubbleFactory {
 
         addTimeToMeta(meta, msg);
         addStatusToMeta(meta, msg);
-        content.getChildren().add(meta);
+
+        HBox footer = new HBox(8);
+        footer.setAlignment(Pos.CENTER_RIGHT);
+        footer.getStyleClass().add("chat-bubble-footer");
+        Region footerSpacer = new Region();
+        HBox.setHgrow(footerSpacer, Priority.ALWAYS);
+        footer.getChildren().add(footerSpacer);
+        if (reactionBar != null) {
+            footer.getChildren().add(reactionBar);
+        }
+        footer.getChildren().add(meta);
+        content.getChildren().add(footer);
 
         StackPane avatar = buildSmallAvatar(msg);
 
@@ -277,7 +300,7 @@ public class MessageBubbleFactory {
 
         VBox content = new VBox(2);
         content.getStyleClass().add("chat-bubble-system");
-        content.maxWidthProperty().bind(containerWidthProp.multiply(0.85));
+        content.maxWidthProperty().bind(containerWidthProp.multiply(SYSTEM_BUBBLE_WIDTH_RATIO));
         content.setMinHeight(Region.USE_PREF_SIZE);
 
         EmojiTextFlow textFlow = new EmojiTextFlow(msg.getText(), 18);
@@ -434,10 +457,16 @@ public class MessageBubbleFactory {
         content.getChildren().add(textFlow);
     }
 
-    private void addReactionsIfPresent(VBox content, MeshMessage msg) {
+    private void bindBubbleWidth(VBox content, boolean hasReactions, double defaultWidthRatio) {
+        double widthRatio = hasReactions ? REACTION_BUBBLE_WIDTH_RATIO : defaultWidthRatio;
+        content.maxWidthProperty().bind(containerWidthProp.multiply(widthRatio));
+    }
+
+    private HBox buildReactionsBar(MeshMessage msg) {
         if (!msg.hasReactions()) {
-            return;
+            return null;
         }
+        boolean reactionAvailable = msg.getPacketId() != 0;
 
         record ReactionAggregate(String emoji, boolean own, int count) {}
 
@@ -460,7 +489,7 @@ public class MessageBubbleFactory {
         }
 
         if (aggregates.isEmpty()) {
-            return;
+            return null;
         }
 
         HBox reactionBar = new HBox(6);
@@ -473,6 +502,16 @@ public class MessageBubbleFactory {
             chip.getStyleClass().add("chat-reaction-chip");
             if (aggregate.own()) {
                 chip.getStyleClass().add("chat-reaction-chip-own");
+            } else if (reactionAvailable) {
+                chip.getStyleClass().add("chat-reaction-chip-clickable");
+                chip.setCursor(Cursor.HAND);
+                chip.setOnMouseClicked(e -> {
+                    if (e.getButton() != MouseButton.PRIMARY) {
+                        return;
+                    }
+                    actions.sendReaction(msg, aggregate.emoji());
+                    e.consume();
+                });
             }
 
             chip.getChildren().add(createEmojiNode(aggregate.emoji(), 14));
@@ -484,7 +523,7 @@ public class MessageBubbleFactory {
             reactionBar.getChildren().add(chip);
         }
 
-        content.getChildren().add(reactionBar);
+        return reactionBar;
     }
 
     private HBox buildIncomingMeta(MeshMessage msg) {
@@ -551,7 +590,7 @@ public class MessageBubbleFactory {
     }
 
     private Popup buildReactionPopup(MeshMessage msg) {
-        HBox picker = new HBox(4);
+        VBox picker = new VBox(4);
         picker.setAlignment(Pos.CENTER_LEFT);
         picker.getStyleClass().add("chat-reaction-picker");
 
@@ -569,17 +608,22 @@ public class MessageBubbleFactory {
             }
         });
 
-        for (String emoji : REACTION_EMOJIS) {
-            Button emojiButton = new Button();
-            emojiButton.getStyleClass().add("chat-reaction-picker-btn");
-            emojiButton.setGraphic(createEmojiNode(emoji, 18));
-            emojiButton.setFocusTraversable(false);
-            emojiButton.setOnAction(e -> {
-                popup.hide();
-                actions.sendReaction(msg, emoji);
-                e.consume();
-            });
-            picker.getChildren().add(emojiButton);
+        for (String[] emojiRow : REACTION_EMOJI_ROWS) {
+            HBox row = new HBox(4);
+            row.setAlignment(Pos.CENTER_LEFT);
+            for (String emoji : emojiRow) {
+                Button emojiButton = new Button();
+                emojiButton.getStyleClass().add("chat-reaction-picker-btn");
+                emojiButton.setGraphic(createEmojiNode(emoji, 18));
+                emojiButton.setFocusTraversable(false);
+                emojiButton.setOnAction(e -> {
+                    popup.hide();
+                    actions.sendReaction(msg, emoji);
+                    e.consume();
+                });
+                row.getChildren().add(emojiButton);
+            }
+            picker.getChildren().add(row);
         }
 
         return popup;

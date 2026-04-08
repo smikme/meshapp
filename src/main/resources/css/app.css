@@ -1137,21 +1137,25 @@
 }
 
 .chat-bubble-meta {
-    -fx-padding: 2 0 0 0;
+    -fx-padding: 0;
 }
 
 .chat-bubble-footer {
-    -fx-padding: 2 0 0 0;
+    -fx-padding: 4 0 0 0;
 }
 
 .chat-bubble-reactions {
-    -fx-padding: 4 0 0 0;
+    -fx-padding: 0;
 }
 
 .chat-reaction-chip {
     -fx-background-color: rgba(255, 255, 255, 0.08);
     -fx-background-radius: 10;
     -fx-padding: 2 8;
+}
+
+.chat-reaction-chip-clickable:hover {
+    -fx-background-color: rgba(255, 255, 255, 0.14);
 }
 
 .chat-reaction-chip-own {
@@ -1217,6 +1221,10 @@
 
 .light-theme .chat-reaction-chip {
     -fx-background-color: rgba(0, 0, 0, 0.06);
+}
+
+.light-theme .chat-reaction-chip-clickable:hover {
+    -fx-background-color: rgba(0, 0, 0, 0.10);
 }
 
 .light-theme .chat-reaction-chip-own {
