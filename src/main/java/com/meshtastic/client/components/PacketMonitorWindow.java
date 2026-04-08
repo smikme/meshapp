@@ -10,6 +10,9 @@ import com.meshtastic.client.utils.AppPreferences;
 import com.meshtastic.client.utils.PacketDebugFormatter;
 import com.meshtastic.client.utils.SvgIconLoader;
 import javafx.application.Platform;
+import javafx.beans.binding.Bindings;
+import javafx.beans.property.BooleanProperty;
+import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.value.ChangeListener;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
@@ -54,6 +57,8 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -104,6 +109,7 @@ public final class PacketMonitorWindow {
     private final PacketMonitorService packetMonitorService;
     private final ObservableList<PacketLogEntry> packetItems = FXCollections.observableArrayList();
     private final ObservableList<String> packetTypeFilters = FXCollections.observableArrayList(FILTER_ALL_TYPES);
+    private final BooleanProperty suppressPacketTableTooltips = new SimpleBooleanProperty(false);
     private final ChangeListener<Number> packetTableScrollListener =
             (obs, oldValue, newValue) -> handlePacketTableScroll(
                     oldValue != null ? oldValue.doubleValue() : 0.0,
@@ -136,6 +142,8 @@ public final class PacketMonitorWindow {
     private TreeView<PacketTreeNode> packetTree;
     private ComboBox<String> directionFilter;
     private ComboBox<String> typeFilter;
+    private DateTimePicker fromDateTimeFilter;
+    private DateTimePicker toDateTimeFilter;
     private TextField searchField;
     private Button btnStart;
     private Button btnStop;
@@ -145,7 +153,6 @@ public final class PacketMonitorWindow {
     private Button btnSaveText;
     private Button btnSaveJson;
     private Label statusLabel;
-    private Label countLabel;
     private PacketLogEntry viewedPacketEntry;
     private long viewedPacketId = -1L;
     private boolean restoringSelection;
@@ -304,6 +311,11 @@ public final class PacketMonitorWindow {
             onFilterChanged();
         });
 
+        fromDateTimeFilter = createDateTimePicker("дд.мм.гггг");
+        toDateTimeFilter = createDateTimePicker("дд.мм.гггг");
+        fromDateTimeFilter.popupShowingProperty().addListener((obs, oldValue, newValue) -> updatePacketTableTooltipSuppression());
+        toDateTimeFilter.popupShowingProperty().addListener((obs, oldValue, newValue) -> updatePacketTableTooltipSuppression());
+
         searchField = new TextField();
         searchField.setPromptText("Поиск по типу, узлам и payload");
         searchField.getStyleClass().add("packet-monitor-search-field");
@@ -319,9 +331,6 @@ public final class PacketMonitorWindow {
         HBox.setHgrow(searchField, Priority.ALWAYS);
         searchBox.getChildren().add(searchField);
 
-        countLabel = new Label();
-        countLabel.getStyleClass().add("config-status-label");
-
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
 
@@ -330,9 +339,12 @@ public final class PacketMonitorWindow {
                 directionFilter,
                 createFilterLabel("Тип"),
                 typeFilter,
+                createFilterLabel("С"),
+                fromDateTimeFilter,
+                createFilterLabel("По"),
+                toDateTimeFilter,
                 spacer,
-                searchBox,
-                countLabel
+                searchBox
         );
         HBox.setHgrow(searchBox, Priority.ALWAYS);
         return filterBar;
@@ -500,12 +512,16 @@ public final class PacketMonitorWindow {
 
         table.getColumns().addAll(colTime, colType, colFrom, colTo, colPayload);
         table.setRowFactory(tv -> new TableRow<>() {
+            private final Tooltip rowTooltip = new Tooltip();
+
             @Override
             protected void updateItem(PacketLogEntry item, boolean empty) {
                 super.updateItem(item, empty);
                 setStyle("");
+                tooltipProperty().unbind();
                 setTooltip(null);
                 if (empty || item == null) {
+                    rowTooltip.hide();
                     return;
                 }
                 if (item.getDirection() == PacketLogEntry.Direction.INCOMING) {
@@ -513,7 +529,14 @@ public final class PacketMonitorWindow {
                 } else {
                     setStyle("-fx-text-fill: -color-success-emphasis;");
                 }
-                setTooltip(new Tooltip(item.getDirectionText() + ": " + item.getPayloadText()));
+                tooltipProperty().bind(Bindings.createObjectBinding(() -> {
+                    if (suppressPacketTableTooltips.get()) {
+                        rowTooltip.hide();
+                        return null;
+                    }
+                    rowTooltip.setText(item.getDirectionText() + ": " + item.getPayloadText());
+                    return rowTooltip;
+                }, itemProperty(), suppressPacketTableTooltips));
             }
         });
         table.getSelectionModel().selectedItemProperty()
@@ -577,6 +600,21 @@ public final class PacketMonitorWindow {
         Label label = new Label(text);
         label.getStyleClass().add("packet-monitor-filter-label");
         return label;
+    }
+
+    /**
+     * Создаёт фильтр даты/времени на базе DatePicker с кастомным popup-календарём.
+     * В нижней части popup доступны выбор времени через слайдеры часов и минут.
+     */
+    private DateTimePicker createDateTimePicker(String promptText) {
+        return new DateTimePicker(promptText, this::onFilterChanged);
+    }
+
+    private void updatePacketTableTooltipSuppression() {
+        suppressPacketTableTooltips.set(
+                (fromDateTimeFilter != null && fromDateTimeFilter.isPopupShowing())
+                        || (toDateTimeFilter != null && toDateTimeFilter.isPopupShowing())
+        );
     }
 
     private Button createToolbarButton(String title, String tooltipText, String iconPath, Runnable action) {
@@ -656,7 +694,6 @@ public final class PacketMonitorWindow {
                     );
             if (page.entries().isEmpty()) {
                 currentPageHasOlder = false;
-                updateCountLabel();
                 return;
             }
             appendOlderChunk(page, anchorIndex);
@@ -687,7 +724,6 @@ public final class PacketMonitorWindow {
             if (page.entries().isEmpty()) {
                 currentPageHasNewer = false;
                 latestFrameDirty = false;
-                updateCountLabel();
                 return;
             }
             prependNewerChunk(page, anchorIndex);
@@ -811,13 +847,6 @@ public final class PacketMonitorWindow {
         btnStop.setDisable(!captureEnabled);
         btnClear.setDisable(totalStoredPacketCount == 0);
         statusLabel.setText(captureEnabled ? "Сбор активен" : "Сбор остановлен");
-        updateCountLabel();
-    }
-
-    private void updateCountLabel() {
-        countLabel.setText("Показано " + packetItems.size()
-                + " из " + matchingPacketCount
-                + " · в памяти " + packetItems.size() + "/" + PAGE_SIZE);
     }
 
     /**
@@ -1040,12 +1069,26 @@ public final class PacketMonitorWindow {
         String selectedType = getActiveTypeFilterSelection();
         String packetType = FILTER_ALL_TYPES.equals(selectedType) ? null : selectedType;
         String searchText = searchField != null ? searchField.getText() : null;
-        return new PacketMonitorService.PacketQuery(direction, packetType, searchText);
+        Long capturedAtFromMillis = resolveCapturedAtBoundary(fromDateTimeFilter, true);
+        Long capturedAtToMillis = resolveCapturedAtBoundary(toDateTimeFilter, false);
+        return new PacketMonitorService.PacketQuery(
+                direction,
+                packetType,
+                searchText,
+                capturedAtFromMillis,
+                capturedAtToMillis
+        );
     }
 
     private PacketMonitorService.PacketQuery buildTypeOptionsQuery() {
         PacketMonitorService.PacketQuery query = buildCurrentQuery();
-        return new PacketMonitorService.PacketQuery(query.direction(), null, query.searchText());
+        return new PacketMonitorService.PacketQuery(
+                query.direction(),
+                null,
+                query.searchText(),
+                query.capturedAtFromMillis(),
+                query.capturedAtToMillis()
+        );
     }
 
     /**
@@ -1069,6 +1112,15 @@ public final class PacketMonitorWindow {
         String selectedType = getActiveTypeFilterSelection();
         if (selectedType != null && !FILTER_ALL_TYPES.equals(selectedType)
                 && !selectedType.equals(entry.getPacketType())) {
+            return false;
+        }
+
+        Long capturedAtFromMillis = resolveCapturedAtBoundary(fromDateTimeFilter, true);
+        if (capturedAtFromMillis != null && entry.getCapturedAt() < capturedAtFromMillis) {
+            return false;
+        }
+        Long capturedAtToMillis = resolveCapturedAtBoundary(toDateTimeFilter, false);
+        if (capturedAtToMillis != null && entry.getCapturedAt() > capturedAtToMillis) {
             return false;
         }
 
@@ -1559,6 +1611,24 @@ public final class PacketMonitorWindow {
         if (contentSplit != null && !contentSplit.getDividers().isEmpty()) {
             AppPreferences.setPacketMonitorDividerPos(contentSplit.getDividers().getFirst().getPosition());
         }
+    }
+
+    private static Long resolveCapturedAtBoundary(DateTimePicker dateTimePicker, boolean lowerBound) {
+        if (dateTimePicker == null || dateTimePicker.getDate() == null) {
+            return null;
+        }
+
+        LocalTime selectedTime = dateTimePicker.getTime();
+        LocalTime effectiveTime;
+        if (selectedTime == null) {
+            effectiveTime = lowerBound ? LocalTime.MIN : LocalTime.MAX;
+        } else if (lowerBound) {
+            effectiveTime = selectedTime.withSecond(0).withNano(0);
+        } else {
+            effectiveTime = selectedTime.withSecond(59).withNano(999_999_999);
+        }
+        LocalDateTime capturedAt = LocalDateTime.of(dateTimePicker.getDate(), effectiveTime);
+        return capturedAt.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
     }
 
     private static boolean containsIgnoreCase(String value, String query) {

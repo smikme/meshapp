@@ -54,11 +54,17 @@ public final class PacketMonitorService {
      * Контракт: пустые строки нормализуются к {@code null}, чтобы SQL-слой не
      * различал "пустой фильтр" и "фильтр не задан".
      *
-     * @param direction  направление пакета или {@code null} для обоих направлений
-     * @param packetType точный тип пакета или {@code null} для всех типов
-     * @param searchText поисковая строка по UI-полям таблицы или {@code null}
+     * @param direction            направление пакета или {@code null} для обоих направлений
+     * @param packetType           точный тип пакета или {@code null} для всех типов
+     * @param searchText           поисковая строка по UI-полям таблицы или {@code null}
+     * @param capturedAtFromMillis нижняя граница времени захвата в epoch millis включительно или {@code null}
+     * @param capturedAtToMillis   верхняя граница времени захвата в epoch millis включительно или {@code null}
      */
-    public record PacketQuery(PacketLogEntry.Direction direction, String packetType, String searchText) {
+    public record PacketQuery(PacketLogEntry.Direction direction,
+                              String packetType,
+                              String searchText,
+                              Long capturedAtFromMillis,
+                              Long capturedAtToMillis) {
 
         public PacketQuery {
             packetType = normalizeNullableText(packetType);
@@ -400,8 +406,13 @@ public final class PacketMonitorService {
         }
 
         PacketQuery typeQuery = query != null
-                ? new PacketQuery(query.direction(), null, query.searchText())
-                : new PacketQuery(null, null, null);
+                ? new PacketQuery(
+                        query.direction(),
+                        null,
+                        query.searchText(),
+                        query.capturedAtFromMillis(),
+                        query.capturedAtToMillis())
+                : new PacketQuery(null, null, null, null, null);
 
         SqlQuery sqlQuery = buildFilteredQuery("""
                 SELECT DISTINCT packet_type
@@ -718,6 +729,14 @@ public final class PacketMonitorService {
             for (int i = 0; i < 5; i++) {
                 params.add(query.searchPattern());
             }
+        }
+        if (query != null && query.capturedAtFromMillis() != null) {
+            sql.append("\nAND captured_at >= ?");
+            params.add(query.capturedAtFromMillis());
+        }
+        if (query != null && query.capturedAtToMillis() != null) {
+            sql.append("\nAND captured_at <= ?");
+            params.add(query.capturedAtToMillis());
         }
 
         if (cursor != null && requestKind == PageRequestKind.OLDER) {

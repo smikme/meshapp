@@ -239,6 +239,73 @@
     -fx-font-size: 12px;
 }
 
+.packet-monitor-date-time-box {
+    -fx-alignment: center-left;
+    -fx-spacing: 4;
+}
+
+.packet-monitor-date-time-summary {
+    -fx-min-width: 56px;
+    -fx-text-fill: -color-fg-muted;
+}
+
+.packet-monitor-date-time-box-empty .packet-monitor-date-time-summary {
+    -fx-opacity: 0.78;
+}
+
+.packet-monitor-date-time-clear {
+    -fx-min-width: 30px;
+    -fx-pref-width: 30px;
+    -fx-max-width: 30px;
+    -fx-padding: 7 0 7 0;
+}
+
+.packet-monitor-date-time-popup {
+    -fx-background-color: -color-bg-default;
+    -fx-background-radius: 12;
+    -fx-border-color: -color-border-default;
+    -fx-border-radius: 12;
+    -fx-padding: 0;
+}
+
+.packet-monitor-date-time-popup-bottom {
+    -fx-padding: 12;
+    -fx-spacing: 10;
+}
+
+.packet-monitor-date-time-popup-all-day {
+    -fx-text-fill: -color-fg-default;
+}
+
+.packet-monitor-date-time-popup-row {
+    -fx-alignment: center-left;
+    -fx-spacing: 10;
+}
+
+.packet-monitor-date-time-popup-label {
+    -fx-min-width: 58px;
+    -fx-text-fill: -color-fg-muted;
+}
+
+.packet-monitor-date-time-popup-value {
+    -fx-min-width: 28px;
+    -fx-font-weight: bold;
+    -fx-alignment: center-right;
+}
+
+.packet-monitor-date-time-slider {
+    -fx-pref-width: 220px;
+}
+
+.packet-monitor-date-time-popup-actions {
+    -fx-alignment: center-left;
+    -fx-spacing: 8;
+}
+
+.packet-monitor-date-time-popup-action {
+    -fx-padding: 5 12 5 12;
+}
+
 .packet-monitor-search-box {
     -fx-alignment: center-left;
     -fx-padding: 0 10 0 10;
