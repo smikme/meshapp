@@ -122,7 +122,11 @@ public class FormSetting extends Form {
 
     private DeviceState state;
     private ProtocolHandler handler;
-    private final Runnable connectionListener = () -> Platform.runLater(this::reloadConfigTree);
+    private volatile String pendingTimeOnlySyncConnectionId;
+    private final Runnable connectionListener = () -> Platform.runLater(() -> {
+        reloadConfigTree();
+        maybeResumeDeferredTimeOnlySync();
+    });
 
     // Cache tab
     private TableView<NodeData> cacheTable;
@@ -909,7 +913,8 @@ public class FormSetting extends Form {
                     .append("GMT ноды не совпадает с GMT ПК.")
                     .append(" Нода: ").append(nodeGmtLabel).append(".")
                     .append(" ПК: ").append(systemGmtLabel).append(".")
-                    .append(" Для обновления GMT будет изменён параметр device.tzdef, после чего устройство перезагрузится.");
+                    .append(" Для обновления GMT будет изменён параметр device.tzdef, после чего устройство перезагрузится.")
+                    .append(" После переподключения время будет синхронизировано повторно, чтобы reboot не сбросил его.");
             if (hasPendingEditorChanges()) {
                 message.append(" Несохранённые изменения в редакторе будут потеряны.");
             }
@@ -985,11 +990,6 @@ public class FormSetting extends Form {
 
         Thread syncThread = new Thread(() -> {
             try {
-                long epochSeconds = Instant.now().getEpochSecond();
-                waitForRequiredConfigSaveAck(
-                        MessageService.setTimeOnly(actionHandler, actionState, epochSeconds),
-                        "setTimeOnly");
-
                 if (!gmtMatches) {
                     ConfigProtos.Config deviceTzConfig = buildDeviceTimeZoneConfig(deviceConfig, targetTzDef);
 
@@ -1012,8 +1012,12 @@ public class FormSetting extends Form {
                         waitForRequiredConfigSaveAck(commitAck, "commitEditSettings");
                     }
 
+                    if (activeEntry != null) {
+                        pendingTimeOnlySyncConnectionId = activeEntry.getId();
+                    }
+                    log.info("Time sync: GMT update requires reboot, deferring set_time_only until reconnect");
                     Platform.runLater(() -> configStatusLabel.setText(
-                            "Время и GMT синхронизированы с ПК. Устройство перезагрузится. Переподключение..."));
+                            "GMT обновлён. Устройство перезагрузится, после переподключения время будет синхронизировано повторно..."));
 
                     Thread.sleep(getDevicePowerActionHandoffDelayMs(transport));
                     if (activeEntry != null) {
@@ -1026,11 +1030,17 @@ public class FormSetting extends Form {
                     } else {
                         Platform.runLater(() -> {
                             setSyncDateTimeButtonDisabled(false);
-                            configStatusLabel.setText("Время и GMT синхронизированы с ПК (" + systemGmtLabel + ").");
+                            configStatusLabel.setText("GMT синхронизирован с ПК (" + systemGmtLabel
+                                    + "). Синхронизируйте время после переподключения.");
                         });
                     }
                     return;
                 }
+
+                long epochSeconds = Instant.now().getEpochSecond();
+                waitForRequiredConfigSaveAck(
+                        MessageService.setTimeOnly(actionHandler, actionState, epochSeconds),
+                        "setTimeOnly");
 
                 Platform.runLater(() -> {
                     setSyncDateTimeButtonDisabled(false);
@@ -1043,6 +1053,9 @@ public class FormSetting extends Form {
                 Platform.runLater(() -> setSyncDateTimeButtonDisabled(false));
             } catch (Exception e) {
                 log.error("Time sync failed", e);
+                if (activeEntry != null && activeEntry.getId().equals(pendingTimeOnlySyncConnectionId)) {
+                    pendingTimeOnlySyncConnectionId = null;
+                }
                 Platform.runLater(() -> {
                     setSyncDateTimeButtonDisabled(false);
                     configStatusLabel.setText("Ошибка синхронизации: "
@@ -1074,6 +1087,34 @@ public class FormSetting extends Form {
         return ConfigProtos.Config.newBuilder(baseConfig)
                 .setDevice(deviceBuilder.build())
                 .build();
+    }
+
+    private void maybeResumeDeferredTimeOnlySync() {
+        String pendingConnectionId = pendingTimeOnlySyncConnectionId;
+        if (pendingConnectionId == null || pendingConnectionId.isBlank()) {
+            return;
+        }
+
+        ConnectionEntry activeEntry = findActiveConnectionEntry();
+        if (activeEntry == null || !pendingConnectionId.equals(activeEntry.getId())) {
+            return;
+        }
+        if (isConfigExchangeInProgress(activeEntry)) {
+            watchConfigExchangeCompletion(activeEntry);
+            return;
+        }
+
+        refreshConnection();
+        if (state == null || handler == null) {
+            return;
+        }
+
+        pendingTimeOnlySyncConnectionId = null;
+        Instant now = Instant.now();
+        String systemGmtLabel = TimeZoneSyncUtil.formatGmtOffset(TimeZoneSyncUtil.systemOffset(now));
+        log.info("Time sync: reconnect complete, repeating set_time_only for '{}'", activeEntry.getName());
+        configStatusLabel.setText("Устройство переподключено. Повторная синхронизация времени...");
+        requestDateTimeSync(activeEntry, state, handler, null, true, null, systemGmtLabel);
     }
 
     private void onRestartHardware() {
