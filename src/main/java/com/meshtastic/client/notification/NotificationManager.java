@@ -95,11 +95,14 @@ public class NotificationManager {
 
         String title = buildTitle(msg, chatType);
         String body = truncate(msg.getText());
+        int bodyLength = body.length();
+        int packetId = msg.getPacketId();
 
         Platform.runLater(() -> {
             try {
                 service.showNotification(title, body);
-                log.debug("OS notification: title='{}' body='{}'", title, body);
+                log.debug("OS notification shown for packet {} (chatType={}, bodyChars={})",
+                        packetId, chatType, bodyLength);
             } catch (Throwable t) {
                 log.error("Failed to show notification", t);
             }

@@ -1,15 +1,19 @@
 package com.meshtastic.client.service;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
 import com.google.protobuf.ByteString;
 import com.meshtastic.client.TestEnvironmentSupport;
 import com.meshtastic.client.connection.ConnectionException;
 import com.meshtastic.client.connection.ConnectionListener;
 import com.meshtastic.client.connection.MeshtasticConnection;
+import com.meshtastic.client.logging.UiLogAppender;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.MessageReaction;
 import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.protocol.ProtocolHandler;
+import com.meshtastic.client.utils.AppPreferences;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -28,6 +32,8 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
+
+import org.slf4j.LoggerFactory;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -103,6 +109,46 @@ class MessageListenerServiceTest {
         assertNotNull(persisted);
         assertEquals("hello channel", persisted.getText());
         assertEquals(MeshMessage.DeliveryStatus.DELIVERED, persisted.getStatus());
+    }
+
+    @Test
+    void onMeshPacketDoesNotLogIncomingMessageText() {
+        boolean notificationsEnabled = AppPreferences.isNotificationsEnabled();
+        AppPreferences.setNotificationsEnabled(false);
+        UiLogAppender.clearBuffer();
+        UiLogAppender appender = new UiLogAppender();
+        appender.start();
+
+        Logger logger = (Logger) LoggerFactory.getLogger(MessageListenerService.class);
+        Level previousLevel = logger.getLevel();
+        logger.addAppender(appender);
+        logger.setLevel(Level.INFO);
+        try {
+            MeshProtos.MeshPacket packet = MeshProtos.MeshPacket.newBuilder()
+                    .setFrom(0x11111111)
+                    .setTo(0xFFFFFFFF)
+                    .setChannel(2)
+                    .setId(7999)
+                    .setDecoded(MeshProtos.Data.newBuilder()
+                            .setPortnum(Portnums.PortNum.TEXT_MESSAGE_APP)
+                            .setPayload(ByteString.copyFrom("private text", StandardCharsets.UTF_8))
+                            .build())
+                    .build();
+
+            service.onMeshPacket(packet);
+
+            List<String> loggedMessages = UiLogAppender.getBuffer().stream()
+                    .map(entry -> entry.getFullMessage())
+                    .toList();
+            assertTrue(loggedMessages.stream().anyMatch(message ->
+                    message.contains("Received channel 2 message from !11111111")));
+            assertTrue(loggedMessages.stream().noneMatch(message -> message.contains("private text")));
+        } finally {
+            logger.detachAppender(appender);
+            logger.setLevel(previousLevel);
+            UiLogAppender.clearBuffer();
+            AppPreferences.setNotificationsEnabled(notificationsEnabled);
+        }
     }
 
     @Test
