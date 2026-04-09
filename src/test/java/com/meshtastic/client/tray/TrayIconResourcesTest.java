@@ -4,8 +4,12 @@ import org.junit.jupiter.api.Test;
 
 import java.awt.image.BufferedImage;
 import java.io.IOException;
+import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class TrayIconResourcesTest {
 
@@ -36,5 +40,20 @@ class TrayIconResourcesTest {
         assertEquals(16, image.getHeight());
         assertEquals(BufferedImage.TYPE_INT_ARGB, image.getType());
         assertEquals(0, (image.getRGB(0, 0) >>> 24));
+    }
+
+    @Test
+    void extractMacOsTrayIconCopiesBundledPng() throws IOException {
+        Path extracted = TrayIconResources.extractMacOsTrayIcon();
+
+        assertTrue(Files.exists(extracted));
+        assertTrue(Files.size(extracted) > 0);
+
+        try (InputStream input = Files.newInputStream(extracted)) {
+            assertEquals(0x89, input.read());
+            assertEquals('P', input.read());
+            assertEquals('N', input.read());
+            assertEquals('G', input.read());
+        }
     }
 }

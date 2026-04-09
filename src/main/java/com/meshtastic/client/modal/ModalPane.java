@@ -27,9 +27,7 @@ import javafx.util.Duration;
 import com.meshtastic.client.MeshApp;
 import com.meshtastic.client.components.EmojiTextFlow;
 import com.meshtastic.client.model.UpdateInfo;
-
-import java.awt.Desktop;
-import java.net.URI;
+import com.meshtastic.client.utils.ExternalUrlLauncher;
 import java.util.function.Consumer;
 
 /**
@@ -256,13 +254,7 @@ public class ModalPane extends StackPane {
             pane.hide();
             String url = info.getDownloadUrl();
             if (url != null) {
-                Thread.ofVirtual().start(() -> {
-                    try {
-                        if (Desktop.isDesktopSupported()) {
-                            Desktop.getDesktop().browse(new URI(url));
-                        }
-                    } catch (Exception ignored) {}
-                });
+                ExternalUrlLauncher.open(url);
             }
         });
 

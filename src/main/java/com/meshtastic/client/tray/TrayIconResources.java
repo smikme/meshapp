@@ -14,6 +14,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.Objects;
 
 /**
@@ -53,9 +54,15 @@ final class TrayIconResources {
 
     static Path extractMacOsTrayIcon() {
         try {
-            BufferedImage image = loadScaledImage(MACOS_STATUS_ICON_SIZE, MACOS_STATUS_ICON_SIZE, TrayAsset.APP);
+            int sourceSize = chooseSourceIconSize(MACOS_STATUS_ICON_SIZE, TrayAsset.APP);
+            String resourcePath = TrayAsset.APP.resourcePath(sourceSize);
             Path extracted = Files.createTempFile("meshapp-tray-icon-", ".png");
-            ImageIO.write(image, "png", extracted.toFile());
+            try (InputStream input = TrayIconResources.class.getResourceAsStream(resourcePath)) {
+                Files.copy(Objects.requireNonNull(
+                        input, "Tray icon resource " + resourcePath + " is missing"),
+                        extracted,
+                        StandardCopyOption.REPLACE_EXISTING);
+            }
             extracted.toFile().deleteOnExit();
             return extracted;
         } catch (IOException e) {

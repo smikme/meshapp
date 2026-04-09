@@ -1,6 +1,7 @@
 package com.meshtastic.client.modal;
 
 import com.meshtastic.client.MeshApp;
+import com.meshtastic.client.utils.ExternalUrlLauncher;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Group;
@@ -18,9 +19,6 @@ import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
 
 import com.meshtastic.client.components.MemoryBar;
-
-import java.awt.Desktop;
-import java.net.URI;
 
 public class About extends VBox {
 
@@ -180,13 +178,6 @@ public class About extends VBox {
     }
 
     private static void openUrl(String url) {
-        Thread.ofVirtual().start(() -> {
-            try {
-                if (Desktop.isDesktopSupported()) {
-                    Desktop.getDesktop().browse(new URI(url));
-                }
-            } catch (Exception ignored) {
-            }
-        });
+        ExternalUrlLauncher.open(url);
     }
 }
