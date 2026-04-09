@@ -2,9 +2,11 @@ package com.meshtastic.client.components;
 
 import com.meshtastic.client.MeshApp;
 import com.meshtastic.client.modal.Toast;
+import com.meshtastic.client.model.ConnectionEntry;
+import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.PacketLogEntry;
 import com.meshtastic.client.model.PacketTreeNode;
-import com.meshtastic.client.platform.OsDetect;
+import com.meshtastic.client.service.ConnectionManager;
 import com.meshtastic.client.service.PacketMonitorService;
 import com.meshtastic.client.themes.ThemeManager;
 import com.meshtastic.client.utils.AppPreferences;
@@ -12,6 +14,7 @@ import com.meshtastic.client.utils.PacketDebugFormatter;
 import com.meshtastic.client.utils.SvgIconLoader;
 import javafx.application.Platform;
 import javafx.beans.binding.Bindings;
+import javafx.beans.property.ReadOnlyStringWrapper;
 import javafx.beans.property.BooleanProperty;
 import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.value.ChangeListener;
@@ -103,7 +106,9 @@ public final class PacketMonitorWindow {
     private static final double PACKET_TABLE_TIME_COLUMN_WIDTH = 190;
     private static final double PACKET_TABLE_TYPE_COLUMN_WIDTH = 130;
     private static final double PACKET_TABLE_NODE_COLUMN_WIDTH = 150;
+    private static final double PACKET_TABLE_COMPACT_COLUMN_MIN_WIDTH = 72;
     private static final double PACKET_TABLE_PAYLOAD_MIN_WIDTH = 260;
+    private static final double PACKET_TABLE_PAYLOAD_RUNTIME_MIN_WIDTH = 140;
     private static final DateTimeFormatter PACKET_EXPORT_FILE_TIME =
             DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss");
 
@@ -159,6 +164,7 @@ public final class PacketMonitorWindow {
     private PacketLogEntry viewedPacketEntry;
     private long viewedPacketId = -1L;
     private boolean restoringSelection;
+    private boolean restoringPacketTableColumnWidths;
     private boolean suppressFilterReload;
     private boolean pageLoadInProgress;
     private boolean ignoreTableScrollEvents;
@@ -220,9 +226,9 @@ public final class PacketMonitorWindow {
     /**
      * Создаёт сцену и stage окна мониторинга.
      * Контракт:
-     * - окно использует compact utility frame;
+     * - окно использует стандартную системную рамку;
      * - геометрия восстанавливается до {@code show()};
-     * - геометрия сохраняется на hiding, чтобы одинаково работать при нативном и программном закрытии.
+     * - геометрия сохраняется на hiding при любом способе закрытия окна.
      */
     private void createStage() {
         VBox root = new VBox(10);
@@ -235,11 +241,9 @@ public final class PacketMonitorWindow {
         ThemeManager.applyTheme(scene, AppPreferences.isDarkMode());
 
         stage = new Stage();
-        stage.initStyle(StageStyle.UTILITY);
+        stage.initStyle(StageStyle.DECORATED);
         stage.setTitle("Мониторинг LoRa-пакетов");
-        if (MeshApp.getPrimaryStage() != null && !OsDetect.isMacOs()) {
-            stage.initOwner(MeshApp.getPrimaryStage());
-        }
+        stage.setResizable(true);
         if (MeshApp.getPrimaryStage() != null && !MeshApp.getPrimaryStage().getIcons().isEmpty()) {
             stage.getIcons().setAll(MeshApp.getPrimaryStage().getIcons());
         }
@@ -486,6 +490,8 @@ public final class PacketMonitorWindow {
      * Создаёт таблицу логов пакетов.
      * Selection listener перестраивает детали только если выбран другой пакет,
      * а не если JavaFX переиздал событие на ту же запись.
+     * Стартовые ширины колонок задаются явно, но после открытия окна пользователь
+     * может свободно менять их вручную.
      */
     private TableView<PacketLogEntry> createPacketTable() {
         TableView<PacketLogEntry> table = new TableView<>(packetItems);
@@ -501,18 +507,29 @@ public final class PacketMonitorWindow {
         configureCompactColumn(colType, PACKET_TABLE_TYPE_COLUMN_WIDTH);
 
         TableColumn<PacketLogEntry, String> colFrom = new TableColumn<>("От");
-        colFrom.setCellValueFactory(new PropertyValueFactory<>("fromNode"));
+        colFrom.setCellValueFactory(cellData -> new ReadOnlyStringWrapper(
+                formatPacketFromNode(cellData.getValue())));
         configureCompactColumn(colFrom, PACKET_TABLE_NODE_COLUMN_WIDTH);
 
         TableColumn<PacketLogEntry, String> colTo = new TableColumn<>("Кому");
-        colTo.setCellValueFactory(new PropertyValueFactory<>("toNode"));
+        colTo.setCellValueFactory(cellData -> new ReadOnlyStringWrapper(
+                formatPacketToNode(cellData.getValue())));
         configureCompactColumn(colTo, PACKET_TABLE_NODE_COLUMN_WIDTH);
 
         TableColumn<PacketLogEntry, String> colPayload = new TableColumn<>("Payload");
         colPayload.setCellValueFactory(new PropertyValueFactory<>("payloadText"));
-        colPayload.setMinWidth(PACKET_TABLE_PAYLOAD_MIN_WIDTH);
+        colPayload.setMinWidth(PACKET_TABLE_PAYLOAD_RUNTIME_MIN_WIDTH);
         colPayload.setPrefWidth(PACKET_TABLE_PAYLOAD_MIN_WIDTH);
+        colPayload.setMaxWidth(Double.MAX_VALUE);
+        colPayload.setResizable(true);
         colPayload.setSortable(false);
+
+        restorePacketTableColumnWidths(colTime, colType, colFrom, colTo, colPayload);
+        trackPacketTableColumnWidth(colTime, AppPreferences.KEY_PACKET_MONITOR_COLUMN_TIME_WIDTH);
+        trackPacketTableColumnWidth(colType, AppPreferences.KEY_PACKET_MONITOR_COLUMN_TYPE_WIDTH);
+        trackPacketTableColumnWidth(colFrom, AppPreferences.KEY_PACKET_MONITOR_COLUMN_FROM_WIDTH);
+        trackPacketTableColumnWidth(colTo, AppPreferences.KEY_PACKET_MONITOR_COLUMN_TO_WIDTH);
+        trackPacketTableColumnWidth(colPayload, AppPreferences.KEY_PACKET_MONITOR_COLUMN_PAYLOAD_WIDTH);
 
         table.getColumns().addAll(colTime, colType, colFrom, colTo, colPayload);
         table.setRowFactory(tv -> new TableRow<>() {
@@ -582,10 +599,67 @@ public final class PacketMonitorWindow {
     }
 
     private void configureCompactColumn(TableColumn<PacketLogEntry, String> column, double width) {
-        column.setMinWidth(width);
+        column.setMinWidth(Math.min(PACKET_TABLE_COMPACT_COLUMN_MIN_WIDTH, width));
         column.setPrefWidth(width);
-        column.setMaxWidth(width);
+        column.setMaxWidth(Double.MAX_VALUE);
+        column.setResizable(true);
         column.setSortable(false);
+    }
+
+    /**
+     * Восстанавливает пользовательские ширины колонок таблицы из конфигурации приложения.
+     * Стартовые размеры остаются fallback-значениями на первый запуск либо если настройка отсутствует.
+     */
+    private void restorePacketTableColumnWidths(TableColumn<PacketLogEntry, String> colTime,
+                                                TableColumn<PacketLogEntry, String> colType,
+                                                TableColumn<PacketLogEntry, String> colFrom,
+                                                TableColumn<PacketLogEntry, String> colTo,
+                                                TableColumn<PacketLogEntry, String> colPayload) {
+        restoringPacketTableColumnWidths = true;
+        applyPacketTableColumnWidth(colTime,
+                AppPreferences.KEY_PACKET_MONITOR_COLUMN_TIME_WIDTH,
+                PACKET_TABLE_TIME_COLUMN_WIDTH);
+        applyPacketTableColumnWidth(colType,
+                AppPreferences.KEY_PACKET_MONITOR_COLUMN_TYPE_WIDTH,
+                PACKET_TABLE_TYPE_COLUMN_WIDTH);
+        applyPacketTableColumnWidth(colFrom,
+                AppPreferences.KEY_PACKET_MONITOR_COLUMN_FROM_WIDTH,
+                PACKET_TABLE_NODE_COLUMN_WIDTH);
+        applyPacketTableColumnWidth(colTo,
+                AppPreferences.KEY_PACKET_MONITOR_COLUMN_TO_WIDTH,
+                PACKET_TABLE_NODE_COLUMN_WIDTH);
+        applyPacketTableColumnWidth(colPayload,
+                AppPreferences.KEY_PACKET_MONITOR_COLUMN_PAYLOAD_WIDTH,
+                PACKET_TABLE_PAYLOAD_MIN_WIDTH);
+        Platform.runLater(() -> restoringPacketTableColumnWidths = false);
+    }
+
+    /**
+     * Применяет сохранённую ширину к одной колонке с учётом её runtime-ограничений.
+     */
+    private void applyPacketTableColumnWidth(TableColumn<PacketLogEntry, String> column,
+                                             String preferenceKey,
+                                             double defaultWidth) {
+        double savedWidth = AppPreferences.getPacketMonitorColumnWidth(preferenceKey, defaultWidth);
+        double boundedWidth = Math.max(column.getMinWidth(), savedWidth);
+        column.setPrefWidth(boundedWidth);
+    }
+
+    /**
+     * Подписывает колонку на сохранение текущей ширины в preferences.
+     * Во время начального восстановления значения игнорируются, чтобы стартовый layout
+     * не перетирал уже сохранённые пользовательские настройки.
+     */
+    private void trackPacketTableColumnWidth(TableColumn<PacketLogEntry, String> column, String preferenceKey) {
+        column.widthProperty().addListener((obs, oldValue, newValue) -> {
+            if (restoringPacketTableColumnWidths || newValue == null) {
+                return;
+            }
+            double width = newValue.doubleValue();
+            if (width > 0) {
+                AppPreferences.setPacketMonitorColumnWidth(preferenceKey, width);
+            }
+        });
     }
 
     private VBox createSection(String title, javafx.scene.Node content) {
@@ -1135,10 +1209,73 @@ public final class PacketMonitorWindow {
 
         String lowerQuery = query.toLowerCase(java.util.Locale.ROOT);
         return containsIgnoreCase(entry.getPacketType(), lowerQuery)
-                || containsIgnoreCase(entry.getFromNode(), lowerQuery)
-                || containsIgnoreCase(entry.getToNode(), lowerQuery)
+                || containsIgnoreCase(formatPacketFromNode(entry), lowerQuery)
+                || containsIgnoreCase(formatPacketToNode(entry), lowerQuery)
                 || containsIgnoreCase(entry.getPayloadText(), lowerQuery)
                 || containsIgnoreCase(entry.getDirectionText(), lowerQuery);
+    }
+
+    /**
+     * Формирует UI-представление поля {@code from} в виде {@code Имя (!nodeId)}.
+     * Если имя ноды недоступно, возвращается только стандартный {@code !nodeId};
+     * сохранённое в БД значение используется только как fallback при ошибке разбора пакета.
+     */
+    private String formatPacketFromNode(PacketLogEntry entry) {
+        return resolvePacketEndpoints(entry).fromNode();
+    }
+
+    /**
+     * Формирует UI-представление поля {@code to} в виде {@code Имя (!nodeId)}.
+     * Если имя ноды недоступно, возвращается только стандартный {@code !nodeId};
+     * сохранённое в БД значение используется только как fallback при ошибке разбора пакета.
+     */
+    private String formatPacketToNode(PacketLogEntry entry) {
+        return resolvePacketEndpoints(entry).toNode();
+    }
+
+    /**
+     * Пересчитывает подписи {@code От}/{@code Кому} из байтов пакета без модификации БД.
+     * Для уже сохранённых записей это позволяет показывать одинаковый формат в таблице
+     * и текстовом экспорте независимо от исторического содержимого колонок {@code from_node/to_node}.
+     */
+    private PacketDebugFormatter.PacketEndpoints resolvePacketEndpoints(PacketLogEntry entry) {
+        return PacketDebugFormatter.resolvePacketEndpoints(entry, resolveEntryDeviceState(entry));
+    }
+
+    /**
+     * Подбирает {@link DeviceState}, соответствующий owner-нode записи пакета.
+     * Контракт:
+     * - при точном совпадении {@code ownerNodeId} используется связанный активный {@link DeviceState};
+     * - если owner пустой и есть единственное активное подключение, используется его состояние;
+     * - при отсутствии подходящего подключения возвращается {@code null}, и formatter
+     *   отображает только стандартные {@code !nodeId} без имени.
+     */
+    private DeviceState resolveEntryDeviceState(PacketLogEntry entry) {
+        if (entry == null) {
+            return null;
+        }
+
+        String ownerNodeId = entry.getOwnerNodeId();
+        ConnectionManager connectionManager = ConnectionManager.getInstance();
+        DeviceState fallback = null;
+        for (ConnectionEntry connectionEntry : connectionManager.getEntries()) {
+            DeviceState deviceState = connectionManager.getDeviceState(connectionEntry.getId());
+            if (deviceState == null) {
+                continue;
+            }
+
+            if (fallback == null) {
+                fallback = deviceState;
+            }
+
+            String connectionOwnerNodeId = connectionManager.getOwnerNodeId(connectionEntry.getId());
+            if (ownerNodeId != null && !ownerNodeId.isBlank()
+                    && ownerNodeId.equalsIgnoreCase(connectionOwnerNodeId)) {
+                return deviceState;
+            }
+        }
+
+        return (ownerNodeId == null || ownerNodeId.isBlank()) ? fallback : null;
     }
 
     private String getActiveTypeFilterSelection() {
@@ -1415,7 +1552,9 @@ public final class PacketMonitorWindow {
      * Копирует текущий пакет в текстовом экспортном формате.
      */
     private void copyViewedPacketAsText() {
-        copyViewedPacket(PacketDebugFormatter.exportPacketAsText(viewedPacketEntry),
+        copyViewedPacket(PacketDebugFormatter.exportPacketAsText(
+                        viewedPacketEntry,
+                        resolveEntryDeviceState(viewedPacketEntry)),
                 "Пакет скопирован в текстовом виде");
     }
 
@@ -1442,7 +1581,9 @@ public final class PacketMonitorWindow {
     }
 
     private void saveViewedPacketAsText() {
-        saveViewedPacket(PacketDebugFormatter.exportPacketAsText(viewedPacketEntry), false);
+        saveViewedPacket(PacketDebugFormatter.exportPacketAsText(
+                viewedPacketEntry,
+                resolveEntryDeviceState(viewedPacketEntry)), false);
     }
 
     private void saveViewedPacketAsJson() {

@@ -32,17 +32,13 @@ public final class DatabaseProvider {
             return connection;
         }
         try {
-            Path dbDir = Path.of(System.getProperty("user.home"), ".meshapp");
-            Files.createDirectories(dbDir);
-            String dbPath = dbDir.resolve("nodedb").toString();
-
-            Path dbFile = dbDir.resolve("nodedb.mv.db");
+            Path dbFile = resolveDatabaseDirectory().resolve("nodedb.mv.db");
             boolean existed = Files.exists(dbFile);
             long sizeBytes = existed ? Files.size(dbFile) : 0;
             log.info("DB file {}: exists={}, size={} bytes", dbFile, existed, sizeBytes);
 
-            connection = DriverManager.getConnection("jdbc:h2:" + dbPath + ";AUTO_SERVER=FALSE;TRACE_LEVEL_FILE=0");
-            log.info("Database connection established: {}", dbPath);
+            connection = DriverManager.getConnection(resolveDatabaseUrl());
+            log.info("Database connection established: {}", dbFile);
             DatabaseMigrator.migrate(connection);
         } catch (Exception e) {
             log.error("Failed to create database connection", e);
@@ -93,5 +89,15 @@ public final class DatabaseProvider {
         }
         log.info("All database objects dropped by explicit reset request");
         DatabaseMigrator.migrate(activeConnection);
+    }
+
+    private static Path resolveDatabaseDirectory() throws Exception {
+        Path dbDir = Path.of(System.getProperty("user.home"), ".meshapp");
+        Files.createDirectories(dbDir);
+        return dbDir;
+    }
+
+    private static String resolveDatabaseUrl() throws Exception {
+        return "jdbc:h2:" + resolveDatabaseDirectory().resolve("nodedb") + ";AUTO_SERVER=FALSE;TRACE_LEVEL_FILE=0";
     }
 }

@@ -3,6 +3,8 @@ package com.meshtastic.client.utils;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.google.protobuf.ByteString;
+import com.meshtastic.client.model.DeviceState;
+import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.model.PacketLogEntry;
 import com.meshtastic.client.model.PacketTreeNode;
 import javafx.scene.control.TreeItem;
@@ -142,9 +144,30 @@ class PacketDebugFormatterTest {
         String exported = PacketDebugFormatter.exportPacketAsText(entry);
 
         assertTrue(exported.contains("Тип пакета: TEXT_MESSAGE_APP"));
+        assertTrue(exported.contains("От: !12345678"));
+        assertTrue(exported.contains("Кому: Вещание (!ffffffff)"));
         assertTrue(exported.contains("HEX"));
         assertTrue(exported.contains("Иерархия"));
         assertTrue(exported.contains("payload:"));
+    }
+
+    @Test
+    void packetEndpointsUseNodeNameAndStandardNodeId() {
+        DeviceState deviceState = new DeviceState();
+        NodeData fromNode = deviceState.getOrCreateNode(0x1DC26363);
+        fromNode.setLongName("Тестер");
+
+        MeshProtos.MeshPacket packet = MeshProtos.MeshPacket.newBuilder()
+                .setFrom(0x1DC26363)
+                .setTo(0xFFFFFFFF)
+                .setId(777)
+                .build();
+
+        PacketDebugFormatter.PacketEndpoints endpoints =
+                PacketDebugFormatter.resolvePacketEndpoints(packet.toByteArray(), deviceState);
+
+        assertEquals("Тестер (!1dc26363)", endpoints.fromNode());
+        assertEquals("Вещание (!ffffffff)", endpoints.toNode());
     }
 
     @Test

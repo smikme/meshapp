@@ -29,6 +29,11 @@ public class AppPreferences {
     public static final String KEY_PACKET_MONITOR_WINDOW_WIDTH = "packetMonitorWindowWidth";
     public static final String KEY_PACKET_MONITOR_WINDOW_HEIGHT = "packetMonitorWindowHeight";
     public static final String KEY_PACKET_MONITOR_WINDOW_MAXIMIZED = "packetMonitorWindowMaximized";
+    public static final String KEY_PACKET_MONITOR_COLUMN_TIME_WIDTH = "packetMonitorColumnTimeWidth";
+    public static final String KEY_PACKET_MONITOR_COLUMN_TYPE_WIDTH = "packetMonitorColumnTypeWidth";
+    public static final String KEY_PACKET_MONITOR_COLUMN_FROM_WIDTH = "packetMonitorColumnFromWidth";
+    public static final String KEY_PACKET_MONITOR_COLUMN_TO_WIDTH = "packetMonitorColumnToWidth";
+    public static final String KEY_PACKET_MONITOR_COLUMN_PAYLOAD_WIDTH = "packetMonitorColumnPayloadWidth";
 
     private static Preferences state;
 
@@ -253,6 +258,28 @@ public class AppPreferences {
      * @param pos позиция разделителя в диапазоне {@code 0..1}
      */
     public static void setPacketMonitorDividerPos(double pos) { state().putDouble(KEY_PACKET_MONITOR_DIVIDER, pos); }
+
+    /**
+     * Возвращает сохранённую ширину колонки таблицы LoRa-мониторинга.
+     * Если пользователь ещё не менял размер, возвращается переданное стартовое значение.
+     *
+     * @param key          preference-key конкретной колонки
+     * @param defaultWidth стартовая ширина, используемая как fallback
+     * @return сохранённая либо стартовая ширина колонки
+     */
+    public static double getPacketMonitorColumnWidth(String key, double defaultWidth) {
+        return state().getDouble(key, defaultWidth);
+    }
+
+    /**
+     * Сохраняет текущую ширину колонки таблицы LoRa-мониторинга.
+     *
+     * @param key   preference-key конкретной колонки
+     * @param width фактическая ширина колонки в пикселях
+     */
+    public static void setPacketMonitorColumnWidth(String key, double width) {
+        state().putDouble(key, width);
+    }
 
     public static final class ChatScrollState {
         private final long anchorDbId;

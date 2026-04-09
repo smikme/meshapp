@@ -59,6 +59,15 @@ public final class PacketDebugFormatter {
                                 long capturedAtMillis) {}
 
     /**
+     * Подготовленные подписи адресов верхнего уровня MeshPacket для UI.
+     * Контракт:
+     * - если имя ноды известно, оно добавляется перед стандартным {@code nodeId};
+     * - если имя неизвестно, возвращается только стандартный {@code nodeId};
+     * - для broadcast используется локализованная подпись c {@code !ffffffff}.
+     */
+    public record PacketEndpoints(String fromNode, String toNode) {}
+
+    /**
      * Диапазон выделения в текстовом представлении предпросмотра.
      *
      * @param startChar индекс первого символа включительно
@@ -233,17 +242,33 @@ public final class PacketDebugFormatter {
      * @return текст экспорта или пустая строка, если запись отсутствует
      */
     public static String exportPacketAsText(PacketLogEntry entry) {
+        return exportPacketAsText(entry, null);
+    }
+
+    /**
+     * Экспортирует выбранный пакет в человекочитаемый текстовый формат для анализа и обмена.
+     * Поля {@code От} и {@code Кому} пересчитываются из {@link MeshProtos.MeshPacket},
+     * чтобы UI и экспорт использовали единый формат {@code Имя (!nodeId)} независимо
+     * от того, в каком виде адреса были сохранены в БД.
+     *
+     * @param entry       выбранная запись из журнала
+     * @param deviceState состояние устройства для разрешения имён нод; может быть {@code null}
+     * @return текст экспорта или пустая строка, если запись отсутствует
+     */
+    public static String exportPacketAsText(PacketLogEntry entry,
+                                            com.meshtastic.client.model.DeviceState deviceState) {
         if (entry == null) {
             return "";
         }
 
+        PacketEndpoints endpoints = resolvePacketEndpoints(entry, deviceState);
         StringBuilder sb = new StringBuilder(1024);
         appendExportLine(sb, "ID", Long.toString(entry.getId()));
         appendExportLine(sb, "Дата/время", entry.getCapturedAtText());
         appendExportLine(sb, "Направление", entry.getDirectionText());
         appendExportLine(sb, "Тип пакета", entry.getPacketType());
-        appendExportLine(sb, "От", entry.getFromNode());
-        appendExportLine(sb, "Кому", entry.getToNode());
+        appendExportLine(sb, "От", endpoints.fromNode());
+        appendExportLine(sb, "Кому", endpoints.toNode());
         appendExportLine(sb, "Payload", entry.getPayloadText());
         appendExportLine(sb, "Размер", entry.getPacketBytes().length + " байт");
         sb.append('\n').append("HEX").append('\n');
@@ -251,6 +276,51 @@ public final class PacketDebugFormatter {
         sb.append('\n').append('\n').append("Иерархия").append('\n');
         appendTreeText(sb, buildPacketTree(entry.getPacketBytes()), 0);
         return sb.toString();
+    }
+
+    /**
+     * Возвращает подписи полей {@code from}/{@code to} для уже сохранённой записи пакета.
+     * Метод не зависит от строк, лежащих в БД: приоритетом всегда является разбор
+     * {@link MeshProtos.MeshPacket} из {@code packet_bytes}, а значения записи используются только как fallback.
+     *
+     * @param entry       запись журнала
+     * @param deviceState состояние устройства для разрешения имён нод; может быть {@code null}
+     * @return подписи отправителя и получателя, пригодные для таблицы и текстового экспорта
+     */
+    public static PacketEndpoints resolvePacketEndpoints(PacketLogEntry entry,
+                                                         com.meshtastic.client.model.DeviceState deviceState) {
+        if (entry == null) {
+            return new PacketEndpoints("", "");
+        }
+
+        PacketEndpoints resolved = resolvePacketEndpoints(entry.getPacketBytes(), deviceState);
+        return new PacketEndpoints(
+                firstNonBlank(resolved.fromNode(), entry.getFromNode(), "-"),
+                firstNonBlank(resolved.toNode(), entry.getToNode(), "-")
+        );
+    }
+
+    /**
+     * Разбирает верхнеуровневые поля {@code from}/{@code to} напрямую из байтов пакета.
+     *
+     * @param packetBytes сериализованный {@link MeshProtos.MeshPacket}
+     * @param deviceState состояние устройства для разрешения имён нод; может быть {@code null}
+     * @return подписи отправителя и получателя; при ошибке разбора оба значения {@code null}
+     */
+    public static PacketEndpoints resolvePacketEndpoints(byte[] packetBytes,
+                                                         com.meshtastic.client.model.DeviceState deviceState) {
+        if (packetBytes == null || packetBytes.length == 0) {
+            return new PacketEndpoints(null, null);
+        }
+        try {
+            MeshProtos.MeshPacket packet = MeshProtos.MeshPacket.parseFrom(packetBytes);
+            return new PacketEndpoints(
+                    formatNodeDisplay(packet.getFrom(), deviceState),
+                    formatNodeDisplay(packet.getTo(), deviceState)
+            );
+        } catch (InvalidProtocolBufferException e) {
+            return new PacketEndpoints(null, null);
+        }
     }
 
     /**
@@ -780,6 +850,27 @@ public final class PacketDebugFormatter {
             }
         }
         return nodeId;
+    }
+
+    /**
+     * Форматирует идентификатор узла в стандартном Meshtastic-виде для таблицы и экспорта:
+     * {@code Имя (!nodeId)} или только {@code !nodeId}, если имя неизвестно.
+     */
+    private static String formatNodeDisplay(int nodeNum, com.meshtastic.client.model.DeviceState deviceState) {
+        String nodeId = String.format("!%08x", nodeNum);
+        if (Integer.toUnsignedLong(nodeNum) == BROADCAST_NODE_NUM) {
+            return "Вещание (" + nodeId + ")";
+        }
+
+        String name = null;
+        if (deviceState != null) {
+            NodeData node = deviceState.getNodeDb().get(nodeNum);
+            if (node != null) {
+                name = firstNonBlank(node.getLongName(), node.getShortName());
+            }
+        }
+
+        return name != null ? name + " (" + nodeId + ")" : nodeId;
     }
 
     private static String describeBytes(ByteString bytes) {

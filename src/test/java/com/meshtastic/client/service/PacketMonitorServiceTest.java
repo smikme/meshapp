@@ -3,6 +3,7 @@ package com.meshtastic.client.service;
 import com.google.protobuf.ByteString;
 import com.meshtastic.client.TestEnvironmentSupport;
 import com.meshtastic.client.model.DeviceState;
+import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.model.PacketLogEntry;
 import org.junit.jupiter.api.AfterEach;
@@ -244,6 +245,66 @@ class PacketMonitorServiceTest {
         assertEquals("\"range-2\"", page.entries().getFirst().getPayloadText());
         assertEquals(1, page.totalMatchingCount());
         assertEquals(3, page.totalStoredCount());
+    }
+
+    @Test
+    void searchFindsPacketsByStandardNodeIdFormat() {
+        DeviceState state = deviceState();
+        service.startCapture();
+
+        MeshProtos.MeshPacket packet = MeshProtos.MeshPacket.newBuilder()
+                .setFrom(0x11111111)
+                .setTo(0xFFFFFFFF)
+                .setId(404)
+                .setRxTime(1_710_000_123)
+                .setDecoded(MeshProtos.Data.newBuilder()
+                        .setPortnum(Portnums.PortNum.TEXT_MESSAGE_APP)
+                        .setPayload(ByteString.copyFromUtf8("search-node"))
+                        .build())
+                .build();
+
+        service.recordPacket(PacketLogEntry.Direction.INCOMING, packet, "!12345678", state);
+
+        PacketMonitorService.PacketQuery fromQuery = new PacketMonitorService.PacketQuery(
+                null,
+                null,
+                "!11111111",
+                null,
+                null
+        );
+        PacketMonitorService.PacketPage fromPage = service.loadLatestPage(fromQuery, 200);
+        assertEquals(1, fromPage.entries().size());
+        assertEquals("\"search-node\"", fromPage.entries().getFirst().getPayloadText());
+
+        PacketMonitorService.PacketQuery broadcastQuery = new PacketMonitorService.PacketQuery(
+                null,
+                null,
+                "!ffffffff",
+                null,
+                null
+        );
+        PacketMonitorService.PacketPage broadcastPage = service.loadLatestPage(broadcastQuery, 200);
+        assertEquals(1, broadcastPage.entries().size());
+        assertEquals("\"search-node\"", broadcastPage.entries().getFirst().getPayloadText());
+    }
+
+    @Test
+    void clearingLoraLogsDoesNotDeleteChatMessages() {
+        MessageDbService messageDbService = MessageDbService.getInstance();
+        MeshMessage message = new MeshMessage("!11111111", "!ffffffff", 0, "chat survives", 1_710_000_000L, false);
+        message.setPacketId(9001);
+        messageDbService.save(message, "channel", "0", "!owner");
+
+        service.startCapture();
+        service.recordPacket(PacketLogEntry.Direction.INCOMING,
+                textPacket(1, 1_710_000_100, "lora only"), "!owner", null);
+
+        service.clear();
+
+        assertTrue(service.loadAll().isEmpty());
+        List<MeshMessage> messages = messageDbService.loadLast("channel", "0", 20, "!owner");
+        assertEquals(1, messages.size());
+        assertEquals("chat survives", messages.getFirst().getText());
     }
 
     private static MeshProtos.MeshPacket textPacket(int id, int rxTimeSeconds, String payload) {

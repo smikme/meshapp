@@ -15,10 +15,12 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.regex.Pattern;
 
 /**
  * Сервис захвата и хранения LoRa mesh-пакетов для окна мониторинга.
@@ -29,6 +31,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * работают с БД и общим состоянием сервиса, синхронизированы на экземпляре.
  */
 public final class PacketMonitorService {
+
+    private static final long BROADCAST_NODE_NUM = 0xFFFF_FFFFL;
+    private static final Pattern STANDARD_NODE_ID_PATTERN = Pattern.compile("^!?[0-9a-fA-F]{8}$");
 
     private enum PageRequestKind {
         LATEST,
@@ -76,6 +81,16 @@ public final class PacketMonitorService {
          */
         public String searchPattern() {
             return searchText == null ? null : "%" + searchText.toLowerCase(Locale.ROOT) + "%";
+        }
+
+        /**
+         * Возвращает дополнительные SQL-patterns для поиска по адресам нод.
+         * Нужен для совместимости между UI-форматом {@code !1dc26363} и тем,
+         * как исторически были сохранены поля {@code from_node/to_node} в БД
+         * (имена с decimal-id или просто decimal-id).
+         */
+        public List<String> nodeAddressSearchPatterns() {
+            return resolveNodeAddressSearchPatterns(searchText);
         }
     }
 
@@ -712,6 +727,7 @@ public final class PacketMonitorService {
             params.add(query.packetType());
         }
         if (query != null && query.searchPattern() != null) {
+            List<String> nodeAddressPatterns = query.nodeAddressSearchPatterns();
             sql.append("""
                     
                     AND (
@@ -728,6 +744,18 @@ public final class PacketMonitorService {
                     """);
             for (int i = 0; i < 5; i++) {
                 params.add(query.searchPattern());
+            }
+
+            if (!nodeAddressPatterns.isEmpty()) {
+                int insertionPoint = sql.lastIndexOf(")");
+                StringBuilder addressConditions = new StringBuilder();
+                for (String pattern : nodeAddressPatterns) {
+                    addressConditions.append("\nOR LOWER(COALESCE(from_node, '')) LIKE ?");
+                    addressConditions.append("\nOR LOWER(COALESCE(to_node, '')) LIKE ?");
+                    params.add(pattern);
+                    params.add(pattern);
+                }
+                sql.insert(insertionPoint, addressConditions);
             }
         }
         if (query != null && query.capturedAtFromMillis() != null) {
@@ -793,5 +821,42 @@ public final class PacketMonitorService {
         }
         String trimmed = value.trim();
         return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    private static List<String> resolveNodeAddressSearchPatterns(String searchText) {
+        String normalized = normalizeNullableText(searchText);
+        if (normalized == null) {
+            return List.of();
+        }
+
+        String lowered = normalized.toLowerCase(Locale.ROOT);
+        LinkedHashSet<String> patterns = new LinkedHashSet<>();
+
+        Integer parsedNodeNum = parseStandardNodeId(lowered);
+        if (parsedNodeNum != null) {
+            long unsignedNodeNum = Integer.toUnsignedLong(parsedNodeNum);
+            patterns.add("%" + String.format("!%08x", parsedNodeNum) + "%");
+            patterns.add("%" + Long.toUnsignedString(unsignedNodeNum) + "%");
+            patterns.add("%" + parsedNodeNum + "%");
+            if (unsignedNodeNum == BROADCAST_NODE_NUM) {
+                patterns.add("%вещание%");
+            }
+        }
+
+        return List.copyOf(patterns);
+    }
+
+    private static Integer parseStandardNodeId(String searchText) {
+        if (searchText == null || !STANDARD_NODE_ID_PATTERN.matcher(searchText).matches()) {
+            return null;
+        }
+
+        String hex = searchText.charAt(0) == '!' ? searchText.substring(1) : searchText;
+        try {
+            long unsignedValue = Long.parseUnsignedLong(hex, 16);
+            return (int) unsignedValue;
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 }
