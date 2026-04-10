@@ -42,6 +42,8 @@ public class ModalPane extends StackPane {
     private static ModalPane instance;
     private Node currentContent;
     private Runnable onHidden;
+    private boolean dismissOnBackdrop = true;
+    private boolean dismissOnEscape = true;
 
     /** Scene-level фильтр: закрытие по клику вне контента */
     private final EventHandler<MouseEvent> sceneClickFilter = e -> {
@@ -63,7 +65,7 @@ public class ModalPane extends StackPane {
 
         // ESC закрывает модалку
         addEventHandler(KeyEvent.KEY_PRESSED, e -> {
-            if (e.getCode() == KeyCode.ESCAPE) {
+            if (dismissOnEscape && e.getCode() == KeyCode.ESCAPE) {
                 hide();
                 e.consume();
             }
@@ -89,13 +91,22 @@ public class ModalPane extends StackPane {
      * Показать контент — выезжает справа с fade-in.
      */
     public void show(Node content) {
+        show(content, true, true);
+    }
+
+    /**
+     * Показать контент с явным управлением dismiss-поведением.
+     */
+    public void show(Node content, boolean dismissOnBackdrop, boolean dismissOnEscape) {
         currentContent = content;
         onHidden = null;
+        this.dismissOnBackdrop = dismissOnBackdrop;
+        this.dismissOnEscape = dismissOnEscape;
         getChildren().setAll(content);
         setVisible(true);
 
         // Scene-level фильтр для закрытия по клику вне контента
-        if (getScene() != null) {
+        if (dismissOnBackdrop && getScene() != null) {
             getScene().addEventFilter(MouseEvent.MOUSE_PRESSED, sceneClickFilter);
         }
 
@@ -140,6 +151,8 @@ public class ModalPane extends StackPane {
             setVisible(false);
             getChildren().clear();
             currentContent = null;
+            dismissOnBackdrop = true;
+            dismissOnEscape = true;
             if (onHidden != null) {
                 onHidden.run();
                 onHidden = null;

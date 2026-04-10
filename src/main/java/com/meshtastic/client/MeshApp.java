@@ -1,8 +1,12 @@
 package com.meshtastic.client;
 
+import com.meshtastic.client.components.CrashReportPrompt;
+import com.meshtastic.client.logging.SessionCrashLogManager;
 import com.meshtastic.client.modal.ModalPane;
+import com.meshtastic.client.modal.Toast;
 import com.meshtastic.client.platform.NativeWindowHelper;
 import com.meshtastic.client.platform.OsDetect;
+import com.meshtastic.client.service.CrashReportService;
 import com.meshtastic.client.service.DatabaseProvider;
 import com.meshtastic.client.service.MessageDbService;
 import com.meshtastic.client.service.NodeCacheService;
@@ -15,6 +19,7 @@ import com.meshtastic.client.themes.ThemeManager;
 import com.meshtastic.client.tray.AppTrayManager;
 import com.meshtastic.client.utils.AppPreferences;
 import javafx.application.Application;
+import javafx.application.Platform;
 import javafx.collections.ObservableList;
 import javafx.scene.Scene;
 import javafx.scene.image.Image;
@@ -25,7 +30,11 @@ import javafx.stage.Stage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.nio.file.Path;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 public class MeshApp extends Application {
 
@@ -87,6 +96,7 @@ public class MeshApp extends Application {
     }
 
     private static Stage primaryStage;
+    private final AtomicBoolean deferredStartupTasksStarted = new AtomicBoolean(false);
 
     @Override
     public void start(Stage stage) {
@@ -151,13 +161,10 @@ public class MeshApp extends Application {
 
         // Сохранять состояние окна при закрытии (setOnHiding срабатывает и при
         // программном stage.close() из кастомного title bar, и при нативном закрытии)
-        stage.setOnCloseRequest(e -> javafx.application.Platform.setImplicitExit(true));
+        stage.setOnCloseRequest(e -> Platform.setImplicitExit(true));
         stage.setOnHiding(e -> saveWindowState(stage, rootPane));
 
-        // Проверка обновлений (асинхронно, не блокирует запуск)
-        if (AppPreferences.isCheckUpdates()) {
-            UpdateCheckService.checkAsync(ModalPane::showUpdateAvailable);
-        }
+        handlePendingCrashLog(stage);
     }
 
     private void restoreWindowBounds(Stage stage) {
@@ -211,6 +218,7 @@ public class MeshApp extends Application {
     public void stop() {
         AppTrayManager.getInstance().dispose();
         ConnectionManager.getInstance().shutdownAll();
+        SessionCrashLogManager.markNormalShutdown();
         System.exit(0);
     }
 
@@ -227,5 +235,112 @@ public class MeshApp extends Application {
                 log.error("Uncaught exception in thread '{}'", thread.getName(), throwable));
         logStartupContext();
         launch(args);
+    }
+
+    private void handlePendingCrashLog(Stage stage) {
+        Optional<Path> pendingCrashLog = SessionCrashLogManager.peekPendingCrashLog();
+        if (pendingCrashLog.isEmpty()) {
+            runDeferredStartupTasks();
+            return;
+        }
+
+        CrashReportPrompt.show(stage, decision -> {
+            if (!decision.sendReport()) {
+                SessionCrashLogManager.deletePendingCrashLog(pendingCrashLog.get());
+                runDeferredStartupTasks();
+                return;
+            }
+
+            submitCrashLog(stage, pendingCrashLog.get(), decision.comment());
+        });
+    }
+
+    private void submitCrashLog(Stage stage, Path crashLog, String comment) {
+        AtomicBoolean cancelled = new AtomicBoolean(false);
+        AtomicReference<Thread> workerRef = new AtomicReference<>();
+        CrashReportPrompt.ProgressDialog progressDialog = CrashReportPrompt.showProgress(stage);
+        progressDialog.setOnCancel(() -> {
+            cancelled.set(true);
+            SessionCrashLogManager.deletePendingCrashLog(crashLog);
+            Thread worker = workerRef.get();
+            if (worker != null) {
+                worker.interrupt();
+            }
+            runDeferredStartupTasks();
+        });
+
+        Thread worker = Thread.ofVirtual().name("meshapp-crash-report").unstarted(() -> {
+            try {
+                CrashReportService.SubmissionResult result = CrashReportService.createDefault().submitCrashReport(
+                        crashLog,
+                        comment,
+                        new CrashReportService.CrashContext(
+                                APPLICATION_VERSION,
+                                VERSION_CODE,
+                                resolveOperatingSystemName(),
+                                resolveOperatingSystemVersion(),
+                                resolveOperatingSystemArch()
+                        )
+                );
+
+                if (cancelled.get()) {
+                    return;
+                }
+                SessionCrashLogManager.deletePendingCrashLog(crashLog);
+                Platform.runLater(() -> {
+                    if (cancelled.get()) {
+                        return;
+                    }
+                    progressDialog.close(() -> {
+                        Toast.show(Toast.Type.SUCCESS, "Лог отправлен разработчикам: issue #" + result.issueIndex());
+                        runDeferredStartupTasks();
+                    });
+                });
+            } catch (Exception e) {
+                if (cancelled.get() || e instanceof InterruptedException) {
+                    return;
+                }
+                log.error("Failed to submit crash report", e);
+                Platform.runLater(() -> {
+                    if (cancelled.get()) {
+                        return;
+                    }
+                    progressDialog.close(() -> {
+                        ModalPane.showError(
+                                "Не удалось отправить лог",
+                                "Сохранённый лог останется на диске и будет снова предложен при следующем запуске.\n\n"
+                                        + humanizeError(e)
+                        );
+                        ModalPane pane = ModalPane.getInstance();
+                        if (pane != null) {
+                            pane.setOnHidden(this::runDeferredStartupTasks);
+                        } else {
+                            runDeferredStartupTasks();
+                        }
+                    });
+                });
+            }
+        });
+        workerRef.set(worker);
+        if (!cancelled.get()) {
+            worker.start();
+        }
+    }
+
+    private void runDeferredStartupTasks() {
+        if (!deferredStartupTasksStarted.compareAndSet(false, true)) {
+            return;
+        }
+        if (AppPreferences.isCheckUpdates()) {
+            UpdateCheckService.checkAsync(ModalPane::showUpdateAvailable);
+        }
+    }
+
+    private static String humanizeError(Exception exception) {
+        String message = exception.getMessage();
+        if (message == null || message.isBlank()) {
+            return "Неизвестная ошибка отправки.";
+        }
+        return message;
     }
 }
