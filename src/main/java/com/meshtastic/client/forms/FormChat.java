@@ -1,6 +1,7 @@
 package com.meshtastic.client.forms;
 
 import com.meshtastic.client.components.EmojiTextFlow;
+import com.meshtastic.client.components.chat.ChatBotCommandHelper;
 import com.meshtastic.client.components.chat.ChatInputBar;
 import com.meshtastic.client.components.chat.ChatListCell;
 import com.meshtastic.client.components.chat.ChatNameResolver;
@@ -63,6 +64,7 @@ import org.meshtastic.proto.MeshProtos;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -448,40 +450,44 @@ public class FormChat extends Form {
             }
         });
 
-        chatInputBar = new ChatInputBar(request -> {
-            if (selectedChat == null || state == null || protocolHandler == null) {
-                return;
-            }
-            if (selectedChat.getType() == ChatItem.ChatType.CHANNEL) {
-                MessageService.sendChannelMessage(
-                        protocolHandler, state,
-                        selectedChat.getChannelIndex(),
-                        request.text(), request.replyId());
-            } else {
-                NodeData peerNode = NodeUtils.resolveNode(state, selectedChat.getPeerNodeId());
-                if (peerNode != null && peerNode.isUnmessagable()) {
-                    Toast.show(Toast.Type.WARNING, "Нода объявила, что не принимает личные сообщения");
-                    return;
-                }
-                MeshMessage sent = MessageService.sendDirectMessage(
-                        protocolHandler, state,
-                        selectedChat.getPeerNodeId(),
-                        request.text(), request.replyId());
-                if (sent == null) {
-                    if (peerNode != null && peerNode.isUnmessagable()) {
-                        Toast.show(Toast.Type.WARNING, "Нода объявила, что не принимает личные сообщения");
-                    } else {
-                    Toast.show(Toast.Type.ERROR, "Не удалось определить ноду для DM");
+        chatInputBar = new ChatInputBar(
+                request -> {
+                    if (selectedChat == null || state == null || protocolHandler == null) {
+                        return;
                     }
-                    return;
-                }
-            }
+                    if (selectedChat.getType() == ChatItem.ChatType.CHANNEL) {
+                        MessageService.sendChannelMessage(
+                                protocolHandler, state,
+                                selectedChat.getChannelIndex(),
+                                request.text(), request.replyId());
+                    } else {
+                        NodeData peerNode = NodeUtils.resolveNode(state, selectedChat.getPeerNodeId());
+                        if (peerNode != null && peerNode.isUnmessagable()) {
+                            Toast.show(Toast.Type.WARNING, "Нода объявила, что не принимает личные сообщения");
+                            return;
+                        }
+                        MeshMessage sent = MessageService.sendDirectMessage(
+                                protocolHandler, state,
+                                selectedChat.getPeerNodeId(),
+                                request.text(), request.replyId());
+                        if (sent == null) {
+                            if (peerNode != null && peerNode.isUnmessagable()) {
+                                Toast.show(Toast.Type.WARNING, "Нода объявила, что не принимает личные сообщения");
+                            } else {
+                                Toast.show(Toast.Type.ERROR, "Не удалось определить ноду для DM");
+                            }
+                            return;
+                        }
+                    }
 
-            // Локально уже сохранили исходящее сообщение в БД и DeviceState.
-            // Подтягиваем его в открытую беседу сразу, не дожидаясь асинхронного
-            // messageListener, чтобы UI не выглядел "немым" при проблемах с RX/ACK.
-            refreshCurrentChatAfterLocalSend();
-        });
+                    // Локально уже сохранили исходящее сообщение в БД и DeviceState.
+                    // Подтягиваем его в открытую беседу сразу, не дожидаясь асинхронного
+                    // messageListener, чтобы UI не выглядел "немым" при проблемах с RX/ACK.
+                    refreshCurrentChatAfterLocalSend();
+                },
+                this::handleBotCommand,
+                query -> ChatBotCommandHelper.suggestNodes(listBotCommandNodes(), query, 8)
+        );
     }
 
     // ==================== Правая панель: открытие/закрытие чата ====================
@@ -1562,16 +1568,104 @@ public class FormChat extends Form {
 
     // ==================== Traceroute / Node Info ====================
 
+    private boolean handleBotCommand(ChatBotCommandHelper.ParsedBotCommand command) {
+        if (command == null || !command.isCommand()) {
+            return false;
+        }
+        if (selectedChat == null || state == null || protocolHandler == null) {
+            Toast.show(Toast.Type.WARNING, "Нет подключения к радио");
+            return false;
+        }
+        if (command.hasExtraTokens()) {
+            Toast.show(Toast.Type.WARNING, "Команда бота принимает только одну ноду");
+            return false;
+        }
+        if (command.targetToken() == null || command.targetToken().isBlank()) {
+            Toast.show(Toast.Type.WARNING, switch (command.action()) {
+                case TRACEROUTE -> "Используйте: @tracebot имя(!nodeid)";
+                case NODE_INFO -> "Используйте: @infobot имя(!nodeid)";
+            });
+            return false;
+        }
+
+        ChatBotCommandHelper.NodeResolution resolution =
+                ChatBotCommandHelper.resolveTarget(command.targetToken(), listBotCommandNodes());
+        if (resolution.status() == ChatBotCommandHelper.NodeResolutionStatus.AMBIGUOUS) {
+            Toast.show(Toast.Type.WARNING, "Найдено несколько нод. Уточните выбор через подсказку");
+            return false;
+        }
+        if (resolution.status() != ChatBotCommandHelper.NodeResolutionStatus.FOUND || resolution.node() == null) {
+            Toast.show(Toast.Type.WARNING, "Нода не найдена: " + command.targetToken());
+            return false;
+        }
+
+        return switch (command.action()) {
+            case TRACEROUTE -> {
+                requestTraceroute(resolution.node());
+                yield true;
+            }
+            case NODE_INFO -> {
+                requestNodeInfo(resolution.node());
+                yield true;
+            }
+        };
+    }
+
+    private List<NodeData> listBotCommandNodes() {
+        LinkedHashMap<String, NodeData> nodes = new LinkedHashMap<>();
+        if (state != null) {
+            for (NodeData node : state.getNodeDb().values()) {
+                NodeCacheService.getInstance().enrichFromCache(node);
+                registerBotNode(nodes, node);
+            }
+        }
+        for (NodeData node : NodeCacheService.getInstance().getAll()) {
+            registerBotNode(nodes, node);
+        }
+        return new ArrayList<>(nodes.values());
+    }
+
+    private static void registerBotNode(Map<String, NodeData> nodes, NodeData node) {
+        if (node == null) {
+            return;
+        }
+        String nodeId = node.getNodeId();
+        if (nodeId == null || nodeId.isBlank()) {
+            nodeId = String.format("!%08x", node.getNodeNum());
+        }
+        nodes.putIfAbsent(nodeId.toLowerCase(Locale.ROOT), node);
+    }
+
+    private NodeData resolveTargetNodeFromMessage(MeshMessage msg) {
+        if (msg == null || state == null) {
+            return null;
+        }
+        NodeData targetNode = state.getNodeByNodeId(msg.getFromNodeId());
+        if (targetNode != null) {
+            return targetNode;
+        }
+
+        String nodeId = msg.getFromNodeId();
+        if (nodeId == null || nodeId.length() < 2) {
+            return null;
+        }
+
+        int nodeNum = (int) Long.parseUnsignedLong(nodeId.substring(1), 16);
+        targetNode = state.getOrCreateNode(nodeNum);
+        NodeCacheService.getInstance().enrichFromCache(targetNode);
+        return targetNode;
+    }
+
     /** Запрос traceroute до ноды — ответ показывается как системное сообщение */
     private void requestTraceroute(MeshMessage msg) {
+        requestTraceroute(resolveTargetNodeFromMessage(msg));
+    }
+
+    /** Запрос traceroute до указанной ноды — ответ показывается как системное сообщение */
+    private void requestTraceroute(NodeData targetNode) {
         if (state == null || protocolHandler == null) { return; }
-        NodeData targetNode = state.getNodeByNodeId(msg.getFromNodeId());
         if (targetNode == null) {
-            String nodeId = msg.getFromNodeId();
-            if (nodeId == null || nodeId.length() < 2) { return; }
-            int nodeNum = (int) Long.parseUnsignedLong(nodeId.substring(1), 16);
-            targetNode = state.getOrCreateNode(nodeNum);
-            NodeCacheService.getInstance().enrichFromCache(targetNode);
+            return;
         }
         int targetNum = targetNode.getNodeNum();
         String name = nameResolver.resolveNodeName(targetNum);
@@ -1619,14 +1713,14 @@ public class FormChat extends Form {
 
     /** Запрос информации о ноде — всегда запрашивает актуальные данные по сети */
     private void requestNodeInfo(MeshMessage msg) {
+        requestNodeInfo(resolveTargetNodeFromMessage(msg));
+    }
+
+    /** Запрос информации о ноде — всегда запрашивает актуальные данные по сети */
+    private void requestNodeInfo(NodeData targetNode) {
         if (state == null || protocolHandler == null) { return; }
-        NodeData targetNode = state.getNodeByNodeId(msg.getFromNodeId());
         if (targetNode == null) {
-            String nodeId = msg.getFromNodeId();
-            if (nodeId == null || nodeId.length() < 2) { return; }
-            int nodeNum = (int) Long.parseUnsignedLong(nodeId.substring(1), 16);
-            targetNode = state.getOrCreateNode(nodeNum);
-            NodeCacheService.getInstance().enrichFromCache(targetNode);
+            return;
         }
         int targetNum = targetNode.getNodeNum();
         String name = nameResolver.resolveNodeName(targetNum);

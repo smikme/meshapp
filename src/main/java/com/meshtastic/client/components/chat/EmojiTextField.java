@@ -32,6 +32,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
 import java.util.function.IntSupplier;
+import java.util.function.Predicate;
 
 /**
  * Кастомное многострочное текстовое поле с отображением эмодзи как изображений.
@@ -63,6 +64,7 @@ public class EmojiTextField extends StackPane {
 
     private String promptText = "";
     private Consumer<Void> onAction;
+    private Predicate<KeyEvent> keyPressedInterceptor;
     private boolean disabled = false;
     private IntSupplier maxBytesSupplier;
     private ContextMenu contextMenu;
@@ -237,6 +239,15 @@ public class EmojiTextField extends StackPane {
         this.onAction = handler;
     }
 
+    /**
+     * Устанавливает внешний pre-handler для KEY_PRESSED.
+     * Если predicate возвращает {@code true}, внутренняя логика поля
+     * не выполняется и событие считается обработанным.
+     */
+    public void setKeyPressedInterceptor(Predicate<KeyEvent> interceptor) {
+        this.keyPressedInterceptor = interceptor;
+    }
+
     public void setFieldDisabled(boolean value) {
         this.disabled = value;
         super.setDisable(value);
@@ -274,6 +285,10 @@ public class EmojiTextField extends StackPane {
 
     private void handleKeyPressed(KeyEvent e) {
         if (disabled) { return; }
+        if (keyPressedInterceptor != null && keyPressedInterceptor.test(e)) {
+            e.consume();
+            return;
+        }
         boolean shift = e.isShiftDown();
         boolean shortcutDown = e.isMetaDown() || e.isControlDown();
 
