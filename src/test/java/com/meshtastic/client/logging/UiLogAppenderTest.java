@@ -4,23 +4,40 @@ import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.LoggerContext;
 import ch.qos.logback.classic.spi.LoggingEvent;
+import com.meshtastic.client.TestEnvironmentSupport;
 import com.meshtastic.client.model.LogEntry;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import java.nio.file.Files;
+import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class UiLogAppenderTest {
 
+    @TempDir
+    Path tempHome;
+
+    @BeforeEach
+    void setUp() {
+        TestEnvironmentSupport.setUserHome(tempHome);
+        SessionCrashLogManager.resetForTests();
+        SessionCrashLogManager.prepareForLaunch();
+    }
+
     @AfterEach
     void tearDown() {
         UiLogAppender.clearLiveListener();
         UiLogAppender.clearBuffer();
+        SessionCrashLogManager.resetForTests();
     }
 
     @Test
-    void preservesThrowableStacktraceInBufferedEntry() {
+    void preservesThrowableStacktraceInBufferedEntry() throws Exception {
         UiLogAppender.clearLiveListener();
         UiLogAppender.clearBuffer();
         UiLogAppender appender = new UiLogAppender();
@@ -45,5 +62,6 @@ class UiLogAppenderTest {
         assertEquals("Uncaught exception in thread 'JavaFX Application Thread'", entry.getMessage());
         assertTrue(entry.getFullMessage().contains("java.lang.RuntimeException: boom"));
         assertTrue(entry.getFullMessage().contains("UiLogAppenderTest"));
+        assertTrue(Files.readString(SessionCrashLogManager.getActiveLogPath()).contains("java.lang.RuntimeException: boom"));
     }
 }

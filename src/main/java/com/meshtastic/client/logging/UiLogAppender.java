@@ -34,6 +34,8 @@ public class UiLogAppender extends UnsynchronizedAppenderBase<ILoggingEvent> {
                 fullMessage
         );
 
+        SessionCrashLogManager.append(event);
+
         buffer.addLast(entry);
         if (size.incrementAndGet() > MAX_ENTRIES) {
             if (buffer.pollFirst() != null) {
