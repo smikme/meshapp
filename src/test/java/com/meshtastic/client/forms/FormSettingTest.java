@@ -25,6 +25,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.meshtastic.proto.ConfigProtos;
+import org.meshtastic.proto.MeshProtos;
 import org.meshtastic.proto.ModuleConfigProtos;
 
 import java.lang.reflect.Field;
@@ -33,16 +34,20 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class FormSettingTest {
@@ -117,6 +122,48 @@ class FormSettingTest {
 
         assertEquals(1_200L, tcpDelay);
         assertEquals(1_350L, bleDelay);
+    }
+
+    @Test
+    void shouldTreatCommitAckTimeoutAsExpectedReboot() {
+        FormSetting form = onFxThread(FormSetting::new);
+        CompletableFuture<MeshProtos.Routing.Error> ackFuture = new CompletableFuture<>();
+        ackFuture.completeExceptionally(new TimeoutException("commit timed out"));
+
+        assertDoesNotThrow(() -> invokeReturning(
+                form,
+                "waitForCommitConfigSaveAckOrExpectedReboot",
+                new Class<?>[] { CompletableFuture.class, String.class },
+                ackFuture, "commitEditSettings"));
+    }
+
+    @Test
+    void shouldTreatCommitAckDisconnectCleanupAsExpectedReboot() {
+        FormSetting form = onFxThread(FormSetting::new);
+        CompletableFuture<MeshProtos.Routing.Error> ackFuture = new CompletableFuture<>();
+        ackFuture.completeExceptionally(new IllegalStateException("Packet ACK waiter aborted: DISCONNECTED"));
+
+        assertDoesNotThrow(() -> invokeReturning(
+                form,
+                "waitForCommitConfigSaveAckOrExpectedReboot",
+                new Class<?>[] { CompletableFuture.class, String.class },
+                ackFuture, "commitEditSettings"));
+    }
+
+    @Test
+    void shouldStillFailCommitOnExplicitRoutingError() {
+        FormSetting form = onFxThread(FormSetting::new);
+        CompletableFuture<MeshProtos.Routing.Error> ackFuture =
+                CompletableFuture.completedFuture(MeshProtos.Routing.Error.BAD_REQUEST);
+
+        AssertionError error = assertThrows(AssertionError.class, () -> invokeReturning(
+                form,
+                "waitForCommitConfigSaveAckOrExpectedReboot",
+                new Class<?>[] { CompletableFuture.class, String.class },
+                ackFuture, "commitEditSettings"));
+
+        assertTrue(error.getCause() instanceof java.lang.reflect.InvocationTargetException);
+        assertTrue(error.getCause().getCause() instanceof IllegalStateException);
     }
 
     @Test
