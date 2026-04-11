@@ -322,6 +322,65 @@ public class FormSetting extends Form {
     }
 
     /**
+     * Ждёт routing ACK для reboot-triggering commit, но не считает ошибкой случай,
+     * когда устройство успело разорвать линк раньше подтверждения.
+     * <p>
+     * commit применяет изменения и почти сразу запускает reboot, поэтому на любом
+     * транспорте ACK может потеряться уже после успешного принятия команды.
+     * Явный routing NAK при этом остаётся настоящей ошибкой.
+     */
+    private void waitForCommitConfigSaveAckOrExpectedReboot(CompletableFuture<MeshProtos.Routing.Error> ackFuture,
+                                                            String stepName) {
+        if (ackFuture == null) {
+            return;
+        }
+
+        try {
+            MeshProtos.Routing.Error error = ackFuture.get(CONFIG_SAVE_ACK_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+            if (error != MeshProtos.Routing.Error.NONE) {
+                throw new IllegalStateException("Config save step '" + stepName + "' failed with " + error);
+            }
+        } catch (TimeoutException e) {
+            log.info("Config save: commit '{}' ACK timed out after {} ms, continuing with reconnect flow",
+                    stepName, CONFIG_SAVE_ACK_TIMEOUT_MS);
+        } catch (Exception e) {
+            if (isExpectedRebootAckLoss(e)) {
+                log.info("Config save: commit '{}' lost ACK during expected reboot/disconnect: {}",
+                        stepName, rootCauseMessage(e));
+                return;
+            }
+            throw new IllegalStateException("Config save step '" + stepName + "' ACK failed", e);
+        }
+    }
+
+    private boolean isExpectedRebootAckLoss(Throwable error) {
+        Throwable current = error;
+        while (current != null) {
+            if (current instanceof TimeoutException) {
+                return true;
+            }
+
+            String message = current.getMessage();
+            if (message != null && (message.contains("Packet ACK waiter aborted: DISCONNECTED")
+                    || message.contains("Packet ACK waiter aborted: STATE_CLEARED"))) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
+    }
+
+    private String rootCauseMessage(Throwable error) {
+        Throwable current = error;
+        while (current != null && current.getCause() != null) {
+            current = current.getCause();
+        }
+        return current != null && current.getMessage() != null
+                ? current.getMessage()
+                : error.getClass().getSimpleName();
+    }
+
+    /**
      * Подключает диагностику к ACK, который не должен блокировать commit/reconnect flow.
      * <p>
      * Финальный mutating step и BLE commit не должны держать транзакцию открытой в UI:
@@ -1006,11 +1065,8 @@ public class FormSetting extends Form {
                     Thread.sleep(getConfigSaveInterTaskDelayMs(transport, 1, 3));
                     CompletableFuture<MeshProtos.Routing.Error> commitAck =
                             MessageService.commitEditSettings(actionHandler, actionState);
-                    if (transport == ConnectionType.BLE) {
-                        observeDeferredConfigSaveAck(commitAck, "commitEditSettings");
-                    } else {
-                        waitForRequiredConfigSaveAck(commitAck, "commitEditSettings");
-                    }
+                    observeDeferredConfigSaveAck(commitAck, "commitEditSettings");
+                    waitForCommitConfigSaveAckOrExpectedReboot(commitAck, "commitEditSettings");
 
                     if (activeEntry != null) {
                         pendingTimeOnlySyncConnectionId = activeEntry.getId();
@@ -2312,13 +2368,11 @@ public class FormSetting extends Form {
                     log.info("Config save: commitEditSettings");
                     CompletableFuture<MeshProtos.Routing.Error> ackFuture =
                             MessageService.commitEditSettings(handler, state);
-                    if (activeTransport == ConnectionType.BLE) {
-                        // BLE devices often reboot/disconnect immediately after commit, so the save
-                        // flow must hand off to reconnect even if the routing ACK never comes back.
-                        observeDeferredConfigSaveAck(ackFuture, stepName);
-                    } else {
-                        waitForRequiredConfigSaveAck(ackFuture, stepName);
-                    }
+                    // commit triggers reboot/disconnect across transports, so a missing ACK
+                    // is not necessarily a failed save. Continue into reconnect flow unless
+                    // the device explicitly returns a routing error.
+                    observeDeferredConfigSaveAck(ackFuture, stepName);
+                    waitForCommitConfigSaveAckOrExpectedReboot(ackFuture, stepName);
                 });
             }
 
