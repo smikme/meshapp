@@ -1,6 +1,7 @@
 package com.meshtastic.client;
 
 import com.meshtastic.client.components.CrashReportFlow;
+import com.meshtastic.client.components.EmojiImageCache;
 import com.meshtastic.client.logging.SessionCrashLogManager;
 import com.meshtastic.client.modal.ModalPane;
 import com.meshtastic.client.platform.NativeWindowHelper;
@@ -91,6 +92,10 @@ public class MeshApp extends Application {
         Font.loadFont(getClass().getResourceAsStream("/fonts/Roboto-Bold.ttf"), 13);
 
         AppPreferences.init();
+        
+        // Предзагрузить часто используемые эмодзи для ускорения отображения
+        EmojiImageCache.preloadCommonEmojis();
+        
         // Инициализировать MessageDbService и выполнить миграцию JSON → H2 при первом запуске
         MessageDbService.getInstance().migrateFromJsonHistory();
         MessageDbService.getInstance().markStaleSendingAsFailed();

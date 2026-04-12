@@ -96,10 +96,78 @@ class TelemetryChartPanelTest {
         assertTrue(TelemetryChartPanel.formatSeriesValue(voltageSeries.getName(), point).matches("4[,.]20V"));
     }
 
+    @Test
+    void derivesRateAndTxSeriesFromCounterDeltasIncludingCounterReset() {
+        TelemetryChartPanel panel = onFxThread(() -> new TelemetryChartPanel(false));
+
+        TelemetryEntry first = telemetryEntry(1_700_000_000L, 10, 1, 2, 20, 2, 3, 1);
+        TelemetryEntry second = telemetryEntry(1_700_000_060L, 25, 4, 3, 32, 5, 7, 2);
+        TelemetryEntry third = telemetryEntry(1_700_000_120L, 5, 1, 0, 6, 1, 1, 0);
+
+        onFxThread(() -> {
+            invokeUpdateChart(panel, List.of(first, second, third), List.of());
+            return null;
+        });
+
+        AreaChart<Number, Number> rxChart = chartField(panel, "rxChart");
+        AreaChart<Number, Number> rateChart = chartField(panel, "rateChart");
+        AreaChart<Number, Number> txChart = chartField(panel, "txChart");
+
+        assertSeriesValues(rateChart, "Packets Received", 15.0, 5.0);
+        assertSeriesValues(rateChart, "Bad Packets", 3.0, 1.0);
+        assertSeriesValues(rateChart, "Duplicates", 1.0, 0.0);
+
+        assertSeriesValues(rxChart, "Good RX %", 73.33333333333333, 80.0);
+        assertSeriesValues(rxChart, "Bad RX %", 20.0, 20.0);
+        assertSeriesValues(rxChart, "Dupe RX %", 6.666666666666667, 0.0);
+
+        assertSeriesValues(txChart, "Packets Transmitted", 12.0, 6.0);
+        assertSeriesValues(txChart, "Dropped", 3.0, 1.0);
+        assertSeriesValues(txChart, "Relayed", 4.0, 1.0);
+        assertSeriesValues(txChart, "Relay Canceled", 1.0, 0.0);
+    }
+
     private static List<String> seriesNames(AreaChart<Number, Number> chart) {
         return chart.getData().stream()
                 .map(XYChart.Series::getName)
                 .toList();
+    }
+
+    private static List<Double> seriesValues(AreaChart<Number, Number> chart, String seriesName) {
+        return chart.getData().stream()
+                .filter(series -> seriesName.equals(series.getName()))
+                .findFirst()
+                .orElseThrow()
+                .getData().stream()
+                .map(point -> point.getYValue().doubleValue())
+                .toList();
+    }
+
+    private static void assertSeriesValues(AreaChart<Number, Number> chart, String seriesName, double... expected) {
+        List<Double> actual = seriesValues(chart, seriesName);
+        assertEquals(expected.length, actual.size());
+        for (int index = 0; index < expected.length; index++) {
+            assertEquals(expected[index], actual.get(index), 0.0001);
+        }
+    }
+
+    private static TelemetryEntry telemetryEntry(long timestamp,
+                                                 int rx,
+                                                 int badRx,
+                                                 int dupeRx,
+                                                 int tx,
+                                                 int txDropped,
+                                                 int txRelay,
+                                                 int txCanceled) {
+        TelemetryEntry entry = new TelemetryEntry(timestamp, "!test");
+        entry.setNumPacketsRx(rx);
+        entry.setNumPacketsRxBad(badRx);
+        entry.setNumRxDupe(dupeRx);
+        entry.setNumPacketsTx(tx);
+        entry.setNumTxDropped(txDropped);
+        entry.setNumTxRelay(txRelay);
+        entry.setNumTxRelayCanceled(txCanceled);
+        return entry;
     }
 
     private static void invokeUpdateChart(TelemetryChartPanel panel,

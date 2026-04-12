@@ -4,6 +4,7 @@ import com.meshtastic.client.components.EmojiTextFlow;
 import com.meshtastic.client.modal.ModalPane;
 import com.meshtastic.client.model.ChatItem;
 import com.meshtastic.client.utils.NodeUtils;
+import javafx.application.Platform;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.control.ContextMenu;
