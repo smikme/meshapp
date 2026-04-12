@@ -273,7 +273,10 @@ public class FormChat extends Form {
 
         chatListView = new ListView<>(sortedChats);
         chatListView.getStyleClass().add("chat-list-view");
-        chatListView.setCellFactory(lv -> new ChatListCell(this::deleteChat, this::showChannelProperties));
+        chatListView.setCellFactory(lv -> new ChatListCell(
+                this::deleteChat,
+                this::showChannelProperties,
+                this::toggleChatMute));
         chatListView.getSelectionModel().selectedItemProperty().addListener(
                 (obs, oldItem, newItem) -> {
                     if (suppressSelectionListener) { return; }
@@ -499,7 +502,14 @@ public class FormChat extends Form {
      */
     public void openDirectChat(String peerNodeId, NodeData peerNode) {
         saveCurrentChatScrollState();
-        ChatItem dm = ChatItem.fromDirectMessage(peerNodeId, peerNode, (MeshMessage) null, 0);
+        ChatItem dm = ChatItem.fromDirectMessage(
+                peerNodeId,
+                peerNode,
+                (MeshMessage) null,
+                0,
+                AppPreferences.isChatMuted(
+                        currentOwnerNodeId(),
+                        AppPreferences.composeChatPreferenceId("dm", peerNodeId)));
         openingChatUnreadCount = 0;
 
         // Добавить в список если DM с этим пиром ещё нет
@@ -1055,6 +1065,15 @@ public class FormChat extends Form {
         return item.getType() == ChatItem.ChatType.CHANNEL
                 ? "channel:" + item.getChannelIndex()
                 : "dm:" + item.getPeerNodeId();
+    }
+
+    private String chatPreferenceId(ChatItem item) {
+        if (item == null) {
+            return "";
+        }
+        return item.getType() == ChatItem.ChatType.CHANNEL
+                ? AppPreferences.composeChatPreferenceId("channel", String.valueOf(item.getChannelIndex()))
+                : AppPreferences.composeChatPreferenceId("dm", item.getPeerNodeId());
     }
 
     private String chatScrollCacheKey(ChatItem item) {
@@ -1897,7 +1916,10 @@ public class FormChat extends Form {
             int totalCount = db.getUnreadEligibleMessageCount("channel", chKey, ownerId);
             int lastRead = lastReadCounts.getOrDefault(readKey, 0);
             int unread = Math.max(0, totalCount - lastRead);
-            items.add(ChatItem.fromChannel(channel, lastMsg, unread));
+            boolean muted = AppPreferences.isChatMuted(
+                    ownerId,
+                    AppPreferences.composeChatPreferenceId("channel", chKey));
+            items.add(ChatItem.fromChannel(channel, lastMsg, unread, muted));
         }
 
         // 2. DM-пиры: объединение из БД + текущей сессии
@@ -1914,7 +1936,10 @@ public class FormChat extends Form {
             int totalCount = db.getUnreadEligibleMessageCount("dm", peerNodeId, ownerId);
             int lastRead = lastReadCounts.getOrDefault(readKey, 0);
             int unread = Math.max(0, totalCount - lastRead);
-            items.add(ChatItem.fromDirectMessage(peerNodeId, peerNode, lastMsg, unread));
+            boolean muted = AppPreferences.isChatMuted(
+                    ownerId,
+                    AppPreferences.composeChatPreferenceId("dm", peerNodeId));
+            items.add(ChatItem.fromDirectMessage(peerNodeId, peerNode, lastMsg, unread, muted));
         }
 
         // Восстановить выделение
@@ -1925,7 +1950,10 @@ public class FormChat extends Form {
                 chatListView.getItems().stream()
                         .filter(item -> chatItemMatches(item, selectedChat))
                         .findFirst()
-                        .ifPresent(chatListView.getSelectionModel()::select);
+                        .ifPresent(item -> {
+                            selectedChat = item;
+                            chatListView.getSelectionModel().select(item);
+                        });
             }
         } finally {
             suppressSelectionListener = false;
@@ -1949,6 +1977,14 @@ public class FormChat extends Form {
         }
         ChannelPropertiesDialog.show(state, protocolHandler,
                 item.getChannelIndex(), this::reloadChatList);
+    }
+
+    private void toggleChatMute(ChatItem item) {
+        if (item == null) {
+            return;
+        }
+        AppPreferences.setChatMuted(currentOwnerNodeId(), chatPreferenceId(item), !item.isMuted());
+        reloadChatList();
     }
 
     /**
