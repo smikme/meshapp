@@ -1,5 +1,8 @@
 package com.meshtastic.client;
 
+import com.meshtastic.client.components.CrashReportFlow;
+import com.meshtastic.client.components.EmojiImageCache;
+import com.meshtastic.client.logging.SessionCrashLogManager;
 import com.meshtastic.client.modal.ModalPane;
 import com.meshtastic.client.platform.NativeWindowHelper;
 import com.meshtastic.client.platform.OsDetect;
@@ -15,6 +18,7 @@ import com.meshtastic.client.themes.ThemeManager;
 import com.meshtastic.client.tray.AppTrayManager;
 import com.meshtastic.client.utils.AppPreferences;
 import javafx.application.Application;
+import javafx.application.Platform;
 import javafx.collections.ObservableList;
 import javafx.scene.Scene;
 import javafx.scene.image.Image;
@@ -25,7 +29,10 @@ import javafx.stage.Stage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.nio.file.Path;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public class MeshApp extends Application {
 
@@ -63,30 +70,19 @@ public class MeshApp extends Application {
         return 0;
     }
 
-    private static String resolveOperatingSystemName() {
-        return System.getProperty("os.name", "unknown").trim();
-    }
-
-    private static String resolveOperatingSystemVersion() {
-        return System.getProperty("os.version", "unknown").trim();
-    }
-
-    private static String resolveOperatingSystemArch() {
-        return System.getProperty("os.arch", "unknown").trim();
-    }
-
     private static void logStartupContext() {
         log.info(
                 "Starting MeshApp version {} (build {}) on {} {} ({})",
                 APPLICATION_VERSION,
                 VERSION_CODE,
-                resolveOperatingSystemName(),
-                resolveOperatingSystemVersion(),
-                resolveOperatingSystemArch()
+                System.getProperty("os.name", "unknown").trim(),
+                System.getProperty("os.version", "unknown").trim(),
+                System.getProperty("os.arch", "unknown").trim()
         );
     }
 
     private static Stage primaryStage;
+    private final AtomicBoolean deferredStartupTasksStarted = new AtomicBoolean(false);
 
     @Override
     public void start(Stage stage) {
@@ -96,6 +92,10 @@ public class MeshApp extends Application {
         Font.loadFont(getClass().getResourceAsStream("/fonts/Roboto-Bold.ttf"), 13);
 
         AppPreferences.init();
+        
+        // Предзагрузить часто используемые эмодзи для ускорения отображения
+        EmojiImageCache.preloadCommonEmojis();
+        
         // Инициализировать MessageDbService и выполнить миграцию JSON → H2 при первом запуске
         MessageDbService.getInstance().migrateFromJsonHistory();
         MessageDbService.getInstance().markStaleSendingAsFailed();
@@ -151,13 +151,10 @@ public class MeshApp extends Application {
 
         // Сохранять состояние окна при закрытии (setOnHiding срабатывает и при
         // программном stage.close() из кастомного title bar, и при нативном закрытии)
-        stage.setOnCloseRequest(e -> javafx.application.Platform.setImplicitExit(true));
+        stage.setOnCloseRequest(e -> Platform.setImplicitExit(true));
         stage.setOnHiding(e -> saveWindowState(stage, rootPane));
 
-        // Проверка обновлений (асинхронно, не блокирует запуск)
-        if (AppPreferences.isCheckUpdates()) {
-            UpdateCheckService.checkAsync(ModalPane::showUpdateAvailable);
-        }
+        handlePendingCrashLog(stage);
     }
 
     private void restoreWindowBounds(Stage stage) {
@@ -211,6 +208,7 @@ public class MeshApp extends Application {
     public void stop() {
         AppTrayManager.getInstance().dispose();
         ConnectionManager.getInstance().shutdownAll();
+        SessionCrashLogManager.markNormalShutdown();
         System.exit(0);
     }
 
@@ -227,5 +225,24 @@ public class MeshApp extends Application {
                 log.error("Uncaught exception in thread '{}'", thread.getName(), throwable));
         logStartupContext();
         launch(args);
+    }
+
+    private void handlePendingCrashLog(Stage stage) {
+        Optional<Path> pendingCrashLog = SessionCrashLogManager.peekPendingCrashLog();
+        if (pendingCrashLog.isEmpty()) {
+            runDeferredStartupTasks();
+            return;
+        }
+
+        CrashReportFlow.showPendingCrashPrompt(stage, pendingCrashLog.get(), this::runDeferredStartupTasks);
+    }
+
+    private void runDeferredStartupTasks() {
+        if (!deferredStartupTasksStarted.compareAndSet(false, true)) {
+            return;
+        }
+        if (AppPreferences.isCheckUpdates()) {
+            UpdateCheckService.checkAsync(ModalPane::showUpdateAvailable);
+        }
     }
 }

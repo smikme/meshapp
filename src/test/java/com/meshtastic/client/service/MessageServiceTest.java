@@ -1,10 +1,13 @@
 package com.meshtastic.client.service;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
 import com.google.protobuf.ByteString;
 import com.meshtastic.client.TestEnvironmentSupport;
 import com.meshtastic.client.connection.ConnectionException;
 import com.meshtastic.client.connection.ConnectionListener;
 import com.meshtastic.client.connection.MeshtasticConnection;
+import com.meshtastic.client.logging.UiLogAppender;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.MessageReaction;
 import com.meshtastic.client.model.MeshMessage;
@@ -26,6 +29,7 @@ import java.nio.file.Path;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.slf4j.LoggerFactory;
 
 class MessageServiceTest {
 
@@ -152,6 +156,42 @@ class MessageServiceTest {
                 .get(22222).getFirst();
         assertEquals("!04c5b420", stored.getFromNodeId());
         state.shutdown();
+    }
+
+    @Test
+    void sendChannelMessageReplyDebugDoesNotLogPayloadBytesDump() {
+        UiLogAppender.clearBuffer();
+        UiLogAppender appender = new UiLogAppender();
+        appender.start();
+
+        Logger logger = (Logger) LoggerFactory.getLogger(MessageService.class);
+        Level previousLevel = logger.getLevel();
+        logger.addAppender(appender);
+        logger.setLevel(Level.INFO);
+        try {
+            RecordingConnection connection = new RecordingConnection();
+            ProtocolHandler handler = track(new ProtocolHandler(connection));
+            DeviceState state = new DeviceState();
+            state.setMyNodeNum(0x04c5b420);
+            state.getOrCreateNode(state.getMyNodeNum()).setNodeId("!04c5b420");
+
+            MessageService.sendChannelMessage(handler, state, 2, "private reply payload", 12345);
+
+            List<String> loggedMessages = UiLogAppender.getBuffer().stream()
+                    .map(entry -> entry.getFullMessage())
+                    .toList();
+            assertTrue(loggedMessages.stream().anyMatch(message ->
+                    message.contains("REPLY_DEBUG send channel: replyId=12345")));
+            assertTrue(loggedMessages.stream().anyMatch(message -> message.contains("payloadBytes=")));
+            assertTrue(loggedMessages.stream().noneMatch(message -> message.contains("data bytes=")));
+            assertTrue(loggedMessages.stream().noneMatch(message -> message.contains("private reply payload")));
+
+            state.shutdown();
+        } finally {
+            logger.detachAppender(appender);
+            logger.setLevel(previousLevel);
+            UiLogAppender.clearBuffer();
+        }
     }
 
     private ProtocolHandler track(ProtocolHandler handler) {

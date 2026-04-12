@@ -1,6 +1,7 @@
 package com.meshtastic.client.forms;
 
 import com.meshtastic.client.components.EmojiTextFlow;
+import com.meshtastic.client.components.chat.ChatBotCommandHelper;
 import com.meshtastic.client.components.chat.ChatInputBar;
 import com.meshtastic.client.components.chat.ChatListCell;
 import com.meshtastic.client.components.chat.ChatNameResolver;
@@ -63,6 +64,7 @@ import org.meshtastic.proto.MeshProtos;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -271,7 +273,10 @@ public class FormChat extends Form {
 
         chatListView = new ListView<>(sortedChats);
         chatListView.getStyleClass().add("chat-list-view");
-        chatListView.setCellFactory(lv -> new ChatListCell(this::deleteChat, this::showChannelProperties));
+        chatListView.setCellFactory(lv -> new ChatListCell(
+                this::deleteChat,
+                this::showChannelProperties,
+                this::toggleChatMute));
         chatListView.getSelectionModel().selectedItemProperty().addListener(
                 (obs, oldItem, newItem) -> {
                     if (suppressSelectionListener) { return; }
@@ -448,40 +453,44 @@ public class FormChat extends Form {
             }
         });
 
-        chatInputBar = new ChatInputBar(request -> {
-            if (selectedChat == null || state == null || protocolHandler == null) {
-                return;
-            }
-            if (selectedChat.getType() == ChatItem.ChatType.CHANNEL) {
-                MessageService.sendChannelMessage(
-                        protocolHandler, state,
-                        selectedChat.getChannelIndex(),
-                        request.text(), request.replyId());
-            } else {
-                NodeData peerNode = NodeUtils.resolveNode(state, selectedChat.getPeerNodeId());
-                if (peerNode != null && peerNode.isUnmessagable()) {
-                    Toast.show(Toast.Type.WARNING, "Нода объявила, что не принимает личные сообщения");
-                    return;
-                }
-                MeshMessage sent = MessageService.sendDirectMessage(
-                        protocolHandler, state,
-                        selectedChat.getPeerNodeId(),
-                        request.text(), request.replyId());
-                if (sent == null) {
-                    if (peerNode != null && peerNode.isUnmessagable()) {
-                        Toast.show(Toast.Type.WARNING, "Нода объявила, что не принимает личные сообщения");
-                    } else {
-                    Toast.show(Toast.Type.ERROR, "Не удалось определить ноду для DM");
+        chatInputBar = new ChatInputBar(
+                request -> {
+                    if (selectedChat == null || state == null || protocolHandler == null) {
+                        return;
                     }
-                    return;
-                }
-            }
+                    if (selectedChat.getType() == ChatItem.ChatType.CHANNEL) {
+                        MessageService.sendChannelMessage(
+                                protocolHandler, state,
+                                selectedChat.getChannelIndex(),
+                                request.text(), request.replyId());
+                    } else {
+                        NodeData peerNode = NodeUtils.resolveNode(state, selectedChat.getPeerNodeId());
+                        if (peerNode != null && peerNode.isUnmessagable()) {
+                            Toast.show(Toast.Type.WARNING, "Нода объявила, что не принимает личные сообщения");
+                            return;
+                        }
+                        MeshMessage sent = MessageService.sendDirectMessage(
+                                protocolHandler, state,
+                                selectedChat.getPeerNodeId(),
+                                request.text(), request.replyId());
+                        if (sent == null) {
+                            if (peerNode != null && peerNode.isUnmessagable()) {
+                                Toast.show(Toast.Type.WARNING, "Нода объявила, что не принимает личные сообщения");
+                            } else {
+                                Toast.show(Toast.Type.ERROR, "Не удалось определить ноду для DM");
+                            }
+                            return;
+                        }
+                    }
 
-            // Локально уже сохранили исходящее сообщение в БД и DeviceState.
-            // Подтягиваем его в открытую беседу сразу, не дожидаясь асинхронного
-            // messageListener, чтобы UI не выглядел "немым" при проблемах с RX/ACK.
-            refreshCurrentChatAfterLocalSend();
-        });
+                    // Локально уже сохранили исходящее сообщение в БД и DeviceState.
+                    // Подтягиваем его в открытую беседу сразу, не дожидаясь асинхронного
+                    // messageListener, чтобы UI не выглядел "немым" при проблемах с RX/ACK.
+                    refreshCurrentChatAfterLocalSend();
+                },
+                this::handleBotCommand,
+                query -> ChatBotCommandHelper.suggestNodes(listBotCommandNodes(), query, 8)
+        );
     }
 
     // ==================== Правая панель: открытие/закрытие чата ====================
@@ -493,7 +502,14 @@ public class FormChat extends Form {
      */
     public void openDirectChat(String peerNodeId, NodeData peerNode) {
         saveCurrentChatScrollState();
-        ChatItem dm = ChatItem.fromDirectMessage(peerNodeId, peerNode, (MeshMessage) null, 0);
+        ChatItem dm = ChatItem.fromDirectMessage(
+                peerNodeId,
+                peerNode,
+                (MeshMessage) null,
+                0,
+                AppPreferences.isChatMuted(
+                        currentOwnerNodeId(),
+                        AppPreferences.composeChatPreferenceId("dm", peerNodeId)));
         openingChatUnreadCount = 0;
 
         // Добавить в список если DM с этим пиром ещё нет
@@ -1051,6 +1067,15 @@ public class FormChat extends Form {
                 : "dm:" + item.getPeerNodeId();
     }
 
+    private String chatPreferenceId(ChatItem item) {
+        if (item == null) {
+            return "";
+        }
+        return item.getType() == ChatItem.ChatType.CHANNEL
+                ? AppPreferences.composeChatPreferenceId("channel", String.valueOf(item.getChannelIndex()))
+                : AppPreferences.composeChatPreferenceId("dm", item.getPeerNodeId());
+    }
+
     private String chatScrollCacheKey(ChatItem item) {
         return currentOwnerNodeId() + "|" + chatScrollStateKey(item);
     }
@@ -1562,16 +1587,104 @@ public class FormChat extends Form {
 
     // ==================== Traceroute / Node Info ====================
 
+    private boolean handleBotCommand(ChatBotCommandHelper.ParsedBotCommand command) {
+        if (command == null || !command.isCommand()) {
+            return false;
+        }
+        if (selectedChat == null || state == null || protocolHandler == null) {
+            Toast.show(Toast.Type.WARNING, "Нет подключения к радио");
+            return false;
+        }
+        if (command.hasExtraTokens()) {
+            Toast.show(Toast.Type.WARNING, "Команда бота принимает только одну ноду");
+            return false;
+        }
+        if (command.targetToken() == null || command.targetToken().isBlank()) {
+            Toast.show(Toast.Type.WARNING, switch (command.action()) {
+                case TRACEROUTE -> "Используйте: @tracebot имя(!nodeid)";
+                case NODE_INFO -> "Используйте: @infobot имя(!nodeid)";
+            });
+            return false;
+        }
+
+        ChatBotCommandHelper.NodeResolution resolution =
+                ChatBotCommandHelper.resolveTarget(command.targetToken(), listBotCommandNodes());
+        if (resolution.status() == ChatBotCommandHelper.NodeResolutionStatus.AMBIGUOUS) {
+            Toast.show(Toast.Type.WARNING, "Найдено несколько нод. Уточните выбор через подсказку");
+            return false;
+        }
+        if (resolution.status() != ChatBotCommandHelper.NodeResolutionStatus.FOUND || resolution.node() == null) {
+            Toast.show(Toast.Type.WARNING, "Нода не найдена: " + command.targetToken());
+            return false;
+        }
+
+        return switch (command.action()) {
+            case TRACEROUTE -> {
+                requestTraceroute(resolution.node());
+                yield true;
+            }
+            case NODE_INFO -> {
+                requestNodeInfo(resolution.node());
+                yield true;
+            }
+        };
+    }
+
+    private List<NodeData> listBotCommandNodes() {
+        LinkedHashMap<String, NodeData> nodes = new LinkedHashMap<>();
+        if (state != null) {
+            for (NodeData node : state.getNodeDb().values()) {
+                NodeCacheService.getInstance().enrichFromCache(node);
+                registerBotNode(nodes, node);
+            }
+        }
+        for (NodeData node : NodeCacheService.getInstance().getAll()) {
+            registerBotNode(nodes, node);
+        }
+        return new ArrayList<>(nodes.values());
+    }
+
+    private static void registerBotNode(Map<String, NodeData> nodes, NodeData node) {
+        if (node == null) {
+            return;
+        }
+        String nodeId = node.getNodeId();
+        if (nodeId == null || nodeId.isBlank()) {
+            nodeId = String.format("!%08x", node.getNodeNum());
+        }
+        nodes.putIfAbsent(nodeId.toLowerCase(Locale.ROOT), node);
+    }
+
+    private NodeData resolveTargetNodeFromMessage(MeshMessage msg) {
+        if (msg == null || state == null) {
+            return null;
+        }
+        NodeData targetNode = state.getNodeByNodeId(msg.getFromNodeId());
+        if (targetNode != null) {
+            return targetNode;
+        }
+
+        String nodeId = msg.getFromNodeId();
+        if (nodeId == null || nodeId.length() < 2) {
+            return null;
+        }
+
+        int nodeNum = (int) Long.parseUnsignedLong(nodeId.substring(1), 16);
+        targetNode = state.getOrCreateNode(nodeNum);
+        NodeCacheService.getInstance().enrichFromCache(targetNode);
+        return targetNode;
+    }
+
     /** Запрос traceroute до ноды — ответ показывается как системное сообщение */
     private void requestTraceroute(MeshMessage msg) {
+        requestTraceroute(resolveTargetNodeFromMessage(msg));
+    }
+
+    /** Запрос traceroute до указанной ноды — ответ показывается как системное сообщение */
+    private void requestTraceroute(NodeData targetNode) {
         if (state == null || protocolHandler == null) { return; }
-        NodeData targetNode = state.getNodeByNodeId(msg.getFromNodeId());
         if (targetNode == null) {
-            String nodeId = msg.getFromNodeId();
-            if (nodeId == null || nodeId.length() < 2) { return; }
-            int nodeNum = (int) Long.parseUnsignedLong(nodeId.substring(1), 16);
-            targetNode = state.getOrCreateNode(nodeNum);
-            NodeCacheService.getInstance().enrichFromCache(targetNode);
+            return;
         }
         int targetNum = targetNode.getNodeNum();
         String name = nameResolver.resolveNodeName(targetNum);
@@ -1619,14 +1732,14 @@ public class FormChat extends Form {
 
     /** Запрос информации о ноде — всегда запрашивает актуальные данные по сети */
     private void requestNodeInfo(MeshMessage msg) {
+        requestNodeInfo(resolveTargetNodeFromMessage(msg));
+    }
+
+    /** Запрос информации о ноде — всегда запрашивает актуальные данные по сети */
+    private void requestNodeInfo(NodeData targetNode) {
         if (state == null || protocolHandler == null) { return; }
-        NodeData targetNode = state.getNodeByNodeId(msg.getFromNodeId());
         if (targetNode == null) {
-            String nodeId = msg.getFromNodeId();
-            if (nodeId == null || nodeId.length() < 2) { return; }
-            int nodeNum = (int) Long.parseUnsignedLong(nodeId.substring(1), 16);
-            targetNode = state.getOrCreateNode(nodeNum);
-            NodeCacheService.getInstance().enrichFromCache(targetNode);
+            return;
         }
         int targetNum = targetNode.getNodeNum();
         String name = nameResolver.resolveNodeName(targetNum);
@@ -1803,7 +1916,10 @@ public class FormChat extends Form {
             int totalCount = db.getUnreadEligibleMessageCount("channel", chKey, ownerId);
             int lastRead = lastReadCounts.getOrDefault(readKey, 0);
             int unread = Math.max(0, totalCount - lastRead);
-            items.add(ChatItem.fromChannel(channel, lastMsg, unread));
+            boolean muted = AppPreferences.isChatMuted(
+                    ownerId,
+                    AppPreferences.composeChatPreferenceId("channel", chKey));
+            items.add(ChatItem.fromChannel(channel, lastMsg, unread, muted));
         }
 
         // 2. DM-пиры: объединение из БД + текущей сессии
@@ -1820,7 +1936,10 @@ public class FormChat extends Form {
             int totalCount = db.getUnreadEligibleMessageCount("dm", peerNodeId, ownerId);
             int lastRead = lastReadCounts.getOrDefault(readKey, 0);
             int unread = Math.max(0, totalCount - lastRead);
-            items.add(ChatItem.fromDirectMessage(peerNodeId, peerNode, lastMsg, unread));
+            boolean muted = AppPreferences.isChatMuted(
+                    ownerId,
+                    AppPreferences.composeChatPreferenceId("dm", peerNodeId));
+            items.add(ChatItem.fromDirectMessage(peerNodeId, peerNode, lastMsg, unread, muted));
         }
 
         // Восстановить выделение
@@ -1831,7 +1950,10 @@ public class FormChat extends Form {
                 chatListView.getItems().stream()
                         .filter(item -> chatItemMatches(item, selectedChat))
                         .findFirst()
-                        .ifPresent(chatListView.getSelectionModel()::select);
+                        .ifPresent(item -> {
+                            selectedChat = item;
+                            chatListView.getSelectionModel().select(item);
+                        });
             }
         } finally {
             suppressSelectionListener = false;
@@ -1855,6 +1977,14 @@ public class FormChat extends Form {
         }
         ChannelPropertiesDialog.show(state, protocolHandler,
                 item.getChannelIndex(), this::reloadChatList);
+    }
+
+    private void toggleChatMute(ChatItem item) {
+        if (item == null) {
+            return;
+        }
+        AppPreferences.setChatMuted(currentOwnerNodeId(), chatPreferenceId(item), !item.isMuted());
+        reloadChatList();
     }
 
     /**

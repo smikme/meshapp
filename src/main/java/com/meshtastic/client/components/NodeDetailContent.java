@@ -260,8 +260,9 @@ public class NodeDetailContent extends HBox {
 
     /** Обновить только данные таблицы (без пересоздания UI). */
     public void updateTableData(NodeData node) {
-        tableData.clear();
-        NodeUtils.fillDetailRows(tableData, node);
+        ObservableList<String[]> refreshedRows = FXCollections.observableArrayList();
+        NodeUtils.fillDetailRows(refreshedRows, node);
+        tableData.setAll(refreshedRows);
     }
 
     public TelemetryChartPanel getChartPanel() {

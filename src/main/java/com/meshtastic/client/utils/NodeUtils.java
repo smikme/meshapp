@@ -208,7 +208,12 @@ public final class NodeUtils {
                     setGraphic(null);
                     return;
                 }
-                String[] row = getTableView().getItems().get(getIndex());
+                String[] row = getTableRow() != null ? getTableRow().getItem() : null;
+                if (row == null || row.length < 2) {
+                    setText(label);
+                    setGraphic(null);
+                    return;
+                }
                 String emoji = row[0];
                 ImageView iv = EmojiImageCache.createImageView(emoji, 16);
                 if (iv != null) {

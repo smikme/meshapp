@@ -29,6 +29,11 @@ public class AppPreferences {
     public static final String KEY_PACKET_MONITOR_WINDOW_WIDTH = "packetMonitorWindowWidth";
     public static final String KEY_PACKET_MONITOR_WINDOW_HEIGHT = "packetMonitorWindowHeight";
     public static final String KEY_PACKET_MONITOR_WINDOW_MAXIMIZED = "packetMonitorWindowMaximized";
+    public static final String KEY_PACKET_MONITOR_COLUMN_TIME_WIDTH = "packetMonitorColumnTimeWidth";
+    public static final String KEY_PACKET_MONITOR_COLUMN_TYPE_WIDTH = "packetMonitorColumnTypeWidth";
+    public static final String KEY_PACKET_MONITOR_COLUMN_FROM_WIDTH = "packetMonitorColumnFromWidth";
+    public static final String KEY_PACKET_MONITOR_COLUMN_TO_WIDTH = "packetMonitorColumnToWidth";
+    public static final String KEY_PACKET_MONITOR_COLUMN_PAYLOAD_WIDTH = "packetMonitorColumnPayloadWidth";
 
     private static Preferences state;
 
@@ -235,6 +240,7 @@ public class AppPreferences {
     public static final String KEY_NODES_DIVIDER = "nodesDividerPos";
     public static final String KEY_PACKET_MONITOR_DIVIDER = "packetMonitorDividerPos";
     private static final String NODE_CHAT_SCROLL = "chatScroll";
+    private static final String NODE_CHAT_NOTIFICATIONS = "chatNotifications";
 
     public static double getChatDividerPos() { return state().getDouble(KEY_CHAT_DIVIDER, 0.35); }
     public static void setChatDividerPos(double pos) { state().putDouble(KEY_CHAT_DIVIDER, pos); }
@@ -253,6 +259,28 @@ public class AppPreferences {
      * @param pos позиция разделителя в диапазоне {@code 0..1}
      */
     public static void setPacketMonitorDividerPos(double pos) { state().putDouble(KEY_PACKET_MONITOR_DIVIDER, pos); }
+
+    /**
+     * Возвращает сохранённую ширину колонки таблицы LoRa-мониторинга.
+     * Если пользователь ещё не менял размер, возвращается переданное стартовое значение.
+     *
+     * @param key          preference-key конкретной колонки
+     * @param defaultWidth стартовая ширина, используемая как fallback
+     * @return сохранённая либо стартовая ширина колонки
+     */
+    public static double getPacketMonitorColumnWidth(String key, double defaultWidth) {
+        return state().getDouble(key, defaultWidth);
+    }
+
+    /**
+     * Сохраняет текущую ширину колонки таблицы LoRa-мониторинга.
+     *
+     * @param key   preference-key конкретной колонки
+     * @param width фактическая ширина колонки в пикселях
+     */
+    public static void setPacketMonitorColumnWidth(String key, double width) {
+        state().putDouble(key, width);
+    }
 
     public static final class ChatScrollState {
         private final long anchorDbId;
@@ -301,8 +329,38 @@ public class AppPreferences {
         chatScrollNode().remove(composeChatScrollKey(ownerId, chatId));
     }
 
+    public static boolean isChatMuted(String ownerId, String chatId) {
+        return chatNotificationsNode().getBoolean(composeChatScrollKey(ownerId, chatId), false);
+    }
+
+    public static boolean isChatMuted(String ownerId, String chatType, String chatKey) {
+        return isChatMuted(ownerId, composeChatPreferenceId(chatType, chatKey));
+    }
+
+    public static void setChatMuted(String ownerId, String chatId, boolean muted) {
+        chatNotificationsNode().putBoolean(composeChatScrollKey(ownerId, chatId), muted);
+    }
+
+    public static void setChatMuted(String ownerId, String chatType, String chatKey, boolean muted) {
+        setChatMuted(ownerId, composeChatPreferenceId(chatType, chatKey), muted);
+    }
+
+    public static String composeChatPreferenceId(String chatType, String chatKey) {
+        if ("channel".equals(chatType)) {
+            return "channel:" + (chatKey != null ? chatKey : "");
+        }
+        if ("dm".equals(chatType)) {
+            return "dm:" + (chatKey != null ? chatKey : "");
+        }
+        return (chatType != null ? chatType : "") + ":" + (chatKey != null ? chatKey : "");
+    }
+
     private static Preferences chatScrollNode() {
         return state().node(NODE_CHAT_SCROLL);
+    }
+
+    private static Preferences chatNotificationsNode() {
+        return state().node(NODE_CHAT_NOTIFICATIONS);
     }
 
     private static String composeChatScrollKey(String ownerId, String chatId) {

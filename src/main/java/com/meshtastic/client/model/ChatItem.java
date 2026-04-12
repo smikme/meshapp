@@ -27,10 +27,11 @@ public final class ChatItem {
     private final int unreadCount;
     private final int channelIndex;
     private final String peerNodeId;
+    private final boolean muted;
 
     private ChatItem(ChatType type, String displayName, String avatarText, String avatarColor,
                      String lastMessageText, long lastMessageTime, int unreadCount,
-                     int channelIndex, String peerNodeId) {
+                     int channelIndex, String peerNodeId, boolean muted) {
         this.type = type;
         this.displayName = displayName;
         this.avatarText = avatarText;
@@ -40,6 +41,7 @@ public final class ChatItem {
         this.unreadCount = unreadCount;
         this.channelIndex = channelIndex;
         this.peerNodeId = peerNodeId;
+        this.muted = muted;
     }
 
     /**
@@ -52,7 +54,8 @@ public final class ChatItem {
      */
     public static ChatItem fromChannel(ChannelProtos.Channel channel,
                                        List<MeshMessage> messages,
-                                       int unreadCount) {
+                                       int unreadCount,
+                                       boolean muted) {
         String name = channel.getSettings().getName();
         if (name == null || name.isEmpty()) {
             name = channel.getIndex() == 0 ? "Primary" : "Ch " + channel.getIndex();
@@ -74,7 +77,7 @@ public final class ChatItem {
         }
 
         return new ChatItem(ChatType.CHANNEL, name, avatarText, color,
-                lastText, lastTime, unreadCount, channel.getIndex(), null);
+                lastText, lastTime, unreadCount, channel.getIndex(), null, muted);
     }
 
     /**
@@ -88,7 +91,8 @@ public final class ChatItem {
      */
     public static ChatItem fromDirectMessage(String peerNodeId, NodeData peerNode,
                                              List<MeshMessage> messages,
-                                             int unreadCount) {
+                                             int unreadCount,
+                                             boolean muted) {
         String displayName;
         String avatarText;
 
@@ -122,7 +126,7 @@ public final class ChatItem {
         }
 
         return new ChatItem(ChatType.DIRECT_MESSAGE, displayName, avatarText, color,
-                lastText, lastTime, unreadCount, 0, peerNodeId);
+                lastText, lastTime, unreadCount, 0, peerNodeId, muted);
     }
 
     // === DB-backed factory methods ===
@@ -132,7 +136,8 @@ public final class ChatItem {
      */
     public static ChatItem fromChannel(ChannelProtos.Channel channel,
                                        MeshMessage lastMessage,
-                                       int unreadCount) {
+                                       int unreadCount,
+                                       boolean muted) {
         String name = channel.getSettings().getName();
         if (name == null || name.isEmpty()) {
             name = channel.getIndex() == 0 ? "Primary" : "Ch " + channel.getIndex();
@@ -150,7 +155,7 @@ public final class ChatItem {
         }
 
         return new ChatItem(ChatType.CHANNEL, name, avatarText, color,
-                lastText, lastTime, unreadCount, channel.getIndex(), null);
+                lastText, lastTime, unreadCount, channel.getIndex(), null, muted);
     }
 
     /**
@@ -158,7 +163,8 @@ public final class ChatItem {
      */
     public static ChatItem fromDirectMessage(String peerNodeId, NodeData peerNode,
                                              MeshMessage lastMessage,
-                                             int unreadCount) {
+                                             int unreadCount,
+                                             boolean muted) {
         String displayName;
         String avatarText;
 
@@ -190,7 +196,7 @@ public final class ChatItem {
         }
 
         return new ChatItem(ChatType.DIRECT_MESSAGE, displayName, avatarText, color,
-                lastText, lastTime, unreadCount, 0, peerNodeId);
+                lastText, lastTime, unreadCount, 0, peerNodeId, muted);
     }
 
     private static String truncate(String text) {
@@ -210,4 +216,5 @@ public final class ChatItem {
     public int getUnreadCount() { return unreadCount; }
     public int getChannelIndex() { return channelIndex; }
     public String getPeerNodeId() { return peerNodeId; }
+    public boolean isMuted() { return muted; }
 }

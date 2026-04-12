@@ -19,5 +19,6 @@ com.meshtastic.client.service
 com.meshtastic.client.simple
 com.meshtastic.client.system
 com.meshtastic.client.themes
+com.meshtastic.client.tray
 com.meshtastic.client.utils
 fi.kapsi.koti.jpa.nanopb

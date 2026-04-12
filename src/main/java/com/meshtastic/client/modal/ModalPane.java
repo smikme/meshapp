@@ -27,9 +27,7 @@ import javafx.util.Duration;
 import com.meshtastic.client.MeshApp;
 import com.meshtastic.client.components.EmojiTextFlow;
 import com.meshtastic.client.model.UpdateInfo;
-
-import java.awt.Desktop;
-import java.net.URI;
+import com.meshtastic.client.utils.ExternalUrlLauncher;
 import java.util.function.Consumer;
 
 /**
@@ -44,6 +42,8 @@ public class ModalPane extends StackPane {
     private static ModalPane instance;
     private Node currentContent;
     private Runnable onHidden;
+    private boolean dismissOnBackdrop = true;
+    private boolean dismissOnEscape = true;
 
     /** Scene-level фильтр: закрытие по клику вне контента */
     private final EventHandler<MouseEvent> sceneClickFilter = e -> {
@@ -57,19 +57,20 @@ public class ModalPane extends StackPane {
         }
     };
 
+    /** Scene-level фильтр: закрытие по ESC независимо от focus owner внутри модалки */
+    private final EventHandler<KeyEvent> sceneKeyFilter = e -> {
+        if (dismissOnEscape && isVisible() && e.getCode() == KeyCode.ESCAPE) {
+            hide();
+            e.consume();
+        }
+    };
+
     public ModalPane() {
         setVisible(false);
         setPickOnBounds(true);
         getStyleClass().add("modal-overlay");
         setAlignment(Pos.CENTER_RIGHT);
-
-        // ESC закрывает модалку
-        addEventHandler(KeyEvent.KEY_PRESSED, e -> {
-            if (e.getCode() == KeyCode.ESCAPE) {
-                hide();
-                e.consume();
-            }
-        });
+        setFocusTraversable(false);
     }
 
     public static void install(ModalPane pane) {
@@ -91,14 +92,26 @@ public class ModalPane extends StackPane {
      * Показать контент — выезжает справа с fade-in.
      */
     public void show(Node content) {
+        show(content, true, true);
+    }
+
+    /**
+     * Показать контент с явным управлением dismiss-поведением.
+     */
+    public void show(Node content, boolean dismissOnBackdrop, boolean dismissOnEscape) {
         currentContent = content;
         onHidden = null;
+        this.dismissOnBackdrop = dismissOnBackdrop;
+        this.dismissOnEscape = dismissOnEscape;
         getChildren().setAll(content);
         setVisible(true);
 
         // Scene-level фильтр для закрытия по клику вне контента
-        if (getScene() != null) {
+        if (dismissOnBackdrop && getScene() != null) {
             getScene().addEventFilter(MouseEvent.MOUSE_PRESSED, sceneClickFilter);
+        }
+        if (dismissOnEscape && getScene() != null) {
+            getScene().addEventFilter(KeyEvent.KEY_PRESSED, sceneKeyFilter);
         }
 
         // Фон: fade-in
@@ -115,8 +128,6 @@ public class ModalPane extends StackPane {
 
         new ParallelTransition(bgFade, slide).play();
 
-        // Фокус на панель для обработки ESC
-        requestFocus();
     }
 
     /**
@@ -128,6 +139,7 @@ public class ModalPane extends StackPane {
         // Снять scene-level фильтр
         if (getScene() != null) {
             getScene().removeEventFilter(MouseEvent.MOUSE_PRESSED, sceneClickFilter);
+            getScene().removeEventFilter(KeyEvent.KEY_PRESSED, sceneKeyFilter);
         }
 
         FadeTransition bgFade = new FadeTransition(ANIM_DURATION, this);
@@ -142,9 +154,12 @@ public class ModalPane extends StackPane {
             setVisible(false);
             getChildren().clear();
             currentContent = null;
-            if (onHidden != null) {
-                onHidden.run();
-                onHidden = null;
+            dismissOnBackdrop = true;
+            dismissOnEscape = true;
+            Runnable hiddenCallback = onHidden;
+            onHidden = null;
+            if (hiddenCallback != null) {
+                hiddenCallback.run();
             }
         });
         anim.play();
@@ -256,13 +271,7 @@ public class ModalPane extends StackPane {
             pane.hide();
             String url = info.getDownloadUrl();
             if (url != null) {
-                Thread.ofVirtual().start(() -> {
-                    try {
-                        if (Desktop.isDesktopSupported()) {
-                            Desktop.getDesktop().browse(new URI(url));
-                        }
-                    } catch (Exception ignored) {}
-                });
+                ExternalUrlLauncher.open(url);
             }
         });
 

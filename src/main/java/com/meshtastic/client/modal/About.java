@@ -1,9 +1,12 @@
 package com.meshtastic.client.modal;
 
 import com.meshtastic.client.MeshApp;
+import com.meshtastic.client.components.CrashReportFlow;
+import com.meshtastic.client.utils.ExternalUrlLauncher;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Group;
+import javafx.scene.control.Button;
 import javafx.scene.control.Hyperlink;
 import javafx.scene.control.Label;
 import javafx.scene.image.Image;
@@ -16,11 +19,9 @@ import javafx.scene.shape.Circle;
 import javafx.scene.shape.Line;
 import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
+import javafx.stage.Window;
 
 import com.meshtastic.client.components.MemoryBar;
-
-import java.awt.Desktop;
-import java.net.URI;
 
 public class About extends VBox {
 
@@ -114,7 +115,24 @@ public class About extends VBox {
 
         sysInfo.getChildren().addAll(sysTitle, sysVersion, sysJava, sysOs, memTitle, memoryBar);
 
-        getChildren().addAll(title, projectBox, partnerBox, sysInfo);
+        VBox reportBox = new VBox(8);
+        reportBox.setPadding(new Insets(10));
+        reportBox.setStyle(BORDER_STYLE);
+
+        Label reportTitle = new Label("Поддержка");
+        reportTitle.setFont(Font.font("Roboto", FontWeight.BOLD, 13));
+
+        Label reportDesc = new Label("Если приложение работает некорректно, отправьте технический лог текущей сессии разработчикам.");
+        reportDesc.setWrapText(true);
+
+        Button reportButton = new Button("Сообщить о проблеме");
+        reportButton.getStyleClass().add("report-problem-button");
+        reportButton.setMaxWidth(Double.MAX_VALUE);
+        reportButton.setOnAction(event -> openProblemReportFlow());
+
+        reportBox.getChildren().addAll(reportTitle, reportDesc, reportButton);
+
+        getChildren().addAll(title, projectBox, partnerBox, sysInfo, reportBox);
     }
 
     /**
@@ -180,13 +198,20 @@ public class About extends VBox {
     }
 
     private static void openUrl(String url) {
-        Thread.ofVirtual().start(() -> {
-            try {
-                if (Desktop.isDesktopSupported()) {
-                    Desktop.getDesktop().browse(new URI(url));
-                }
-            } catch (Exception ignored) {
-            }
-        });
+        ExternalUrlLauncher.open(url);
+    }
+
+    private void openProblemReportFlow() {
+        Window owner = getScene() != null ? getScene().getWindow() : MeshApp.getPrimaryStage();
+        Runnable openFlow = () -> CrashReportFlow.showProblemReport(owner);
+
+        ModalPane pane = ModalPane.getInstance();
+        if (pane != null && pane.isVisible()) {
+            pane.setOnHidden(openFlow);
+            pane.hide();
+            return;
+        }
+
+        openFlow.run();
     }
 }

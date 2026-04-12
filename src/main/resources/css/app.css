@@ -239,6 +239,73 @@
     -fx-font-size: 12px;
 }
 
+.packet-monitor-date-time-box {
+    -fx-alignment: center-left;
+    -fx-spacing: 4;
+}
+
+.packet-monitor-date-time-summary {
+    -fx-min-width: 56px;
+    -fx-text-fill: -color-fg-muted;
+}
+
+.packet-monitor-date-time-box-empty .packet-monitor-date-time-summary {
+    -fx-opacity: 0.78;
+}
+
+.packet-monitor-date-time-clear {
+    -fx-min-width: 30px;
+    -fx-pref-width: 30px;
+    -fx-max-width: 30px;
+    -fx-padding: 7 0 7 0;
+}
+
+.packet-monitor-date-time-popup {
+    -fx-background-color: -color-bg-default;
+    -fx-background-radius: 12;
+    -fx-border-color: -color-border-default;
+    -fx-border-radius: 12;
+    -fx-padding: 0;
+}
+
+.packet-monitor-date-time-popup-bottom {
+    -fx-padding: 12;
+    -fx-spacing: 10;
+}
+
+.packet-monitor-date-time-popup-all-day {
+    -fx-text-fill: -color-fg-default;
+}
+
+.packet-monitor-date-time-popup-row {
+    -fx-alignment: center-left;
+    -fx-spacing: 10;
+}
+
+.packet-monitor-date-time-popup-label {
+    -fx-min-width: 58px;
+    -fx-text-fill: -color-fg-muted;
+}
+
+.packet-monitor-date-time-popup-value {
+    -fx-min-width: 28px;
+    -fx-font-weight: bold;
+    -fx-alignment: center-right;
+}
+
+.packet-monitor-date-time-slider {
+    -fx-pref-width: 220px;
+}
+
+.packet-monitor-date-time-popup-actions {
+    -fx-alignment: center-left;
+    -fx-spacing: 8;
+}
+
+.packet-monitor-date-time-popup-action {
+    -fx-padding: 5 12 5 12;
+}
+
 .packet-monitor-search-box {
     -fx-alignment: center-left;
     -fx-padding: 0 10 0 10;
@@ -447,6 +514,16 @@
 .toast-warning {
     -fx-background-color: -color-warning-emphasis;
     -fx-text-fill: -color-fg-emphasis;
+}
+
+.report-problem-button {
+    -fx-background-color: -color-danger-emphasis;
+    -fx-text-fill: white;
+    -fx-font-weight: bold;
+}
+
+.report-problem-button:hover {
+    -fx-opacity: 0.9;
 }
 
 /* Memory bar */
@@ -885,6 +962,28 @@
     -fx-text-fill: rgba(0, 0, 0, 0.85);
 }
 
+.chat-mute-icon {
+    -fx-min-width: 14;
+    -fx-padding: 0;
+    -fx-alignment: center;
+}
+
+.chat-mute-icon .svg-icon {
+    -fx-fill: rgba(255, 255, 255, 0.78);
+}
+
+.light-theme .chat-mute-icon .svg-icon {
+    -fx-fill: rgba(0, 0, 0, 0.72);
+}
+
+.chat-list-view .list-cell:selected .chat-mute-icon .svg-icon {
+    -fx-fill: rgba(255, 255, 255, 0.92);
+}
+
+.light-theme .chat-list-view .list-cell:selected .chat-mute-icon .svg-icon {
+    -fx-fill: rgba(0, 0, 0, 0.86);
+}
+
 .chat-preview-label {
     -fx-text-fill: rgba(255, 255, 255, 0.5);
     -fx-font-size: 12px;
@@ -1137,21 +1236,25 @@
 }
 
 .chat-bubble-meta {
-    -fx-padding: 2 0 0 0;
+    -fx-padding: 0;
 }
 
 .chat-bubble-footer {
-    -fx-padding: 2 0 0 0;
+    -fx-padding: 4 0 0 0;
 }
 
 .chat-bubble-reactions {
-    -fx-padding: 4 0 0 0;
+    -fx-padding: 0;
 }
 
 .chat-reaction-chip {
     -fx-background-color: rgba(255, 255, 255, 0.08);
     -fx-background-radius: 10;
     -fx-padding: 2 8;
+}
+
+.chat-reaction-chip-clickable:hover {
+    -fx-background-color: rgba(255, 255, 255, 0.14);
 }
 
 .chat-reaction-chip-own {
@@ -1219,6 +1322,10 @@
     -fx-background-color: rgba(0, 0, 0, 0.06);
 }
 
+.light-theme .chat-reaction-chip-clickable:hover {
+    -fx-background-color: rgba(0, 0, 0, 0.10);
+}
+
 .light-theme .chat-reaction-chip-own {
     -fx-background-color: rgba(91, 141, 239, 0.12);
     -fx-border-color: rgba(91, 141, 239, 0.35);
@@ -1226,6 +1333,52 @@
 
 .light-theme .chat-reaction-picker-btn:hover {
     -fx-background-color: rgba(0, 0, 0, 0.08);
+}
+
+.chat-command-popup {
+    -fx-background-color: -color-bg-default;
+    -fx-border-color: -color-border-default;
+    -fx-border-width: 1;
+    -fx-border-radius: 8;
+    -fx-background-radius: 8;
+    -fx-padding: 4;
+    -fx-spacing: 2;
+    -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.28), 10, 0, 0, 3);
+}
+
+.chat-command-suggestion-btn {
+    -fx-background-color: transparent;
+    -fx-background-radius: 6;
+    -fx-padding: 8 10;
+    -fx-cursor: hand;
+    -fx-max-width: Infinity;
+    -fx-content-display: graphic-only;
+}
+
+.chat-command-suggestion-btn:hover {
+    -fx-background-color: rgba(255, 255, 255, 0.10);
+}
+
+.chat-command-suggestion-btn-selected {
+    -fx-background-color: rgba(91, 141, 239, 0.18);
+}
+
+.light-theme .chat-command-suggestion-btn:hover {
+    -fx-background-color: rgba(0, 0, 0, 0.08);
+}
+
+.light-theme .chat-command-suggestion-btn-selected {
+    -fx-background-color: rgba(91, 141, 239, 0.12);
+}
+
+.chat-command-suggestion-primary {
+    -fx-text-fill: -color-fg-default;
+    -fx-font-size: 13px;
+}
+
+.chat-command-suggestion-secondary {
+    -fx-text-fill: -color-fg-muted;
+    -fx-font-size: 11px;
 }
 
 /* Время и хопы — lookup-цвет, авто-адаптация */

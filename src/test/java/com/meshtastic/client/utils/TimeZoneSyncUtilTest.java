@@ -28,6 +28,12 @@ class TimeZoneSyncUtilTest {
     }
 
     @Test
+    void resolvesCurrentOffsetForGmtLiteralTzDef() {
+        Instant instant = Instant.parse("2026-03-30T09:00:00Z");
+        assertTrue(TimeZoneSyncUtil.matchesCurrentGmtOffset("GMT-3", ZoneOffset.ofHours(3), instant));
+    }
+
+    @Test
     void resolvesCurrentOffsetForNorthernHemisphereDst() {
         Instant instant = Instant.parse("2026-03-30T12:00:00Z");
         assertTrue(TimeZoneSyncUtil.matchesCurrentGmtOffset(

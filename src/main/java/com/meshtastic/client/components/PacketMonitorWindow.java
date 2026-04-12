@@ -2,20 +2,28 @@ package com.meshtastic.client.components;
 
 import com.meshtastic.client.MeshApp;
 import com.meshtastic.client.modal.Toast;
+import com.meshtastic.client.model.ConnectionEntry;
+import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.PacketLogEntry;
 import com.meshtastic.client.model.PacketTreeNode;
+import com.meshtastic.client.service.ConnectionManager;
 import com.meshtastic.client.service.PacketMonitorService;
 import com.meshtastic.client.themes.ThemeManager;
 import com.meshtastic.client.utils.AppPreferences;
 import com.meshtastic.client.utils.PacketDebugFormatter;
 import com.meshtastic.client.utils.SvgIconLoader;
 import javafx.application.Platform;
+import javafx.beans.binding.Bindings;
+import javafx.beans.property.ReadOnlyStringWrapper;
+import javafx.beans.property.BooleanProperty;
+import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.value.ChangeListener;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import javafx.geometry.Insets;
 import javafx.geometry.Orientation;
 import javafx.geometry.Pos;
+import javafx.geometry.Rectangle2D;
 import javafx.scene.Node;
 import javafx.scene.Scene;
 import javafx.stage.Screen;
@@ -54,11 +62,14 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * Отдельное окно мониторинга LoRa mesh-пакетов.
@@ -95,7 +106,9 @@ public final class PacketMonitorWindow {
     private static final double PACKET_TABLE_TIME_COLUMN_WIDTH = 190;
     private static final double PACKET_TABLE_TYPE_COLUMN_WIDTH = 130;
     private static final double PACKET_TABLE_NODE_COLUMN_WIDTH = 150;
+    private static final double PACKET_TABLE_COMPACT_COLUMN_MIN_WIDTH = 72;
     private static final double PACKET_TABLE_PAYLOAD_MIN_WIDTH = 260;
+    private static final double PACKET_TABLE_PAYLOAD_RUNTIME_MIN_WIDTH = 140;
     private static final DateTimeFormatter PACKET_EXPORT_FILE_TIME =
             DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss");
 
@@ -104,6 +117,7 @@ public final class PacketMonitorWindow {
     private final PacketMonitorService packetMonitorService;
     private final ObservableList<PacketLogEntry> packetItems = FXCollections.observableArrayList();
     private final ObservableList<String> packetTypeFilters = FXCollections.observableArrayList(FILTER_ALL_TYPES);
+    private final BooleanProperty suppressPacketTableTooltips = new SimpleBooleanProperty(false);
     private final ChangeListener<Number> packetTableScrollListener =
             (obs, oldValue, newValue) -> handlePacketTableScroll(
                     oldValue != null ? oldValue.doubleValue() : 0.0,
@@ -136,6 +150,8 @@ public final class PacketMonitorWindow {
     private TreeView<PacketTreeNode> packetTree;
     private ComboBox<String> directionFilter;
     private ComboBox<String> typeFilter;
+    private DateTimePicker fromDateTimeFilter;
+    private DateTimePicker toDateTimeFilter;
     private TextField searchField;
     private Button btnStart;
     private Button btnStop;
@@ -145,10 +161,10 @@ public final class PacketMonitorWindow {
     private Button btnSaveText;
     private Button btnSaveJson;
     private Label statusLabel;
-    private Label countLabel;
     private PacketLogEntry viewedPacketEntry;
     private long viewedPacketId = -1L;
     private boolean restoringSelection;
+    private boolean restoringPacketTableColumnWidths;
     private boolean suppressFilterReload;
     private boolean pageLoadInProgress;
     private boolean ignoreTableScrollEvents;
@@ -196,6 +212,7 @@ public final class PacketMonitorWindow {
         if (instance == null) {
             instance = new PacketMonitorWindow();
         }
+        instance.ensureWindowVisible();
         instance.stage.show();
         if (instance.restoreWindowMaximized) {
             instance.captureCurrentWindowBounds();
@@ -209,9 +226,9 @@ public final class PacketMonitorWindow {
     /**
      * Создаёт сцену и stage окна мониторинга.
      * Контракт:
-     * - окно использует compact utility frame;
+     * - окно использует стандартную системную рамку;
      * - геометрия восстанавливается до {@code show()};
-     * - геометрия сохраняется на hiding, чтобы одинаково работать при нативном и программном закрытии.
+     * - геометрия сохраняется на hiding при любом способе закрытия окна.
      */
     private void createStage() {
         VBox root = new VBox(10);
@@ -224,11 +241,9 @@ public final class PacketMonitorWindow {
         ThemeManager.applyTheme(scene, AppPreferences.isDarkMode());
 
         stage = new Stage();
-        stage.initStyle(StageStyle.UTILITY);
+        stage.initStyle(StageStyle.DECORATED);
         stage.setTitle("Мониторинг LoRa-пакетов");
-        if (MeshApp.getPrimaryStage() != null) {
-            stage.initOwner(MeshApp.getPrimaryStage());
-        }
+        stage.setResizable(true);
         if (MeshApp.getPrimaryStage() != null && !MeshApp.getPrimaryStage().getIcons().isEmpty()) {
             stage.getIcons().setAll(MeshApp.getPrimaryStage().getIcons());
         }
@@ -304,6 +319,11 @@ public final class PacketMonitorWindow {
             onFilterChanged();
         });
 
+        fromDateTimeFilter = createDateTimePicker("дд.мм.гггг");
+        toDateTimeFilter = createDateTimePicker("дд.мм.гггг");
+        fromDateTimeFilter.popupShowingProperty().addListener((obs, oldValue, newValue) -> updatePacketTableTooltipSuppression());
+        toDateTimeFilter.popupShowingProperty().addListener((obs, oldValue, newValue) -> updatePacketTableTooltipSuppression());
+
         searchField = new TextField();
         searchField.setPromptText("Поиск по типу, узлам и payload");
         searchField.getStyleClass().add("packet-monitor-search-field");
@@ -319,9 +339,6 @@ public final class PacketMonitorWindow {
         HBox.setHgrow(searchField, Priority.ALWAYS);
         searchBox.getChildren().add(searchField);
 
-        countLabel = new Label();
-        countLabel.getStyleClass().add("config-status-label");
-
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
 
@@ -330,9 +347,12 @@ public final class PacketMonitorWindow {
                 directionFilter,
                 createFilterLabel("Тип"),
                 typeFilter,
+                createFilterLabel("С"),
+                fromDateTimeFilter,
+                createFilterLabel("По"),
+                toDateTimeFilter,
                 spacer,
-                searchBox,
-                countLabel
+                searchBox
         );
         HBox.setHgrow(searchBox, Priority.ALWAYS);
         return filterBar;
@@ -470,6 +490,8 @@ public final class PacketMonitorWindow {
      * Создаёт таблицу логов пакетов.
      * Selection listener перестраивает детали только если выбран другой пакет,
      * а не если JavaFX переиздал событие на ту же запись.
+     * Стартовые ширины колонок задаются явно, но после открытия окна пользователь
+     * может свободно менять их вручную.
      */
     private TableView<PacketLogEntry> createPacketTable() {
         TableView<PacketLogEntry> table = new TableView<>(packetItems);
@@ -485,27 +507,42 @@ public final class PacketMonitorWindow {
         configureCompactColumn(colType, PACKET_TABLE_TYPE_COLUMN_WIDTH);
 
         TableColumn<PacketLogEntry, String> colFrom = new TableColumn<>("От");
-        colFrom.setCellValueFactory(new PropertyValueFactory<>("fromNode"));
+        colFrom.setCellValueFactory(cellData -> new ReadOnlyStringWrapper(
+                formatPacketFromNode(cellData.getValue())));
         configureCompactColumn(colFrom, PACKET_TABLE_NODE_COLUMN_WIDTH);
 
         TableColumn<PacketLogEntry, String> colTo = new TableColumn<>("Кому");
-        colTo.setCellValueFactory(new PropertyValueFactory<>("toNode"));
+        colTo.setCellValueFactory(cellData -> new ReadOnlyStringWrapper(
+                formatPacketToNode(cellData.getValue())));
         configureCompactColumn(colTo, PACKET_TABLE_NODE_COLUMN_WIDTH);
 
         TableColumn<PacketLogEntry, String> colPayload = new TableColumn<>("Payload");
         colPayload.setCellValueFactory(new PropertyValueFactory<>("payloadText"));
-        colPayload.setMinWidth(PACKET_TABLE_PAYLOAD_MIN_WIDTH);
+        colPayload.setMinWidth(PACKET_TABLE_PAYLOAD_RUNTIME_MIN_WIDTH);
         colPayload.setPrefWidth(PACKET_TABLE_PAYLOAD_MIN_WIDTH);
+        colPayload.setMaxWidth(Double.MAX_VALUE);
+        colPayload.setResizable(true);
         colPayload.setSortable(false);
+
+        restorePacketTableColumnWidths(colTime, colType, colFrom, colTo, colPayload);
+        trackPacketTableColumnWidth(colTime, AppPreferences.KEY_PACKET_MONITOR_COLUMN_TIME_WIDTH);
+        trackPacketTableColumnWidth(colType, AppPreferences.KEY_PACKET_MONITOR_COLUMN_TYPE_WIDTH);
+        trackPacketTableColumnWidth(colFrom, AppPreferences.KEY_PACKET_MONITOR_COLUMN_FROM_WIDTH);
+        trackPacketTableColumnWidth(colTo, AppPreferences.KEY_PACKET_MONITOR_COLUMN_TO_WIDTH);
+        trackPacketTableColumnWidth(colPayload, AppPreferences.KEY_PACKET_MONITOR_COLUMN_PAYLOAD_WIDTH);
 
         table.getColumns().addAll(colTime, colType, colFrom, colTo, colPayload);
         table.setRowFactory(tv -> new TableRow<>() {
+            private final Tooltip rowTooltip = new Tooltip();
+
             @Override
             protected void updateItem(PacketLogEntry item, boolean empty) {
                 super.updateItem(item, empty);
                 setStyle("");
+                tooltipProperty().unbind();
                 setTooltip(null);
                 if (empty || item == null) {
+                    rowTooltip.hide();
                     return;
                 }
                 if (item.getDirection() == PacketLogEntry.Direction.INCOMING) {
@@ -513,7 +550,14 @@ public final class PacketMonitorWindow {
                 } else {
                     setStyle("-fx-text-fill: -color-success-emphasis;");
                 }
-                setTooltip(new Tooltip(item.getDirectionText() + ": " + item.getPayloadText()));
+                tooltipProperty().bind(Bindings.createObjectBinding(() -> {
+                    if (suppressPacketTableTooltips.get()) {
+                        rowTooltip.hide();
+                        return null;
+                    }
+                    rowTooltip.setText(item.getDirectionText() + ": " + item.getPayloadText());
+                    return rowTooltip;
+                }, itemProperty(), suppressPacketTableTooltips));
             }
         });
         table.getSelectionModel().selectedItemProperty()
@@ -555,10 +599,67 @@ public final class PacketMonitorWindow {
     }
 
     private void configureCompactColumn(TableColumn<PacketLogEntry, String> column, double width) {
-        column.setMinWidth(width);
+        column.setMinWidth(Math.min(PACKET_TABLE_COMPACT_COLUMN_MIN_WIDTH, width));
         column.setPrefWidth(width);
-        column.setMaxWidth(width);
+        column.setMaxWidth(Double.MAX_VALUE);
+        column.setResizable(true);
         column.setSortable(false);
+    }
+
+    /**
+     * Восстанавливает пользовательские ширины колонок таблицы из конфигурации приложения.
+     * Стартовые размеры остаются fallback-значениями на первый запуск либо если настройка отсутствует.
+     */
+    private void restorePacketTableColumnWidths(TableColumn<PacketLogEntry, String> colTime,
+                                                TableColumn<PacketLogEntry, String> colType,
+                                                TableColumn<PacketLogEntry, String> colFrom,
+                                                TableColumn<PacketLogEntry, String> colTo,
+                                                TableColumn<PacketLogEntry, String> colPayload) {
+        restoringPacketTableColumnWidths = true;
+        applyPacketTableColumnWidth(colTime,
+                AppPreferences.KEY_PACKET_MONITOR_COLUMN_TIME_WIDTH,
+                PACKET_TABLE_TIME_COLUMN_WIDTH);
+        applyPacketTableColumnWidth(colType,
+                AppPreferences.KEY_PACKET_MONITOR_COLUMN_TYPE_WIDTH,
+                PACKET_TABLE_TYPE_COLUMN_WIDTH);
+        applyPacketTableColumnWidth(colFrom,
+                AppPreferences.KEY_PACKET_MONITOR_COLUMN_FROM_WIDTH,
+                PACKET_TABLE_NODE_COLUMN_WIDTH);
+        applyPacketTableColumnWidth(colTo,
+                AppPreferences.KEY_PACKET_MONITOR_COLUMN_TO_WIDTH,
+                PACKET_TABLE_NODE_COLUMN_WIDTH);
+        applyPacketTableColumnWidth(colPayload,
+                AppPreferences.KEY_PACKET_MONITOR_COLUMN_PAYLOAD_WIDTH,
+                PACKET_TABLE_PAYLOAD_MIN_WIDTH);
+        Platform.runLater(() -> restoringPacketTableColumnWidths = false);
+    }
+
+    /**
+     * Применяет сохранённую ширину к одной колонке с учётом её runtime-ограничений.
+     */
+    private void applyPacketTableColumnWidth(TableColumn<PacketLogEntry, String> column,
+                                             String preferenceKey,
+                                             double defaultWidth) {
+        double savedWidth = AppPreferences.getPacketMonitorColumnWidth(preferenceKey, defaultWidth);
+        double boundedWidth = Math.max(column.getMinWidth(), savedWidth);
+        column.setPrefWidth(boundedWidth);
+    }
+
+    /**
+     * Подписывает колонку на сохранение текущей ширины в preferences.
+     * Во время начального восстановления значения игнорируются, чтобы стартовый layout
+     * не перетирал уже сохранённые пользовательские настройки.
+     */
+    private void trackPacketTableColumnWidth(TableColumn<PacketLogEntry, String> column, String preferenceKey) {
+        column.widthProperty().addListener((obs, oldValue, newValue) -> {
+            if (restoringPacketTableColumnWidths || newValue == null) {
+                return;
+            }
+            double width = newValue.doubleValue();
+            if (width > 0) {
+                AppPreferences.setPacketMonitorColumnWidth(preferenceKey, width);
+            }
+        });
     }
 
     private VBox createSection(String title, javafx.scene.Node content) {
@@ -577,6 +678,21 @@ public final class PacketMonitorWindow {
         Label label = new Label(text);
         label.getStyleClass().add("packet-monitor-filter-label");
         return label;
+    }
+
+    /**
+     * Создаёт фильтр даты/времени на базе DatePicker с кастомным popup-календарём.
+     * В нижней части popup доступны выбор времени через слайдеры часов и минут.
+     */
+    private DateTimePicker createDateTimePicker(String promptText) {
+        return new DateTimePicker(promptText, this::onFilterChanged);
+    }
+
+    private void updatePacketTableTooltipSuppression() {
+        suppressPacketTableTooltips.set(
+                (fromDateTimeFilter != null && fromDateTimeFilter.isPopupShowing())
+                        || (toDateTimeFilter != null && toDateTimeFilter.isPopupShowing())
+        );
     }
 
     private Button createToolbarButton(String title, String tooltipText, String iconPath, Runnable action) {
@@ -656,7 +772,6 @@ public final class PacketMonitorWindow {
                     );
             if (page.entries().isEmpty()) {
                 currentPageHasOlder = false;
-                updateCountLabel();
                 return;
             }
             appendOlderChunk(page, anchorIndex);
@@ -687,7 +802,6 @@ public final class PacketMonitorWindow {
             if (page.entries().isEmpty()) {
                 currentPageHasNewer = false;
                 latestFrameDirty = false;
-                updateCountLabel();
                 return;
             }
             prependNewerChunk(page, anchorIndex);
@@ -811,13 +925,6 @@ public final class PacketMonitorWindow {
         btnStop.setDisable(!captureEnabled);
         btnClear.setDisable(totalStoredPacketCount == 0);
         statusLabel.setText(captureEnabled ? "Сбор активен" : "Сбор остановлен");
-        updateCountLabel();
-    }
-
-    private void updateCountLabel() {
-        countLabel.setText("Показано " + packetItems.size()
-                + " из " + matchingPacketCount
-                + " · в памяти " + packetItems.size() + "/" + PAGE_SIZE);
     }
 
     /**
@@ -1040,12 +1147,26 @@ public final class PacketMonitorWindow {
         String selectedType = getActiveTypeFilterSelection();
         String packetType = FILTER_ALL_TYPES.equals(selectedType) ? null : selectedType;
         String searchText = searchField != null ? searchField.getText() : null;
-        return new PacketMonitorService.PacketQuery(direction, packetType, searchText);
+        Long capturedAtFromMillis = resolveCapturedAtBoundary(fromDateTimeFilter, true);
+        Long capturedAtToMillis = resolveCapturedAtBoundary(toDateTimeFilter, false);
+        return new PacketMonitorService.PacketQuery(
+                direction,
+                packetType,
+                searchText,
+                capturedAtFromMillis,
+                capturedAtToMillis
+        );
     }
 
     private PacketMonitorService.PacketQuery buildTypeOptionsQuery() {
         PacketMonitorService.PacketQuery query = buildCurrentQuery();
-        return new PacketMonitorService.PacketQuery(query.direction(), null, query.searchText());
+        return new PacketMonitorService.PacketQuery(
+                query.direction(),
+                null,
+                query.searchText(),
+                query.capturedAtFromMillis(),
+                query.capturedAtToMillis()
+        );
     }
 
     /**
@@ -1072,6 +1193,15 @@ public final class PacketMonitorWindow {
             return false;
         }
 
+        Long capturedAtFromMillis = resolveCapturedAtBoundary(fromDateTimeFilter, true);
+        if (capturedAtFromMillis != null && entry.getCapturedAt() < capturedAtFromMillis) {
+            return false;
+        }
+        Long capturedAtToMillis = resolveCapturedAtBoundary(toDateTimeFilter, false);
+        if (capturedAtToMillis != null && entry.getCapturedAt() > capturedAtToMillis) {
+            return false;
+        }
+
         String query = searchField != null ? searchField.getText() : null;
         if (query == null || query.isBlank()) {
             return true;
@@ -1079,10 +1209,73 @@ public final class PacketMonitorWindow {
 
         String lowerQuery = query.toLowerCase(java.util.Locale.ROOT);
         return containsIgnoreCase(entry.getPacketType(), lowerQuery)
-                || containsIgnoreCase(entry.getFromNode(), lowerQuery)
-                || containsIgnoreCase(entry.getToNode(), lowerQuery)
+                || containsIgnoreCase(formatPacketFromNode(entry), lowerQuery)
+                || containsIgnoreCase(formatPacketToNode(entry), lowerQuery)
                 || containsIgnoreCase(entry.getPayloadText(), lowerQuery)
                 || containsIgnoreCase(entry.getDirectionText(), lowerQuery);
+    }
+
+    /**
+     * Формирует UI-представление поля {@code from} в виде {@code Имя (!nodeId)}.
+     * Если имя ноды недоступно, возвращается только стандартный {@code !nodeId};
+     * сохранённое в БД значение используется только как fallback при ошибке разбора пакета.
+     */
+    private String formatPacketFromNode(PacketLogEntry entry) {
+        return resolvePacketEndpoints(entry).fromNode();
+    }
+
+    /**
+     * Формирует UI-представление поля {@code to} в виде {@code Имя (!nodeId)}.
+     * Если имя ноды недоступно, возвращается только стандартный {@code !nodeId};
+     * сохранённое в БД значение используется только как fallback при ошибке разбора пакета.
+     */
+    private String formatPacketToNode(PacketLogEntry entry) {
+        return resolvePacketEndpoints(entry).toNode();
+    }
+
+    /**
+     * Пересчитывает подписи {@code От}/{@code Кому} из байтов пакета без модификации БД.
+     * Для уже сохранённых записей это позволяет показывать одинаковый формат в таблице
+     * и текстовом экспорте независимо от исторического содержимого колонок {@code from_node/to_node}.
+     */
+    private PacketDebugFormatter.PacketEndpoints resolvePacketEndpoints(PacketLogEntry entry) {
+        return PacketDebugFormatter.resolvePacketEndpoints(entry, resolveEntryDeviceState(entry));
+    }
+
+    /**
+     * Подбирает {@link DeviceState}, соответствующий owner-нode записи пакета.
+     * Контракт:
+     * - при точном совпадении {@code ownerNodeId} используется связанный активный {@link DeviceState};
+     * - если owner пустой и есть единственное активное подключение, используется его состояние;
+     * - при отсутствии подходящего подключения возвращается {@code null}, и formatter
+     *   отображает только стандартные {@code !nodeId} без имени.
+     */
+    private DeviceState resolveEntryDeviceState(PacketLogEntry entry) {
+        if (entry == null) {
+            return null;
+        }
+
+        String ownerNodeId = entry.getOwnerNodeId();
+        ConnectionManager connectionManager = ConnectionManager.getInstance();
+        DeviceState fallback = null;
+        for (ConnectionEntry connectionEntry : connectionManager.getEntries()) {
+            DeviceState deviceState = connectionManager.getDeviceState(connectionEntry.getId());
+            if (deviceState == null) {
+                continue;
+            }
+
+            if (fallback == null) {
+                fallback = deviceState;
+            }
+
+            String connectionOwnerNodeId = connectionManager.getOwnerNodeId(connectionEntry.getId());
+            if (ownerNodeId != null && !ownerNodeId.isBlank()
+                    && ownerNodeId.equalsIgnoreCase(connectionOwnerNodeId)) {
+                return deviceState;
+            }
+        }
+
+        return (ownerNodeId == null || ownerNodeId.isBlank()) ? fallback : null;
     }
 
     private String getActiveTypeFilterSelection() {
@@ -1359,7 +1552,9 @@ public final class PacketMonitorWindow {
      * Копирует текущий пакет в текстовом экспортном формате.
      */
     private void copyViewedPacketAsText() {
-        copyViewedPacket(PacketDebugFormatter.exportPacketAsText(viewedPacketEntry),
+        copyViewedPacket(PacketDebugFormatter.exportPacketAsText(
+                        viewedPacketEntry,
+                        resolveEntryDeviceState(viewedPacketEntry)),
                 "Пакет скопирован в текстовом виде");
     }
 
@@ -1386,7 +1581,9 @@ public final class PacketMonitorWindow {
     }
 
     private void saveViewedPacketAsText() {
-        saveViewedPacket(PacketDebugFormatter.exportPacketAsText(viewedPacketEntry), false);
+        saveViewedPacket(PacketDebugFormatter.exportPacketAsText(
+                viewedPacketEntry,
+                resolveEntryDeviceState(viewedPacketEntry)), false);
     }
 
     private void saveViewedPacketAsJson() {
@@ -1478,8 +1675,8 @@ public final class PacketMonitorWindow {
 
     /**
      * Восстанавливает координаты, размер и флаг maximized.
-     * Состояние применяется только если сохранённый прямоугольник попадает хотя бы
-     * частично на один из доступных экранов.
+     * Если сохранённый прямоугольник больше не попадает на доступные экраны,
+     * окно возвращается в видимую область ближайшего дисплея.
      */
     private void restoreWindowState() {
         restoreWindowMaximized = AppPreferences.isPacketMonitorWindowMaximized();
@@ -1487,23 +1684,12 @@ public final class PacketMonitorWindow {
             return;
         }
 
-        double x = AppPreferences.getPacketMonitorWindowX();
-        double y = AppPreferences.getPacketMonitorWindowY();
-        double width = AppPreferences.getPacketMonitorWindowWidth();
-        double height = AppPreferences.getPacketMonitorWindowHeight();
-        ObservableList<Screen> screens = Screen.getScreensForRectangle(x, y, width, height);
-        if (screens.isEmpty()) {
-            return;
-        }
-
-        stage.setX(x);
-        stage.setY(y);
-        stage.setWidth(width);
-        stage.setHeight(height);
-        normalWindowX = x;
-        normalWindowY = y;
-        normalWindowWidth = width;
-        normalWindowHeight = height;
+        applyWindowBounds(resolveVisibleWindowBounds(
+                AppPreferences.getPacketMonitorWindowX(),
+                AppPreferences.getPacketMonitorWindowY(),
+                AppPreferences.getPacketMonitorWindowWidth(),
+                AppPreferences.getPacketMonitorWindowHeight()
+        ));
     }
 
     /**
@@ -1549,16 +1735,207 @@ public final class PacketMonitorWindow {
     private void saveWindowState() {
         boolean maximized = stage != null && stage.isMaximized();
         captureCurrentWindowBounds();
-        AppPreferences.savePacketMonitorWindowBounds(
+        WindowBounds visibleBounds = resolveVisibleWindowBounds(
                 Double.isNaN(normalWindowX) ? stage.getX() : normalWindowX,
                 Double.isNaN(normalWindowY) ? stage.getY() : normalWindowY,
                 normalWindowWidth > 0 ? normalWindowWidth : stage.getWidth(),
-                normalWindowHeight > 0 ? normalWindowHeight : stage.getHeight(),
+                normalWindowHeight > 0 ? normalWindowHeight : stage.getHeight()
+        );
+        AppPreferences.savePacketMonitorWindowBounds(
+                visibleBounds.x(),
+                visibleBounds.y(),
+                visibleBounds.width(),
+                visibleBounds.height(),
                 maximized
         );
         if (contentSplit != null && !contentSplit.getDividers().isEmpty()) {
             AppPreferences.setPacketMonitorDividerPos(contentSplit.getDividers().getFirst().getPosition());
         }
+    }
+
+    /**
+     * Возвращает окно в видимую область, если его normal bounds ушли за пределы доступных экранов.
+     */
+    private void ensureWindowVisible() {
+        if (stage == null || stage.isMaximized()) {
+            return;
+        }
+
+        applyWindowBounds(resolveVisibleWindowBounds(
+                Double.isNaN(normalWindowX) ? stage.getX() : normalWindowX,
+                Double.isNaN(normalWindowY) ? stage.getY() : normalWindowY,
+                normalWindowWidth > 0 ? normalWindowWidth : stage.getWidth(),
+                normalWindowHeight > 0 ? normalWindowHeight : stage.getHeight()
+        ));
+    }
+
+    private void applyWindowBounds(WindowBounds bounds) {
+        if (bounds == null) {
+            return;
+        }
+
+        stage.setX(bounds.x());
+        stage.setY(bounds.y());
+        stage.setWidth(bounds.width());
+        stage.setHeight(bounds.height());
+        normalWindowX = bounds.x();
+        normalWindowY = bounds.y();
+        normalWindowWidth = bounds.width();
+        normalWindowHeight = bounds.height();
+    }
+
+    private static WindowBounds resolveVisibleWindowBounds(double x, double y, double width, double height) {
+        List<Rectangle2D> visibleAreas = Screen.getScreens().stream()
+                .map(Screen::getVisualBounds)
+                .filter(Objects::nonNull)
+                .toList();
+        Rectangle2D fallbackArea = visibleAreas.isEmpty() ? defaultVisibleArea() : visibleAreas.getFirst();
+        return normalizeWindowBounds(x, y, width, height, visibleAreas, fallbackArea);
+    }
+
+    static WindowBounds normalizeWindowBounds(double x,
+                                              double y,
+                                              double width,
+                                              double height,
+                                              List<Rectangle2D> visibleAreas,
+                                              Rectangle2D fallbackArea) {
+        Rectangle2D effectiveFallback = fallbackArea != null ? fallbackArea : defaultVisibleArea();
+        List<Rectangle2D> safeVisibleAreas = visibleAreas == null ? List.of() : visibleAreas.stream()
+                .filter(Objects::nonNull)
+                .toList();
+        Rectangle2D targetArea = selectTargetArea(x, y, width, height, safeVisibleAreas, effectiveFallback);
+
+        double safeWidth = sanitizeWindowDimension(width, DEFAULT_WINDOW_WIDTH, targetArea.getWidth());
+        double safeHeight = sanitizeWindowDimension(height, DEFAULT_WINDOW_HEIGHT, targetArea.getHeight());
+        boolean intersectsVisibleArea = intersectsAnyVisibleArea(x, y, safeWidth, safeHeight, safeVisibleAreas);
+
+        double targetX = intersectsVisibleArea && Double.isFinite(x)
+                ? clamp(x, targetArea.getMinX(), targetArea.getMaxX() - safeWidth)
+                : centerCoordinate(targetArea.getMinX(), targetArea.getWidth(), safeWidth);
+        double targetY = intersectsVisibleArea && Double.isFinite(y)
+                ? clamp(y, targetArea.getMinY(), targetArea.getMaxY() - safeHeight)
+                : centerCoordinate(targetArea.getMinY(), targetArea.getHeight(), safeHeight);
+        return new WindowBounds(targetX, targetY, safeWidth, safeHeight);
+    }
+
+    private static Rectangle2D selectTargetArea(double x,
+                                                double y,
+                                                double width,
+                                                double height,
+                                                List<Rectangle2D> visibleAreas,
+                                                Rectangle2D fallbackArea) {
+        if (visibleAreas == null || visibleAreas.isEmpty()) {
+            return fallbackArea != null ? fallbackArea : defaultVisibleArea();
+        }
+
+        Rectangle2D candidate = candidateBounds(x, y, width, height);
+        if (candidate != null) {
+            Rectangle2D overlappingArea = visibleAreas.stream()
+                    .filter(area -> intersects(area, candidate))
+                    .max((left, right) -> Double.compare(intersectionArea(left, candidate), intersectionArea(right, candidate)))
+                    .orElse(null);
+            if (overlappingArea != null) {
+                return overlappingArea;
+            }
+
+            double centerX = candidate.getMinX() + candidate.getWidth() / 2.0;
+            double centerY = candidate.getMinY() + candidate.getHeight() / 2.0;
+            return visibleAreas.stream()
+                    .min((left, right) -> Double.compare(
+                            distanceSquaredToRectangle(centerX, centerY, left),
+                            distanceSquaredToRectangle(centerX, centerY, right)))
+                    .orElse(visibleAreas.getFirst());
+        }
+
+        return fallbackArea != null ? fallbackArea : visibleAreas.getFirst();
+    }
+
+    private static Rectangle2D candidateBounds(double x, double y, double width, double height) {
+        if (!Double.isFinite(x) || !Double.isFinite(y)) {
+            return null;
+        }
+
+        double safeWidth = width > 0 && Double.isFinite(width) ? width : DEFAULT_WINDOW_WIDTH;
+        double safeHeight = height > 0 && Double.isFinite(height) ? height : DEFAULT_WINDOW_HEIGHT;
+        return new Rectangle2D(x, y, safeWidth, safeHeight);
+    }
+
+    private static boolean intersectsAnyVisibleArea(double x,
+                                                    double y,
+                                                    double width,
+                                                    double height,
+                                                    List<Rectangle2D> visibleAreas) {
+        Rectangle2D candidate = candidateBounds(x, y, width, height);
+        return candidate != null && visibleAreas.stream().anyMatch(area -> intersects(area, candidate));
+    }
+
+    private static boolean intersects(Rectangle2D left, Rectangle2D right) {
+        return left.getMaxX() > right.getMinX()
+                && right.getMaxX() > left.getMinX()
+                && left.getMaxY() > right.getMinY()
+                && right.getMaxY() > left.getMinY();
+    }
+
+    private static double intersectionArea(Rectangle2D left, Rectangle2D right) {
+        double intersectionWidth = Math.min(left.getMaxX(), right.getMaxX()) - Math.max(left.getMinX(), right.getMinX());
+        double intersectionHeight = Math.min(left.getMaxY(), right.getMaxY()) - Math.max(left.getMinY(), right.getMinY());
+        if (intersectionWidth <= 0 || intersectionHeight <= 0) {
+            return 0.0;
+        }
+        return intersectionWidth * intersectionHeight;
+    }
+
+    private static double distanceSquaredToRectangle(double x, double y, Rectangle2D area) {
+        double dx = x < area.getMinX() ? area.getMinX() - x : Math.max(0.0, x - area.getMaxX());
+        double dy = y < area.getMinY() ? area.getMinY() - y : Math.max(0.0, y - area.getMaxY());
+        return dx * dx + dy * dy;
+    }
+
+    private static double sanitizeWindowDimension(double requested, double defaultValue, double maxVisible) {
+        double preferred = requested > 0 && Double.isFinite(requested) ? requested : defaultValue;
+        return Math.min(maxVisible, Math.max(200.0, preferred));
+    }
+
+    private static double centerCoordinate(double min, double available, double size) {
+        return min + Math.max(0.0, (available - size) / 2.0);
+    }
+
+    private static double clamp(double value, double min, double max) {
+        if (max < min) {
+            return min;
+        }
+        return Math.max(min, Math.min(value, max));
+    }
+
+    private static Rectangle2D defaultVisibleArea() {
+        return new Rectangle2D(0, 0, DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT);
+    }
+
+    record WindowBounds(double x, double y, double width, double height) {}
+
+    /**
+     * Преобразует выбранное значение date/time filter-а в границу SQL-диапазона.
+     * Контракт:
+     * - отсутствие даты выключает фильтр и возвращает {@code null};
+     * - режим {@code Весь день} разворачивается в начало или конец суток;
+     * - верхняя граница включительная и поэтому доводится до последней наносекунды минуты/дня.
+     */
+    private static Long resolveCapturedAtBoundary(DateTimePicker dateTimePicker, boolean lowerBound) {
+        if (dateTimePicker == null || dateTimePicker.getDate() == null) {
+            return null;
+        }
+
+        LocalTime selectedTime = dateTimePicker.getTime();
+        LocalTime effectiveTime;
+        if (selectedTime == null) {
+            effectiveTime = lowerBound ? LocalTime.MIN : LocalTime.MAX;
+        } else if (lowerBound) {
+            effectiveTime = selectedTime.withSecond(0).withNano(0);
+        } else {
+            effectiveTime = selectedTime.withSecond(59).withNano(999_999_999);
+        }
+        LocalDateTime capturedAt = LocalDateTime.of(dateTimePicker.getDate(), effectiveTime);
+        return capturedAt.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
     }
 
     private static boolean containsIgnoreCase(String value, String query) {

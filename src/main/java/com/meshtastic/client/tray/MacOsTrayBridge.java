@@ -61,6 +61,18 @@ final class MacOsTrayBridge {
         }
     }
 
+    static boolean focusWindow(long nsWindow, long nsView) {
+        if (!LIBRARY_LOADED.get() || nsWindow == 0) {
+            return false;
+        }
+        try {
+            return focusWindow0(nsWindow, nsView);
+        } catch (UnsatisfiedLinkError e) {
+            log.debug("macOS tray bridge focusWindow failed", e);
+            return false;
+        }
+    }
+
     @SuppressWarnings("unused") // called from JNI
     private static void handleClickFromNative() {
         Runnable handler = activateHandler;
@@ -96,6 +108,7 @@ final class MacOsTrayBridge {
     private static native boolean install0(String iconPath, String toolTip);
     private static native void dispose0();
     private static native void activate0();
+    private static native boolean focusWindow0(long nsWindow, long nsView);
 
     private MacOsTrayBridge() {}
 }

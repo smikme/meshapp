@@ -3,6 +3,7 @@ package com.meshtastic.client.service;
 import com.google.protobuf.ByteString;
 import com.meshtastic.client.TestEnvironmentSupport;
 import com.meshtastic.client.model.DeviceState;
+import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.model.PacketLogEntry;
 import org.junit.jupiter.api.AfterEach;
@@ -13,6 +14,8 @@ import org.meshtastic.proto.MeshProtos;
 import org.meshtastic.proto.Portnums;
 
 import java.nio.file.Path;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
@@ -80,16 +83,16 @@ class PacketMonitorServiceTest {
         PacketLogEntry first = entries.getFirst();
         assertEquals(PacketLogEntry.Direction.OUTGOING, first.getDirection());
         assertEquals("NODEINFO_APP", first.getPacketType());
-        assertEquals("Local Base (!12345678)", first.getFromNode());
-        assertEquals("Peer B (!22222222)", first.getToNode());
+        assertEquals("Local Base (305419896)", first.getFromNode());
+        assertEquals("Peer B (572662306)", first.getToNode());
         assertTrue(first.getPayloadText().contains("Relay"));
         assertArrayEquals(outgoing.toByteArray(), first.getPacketBytes());
 
         PacketLogEntry second = entries.getLast();
         assertEquals(PacketLogEntry.Direction.INCOMING, second.getDirection());
         assertEquals("TEXT_MESSAGE_APP", second.getPacketType());
-        assertEquals("Peer A (!11111111)", second.getFromNode());
-        assertEquals("Вещание (!ffffffff)", second.getToNode());
+        assertEquals("Peer A (286331153)", second.getFromNode());
+        assertEquals("Вещание (4294967295)", second.getToNode());
         assertEquals("\"hello mesh\"", second.getPayloadText());
         assertEquals(1_710_000_000_000L, second.getCapturedAt());
         assertArrayEquals(incoming.toByteArray(), second.getPacketBytes());
@@ -136,7 +139,7 @@ class PacketMonitorServiceTest {
             service.recordPacket(PacketLogEntry.Direction.INCOMING, packet, "!owner", null);
         }
 
-        PacketMonitorService.PacketQuery query = new PacketMonitorService.PacketQuery(null, null, null);
+        PacketMonitorService.PacketQuery query = new PacketMonitorService.PacketQuery(null, null, null, null, null);
         PacketMonitorService.PacketPage latestPage = service.loadLatestPage(query, 200);
 
         assertEquals(200, latestPage.entries().size());
@@ -190,7 +193,7 @@ class PacketMonitorServiceTest {
             service.recordPacket(PacketLogEntry.Direction.INCOMING, packet, "!owner", null);
         }
 
-        PacketMonitorService.PacketQuery query = new PacketMonitorService.PacketQuery(null, null, null);
+        PacketMonitorService.PacketQuery query = new PacketMonitorService.PacketQuery(null, null, null, null, null);
 
         PacketMonitorService.PacketPage firstFrame = service.loadPageFrame(query, 0, 200);
         assertFalse(firstFrame.hasNewer());
@@ -212,6 +215,120 @@ class PacketMonitorServiceTest {
         assertEquals(30, lastFrame.entries().size());
         assertEquals("\"frame-30\"", lastFrame.entries().getFirst().getPayloadText());
         assertEquals("\"frame-1\"", lastFrame.entries().getLast().getPayloadText());
+    }
+
+    @Test
+    void filtersPacketsByCapturedAtRange() {
+        service.startCapture();
+
+        service.recordPacket(PacketLogEntry.Direction.INCOMING,
+                textPacket(1, toEpochSeconds(2024, 11, 11, 8, 0, 0), "range-1"), "!owner", null);
+        service.recordPacket(PacketLogEntry.Direction.INCOMING,
+                textPacket(2, toEpochSeconds(2024, 11, 11, 10, 30, 0), "range-2"), "!owner", null);
+        service.recordPacket(PacketLogEntry.Direction.INCOMING,
+                textPacket(3, toEpochSeconds(2024, 11, 11, 12, 30, 0), "range-3"), "!owner", null);
+
+        long fromMillis = toEpochMillis(2024, 11, 11, 9, 0, 0);
+        long toMillis = toEpochMillis(2024, 11, 11, 11, 0, 0);
+
+        PacketMonitorService.PacketQuery query = new PacketMonitorService.PacketQuery(
+                null,
+                null,
+                null,
+                fromMillis,
+                toMillis
+        );
+
+        PacketMonitorService.PacketPage page = service.loadLatestPage(query, 200);
+
+        assertEquals(1, page.entries().size());
+        assertEquals("\"range-2\"", page.entries().getFirst().getPayloadText());
+        assertEquals(1, page.totalMatchingCount());
+        assertEquals(3, page.totalStoredCount());
+    }
+
+    @Test
+    void searchFindsPacketsByStandardNodeIdFormat() {
+        DeviceState state = deviceState();
+        service.startCapture();
+
+        MeshProtos.MeshPacket packet = MeshProtos.MeshPacket.newBuilder()
+                .setFrom(0x11111111)
+                .setTo(0xFFFFFFFF)
+                .setId(404)
+                .setRxTime(1_710_000_123)
+                .setDecoded(MeshProtos.Data.newBuilder()
+                        .setPortnum(Portnums.PortNum.TEXT_MESSAGE_APP)
+                        .setPayload(ByteString.copyFromUtf8("search-node"))
+                        .build())
+                .build();
+
+        service.recordPacket(PacketLogEntry.Direction.INCOMING, packet, "!12345678", state);
+
+        PacketMonitorService.PacketQuery fromQuery = new PacketMonitorService.PacketQuery(
+                null,
+                null,
+                "!11111111",
+                null,
+                null
+        );
+        PacketMonitorService.PacketPage fromPage = service.loadLatestPage(fromQuery, 200);
+        assertEquals(1, fromPage.entries().size());
+        assertEquals("\"search-node\"", fromPage.entries().getFirst().getPayloadText());
+
+        PacketMonitorService.PacketQuery broadcastQuery = new PacketMonitorService.PacketQuery(
+                null,
+                null,
+                "!ffffffff",
+                null,
+                null
+        );
+        PacketMonitorService.PacketPage broadcastPage = service.loadLatestPage(broadcastQuery, 200);
+        assertEquals(1, broadcastPage.entries().size());
+        assertEquals("\"search-node\"", broadcastPage.entries().getFirst().getPayloadText());
+    }
+
+    @Test
+    void clearingLoraLogsDoesNotDeleteChatMessages() {
+        MessageDbService messageDbService = MessageDbService.getInstance();
+        MeshMessage message = new MeshMessage("!11111111", "!ffffffff", 0, "chat survives", 1_710_000_000L, false);
+        message.setPacketId(9001);
+        messageDbService.save(message, "channel", "0", "!owner");
+
+        service.startCapture();
+        service.recordPacket(PacketLogEntry.Direction.INCOMING,
+                textPacket(1, 1_710_000_100, "lora only"), "!owner", null);
+
+        service.clear();
+
+        assertTrue(service.loadAll().isEmpty());
+        List<MeshMessage> messages = messageDbService.loadLast("channel", "0", 20, "!owner");
+        assertEquals(1, messages.size());
+        assertEquals("chat survives", messages.getFirst().getText());
+    }
+
+    private static MeshProtos.MeshPacket textPacket(int id, int rxTimeSeconds, String payload) {
+        return MeshProtos.MeshPacket.newBuilder()
+                .setFrom(id)
+                .setTo(0xFFFFFFFF)
+                .setId(id)
+                .setRxTime(rxTimeSeconds)
+                .setDecoded(MeshProtos.Data.newBuilder()
+                        .setPortnum(Portnums.PortNum.TEXT_MESSAGE_APP)
+                        .setPayload(ByteString.copyFromUtf8(payload))
+                        .build())
+                .build();
+    }
+
+    private static long toEpochMillis(int year, int month, int day, int hour, int minute, int second) {
+        return LocalDateTime.of(year, month, day, hour, minute, second)
+                .atZone(ZoneId.systemDefault())
+                .toInstant()
+                .toEpochMilli();
+    }
+
+    private static int toEpochSeconds(int year, int month, int day, int hour, int minute, int second) {
+        return (int) (toEpochMillis(year, month, day, hour, minute, second) / 1000);
     }
 
     private static DeviceState deviceState() {

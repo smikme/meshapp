@@ -122,7 +122,11 @@ public class FormSetting extends Form {
 
     private DeviceState state;
     private ProtocolHandler handler;
-    private final Runnable connectionListener = () -> Platform.runLater(this::reloadConfigTree);
+    private volatile String pendingTimeOnlySyncConnectionId;
+    private final Runnable connectionListener = () -> Platform.runLater(() -> {
+        reloadConfigTree();
+        maybeResumeDeferredTimeOnlySync();
+    });
 
     // Cache tab
     private TableView<NodeData> cacheTable;
@@ -315,6 +319,65 @@ public class FormSetting extends Form {
         } catch (Exception e) {
             throw new IllegalStateException("Config save step '" + stepName + "' ACK failed", e);
         }
+    }
+
+    /**
+     * Ждёт routing ACK для reboot-triggering commit, но не считает ошибкой случай,
+     * когда устройство успело разорвать линк раньше подтверждения.
+     * <p>
+     * commit применяет изменения и почти сразу запускает reboot, поэтому на любом
+     * транспорте ACK может потеряться уже после успешного принятия команды.
+     * Явный routing NAK при этом остаётся настоящей ошибкой.
+     */
+    private void waitForCommitConfigSaveAckOrExpectedReboot(CompletableFuture<MeshProtos.Routing.Error> ackFuture,
+                                                            String stepName) {
+        if (ackFuture == null) {
+            return;
+        }
+
+        try {
+            MeshProtos.Routing.Error error = ackFuture.get(CONFIG_SAVE_ACK_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+            if (error != MeshProtos.Routing.Error.NONE) {
+                throw new IllegalStateException("Config save step '" + stepName + "' failed with " + error);
+            }
+        } catch (TimeoutException e) {
+            log.info("Config save: commit '{}' ACK timed out after {} ms, continuing with reconnect flow",
+                    stepName, CONFIG_SAVE_ACK_TIMEOUT_MS);
+        } catch (Exception e) {
+            if (isExpectedRebootAckLoss(e)) {
+                log.info("Config save: commit '{}' lost ACK during expected reboot/disconnect: {}",
+                        stepName, rootCauseMessage(e));
+                return;
+            }
+            throw new IllegalStateException("Config save step '" + stepName + "' ACK failed", e);
+        }
+    }
+
+    private boolean isExpectedRebootAckLoss(Throwable error) {
+        Throwable current = error;
+        while (current != null) {
+            if (current instanceof TimeoutException) {
+                return true;
+            }
+
+            String message = current.getMessage();
+            if (message != null && (message.contains("Packet ACK waiter aborted: DISCONNECTED")
+                    || message.contains("Packet ACK waiter aborted: STATE_CLEARED"))) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
+    }
+
+    private String rootCauseMessage(Throwable error) {
+        Throwable current = error;
+        while (current != null && current.getCause() != null) {
+            current = current.getCause();
+        }
+        return current != null && current.getMessage() != null
+                ? current.getMessage()
+                : error.getClass().getSimpleName();
     }
 
     /**
@@ -909,7 +972,8 @@ public class FormSetting extends Form {
                     .append("GMT ноды не совпадает с GMT ПК.")
                     .append(" Нода: ").append(nodeGmtLabel).append(".")
                     .append(" ПК: ").append(systemGmtLabel).append(".")
-                    .append(" Для обновления GMT будет изменён параметр device.tzdef, после чего устройство перезагрузится.");
+                    .append(" Для обновления GMT будет изменён параметр device.tzdef, после чего устройство перезагрузится.")
+                    .append(" После переподключения время будет синхронизировано повторно, чтобы reboot не сбросил его.");
             if (hasPendingEditorChanges()) {
                 message.append(" Несохранённые изменения в редакторе будут потеряны.");
             }
@@ -985,11 +1049,6 @@ public class FormSetting extends Form {
 
         Thread syncThread = new Thread(() -> {
             try {
-                long epochSeconds = Instant.now().getEpochSecond();
-                waitForRequiredConfigSaveAck(
-                        MessageService.setTimeOnly(actionHandler, actionState, epochSeconds),
-                        "setTimeOnly");
-
                 if (!gmtMatches) {
                     ConfigProtos.Config deviceTzConfig = buildDeviceTimeZoneConfig(deviceConfig, targetTzDef);
 
@@ -1006,14 +1065,15 @@ public class FormSetting extends Form {
                     Thread.sleep(getConfigSaveInterTaskDelayMs(transport, 1, 3));
                     CompletableFuture<MeshProtos.Routing.Error> commitAck =
                             MessageService.commitEditSettings(actionHandler, actionState);
-                    if (transport == ConnectionType.BLE) {
-                        observeDeferredConfigSaveAck(commitAck, "commitEditSettings");
-                    } else {
-                        waitForRequiredConfigSaveAck(commitAck, "commitEditSettings");
-                    }
+                    observeDeferredConfigSaveAck(commitAck, "commitEditSettings");
+                    waitForCommitConfigSaveAckOrExpectedReboot(commitAck, "commitEditSettings");
 
+                    if (activeEntry != null) {
+                        pendingTimeOnlySyncConnectionId = activeEntry.getId();
+                    }
+                    log.info("Time sync: GMT update requires reboot, deferring set_time_only until reconnect");
                     Platform.runLater(() -> configStatusLabel.setText(
-                            "Время и GMT синхронизированы с ПК. Устройство перезагрузится. Переподключение..."));
+                            "GMT обновлён. Устройство перезагрузится, после переподключения время будет синхронизировано повторно..."));
 
                     Thread.sleep(getDevicePowerActionHandoffDelayMs(transport));
                     if (activeEntry != null) {
@@ -1026,11 +1086,17 @@ public class FormSetting extends Form {
                     } else {
                         Platform.runLater(() -> {
                             setSyncDateTimeButtonDisabled(false);
-                            configStatusLabel.setText("Время и GMT синхронизированы с ПК (" + systemGmtLabel + ").");
+                            configStatusLabel.setText("GMT синхронизирован с ПК (" + systemGmtLabel
+                                    + "). Синхронизируйте время после переподключения.");
                         });
                     }
                     return;
                 }
+
+                long epochSeconds = Instant.now().getEpochSecond();
+                waitForRequiredConfigSaveAck(
+                        MessageService.setTimeOnly(actionHandler, actionState, epochSeconds),
+                        "setTimeOnly");
 
                 Platform.runLater(() -> {
                     setSyncDateTimeButtonDisabled(false);
@@ -1043,6 +1109,9 @@ public class FormSetting extends Form {
                 Platform.runLater(() -> setSyncDateTimeButtonDisabled(false));
             } catch (Exception e) {
                 log.error("Time sync failed", e);
+                if (activeEntry != null && activeEntry.getId().equals(pendingTimeOnlySyncConnectionId)) {
+                    pendingTimeOnlySyncConnectionId = null;
+                }
                 Platform.runLater(() -> {
                     setSyncDateTimeButtonDisabled(false);
                     configStatusLabel.setText("Ошибка синхронизации: "
@@ -1074,6 +1143,34 @@ public class FormSetting extends Form {
         return ConfigProtos.Config.newBuilder(baseConfig)
                 .setDevice(deviceBuilder.build())
                 .build();
+    }
+
+    private void maybeResumeDeferredTimeOnlySync() {
+        String pendingConnectionId = pendingTimeOnlySyncConnectionId;
+        if (pendingConnectionId == null || pendingConnectionId.isBlank()) {
+            return;
+        }
+
+        ConnectionEntry activeEntry = findActiveConnectionEntry();
+        if (activeEntry == null || !pendingConnectionId.equals(activeEntry.getId())) {
+            return;
+        }
+        if (isConfigExchangeInProgress(activeEntry)) {
+            watchConfigExchangeCompletion(activeEntry);
+            return;
+        }
+
+        refreshConnection();
+        if (state == null || handler == null) {
+            return;
+        }
+
+        pendingTimeOnlySyncConnectionId = null;
+        Instant now = Instant.now();
+        String systemGmtLabel = TimeZoneSyncUtil.formatGmtOffset(TimeZoneSyncUtil.systemOffset(now));
+        log.info("Time sync: reconnect complete, repeating set_time_only for '{}'", activeEntry.getName());
+        configStatusLabel.setText("Устройство переподключено. Повторная синхронизация времени...");
+        requestDateTimeSync(activeEntry, state, handler, null, true, null, systemGmtLabel);
     }
 
     private void onRestartHardware() {
@@ -2271,13 +2368,11 @@ public class FormSetting extends Form {
                     log.info("Config save: commitEditSettings");
                     CompletableFuture<MeshProtos.Routing.Error> ackFuture =
                             MessageService.commitEditSettings(handler, state);
-                    if (activeTransport == ConnectionType.BLE) {
-                        // BLE devices often reboot/disconnect immediately after commit, so the save
-                        // flow must hand off to reconnect even if the routing ACK never comes back.
-                        observeDeferredConfigSaveAck(ackFuture, stepName);
-                    } else {
-                        waitForRequiredConfigSaveAck(ackFuture, stepName);
-                    }
+                    // commit triggers reboot/disconnect across transports, so a missing ACK
+                    // is not necessarily a failed save. Continue into reconnect flow unless
+                    // the device explicitly returns a routing error.
+                    observeDeferredConfigSaveAck(ackFuture, stepName);
+                    waitForCommitConfigSaveAckOrExpectedReboot(ackFuture, stepName);
                 });
             }
 

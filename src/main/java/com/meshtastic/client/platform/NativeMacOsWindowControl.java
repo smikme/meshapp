@@ -37,6 +37,7 @@ public class NativeMacOsWindowControl {
     private static Callback miniaturizeCallback;
 
     private final long nsWindow;
+    private final long nsView;
 
     static {
         initMiniaturizeObserverClass();
@@ -44,6 +45,15 @@ public class NativeMacOsWindowControl {
 
     public NativeMacOsWindowControl(Window window) {
         this.nsWindow = extractNsWindow(window);
+        this.nsView = extractNsView(window);
+    }
+
+    public long getNativeWindowHandle() {
+        return nsWindow;
+    }
+
+    public long getNativeViewHandle() {
+        return nsView;
     }
 
     /**
@@ -51,13 +61,10 @@ public class NativeMacOsWindowControl {
      */
     private static long extractNsWindow(Window window) {
         try {
-            Method getPeer = Window.class.getDeclaredMethod("getPeer");
-            getPeer.setAccessible(true);
-            Object tkStage = getPeer.invoke(window);
-
-            Method getPlatformWindow = tkStage.getClass().getDeclaredMethod("getPlatformWindow");
-            getPlatformWindow.setAccessible(true);
-            Object platformWindow = getPlatformWindow.invoke(tkStage);
+            Object platformWindow = extractPlatformWindow(window);
+            if (platformWindow == null) {
+                return 0;
+            }
 
             Method getNativeHandle = platformWindow.getClass().getMethod("getNativeHandle");
             getNativeHandle.setAccessible(true);
@@ -66,6 +73,42 @@ public class NativeMacOsWindowControl {
             log.error("Не удалось получить NSWindow", e);
             return 0;
         }
+    }
+
+    private static long extractNsView(Window window) {
+        try {
+            Object platformWindow = extractPlatformWindow(window);
+            if (platformWindow == null) {
+                return 0;
+            }
+
+            Method getView = platformWindow.getClass().getMethod("getView");
+            getView.setAccessible(true);
+            Object glassView = getView.invoke(platformWindow);
+            if (glassView == null) {
+                return 0;
+            }
+
+            Method getNativeView = glassView.getClass().getMethod("getNativeView");
+            getNativeView.setAccessible(true);
+            return (long) getNativeView.invoke(glassView);
+        } catch (Exception e) {
+            log.error("Не удалось получить NSView JavaFX", e);
+            return 0;
+        }
+    }
+
+    private static Object extractPlatformWindow(Window window) throws Exception {
+        Method getPeer = Window.class.getDeclaredMethod("getPeer");
+        getPeer.setAccessible(true);
+        Object tkStage = getPeer.invoke(window);
+        if (tkStage == null) {
+            return null;
+        }
+
+        Method getPlatformWindow = tkStage.getClass().getDeclaredMethod("getPlatformWindow");
+        getPlatformWindow.setAccessible(true);
+        return getPlatformWindow.invoke(tkStage);
     }
 
     /**
@@ -276,10 +319,43 @@ public class NativeMacOsWindowControl {
         if (nsWindow == 0) { return; }
         try {
             msgSendId(nsWindow, "deminiaturize:", 0L);
+            makeKeyAndOrderFront();
+        } catch (Throwable t) {
+            log.error("Не удалось восстановить NSWindow из tray", t);
+        }
+    }
+
+    /**
+     * Поднять окно наверх и сделать его key window, чтобы оно сразу принимало клавиатурный ввод.
+     */
+    public void makeKeyAndOrderFront() {
+        if (nsWindow == 0) { return; }
+        try {
             msgSendId(nsWindow, "makeKeyAndOrderFront:", 0L);
             msgSend(nsWindow, "orderFrontRegardless");
         } catch (Throwable t) {
-            log.error("Не удалось восстановить NSWindow из tray", t);
+            log.error("Не удалось перевести NSWindow в key state", t);
+        }
+    }
+
+    /**
+     * Передать first responder в JavaFX Glass view, чтобы аппаратный keyDown не оставался на самом NSWindow.
+     */
+    public void focusTextInputView() {
+        if (nsWindow == 0 || nsView == 0) {
+            return;
+        }
+        try {
+            if (msgSendBoolWithId(nsWindow, "makeFirstResponder:", nsView)) {
+                return;
+            }
+
+            long contentView = msgSend(nsWindow, "contentView");
+            if (contentView != 0) {
+                msgSendBoolWithId(nsWindow, "makeFirstResponder:", contentView);
+            }
+        } catch (Throwable t) {
+            log.error("Не удалось передать first responder в JavaFX view", t);
         }
     }
 
@@ -391,6 +467,11 @@ public class NativeMacOsWindowControl {
     /** objc_msgSend(receiver, selector, id) → id — для методов с одним object-аргументом */
     private static long msgSendId(long receiver, String selectorName, long arg) {
         return OBJC_MSG_SEND.invokeLong(new Object[]{receiver, sel(selectorName), arg});
+    }
+
+    /** objc_msgSend(receiver, selector, id) → bool */
+    private static boolean msgSendBoolWithId(long receiver, String selectorName, long arg) {
+        return OBJC_MSG_SEND.invokeLong(new Object[]{receiver, sel(selectorName), arg}) != 0;
     }
 
     /** objc_msgSend(receiver, selector, long) — для setMaterial:, setState: и т.д. */

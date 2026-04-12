@@ -67,9 +67,8 @@ public final class MessageService {
         MeshProtos.Data data = dataBuilder.build();
 
         if (replyId != 0) {
-            byte[] dataBytes = data.toByteArray();
-            log.info("REPLY_DEBUG send channel: replyId={} (0x{}), data bytes={}",
-                    replyId, Integer.toHexString(replyId), bytesToHex(dataBytes));
+            log.info("REPLY_DEBUG send channel: replyId={} (0x{}), payloadBytes={}",
+                    replyId, Integer.toHexString(replyId), data.getPayload().size());
         }
 
         MeshProtos.MeshPacket packet = MeshProtos.MeshPacket.newBuilder()
@@ -144,9 +143,8 @@ public final class MessageService {
         MeshProtos.Data data = dataBuilder.build();
 
         if (replyId != 0) {
-            byte[] dataBytes = data.toByteArray();
-            log.info("REPLY_DEBUG send DM: replyId={} (0x{}), data bytes={}",
-                    replyId, Integer.toHexString(replyId), bytesToHex(dataBytes));
+            log.info("REPLY_DEBUG send DM: replyId={} (0x{}), payloadBytes={}",
+                    replyId, Integer.toHexString(replyId), data.getPayload().size());
         }
 
         boolean usePkiTransport = shouldUsePkiDirectMessage(state, peerNodeId, peerNode);
@@ -1219,11 +1217,5 @@ public final class MessageService {
         }
 
         return MessageDbService.getInstance().saveReaction(reaction, chatType, chatKey, ownerNodeId);
-    }
-
-    private static String bytesToHex(byte[] bytes) {
-        StringBuilder sb = new StringBuilder(bytes.length * 2);
-        for (byte b : bytes) { sb.append(String.format("%02x", b)); }
-        return sb.toString();
     }
 }

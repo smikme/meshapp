@@ -7,6 +7,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.meshtastic.proto.ChannelProtos;
+import org.meshtastic.proto.MeshProtos;
 
 import java.nio.file.Path;
 
@@ -34,9 +35,18 @@ class DeviceStateTest {
         TestEnvironmentSupport.resetSingletons();
     }
 
+    private DeviceState createDeviceStateWithOwner() {
+        DeviceState state = new DeviceState();
+        MeshProtos.User owner = MeshProtos.User.newBuilder()
+                .setId("!owner")
+                .build();
+        state.setOwnerInfo(owner);
+        return state;
+    }
+
     @Test
     void addMessageDeduplicatesByPacketIdAndKeepsLatest100() {
-        DeviceState state = new DeviceState();
+        DeviceState state = createDeviceStateWithOwner();
 
         MeshMessage duplicateA = message("one", 0, 123);
         MeshMessage duplicateB = message("two", 0, 123);
@@ -57,11 +67,10 @@ class DeviceStateTest {
 
     @Test
     void failAllPendingAcksMarksMessagesAsFailedAndClearsQueue() {
-        DeviceState state = new DeviceState();
+        DeviceState state = createDeviceStateWithOwner();
         MeshMessage outgoing = message("pending", 0, 777);
         outgoing.setStatus(MeshMessage.DeliveryStatus.SENDING);
         state.addMessage(outgoing);
-        MessageDbService.getInstance().save(outgoing, "channel", "0", "!owner");
 
         state.registerPendingAck(777, outgoing);
         state.failAllPendingAcks("DISCONNECTED");
@@ -80,7 +89,7 @@ class DeviceStateTest {
 
     @Test
     void clearResetsRuntimeStateButKeepsPendingFixedPosition() {
-        DeviceState state = new DeviceState();
+        DeviceState state = createDeviceStateWithOwner();
         state.setMyNodeNum(42);
         state.getOrCreateNode(42).setLongName("Owner");
         state.addMessage(message("channel", 0, 1));
@@ -106,7 +115,7 @@ class DeviceStateTest {
 
     @Test
     void addChannelReplacesExistingChannelWithSameIndex() {
-        DeviceState state = new DeviceState();
+        DeviceState state = createDeviceStateWithOwner();
 
         state.addChannel(ChannelProtos.Channel.newBuilder()
                 .setIndex(2)
@@ -125,7 +134,7 @@ class DeviceStateTest {
 
     @Test
     void findMessageByPacketIdSearchesMemoryBeforeDatabase() {
-        DeviceState state = new DeviceState();
+        DeviceState state = createDeviceStateWithOwner();
         MeshMessage inMemory = message("memory", 1, 500);
         MeshMessage persisted = message("database", 1, 501);
         state.addMessage(inMemory);

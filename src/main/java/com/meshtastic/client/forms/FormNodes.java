@@ -84,7 +84,8 @@ public class FormNodes extends Form {
                 } finally {
                     suppressSelectionListener = false;
                 }
-                // Восстановить выделение если обновлённая нода была выбрана
+                // Обновлять правую панель только для реально выбранной ноды.
+                // Иначе частые апдейты чужих нод дёргают detail-table во время layout/render.
                 if (num == currentDetailNodeNum) {
                     for (NodeData n : nodeListView.getItems()) {
                         if (n.getNodeNum() == num) {
@@ -92,8 +93,8 @@ public class FormNodes extends Form {
                             break;
                         }
                     }
+                    refreshDetail();
                 }
-                refreshDetail();
                 return;
             }
         }

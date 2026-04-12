@@ -183,11 +183,14 @@ public class MessageListenerService implements FromRadioListener {
         }
 
         String ownerNodeId = String.format("!%08x", deviceState.getMyNodeNum());
+        int payloadBytes = data.getPayload().size();
+        int textLength = text.length();
         if (isDirect) {
             msg.setStatus(MeshMessage.DeliveryStatus.DELIVERED);
             MessageDbService.getInstance().save(msg, "dm", fromNodeId, ownerNodeId);
             deviceState.addDirectMessage(msg, fromNodeId);
-            log.info("Received DM from {}: {}", fromNodeId, text);
+            log.info("Received DM from {} (packetId={}, chars={}, bytes={}, replyId={})",
+                    fromNodeId, packet.getId(), textLength, payloadBytes, data.getReplyId());
             try {
                 notificationManager.onIncomingMessage(msg, "dm", fromNodeId);
             } catch (Throwable t) {
@@ -197,7 +200,8 @@ public class MessageListenerService implements FromRadioListener {
             msg.setStatus(MeshMessage.DeliveryStatus.DELIVERED);
             MessageDbService.getInstance().save(msg, "channel", String.valueOf(channel), ownerNodeId);
             deviceState.addMessage(msg);
-            log.info("Received channel {} message from {}: {}", channel, fromNodeId, text);
+            log.info("Received channel {} message from {} (packetId={}, chars={}, bytes={}, replyId={})",
+                    channel, fromNodeId, packet.getId(), textLength, payloadBytes, data.getReplyId());
             try {
                 notificationManager.onIncomingMessage(msg, "channel", String.valueOf(channel));
             } catch (Throwable t) {

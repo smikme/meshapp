@@ -2,8 +2,6 @@ package com.meshtastic.client.components.chat;
 
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.MeshMessage;
-import com.meshtastic.client.model.NodeData;
-import com.meshtastic.client.utils.NodeUtils;
 
 /**
  * Разрешение имён нод и отправителей для чата.
@@ -31,13 +29,7 @@ public class ChatNameResolver {
      * @return отображаемое имя
      */
     public String resolveNodeName(int nodeNum) {
-        NodeData node = NodeUtils.resolveNode(state, nodeNum);
-        if (node != null
-                && node.getLongName() != null
-                && !node.getLongName().isEmpty()) {
-            return node.getLongName();
-        }
-        return "!" + String.format("%08x", nodeNum);
+        return ChatNodeDisplayHelper.resolveNodeName(state, nodeNum);
     }
 
     /**
@@ -47,18 +39,6 @@ public class ChatNameResolver {
      * @return «Вы» для исходящих, longName / senderName / nodeId для входящих
      */
     public String resolveSenderName(MeshMessage msg) {
-        if (msg.isOutgoing()) {
-            return "Вы";
-        }
-        NodeData node = NodeUtils.resolveNode(state, msg.getFromNodeId());
-        if (node != null
-                && node.getLongName() != null
-                && !node.getLongName().isEmpty()) {
-            return node.getLongName();
-        }
-        if (msg.getSenderName() != null && !msg.getSenderName().isEmpty()) {
-            return msg.getSenderName();
-        }
-        return msg.getFromNodeId();
+        return ChatNodeDisplayHelper.resolveReplySenderName(state, msg);
     }
 }

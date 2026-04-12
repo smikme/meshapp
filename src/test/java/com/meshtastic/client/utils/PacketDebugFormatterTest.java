@@ -3,6 +3,8 @@ package com.meshtastic.client.utils;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.google.protobuf.ByteString;
+import com.meshtastic.client.model.DeviceState;
+import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.model.PacketLogEntry;
 import com.meshtastic.client.model.PacketTreeNode;
 import javafx.scene.control.TreeItem;
@@ -62,6 +64,56 @@ class PacketDebugFormatterTest {
     }
 
     @Test
+    void packetTreeShowsUint32FieldsAsUnsignedValues() {
+        MeshProtos.MeshPacket packet = MeshProtos.MeshPacket.newBuilder()
+                .setFrom(0xF66F82E0)
+                .setTo(0xFFFFFFFF)
+                .setId(101)
+                .build();
+
+        TreeItem<PacketTreeNode> root = PacketDebugFormatter.buildPacketTree(packet.toByteArray());
+
+        assertNotNull(findByPrefix(root, "from: 4134503136"), dumpTree(root));
+        assertNotNull(findByPrefix(root, "to: 4294967295"), dumpTree(root));
+    }
+
+    @Test
+    void payloadTextShowsUint32FieldsAsUnsignedValues() {
+        MeshProtos.MeshPacket textPacket = MeshProtos.MeshPacket.newBuilder()
+                .setFrom(1)
+                .setTo(2)
+                .setId(0xFFFFFFFF)
+                .setDecoded(MeshProtos.Data.newBuilder()
+                        .setPortnum(Portnums.PortNum.TEXT_MESSAGE_APP)
+                        .setPayload(ByteString.copyFromUtf8("hello"))
+                        .setReplyId(0xFFFFFFFF)
+                        .build())
+                .build();
+        MeshProtos.MeshPacket routePacket = MeshProtos.MeshPacket.newBuilder()
+                .setFrom(1)
+                .setTo(2)
+                .setId(1)
+                .setDecoded(MeshProtos.Data.newBuilder()
+                        .setPortnum(Portnums.PortNum.TRACEROUTE_APP)
+                        .setRequestId(0xFFFFFFFF)
+                        .setPayload(MeshProtos.RouteDiscovery.newBuilder()
+                                .addRoute(0xF66F82E0)
+                                .addRouteBack(0xFFFFFFFF)
+                                .build()
+                                .toByteString())
+                        .build())
+                .build();
+
+        PacketDebugFormatter.PacketDetails textDetails =
+                PacketDebugFormatter.describeMeshPacket(textPacket, PacketLogEntry.Direction.INCOMING, null);
+        PacketDebugFormatter.PacketDetails routeDetails =
+                PacketDebugFormatter.describeMeshPacket(routePacket, PacketLogEntry.Direction.INCOMING, null);
+
+        assertEquals("\"hello\" (reply_id=4294967295)", textDetails.payloadText());
+        assertEquals("route=[4134503136], back=[4294967295]", routeDetails.payloadText());
+    }
+
+    @Test
     void multilineSelectionDoesNotIncludeAddressColumn() {
         byte[] bytes = new byte[24];
         for (int i = 0; i < bytes.length; i++) {
@@ -92,9 +144,30 @@ class PacketDebugFormatterTest {
         String exported = PacketDebugFormatter.exportPacketAsText(entry);
 
         assertTrue(exported.contains("Тип пакета: TEXT_MESSAGE_APP"));
+        assertTrue(exported.contains("От: !12345678"));
+        assertTrue(exported.contains("Кому: Вещание (!ffffffff)"));
         assertTrue(exported.contains("HEX"));
         assertTrue(exported.contains("Иерархия"));
         assertTrue(exported.contains("payload:"));
+    }
+
+    @Test
+    void packetEndpointsUseNodeNameAndStandardNodeId() {
+        DeviceState deviceState = new DeviceState();
+        NodeData fromNode = deviceState.getOrCreateNode(0x1DC26363);
+        fromNode.setLongName("Тестер");
+
+        MeshProtos.MeshPacket packet = MeshProtos.MeshPacket.newBuilder()
+                .setFrom(0x1DC26363)
+                .setTo(0xFFFFFFFF)
+                .setId(777)
+                .build();
+
+        PacketDebugFormatter.PacketEndpoints endpoints =
+                PacketDebugFormatter.resolvePacketEndpoints(packet.toByteArray(), deviceState);
+
+        assertEquals("Тестер (!1dc26363)", endpoints.fromNode());
+        assertEquals("Вещание (!ffffffff)", endpoints.toNode());
     }
 
     @Test
@@ -131,8 +204,8 @@ class PacketDebugFormatterTest {
                 1_710_000_000_000L,
                 PacketLogEntry.Direction.INCOMING,
                 "TEXT_MESSAGE_APP",
-                "Peer (!12345678)",
-                "Вещание (!ffffffff)",
+                "Peer (305419896)",
+                "Вещание (4294967295)",
                 "\"" + text + "\"",
                 packet.toByteArray()
         );
@@ -154,5 +227,21 @@ class PacketDebugFormatterTest {
             }
         }
         return null;
+    }
+
+    private static String dumpTree(TreeItem<PacketTreeNode> root) {
+        StringBuilder sb = new StringBuilder();
+        appendLabels(sb, root, 0);
+        return sb.toString();
+    }
+
+    private static void appendLabels(StringBuilder sb, TreeItem<PacketTreeNode> item, int depth) {
+        if (item == null || item.getValue() == null) {
+            return;
+        }
+        sb.append("  ".repeat(Math.max(0, depth))).append(item.getValue().getLabel()).append('\n');
+        for (TreeItem<PacketTreeNode> child : item.getChildren()) {
+            appendLabels(sb, child, depth + 1);
+        }
     }
 }

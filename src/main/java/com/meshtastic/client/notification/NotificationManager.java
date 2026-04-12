@@ -75,6 +75,10 @@ public class NotificationManager {
             return;
         }
 
+        if (AppPreferences.isChatMuted(currentOwnerNodeId(), chatType, chatKey)) {
+            return;
+        }
+
         if (msg.isOutgoing()) {
             return;
         }
@@ -95,11 +99,14 @@ public class NotificationManager {
 
         String title = buildTitle(msg, chatType);
         String body = truncate(msg.getText());
+        int bodyLength = body.length();
+        int packetId = msg.getPacketId();
 
         Platform.runLater(() -> {
             try {
                 service.showNotification(title, body);
-                log.debug("OS notification: title='{}' body='{}'", title, body);
+                log.debug("OS notification shown for packet {} (chatType={}, bodyChars={})",
+                        packetId, chatType, bodyLength);
             } catch (Throwable t) {
                 log.error("Failed to show notification", t);
             }
@@ -120,6 +127,12 @@ public class NotificationManager {
         BiPredicate<String, String> checker = activeChatChecker;
         if (checker == null) { return false; }
         return checker.test(chatType, chatKey);
+    }
+
+    private String currentOwnerNodeId() {
+        return deviceState != null && deviceState.getMyNodeNum() != 0
+                ? String.format("!%08x", deviceState.getMyNodeNum())
+                : "";
     }
 
     private String buildTitle(MeshMessage msg, String chatType) {
