@@ -2,7 +2,21 @@ package com.meshtastic.client.model;
 
 /**
  * Одна запись телеметрии, привязанная к моменту времени.
- * Хранит DeviceMetrics и EnvironmentMetrics для отображения на графиках.
+ * <p>
+ * Хранит метрики устройства ({@code batteryLevel}, {@code voltage}, {@code channelUtilization}),
+ * метрики окружающей среды ({@code temperature}, {@code humidity}, {@code pressure}) и
+ * статистику пакетов ({@code numPacketsRx}, {@code numPacketsTx}).
+ * <p>
+ * Используется для построения графиков телеметрии и отслеживания состояния узлов сети.
+ * <p>
+ * Пример создания записи:
+ * <pre>{@code
+ * TelemetryEntry entry = new TelemetryEntry(System.currentTimeMillis() / 1000, "!00000001");
+ * entry.setBatteryLevel(85);
+ * entry.setTemperature(23.5f);
+ * }</pre>
+ *
+ * @author Meshtastic Team
  */
 public class TelemetryEntry {
 

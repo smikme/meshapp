@@ -34,7 +34,7 @@ import java.util.Objects;
  * Переиспользуемый компонент: AreaChart телеметрии + панель фильтра по периоду.
  * <p>
  * Используется в FormDashboard (телеметрия локальной ноды) и в FormNodes (телеметрия выбранной ноды).
- * Жизненный цикл: {@link #bind(DeviceState, int)} / {@link #unbind()}.
+ * Жизненный цикл: {@link #bind(DeviceState, String)} / {@link #unbind()}.
  */
 public class TelemetryChartPanel extends VBox {
 
@@ -50,7 +50,7 @@ public class TelemetryChartPanel extends VBox {
     private static final long PERIOD_MAX = 0; // без ограничений
 
     /** Максимальное количество точек на графике для плавного отображения */
-    private static final int MAX_CHART_POINTS = 100;
+    private static final int MAX_CHART_POINTS = 60;
 
     /** Период-заглушка для пустого режима, когда пользователь выбрал "Всё" */
     private static final long EMPTY_PERIOD_FALLBACK = PERIOD_24H;

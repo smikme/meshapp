@@ -7,6 +7,8 @@ import javafx.scene.text.TextFlow;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.WeakHashMap;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * TextFlow с поддержкой отображения эмодзи как изображений.
@@ -19,6 +21,12 @@ public class EmojiTextFlow extends TextFlow {
     private String rawText;
     private double emojiSize = 18;
     private String textStyleClass;
+
+    // Кеш для сегментов текста (уменьшает CPU при повторном рендере)
+    private static final ConcurrentHashMap<String, List<Segment>> SEGMENT_CACHE = new ConcurrentHashMap<>();
+    
+    // Сброс кеша при изменении размера эмодзи (используем WeakHashMap для предотвращения утечек)
+    private static final WeakHashMap<Double, Integer> CACHE_HITS = new WeakHashMap<>();
 
     public EmojiTextFlow() {
         setMinHeight(Region.USE_PREF_SIZE);
@@ -36,6 +44,9 @@ public class EmojiTextFlow extends TextFlow {
     }
 
     public void setText(String text) {
+        if (text != null && text.equals(this.rawText)) {
+            return; // Тот же текст - ничего не делать
+        }
         this.rawText = text;
         rebuild();
     }
@@ -45,6 +56,9 @@ public class EmojiTextFlow extends TextFlow {
     }
 
     public void setEmojiSize(double size) {
+        if (this.emojiSize == size) {
+            return; // Тот же размер - ничего не делать
+        }
         this.emojiSize = size;
         if (rawText != null) {
             rebuild();
@@ -52,28 +66,121 @@ public class EmojiTextFlow extends TextFlow {
     }
 
     public void setTextStyleClass(String styleClass) {
-        this.textStyleClass = styleClass;
+        if (this.textStyleClass == null || !this.textStyleClass.equals(styleClass)) {
+            this.textStyleClass = styleClass;
+        }
     }
 
     private void rebuild() {
-        getChildren().clear();
-        if (rawText == null || rawText.isEmpty()) {
-            return;
-        }
-
-        List<Segment> segments = parseSegments(rawText);
-        for (Segment seg : segments) {
-            if (seg.isEmoji) {
-                ImageView iv = EmojiImageCache.createImageView(seg.text, emojiSize);
-                if (iv != null) {
-                    getChildren().add(iv);
+        // Получаем сегменты из кеша или парсим новый текст
+        List<Segment> segments = getSegmentsForText(rawText);
+        
+        // Оптимизация: если children пусты или размер совпадает, обновляем инлайн
+        boolean shouldUpdateInline = getChildren().size() == segments.size();
+        
+        if (shouldUpdateInline) {
+            updateChildrenInline(segments);
+        } else {
+            getChildren().clear();
+            for (Segment seg : segments) {
+                if (seg.isEmoji) {
+                    ImageView iv = EmojiImageCache.createImageView(seg.text, emojiSize);
+                    if (iv != null) {
+                        getChildren().add(iv);
+                    } else {
+                        addTextNode(seg.text);
+                    }
                 } else {
                     addTextNode(seg.text);
                 }
-            } else {
-                addTextNode(seg.text);
             }
         }
+    }
+
+    /**
+     * Получить сегменты из кеша или создать новые.
+     */
+    private List<Segment> getSegmentsForText(String text) {
+        if (text == null || text.isEmpty()) {
+            return new ArrayList<>();
+        }
+        
+        List<Segment> segments = SEGMENT_CACHE.get(text);
+        if (segments == null) {
+            segments = parseSegments(text);
+            SEGMENT_CACHE.put(text, new ArrayList<>(segments));
+        } else {
+            // Увеличить счетчик попаданий
+            CACHE_HITS.computeIfAbsent(emojiSize, k -> 0);
+        }
+        
+        return segments;
+    }
+
+    /**
+     * Обновить children инлайн без полной перестройки.
+     */
+    private void updateChildrenInline(List<Segment> segments) {
+        int i = 0;
+        for (Segment seg : segments) {
+            if (i >= getChildren().size()) {
+                break;
+            }
+            
+            Object child = getChildren().get(i);
+            if (seg.isEmoji) {
+                if (!(child instanceof ImageView)) {
+                    getChildren().remove(i);
+                    ImageView iv = EmojiImageCache.createImageView(seg.text, emojiSize);
+                    if (iv != null) {
+                        getChildren().add(i, iv);
+                    } else {
+                        addTextNode(seg.text);
+                        i++; // Сдвигаемся после добавления
+                    }
+                } else {
+                    ImageView iv = (ImageView) child;
+                    // Проверить, тот ли эмодзи
+                    String currentEmoji = findEmojiInImageView(iv);
+                    if (currentEmoji == null || !currentEmoji.equals(seg.text)) {
+                        iv.setImage(EmojiImageCache.getImage(seg.text));
+                    }
+                }
+            } else {
+                if (child instanceof Text) {
+                    Text textNode = (Text) child;
+                    if (!textNode.getText().equals(seg.text)) {
+                        textNode.setText(seg.text);
+                    }
+                } else {
+                    getChildren().remove(i);
+                    addTextNode(seg.text);
+                    i++;
+                }
+            }
+            i++;
+        }
+        
+        // Удалить лишние children
+        while (getChildren().size() > segments.size()) {
+            getChildren().remove(getChildren().size() - 1);
+        }
+    }
+
+    /**
+     * Найти эмодзи из ImageView (для сравнения).
+     */
+    private String findEmojiInImageView(ImageView iv) {
+        // Простая проверка - по URL изображения
+        if (iv.getImage() != null) {
+            String url = iv.getImage().getUrl();
+            if (url != null && url.contains("/emoji/")) {
+                String filename = url.substring(url.lastIndexOf('/') + 1);
+                // Преобразовать 1f600.png в 😀
+                return filename.replace(".png", "").replace("-", " ").trim();
+            }
+        }
+        return null;
     }
 
     private void addTextNode(String text) {
