@@ -91,4 +91,49 @@ class CrashReportServiceTest {
         assertTrue(uploadBody.get().contains("name=\"attachment\""));
         assertTrue(uploadBody.get().contains("meshapp-session-"));
     }
+
+    @Test
+    void submitProblemReportUsesProblemSpecificTitleAndBody() throws Exception {
+        AtomicReference<String> issueBody = new AtomicReference<>();
+
+        server.createContext("/api/v1/repos/covox/meshapp/issues", exchange -> {
+            issueBody.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+            byte[] response = "{\"index\":7}".getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(201, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+
+        server.createContext("/api/v1/repos/covox/meshapp/issues/7/assets", exchange -> {
+            byte[] response = "{}".getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(201, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+
+        Path logFile = Files.createTempFile("meshapp-session-", ".log");
+        Files.writeString(logFile, "ui glitch");
+
+        CrashReportService service = new CrashReportService(
+                URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/api/v1"),
+                "covox",
+                "meshapp",
+                "test-token",
+                HttpClient.newHttpClient(),
+                Clock.fixed(Instant.parse("2026-04-10T10:15:30Z"), ZoneOffset.UTC)
+        );
+
+        service.submitProblemReport(
+                logFile,
+                "Не открывается окно помощи",
+                new CrashReportService.CrashContext("1.2.3", 77, "Linux", "6.8", "x86_64")
+        );
+
+        assertTrue(issueBody.get().contains("Problem report"));
+        assertTrue(issueBody.get().contains("Автоматически созданный отчёт о проблеме MeshApp."));
+        assertTrue(issueBody.get().contains("Не открывается окно помощи"));
+        assertTrue(issueBody.get().contains("текущей сессии"));
+    }
 }

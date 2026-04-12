@@ -13,6 +13,7 @@ application {
 //		'-Xms256m',
 //		'-Dprism.order=sw',
 		'--add-opens', 'javafx.graphics/javafx.stage=ALL-UNNAMED',
+		'--add-exports', 'javafx.graphics/com.sun.javafx.scene=ALL-UNNAMED',
 		'--add-opens', 'javafx.graphics/com.sun.javafx.tk=ALL-UNNAMED',
 		'--add-opens', 'javafx.graphics/com.sun.javafx.tk.quantum=ALL-UNNAMED',
 		'--add-opens', 'javafx.graphics/com.sun.glass.ui=ALL-UNNAMED'

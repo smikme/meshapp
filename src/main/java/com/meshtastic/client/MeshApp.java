@@ -1,12 +1,10 @@
 package com.meshtastic.client;
 
-import com.meshtastic.client.components.CrashReportPrompt;
+import com.meshtastic.client.components.CrashReportFlow;
 import com.meshtastic.client.logging.SessionCrashLogManager;
 import com.meshtastic.client.modal.ModalPane;
-import com.meshtastic.client.modal.Toast;
 import com.meshtastic.client.platform.NativeWindowHelper;
 import com.meshtastic.client.platform.OsDetect;
-import com.meshtastic.client.service.CrashReportService;
 import com.meshtastic.client.service.DatabaseProvider;
 import com.meshtastic.client.service.MessageDbService;
 import com.meshtastic.client.service.NodeCacheService;
@@ -34,7 +32,6 @@ import java.nio.file.Path;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicReference;
 
 public class MeshApp extends Application {
 
@@ -72,26 +69,14 @@ public class MeshApp extends Application {
         return 0;
     }
 
-    private static String resolveOperatingSystemName() {
-        return System.getProperty("os.name", "unknown").trim();
-    }
-
-    private static String resolveOperatingSystemVersion() {
-        return System.getProperty("os.version", "unknown").trim();
-    }
-
-    private static String resolveOperatingSystemArch() {
-        return System.getProperty("os.arch", "unknown").trim();
-    }
-
     private static void logStartupContext() {
         log.info(
                 "Starting MeshApp version {} (build {}) on {} {} ({})",
                 APPLICATION_VERSION,
                 VERSION_CODE,
-                resolveOperatingSystemName(),
-                resolveOperatingSystemVersion(),
-                resolveOperatingSystemArch()
+                System.getProperty("os.name", "unknown").trim(),
+                System.getProperty("os.version", "unknown").trim(),
+                System.getProperty("os.arch", "unknown").trim()
         );
     }
 
@@ -244,87 +229,7 @@ public class MeshApp extends Application {
             return;
         }
 
-        CrashReportPrompt.show(stage, decision -> {
-            if (!decision.sendReport()) {
-                SessionCrashLogManager.deletePendingCrashLog(pendingCrashLog.get());
-                runDeferredStartupTasks();
-                return;
-            }
-
-            submitCrashLog(stage, pendingCrashLog.get(), decision.comment());
-        });
-    }
-
-    private void submitCrashLog(Stage stage, Path crashLog, String comment) {
-        AtomicBoolean cancelled = new AtomicBoolean(false);
-        AtomicReference<Thread> workerRef = new AtomicReference<>();
-        CrashReportPrompt.ProgressDialog progressDialog = CrashReportPrompt.showProgress(stage);
-        progressDialog.setOnCancel(() -> {
-            cancelled.set(true);
-            SessionCrashLogManager.deletePendingCrashLog(crashLog);
-            Thread worker = workerRef.get();
-            if (worker != null) {
-                worker.interrupt();
-            }
-            runDeferredStartupTasks();
-        });
-
-        Thread worker = Thread.ofVirtual().name("meshapp-crash-report").unstarted(() -> {
-            try {
-                CrashReportService.SubmissionResult result = CrashReportService.createDefault().submitCrashReport(
-                        crashLog,
-                        comment,
-                        new CrashReportService.CrashContext(
-                                APPLICATION_VERSION,
-                                VERSION_CODE,
-                                resolveOperatingSystemName(),
-                                resolveOperatingSystemVersion(),
-                                resolveOperatingSystemArch()
-                        )
-                );
-
-                if (cancelled.get()) {
-                    return;
-                }
-                SessionCrashLogManager.deletePendingCrashLog(crashLog);
-                Platform.runLater(() -> {
-                    if (cancelled.get()) {
-                        return;
-                    }
-                    progressDialog.close(() -> {
-                        Toast.show(Toast.Type.SUCCESS, "Лог отправлен разработчикам: issue #" + result.issueIndex());
-                        runDeferredStartupTasks();
-                    });
-                });
-            } catch (Exception e) {
-                if (cancelled.get() || e instanceof InterruptedException) {
-                    return;
-                }
-                log.error("Failed to submit crash report", e);
-                Platform.runLater(() -> {
-                    if (cancelled.get()) {
-                        return;
-                    }
-                    progressDialog.close(() -> {
-                        ModalPane.showError(
-                                "Не удалось отправить лог",
-                                "Сохранённый лог останется на диске и будет снова предложен при следующем запуске.\n\n"
-                                        + humanizeError(e)
-                        );
-                        ModalPane pane = ModalPane.getInstance();
-                        if (pane != null) {
-                            pane.setOnHidden(this::runDeferredStartupTasks);
-                        } else {
-                            runDeferredStartupTasks();
-                        }
-                    });
-                });
-            }
-        });
-        workerRef.set(worker);
-        if (!cancelled.get()) {
-            worker.start();
-        }
+        CrashReportFlow.showPendingCrashPrompt(stage, pendingCrashLog.get(), this::runDeferredStartupTasks);
     }
 
     private void runDeferredStartupTasks() {
@@ -334,13 +239,5 @@ public class MeshApp extends Application {
         if (AppPreferences.isCheckUpdates()) {
             UpdateCheckService.checkAsync(ModalPane::showUpdateAvailable);
         }
-    }
-
-    private static String humanizeError(Exception exception) {
-        String message = exception.getMessage();
-        if (message == null || message.isBlank()) {
-            return "Неизвестная ошибка отправки.";
-        }
-        return message;
     }
 }

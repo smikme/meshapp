@@ -22,6 +22,18 @@ public class MacOsNativeTrayService implements AppTrayService {
         MacOsTrayBridge.activateApplication();
     }
 
+    public static void focusWindow(Stage stage) {
+        if (stage == null) {
+            return;
+        }
+        var window = new NativeMacOsWindowControl(stage);
+        window.makeVisibleInAppSwitcher();
+        if (!MacOsTrayBridge.focusWindow(window.getNativeWindowHandle(), window.getNativeViewHandle())) {
+            window.makeKeyAndOrderFront();
+            window.focusTextInputView();
+        }
+    }
+
     public static void hideWindow(Stage stage) {
         if (stage == null) {
             return;

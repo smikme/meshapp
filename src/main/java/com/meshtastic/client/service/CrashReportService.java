@@ -24,7 +24,7 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
 /**
- * Отправляет crash-репорт в Gitea: создаёт issue и прикладывает ZIP-архив session-лога.
+ * Отправляет в Gitea отчёты о сбоях и проблемах, создавая issue и прикладывая ZIP-архив session-лога.
  */
 public final class CrashReportService {
 
@@ -71,15 +71,29 @@ public final class CrashReportService {
     public SubmissionResult submitCrashReport(Path logFile,
                                               String comment,
                                               CrashContext context) throws IOException, InterruptedException {
+        return submitReport(logFile, comment, context, ReportType.CRASH);
+    }
+
+    public SubmissionResult submitProblemReport(Path logFile,
+                                                String comment,
+                                                CrashContext context) throws IOException, InterruptedException {
+        return submitReport(logFile, comment, context, ReportType.PROBLEM);
+    }
+
+    private SubmissionResult submitReport(Path logFile,
+                                          String comment,
+                                          CrashContext context,
+                                          ReportType reportType) throws IOException, InterruptedException {
         Objects.requireNonNull(logFile, "logFile");
         Objects.requireNonNull(context, "context");
+        Objects.requireNonNull(reportType, "reportType");
         if (!Files.isRegularFile(logFile)) {
-            throw new IOException("Crash log file not found: " + logFile);
+            throw new IOException("Report log file not found: " + logFile);
         }
 
         Path archive = createArchive(logFile);
         try {
-            long issueIndex = createIssue(comment, context);
+            long issueIndex = createIssue(comment, context, reportType);
             uploadIssueAsset(issueIndex, archive);
             return new SubmissionResult(issueIndex, issuePageUri(issueIndex));
         } finally {
@@ -87,10 +101,12 @@ public final class CrashReportService {
         }
     }
 
-    private long createIssue(String comment, CrashContext context) throws IOException, InterruptedException {
+    private long createIssue(String comment,
+                             CrashContext context,
+                             ReportType reportType) throws IOException, InterruptedException {
         JsonObject payload = new JsonObject();
-        payload.addProperty("title", buildIssueTitle(context));
-        payload.addProperty("body", buildIssueBody(comment, context));
+        payload.addProperty("title", buildIssueTitle(context, reportType));
+        payload.addProperty("body", buildIssueBody(comment, context, reportType));
 
         HttpRequest request = HttpRequest.newBuilder(issueCollectionUri())
                 .header("Accept", "application/json")
@@ -152,21 +168,22 @@ public final class CrashReportService {
         return archive;
     }
 
-    private String buildIssueTitle(CrashContext context) {
-        return "Crash report: MeshApp %s on %s (%s)".formatted(
+    private String buildIssueTitle(CrashContext context, ReportType reportType) {
+        return "%s: MeshApp %s on %s (%s)".formatted(
+                reportType.titlePrefix(),
                 context.applicationVersion(),
                 context.osName(),
                 TITLE_TIME_FORMAT.format(Instant.now(clock))
         );
     }
 
-    private String buildIssueBody(String comment, CrashContext context) {
+    private String buildIssueBody(String comment, CrashContext context, ReportType reportType) {
         String normalizedComment = comment == null || comment.isBlank()
                 ? "Комментарий не указан."
                 : comment.trim();
 
         return String.join("\n", List.of(
-                "Автоматически созданный отчёт о сбое MeshApp.",
+                reportType.bodyLead(),
                 "",
                 "Версия приложения: " + context.applicationVersion(),
                 "Код сборки: " + context.versionCode(),
@@ -176,7 +193,7 @@ public final class CrashReportService {
                 "Комментарий пользователя:",
                 normalizedComment,
                 "",
-                "ZIP-архив session-лога приложен во вложениях issue."
+                reportType.attachmentNote()
         ));
     }
 
@@ -228,4 +245,39 @@ public final class CrashReportService {
     }
 
     public record SubmissionResult(long issueIndex, URI issueUrl) {}
+
+    private enum ReportType {
+        CRASH(
+                "Crash report",
+                "Автоматически созданный отчёт о сбое MeshApp.",
+                "ZIP-архив session-лога приложен во вложениях issue."
+        ),
+        PROBLEM(
+                "Problem report",
+                "Автоматически созданный отчёт о проблеме MeshApp.",
+                "ZIP-архив session-лога текущей сессии приложен во вложениях issue."
+        );
+
+        private final String titlePrefix;
+        private final String bodyLead;
+        private final String attachmentNote;
+
+        ReportType(String titlePrefix, String bodyLead, String attachmentNote) {
+            this.titlePrefix = titlePrefix;
+            this.bodyLead = bodyLead;
+            this.attachmentNote = attachmentNote;
+        }
+
+        private String titlePrefix() {
+            return titlePrefix;
+        }
+
+        private String bodyLead() {
+            return bodyLead;
+        }
+
+        private String attachmentNote() {
+            return attachmentNote;
+        }
+    }
 }

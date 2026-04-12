@@ -66,4 +66,24 @@ class SessionCrashLogManagerTest {
         assertFalse(Files.exists(SessionCrashLogManager.getNormalExitMarkerPath()));
         assertTrue(SessionCrashLogManager.peekPendingCrashLog().isEmpty());
     }
+
+    @Test
+    void createReportLogSnapshotCopiesActiveSessionLogWithoutDeletingIt() throws Exception {
+        Path activeLog = tempHome
+                .resolve(SessionCrashLogManager.APP_DIR_NAME)
+                .resolve(SessionCrashLogManager.LOG_DIR_NAME)
+                .resolve(SessionCrashLogManager.ACTIVE_LOG_NAME);
+        Files.createDirectories(activeLog.getParent());
+        Files.writeString(activeLog, "current session log");
+
+        Path snapshot = SessionCrashLogManager.createReportLogSnapshot();
+        try {
+            assertTrue(Files.exists(activeLog));
+            assertTrue(Files.exists(snapshot));
+            assertEquals("current session log", Files.readString(activeLog));
+            assertEquals("current session log", Files.readString(snapshot));
+        } finally {
+            Files.deleteIfExists(snapshot);
+        }
+    }
 }

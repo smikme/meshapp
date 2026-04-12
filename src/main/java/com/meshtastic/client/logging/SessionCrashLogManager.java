@@ -9,6 +9,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.time.Instant;
 import java.time.ZoneId;
@@ -138,6 +139,20 @@ public final class SessionCrashLogManager {
         }
     }
 
+    public static Path createReportLogSnapshot() throws IOException {
+        synchronized (LOCK) {
+            refreshPaths();
+            ensureDirectories();
+            flushWriterQuietly();
+
+            Path snapshot = Files.createTempFile("meshapp-session-report-", ".log");
+            if (Files.exists(activeLogPath)) {
+                Files.copy(activeLogPath, snapshot, StandardCopyOption.REPLACE_EXISTING);
+            }
+            return snapshot;
+        }
+    }
+
     static Path getActiveLogPath() {
         synchronized (LOCK) {
             refreshPaths();
@@ -261,12 +276,24 @@ public final class SessionCrashLogManager {
         if (writer == null) {
             return;
         }
+        flushWriterQuietly();
         try {
             writer.close();
         } catch (IOException e) {
             System.err.println("[MeshApp] Failed to close session log writer: " + e.getMessage());
         } finally {
             writer = null;
+        }
+    }
+
+    private static void flushWriterQuietly() {
+        if (writer == null) {
+            return;
+        }
+        try {
+            writer.flush();
+        } catch (IOException e) {
+            System.err.println("[MeshApp] Failed to flush session log writer: " + e.getMessage());
         }
     }
 

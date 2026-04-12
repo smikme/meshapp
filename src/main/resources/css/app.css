@@ -516,6 +516,16 @@
     -fx-text-fill: -color-fg-emphasis;
 }
 
+.report-problem-button {
+    -fx-background-color: -color-danger-emphasis;
+    -fx-text-fill: white;
+    -fx-font-weight: bold;
+}
+
+.report-problem-button:hover {
+    -fx-opacity: 0.9;
+}
+
 /* Memory bar */
 .memory-bar {
     -fx-pref-width: 150;

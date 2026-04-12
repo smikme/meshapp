@@ -195,3 +195,46 @@ JNIEXPORT void JNICALL Java_com_meshtastic_client_tray_MacOsTrayBridge_activate0
         [NSApp activateIgnoringOtherApps:YES];
     });
 }
+
+JNIEXPORT jboolean JNICALL Java_com_meshtastic_client_tray_MacOsTrayBridge_focusWindow0(
+        JNIEnv *env,
+        jclass clazz,
+        jlong nsWindowPtr,
+        jlong nsViewPtr
+) {
+    (void)env;
+    (void)clazz;
+
+    if (nsWindowPtr == 0) {
+        return JNI_FALSE;
+    }
+
+    __block BOOL focused = NO;
+    meshapp_tray_run_on_main(^{
+        [NSApplication sharedApplication];
+        [NSApp activateIgnoringOtherApps:YES];
+
+        NSWindow *window = (__bridge NSWindow *)(void *)nsWindowPtr;
+        NSView *view = nsViewPtr != 0 ? (__bridge NSView *)(void *)nsViewPtr : nil;
+        if (window == nil) {
+            return;
+        }
+
+        [window orderFrontRegardless];
+        [window makeKeyAndOrderFront:nil];
+        [window makeMainWindow];
+
+        if (view != nil && [view acceptsFirstResponder]) {
+            focused = [window makeFirstResponder:view];
+        }
+
+        if (!focused) {
+            NSView *contentView = window.contentView;
+            if (contentView != nil && [contentView acceptsFirstResponder]) {
+                focused = [window makeFirstResponder:contentView];
+            }
+        }
+    });
+
+    return focused ? JNI_TRUE : JNI_FALSE;
+}

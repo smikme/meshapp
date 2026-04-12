@@ -13,7 +13,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public final class TestEnvironmentSupport {
 
     // JavaFX toolkit можно поднять только один раз на JVM.
-    private static final AtomicBoolean FX_STARTED = new AtomicBoolean(false);
+    private static final AtomicBoolean FX_START_REQUESTED = new AtomicBoolean(false);
+    private static final CountDownLatch FX_READY = new CountDownLatch(1);
 
     private TestEnvironmentSupport() {}
 
@@ -23,20 +24,20 @@ public final class TestEnvironmentSupport {
 
     public static void ensureJavaFxStarted() {
         configureHeadlessJavaFxIfNeeded();
-        if (FX_STARTED.compareAndSet(false, true)) {
-            CountDownLatch latch = new CountDownLatch(1);
+        if (FX_START_REQUESTED.compareAndSet(false, true)) {
             try {
-                Platform.startup(latch::countDown);
-                await(latch);
+                Platform.startup(FX_READY::countDown);
             } catch (IllegalStateException e) {
                 if (!"Toolkit already initialized".equals(e.getMessage())) {
                     throw e;
                 }
+                FX_READY.countDown();
             }
-            return;
         }
 
-        // Для повторных вызовов достаточно убедиться, что FX event loop жив.
+        await(FX_READY);
+
+        // Для повторных вызовов и гонок во время старта достаточно убедиться, что FX event loop жив.
         CountDownLatch latch = new CountDownLatch(1);
         Platform.runLater(latch::countDown);
         await(latch);

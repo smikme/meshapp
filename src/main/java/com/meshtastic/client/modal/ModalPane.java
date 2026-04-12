@@ -57,19 +57,20 @@ public class ModalPane extends StackPane {
         }
     };
 
+    /** Scene-level фильтр: закрытие по ESC независимо от focus owner внутри модалки */
+    private final EventHandler<KeyEvent> sceneKeyFilter = e -> {
+        if (dismissOnEscape && isVisible() && e.getCode() == KeyCode.ESCAPE) {
+            hide();
+            e.consume();
+        }
+    };
+
     public ModalPane() {
         setVisible(false);
         setPickOnBounds(true);
         getStyleClass().add("modal-overlay");
         setAlignment(Pos.CENTER_RIGHT);
-
-        // ESC закрывает модалку
-        addEventHandler(KeyEvent.KEY_PRESSED, e -> {
-            if (dismissOnEscape && e.getCode() == KeyCode.ESCAPE) {
-                hide();
-                e.consume();
-            }
-        });
+        setFocusTraversable(false);
     }
 
     public static void install(ModalPane pane) {
@@ -109,6 +110,9 @@ public class ModalPane extends StackPane {
         if (dismissOnBackdrop && getScene() != null) {
             getScene().addEventFilter(MouseEvent.MOUSE_PRESSED, sceneClickFilter);
         }
+        if (dismissOnEscape && getScene() != null) {
+            getScene().addEventFilter(KeyEvent.KEY_PRESSED, sceneKeyFilter);
+        }
 
         // Фон: fade-in
         setOpacity(0);
@@ -124,8 +128,6 @@ public class ModalPane extends StackPane {
 
         new ParallelTransition(bgFade, slide).play();
 
-        // Фокус на панель для обработки ESC
-        requestFocus();
     }
 
     /**
@@ -137,6 +139,7 @@ public class ModalPane extends StackPane {
         // Снять scene-level фильтр
         if (getScene() != null) {
             getScene().removeEventFilter(MouseEvent.MOUSE_PRESSED, sceneClickFilter);
+            getScene().removeEventFilter(KeyEvent.KEY_PRESSED, sceneKeyFilter);
         }
 
         FadeTransition bgFade = new FadeTransition(ANIM_DURATION, this);
@@ -153,9 +156,10 @@ public class ModalPane extends StackPane {
             currentContent = null;
             dismissOnBackdrop = true;
             dismissOnEscape = true;
-            if (onHidden != null) {
-                onHidden.run();
-                onHidden = null;
+            Runnable hiddenCallback = onHidden;
+            onHidden = null;
+            if (hiddenCallback != null) {
+                hiddenCallback.run();
             }
         });
         anim.play();
