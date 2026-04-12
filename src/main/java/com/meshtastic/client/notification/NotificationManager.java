@@ -75,6 +75,10 @@ public class NotificationManager {
             return;
         }
 
+        if (AppPreferences.isChatMuted(currentOwnerNodeId(), chatType, chatKey)) {
+            return;
+        }
+
         if (msg.isOutgoing()) {
             return;
         }
@@ -123,6 +127,12 @@ public class NotificationManager {
         BiPredicate<String, String> checker = activeChatChecker;
         if (checker == null) { return false; }
         return checker.test(chatType, chatKey);
+    }
+
+    private String currentOwnerNodeId() {
+        return deviceState != null && deviceState.getMyNodeNum() != 0
+                ? String.format("!%08x", deviceState.getMyNodeNum())
+                : "";
     }
 
     private String buildTitle(MeshMessage msg, String chatType) {

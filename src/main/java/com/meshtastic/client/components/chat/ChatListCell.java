@@ -4,19 +4,24 @@ import com.meshtastic.client.components.EmojiTextFlow;
 import com.meshtastic.client.modal.ModalPane;
 import com.meshtastic.client.model.ChatItem;
 import com.meshtastic.client.utils.NodeUtils;
-import javafx.application.Platform;
+import com.meshtastic.client.utils.SvgIconLoader;
+import javafx.scene.Cursor;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.control.ContextMenu;
+import javafx.scene.control.ContentDisplay;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
 import javafx.scene.control.MenuItem;
+import javafx.scene.control.SeparatorMenuItem;
+import javafx.scene.control.Tooltip;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 import javafx.scene.paint.Color;
 import javafx.scene.shape.Rectangle;
+import javafx.scene.shape.SVGPath;
 import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
 
@@ -26,22 +31,31 @@ import java.util.function.Consumer;
  * Ячейка списка чатов: аватар, имя, превью последнего сообщения, время, badge непрочитанных.
  */
 public class ChatListCell extends ListCell<ChatItem> {
+    private static final String BELL_ICON_PATH = "/drawer/icon/bell.svg";
+    private static final String BELL_OFF_ICON_PATH = "/drawer/icon/bell-off.svg";
+    private static final double MUTE_ICON_SIZE = 12;
 
     private final HBox root = new HBox(10);
     private final StackPane avatarPane = new StackPane();
     private final Label avatarLabel = new Label();
     private final VBox textBox = new VBox(2);
     private final Label nameLabel = new Label();
+    private final Label muteIconLabel = new Label();
+    private final Tooltip muteIconTooltip = new Tooltip("Оповещения чата");
     private final EmojiTextFlow messagePreview = new EmojiTextFlow();
     private final VBox metaBox = new VBox(4);
+    private final HBox timeBox = new HBox(6);
     private final Label timeLabel = new Label();
     private final Label unreadBadge = new Label();
 
     /**
      * @param onDeleteChat      колбэк удаления чата (вызывается из контекстного меню удаления/отключения)
      * @param onShowProperties  колбэк свойств канала (вызывается из контекстного меню «Свойства»)
+     * @param onToggleMute      колбэк переключения оповещений для чата
      */
-    public ChatListCell(Consumer<ChatItem> onDeleteChat, Consumer<ChatItem> onShowProperties) {
+    public ChatListCell(Consumer<ChatItem> onDeleteChat,
+                        Consumer<ChatItem> onShowProperties,
+                        Consumer<ChatItem> onToggleMute) {
         root.setAlignment(Pos.CENTER_LEFT);
         root.setPadding(new Insets(8, 10, 8, 10));
         root.getStyleClass().add("chat-list-cell-root");
@@ -56,6 +70,20 @@ public class ChatListCell extends ListCell<ChatItem> {
 
         nameLabel.setFont(Font.font("Roboto", FontWeight.BOLD, 14));
         nameLabel.getStyleClass().add("chat-name-label");
+
+        muteIconLabel.getStyleClass().add("chat-mute-icon");
+        muteIconLabel.setMinWidth(Label.USE_PREF_SIZE);
+        muteIconLabel.setContentDisplay(ContentDisplay.GRAPHIC_ONLY);
+        muteIconLabel.setTooltip(muteIconTooltip);
+        muteIconLabel.setCursor(Cursor.HAND);
+        muteIconLabel.setOnMousePressed(ev -> ev.consume());
+        muteIconLabel.setOnMouseClicked(ev -> {
+            ChatItem chatItem = getItem();
+            if (chatItem != null) {
+                onToggleMute.accept(chatItem);
+            }
+            ev.consume();
+        });
 
         messagePreview.getStyleClass().add("chat-preview-label");
         messagePreview.setTextStyleClass("chat-preview-text-node");
@@ -81,9 +109,12 @@ public class ChatListCell extends ListCell<ChatItem> {
         unreadBadge.getStyleClass().add("chat-unread-badge");
         unreadBadge.setAlignment(Pos.CENTER);
 
+        timeBox.setAlignment(Pos.CENTER_RIGHT);
+        timeBox.getChildren().addAll(timeLabel, muteIconLabel);
+
         metaBox.setAlignment(Pos.TOP_RIGHT);
         metaBox.setMinWidth(50);
-        metaBox.getChildren().addAll(timeLabel, unreadBadge);
+        metaBox.getChildren().addAll(timeBox, unreadBadge);
 
         root.getChildren().addAll(avatarPane, textBox, metaBox);
 
@@ -96,8 +127,16 @@ public class ChatListCell extends ListCell<ChatItem> {
             }
         });
 
+        MenuItem notificationsItem = new MenuItem();
+        notificationsItem.setOnAction(ev -> {
+            ChatItem chatItem = getItem();
+            if (chatItem != null) {
+                onToggleMute.accept(chatItem);
+            }
+        });
+
         MenuItem closeItem = new MenuItem("Удалить локально");
-        ContextMenu ctxMenu = new ContextMenu(propertiesItem, closeItem);
+        ContextMenu ctxMenu = new ContextMenu(propertiesItem, notificationsItem, new SeparatorMenuItem(), closeItem);
         setContextMenu(ctxMenu);
 
         // «Свойства» только для каналов
@@ -106,6 +145,11 @@ public class ChatListCell extends ListCell<ChatItem> {
             boolean isChannel = chatItem != null
                     && chatItem.getType() == ChatItem.ChatType.CHANNEL;
             propertiesItem.setVisible(isChannel);
+            if (chatItem != null) {
+                notificationsItem.setText(chatItem.isMuted()
+                        ? "Включить оповещения"
+                        : "Выключить оповещения");
+            }
             closeItem.setText(isChannel ? "Отключить канал" : "Удалить локально");
         });
 
@@ -147,6 +191,11 @@ public class ChatListCell extends ListCell<ChatItem> {
                 + "; -fx-background-radius: 20;");
 
         nameLabel.setText(item.getDisplayName());
+        muteIconLabel.setText(null);
+        muteIconLabel.setGraphic(createMuteIcon(item.isMuted()));
+        muteIconTooltip.setText(item.isMuted()
+                ? "Оповещения чата выключены"
+                : "Оповещения чата включены");
         messagePreview.setText(
                 item.getLastMessageText() != null ? item.getLastMessageText() : "");
 
@@ -171,5 +220,9 @@ public class ChatListCell extends ListCell<ChatItem> {
 
         setGraphic(root);
         setText(null);
+    }
+
+    private SVGPath createMuteIcon(boolean muted) {
+        return SvgIconLoader.load(muted ? BELL_OFF_ICON_PATH : BELL_ICON_PATH, MUTE_ICON_SIZE);
     }
 }
