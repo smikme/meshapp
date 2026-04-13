@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.Map;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -36,5 +37,41 @@ class OsDetectTest {
     @Test
     void returnsFalseWhenAppImageVariablesAreMissing() {
         assertFalse(OsDetect.isLinuxAppImage(OsDetect.OsType.LINUX, Map.of()));
+    }
+
+    @Test
+    void detectsFlatpakByFlatpakIdVariable() {
+        assertTrue(OsDetect.isLinuxFlatpak(
+                OsDetect.OsType.LINUX,
+                Map.of("FLATPAK_ID", "com.meshtastic.meshapp")
+        ));
+    }
+
+    @Test
+    void detectsFlatpakByContainerVariable() {
+        assertTrue(OsDetect.isLinuxFlatpak(
+                OsDetect.OsType.LINUX,
+                Map.of("container", "flatpak")
+        ));
+    }
+
+    @Test
+    void flatpakTakesPriorityOverAppImageWhenBothMarkersExist() {
+        assertEquals(
+                OsDetect.PackageFormat.FLATPAK,
+                OsDetect.detectPackageFormat(
+                        OsDetect.OsType.LINUX,
+                        Map.of(
+                                "FLATPAK_ID", "com.meshtastic.meshapp",
+                                "APPIMAGE", "/tmp/MeshApp-x86_64.AppImage"
+                        )
+                )
+        );
+    }
+
+    @Test
+    void normalizesArchitectureAliases() {
+        assertEquals("x86_64", OsDetect.normalizeArch("amd64"));
+        assertEquals("aarch64", OsDetect.normalizeArch("arm64"));
     }
 }
