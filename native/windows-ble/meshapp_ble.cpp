@@ -35,6 +35,7 @@
 #include <queue>
 #include <condition_variable>
 #include <memory>
+#include <stdexcept>
 
 using namespace winrt;
 using namespace Windows::Foundation;
@@ -229,6 +230,60 @@ static void cancel_pending_pairing_request() {
     g_pairing_cv.notify_all();
 }
 
+struct async_timeout_error : std::runtime_error {
+    using std::runtime_error::runtime_error;
+};
+
+template<typename AsyncOp>
+static auto await_async_result(
+        AsyncOp op,
+        std::chrono::milliseconds timeout,
+        const char* label) -> decltype(op.GetResults()) {
+    using Result = decltype(op.GetResults());
+
+    if (timeout.count() <= 0) {
+        throw async_timeout_error(std::string(label) + " timed out before start");
+    }
+
+    auto promise = std::make_shared<std::promise<Result>>();
+    auto future = promise->get_future();
+
+    op.Completed([promise, label](AsyncOp const& async, AsyncStatus status) mutable {
+        try {
+            switch (status) {
+                case AsyncStatus::Completed:
+                    promise->set_value(async.GetResults());
+                    break;
+                case AsyncStatus::Canceled:
+                    promise->set_exception(std::make_exception_ptr(
+                            async_timeout_error(std::string(label) + " cancelled")));
+                    break;
+                case AsyncStatus::Error:
+                    async.GetResults();
+                    promise->set_exception(std::make_exception_ptr(
+                            std::runtime_error(std::string(label) + " completed with error")));
+                    break;
+                default:
+                    promise->set_exception(std::make_exception_ptr(
+                            std::runtime_error(std::string(label) + " completed with unexpected status")));
+                    break;
+            }
+        } catch (...) {
+            try {
+                promise->set_exception(std::current_exception());
+            } catch (...) {}
+        }
+    });
+
+    if (future.wait_for(timeout) != std::future_status::ready) {
+        try { op.Cancel(); } catch (...) {}
+        throw async_timeout_error(std::string(label) + " timed out after "
+                + std::to_string(timeout.count()) + "ms");
+    }
+
+    return future.get();
+}
+
 /**
  * Waits for the application to provide a BLE passkey.
  * Uses a dedicated condition variable instead of run_on_worker(), because the
@@ -275,7 +330,10 @@ static bool await_user_passkey(std::string const& address, std::string& out_pin)
  * unpaired device, but the first WriteValueAsync then fails with AccessDenied.
  * Pairing up front keeps connect() and first write on the same contract.
  */
-static bool ensure_paired(BluetoothLEDevice const& device, std::string const& address) {
+static bool ensure_paired(
+        BluetoothLEDevice const& device,
+        std::string const& address,
+        std::chrono::milliseconds timeout) {
     auto device_info = device.DeviceInformation();
     if (device_info == nullptr) {
         log_msg("[meshble] DeviceInformation is unavailable for %s", address.c_str());
@@ -334,8 +392,11 @@ static bool ensure_paired(BluetoothLEDevice const& device, std::string const& ad
             deferral.Complete();
         });
 
-    auto result = custom_pairing.PairAsync(
-            DevicePairingKinds::ConfirmOnly | DevicePairingKinds::ProvidePin).get();
+    auto result = await_async_result(
+            custom_pairing.PairAsync(
+                    DevicePairingKinds::ConfirmOnly | DevicePairingKinds::ProvidePin),
+            timeout,
+            "PairAsync");
 
     switch (result.Status()) {
         case DevicePairingResultStatus::Paired:
@@ -350,8 +411,14 @@ static bool ensure_paired(BluetoothLEDevice const& device, std::string const& ad
     }
 }
 
-static GattCharacteristic find_characteristic(GattDeviceService const& service, guid const& uuid) {
-    auto result = service.GetCharacteristicsForUuidAsync(uuid, BluetoothCacheMode::Uncached).get();
+static GattCharacteristic find_characteristic(
+        GattDeviceService const& service,
+        guid const& uuid,
+        std::chrono::milliseconds timeout) {
+    auto result = await_async_result(
+            service.GetCharacteristicsForUuidAsync(uuid, BluetoothCacheMode::Uncached),
+            timeout,
+            "GetCharacteristicsForUuidAsync");
     if (result.Status() == GattCommunicationStatus::Success) {
         auto chars = result.Characteristics();
         if (chars.Size() > 0) return chars.GetAt(0);
@@ -572,9 +639,15 @@ MESHBLE_API void meshble_stop_scan(void) {
 MESHBLE_API int meshble_connect(const char* address, int timeout_ms) {
     if (!g_initialized || !address) return -1;
     std::string addr(address);
+    auto step_timeout = std::chrono::milliseconds(timeout_ms > 0 ? timeout_ms : 10000);
+    auto pairing_timeout = step_timeout;
+    auto minimum_pairing_timeout = std::chrono::minutes(2) + std::chrono::seconds(5);
+    if (pairing_timeout < minimum_pairing_timeout) {
+        pairing_timeout = minimum_pairing_timeout;
+    }
 
     try {
-        return run_on_worker([addr]() -> int {
+        return run_on_worker([addr, step_timeout, pairing_timeout]() -> int {
             do_disconnect();
             uint64_t mac = string_to_mac(addr.c_str());
             if (mac == 0) return -2;
@@ -582,10 +655,14 @@ MESHBLE_API int meshble_connect(const char* address, int timeout_ms) {
             try {
                 log_msg("[meshble] Connecting to %s ...", addr.c_str());
 
-                auto dev = BluetoothLEDevice::FromBluetoothAddressAsync(mac).get();
+                log_msg("[meshble] Resolving device object...");
+                auto dev = await_async_result(
+                        BluetoothLEDevice::FromBluetoothAddressAsync(mac),
+                        step_timeout,
+                        "FromBluetoothAddressAsync");
                 if (dev == nullptr) { log_msg("[meshble] Device not found"); return -2; }
 
-                if (!ensure_paired(dev, addr)) {
+                if (!ensure_paired(dev, addr, pairing_timeout)) {
                     try { dev.Close(); } catch (...) {}
                     do_disconnect();
                     return -4;
@@ -594,14 +671,23 @@ MESHBLE_API int meshble_connect(const char* address, int timeout_ms) {
                 // Re-open after pairing so the next GATT requests run against a fresh
                 // WinRT device object with updated authentication state.
                 try { dev.Close(); } catch (...) {}
-                dev = BluetoothLEDevice::FromBluetoothAddressAsync(mac).get();
+                log_msg("[meshble] Re-opening device after pairing...");
+                dev = await_async_result(
+                        BluetoothLEDevice::FromBluetoothAddressAsync(mac),
+                        step_timeout,
+                        "FromBluetoothAddressAsync(reopen)");
                 if (dev == nullptr) { log_msg("[meshble] Device not found after pairing"); return -2; }
 
                 g_ble->device = dev;
                 g_ble->connection_status_token = g_ble->device.ConnectionStatusChanged(on_connection_status_changed);
 
                 log_msg("[meshble] Discovering GATT services...");
-                auto svc_result = g_ble->device.GetGattServicesForUuidAsync(to_guid(SVC_UUID), BluetoothCacheMode::Uncached).get();
+                auto svc_result = await_async_result(
+                        g_ble->device.GetGattServicesForUuidAsync(
+                                to_guid(SVC_UUID),
+                                BluetoothCacheMode::Uncached),
+                        step_timeout,
+                        "GetGattServicesForUuidAsync");
                 if (svc_result.Status() == GattCommunicationStatus::AccessDenied) { do_disconnect(); return -4; }
                 if (svc_result.Status() != GattCommunicationStatus::Success || svc_result.Services().Size() == 0) {
                     do_disconnect(); return -3;
@@ -609,9 +695,9 @@ MESHBLE_API int meshble_connect(const char* address, int timeout_ms) {
                 g_ble->service = svc_result.Services().GetAt(0);
 
                 log_msg("[meshble] Discovering characteristics...");
-                g_ble->from_radio = find_characteristic(g_ble->service, to_guid(FR_UUID));
-                g_ble->to_radio   = find_characteristic(g_ble->service, to_guid(TR_UUID));
-                g_ble->from_num   = find_characteristic(g_ble->service, to_guid(FN_UUID));
+                g_ble->from_radio = find_characteristic(g_ble->service, to_guid(FR_UUID), step_timeout);
+                g_ble->to_radio   = find_characteristic(g_ble->service, to_guid(TR_UUID), step_timeout);
+                g_ble->from_num   = find_characteristic(g_ble->service, to_guid(FN_UUID), step_timeout);
 
                 if (!g_ble->to_radio || !g_ble->from_radio) {
                     log_msg("[meshble] Required characteristics not found");
@@ -626,8 +712,11 @@ MESHBLE_API int meshble_connect(const char* address, int timeout_ms) {
 
                 if (g_ble->from_num != nullptr) {
                     try {
-                        auto nr2 = g_ble->from_num.WriteClientCharacteristicConfigurationDescriptorAsync(
-                            GattClientCharacteristicConfigurationDescriptorValue::Notify).get();
+                        auto nr2 = await_async_result(
+                            g_ble->from_num.WriteClientCharacteristicConfigurationDescriptorAsync(
+                                GattClientCharacteristicConfigurationDescriptorValue::Notify),
+                            step_timeout,
+                            "WriteClientCharacteristicConfigurationDescriptorAsync");
                         if (nr2 == GattCommunicationStatus::Success)
                             g_ble->from_num_notify_token = g_ble->from_num.ValueChanged(on_from_num_value_changed);
                     } catch (...) {}
@@ -639,6 +728,9 @@ MESHBLE_API int meshble_connect(const char* address, int timeout_ms) {
                 if (g_state_callback) g_state_callback(0, nullptr);
                 return 0;
 
+            } catch (const async_timeout_error& e) {
+                log_msg("[meshble] Connect timeout: %s", e.what());
+                do_disconnect(); return -1;
             } catch (const hresult_error& e) {
                 log_msg("[meshble] Connect error: %ls", e.message().c_str());
                 do_disconnect(); return -3;

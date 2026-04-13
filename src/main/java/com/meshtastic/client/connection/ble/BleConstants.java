@@ -18,10 +18,10 @@ public final class BleConstants {
     public static final String FROM_NUM_UUID = "ed9da18c-a800-4f66-a670-aa7547e34453";
 
     /** Таймаут подключения к периферии (мс). */
-    public static final int CONNECT_TIMEOUT_MS = 10_000;
+    public static final int CONNECT_TIMEOUT_MS = 20_000;
 
     /** Таймаут обнаружения GATT-сервисов после подключения (мс). */
-    public static final int SERVICE_DISCOVERY_TIMEOUT_MS = 10_000;
+    public static final int SERVICE_DISCOVERY_TIMEOUT_MS = 20_000;
 
     /** Длина заголовка serial-фрейма [0x94][0xC3][len_msb][len_lsb], который BLE не использует. */
     public static final int SERIAL_FRAME_HEADER_SIZE = 4;
