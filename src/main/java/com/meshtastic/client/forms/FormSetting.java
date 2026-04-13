@@ -14,6 +14,7 @@ import com.meshtastic.client.service.ConfigSnapshotService;
 import com.meshtastic.client.service.DatabaseResetService;
 import com.meshtastic.client.service.MessageService;
 import com.meshtastic.client.service.NodeCacheService;
+import com.meshtastic.client.platform.OsDetect;
 import com.meshtastic.client.utils.ConfigValueFormatter;
 import com.meshtastic.client.system.Form;
 import com.meshtastic.client.themes.TypographyManager;
@@ -466,7 +467,10 @@ public class FormSetting extends Form {
         appearanceHeader.getStyleClass().add("section-title");
 
         CheckBox disableEffectsCb = new CheckBox("Выключить эффекты оформления");
-        disableEffectsCb.setSelected(AppPreferences.isDisableEffects());
+        disableEffectsCb.setSelected(AppPreferences.isDisableEffectsEffective());
+        if (OsDetect.isWindows10()) {
+            disableEffectsCb.setDisable(true);
+        }
         disableEffectsCb.selectedProperty().addListener((obs, old, val) ->
                 AppPreferences.setDisableEffects(val));
 
@@ -499,7 +503,9 @@ public class FormSetting extends Form {
                         TypographyManager::setChatFontSize)
         );
 
-        Label restartNote = new Label("Изменения вступят в силу после перезапуска приложения");
+        Label restartNote = new Label(OsDetect.isWindows10()
+                ? "На Windows 10 эффекты оформления принудительно выключены"
+                : "Изменения вступят в силу после перезапуска приложения");
         restartNote.getStyleClass().add("muted-note-label");
 
         VBox appearanceGroup = new VBox(8, appearanceHeader, typographyGroup,

@@ -112,7 +112,7 @@ public class MeshApp extends Application {
 
         RootPane rootPane = new RootPane();
         Scene scene = new Scene(rootPane, 1010, 750);
-        if (!AppPreferences.isDisableEffects() && OsDetect.supportsSeamlessFrame()) {
+        if (!AppPreferences.isDisableEffectsEffective() && OsDetect.supportsSeamlessFrame()) {
             // Для transparent stage fill должен быть прозрачным ещё до первого show(),
             // иначе первый кадр успевает отрисоваться как opaque и backdrop "просыпается"
             // только после следующего крупного repaint (например, смены темы).

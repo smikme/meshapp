@@ -1,5 +1,7 @@
 package com.meshtastic.client.utils;
 
+import com.meshtastic.client.platform.OsDetect;
+
 import java.util.Collections;
 import java.util.List;
 import java.util.prefs.Preferences;
@@ -88,6 +90,10 @@ public class AppPreferences {
 
     public static boolean isDisableEffects() {
         return state().getBoolean(KEY_DISABLE_EFFECTS, false);
+    }
+
+    public static boolean isDisableEffectsEffective() {
+        return isDisableEffects() || OsDetect.isWindows10();
     }
 
     public static void setDisableEffects(boolean value) {

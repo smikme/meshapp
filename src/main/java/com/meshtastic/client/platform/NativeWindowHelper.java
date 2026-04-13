@@ -38,7 +38,7 @@ public final class NativeWindowHelper {
             catch (Throwable t) { log.warn("initDarkModeSupport failed", t); }
         }
 
-        if (AppPreferences.isDisableEffects()) {
+        if (AppPreferences.isDisableEffectsEffective()) {
             // Выключены эффекты оформления: стандартный DECORATED стиль ОС
             return;
         }
@@ -59,7 +59,7 @@ public final class NativeWindowHelper {
         }
 
         // Выключены эффекты оформления — без backdrop эффектов
-        if (AppPreferences.isDisableEffects()) {
+        if (AppPreferences.isDisableEffectsEffective()) {
             setSeamlessState(stage, false);
             setThemeState(stage, isDark);
             // Windows: установить тёмный/светлый title bar в нативном режиме
