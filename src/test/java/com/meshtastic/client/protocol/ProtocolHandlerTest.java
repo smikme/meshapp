@@ -22,6 +22,7 @@ import java.util.List;
 import java.nio.file.Path;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
@@ -153,6 +154,44 @@ class ProtocolHandlerTest {
 
         Thread.sleep(200);
         assertEquals(0, connection.sendCount.get());
+    }
+
+    @Test
+    void shutdownDoesNotInterruptInFlightListener() throws Exception {
+        FakeConnection connection = new FakeConnection();
+        ProtocolHandler handler = track(new ProtocolHandler(connection));
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        CountDownLatch finished = new CountDownLatch(1);
+        AtomicBoolean interrupted = new AtomicBoolean(false);
+
+        handler.addListener(new FromRadioListener() {
+            @Override
+            public void onNodeInfo(MeshProtos.NodeInfo nodeInfo) {
+                entered.countDown();
+                try {
+                    release.await(1, TimeUnit.SECONDS);
+                } catch (InterruptedException e) {
+                    interrupted.set(true);
+                    Thread.currentThread().interrupt();
+                } finally {
+                    interrupted.compareAndSet(false, Thread.currentThread().isInterrupted());
+                    finished.countDown();
+                }
+            }
+        });
+
+        connection.emit(MeshProtos.FromRadio.newBuilder()
+                .setNodeInfo(MeshProtos.NodeInfo.newBuilder().setNum(0xCAFEBABE).build())
+                .build()
+                .toByteArray());
+
+        assertTrue(entered.await(1, TimeUnit.SECONDS));
+        handler.shutdown();
+        release.countDown();
+
+        assertTrue(finished.await(1, TimeUnit.SECONDS));
+        assertFalse(interrupted.get());
     }
 
     @Test
