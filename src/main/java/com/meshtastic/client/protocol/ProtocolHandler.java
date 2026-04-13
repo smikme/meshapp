@@ -15,6 +15,7 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -28,6 +29,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class ProtocolHandler {
 
     private static final Logger log = LoggerFactory.getLogger(ProtocolHandler.class);
+    private static final byte[] SHUTDOWN_MARKER = new byte[0];
 
     /** Интервал heartbeat (секунды). Прошивка Meshtastic закрывает TCP при idle (~5-7 сек). */
     private static final int HEARTBEAT_INTERVAL_SEC = 5;
@@ -42,6 +44,7 @@ public class ProtocolHandler {
      *  чтобы reader не блокировался на listeners и не терял данные из serial-буфера. */
     private final BlockingQueue<byte[]> incomingQueue = new LinkedBlockingQueue<>(256);
     private final Thread dispatcherThread;
+    private final AtomicBoolean shutdownRequested = new AtomicBoolean(false);
 
     private final ScheduledExecutorService heartbeatScheduler =
             Executors.newSingleThreadScheduledExecutor(r -> {
@@ -151,10 +154,18 @@ public class ProtocolHandler {
     public void shutdown() {
         stopHeartbeat();
         heartbeatScheduler.shutdownNow();
-        dispatcherThread.interrupt();
+        if (!shutdownRequested.compareAndSet(false, true)) {
+            return;
+        }
+        connection.setDataListener(null);
+        incomingQueue.clear();
+        incomingQueue.offer(SHUTDOWN_MARKER);
     }
 
     private void handleRawPacket(byte[] data) {
+        if (shutdownRequested.get()) {
+            return;
+        }
         if (!incomingQueue.offer(data)) {
             log.warn("Incoming queue full, dropping packet ({} bytes)", data.length);
         }
@@ -165,6 +176,9 @@ public class ProtocolHandler {
         while (!Thread.currentThread().isInterrupted()) {
             try {
                 byte[] data = incomingQueue.take();
+                if (data == SHUTDOWN_MARKER) {
+                    break;
+                }
                 MeshProtos.FromRadio fromRadio = MeshProtos.FromRadio.parseFrom(data);
                 dispatchFromRadio(fromRadio);
             } catch (InterruptedException e) {

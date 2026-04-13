@@ -16,8 +16,10 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ThreadLocalRandom;
@@ -57,6 +59,7 @@ public class ConfigExchangeService implements FromRadioListener {
     private final Map<String, Boolean> favoriteFlags = new HashMap<>();
     private final Map<String, Boolean> ignoredFlags = new HashMap<>();
     private final AtomicBoolean receivedAny = new AtomicBoolean(false);
+    private final AtomicBoolean aborted = new AtomicBoolean(false);
     private final Object deferredConfigLock = new Object();
     private final List<MeshProtos.NodeInfo> deferredNodeInfos = new ArrayList<>();
     private volatile ScheduledFuture<?> retryFuture;
@@ -98,6 +101,9 @@ public class ConfigExchangeService implements FromRadioListener {
     }
 
     private void sendWantConfig() {
+        if (aborted.get()) {
+            return;
+        }
         MeshProtos.ToRadio toRadio = MeshProtos.ToRadio.newBuilder()
                 .setWantConfigId(sentConfigId)
                 .build();
@@ -110,17 +116,26 @@ public class ConfigExchangeService implements FromRadioListener {
      * открытии порта и первый want_config_id был потерян во время загрузки.
      */
     private void scheduleRetry(int attempt) {
-        if (attempt > MAX_RETRIES) return;
-        retryFuture = retryScheduler.schedule(() -> {
-            if (!receivedAny.get() && !future.isDone()) {
-                log.info("No response from device, retrying want_config_id (attempt {}/{})", attempt, MAX_RETRIES);
-                deviceState.clear();
-                resetDeferredConfigState();
-                sentConfigId = ThreadLocalRandom.current().nextInt(1, Integer.MAX_VALUE);
-                sendWantConfig();
-                scheduleRetry(attempt + 1);
-            }
-        }, RETRY_INTERVAL_MS, TimeUnit.MILLISECONDS);
+        if (attempt > MAX_RETRIES || aborted.get() || retryScheduler.isShutdown()) {
+            return;
+        }
+        try {
+            retryFuture = retryScheduler.schedule(() -> {
+                if (aborted.get()) {
+                    return;
+                }
+                if (!receivedAny.get() && !future.isDone()) {
+                    log.info("No response from device, retrying want_config_id (attempt {}/{})", attempt, MAX_RETRIES);
+                    deviceState.clear();
+                    resetDeferredConfigState();
+                    sentConfigId = ThreadLocalRandom.current().nextInt(1, Integer.MAX_VALUE);
+                    sendWantConfig();
+                    scheduleRetry(attempt + 1);
+                }
+            }, RETRY_INTERVAL_MS, TimeUnit.MILLISECONDS);
+        } catch (RejectedExecutionException e) {
+            log.debug("Retry scheduler already stopped");
+        }
     }
 
     private void cancelRetry() {
@@ -132,8 +147,23 @@ public class ConfigExchangeService implements FromRadioListener {
         retryScheduler.shutdownNow();
     }
 
+    public void abort(String reason) {
+        if (!aborted.compareAndSet(false, true)) {
+            return;
+        }
+        cancelRetry();
+        protocolHandler.removeListener(this);
+        resetDeferredConfigState();
+        if (future != null && !future.isDone()) {
+            future.completeExceptionally(new CancellationException("Config exchange aborted: " + reason));
+        }
+    }
+
     @Override
     public void onMyNodeInfo(MeshProtos.MyNodeInfo myInfo) {
+        if (aborted.get()) {
+            return;
+        }
         receivedAny.set(true);
         deviceState.setMyNodeNum(myInfo.getMyNodeNum());
         log.info("My node number: {}", myInfo.getMyNodeNum());
@@ -142,6 +172,9 @@ public class ConfigExchangeService implements FromRadioListener {
 
     @Override
     public void onNodeInfo(MeshProtos.NodeInfo nodeInfo) {
+        if (aborted.get()) {
+            return;
+        }
         if (deviceState.getMyNodeNum() == 0) {
             deferNodeInfo(nodeInfo);
             return;
@@ -150,6 +183,9 @@ public class ConfigExchangeService implements FromRadioListener {
     }
 
     private void processNodeInfo(MeshProtos.NodeInfo nodeInfo) {
+        if (aborted.get()) {
+            return;
+        }
         NodeData node = deviceState.getOrCreateNode(nodeInfo.getNum());
 
         if (nodeInfo.hasUser()) {
@@ -247,6 +283,9 @@ public class ConfigExchangeService implements FromRadioListener {
 
     @Override
     public void onConfig(ConfigProtos.Config config) {
+        if (aborted.get()) {
+            return;
+        }
         if (config.getPayloadVariantCase() == ConfigProtos.Config.PayloadVariantCase.LORA) {
             log.debug("onConfig LORA ignore_incoming {}", ConfigDebugFormatter.describeIgnoreIncoming(config));
         }
@@ -255,11 +294,17 @@ public class ConfigExchangeService implements FromRadioListener {
 
     @Override
     public void onModuleConfig(ModuleConfigProtos.ModuleConfig moduleConfig) {
+        if (aborted.get()) {
+            return;
+        }
         deviceState.addModuleConfig(moduleConfig);
     }
 
     @Override
     public void onChannel(ChannelProtos.Channel channel) {
+        if (aborted.get()) {
+            return;
+        }
         deviceState.addChannel(channel);
     }
 
@@ -290,6 +335,9 @@ public class ConfigExchangeService implements FromRadioListener {
 
     @Override
     public void onConfigComplete(int configCompleteId) {
+        if (aborted.get()) {
+            return;
+        }
         if (configCompleteId != sentConfigId) {
             log.warn("Received config_complete_id {} but expected {}", configCompleteId, sentConfigId);
             return;
@@ -303,6 +351,9 @@ public class ConfigExchangeService implements FromRadioListener {
     }
 
     private void processConfigComplete(int configCompleteId) {
+        if (aborted.get()) {
+            return;
+        }
         log.info("Config exchange complete. Nodes: {}, Channels: {}, Configs: {}",
                 deviceState.getNodeCount(),
                 deviceState.getChannels().size(),
@@ -351,6 +402,9 @@ public class ConfigExchangeService implements FromRadioListener {
     }
 
     private void deferNodeInfo(MeshProtos.NodeInfo nodeInfo) {
+        if (aborted.get()) {
+            return;
+        }
         if (nodeInfo == null) {
             return;
         }
@@ -361,6 +415,9 @@ public class ConfigExchangeService implements FromRadioListener {
     }
 
     private void deferConfigComplete(int configCompleteId) {
+        if (aborted.get()) {
+            return;
+        }
         synchronized (deferredConfigLock) {
             deferredConfigCompleteId = configCompleteId;
         }
@@ -368,6 +425,9 @@ public class ConfigExchangeService implements FromRadioListener {
     }
 
     private void flushDeferredConfigState() {
+        if (aborted.get()) {
+            return;
+        }
         List<MeshProtos.NodeInfo> nodeInfos;
         Integer configCompleteId;
         synchronized (deferredConfigLock) {

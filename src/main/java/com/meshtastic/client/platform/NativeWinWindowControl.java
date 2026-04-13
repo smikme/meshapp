@@ -100,18 +100,32 @@ public class NativeWinWindowControl {
 
         try {
             NativeLibrary uxTheme = NativeLibrary.getInstance("uxtheme");
-            uxSetPreferredAppMode = uxTheme.getFunction("#135");
-            uxAllowDarkModeForWindow = uxTheme.getFunction("#133");
-            uxRefreshImmersiveColorPolicy = uxTheme.getFunction("#104");
+            uxSetPreferredAppMode = resolveUxThemeOrdinal(uxTheme, "#135", "SetPreferredAppMode");
+            uxAllowDarkModeForWindow = resolveUxThemeOrdinal(uxTheme, "#133", "AllowDarkModeForWindow");
+            uxRefreshImmersiveColorPolicy = resolveUxThemeOrdinal(
+                    uxTheme, "#104", "RefreshImmersiveColorPolicyState");
 
             // SetPreferredAppMode(AllowDark) — разрешить тёмный режим на уровне процесса
-            int result = uxSetPreferredAppMode.invokeInt(new Object[]{APP_MODE_ALLOW_DARK});
-            log.info("UxTheme: SetPreferredAppMode(AllowDark) = {}", result);
-        } catch (Exception e) {
-            log.warn("UxTheme ordinals недоступны (ожидаемо на Win11/Server): {}", e.getMessage());
+            if (uxSetPreferredAppMode != null) {
+                int result = uxSetPreferredAppMode.invokeInt(new Object[]{APP_MODE_ALLOW_DARK});
+                log.info("UxTheme: SetPreferredAppMode(AllowDark) = {}", result);
+            } else {
+                log.debug("UxTheme SetPreferredAppMode unavailable; continuing without process-level dark mode init");
+            }
+        } catch (Throwable t) {
+            log.warn("UxTheme dark mode init unavailable: {}", t.getMessage());
             uxSetPreferredAppMode = null;
             uxAllowDarkModeForWindow = null;
             uxRefreshImmersiveColorPolicy = null;
+        }
+    }
+
+    private static Function resolveUxThemeOrdinal(NativeLibrary uxTheme, String ordinal, String functionName) {
+        try {
+            return uxTheme.getFunction(ordinal);
+        } catch (Throwable t) {
+            log.debug("UxTheme {} ({}) unavailable: {}", functionName, ordinal, t.getMessage());
+            return null;
         }
     }
 

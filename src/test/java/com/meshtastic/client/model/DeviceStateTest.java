@@ -88,6 +88,25 @@ class DeviceStateTest {
     }
 
     @Test
+    void failAllPendingAcksUpdatesDbForMessageTrackedOnlyInPendingQueue() {
+        DeviceState state = createDeviceStateWithOwner();
+        MeshMessage outgoing = new MeshMessage("!owner", "!ffffffff", 0, "retry pending", 1_700_000_000L, true);
+        outgoing.setPacketId(778);
+        outgoing.setStatus(MeshMessage.DeliveryStatus.SENDING);
+        MessageDbService.getInstance().save(outgoing, "channel", "0", "!owner");
+
+        state.registerPendingAck(778, outgoing);
+        state.failAllPendingAcks("DISCONNECTED");
+
+        MeshMessage persisted = MessageDbService.getInstance().findByPacketId(778);
+        assertNotNull(persisted);
+        assertEquals(MeshMessage.DeliveryStatus.FAILED, persisted.getStatus());
+        assertEquals("DISCONNECTED", persisted.getErrorReason());
+
+        state.shutdown();
+    }
+
+    @Test
     void clearResetsRuntimeStateButKeepsPendingFixedPosition() {
         DeviceState state = createDeviceStateWithOwner();
         state.setMyNodeNum(42);

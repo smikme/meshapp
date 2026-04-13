@@ -23,8 +23,6 @@ import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
-import javafx.scene.text.Font;
-import javafx.scene.text.FontWeight;
 
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
@@ -47,7 +45,7 @@ public class FormConnections extends Form {
         titleRow.setAlignment(Pos.CENTER_LEFT);
 
         Label title = new Label("Подключения");
-        title.setFont(Font.font("Roboto", FontWeight.BOLD, 16));
+        title.getStyleClass().add("form-title");
 
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
@@ -108,7 +106,7 @@ public class FormConnections extends Form {
         indicator.setStyle("-fx-text-fill: " + indicatorColor + "; -fx-font-weight: bold;");
 
         Label lblName = new Label(entry.getName());
-        lblName.setFont(Font.font("Roboto", FontWeight.BOLD, 14));
+        lblName.getStyleClass().add("connection-card-name");
 
         String statusText = connected ? "\u2713 Подключено" : reconnecting ? "\u21BB Переподключение..." : "";
         String statusColor = connected ? "#1EA97C" : "#F59E0B";

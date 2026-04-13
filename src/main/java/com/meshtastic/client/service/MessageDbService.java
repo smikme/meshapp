@@ -312,6 +312,46 @@ public final class MessageDbService {
     }
 
     /**
+     * Переводит существующее сообщение в новую попытку отправки:
+     * обновляет packetId, статус и причину ошибки.
+     *
+     * @return {@code true}, если обновлена хотя бы одна запись
+     */
+    public synchronized boolean updateMessageForRetry(long dbId,
+                                                      int previousPacketId,
+                                                      int newPacketId,
+                                                      MeshMessage.DeliveryStatus status,
+                                                      String errorReason) {
+        if (dbConnection == null || newPacketId == 0) {
+            return false;
+        }
+
+        boolean lookupByDbId = dbId > 0;
+        if (!lookupByDbId && previousPacketId == 0) {
+            return false;
+        }
+
+        String sql = lookupByDbId
+                ? "UPDATE messages SET packet_id = ?, status = ?, error_reason = ? WHERE id = ?"
+                : "UPDATE messages SET packet_id = ?, status = ?, error_reason = ? WHERE packet_id = ? AND packet_id <> 0";
+        try (PreparedStatement ps = dbConnection.prepareStatement(sql)) {
+            ps.setInt(1, newPacketId);
+            ps.setString(2, status != null ? status.name() : null);
+            ps.setString(3, errorReason);
+            if (lookupByDbId) {
+                ps.setLong(4, dbId);
+            } else {
+                ps.setInt(4, previousPacketId);
+            }
+            return ps.executeUpdate() > 0;
+        } catch (SQLException e) {
+            log.error("Failed to update message retry state (dbId={}, previousPacketId={}, newPacketId={})",
+                    dbId, previousPacketId, newPacketId, e);
+            return false;
+        }
+    }
+
+    /**
      * Обновляет статус доставки реакции по packetId.
      *
      * @return {@code true}, если найдена и обновлена хотя бы одна запись

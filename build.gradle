@@ -1,3 +1,5 @@
+import groovy.json.JsonOutput
+
 plugins {
 	id 'java'
 	id 'application'
@@ -432,9 +434,196 @@ def prepareLinuxPackagingResources = {
 	return linuxResourceDir
 }
 
+def resolveBuildOption = { String propertyName, String envName ->
+	def propertyValue = findProperty(propertyName)?.toString()?.trim()
+	if (propertyValue) {
+		return propertyValue
+	}
+	def envValue = System.getenv(envName)?.trim()
+	return envValue ?: null
+}
+
+def executePackagingCommand = { List<?> args, String failureMessage, File workingDir = project.projectDir ->
+	def process = new ProcessBuilder(args.collect { it.toString() })
+		.directory(workingDir)
+		.redirectErrorStream(true)
+		.start()
+	def output = process.inputStream.text
+	process.waitFor()
+	if (output) {
+		logger.lifecycle(output.trim())
+	}
+	if (process.exitValue() != 0) {
+		throw new GradleException(output ? "${failureMessage}: ${output}" : failureMessage)
+	}
+	return output
+}
+
+def appendMacSigningOptions = { List args, Map signingConfig, boolean includeEntitlements = false, File entitlementsFile = null ->
+	if (signingConfig == null) {
+		return args
+	}
+	args << '--mac-sign'
+	args << '--mac-signing-key-user-name'
+	args << signingConfig.keyUserName
+	if (signingConfig.keychain) {
+		args << '--mac-signing-keychain'
+		args << signingConfig.keychain
+	}
+	if (signingConfig.signingPrefix) {
+		args << '--mac-package-signing-prefix'
+		args << signingConfig.signingPrefix
+	}
+	if (includeEntitlements && entitlementsFile?.exists()) {
+		args << '--mac-entitlements'
+		args << entitlementsFile.absolutePath
+	}
+	return args
+}
+
+def resolveMacSigningConfig = {
+	def keyUserName = resolveBuildOption('macSigningKeyUserName', 'MAC_SIGNING_KEY_USER_NAME')
+	if (!keyUserName) {
+		return null
+	}
+	return [
+		keyUserName : keyUserName,
+		keychain    : resolveBuildOption('macSigningKeychain', 'MAC_SIGNING_KEYCHAIN'),
+		signingPrefix: resolveBuildOption('macPackageSigningPrefix', 'MAC_PACKAGE_SIGNING_PREFIX') ?: 'com.meshtastic'
+	]
+}
+
+def resolveMacNotarizationConfig = {
+	def keychainProfile = resolveBuildOption('macNotaryKeychainProfile', 'MAC_NOTARY_KEYCHAIN_PROFILE')
+	if (keychainProfile) {
+		return [mode: 'keychainProfile', keychainProfile: keychainProfile]
+	}
+
+	def appleId = resolveBuildOption('macNotaryAppleId', 'MAC_NOTARY_APPLE_ID')
+	def teamId = resolveBuildOption('macNotaryTeamId', 'MAC_NOTARY_TEAM_ID')
+	def password = resolveBuildOption('macNotaryPassword', 'MAC_NOTARY_PASSWORD')
+	if (appleId || teamId || password) {
+		if (!appleId || !teamId || !password) {
+			throw new GradleException(
+				"macOS notarization requires macNotaryAppleId/MAC_NOTARY_APPLE_ID, " +
+				"macNotaryTeamId/MAC_NOTARY_TEAM_ID and macNotaryPassword/MAC_NOTARY_PASSWORD"
+			)
+		}
+		return [mode: 'appleId', appleId: appleId, teamId: teamId, password: password]
+	}
+
+	def keyFilePath = resolveBuildOption('macNotaryKeyFile', 'MAC_NOTARY_KEY_FILE')
+	def keyId = resolveBuildOption('macNotaryKeyId', 'MAC_NOTARY_KEY_ID')
+	def issuer = resolveBuildOption('macNotaryIssuer', 'MAC_NOTARY_ISSUER')
+	if (keyFilePath || keyId || issuer) {
+		if (!keyFilePath || !keyId || !issuer) {
+			throw new GradleException(
+				"macOS notarization with App Store Connect API key requires " +
+				"macNotaryKeyFile/MAC_NOTARY_KEY_FILE, macNotaryKeyId/MAC_NOTARY_KEY_ID " +
+				"and macNotaryIssuer/MAC_NOTARY_ISSUER"
+			)
+		}
+		def keyFile = file(keyFilePath)
+		if (!keyFile.isFile()) {
+			throw new GradleException("macOS notarization key file not found: ${keyFile}")
+		}
+		return [mode: 'apiKey', keyFile: keyFile.absolutePath, keyId: keyId, issuer: issuer]
+	}
+
+	return null
+}
+
+def notarizeMacArtifact = { File artifact, Map notarizationConfig ->
+	if (notarizationConfig == null) {
+		return
+	}
+
+	def submitArgs = ['xcrun', 'notarytool', 'submit', artifact.absolutePath, '--wait']
+	switch (notarizationConfig.mode) {
+		case 'keychainProfile':
+			submitArgs << '--keychain-profile'
+			submitArgs << notarizationConfig.keychainProfile
+			break
+		case 'appleId':
+			submitArgs << '--apple-id'
+			submitArgs << notarizationConfig.appleId
+			submitArgs << '--team-id'
+			submitArgs << notarizationConfig.teamId
+			submitArgs << '--password'
+			submitArgs << notarizationConfig.password
+			break
+		case 'apiKey':
+			submitArgs << '--key'
+			submitArgs << notarizationConfig.keyFile
+			submitArgs << '--key-id'
+			submitArgs << notarizationConfig.keyId
+			submitArgs << '--issuer'
+			submitArgs << notarizationConfig.issuer
+			break
+		default:
+			throw new GradleException("Unsupported notarization mode: ${notarizationConfig.mode}")
+	}
+
+	executePackagingCommand(submitArgs, "notarytool failed for ${artifact.name}")
+	executePackagingCommand(['xcrun', 'stapler', 'staple', artifact.absolutePath], "stapler failed for ${artifact.name}")
+	executePackagingCommand(['xcrun', 'stapler', 'validate', artifact.absolutePath], "stapler validation failed for ${artifact.name}")
+}
+
+def adHocSignMacBundle = { File appDir, File entitlements ->
+	def signFile = { File target, boolean withEntitlements ->
+		def signArgs = ['codesign', '--force', '--sign', '-', '--timestamp=none']
+		if (withEntitlements && entitlements.exists()) {
+			signArgs << '--entitlements'
+			signArgs << entitlements.absolutePath
+		}
+		signArgs << target.absolutePath
+		executePackagingCommand(signArgs, "codesign failed for ${target.name}")
+	}
+
+	def runtimeLib = new File(appDir, 'Contents/runtime/Contents/Home/lib')
+	if (runtimeLib.exists()) {
+		runtimeLib.eachFileRecurse { f ->
+			if (f.name.endsWith('.dylib') || f.name.endsWith('.jnilib')) {
+				signFile(f, false)
+			}
+		}
+	}
+
+	def runtimeMacOs = new File(appDir, 'Contents/runtime/Contents/MacOS')
+	if (runtimeMacOs.exists()) {
+		runtimeMacOs.listFiles()?.each { f ->
+			if (f.name.endsWith('.dylib')) {
+				signFile(f, false)
+			}
+		}
+	}
+
+	def runtimeBundle = new File(appDir, 'Contents/runtime')
+	if (runtimeBundle.exists()) {
+		signFile(runtimeBundle, false)
+	}
+
+	def mainExe = new File(appDir, 'Contents/MacOS/MeshApp')
+	if (mainExe.exists()) {
+		signFile(mainExe, true)
+	}
+
+	signFile(appDir, true)
+	executePackagingCommand(
+		['codesign', '--verify', '--deep', '--strict', appDir.absolutePath],
+		"Signature verification failed for ${appDir.name}"
+	)
+}
+
 def sanitizeArtifactVersion = { value ->
 	value.replaceAll(/[^A-Za-z0-9._-]+/, '_')
 }
+
+def flatpakAppId = 'com.meshtastic.meshapp'
+def flatpakMetadataDir = file('src/flatpak')
+def flatpakDesktopFileName = "${flatpakAppId}.desktop"
+def flatpakMetainfoFileName = "${flatpakAppId}.metainfo.xml"
+def flatpakLauncherFileName = 'MeshApp'
 
 def resolveLinuxAppImageArch = {
 	def arch = System.getProperty('os.arch').toLowerCase(java.util.Locale.ROOT)
@@ -475,6 +664,176 @@ def resolveAppImageTool = {
 		}
 	}
 	return null
+}
+
+def resolveCommandExecutable = { String propertyName, String envName, String binaryName, String taskName ->
+	def configuredPath = (findProperty(propertyName) ?: System.getenv(envName))?.toString()?.trim()
+	if (configuredPath) {
+		def configured = file(configuredPath)
+		if (configured.isFile() && configured.canExecute()) {
+			return configured
+		}
+		throw new GradleException("${taskName}: ${binaryName} not found or not executable: ${configured}")
+	}
+
+	def pathEntries = (System.getenv('PATH') ?: '')
+		.split(java.util.regex.Pattern.quote(File.pathSeparator))
+		.findAll { it }
+	for (entry in pathEntries) {
+		def candidate = new File(entry, binaryName)
+		if (candidate.isFile() && candidate.canExecute()) {
+			return candidate
+		}
+	}
+
+	throw new GradleException(
+		"${taskName}: ${binaryName} not found. Add it to PATH or pass -P${propertyName}=/path/to/${binaryName}"
+	)
+}
+
+def requirePackagingFile = { String relativePath, String taskName ->
+	def source = file(relativePath)
+	if (!source.isFile()) {
+		throw new GradleException("${taskName}: required packaging file not found: ${source}")
+	}
+	return source
+}
+
+def buildLinuxAppImage = { File installDir, File workDir, String taskName ->
+	def os = org.gradle.internal.os.OperatingSystem.current()
+	if (!os.isLinux()) {
+		throw new GradleException("${taskName} task is supported only on Linux")
+	}
+
+	if (workDir.exists()) {
+		workDir.deleteDir()
+	}
+	workDir.mkdirs()
+
+	def appVersion = resolvePackageVersion(os)
+	def javaHome = resolvePackagingJavaHome()
+	def jpackageBin = "${javaHome}/bin/jpackage"
+	def libDir = preparePackagingLibDir(os, installDir)
+	def jvmArgsList = buildPackagingJvmArgs()
+	def linuxResourceDir = prepareLinuxPackagingResources()
+	def iconSource = file('src/main/resources/logo/icon_512.png')
+	if (!iconSource.exists()) {
+		throw new GradleException("${taskName}: icon not found: ${iconSource}")
+	}
+
+	def jpackageArgs = [
+		jpackageBin,
+		'--type', 'app-image',
+		'--name', 'MeshApp',
+		'--app-version', appVersion,
+		'--vendor', 'Meshtastic',
+		'--copyright', 'Copyright © Konstantin A. Smirnov',
+		'--dest', workDir.absolutePath,
+		'--input', libDir.absolutePath,
+		'--main-jar', "${project.name}-${project.version}.jar",
+		'--main-class', application.mainClass.get(),
+		'--resource-dir', linuxResourceDir.absolutePath
+	]
+
+	jvmArgsList.each { arg ->
+		jpackageArgs << '--java-options'
+		jpackageArgs << arg
+	}
+
+	jpackageArgs << '--icon'
+	jpackageArgs << iconSource.absolutePath
+
+	executePackagingCommand(jpackageArgs, "${taskName}: jpackage app-image failed")
+
+	def jpackageImageDir = new File(workDir, 'MeshApp')
+	if (!jpackageImageDir.isDirectory()) {
+		throw new GradleException("${taskName}: jpackage image not found: ${jpackageImageDir}")
+	}
+
+	return [imageDir: jpackageImageDir, iconFile: iconSource]
+}
+
+def prepareFlatpakSources = { File workDir, File appImageDir, File iconSource ->
+	def sourceDir = new File(workDir, 'sources')
+	if (sourceDir.exists()) {
+		sourceDir.deleteDir()
+	}
+	sourceDir.mkdirs()
+
+	project.copy {
+		from appImageDir
+		into new File(sourceDir, 'meshapp')
+	}
+
+	def resourcesDir = new File(sourceDir, 'resources')
+	resourcesDir.mkdirs()
+
+	def desktopSource = requirePackagingFile("${flatpakMetadataDir.path}/${flatpakDesktopFileName}", 'flatpak')
+	def metainfoSource = requirePackagingFile("${flatpakMetadataDir.path}/${flatpakMetainfoFileName}", 'flatpak')
+	def launcherSource = requirePackagingFile("${flatpakMetadataDir.path}/${flatpakLauncherFileName}", 'flatpak')
+
+	java.nio.file.Files.copy(
+		desktopSource.toPath(),
+		new File(resourcesDir, flatpakDesktopFileName).toPath(),
+		java.nio.file.StandardCopyOption.REPLACE_EXISTING
+	)
+	java.nio.file.Files.copy(
+		metainfoSource.toPath(),
+		new File(resourcesDir, flatpakMetainfoFileName).toPath(),
+		java.nio.file.StandardCopyOption.REPLACE_EXISTING
+	)
+	java.nio.file.Files.copy(
+		launcherSource.toPath(),
+		new File(resourcesDir, flatpakLauncherFileName).toPath(),
+		java.nio.file.StandardCopyOption.REPLACE_EXISTING
+	)
+	java.nio.file.Files.copy(
+		iconSource.toPath(),
+		new File(resourcesDir, "${flatpakAppId}.png").toPath(),
+		java.nio.file.StandardCopyOption.REPLACE_EXISTING
+	)
+
+	return sourceDir
+}
+
+def writeFlatpakManifest = { File manifestFile, File sourceDir, String runtime, String runtimeVersion, String sdk ->
+	def manifest = [
+		'app-id'         : flatpakAppId,
+		'runtime'        : runtime,
+		'runtime-version': runtimeVersion,
+		'sdk'            : sdk,
+		'command'        : 'MeshApp',
+		'finish-args'    : [
+			'--share=network',
+			'--share=ipc',
+			// JavaFX on Linux uses the GTK/X11 backend, so Wayland + fallback-x11
+			// breaks startup inside Flatpak on Wayland sessions ("Unable to open DISPLAY").
+			'--socket=x11',
+			'--device=dri',
+			'--device=all',
+			'--filesystem=home',
+			'--system-talk-name=org.bluez'
+		],
+		'modules'        : [[
+			'name'          : 'meshapp',
+			'buildsystem'   : 'simple',
+			'build-commands': [
+				'install -d /app/meshapp',
+				'cp -a meshapp/. /app/meshapp/',
+				"install -Dm755 resources/${flatpakLauncherFileName} /app/bin/MeshApp",
+				"install -Dm644 resources/${flatpakDesktopFileName} /app/share/applications/${flatpakDesktopFileName}",
+				"install -Dm644 resources/${flatpakMetainfoFileName} /app/share/metainfo/${flatpakMetainfoFileName}",
+				"install -Dm644 resources/${flatpakAppId}.png /app/share/icons/hicolor/512x512/apps/${flatpakAppId}.png"
+			],
+			'sources'       : [[
+				'type': 'dir',
+				'path': sourceDir.absolutePath
+			]]
+		]]
+	]
+
+	manifestFile.parentFile.mkdirs()
+	manifestFile.setText(JsonOutput.prettyPrint(JsonOutput.toJson(manifest)) + '\n', 'UTF-8')
 }
 
 def normalizeDebDependencyToken = { String token ->
@@ -730,72 +1089,32 @@ tasks.register('jpackage') {
 				logger.lifecycle("jpackage: Assets.car скопирован в бандл")
 			}
 
-			// Ad-hoc подпись (inside-out): после патча Info.plist и Assets.car
-			// подпись jpackage сломана — переподписываем каждый компонент отдельно.
-			// Без Developer ID пользователи увидят «неизвестный разработчик»
-			// и смогут открыть через правый клик → Открыть.
 			def entitlements = file('src/main/resources/macos/entitlements.plist')
-
-			def signFile = { File target, boolean withEntitlements ->
-				def signArgs = ['codesign', '--force', '--sign', '-', '--timestamp=none']
-				if (withEntitlements && entitlements.exists()) {
-					signArgs << '--entitlements'
-					signArgs << entitlements.absolutePath
-				}
-				signArgs << target.absolutePath
-				def p = new ProcessBuilder(signArgs).redirectErrorStream(true).start()
-				def out = p.inputStream.text
-				p.waitFor()
-				if (p.exitValue() != 0) {
-					throw new GradleException("codesign failed for ${target.name}: ${out}")
-				}
+			def macSigningConfig = resolveMacSigningConfig()
+			def macNotarizationConfig = resolveMacNotarizationConfig()
+			if (macNotarizationConfig != null && macSigningConfig == null) {
+				throw new GradleException("macOS notarization requires Developer ID signing credentials")
 			}
 
-			// 1. Подписать все dylib/jnilib в runtime (рекурсивно)
-			def runtimeLib = new File(appDir, 'Contents/runtime/Contents/Home/lib')
-			if (runtimeLib.exists()) {
-				runtimeLib.eachFileRecurse { f ->
-					if (f.name.endsWith('.dylib') || f.name.endsWith('.jnilib')) {
-						signFile(f, false)
-					}
-				}
+			if (macSigningConfig != null) {
+				def signArgs = [
+					jpackageBin,
+					'--type', 'app-image',
+					'--app-image', appDir.absolutePath
+				]
+				appendMacSigningOptions(signArgs, macSigningConfig, true, entitlements)
+				executePackagingCommand(signArgs, "Developer ID signing failed for ${appDir.name}")
+				executePackagingCommand(
+					['codesign', '--verify', '--deep', '--strict', appDir.absolutePath],
+					"Signature verification failed for ${appDir.name}"
+				)
+				logger.lifecycle("jpackage: Developer ID подпись применена к ${appDir.name}")
+			} else {
+				// Локальный fallback: ad-hoc подпись убирает immediate launch failures,
+				// но не подходит для распространяемого из интернета DMG.
+				adHocSignMacBundle(appDir, entitlements)
+				logger.lifecycle("jpackage: ad-hoc подпись применена и верифицирована")
 			}
-
-			// 2. Подписать libjli.dylib в runtime/Contents/MacOS
-			def runtimeMacOs = new File(appDir, 'Contents/runtime/Contents/MacOS')
-			if (runtimeMacOs.exists()) {
-				runtimeMacOs.listFiles()?.each { f ->
-					if (f.name.endsWith('.dylib')) {
-						signFile(f, false)
-					}
-				}
-			}
-
-			// 3. Подписать sub-bundle runtime
-			def runtimeBundle = new File(appDir, 'Contents/runtime')
-			if (runtimeBundle.exists()) {
-				signFile(runtimeBundle, false)
-			}
-
-			// 4. Подписать главный исполняемый файл (с entitlements для JIT)
-			def mainExe = new File(appDir, 'Contents/MacOS/MeshApp')
-			if (mainExe.exists()) {
-				signFile(mainExe, true)
-			}
-
-			// 5. Подписать .app бандл (с entitlements)
-			signFile(appDir, true)
-
-			// 6. Верификация
-			def verifyProc = new ProcessBuilder(
-				'codesign', '--verify', '--deep', '--strict', appDir.absolutePath
-			).redirectErrorStream(true).start()
-			def verifyOut = verifyProc.inputStream.text
-			verifyProc.waitFor()
-			if (verifyProc.exitValue() != 0) {
-				throw new GradleException("Signature verification failed: ${verifyOut}")
-			}
-			logger.lifecycle("jpackage: ad-hoc подпись применена и верифицирована")
 
 			// Собрать DMG
 			def dmgFile = new File(outputDir, "MeshApp-${appVersion}.dmg")
@@ -811,11 +1130,17 @@ tasks.register('jpackage') {
 				'--mac-package-identifier', 'com.meshtastic.meshapp',
 				'--mac-package-name', 'MeshApp'
 			]
-			def proc2 = new ProcessBuilder(dmgArgs.collect { it.toString() }).redirectErrorStream(true).start()
-			def proc2Output = proc2.inputStream.text
-			proc2.waitFor()
-			if (proc2Output) logger.lifecycle(proc2Output.trim())
-			if (proc2.exitValue() != 0) throw new GradleException("jpackage DMG failed with exit code ${proc2.exitValue()}")
+			appendMacSigningOptions(dmgArgs, macSigningConfig, false, entitlements)
+			executePackagingCommand(dmgArgs, "jpackage DMG failed")
+			if (!dmgFile.isFile()) {
+				throw new GradleException("jpackage: DMG not found after build: ${dmgFile}")
+			}
+			if (macNotarizationConfig != null) {
+				notarizeMacArtifact(dmgFile, macNotarizationConfig)
+				logger.lifecycle("jpackage: DMG notarized and stapled")
+			} else if (macSigningConfig != null) {
+				logger.warn("jpackage: DMG signed with Developer ID but not notarized; Gatekeeper may still block downloaded builds")
+			}
 			logger.lifecycle("jpackage: DMG создан в ${outputDir}")
 		}
 	}
@@ -840,59 +1165,11 @@ tasks.register('appImage') {
 		def installDir = layout.buildDirectory.dir("install/${project.name}").get().asFile
 		def outputDir = layout.buildDirectory.dir("jpackage").get().asFile
 		def workDir = layout.buildDirectory.dir("appimage").get().asFile
-		if (workDir.exists()) {
-			workDir.deleteDir()
-		}
-		workDir.mkdirs()
 		outputDir.mkdirs()
 
-		def appVersion = resolvePackageVersion(os)
-		def javaHome = resolvePackagingJavaHome()
-		def jpackageBin = "${javaHome}/bin/jpackage"
-		def libDir = preparePackagingLibDir(os, installDir)
-		def jvmArgsList = buildPackagingJvmArgs()
-		def linuxResourceDir = prepareLinuxPackagingResources()
-		def iconSource = file('src/main/resources/logo/icon_512.png')
-		if (!iconSource.exists()) {
-			throw new GradleException("appImage: icon not found: ${iconSource}")
-		}
-
-		def jpackageArgs = [
-			jpackageBin,
-			'--type', 'app-image',
-			'--name', 'MeshApp',
-			'--app-version', appVersion,
-			'--vendor', 'Meshtastic',
-			'--copyright', 'Copyright © Konstantin A. Smirnov',
-			'--dest', workDir.absolutePath,
-			'--input', libDir.absolutePath,
-			'--main-jar', "${project.name}-${project.version}.jar",
-			'--main-class', application.mainClass.get(),
-			'--resource-dir', linuxResourceDir.absolutePath
-		]
-
-		jvmArgsList.each { arg ->
-			jpackageArgs << '--java-options'
-			jpackageArgs << arg
-		}
-
-		jpackageArgs << '--icon'
-		jpackageArgs << iconSource.absolutePath
-
-		def jpackageProc = new ProcessBuilder(jpackageArgs.collect { it.toString() })
-			.redirectErrorStream(true)
-			.start()
-		def jpackageOutput = jpackageProc.inputStream.text
-		jpackageProc.waitFor()
-		if (jpackageOutput) logger.lifecycle(jpackageOutput.trim())
-		if (jpackageProc.exitValue() != 0) {
-			throw new GradleException("appImage: jpackage app-image failed with exit code ${jpackageProc.exitValue()}")
-		}
-
-		def jpackageImageDir = new File(workDir, 'MeshApp')
-		if (!jpackageImageDir.isDirectory()) {
-			throw new GradleException("appImage: jpackage image not found: ${jpackageImageDir}")
-		}
+		def appImage = buildLinuxAppImage(installDir, workDir, 'appImage')
+		def iconSource = appImage.iconFile
+		def jpackageImageDir = appImage.imageDir
 
 		def appDir = new File(workDir, 'MeshApp.AppDir')
 		project.copy {
@@ -905,25 +1182,23 @@ tasks.register('appImage') {
 			throw new GradleException("appImage: launcher not found in AppDir: ${launcher}")
 		}
 
-		def desktopEntry = """\
-[Desktop Entry]
-Name=MeshApp
-Exec=MeshApp
-Icon=meshapp
-Type=Application
-Categories=Network;Utility;
-Comment=Meshtastic Desktop Client
-Terminal=false
-StartupWMClass=MeshApp
-"""
-		def desktopFile = new File(appDir, 'meshapp.desktop')
-		desktopFile.text = desktopEntry
+		def desktopSource = requirePackagingFile("${flatpakMetadataDir.path}/${flatpakDesktopFileName}", 'appImage')
+		def desktopFile = new File(appDir, flatpakDesktopFileName)
+		java.nio.file.Files.copy(
+			desktopSource.toPath(),
+			desktopFile.toPath(),
+			java.nio.file.StandardCopyOption.REPLACE_EXISTING
+		)
 
 		def shareApplicationsDir = new File(appDir, 'usr/share/applications')
 		shareApplicationsDir.mkdirs()
-		new File(shareApplicationsDir, 'meshapp.desktop').text = desktopEntry
+		java.nio.file.Files.copy(
+			desktopSource.toPath(),
+			new File(shareApplicationsDir, flatpakDesktopFileName).toPath(),
+			java.nio.file.StandardCopyOption.REPLACE_EXISTING
+		)
 
-		def rootIcon = new File(appDir, 'meshapp.png')
+		def rootIcon = new File(appDir, "${flatpakAppId}.png")
 		java.nio.file.Files.copy(
 			iconSource.toPath(),
 			rootIcon.toPath(),
@@ -939,7 +1214,7 @@ StartupWMClass=MeshApp
 		shareIconsDir.mkdirs()
 		java.nio.file.Files.copy(
 			iconSource.toPath(),
-			new File(shareIconsDir, 'meshapp.png').toPath(),
+			new File(shareIconsDir, "${flatpakAppId}.png").toPath(),
 			java.nio.file.StandardCopyOption.REPLACE_EXISTING
 		)
 
@@ -985,6 +1260,83 @@ exec "$HERE/usr/bin/MeshApp" "$@"
 
 		appImageFile.setExecutable(true, false)
 		logger.lifecycle("appImage: AppImage создан в ${appImageFile}")
+	}
+}
+
+// ============================================================
+// Flatpak: создание sandboxed Linux bundle через flatpak-builder
+// Использование: ./gradlew flatpak
+// Требует: flatpak + flatpak-builder + установленный runtime/SDK
+// ============================================================
+tasks.register('flatpak') {
+	dependsOn installDist
+	mustRunAfter tasks.named('jpackage')
+	mustRunAfter tasks.named('appImage')
+	group = 'distribution'
+	description = 'Собрать Linux Flatpak bundle'
+
+	doLast {
+		def os = org.gradle.internal.os.OperatingSystem.current()
+		if (!os.isLinux()) {
+			throw new GradleException('flatpak task is supported only on Linux')
+		}
+
+		def installDir = layout.buildDirectory.dir("install/${project.name}").get().asFile
+		def outputDir = layout.buildDirectory.dir("jpackage").get().asFile
+		def workDir = layout.buildDirectory.dir("flatpak").get().asFile
+		if (workDir.exists()) {
+			workDir.deleteDir()
+		}
+		workDir.mkdirs()
+		outputDir.mkdirs()
+
+		def flatpakRuntime = (findProperty('flatpakRuntime') ?: 'org.freedesktop.Platform').toString().trim()
+		def flatpakRuntimeVersion = (findProperty('flatpakRuntimeVersion') ?: '24.08').toString().trim()
+		def flatpakSdk = (findProperty('flatpakSdk') ?: 'org.freedesktop.Sdk').toString().trim()
+		def flatpakBranch = (findProperty('flatpakBranch') ?: 'stable').toString().trim()
+		def flatpakBuilder = resolveCommandExecutable('flatpakBuilder', 'FLATPAK_BUILDER', 'flatpak-builder', 'flatpak')
+		def flatpakBin = resolveCommandExecutable('flatpakBin', 'FLATPAK_BIN', 'flatpak', 'flatpak')
+
+		def appImage = buildLinuxAppImage(installDir, new File(workDir, 'app-image'), 'flatpak')
+		def sourceDir = prepareFlatpakSources(workDir, appImage.imageDir, appImage.iconFile)
+		def manifestFile = new File(workDir, "${flatpakAppId}.json")
+		writeFlatpakManifest(manifestFile, sourceDir, flatpakRuntime, flatpakRuntimeVersion, flatpakSdk)
+
+		def repoDir = new File(workDir, 'repo')
+		def buildDir = new File(workDir, 'builder')
+		executePackagingCommand(
+			[
+				flatpakBuilder.absolutePath,
+				"--arch=${resolveLinuxAppImageArch()}",
+				'--force-clean',
+				"--repo=${repoDir.absolutePath}",
+				"--default-branch=${flatpakBranch}",
+				buildDir.absolutePath,
+				manifestFile.absolutePath
+			],
+			'flatpak: flatpak-builder failed'
+		)
+
+		def artifactName = "MeshApp-${sanitizeArtifactVersion(project.version.toString())}-${resolveLinuxAppImageArch()}.flatpak"
+		def bundleFile = new File(outputDir, artifactName)
+		if (bundleFile.exists()) {
+			bundleFile.delete()
+		}
+
+		executePackagingCommand(
+			[
+				flatpakBin.absolutePath,
+				'build-bundle',
+				"--arch=${resolveLinuxAppImageArch()}",
+				repoDir.absolutePath,
+				bundleFile.absolutePath,
+				flatpakAppId,
+				flatpakBranch
+			],
+			'flatpak: flatpak build-bundle failed'
+		)
+
+		logger.lifecycle("flatpak: Flatpak bundle создан в ${bundleFile}")
 	}
 }
 

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>com.meshtastic.meshapp</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-only</project_license>
+  <name>MeshApp</name>
+  <summary>Meshtastic desktop client</summary>
+  <developer_name>Konstantin A. Smirnov</developer_name>
+  <launchable type="desktop-id">com.meshtastic.meshapp.desktop</launchable>
+  <description>
+    <p>MeshApp is a desktop client for Meshtastic devices and mesh networks.</p>
+    <p>It supports TCP, serial or USB and Bluetooth Low Energy connections, chat, node monitoring, telemetry charts, packet debugging and device configuration.</p>
+  </description>
+  <url type="homepage">https://meshapp.ru</url>
+  <url type="bugtracker">https://git.privatepractice.app/covox/meshapp/issues</url>
+  <url type="vcs-browser">https://git.privatepractice.app/covox/meshapp</url>
+  <provides>
+    <binary>MeshApp</binary>
+  </provides>
+</component>

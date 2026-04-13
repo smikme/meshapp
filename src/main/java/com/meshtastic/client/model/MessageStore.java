@@ -232,7 +232,8 @@ public class MessageStore {
      *
      * @param reason причина неудачи
      */
-    public void failAllPendingAcksWithDbUpdate(String reason, java.util.function.Consumer<Integer> updateDb) {
+    public void failAllPendingAcksWithDbUpdate(String reason,
+                                               java.util.function.BiConsumer<Integer, MeshMessage> updateDb) {
         if (pendingAcks.isEmpty()) { return; }
         int count = 0;
         var iterator = pendingAcks.entrySet().iterator();
@@ -247,7 +248,7 @@ public class MessageStore {
             
             // Обновляем в БД
             if (updateDb != null && packetId > 0) {
-                updateDb.accept(packetId);
+                updateDb.accept(packetId, msg);
             }
             
             count++;

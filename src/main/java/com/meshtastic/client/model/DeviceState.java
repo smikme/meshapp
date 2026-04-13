@@ -355,8 +355,7 @@ public class DeviceState {
      */
     public void failAllPendingAcks(String reason) {
         // Обновляем статус в БД для каждого сообщения
-        messageStore.failAllPendingAcksWithDbUpdate(reason, packetId -> {
-            MeshMessage msg = messageStore.findMessageByPacketId(packetId);
+        messageStore.failAllPendingAcksWithDbUpdate(reason, (packetId, msg) -> {
             if (msg != null) {
                 messageDbService.updateStatus(packetId, msg.getStatus(), msg.getErrorReason());
             }

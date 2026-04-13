@@ -48,6 +48,7 @@ public final class ConnectionManager {
     private final Map<String, ProtocolHandler> protocolHandlers = new ConcurrentHashMap<>();
     private final Map<String, MessageListenerService> messageListenerServices = new ConcurrentHashMap<>();
     private final Map<String, MqttProxyService> mqttProxyServices = new ConcurrentHashMap<>();
+    private final Map<String, ConfigExchangeService> configExchangeServices = new ConcurrentHashMap<>();
     private final Map<String, CompletableFuture<DeviceState>> configFutures = new ConcurrentHashMap<>();
     private final Set<String> userDisconnectedIds = ConcurrentHashMap.newKeySet();
     private final Map<String, String> userDisconnectReasons = new ConcurrentHashMap<>();
@@ -233,10 +234,16 @@ public final class ConnectionManager {
         mqttProxyServices.put(id, mqttProxyService);
 
         ConfigExchangeService configExchange = new ConfigExchangeService(protocolHandler, deviceState);
+        configExchangeServices.put(id, configExchange);
         CompletableFuture<DeviceState> future = configExchange.startConfigExchange();
         configFutures.put(id, future);
 
         future.thenAccept(ds -> {
+            if (activeConnections.get(id) != conn || !entry.isConnected()) {
+                log.debug("Skipping post-connect actions for '{}' because transport is no longer active",
+                        entry.getName());
+                return;
+            }
             String nodeId = resolveLocalNodeId(ds);
             entry.setNodeId(nodeId);
             save();
@@ -389,6 +396,10 @@ public final class ConnectionManager {
         MqttProxyService mqttProxy = mqttProxyServices.remove(id);
         if (mqttProxy != null) {
             mqttProxy.close();
+        }
+        ConfigExchangeService configExchange = configExchangeServices.remove(id);
+        if (configExchange != null) {
+            configExchange.abort("connection cleanup");
         }
         ProtocolHandler ph = protocolHandlers.remove(id);
         if (ph != null) {

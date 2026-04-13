@@ -20,8 +20,6 @@ import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyEvent;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
-import javafx.scene.text.Font;
-import javafx.scene.text.FontWeight;
 import javafx.beans.value.ChangeListener;
 import javafx.stage.Stage;
 import javafx.stage.Window;
@@ -52,7 +50,7 @@ public final class CrashReportPrompt {
         DecisionHolder result = new DecisionHolder();
 
         Label title = new Label(content.title());
-        title.setFont(Font.font("Roboto", FontWeight.BOLD, 15));
+        title.getStyleClass().add("dialog-title");
 
         Label lead = new Label(content.lead());
         lead.setWrapText(true);
@@ -123,7 +121,7 @@ public final class CrashReportPrompt {
         }
 
         Label title = new Label("Отправка отчёта");
-        title.setFont(Font.font("Roboto", FontWeight.BOLD, 15));
+        title.getStyleClass().add("dialog-title");
 
         ProgressIndicator indicator = new ProgressIndicator();
         indicator.setMaxSize(56, 56);

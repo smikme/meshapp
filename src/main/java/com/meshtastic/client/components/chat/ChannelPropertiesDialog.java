@@ -17,8 +17,6 @@ import javafx.scene.control.TextField;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
-import javafx.scene.text.Font;
-import javafx.scene.text.FontWeight;
 import org.meshtastic.proto.ChannelProtos;
 
 import java.nio.charset.StandardCharsets;
@@ -83,7 +81,7 @@ public final class ChannelPropertiesDialog {
         panel.getStyleClass().add("modal-side-panel");
 
         Label title = new Label("Свойства канала");
-        title.setFont(Font.font("Roboto", FontWeight.BOLD, 15));
+        title.getStyleClass().add("dialog-title");
 
         Separator sep = new Separator();
 
@@ -143,7 +141,7 @@ public final class ChannelPropertiesDialog {
         }
 
         Label precisionLabel = new Label(PRECISION_LABELS[initIndex]);
-        precisionLabel.setStyle("-fx-opacity: 0.7;");
+        precisionLabel.getStyleClass().add("muted-small-label");
 
         Slider precisionSlider = new Slider(0, PRECISION_BITS.length - 1, initIndex);
         precisionSlider.setMajorTickUnit(1);
@@ -164,7 +162,7 @@ public final class ChannelPropertiesDialog {
 
         // Статус
         Label statusLabel = new Label("");
-        statusLabel.setStyle("-fx-opacity: 0.7;");
+        statusLabel.getStyleClass().add("muted-small-label");
         statusLabel.setWrapText(true);
 
         // Кнопки

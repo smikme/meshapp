@@ -229,7 +229,7 @@ Meshtastic — открытый проект, превращающий недо�
 - **Windows**: CMake + MSVC Build Tools для сборки `meshapp-ble.dll`
 - **Linux**: CMake + C/C++ toolchain + `libsystemd-dev` / `systemd-devel` для сборки `libmeshapp-ble.so`
 
-Для готовых релизных пакетов (`.dmg`, `.msi`, `.deb`, `.AppImage`) эти build-зависимости не нужны.
+Для готовых релизных пакетов (`.dmg`, `.msi`, `.deb`, `.AppImage`, `.flatpak`) эти build-зависимости не нужны.
 
 ### Сборка и запуск
 
@@ -246,6 +246,9 @@ cd meshapp
 
 # Linux: собрать portable AppImage
 ./gradlew appImage -Pappimagetool=/path/to/appimagetool.AppImage
+
+# Linux: собрать Flatpak bundle
+./gradlew flatpak
 ```
 
 ### Подключение к устройству
@@ -308,7 +311,7 @@ meshapp/
 
 ## Сборка инсталляторов
 
-MeshApp собирается в нативные пакеты через `jpackage`, а для Linux дополнительно поддерживает portable `AppImage`:
+MeshApp собирается в нативные пакеты через `jpackage`, а для Linux дополнительно поддерживает portable `AppImage` и sandboxed `Flatpak`:
 
 | Платформа | Формат | Команда |
 |-----------|--------|---------|
@@ -316,8 +319,19 @@ MeshApp собирается в нативные пакеты через `jpacka
 | macOS | `.dmg` | `./gradlew jpackage` |
 | Linux | `.deb` | `./gradlew jpackage` |
 | Linux | `.AppImage` | `./gradlew appImage -Pappimagetool=/path/to/appimagetool.AppImage` |
+| Linux | `.flatpak` | `./gradlew flatpak` |
 
 Для `AppImage` нужен `appimagetool`: либо в `PATH`, либо через `-Pappimagetool=...` / `APPIMAGETOOL=...`. Если используется `.AppImage`-версия самого `appimagetool`, может понадобиться `APPIMAGE_EXTRACT_AND_RUN=1`.
+
+Для `Flatpak` нужны `flatpak` и `flatpak-builder`, а также установленный runtime/SDK. По умолчанию задача использует `org.freedesktop.Platform//24.08` и `org.freedesktop.Sdk//24.08`:
+
+```bash
+flatpak --user remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+flatpak --user install -y flathub org.freedesktop.Platform//24.08 org.freedesktop.Sdk//24.08
+./gradlew flatpak
+```
+
+При необходимости runtime можно переопределить через `-PflatpakRuntime=...`, `-PflatpakRuntimeVersion=...`, `-PflatpakSdk=...` и `-PflatpakBranch=...`.
 
 Во время `processResources` Gradle автоматически собирает платформенные native-компоненты:
 
@@ -326,9 +340,27 @@ MeshApp собирается в нативные пакеты через `jpacka
 - **macOS** — `libmeshapp-serial.dylib` для безопасного управления serial modem lines
 - **macOS** — `libmeshapp-tray.dylib` для нативного status item / tray bridge
 
+### Подпись и notarization на macOS
+
+По умолчанию `./gradlew jpackage` на macOS делает только ad-hoc подпись `.app`. Такой `.dmg` подходит для локальной проверки, но для скачивания из браузера этого недостаточно: Gatekeeper может показать **«Приложение повреждено, его не удается открыть»**.
+
+Для release-сборки нужно передать credentials для `Developer ID` подписи:
+
+- `MAC_SIGNING_KEY_USER_NAME` или `-PmacSigningKeyUserName=...` — Team/User name из Apple Developer certificate
+- `MAC_SIGNING_KEYCHAIN` или `-PmacSigningKeychain=...` — optional keychain с сертификатом
+- `MAC_PACKAGE_SIGNING_PREFIX` или `-PmacPackageSigningPrefix=...` — optional signing prefix, по умолчанию `com.meshtastic`
+
+И один из вариантов notarization:
+
+- `MAC_NOTARY_KEYCHAIN_PROFILE` или `-PmacNotaryKeychainProfile=...`
+- `MAC_NOTARY_APPLE_ID` + `MAC_NOTARY_TEAM_ID` + `MAC_NOTARY_PASSWORD`
+- `MAC_NOTARY_KEY_FILE` + `MAC_NOTARY_KEY_ID` + `MAC_NOTARY_ISSUER`
+
+После этого обычный `./gradlew jpackage` соберёт signed `.app`, signed `.dmg` и выполнит `notarytool submit --wait` + `stapler`.
+
 ### Установка на macOS
 
-При первом запуске macOS может показать предупреждение **«от неизвестного разработчика»**, так как приложение не подписано сертификатом Apple Developer ID. Это стандартное поведение для open-source приложений.
+Если сборка сделана без `Developer ID` и notarization, macOS может показать предупреждение **«от неизвестного разработчика»** или **«Приложение повреждено, его не удается открыть»**. Это ожидаемо для локального ad-hoc build.
 
 **Способ 1** — через Finder:
 1. Откройте папку Applications (или куда вы установили MeshApp)

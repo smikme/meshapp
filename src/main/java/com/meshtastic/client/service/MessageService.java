@@ -39,6 +39,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public final class MessageService {
 
     private static final Logger log = LoggerFactory.getLogger(MessageService.class);
+    private static final String BROADCAST_NODE_ID = "!ffffffff";
     private static final long OWNER_INFO_EXCHANGE_WAIT_MS = 2_500;
     private static final long PKI_PREP_ACK_WAIT_MS = 10_000;
 
@@ -195,6 +196,24 @@ public final class MessageService {
     }
 
     /**
+     * Переотправляет ранее не доставленное исходящее сообщение без создания новой записи в истории.
+     *
+     * @return {@code true}, если новая попытка отправки инициирована
+     */
+    public static boolean retryMessage(ProtocolHandler handler, DeviceState state, MeshMessage message) {
+        if (handler == null || state == null || message == null || !message.isOutgoing()) {
+            return false;
+        }
+        if (message.getStatus() != MeshMessage.DeliveryStatus.FAILED) {
+            return false;
+        }
+
+        return isChannelMessage(message)
+                ? retryChannelMessage(handler, state, message)
+                : retryDirectMessage(handler, state, message);
+    }
+
+    /**
      * Отправляет emoji-реакцию на канальное сообщение.
      * Реакция хранится отдельно от обычных сообщений и не попадает в preview чатов.
      */
@@ -284,6 +303,80 @@ public final class MessageService {
 
         handler.sendToRadio(MeshProtos.ToRadio.newBuilder().setPacket(packet).build());
         return saveOutgoingReaction(state, "dm", peerNodeId, targetMessage, emoji, now, packetId);
+    }
+
+    private static boolean retryChannelMessage(ProtocolHandler handler,
+                                               DeviceState state,
+                                               MeshMessage message) {
+        int packetId = ThreadLocalRandom.current().nextInt(1, Integer.MAX_VALUE);
+        MeshProtos.Data data = buildTextMessageData(message.getText(), message.getReplyId());
+        logRetryReplyDebug("channel", message.getReplyId(), data);
+        if (!prepareMessageForRetry(message, packetId)) {
+            return false;
+        }
+
+        MeshProtos.MeshPacket packet = MeshProtos.MeshPacket.newBuilder()
+                .setFrom(state.getMyNodeNum())
+                .setTo(0xFFFFFFFF)
+                .setChannel(message.getChannelIndex())
+                .setDecoded(data)
+                .setId(packetId)
+                .setWantAck(true)
+                .build();
+
+        handler.sendToRadio(MeshProtos.ToRadio.newBuilder().setPacket(packet).build());
+        state.registerPendingAck(packetId, message);
+        return true;
+    }
+
+    private static boolean retryDirectMessage(ProtocolHandler handler,
+                                              DeviceState state,
+                                              MeshMessage message) {
+        String peerNodeId = message.getToNodeId();
+        NodeData peerNode = resolvePeerNode(state, peerNodeId);
+        if (peerNode == null) {
+            log.warn("Cannot retry DM: failed to resolve peer '{}' to nodeNum", peerNodeId);
+            return false;
+        }
+        if (peerNode.isUnmessagable()) {
+            log.warn("Cannot retry DM to '{}': peer declared is_unmessagable", peerNodeId);
+            return false;
+        }
+
+        int packetId = ThreadLocalRandom.current().nextInt(1, Integer.MAX_VALUE);
+        int peerNodeNum = peerNode.getNodeNum();
+        MeshProtos.Data data = buildTextMessageData(message.getText(), message.getReplyId());
+        logRetryReplyDebug("DM", message.getReplyId(), data);
+
+        boolean usePkiTransport = shouldUsePkiDirectMessage(state, peerNodeId, peerNode);
+        int directChannel = usePkiTransport ? 0 : resolveDirectMessageChannel(state, peerNodeId, peerNode);
+        if (!prepareMessageForRetry(message, packetId)) {
+            return false;
+        }
+
+        if (usePkiTransport) {
+            preparePeerForPkiDirectMessage(handler, state, peerNode)
+                    .completeOnTimeout(MeshProtos.Routing.Error.TIMEOUT, PKI_PREP_ACK_WAIT_MS, TimeUnit.MILLISECONDS)
+                    .whenComplete((routingError, throwable) -> {
+                        if (throwable != null) {
+                            log.debug("PKI preparation for {} failed before DM retry", peerNodeId, throwable);
+                        } else if (routingError == MeshProtos.Routing.Error.TIMEOUT) {
+                            log.debug("PKI preparation for {} timed out after {} ms, retrying DM anyway",
+                                    peerNodeId, PKI_PREP_ACK_WAIT_MS);
+                        } else if (routingError != null && routingError != MeshProtos.Routing.Error.NONE) {
+                            log.debug("PKI preparation for {} completed with {}, retrying DM anyway",
+                                    peerNodeId, routingError);
+                        } else {
+                            log.debug("PKI preparation for {} acknowledged, retrying DM", peerNodeId);
+                        }
+                        dispatchDirectMessagePacket(handler, state, peerNodeId, peerNode, peerNodeNum, data,
+                                packetId, directChannel, true, message);
+                    });
+        } else {
+            dispatchDirectMessagePacket(handler, state, peerNodeId, peerNode, peerNodeNum, data,
+                    packetId, directChannel, false, message);
+        }
+        return true;
     }
 
     /**
@@ -856,6 +949,24 @@ public final class MessageService {
         requestNodeInfo(handler, state, targetNodeNum);
     }
 
+    private static MeshProtos.Data buildTextMessageData(String text, int replyId) {
+        MeshProtos.Data.Builder dataBuilder = MeshProtos.Data.newBuilder()
+                .setPortnum(Portnums.PortNum.TEXT_MESSAGE_APP)
+                .setPayload(ByteString.copyFrom(text, StandardCharsets.UTF_8));
+        if (replyId != 0) {
+            dataBuilder.setReplyId(replyId);
+        }
+        return dataBuilder.build();
+    }
+
+    private static void logRetryReplyDebug(String destination, int replyId, MeshProtos.Data data) {
+        if (replyId == 0) {
+            return;
+        }
+        log.info("REPLY_DEBUG retry {}: replyId={} (0x{}), payloadBytes={}",
+                destination, replyId, Integer.toHexString(replyId), data.getPayload().size());
+    }
+
     private static NodeData resolvePeerNode(DeviceState state, String peerNodeId) {
         if (state == null || peerNodeId == null || peerNodeId.isEmpty()) { return null; }
 
@@ -1083,6 +1194,39 @@ public final class MessageService {
                 peerNodeId, Integer.toUnsignedString(peerNodeNum), usePkiTransport ? "PKI" : "legacy", directChannel);
         handler.sendToRadio(MeshProtos.ToRadio.newBuilder().setPacket(packetBuilder.build()).build());
         state.registerPendingAck(packetId, msg);
+    }
+
+    private static boolean prepareMessageForRetry(MeshMessage message, int newPacketId) {
+        if (message == null || newPacketId == 0) {
+            return false;
+        }
+
+        int previousPacketId = message.getPacketId();
+        MeshMessage.DeliveryStatus previousStatus = message.getStatus();
+        String previousErrorReason = message.getErrorReason();
+
+        message.setPacketId(newPacketId);
+        message.setStatus(MeshMessage.DeliveryStatus.SENDING);
+        message.setErrorReason(null);
+
+        boolean updated = MessageDbService.getInstance().updateMessageForRetry(
+                message.getDbId(),
+                previousPacketId,
+                newPacketId,
+                message.getStatus(),
+                null);
+        if (updated) {
+            return true;
+        }
+
+        message.setPacketId(previousPacketId);
+        message.setStatus(previousStatus);
+        message.setErrorReason(previousErrorReason);
+        return false;
+    }
+
+    private static boolean isChannelMessage(MeshMessage message) {
+        return message != null && BROADCAST_NODE_ID.equalsIgnoreCase(message.getToNodeId());
     }
 
     private static void rememberDirectMessageRoutingHint(String peerNodeId,

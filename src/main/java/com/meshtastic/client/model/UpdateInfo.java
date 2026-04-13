@@ -2,6 +2,7 @@ package com.meshtastic.client.model;
 
 import com.meshtastic.client.platform.OsDetect;
 import com.meshtastic.client.platform.OsDetect.OsType;
+import com.meshtastic.client.platform.OsDetect.PackageFormat;
 
 import java.util.Map;
 
@@ -25,20 +26,44 @@ public class UpdateInfo {
      * URL для скачивания для текущей платформы, или null если недоступен.
      */
     public String getDownloadUrl() {
-        return getDownloadUrl(OsDetect.current(), OsDetect.isLinuxAppImage());
+        return getDownloadUrl(OsDetect.current(), OsDetect.currentPackageFormat());
     }
 
     String getDownloadUrl(OsType osType, boolean linuxAppImage) {
+        return getDownloadUrl(
+                osType,
+                linuxAppImage ? PackageFormat.APPIMAGE : PackageFormat.DEB
+        );
+    }
+
+    String getDownloadUrl(OsType osType, PackageFormat packageFormat) {
         if (downloads == null || downloads.isEmpty()) {
             return null;
         }
 
         return switch (osType) {
-            case WINDOWS -> firstNonBlank(downloads.get("windows"));
-            case MACOS -> firstNonBlank(downloads.get("macos"));
-            case LINUX -> linuxAppImage
-                    ? firstNonBlank(downloads.get("linux-appimage"), downloads.get("linux"), downloads.get("linux-deb"))
-                    : firstNonBlank(downloads.get("linux-deb"), downloads.get("linux"), downloads.get("linux-appimage"));
+            case WINDOWS -> firstNonBlank(downloads.get("windows-msi"), downloads.get("windows"));
+            case MACOS -> firstNonBlank(downloads.get("macos-dmg"), downloads.get("macos"));
+            case LINUX -> switch (packageFormat) {
+                case FLATPAK -> firstNonBlank(
+                        downloads.get("linux-flatpak"),
+                        downloads.get("linux"),
+                        downloads.get("linux-deb"),
+                        downloads.get("linux-appimage")
+                );
+                case APPIMAGE -> firstNonBlank(
+                        downloads.get("linux-appimage"),
+                        downloads.get("linux"),
+                        downloads.get("linux-deb"),
+                        downloads.get("linux-flatpak")
+                );
+                case DEB, UNKNOWN, MSI, DMG -> firstNonBlank(
+                        downloads.get("linux-deb"),
+                        downloads.get("linux"),
+                        downloads.get("linux-appimage"),
+                        downloads.get("linux-flatpak")
+                );
+            };
             case UNKNOWN -> null;
         };
     }
