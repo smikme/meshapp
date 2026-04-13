@@ -432,6 +432,187 @@ def prepareLinuxPackagingResources = {
 	return linuxResourceDir
 }
 
+def resolveBuildOption = { String propertyName, String envName ->
+	def propertyValue = findProperty(propertyName)?.toString()?.trim()
+	if (propertyValue) {
+		return propertyValue
+	}
+	def envValue = System.getenv(envName)?.trim()
+	return envValue ?: null
+}
+
+def executePackagingCommand = { List<?> args, String failureMessage, File workingDir = project.projectDir ->
+	def process = new ProcessBuilder(args.collect { it.toString() })
+		.directory(workingDir)
+		.redirectErrorStream(true)
+		.start()
+	def output = process.inputStream.text
+	process.waitFor()
+	if (output) {
+		logger.lifecycle(output.trim())
+	}
+	if (process.exitValue() != 0) {
+		throw new GradleException(output ? "${failureMessage}: ${output}" : failureMessage)
+	}
+	return output
+}
+
+def appendMacSigningOptions = { List args, Map signingConfig, boolean includeEntitlements = false, File entitlementsFile = null ->
+	if (signingConfig == null) {
+		return args
+	}
+	args << '--mac-sign'
+	args << '--mac-signing-key-user-name'
+	args << signingConfig.keyUserName
+	if (signingConfig.keychain) {
+		args << '--mac-signing-keychain'
+		args << signingConfig.keychain
+	}
+	if (signingConfig.signingPrefix) {
+		args << '--mac-package-signing-prefix'
+		args << signingConfig.signingPrefix
+	}
+	if (includeEntitlements && entitlementsFile?.exists()) {
+		args << '--mac-entitlements'
+		args << entitlementsFile.absolutePath
+	}
+	return args
+}
+
+def resolveMacSigningConfig = {
+	def keyUserName = resolveBuildOption('macSigningKeyUserName', 'MAC_SIGNING_KEY_USER_NAME')
+	if (!keyUserName) {
+		return null
+	}
+	return [
+		keyUserName : keyUserName,
+		keychain    : resolveBuildOption('macSigningKeychain', 'MAC_SIGNING_KEYCHAIN'),
+		signingPrefix: resolveBuildOption('macPackageSigningPrefix', 'MAC_PACKAGE_SIGNING_PREFIX') ?: 'com.meshtastic'
+	]
+}
+
+def resolveMacNotarizationConfig = {
+	def keychainProfile = resolveBuildOption('macNotaryKeychainProfile', 'MAC_NOTARY_KEYCHAIN_PROFILE')
+	if (keychainProfile) {
+		return [mode: 'keychainProfile', keychainProfile: keychainProfile]
+	}
+
+	def appleId = resolveBuildOption('macNotaryAppleId', 'MAC_NOTARY_APPLE_ID')
+	def teamId = resolveBuildOption('macNotaryTeamId', 'MAC_NOTARY_TEAM_ID')
+	def password = resolveBuildOption('macNotaryPassword', 'MAC_NOTARY_PASSWORD')
+	if (appleId || teamId || password) {
+		if (!appleId || !teamId || !password) {
+			throw new GradleException(
+				"macOS notarization requires macNotaryAppleId/MAC_NOTARY_APPLE_ID, " +
+				"macNotaryTeamId/MAC_NOTARY_TEAM_ID and macNotaryPassword/MAC_NOTARY_PASSWORD"
+			)
+		}
+		return [mode: 'appleId', appleId: appleId, teamId: teamId, password: password]
+	}
+
+	def keyFilePath = resolveBuildOption('macNotaryKeyFile', 'MAC_NOTARY_KEY_FILE')
+	def keyId = resolveBuildOption('macNotaryKeyId', 'MAC_NOTARY_KEY_ID')
+	def issuer = resolveBuildOption('macNotaryIssuer', 'MAC_NOTARY_ISSUER')
+	if (keyFilePath || keyId || issuer) {
+		if (!keyFilePath || !keyId || !issuer) {
+			throw new GradleException(
+				"macOS notarization with App Store Connect API key requires " +
+				"macNotaryKeyFile/MAC_NOTARY_KEY_FILE, macNotaryKeyId/MAC_NOTARY_KEY_ID " +
+				"and macNotaryIssuer/MAC_NOTARY_ISSUER"
+			)
+		}
+		def keyFile = file(keyFilePath)
+		if (!keyFile.isFile()) {
+			throw new GradleException("macOS notarization key file not found: ${keyFile}")
+		}
+		return [mode: 'apiKey', keyFile: keyFile.absolutePath, keyId: keyId, issuer: issuer]
+	}
+
+	return null
+}
+
+def notarizeMacArtifact = { File artifact, Map notarizationConfig ->
+	if (notarizationConfig == null) {
+		return
+	}
+
+	def submitArgs = ['xcrun', 'notarytool', 'submit', artifact.absolutePath, '--wait']
+	switch (notarizationConfig.mode) {
+		case 'keychainProfile':
+			submitArgs << '--keychain-profile'
+			submitArgs << notarizationConfig.keychainProfile
+			break
+		case 'appleId':
+			submitArgs << '--apple-id'
+			submitArgs << notarizationConfig.appleId
+			submitArgs << '--team-id'
+			submitArgs << notarizationConfig.teamId
+			submitArgs << '--password'
+			submitArgs << notarizationConfig.password
+			break
+		case 'apiKey':
+			submitArgs << '--key'
+			submitArgs << notarizationConfig.keyFile
+			submitArgs << '--key-id'
+			submitArgs << notarizationConfig.keyId
+			submitArgs << '--issuer'
+			submitArgs << notarizationConfig.issuer
+			break
+		default:
+			throw new GradleException("Unsupported notarization mode: ${notarizationConfig.mode}")
+	}
+
+	executePackagingCommand(submitArgs, "notarytool failed for ${artifact.name}")
+	executePackagingCommand(['xcrun', 'stapler', 'staple', artifact.absolutePath], "stapler failed for ${artifact.name}")
+	executePackagingCommand(['xcrun', 'stapler', 'validate', artifact.absolutePath], "stapler validation failed for ${artifact.name}")
+}
+
+def adHocSignMacBundle = { File appDir, File entitlements ->
+	def signFile = { File target, boolean withEntitlements ->
+		def signArgs = ['codesign', '--force', '--sign', '-', '--timestamp=none']
+		if (withEntitlements && entitlements.exists()) {
+			signArgs << '--entitlements'
+			signArgs << entitlements.absolutePath
+		}
+		signArgs << target.absolutePath
+		executePackagingCommand(signArgs, "codesign failed for ${target.name}")
+	}
+
+	def runtimeLib = new File(appDir, 'Contents/runtime/Contents/Home/lib')
+	if (runtimeLib.exists()) {
+		runtimeLib.eachFileRecurse { f ->
+			if (f.name.endsWith('.dylib') || f.name.endsWith('.jnilib')) {
+				signFile(f, false)
+			}
+		}
+	}
+
+	def runtimeMacOs = new File(appDir, 'Contents/runtime/Contents/MacOS')
+	if (runtimeMacOs.exists()) {
+		runtimeMacOs.listFiles()?.each { f ->
+			if (f.name.endsWith('.dylib')) {
+				signFile(f, false)
+			}
+		}
+	}
+
+	def runtimeBundle = new File(appDir, 'Contents/runtime')
+	if (runtimeBundle.exists()) {
+		signFile(runtimeBundle, false)
+	}
+
+	def mainExe = new File(appDir, 'Contents/MacOS/MeshApp')
+	if (mainExe.exists()) {
+		signFile(mainExe, true)
+	}
+
+	signFile(appDir, true)
+	executePackagingCommand(
+		['codesign', '--verify', '--deep', '--strict', appDir.absolutePath],
+		"Signature verification failed for ${appDir.name}"
+	)
+}
+
 def sanitizeArtifactVersion = { value ->
 	value.replaceAll(/[^A-Za-z0-9._-]+/, '_')
 }
@@ -730,72 +911,32 @@ tasks.register('jpackage') {
 				logger.lifecycle("jpackage: Assets.car скопирован в бандл")
 			}
 
-			// Ad-hoc подпись (inside-out): после патча Info.plist и Assets.car
-			// подпись jpackage сломана — переподписываем каждый компонент отдельно.
-			// Без Developer ID пользователи увидят «неизвестный разработчик»
-			// и смогут открыть через правый клик → Открыть.
 			def entitlements = file('src/main/resources/macos/entitlements.plist')
-
-			def signFile = { File target, boolean withEntitlements ->
-				def signArgs = ['codesign', '--force', '--sign', '-', '--timestamp=none']
-				if (withEntitlements && entitlements.exists()) {
-					signArgs << '--entitlements'
-					signArgs << entitlements.absolutePath
-				}
-				signArgs << target.absolutePath
-				def p = new ProcessBuilder(signArgs).redirectErrorStream(true).start()
-				def out = p.inputStream.text
-				p.waitFor()
-				if (p.exitValue() != 0) {
-					throw new GradleException("codesign failed for ${target.name}: ${out}")
-				}
+			def macSigningConfig = resolveMacSigningConfig()
+			def macNotarizationConfig = resolveMacNotarizationConfig()
+			if (macNotarizationConfig != null && macSigningConfig == null) {
+				throw new GradleException("macOS notarization requires Developer ID signing credentials")
 			}
 
-			// 1. Подписать все dylib/jnilib в runtime (рекурсивно)
-			def runtimeLib = new File(appDir, 'Contents/runtime/Contents/Home/lib')
-			if (runtimeLib.exists()) {
-				runtimeLib.eachFileRecurse { f ->
-					if (f.name.endsWith('.dylib') || f.name.endsWith('.jnilib')) {
-						signFile(f, false)
-					}
-				}
+			if (macSigningConfig != null) {
+				def signArgs = [
+					jpackageBin,
+					'--type', 'app-image',
+					'--app-image', appDir.absolutePath
+				]
+				appendMacSigningOptions(signArgs, macSigningConfig, true, entitlements)
+				executePackagingCommand(signArgs, "Developer ID signing failed for ${appDir.name}")
+				executePackagingCommand(
+					['codesign', '--verify', '--deep', '--strict', appDir.absolutePath],
+					"Signature verification failed for ${appDir.name}"
+				)
+				logger.lifecycle("jpackage: Developer ID подпись применена к ${appDir.name}")
+			} else {
+				// Локальный fallback: ad-hoc подпись убирает immediate launch failures,
+				// но не подходит для распространяемого из интернета DMG.
+				adHocSignMacBundle(appDir, entitlements)
+				logger.lifecycle("jpackage: ad-hoc подпись применена и верифицирована")
 			}
-
-			// 2. Подписать libjli.dylib в runtime/Contents/MacOS
-			def runtimeMacOs = new File(appDir, 'Contents/runtime/Contents/MacOS')
-			if (runtimeMacOs.exists()) {
-				runtimeMacOs.listFiles()?.each { f ->
-					if (f.name.endsWith('.dylib')) {
-						signFile(f, false)
-					}
-				}
-			}
-
-			// 3. Подписать sub-bundle runtime
-			def runtimeBundle = new File(appDir, 'Contents/runtime')
-			if (runtimeBundle.exists()) {
-				signFile(runtimeBundle, false)
-			}
-
-			// 4. Подписать главный исполняемый файл (с entitlements для JIT)
-			def mainExe = new File(appDir, 'Contents/MacOS/MeshApp')
-			if (mainExe.exists()) {
-				signFile(mainExe, true)
-			}
-
-			// 5. Подписать .app бандл (с entitlements)
-			signFile(appDir, true)
-
-			// 6. Верификация
-			def verifyProc = new ProcessBuilder(
-				'codesign', '--verify', '--deep', '--strict', appDir.absolutePath
-			).redirectErrorStream(true).start()
-			def verifyOut = verifyProc.inputStream.text
-			verifyProc.waitFor()
-			if (verifyProc.exitValue() != 0) {
-				throw new GradleException("Signature verification failed: ${verifyOut}")
-			}
-			logger.lifecycle("jpackage: ad-hoc подпись применена и верифицирована")
 
 			// Собрать DMG
 			def dmgFile = new File(outputDir, "MeshApp-${appVersion}.dmg")
@@ -811,11 +952,17 @@ tasks.register('jpackage') {
 				'--mac-package-identifier', 'com.meshtastic.meshapp',
 				'--mac-package-name', 'MeshApp'
 			]
-			def proc2 = new ProcessBuilder(dmgArgs.collect { it.toString() }).redirectErrorStream(true).start()
-			def proc2Output = proc2.inputStream.text
-			proc2.waitFor()
-			if (proc2Output) logger.lifecycle(proc2Output.trim())
-			if (proc2.exitValue() != 0) throw new GradleException("jpackage DMG failed with exit code ${proc2.exitValue()}")
+			appendMacSigningOptions(dmgArgs, macSigningConfig, false, entitlements)
+			executePackagingCommand(dmgArgs, "jpackage DMG failed")
+			if (!dmgFile.isFile()) {
+				throw new GradleException("jpackage: DMG not found after build: ${dmgFile}")
+			}
+			if (macNotarizationConfig != null) {
+				notarizeMacArtifact(dmgFile, macNotarizationConfig)
+				logger.lifecycle("jpackage: DMG notarized and stapled")
+			} else if (macSigningConfig != null) {
+				logger.warn("jpackage: DMG signed with Developer ID but not notarized; Gatekeeper may still block downloaded builds")
+			}
 			logger.lifecycle("jpackage: DMG создан в ${outputDir}")
 		}
 	}
