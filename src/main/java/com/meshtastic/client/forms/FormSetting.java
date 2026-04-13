@@ -16,6 +16,7 @@ import com.meshtastic.client.service.MessageService;
 import com.meshtastic.client.service.NodeCacheService;
 import com.meshtastic.client.utils.ConfigValueFormatter;
 import com.meshtastic.client.system.Form;
+import com.meshtastic.client.themes.TypographyManager;
 import com.meshtastic.client.utils.AppPreferences;
 import com.meshtastic.client.utils.ProtobufTreeBuilder;
 import com.meshtastic.client.utils.SvgIconLoader;
@@ -38,6 +39,7 @@ import javafx.scene.control.MenuButton;
 import javafx.scene.control.CheckMenuItem;
 import javafx.scene.control.ScrollPane;
 import javafx.scene.control.Separator;
+import javafx.scene.control.Slider;
 import javafx.scene.control.Tab;
 import javafx.scene.control.TabPane;
 import javafx.scene.control.TableColumn;
@@ -51,10 +53,9 @@ import javafx.scene.control.TreeTableColumn;
 import javafx.scene.control.TreeTableView;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
+import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
 import javafx.scene.shape.SVGPath;
-import javafx.scene.text.Font;
-import javafx.scene.text.FontWeight;
 import javafx.stage.FileChooser;
 import javafx.stage.Window;
 import org.meshtastic.proto.ChannelProtos;
@@ -174,7 +175,7 @@ public class FormSetting extends Form {
         content.setPadding(new Insets(10));
 
         Label title = new Label("Настройки");
-        title.setFont(Font.font("Roboto", FontWeight.BOLD, 16));
+        title.getStyleClass().add("form-title");
 
         TabPane tabPane = new TabPane();
         tabPane.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
@@ -462,7 +463,7 @@ public class FormSetting extends Form {
 
         // --- Группа «Оформление» ---
         Label appearanceHeader = new Label("Оформление");
-        appearanceHeader.setFont(Font.font("Roboto", FontWeight.BOLD, 13));
+        appearanceHeader.getStyleClass().add("section-title");
 
         CheckBox disableEffectsCb = new CheckBox("Выключить эффекты оформления");
         disableEffectsCb.setSelected(AppPreferences.isDisableEffects());
@@ -479,15 +480,34 @@ public class FormSetting extends Form {
         minimizeToTrayCb.selectedProperty().addListener((obs, old, val) ->
                 AppPreferences.setMinimizeToTray(val));
 
-        Label restartNote = new Label("Изменения вступят в силу после перезапуска приложения");
-        restartNote.setStyle("-fx-opacity: 0.6; -fx-font-size: 11;");
+        VBox typographyGroup = new VBox(10,
+                createFontSizeSettingRow(
+                        "Размер шрифта приложения",
+                        "Управляет шрифтом форм, таблиц и типовых диалогов.",
+                        TypographyManager.MIN_APP_FONT_SIZE,
+                        TypographyManager.MAX_APP_FONT_SIZE,
+                        TypographyManager.getAppFontSize(),
+                        TypographyManager.DEFAULT_APP_FONT_SIZE,
+                        TypographyManager::setAppFontSize),
+                createFontSizeSettingRow(
+                        "Размер шрифта чатов",
+                        "Управляет списком чатов, сообщениями и полем ввода.",
+                        TypographyManager.MIN_CHAT_FONT_SIZE,
+                        TypographyManager.MAX_CHAT_FONT_SIZE,
+                        TypographyManager.getChatFontSize(),
+                        TypographyManager.DEFAULT_CHAT_FONT_SIZE,
+                        TypographyManager::setChatFontSize)
+        );
 
-        VBox appearanceGroup = new VBox(8, appearanceHeader, disableEffectsCb, softwareRenderingCb,
-                minimizeToTrayCb, restartNote);
+        Label restartNote = new Label("Изменения вступят в силу после перезапуска приложения");
+        restartNote.getStyleClass().add("muted-note-label");
+
+        VBox appearanceGroup = new VBox(8, appearanceHeader, typographyGroup,
+                disableEffectsCb, softwareRenderingCb, minimizeToTrayCb, restartNote);
 
         // --- Группа «Интеграции» ---
         Label integrationsHeader = new Label("Интеграции");
-        integrationsHeader.setFont(Font.font("Roboto", FontWeight.BOLD, 13));
+        integrationsHeader.getStyleClass().add("section-title");
 
         CheckBox checkUpdatesCb = new CheckBox("Проверять обновления при старте приложения");
         checkUpdatesCb.setSelected(AppPreferences.isCheckUpdates());
@@ -498,6 +518,63 @@ public class FormSetting extends Form {
 
         panel.getChildren().addAll(appearanceGroup, new Separator(), integrationsGroup);
         return panel;
+    }
+
+    private VBox createFontSizeSettingRow(String title,
+                                          String description,
+                                          int min,
+                                          int max,
+                                          int initialValue,
+                                          int defaultValue,
+                                          java.util.function.DoubleConsumer onValueChanged) {
+        Label titleLabel = new Label(title);
+        titleLabel.getStyleClass().add("item-title");
+
+        Label descriptionLabel = new Label(description);
+        descriptionLabel.getStyleClass().add("muted-note-label");
+        descriptionLabel.setWrapText(true);
+
+        Label valueLabel = new Label(formatFontSizeLabel(initialValue));
+        valueLabel.getStyleClass().add("section-title");
+
+        Region spacer = new Region();
+        HBox.setHgrow(spacer, Priority.ALWAYS);
+
+        HBox header = new HBox(12, titleLabel, spacer, valueLabel);
+        header.setAlignment(Pos.CENTER_LEFT);
+
+        Slider slider = new Slider(min, max, initialValue);
+        slider.setMajorTickUnit(1);
+        slider.setMinorTickCount(0);
+        slider.setBlockIncrement(1);
+        slider.setSnapToTicks(true);
+        slider.setShowTickMarks(true);
+        slider.setShowTickLabels(true);
+        slider.setMinWidth(0);
+
+        Button resetButton = new Button("Сброс");
+        resetButton.setOnAction(event -> slider.setValue(defaultValue));
+
+        HBox sliderRow = new HBox(10, slider, resetButton);
+        sliderRow.setAlignment(Pos.CENTER_LEFT);
+
+        slider.prefWidthProperty().bind(sliderRow.widthProperty().multiply(0.5));
+        slider.maxWidthProperty().bind(sliderRow.widthProperty().multiply(0.5));
+
+        slider.valueProperty().addListener((obs, oldValue, newValue) -> {
+            int rounded = (int) Math.round(newValue.doubleValue());
+            if (rounded == (int) Math.round(oldValue.doubleValue())) {
+                return;
+            }
+            valueLabel.setText(formatFontSizeLabel(rounded));
+            onValueChanged.accept(rounded);
+        });
+
+        return new VBox(6, header, descriptionLabel, sliderRow);
+    }
+
+    private String formatFontSizeLabel(int value) {
+        return value + " px";
     }
 
     // ==================== Кэш ====================
@@ -829,7 +906,7 @@ public class FormSetting extends Form {
         panel.getStyleClass().add("modal-side-panel");
 
         Label lblTitle = new Label("Очистка базы данных");
-        lblTitle.setFont(Font.font("Roboto", FontWeight.BOLD, 15));
+        lblTitle.getStyleClass().add("dialog-title");
 
         Label lblMessage = new Label(
                 "Будут удалены сообщения, реакции, кэш нод, телеметрия и журнал LoRa-пакетов. "

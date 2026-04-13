@@ -7,6 +7,7 @@ import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.service.MessageDbService;
+import com.meshtastic.client.themes.TypographyManager;
 import com.meshtastic.client.utils.NodeUtils;
 import javafx.beans.property.ReadOnlyDoubleProperty;
 import javafx.geometry.Bounds;
@@ -575,7 +576,9 @@ public class MessageBubbleFactory {
                                                       double emojiSize,
                                                       String textStyleClass,
                                                       String styleClass) {
-        EmojiTextFlow textFlow = new EmojiTextFlow(text == null ? "" : text, emojiSize);
+        EmojiTextFlow textFlow = new EmojiTextFlow(
+                text == null ? "" : text,
+                TypographyManager.scaleChat(emojiSize));
         textFlow.setTextStyleClass(textStyleClass);
         textFlow.getStyleClass().add(styleClass);
         textFlow.setMinHeight(Region.USE_PREF_SIZE);
@@ -989,10 +992,11 @@ public class MessageBubbleFactory {
      * @return {@link ImageView} или {@link Label}
      */
     private static Node createEmojiNode(String emoji, double size) {
-        ImageView image = EmojiImageCache.createImageView(emoji, size);
+        double scaledSize = TypographyManager.scaleChat(size);
+        ImageView image = EmojiImageCache.createImageView(emoji, scaledSize);
         return Optional.ofNullable(image)
                 .map(Node.class::cast)
-                .orElseGet(() -> createEmojiFallbackLabel(emoji, size));
+                .orElseGet(() -> createEmojiFallbackLabel(emoji, scaledSize));
     }
 
     private static Node createEmojiFallbackLabel(String emoji, double size) {

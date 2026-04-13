@@ -20,8 +20,6 @@ import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
-import javafx.scene.text.Font;
-import javafx.scene.text.FontWeight;
 import javafx.util.Duration;
 
 import com.meshtastic.client.MeshApp;
@@ -257,7 +255,7 @@ public class ModalPane extends StackPane {
         panel.getStyleClass().add("modal-side-panel");
 
         Label lblTitle = new Label("Доступно обновление");
-        lblTitle.setFont(Font.font("Roboto", FontWeight.BOLD, 15));
+        lblTitle.getStyleClass().add("dialog-title");
 
         Label lblCurrent = new Label("Текущая версия: " + MeshApp.APPLICATION_VERSION);
         Label lblNew = new Label("Новая версия: " + info.getVersion());
@@ -309,7 +307,7 @@ public class ModalPane extends StackPane {
         panel.getStyleClass().add("modal-side-panel");
 
         Label lblTitle = new Label(title);
-        lblTitle.setFont(Font.font("Roboto", FontWeight.BOLD, 15));
+        lblTitle.getStyleClass().add("dialog-title");
 
         Label lblMessage = new Label(message);
         lblMessage.setWrapText(true);

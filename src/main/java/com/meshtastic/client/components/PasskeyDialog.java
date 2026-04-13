@@ -10,8 +10,6 @@ import javafx.scene.control.Separator;
 import javafx.scene.control.TextField;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
-import javafx.scene.text.Font;
-import javafx.scene.text.FontWeight;
 
 import java.util.function.IntConsumer;
 
@@ -46,7 +44,7 @@ public final class PasskeyDialog {
         panel.getStyleClass().add("modal-side-panel");
 
         Label title = new Label("Сопряжение BLE");
-        title.setFont(Font.font("Roboto", FontWeight.BOLD, 15));
+        title.getStyleClass().add("dialog-title");
 
         Separator sep = new Separator();
 

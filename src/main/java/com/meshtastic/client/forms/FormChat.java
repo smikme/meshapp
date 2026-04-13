@@ -10,6 +10,7 @@ import com.meshtastic.client.components.chat.CreateChannelDialog;
 import com.meshtastic.client.components.chat.MessageBubbleFactory;
 import com.meshtastic.client.components.chat.NodeInfoFormatter;
 import com.meshtastic.client.components.chat.TracerouteView;
+import com.meshtastic.client.themes.TypographyManager;
 import com.meshtastic.client.utils.AppPreferences;
 import com.meshtastic.client.modal.ModalPane;
 import com.meshtastic.client.modal.Toast;
@@ -31,6 +32,7 @@ import com.meshtastic.client.utils.SystemForm;
 import javafx.animation.KeyFrame;
 import javafx.animation.Timeline;
 import javafx.application.Platform;
+import javafx.beans.value.ChangeListener;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import javafx.collections.transformation.FilteredList;
@@ -187,14 +189,18 @@ public class FormChat extends Form {
         reloadChatList();
     });
     private final Runnable connectionListener = () -> Platform.runLater(this::rebindState);
+    private final ChangeListener<Number> chatFontSizeListener =
+            (obs, oldValue, newValue) -> Platform.runLater(this::handleChatFontSizeChanged);
 
     public FormChat() {
         initComponents();
+        applyChatTypography();
     }
 
     @Override
     public void formInit() {
         ConnectionManager.getInstance().addListener(connectionListener);
+        TypographyManager.chatFontSizeProperty().addListener(chatFontSizeListener);
         // Загрузить сохранённые счётчики прочитанных сообщений из БД
         lastReadCounts.putAll(MessageDbService.getInstance().loadAllReadCounts(currentOwnerNodeId()));
         rebindState();
@@ -325,7 +331,7 @@ public class FormChat extends Form {
         placeholderBox.setAlignment(Pos.CENTER);
         VBox.setVgrow(placeholderBox, Priority.ALWAYS);
         Label placeholder = new Label("Выберите, кому хотели бы написать");
-        placeholder.setStyle("-fx-opacity: 0.5; -fx-font-size: 14px;");
+        placeholder.getStyleClass().add("form-placeholder-label");
         placeholder.setWrapText(true);
         placeholderBox.getChildren().add(placeholder);
 
@@ -340,7 +346,6 @@ public class FormChat extends Form {
         headerAvatarPane.getChildren().add(headerAvatarLabel);
 
         headerNameLabel = new Label();
-        headerNameLabel.setFont(Font.font("Roboto", FontWeight.BOLD, 16));
         headerNameLabel.getStyleClass().add("chat-header-name");
 
         chatHeader = new HBox(10, headerAvatarPane, headerNameLabel);
@@ -562,6 +567,24 @@ public class FormChat extends Form {
 
         updateInputEnabled();
         chatInputBar.focusInput();
+    }
+
+    private void handleChatFontSizeChanged() {
+        applyChatTypography();
+        if (chatListView != null) {
+            chatListView.refresh();
+        }
+        if (selectedChat != null) {
+            refreshLoadedMessageRows();
+        }
+    }
+
+    private void applyChatTypography() {
+        setStyle("-fx-font-size: " + TypographyManager.getChatFontSize() + "px;");
+        if (getScene() != null) {
+            applyCss();
+            requestLayout();
+        }
     }
 
     private void closeChat() {

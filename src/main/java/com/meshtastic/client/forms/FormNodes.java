@@ -335,13 +335,7 @@ public class FormNodes extends Form {
 
         // Бейдж с количеством нод
         countBadge = new Label("0");
-        countBadge.setStyle(
-                "-fx-background-color: #5B5B5E;" +
-                "-fx-background-radius: 12;" +
-                "-fx-padding: 4 10;" +
-                "-fx-text-fill: white;" +
-                "-fx-font-size: 12px;"
-        );
+        countBadge.getStyleClass().add("node-count-badge");
         countBadge.setMouseTransparent(true);
         StackPane.setAlignment(countBadge, Pos.BOTTOM_RIGHT);
         StackPane.setMargin(countBadge, new Insets(0, 12, 12, 0));
@@ -360,7 +354,7 @@ public class FormNodes extends Form {
         detailPane.getStyleClass().add("node-detail-pane");
 
         detailPlaceholder = new Label("Выберите ноду из списка");
-        detailPlaceholder.setStyle("-fx-opacity: 0.5; -fx-font-size: 14px;");
+        detailPlaceholder.getStyleClass().add("form-placeholder-label");
         detailPlaceholder.setMaxWidth(Double.MAX_VALUE);
         detailPlaceholder.setAlignment(Pos.CENTER);
 
@@ -579,13 +573,11 @@ public class FormNodes extends Form {
             avatarLabel.setStyle("-fx-text-fill: white; -fx-font-weight: bold; -fx-padding: 0;");
             avatarPane.getChildren().add(avatarLabel);
 
-            nameLabel.setFont(Font.font("Roboto", FontWeight.BOLD, 14));
             nameLabel.getStyleClass().add("node-name-label");
 
             subtitleLabel.getStyleClass().add("node-subtitle-label");
 
-            detailsLabel.getStyleClass().add("node-subtitle-label");
-            detailsLabel.setStyle("-fx-opacity: 0.7; -fx-font-size: 11px;");
+            detailsLabel.getStyleClass().addAll("node-subtitle-label", "node-detail-meta-label");
 
             textBox.getChildren().addAll(nameLabel, subtitleLabel);
             HBox.setHgrow(textBox, Priority.ALWAYS);

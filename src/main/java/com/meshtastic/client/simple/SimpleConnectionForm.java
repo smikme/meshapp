@@ -19,8 +19,6 @@ import javafx.scene.control.Tooltip;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
-import javafx.scene.text.Font;
-import javafx.scene.text.FontWeight;
 
 import java.util.List;
 import java.util.function.Consumer;
@@ -58,7 +56,7 @@ public class SimpleConnectionForm extends VBox {
         getStyleClass().add("modal-side-panel");
 
         Label title = new Label("Новое подключение");
-        title.setFont(Font.font("Roboto", FontWeight.BOLD, 15));
+        title.getStyleClass().add("dialog-title");
 
         // Тип подключения
         cmbType = new ComboBox<>();
