@@ -82,6 +82,22 @@ public final class NativeWindowHelper {
                 case WINDOWS -> {
                     var ctrl = new NativeWinWindowControl(stage);
                     seamless = ctrl.prepareMicaWindow(isDark);
+                    if (seamless) {
+                        // Первый кадр у transparent stage иногда остаётся opaque
+                        // до следующего явного repaint. Принудительно обновляем
+                        // CSS и DWM после применения backdrop.
+                        stage.getScene().setFill(Color.TRANSPARENT);
+                        var root = stage.getScene().getRoot();
+                        root.applyCss();
+                        root.requestLayout();
+                        ctrl.redrawFrame();
+                        Platform.runLater(() -> {
+                            stage.getScene().setFill(Color.TRANSPARENT);
+                            root.applyCss();
+                            root.requestLayout();
+                            ctrl.redrawFrame();
+                        });
+                    }
                 }
                 case MACOS -> {
                     var ctrl = new NativeMacOsWindowControl(stage);
@@ -100,6 +116,16 @@ public final class NativeWindowHelper {
         setSeamlessState(stage, seamless);
         setThemeState(stage, isDark);
         seamlessActive = seamless;
+
+        var root = stage.getScene().getRoot();
+        root.applyCss();
+        root.requestLayout();
+        if (seamless) {
+            Platform.runLater(() -> {
+                root.applyCss();
+                root.requestLayout();
+            });
+        }
 
         // Для seamless режима — прозрачный фон сцены, чтобы backdrop просвечивал
         if (seamless) {
