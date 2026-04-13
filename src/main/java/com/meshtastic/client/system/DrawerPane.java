@@ -18,6 +18,7 @@ import javafx.scene.shape.SVGPath;
 import com.meshtastic.client.MeshApp;
 import com.meshtastic.client.forms.FormChat;
 import com.meshtastic.client.menu.MyDrawerBuilder;
+import com.meshtastic.client.platform.OsDetect;
 import com.meshtastic.client.themes.ThemeManager;
 import com.meshtastic.client.utils.AppPreferences;
 import com.meshtastic.client.utils.SvgIconLoader;
@@ -27,6 +28,7 @@ import java.util.List;
 public class DrawerPane extends StackPane {
 
     public static final double TOOLBAR_WIDTH = 56;
+    private static final String WINDOWS_HIT_TEST_BACKGROUND = "-fx-background-color: rgba(0,0,0,0.004);";
 
     private final ToolBar toolBar;
     private final Button themeButton;
@@ -39,12 +41,13 @@ public class DrawerPane extends StackPane {
         setPrefWidth(TOOLBAR_WIDTH);
         setMinWidth(TOOLBAR_WIDTH);
         setMaxWidth(TOOLBAR_WIDTH);
-        setPickOnBounds(true);
+        if (OsDetect.isWindows() && !AppPreferences.isDisableEffectsEffective()) {
+            setStyle(WINDOWS_HIT_TEST_BACKGROUND);
+        }
 
         toolBar = new ToolBar();
         toolBar.setOrientation(Orientation.VERTICAL);
         toolBar.getStyleClass().add("drawer-toolbar");
-        toolBar.setPickOnBounds(true);
 
         // Кнопки уведомлений и темы — прижаты к низу
         notifButton = createNotificationButton();
@@ -56,7 +59,9 @@ public class DrawerPane extends StackPane {
         VBox container = new VBox(toolBar, spacer, notifButton, themeButton);
         container.setAlignment(Pos.TOP_CENTER);
         container.setPadding(new javafx.geometry.Insets(0, 0, 8, 0));
-        container.setPickOnBounds(true);
+        if (OsDetect.isWindows() && !AppPreferences.isDisableEffectsEffective()) {
+            container.setStyle(WINDOWS_HIT_TEST_BACKGROUND);
+        }
 
         getChildren().add(container);
 
