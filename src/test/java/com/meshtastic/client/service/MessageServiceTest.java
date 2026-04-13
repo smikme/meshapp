@@ -28,6 +28,10 @@ import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.slf4j.LoggerFactory;
 
@@ -192,6 +196,40 @@ class MessageServiceTest {
             logger.setLevel(previousLevel);
             UiLogAppender.clearBuffer();
         }
+    }
+
+    @Test
+    void retryMessageReusesExistingChannelRowAndRegistersNewPendingAck() throws Exception {
+        RecordingConnection connection = new RecordingConnection();
+        ProtocolHandler handler = track(new ProtocolHandler(connection));
+        DeviceState state = new DeviceState();
+        state.setMyNodeNum(0x04c5b420);
+        state.getOrCreateNode(state.getMyNodeNum()).setNodeId("!04c5b420");
+
+        MeshMessage failed = new MeshMessage("!04c5b420", "!ffffffff", 2, "retry me", 1_700_000_000L, true);
+        failed.setPacketId(12345);
+        failed.setStatus(MeshMessage.DeliveryStatus.FAILED);
+        failed.setErrorReason("TIMEOUT");
+        MessageDbService.getInstance().save(failed, "channel", "2", "!04c5b420");
+
+        int previousPacketId = failed.getPacketId();
+        assertTrue(MessageService.retryMessage(handler, state, failed));
+        assertEquals(MeshMessage.DeliveryStatus.SENDING, failed.getStatus());
+        assertNull(failed.getErrorReason());
+        assertNotEquals(previousPacketId, failed.getPacketId());
+
+        MeshProtos.ToRadio sent = parseLastToRadio(connection);
+        assertEquals(failed.getPacketId(), sent.getPacket().getId());
+        assertEquals("retry me", sent.getPacket().getDecoded().getPayload().toStringUtf8());
+
+        MeshMessage persisted = MessageDbService.getInstance().findByPacketId(failed.getPacketId());
+        assertNotNull(persisted);
+        assertEquals(failed.getDbId(), persisted.getDbId());
+        assertEquals(MeshMessage.DeliveryStatus.SENDING, persisted.getStatus());
+        assertNull(MessageDbService.getInstance().findByPacketId(previousPacketId));
+        assertSame(failed, state.resolvePendingAck(failed.getPacketId()));
+
+        state.shutdown();
     }
 
     private ProtocolHandler track(ProtocolHandler handler) {

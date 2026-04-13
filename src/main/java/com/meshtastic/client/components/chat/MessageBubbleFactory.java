@@ -8,6 +8,7 @@ import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.service.MessageDbService;
 import com.meshtastic.client.themes.TypographyManager;
+import com.meshtastic.client.utils.SvgIconLoader;
 import com.meshtastic.client.utils.NodeUtils;
 import javafx.beans.property.ReadOnlyDoubleProperty;
 import javafx.geometry.Bounds;
@@ -15,6 +16,7 @@ import javafx.geometry.Pos;
 import javafx.scene.Cursor;
 import javafx.scene.Node;
 import javafx.scene.control.Button;
+import javafx.scene.control.ContentDisplay;
 import javafx.scene.control.ContextMenu;
 import javafx.scene.control.Label;
 import javafx.scene.control.MenuItem;
@@ -29,6 +31,7 @@ import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
+import javafx.scene.shape.SVGPath;
 import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
 import javafx.stage.Popup;
@@ -62,6 +65,8 @@ public class MessageBubbleFactory {
     private static final int REACTION_COUNT_DISPLAY_THRESHOLD = 1;
     private static final int META_PRESENT_THRESHOLD = 0;
     private static final int POPUP_VERTICAL_OFFSET = 6;
+    private static final int RETRY_ICON_SIZE = 12;
+    private static final int RETRY_ACTION_GAP = 4;
     private static final double MESSAGE_TEXT_EMOJI_SIZE = 18;
     private static final double QUOTE_TEXT_EMOJI_SIZE = 14;
     private static final double REACTION_BUTTON_EMOJI_SIZE = 14;
@@ -77,6 +82,8 @@ public class MessageBubbleFactory {
     private static final String AVATAR_LABEL_STYLE = "-fx-text-fill: white; -fx-padding: 0;";
     private static final String LIGHT_THEME_STYLE_CLASS = "light-theme";
     private static final String REACTION_UNAVAILABLE_TOOLTIP = "Реакция недоступна: у сообщения нет packet id";
+    private static final String RETRY_TOOLTIP = "Повторить отправку";
+    private static final String RETRY_ICON_PATH = "/icons/refresh.svg";
     private static final List<List<String>> REACTION_EMOJI_ROWS = List.of(
             List.of("⭐", "✅", "👍", "👋", "💯", "🔥", "🤝", "😁", "😂", "🤣", "😀"),
             List.of("👌", "❎", "👎", "🤔", "👀", "👽", "🙏", "💪", "🤡", "😄", "🫡"),
@@ -103,6 +110,9 @@ public class MessageBubbleFactory {
 
         /** Подтвердить и удалить сообщение. */
         void confirmDeleteMessage(MeshMessage msg, HBox bubbleRow);
+
+        /** Повторно отправить недоставленное сообщение. */
+        boolean retryMessage(MeshMessage msg);
     }
 
     private DeviceState state;
@@ -175,16 +185,34 @@ public class MessageBubbleFactory {
             return;
         }
 
-        String icon = switch (status) {
-            case SENDING -> "⏳";
-            case DELIVERED -> "✓";
-            case FAILED -> "✗";
-        };
-
-        label.setText(icon);
+        label.setText(null);
+        label.setGraphic(null);
+        label.setContentDisplay(ContentDisplay.TEXT_ONLY);
         label.getStyleClass().remove("chat-bubble-status-failed");
+        switch (status) {
+            case SENDING -> label.setText("⏳");
+            case DELIVERED -> label.setText("✓");
+            case FAILED -> label.setText("✗");
+        }
         if (status == MeshMessage.DeliveryStatus.FAILED) {
             label.getStyleClass().add("chat-bubble-status-failed");
+        }
+    }
+
+    /**
+     * Обновляет визуал и интерактивность статус-контрола исходящего сообщения.
+     *
+     * @param label контрол статуса
+     * @param msg сообщение, связанное с этим контролом
+     */
+    public void refreshStatusLabel(Label label, MeshMessage msg) {
+        if (label == null || msg == null || msg.getStatus() == null) {
+            return;
+        }
+        updateStatusLabel(label, msg.getStatus());
+        configureStatusLabelInteraction(label, msg);
+        if (msg.getStatus() == MeshMessage.DeliveryStatus.SENDING && msg.getPacketId() != ZERO_VALUE) {
+            pendingStatusLabels.put(msg.getPacketId(), label);
         }
     }
 
@@ -1028,13 +1056,51 @@ public class MessageBubbleFactory {
                 .map(status -> {
                     Label statusLabel = new Label();
                     statusLabel.getStyleClass().add("chat-bubble-status");
-                    updateStatusLabel(statusLabel, status);
-                    Optional.of(msg)
-                            .filter(message -> status == MeshMessage.DeliveryStatus.SENDING
-                                    && message.getPacketId() != ZERO_VALUE)
-                            .ifPresent(message -> pendingStatusLabels.put(message.getPacketId(), statusLabel));
+                    statusLabel.setGraphicTextGap(ZERO_VALUE);
+                    refreshStatusLabel(statusLabel, msg);
                     return statusLabel;
                 });
+    }
+
+    private void configureStatusLabelInteraction(Label statusLabel, MeshMessage msg) {
+        statusLabel.setGraphic(null);
+        statusLabel.setContentDisplay(ContentDisplay.TEXT_ONLY);
+        statusLabel.setGraphicTextGap(ZERO_VALUE);
+
+        if (msg.getStatus() != MeshMessage.DeliveryStatus.FAILED || !msg.isOutgoing()) {
+            return;
+        }
+
+        statusLabel.setGraphic(createRetryAction(statusLabel, msg));
+        statusLabel.setContentDisplay(ContentDisplay.RIGHT);
+        statusLabel.setGraphicTextGap(RETRY_ACTION_GAP);
+    }
+
+    private StackPane createRetryAction(Label statusLabel, MeshMessage msg) {
+        StackPane retryAction = new StackPane();
+        retryAction.getStyleClass().add("chat-bubble-status-retry-action");
+        retryAction.setCursor(Cursor.HAND);
+
+        SVGPath retryIcon = SvgIconLoader.load(RETRY_ICON_PATH, RETRY_ICON_SIZE);
+        if (retryIcon != null) {
+            retryAction.getChildren().add(retryIcon);
+        } else {
+            Label fallback = new Label("↻");
+            fallback.getStyleClass().add("chat-bubble-status-retry-fallback");
+            retryAction.getChildren().add(fallback);
+        }
+
+        Tooltip.install(retryAction, new Tooltip(RETRY_TOOLTIP));
+        retryAction.setOnMouseClicked(event -> {
+            if (event.getButton() != MouseButton.PRIMARY) {
+                return;
+            }
+            if (actions.retryMessage(msg)) {
+                refreshStatusLabel(statusLabel, msg);
+            }
+            event.consume();
+        });
+        return retryAction;
     }
 
     /**

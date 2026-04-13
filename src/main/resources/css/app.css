@@ -1470,6 +1470,31 @@
     -fx-text-fill: #E53935;
 }
 
+.chat-bubble-status-retry-action {
+    -fx-opacity: 0.78;
+}
+
+.chat-bubble-status-retry-action:hover {
+    -fx-opacity: 1.0;
+}
+
+.chat-bubble-status-retry-action .svg-icon {
+    -fx-fill: -color-fg-muted;
+}
+
+.chat-bubble-status-retry-action:hover .svg-icon {
+    -fx-fill: -color-fg-default;
+}
+
+.chat-bubble-status-retry-fallback {
+    -fx-text-fill: -color-fg-muted;
+    -fx-font-size: 0.8462em;
+}
+
+.chat-bubble-status-retry-action:hover .chat-bubble-status-retry-fallback {
+    -fx-text-fill: -color-fg-default;
+}
+
 /* Системные: белый мета-текст на тёмном фоне */
 .chat-bubble-system .chat-bubble-time {
     -fx-text-fill: rgba(255, 255, 255, 0.45);

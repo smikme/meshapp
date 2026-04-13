@@ -378,6 +378,7 @@ public class FormChat extends Form {
                     @Override public void requestNodeInfo(MeshMessage msg) { FormChat.this.requestNodeInfo(msg); }
                     @Override public void sendReaction(MeshMessage msg, String emoji) { FormChat.this.sendReaction(msg, emoji); }
                     @Override public void confirmDeleteMessage(MeshMessage msg, HBox row) { FormChat.this.confirmDeleteMessage(msg, row); }
+                    @Override public boolean retryMessage(MeshMessage msg) { return FormChat.this.retryMessage(msg); }
                 },
                 pendingStatusLabels);
         bubbleFactory.setTracerouteView(tracerouteView);
@@ -763,8 +764,8 @@ public class FormChat extends Form {
             MeshMessage updated = db.findByPacketId(entry.getKey());
             if (updated != null && updated.getStatus() != null
                     && updated.getStatus() != MeshMessage.DeliveryStatus.SENDING) {
-                MessageBubbleFactory.updateStatusLabel(entry.getValue(), updated.getStatus());
-                syncLoadedMessageDeliveryStatus(updated);
+                MeshMessage loaded = syncLoadedMessageDeliveryStatus(updated);
+                bubbleFactory.refreshStatusLabel(entry.getValue(), loaded != null ? loaded : updated);
                 return true;
             }
             return false;
@@ -857,17 +858,18 @@ public class FormChat extends Form {
         });
     }
 
-    private void syncLoadedMessageDeliveryStatus(MeshMessage updated) {
+    private MeshMessage syncLoadedMessageDeliveryStatus(MeshMessage updated) {
         if (updated == null || updated.getPacketId() == 0) {
-            return;
+            return null;
         }
         for (MeshMessage loaded : loadedMessages) {
             if (loaded.getPacketId() == updated.getPacketId()) {
                 loaded.setStatus(updated.getStatus());
                 loaded.setErrorReason(updated.getErrorReason());
-                return;
+                return loaded;
             }
         }
+        return null;
     }
 
     /**
@@ -1608,6 +1610,37 @@ public class FormChat extends Form {
         refreshCurrentChatAfterLocalReaction();
     }
 
+    private boolean retryMessage(MeshMessage msg) {
+        if (msg == null || !msg.isOutgoing() || msg.getStatus() != MeshMessage.DeliveryStatus.FAILED) {
+            return false;
+        }
+        if (state == null || protocolHandler == null) {
+            Toast.show(Toast.Type.WARNING, "Нет подключения к радио");
+            return false;
+        }
+
+        if (!isChannelMessage(msg)) {
+            NodeData peerNode = NodeUtils.resolveNode(state, msg.getToNodeId());
+            if (peerNode != null && peerNode.isUnmessagable()) {
+                Toast.show(Toast.Type.WARNING, "Нода объявила, что не принимает личные сообщения");
+                return false;
+            }
+        }
+
+        boolean retried = MessageService.retryMessage(protocolHandler, state, msg);
+        if (!retried) {
+            if (!isChannelMessage(msg)) {
+                Toast.show(Toast.Type.ERROR, "Не удалось определить ноду для DM");
+            } else {
+                Toast.show(Toast.Type.ERROR, "Не удалось переотправить сообщение");
+            }
+            return false;
+        }
+
+        reloadChatList();
+        return true;
+    }
+
     // ==================== Traceroute / Node Info ====================
 
     private boolean handleBotCommand(ChatBotCommandHelper.ParsedBotCommand command) {
@@ -1676,6 +1709,10 @@ public class FormChat extends Form {
             nodeId = String.format("!%08x", node.getNodeNum());
         }
         nodes.putIfAbsent(nodeId.toLowerCase(Locale.ROOT), node);
+    }
+
+    private static boolean isChannelMessage(MeshMessage msg) {
+        return msg != null && "!ffffffff".equalsIgnoreCase(msg.getToNodeId());
     }
 
     private NodeData resolveTargetNodeFromMessage(MeshMessage msg) {
