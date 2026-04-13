@@ -3,6 +3,7 @@ package com.meshtastic.client.components.chat;
 import com.meshtastic.client.components.EmojiImageCache;
 import com.meshtastic.client.components.EmojiTextFlow;
 import com.meshtastic.client.model.MeshMessage;
+import com.meshtastic.client.themes.TypographyManager;
 import javafx.beans.property.ReadOnlyDoubleProperty;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
@@ -126,7 +127,9 @@ public class TracerouteView {
                                MeshMessage msg) {
         VBox content = createBubbleContent();
 
-        EmojiTextFlow header = new EmojiTextFlow(TRACEROUTE_PREFIX + targetName, 18);
+        EmojiTextFlow header = new EmojiTextFlow(
+                TRACEROUTE_PREFIX + targetName,
+                TypographyManager.scaleChat(18));
         header.setTextStyleClass("chat-bubble-text-node");
         header.getStyleClass().add("chat-bubble-text");
         content.getChildren().add(header);
@@ -182,7 +185,9 @@ public class TracerouteView {
 
         VBox content = createBubbleContent();
 
-        EmojiTextFlow headerLabel = new EmojiTextFlow(TRACEROUTE_PREFIX + targetName, 18);
+        EmojiTextFlow headerLabel = new EmojiTextFlow(
+                TRACEROUTE_PREFIX + targetName,
+                TypographyManager.scaleChat(18));
         headerLabel.setTextStyleClass("chat-bubble-text-node");
         headerLabel.getStyleClass().add("chat-bubble-text");
         content.getChildren().add(headerLabel);
@@ -225,12 +230,13 @@ public class TracerouteView {
         botAvatar.setMinSize(28, 28);
         botAvatar.setMaxSize(28, 28);
         botAvatar.setAlignment(Pos.CENTER);
-        ImageView botImg = EmojiImageCache.createImageView("\uD83E\uDD16", 20);
+        double botSize = TypographyManager.scaleChat(20);
+        ImageView botImg = EmojiImageCache.createImageView("\uD83E\uDD16", botSize);
         if (botImg != null) {
             botAvatar.getChildren().add(botImg);
         } else {
             Label fallback = new Label("\uD83E\uDD16");
-            fallback.setFont(Font.font(20));
+            fallback.setFont(Font.font(botSize));
             botAvatar.getChildren().add(fallback);
         }
 

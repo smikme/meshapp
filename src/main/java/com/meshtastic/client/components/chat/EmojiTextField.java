@@ -2,6 +2,7 @@ package com.meshtastic.client.components.chat;
 
 import com.meshtastic.client.components.EmojiImageCache;
 import com.meshtastic.client.components.EmojiTextFlow;
+import com.meshtastic.client.themes.TypographyManager;
 import javafx.animation.KeyFrame;
 import javafx.animation.Timeline;
 import javafx.beans.property.ReadOnlyIntegerProperty;
@@ -106,7 +107,7 @@ public class EmojiTextField extends StackPane {
         promptNode.setManaged(false);
         promptNode.setMouseTransparent(true);
 
-        caret = new Rectangle(CARET_WIDTH, 16);
+        caret = new Rectangle(CARET_WIDTH, scaledValue(16));
         caret.getStyleClass().add("emoji-text-field-caret");
         // Цвет каретки задаётся через CSS (.emoji-text-field-caret)
         // для корректной работы при смене темы
@@ -180,11 +181,56 @@ public class EmojiTextField extends StackPane {
             resetBlink();
         });
 
-        setMinHeight(MIN_HEIGHT);
-        setPrefHeight(MIN_HEIGHT);
-        setMaxHeight(MAX_HEIGHT);
+        TypographyManager.chatFontSizeProperty().addListener((obs, oldValue, newValue) ->
+                applyTypography());
+
+        setMinHeight(scaledMinHeight());
+        setPrefHeight(scaledMinHeight());
+        setMaxHeight(scaledMaxHeight());
 
         updatePromptVisibility();
+    }
+
+    private void applyTypography() {
+        caret.setHeight(scaledValue(16));
+        setMinHeight(scaledMinHeight());
+        setPrefHeight(Math.max(getPrefHeight(), scaledMinHeight()));
+        setMaxHeight(scaledMaxHeight());
+        rebuild();
+        updatePromptVisibility();
+        requestLayout();
+    }
+
+    private double scaledValue(double baseValue) {
+        return TypographyManager.scaleChat(baseValue);
+    }
+
+    private double currentFontSize() {
+        return TypographyManager.getChatFontSize();
+    }
+
+    private double scaledPadLeft() {
+        return scaledValue(PAD_LEFT);
+    }
+
+    private double scaledPadTop() {
+        return scaledValue(PAD_TOP);
+    }
+
+    private double scaledPadRight() {
+        return scaledValue(PAD_RIGHT);
+    }
+
+    private double scaledMinHeight() {
+        return scaledValue(MIN_HEIGHT);
+    }
+
+    private double scaledMaxHeight() {
+        return scaledValue(MAX_HEIGHT);
+    }
+
+    private double scaledLineHeight() {
+        return scaledValue(LINE_HEIGHT);
     }
 
     // === Публичный API ===
@@ -519,8 +565,8 @@ public class EmojiTextField extends StackPane {
         // adjustedY = clickY - PAD_TOP + verticalOffset
         // Нам нужно adjustedY = targetLineY + halfNodeH (середина строки)
         double nodeH = segments.getFirst().node.getBoundsInLocal().getHeight();
-        double screenX = cp.x + PAD_LEFT;
-        double screenY = lineYs.get(targetLine) + nodeH / 2 + PAD_TOP - verticalOffset;
+        double screenX = cp.x + scaledPadLeft();
+        double screenY = lineYs.get(targetLine) + nodeH / 2 + scaledPadTop() - verticalOffset;
         int newPos = hitTestCaret(screenX, screenY);
         caretPosition.set(newPos);
     }
@@ -747,7 +793,7 @@ public class EmojiTextField extends StackPane {
             if (seg.isEmoji()) {
                 int segStart = charIdx;
                 int segEnd = charIdx + seg.text().length();
-                ImageView iv = EmojiImageCache.createImageView(seg.text(), EMOJI_SIZE);
+                ImageView iv = EmojiImageCache.createImageView(seg.text(), scaledValue(EMOJI_SIZE));
                 if (iv != null) {
                     segments.add(new VisualSegment(iv, segStart, segEnd, true));
                     contentFlow.getChildren().add(iv);
@@ -800,7 +846,7 @@ public class EmojiTextField extends StackPane {
     private Text createTextNode(String content) {
         Text t = new Text(content);
         t.getStyleClass().add("emoji-text-field-text");
-        t.setFont(Font.font("Roboto", 13));
+        t.setFont(Font.font("Roboto", currentFontSize()));
         return t;
     }
 
@@ -810,9 +856,9 @@ public class EmojiTextField extends StackPane {
         promptNode.setVisible(showPrompt);
         if (showPrompt) {
             promptNode.setText(promptText);
-            promptNode.setFont(Font.font("Roboto", 13));
-            promptNode.setLayoutX(PAD_LEFT);
-            promptNode.setLayoutY(MIN_HEIGHT / 2 + 4);
+            promptNode.setFont(Font.font("Roboto", currentFontSize()));
+            promptNode.setLayoutX(scaledPadLeft());
+            promptNode.setLayoutY(scaledMinHeight() / 2 + scaledValue(4));
         }
     }
 
@@ -827,23 +873,24 @@ public class EmojiTextField extends StackPane {
      * setPrefHeight одного недостаточно — HBox может выдать только minHeight.
      */
     private void updateHeight() {
-        double flowWidth = getWidth() - PAD_LEFT - PAD_RIGHT;
+        double flowWidth = getWidth() - scaledPadLeft() - scaledPadRight();
         if (flowWidth <= 0) { return; }
 
         String t = text.get();
         double contentH;
         if (t == null || t.isEmpty()) {
-            contentH = LINE_HEIGHT;
+            contentH = scaledLineHeight();
         } else {
             // Измеряем высоту текста через Text с wrappingWidth —
             // надёжнее, чем читать позиции детей TextFlow
             Text helper = new Text(t);
-            helper.setFont(Font.font("Roboto", 13));
+            helper.setFont(Font.font("Roboto", currentFontSize()));
             helper.setWrappingWidth(flowWidth);
             contentH = helper.getBoundsInLocal().getHeight();
         }
 
-        double target = Math.max(MIN_HEIGHT, Math.min(contentH + PAD_TOP * 2, MAX_HEIGHT));
+        double target = Math.max(scaledMinHeight(),
+                Math.min(contentH + scaledPadTop() * 2, scaledMaxHeight()));
         if (Math.abs(getPrefHeight() - target) > 1) {
             setPrefHeight(target);
             setMinHeight(target);
@@ -853,7 +900,7 @@ public class EmojiTextField extends StackPane {
         contentFlow.setMinWidth(flowWidth);
         contentFlow.setPrefWidth(flowWidth);
         contentFlow.setMaxWidth(flowWidth);
-        contentFlow.resize(flowWidth, Math.max(contentH, MAX_HEIGHT));
+        contentFlow.resize(flowWidth, Math.max(contentH, scaledMaxHeight()));
         contentFlow.requestLayout();
         contentFlow.layout();
     }
@@ -862,20 +909,20 @@ public class EmojiTextField extends StackPane {
     protected void layoutChildren() {
         super.layoutChildren();
         double w = getWidth();
-        double flowWidth = w - PAD_LEFT - PAD_RIGHT;
+        double flowWidth = w - scaledPadLeft() - scaledPadRight();
 
         if (flowWidth > 0) {
             contentFlow.setMinWidth(flowWidth);
             contentFlow.setPrefWidth(flowWidth);
             contentFlow.setMaxWidth(flowWidth);
             // Явно задать размер unmanaged TextFlow для корректного переноса строк
-            contentFlow.resize(flowWidth, MAX_HEIGHT * 10);
+            contentFlow.resize(flowWidth, scaledMaxHeight() * 10);
             contentFlow.layout();
         }
 
         // Позиционируем contentFlow с учётом вертикального скролла
-        contentFlow.setLayoutX(PAD_LEFT);
-        contentFlow.setLayoutY(PAD_TOP - verticalOffset);
+        contentFlow.setLayoutX(scaledPadLeft());
+        contentFlow.setLayoutY(scaledPadTop() - verticalOffset);
 
         // При изменении ширины пересчитать высоту (текст перетекает на другие строки)
         if (Math.abs(w - lastLayoutWidth) > 1) {
@@ -885,8 +932,8 @@ public class EmojiTextField extends StackPane {
 
         // Промпт
         if (promptNode.isVisible()) {
-            promptNode.setLayoutX(PAD_LEFT);
-            promptNode.setLayoutY(MIN_HEIGHT / 2 + 4);
+            promptNode.setLayoutX(scaledPadLeft());
+            promptNode.setLayoutY(scaledMinHeight() / 2 + scaledValue(4));
         }
 
         updateCaretVisual();
@@ -897,14 +944,14 @@ public class EmojiTextField extends StackPane {
 
     private void updateCaretVisual() {
         if (segments.isEmpty() && (text.get() == null || text.get().isEmpty())) {
-            caret.setLayoutX(PAD_LEFT);
-            caret.setLayoutY((Math.min(getHeight(), MIN_HEIGHT) - caret.getHeight()) / 2);
+            caret.setLayoutX(scaledPadLeft());
+            caret.setLayoutY((Math.min(getHeight(), scaledMinHeight()) - caret.getHeight()) / 2);
             return;
         }
 
         CaretPos cp = computeCaretPos(caretPosition.get());
-        caret.setLayoutX(cp.x + PAD_LEFT);
-        caret.setLayoutY(cp.y + PAD_TOP - verticalOffset);
+        caret.setLayoutX(cp.x + scaledPadLeft());
+        caret.setLayoutY(cp.y + scaledPadTop() - verticalOffset);
     }
 
     private CaretPos computeCaretPos(int pos) {
@@ -955,13 +1002,13 @@ public class EmojiTextField extends StackPane {
     private void ensureCaretVisible() {
         CaretPos cp = computeCaretPos(caretPosition.get());
         double caretY = cp.y;
-        double viewH = getPrefHeight() - PAD_TOP * 2;
+        double viewH = getPrefHeight() - scaledPadTop() * 2;
 
         if (viewH <= 0) { return; }
 
         // Каретка ниже видимой области
-        if (caretY - verticalOffset + LINE_HEIGHT > viewH) {
-            verticalOffset = caretY + LINE_HEIGHT - viewH;
+        if (caretY - verticalOffset + scaledLineHeight() > viewH) {
+            verticalOffset = caretY + scaledLineHeight() - viewH;
             requestLayout();
         }
         // Каретка выше видимой области
@@ -983,8 +1030,8 @@ public class EmojiTextField extends StackPane {
 
     /** Определить позицию каретки по координатам клика. */
     private int hitTestCaret(double clickX, double clickY) {
-        double adjustedX = clickX - PAD_LEFT;
-        double adjustedY = clickY - PAD_TOP + verticalOffset;
+        double adjustedX = clickX - scaledPadLeft();
+        double adjustedY = clickY - scaledPadTop() + verticalOffset;
 
         if (segments.isEmpty()) { return 0; }
 
@@ -1131,8 +1178,8 @@ public class EmojiTextField extends StackPane {
 
             double w = Math.max(1, x2 - x1);
             Rectangle rect = new Rectangle(w, caret.getHeight());
-            rect.setLayoutX(x1 + PAD_LEFT);
-            rect.setLayoutY(nodeY + PAD_TOP - verticalOffset);
+            rect.setLayoutX(x1 + scaledPadLeft());
+            rect.setLayoutY(nodeY + scaledPadTop() - verticalOffset);
             rect.getStyleClass().add("emoji-text-field-selection");
             // Цвет выделения задаётся через CSS (.emoji-text-field-selection)
             rect.setManaged(false);

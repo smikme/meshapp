@@ -220,7 +220,7 @@ public class NodeDetailContent extends HBox {
         bigAvatar.getChildren().add(avatarLabel);
 
         Label nameLabel = new Label(displayName);
-        nameLabel.setFont(Font.font("Roboto", FontWeight.BOLD, 18));
+        nameLabel.getStyleClass().add("node-detail-name-label");
 
         Label nodeIdLabel = new Label(node.getNodeId() != null ? node.getNodeId() : "");
         nodeIdLabel.setStyle("-fx-opacity: 0.6;");

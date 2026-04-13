@@ -17,8 +17,6 @@ import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 import javafx.scene.shape.Circle;
 import javafx.scene.shape.Line;
-import javafx.scene.text.Font;
-import javafx.scene.text.FontWeight;
 import javafx.stage.Window;
 
 import com.meshtastic.client.components.MemoryBar;
@@ -34,7 +32,7 @@ public class About extends VBox {
         setPrefWidth(400);
 
         Label title = new Label("Клиент для mesh сети Meshtastic");
-        title.setFont(Font.font("Roboto", FontWeight.BOLD, 18));
+        title.getStyleClass().add("hero-title");
 
         // ── О проекте ────────────────────────────────────────────
         VBox projectBox = new VBox(8);
@@ -44,7 +42,7 @@ public class About extends VBox {
         Region projectLogo = createMeshIcon(42);
 
         Label projectName = new Label("MeshApp");
-        projectName.setFont(Font.font("Roboto", FontWeight.BOLD, 14));
+        projectName.getStyleClass().add("item-title");
 
         Label projectDesc = new Label("Кроссплатформенный desktop-клиент\nдля управления сетями Meshtastic");
         projectDesc.setWrapText(true);
@@ -69,7 +67,7 @@ public class About extends VBox {
         partnerBox.setStyle(BORDER_STYLE);
 
         Label partnerTitle = new Label("Партнёр проекта");
-        partnerTitle.setFont(Font.font("Roboto", FontWeight.BOLD, 13));
+        partnerTitle.getStyleClass().add("section-title");
 
         ImageView partnerLogo = new ImageView(
                 new Image(About.class.getResourceAsStream("/icons/onemesh.png")));
@@ -79,7 +77,7 @@ public class About extends VBox {
         partnerLogo.setSmooth(true);
 
         Label partnerName = new Label("OneMesh — Карта Meshtastic");
-        partnerName.setFont(Font.font("Roboto", FontWeight.BOLD, 13));
+        partnerName.getStyleClass().add("section-title");
 
         Label partnerDesc = new Label("Интерактивная карта устройств Meshtastic в России");
         partnerDesc.setWrapText(true);
@@ -99,7 +97,7 @@ public class About extends VBox {
         sysInfo.setStyle(BORDER_STYLE);
 
         Label sysTitle = new Label("Системная информация");
-        sysTitle.setFont(Font.font("Roboto", FontWeight.BOLD, 13));
+        sysTitle.getStyleClass().add("section-title");
 
         String version = MeshApp.APPLICATION_VERSION;
         String java = System.getProperty("java.vendor") + " - v" + System.getProperty("java.version");
@@ -120,7 +118,7 @@ public class About extends VBox {
         reportBox.setStyle(BORDER_STYLE);
 
         Label reportTitle = new Label("Поддержка");
-        reportTitle.setFont(Font.font("Roboto", FontWeight.BOLD, 13));
+        reportTitle.getStyleClass().add("section-title");
 
         Label reportDesc = new Label("Если приложение работает некорректно, отправьте технический лог текущей сессии разработчикам.");
         reportDesc.setWrapText(true);

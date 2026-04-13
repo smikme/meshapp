@@ -9,7 +9,7 @@
 
 .footer-label {
     -fx-text-fill: -color-fg-muted;
-    -fx-font-size: 11px;
+    -fx-font-size: 0.8462em;
 }
 
 /* Drawer (ToolBar) */
@@ -200,7 +200,7 @@
     -fx-content-display: left;
     -fx-graphic-text-gap: 8;
     -fx-text-fill: rgba(255, 255, 255, 0.88);
-    -fx-font-size: 12px;
+    -fx-font-size: 0.9231em;
 }
 
 .light-theme .packet-monitor-toolbar-button {
@@ -209,7 +209,7 @@
 
 .config-status-label {
     -fx-text-fill: rgba(255, 255, 255, 0.6);
-    -fx-font-size: 11px;
+    -fx-font-size: 0.8462em;
 }
 
 .light-theme .config-status-label {
@@ -236,7 +236,7 @@
 
 .packet-monitor-filter-label {
     -fx-text-fill: -color-fg-muted;
-    -fx-font-size: 12px;
+    -fx-font-size: 0.9231em;
 }
 
 .packet-monitor-date-time-box {
@@ -416,7 +416,7 @@
 
 .title-bar-label {
     -fx-text-fill: rgba(255, 255, 255, 0.6);
-    -fx-font-size: 13px;
+    -fx-font-size: 1em;
 }
 
 .light-theme .title-bar-label {
@@ -491,7 +491,7 @@
 .toast {
     -fx-padding: 12 24;
     -fx-background-radius: 8;
-    -fx-font-size: 13px;
+    -fx-font-size: 1em;
     -fx-translate-y: 20;
     -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.2), 10, 0, 0, 2);
 }
@@ -533,7 +533,7 @@
 }
 
 .memory-label {
-    -fx-font-size: 10px;
+    -fx-font-size: 0.7692em;
 }
 
 /* Connection cards */
@@ -584,6 +584,61 @@
     -fx-border-color: -color-border-default;
     -fx-border-width: 0 0 0 1;
     -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.25), 15, 0, -4, 0);
+}
+
+.form-title {
+    -fx-font-size: 1.2308em;
+    -fx-font-weight: bold;
+}
+
+.dialog-title {
+    -fx-font-size: 1.1538em;
+    -fx-font-weight: bold;
+}
+
+.hero-title {
+    -fx-font-size: 1.3846em;
+    -fx-font-weight: bold;
+}
+
+.section-title {
+    -fx-font-size: 1em;
+    -fx-font-weight: bold;
+}
+
+.item-title {
+    -fx-font-size: 1.0769em;
+    -fx-font-weight: bold;
+}
+
+.form-placeholder-label {
+    -fx-opacity: 0.5;
+    -fx-font-size: 1.0769em;
+}
+
+.muted-note-label {
+    -fx-opacity: 0.6;
+    -fx-font-size: 0.8462em;
+}
+
+.muted-small-label {
+    -fx-opacity: 0.7;
+    -fx-font-size: 0.8462em;
+}
+
+.connection-card-name {
+    -fx-font-size: 1.0769em;
+    -fx-font-weight: bold;
+}
+
+.node-detail-name-label {
+    -fx-font-size: 1.3846em;
+    -fx-font-weight: bold;
+}
+
+.dashboard-log-count-label {
+    -fx-opacity: 0.6;
+    -fx-font-size: 0.9231em;
 }
 
 /* Панель ошибки — красный акцент слева */
@@ -683,7 +738,7 @@
 
 .node-subtitle-label {
     -fx-text-fill: rgba(255, 255, 255, 0.5);
-    -fx-font-size: 12px;
+    -fx-font-size: 0.9231em;
 }
 
 .light-theme .node-subtitle-label {
@@ -695,7 +750,17 @@
     -fx-background-radius: 12;
     -fx-padding: 4 10;
     -fx-text-fill: rgba(255, 255, 255, 0.7);
-    -fx-font-size: 12px;
+    -fx-font-size: 0.9231em;
+}
+
+.node-name-label {
+    -fx-font-size: 1.0769em;
+    -fx-font-weight: bold;
+}
+
+.node-detail-meta-label {
+    -fx-opacity: 0.7;
+    -fx-font-size: 0.8462em;
 }
 
 .light-theme .node-count-badge {
@@ -956,6 +1021,8 @@
 /* Текстовые стили чата */
 .chat-name-label {
     -fx-text-fill: rgba(255, 255, 255, 0.9);
+    -fx-font-size: 1.0769em;
+    -fx-font-weight: bold;
 }
 
 .light-theme .chat-name-label {
@@ -986,13 +1053,13 @@
 
 .chat-preview-label {
     -fx-text-fill: rgba(255, 255, 255, 0.5);
-    -fx-font-size: 12px;
+    -fx-font-size: 0.9231em;
     -fx-text-overrun: ellipsis;
 }
 
 .chat-preview-text-node {
     -fx-fill: rgba(255, 255, 255, 0.5);
-    -fx-font-size: 12px;
+    -fx-font-size: 0.9231em;
 }
 
 .light-theme .chat-preview-label {
@@ -1005,7 +1072,7 @@
 
 .chat-time-label {
     -fx-text-fill: rgba(255, 255, 255, 0.4);
-    -fx-font-size: 11px;
+    -fx-font-size: 0.8462em;
 }
 
 .light-theme .chat-time-label {
@@ -1018,7 +1085,7 @@
     -fx-background-radius: 10;
     -fx-padding: 2 6;
     -fx-text-fill: white;
-    -fx-font-size: 11px;
+    -fx-font-size: 0.8462em;
     -fx-font-weight: bold;
     -fx-min-width: 20;
     -fx-alignment: center;
@@ -1062,6 +1129,8 @@
 
 .chat-header-name {
     -fx-text-fill: rgba(255, 255, 255, 0.9);
+    -fx-font-size: 1.2308em;
+    -fx-font-weight: bold;
 }
 
 .light-theme .chat-header-name {
@@ -1124,7 +1193,7 @@
 .chat-scroll-down-badge {
     -fx-background-color: #e74c3c;
     -fx-text-fill: white;
-    -fx-font-size: 10px;
+    -fx-font-size: 0.7692em;
     -fx-font-weight: bold;
     -fx-min-width: 18;
     -fx-min-height: 18;
@@ -1207,13 +1276,13 @@
 /* Текстовые элементы пузырей */
 .chat-bubble-sender {
     -fx-text-fill: -color-accent-emphasis;
-    -fx-font-size: 12px;
+    -fx-font-size: 0.9231em;
     -fx-font-weight: bold;
 }
 
 .chat-bubble-quote {
     -fx-text-fill: -color-fg-muted;
-    -fx-font-size: 12px;
+    -fx-font-size: 0.9231em;
     -fx-font-style: italic;
     -fx-border-color: -color-border-default;
     -fx-border-width: 0 0 0 2;
@@ -1223,7 +1292,7 @@
 /* Текст пузыря — lookup-цвет, авто-адаптация light/dark */
 .chat-bubble-text {
     -fx-text-fill: -color-fg-default;
-    -fx-font-size: 13px;
+    -fx-font-size: 1em;
 }
 
 /* Системные: белый текст на тёмном фоне */
@@ -1266,7 +1335,7 @@
 
 .chat-reaction-chip-count {
     -fx-text-fill: -color-fg-muted;
-    -fx-font-size: 10px;
+    -fx-font-size: 0.7692em;
 }
 
 .chat-reaction-btn {
@@ -1373,28 +1442,28 @@
 
 .chat-command-suggestion-primary {
     -fx-text-fill: -color-fg-default;
-    -fx-font-size: 13px;
+    -fx-font-size: 1em;
 }
 
 .chat-command-suggestion-secondary {
     -fx-text-fill: -color-fg-muted;
-    -fx-font-size: 11px;
+    -fx-font-size: 0.8462em;
 }
 
 /* Время и хопы — lookup-цвет, авто-адаптация */
 .chat-bubble-time {
     -fx-text-fill: -color-fg-muted;
-    -fx-font-size: 10px;
+    -fx-font-size: 0.7692em;
 }
 
 .chat-bubble-hops {
     -fx-text-fill: -color-fg-muted;
-    -fx-font-size: 10px;
+    -fx-font-size: 0.7692em;
 }
 
 .chat-bubble-status {
     -fx-text-fill: -color-fg-muted;
-    -fx-font-size: 11px;
+    -fx-font-size: 0.8462em;
 }
 
 .chat-bubble-status-failed {
@@ -1412,7 +1481,7 @@
 
 .chat-countdown-cancel {
     -fx-text-fill: rgba(255, 255, 255, 0.6);
-    -fx-font-size: 11px;
+    -fx-font-size: 0.8462em;
     -fx-padding: 2 0 0 0;
     -fx-underline: true;
 }
@@ -1431,7 +1500,7 @@
 
 /* Traceroute визуализация */
 .traceroute-hop-name {
-    -fx-font-size: 10px;
+    -fx-font-size: 0.7692em;
     -fx-text-fill: rgba(255, 255, 255, 0.85);
     -fx-padding: 1 0 0 0;
 }
@@ -1441,12 +1510,12 @@
 }
 
 .traceroute-snr-label {
-    -fx-font-size: 9px;
+    -fx-font-size: 0.6923em;
     -fx-padding: 0;
 }
 
 .traceroute-section-label {
-    -fx-font-size: 11px;
+    -fx-font-size: 0.8462em;
     -fx-padding: 4 0 0 0;
     -fx-opacity: 0.7;
 }
@@ -1559,13 +1628,13 @@
 
 .chat-reply-icon {
     -fx-text-fill: -color-accent-emphasis;
-    -fx-font-size: 14px;
+    -fx-font-size: 1.0769em;
     -fx-font-weight: bold;
 }
 
 .chat-reply-quote {
     -fx-text-fill: -color-fg-muted;
-    -fx-font-size: 12px;
+    -fx-font-size: 0.9231em;
     -fx-border-color: -color-accent-emphasis;
     -fx-border-width: 0 0 0 2;
     -fx-padding: 2 0 2 8;
@@ -1575,7 +1644,7 @@
 .chat-reply-cancel {
     -fx-background-color: transparent;
     -fx-text-fill: -color-fg-muted;
-    -fx-font-size: 13px;
+    -fx-font-size: 1em;
     -fx-padding: 2 6;
     -fx-cursor: hand;
     -fx-background-insets: 0;
@@ -1680,7 +1749,7 @@
 .chat-bubble-text-node {
     -fx-fill: -color-fg-default;
     -fx-font-family: 'Roboto';
-    -fx-font-size: 13px;
+    -fx-font-size: 1em;
 }
 
 /* Текст пузыря (системные — белый на тёмном фоне) */
@@ -1705,7 +1774,7 @@
 .chat-bubble-quote-node {
     -fx-fill: -color-fg-muted;
     -fx-font-family: 'Roboto';
-    -fx-font-size: 12px;
+    -fx-font-size: 0.9231em;
     -fx-font-style: italic;
 }
 
@@ -1731,7 +1800,7 @@
 .emoji-text-field-text {
     -fx-fill: rgba(255, 255, 255, 0.9);
     -fx-font-family: 'Roboto';
-    -fx-font-size: 13px;
+    -fx-font-size: 1em;
 }
 
 .light-theme .emoji-text-field-text {
@@ -1741,7 +1810,7 @@
 .emoji-text-field-prompt {
     -fx-fill: rgba(255, 255, 255, 0.4);
     -fx-font-family: 'Roboto';
-    -fx-font-size: 13px;
+    -fx-font-size: 1em;
 }
 
 .light-theme .emoji-text-field-prompt {

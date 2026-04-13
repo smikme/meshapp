@@ -77,7 +77,7 @@ public class FormDashboard extends Form {
 
         // --- Счётчик логов ---
         logCountLabel = new Label("0 записей");
-        logCountLabel.setStyle("-fx-opacity: 0.6; -fx-font-size: 12px;");
+        logCountLabel.getStyleClass().add("dashboard-log-count-label");
         logCountLabel.setPadding(new Insets(4, 0, 4, 2));
 
         // --- Таблица логов ---

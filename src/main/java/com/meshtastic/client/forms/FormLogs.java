@@ -34,8 +34,6 @@ import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
 import javafx.scene.shape.SVGPath;
-import javafx.scene.text.Font;
-import javafx.scene.text.FontWeight;
 import javafx.stage.FileChooser;
 import javafx.stage.Window;
 import org.slf4j.Logger;
@@ -77,7 +75,7 @@ public class FormLogs extends Form {
         titleRow.setAlignment(Pos.CENTER_LEFT);
 
         Label title = new Label("Логирование");
-        title.setFont(Font.font("Roboto", FontWeight.BOLD, 16));
+        title.getStyleClass().add("form-title");
 
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);

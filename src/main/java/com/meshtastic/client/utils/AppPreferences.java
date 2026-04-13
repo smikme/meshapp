@@ -24,6 +24,8 @@ public class AppPreferences {
     public static final String KEY_SOFTWARE_RENDERING = "softwareRendering";
     public static final String KEY_CHECK_UPDATES = "checkUpdates";
     public static final String KEY_MINIMIZE_TO_TRAY = "minimizeToTray";
+    public static final String KEY_APP_FONT_SIZE = "appFontSize";
+    public static final String KEY_CHAT_FONT_SIZE = "chatFontSize";
     public static final String KEY_PACKET_MONITOR_WINDOW_X = "packetMonitorWindowX";
     public static final String KEY_PACKET_MONITOR_WINDOW_Y = "packetMonitorWindowY";
     public static final String KEY_PACKET_MONITOR_WINDOW_WIDTH = "packetMonitorWindowWidth";
@@ -114,6 +116,22 @@ public class AppPreferences {
 
     public static void setMinimizeToTray(boolean value) {
         state().putBoolean(KEY_MINIMIZE_TO_TRAY, value);
+    }
+
+    public static int getAppFontSize() {
+        return state().getInt(KEY_APP_FONT_SIZE, 13);
+    }
+
+    public static void setAppFontSize(int value) {
+        state().putInt(KEY_APP_FONT_SIZE, value);
+    }
+
+    public static int getChatFontSize() {
+        return state().getInt(KEY_CHAT_FONT_SIZE, 13);
+    }
+
+    public static void setChatFontSize(int value) {
+        state().putInt(KEY_CHAT_FONT_SIZE, value);
     }
 
     public static List<String> getRecentSearch(boolean favorite) {

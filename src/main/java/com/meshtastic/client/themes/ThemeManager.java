@@ -5,13 +5,17 @@ import atlantafx.base.theme.CupertinoLight;
 import com.meshtastic.client.MeshApp;
 import com.meshtastic.client.platform.NativeWindowHelper;
 import javafx.application.Application;
+import javafx.scene.Parent;
 import javafx.scene.Scene;
 import javafx.stage.Stage;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 import java.util.WeakHashMap;
+import java.util.stream.Collectors;
 
 public class ThemeManager {
 
@@ -88,5 +92,40 @@ public class ThemeManager {
         if (appCss != null) {
             scene.getStylesheets().add(appCss);
         }
+        applyTypographyToRoot(scene.getRoot());
+    }
+
+    public static void refreshTypography() {
+        for (Scene managedScene : snapshotManagedScenes()) {
+            if (managedScene != null) {
+                applyTypographyToRoot(managedScene.getRoot());
+            }
+        }
+    }
+
+    private static void applyTypographyToRoot(Parent root) {
+        if (root == null) {
+            return;
+        }
+
+        String typographyStyle = String.format(Locale.US,
+                "-fx-font-size: %dpx; -chat-font-size: %dpx;",
+                TypographyManager.getAppFontSize(),
+                TypographyManager.getChatFontSize());
+        root.setStyle(mergeRootStyle(root.getStyle(), typographyStyle));
+        root.applyCss();
+    }
+
+    private static String mergeRootStyle(String existingStyle, String typographyStyle) {
+        List<String> preservedDeclarations = java.util.Arrays.stream(
+                        existingStyle == null ? new String[0] : existingStyle.split(";"))
+                .map(String::trim)
+                .filter(declaration -> !declaration.isBlank())
+                .filter(declaration -> !declaration.startsWith("-fx-font-size"))
+                .filter(declaration -> !declaration.startsWith("-chat-font-size"))
+                .collect(Collectors.toCollection(ArrayList::new));
+        preservedDeclarations.add(typographyStyle);
+        return preservedDeclarations.stream()
+                .collect(Collectors.joining(" "));
     }
 }

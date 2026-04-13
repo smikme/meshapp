@@ -3,6 +3,7 @@ package com.meshtastic.client.components.chat;
 import com.meshtastic.client.components.EmojiTextFlow;
 import com.meshtastic.client.modal.ModalPane;
 import com.meshtastic.client.model.ChatItem;
+import com.meshtastic.client.themes.TypographyManager;
 import com.meshtastic.client.utils.NodeUtils;
 import com.meshtastic.client.utils.SvgIconLoader;
 import javafx.scene.Cursor;
@@ -68,7 +69,6 @@ public class ChatListCell extends ListCell<ChatItem> {
         avatarLabel.setPadding(Insets.EMPTY);
         avatarPane.getChildren().add(avatarLabel);
 
-        nameLabel.setFont(Font.font("Roboto", FontWeight.BOLD, 14));
         nameLabel.getStyleClass().add("chat-name-label");
 
         muteIconLabel.getStyleClass().add("chat-mute-icon");
@@ -87,10 +87,6 @@ public class ChatListCell extends ListCell<ChatItem> {
 
         messagePreview.getStyleClass().add("chat-preview-label");
         messagePreview.setTextStyleClass("chat-preview-text-node");
-        messagePreview.setEmojiSize(12);
-        messagePreview.setMinHeight(34);
-        messagePreview.setPrefHeight(34);
-        messagePreview.setMaxHeight(34);
         Rectangle clip = new Rectangle();
         clip.widthProperty().bind(messagePreview.widthProperty());
         clip.heightProperty().bind(messagePreview.heightProperty());
@@ -198,6 +194,11 @@ public class ChatListCell extends ListCell<ChatItem> {
                 : "Оповещения чата включены");
         messagePreview.setText(
                 item.getLastMessageText() != null ? item.getLastMessageText() : "");
+        messagePreview.setEmojiSize(TypographyManager.scaleChat(12));
+        double previewHeight = TypographyManager.scaleChat(34);
+        messagePreview.setMinHeight(previewHeight);
+        messagePreview.setPrefHeight(previewHeight);
+        messagePreview.setMaxHeight(previewHeight);
 
         if (item.getLastMessageTime() > 0) {
             timeLabel.setText(

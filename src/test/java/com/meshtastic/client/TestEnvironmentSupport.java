@@ -26,7 +26,10 @@ public final class TestEnvironmentSupport {
         configureHeadlessJavaFxIfNeeded();
         if (FX_START_REQUESTED.compareAndSet(false, true)) {
             try {
-                Platform.startup(FX_READY::countDown);
+                Platform.startup(() -> {
+                    Platform.setImplicitExit(false);
+                    FX_READY.countDown();
+                });
             } catch (IllegalStateException e) {
                 if (!"Toolkit already initialized".equals(e.getMessage())) {
                     throw e;
@@ -36,6 +39,7 @@ public final class TestEnvironmentSupport {
         }
 
         await(FX_READY);
+        Platform.setImplicitExit(false);
 
         // Для повторных вызовов и гонок во время старта достаточно убедиться, что FX event loop жив.
         CountDownLatch latch = new CountDownLatch(1);
