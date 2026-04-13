@@ -55,6 +55,13 @@ jobs:
           git clone "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git" .
           git checkout "${GITHUB_SHA}"
 
+      - name: Install Flatpak toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y flatpak flatpak-builder
+          flatpak --user remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+          flatpak --user install -y flathub org.freedesktop.Platform//24.08 org.freedesktop.Sdk//24.08
+
       - name: Download appimagetool
         run: |
           mkdir -p tools
@@ -72,7 +79,7 @@ jobs:
             -o tools/appimagetool.AppImage
           chmod +x tools/appimagetool.AppImage
 
-      - run: APPIMAGE_EXTRACT_AND_RUN=1 ./gradlew jpackage appImage -Pappimagetool="$PWD/tools/appimagetool.AppImage" --no-daemon
+      - run: APPIMAGE_EXTRACT_AND_RUN=1 ./gradlew jpackage appImage flatpak -Pappimagetool="$PWD/tools/appimagetool.AppImage" --no-daemon
 
       - name: Upload to Gitea Release
         env:
@@ -83,7 +90,7 @@ jobs:
           RELEASE_ID=$(curl -sf \
             -H "Authorization: token ${GITEA_TOKEN}" \
             "${API}/releases/tags/${TAG}" | jq -r '.id')
-          for file in build/jpackage/*.deb build/jpackage/*.AppImage; do
+          for file in build/jpackage/*.deb build/jpackage/*.AppImage build/jpackage/*.flatpak; do
             [ -f "$file" ] || continue
             echo "Uploading $(basename "$file")..."
             curl -sf -X POST \

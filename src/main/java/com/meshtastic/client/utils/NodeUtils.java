@@ -45,14 +45,14 @@ public final class NodeUtils {
         if (node != null) {
             NodeCacheService.getInstance().enrichFromCache(node);
             if (node.hasName()) {
-                log.debug("resolveNode: enriched {} from cache → '{}'",
+                log.trace("resolveNode: enriched {} from cache → '{}'",
                         node.getNodeId(), node.getLongName());
             }
         }
         if (node == null) {
             node = NodeCacheService.getInstance().getByNum(nodeNum);
             if (node != null) {
-                log.debug("resolveNode: !{} not in DeviceState, loaded from cache → '{}'",
+                log.trace("resolveNode: !{} not in DeviceState, loaded from cache → '{}'",
                         Integer.toHexString(nodeNum), node.getLongName());
             }
         }
@@ -71,14 +71,14 @@ public final class NodeUtils {
         if (node != null) {
             NodeCacheService.getInstance().enrichFromCache(node);
             if (node.hasName()) {
-                log.debug("resolveNode: enriched {} from cache → '{}'",
+                log.trace("resolveNode: enriched {} from cache → '{}'",
                         node.getNodeId(), node.getLongName());
             }
         }
         if (node == null) {
             node = NodeCacheService.getInstance().get(nodeId);
             if (node != null) {
-                log.debug("resolveNode: {} not in DeviceState, loaded from cache → '{}'",
+                log.trace("resolveNode: {} not in DeviceState, loaded from cache → '{}'",
                         nodeId, node.getLongName());
             }
         }
