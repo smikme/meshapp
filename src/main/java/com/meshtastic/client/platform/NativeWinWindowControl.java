@@ -346,20 +346,17 @@ public class NativeWinWindowControl {
     public boolean prepareMicaWindow(boolean isDark) {
         if (hwnd == null) { return false; }
 
-        // 1. Расширить DWM frame на клиентскую область
-        extendFrameIntoClientArea();
-
-        // 2. Dark mode (Win10 1903+)
+        // 1. Dark mode (Win10 1903+)
         setDarkMode(isDark);
 
-        // 3. Backdrop: Win11 API (Mica) → Win10 fallback (Acrylic)
+        // 2. Backdrop: Win11 API (Mica) → Win10 fallback (Acrylic)
         boolean backdropOk = setWindowBackdrop(DwmSystemBackdropType.MICA);
         if (!backdropOk) {
             log.info("DWMWA_SYSTEMBACKDROP_TYPE недоступен, пробуем SetWindowCompositionAttribute...");
             backdropOk = setAcrylicViaCompositionAttribute(isDark);
         }
 
-        // 4. Скруглённые углы (Win11+, non-fatal на Win10)
+        // 3. Скруглённые углы (Win11+, non-fatal на Win10)
         setRoundedCorners();
 
         return backdropOk;
