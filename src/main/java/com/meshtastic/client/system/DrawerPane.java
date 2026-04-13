@@ -39,10 +39,12 @@ public class DrawerPane extends StackPane {
         setPrefWidth(TOOLBAR_WIDTH);
         setMinWidth(TOOLBAR_WIDTH);
         setMaxWidth(TOOLBAR_WIDTH);
+        setPickOnBounds(true);
 
         toolBar = new ToolBar();
         toolBar.setOrientation(Orientation.VERTICAL);
         toolBar.getStyleClass().add("drawer-toolbar");
+        toolBar.setPickOnBounds(true);
 
         // Кнопки уведомлений и темы — прижаты к низу
         notifButton = createNotificationButton();
@@ -54,6 +56,7 @@ public class DrawerPane extends StackPane {
         VBox container = new VBox(toolBar, spacer, notifButton, themeButton);
         container.setAlignment(Pos.TOP_CENTER);
         container.setPadding(new javafx.geometry.Insets(0, 0, 8, 0));
+        container.setPickOnBounds(true);
 
         getChildren().add(container);
 
