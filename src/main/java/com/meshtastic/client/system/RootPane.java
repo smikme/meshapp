@@ -41,6 +41,12 @@ public class RootPane extends BorderPane {
 
     private static final double RESIZE_MARGIN = 8;
     private static final double CORNER_MARGIN = 16;
+    /**
+     * Windows layered hit-test становится ненадёжным на почти нулевой альфе.
+     * 1 alpha-step (~0.004) периодически округляется в fully transparent,
+     * поэтому держим чуть более высокий, но всё ещё визуально незаметный фон.
+     */
+    private static final String WINDOWS_HIT_TEST_BACKGROUND = "-fx-background-color: rgba(0,0,0,0.012);";
 
     private final DrawerPane drawerPane;
     private final MainForm mainForm;
@@ -85,11 +91,13 @@ public class RootPane extends BorderPane {
 
             // Windows + StageStyle.TRANSPARENT: ОС пропускает mouse events сквозь
             // полностью прозрачные пиксели (hit-test по альфа-каналу).
-            // Минимальный фон (alpha=1/255 ≈ 0.4%) невидим глазу, но делает
-            // все пиксели RootPane «непрозрачными» для Windows hit-test.
+            // Слишком низкая альфа (около 1/255) на новых JavaFX/DWM сборках
+            // периодически округляется до fully transparent, поэтому держим
+            // немного более высокий, но всё ещё визуально незаметный фон.
             // На macOS это не нужно — NSVisualEffectView рисует backdrop под JavaFX.
             if (OsDetect.isWindows()) {
-                setStyle("-fx-background-color: rgba(0,0,0,0.004);");
+                setPickOnBounds(true);
+                setStyle(WINDOWS_HIT_TEST_BACKGROUND);
             }
 
             // На macOS ресайз обрабатывает нативный NSWindowStyleMaskResizable,
