@@ -806,8 +806,9 @@ def writeFlatpakManifest = { File manifestFile, File sourceDir, String runtime, 
 		'finish-args'    : [
 			'--share=network',
 			'--share=ipc',
-			'--socket=wayland',
-			'--socket=fallback-x11',
+			// JavaFX on Linux uses the GTK/X11 backend, so Wayland + fallback-x11
+			// breaks startup inside Flatpak on Wayland sessions ("Unable to open DISPLAY").
+			'--socket=x11',
 			'--device=dri',
 			'--device=all',
 			'--filesystem=home',
