@@ -104,7 +104,7 @@ public final class AppTrayManager {
             try {
                 Platform.setImplicitExit(false);
                 if (OsDetect.isMacOs()) {
-                    if (AppPreferences.isDisableEffects()) {
+                    if (AppPreferences.isDisableEffectsEffective()) {
                         if (stage.isShowing()) {
                             stage.hide();
                         }
@@ -141,7 +141,7 @@ public final class AppTrayManager {
             try {
                 Platform.setImplicitExit(true);
                 if (OsDetect.isMacOs() && macWindowHiddenToTray) {
-                    if (AppPreferences.isDisableEffects()) {
+                    if (AppPreferences.isDisableEffectsEffective()) {
                         if (stage.isIconified()) {
                             stage.setIconified(false);
                         }
@@ -195,7 +195,7 @@ public final class AppTrayManager {
     }
 
     private void installStageHooks(Stage stage) {
-        if (OsDetect.isMacOs() && !AppPreferences.isDisableEffects()) {
+        if (OsDetect.isMacOs() && !AppPreferences.isDisableEffectsEffective()) {
             return;
         }
         stage.iconifiedProperty().addListener((obs, wasIconified, isIconified) -> {

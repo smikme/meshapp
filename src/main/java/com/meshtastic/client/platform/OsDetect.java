@@ -1,5 +1,8 @@
 package com.meshtastic.client.platform;
 
+import com.sun.jna.platform.win32.Advapi32Util;
+import com.sun.jna.platform.win32.WinReg;
+
 import java.util.Map;
 import java.util.Locale;
 
@@ -12,6 +15,9 @@ public final class OsDetect {
     public enum PackageFormat { MSI, DMG, DEB, APPIMAGE, FLATPAK, UNKNOWN }
 
     private static final OsType CURRENT;
+    private static final int WINDOWS_11_BUILD = 22000;
+    private static final String WINDOWS_CURRENT_VERSION_KEY = "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion";
+    private static final Integer WINDOWS_BUILD_NUMBER;
 
     static {
         String os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
@@ -24,10 +30,18 @@ public final class OsDetect {
         } else {
             CURRENT = OsType.UNKNOWN;
         }
+
+        WINDOWS_BUILD_NUMBER = CURRENT == OsType.WINDOWS ? detectWindowsBuildNumber() : null;
     }
 
     public static OsType current() { return CURRENT; }
     public static boolean isWindows() { return CURRENT == OsType.WINDOWS; }
+    public static boolean isWindows10() {
+        return isWindows() && WINDOWS_BUILD_NUMBER != null && WINDOWS_BUILD_NUMBER < WINDOWS_11_BUILD;
+    }
+    public static boolean isWindows11OrGreater() {
+        return isWindows() && WINDOWS_BUILD_NUMBER != null && WINDOWS_BUILD_NUMBER >= WINDOWS_11_BUILD;
+    }
     public static boolean isMacOs() { return CURRENT == OsType.MACOS; }
     public static boolean isLinux() { return CURRENT == OsType.LINUX; }
     public static boolean isLinuxAppImage() { return isLinuxAppImage(CURRENT, System.getenv()); }
@@ -37,7 +51,7 @@ public final class OsDetect {
 
     /** Поддерживает ли ОС объединённый title bar + backdrop эффекты */
     public static boolean supportsSeamlessFrame() {
-        return isWindows() || isMacOs();
+        return isMacOs() || isWindows11OrGreater();
     }
 
     static boolean isLinuxAppImage(OsType osType, Map<String, String> env) {
@@ -84,6 +98,45 @@ public final class OsDetect {
 
     private static boolean hasValue(String value) {
         return value != null && !value.isBlank();
+    }
+
+    private static Integer detectWindowsBuildNumber() {
+        try {
+            String build = Advapi32Util.registryGetStringValue(
+                    WinReg.HKEY_LOCAL_MACHINE,
+                    WINDOWS_CURRENT_VERSION_KEY,
+                    "CurrentBuildNumber");
+            if (hasValue(build)) {
+                return Integer.parseInt(build.trim());
+            }
+        } catch (Throwable ignored) {
+            // Fall through to CurrentBuild/os.version fallback.
+        }
+
+        try {
+            String build = Advapi32Util.registryGetStringValue(
+                    WinReg.HKEY_LOCAL_MACHINE,
+                    WINDOWS_CURRENT_VERSION_KEY,
+                    "CurrentBuild");
+            if (hasValue(build)) {
+                return Integer.parseInt(build.trim());
+            }
+        } catch (Throwable ignored) {
+            // Fall through to os.version fallback.
+        }
+
+        try {
+            String osVersion = System.getProperty("os.version", "").trim();
+            if (!osVersion.isEmpty()) {
+                String[] parts = osVersion.split("\\.");
+                if (parts.length >= 3) {
+                    return Integer.parseInt(parts[2]);
+                }
+            }
+        } catch (Throwable ignored) {
+            // Unknown Windows build; caller will treat it as unsupported.
+        }
+        return null;
     }
 
     private OsDetect() {}

@@ -22,6 +22,7 @@ import javafx.application.Platform;
 import javafx.collections.ObservableList;
 import javafx.scene.Scene;
 import javafx.scene.image.Image;
+import javafx.scene.paint.Color;
 import javafx.scene.text.Font;
 import javafx.stage.Screen;
 import javafx.stage.Stage;
@@ -111,6 +112,12 @@ public class MeshApp extends Application {
 
         RootPane rootPane = new RootPane();
         Scene scene = new Scene(rootPane, 1010, 750);
+        if (!AppPreferences.isDisableEffectsEffective() && OsDetect.supportsSeamlessFrame()) {
+            // Для transparent stage fill должен быть прозрачным ещё до первого show(),
+            // иначе первый кадр успевает отрисоваться как opaque и backdrop "просыпается"
+            // только после следующего крупного repaint (например, смены темы).
+            scene.setFill(Color.TRANSPARENT);
+        }
 
         boolean isDark = AppPreferences.isDarkMode();
         ThemeManager.applyTheme(scene, isDark);

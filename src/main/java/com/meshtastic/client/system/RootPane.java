@@ -41,6 +41,12 @@ public class RootPane extends BorderPane {
 
     private static final double RESIZE_MARGIN = 8;
     private static final double CORNER_MARGIN = 16;
+    /**
+     * Для transparent/layered окна Windows нужен хотя бы минимальный alpha,
+     * иначе hit-test проваливается сквозь полностью прозрачные пиксели.
+     * Значение держим на грани видимости, чтобы не убивать backdrop.
+     */
+    private static final String WINDOWS_HIT_TEST_BACKGROUND = "-fx-background-color: rgba(0,0,0,0.004);";
 
     private final DrawerPane drawerPane;
     private final MainForm mainForm;
@@ -78,18 +84,19 @@ public class RootPane extends BorderPane {
 
         StackPane centerStack = new StackPane(mainForm, modalPane, toastOverlay);
 
-        if (!AppPreferences.isDisableEffects()) {
+        if (!AppPreferences.isDisableEffectsEffective()) {
             // Кастомный title bar — на всю ширину окна, прозрачный (frosted glass просвечивает)
             HBox titleBar = createTitleBar();
             setTop(titleBar);
 
             // Windows + StageStyle.TRANSPARENT: ОС пропускает mouse events сквозь
             // полностью прозрачные пиксели (hit-test по альфа-каналу).
-            // Минимальный фон (alpha=1/255 ≈ 0.4%) невидим глазу, но делает
-            // все пиксели RootPane «непрозрачными» для Windows hit-test.
+            // Полностью прозрачные пиксели не участвуют в Windows hit-test,
+            // поэтому root получает почти невидимый alpha-слой для resize.
             // На macOS это не нужно — NSVisualEffectView рисует backdrop под JavaFX.
             if (OsDetect.isWindows()) {
-                setStyle("-fx-background-color: rgba(0,0,0,0.004);");
+                setPickOnBounds(true);
+                setStyle(WINDOWS_HIT_TEST_BACKGROUND);
             }
 
             // На macOS ресайз обрабатывает нативный NSWindowStyleMaskResizable,
@@ -117,6 +124,11 @@ public class RootPane extends BorderPane {
         // Перехватывать клики по всей площади bar, включая прозрачные spacers —
         // без этого на Windows клики проваливаются сквозь прозрачные Region
         bar.setPickOnBounds(true);
+        if (OsDetect.isWindows()) {
+            // Для transparent/layered окна Windows учитывает альфу именно в верхнем
+            // слое title bar, поэтому делаем hit-testable сам bar, а не только root.
+            bar.setStyle(WINDOWS_HIT_TEST_BACKGROUND);
+        }
 
         // Traffic light кнопки
         Button closeBtn = createWindowButton("window-btn-close");
@@ -136,12 +148,15 @@ public class RootPane extends BorderPane {
 
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
+        spacer.setMouseTransparent(true);
 
         Label titleLabel = new Label("MeshApp");
         titleLabel.getStyleClass().add("title-bar-label");
+        titleLabel.setMouseTransparent(true);
 
         Region spacer2 = new Region();
         HBox.setHgrow(spacer2, Priority.ALWAYS);
+        spacer2.setMouseTransparent(true);
 
         bar.getChildren().addAll(buttons, spacer, titleLabel, spacer2);
 

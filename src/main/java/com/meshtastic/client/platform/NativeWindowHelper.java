@@ -38,7 +38,7 @@ public final class NativeWindowHelper {
             catch (Throwable t) { log.warn("initDarkModeSupport failed", t); }
         }
 
-        if (AppPreferences.isDisableEffects()) {
+        if (AppPreferences.isDisableEffectsEffective()) {
             // Выключены эффекты оформления: стандартный DECORATED стиль ОС
             return;
         }
@@ -59,14 +59,14 @@ public final class NativeWindowHelper {
         }
 
         // Выключены эффекты оформления — без backdrop эффектов
-        if (AppPreferences.isDisableEffects()) {
+        if (AppPreferences.isDisableEffectsEffective()) {
             setSeamlessState(stage, false);
             setThemeState(stage, isDark);
             // Windows: установить тёмный/светлый title bar в нативном режиме
             if (OsDetect.isWindows()) {
                 try {
                     var ctrl = new NativeWinWindowControl(stage);
-                    ctrl.setDarkMode(isDark);
+                    ctrl.applyPlainDecoratedTitleBar(isDark);
                     ctrl.redrawFrame();
                 } catch (Throwable t) {
                     log.warn("Не удалось установить тёмный title bar", t);
@@ -82,6 +82,22 @@ public final class NativeWindowHelper {
                 case WINDOWS -> {
                     var ctrl = new NativeWinWindowControl(stage);
                     seamless = ctrl.prepareMicaWindow(isDark);
+                    if (seamless) {
+                        // Первый кадр у transparent stage иногда остаётся opaque
+                        // до следующего явного repaint. Принудительно обновляем
+                        // CSS и DWM после применения backdrop.
+                        stage.getScene().setFill(Color.TRANSPARENT);
+                        var root = stage.getScene().getRoot();
+                        root.applyCss();
+                        root.requestLayout();
+                        ctrl.redrawFrame();
+                        Platform.runLater(() -> {
+                            stage.getScene().setFill(Color.TRANSPARENT);
+                            root.applyCss();
+                            root.requestLayout();
+                            ctrl.redrawFrame();
+                        });
+                    }
                 }
                 case MACOS -> {
                     var ctrl = new NativeMacOsWindowControl(stage);
@@ -100,6 +116,16 @@ public final class NativeWindowHelper {
         setSeamlessState(stage, seamless);
         setThemeState(stage, isDark);
         seamlessActive = seamless;
+
+        var root = stage.getScene().getRoot();
+        root.applyCss();
+        root.requestLayout();
+        if (seamless) {
+            Platform.runLater(() -> {
+                root.applyCss();
+                root.requestLayout();
+            });
+        }
 
         // Для seamless режима — прозрачный фон сцены, чтобы backdrop просвечивал
         if (seamless) {
@@ -120,7 +146,11 @@ public final class NativeWindowHelper {
             switch (OsDetect.current()) {
                 case WINDOWS -> {
                     var ctrl = new NativeWinWindowControl(stage);
-                    ctrl.setDarkMode(isDark);
+                    if (AppPreferences.isDisableEffectsEffective()) {
+                        ctrl.applyPlainDecoratedTitleBar(isDark);
+                    } else {
+                        ctrl.setDarkMode(isDark);
+                    }
                     ctrl.redrawFrame();
                 }
                 case MACOS -> {
