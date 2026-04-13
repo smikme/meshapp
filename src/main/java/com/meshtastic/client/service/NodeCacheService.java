@@ -39,6 +39,7 @@ public final class NodeCacheService {
     private static NodeCacheService instance;
 
     private final ConcurrentHashMap<String, NodeData> cache = new ConcurrentHashMap<>();
+    private final Set<String> missingNodeIds = ConcurrentHashMap.newKeySet();
     private Connection dbConnection;
     private PreparedStatement mergeStmt;
     private PreparedStatement insertTelemetryStmt;
@@ -189,15 +190,7 @@ public final class NodeCacheService {
      * Ленивая загрузка из БД, если в памяти нет — результат кэшируется.
      */
     public NodeData get(String nodeId) {
-        if (nodeId == null || nodeId.isEmpty()) { return null; }
-        NodeData node = cache.get(nodeId);
-        if (node == null) {
-            node = loadFromDb(nodeId);
-            if (node != null) {
-                cache.put(nodeId, node);
-            }
-        }
-        return node;
+        return getCachedOrLoad(nodeId, false);
     }
 
     /**
@@ -295,6 +288,7 @@ public final class NodeCacheService {
         if (fresh == null) { return; }
         String nodeId = fresh.getNodeId();
         if (nodeId == null || nodeId.isEmpty()) { return; }
+        missingNodeIds.remove(nodeId);
         cache.compute(nodeId, (key, existing) -> {
             if (existing == null) {
                 existing = loadFromDb(nodeId);
@@ -320,6 +314,7 @@ public final class NodeCacheService {
         for (NodeData fresh : nodes.values()) {
             String nodeId = fresh.getNodeId();
             if (nodeId == null || nodeId.isEmpty()) { continue; }
+            missingNodeIds.remove(nodeId);
             cache.compute(nodeId, (key, existing) -> {
                 if (existing == null) {
                     existing = loadFromDb(nodeId);
@@ -358,15 +353,7 @@ public final class NodeCacheService {
         if (!needsIdentity) { return; }
 
         String nodeId = node.getNodeId();
-        NodeData cached = cache.get(nodeId);
-        if (cached == null) {
-            cached = loadFromDb(nodeId);
-            if (cached != null) {
-                log.debug("enrichFromCache: loaded {} from H2, hasName={}", nodeId, cached.hasName());
-            } else {
-                log.debug("enrichFromCache: {} not found in H2", nodeId);
-            }
-        }
+        NodeData cached = getCachedOrLoad(nodeId, true);
         if (cached == null) { return; }
 
         if ((node.getLongName() == null || node.getLongName().isEmpty())
@@ -397,6 +384,7 @@ public final class NodeCacheService {
      */
     public synchronized void clearAll() {
         cache.clear();
+        missingNodeIds.clear();
         if (dbConnection == null) { return; }
         try (Statement stmt = dbConnection.createStatement()) {
             stmt.execute("DELETE FROM nodes");
@@ -410,6 +398,7 @@ public final class NodeCacheService {
     public synchronized void deleteNode(String nodeId) {
         if (nodeId == null) { return; }
         cache.remove(nodeId);
+        missingNodeIds.add(nodeId);
         if (dbConnection == null) { return; }
         try (PreparedStatement ps1 = dbConnection.prepareStatement("DELETE FROM telemetry_history WHERE node_id = ?");
              PreparedStatement ps2 = dbConnection.prepareStatement("DELETE FROM nodes WHERE node_id = ?")) {
@@ -541,7 +530,7 @@ public final class NodeCacheService {
      * чем нода была записана в кэш/H2 полноценным update().
      */
     private void ensureNodeRowExists(String nodeId) {
-        if (mergeStmt == null || loadFromDb(nodeId) != null) { return; }
+        if (mergeStmt == null || get(nodeId) != null) { return; }
 
         int nodeNum;
         try {
@@ -556,6 +545,7 @@ public final class NodeCacheService {
             placeholder.setNodeId(key);
             return placeholder;
         });
+        missingNodeIds.remove(nodeId);
         persistNode(nodeId);
     }
 
@@ -836,6 +826,7 @@ public final class NodeCacheService {
                     if (node == null || !node.hasName()) { continue; }
 
                     cache.put(node.getNodeId(), node);
+                    missingNodeIds.remove(node.getNodeId());
                     bindNode(mergeStmt, node);
                     mergeStmt.addBatch();
                     imported++;
@@ -1008,6 +999,35 @@ public final class NodeCacheService {
 
     }
 
+    private NodeData getCachedOrLoad(String nodeId, boolean logLoadResult) {
+        if (nodeId == null || nodeId.isEmpty()) { return null; }
+
+        NodeData cached = cache.get(nodeId);
+        if (cached != null) {
+            return cached;
+        }
+        if (missingNodeIds.contains(nodeId)) {
+            return null;
+        }
+
+        NodeData loaded = loadFromDb(nodeId);
+        if (loaded == null) {
+            missingNodeIds.add(nodeId);
+            if (logLoadResult) {
+                log.debug("enrichFromCache: {} not found in H2", nodeId);
+            }
+            return null;
+        }
+
+        NodeData existing = cache.putIfAbsent(nodeId, loaded);
+        NodeData resolved = existing != null ? existing : loaded;
+        missingNodeIds.remove(nodeId);
+        if (logLoadResult) {
+            log.debug("enrichFromCache: loaded {} from H2, hasName={}", nodeId, resolved.hasName());
+        }
+        return resolved;
+    }
+
     // ═══════════════════════════════════════════════════════════
     //  Персистентность (H2)
     // ═══════════════════════════════════════════════════════════
@@ -1031,18 +1051,22 @@ public final class NodeCacheService {
      * Корректно закрывает соединение с БД. Вызывается при завершении приложения.
      */
     public void close() {
+        cache.clear();
+        missingNodeIds.clear();
         closeStatements();
         dbConnection = null;
     }
 
     public synchronized void prepareForDatabaseReset() {
         cache.clear();
+        missingNodeIds.clear();
         closeStatements();
         dbConnection = null;
     }
 
     public synchronized void reinitializeAfterDatabaseReset() {
         cache.clear();
+        missingNodeIds.clear();
         initDb();
     }
 

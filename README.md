@@ -229,7 +229,7 @@ Meshtastic — открытый проект, превращающий недо�
 - **Windows**: CMake + MSVC Build Tools для сборки `meshapp-ble.dll`
 - **Linux**: CMake + C/C++ toolchain + `libsystemd-dev` / `systemd-devel` для сборки `libmeshapp-ble.so`
 
-Для готовых релизных пакетов (`.dmg`, `.msi`, `.deb`, `.AppImage`) эти build-зависимости не нужны.
+Для готовых релизных пакетов (`.dmg`, `.msi`, `.deb`, `.AppImage`, `.flatpak`) эти build-зависимости не нужны.
 
 ### Сборка и запуск
 
@@ -246,6 +246,9 @@ cd meshapp
 
 # Linux: собрать portable AppImage
 ./gradlew appImage -Pappimagetool=/path/to/appimagetool.AppImage
+
+# Linux: собрать Flatpak bundle
+./gradlew flatpak
 ```
 
 ### Подключение к устройству
@@ -308,7 +311,7 @@ meshapp/
 
 ## Сборка инсталляторов
 
-MeshApp собирается в нативные пакеты через `jpackage`, а для Linux дополнительно поддерживает portable `AppImage`:
+MeshApp собирается в нативные пакеты через `jpackage`, а для Linux дополнительно поддерживает portable `AppImage` и sandboxed `Flatpak`:
 
 | Платформа | Формат | Команда |
 |-----------|--------|---------|
@@ -316,8 +319,19 @@ MeshApp собирается в нативные пакеты через `jpacka
 | macOS | `.dmg` | `./gradlew jpackage` |
 | Linux | `.deb` | `./gradlew jpackage` |
 | Linux | `.AppImage` | `./gradlew appImage -Pappimagetool=/path/to/appimagetool.AppImage` |
+| Linux | `.flatpak` | `./gradlew flatpak` |
 
 Для `AppImage` нужен `appimagetool`: либо в `PATH`, либо через `-Pappimagetool=...` / `APPIMAGETOOL=...`. Если используется `.AppImage`-версия самого `appimagetool`, может понадобиться `APPIMAGE_EXTRACT_AND_RUN=1`.
+
+Для `Flatpak` нужны `flatpak` и `flatpak-builder`, а также установленный runtime/SDK. По умолчанию задача использует `org.freedesktop.Platform//24.08` и `org.freedesktop.Sdk//24.08`:
+
+```bash
+flatpak --user remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+flatpak --user install -y flathub org.freedesktop.Platform//24.08 org.freedesktop.Sdk//24.08
+./gradlew flatpak
+```
+
+При необходимости runtime можно переопределить через `-PflatpakRuntime=...`, `-PflatpakRuntimeVersion=...`, `-PflatpakSdk=...` и `-PflatpakBranch=...`.
 
 Во время `processResources` Gradle автоматически собирает платформенные native-компоненты:
 

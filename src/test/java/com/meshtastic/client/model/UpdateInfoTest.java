@@ -2,6 +2,7 @@ package com.meshtastic.client.model;
 
 import com.google.gson.Gson;
 import com.meshtastic.client.platform.OsDetect.OsType;
+import com.meshtastic.client.platform.OsDetect.PackageFormat;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -94,6 +95,57 @@ class UpdateInfoTest {
         assertEquals(
                 "https://example.invalid/app.AppImage",
                 info.getDownloadUrl(OsType.LINUX, false)
+        );
+    }
+
+    @Test
+    void linuxFlatpakPrefersDedicatedArtifact() {
+        UpdateInfo info = parse("""
+                {
+                  "downloads": {
+                    "linux-flatpak": "https://example.invalid/app.flatpak",
+                    "linux-deb": "https://example.invalid/app.deb",
+                    "linux-appimage": "https://example.invalid/app.AppImage"
+                  }
+                }
+                """);
+
+        assertEquals(
+                "https://example.invalid/app.flatpak",
+                info.getDownloadUrl(OsType.LINUX, PackageFormat.FLATPAK)
+        );
+    }
+
+    @Test
+    void linuxFlatpakFallsBackToLegacyLinuxKey() {
+        UpdateInfo info = parse("""
+                {
+                  "downloads": {
+                    "linux": "https://example.invalid/release",
+                    "linux-deb": "https://example.invalid/app.deb"
+                  }
+                }
+                """);
+
+        assertEquals(
+                "https://example.invalid/release",
+                info.getDownloadUrl(OsType.LINUX, PackageFormat.FLATPAK)
+        );
+    }
+
+    @Test
+    void linuxDebFallsBackToFlatpakWhenNothingElseExists() {
+        UpdateInfo info = parse("""
+                {
+                  "downloads": {
+                    "linux-flatpak": "https://example.invalid/app.flatpak"
+                  }
+                }
+                """);
+
+        assertEquals(
+                "https://example.invalid/app.flatpak",
+                info.getDownloadUrl(OsType.LINUX, PackageFormat.DEB)
         );
     }
 

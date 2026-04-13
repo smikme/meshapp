@@ -1,3 +1,5 @@
+import groovy.json.JsonOutput
+
 plugins {
 	id 'java'
 	id 'application'
@@ -617,6 +619,12 @@ def sanitizeArtifactVersion = { value ->
 	value.replaceAll(/[^A-Za-z0-9._-]+/, '_')
 }
 
+def flatpakAppId = 'com.meshtastic.meshapp'
+def flatpakMetadataDir = file('src/flatpak')
+def flatpakDesktopFileName = "${flatpakAppId}.desktop"
+def flatpakMetainfoFileName = "${flatpakAppId}.metainfo.xml"
+def flatpakLauncherFileName = 'MeshApp'
+
 def resolveLinuxAppImageArch = {
 	def arch = System.getProperty('os.arch').toLowerCase(java.util.Locale.ROOT)
 	switch (arch) {
@@ -656,6 +664,175 @@ def resolveAppImageTool = {
 		}
 	}
 	return null
+}
+
+def resolveCommandExecutable = { String propertyName, String envName, String binaryName, String taskName ->
+	def configuredPath = (findProperty(propertyName) ?: System.getenv(envName))?.toString()?.trim()
+	if (configuredPath) {
+		def configured = file(configuredPath)
+		if (configured.isFile() && configured.canExecute()) {
+			return configured
+		}
+		throw new GradleException("${taskName}: ${binaryName} not found or not executable: ${configured}")
+	}
+
+	def pathEntries = (System.getenv('PATH') ?: '')
+		.split(java.util.regex.Pattern.quote(File.pathSeparator))
+		.findAll { it }
+	for (entry in pathEntries) {
+		def candidate = new File(entry, binaryName)
+		if (candidate.isFile() && candidate.canExecute()) {
+			return candidate
+		}
+	}
+
+	throw new GradleException(
+		"${taskName}: ${binaryName} not found. Add it to PATH or pass -P${propertyName}=/path/to/${binaryName}"
+	)
+}
+
+def requirePackagingFile = { String relativePath, String taskName ->
+	def source = file(relativePath)
+	if (!source.isFile()) {
+		throw new GradleException("${taskName}: required packaging file not found: ${source}")
+	}
+	return source
+}
+
+def buildLinuxAppImage = { File installDir, File workDir, String taskName ->
+	def os = org.gradle.internal.os.OperatingSystem.current()
+	if (!os.isLinux()) {
+		throw new GradleException("${taskName} task is supported only on Linux")
+	}
+
+	if (workDir.exists()) {
+		workDir.deleteDir()
+	}
+	workDir.mkdirs()
+
+	def appVersion = resolvePackageVersion(os)
+	def javaHome = resolvePackagingJavaHome()
+	def jpackageBin = "${javaHome}/bin/jpackage"
+	def libDir = preparePackagingLibDir(os, installDir)
+	def jvmArgsList = buildPackagingJvmArgs()
+	def linuxResourceDir = prepareLinuxPackagingResources()
+	def iconSource = file('src/main/resources/logo/icon_512.png')
+	if (!iconSource.exists()) {
+		throw new GradleException("${taskName}: icon not found: ${iconSource}")
+	}
+
+	def jpackageArgs = [
+		jpackageBin,
+		'--type', 'app-image',
+		'--name', 'MeshApp',
+		'--app-version', appVersion,
+		'--vendor', 'Meshtastic',
+		'--copyright', 'Copyright © Konstantin A. Smirnov',
+		'--dest', workDir.absolutePath,
+		'--input', libDir.absolutePath,
+		'--main-jar', "${project.name}-${project.version}.jar",
+		'--main-class', application.mainClass.get(),
+		'--resource-dir', linuxResourceDir.absolutePath
+	]
+
+	jvmArgsList.each { arg ->
+		jpackageArgs << '--java-options'
+		jpackageArgs << arg
+	}
+
+	jpackageArgs << '--icon'
+	jpackageArgs << iconSource.absolutePath
+
+	executePackagingCommand(jpackageArgs, "${taskName}: jpackage app-image failed")
+
+	def jpackageImageDir = new File(workDir, 'MeshApp')
+	if (!jpackageImageDir.isDirectory()) {
+		throw new GradleException("${taskName}: jpackage image not found: ${jpackageImageDir}")
+	}
+
+	return [imageDir: jpackageImageDir, iconFile: iconSource]
+}
+
+def prepareFlatpakSources = { File workDir, File appImageDir, File iconSource ->
+	def sourceDir = new File(workDir, 'sources')
+	if (sourceDir.exists()) {
+		sourceDir.deleteDir()
+	}
+	sourceDir.mkdirs()
+
+	project.copy {
+		from appImageDir
+		into new File(sourceDir, 'meshapp')
+	}
+
+	def resourcesDir = new File(sourceDir, 'resources')
+	resourcesDir.mkdirs()
+
+	def desktopSource = requirePackagingFile("${flatpakMetadataDir.path}/${flatpakDesktopFileName}", 'flatpak')
+	def metainfoSource = requirePackagingFile("${flatpakMetadataDir.path}/${flatpakMetainfoFileName}", 'flatpak')
+	def launcherSource = requirePackagingFile("${flatpakMetadataDir.path}/${flatpakLauncherFileName}", 'flatpak')
+
+	java.nio.file.Files.copy(
+		desktopSource.toPath(),
+		new File(resourcesDir, flatpakDesktopFileName).toPath(),
+		java.nio.file.StandardCopyOption.REPLACE_EXISTING
+	)
+	java.nio.file.Files.copy(
+		metainfoSource.toPath(),
+		new File(resourcesDir, flatpakMetainfoFileName).toPath(),
+		java.nio.file.StandardCopyOption.REPLACE_EXISTING
+	)
+	java.nio.file.Files.copy(
+		launcherSource.toPath(),
+		new File(resourcesDir, flatpakLauncherFileName).toPath(),
+		java.nio.file.StandardCopyOption.REPLACE_EXISTING
+	)
+	java.nio.file.Files.copy(
+		iconSource.toPath(),
+		new File(resourcesDir, "${flatpakAppId}.png").toPath(),
+		java.nio.file.StandardCopyOption.REPLACE_EXISTING
+	)
+
+	return sourceDir
+}
+
+def writeFlatpakManifest = { File manifestFile, File sourceDir, String runtime, String runtimeVersion, String sdk ->
+	def manifest = [
+		'app-id'         : flatpakAppId,
+		'runtime'        : runtime,
+		'runtime-version': runtimeVersion,
+		'sdk'            : sdk,
+		'command'        : 'MeshApp',
+		'finish-args'    : [
+			'--share=network',
+			'--share=ipc',
+			'--socket=wayland',
+			'--socket=fallback-x11',
+			'--device=dri',
+			'--device=all',
+			'--filesystem=home',
+			'--system-talk-name=org.bluez'
+		],
+		'modules'        : [[
+			'name'          : 'meshapp',
+			'buildsystem'   : 'simple',
+			'build-commands': [
+				'install -d /app/meshapp',
+				'cp -a meshapp/. /app/meshapp/',
+				"install -Dm755 resources/${flatpakLauncherFileName} /app/bin/MeshApp",
+				"install -Dm644 resources/${flatpakDesktopFileName} /app/share/applications/${flatpakDesktopFileName}",
+				"install -Dm644 resources/${flatpakMetainfoFileName} /app/share/metainfo/${flatpakMetainfoFileName}",
+				"install -Dm644 resources/${flatpakAppId}.png /app/share/icons/hicolor/512x512/apps/${flatpakAppId}.png"
+			],
+			'sources'       : [[
+				'type': 'dir',
+				'path': sourceDir.absolutePath
+			]]
+		]]
+	]
+
+	manifestFile.parentFile.mkdirs()
+	manifestFile.setText(JsonOutput.prettyPrint(JsonOutput.toJson(manifest)) + '\n', 'UTF-8')
 }
 
 def normalizeDebDependencyToken = { String token ->
@@ -987,59 +1164,11 @@ tasks.register('appImage') {
 		def installDir = layout.buildDirectory.dir("install/${project.name}").get().asFile
 		def outputDir = layout.buildDirectory.dir("jpackage").get().asFile
 		def workDir = layout.buildDirectory.dir("appimage").get().asFile
-		if (workDir.exists()) {
-			workDir.deleteDir()
-		}
-		workDir.mkdirs()
 		outputDir.mkdirs()
 
-		def appVersion = resolvePackageVersion(os)
-		def javaHome = resolvePackagingJavaHome()
-		def jpackageBin = "${javaHome}/bin/jpackage"
-		def libDir = preparePackagingLibDir(os, installDir)
-		def jvmArgsList = buildPackagingJvmArgs()
-		def linuxResourceDir = prepareLinuxPackagingResources()
-		def iconSource = file('src/main/resources/logo/icon_512.png')
-		if (!iconSource.exists()) {
-			throw new GradleException("appImage: icon not found: ${iconSource}")
-		}
-
-		def jpackageArgs = [
-			jpackageBin,
-			'--type', 'app-image',
-			'--name', 'MeshApp',
-			'--app-version', appVersion,
-			'--vendor', 'Meshtastic',
-			'--copyright', 'Copyright © Konstantin A. Smirnov',
-			'--dest', workDir.absolutePath,
-			'--input', libDir.absolutePath,
-			'--main-jar', "${project.name}-${project.version}.jar",
-			'--main-class', application.mainClass.get(),
-			'--resource-dir', linuxResourceDir.absolutePath
-		]
-
-		jvmArgsList.each { arg ->
-			jpackageArgs << '--java-options'
-			jpackageArgs << arg
-		}
-
-		jpackageArgs << '--icon'
-		jpackageArgs << iconSource.absolutePath
-
-		def jpackageProc = new ProcessBuilder(jpackageArgs.collect { it.toString() })
-			.redirectErrorStream(true)
-			.start()
-		def jpackageOutput = jpackageProc.inputStream.text
-		jpackageProc.waitFor()
-		if (jpackageOutput) logger.lifecycle(jpackageOutput.trim())
-		if (jpackageProc.exitValue() != 0) {
-			throw new GradleException("appImage: jpackage app-image failed with exit code ${jpackageProc.exitValue()}")
-		}
-
-		def jpackageImageDir = new File(workDir, 'MeshApp')
-		if (!jpackageImageDir.isDirectory()) {
-			throw new GradleException("appImage: jpackage image not found: ${jpackageImageDir}")
-		}
+		def appImage = buildLinuxAppImage(installDir, workDir, 'appImage')
+		def iconSource = appImage.iconFile
+		def jpackageImageDir = appImage.imageDir
 
 		def appDir = new File(workDir, 'MeshApp.AppDir')
 		project.copy {
@@ -1052,25 +1181,23 @@ tasks.register('appImage') {
 			throw new GradleException("appImage: launcher not found in AppDir: ${launcher}")
 		}
 
-		def desktopEntry = """\
-[Desktop Entry]
-Name=MeshApp
-Exec=MeshApp
-Icon=meshapp
-Type=Application
-Categories=Network;Utility;
-Comment=Meshtastic Desktop Client
-Terminal=false
-StartupWMClass=MeshApp
-"""
-		def desktopFile = new File(appDir, 'meshapp.desktop')
-		desktopFile.text = desktopEntry
+		def desktopSource = requirePackagingFile("${flatpakMetadataDir.path}/${flatpakDesktopFileName}", 'appImage')
+		def desktopFile = new File(appDir, flatpakDesktopFileName)
+		java.nio.file.Files.copy(
+			desktopSource.toPath(),
+			desktopFile.toPath(),
+			java.nio.file.StandardCopyOption.REPLACE_EXISTING
+		)
 
 		def shareApplicationsDir = new File(appDir, 'usr/share/applications')
 		shareApplicationsDir.mkdirs()
-		new File(shareApplicationsDir, 'meshapp.desktop').text = desktopEntry
+		java.nio.file.Files.copy(
+			desktopSource.toPath(),
+			new File(shareApplicationsDir, flatpakDesktopFileName).toPath(),
+			java.nio.file.StandardCopyOption.REPLACE_EXISTING
+		)
 
-		def rootIcon = new File(appDir, 'meshapp.png')
+		def rootIcon = new File(appDir, "${flatpakAppId}.png")
 		java.nio.file.Files.copy(
 			iconSource.toPath(),
 			rootIcon.toPath(),
@@ -1086,7 +1213,7 @@ StartupWMClass=MeshApp
 		shareIconsDir.mkdirs()
 		java.nio.file.Files.copy(
 			iconSource.toPath(),
-			new File(shareIconsDir, 'meshapp.png').toPath(),
+			new File(shareIconsDir, "${flatpakAppId}.png").toPath(),
 			java.nio.file.StandardCopyOption.REPLACE_EXISTING
 		)
 
@@ -1132,6 +1259,83 @@ exec "$HERE/usr/bin/MeshApp" "$@"
 
 		appImageFile.setExecutable(true, false)
 		logger.lifecycle("appImage: AppImage создан в ${appImageFile}")
+	}
+}
+
+// ============================================================
+// Flatpak: создание sandboxed Linux bundle через flatpak-builder
+// Использование: ./gradlew flatpak
+// Требует: flatpak + flatpak-builder + установленный runtime/SDK
+// ============================================================
+tasks.register('flatpak') {
+	dependsOn installDist
+	mustRunAfter tasks.named('jpackage')
+	mustRunAfter tasks.named('appImage')
+	group = 'distribution'
+	description = 'Собрать Linux Flatpak bundle'
+
+	doLast {
+		def os = org.gradle.internal.os.OperatingSystem.current()
+		if (!os.isLinux()) {
+			throw new GradleException('flatpak task is supported only on Linux')
+		}
+
+		def installDir = layout.buildDirectory.dir("install/${project.name}").get().asFile
+		def outputDir = layout.buildDirectory.dir("jpackage").get().asFile
+		def workDir = layout.buildDirectory.dir("flatpak").get().asFile
+		if (workDir.exists()) {
+			workDir.deleteDir()
+		}
+		workDir.mkdirs()
+		outputDir.mkdirs()
+
+		def flatpakRuntime = (findProperty('flatpakRuntime') ?: 'org.freedesktop.Platform').toString().trim()
+		def flatpakRuntimeVersion = (findProperty('flatpakRuntimeVersion') ?: '24.08').toString().trim()
+		def flatpakSdk = (findProperty('flatpakSdk') ?: 'org.freedesktop.Sdk').toString().trim()
+		def flatpakBranch = (findProperty('flatpakBranch') ?: 'stable').toString().trim()
+		def flatpakBuilder = resolveCommandExecutable('flatpakBuilder', 'FLATPAK_BUILDER', 'flatpak-builder', 'flatpak')
+		def flatpakBin = resolveCommandExecutable('flatpakBin', 'FLATPAK_BIN', 'flatpak', 'flatpak')
+
+		def appImage = buildLinuxAppImage(installDir, new File(workDir, 'app-image'), 'flatpak')
+		def sourceDir = prepareFlatpakSources(workDir, appImage.imageDir, appImage.iconFile)
+		def manifestFile = new File(workDir, "${flatpakAppId}.json")
+		writeFlatpakManifest(manifestFile, sourceDir, flatpakRuntime, flatpakRuntimeVersion, flatpakSdk)
+
+		def repoDir = new File(workDir, 'repo')
+		def buildDir = new File(workDir, 'builder')
+		executePackagingCommand(
+			[
+				flatpakBuilder.absolutePath,
+				"--arch=${resolveLinuxAppImageArch()}",
+				'--force-clean',
+				"--repo=${repoDir.absolutePath}",
+				"--default-branch=${flatpakBranch}",
+				buildDir.absolutePath,
+				manifestFile.absolutePath
+			],
+			'flatpak: flatpak-builder failed'
+		)
+
+		def artifactName = "MeshApp-${sanitizeArtifactVersion(project.version.toString())}-${resolveLinuxAppImageArch()}.flatpak"
+		def bundleFile = new File(outputDir, artifactName)
+		if (bundleFile.exists()) {
+			bundleFile.delete()
+		}
+
+		executePackagingCommand(
+			[
+				flatpakBin.absolutePath,
+				'build-bundle',
+				"--arch=${resolveLinuxAppImageArch()}",
+				repoDir.absolutePath,
+				bundleFile.absolutePath,
+				flatpakAppId,
+				flatpakBranch
+			],
+			'flatpak: flatpak build-bundle failed'
+		)
+
+		logger.lifecycle("flatpak: Flatpak bundle создан в ${bundleFile}")
 	}
 }
 

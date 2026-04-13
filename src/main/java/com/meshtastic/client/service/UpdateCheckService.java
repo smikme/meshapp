@@ -3,6 +3,9 @@ package com.meshtastic.client.service;
 import com.google.gson.Gson;
 import com.meshtastic.client.MeshApp;
 import com.meshtastic.client.model.UpdateInfo;
+import com.meshtastic.client.platform.OsDetect;
+import com.meshtastic.client.platform.OsDetect.OsType;
+import com.meshtastic.client.platform.OsDetect.PackageFormat;
 import javafx.application.Platform;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -42,12 +45,14 @@ public final class UpdateCheckService {
                 .followRedirects(HttpClient.Redirect.NORMAL)
                 .build();
 
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(UPDATE_URL))
-                .timeout(TIMEOUT)
-                .header("Accept", "application/json")
-                .GET()
-                .build();
+        HttpRequest request = buildRequest(
+                URI.create(UPDATE_URL),
+                OsDetect.current(),
+                OsDetect.currentPackageFormat(),
+                OsDetect.normalizedArch(),
+                MeshApp.APPLICATION_VERSION,
+                MeshApp.VERSION_CODE
+        );
 
         client.sendAsync(request, HttpResponse.BodyHandlers.ofString())
                 .thenAccept(response -> {
@@ -74,5 +79,44 @@ public final class UpdateCheckService {
                     log.debug("Update check failed: {}", ex.getMessage());
                     return null;
                 });
+    }
+
+    static HttpRequest buildRequest(URI uri,
+                                    OsType osType,
+                                    PackageFormat packageFormat,
+                                    String arch,
+                                    String version,
+                                    int versionCode) {
+        return HttpRequest.newBuilder()
+                .uri(uri)
+                .timeout(TIMEOUT)
+                .header("Accept", "application/json")
+                .header("X-MeshApp-OS", normalizeOs(osType))
+                .header("X-MeshApp-Package", normalizePackageFormat(packageFormat))
+                .header("X-MeshApp-Arch", arch != null && !arch.isBlank() ? arch : "unknown")
+                .header("X-MeshApp-Version", version != null && !version.isBlank() ? version : "unknown")
+                .header("X-MeshApp-Version-Code", Integer.toString(versionCode))
+                .GET()
+                .build();
+    }
+
+    private static String normalizeOs(OsType osType) {
+        return switch (osType) {
+            case WINDOWS -> "windows";
+            case MACOS -> "macos";
+            case LINUX -> "linux";
+            case UNKNOWN -> "unknown";
+        };
+    }
+
+    private static String normalizePackageFormat(PackageFormat packageFormat) {
+        return switch (packageFormat) {
+            case MSI -> "msi";
+            case DMG -> "dmg";
+            case DEB -> "deb";
+            case APPIMAGE -> "appimage";
+            case FLATPAK -> "flatpak";
+            case UNKNOWN -> "unknown";
+        };
     }
 }
