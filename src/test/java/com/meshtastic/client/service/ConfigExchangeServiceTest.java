@@ -20,6 +20,7 @@ import org.meshtastic.proto.TelemetryProtos;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
 
@@ -27,6 +28,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ConfigExchangeServiceTest {
@@ -303,6 +305,35 @@ class ConfigExchangeServiceTest {
         service.onConfigComplete(expectedId + 1);
 
         assertFalse(future.isDone());
+    }
+
+    @Test
+    void abortStopsFurtherProcessingAndFailsFuture() throws Exception {
+        FakeConnection connection = new FakeConnection();
+        ProtocolHandler handler = track(new ProtocolHandler(connection));
+        DeviceState state = new DeviceState();
+        ConfigExchangeService service = new ConfigExchangeService(handler, state);
+
+        CompletableFuture<DeviceState> future = service.startConfigExchange();
+        int wantConfigId = connection.lastWantConfigId;
+
+        service.abort("connection cleanup");
+
+        assertThrows(CancellationException.class, future::get);
+
+        service.onMyNodeInfo(MeshProtos.MyNodeInfo.newBuilder().setMyNodeNum(0x12345678).build());
+        service.onNodeInfo(MeshProtos.NodeInfo.newBuilder()
+                .setNum(0xCAFEBABE)
+                .setUser(MeshProtos.User.newBuilder()
+                        .setId("!cafebabe")
+                        .setLongName("Alice")
+                        .build())
+                .build());
+        service.onConfigComplete(wantConfigId);
+
+        assertEquals(0, state.getMyNodeNum());
+        assertTrue(state.getNodeDb().isEmpty());
+        assertFalse(state.isChannelCatalogReady());
     }
 
     private ProtocolHandler track(ProtocolHandler handler) {
