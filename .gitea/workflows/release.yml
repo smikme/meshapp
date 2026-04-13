@@ -75,14 +75,25 @@ jobs:
           elif command -v appimagetool.AppImage >/dev/null 2>&1; then
             APPIMAGETOOL_PATH="$(command -v appimagetool.AppImage)"
           else
-            echo "appimagetool is required on the runner. Set APPIMAGETOOL or place it in tools/." >&2
-            exit 1
+            APPIMAGETOOL_PATH=""
           fi
 
-          echo "Using appimagetool: ${APPIMAGETOOL_PATH}"
+          if [ -n "${APPIMAGETOOL_PATH}" ]; then
+            echo "Using appimagetool: ${APPIMAGETOOL_PATH}"
+            echo "APPIMAGE_ENABLED=true" >> "$GITHUB_ENV"
+          else
+            echo "appimagetool not found on the runner; AppImage build will be skipped"
+            echo "APPIMAGE_ENABLED=false" >> "$GITHUB_ENV"
+          fi
           echo "APPIMAGETOOL_PATH=${APPIMAGETOOL_PATH}" >> "$GITHUB_ENV"
 
-      - run: APPIMAGE_EXTRACT_AND_RUN=1 ./gradlew jpackage appImage flatpak -Pappimagetool="${APPIMAGETOOL_PATH}" --no-daemon
+      - name: Build Linux artifacts
+        run: |
+          if [ "${APPIMAGE_ENABLED}" = "true" ]; then
+            APPIMAGE_EXTRACT_AND_RUN=1 ./gradlew jpackage appImage flatpak -Pappimagetool="${APPIMAGETOOL_PATH}" --no-daemon
+          else
+            ./gradlew jpackage flatpak --no-daemon
+          fi
 
       - name: Upload to Gitea Release
         env:
