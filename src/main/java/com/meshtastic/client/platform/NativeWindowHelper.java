@@ -66,7 +66,7 @@ public final class NativeWindowHelper {
             if (OsDetect.isWindows()) {
                 try {
                     var ctrl = new NativeWinWindowControl(stage);
-                    ctrl.setDarkMode(isDark);
+                    ctrl.applyPlainDecoratedTitleBar(isDark);
                     ctrl.redrawFrame();
                 } catch (Throwable t) {
                     log.warn("Не удалось установить тёмный title bar", t);
@@ -146,7 +146,11 @@ public final class NativeWindowHelper {
             switch (OsDetect.current()) {
                 case WINDOWS -> {
                     var ctrl = new NativeWinWindowControl(stage);
-                    ctrl.setDarkMode(isDark);
+                    if (AppPreferences.isDisableEffectsEffective()) {
+                        ctrl.applyPlainDecoratedTitleBar(isDark);
+                    } else {
+                        ctrl.setDarkMode(isDark);
+                    }
                     ctrl.redrawFrame();
                 }
                 case MACOS -> {

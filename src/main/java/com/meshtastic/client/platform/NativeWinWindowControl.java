@@ -39,6 +39,9 @@ public class NativeWinWindowControl {
     private static final int DWMWA_USE_IMMERSIVE_DARK_MODE_OLD = 19;   // Win10 1809–18985
     private static final int DWMWA_WINDOW_CORNER_PREFERENCE = 33;      // Win11+
     private static final int DWMWA_CAPTION_COLOR = 35;                 // Win11 22000+
+
+    private static final int DARK_CAPTION_COLORREF = 0x00202020;
+    private static final int LIGHT_CAPTION_COLORREF = 0x00F3F3F3;
     private static final int DWMWA_SYSTEMBACKDROP_TYPE = 38;           // Win11 22H2+
     private static final int DWMWCP_DOROUND = 2;
 
@@ -223,7 +226,7 @@ public class NativeWinWindowControl {
 
             // 4. Fallback: явный цвет caption (Win11 22000+, non-fatal на Win10)
             if (hr20 != 0 && hr19 != 0) {
-                setCaptionColor(dark ? 0x00202020 : 0x00FFFFFF);
+                setCaptionColor(dark ? DARK_CAPTION_COLORREF : LIGHT_CAPTION_COLORREF);
             }
 
             return hr20 == 0 || hr19 == 0;
@@ -237,8 +240,8 @@ public class NativeWinWindowControl {
      * Установить цвет caption bar напрямую. COLORREF формат: 0x00BBGGRR.
      * Win11 22000+, non-fatal на Win10.
      */
-    private void setCaptionColor(int colorRef) {
-        if (hwnd == null) { return; }
+    public boolean setCaptionColor(int colorRef) {
+        if (hwnd == null) { return false; }
         try {
             Memory val = new Memory(4);
             val.setInt(0, colorRef);
@@ -246,9 +249,22 @@ public class NativeWinWindowControl {
                     hwnd, DWMWA_CAPTION_COLOR, val, 4).longValue();
             log.info("setCaptionColor(0x{}): HRESULT=0x{}",
                     Integer.toHexString(colorRef), Long.toHexString(hr));
+            return hr == 0;
         } catch (Exception e) {
             log.warn("setCaptionColor недоступен", e);
+            return false;
         }
+    }
+
+    /**
+     * Нативный DECORATED title bar без backdrop-эффектов.
+     * На Win11 стандартный dark title bar визуально похож на Mica, поэтому
+     * при выключенных эффектах задаём явный solid caption color.
+     */
+    public void applyPlainDecoratedTitleBar(boolean isDark) {
+        setDarkMode(isDark);
+        setWindowBackdrop(DwmSystemBackdropType.NONE);
+        setCaptionColor(isDark ? DARK_CAPTION_COLORREF : LIGHT_CAPTION_COLORREF);
     }
 
     /**
