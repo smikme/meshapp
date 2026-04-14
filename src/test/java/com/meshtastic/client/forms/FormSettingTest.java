@@ -193,7 +193,7 @@ class FormSettingTest {
         assertFalse(onFxThread(() -> originalConfigs(form).isEmpty()));
 
         entry.setConnected(false);
-        invoke(manager, "cleanupConnection", entry.getId());
+        invoke(manager, "cleanupRuntimeState", entry.getId());
         invoke(manager, "fireChanged");
         waitForFxEvents();
 

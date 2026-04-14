@@ -4,6 +4,10 @@ import com.google.protobuf.MessageLite;
 import com.meshtastic.client.TestEnvironmentSupport;
 import com.meshtastic.client.connection.ConnectionException;
 import com.meshtastic.client.connection.FrameParser;
+import com.meshtastic.client.connection.ble.BleDevice;
+import com.meshtastic.client.connection.ble.BlePlatform;
+import com.meshtastic.client.connection.ble.BlePlatform.AdapterState;
+import com.meshtastic.client.connection.ble.BleState;
 import com.meshtastic.client.model.ConnectionEntry;
 import com.meshtastic.client.model.ConnectionType;
 import com.meshtastic.client.model.DeviceState;
@@ -17,12 +21,14 @@ import org.meshtastic.proto.MeshProtos;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.lang.reflect.Field;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.file.Path;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -125,6 +131,125 @@ class ConnectionManagerTest {
             assertFalse(entry.isConnected());
             assertTrue(entry.isReconnecting());
             assertFalse(manager.hasActiveConnection());
+        }
+    }
+
+    @Test
+    void removeEntryDoesNotBlockWhileBleConnectIsPending() throws Exception {
+        BlockingBlePlatform platform = new BlockingBlePlatform();
+        installBlePlatform(platform);
+
+        ConnectionManager manager = ConnectionManager.getInstance();
+        ConnectionEntry entry = new ConnectionEntry("ble", "AA:BB:CC:DD:EE:FF", "Test BLE");
+        manager.addEntry(entry);
+
+        Thread connectThread = new Thread(() -> {
+            try {
+                manager.connect(entry.getId());
+            } catch (ConnectionException ignored) {
+            }
+        }, "test-ble-connect");
+        connectThread.setDaemon(true);
+        connectThread.start();
+
+        assertTrue(platform.connectStarted.await(1, TimeUnit.SECONDS));
+
+        long startedAt = System.nanoTime();
+        manager.removeEntry(entry.getId());
+        long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt);
+
+        assertTrue(elapsedMs < 500, "removeEntry should not wait for a hung BLE connect");
+        assertNull(manager.findEntry(entry.getId()));
+
+        platform.allowConnectFinish.countDown();
+        connectThread.join(2_000);
+
+        assertFalse(connectThread.isAlive());
+        assertFalse(manager.hasActiveConnection());
+        assertTrue(platform.disconnectCalls.await(1, TimeUnit.SECONDS),
+                "late BLE connect should be disconnected after removal");
+    }
+
+    private static void installBlePlatform(BlePlatform platform) throws Exception {
+        BleDeviceDiscoveryService discovery = BleDeviceDiscoveryService.getInstance();
+        Field platformField = BleDeviceDiscoveryService.class.getDeclaredField("platform");
+        platformField.setAccessible(true);
+        platformField.set(discovery, platform);
+    }
+
+    private static final class BlockingBlePlatform implements BlePlatform {
+        private final CountDownLatch connectStarted = new CountDownLatch(1);
+        private final CountDownLatch allowConnectFinish = new CountDownLatch(1);
+        private final CountDownLatch disconnectCalls = new CountDownLatch(1);
+        private volatile Consumer<BleState> stateListener;
+        private volatile boolean connected;
+
+        @Override
+        public void startScan(Consumer<BleDevice> onDeviceFound) {
+        }
+
+        @Override
+        public void stopScan() {
+        }
+
+        @Override
+        public void connect(String address) throws ConnectionException {
+            connectStarted.countDown();
+            try {
+                if (!allowConnectFinish.await(5, TimeUnit.SECONDS)) {
+                    throw new ConnectionException("Timed out waiting for test release");
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new ConnectionException("Interrupted while waiting for test release", e);
+            }
+            connected = true;
+            Consumer<BleState> listener = stateListener;
+            if (listener != null) {
+                listener.accept(new BleState.Connected());
+            }
+        }
+
+        @Override
+        public void disconnect() {
+            connected = false;
+            disconnectCalls.countDown();
+            Consumer<BleState> listener = stateListener;
+            if (listener != null) {
+                listener.accept(new BleState.Disconnected());
+            }
+        }
+
+        @Override
+        public boolean isConnected() {
+            return connected;
+        }
+
+        @Override
+        public boolean writeToRadio(byte[] protobufPayload) {
+            return connected;
+        }
+
+        @Override
+        public void setFromRadioListener(Consumer<byte[]> listener) {
+        }
+
+        @Override
+        public void setStateListener(Consumer<BleState> listener) {
+            this.stateListener = listener;
+        }
+
+        @Override
+        public void setPasskeyRequestHandler(Consumer<String> handler) {
+        }
+
+        @Override
+        public AdapterState getAdapterState() {
+            return AdapterState.POWERED_ON;
+        }
+
+        @Override
+        public void dispose() {
         }
     }
 

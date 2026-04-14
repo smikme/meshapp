@@ -2,6 +2,7 @@ package com.meshtastic.client;
 
 import javafx.application.Platform;
 
+import java.lang.reflect.Method;
 import java.lang.reflect.Field;
 import java.nio.file.Path;
 import java.util.Locale;
@@ -120,6 +121,18 @@ public final class TestEnvironmentSupport {
                 connectionManager.getMethod("shutdownAll").invoke(connectionManagerInstance);
             }
             writeStaticField(connectionManager, "instance", null);
+
+            Class<?> bleDiscoveryService = Class.forName("com.meshtastic.client.service.BleDeviceDiscoveryService");
+            Object bleDiscoveryInstance = readStaticField(bleDiscoveryService, "instance");
+            if (bleDiscoveryInstance != null) {
+                Object platform = readField(bleDiscoveryInstance, "platform");
+                if (platform != null) {
+                    Method disposeMethod = platform.getClass().getDeclaredMethod("dispose");
+                    disposeMethod.setAccessible(true);
+                    disposeMethod.invoke(platform);
+                }
+            }
+            writeStaticField(bleDiscoveryService, "instance", null);
         } catch (ReflectiveOperationException e) {
             throw new RuntimeException("Failed to reset test singletons", e);
         }
