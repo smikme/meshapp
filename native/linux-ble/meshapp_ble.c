@@ -133,6 +133,7 @@ static atomic_bool g_worker_running;
 static atomic_bool g_initialized;
 static atomic_bool g_connected;
 static atomic_bool g_notifications_active;
+static atomic_bool g_cancel_connect_requested;
 
 static task_queue_t g_tasks;
 static int g_wake_pipe[2] = {-1, -1};
@@ -917,6 +918,7 @@ static void do_connect(void* arg) {
     connect_ctx_t* ctx = (connect_ctx_t*)arg;
     int r;
 
+    atomic_store(&g_cancel_connect_requested, false);
     do_disconnect();
 
     make_device_path(g_adapter_path, ctx->address, g_device_path, sizeof(g_device_path));
@@ -966,6 +968,13 @@ static void do_connect(void* arg) {
     int64_t connect_deadline = now_ms() + ctx->timeout_ms;
     int connected_ok = 0;
     while (now_ms() < connect_deadline) {
+        if (atomic_load(&g_cancel_connect_requested)) {
+            log_msg("[meshble] Connect cancelled before Connected=1");
+            do_disconnect();
+            ctx->result = -5;
+            return;
+        }
+
         for (;;) {
             r = sd_bus_process(g_bus, NULL);
             if (r <= 0) break;
@@ -997,6 +1006,13 @@ static void do_connect(void* arg) {
     int resolved_ok = 0;
     int loop_count = 0;
     while (now_ms() < deadline) {
+        if (atomic_load(&g_cancel_connect_requested)) {
+            log_msg("[meshble] Connect cancelled while waiting for ServicesResolved");
+            do_disconnect();
+            ctx->result = -5;
+            return;
+        }
+
         /* Process all pending D-Bus events (signals from BlueZ) */
         for (;;) {
             r = sd_bus_process(g_bus, NULL);
@@ -1306,6 +1322,7 @@ MESHBLE_API void meshble_stop_scan(void) {
 
 MESHBLE_API int meshble_connect(const char* address, int timeout_ms) {
     if (!atomic_load(&g_initialized) || !address) return -1;
+    atomic_store(&g_cancel_connect_requested, false);
     connect_ctx_t ctx;
     strncpy(ctx.address, address, sizeof(ctx.address) - 1);
     ctx.address[sizeof(ctx.address) - 1] = '\0';
@@ -1317,6 +1334,7 @@ MESHBLE_API int meshble_connect(const char* address, int timeout_ms) {
 
 MESHBLE_API void meshble_disconnect(void) {
     if (!atomic_load(&g_initialized)) return;
+    atomic_store(&g_cancel_connect_requested, true);
     atomic_store(&g_connected, false);
     atomic_store(&g_notifications_active, false);
     run_on_worker(do_disconnect_wrapper, NULL);

@@ -175,6 +175,7 @@ public class LinuxBle implements BlePlatform {
             case -3 -> throw new ConnectionException("GATT ошибка при подключении к: " + address);
             case -4 -> throw new ConnectionException(
                     "Доступ запрещён. Выполните сопряжение: bluetoothctl pair " + address);
+            case -5 -> throw new ConnectionException("BLE подключение отменено: " + address);
             default -> throw new ConnectionException("BLE ошибка подключения (code=" + result + "): " + address);
         }
     }
