@@ -17,11 +17,12 @@ public class PacketLogEntry {
     private static final int PAYLOAD_PREVIEW_LIMIT = 180;
 
     /**
-     * Направление пакета относительно desktop-клиента.
+     * Направление пакета относительно локального mesh-узла и transport-канала клиента.
      */
     public enum Direction {
         INCOMING,
-        OUTGOING
+        OUTGOING,
+        INTERNAL
     }
 
     private long id;
@@ -101,7 +102,11 @@ public class PacketLogEntry {
     }
 
     public String getDirectionText() {
-        return direction == Direction.INCOMING ? "Входящий" : "Исходящий";
+        return switch (direction) {
+            case INCOMING -> "Входящий";
+            case OUTGOING -> "Исходящий";
+            case INTERNAL -> "Внутренний";
+        };
     }
 
     public String getPacketType() {

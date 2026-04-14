@@ -1,5 +1,6 @@
 package com.meshtastic.client.service;
 
+import com.google.protobuf.InvalidProtocolBufferException;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.PacketLogEntry;
 import com.meshtastic.client.model.PacketLogEntry.Direction;
@@ -248,12 +249,13 @@ public final class PacketMonitorService {
             return;
         }
 
+        Direction loggedDirection = resolveLoggedDirection(direction, packet, ownerNodeId, deviceState);
         PacketDebugFormatter.PacketDetails details =
                 PacketDebugFormatter.describeMeshPacket(packet, direction, deviceState);
         PacketLogEntry entry = new PacketLogEntry(
                 ownerNodeId != null ? ownerNodeId : "",
                 details.capturedAtMillis(),
-                direction,
+                loggedDirection,
                 details.packetType(),
                 details.fromNode(),
                 details.toNode(),
@@ -551,6 +553,7 @@ public final class PacketMonitorService {
                     )
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """, Statement.RETURN_GENERATED_KEYS);
+            normalizeLegacyDirections();
         } catch (Exception e) {
             log.error("Failed to initialize packet monitor DB", e);
         }
@@ -599,6 +602,90 @@ public final class PacketMonitorService {
             return null;
         }
         return ConnectionManager.getInstance().getDeviceState(connectionId);
+    }
+
+    private void normalizeLegacyDirections() {
+        if (dbConnection == null) {
+            return;
+        }
+
+        int updatesQueued = 0;
+        try (PreparedStatement select = dbConnection.prepareStatement("""
+                SELECT id, owner_node_id, packet_bytes
+                FROM lora_packet_logs
+                WHERE direction = ?
+                """);
+             PreparedStatement update = dbConnection.prepareStatement("""
+                     UPDATE lora_packet_logs
+                     SET direction = ?
+                     WHERE id = ?
+                     """)) {
+            select.setString(1, Direction.INCOMING.name());
+            try (ResultSet rs = select.executeQuery()) {
+                while (rs.next()) {
+                    MeshProtos.MeshPacket packet = parsePacketBytes(rs.getLong("id"), rs.getBytes("packet_bytes"));
+                    if (packet == null) {
+                        continue;
+                    }
+                    Direction normalized = resolveLoggedDirection(
+                            Direction.INCOMING,
+                            packet,
+                            rs.getString("owner_node_id"),
+                            null
+                    );
+                    if (normalized != Direction.INTERNAL) {
+                        continue;
+                    }
+                    update.setString(1, Direction.INTERNAL.name());
+                    update.setLong(2, rs.getLong("id"));
+                    update.addBatch();
+                    updatesQueued++;
+                }
+            }
+            if (updatesQueued > 0) {
+                update.executeBatch();
+                log.info("Normalized {} legacy LoRa packet directions for internal self-origin packets", updatesQueued);
+            }
+        } catch (SQLException e) {
+            log.error("Failed to normalize legacy LoRa packet directions", e);
+        }
+    }
+
+    private static MeshProtos.MeshPacket parsePacketBytes(long id, byte[] packetBytes) {
+        if (packetBytes == null || packetBytes.length == 0) {
+            return null;
+        }
+        try {
+            return MeshProtos.MeshPacket.parseFrom(packetBytes);
+        } catch (InvalidProtocolBufferException e) {
+            log.debug("Skipping packet direction normalization for row {}: invalid MeshPacket bytes", id, e);
+            return null;
+        }
+    }
+
+    private static Direction resolveLoggedDirection(Direction transportDirection,
+                                                    MeshProtos.MeshPacket packet,
+                                                    String ownerNodeId,
+                                                    DeviceState deviceState) {
+        if (transportDirection != Direction.INCOMING || packet == null) {
+            return transportDirection;
+        }
+
+        Integer localNodeNum = resolveLocalNodeNum(ownerNodeId, deviceState);
+        if (localNodeNum == null) {
+            return transportDirection;
+        }
+
+        long packetFrom = Integer.toUnsignedLong(packet.getFrom());
+        long localNode = Integer.toUnsignedLong(localNodeNum);
+        return packetFrom == localNode ? Direction.INTERNAL : transportDirection;
+    }
+
+    private static Integer resolveLocalNodeNum(String ownerNodeId, DeviceState deviceState) {
+        if (deviceState != null && deviceState.getMyNodeNum() != 0) {
+            return deviceState.getMyNodeNum();
+        }
+        return parseStandardNodeId(ownerNodeId);
     }
 
     private PacketPage loadPage(PacketQuery query, int limit, PageCursor cursor, PageRequestKind requestKind) {
@@ -738,6 +825,7 @@ public final class PacketMonitorService {
                         OR LOWER(CASE direction
                             WHEN 'INCOMING' THEN 'входящий'
                             WHEN 'OUTGOING' THEN 'исходящий'
+                            WHEN 'INTERNAL' THEN 'внутренний'
                             ELSE direction
                         END) LIKE ?
                     )

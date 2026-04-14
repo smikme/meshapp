@@ -99,6 +99,67 @@ class PacketMonitorServiceTest {
     }
 
     @Test
+    void reclassifiesIncomingPacketFromLocalNodeAsInternal() {
+        DeviceState state = deviceState();
+        service.startCapture();
+
+        MeshProtos.MeshPacket telemetry = MeshProtos.MeshPacket.newBuilder()
+                .setFrom(0x12345678)
+                .setTo(0xFFFFFFFF)
+                .setId(303)
+                .setRxTime(1_710_000_111)
+                .setDecoded(MeshProtos.Data.newBuilder()
+                        .setPortnum(Portnums.PortNum.TELEMETRY_APP)
+                        .build())
+                .build();
+
+        service.recordPacket(PacketLogEntry.Direction.INCOMING, telemetry, "!12345678", state);
+
+        List<PacketLogEntry> entries = service.loadAll();
+        assertEquals(1, entries.size());
+        assertEquals(PacketLogEntry.Direction.INTERNAL, entries.getFirst().getDirection());
+        assertEquals("TELEMETRY_APP", entries.getFirst().getPacketType());
+    }
+
+    @Test
+    void normalizesLegacyIncomingRowsFromLocalNodeOnServiceInit() throws Exception {
+        MeshProtos.MeshPacket telemetry = MeshProtos.MeshPacket.newBuilder()
+                .setFrom(0x12345678)
+                .setTo(0xFFFFFFFF)
+                .setId(304)
+                .setDecoded(MeshProtos.Data.newBuilder()
+                        .setPortnum(Portnums.PortNum.TELEMETRY_APP)
+                        .build())
+                .build();
+
+        try (var ps = DatabaseProvider.getConnection().prepareStatement("""
+                INSERT INTO lora_packet_logs (
+                    owner_node_id, captured_at, direction, packet_type,
+                    from_node, to_node, payload_text, packet_bytes
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """)) {
+            ps.setString(1, "!12345678");
+            ps.setLong(2, 1_710_000_222_000L);
+            ps.setString(3, PacketLogEntry.Direction.INCOMING.name());
+            ps.setString(4, "TELEMETRY_APP");
+            ps.setString(5, "Local Base (305419896)");
+            ps.setString(6, "Вещание (4294967295)");
+            ps.setString(7, "legacy telemetry");
+            ps.setBytes(8, telemetry.toByteArray());
+            ps.executeUpdate();
+        }
+
+        PacketMonitorService.closeIfInitialized();
+        service = PacketMonitorService.getInstance();
+
+        List<PacketLogEntry> entries = service.loadAll();
+        assertEquals(1, entries.size());
+        assertEquals(PacketLogEntry.Direction.INTERNAL, entries.getFirst().getDirection());
+        assertEquals("TELEMETRY_APP", entries.getFirst().getPacketType());
+    }
+
+    @Test
     void clearRemovesPersistedPacketLogs() {
         service.startCapture();
 
