@@ -85,6 +85,7 @@ public final class PacketMonitorWindow {
     private static final String FILTER_ALL_DIRECTIONS = "Все направления";
     private static final String FILTER_INCOMING = "Входящие";
     private static final String FILTER_OUTGOING = "Исходящие";
+    private static final String FILTER_INTERNAL = "Внутренние";
     private static final String FILTER_ALL_TYPES = "Все типы";
     private static final int PAGE_SIZE = 200;
     private static final int PAGE_SHIFT = 80;
@@ -304,7 +305,7 @@ public final class PacketMonitorWindow {
         filterBar.getStyleClass().add("packet-monitor-filter-bar");
 
         directionFilter = new ComboBox<>(FXCollections.observableArrayList(
-                FILTER_ALL_DIRECTIONS, FILTER_INCOMING, FILTER_OUTGOING));
+                FILTER_ALL_DIRECTIONS, FILTER_INCOMING, FILTER_OUTGOING, FILTER_INTERNAL));
         directionFilter.setValue(FILTER_ALL_DIRECTIONS);
         directionFilter.valueProperty().addListener((obs, oldValue, newValue) -> onFilterChanged());
 
@@ -543,10 +544,10 @@ public final class PacketMonitorWindow {
                     rowTooltip.hide();
                     return;
                 }
-                if (item.getDirection() == PacketLogEntry.Direction.INCOMING) {
-                    setStyle("-fx-text-fill: -color-accent-emphasis;");
-                } else {
-                    setStyle("-fx-text-fill: -color-success-emphasis;");
+                switch (item.getDirection()) {
+                    case INCOMING -> setStyle("-fx-text-fill: -color-accent-emphasis;");
+                    case OUTGOING -> setStyle("-fx-text-fill: -color-success-emphasis;");
+                    case INTERNAL -> setStyle("-fx-text-fill: -color-fg-muted;");
                 }
                 tooltipProperty().bind(Bindings.createObjectBinding(() -> {
                     if (suppressPacketTableTooltips.get()) {
@@ -1140,6 +1141,8 @@ public final class PacketMonitorWindow {
             direction = PacketLogEntry.Direction.INCOMING;
         } else if (FILTER_OUTGOING.equals(directionValue)) {
             direction = PacketLogEntry.Direction.OUTGOING;
+        } else if (FILTER_INTERNAL.equals(directionValue)) {
+            direction = PacketLogEntry.Direction.INTERNAL;
         }
 
         String selectedType = getActiveTypeFilterSelection();
@@ -1182,6 +1185,9 @@ public final class PacketMonitorWindow {
             return false;
         }
         if (FILTER_OUTGOING.equals(selectedDirection) && entry.getDirection() != PacketLogEntry.Direction.OUTGOING) {
+            return false;
+        }
+        if (FILTER_INTERNAL.equals(selectedDirection) && entry.getDirection() != PacketLogEntry.Direction.INTERNAL) {
             return false;
         }
 
