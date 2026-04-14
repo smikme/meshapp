@@ -74,6 +74,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BiConsumer;
 import java.util.function.IntConsumer;
 
@@ -185,11 +186,10 @@ public class FormChat extends Form {
     private boolean suppressSelectionListener;
     private boolean formVisible;
     private int scrollStateSyncSuspendCount;
+    private final AtomicBoolean messageRefreshQueued = new AtomicBoolean();
+    private final AtomicBoolean messageRefreshDirty = new AtomicBoolean();
 
-    private final Runnable messageListener = () -> Platform.runLater(() -> {
-        refreshCurrentChat();
-        reloadChatList();
-    });
+    private final Runnable messageListener = this::scheduleMessageRefresh;
     private final Runnable connectionListener = () -> Platform.runLater(this::rebindState);
     private final ChangeListener<Number> chatFontSizeListener =
             (obs, oldValue, newValue) -> Platform.runLater(this::handleChatFontSizeChanged);
@@ -197,6 +197,30 @@ public class FormChat extends Form {
     public FormChat() {
         initComponents();
         applyChatTypography();
+    }
+
+    /**
+     * При бурном трафике отдельный Platform.runLater на каждое событие быстро
+     * раздувает FX-очередь. Держим не более одного запланированного refresh-прохода,
+     * а параллельные события лишь помечают состояние как dirty.
+     */
+    private void scheduleMessageRefresh() {
+        messageRefreshDirty.set(true);
+        if (!messageRefreshQueued.compareAndSet(false, true)) {
+            return;
+        }
+        Platform.runLater(this::flushQueuedMessageRefresh);
+    }
+
+    private void flushQueuedMessageRefresh() {
+        while (messageRefreshDirty.getAndSet(false)) {
+            refreshCurrentChat();
+            reloadChatList();
+        }
+        messageRefreshQueued.set(false);
+        if (messageRefreshDirty.get() && messageRefreshQueued.compareAndSet(false, true)) {
+            Platform.runLater(this::flushQueuedMessageRefresh);
+        }
     }
 
     @Override

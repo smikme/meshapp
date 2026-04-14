@@ -44,6 +44,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.List;
 
 @SystemForm(name = "Логирование", description = "Просмотр логов приложения", tags = {"logs", "logging"})
 public class FormLogs extends Form {
@@ -51,6 +52,7 @@ public class FormLogs extends Form {
     private static final Logger log = LoggerFactory.getLogger(FormLogs.class);
     private static final String ICON_PAUSE = "/icons/pause.svg";
     private static final String ICON_PLAY = "/icons/play.svg";
+    private static final int MAX_VISIBLE_LOG_ENTRIES = 5_000;
     private static final DateTimeFormatter EXPORT_FILE_TIME =
             DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss");
 
@@ -199,23 +201,44 @@ public class FormLogs extends Form {
 
     @Override
     public void formInit() {
-        // Подписка на новые события в реальном времени
-        UiLogAppender.setLiveListener(entry ->
-                Platform.runLater(() -> {
-                    logData.add(entry);
-                    if (autoScrollEnabled) {
-                        scrollToBottom();
-                    }
-                })
-        );
+        // Live-подписка включается только пока форма открыта.
     }
 
     @Override
     public void formOpen() {
         // Обновить из буфера при каждом открытии
         logData.setAll(UiLogAppender.getBuffer());
+        trimVisibleLogEntries(logData, MAX_VISIBLE_LOG_ENTRIES);
+        installLiveLogListener();
         if (autoScrollEnabled) {
             scrollToBottom();
+        }
+    }
+
+    @Override
+    public void formClose() {
+        UiLogAppender.clearLiveListener();
+    }
+
+    private void installLiveLogListener() {
+        UiLogAppender.setLiveListener(entry -> Platform.runLater(() -> appendLogEntry(entry)));
+    }
+
+    private void appendLogEntry(LogEntry entry) {
+        logData.add(entry);
+        trimVisibleLogEntries(logData, MAX_VISIBLE_LOG_ENTRIES);
+        if (autoScrollEnabled) {
+            scrollToBottom();
+        }
+    }
+
+    static void trimVisibleLogEntries(List<?> entries, int maxEntries) {
+        if (entries == null || maxEntries <= 0) {
+            return;
+        }
+        int overflow = entries.size() - maxEntries;
+        if (overflow > 0) {
+            entries.subList(0, overflow).clear();
         }
     }
 
