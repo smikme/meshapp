@@ -19,6 +19,7 @@ import com.meshtastic.client.model.ConnectionEntry;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.model.NodeData;
+import com.meshtastic.client.platform.OsDetect;
 import com.meshtastic.client.protocol.ProtocolHandler;
 import com.meshtastic.client.service.ConnectionManager;
 import com.meshtastic.client.service.MessageDbService;
@@ -86,6 +87,7 @@ public class FormChat extends Form {
     private static final int PAGE_SIZE = 50;
     private static final int MAX_WINDOW_PAGES = 3;
     private static final int MAX_LOADED_MESSAGES = PAGE_SIZE * MAX_WINDOW_PAGES;
+    private static final String WINDOWS_HIT_TEST_BACKGROUND = "-fx-background-color: rgba(0,0,0,0.004);";
 
     // === Левая панель: список чатов ===
     private ListView<ChatItem> chatListView;
@@ -251,6 +253,9 @@ public class FormChat extends Form {
         // --- Левая панель: поиск + список чатов ---
         VBox leftPane = new VBox();
         leftPane.getStyleClass().add("chat-list-pane");
+        if (OsDetect.isWindows() && !AppPreferences.isDisableEffectsEffective()) {
+            leftPane.setStyle(WINDOWS_HIT_TEST_BACKGROUND);
+        }
 
         TextField searchField = new TextField();
         searchField.setPromptText("🔍 Поиск чатов");
@@ -279,6 +284,9 @@ public class FormChat extends Form {
 
         chatListView = new ListView<>(sortedChats);
         chatListView.getStyleClass().add("chat-list-view");
+        if (OsDetect.isWindows() && !AppPreferences.isDisableEffectsEffective()) {
+            chatListView.setStyle(WINDOWS_HIT_TEST_BACKGROUND);
+        }
         chatListView.setCellFactory(lv -> new ChatListCell(
                 this::deleteChat,
                 this::showChannelProperties,

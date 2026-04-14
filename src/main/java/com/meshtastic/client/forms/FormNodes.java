@@ -4,6 +4,7 @@ import com.meshtastic.client.components.NodeDetailContent;
 import com.meshtastic.client.model.ConnectionEntry;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.NodeData;
+import com.meshtastic.client.platform.OsDetect;
 import com.meshtastic.client.protocol.ProtocolHandler;
 import com.meshtastic.client.service.ConnectionManager;
 import com.meshtastic.client.service.FavoriteNodeService;
@@ -35,6 +36,8 @@ import java.util.function.IntConsumer;
 
 @SystemForm(name = "Ноды", description = "Список нод в сети", tags = {"ноды", "nodes", "устройства", "mesh"})
 public class FormNodes extends Form {
+
+    private static final String WINDOWS_HIT_TEST_BACKGROUND = "-fx-background-color: rgba(0,0,0,0.004);";
 
     private ListView<NodeData> nodeListView;
     private final ObservableList<NodeData> nodeData = FXCollections.observableArrayList();
@@ -149,6 +152,9 @@ public class FormNodes extends Form {
         // --- Левая панель: поиск + список ---
         VBox leftPane = new VBox();
         leftPane.getStyleClass().add("node-list-pane");
+        if (OsDetect.isWindows() && !AppPreferences.isDisableEffectsEffective()) {
+            leftPane.setStyle(WINDOWS_HIT_TEST_BACKGROUND);
+        }
 
         searchField = new TextField();
         searchField.setPromptText("\uD83D\uDD0D Поиск");
@@ -327,6 +333,9 @@ public class FormNodes extends Form {
 
         nodeListView = new ListView<>(sortedNodes);
         nodeListView.getStyleClass().add("node-list-view");
+        if (OsDetect.isWindows() && !AppPreferences.isDisableEffectsEffective()) {
+            nodeListView.setStyle(WINDOWS_HIT_TEST_BACKGROUND);
+        }
         nodeListView.setCellFactory(lv -> new NodeListCell());
         nodeListView.getSelectionModel().selectedItemProperty().addListener(
                 (obs, oldNode, newNode) -> {
