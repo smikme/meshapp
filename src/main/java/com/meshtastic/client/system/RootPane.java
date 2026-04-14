@@ -229,14 +229,14 @@ public class RootPane extends BorderPane {
     }
 
     private void maximizeToVisualBounds(Stage stage) {
-        restoreX = stage.getX();
-        restoreY = stage.getY();
-        restoreW = stage.getWidth();
-        restoreH = stage.getHeight();
+        if (hasValidStageBounds(stage)) {
+            restoreX = stage.getX();
+            restoreY = stage.getY();
+            restoreW = stage.getWidth();
+            restoreH = stage.getHeight();
+        }
 
-        Rectangle2D bounds = Screen.getScreensForRectangle(
-                stage.getX(), stage.getY(), stage.getWidth(), stage.getHeight()
-        ).getFirst().getVisualBounds();
+        Rectangle2D bounds = resolveVisualBounds(stage);
 
         stage.setX(bounds.getMinX());
         stage.setY(bounds.getMinY());
@@ -246,6 +246,7 @@ public class RootPane extends BorderPane {
     }
 
     private void restoreFromMaximize(Stage stage) {
+        ensureRestoreBounds(stage);
         stage.setX(restoreX);
         stage.setY(restoreY);
         stage.setWidth(restoreW);
@@ -423,6 +424,42 @@ public class RootPane extends BorderPane {
 
     public MainForm getMainForm() {
         return mainForm;
+    }
+
+    private Rectangle2D resolveVisualBounds(Stage stage) {
+        var screens = hasValidStageBounds(stage)
+                ? Screen.getScreensForRectangle(stage.getX(), stage.getY(), stage.getWidth(), stage.getHeight())
+                : Screen.getScreens();
+        Screen screen = screens.isEmpty() ? Screen.getPrimary() : screens.getFirst();
+        return screen.getVisualBounds();
+    }
+
+    private boolean hasValidStageBounds(Stage stage) {
+        return Double.isFinite(stage.getX())
+                && Double.isFinite(stage.getY())
+                && Double.isFinite(stage.getWidth())
+                && Double.isFinite(stage.getHeight())
+                && stage.getWidth() > 0
+                && stage.getHeight() > 0;
+    }
+
+    private void ensureRestoreBounds(Stage stage) {
+        if (Double.isFinite(restoreX)
+                && Double.isFinite(restoreY)
+                && Double.isFinite(restoreW)
+                && Double.isFinite(restoreH)
+                && restoreW > 0
+                && restoreH > 0) {
+            return;
+        }
+
+        Rectangle2D bounds = resolveVisualBounds(stage);
+        double minW = stage.getMinWidth() > 0 ? stage.getMinWidth() : 800;
+        double minH = stage.getMinHeight() > 0 ? stage.getMinHeight() : 600;
+        restoreW = Math.max(minW, Math.min(bounds.getWidth() * 0.85, bounds.getWidth()));
+        restoreH = Math.max(minH, Math.min(bounds.getHeight() * 0.85, bounds.getHeight()));
+        restoreX = bounds.getMinX() + (bounds.getWidth() - restoreW) / 2.0;
+        restoreY = bounds.getMinY() + (bounds.getHeight() - restoreH) / 2.0;
     }
 
     private enum ResizeDirection {
