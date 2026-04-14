@@ -4,11 +4,15 @@ import com.meshtastic.client.connection.ConnectionException;
 import com.meshtastic.client.connection.ConnectionListener;
 import org.junit.jupiter.api.Test;
 
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class BleConnectionTest {
@@ -90,12 +94,89 @@ class BleConnectionTest {
         connection.connect();
     }
 
+    @Test
+    void sendBytesOffloadsBleWriteFromCallerThread() throws Exception {
+        FakePlatform platform = new FakePlatform();
+        CountDownLatch writeStarted = new CountDownLatch(1);
+        CountDownLatch allowWriteFinish = new CountDownLatch(1);
+        platform.connectAction = p -> p.connected = true;
+        platform.writeAction = (p, payload) -> {
+            p.lastWriteThread = Thread.currentThread().getName();
+            writeStarted.countDown();
+            try {
+                allowWriteFinish.await(1, TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return false;
+            }
+            return true;
+        };
+
+        BleConnection connection = new BleConnection("device", platform);
+        connection.connect();
+
+        Thread caller = new Thread(() -> connection.sendBytes(frame((byte) 0x2A)), "JavaFX Application Thread");
+        caller.start();
+
+        assertTrue(writeStarted.await(1, TimeUnit.SECONDS));
+        caller.join(200);
+        assertFalse(caller.isAlive());
+        assertNotEquals("JavaFX Application Thread", platform.lastWriteThread);
+
+        allowWriteFinish.countDown();
+        caller.join(1_000);
+    }
+
+    @Test
+    void disconnectDropsQueuedBleWrites() throws Exception {
+        FakePlatform platform = new FakePlatform();
+        CountDownLatch firstWriteStarted = new CountDownLatch(1);
+        CountDownLatch secondWriteStarted = new CountDownLatch(1);
+        CountDownLatch allowFirstWriteFinish = new CountDownLatch(1);
+        AtomicInteger writeCalls = new AtomicInteger();
+        platform.connectAction = p -> p.connected = true;
+        platform.writeAction = (p, payload) -> {
+            int call = writeCalls.incrementAndGet();
+            if (call == 1) {
+                firstWriteStarted.countDown();
+                try {
+                    allowFirstWriteFinish.await(1, TimeUnit.SECONDS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+                return true;
+            }
+            secondWriteStarted.countDown();
+            return true;
+        };
+
+        BleConnection connection = new BleConnection("device", platform);
+        connection.connect();
+
+        connection.sendBytes(frame((byte) 0x11));
+        connection.sendBytes(frame((byte) 0x22));
+
+        assertTrue(firstWriteStarted.await(1, TimeUnit.SECONDS));
+
+        connection.disconnect();
+        allowFirstWriteFinish.countDown();
+
+        assertFalse(secondWriteStarted.await(300, TimeUnit.MILLISECONDS));
+        assertEquals(1, writeCalls.get());
+    }
+
+    private static byte[] frame(byte payloadByte) {
+        return new byte[]{(byte) 0x94, (byte) 0xC3, 0x00, 0x01, payloadByte};
+    }
+
     private static final class FakePlatform implements BlePlatform {
         private Consumer<byte[]> fromRadioListener;
         private Consumer<BleState> stateListener;
         private Consumer<String> passkeyRequestHandler;
         private boolean connected;
         private ConnectAction connectAction = p -> p.connected = true;
+        private WriteAction writeAction = (p, payload) -> p.connected;
+        private volatile String lastWriteThread;
 
         @Override
         public void startScan(Consumer<BleDevice> onDeviceFound) {
@@ -122,7 +203,7 @@ class BleConnectionTest {
 
         @Override
         public boolean writeToRadio(byte[] protobufPayload) {
-            return connected;
+            return writeAction.run(this, protobufPayload);
         }
 
         @Override
@@ -153,6 +234,11 @@ class BleConnectionTest {
     @FunctionalInterface
     private interface ConnectAction {
         void run(FakePlatform platform) throws ConnectionException;
+    }
+
+    @FunctionalInterface
+    private interface WriteAction {
+        boolean run(FakePlatform platform, byte[] payload);
     }
 
     private static final class TestConnectionListener implements ConnectionListener {
