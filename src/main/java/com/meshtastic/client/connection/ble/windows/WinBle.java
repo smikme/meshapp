@@ -36,6 +36,7 @@ public class WinBle implements BlePlatform {
 
     private static final int POLL_INTERVAL_MS = 200;
     private static final int READ_BUFFER_SIZE = 512;
+    private static final long WRITE_WARN_THRESHOLD_MS = 2_000;
 
     private final WinBleLibrary lib;
 
@@ -200,7 +201,11 @@ public class WinBle implements BlePlatform {
             log.warn("writeToRadio: не подключено");
             return false;
         }
+        long startedAt = System.nanoTime();
+        String threadName = Thread.currentThread().getName();
+        log.debug("writeToRadio: start {} bytes on thread {}", protobufPayload.length, threadName);
         int result = lib.meshble_write_to_radio(protobufPayload, protobufPayload.length);
+        long durationMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt);
         if (result != 0) {
             if (result == -2) {
                 // AccessDenied означает, что текущая GATT-сессия не получила pairing/auth.
@@ -217,18 +222,25 @@ public class WinBle implements BlePlatform {
                     sl.accept(new BleState.Error(
                             "BLE сопряжение не завершено. Подключитесь заново и подтвердите pairing", null));
                 }
+                log.error("writeToRadio: AccessDenied after {} ms on thread {}", durationMs, threadName);
                 return false;
             }
             int failures = ++consecutiveWriteFailures;
             if (failures == 5) {
-                log.warn("writeToRadio: {} consecutive failures", failures);
+                log.warn("writeToRadio: {} consecutive failures (lastDuration={} ms, thread={})",
+                        failures, durationMs, threadName);
             } else if (failures <= 5) {
-                log.error("writeToRadio failed: error={}", result);
+                log.error("writeToRadio failed: error={}, duration={} ms, thread={}",
+                        result, durationMs, threadName);
             }
             return false;
         } else {
             consecutiveWriteFailures = 0;
-            log.debug("Отправлено {} байт в toRadio", protobufPayload.length);
+            if (durationMs >= WRITE_WARN_THRESHOLD_MS) {
+                log.warn("writeToRadio: slow success in {} ms ({} bytes, thread={})",
+                        durationMs, protobufPayload.length, threadName);
+            }
+            log.debug("Отправлено {} байт в toRadio за {} мс", protobufPayload.length, durationMs);
             scheduleDrainAfterWrite();
             return true;
         }
