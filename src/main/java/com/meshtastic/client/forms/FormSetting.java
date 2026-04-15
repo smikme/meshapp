@@ -299,11 +299,7 @@ public class FormSetting extends Form {
     }
 
     /**
-     * Ждёт routing ACK для шага сохранения конфигурации.
-     * <p>
-     * Теперь это делается не только для BLE: begin_edit_settings и промежуточные
-     * set_config/set_module_config должны завершиться подтверждением до отправки
-     * следующего шага, иначе commit может догнать ещё не обработанную транзакцию.
+     * Ждёт routing ACK для шага сохранения конфигурации и считает отсутствие ACK ошибкой.
      */
     private void waitForRequiredConfigSaveAck(CompletableFuture<MeshProtos.Routing.Error> ackFuture,
                                               String stepName) {
@@ -321,6 +317,22 @@ public class FormSetting extends Form {
         } catch (Exception e) {
             throw new IllegalStateException("Config save step '" + stepName + "' ACK failed", e);
         }
+    }
+
+    /**
+     * BLE save-flow должен упорядочивать admin-пакеты по routing ACK: иначе следующий
+     * GATT write может догнать ещё не обработанный begin/set. Serial/TCP локальные
+     * admin-пакеты на части прошивок routing ACK не присылают, поэтому там используем
+     * transport-aware паузы, а ACK оставляем только диагностикой.
+     */
+    private void waitForTransportRequiredConfigSaveAck(ConnectionType transport,
+                                                       CompletableFuture<MeshProtos.Routing.Error> ackFuture,
+                                                       String stepName) {
+        if (transport != ConnectionType.BLE) {
+            observeOptionalConfigSaveAck(ackFuture, stepName);
+            return;
+        }
+        waitForRequiredConfigSaveAck(ackFuture, stepName);
     }
 
     /**
@@ -355,6 +367,17 @@ public class FormSetting extends Form {
         }
     }
 
+    private void handleCommitConfigSaveAck(ConnectionType transport,
+                                           CompletableFuture<MeshProtos.Routing.Error> ackFuture,
+                                           String stepName) {
+        if (transport != ConnectionType.BLE) {
+            observeOptionalConfigSaveAck(ackFuture, stepName);
+            return;
+        }
+        observeDeferredConfigSaveAck(ackFuture, stepName);
+        waitForCommitConfigSaveAckOrExpectedReboot(ackFuture, stepName);
+    }
+
     private boolean isExpectedRebootAckLoss(Throwable error) {
         Throwable current = error;
         while (current != null) {
@@ -380,6 +403,26 @@ public class FormSetting extends Form {
         return current != null && current.getMessage() != null
                 ? current.getMessage()
                 : error.getClass().getSimpleName();
+    }
+
+    private void observeOptionalConfigSaveAck(CompletableFuture<MeshProtos.Routing.Error> ackFuture,
+                                              String stepName) {
+        if (ackFuture == null) {
+            return;
+        }
+
+        ackFuture
+                .orTimeout(CONFIG_SAVE_ACK_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+                .whenComplete((error, ex) -> {
+                    if (ex != null) {
+                        log.debug("Config save: optional ACK for '{}' was not observed: {}",
+                                stepName, rootCauseMessage(ex));
+                    } else if (error != null && error != MeshProtos.Routing.Error.NONE) {
+                        log.warn("Config save: optional ACK for '{}' returned {}", stepName, error);
+                    } else {
+                        log.debug("Config save: optional ACK received for '{}'", stepName);
+                    }
+                });
     }
 
     /**
@@ -1136,7 +1179,7 @@ public class FormSetting extends Form {
                     ConfigProtos.Config deviceTzConfig = buildDeviceTimeZoneConfig(deviceConfig, targetTzDef);
 
                     Thread.sleep(baseConfigMessageDelayMs(transport));
-                    waitForRequiredConfigSaveAck(
+                    waitForTransportRequiredConfigSaveAck(transport,
                             MessageService.beginEditSettings(actionHandler, actionState),
                             "beginEditSettings");
 
@@ -1148,8 +1191,7 @@ public class FormSetting extends Form {
                     Thread.sleep(getConfigSaveInterTaskDelayMs(transport, 1, 3));
                     CompletableFuture<MeshProtos.Routing.Error> commitAck =
                             MessageService.commitEditSettings(actionHandler, actionState);
-                    observeDeferredConfigSaveAck(commitAck, "commitEditSettings");
-                    waitForCommitConfigSaveAckOrExpectedReboot(commitAck, "commitEditSettings");
+                    handleCommitConfigSaveAck(transport, commitAck, "commitEditSettings");
 
                     if (activeEntry != null) {
                         pendingTimeOnlySyncConnectionId = activeEntry.getId();
@@ -1177,7 +1219,7 @@ public class FormSetting extends Form {
                 }
 
                 long epochSeconds = Instant.now().getEpochSecond();
-                waitForRequiredConfigSaveAck(
+                waitForTransportRequiredConfigSaveAck(transport,
                         MessageService.setTimeOnly(actionHandler, actionState, epochSeconds),
                         "setTimeOnly");
 
@@ -2393,7 +2435,7 @@ public class FormSetting extends Form {
                     String stepName = "setChannel/" + channel.getIndex();
                     log.info("Config save: setChannel index={} role={}",
                             channel.getIndex(), channel.getRole());
-                    waitForRequiredConfigSaveAck(
+                    waitForTransportRequiredConfigSaveAck(activeTransport,
                             MessageService.setChannel(actionHandler, actionState, channel,
                                     actionState.getSessionPasskey()),
                             stepName);
@@ -2414,7 +2456,7 @@ public class FormSetting extends Form {
             } else if (requiresReconnect) {
                 tasks.add(() -> {
                     log.info("Config save: beginEditSettings");
-                    waitForRequiredConfigSaveAck(
+                    waitForTransportRequiredConfigSaveAck(activeTransport,
                             MessageService.beginEditSettings(actionHandler, actionState),
                             "beginEditSettings");
                 });
@@ -2429,7 +2471,7 @@ public class FormSetting extends Form {
                         CompletableFuture<MeshProtos.Routing.Error> ackFuture =
                                 MessageService.setConfig(actionHandler, actionState, c);
                         if (waitForAckBeforeCommit) {
-                            waitForRequiredConfigSaveAck(ackFuture, stepName);
+                            waitForTransportRequiredConfigSaveAck(activeTransport, ackFuture, stepName);
                         } else {
                             // On BLE the final payload step can trigger a disconnect before its routing
                             // ACK is observed, so commit must still be allowed to proceed.
@@ -2446,7 +2488,7 @@ public class FormSetting extends Form {
                         CompletableFuture<MeshProtos.Routing.Error> ackFuture =
                                 MessageService.setModuleConfig(actionHandler, actionState, mc);
                         if (waitForAckBeforeCommit) {
-                            waitForRequiredConfigSaveAck(ackFuture, stepName);
+                            waitForTransportRequiredConfigSaveAck(activeTransport, ackFuture, stepName);
                         } else {
                             // MQTT and other reboot-sensitive module updates should not prevent the
                             // trailing commit from being sent just because their routing ACK is late.
@@ -2459,11 +2501,7 @@ public class FormSetting extends Form {
                     log.info("Config save: commitEditSettings");
                     CompletableFuture<MeshProtos.Routing.Error> ackFuture =
                             MessageService.commitEditSettings(actionHandler, actionState);
-                    // commit triggers reboot/disconnect across transports, so a missing ACK
-                    // is not necessarily a failed save. Continue into reconnect flow unless
-                    // the device explicitly returns a routing error.
-                    observeDeferredConfigSaveAck(ackFuture, stepName);
-                    waitForCommitConfigSaveAckOrExpectedReboot(ackFuture, stepName);
+                    handleCommitConfigSaveAck(activeTransport, ackFuture, stepName);
                 });
             }
 

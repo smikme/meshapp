@@ -167,6 +167,35 @@ class FormSettingTest {
     }
 
     @Test
+    void shouldNotRequireConfigSaveAckForSerialTransport() {
+        FormSetting form = onFxThread(FormSetting::new);
+        CompletableFuture<MeshProtos.Routing.Error> ackFuture = new CompletableFuture<>();
+
+        assertDoesNotThrow(() -> invokeReturning(
+                form,
+                "waitForTransportRequiredConfigSaveAck",
+                new Class<?>[] { ConnectionType.class, CompletableFuture.class, String.class },
+                ConnectionType.SERIAL, ackFuture, "beginEditSettings"));
+        assertFalse(ackFuture.isDone());
+    }
+
+    @Test
+    void shouldRequireConfigSaveAckForBleTransport() {
+        FormSetting form = onFxThread(FormSetting::new);
+        CompletableFuture<MeshProtos.Routing.Error> ackFuture =
+                CompletableFuture.completedFuture(MeshProtos.Routing.Error.BAD_REQUEST);
+
+        AssertionError error = assertThrows(AssertionError.class, () -> invokeReturning(
+                form,
+                "waitForTransportRequiredConfigSaveAck",
+                new Class<?>[] { ConnectionType.class, CompletableFuture.class, String.class },
+                ConnectionType.BLE, ackFuture, "beginEditSettings"));
+
+        assertTrue(error.getCause() instanceof java.lang.reflect.InvocationTargetException);
+        assertTrue(error.getCause().getCause() instanceof IllegalStateException);
+    }
+
+    @Test
     void clearsLoadedConfigWhenConnectionIsDisconnected() throws Exception {
         ConnectionManager manager = ConnectionManager.getInstance();
         ConnectionEntry entry = new ConnectionEntry("Test radio", "localhost", 4403);
