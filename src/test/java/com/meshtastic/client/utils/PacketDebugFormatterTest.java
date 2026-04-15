@@ -12,6 +12,8 @@ import org.junit.jupiter.api.Test;
 import org.meshtastic.proto.MeshProtos;
 import org.meshtastic.proto.Portnums;
 
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -188,6 +190,42 @@ class PacketDebugFormatterTest {
         assertTrue(!root.has("packetHexView"));
     }
 
+    @Test
+    void packetCollectionExportJsonContainsFiltersDecodedPayloadAndHierarchy() {
+        PacketLogEntry entry = packetLogEntry("bulk hello");
+
+        String exported = PacketDebugFormatter.exportPacketsAsJson(
+                List.of(entry),
+                new PacketDebugFormatter.PacketCollectionExportMetadata(
+                        1_710_000_000_000L,
+                        "Исходящие",
+                        "TEXT_MESSAGE_APP",
+                        "bulk",
+                        "11.11.2024 09:00",
+                        "11.11.2024 10:00"
+                ),
+                ignored -> null
+        );
+
+        JsonObject root = JsonParser.parseString(exported).getAsJsonObject();
+        assertEquals(1, root.get("packetCount").getAsInt());
+        assertEquals("Исходящие", root.getAsJsonObject("filters").get("route").getAsString());
+        assertEquals("TEXT_MESSAGE_APP", root.getAsJsonObject("filters").get("packetType").getAsString());
+        assertEquals("bulk", root.getAsJsonObject("filters").get("searchText").getAsString());
+
+        JsonObject packet = root.getAsJsonArray("packets").get(0).getAsJsonObject();
+        assertEquals("Входящий / LoRa", packet.getAsJsonObject("logEntry").get("routeText").getAsString());
+        assertEquals(
+                "bulk hello",
+                packet.getAsJsonObject("meshPacket")
+                        .getAsJsonObject("decoded")
+                        .get("decodedPayload")
+                        .getAsString()
+        );
+        assertEquals("MeshPacket", packet.getAsJsonObject("hierarchy").get("label").getAsString());
+        assertTrue(packet.getAsJsonObject("hierarchy").getAsJsonArray("children").size() > 0);
+    }
+
     private static PacketLogEntry packetLogEntry(String text) {
         MeshProtos.MeshPacket packet = MeshProtos.MeshPacket.newBuilder()
                 .setFrom(0x12345678)
@@ -204,6 +242,7 @@ class PacketDebugFormatterTest {
                 1_710_000_000_000L,
                 PacketLogEntry.Direction.INCOMING,
                 "TEXT_MESSAGE_APP",
+                "TRANSPORT_LORA",
                 "Peer (305419896)",
                 "Вещание (4294967295)",
                 "\"" + text + "\"",

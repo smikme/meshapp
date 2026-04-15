@@ -175,8 +175,47 @@ class DatabaseMigratorTest {
             assertEquals(DatabaseMigrator.CURRENT_VERSION, schemaVersion(connection));
             assertTrue(tableExists(connection, "LORA_PACKET_LOGS"));
             assertTrue(columnExists(connection, "LORA_PACKET_LOGS", "PACKET_BYTES"));
+            assertTrue(columnExists(connection, "LORA_PACKET_LOGS", "TRANSPORT_MECHANISM"));
             assertTrue(indexExists(connection, "IDX_LORA_OWNER_TS"));
             assertTrue(indexExists(connection, "IDX_LORA_TYPE"));
+            assertTrue(indexExists(connection, "IDX_LORA_TRANSPORT"));
+        }
+    }
+
+    @Test
+    void migrateFromV8AddsTransportMechanismToLoraPacketMonitorTable() throws Exception {
+        try (Connection connection = openConnection("upgrade-v8")) {
+            createSchemaVersion(connection, 8);
+
+            try (Statement stmt = connection.createStatement()) {
+                stmt.execute("""
+                        CREATE TABLE lora_packet_logs (
+                            id            BIGINT AUTO_INCREMENT PRIMARY KEY,
+                            owner_node_id VARCHAR(20) NOT NULL DEFAULT '',
+                            captured_at   BIGINT NOT NULL,
+                            direction     VARCHAR(10) NOT NULL,
+                            packet_type   VARCHAR(40) NOT NULL,
+                            from_node     VARCHAR(160),
+                            to_node       VARCHAR(160),
+                            payload_text  CLOB,
+                            packet_bytes  BLOB NOT NULL
+                        )
+                        """);
+                stmt.execute("""
+                        CREATE INDEX idx_lora_owner_ts
+                        ON lora_packet_logs (owner_node_id, captured_at)
+                        """);
+                stmt.execute("""
+                        CREATE INDEX idx_lora_type
+                        ON lora_packet_logs (packet_type)
+                        """);
+            }
+
+            DatabaseMigrator.migrate(connection);
+
+            assertEquals(DatabaseMigrator.CURRENT_VERSION, schemaVersion(connection));
+            assertTrue(columnExists(connection, "LORA_PACKET_LOGS", "TRANSPORT_MECHANISM"));
+            assertTrue(indexExists(connection, "IDX_LORA_TRANSPORT"));
         }
     }
 

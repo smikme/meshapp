@@ -2,15 +2,18 @@ package com.meshtastic.client.utils;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonPrimitive;
+import com.google.gson.stream.JsonWriter;
 import com.google.protobuf.ByteString;
 import com.google.protobuf.Descriptors.FieldDescriptor;
 import com.google.protobuf.Descriptors.EnumValueDescriptor;
 import com.google.protobuf.InvalidProtocolBufferException;
 import com.google.protobuf.Message;
 import com.google.protobuf.WireFormat;
+import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.model.PacketLogEntry;
 import com.meshtastic.client.model.PacketTreeNode;
@@ -20,13 +23,18 @@ import org.meshtastic.proto.AdminProtos;
 import org.meshtastic.proto.MeshProtos;
 import org.meshtastic.proto.TelemetryProtos;
 
+import java.time.Instant;
 import java.util.HashMap;
 import java.nio.charset.StandardCharsets;
+import java.io.IOException;
+import java.io.StringWriter;
+import java.io.Writer;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Base64;
+import java.util.function.Function;
 
 /**
  * Форматирование и построение дерева для отладки LoRa-пакетов.
@@ -66,6 +74,25 @@ public final class PacketDebugFormatter {
      * - для broadcast используется локализованная подпись c {@code !ffffffff}.
      */
     public record PacketEndpoints(String fromNode, String toNode) {}
+
+    /**
+     * Метаданные массового JSON-экспорта по текущим фильтрам окна мониторинга.
+     *
+     * @param exportedAtMillis время создания файла экспорта
+     * @param routeFilter      человекочитаемое значение фильтра маршрута
+     * @param packetTypeFilter человекочитаемое значение фильтра типа
+     * @param searchText       поисковая строка или {@code null}
+     * @param capturedAtFrom   нижняя граница времени в UI-представлении или {@code null}
+     * @param capturedAtTo     верхняя граница времени в UI-представлении или {@code null}
+     */
+    public record PacketCollectionExportMetadata(long exportedAtMillis,
+                                                 String routeFilter,
+                                                 String packetTypeFilter,
+                                                 String searchText,
+                                                 String capturedAtFrom,
+                                                 String capturedAtTo) {}
+
+    public record PacketCollectionJsonExportState(JsonWriter writer, long packetCount) {}
 
     /**
      * Диапазон выделения в текстовом представлении предпросмотра.
@@ -133,6 +160,11 @@ public final class PacketDebugFormatter {
     private record VarintResult(int value, int nextOffset) {}
 
     private record FieldEnvelope(int fieldStart, int fieldEnd, int valueStart, int valueEnd) {}
+
+    @FunctionalInterface
+    private interface PayloadParser {
+        Message parse() throws InvalidProtocolBufferException;
+    }
 
     public static PacketDetails describeMeshPacket(MeshProtos.MeshPacket packet,
                                                    Direction direction,
@@ -341,6 +373,84 @@ public final class PacketDebugFormatter {
         } catch (InvalidProtocolBufferException e) {
             return "";
         }
+    }
+
+    /**
+     * Экспортирует набор пакетов в иерархический JSON-файл с учётом текущих фильтров UI.
+     * В отличие от {@link #exportPacketAsJson(PacketLogEntry)}, формат включает:
+     * - метаданные экспорта и выбранных фильтров;
+     * - desktop-метаданные каждой записи журнала;
+     * - protobuf-структуру пакета;
+     * - расшифрованный {@code decodedPayload}, когда его можно разобрать;
+     * - дерево иерархии пакета с byte-range.
+     *
+     * @param entries            записи, которые должны попасть в файл
+     * @param metadata           метаданные экспорта; может быть {@code null}
+     * @param deviceStateResolver resolver device-state для нормализации имён нод; может быть {@code null}
+     * @return pretty-printed JSON
+     */
+    public static String exportPacketsAsJson(List<PacketLogEntry> entries,
+                                             PacketCollectionExportMetadata metadata,
+                                             Function<PacketLogEntry, DeviceState> deviceStateResolver) {
+        try {
+            StringWriter buffer = new StringWriter(4096);
+            PacketCollectionJsonExportState state = beginPacketCollectionJsonExport(buffer, metadata);
+            long exportedCount = 0;
+            if (entries != null) {
+                for (PacketLogEntry entry : entries) {
+                    DeviceState deviceState = deviceStateResolver != null ? deviceStateResolver.apply(entry) : null;
+                    state = writePacketCollectionJsonEntry(state, entry, deviceState);
+                    exportedCount++;
+                }
+            }
+            finishPacketCollectionJsonExport(state, exportedCount);
+            return buffer.toString();
+        } catch (IOException e) {
+            return "";
+        }
+    }
+
+    public static PacketCollectionJsonExportState beginPacketCollectionJsonExport(
+            Writer writer,
+            PacketCollectionExportMetadata metadata) throws IOException {
+        JsonWriter jsonWriter = new JsonWriter(writer);
+        jsonWriter.setIndent("  ");
+        jsonWriter.beginObject();
+
+        long exportedAtMillis = metadata != null ? metadata.exportedAtMillis() : System.currentTimeMillis();
+        jsonWriter.name("exportedAt").value(Instant.ofEpochMilli(exportedAtMillis).toString());
+        jsonWriter.name("exportedAtMillis").value(exportedAtMillis);
+        if (metadata != null) {
+            jsonWriter.name("filters");
+            EXPORT_GSON.toJson(toExportFiltersJson(metadata), jsonWriter);
+        }
+        jsonWriter.name("packets");
+        jsonWriter.beginArray();
+        return new PacketCollectionJsonExportState(jsonWriter, 0);
+    }
+
+    public static PacketCollectionJsonExportState writePacketCollectionJsonEntry(
+            PacketCollectionJsonExportState state,
+            PacketLogEntry entry,
+            DeviceState deviceState) throws IOException {
+        if (state == null || state.writer() == null || entry == null) {
+            return state;
+        }
+        EXPORT_GSON.toJson(buildHierarchicalPacketJson(entry, deviceState), state.writer());
+        return new PacketCollectionJsonExportState(state.writer(), state.packetCount() + 1);
+    }
+
+    public static void finishPacketCollectionJsonExport(
+            PacketCollectionJsonExportState state,
+            long packetCount) throws IOException {
+        if (state == null || state.writer() == null) {
+            return;
+        }
+        JsonWriter jsonWriter = state.writer();
+        jsonWriter.endArray();
+        jsonWriter.name("packetCount").value(packetCount);
+        jsonWriter.endObject();
+        jsonWriter.flush();
     }
 
     /**
@@ -755,6 +865,129 @@ public final class PacketDebugFormatter {
             json.add(field.getJsonName(), toProtoJsonElement(field, entry.getValue()));
         }
         return json;
+    }
+
+    private static JsonObject toExportFiltersJson(PacketCollectionExportMetadata metadata) {
+        JsonObject filters = new JsonObject();
+        addNullableProperty(filters, "route", metadata.routeFilter());
+        addNullableProperty(filters, "packetType", metadata.packetTypeFilter());
+        addNullableProperty(filters, "searchText", metadata.searchText());
+        addNullableProperty(filters, "capturedAtFrom", metadata.capturedAtFrom());
+        addNullableProperty(filters, "capturedAtTo", metadata.capturedAtTo());
+        return filters;
+    }
+
+    private static JsonObject buildHierarchicalPacketJson(PacketLogEntry entry, DeviceState deviceState) {
+        JsonObject packetJson = new JsonObject();
+        if (entry == null) {
+            return packetJson;
+        }
+
+        PacketEndpoints endpoints = resolvePacketEndpoints(entry, deviceState);
+        JsonObject logEntryJson = new JsonObject();
+        logEntryJson.addProperty("id", entry.getId());
+        addNullableProperty(logEntryJson, "ownerNodeId", entry.getOwnerNodeId());
+        logEntryJson.addProperty("capturedAt", Instant.ofEpochMilli(entry.getCapturedAt()).toString());
+        logEntryJson.addProperty("capturedAtMillis", entry.getCapturedAt());
+        addNullableProperty(logEntryJson, "capturedAtText", entry.getCapturedAtText());
+        logEntryJson.addProperty("direction", entry.getDirection().name());
+        addNullableProperty(logEntryJson, "directionText", entry.getDirectionText());
+        addNullableProperty(logEntryJson, "packetType", entry.getPacketType());
+        addNullableProperty(logEntryJson, "transportMechanism", entry.getTransportMechanism());
+        addNullableProperty(logEntryJson, "transportText", entry.getTransportText());
+        addNullableProperty(logEntryJson, "routeText", entry.getRouteText());
+        addNullableProperty(logEntryJson, "from", endpoints.fromNode());
+        addNullableProperty(logEntryJson, "to", endpoints.toNode());
+        addNullableProperty(logEntryJson, "payloadText", entry.getPayloadText());
+        logEntryJson.addProperty("packetSizeBytes", entry.getPacketBytes().length);
+        packetJson.add("logEntry", logEntryJson);
+
+        try {
+            MeshProtos.MeshPacket packet = MeshProtos.MeshPacket.parseFrom(entry.getPacketBytes());
+            JsonObject meshPacketJson = toProtoJsonObject(packet);
+            appendDecodedPayloadJson(meshPacketJson, packet);
+            packetJson.add("meshPacket", meshPacketJson);
+            packetJson.add("hierarchy", toTreeJson(buildPacketTree(packet, entry.getPacketBytes())));
+        } catch (InvalidProtocolBufferException e) {
+            packetJson.addProperty("parseError", e.getMessage());
+            packetJson.add("hierarchy", toTreeJson(buildPacketTree(entry.getPacketBytes())));
+        }
+
+        return packetJson;
+    }
+
+    private static void appendDecodedPayloadJson(JsonObject meshPacketJson, MeshProtos.MeshPacket packet) {
+        if (meshPacketJson == null || packet == null || !packet.hasDecoded()) {
+            return;
+        }
+        JsonObject decodedJson = meshPacketJson.getAsJsonObject("decoded");
+        if (decodedJson == null) {
+            return;
+        }
+        JsonElement decodedPayloadJson = toDecodedPayloadJson(packet.getDecoded());
+        if (decodedPayloadJson != null) {
+            decodedJson.add("decodedPayload", decodedPayloadJson);
+        }
+    }
+
+    private static JsonElement toDecodedPayloadJson(MeshProtos.Data data) {
+        if (data == null) {
+            return null;
+        }
+        return switch (data.getPortnum()) {
+            case TEXT_MESSAGE_APP -> new JsonPrimitive(data.getPayload().toString(StandardCharsets.UTF_8));
+            case ROUTING_APP -> parseDecodedPayloadJson(() -> MeshProtos.Routing.parseFrom(data.getPayload()));
+            case NODEINFO_APP -> parseDecodedPayloadJson(() -> MeshProtos.User.parseFrom(data.getPayload()));
+            case POSITION_APP -> parseDecodedPayloadJson(() -> MeshProtos.Position.parseFrom(data.getPayload()));
+            case TELEMETRY_APP -> parseDecodedPayloadJson(() -> TelemetryProtos.Telemetry.parseFrom(data.getPayload()));
+            case TRACEROUTE_APP -> parseDecodedPayloadJson(() -> MeshProtos.RouteDiscovery.parseFrom(data.getPayload()));
+            case ADMIN_APP -> parseDecodedPayloadJson(() -> AdminProtos.AdminMessage.parseFrom(data.getPayload()));
+            default -> {
+                if (data.getPayload().isEmpty()) {
+                    yield new JsonPrimitive("");
+                }
+                if (isProbablyText(data.getPayload())) {
+                    yield new JsonPrimitive(data.getPayload().toString(StandardCharsets.UTF_8));
+                }
+                yield null;
+            }
+        };
+    }
+
+    private static JsonElement parseDecodedPayloadJson(PayloadParser parser) {
+        try {
+            return toProtoJsonObject(parser.parse());
+        } catch (InvalidProtocolBufferException e) {
+            JsonObject errorJson = new JsonObject();
+            errorJson.addProperty("parseError", e.getMessage());
+            return errorJson;
+        }
+    }
+
+    private static JsonObject toTreeJson(TreeItem<PacketTreeNode> item) {
+        JsonObject json = new JsonObject();
+        if (item == null || item.getValue() == null) {
+            return json;
+        }
+        PacketTreeNode node = item.getValue();
+        json.addProperty("label", node.getLabel());
+        if (node.hasByteRange()) {
+            json.addProperty("startByte", node.getStartByte());
+            json.addProperty("endByte", node.getEndByte());
+        }
+        JsonArray children = new JsonArray();
+        for (TreeItem<PacketTreeNode> child : item.getChildren()) {
+            children.add(toTreeJson(child));
+        }
+        json.add("children", children);
+        return json;
+    }
+
+    private static void addNullableProperty(JsonObject json, String propertyName, String value) {
+        if (json == null || propertyName == null || value == null || value.isBlank()) {
+            return;
+        }
+        json.addProperty(propertyName, value);
     }
 
     private static JsonElement toProtoJsonElement(FieldDescriptor field, Object value) {

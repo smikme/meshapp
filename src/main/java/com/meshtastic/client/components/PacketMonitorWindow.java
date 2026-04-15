@@ -31,6 +31,7 @@ import javafx.scene.control.Button;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.ContentDisplay;
 import javafx.scene.control.Label;
+import javafx.scene.control.ProgressBar;
 import javafx.scene.control.Separator;
 import javafx.scene.control.SplitPane;
 import javafx.scene.control.ScrollBar;
@@ -55,6 +56,7 @@ import javafx.scene.shape.SVGPath;
 import javafx.stage.FileChooser;
 import javafx.stage.Stage;
 import javafx.stage.StageStyle;
+import java.io.BufferedWriter;
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -68,6 +70,8 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * Отдельное окно мониторинга LoRa mesh-пакетов.
@@ -82,13 +86,13 @@ import java.util.Objects;
  */
 public final class PacketMonitorWindow {
 
-    private static final String FILTER_ALL_DIRECTIONS = "Все направления";
+    private static final String FILTER_ALL_ROUTES = "Все LoRa";
     private static final String FILTER_INCOMING = "Входящие";
     private static final String FILTER_OUTGOING = "Исходящие";
-    private static final String FILTER_INTERNAL = "Внутренние";
     private static final String FILTER_ALL_TYPES = "Все типы";
     private static final int PAGE_SIZE = 200;
     private static final int PAGE_SHIFT = 80;
+    private static final int PACKET_EXPORT_BATCH_SIZE = 1_000;
     private static final int HEX_PREVIEW_VISIBLE_ROWS = 16;
     private static final int HEX_PREVIEW_ADDRESS_COLUMNS = 6;
     private static final int HEX_PREVIEW_BYTES_COLUMNS = 50;
@@ -104,16 +108,28 @@ public final class PacketMonitorWindow {
     private static final double DEFAULT_WINDOW_HEIGHT = 860;
     private static final double PACKET_TABLE_TIME_COLUMN_WIDTH = 190;
     private static final double PACKET_TABLE_TYPE_COLUMN_WIDTH = 130;
+    private static final double PACKET_TABLE_TRANSPORT_COLUMN_WIDTH = 170;
     private static final double PACKET_TABLE_NODE_COLUMN_WIDTH = 150;
     private static final double PACKET_TABLE_COMPACT_COLUMN_MIN_WIDTH = 72;
     private static final double PACKET_TABLE_PAYLOAD_MIN_WIDTH = 260;
     private static final double PACKET_TABLE_PAYLOAD_RUNTIME_MIN_WIDTH = 140;
     private static final DateTimeFormatter PACKET_EXPORT_FILE_TIME =
             DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss");
+    private static final DateTimeFormatter PACKET_EXPORT_FILTER_DATE =
+            DateTimeFormatter.ofPattern("dd.MM.yyyy");
+    private static final DateTimeFormatter PACKET_EXPORT_FILTER_DATE_TIME =
+            DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm");
+
+    static record RouteFilterSelection(PacketLogEntry.Direction direction, String transportMechanism) {}
 
     private static PacketMonitorWindow instance;
 
     private final PacketMonitorService packetMonitorService;
+    private final ExecutorService exportExecutor = Executors.newSingleThreadExecutor(r -> {
+        Thread thread = new Thread(r, "packet-monitor-export");
+        thread.setDaemon(true);
+        return thread;
+    });
     private final ObservableList<PacketLogEntry> packetItems = FXCollections.observableArrayList();
     private final ObservableList<String> packetTypeFilters = FXCollections.observableArrayList(FILTER_ALL_TYPES);
     private final BooleanProperty suppressPacketTableTooltips = new SimpleBooleanProperty(false);
@@ -147,7 +163,7 @@ public final class PacketMonitorWindow {
     private TextArea hexPreview;
     private TextArea asciiPreview;
     private TreeView<PacketTreeNode> packetTree;
-    private ComboBox<String> directionFilter;
+    private ComboBox<String> routeFilter;
     private ComboBox<String> typeFilter;
     private DateTimePicker fromDateTimeFilter;
     private DateTimePicker toDateTimeFilter;
@@ -155,11 +171,15 @@ public final class PacketMonitorWindow {
     private Button btnStart;
     private Button btnStop;
     private Button btnClear;
+    private Button btnExportJson;
     private Button btnCopyText;
     private Button btnCopyJson;
     private Button btnSaveText;
     private Button btnSaveJson;
     private Label statusLabel;
+    private HBox exportProgressBox;
+    private ProgressBar exportProgressBar;
+    private Label exportProgressLabel;
     private PacketLogEntry viewedPacketEntry;
     private long viewedPacketId = -1L;
     private boolean restoringSelection;
@@ -182,6 +202,7 @@ public final class PacketMonitorWindow {
     private double normalWindowWidth = DEFAULT_WINDOW_WIDTH;
     private double normalWindowHeight = DEFAULT_WINDOW_HEIGHT;
     private boolean restoreWindowMaximized;
+    private volatile boolean exportInProgress;
 
     private PacketMonitorWindow() {
         this.packetMonitorService = PacketMonitorService.getInstance();
@@ -263,6 +284,19 @@ public final class PacketMonitorWindow {
         statusLabel = new Label();
         statusLabel.getStyleClass().add("config-status-label");
 
+        exportProgressLabel = new Label();
+        exportProgressLabel.getStyleClass().add("config-status-label");
+
+        exportProgressBar = new ProgressBar(0);
+        exportProgressBar.setPrefWidth(220);
+        exportProgressBar.setMinWidth(160);
+        exportProgressBar.setMaxWidth(220);
+
+        exportProgressBox = new HBox(8, exportProgressLabel, exportProgressBar);
+        exportProgressBox.setAlignment(Pos.CENTER_LEFT);
+        exportProgressBox.setVisible(false);
+        exportProgressBox.setManaged(false);
+
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
 
@@ -283,11 +317,10 @@ public final class PacketMonitorWindow {
         );
         btnClear = createToolbarButton(
                 "Очистить данные",
-                "Удалить уже собранные данные из таблицы и базы",
+                "Удалить уже собранные LoRa-пакеты из таблицы и базы",
                 "/icons/clear.svg",
                 packetMonitorService::clear
         );
-
         toolBar.getItems().addAll(
                 btnStart,
                 btnStop,
@@ -295,7 +328,7 @@ public final class PacketMonitorWindow {
                 btnClear
         );
 
-        header.getChildren().addAll(title, statusLabel, spacer, toolBar);
+        header.getChildren().addAll(title, statusLabel, exportProgressBox, spacer, toolBar);
         return header;
     }
 
@@ -304,10 +337,9 @@ public final class PacketMonitorWindow {
         filterBar.setAlignment(Pos.CENTER_LEFT);
         filterBar.getStyleClass().add("packet-monitor-filter-bar");
 
-        directionFilter = new ComboBox<>(FXCollections.observableArrayList(
-                FILTER_ALL_DIRECTIONS, FILTER_INCOMING, FILTER_OUTGOING, FILTER_INTERNAL));
-        directionFilter.setValue(FILTER_ALL_DIRECTIONS);
-        directionFilter.valueProperty().addListener((obs, oldValue, newValue) -> onFilterChanged());
+        routeFilter = new ComboBox<>(FXCollections.observableArrayList(buildRouteFilterOptions()));
+        routeFilter.setValue(FILTER_ALL_ROUTES);
+        routeFilter.valueProperty().addListener((obs, oldValue, newValue) -> onFilterChanged());
 
         typeFilter = new ComboBox<>(packetTypeFilters);
         typeFilter.setValue(FILTER_ALL_TYPES);
@@ -324,7 +356,7 @@ public final class PacketMonitorWindow {
         toDateTimeFilter.popupShowingProperty().addListener((obs, oldValue, newValue) -> updatePacketTableTooltipSuppression());
 
         searchField = new TextField();
-        searchField.setPromptText("Поиск по типу, узлам и payload");
+        searchField.setPromptText("Поиск по типу, маршруту, узлам и payload");
         searchField.getStyleClass().add("packet-monitor-search-field");
         searchField.textProperty().addListener((obs, oldValue, newValue) -> onFilterChanged());
 
@@ -342,8 +374,8 @@ public final class PacketMonitorWindow {
         HBox.setHgrow(spacer, Priority.ALWAYS);
 
         filterBar.getChildren().addAll(
-                createFilterLabel("Направление"),
-                directionFilter,
+                createFilterLabel("Маршрут"),
+                routeFilter,
                 createFilterLabel("Тип"),
                 typeFilter,
                 createFilterLabel("С"),
@@ -365,7 +397,10 @@ public final class PacketMonitorWindow {
     private SplitPane createContentSplitPane() {
         packetTable = createPacketTable();
 
-        HBox previewBox = createHexPreviewBox();
+        addressPreview = createPreviewTextArea("packet-monitor-hex-address");
+        hexPreview = createPreviewTextArea("packet-monitor-hex-bytes");
+        asciiPreview = createPreviewTextArea("packet-monitor-hex-ascii");
+        HBox previewBox = createHexPreviewBox(addressPreview, hexPreview, asciiPreview);
 
         packetTree = new TreeView<>();
         packetTree.setShowRoot(true);
@@ -406,22 +441,20 @@ public final class PacketMonitorWindow {
      * Создаёт фиксированный трёхколоночный HEX/ASCII предпросмотр.
      * Адреса, HEX и ASCII рендерятся отдельно, чтобы подсветка никогда не затрагивала адресную колонку.
      */
-    private HBox createHexPreviewBox() {
-        addressPreview = createPreviewTextArea("packet-monitor-hex-address");
-        hexPreview = createPreviewTextArea("packet-monitor-hex-bytes");
-        asciiPreview = createPreviewTextArea("packet-monitor-hex-ascii");
+    private HBox createHexPreviewBox(TextArea addressPreviewArea,
+                                     TextArea hexPreviewArea,
+                                     TextArea asciiPreviewArea) {
+        addressPreviewArea.setPrefColumnCount(HEX_PREVIEW_ADDRESS_COLUMNS);
+        addressPreviewArea.setMinWidth(Region.USE_PREF_SIZE);
+        addressPreviewArea.setMaxWidth(Region.USE_PREF_SIZE);
+        hexPreviewArea.setPrefColumnCount(HEX_PREVIEW_BYTES_COLUMNS);
+        hexPreviewArea.setMinWidth(Region.USE_PREF_SIZE);
+        hexPreviewArea.setMaxWidth(Region.USE_PREF_SIZE);
+        asciiPreviewArea.setPrefColumnCount(HEX_PREVIEW_ASCII_COLUMNS);
+        asciiPreviewArea.setMinWidth(Region.USE_PREF_SIZE);
+        asciiPreviewArea.setMaxWidth(Region.USE_PREF_SIZE);
 
-        addressPreview.setPrefColumnCount(HEX_PREVIEW_ADDRESS_COLUMNS);
-        addressPreview.setMinWidth(Region.USE_PREF_SIZE);
-        addressPreview.setMaxWidth(Region.USE_PREF_SIZE);
-        hexPreview.setPrefColumnCount(HEX_PREVIEW_BYTES_COLUMNS);
-        hexPreview.setMinWidth(Region.USE_PREF_SIZE);
-        hexPreview.setMaxWidth(Region.USE_PREF_SIZE);
-        asciiPreview.setPrefColumnCount(HEX_PREVIEW_ASCII_COLUMNS);
-        asciiPreview.setMinWidth(Region.USE_PREF_SIZE);
-        asciiPreview.setMaxWidth(Region.USE_PREF_SIZE);
-
-        HBox previewBox = new HBox(4, addressPreview, hexPreview, asciiPreview);
+        HBox previewBox = new HBox(4, addressPreviewArea, hexPreviewArea, asciiPreviewArea);
         previewBox.getStyleClass().add("packet-monitor-hex-grid");
         previewBox.setMinWidth(Region.USE_PREF_SIZE);
         previewBox.setMaxWidth(Region.USE_PREF_SIZE);
@@ -459,13 +492,21 @@ public final class PacketMonitorWindow {
                 "/icons/save-json.svg",
                 this::saveViewedPacketAsJson
         );
+        btnExportJson = createPacketActionButton(
+                "Экспорт JSON",
+                "Экспортировать все LoRa-пакеты по текущим фильтрам в JSON файл",
+                "/icons/save-json.svg",
+                this::exportFilteredPacketsAsJson
+        );
 
         ToolBar toolBar = new ToolBar(
                 btnCopyText,
                 btnCopyJson,
                 new Separator(Orientation.HORIZONTAL),
                 btnSaveText,
-                btnSaveJson
+                btnSaveJson,
+                new Separator(Orientation.HORIZONTAL),
+                btnExportJson
         );
         toolBar.setOrientation(Orientation.VERTICAL);
         toolBar.getStyleClass().add("packet-monitor-side-toolbar");
@@ -505,6 +546,10 @@ public final class PacketMonitorWindow {
         colType.setCellValueFactory(new PropertyValueFactory<>("packetType"));
         configureCompactColumn(colType, PACKET_TABLE_TYPE_COLUMN_WIDTH);
 
+        TableColumn<PacketLogEntry, String> colTransport = new TableColumn<>("Маршрут");
+        colTransport.setCellValueFactory(new PropertyValueFactory<>("routeText"));
+        configureCompactColumn(colTransport, PACKET_TABLE_TRANSPORT_COLUMN_WIDTH);
+
         TableColumn<PacketLogEntry, String> colFrom = new TableColumn<>("От");
         colFrom.setCellValueFactory(cellData -> new ReadOnlyStringWrapper(
                 formatPacketFromNode(cellData.getValue())));
@@ -523,14 +568,14 @@ public final class PacketMonitorWindow {
         colPayload.setResizable(true);
         colPayload.setSortable(false);
 
-        restorePacketTableColumnWidths(colTime, colType, colFrom, colTo, colPayload);
+        restorePacketTableColumnWidths(colTime, colType, colTransport, colFrom, colTo, colPayload);
         trackPacketTableColumnWidth(colTime, AppPreferences.KEY_PACKET_MONITOR_COLUMN_TIME_WIDTH);
         trackPacketTableColumnWidth(colType, AppPreferences.KEY_PACKET_MONITOR_COLUMN_TYPE_WIDTH);
         trackPacketTableColumnWidth(colFrom, AppPreferences.KEY_PACKET_MONITOR_COLUMN_FROM_WIDTH);
         trackPacketTableColumnWidth(colTo, AppPreferences.KEY_PACKET_MONITOR_COLUMN_TO_WIDTH);
         trackPacketTableColumnWidth(colPayload, AppPreferences.KEY_PACKET_MONITOR_COLUMN_PAYLOAD_WIDTH);
 
-        table.getColumns().addAll(colTime, colType, colFrom, colTo, colPayload);
+        table.getColumns().addAll(colTime, colType, colTransport, colFrom, colTo, colPayload);
         table.setRowFactory(tv -> new TableRow<>() {
             private final Tooltip rowTooltip = new Tooltip();
 
@@ -554,7 +599,7 @@ public final class PacketMonitorWindow {
                         rowTooltip.hide();
                         return null;
                     }
-                    rowTooltip.setText(item.getDirectionText() + ": " + item.getPayloadText());
+                    rowTooltip.setText(item.getRouteText() + ": " + item.getPayloadText());
                     return rowTooltip;
                 }, itemProperty(), suppressPacketTableTooltips));
             }
@@ -611,6 +656,7 @@ public final class PacketMonitorWindow {
      */
     private void restorePacketTableColumnWidths(TableColumn<PacketLogEntry, String> colTime,
                                                 TableColumn<PacketLogEntry, String> colType,
+                                                TableColumn<PacketLogEntry, String> colTransport,
                                                 TableColumn<PacketLogEntry, String> colFrom,
                                                 TableColumn<PacketLogEntry, String> colTo,
                                                 TableColumn<PacketLogEntry, String> colPayload) {
@@ -922,8 +968,28 @@ public final class PacketMonitorWindow {
         boolean captureEnabled = packetMonitorService.isCaptureEnabled();
         btnStart.setDisable(captureEnabled);
         btnStop.setDisable(!captureEnabled);
-        btnClear.setDisable(totalStoredPacketCount == 0);
+        btnClear.setDisable(exportInProgress || totalStoredPacketCount == 0);
+        btnExportJson.setDisable(exportInProgress || matchingPacketCount == 0);
+        updateExportControlsState();
         statusLabel.setText(captureEnabled ? "Сбор активен" : "Сбор остановлен");
+    }
+
+    private void updateExportControlsState() {
+        if (routeFilter != null) {
+            routeFilter.setDisable(exportInProgress);
+        }
+        if (typeFilter != null) {
+            typeFilter.setDisable(exportInProgress);
+        }
+        if (fromDateTimeFilter != null) {
+            fromDateTimeFilter.setDisable(exportInProgress);
+        }
+        if (toDateTimeFilter != null) {
+            toDateTimeFilter.setDisable(exportInProgress);
+        }
+        if (searchField != null) {
+            searchField.setDisable(exportInProgress);
+        }
     }
 
     /**
@@ -1135,24 +1201,17 @@ public final class PacketMonitorWindow {
     }
 
     private PacketMonitorService.PacketQuery buildCurrentQuery() {
-        PacketLogEntry.Direction direction = null;
-        String directionValue = directionFilter != null ? directionFilter.getValue() : FILTER_ALL_DIRECTIONS;
-        if (FILTER_INCOMING.equals(directionValue)) {
-            direction = PacketLogEntry.Direction.INCOMING;
-        } else if (FILTER_OUTGOING.equals(directionValue)) {
-            direction = PacketLogEntry.Direction.OUTGOING;
-        } else if (FILTER_INTERNAL.equals(directionValue)) {
-            direction = PacketLogEntry.Direction.INTERNAL;
-        }
-
+        RouteFilterSelection routeSelection =
+                resolveRouteFilterSelection(routeFilter != null ? routeFilter.getValue() : FILTER_ALL_ROUTES);
         String selectedType = getActiveTypeFilterSelection();
         String packetType = FILTER_ALL_TYPES.equals(selectedType) ? null : selectedType;
         String searchText = searchField != null ? searchField.getText() : null;
         Long capturedAtFromMillis = resolveCapturedAtBoundary(fromDateTimeFilter, true);
         Long capturedAtToMillis = resolveCapturedAtBoundary(toDateTimeFilter, false);
         return new PacketMonitorService.PacketQuery(
-                direction,
+                routeSelection.direction(),
                 packetType,
+                routeSelection.transportMechanism(),
                 searchText,
                 capturedAtFromMillis,
                 capturedAtToMillis
@@ -1164,6 +1223,7 @@ public final class PacketMonitorWindow {
         return new PacketMonitorService.PacketQuery(
                 query.direction(),
                 null,
+                query.transportMechanism(),
                 query.searchText(),
                 query.capturedAtFromMillis(),
                 query.capturedAtToMillis()
@@ -1180,15 +1240,22 @@ public final class PacketMonitorWindow {
             return false;
         }
 
-        String selectedDirection = directionFilter != null ? directionFilter.getValue() : FILTER_ALL_DIRECTIONS;
-        if (FILTER_INCOMING.equals(selectedDirection) && entry.getDirection() != PacketLogEntry.Direction.INCOMING) {
+        RouteFilterSelection routeSelection =
+                resolveRouteFilterSelection(routeFilter != null ? routeFilter.getValue() : FILTER_ALL_ROUTES);
+        if (routeSelection.direction() != null && entry.getDirection() != routeSelection.direction()) {
             return false;
         }
-        if (FILTER_OUTGOING.equals(selectedDirection) && entry.getDirection() != PacketLogEntry.Direction.OUTGOING) {
-            return false;
-        }
-        if (FILTER_INTERNAL.equals(selectedDirection) && entry.getDirection() != PacketLogEntry.Direction.INTERNAL) {
-            return false;
+
+        String transportMechanismFilter = routeSelection.transportMechanism();
+        if (transportMechanismFilter != null) {
+            String entryTransportMechanism = entry.getTransportMechanism();
+            if (PacketMonitorService.TRANSPORT_MECHANISM_UNSPECIFIED.equals(transportMechanismFilter)) {
+                if (entryTransportMechanism != null && !entryTransportMechanism.isBlank()) {
+                    return false;
+                }
+            } else if (!transportMechanismFilter.equals(entryTransportMechanism)) {
+                return false;
+            }
         }
 
         String selectedType = getActiveTypeFilterSelection();
@@ -1213,6 +1280,9 @@ public final class PacketMonitorWindow {
 
         String lowerQuery = query.toLowerCase(java.util.Locale.ROOT);
         return containsIgnoreCase(entry.getPacketType(), lowerQuery)
+                || containsIgnoreCase(entry.getRouteText(), lowerQuery)
+                || containsIgnoreCase(entry.getTransportMechanism(), lowerQuery)
+                || containsIgnoreCase(entry.getTransportText(), lowerQuery)
                 || containsIgnoreCase(formatPacketFromNode(entry), lowerQuery)
                 || containsIgnoreCase(formatPacketToNode(entry), lowerQuery)
                 || containsIgnoreCase(entry.getPayloadText(), lowerQuery)
@@ -1280,6 +1350,25 @@ public final class PacketMonitorWindow {
         }
 
         return (ownerNodeId == null || ownerNodeId.isBlank()) ? fallback : null;
+    }
+
+    static List<String> buildRouteFilterOptions() {
+        return List.of(
+                FILTER_ALL_ROUTES,
+                FILTER_INCOMING,
+                FILTER_OUTGOING
+        );
+    }
+
+    static RouteFilterSelection resolveRouteFilterSelection(String selectedRoute) {
+        if (selectedRoute == null || selectedRoute.isBlank() || FILTER_ALL_ROUTES.equals(selectedRoute)) {
+            return new RouteFilterSelection(null, null);
+        }
+        return switch (selectedRoute) {
+            case FILTER_INCOMING -> new RouteFilterSelection(PacketLogEntry.Direction.INCOMING, null);
+            case FILTER_OUTGOING -> new RouteFilterSelection(PacketLogEntry.Direction.OUTGOING, null);
+            default -> new RouteFilterSelection(null, null);
+        };
     }
 
     private String getActiveTypeFilterSelection() {
@@ -1606,12 +1695,140 @@ public final class PacketMonitorWindow {
             return;
         }
 
-        FileChooser chooser = new FileChooser();
-        chooser.setTitle(jsonFormat ? "Сохранить пакет в JSON" : "Сохранить пакет в текстовый файл");
-        chooser.setInitialFileName(buildPacketExportFileName(jsonFormat));
-        chooser.getExtensionFilters().add(new FileChooser.ExtensionFilter(
+        saveContentToFile(
+                content,
+                jsonFormat ? "Сохранить пакет в JSON" : "Сохранить пакет в текстовый файл",
+                buildPacketExportFileName(jsonFormat),
                 jsonFormat ? "JSON (*.json)" : "Text (*.txt)",
-                jsonFormat ? "*.json" : "*.txt"
+                jsonFormat ? ".json" : ".txt",
+                "Пакет сохранён: ",
+                "Не удалось сохранить пакет"
+        );
+    }
+
+    private void exportFilteredPacketsAsJson() {
+        if (exportInProgress) {
+            return;
+        }
+        PacketMonitorService.PacketQuery query = buildCurrentQuery();
+        int totalToExport = packetMonitorService.countMatchingPackets(query);
+        if (totalToExport == 0) {
+            Toast.show(Toast.Type.INFO, "Нет LoRa-пакетов для экспорта по текущим фильтрам");
+            return;
+        }
+
+        FileChooser chooser = new FileChooser();
+        chooser.setTitle("Экспортировать LoRa-пакеты в JSON");
+        chooser.setInitialFileName(buildFilteredPacketsExportFileName());
+        chooser.getExtensionFilters().add(new FileChooser.ExtensionFilter("JSON (*.json)", "*.json"));
+
+        File selected = chooser.showSaveDialog(stage);
+        if (selected == null) {
+            return;
+        }
+        File target = ensureExtension(selected, ".json");
+
+        PacketDebugFormatter.PacketCollectionExportMetadata metadata = buildCurrentExportMetadata();
+        beginExportProgress(totalToExport);
+        exportExecutor.execute(() -> runFilteredPacketExport(query, metadata, target, totalToExport));
+    }
+
+    private void runFilteredPacketExport(PacketMonitorService.PacketQuery query,
+                                         PacketDebugFormatter.PacketCollectionExportMetadata metadata,
+                                         File target,
+                                         long totalToExport) {
+        try (BufferedWriter writer = Files.newBufferedWriter(target.toPath(), StandardCharsets.UTF_8)) {
+            PacketDebugFormatter.PacketCollectionJsonExportState state =
+                    PacketDebugFormatter.beginPacketCollectionJsonExport(writer, metadata);
+            state = exportFilteredPacketsJsonBatches(query, state, totalToExport);
+            PacketDebugFormatter.finishPacketCollectionJsonExport(state, state.packetCount());
+            long exportedCount = state.packetCount();
+            Platform.runLater(() -> {
+                finishExportProgress();
+                Toast.show(Toast.Type.SUCCESS, "Экспорт сохранён: " + target.getName()
+                        + " (" + exportedCount + " пакетов)");
+            });
+        } catch (IOException e) {
+            Platform.runLater(() -> {
+                finishExportProgress();
+                Toast.show(Toast.Type.ERROR, "Не удалось сохранить экспорт");
+            });
+        }
+    }
+
+    private PacketDebugFormatter.PacketCollectionJsonExportState exportFilteredPacketsJsonBatches(
+            PacketMonitorService.PacketQuery query,
+            PacketDebugFormatter.PacketCollectionJsonExportState initialState,
+            long totalToExport) throws IOException {
+        final PacketDebugFormatter.PacketCollectionJsonExportState[] stateHolder = {initialState};
+        packetMonitorService.forEachMatchingBatch(query, PACKET_EXPORT_BATCH_SIZE, batch -> {
+            if (Thread.currentThread().isInterrupted()) {
+                throw new IOException("Packet export interrupted");
+            }
+            PacketDebugFormatter.PacketCollectionJsonExportState state = stateHolder[0];
+            for (PacketLogEntry entry : batch) {
+                state = PacketDebugFormatter.writePacketCollectionJsonEntry(
+                        state,
+                        entry,
+                        resolveEntryDeviceState(entry)
+                );
+            }
+            stateHolder[0] = state;
+            long exportedCount = state.packetCount();
+            Platform.runLater(() -> updateExportProgress(exportedCount, totalToExport));
+        });
+        return stateHolder[0];
+    }
+
+    private void beginExportProgress(long totalToExport) {
+        exportInProgress = true;
+        updateExportProgress(0, totalToExport);
+        if (exportProgressBox != null) {
+            exportProgressBox.setManaged(true);
+            exportProgressBox.setVisible(true);
+        }
+        updateToolbarState();
+    }
+
+    private void updateExportProgress(long exportedCount, long totalToExport) {
+        long safeTotal = Math.max(1, totalToExport);
+        long safeExported = Math.max(0, Math.min(exportedCount, safeTotal));
+        if (exportProgressLabel != null) {
+            exportProgressLabel.setText(formatExportProgressText(safeExported, safeTotal));
+        }
+        if (exportProgressBar != null) {
+            exportProgressBar.setProgress((double) safeExported / safeTotal);
+        }
+    }
+
+    private void finishExportProgress() {
+        exportInProgress = false;
+        if (exportProgressBox != null) {
+            exportProgressBox.setVisible(false);
+            exportProgressBox.setManaged(false);
+        }
+        if (exportProgressLabel != null) {
+            exportProgressLabel.setText("");
+        }
+        if (exportProgressBar != null) {
+            exportProgressBar.setProgress(0);
+        }
+        updateToolbarState();
+    }
+
+    private void saveContentToFile(String content,
+                                   String dialogTitle,
+                                   String initialFileName,
+                                   String extensionFilterLabel,
+                                   String extension,
+                                   String successMessagePrefix,
+                                   String errorMessage) {
+        FileChooser chooser = new FileChooser();
+        chooser.setTitle(dialogTitle);
+        chooser.setInitialFileName(initialFileName);
+        chooser.getExtensionFilters().add(new FileChooser.ExtensionFilter(
+                extensionFilterLabel,
+                "*" + extension
         ));
 
         File selected = chooser.showSaveDialog(stage);
@@ -1619,12 +1836,12 @@ public final class PacketMonitorWindow {
             return;
         }
 
-        File target = ensureExtension(selected, jsonFormat ? ".json" : ".txt");
+        File target = ensureExtension(selected, extension);
         try {
             Files.writeString(target.toPath(), content, StandardCharsets.UTF_8);
-            Toast.show(Toast.Type.SUCCESS, "Пакет сохранён: " + target.getName());
+            Toast.show(Toast.Type.SUCCESS, successMessagePrefix + target.getName());
         } catch (IOException e) {
-            Toast.show(Toast.Type.ERROR, "Не удалось сохранить пакет");
+            Toast.show(Toast.Type.ERROR, errorMessage);
         }
     }
 
@@ -1640,6 +1857,24 @@ public final class PacketMonitorWindow {
         );
         String extension = jsonFormat ? ".json" : ".txt";
         return "lora-packet-" + timestamp + "-" + viewedPacketEntry.getId() + extension;
+    }
+
+    private String buildFilteredPacketsExportFileName() {
+        String timestamp = PACKET_EXPORT_FILE_TIME.format(
+                Instant.ofEpochMilli(System.currentTimeMillis()).atZone(ZoneId.systemDefault()).toLocalDateTime()
+        );
+        return "lora-packets-" + timestamp + ".json";
+    }
+
+    private PacketDebugFormatter.PacketCollectionExportMetadata buildCurrentExportMetadata() {
+        return new PacketDebugFormatter.PacketCollectionExportMetadata(
+                System.currentTimeMillis(),
+                routeFilter != null ? routeFilter.getValue() : FILTER_ALL_ROUTES,
+                getActiveTypeFilterSelection(),
+                searchField != null ? searchField.getText() : null,
+                formatDateTimeFilterValue(fromDateTimeFilter),
+                formatDateTimeFilterValue(toDateTimeFilter)
+        );
     }
 
     /**
@@ -1671,6 +1906,7 @@ public final class PacketMonitorWindow {
      */
     private void dispose() {
         packetMonitorService.removeListener(packetListener);
+        exportExecutor.shutdownNow();
         if (stage != null && stage.getScene() != null) {
             ThemeManager.unregisterScene(stage.getScene());
         }
@@ -1940,6 +2176,24 @@ public final class PacketMonitorWindow {
         }
         LocalDateTime capturedAt = LocalDateTime.of(dateTimePicker.getDate(), effectiveTime);
         return capturedAt.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
+    }
+
+    private static String formatDateTimeFilterValue(DateTimePicker dateTimePicker) {
+        if (dateTimePicker == null || dateTimePicker.getDate() == null) {
+            return null;
+        }
+        if (dateTimePicker.getTime() == null) {
+            return dateTimePicker.getDate().format(PACKET_EXPORT_FILTER_DATE);
+        }
+        return LocalDateTime.of(dateTimePicker.getDate(), dateTimePicker.getTime())
+                .format(PACKET_EXPORT_FILTER_DATE_TIME);
+    }
+
+    static String formatExportProgressText(long exportedCount, long totalToExport) {
+        long safeTotal = Math.max(1, totalToExport);
+        long safeExported = Math.max(0, Math.min(exportedCount, safeTotal));
+        int percent = (int) Math.round((double) safeExported * 100.0 / safeTotal);
+        return "Экспорт: " + safeExported + " / " + safeTotal + " (" + percent + "%)";
     }
 
     private static boolean containsIgnoreCase(String value, String query) {
