@@ -389,7 +389,7 @@ public class DeviceState {
      */
     public MeshMessage findMessageByPacketId(int packetId) {
         // Сначала ищем в памяти
-        MeshMessage msg = messageStore.findMessageByPacketId(packetId);
+        MeshMessage msg = findRuntimeMessageByPacketId(packetId);
         if (msg != null) {
             return msg;
         }
@@ -398,6 +398,13 @@ public class DeviceState {
             return messageDbService.findByPacketId(packetId);
         }
         return null;
+    }
+
+    /**
+     * Ищет сообщение только в текущем runtime-хранилище, без fallback в БД.
+     */
+    public MeshMessage findRuntimeMessageByPacketId(int packetId) {
+        return messageStore.findMessageByPacketId(packetId);
     }
 
     // ═══════════════════════════════════════════════════════════

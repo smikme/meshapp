@@ -144,6 +144,97 @@ class MessageDbServiceTest {
     }
 
     @Test
+    void scopedFindByPacketIdUsesOwnerChatAndOldestMatchingRow() {
+        MeshMessage ownerA = message("owner-a", 888, 10);
+        MeshMessage ownerB = message("owner-b", 888, 20);
+        MeshMessage channelOne = message("channel-one", 888, 30);
+
+        service.save(ownerA, "channel", "0", "!ownerA");
+        service.save(ownerB, "channel", "0", "!ownerB");
+        service.save(channelOne, "channel", "1", "!ownerA");
+
+        assertEquals("owner-a", service.findByPacketId(888, "channel", "0", "!ownerA").getText());
+        assertEquals("owner-b", service.findByPacketId(888, "channel", "0", "!ownerB").getText());
+        assertEquals("channel-one", service.findByPacketId(888, "channel", "1", "!ownerA").getText());
+    }
+
+    @Test
+    void hydrateReplyTextsFillsMissingQuoteFromSameChatAndPersistsIt() {
+        MeshMessage original = message("quoted text", 901, 10);
+        MeshMessage reply = message("reply", 902, 20);
+        reply.setReplyId(901);
+
+        service.save(original, "channel", "0", "!owner");
+        service.save(reply, "channel", "0", "!owner");
+
+        List<MeshMessage> loaded = service.loadLast("channel", "0", 10, "!owner");
+
+        assertEquals(1, service.hydrateReplyTexts(loaded, "channel", "0", "!owner"));
+
+        MeshMessage loadedReply = loaded.stream()
+                .filter(message -> message.getPacketId() == 902)
+                .findFirst()
+                .orElseThrow();
+        assertEquals("quoted text", loadedReply.getReplyText());
+        assertEquals("quoted text",
+                service.findByPacketId(902, "channel", "0", "!owner").getReplyText());
+    }
+
+    @Test
+    void hydrateReplyTextsDoesNotUseOriginalFromAnotherScope() {
+        MeshMessage otherOwnerOriginal = message("wrong owner", 903, 10);
+        MeshMessage otherChannelOriginal = message("wrong channel", 904, 11);
+        MeshMessage replyToOtherOwner = message("reply owner", 905, 20);
+        MeshMessage replyToOtherChannel = message("reply channel", 906, 21);
+        replyToOtherOwner.setReplyId(903);
+        replyToOtherChannel.setReplyId(904);
+
+        service.save(otherOwnerOriginal, "channel", "0", "!other");
+        service.save(otherChannelOriginal, "channel", "1", "!owner");
+        service.save(replyToOtherOwner, "channel", "0", "!owner");
+        service.save(replyToOtherChannel, "channel", "0", "!owner");
+
+        List<MeshMessage> loaded = service.loadLast("channel", "0", 10, "!owner");
+
+        assertEquals(0, service.hydrateReplyTexts(loaded, "channel", "0", "!owner"));
+        assertTrue(loaded.stream().allMatch(message -> message.getReplyText() == null));
+    }
+
+    @Test
+    void backfillMissingReplyTextsUpdatesAllResolvableRepliesInChat() {
+        MeshMessage original = message("old quoted", 907, 10);
+        MeshMessage reply = message("old reply", 908, 20);
+        MeshMessage unresolvedReply = message("unresolved", 909, 30);
+        reply.setReplyId(907);
+        unresolvedReply.setReplyId(123456);
+
+        service.save(original, "channel", "0", "!owner");
+        service.save(reply, "channel", "0", "!owner");
+        service.save(unresolvedReply, "channel", "0", "!owner");
+
+        assertEquals(1, service.backfillMissingReplyTexts("channel", "0", "!owner"));
+        assertEquals("old quoted",
+                service.findByPacketId(908, "channel", "0", "!owner").getReplyText());
+        assertNull(service.findByPacketId(909, "channel", "0", "!owner").getReplyText());
+    }
+
+    @Test
+    void saveDoesNotInsertDuplicateForSameScopedPacketId() {
+        MeshMessage first = message("first", 990, 10);
+        MeshMessage duplicate = message("duplicate", 990, 20);
+        duplicate.setStatus(MeshMessage.DeliveryStatus.DELIVERED);
+
+        service.save(first, "channel", "0", "!owner");
+        service.save(duplicate, "channel", "0", "!owner");
+
+        List<MeshMessage> loaded = service.loadLast("channel", "0", 10, "!owner");
+        assertEquals(1, loaded.size());
+        assertEquals(first.getDbId(), duplicate.getDbId());
+        assertEquals("first", loaded.getFirst().getText());
+        assertEquals(MeshMessage.DeliveryStatus.DELIVERED, loaded.getFirst().getStatus());
+    }
+
+    @Test
     void saveAndLoadReactionsAreScopedByOwnerAndTargetPacketId() {
         MessageReaction ownerAFirst = reaction(555, 9001, "👍", 10, false);
         MessageReaction ownerASecond = reaction(555, 9002, "🎉", 20, true);

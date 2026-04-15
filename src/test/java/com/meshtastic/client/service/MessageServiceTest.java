@@ -199,6 +199,48 @@ class MessageServiceTest {
     }
 
     @Test
+    void sendChannelMessageHydratesReplyTextFromScopedOriginalAndDoesNotDuplicate() throws Exception {
+        RecordingConnection connection = new RecordingConnection();
+        ProtocolHandler handler = track(new ProtocolHandler(connection));
+        DeviceState state = new DeviceState();
+        state.setMyNodeNum(0x04c5b420);
+        state.getOrCreateNode(state.getMyNodeNum()).setNodeId("!04c5b420");
+
+        MeshMessage original = new MeshMessage("!11111111", "!ffffffff", 2, "quoted", 1_700_000_000L, false);
+        original.setPacketId(22222);
+        MessageDbService.getInstance().save(original, "channel", "2", "!04c5b420");
+
+        MeshMessage sent = MessageService.sendChannelMessage(handler, state, 2, "reply", 22222);
+
+        assertNotNull(sent);
+        assertEquals("quoted", sent.getReplyText());
+        assertEquals(22222, parseLastToRadio(connection).getPacket().getDecoded().getReplyId());
+        assertEquals(2, MessageDbService.getInstance().loadLast("channel", "2", 10, "!04c5b420").size());
+
+        state.shutdown();
+    }
+
+    @Test
+    void sendChannelMessageDoesNotHydrateReplyTextFromAnotherOwner() {
+        RecordingConnection connection = new RecordingConnection();
+        ProtocolHandler handler = track(new ProtocolHandler(connection));
+        DeviceState state = new DeviceState();
+        state.setMyNodeNum(0x04c5b420);
+        state.getOrCreateNode(state.getMyNodeNum()).setNodeId("!04c5b420");
+
+        MeshMessage otherOwnerOriginal = new MeshMessage("!11111111", "!ffffffff", 2, "wrong", 1_700_000_000L, false);
+        otherOwnerOriginal.setPacketId(33333);
+        MessageDbService.getInstance().save(otherOwnerOriginal, "channel", "2", "!other");
+
+        MeshMessage sent = MessageService.sendChannelMessage(handler, state, 2, "reply", 33333);
+
+        assertNotNull(sent);
+        assertNull(sent.getReplyText());
+
+        state.shutdown();
+    }
+
+    @Test
     void retryMessageReusesExistingChannelRowAndRegistersNewPendingAck() throws Exception {
         RecordingConnection connection = new RecordingConnection();
         ProtocolHandler handler = track(new ProtocolHandler(connection));
