@@ -266,7 +266,6 @@ public class MessageBubbleFactory {
         Region spacer = createFlexibleSpacer();
 
         HBox row = createMessageRow(Pos.BOTTOM_RIGHT, "chat-message-row-outgoing", spacer, content, avatar);
-        attachReplyOnDoubleClick(content, msg);
         attachCopyDeleteMenu(content, msg, row);
         return row;
     }

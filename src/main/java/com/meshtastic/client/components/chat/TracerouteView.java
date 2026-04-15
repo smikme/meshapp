@@ -96,7 +96,7 @@ public class TracerouteView {
             sb.append((i < hops.size())
                     ? nodeNameResolver.apply(hops.get(i)) : targetName);
         }
-        if (route.getRouteBackCount() > 0) {
+        if (hasReverseRoute(route)) {
             sb.append("\n").append(targetName);
             List<Integer> backHops = route.getRouteBackList();
             int snrBackCount = route.getSnrBackCount();
@@ -140,7 +140,7 @@ public class TracerouteView {
                 route.getRouteList(), route.getSnrTowardsList(), true));
 
         // Обратный маршрут
-        if (route.getRouteBackCount() > 0) {
+        if (hasReverseRoute(route)) {
             Label backLabel = new Label("Обратный:");
             backLabel.getStyleClass().addAll(
                     "chat-bubble-text", "traceroute-section-label");
@@ -374,6 +374,11 @@ public class TracerouteView {
             return SNR_MEDIUM;
         }
         return SNR_BAD;
+    }
+
+    private static boolean hasReverseRoute(MeshProtos.RouteDiscovery route) {
+        // route_back stores only intermediate nodes; direct return links are represented by snr_back alone.
+        return route.getRouteBackCount() > 0 || route.getSnrBackCount() > 0;
     }
 
     private static ParsedRoute parseRouteLine(String line) {
