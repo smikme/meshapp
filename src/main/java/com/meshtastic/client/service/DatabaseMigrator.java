@@ -23,7 +23,7 @@ public final class DatabaseMigrator {
     private static final Logger log = LoggerFactory.getLogger(DatabaseMigrator.class);
 
     /** Текущая версия схемы. Увеличивается при каждом изменении схемы. */
-    static final int CURRENT_VERSION = 8;
+    static final int CURRENT_VERSION = 9;
 
     private DatabaseMigrator() {}
 
@@ -64,6 +64,7 @@ public final class DatabaseMigrator {
             if (version < 6) { migrateToV6(connection); version = 6; }
             if (version < 7) { migrateToV7(connection); version = 7; }
             if (version < 8) { migrateToV8(connection); version = 8; }
+            if (version < 9) { migrateToV9(connection); version = 9; }
 
             setVersion(connection, CURRENT_VERSION);
             log.info("Database migration complete, schema version = {}", CURRENT_VERSION);
@@ -233,6 +234,43 @@ public final class DatabaseMigrator {
                     """);
         }
         log.info("Migration v8: created 'lora_packet_logs' table and indexes");
+    }
+
+    /** v9: transport_mechanism для точного различения радио/API/MQTT путей. */
+    private static void migrateToV9(Connection connection) throws SQLException {
+        try (Statement stmt = connection.createStatement()) {
+            stmt.execute("""
+                    CREATE TABLE IF NOT EXISTS lora_packet_logs (
+                        id                  BIGINT AUTO_INCREMENT PRIMARY KEY,
+                        owner_node_id       VARCHAR(20) NOT NULL DEFAULT '',
+                        captured_at         BIGINT NOT NULL,
+                        direction           VARCHAR(10) NOT NULL,
+                        packet_type         VARCHAR(40) NOT NULL,
+                        transport_mechanism VARCHAR(40),
+                        from_node           VARCHAR(160),
+                        to_node             VARCHAR(160),
+                        payload_text        CLOB,
+                        packet_bytes        BLOB NOT NULL
+                    )
+                    """);
+            stmt.execute("""
+                    ALTER TABLE lora_packet_logs
+                    ADD COLUMN IF NOT EXISTS transport_mechanism VARCHAR(40)
+                    """);
+            stmt.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_lora_owner_ts
+                    ON lora_packet_logs (owner_node_id, captured_at)
+                    """);
+            stmt.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_lora_type
+                    ON lora_packet_logs (packet_type)
+                    """);
+            stmt.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_lora_transport
+                    ON lora_packet_logs (transport_mechanism)
+                    """);
+        }
+        log.info("Migration v9: added 'transport_mechanism' to lora_packet_logs");
     }
 
     /** v2: колонка favorite для избранных нод. */

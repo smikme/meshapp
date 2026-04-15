@@ -1,5 +1,6 @@
 package com.meshtastic.client.components;
 
+import com.meshtastic.client.model.PacketLogEntry;
 import javafx.geometry.Rectangle2D;
 import org.junit.jupiter.api.Test;
 
@@ -27,6 +28,31 @@ class PacketMonitorWindowTest {
                 "TEXT_MESSAGE_APP");
 
         assertEquals(List.of("Все типы", "TEXT_MESSAGE_APP", "NODEINFO_APP"), options);
+    }
+
+    @Test
+    void shouldResolveLoraRouteFilterToDirection() {
+        PacketMonitorWindow.RouteFilterSelection all =
+                PacketMonitorWindow.resolveRouteFilterSelection("Все LoRa");
+        PacketMonitorWindow.RouteFilterSelection incoming =
+                PacketMonitorWindow.resolveRouteFilterSelection("Входящие");
+        PacketMonitorWindow.RouteFilterSelection outgoing =
+                PacketMonitorWindow.resolveRouteFilterSelection("Исходящие");
+
+        assertEquals(null, all.direction());
+        assertEquals(null, all.transportMechanism());
+        assertEquals(PacketLogEntry.Direction.INCOMING, incoming.direction());
+        assertEquals(null, incoming.transportMechanism());
+        assertEquals(PacketLogEntry.Direction.OUTGOING, outgoing.direction());
+        assertEquals(null, outgoing.transportMechanism());
+    }
+
+    @Test
+    void shouldFormatExportProgressTextWithPercent() {
+        assertEquals(
+                "Экспорт: 250 / 1000 (25%)",
+                PacketMonitorWindow.formatExportProgressText(250, 1000)
+        );
     }
 
     @Test

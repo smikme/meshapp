@@ -195,7 +195,7 @@ class ProtocolHandlerTest {
     }
 
     @Test
-    void logsIncomingAndOutgoingMeshPacketsWhenMonitorIsEnabled() throws Exception {
+    void logsIncomingAndOutgoingLoraMonitorPacketsWhenMonitorIsEnabled() throws Exception {
         PacketMonitorService monitorService = PacketMonitorService.getInstance();
         CountDownLatch packetLatch = new CountDownLatch(2);
         monitorService.addListener(new PacketMonitorService.Listener() {
@@ -223,6 +223,7 @@ class ProtocolHandlerTest {
                 .setFrom(2)
                 .setTo(1)
                 .setId(502)
+                .setTransportMechanism(MeshProtos.MeshPacket.TransportMechanism.TRANSPORT_LORA)
                 .setDecoded(MeshProtos.Data.newBuilder()
                         .setPortnum(Portnums.PortNum.ROUTING_APP)
                         .setRequestId(501)
@@ -242,6 +243,7 @@ class ProtocolHandlerTest {
         assertEquals(2, entries.size());
         assertEquals(PacketLogEntry.Direction.INCOMING, entries.getFirst().getDirection());
         assertEquals("ROUTING_APP", entries.getFirst().getPacketType());
+        assertEquals("TRANSPORT_LORA", entries.getLast().getTransportMechanism());
         assertEquals(PacketLogEntry.Direction.OUTGOING, entries.getLast().getDirection());
         assertEquals("TEXT_MESSAGE_APP", entries.getLast().getPacketType());
     }
