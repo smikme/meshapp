@@ -172,6 +172,7 @@ public final class PacketMonitorWindow {
     private Button btnStop;
     private Button btnClear;
     private Button btnExportJson;
+    private Button btnExportCsv;
     private Button btnCopyText;
     private Button btnCopyJson;
     private Button btnSaveText;
@@ -498,6 +499,12 @@ public final class PacketMonitorWindow {
                 "/icons/save-json.svg",
                 this::exportFilteredPacketsAsJson
         );
+        btnExportCsv = createPacketActionButton(
+                "Экспорт CSV",
+                "Экспортировать все LoRa-пакеты по текущим фильтрам в CSV файл",
+                "/icons/save-text.svg",
+                this::exportFilteredPacketsAsCsv
+        );
 
         ToolBar toolBar = new ToolBar(
                 btnCopyText,
@@ -506,7 +513,8 @@ public final class PacketMonitorWindow {
                 btnSaveText,
                 btnSaveJson,
                 new Separator(Orientation.HORIZONTAL),
-                btnExportJson
+                btnExportJson,
+                btnExportCsv
         );
         toolBar.setOrientation(Orientation.VERTICAL);
         toolBar.getStyleClass().add("packet-monitor-side-toolbar");
@@ -970,6 +978,7 @@ public final class PacketMonitorWindow {
         btnStop.setDisable(!captureEnabled);
         btnClear.setDisable(exportInProgress || totalStoredPacketCount == 0);
         btnExportJson.setDisable(exportInProgress || matchingPacketCount == 0);
+        btnExportCsv.setDisable(exportInProgress || matchingPacketCount == 0);
         updateExportControlsState();
         statusLabel.setText(captureEnabled ? "Сбор активен" : "Сбор остановлен");
     }
@@ -1719,7 +1728,7 @@ public final class PacketMonitorWindow {
 
         FileChooser chooser = new FileChooser();
         chooser.setTitle("Экспортировать LoRa-пакеты в JSON");
-        chooser.setInitialFileName(buildFilteredPacketsExportFileName());
+        chooser.setInitialFileName(buildFilteredPacketsExportFileName(".json"));
         chooser.getExtensionFilters().add(new FileChooser.ExtensionFilter("JSON (*.json)", "*.json"));
 
         File selected = chooser.showSaveDialog(stage);
@@ -1731,6 +1740,32 @@ public final class PacketMonitorWindow {
         PacketDebugFormatter.PacketCollectionExportMetadata metadata = buildCurrentExportMetadata();
         beginExportProgress(totalToExport);
         exportExecutor.execute(() -> runFilteredPacketExport(query, metadata, target, totalToExport));
+    }
+
+    private void exportFilteredPacketsAsCsv() {
+        if (exportInProgress) {
+            return;
+        }
+        PacketMonitorService.PacketQuery query = buildCurrentQuery();
+        int totalToExport = packetMonitorService.countMatchingPackets(query);
+        if (totalToExport == 0) {
+            Toast.show(Toast.Type.INFO, "Нет LoRa-пакетов для экспорта по текущим фильтрам");
+            return;
+        }
+
+        FileChooser chooser = new FileChooser();
+        chooser.setTitle("Экспортировать LoRa-пакеты в CSV");
+        chooser.setInitialFileName(buildFilteredPacketsExportFileName(".csv"));
+        chooser.getExtensionFilters().add(new FileChooser.ExtensionFilter("CSV (*.csv)", "*.csv"));
+
+        File selected = chooser.showSaveDialog(stage);
+        if (selected == null) {
+            return;
+        }
+        File target = ensureExtension(selected, ".csv");
+
+        beginExportProgress(totalToExport);
+        exportExecutor.execute(() -> runFilteredPacketCsvExport(query, target, totalToExport));
     }
 
     private void runFilteredPacketExport(PacketMonitorService.PacketQuery query,
@@ -1768,6 +1803,52 @@ public final class PacketMonitorWindow {
             PacketDebugFormatter.PacketCollectionJsonExportState state = stateHolder[0];
             for (PacketLogEntry entry : batch) {
                 state = PacketDebugFormatter.writePacketCollectionJsonEntry(
+                        state,
+                        entry,
+                        resolveEntryDeviceState(entry)
+                );
+            }
+            stateHolder[0] = state;
+            long exportedCount = state.packetCount();
+            Platform.runLater(() -> updateExportProgress(exportedCount, totalToExport));
+        });
+        return stateHolder[0];
+    }
+
+    private void runFilteredPacketCsvExport(PacketMonitorService.PacketQuery query,
+                                            File target,
+                                            long totalToExport) {
+        try (BufferedWriter writer = Files.newBufferedWriter(target.toPath(), StandardCharsets.UTF_8)) {
+            PacketDebugFormatter.PacketCollectionCsvExportState state =
+                    PacketDebugFormatter.beginPacketCollectionCsvExport(writer);
+            state = exportFilteredPacketsCsvBatches(query, state, totalToExport);
+            PacketDebugFormatter.finishPacketCollectionCsvExport(state);
+            long exportedCount = state.packetCount();
+            Platform.runLater(() -> {
+                finishExportProgress();
+                Toast.show(Toast.Type.SUCCESS, "Экспорт сохранён: " + target.getName()
+                        + " (" + exportedCount + " пакетов)");
+            });
+        } catch (IOException e) {
+            Platform.runLater(() -> {
+                finishExportProgress();
+                Toast.show(Toast.Type.ERROR, "Не удалось сохранить экспорт");
+            });
+        }
+    }
+
+    private PacketDebugFormatter.PacketCollectionCsvExportState exportFilteredPacketsCsvBatches(
+            PacketMonitorService.PacketQuery query,
+            PacketDebugFormatter.PacketCollectionCsvExportState initialState,
+            long totalToExport) throws IOException {
+        final PacketDebugFormatter.PacketCollectionCsvExportState[] stateHolder = {initialState};
+        packetMonitorService.forEachMatchingBatch(query, PACKET_EXPORT_BATCH_SIZE, batch -> {
+            if (Thread.currentThread().isInterrupted()) {
+                throw new IOException("Packet export interrupted");
+            }
+            PacketDebugFormatter.PacketCollectionCsvExportState state = stateHolder[0];
+            for (PacketLogEntry entry : batch) {
+                state = PacketDebugFormatter.writePacketCollectionCsvEntry(
                         state,
                         entry,
                         resolveEntryDeviceState(entry)
@@ -1859,11 +1940,11 @@ public final class PacketMonitorWindow {
         return "lora-packet-" + timestamp + "-" + viewedPacketEntry.getId() + extension;
     }
 
-    private String buildFilteredPacketsExportFileName() {
+    private String buildFilteredPacketsExportFileName(String extension) {
         String timestamp = PACKET_EXPORT_FILE_TIME.format(
                 Instant.ofEpochMilli(System.currentTimeMillis()).atZone(ZoneId.systemDefault()).toLocalDateTime()
         );
-        return "lora-packets-" + timestamp + ".json";
+        return "lora-packets-" + timestamp + extension;
     }
 
     private PacketDebugFormatter.PacketCollectionExportMetadata buildCurrentExportMetadata() {

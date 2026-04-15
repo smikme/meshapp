@@ -12,7 +12,9 @@ import org.junit.jupiter.api.Test;
 import org.meshtastic.proto.MeshProtos;
 import org.meshtastic.proto.Portnums;
 
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -226,6 +228,31 @@ class PacketDebugFormatterTest {
         assertTrue(packet.getAsJsonObject("hierarchy").getAsJsonArray("children").size() > 0);
     }
 
+    @Test
+    void packetCollectionExportCsvFlattensDecodedPayloadColumns() {
+        PacketLogEntry textEntry = packetLogEntry("csv hello");
+        PacketLogEntry positionEntry = positionPacketLogEntry();
+
+        String exported = PacketDebugFormatter.exportPacketsAsCsv(List.of(textEntry, positionEntry), ignored -> null);
+        String[] lines = exported.split("\n");
+
+        assertEquals(3, lines.length);
+        assertTrue(lines[0].contains("decoded_payload_text"));
+        assertTrue(lines[0].contains("decoded_position_latitude"));
+        assertTrue(!lines[0].contains("mesh_packet_json"));
+        assertTrue(!lines[0].contains("hierarchy_json"));
+
+        Map<String, String> textRow = csvRow(lines[0], lines[1]);
+        Map<String, String> positionRow = csvRow(lines[0], lines[2]);
+
+        assertEquals("TEXT_MESSAGE_APP", textRow.get("decoded_portnum"));
+        assertEquals("csv hello", textRow.get("decoded_payload_text"));
+        assertEquals("POSITION_APP", positionRow.get("decoded_portnum"));
+        assertEquals("55.7558000", positionRow.get("decoded_position_latitude"));
+        assertEquals("37.6173000", positionRow.get("decoded_position_longitude"));
+        assertEquals("156", positionRow.get("decoded_position_altitude"));
+    }
+
     private static PacketLogEntry packetLogEntry(String text) {
         MeshProtos.MeshPacket packet = MeshProtos.MeshPacket.newBuilder()
                 .setFrom(0x12345678)
@@ -250,6 +277,77 @@ class PacketDebugFormatterTest {
         );
         entry.setId(42);
         return entry;
+    }
+
+    private static PacketLogEntry positionPacketLogEntry() {
+        MeshProtos.MeshPacket packet = MeshProtos.MeshPacket.newBuilder()
+                .setFrom(0x12345678)
+                .setTo(0xFFFFFFFF)
+                .setId(778)
+                .setDecoded(MeshProtos.Data.newBuilder()
+                        .setPortnum(Portnums.PortNum.POSITION_APP)
+                        .setPayload(MeshProtos.Position.newBuilder()
+                                .setLatitudeI(557558000)
+                                .setLongitudeI(376173000)
+                                .setAltitude(156)
+                                .build()
+                                .toByteString())
+                        .build())
+                .build();
+
+        PacketLogEntry entry = new PacketLogEntry(
+                "!12345678",
+                1_710_000_001_000L,
+                PacketLogEntry.Direction.OUTGOING,
+                "POSITION_APP",
+                "TRANSPORT_LORA",
+                "Peer (305419896)",
+                "Вещание (4294967295)",
+                "lat=55.7558000, lon=37.6173000, alt=156",
+                packet.toByteArray()
+        );
+        entry.setId(43);
+        return entry;
+    }
+
+    private static Map<String, String> csvRow(String headerLine, String rowLine) {
+        List<String> headers = parseCsvLine(headerLine);
+        List<String> values = parseCsvLine(rowLine);
+        Map<String, String> row = new LinkedHashMap<>();
+        for (int i = 0; i < headers.size(); i++) {
+            row.put(headers.get(i), i < values.size() ? values.get(i) : "");
+        }
+        return row;
+    }
+
+    private static List<String> parseCsvLine(String line) {
+        java.util.ArrayList<String> values = new java.util.ArrayList<>();
+        StringBuilder cell = new StringBuilder();
+        boolean quoted = false;
+        for (int i = 0; i < line.length(); i++) {
+            char ch = line.charAt(i);
+            if (quoted) {
+                if (ch == '"') {
+                    if (i + 1 < line.length() && line.charAt(i + 1) == '"') {
+                        cell.append('"');
+                        i++;
+                    } else {
+                        quoted = false;
+                    }
+                } else {
+                    cell.append(ch);
+                }
+            } else if (ch == '"') {
+                quoted = true;
+            } else if (ch == ',') {
+                values.add(cell.toString());
+                cell.setLength(0);
+            } else {
+                cell.append(ch);
+            }
+        }
+        values.add(cell.toString());
+        return values;
     }
 
     private static TreeItem<PacketTreeNode> findByPrefix(TreeItem<PacketTreeNode> root, String prefix) {

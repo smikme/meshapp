@@ -94,6 +94,70 @@ public final class PacketDebugFormatter {
 
     public record PacketCollectionJsonExportState(JsonWriter writer, long packetCount) {}
 
+    public record PacketCollectionCsvExportState(Writer writer, long packetCount) {}
+
+    private static final String[] PACKET_COLLECTION_CSV_COLUMNS = {
+            "id",
+            "owner_node_id",
+            "captured_at",
+            "captured_at_millis",
+            "captured_at_text",
+            "direction",
+            "direction_text",
+            "packet_type",
+            "transport_mechanism",
+            "transport_text",
+            "route_text",
+            "from_node",
+            "to_node",
+            "payload_text",
+            "packet_size_bytes",
+            "mesh_packet_id",
+            "mesh_packet_from_num",
+            "mesh_packet_to_num",
+            "mesh_packet_channel",
+            "mesh_packet_rx_time",
+            "mesh_packet_hop_start",
+            "mesh_packet_hop_limit",
+            "mesh_packet_rx_rssi",
+            "mesh_packet_rx_snr",
+            "decoded_portnum",
+            "decoded_request_id",
+            "decoded_reply_id",
+            "decoded_emoji",
+            "decoded_payload_text",
+            "decoded_payload_base64",
+            "decoded_payload_size_bytes",
+            "decoded_payload_parse_error",
+            "decoded_routing_error",
+            "decoded_user_id",
+            "decoded_user_long_name",
+            "decoded_user_short_name",
+            "decoded_user_role",
+            "decoded_user_hw_model",
+            "decoded_position_latitude",
+            "decoded_position_longitude",
+            "decoded_position_altitude",
+            "decoded_telemetry_battery_level",
+            "decoded_telemetry_voltage",
+            "decoded_telemetry_temperature",
+            "decoded_telemetry_humidity",
+            "decoded_telemetry_pressure",
+            "decoded_telemetry_packets_rx",
+            "decoded_telemetry_packets_tx",
+            "decoded_telemetry_channel_utilization",
+            "decoded_telemetry_air_util_tx",
+            "decoded_traceroute_route",
+            "decoded_traceroute_route_back",
+            "decoded_admin_variant",
+            "decoded_admin_owner_id",
+            "decoded_admin_owner_long_name",
+            "decoded_admin_owner_short_name",
+            "decoded_admin_firmware_version",
+            "decoded_admin_role",
+            "parse_error"
+    };
+
     /**
      * Диапазон выделения в текстовом представлении предпросмотра.
      *
@@ -410,6 +474,24 @@ public final class PacketDebugFormatter {
         }
     }
 
+    public static String exportPacketsAsCsv(List<PacketLogEntry> entries,
+                                            Function<PacketLogEntry, DeviceState> deviceStateResolver) {
+        try {
+            StringWriter buffer = new StringWriter(4096);
+            PacketCollectionCsvExportState state = beginPacketCollectionCsvExport(buffer);
+            if (entries != null) {
+                for (PacketLogEntry entry : entries) {
+                    DeviceState deviceState = deviceStateResolver != null ? deviceStateResolver.apply(entry) : null;
+                    state = writePacketCollectionCsvEntry(state, entry, deviceState);
+                }
+            }
+            finishPacketCollectionCsvExport(state);
+            return buffer.toString();
+        } catch (IOException e) {
+            return "";
+        }
+    }
+
     public static PacketCollectionJsonExportState beginPacketCollectionJsonExport(
             Writer writer,
             PacketCollectionExportMetadata metadata) throws IOException {
@@ -451,6 +533,241 @@ public final class PacketDebugFormatter {
         jsonWriter.name("packetCount").value(packetCount);
         jsonWriter.endObject();
         jsonWriter.flush();
+    }
+
+    public static PacketCollectionCsvExportState beginPacketCollectionCsvExport(Writer writer) throws IOException {
+        if (writer == null) {
+            return new PacketCollectionCsvExportState(new StringWriter(), 0);
+        }
+        writer.write(String.join(",", PACKET_COLLECTION_CSV_COLUMNS));
+        writer.write('\n');
+        return new PacketCollectionCsvExportState(writer, 0);
+    }
+
+    public static PacketCollectionCsvExportState writePacketCollectionCsvEntry(
+            PacketCollectionCsvExportState state,
+            PacketLogEntry entry,
+            DeviceState deviceState) throws IOException {
+        if (state == null || state.writer() == null || entry == null) {
+            return state;
+        }
+
+        PacketEndpoints endpoints = resolvePacketEndpoints(entry, deviceState);
+
+        String meshPacketId = "";
+        String meshPacketFromNum = "";
+        String meshPacketToNum = "";
+        String meshPacketChannel = "";
+        String meshPacketRxTime = "";
+        String meshPacketHopStart = "";
+        String meshPacketHopLimit = "";
+        String meshPacketRxRssi = "";
+        String meshPacketRxSnr = "";
+        String decodedPortnum = "";
+        String decodedRequestId = "";
+        String decodedReplyId = "";
+        String decodedEmoji = "";
+        String decodedPayloadText = "";
+        String decodedPayloadBase64 = "";
+        String decodedPayloadSizeBytes = "";
+        String decodedPayloadParseError = "";
+        String decodedRoutingError = "";
+        String decodedUserId = "";
+        String decodedUserLongName = "";
+        String decodedUserShortName = "";
+        String decodedUserRole = "";
+        String decodedUserHwModel = "";
+        String decodedPositionLatitude = "";
+        String decodedPositionLongitude = "";
+        String decodedPositionAltitude = "";
+        String decodedTelemetryBatteryLevel = "";
+        String decodedTelemetryVoltage = "";
+        String decodedTelemetryTemperature = "";
+        String decodedTelemetryHumidity = "";
+        String decodedTelemetryPressure = "";
+        String decodedTelemetryPacketsRx = "";
+        String decodedTelemetryPacketsTx = "";
+        String decodedTelemetryChannelUtilization = "";
+        String decodedTelemetryAirUtilTx = "";
+        String decodedTracerouteRoute = "";
+        String decodedTracerouteRouteBack = "";
+        String decodedAdminVariant = "";
+        String decodedAdminOwnerId = "";
+        String decodedAdminOwnerLongName = "";
+        String decodedAdminOwnerShortName = "";
+        String decodedAdminFirmwareVersion = "";
+        String decodedAdminRole = "";
+        String parseError = "";
+
+        try {
+            MeshProtos.MeshPacket packet = MeshProtos.MeshPacket.parseFrom(entry.getPacketBytes());
+            meshPacketId = formatUint32(packet.getId());
+            meshPacketFromNum = formatUint32(packet.getFrom());
+            meshPacketToNum = formatUint32(packet.getTo());
+            meshPacketChannel = Integer.toString(packet.getChannel());
+            meshPacketRxTime = packet.getRxTime() > 0 ? Long.toString(packet.getRxTime()) : "";
+            meshPacketHopStart = packet.getHopStart() != 0 ? Integer.toString(packet.getHopStart()) : "";
+            meshPacketHopLimit = packet.getHopLimit() != 0 ? Integer.toString(packet.getHopLimit()) : "";
+            meshPacketRxRssi = packet.getRxRssi() != 0 ? Integer.toString(packet.getRxRssi()) : "";
+            meshPacketRxSnr = packet.getRxSnr() != 0 ? Float.toString(packet.getRxSnr()) : "";
+
+            if (packet.hasDecoded()) {
+                MeshProtos.Data data = packet.getDecoded();
+                decodedPortnum = data.getPortnum().name();
+                decodedRequestId = data.getRequestId() != 0 ? formatUint32(data.getRequestId()) : "";
+                decodedReplyId = data.getReplyId() != 0 ? formatUint32(data.getReplyId()) : "";
+                decodedEmoji = data.getEmoji() != 0 ? Integer.toString(data.getEmoji()) : "";
+                decodedPayloadSizeBytes = Integer.toString(data.getPayload().size());
+                decodedPayloadBase64 = Base64.getEncoder().encodeToString(data.getPayload().toByteArray());
+
+                if (isProbablyText(data.getPayload())) {
+                    decodedPayloadText = data.getPayload().toString(StandardCharsets.UTF_8);
+                }
+
+                try {
+                    switch (data.getPortnum()) {
+                        case TEXT_MESSAGE_APP -> decodedPayloadText = data.getPayload().toString(StandardCharsets.UTF_8);
+                        case ROUTING_APP -> {
+                            MeshProtos.Routing routing = MeshProtos.Routing.parseFrom(data.getPayload());
+                            decodedRoutingError = routing.getErrorReason().name();
+                        }
+                        case NODEINFO_APP -> {
+                            MeshProtos.User user = MeshProtos.User.parseFrom(data.getPayload());
+                            decodedUserId = user.getId();
+                            decodedUserLongName = user.getLongName();
+                            decodedUserShortName = user.getShortName();
+                            decodedUserRole = user.getRole().name();
+                            decodedUserHwModel = user.getHwModel().name();
+                        }
+                        case POSITION_APP -> {
+                            MeshProtos.Position position = MeshProtos.Position.parseFrom(data.getPayload());
+                            decodedPositionLatitude = formatCoordinate(position.getLatitudeI());
+                            decodedPositionLongitude = formatCoordinate(position.getLongitudeI());
+                            decodedPositionAltitude = Integer.toString(position.getAltitude());
+                        }
+                        case TELEMETRY_APP -> {
+                            TelemetryProtos.Telemetry telemetry = TelemetryProtos.Telemetry.parseFrom(data.getPayload());
+                            if (telemetry.hasDeviceMetrics()) {
+                                var metrics = telemetry.getDeviceMetrics();
+                                decodedTelemetryBatteryLevel = Integer.toString(metrics.getBatteryLevel());
+                                decodedTelemetryVoltage = Float.toString(metrics.getVoltage());
+                            }
+                            if (telemetry.hasEnvironmentMetrics()) {
+                                var metrics = telemetry.getEnvironmentMetrics();
+                                decodedTelemetryTemperature = Float.toString(metrics.getTemperature());
+                                decodedTelemetryHumidity = Float.toString(metrics.getRelativeHumidity());
+                                decodedTelemetryPressure = Float.toString(metrics.getBarometricPressure());
+                            }
+                            if (telemetry.hasLocalStats()) {
+                                var stats = telemetry.getLocalStats();
+                                decodedTelemetryPacketsRx = Integer.toString(stats.getNumPacketsRx());
+                                decodedTelemetryPacketsTx = Integer.toString(stats.getNumPacketsTx());
+                                decodedTelemetryChannelUtilization = Float.toString(stats.getChannelUtilization());
+                                decodedTelemetryAirUtilTx = Float.toString(stats.getAirUtilTx());
+                            }
+                        }
+                        case TRACEROUTE_APP -> {
+                            MeshProtos.RouteDiscovery route = MeshProtos.RouteDiscovery.parseFrom(data.getPayload());
+                            decodedTracerouteRoute = formatUint32List(route.getRouteList());
+                            decodedTracerouteRouteBack = formatUint32List(route.getRouteBackList());
+                        }
+                        case ADMIN_APP -> {
+                            AdminProtos.AdminMessage adminMessage = AdminProtos.AdminMessage.parseFrom(data.getPayload());
+                            decodedAdminVariant = adminMessage.getPayloadVariantCase().name();
+                            if (adminMessage.hasGetOwnerResponse()) {
+                                MeshProtos.User owner = adminMessage.getGetOwnerResponse();
+                                decodedAdminOwnerId = owner.getId();
+                                decodedAdminOwnerLongName = owner.getLongName();
+                                decodedAdminOwnerShortName = owner.getShortName();
+                            }
+                            if (adminMessage.hasGetDeviceMetadataResponse()) {
+                                MeshProtos.DeviceMetadata metadata = adminMessage.getGetDeviceMetadataResponse();
+                                decodedAdminFirmwareVersion = metadata.getFirmwareVersion();
+                                decodedAdminRole = metadata.getRole().name();
+                            }
+                        }
+                        default -> {
+                        }
+                    }
+                } catch (InvalidProtocolBufferException e) {
+                    decodedPayloadParseError = e.getMessage();
+                }
+            }
+        } catch (InvalidProtocolBufferException e) {
+            parseError = e.getMessage();
+        }
+
+        String[] values = {
+                Long.toString(entry.getId()),
+                entry.getOwnerNodeId(),
+                Instant.ofEpochMilli(entry.getCapturedAt()).toString(),
+                Long.toString(entry.getCapturedAt()),
+                entry.getCapturedAtText(),
+                entry.getDirection().name(),
+                entry.getDirectionText(),
+                entry.getPacketType(),
+                entry.getTransportMechanism(),
+                entry.getTransportText(),
+                entry.getRouteText(),
+                firstNonBlank(endpoints.fromNode(), entry.getFromNode(), "-"),
+                firstNonBlank(endpoints.toNode(), entry.getToNode(), "-"),
+                entry.getPayloadText(),
+                Integer.toString(entry.getPacketBytes().length),
+                meshPacketId,
+                meshPacketFromNum,
+                meshPacketToNum,
+                meshPacketChannel,
+                meshPacketRxTime,
+                meshPacketHopStart,
+                meshPacketHopLimit,
+                meshPacketRxRssi,
+                meshPacketRxSnr,
+                decodedPortnum,
+                decodedRequestId,
+                decodedReplyId,
+                decodedEmoji,
+                decodedPayloadText,
+                decodedPayloadBase64,
+                decodedPayloadSizeBytes,
+                decodedPayloadParseError,
+                decodedRoutingError,
+                decodedUserId,
+                decodedUserLongName,
+                decodedUserShortName,
+                decodedUserRole,
+                decodedUserHwModel,
+                decodedPositionLatitude,
+                decodedPositionLongitude,
+                decodedPositionAltitude,
+                decodedTelemetryBatteryLevel,
+                decodedTelemetryVoltage,
+                decodedTelemetryTemperature,
+                decodedTelemetryHumidity,
+                decodedTelemetryPressure,
+                decodedTelemetryPacketsRx,
+                decodedTelemetryPacketsTx,
+                decodedTelemetryChannelUtilization,
+                decodedTelemetryAirUtilTx,
+                decodedTracerouteRoute,
+                decodedTracerouteRouteBack,
+                decodedAdminVariant,
+                decodedAdminOwnerId,
+                decodedAdminOwnerLongName,
+                decodedAdminOwnerShortName,
+                decodedAdminFirmwareVersion,
+                decodedAdminRole,
+                parseError
+        };
+
+        writeCsvRow(state.writer(), values);
+        return new PacketCollectionCsvExportState(state.writer(), state.packetCount() + 1);
+    }
+
+    public static void finishPacketCollectionCsvExport(PacketCollectionCsvExportState state) throws IOException {
+        if (state == null || state.writer() == null) {
+            return;
+        }
+        state.writer().flush();
     }
 
     /**
@@ -988,6 +1305,34 @@ public final class PacketDebugFormatter {
             return;
         }
         json.addProperty(propertyName, value);
+    }
+
+    private static void writeCsvRow(Writer writer, String[] values) throws IOException {
+        if (writer == null || values == null) {
+            return;
+        }
+        for (int i = 0; i < values.length; i++) {
+            if (i > 0) {
+                writer.write(',');
+            }
+            writer.write(escapeCsvCell(values[i]));
+        }
+        writer.write('\n');
+    }
+
+    private static String escapeCsvCell(String value) {
+        if (value == null) {
+            return "";
+        }
+        String normalized = value.replace("\r\n", "\n")
+                .replace('\r', '\n')
+                .replace('\n', ' ');
+        boolean needsQuotes = normalized.contains(",")
+                || normalized.contains("\"")
+                || normalized.startsWith(" ")
+                || normalized.endsWith(" ");
+        String escaped = normalized.replace("\"", "\"\"");
+        return needsQuotes ? "\"" + escaped + "\"" : escaped;
     }
 
     private static JsonElement toProtoJsonElement(FieldDescriptor field, Object value) {
