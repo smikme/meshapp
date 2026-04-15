@@ -660,8 +660,10 @@ public class FormChat extends Form {
             MessageDbService db = MessageDbService.getInstance();
             String chatType = currentChatType();
             String chatKey = currentChatKey();
+            String ownerNodeId = currentOwnerNodeId();
 
-            List<MeshMessage> msgs = db.loadLast(chatType, chatKey, PAGE_SIZE, currentOwnerNodeId());
+            db.backfillMissingReplyTexts(chatType, chatKey, ownerNodeId);
+            List<MeshMessage> msgs = db.loadLast(chatType, chatKey, PAGE_SIZE, ownerNodeId);
             attachReactions(msgs);
 
             clearLoadedMessageState();
@@ -1004,11 +1006,17 @@ public class FormChat extends Form {
         if (messages == null || messages.isEmpty() || selectedChat == null) {
             return;
         }
+        MessageDbService db = MessageDbService.getInstance();
+        String chatType = currentChatType();
+        String chatKey = currentChatKey();
+        String ownerNodeId = currentOwnerNodeId();
+        db.hydrateReplyTexts(messages, chatType, chatKey, ownerNodeId);
+
         Map<Integer, List<com.meshtastic.client.model.MessageReaction>> reactionsByTarget =
-                MessageDbService.getInstance().loadReactionsByTargetPacketIds(
-                        currentChatType(),
-                        currentChatKey(),
-                        currentOwnerNodeId(),
+                db.loadReactionsByTargetPacketIds(
+                        chatType,
+                        chatKey,
+                        ownerNodeId,
                         messages.stream().map(MeshMessage::getPacketId).toList());
         for (MeshMessage message : messages) {
             message.setReactions(reactionsByTarget.get(message.getPacketId()));

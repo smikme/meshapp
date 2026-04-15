@@ -23,7 +23,7 @@ public final class DatabaseMigrator {
     private static final Logger log = LoggerFactory.getLogger(DatabaseMigrator.class);
 
     /** Текущая версия схемы. Увеличивается при каждом изменении схемы. */
-    static final int CURRENT_VERSION = 9;
+    static final int CURRENT_VERSION = 10;
 
     private DatabaseMigrator() {}
 
@@ -65,6 +65,7 @@ public final class DatabaseMigrator {
             if (version < 7) { migrateToV7(connection); version = 7; }
             if (version < 8) { migrateToV8(connection); version = 8; }
             if (version < 9) { migrateToV9(connection); version = 9; }
+            if (version < 10) { migrateToV10(connection); version = 10; }
 
             setVersion(connection, CURRENT_VERSION);
             log.info("Database migration complete, schema version = {}", CURRENT_VERSION);
@@ -271,6 +272,18 @@ public final class DatabaseMigrator {
                     """);
         }
         log.info("Migration v9: added 'transport_mechanism' to lora_packet_logs");
+    }
+
+    /** v10: флаг MQTT-доставки для сообщений чата. */
+    private static void migrateToV10(Connection connection) throws SQLException {
+        if (!tableExists(connection, "MESSAGES")) {
+            log.info("Migration v10: skipped messages.via_mqtt because messages table is absent");
+            return;
+        }
+        try (Statement stmt = connection.createStatement()) {
+            stmt.execute("ALTER TABLE messages ADD COLUMN IF NOT EXISTS via_mqtt BOOLEAN DEFAULT FALSE");
+        }
+        log.info("Migration v10: added 'via_mqtt' to messages");
     }
 
     /** v2: колонка favorite для избранных нод. */

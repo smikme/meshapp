@@ -169,13 +169,12 @@ public class MessageListenerService implements FromRadioListener {
         msg.setHopLimit(packet.getHopLimit());
         msg.setRxRssi(packet.getRxRssi());
         msg.setRxSnr(packet.getRxSnr());
+        msg.setViaMqtt(isMqttPacket(packet));
 
         if (data.getReplyId() != 0) {
             log.info("REPLY_DEBUG recv: reply_id={} (0x{}) from {}",
                     data.getReplyId(), Integer.toHexString(data.getReplyId()), fromNodeId);
             msg.setReplyId(data.getReplyId());
-            MeshMessage original = deviceState.findMessageByPacketId(data.getReplyId());
-            if (original != null) { msg.setReplyText(original.getText()); }
         }
 
         if (fromNode.getLongName() != null) {
@@ -187,6 +186,7 @@ public class MessageListenerService implements FromRadioListener {
         int textLength = text.length();
         if (isDirect) {
             msg.setStatus(MeshMessage.DeliveryStatus.DELIVERED);
+            hydrateReplyText(msg, ownerNodeId, "dm", fromNodeId);
             MessageDbService.getInstance().save(msg, "dm", fromNodeId, ownerNodeId);
             deviceState.addDirectMessage(msg, fromNodeId);
             log.info("Received DM from {} (packetId={}, chars={}, bytes={}, replyId={})",
@@ -198,7 +198,9 @@ public class MessageListenerService implements FromRadioListener {
             }
         } else {
             msg.setStatus(MeshMessage.DeliveryStatus.DELIVERED);
-            MessageDbService.getInstance().save(msg, "channel", String.valueOf(channel), ownerNodeId);
+            String chatKey = String.valueOf(channel);
+            hydrateReplyText(msg, ownerNodeId, "channel", chatKey);
+            MessageDbService.getInstance().save(msg, "channel", chatKey, ownerNodeId);
             deviceState.addMessage(msg);
             log.info("Received channel {} message from {} (packetId={}, chars={}, bytes={}, replyId={})",
                     channel, fromNodeId, packet.getId(), textLength, payloadBytes, data.getReplyId());
@@ -211,6 +213,47 @@ public class MessageListenerService implements FromRadioListener {
 
         // Показать красную точку на иконке "Чаты"
         Platform.runLater(() -> DrawerManager.setChatUnreadDot(true));
+    }
+
+    private void hydrateReplyText(MeshMessage msg, String ownerNodeId, String chatType, String chatKey) {
+        if (msg.getReplyId() == 0 || msg.getReplyText() != null) {
+            return;
+        }
+
+        MeshMessage original = MessageDbService.getInstance()
+                .findByPacketId(msg.getReplyId(), chatType, chatKey, ownerNodeId);
+        if (original == null) {
+            original = findInMemoryReplyTarget(msg.getReplyId(), chatType, chatKey);
+        }
+        if (original != null) {
+            msg.setReplyText(original.getText());
+        }
+    }
+
+    private MeshMessage findInMemoryReplyTarget(int replyId, String chatType, String chatKey) {
+        MeshMessage original = deviceState.findRuntimeMessageByPacketId(replyId);
+        if (original == null) {
+            return null;
+        }
+        return isMessageInChatScope(original, chatType, chatKey) ? original : null;
+    }
+
+    private static boolean isMessageInChatScope(MeshMessage message, String chatType, String chatKey) {
+        if ("channel".equals(chatType)) {
+            return "!ffffffff".equalsIgnoreCase(message.getToNodeId())
+                    && String.valueOf(message.getChannelIndex()).equals(chatKey);
+        }
+        if ("dm".equals(chatType)) {
+            return chatKey != null
+                    && (chatKey.equalsIgnoreCase(message.getFromNodeId())
+                    || chatKey.equalsIgnoreCase(message.getToNodeId()));
+        }
+        return false;
+    }
+
+    private static boolean isMqttPacket(MeshProtos.MeshPacket packet) {
+        return packet.getViaMqtt()
+                || packet.getTransportMechanism() == MeshProtos.MeshPacket.TransportMechanism.TRANSPORT_MQTT;
     }
 
     private boolean deferMeshPacket(MeshProtos.MeshPacket packet, String reason) {

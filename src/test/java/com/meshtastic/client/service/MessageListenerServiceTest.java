@@ -79,36 +79,45 @@ class MessageListenerServiceTest {
 
     @Test
     void onMeshPacketStoresIncomingChannelMessageInStateAndDatabase() {
-        MeshProtos.MeshPacket packet = MeshProtos.MeshPacket.newBuilder()
-                .setFrom(0x11111111)
-                .setTo(0xFFFFFFFF)
-                .setChannel(2)
-                .setId(7001)
-                .setRxTime(1_700_000_100)
-                .setHopStart(5)
-                .setHopLimit(3)
-                .setRxRssi(-77)
-                .setRxSnr(8.5f)
-                .setDecoded(MeshProtos.Data.newBuilder()
-                        .setPortnum(Portnums.PortNum.TEXT_MESSAGE_APP)
-                        .setPayload(ByteString.copyFrom("hello channel", StandardCharsets.UTF_8))
-                        .build())
-                .build();
+        boolean notificationsEnabled = AppPreferences.isNotificationsEnabled();
+        AppPreferences.setNotificationsEnabled(false);
+        try {
+            MeshProtos.MeshPacket packet = MeshProtos.MeshPacket.newBuilder()
+                    .setFrom(0x11111111)
+                    .setTo(0xFFFFFFFF)
+                    .setChannel(2)
+                    .setId(7001)
+                    .setRxTime(1_700_000_100)
+                    .setHopStart(5)
+                    .setHopLimit(3)
+                    .setRxRssi(-77)
+                    .setRxSnr(8.5f)
+                    .setViaMqtt(true)
+                    .setDecoded(MeshProtos.Data.newBuilder()
+                            .setPortnum(Portnums.PortNum.TEXT_MESSAGE_APP)
+                            .setPayload(ByteString.copyFrom("hello channel", StandardCharsets.UTF_8))
+                            .build())
+                    .build();
 
-        service.onMeshPacket(packet);
+            service.onMeshPacket(packet);
 
-        MeshMessage inMemory = state.getMessages(2).getFirst();
-        assertEquals("hello channel", inMemory.getText());
-        assertEquals("!11111111", inMemory.getFromNodeId());
-        assertEquals("!ffffffff", inMemory.getToNodeId());
-        assertEquals(MeshMessage.DeliveryStatus.DELIVERED, inMemory.getStatus());
-        assertEquals(-77, inMemory.getRxRssi());
-        assertEquals(8.5f, inMemory.getRxSnr());
+            MeshMessage inMemory = state.getMessages(2).getFirst();
+            assertEquals("hello channel", inMemory.getText());
+            assertEquals("!11111111", inMemory.getFromNodeId());
+            assertEquals("!ffffffff", inMemory.getToNodeId());
+            assertEquals(MeshMessage.DeliveryStatus.DELIVERED, inMemory.getStatus());
+            assertEquals(-77, inMemory.getRxRssi());
+            assertEquals(8.5f, inMemory.getRxSnr());
+            assertTrue(inMemory.isViaMqtt());
 
-        MeshMessage persisted = MessageDbService.getInstance().findByPacketId(7001);
-        assertNotNull(persisted);
-        assertEquals("hello channel", persisted.getText());
-        assertEquals(MeshMessage.DeliveryStatus.DELIVERED, persisted.getStatus());
+            MeshMessage persisted = MessageDbService.getInstance().findByPacketId(7001);
+            assertNotNull(persisted);
+            assertEquals("hello channel", persisted.getText());
+            assertEquals(MeshMessage.DeliveryStatus.DELIVERED, persisted.getStatus());
+            assertTrue(persisted.isViaMqtt());
+        } finally {
+            AppPreferences.setNotificationsEnabled(notificationsEnabled);
+        }
     }
 
     @Test

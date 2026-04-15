@@ -8,6 +8,8 @@ import javafx.scene.Node;
 import javafx.scene.Parent;
 import javafx.scene.control.Label;
 import javafx.scene.layout.HBox;
+import javafx.scene.layout.Region;
+import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -20,6 +22,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class MessageBubbleFactoryTest {
 
@@ -43,6 +46,30 @@ class MessageBubbleFactoryTest {
 
             assertNotNull(content);
             assertNull(content.getOnMouseClicked());
+            return null;
+        });
+    }
+
+    @Test
+    void incomingMqttBubbleShowsCloudBadge() {
+        onFxThread(() -> {
+            MessageBubbleFactory factory = new MessageBubbleFactory(
+                    null,
+                    new SimpleDoubleProperty(600),
+                    new NoOpBubbleActions(),
+                    new HashMap<>());
+            MeshMessage incoming = new MeshMessage("!00000002", "!ffffffff", 0, "mqtt message", 10, false);
+            incoming.setViaMqtt(true);
+
+            HBox row = factory.build(incoming);
+            VBox content = findNodeWithStyle(row, "chat-bubble-incoming", VBox.class).orElse(null);
+            StackPane badge = findNodeWithStyle(row, "chat-bubble-mqtt-badge", StackPane.class).orElse(null);
+            Region icon = findNodeWithStyle(row, "chat-bubble-mqtt-icon", Region.class).orElse(null);
+
+            assertNotNull(content);
+            assertNotNull(badge);
+            assertNotNull(icon);
+            assertTrue(content.getStyleClass().contains("chat-bubble-with-mqtt-badge"));
             return null;
         });
     }

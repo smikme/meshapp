@@ -85,6 +85,7 @@ public final class MessageDbService {
                         hop_start      INT DEFAULT 0,
                         hop_limit      INT DEFAULT 0,
                         sender_name    VARCHAR(100),
+                        via_mqtt       BOOLEAN DEFAULT FALSE,
                         system_msg     BOOLEAN DEFAULT FALSE,
                         rx_rssi        INT DEFAULT 0,
                         rx_snr         REAL DEFAULT 0,
@@ -142,8 +143,8 @@ public final class MessageDbService {
                 INSERT INTO messages (chat_type, chat_key, from_node_id, to_node_id, channel_idx,
                     text, timestamp, outgoing, packet_id, status, error_reason,
                     reply_id, reply_text, hop_start, hop_limit, sender_name, system_msg,
-                    rx_rssi, rx_snr, owner_node_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    rx_rssi, rx_snr, via_mqtt, owner_node_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, Statement.RETURN_GENERATED_KEYS);
 
             updateStatusStmt = dbConnection.prepareStatement("""
@@ -219,7 +220,15 @@ public final class MessageDbService {
             log.warn("Message DB not initialized — message dropped (chatType={}, chatKey={})", chatType, chatKey);
             return;
         }
+        String normalizedOwnerNodeId = ownerNodeId != null ? ownerNodeId : "";
         try {
+            Long existingDbId = findExistingMessageDbId(msg.getPacketId(), chatType, chatKey, normalizedOwnerNodeId);
+            if (existingDbId != null) {
+                msg.setDbId(existingDbId);
+                updateExistingMessageMetadata(existingDbId, msg);
+                return;
+            }
+
             insertStmt.setString(1, chatType);
             insertStmt.setString(2, chatKey);
             insertStmt.setString(3, msg.getFromNodeId());
@@ -239,7 +248,8 @@ public final class MessageDbService {
             insertStmt.setBoolean(17, msg.isSystemMessage());
             insertStmt.setInt(18, msg.getRxRssi());
             insertStmt.setFloat(19, msg.getRxSnr());
-            insertStmt.setString(20, ownerNodeId != null ? ownerNodeId : "");
+            insertStmt.setBoolean(20, msg.isViaMqtt());
+            insertStmt.setString(21, normalizedOwnerNodeId);
             insertStmt.executeUpdate();
 
             try (ResultSet keys = insertStmt.getGeneratedKeys()) {
@@ -249,6 +259,62 @@ public final class MessageDbService {
             }
         } catch (SQLException e) {
             log.error("Failed to save message to DB", e);
+        }
+    }
+
+    private Long findExistingMessageDbId(int packetId, String chatType, String chatKey, String ownerNodeId) throws SQLException {
+        if (dbConnection == null || packetId == 0) {
+            return null;
+        }
+        try (PreparedStatement ps = dbConnection.prepareStatement("""
+                SELECT id FROM messages
+                WHERE owner_node_id = ? AND chat_type = ? AND chat_key = ?
+                  AND packet_id = ? AND packet_id <> 0
+                ORDER BY id ASC LIMIT 1
+                """)) {
+            ps.setString(1, ownerNodeId);
+            ps.setString(2, chatType);
+            ps.setString(3, chatKey);
+            ps.setInt(4, packetId);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next() ? rs.getLong("id") : null;
+            }
+        }
+    }
+
+    private void updateExistingMessageMetadata(long dbId, MeshMessage msg) throws SQLException {
+        try (PreparedStatement ps = dbConnection.prepareStatement("""
+                UPDATE messages
+                SET status = COALESCE(?, status),
+                    error_reason = COALESCE(?, error_reason),
+                    reply_id = CASE WHEN ? <> 0 THEN ? ELSE reply_id END,
+                    reply_text = CASE
+                        WHEN ? IS NOT NULL AND LENGTH(?) > 0
+                             AND (reply_text IS NULL OR LENGTH(reply_text) = 0)
+                        THEN ?
+                        ELSE reply_text
+                    END,
+                    sender_name = COALESCE(?, sender_name),
+                    rx_rssi = CASE WHEN ? <> 0 THEN ? ELSE rx_rssi END,
+                    rx_snr = CASE WHEN ? <> 0 THEN ? ELSE rx_snr END,
+                    via_mqtt = CASE WHEN ? THEN TRUE ELSE via_mqtt END
+                WHERE id = ?
+                """)) {
+            ps.setString(1, msg.getStatus() != null ? msg.getStatus().name() : null);
+            ps.setString(2, msg.getErrorReason());
+            ps.setInt(3, msg.getReplyId());
+            ps.setInt(4, msg.getReplyId());
+            ps.setString(5, msg.getReplyText());
+            ps.setString(6, msg.getReplyText());
+            ps.setString(7, msg.getReplyText());
+            ps.setString(8, msg.getSenderName());
+            ps.setInt(9, msg.getRxRssi());
+            ps.setInt(10, msg.getRxRssi());
+            ps.setFloat(11, msg.getRxSnr());
+            ps.setFloat(12, msg.getRxSnr());
+            ps.setBoolean(13, msg.isViaMqtt());
+            ps.setLong(14, dbId);
+            ps.executeUpdate();
         }
     }
 
@@ -522,6 +588,127 @@ public final class MessageDbService {
         }
         return null;
     }
+
+    /**
+     * Находит сообщение по packetId только внутри конкретного owner/chat scope.
+     */
+    public MeshMessage findByPacketId(int packetId, String chatType, String chatKey, String ownerNodeId) {
+        if (dbConnection == null || packetId == 0) { return null; }
+        try (PreparedStatement ps = dbConnection.prepareStatement("""
+                SELECT * FROM messages
+                WHERE owner_node_id = ? AND chat_type = ? AND chat_key = ?
+                  AND packet_id = ? AND packet_id <> 0
+                ORDER BY id ASC LIMIT 1
+                """)) {
+            ps.setString(1, ownerNodeId != null ? ownerNodeId : "");
+            ps.setString(2, chatType);
+            ps.setString(3, chatKey);
+            ps.setInt(4, packetId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) { return readMessage(rs); }
+            }
+        } catch (SQLException e) {
+            log.error("Failed to find message by packetId {} in scope ({}, {}, {})",
+                    packetId, ownerNodeId, chatType, chatKey, e);
+        }
+        return null;
+    }
+
+    /**
+     * Восстанавливает текст цитаты для reply-сообщений, если оригинал уже есть
+     * в том же owner/chat scope. Найденные quote-тексты сразу сохраняются в БД.
+     *
+     * @return количество сообщений, для которых удалось заполнить replyText
+     */
+    public synchronized int hydrateReplyTexts(List<MeshMessage> messages,
+                                              String chatType,
+                                              String chatKey,
+                                              String ownerNodeId) {
+        if (messages == null || messages.isEmpty() || dbConnection == null) {
+            return 0;
+        }
+
+        int updated = 0;
+        for (MeshMessage message : messages) {
+            if (!needsReplyText(message)) {
+                continue;
+            }
+
+            MeshMessage original = findByPacketId(message.getReplyId(), chatType, chatKey, ownerNodeId);
+            if (original == null || original.getText() == null || original.getText().isEmpty()) {
+                continue;
+            }
+
+            message.setReplyText(original.getText());
+            if (message.getDbId() > 0) {
+                updateReplyText(message.getDbId(), original.getText());
+            }
+            updated++;
+        }
+        return updated;
+    }
+
+    /**
+     * Заполняет отсутствующие reply_text во всём указанном чате, когда оригинал
+     * сообщения уже сохранён в этом же owner/chat scope.
+     */
+    public synchronized int backfillMissingReplyTexts(String chatType, String chatKey, String ownerNodeId) {
+        if (dbConnection == null) {
+            return 0;
+        }
+
+        List<ReplyBackfillTarget> targets = new ArrayList<>();
+        try (PreparedStatement ps = dbConnection.prepareStatement("""
+                SELECT id, reply_id FROM messages
+                WHERE owner_node_id = ? AND chat_type = ? AND chat_key = ?
+                  AND reply_id <> 0
+                  AND (reply_text IS NULL OR LENGTH(reply_text) = 0)
+                ORDER BY id ASC
+                """)) {
+            ps.setString(1, ownerNodeId != null ? ownerNodeId : "");
+            ps.setString(2, chatType);
+            ps.setString(3, chatKey);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    targets.add(new ReplyBackfillTarget(rs.getLong("id"), rs.getInt("reply_id")));
+                }
+            }
+        } catch (SQLException e) {
+            log.error("Failed to list missing reply_text rows for ({}, {}, {})",
+                    ownerNodeId, chatType, chatKey, e);
+            return 0;
+        }
+
+        int updated = 0;
+        for (ReplyBackfillTarget target : targets) {
+            MeshMessage original = findByPacketId(target.replyId(), chatType, chatKey, ownerNodeId);
+            if (original == null || original.getText() == null || original.getText().isEmpty()) {
+                continue;
+            }
+            updateReplyText(target.dbId(), original.getText());
+            updated++;
+        }
+        return updated;
+    }
+
+    private static boolean needsReplyText(MeshMessage message) {
+        return message != null
+                && message.getReplyId() != 0
+                && (message.getReplyText() == null || message.getReplyText().isEmpty());
+    }
+
+    private void updateReplyText(long dbId, String replyText) {
+        try (PreparedStatement ps = dbConnection.prepareStatement(
+                "UPDATE messages SET reply_text = ? WHERE id = ? AND (reply_text IS NULL OR LENGTH(reply_text) = 0)")) {
+            ps.setString(1, replyText);
+            ps.setLong(2, dbId);
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            log.error("Failed to update reply_text for message id={}", dbId, e);
+        }
+    }
+
+    private record ReplyBackfillTarget(long dbId, int replyId) {}
 
     /**
      * Загружает реакции для набора packetId сообщений, сгруппированные по target_packet_id.
@@ -891,7 +1078,8 @@ public final class MessageDbService {
                             insertStmt.setBoolean(17, msg.isSystemMessage());
                             insertStmt.setInt(18, 0);
                             insertStmt.setFloat(19, 0);
-                            insertStmt.setString(20, "");
+                            insertStmt.setBoolean(20, false);
+                            insertStmt.setString(21, "");
                             insertStmt.addBatch();
                             total++;
 
@@ -980,6 +1168,7 @@ public final class MessageDbService {
         msg.setSystemMessage(rs.getBoolean("system_msg"));
         msg.setRxRssi(rs.getInt("rx_rssi"));
         msg.setRxSnr(rs.getFloat("rx_snr"));
+        msg.setViaMqtt(rs.getBoolean("via_mqtt"));
         return msg;
     }
 
