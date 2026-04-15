@@ -42,7 +42,9 @@ public final class ConnectionManager {
 
     private static ConnectionManager instance;
 
+    private final Object connectionLock = new Object();
     private final List<ConnectionEntry> entries = new CopyOnWriteArrayList<>();
+    private final Map<String, MeshtasticConnection> pendingConnections = new ConcurrentHashMap<>();
     private final Map<String, MeshtasticConnection> activeConnections = new ConcurrentHashMap<>();
     private final Map<String, DeviceState> deviceStates = new ConcurrentHashMap<>();
     private final Map<String, ProtocolHandler> protocolHandlers = new ConcurrentHashMap<>();
@@ -135,20 +137,26 @@ public final class ConnectionManager {
      * @param id идентификатор профиля подключения
      * @throws ConnectionException если профиль не найден или соединение не удалось
      */
-    public synchronized void connect(String id) throws ConnectionException {
-        userDisconnectedIds.remove(id);
-        userDisconnectReasons.remove(id);
-        ConnectionEntry entry = findEntry(id);
-        if (entry == null) {
-            throw new ConnectionException("Connection entry not found: " + id);
+    public void connect(String id) throws ConnectionException {
+        ConnectionEntry entry;
+        MeshtasticConnection conn;
+        synchronized (connectionLock) {
+            userDisconnectedIds.remove(id);
+            userDisconnectReasons.remove(id);
+            entry = findEntry(id);
+            if (entry == null) {
+                throw new ConnectionException("Connection entry not found: " + id);
+            }
+            if (activeConnections.containsKey(id) || pendingConnections.containsKey(id)) {
+                return;
+            }
+            if (!activeConnections.isEmpty() || !pendingConnections.isEmpty()) {
+                throw new ConnectionException("Уже есть активное подключение. Отключитесь перед подключением к другому устройству.");
+            }
+            conn = createConnection(entry);
+            pendingConnections.put(id, conn);
         }
-        if (activeConnections.containsKey(id)) {
-            return;
-        }
-        if (!activeConnections.isEmpty()) {
-            throw new ConnectionException("Уже есть активное подключение. Отключитесь перед подключением к другому устройству.");
-        }
-        MeshtasticConnection conn = createConnection(entry);
+
         conn.setConnectionListener(new ConnectionListener() {
             @Override
             public void onConnected() {
@@ -172,13 +180,13 @@ public final class ConnectionManager {
                     log.warn("Connection '{}' disconnected unexpectedly", entry.getName());
                 }
                 entry.setConnected(false);
-                cleanupConnection(id);
+                cleanupConnection(id, conn);
                 fireChanged();
                 if (!userInitiated) {
                     log.info("Scheduling auto-reconnect for '{}' after disconnect", entry.getName());
                     ReconnectService.getInstance().startReconnect(id);
                 }
-                clearUserDisconnectState(id);
+                clearUserDisconnectStateIfIdle(id);
             }
 
             @Override
@@ -201,42 +209,82 @@ public final class ConnectionManager {
                     }
                 }
                 entry.setConnected(false);
-                cleanupConnection(id);
+                cleanupConnection(id, conn);
                 fireChanged();
                 if (!userInitiated) {
                     log.info("Scheduling auto-reconnect for '{}' after connection error", entry.getName());
                     ReconnectService.getInstance().startReconnect(id);
                 }
-                clearUserDisconnectState(id);
+                clearUserDisconnectStateIfIdle(id);
             }
         });
-        conn.connect();
-        activeConnections.put(id, conn);
 
-        ProtocolHandler protocolHandler = new ProtocolHandler(id, conn);
-        protocolHandlers.put(id, protocolHandler);
-
-        // Heartbeat нужен для transport-ов, которые либо закрываются по idle (TCP),
-        // либо требуют периодического keepalive на serial-соединении.
-        // В mesh.proto heartbeat отдельно помечен как keepalive для serial.
-        if (shouldStartHeartbeat(entry)) {
-            protocolHandler.startHeartbeat();
+        try {
+            conn.connect();
+            if (!conn.isConnected()) {
+                throw new ConnectionException("Подключение завершилось без активного транспорта: " + entry.getName());
+            }
+        } catch (ConnectionException e) {
+            abortPendingConnection(id, conn);
+            throw e;
+        } catch (RuntimeException e) {
+            abortPendingConnection(id, conn);
+            throw e;
         }
 
-        DeviceState deviceState = new DeviceState();
-        deviceStates.put(id, deviceState);
+        ProtocolHandler protocolHandler;
+        DeviceState deviceState;
+        MqttProxyService mqttProxyService;
+        CompletableFuture<DeviceState> future;
+        boolean cancelledDuringConnect = false;
 
-        MessageListenerService messageListener = new MessageListenerService(deviceState, protocolHandler);
-        messageListenerServices.put(id, messageListener);
-        protocolHandler.addListener(messageListener);
+        synchronized (connectionLock) {
+            boolean shouldCancel = pendingConnections.get(id) != conn
+                    || findEntry(id) == null
+                    || userDisconnectedIds.contains(id);
+            pendingConnections.remove(id, conn);
+            if (shouldCancel) {
+                cancelledDuringConnect = true;
+                protocolHandler = null;
+                deviceState = null;
+                mqttProxyService = null;
+                future = null;
+            } else {
+                activeConnections.put(id, conn);
 
-        MqttProxyService mqttProxyService = new MqttProxyService(id, entry.getName(), protocolHandler, deviceState);
-        mqttProxyServices.put(id, mqttProxyService);
+                protocolHandler = new ProtocolHandler(id, conn);
+                protocolHandlers.put(id, protocolHandler);
 
-        ConfigExchangeService configExchange = new ConfigExchangeService(protocolHandler, deviceState);
-        configExchangeServices.put(id, configExchange);
-        CompletableFuture<DeviceState> future = configExchange.startConfigExchange();
-        configFutures.put(id, future);
+                // Heartbeat нужен для transport-ов, которые либо закрываются по idle (TCP),
+                // либо требуют периодического keepalive на serial-соединении.
+                // В mesh.proto heartbeat отдельно помечен как keepalive для serial.
+                if (shouldStartHeartbeat(entry)) {
+                    protocolHandler.startHeartbeat();
+                }
+
+                deviceState = new DeviceState();
+                deviceStates.put(id, deviceState);
+
+                MessageListenerService messageListener = new MessageListenerService(deviceState, protocolHandler);
+                messageListenerServices.put(id, messageListener);
+                protocolHandler.addListener(messageListener);
+
+                mqttProxyService = new MqttProxyService(id, entry.getName(), protocolHandler, deviceState);
+                mqttProxyServices.put(id, mqttProxyService);
+
+                ConfigExchangeService configExchange = new ConfigExchangeService(protocolHandler, deviceState);
+                configExchangeServices.put(id, configExchange);
+                future = configExchange.startConfigExchange();
+                configFutures.put(id, future);
+
+                entry.setConnected(true);
+            }
+        }
+
+        if (cancelledDuringConnect) {
+            disconnectStalePendingConnection(id, entry, conn);
+            return;
+        }
 
         future.thenAccept(ds -> {
             if (activeConnections.get(id) != conn || !entry.isConnected()) {
@@ -252,8 +300,6 @@ public final class ConnectionManager {
             requestAndLogDeviceMetadata(entry, protocolHandler, ds);
             fireChanged();
         });
-
-        entry.setConnected(true);
         fireChanged();
     }
 
@@ -263,26 +309,36 @@ public final class ConnectionManager {
      *
      * @param id идентификатор профиля подключения
      */
-    public synchronized void disconnect(String id) {
+    public void disconnect(String id) {
         disconnect(id, "manual disconnect");
     }
 
-    private synchronized void disconnect(String id, String reason) {
-        userDisconnectedIds.add(id);
-        userDisconnectReasons.put(id, reason);
-        ReconnectService.getInstance().cancelReconnect(id);
-        ConnectionEntry entry = findEntry(id);
-        String connectionName = entry != null ? entry.getName() : id;
+    private void disconnect(String id, String reason) {
+        MeshtasticConnection conn;
+        MeshtasticConnection pendingConn;
+        ConnectionEntry entry;
+        String connectionName;
+        synchronized (connectionLock) {
+            userDisconnectedIds.add(id);
+            userDisconnectReasons.put(id, reason);
+            ReconnectService.getInstance().cancelReconnect(id);
+            entry = findEntry(id);
+            connectionName = entry != null ? entry.getName() : id;
+            conn = activeConnections.remove(id);
+            pendingConn = pendingConnections.get(id);
+            if (conn != null) {
+                cleanupRuntimeState(id);
+            }
+            if (entry != null) {
+                entry.setConnected(false);
+            }
+        }
+
         log.info("Disconnect requested for '{}' ({})", connectionName, reason);
-        MeshtasticConnection conn = activeConnections.get(id);
-        cleanupConnection(id);
         if (conn != null) {
             conn.disconnect();
-        } else {
-            clearUserDisconnectState(id);
-        }
-        if (entry != null) {
-            entry.setConnected(false);
+        } else if (pendingConn == null) {
+            clearUserDisconnectStateIfIdle(id);
         }
         fireChanged();
     }
@@ -297,16 +353,19 @@ public final class ConnectionManager {
      *
      * @param id идентификатор профиля подключения
      */
-    public synchronized void disconnectForDeviceReboot(String id) {
-        userDisconnectedIds.remove(id);
-        userDisconnectReasons.remove(id);
-
-        ConnectionEntry entry = findEntry(id);
-        if (entry == null) {
-            return;
+    public void disconnectForDeviceReboot(String id) {
+        ConnectionEntry entry;
+        MeshtasticConnection conn;
+        synchronized (connectionLock) {
+            userDisconnectedIds.remove(id);
+            userDisconnectReasons.remove(id);
+            entry = findEntry(id);
+            if (entry == null) {
+                return;
+            }
+            conn = activeConnections.get(id);
         }
 
-        MeshtasticConnection conn = activeConnections.get(id);
         if (conn != null) {
             // Не вызываем cleanupConnection() здесь: нам нужно, чтобы normal
             // onDisconnected()/onConnectionError() path запустил auto-reconnect.
@@ -314,7 +373,7 @@ public final class ConnectionManager {
             return;
         }
 
-        if (!entry.isReconnecting()) {
+        if (!entry.isReconnecting() && !pendingConnections.containsKey(id)) {
             entry.setConnected(false);
             fireChanged();
             ReconnectService.getInstance().startReconnect(id);
@@ -322,7 +381,7 @@ public final class ConnectionManager {
     }
 
     public boolean hasActiveConnection() {
-        return !activeConnections.isEmpty();
+        return !activeConnections.isEmpty() || !pendingConnections.isEmpty();
     }
 
     public List<ConnectionEntry> getEntries() {
@@ -370,8 +429,10 @@ public final class ConnectionManager {
      * Отключает все активные соединения и освобождает ресурсы (tray icon, BLE polling и т.д.).
      * Вызывается при завершении приложения.
      */
-    public synchronized void shutdownAll() {
-        for (String id : new ArrayList<>(activeConnections.keySet())) {
+    public void shutdownAll() {
+        Set<String> ids = new LinkedHashSet<>(activeConnections.keySet());
+        ids.addAll(pendingConnections.keySet());
+        for (String id : ids) {
             disconnect(id, "application shutdown");
         }
     }
@@ -381,8 +442,45 @@ public final class ConnectionManager {
         userDisconnectReasons.remove(id);
     }
 
-    private synchronized void cleanupConnection(String id) {
-        activeConnections.remove(id);
+    private void abortPendingConnection(String id, MeshtasticConnection conn) {
+        synchronized (connectionLock) {
+            pendingConnections.remove(id, conn);
+        }
+        clearUserDisconnectStateIfIdle(id);
+    }
+
+    private void disconnectStalePendingConnection(String id, ConnectionEntry entry, MeshtasticConnection conn) {
+        log.info("Connection '{}' completed after cancellation; disconnecting stale transport", entry.getName());
+        try {
+            conn.disconnect();
+        } catch (RuntimeException e) {
+            log.warn("Failed to disconnect stale transport for '{}'", entry.getName(), e);
+        } finally {
+            abortPendingConnection(id, conn);
+        }
+    }
+
+    private void clearUserDisconnectStateIfIdle(String id) {
+        synchronized (connectionLock) {
+            if (!activeConnections.containsKey(id) && !pendingConnections.containsKey(id)) {
+                clearUserDisconnectState(id);
+            }
+        }
+    }
+
+    private void cleanupConnection(String id, MeshtasticConnection expectedConnection) {
+        synchronized (connectionLock) {
+            boolean removedActive = activeConnections.remove(id, expectedConnection);
+            boolean removedPending = pendingConnections.remove(id, expectedConnection);
+            if (removedActive) {
+                cleanupRuntimeState(id);
+            } else if (!removedPending) {
+                return;
+            }
+        }
+    }
+
+    private void cleanupRuntimeState(String id) {
         DeviceState ds = deviceStates.remove(id);
         if (ds != null) {
             ds.failAllPendingAcks("DISCONNECTED");

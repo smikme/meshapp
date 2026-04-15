@@ -185,9 +185,20 @@ public class FormConnections extends Form {
     }
 
     private void doDisconnect(ConnectionEntry entry) {
-        ConnectionManager.getInstance().disconnect(entry.getId());
-        MyDrawerBuilder.updateHeader("?", "?", "?");
-        Toast.show(Toast.Type.SUCCESS, "Отключено: " + entry.getName());
+        Thread worker = new Thread(() -> {
+            try {
+                ConnectionManager.getInstance().disconnect(entry.getId());
+                Platform.runLater(() -> {
+                    MyDrawerBuilder.updateHeader("?", "?", "?");
+                    Toast.show(Toast.Type.SUCCESS, "Отключено: " + entry.getName());
+                });
+            } catch (RuntimeException ex) {
+                Platform.runLater(() ->
+                        Toast.show(Toast.Type.ERROR, "Ошибка отключения: " + ex.getMessage()));
+            }
+        }, "disconnect-" + entry.getId());
+        worker.setDaemon(true);
+        worker.start();
     }
 
     private void doDelete(ConnectionEntry entry) {
@@ -196,8 +207,23 @@ public class FormConnections extends Form {
                 "Удалить подключение \"" + entry.getName() + "\"?",
                 confirmed -> {
                     if (confirmed) {
-                        ConnectionManager.getInstance().removeEntry(entry.getId());
-                        Toast.show(Toast.Type.SUCCESS, "Удалено: " + entry.getName());
+                        boolean resetHeader = entry.isConnected() || entry.isReconnecting();
+                        Thread worker = new Thread(() -> {
+                            try {
+                                ConnectionManager.getInstance().removeEntry(entry.getId());
+                                Platform.runLater(() -> {
+                                    if (resetHeader) {
+                                        MyDrawerBuilder.updateHeader("?", "?", "?");
+                                    }
+                                    Toast.show(Toast.Type.SUCCESS, "Удалено: " + entry.getName());
+                                });
+                            } catch (RuntimeException ex) {
+                                Platform.runLater(() ->
+                                        Toast.show(Toast.Type.ERROR, "Ошибка удаления: " + ex.getMessage()));
+                            }
+                        }, "delete-connection-" + entry.getId());
+                        worker.setDaemon(true);
+                        worker.start();
                     }
                 });
     }

@@ -335,6 +335,7 @@ public class DeviceState {
     public CompletableFuture<MeshProtos.Routing.Error> registerPendingPacketAck(int packetId) {
         CompletableFuture<MeshProtos.Routing.Error> future = new CompletableFuture<>();
         pendingPacketAcks.put(packetId, future);
+        future.whenComplete((ignored, ignoredError) -> pendingPacketAcks.remove(packetId, future));
         return future;
     }
 

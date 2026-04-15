@@ -17,11 +17,12 @@ public class PacketLogEntry {
     private static final int PAYLOAD_PREVIEW_LIMIT = 180;
 
     /**
-     * Направление пакета относительно desktop-клиента.
+     * Направление пакета относительно локального mesh-узла и transport-канала клиента.
      */
     public enum Direction {
         INCOMING,
-        OUTGOING
+        OUTGOING,
+        INTERNAL
     }
 
     private long id;
@@ -29,6 +30,7 @@ public class PacketLogEntry {
     private final long capturedAt;
     private final Direction direction;
     private final String packetType;
+    private final String transportMechanism;
     private final String fromNode;
     private final String toNode;
     private final String payloadText;
@@ -41,6 +43,7 @@ public class PacketLogEntry {
      * @param capturedAt  время захвата в миллисекундах Unix epoch
      * @param direction   направление пакета
      * @param packetType  тип пакета или portnum в UI-представлении
+     * @param transportMechanism transport_mechanism в UI-представлении
      * @param fromNode    отправитель в UI-представлении
      * @param toNode      получатель в UI-представлении
      * @param payloadText payload в текстовом виде для таблицы
@@ -50,6 +53,7 @@ public class PacketLogEntry {
                           long capturedAt,
                           Direction direction,
                           String packetType,
+                          String transportMechanism,
                           String fromNode,
                           String toNode,
                           String payloadText,
@@ -58,6 +62,7 @@ public class PacketLogEntry {
         this.capturedAt = capturedAt;
         this.direction = direction;
         this.packetType = packetType;
+        this.transportMechanism = transportMechanism != null ? transportMechanism : "";
         this.fromNode = fromNode;
         this.toNode = toNode;
         this.payloadText = payloadText;
@@ -101,11 +106,30 @@ public class PacketLogEntry {
     }
 
     public String getDirectionText() {
-        return direction == Direction.INCOMING ? "Входящий" : "Исходящий";
+        return switch (direction) {
+            case INCOMING -> "Входящий";
+            case OUTGOING -> "Исходящий";
+            case INTERNAL -> "Внутренний";
+        };
     }
 
     public String getPacketType() {
         return packetType;
+    }
+
+    public String getTransportMechanism() {
+        return transportMechanism;
+    }
+
+    public String getTransportText() {
+        return formatTransportMechanism(transportMechanism);
+    }
+
+    public String getRouteText() {
+        if (direction == Direction.OUTGOING && (transportMechanism == null || transportMechanism.isBlank())) {
+            return "Исходящий / Без подтверждения LoRa";
+        }
+        return getDirectionText() + " / " + getTransportText();
     }
 
     public String getFromNode() {
@@ -141,5 +165,22 @@ public class PacketLogEntry {
      */
     public byte[] getPacketBytes() {
         return Arrays.copyOf(packetBytes, packetBytes.length);
+    }
+
+    public static String formatTransportMechanism(String transportMechanism) {
+        if (transportMechanism == null || transportMechanism.isBlank()) {
+            return "Локальный";
+        }
+        return switch (transportMechanism) {
+            case "TRANSPORT_LORA" -> "LoRa";
+            case "TRANSPORT_LORA_ALT1" -> "LoRa alt 1";
+            case "TRANSPORT_LORA_ALT2" -> "LoRa alt 2";
+            case "TRANSPORT_LORA_ALT3" -> "LoRa alt 3";
+            case "TRANSPORT_MQTT" -> "MQTT";
+            case "TRANSPORT_MULTICAST_UDP" -> "Multicast UDP";
+            case "TRANSPORT_API" -> "API";
+            case "TRANSPORT_INTERNAL" -> "Локальный";
+            default -> transportMechanism;
+        };
     }
 }

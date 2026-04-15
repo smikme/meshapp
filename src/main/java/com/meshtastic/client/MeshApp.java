@@ -155,6 +155,7 @@ public class MeshApp extends Application {
 
         // Нативные эффекты: ПОСЛЕ show() (HWND/NSWindow уже существует)
         NativeWindowHelper.applyNativeEffects(stage, isDark);
+        installWindowStateGuards(stage, rootPane);
 
         // Сохранять состояние окна при закрытии (setOnHiding срабатывает и при
         // программном stage.close() из кастомного title bar, и при нативном закрытии)
@@ -209,6 +210,55 @@ public class MeshApp extends Application {
         }
 
         AppPreferences.saveWindowBounds(x, y, w, h, maximized);
+    }
+
+    private void installWindowStateGuards(Stage stage, RootPane rootPane) {
+        if (OsDetect.isMacOs() || AppPreferences.isDisableEffectsEffective()) {
+            return;
+        }
+
+        AtomicBoolean nativeMaximizeNormalizationInProgress = new AtomicBoolean(false);
+
+        stage.maximizedProperty().addListener((obs, wasMaximized, isMaximized) -> {
+            if (!isMaximized) {
+                return;
+            }
+            Platform.runLater(() -> normalizeNativeMaximize(stage, rootPane, nativeMaximizeNormalizationInProgress));
+        });
+
+        stage.iconifiedProperty().addListener((obs, wasIconified, isIconified) -> {
+            if (isIconified) {
+                return;
+            }
+            Platform.runLater(() -> {
+                normalizeNativeMaximize(stage, rootPane, nativeMaximizeNormalizationInProgress);
+                if (OsDetect.isWindows() && stage.isShowing()) {
+                    NativeWindowHelper.applyNativeEffects(stage, AppPreferences.isDarkMode());
+                }
+            });
+        });
+    }
+
+    private void normalizeNativeMaximize(Stage stage, RootPane rootPane, AtomicBoolean normalizationInProgress) {
+        if (normalizationInProgress.get() || !stage.isShowing() || stage.isIconified() || !stage.isMaximized()) {
+            return;
+        }
+
+        log.warn("Detected native maximize on a custom-framed window; translating to custom maximize");
+        normalizationInProgress.set(true);
+        stage.setMaximized(false);
+        Platform.runLater(() -> {
+            try {
+                if (!stage.isShowing() || stage.isIconified()) {
+                    return;
+                }
+                if (!rootPane.isCustomMaximized()) {
+                    rootPane.maximizeToVisualBounds();
+                }
+            } finally {
+                normalizationInProgress.set(false);
+            }
+        });
     }
 
     @Override

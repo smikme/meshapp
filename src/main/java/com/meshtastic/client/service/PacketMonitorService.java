@@ -1,5 +1,6 @@
 package com.meshtastic.client.service;
 
+import com.google.protobuf.InvalidProtocolBufferException;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.PacketLogEntry;
 import com.meshtastic.client.model.PacketLogEntry.Direction;
@@ -13,6 +14,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashSet;
@@ -24,7 +26,7 @@ import java.util.regex.Pattern;
 
 /**
  * Сервис захвата и хранения LoRa mesh-пакетов для окна мониторинга.
- * Инкапсулирует приём пакетов из протокольного слоя, их сохранение в БД и
+ * Инкапсулирует приём сообщений из протокольного слоя, их сохранение в БД и
  * рассылку live-событий UI-слушателям.
  *
  * Публичные методы допускают вызов из произвольных потоков. Операции, которые
@@ -34,6 +36,7 @@ public final class PacketMonitorService {
 
     private static final long BROADCAST_NODE_NUM = 0xFFFF_FFFFL;
     private static final Pattern STANDARD_NODE_ID_PATTERN = Pattern.compile("^!?[0-9a-fA-F]{8}$");
+    public static final String TRANSPORT_MECHANISM_UNSPECIFIED = "__UNSPECIFIED__";
 
     private enum PageRequestKind {
         LATEST,
@@ -54,6 +57,11 @@ public final class PacketMonitorService {
         default void onCleared() {}
     }
 
+    @FunctionalInterface
+    public interface PacketBatchConsumer {
+        void accept(List<PacketLogEntry> batch) throws IOException;
+    }
+
     /**
      * Серверный фильтр таблицы пакетов.
      * Контракт: пустые строки нормализуются к {@code null}, чтобы SQL-слой не
@@ -61,18 +69,22 @@ public final class PacketMonitorService {
      *
      * @param direction            направление пакета или {@code null} для обоих направлений
      * @param packetType           точный тип пакета или {@code null} для всех типов
+     * @param transportMechanism   точный transport_mechanism, {@link #TRANSPORT_MECHANISM_UNSPECIFIED}
+     *                             для строк без заполненного механизма или {@code null} для всех
      * @param searchText           поисковая строка по UI-полям таблицы или {@code null}
      * @param capturedAtFromMillis нижняя граница времени захвата в epoch millis включительно или {@code null}
      * @param capturedAtToMillis   верхняя граница времени захвата в epoch millis включительно или {@code null}
      */
     public record PacketQuery(PacketLogEntry.Direction direction,
                               String packetType,
+                              String transportMechanism,
                               String searchText,
                               Long capturedAtFromMillis,
                               Long capturedAtToMillis) {
 
         public PacketQuery {
             packetType = normalizeNullableText(packetType);
+            transportMechanism = normalizeNullableText(transportMechanism);
             searchText = normalizeNullableText(searchText);
         }
 
@@ -243,18 +255,24 @@ public final class PacketMonitorService {
         if (!captureEnabled.get() || packet == null) {
             return;
         }
+        if (!shouldRecordPacket(direction, packet)) {
+            return;
+        }
         if (insertStmt == null) {
             log.warn("Packet monitor DB not initialized — packet dropped");
             return;
         }
 
+        Direction loggedDirection = resolveLoggedDirection(direction, packet, ownerNodeId, deviceState);
+        String transportMechanism = resolveStoredTransportMechanism(packet, loggedDirection);
         PacketDebugFormatter.PacketDetails details =
                 PacketDebugFormatter.describeMeshPacket(packet, direction, deviceState);
         PacketLogEntry entry = new PacketLogEntry(
                 ownerNodeId != null ? ownerNodeId : "",
                 details.capturedAtMillis(),
-                direction,
+                loggedDirection,
                 details.packetType(),
+                transportMechanism,
                 details.fromNode(),
                 details.toNode(),
                 details.payloadText(),
@@ -266,10 +284,11 @@ public final class PacketMonitorService {
             insertStmt.setLong(2, entry.getCapturedAt());
             insertStmt.setString(3, entry.getDirection().name());
             insertStmt.setString(4, entry.getPacketType());
-            insertStmt.setString(5, entry.getFromNode());
-            insertStmt.setString(6, entry.getToNode());
-            insertStmt.setString(7, entry.getPayloadText());
-            insertStmt.setBytes(8, entry.getPacketBytes());
+            insertStmt.setString(5, entry.getTransportMechanism());
+            insertStmt.setString(6, entry.getFromNode());
+            insertStmt.setString(7, entry.getToNode());
+            insertStmt.setString(8, entry.getPayloadText());
+            insertStmt.setBytes(9, entry.getPacketBytes());
             insertStmt.executeUpdate();
 
             try (ResultSet keys = insertStmt.getGeneratedKeys()) {
@@ -290,36 +309,102 @@ public final class PacketMonitorService {
      * @return список записей в порядке {@code captured_at DESC, id DESC}
      */
     public synchronized List<PacketLogEntry> loadAll() {
+        return loadAll(null);
+    }
+
+    /**
+     * Загружает все сохранённые пакеты, удовлетворяющие заданному фильтру,
+     * в порядке "новые сверху".
+     *
+     * @param query фильтр таблицы; {@code null} означает отсутствие дополнительных условий
+     * @return список записей в порядке {@code captured_at DESC, id DESC}
+     */
+    public synchronized List<PacketLogEntry> loadAll(PacketQuery query) {
         List<PacketLogEntry> entries = new ArrayList<>();
         if (dbConnection == null) {
             return entries;
         }
 
-        try (PreparedStatement ps = dbConnection.prepareStatement("""
-                SELECT id, owner_node_id, captured_at, direction, packet_type, from_node, to_node, payload_text, packet_bytes
+        SqlQuery sqlQuery = buildFilteredQuery("""
+                SELECT id, owner_node_id, captured_at, direction, packet_type, transport_mechanism,
+                       from_node, to_node, payload_text, packet_bytes
                 FROM lora_packet_logs
-                ORDER BY captured_at DESC, id DESC
-                """);
-             ResultSet rs = ps.executeQuery()) {
-            while (rs.next()) {
-                PacketLogEntry entry = new PacketLogEntry(
-                        rs.getString("owner_node_id"),
-                        rs.getLong("captured_at"),
-                        Direction.valueOf(rs.getString("direction")),
-                        rs.getString("packet_type"),
-                        rs.getString("from_node"),
-                        rs.getString("to_node"),
-                        rs.getString("payload_text"),
-                        rs.getBytes("packet_bytes")
-                );
-                entry.setId(rs.getLong("id"));
-                entries.add(entry);
+                WHERE 1 = 1
+                """, query, null, null, true, false);
+        String sql = sqlQuery.sql() + "\nORDER BY captured_at DESC, id DESC";
+
+        try (PreparedStatement ps = dbConnection.prepareStatement(sql)) {
+            bindParams(ps, sqlQuery.params());
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    PacketLogEntry entry = new PacketLogEntry(
+                            rs.getString("owner_node_id"),
+                            rs.getLong("captured_at"),
+                            Direction.valueOf(rs.getString("direction")),
+                            rs.getString("packet_type"),
+                            rs.getString("transport_mechanism"),
+                            rs.getString("from_node"),
+                            rs.getString("to_node"),
+                            rs.getString("payload_text"),
+                            rs.getBytes("packet_bytes")
+                    );
+                    entry.setId(rs.getLong("id"));
+                    entries.add(entry);
+                }
             }
         } catch (SQLException e) {
             log.error("Failed to load LoRa packet logs", e);
         }
 
         return entries;
+    }
+
+    /**
+     * Обходит все пакеты, удовлетворяющие фильтру, фиксированными блоками.
+     * Метод нужен для операций вроде экспорта, где нельзя загружать всю выборку в память.
+     *
+     * @param query     фильтр таблицы; {@code null} означает отсутствие дополнительных условий
+     * @param batchSize максимальный размер одного блока
+     * @param consumer  callback для обработки блока в порядке {@code captured_at DESC, id DESC}
+     * @return фактическое число обработанных записей
+     * @throws IOException если consumer завершился ошибкой либо не удалось прочитать данные из БД
+     */
+    public long forEachMatchingBatch(PacketQuery query,
+                                     int batchSize,
+                                     PacketBatchConsumer consumer) throws IOException {
+        if (consumer == null) {
+            return 0;
+        }
+
+        int safeBatchSize = Math.max(1, batchSize);
+        PageCursor cursor = null;
+        PageRequestKind requestKind = PageRequestKind.LATEST;
+        long processed = 0;
+
+        while (true) {
+            List<PacketLogEntry> batch = loadExportBatch(query, cursor, requestKind, safeBatchSize);
+
+            if (batch.isEmpty()) {
+                return processed;
+            }
+
+            consumer.accept(Collections.unmodifiableList(batch));
+            processed += batch.size();
+
+            if (batch.size() < safeBatchSize) {
+                return processed;
+            }
+
+            cursor = PageCursor.fromEntry(batch.getLast());
+            requestKind = PageRequestKind.OLDER;
+        }
+    }
+
+    /**
+     * @return общее число строк, подходящих под заданный фильтр
+     */
+    public synchronized int countMatchingPackets(PacketQuery query) {
+        return countMatching(query);
     }
 
     /**
@@ -356,7 +441,8 @@ public final class PacketMonitorService {
         }
 
         SqlQuery sqlQuery = buildFilteredQuery("""
-                SELECT id, owner_node_id, captured_at, direction, packet_type, from_node, to_node, payload_text, packet_bytes
+                SELECT id, owner_node_id, captured_at, direction, packet_type, transport_mechanism,
+                       from_node, to_node, payload_text, packet_bytes
                 FROM lora_packet_logs
                 WHERE 1 = 1
                 """, query, null, null, true, false);
@@ -424,10 +510,11 @@ public final class PacketMonitorService {
                 ? new PacketQuery(
                         query.direction(),
                         null,
+                        query.transportMechanism(),
                         query.searchText(),
                         query.capturedAtFromMillis(),
                         query.capturedAtToMillis())
-                : new PacketQuery(null, null, null, null, null);
+                : new PacketQuery(null, null, null, null, null, null);
 
         SqlQuery sqlQuery = buildFilteredQuery("""
                 SELECT DISTINCT packet_type
@@ -460,9 +547,16 @@ public final class PacketMonitorService {
         if (dbConnection == null) {
             return 0;
         }
-        try (PreparedStatement ps = dbConnection.prepareStatement("SELECT COUNT(*) FROM lora_packet_logs");
-             ResultSet rs = ps.executeQuery()) {
-            return rs.next() ? rs.getInt(1) : 0;
+        SqlQuery sqlQuery = buildFilteredQuery("""
+                SELECT COUNT(*)
+                FROM lora_packet_logs
+                WHERE 1 = 1
+                """, null, null, null, true, false);
+        try (PreparedStatement ps = dbConnection.prepareStatement(sqlQuery.sql())) {
+            bindParams(ps, sqlQuery.params());
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next() ? rs.getInt(1) : 0;
+            }
         } catch (SQLException e) {
             log.error("Failed to count packet monitor rows", e);
             return 0;
@@ -477,11 +571,11 @@ public final class PacketMonitorService {
         if (dbConnection == null) {
             return;
         }
-        try (PreparedStatement ps = dbConnection.prepareStatement("DELETE FROM lora_packet_logs")) {
-            ps.executeUpdate();
+        try (Statement stmt = dbConnection.createStatement()) {
+            stmt.executeUpdate("DELETE FROM lora_packet_logs");
             notifyCleared();
         } catch (SQLException e) {
-            log.error("Failed to clear LoRa packet logs", e);
+            log.error("Failed to clear monitor logs", e);
         }
     }
 
@@ -523,16 +617,21 @@ public final class PacketMonitorService {
             try (Statement stmt = dbConnection.createStatement()) {
                 stmt.execute("""
                         CREATE TABLE IF NOT EXISTS lora_packet_logs (
-                            id            BIGINT AUTO_INCREMENT PRIMARY KEY,
-                            owner_node_id VARCHAR(20) NOT NULL DEFAULT '',
-                            captured_at   BIGINT NOT NULL,
-                            direction     VARCHAR(10) NOT NULL,
-                            packet_type   VARCHAR(40) NOT NULL,
-                            from_node     VARCHAR(160),
-                            to_node       VARCHAR(160),
-                            payload_text  CLOB,
-                            packet_bytes  BLOB NOT NULL
+                            id                  BIGINT AUTO_INCREMENT PRIMARY KEY,
+                            owner_node_id       VARCHAR(20) NOT NULL DEFAULT '',
+                            captured_at         BIGINT NOT NULL,
+                            direction           VARCHAR(10) NOT NULL,
+                            packet_type         VARCHAR(40) NOT NULL,
+                            transport_mechanism VARCHAR(40),
+                            from_node           VARCHAR(160),
+                            to_node             VARCHAR(160),
+                            payload_text        CLOB,
+                            packet_bytes        BLOB NOT NULL
                         )
+                        """);
+                stmt.execute("""
+                        ALTER TABLE lora_packet_logs
+                        ADD COLUMN IF NOT EXISTS transport_mechanism VARCHAR(40)
                         """);
                 stmt.execute("""
                         CREATE INDEX IF NOT EXISTS idx_lora_owner_ts
@@ -542,15 +641,21 @@ public final class PacketMonitorService {
                         CREATE INDEX IF NOT EXISTS idx_lora_type
                         ON lora_packet_logs (packet_type)
                         """);
+                stmt.execute("""
+                        CREATE INDEX IF NOT EXISTS idx_lora_transport
+                        ON lora_packet_logs (transport_mechanism)
+                        """);
             }
 
             insertStmt = dbConnection.prepareStatement("""
                     INSERT INTO lora_packet_logs (
                         owner_node_id, captured_at, direction, packet_type,
-                        from_node, to_node, payload_text, packet_bytes
+                        transport_mechanism, from_node, to_node, payload_text, packet_bytes
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, Statement.RETURN_GENERATED_KEYS);
+            normalizeLegacyDirections();
+            normalizeLegacyTransportMechanisms();
         } catch (Exception e) {
             log.error("Failed to initialize packet monitor DB", e);
         }
@@ -601,29 +706,195 @@ public final class PacketMonitorService {
         return ConnectionManager.getInstance().getDeviceState(connectionId);
     }
 
+    private void normalizeLegacyDirections() {
+        if (dbConnection == null) {
+            return;
+        }
+
+        int updatesQueued = 0;
+        try (PreparedStatement select = dbConnection.prepareStatement("""
+                SELECT id, owner_node_id, packet_bytes
+                FROM lora_packet_logs
+                WHERE direction = ?
+                """);
+             PreparedStatement update = dbConnection.prepareStatement("""
+                     UPDATE lora_packet_logs
+                     SET direction = ?
+                     WHERE id = ?
+                     """)) {
+            select.setString(1, Direction.INCOMING.name());
+            try (ResultSet rs = select.executeQuery()) {
+                while (rs.next()) {
+                    MeshProtos.MeshPacket packet = parsePacketBytes(rs.getLong("id"), rs.getBytes("packet_bytes"));
+                    if (packet == null) {
+                        continue;
+                    }
+                    Direction normalized = resolveLoggedDirection(
+                            Direction.INCOMING,
+                            packet,
+                            rs.getString("owner_node_id"),
+                            null
+                    );
+                    if (normalized == Direction.INCOMING) {
+                        continue;
+                    }
+                    update.setString(1, normalized.name());
+                    update.setLong(2, rs.getLong("id"));
+                    update.addBatch();
+                    updatesQueued++;
+                }
+            }
+            if (updatesQueued > 0) {
+                update.executeBatch();
+                log.info("Normalized {} legacy LoRa packet directions for self-origin packets", updatesQueued);
+            }
+        } catch (SQLException e) {
+            log.error("Failed to normalize legacy LoRa packet directions", e);
+        }
+    }
+
+    private void normalizeLegacyTransportMechanisms() {
+        if (dbConnection == null) {
+            return;
+        }
+
+        int updatesQueued = 0;
+        try (PreparedStatement select = dbConnection.prepareStatement("""
+                SELECT id, direction, packet_bytes
+                FROM lora_packet_logs
+                WHERE transport_mechanism IS NULL OR TRIM(transport_mechanism) = ''
+                """);
+             PreparedStatement update = dbConnection.prepareStatement("""
+                     UPDATE lora_packet_logs
+                     SET transport_mechanism = ?
+                     WHERE id = ?
+                     """)) {
+            try (ResultSet rs = select.executeQuery()) {
+                while (rs.next()) {
+                    MeshProtos.MeshPacket packet = parsePacketBytes(rs.getLong("id"), rs.getBytes("packet_bytes"));
+                    if (packet == null) {
+                        continue;
+                    }
+                    Direction storedDirection = Direction.valueOf(rs.getString("direction"));
+                    String transportMechanism = resolveStoredTransportMechanism(packet, storedDirection);
+                    if (transportMechanism == null || transportMechanism.isBlank()) {
+                        continue;
+                    }
+                    update.setString(1, transportMechanism);
+                    update.setLong(2, rs.getLong("id"));
+                    update.addBatch();
+                    updatesQueued++;
+                }
+            }
+            if (updatesQueued > 0) {
+                update.executeBatch();
+                log.info("Backfilled {} legacy LoRa packet transport mechanisms", updatesQueued);
+            }
+        } catch (SQLException e) {
+            log.error("Failed to backfill legacy LoRa packet transport mechanisms", e);
+        }
+    }
+
+    private static MeshProtos.MeshPacket parsePacketBytes(long id, byte[] packetBytes) {
+        if (packetBytes == null || packetBytes.length == 0) {
+            return null;
+        }
+        try {
+            return MeshProtos.MeshPacket.parseFrom(packetBytes);
+        } catch (InvalidProtocolBufferException e) {
+            log.debug("Skipping packet direction normalization for row {}: invalid MeshPacket bytes", id, e);
+            return null;
+        }
+    }
+
+    private static Direction resolveLoggedDirection(Direction transportDirection,
+                                                    MeshProtos.MeshPacket packet,
+                                                    String ownerNodeId,
+                                                    DeviceState deviceState) {
+        if (transportDirection != Direction.INCOMING || packet == null) {
+            return transportDirection;
+        }
+
+        Integer localNodeNum = resolveLocalNodeNum(ownerNodeId, deviceState);
+        if (localNodeNum == null) {
+            return transportDirection;
+        }
+
+        long packetFrom = Integer.toUnsignedLong(packet.getFrom());
+        long localNode = Integer.toUnsignedLong(localNodeNum);
+        if (packetFrom != localNode) {
+            return transportDirection;
+        }
+
+        if (arrivedOverRadio(packet)) {
+            // Для mesh-монитора self-origin LoRa пакет должен считаться исходящим:
+            // desktop его получил как FromRadio, но сама нода отправила его в эфир.
+            return Direction.OUTGOING;
+        }
+
+        return Direction.INTERNAL;
+    }
+
+    private static boolean arrivedOverRadio(MeshProtos.MeshPacket packet) {
+        return switch (packet.getTransportMechanism()) {
+            case TRANSPORT_LORA,
+                 TRANSPORT_LORA_ALT1,
+                 TRANSPORT_LORA_ALT2,
+                 TRANSPORT_LORA_ALT3 -> true;
+            default -> false;
+        };
+    }
+
+    private static boolean shouldRecordPacket(Direction direction, MeshProtos.MeshPacket packet) {
+        if (direction == Direction.OUTGOING) {
+            MeshProtos.MeshPacket.TransportMechanism mechanism = packet.getTransportMechanism();
+            return mechanism == null
+                    || mechanism == MeshProtos.MeshPacket.TransportMechanism.TRANSPORT_INTERNAL
+                    || mechanism == MeshProtos.MeshPacket.TransportMechanism.UNRECOGNIZED
+                    || arrivedOverRadio(packet);
+        }
+        return arrivedOverRadio(packet);
+    }
+
+    private static String resolveStoredTransportMechanism(MeshProtos.MeshPacket packet, Direction direction) {
+        if (packet == null) {
+            return "";
+        }
+        MeshProtos.MeshPacket.TransportMechanism mechanism = packet.getTransportMechanism();
+        if (mechanism == null
+                || mechanism == MeshProtos.MeshPacket.TransportMechanism.TRANSPORT_INTERNAL
+                || mechanism == MeshProtos.MeshPacket.TransportMechanism.UNRECOGNIZED) {
+            if (direction == Direction.OUTGOING) {
+                return MeshProtos.MeshPacket.TransportMechanism.TRANSPORT_LORA.name();
+            }
+            return "";
+        }
+        return mechanism.name();
+    }
+
+    private static Integer resolveLocalNodeNum(String ownerNodeId, DeviceState deviceState) {
+        if (deviceState != null && deviceState.getMyNodeNum() != 0) {
+            return deviceState.getMyNodeNum();
+        }
+        return parseStandardNodeId(ownerNodeId);
+    }
+
     private PacketPage loadPage(PacketQuery query, int limit, PageCursor cursor, PageRequestKind requestKind) {
         int safeLimit = Math.max(1, limit);
         int totalMatchingCount = countMatching(query);
         int totalStoredCount = countAllPackets();
-        List<PacketLogEntry> entries = new ArrayList<>();
+        List<PacketLogEntry> entries;
 
         if (dbConnection == null) {
-            return new PacketPage(entries, false, false, totalMatchingCount, totalStoredCount);
+            return new PacketPage(List.of(), false, false, totalMatchingCount, totalStoredCount);
         }
         if ((requestKind == PageRequestKind.OLDER || requestKind == PageRequestKind.NEWER) && cursor == null) {
-            return new PacketPage(entries, false, false, totalMatchingCount, totalStoredCount);
+            return new PacketPage(List.of(), false, false, totalMatchingCount, totalStoredCount);
         }
 
-        SqlQuery sqlQuery = buildPageQuery(query, cursor, requestKind, safeLimit);
-        try (PreparedStatement ps = dbConnection.prepareStatement(sqlQuery.sql())) {
-            bindParams(ps, sqlQuery.params());
-            try (ResultSet rs = ps.executeQuery()) {
-                while (rs.next()) {
-                    entries.add(readEntry(rs));
-                }
-            }
-        } catch (SQLException e) {
-            log.error("Failed to load paged LoRa packet logs", e);
+        try {
+            entries = loadExportBatch(query, cursor, requestKind, safeLimit);
+        } catch (IOException e) {
             return new PacketPage(List.of(), false, false, totalMatchingCount, totalStoredCount);
         }
 
@@ -637,6 +908,33 @@ public final class PacketMonitorService {
                 && existsOlderThan(query, PageCursor.fromEntry(entries.getLast()));
 
         return new PacketPage(entries, hasNewer, hasOlder, totalMatchingCount, totalStoredCount);
+    }
+
+    private synchronized List<PacketLogEntry> loadExportBatch(PacketQuery query,
+                                                              PageCursor cursor,
+                                                              PageRequestKind requestKind,
+                                                              int limit) throws IOException {
+        List<PacketLogEntry> entries = new ArrayList<>(Math.max(1, limit));
+        if (dbConnection == null) {
+            return entries;
+        }
+        if ((requestKind == PageRequestKind.OLDER || requestKind == PageRequestKind.NEWER) && cursor == null) {
+            return entries;
+        }
+
+        SqlQuery sqlQuery = buildPageQuery(query, cursor, requestKind, Math.max(1, limit));
+        try (PreparedStatement ps = dbConnection.prepareStatement(sqlQuery.sql())) {
+            bindParams(ps, sqlQuery.params());
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    entries.add(readEntry(rs));
+                }
+            }
+            return entries;
+        } catch (SQLException e) {
+            log.error("Failed to load paged LoRa packet logs", e);
+            throw new IOException("Failed to load paged LoRa packet logs", e);
+        }
     }
 
     private int countMatching(PacketQuery query) {
@@ -694,7 +992,8 @@ public final class PacketMonitorService {
 
     private SqlQuery buildPageQuery(PacketQuery query, PageCursor cursor, PageRequestKind requestKind, int limit) {
         SqlQuery sqlQuery = buildFilteredQuery("""
-                SELECT id, owner_node_id, captured_at, direction, packet_type, from_node, to_node, payload_text, packet_bytes
+                SELECT id, owner_node_id, captured_at, direction, packet_type, transport_mechanism,
+                       from_node, to_node, payload_text, packet_bytes
                 FROM lora_packet_logs
                 WHERE 1 = 1
                 """, query, cursor, requestKind, true, true);
@@ -718,6 +1017,16 @@ public final class PacketMonitorService {
         StringBuilder sql = new StringBuilder(baseSql);
         List<Object> params = new ArrayList<>();
 
+        sql.append("""
+                
+                AND transport_mechanism IN (
+                    'TRANSPORT_LORA',
+                    'TRANSPORT_LORA_ALT1',
+                    'TRANSPORT_LORA_ALT2',
+                    'TRANSPORT_LORA_ALT3'
+                )
+                """);
+
         if (query != null && query.direction() != null) {
             sql.append("\nAND direction = ?");
             params.add(query.direction().name());
@@ -726,23 +1035,69 @@ public final class PacketMonitorService {
             sql.append("\nAND packet_type = ?");
             params.add(query.packetType());
         }
+        if (query != null && query.transportMechanism() != null) {
+            if (TRANSPORT_MECHANISM_UNSPECIFIED.equals(query.transportMechanism())) {
+                sql.append("\nAND (transport_mechanism IS NULL OR TRIM(transport_mechanism) = '')");
+            } else {
+                sql.append("\nAND transport_mechanism = ?");
+                params.add(query.transportMechanism());
+            }
+        }
         if (query != null && query.searchPattern() != null) {
             List<String> nodeAddressPatterns = query.nodeAddressSearchPatterns();
             sql.append("""
                     
                     AND (
                         LOWER(COALESCE(packet_type, '')) LIKE ?
+                        OR LOWER(COALESCE(transport_mechanism, '')) LIKE ?
+                        OR LOWER(CASE
+                            WHEN transport_mechanism IS NULL OR TRIM(transport_mechanism) = '' THEN 'локальный'
+                            WHEN transport_mechanism = 'TRANSPORT_LORA' THEN 'lora'
+                            WHEN transport_mechanism = 'TRANSPORT_LORA_ALT1' THEN 'lora alt 1'
+                            WHEN transport_mechanism = 'TRANSPORT_LORA_ALT2' THEN 'lora alt 2'
+                            WHEN transport_mechanism = 'TRANSPORT_LORA_ALT3' THEN 'lora alt 3'
+                            WHEN transport_mechanism = 'TRANSPORT_MQTT' THEN 'mqtt'
+                            WHEN transport_mechanism = 'TRANSPORT_MULTICAST_UDP' THEN 'multicast udp'
+                            WHEN transport_mechanism = 'TRANSPORT_API' THEN 'api'
+                            WHEN transport_mechanism = 'TRANSPORT_INTERNAL' THEN 'локальный'
+                            ELSE transport_mechanism
+                        END) LIKE ?
+                        OR LOWER(CONCAT(
+                            CASE direction
+                                WHEN 'INCOMING' THEN 'входящий'
+                                WHEN 'OUTGOING' THEN 'исходящий'
+                                WHEN 'INTERNAL' THEN 'внутренний'
+                                ELSE direction
+                            END,
+                            ' / ',
+                            CASE
+                                WHEN direction = 'OUTGOING'
+                                     AND (transport_mechanism IS NULL OR TRIM(transport_mechanism) = '')
+                                    THEN 'без подтверждения lora'
+                                WHEN transport_mechanism IS NULL OR TRIM(transport_mechanism) = '' THEN 'локальный'
+                                WHEN transport_mechanism = 'TRANSPORT_LORA' THEN 'lora'
+                                WHEN transport_mechanism = 'TRANSPORT_LORA_ALT1' THEN 'lora alt 1'
+                                WHEN transport_mechanism = 'TRANSPORT_LORA_ALT2' THEN 'lora alt 2'
+                                WHEN transport_mechanism = 'TRANSPORT_LORA_ALT3' THEN 'lora alt 3'
+                                WHEN transport_mechanism = 'TRANSPORT_MQTT' THEN 'mqtt'
+                                WHEN transport_mechanism = 'TRANSPORT_MULTICAST_UDP' THEN 'multicast udp'
+                                WHEN transport_mechanism = 'TRANSPORT_API' THEN 'api'
+                                WHEN transport_mechanism = 'TRANSPORT_INTERNAL' THEN 'локальный'
+                                ELSE LOWER(COALESCE(transport_mechanism, ''))
+                            END
+                        )) LIKE ?
                         OR LOWER(COALESCE(from_node, '')) LIKE ?
                         OR LOWER(COALESCE(to_node, '')) LIKE ?
                         OR LOWER(COALESCE(CAST(payload_text AS VARCHAR), '')) LIKE ?
                         OR LOWER(CASE direction
                             WHEN 'INCOMING' THEN 'входящий'
                             WHEN 'OUTGOING' THEN 'исходящий'
+                            WHEN 'INTERNAL' THEN 'внутренний'
                             ELSE direction
                         END) LIKE ?
                     )
                     """);
-            for (int i = 0; i < 5; i++) {
+            for (int i = 0; i < 8; i++) {
                 params.add(query.searchPattern());
             }
 
@@ -806,6 +1161,7 @@ public final class PacketMonitorService {
                 rs.getLong("captured_at"),
                 Direction.valueOf(rs.getString("direction")),
                 rs.getString("packet_type"),
+                rs.getString("transport_mechanism"),
                 rs.getString("from_node"),
                 rs.getString("to_node"),
                 rs.getString("payload_text"),

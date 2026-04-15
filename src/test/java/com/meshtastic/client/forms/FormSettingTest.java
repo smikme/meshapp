@@ -167,6 +167,35 @@ class FormSettingTest {
     }
 
     @Test
+    void shouldNotRequireConfigSaveAckForSerialTransport() {
+        FormSetting form = onFxThread(FormSetting::new);
+        CompletableFuture<MeshProtos.Routing.Error> ackFuture = new CompletableFuture<>();
+
+        assertDoesNotThrow(() -> invokeReturning(
+                form,
+                "waitForTransportRequiredConfigSaveAck",
+                new Class<?>[] { ConnectionType.class, CompletableFuture.class, String.class },
+                ConnectionType.SERIAL, ackFuture, "beginEditSettings"));
+        assertFalse(ackFuture.isDone());
+    }
+
+    @Test
+    void shouldRequireConfigSaveAckForBleTransport() {
+        FormSetting form = onFxThread(FormSetting::new);
+        CompletableFuture<MeshProtos.Routing.Error> ackFuture =
+                CompletableFuture.completedFuture(MeshProtos.Routing.Error.BAD_REQUEST);
+
+        AssertionError error = assertThrows(AssertionError.class, () -> invokeReturning(
+                form,
+                "waitForTransportRequiredConfigSaveAck",
+                new Class<?>[] { ConnectionType.class, CompletableFuture.class, String.class },
+                ConnectionType.BLE, ackFuture, "beginEditSettings"));
+
+        assertTrue(error.getCause() instanceof java.lang.reflect.InvocationTargetException);
+        assertTrue(error.getCause().getCause() instanceof IllegalStateException);
+    }
+
+    @Test
     void clearsLoadedConfigWhenConnectionIsDisconnected() throws Exception {
         ConnectionManager manager = ConnectionManager.getInstance();
         ConnectionEntry entry = new ConnectionEntry("Test radio", "localhost", 4403);
@@ -193,7 +222,7 @@ class FormSettingTest {
         assertFalse(onFxThread(() -> originalConfigs(form).isEmpty()));
 
         entry.setConnected(false);
-        invoke(manager, "cleanupConnection", entry.getId());
+        invoke(manager, "cleanupRuntimeState", entry.getId());
         invoke(manager, "fireChanged");
         waitForFxEvents();
 
@@ -241,6 +270,45 @@ class FormSettingTest {
         assertTrue(confirmed.get());
     }
 
+    @Test
+    void saveConfigShouldUseCapturedStateAfterFormStateClears() {
+        DeviceState actionState = new DeviceState();
+        actionState.setMyNodeNum(0x12345678);
+        ProtocolHandler actionHandler = track(new ProtocolHandler(new FakeConnection()));
+
+        FormSetting form = onFxThread(FormSetting::new);
+        TreeItem<ConfigTreeItem> root = ownerInfoRoot("Old long", "NEWL", "New long", "NEWS");
+
+        onFxThread(() -> {
+            writeField(form, "state", actionState);
+            writeField(form, "handler", actionHandler);
+            writeField(form, "fullConfigRoot", root);
+            configTree(form).setRoot(root);
+            return null;
+        });
+
+        onFxThread(() -> {
+            invoke(form, "onSaveConfig");
+            return null;
+        });
+        waitForFxEvents();
+
+        assertEquals(1, ownerInfoListeners(actionState).size());
+        assertEquals("Запрос session key...", onFxThread(() -> statusLabel(form).getText()));
+
+        onFxThread(() -> {
+            writeField(form, "state", null);
+            writeField(form, "handler", null);
+            return null;
+        });
+        actionState.fireOwnerInfoListeners();
+        waitForFxEvents();
+
+        assertTrue(ownerInfoListeners(actionState).isEmpty());
+        assertEquals("Отправлено секций: 1", onFxThread(() -> statusLabel(form).getText()));
+        assertFalse(onFxThread(() -> saveButton(form).isDisable()));
+    }
+
     private ProtocolHandler track(ProtocolHandler handler) {
         handlersToShutdown.add(handler);
         return handler;
@@ -277,6 +345,32 @@ class FormSettingTest {
 
     private static Label statusLabel(FormSetting form) {
         return (Label) readField(form, "configStatusLabel");
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<Runnable> ownerInfoListeners(DeviceState state) {
+        return (List<Runnable>) readField(state, "ownerInfoListeners");
+    }
+
+    private static TreeItem<ConfigTreeItem> ownerInfoRoot(String originalLongName,
+                                                          String originalShortName,
+                                                          String updatedLongName,
+                                                          String updatedShortName) {
+        TreeItem<ConfigTreeItem> root = new TreeItem<>(new ConfigTreeItem("Root", "root", 0));
+        TreeItem<ConfigTreeItem> ownerSection = new TreeItem<>(new ConfigTreeItem("Owner", "owner_info", 0));
+
+        ConfigTreeItem longName = new ConfigTreeItem(
+                "Long name", "long_name", originalLongName, String.class, null, null, "owner_info", 0);
+        longName.setValue(updatedLongName);
+
+        ConfigTreeItem shortName = new ConfigTreeItem(
+                "Short name", "short_name", originalShortName, String.class, null, null, "owner_info", 0);
+        shortName.setValue(updatedShortName);
+
+        ownerSection.getChildren().add(new TreeItem<>(longName));
+        ownerSection.getChildren().add(new TreeItem<>(shortName));
+        root.getChildren().add(ownerSection);
+        return root;
     }
 
     private static Button findButtonByText(Parent root, String text) {
@@ -321,6 +415,16 @@ class FormSettingTest {
             return field.get(target);
         } catch (ReflectiveOperationException e) {
             throw new AssertionError("Failed to read field " + fieldName, e);
+        }
+    }
+
+    private static void writeField(Object target, String fieldName, Object value) {
+        try {
+            Field field = target.getClass().getDeclaredField(fieldName);
+            field.setAccessible(true);
+            field.set(target, value);
+        } catch (ReflectiveOperationException e) {
+            throw new AssertionError("Failed to write field " + fieldName, e);
         }
     }
 

@@ -19,6 +19,7 @@ import com.meshtastic.client.model.ConnectionEntry;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.model.NodeData;
+import com.meshtastic.client.platform.OsDetect;
 import com.meshtastic.client.protocol.ProtocolHandler;
 import com.meshtastic.client.service.ConnectionManager;
 import com.meshtastic.client.service.MessageDbService;
@@ -73,6 +74,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BiConsumer;
 import java.util.function.IntConsumer;
 
@@ -86,6 +88,7 @@ public class FormChat extends Form {
     private static final int PAGE_SIZE = 50;
     private static final int MAX_WINDOW_PAGES = 3;
     private static final int MAX_LOADED_MESSAGES = PAGE_SIZE * MAX_WINDOW_PAGES;
+    private static final String WINDOWS_HIT_TEST_BACKGROUND = "-fx-background-color: rgba(0,0,0,0.004);";
 
     // === Левая панель: список чатов ===
     private ListView<ChatItem> chatListView;
@@ -183,11 +186,10 @@ public class FormChat extends Form {
     private boolean suppressSelectionListener;
     private boolean formVisible;
     private int scrollStateSyncSuspendCount;
+    private final AtomicBoolean messageRefreshQueued = new AtomicBoolean();
+    private final AtomicBoolean messageRefreshDirty = new AtomicBoolean();
 
-    private final Runnable messageListener = () -> Platform.runLater(() -> {
-        refreshCurrentChat();
-        reloadChatList();
-    });
+    private final Runnable messageListener = this::scheduleMessageRefresh;
     private final Runnable connectionListener = () -> Platform.runLater(this::rebindState);
     private final ChangeListener<Number> chatFontSizeListener =
             (obs, oldValue, newValue) -> Platform.runLater(this::handleChatFontSizeChanged);
@@ -195,6 +197,30 @@ public class FormChat extends Form {
     public FormChat() {
         initComponents();
         applyChatTypography();
+    }
+
+    /**
+     * При бурном трафике отдельный Platform.runLater на каждое событие быстро
+     * раздувает FX-очередь. Держим не более одного запланированного refresh-прохода,
+     * а параллельные события лишь помечают состояние как dirty.
+     */
+    private void scheduleMessageRefresh() {
+        messageRefreshDirty.set(true);
+        if (!messageRefreshQueued.compareAndSet(false, true)) {
+            return;
+        }
+        Platform.runLater(this::flushQueuedMessageRefresh);
+    }
+
+    private void flushQueuedMessageRefresh() {
+        while (messageRefreshDirty.getAndSet(false)) {
+            refreshCurrentChat();
+            reloadChatList();
+        }
+        messageRefreshQueued.set(false);
+        if (messageRefreshDirty.get() && messageRefreshQueued.compareAndSet(false, true)) {
+            Platform.runLater(this::flushQueuedMessageRefresh);
+        }
     }
 
     @Override
@@ -251,6 +277,9 @@ public class FormChat extends Form {
         // --- Левая панель: поиск + список чатов ---
         VBox leftPane = new VBox();
         leftPane.getStyleClass().add("chat-list-pane");
+        if (OsDetect.isWindows() && !AppPreferences.isDisableEffectsEffective()) {
+            leftPane.setStyle(WINDOWS_HIT_TEST_BACKGROUND);
+        }
 
         TextField searchField = new TextField();
         searchField.setPromptText("🔍 Поиск чатов");
@@ -279,6 +308,9 @@ public class FormChat extends Form {
 
         chatListView = new ListView<>(sortedChats);
         chatListView.getStyleClass().add("chat-list-view");
+        if (OsDetect.isWindows() && !AppPreferences.isDisableEffectsEffective()) {
+            chatListView.setStyle(WINDOWS_HIT_TEST_BACKGROUND);
+        }
         chatListView.setCellFactory(lv -> new ChatListCell(
                 this::deleteChat,
                 this::showChannelProperties,

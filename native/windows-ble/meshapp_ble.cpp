@@ -450,6 +450,9 @@ static void on_from_radio_value_changed(
 
 static void on_from_num_value_changed(
     GattCharacteristic const&, GattValueChangedEventArgs const&) {
+    if (!g_notifications_active.load()) {
+        return;
+    }
     post_to_worker([] { drain_from_radio(); });
 }
 
@@ -704,26 +707,16 @@ MESHBLE_API int meshble_connect(const char* address, int timeout_ms) {
                     do_disconnect(); return -3;
                 }
 
-                // fromRadio notifications unreliable on many Windows BLE adapters:
+                // fromRadio notifications are unreliable on many Windows BLE adapters:
                 // subscription succeeds but notifications are never delivered.
-                // Always use Java-side polling (same approach as macOS).
+                // Use a single Java-side polling path in this mode. Mixing native
+                // callback drains with Java polling crosses the JNA boundary from
+                // multiple directions during heavy config exchange and can hard-crash
+                // the process without a Java exception.
                 g_notifications_active = false;
-                log_msg("[meshble] fromRadio: using polling (notifications skipped)");
-
-                if (g_ble->from_num != nullptr) {
-                    try {
-                        auto nr2 = await_async_result(
-                            g_ble->from_num.WriteClientCharacteristicConfigurationDescriptorAsync(
-                                GattClientCharacteristicConfigurationDescriptorValue::Notify),
-                            step_timeout,
-                            "WriteClientCharacteristicConfigurationDescriptorAsync");
-                        if (nr2 == GattCommunicationStatus::Success)
-                            g_ble->from_num_notify_token = g_ble->from_num.ValueChanged(on_from_num_value_changed);
-                    } catch (...) {}
-                }
+                log_msg("[meshble] fromRadio: using polling only (native drains disabled)");
 
                 g_connected = true;
-                drain_from_radio();
                 log_msg("[meshble] Connected (notifications=%s)", g_notifications_active.load() ? "yes" : "polling");
                 if (g_state_callback) g_state_callback(0, nullptr);
                 return 0;

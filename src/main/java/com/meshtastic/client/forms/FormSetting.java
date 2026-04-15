@@ -299,11 +299,7 @@ public class FormSetting extends Form {
     }
 
     /**
-     * Ждёт routing ACK для шага сохранения конфигурации.
-     * <p>
-     * Теперь это делается не только для BLE: begin_edit_settings и промежуточные
-     * set_config/set_module_config должны завершиться подтверждением до отправки
-     * следующего шага, иначе commit может догнать ещё не обработанную транзакцию.
+     * Ждёт routing ACK для шага сохранения конфигурации и считает отсутствие ACK ошибкой.
      */
     private void waitForRequiredConfigSaveAck(CompletableFuture<MeshProtos.Routing.Error> ackFuture,
                                               String stepName) {
@@ -321,6 +317,22 @@ public class FormSetting extends Form {
         } catch (Exception e) {
             throw new IllegalStateException("Config save step '" + stepName + "' ACK failed", e);
         }
+    }
+
+    /**
+     * BLE save-flow должен упорядочивать admin-пакеты по routing ACK: иначе следующий
+     * GATT write может догнать ещё не обработанный begin/set. Serial/TCP локальные
+     * admin-пакеты на части прошивок routing ACK не присылают, поэтому там используем
+     * transport-aware паузы, а ACK оставляем только диагностикой.
+     */
+    private void waitForTransportRequiredConfigSaveAck(ConnectionType transport,
+                                                       CompletableFuture<MeshProtos.Routing.Error> ackFuture,
+                                                       String stepName) {
+        if (transport != ConnectionType.BLE) {
+            observeOptionalConfigSaveAck(ackFuture, stepName);
+            return;
+        }
+        waitForRequiredConfigSaveAck(ackFuture, stepName);
     }
 
     /**
@@ -355,6 +367,17 @@ public class FormSetting extends Form {
         }
     }
 
+    private void handleCommitConfigSaveAck(ConnectionType transport,
+                                           CompletableFuture<MeshProtos.Routing.Error> ackFuture,
+                                           String stepName) {
+        if (transport != ConnectionType.BLE) {
+            observeOptionalConfigSaveAck(ackFuture, stepName);
+            return;
+        }
+        observeDeferredConfigSaveAck(ackFuture, stepName);
+        waitForCommitConfigSaveAckOrExpectedReboot(ackFuture, stepName);
+    }
+
     private boolean isExpectedRebootAckLoss(Throwable error) {
         Throwable current = error;
         while (current != null) {
@@ -380,6 +403,26 @@ public class FormSetting extends Form {
         return current != null && current.getMessage() != null
                 ? current.getMessage()
                 : error.getClass().getSimpleName();
+    }
+
+    private void observeOptionalConfigSaveAck(CompletableFuture<MeshProtos.Routing.Error> ackFuture,
+                                              String stepName) {
+        if (ackFuture == null) {
+            return;
+        }
+
+        ackFuture
+                .orTimeout(CONFIG_SAVE_ACK_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+                .whenComplete((error, ex) -> {
+                    if (ex != null) {
+                        log.debug("Config save: optional ACK for '{}' was not observed: {}",
+                                stepName, rootCauseMessage(ex));
+                    } else if (error != null && error != MeshProtos.Routing.Error.NONE) {
+                        log.warn("Config save: optional ACK for '{}' returned {}", stepName, error);
+                    } else {
+                        log.debug("Config save: optional ACK received for '{}'", stepName);
+                    }
+                });
     }
 
     /**
@@ -1136,7 +1179,7 @@ public class FormSetting extends Form {
                     ConfigProtos.Config deviceTzConfig = buildDeviceTimeZoneConfig(deviceConfig, targetTzDef);
 
                     Thread.sleep(baseConfigMessageDelayMs(transport));
-                    waitForRequiredConfigSaveAck(
+                    waitForTransportRequiredConfigSaveAck(transport,
                             MessageService.beginEditSettings(actionHandler, actionState),
                             "beginEditSettings");
 
@@ -1148,8 +1191,7 @@ public class FormSetting extends Form {
                     Thread.sleep(getConfigSaveInterTaskDelayMs(transport, 1, 3));
                     CompletableFuture<MeshProtos.Routing.Error> commitAck =
                             MessageService.commitEditSettings(actionHandler, actionState);
-                    observeDeferredConfigSaveAck(commitAck, "commitEditSettings");
-                    waitForCommitConfigSaveAckOrExpectedReboot(commitAck, "commitEditSettings");
+                    handleCommitConfigSaveAck(transport, commitAck, "commitEditSettings");
 
                     if (activeEntry != null) {
                         pendingTimeOnlySyncConnectionId = activeEntry.getId();
@@ -1177,7 +1219,7 @@ public class FormSetting extends Form {
                 }
 
                 long epochSeconds = Instant.now().getEpochSecond();
-                waitForRequiredConfigSaveAck(
+                waitForTransportRequiredConfigSaveAck(transport,
                         MessageService.setTimeOnly(actionHandler, actionState, epochSeconds),
                         "setTimeOnly");
 
@@ -2180,7 +2222,9 @@ public class FormSetting extends Form {
      * Использует begin_edit_settings / commit_edit_settings для батч-отправки.
      */
     private void onSaveConfig() {
-        if (state == null || handler == null) {
+        DeviceState actionState = state;
+        ProtocolHandler actionHandler = handler;
+        if (actionState == null || actionHandler == null) {
             configStatusLabel.setText("Нет подключения к радио");
             return;
         }
@@ -2294,24 +2338,26 @@ public class FormSetting extends Form {
         AtomicBoolean saveDispatchStarted = new AtomicBoolean(false);
         Runnable[] listenerHolder = new Runnable[1];
         listenerHolder[0] = () -> Platform.runLater(() -> {
-            state.removeOwnerInfoListener(listenerHolder[0]);
+            actionState.removeOwnerInfoListener(listenerHolder[0]);
             if (saveDispatchStarted.compareAndSet(false, true)) {
-                sendConfigChanges(modifiedConfigs, modifiedModuleConfigs, modifiedChannels,
+                sendConfigChanges(activeEntry, actionState, actionHandler,
+                        modifiedConfigs, modifiedModuleConfigs, modifiedChannels,
                         fOwnerModified, fLongName, fShortName,
                         fPositionModified, fLat, fLon, fAlt,
                         totalChanges);
             }
         });
-        state.addOwnerInfoListener(listenerHolder[0]);
+        actionState.addOwnerInfoListener(listenerHolder[0]);
 
         // Таймаут — отправить без passkey
         Thread timeoutThread = new Thread(() -> {
             try { Thread.sleep(5000); } catch (InterruptedException ignored) { return; }
             Platform.runLater(() -> {
-                state.removeOwnerInfoListener(listenerHolder[0]);
+                actionState.removeOwnerInfoListener(listenerHolder[0]);
                 if (saveDispatchStarted.compareAndSet(false, true)) {
                     configStatusLabel.setText("Отправка без session key...");
-                    sendConfigChanges(modifiedConfigs, modifiedModuleConfigs, modifiedChannels,
+                    sendConfigChanges(activeEntry, actionState, actionHandler,
+                            modifiedConfigs, modifiedModuleConfigs, modifiedChannels,
                             fOwnerModified, fLongName, fShortName,
                             fPositionModified, fLat, fLon, fAlt,
                             totalChanges);
@@ -2321,7 +2367,7 @@ public class FormSetting extends Form {
         timeoutThread.setDaemon(true);
         timeoutThread.start();
 
-        MessageService.requestSessionPasskey(handler, state);
+        MessageService.requestSessionPasskey(actionHandler, actionState);
     }
 
     /**
@@ -2329,42 +2375,45 @@ public class FormSetting extends Form {
      * Виртуальные секции (имя, позиция) отправляются отдельными admin-сообщениями.
      * Protobuf-секции оборачиваются в begin/commit edit.
      */
-    private void sendConfigChanges(List<ConfigProtos.Config> configs,
-                                    List<ModuleConfigProtos.ModuleConfig> moduleConfigs,
-                                    List<ChannelProtos.Channel> channels,
-                                    boolean ownerModified, String newLongName, String newShortName,
-                                    boolean positionModified, double newLat, double newLon, int newAlt,
-                                    int totalChanges) {
+    private void sendConfigChanges(ConnectionEntry activeEntry,
+                                   DeviceState actionState,
+                                   ProtocolHandler actionHandler,
+                                   List<ConfigProtos.Config> configs,
+                                   List<ModuleConfigProtos.ModuleConfig> moduleConfigs,
+                                   List<ChannelProtos.Channel> channels,
+                                   boolean ownerModified, String newLongName, String newShortName,
+                                   boolean positionModified, double newLat, double newLon, int newAlt,
+                                   int totalChanges) {
         configStatusLabel.setText("Отправка настроек...");
-        ConnectionEntry activeEntry = findActiveConnectionEntry();
         ConnectionType activeTransport = activeEntry != null
                 ? activeEntry.getEffectiveType()
                 : ConnectionType.TCP;
 
         // Виртуальные секции — отправить напрямую
         if (ownerModified && newLongName != null && newShortName != null) {
-            MessageService.setOwnerInfo(handler, state, newLongName, newShortName, state.getSessionPasskey());
-            NodeData myNode = state.getNodeDb().get(state.getMyNodeNum());
+            MessageService.setOwnerInfo(actionHandler, actionState,
+                    newLongName, newShortName, actionState.getSessionPasskey());
+            NodeData myNode = actionState.getNodeDb().get(actionState.getMyNodeNum());
             if (myNode != null) {
                 myNode.setLongName(newLongName);
                 myNode.setShortName(newShortName);
-                state.fireNodeUpdateListeners(state.getMyNodeNum());
+                actionState.fireNodeUpdateListeners(actionState.getMyNodeNum());
             }
         }
 
         if (positionModified) {
             if (newLat == 0 && newLon == 0 && newAlt == 0) {
-                MessageService.removeFixedPosition(handler, state);
+                MessageService.removeFixedPosition(actionHandler, actionState);
             } else {
-                MessageService.setFixedPosition(handler, state, newLat, newLon, newAlt);
-                state.setPendingFixedPosition(newLat, newLon, newAlt);
-                NodeData myNode = state.getNodeDb().get(state.getMyNodeNum());
+                MessageService.setFixedPosition(actionHandler, actionState, newLat, newLon, newAlt);
+                actionState.setPendingFixedPosition(newLat, newLon, newAlt);
+                NodeData myNode = actionState.getNodeDb().get(actionState.getMyNodeNum());
                 if (myNode != null) {
                     // Round-trip through int to show what the device will actually store
                     myNode.setLatitude(Math.round(newLat * 1e7) * 1e-7);
                     myNode.setLongitude(Math.round(newLon * 1e7) * 1e-7);
                     myNode.setAltitude(newAlt);
-                    state.fireNodeUpdateListeners(state.getMyNodeNum());
+                    actionState.fireNodeUpdateListeners(actionState.getMyNodeNum());
                 }
             }
         }
@@ -2386,10 +2435,11 @@ public class FormSetting extends Form {
                     String stepName = "setChannel/" + channel.getIndex();
                     log.info("Config save: setChannel index={} role={}",
                             channel.getIndex(), channel.getRole());
-                    waitForRequiredConfigSaveAck(
-                            MessageService.setChannel(handler, state, channel, state.getSessionPasskey()),
+                    waitForTransportRequiredConfigSaveAck(activeTransport,
+                            MessageService.setChannel(actionHandler, actionState, channel,
+                                    actionState.getSessionPasskey()),
                             stepName);
-                    state.updateChannel(channel);
+                    actionState.updateChannel(channel);
                 });
             }
 
@@ -2400,14 +2450,14 @@ public class FormSetting extends Form {
                     log.info("Config save: implicit BLE {} variant={} size={}",
                             stepName, mqttConfig.getPayloadVariantCase(), mqttConfig.getSerializedSize());
                     CompletableFuture<MeshProtos.Routing.Error> ackFuture =
-                            MessageService.setModuleConfig(handler, state, mqttConfig);
+                            MessageService.setModuleConfig(actionHandler, actionState, mqttConfig);
                     observeDeferredConfigSaveAck(ackFuture, stepName);
                 });
             } else if (requiresReconnect) {
                 tasks.add(() -> {
                     log.info("Config save: beginEditSettings");
-                    waitForRequiredConfigSaveAck(
-                            MessageService.beginEditSettings(handler, state),
+                    waitForTransportRequiredConfigSaveAck(activeTransport,
+                            MessageService.beginEditSettings(actionHandler, actionState),
                             "beginEditSettings");
                 });
                 int totalMutatingSteps = configs.size() + moduleConfigs.size();
@@ -2419,9 +2469,9 @@ public class FormSetting extends Form {
                         log.info("Config save: setConfig variant={} size={}",
                                 c.getPayloadVariantCase(), c.getSerializedSize());
                         CompletableFuture<MeshProtos.Routing.Error> ackFuture =
-                                MessageService.setConfig(handler, state, c);
+                                MessageService.setConfig(actionHandler, actionState, c);
                         if (waitForAckBeforeCommit) {
-                            waitForRequiredConfigSaveAck(ackFuture, stepName);
+                            waitForTransportRequiredConfigSaveAck(activeTransport, ackFuture, stepName);
                         } else {
                             // On BLE the final payload step can trigger a disconnect before its routing
                             // ACK is observed, so commit must still be allowed to proceed.
@@ -2436,9 +2486,9 @@ public class FormSetting extends Form {
                         log.info("Config save: setModuleConfig variant={} size={}",
                                 mc.getPayloadVariantCase(), mc.getSerializedSize());
                         CompletableFuture<MeshProtos.Routing.Error> ackFuture =
-                                MessageService.setModuleConfig(handler, state, mc);
+                                MessageService.setModuleConfig(actionHandler, actionState, mc);
                         if (waitForAckBeforeCommit) {
-                            waitForRequiredConfigSaveAck(ackFuture, stepName);
+                            waitForTransportRequiredConfigSaveAck(activeTransport, ackFuture, stepName);
                         } else {
                             // MQTT and other reboot-sensitive module updates should not prevent the
                             // trailing commit from being sent just because their routing ACK is late.
@@ -2450,12 +2500,8 @@ public class FormSetting extends Form {
                     String stepName = "commitEditSettings";
                     log.info("Config save: commitEditSettings");
                     CompletableFuture<MeshProtos.Routing.Error> ackFuture =
-                            MessageService.commitEditSettings(handler, state);
-                    // commit triggers reboot/disconnect across transports, so a missing ACK
-                    // is not necessarily a failed save. Continue into reconnect flow unless
-                    // the device explicitly returns a routing error.
-                    observeDeferredConfigSaveAck(ackFuture, stepName);
-                    waitForCommitConfigSaveAckOrExpectedReboot(ackFuture, stepName);
+                            MessageService.commitEditSettings(actionHandler, actionState);
+                    handleCommitConfigSaveAck(activeTransport, ackFuture, stepName);
                 });
             }
 
@@ -2538,8 +2584,12 @@ public class FormSetting extends Form {
                         log.warn("Config save: no active connection to hand off after commit");
                     }
                     Platform.runLater(() -> {
-                        state = null;
-                        handler = null;
+                        if (state == actionState) {
+                            state = null;
+                        }
+                        if (handler == actionHandler) {
+                            handler = null;
+                        }
                         reloadConfigTree();
                     });
                 } catch (InterruptedException e) {
