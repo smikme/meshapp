@@ -85,6 +85,7 @@ public final class MessageDbService {
                         hop_start      INT DEFAULT 0,
                         hop_limit      INT DEFAULT 0,
                         sender_name    VARCHAR(100),
+                        via_mqtt       BOOLEAN DEFAULT FALSE,
                         system_msg     BOOLEAN DEFAULT FALSE,
                         rx_rssi        INT DEFAULT 0,
                         rx_snr         REAL DEFAULT 0,
@@ -142,8 +143,8 @@ public final class MessageDbService {
                 INSERT INTO messages (chat_type, chat_key, from_node_id, to_node_id, channel_idx,
                     text, timestamp, outgoing, packet_id, status, error_reason,
                     reply_id, reply_text, hop_start, hop_limit, sender_name, system_msg,
-                    rx_rssi, rx_snr, owner_node_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    rx_rssi, rx_snr, via_mqtt, owner_node_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, Statement.RETURN_GENERATED_KEYS);
 
             updateStatusStmt = dbConnection.prepareStatement("""
@@ -247,7 +248,8 @@ public final class MessageDbService {
             insertStmt.setBoolean(17, msg.isSystemMessage());
             insertStmt.setInt(18, msg.getRxRssi());
             insertStmt.setFloat(19, msg.getRxSnr());
-            insertStmt.setString(20, normalizedOwnerNodeId);
+            insertStmt.setBoolean(20, msg.isViaMqtt());
+            insertStmt.setString(21, normalizedOwnerNodeId);
             insertStmt.executeUpdate();
 
             try (ResultSet keys = insertStmt.getGeneratedKeys()) {
@@ -294,7 +296,8 @@ public final class MessageDbService {
                     END,
                     sender_name = COALESCE(?, sender_name),
                     rx_rssi = CASE WHEN ? <> 0 THEN ? ELSE rx_rssi END,
-                    rx_snr = CASE WHEN ? <> 0 THEN ? ELSE rx_snr END
+                    rx_snr = CASE WHEN ? <> 0 THEN ? ELSE rx_snr END,
+                    via_mqtt = CASE WHEN ? THEN TRUE ELSE via_mqtt END
                 WHERE id = ?
                 """)) {
             ps.setString(1, msg.getStatus() != null ? msg.getStatus().name() : null);
@@ -309,7 +312,8 @@ public final class MessageDbService {
             ps.setInt(10, msg.getRxRssi());
             ps.setFloat(11, msg.getRxSnr());
             ps.setFloat(12, msg.getRxSnr());
-            ps.setLong(13, dbId);
+            ps.setBoolean(13, msg.isViaMqtt());
+            ps.setLong(14, dbId);
             ps.executeUpdate();
         }
     }
@@ -1074,7 +1078,8 @@ public final class MessageDbService {
                             insertStmt.setBoolean(17, msg.isSystemMessage());
                             insertStmt.setInt(18, 0);
                             insertStmt.setFloat(19, 0);
-                            insertStmt.setString(20, "");
+                            insertStmt.setBoolean(20, false);
+                            insertStmt.setString(21, "");
                             insertStmt.addBatch();
                             total++;
 
@@ -1163,6 +1168,7 @@ public final class MessageDbService {
         msg.setSystemMessage(rs.getBoolean("system_msg"));
         msg.setRxRssi(rs.getInt("rx_rssi"));
         msg.setRxSnr(rs.getFloat("rx_snr"));
+        msg.setViaMqtt(rs.getBoolean("via_mqtt"));
         return msg;
     }
 

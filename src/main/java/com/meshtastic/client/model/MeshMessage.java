@@ -43,6 +43,7 @@ public class MeshMessage {
     private int rxRssi;
     private float rxSnr;
     private String senderName;
+    private boolean viaMqtt;
     private boolean systemMessage;
     private long dbId;
     private List<MessageReaction> reactions = Collections.emptyList();
@@ -102,6 +103,9 @@ public class MeshMessage {
 
     public String getSenderName() { return senderName; }
     public void setSenderName(String senderName) { this.senderName = senderName; }
+
+    public boolean isViaMqtt() { return viaMqtt; }
+    public void setViaMqtt(boolean viaMqtt) { this.viaMqtt = viaMqtt; }
 
     public boolean isSystemMessage() { return systemMessage; }
     public void setSystemMessage(boolean systemMessage) { this.systemMessage = systemMessage; }

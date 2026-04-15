@@ -169,6 +169,7 @@ public class MessageListenerService implements FromRadioListener {
         msg.setHopLimit(packet.getHopLimit());
         msg.setRxRssi(packet.getRxRssi());
         msg.setRxSnr(packet.getRxSnr());
+        msg.setViaMqtt(isMqttPacket(packet));
 
         if (data.getReplyId() != 0) {
             log.info("REPLY_DEBUG recv: reply_id={} (0x{}) from {}",
@@ -248,6 +249,11 @@ public class MessageListenerService implements FromRadioListener {
                     || chatKey.equalsIgnoreCase(message.getToNodeId()));
         }
         return false;
+    }
+
+    private static boolean isMqttPacket(MeshProtos.MeshPacket packet) {
+        return packet.getViaMqtt()
+                || packet.getTransportMechanism() == MeshProtos.MeshPacket.TransportMechanism.TRANSPORT_MQTT;
     }
 
     private boolean deferMeshPacket(MeshProtos.MeshPacket packet, String reason) {

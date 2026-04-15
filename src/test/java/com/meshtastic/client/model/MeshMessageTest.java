@@ -221,6 +221,22 @@ class MeshMessageTest {
     }
 
     @Test
+    void isViaMqttDefaultsToFalse() {
+        MeshMessage msg = createMessage();
+
+        assertFalse(msg.isViaMqtt());
+    }
+
+    @Test
+    void setViaMqtt() {
+        MeshMessage msg = createMessage();
+
+        msg.setViaMqtt(true);
+
+        assertTrue(msg.isViaMqtt());
+    }
+
+    @Test
     void isSystemMessageDefaultsToFalse() {
         MeshMessage msg = createMessage();
         

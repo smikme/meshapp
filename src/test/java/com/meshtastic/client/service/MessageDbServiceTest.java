@@ -130,6 +130,7 @@ class MessageDbServiceTest {
         message.setReplyId(55);
         message.setReplyText("quoted");
         message.setSenderName("alice");
+        message.setViaMqtt(true);
         service.save(message, "dm", "!peer", "!owner");
 
         service.updateStatus(777, MeshMessage.DeliveryStatus.FAILED, "TIMEOUT");
@@ -141,6 +142,7 @@ class MessageDbServiceTest {
         assertEquals(55, loaded.getReplyId());
         assertEquals("quoted", loaded.getReplyText());
         assertEquals("alice", loaded.getSenderName());
+        assertTrue(loaded.isViaMqtt());
     }
 
     @Test
@@ -223,6 +225,7 @@ class MessageDbServiceTest {
         MeshMessage first = message("first", 990, 10);
         MeshMessage duplicate = message("duplicate", 990, 20);
         duplicate.setStatus(MeshMessage.DeliveryStatus.DELIVERED);
+        duplicate.setViaMqtt(true);
 
         service.save(first, "channel", "0", "!owner");
         service.save(duplicate, "channel", "0", "!owner");
@@ -232,6 +235,7 @@ class MessageDbServiceTest {
         assertEquals(first.getDbId(), duplicate.getDbId());
         assertEquals("first", loaded.getFirst().getText());
         assertEquals(MeshMessage.DeliveryStatus.DELIVERED, loaded.getFirst().getStatus());
+        assertTrue(loaded.getFirst().isViaMqtt());
     }
 
     @Test

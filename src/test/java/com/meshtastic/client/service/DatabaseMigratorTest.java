@@ -219,6 +219,29 @@ class DatabaseMigratorTest {
         }
     }
 
+    @Test
+    void migrateFromV9AddsViaMqttToMessages() throws Exception {
+        try (Connection connection = openConnection("upgrade-v9")) {
+            createSchemaVersion(connection, 9);
+
+            try (Statement stmt = connection.createStatement()) {
+                stmt.execute("""
+                        CREATE TABLE messages (
+                            id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                            text CLOB
+                        )
+                        """);
+                stmt.execute("INSERT INTO messages (text) VALUES ('legacy')");
+            }
+
+            DatabaseMigrator.migrate(connection);
+
+            assertEquals(DatabaseMigrator.CURRENT_VERSION, schemaVersion(connection));
+            assertTrue(columnExists(connection, "MESSAGES", "VIA_MQTT"));
+            assertFalse(firstMessageViaMqtt(connection));
+        }
+    }
+
     private Connection openConnection(String name) throws SQLException {
         return DriverManager.getConnection("jdbc:h2:" + tempDir.resolve(name) + ";AUTO_SERVER=FALSE;TRACE_LEVEL_FILE=0");
     }
@@ -291,6 +314,14 @@ class DatabaseMigratorTest {
                 rs.next();
                 return rs.getInt(1);
             }
+        }
+    }
+
+    private static boolean firstMessageViaMqtt(Connection connection) throws SQLException {
+        try (Statement stmt = connection.createStatement();
+             ResultSet rs = stmt.executeQuery("SELECT via_mqtt FROM messages ORDER BY id LIMIT 1")) {
+            rs.next();
+            return rs.getBoolean(1);
         }
     }
 }
