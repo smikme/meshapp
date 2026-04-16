@@ -8,6 +8,8 @@ plugins {
 	id 'org.openjfx.javafxplugin' version '0.1.0'
 }
 
+def javaFxVersion = '21.0.10'
+
 application {
 	mainClass = 'com.meshtastic.client.MeshAppLauncher'
 	def jvmArgs = [
@@ -30,7 +32,7 @@ application {
 }
 
 javafx {
-	version = "21.0.10"
+	version = javaFxVersion
 	modules = ['javafx.controls']
 }
 
@@ -53,6 +55,18 @@ repositories {
 	mavenCentral()
 }
 
+configurations.configureEach {
+	resolutionStrategy.eachDependency { details ->
+		if (details.requested.group == 'org.openjfx' && details.requested.name.startsWith('javafx-')) {
+			// Любой транзитивный org.openjfx должен совпадать с версией,
+			// заданной через org.openjfx.javafxplugin, иначе Gradle берёт
+			// старшую и можно незаметно уехать с JavaFX 21 на 23.
+			details.useVersion(javaFxVersion)
+			details.because("Keep all JavaFX modules aligned with the configured project version ${javaFxVersion}")
+		}
+	}
+}
+
 dependencies {
 	implementation 'com.google.protobuf:protobuf-java:4.33.4'
 	implementation 'com.miglayout:miglayout-javafx:11.4.2'
@@ -60,7 +74,11 @@ dependencies {
 	implementation 'com.fazecast:jSerialComm:2.11.0'
 	implementation 'com.google.code.gson:gson:2.11.0'
 	implementation 'com.h2database:h2:2.3.232'
-	implementation 'io.github.mkpaz:atlantafx-base:2.1.0'
+	implementation('io.github.mkpaz:atlantafx-base:2.1.0') {
+		// AtlantaFX публикует собственный org.openjfx version, который иначе
+		// поднимает проект с JavaFX 21.0.10 до JavaFX 23 через conflict resolution.
+		exclude group: 'org.openjfx'
+	}
 	implementation 'net.java.dev.jna:jna:5.16.0'
 	implementation 'net.java.dev.jna:jna-platform:5.16.0'
 	implementation 'org.eclipse.paho:org.eclipse.paho.client.mqttv3:1.2.5'
@@ -353,26 +371,87 @@ def buildPackagingJvmArgs = {
 	return jvmArgsList
 }
 
-def preparePackagingLibDir = { os, installDir ->
-	def libDir = new File(installDir, "lib")
+def relocateJavaFxJars = { File libDir ->
+	def fxDir = new File(libDir, "fx")
+	fxDir.mkdirs()
+	libDir.listFiles()?.findAll { it.name.startsWith('javafx-') }?.each { jar ->
+		java.nio.file.Files.move(
+			jar.toPath(),
+			new File(fxDir, jar.name).toPath(),
+			java.nio.file.StandardCopyOption.REPLACE_EXISTING
+		)
+	}
+}
+
+def patchUnixStartScriptForJavaFx = { File scriptFile ->
+	if (!scriptFile.isFile()) {
+		return
+	}
+
+	def lines = scriptFile.readLines('UTF-8')
+	def patched = lines.collectMany { line ->
+		if (line.startsWith('CLASSPATH=')) {
+			def entries = line.substring('CLASSPATH='.length())
+				.split(java.util.regex.Pattern.quote(File.pathSeparator))
+				.findAll { !it.contains('/javafx-') }
+			return ["CLASSPATH=${entries.join(File.pathSeparator)}"]
+		}
+		if (line == '        -classpath "$CLASSPATH" \\') {
+			return [
+				'        --module-path "$APP_HOME/lib/fx" \\',
+				'        --add-modules javafx.controls \\',
+				line
+			]
+		}
+		return [line]
+	}
+
+	scriptFile.setText(patched.join('\n') + '\n', 'UTF-8')
+}
+
+def patchWindowsStartScriptForJavaFx = { File scriptFile ->
+	if (!scriptFile.isFile()) {
+		return
+	}
+
+	def lines = scriptFile.readLines('UTF-8')
+	def patched = lines.collect { line ->
+		if (line.startsWith('set CLASSPATH=')) {
+			def entries = line.substring('set CLASSPATH='.length())
+				.split(java.util.regex.Pattern.quote(';'))
+				.findAll { !it.toLowerCase(java.util.Locale.ROOT).contains('\\lib\\javafx-') }
+			return "set CLASSPATH=${entries.join(';')}"
+		}
+		if (line.startsWith('"%JAVA_EXE%" %DEFAULT_JVM_OPTS% %JAVA_OPTS% %MESH_APP_OPTS%  -classpath "%CLASSPATH%" ')) {
+			return "\"%JAVA_EXE%\" %DEFAULT_JVM_OPTS% %JAVA_OPTS% %MESH_APP_OPTS% --module-path \"%APP_HOME%\\lib\\fx\" --add-modules javafx.controls -classpath \"%CLASSPATH%\" ${application.mainClass.get()} %*"
+		}
+		return line
+	}
+
+	scriptFile.setText(patched.join('\r\n') + '\r\n', 'UTF-8')
+}
+
+def preparePackagingLibDir = { os, installDir, stagingRoot ->
+	if (stagingRoot.exists()) {
+		stagingRoot.deleteDir()
+	}
+	stagingRoot.mkdirs()
+
+	def sourceLibDir = new File(installDir, "lib")
+	if (!sourceLibDir.isDirectory()) {
+		throw new GradleException("packaging: installDist lib directory not found: ${sourceLibDir}")
+	}
+
+	def libDir = new File(stagingRoot, "lib")
+	project.copy {
+		from sourceLibDir
+		into libDir
+	}
 
 	// Выделить JavaFX JAR в поддиректорию — только они должны быть на module path.
 	// Если $APPDIR целиком на module path, app JAR становится automatic module,
 	// и --add-opens ...=ALL-UNNAMED перестаёт действовать (рефлексия для HWND ломается).
-	def fxDir = new File(libDir, "fx")
-	fxDir.mkdirs()
-	libDir.listFiles()?.findAll { it.name.startsWith('javafx-') }?.each { jar ->
-		def target = new File(fxDir, jar.name)
-		if (target.exists()) {
-			java.nio.file.Files.delete(jar.toPath())
-		} else {
-			java.nio.file.Files.move(
-				jar.toPath(),
-				target.toPath(),
-				java.nio.file.StandardCopyOption.REPLACE_EXISTING
-			)
-		}
-	}
+	relocateJavaFxJars(libDir)
 
 	// Windows: скопировать meshapp-ble.dll (WinRT BLE) в lib/ для упаковки
 	if (os.isWindows()) {
@@ -713,7 +792,7 @@ def buildLinuxAppImage = { File installDir, File workDir, String taskName ->
 	def appVersion = resolvePackageVersion(os)
 	def javaHome = resolvePackagingJavaHome()
 	def jpackageBin = "${javaHome}/bin/jpackage"
-	def libDir = preparePackagingLibDir(os, installDir)
+	def libDir = preparePackagingLibDir(os, installDir, new File(workDir, 'input'))
 	def jvmArgsList = buildPackagingJvmArgs()
 	def linuxResourceDir = prepareLinuxPackagingResources()
 	def iconSource = file('src/main/resources/logo/icon_512.png')
@@ -948,6 +1027,14 @@ tasks.named("run") {
 		enabled = false
 	}
 }
+tasks.named('installDist') {
+	doLast {
+		def installDir = layout.buildDirectory.dir("install/${project.name}").get().asFile
+		relocateJavaFxJars(new File(installDir, 'lib'))
+		patchUnixStartScriptForJavaFx(new File(installDir, "bin/${project.name}"))
+		patchWindowsStartScriptForJavaFx(new File(installDir, "bin/${project.name}.bat"))
+	}
+}
 
 // ============================================================
 // jpackage: создание нативного инсталлятора
@@ -973,7 +1060,7 @@ tasks.register('jpackage') {
 			? "${javaHome}/bin/jpackage.exe"
 			: "${javaHome}/bin/jpackage"
 
-		def libDir = preparePackagingLibDir(os, installDir)
+		def libDir = preparePackagingLibDir(os, installDir, new File(outputDir, 'input'))
 		def jvmArgsList = buildPackagingJvmArgs()
 
 		// macOS: app-image → копируем Icon Composer ресурсы → DMG
