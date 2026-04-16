@@ -239,9 +239,15 @@ public final class ConnectionManager {
         boolean cancelledDuringConnect = false;
 
         synchronized (connectionLock) {
-            boolean shouldCancel = pendingConnections.get(id) != conn
-                    || findEntry(id) == null
-                    || userDisconnectedIds.contains(id);
+            MeshtasticConnection pendingConn = pendingConnections.get(id);
+            boolean entryRemoved = findEntry(id) == null;
+            boolean userCancelled = userDisconnectedIds.contains(id);
+            boolean replacedDuringConnect = pendingConn != null && pendingConn != conn;
+            boolean pendingClearedDuringConnect = pendingConn == null;
+            boolean shouldCancel = entryRemoved
+                    || userCancelled
+                    || replacedDuringConnect
+                    || (pendingClearedDuringConnect && !conn.isConnected());
             pendingConnections.remove(id, conn);
             if (shouldCancel) {
                 cancelledDuringConnect = true;
@@ -250,6 +256,10 @@ public final class ConnectionManager {
                 mqttProxyService = null;
                 future = null;
             } else {
+                if (pendingClearedDuringConnect) {
+                    log.warn("Connection '{}' reported disconnect during connect, but transport remained connected; promoting transport to active",
+                            entry.getName());
+                }
                 activeConnections.put(id, conn);
 
                 protocolHandler = new ProtocolHandler(id, conn);
@@ -286,6 +296,7 @@ public final class ConnectionManager {
             return;
         }
 
+        ReconnectService.getInstance().cancelReconnect(id);
         future.thenAccept(ds -> {
             if (activeConnections.get(id) != conn || !entry.isConnected()) {
                 log.debug("Skipping post-connect actions for '{}' because transport is no longer active",
