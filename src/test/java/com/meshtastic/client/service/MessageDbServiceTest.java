@@ -13,6 +13,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -235,7 +236,50 @@ class MessageDbServiceTest {
         assertEquals(first.getDbId(), duplicate.getDbId());
         assertEquals("first", loaded.getFirst().getText());
         assertEquals(MeshMessage.DeliveryStatus.DELIVERED, loaded.getFirst().getStatus());
-        assertTrue(loaded.getFirst().isViaMqtt());
+        assertFalse(loaded.getFirst().isViaMqtt());
+    }
+
+    @Test
+    void saveDuplicateRemovesMqttFlagWhenLoraCopyArrivesLater() {
+        MeshMessage mqtt = message("first", 991, 10);
+        mqtt.setViaMqtt(true);
+        service.save(mqtt, "channel", "0", "!owner");
+
+        MeshMessage lora = message("duplicate", 991, 20);
+        lora.setViaMqtt(false);
+        lora.setHopStart(6);
+        lora.setHopLimit(3);
+        lora.setRxRssi(-88);
+        lora.setRxSnr(4.5f);
+        service.save(lora, "channel", "0", "!owner");
+
+        MeshMessage loaded = service.findByPacketId(991, "channel", "0", "!owner");
+        assertNotNull(loaded);
+        assertFalse(loaded.isViaMqtt());
+        assertEquals(6, loaded.getHopStart());
+        assertEquals(3, loaded.getHopLimit());
+        assertEquals(-88, loaded.getRxRssi());
+        assertEquals(4.5f, loaded.getRxSnr());
+    }
+
+    @Test
+    void saveDuplicateKeepsLoraFlagWhenMqttCopyArrivesLater() {
+        MeshMessage lora = message("first", 992, 10);
+        lora.setViaMqtt(false);
+        lora.setHopStart(4);
+        lora.setHopLimit(2);
+        service.save(lora, "channel", "0", "!owner");
+
+        MeshMessage mqtt = message("duplicate", 992, 20);
+        mqtt.setViaMqtt(true);
+        mqtt.setRxRssi(-70);
+        service.save(mqtt, "channel", "0", "!owner");
+
+        MeshMessage loaded = service.findByPacketId(992, "channel", "0", "!owner");
+        assertNotNull(loaded);
+        assertFalse(loaded.isViaMqtt());
+        assertEquals(4, loaded.getHopStart());
+        assertEquals(2, loaded.getHopLimit());
     }
 
     @Test

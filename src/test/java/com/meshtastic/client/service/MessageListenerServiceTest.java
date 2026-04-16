@@ -37,6 +37,7 @@ import org.slf4j.LoggerFactory;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -115,6 +116,106 @@ class MessageListenerServiceTest {
             assertEquals("hello channel", persisted.getText());
             assertEquals(MeshMessage.DeliveryStatus.DELIVERED, persisted.getStatus());
             assertTrue(persisted.isViaMqtt());
+        } finally {
+            AppPreferences.setNotificationsEnabled(notificationsEnabled);
+        }
+    }
+
+    @Test
+    void onMeshPacketPromotesDuplicateFromMqttToLora() {
+        boolean notificationsEnabled = AppPreferences.isNotificationsEnabled();
+        AppPreferences.setNotificationsEnabled(false);
+        try {
+            MeshProtos.MeshPacket mqttPacket = MeshProtos.MeshPacket.newBuilder()
+                    .setFrom(0x11111111)
+                    .setTo(0xFFFFFFFF)
+                    .setChannel(2)
+                    .setId(7013)
+                    .setViaMqtt(true)
+                    .setDecoded(MeshProtos.Data.newBuilder()
+                            .setPortnum(Portnums.PortNum.TEXT_MESSAGE_APP)
+                            .setPayload(ByteString.copyFrom("hello channel", StandardCharsets.UTF_8))
+                            .build())
+                    .build();
+            service.onMeshPacket(mqttPacket);
+
+            MeshProtos.MeshPacket loraPacket = MeshProtos.MeshPacket.newBuilder()
+                    .setFrom(0x11111111)
+                    .setTo(0xFFFFFFFF)
+                    .setChannel(2)
+                    .setId(7013)
+                    .setHopStart(5)
+                    .setHopLimit(2)
+                    .setRxRssi(-83)
+                    .setRxSnr(6.5f)
+                    .setTransportMechanism(MeshProtos.MeshPacket.TransportMechanism.TRANSPORT_LORA)
+                    .setDecoded(MeshProtos.Data.newBuilder()
+                            .setPortnum(Portnums.PortNum.TEXT_MESSAGE_APP)
+                            .setPayload(ByteString.copyFrom("hello channel", StandardCharsets.UTF_8))
+                            .build())
+                    .build();
+            service.onMeshPacket(loraPacket);
+
+            MeshMessage inMemory = state.getMessages(2).getFirst();
+            assertFalse(inMemory.isViaMqtt());
+            assertEquals(5, inMemory.getHopStart());
+            assertEquals(2, inMemory.getHopLimit());
+            assertEquals(-83, inMemory.getRxRssi());
+            assertEquals(6.5f, inMemory.getRxSnr());
+
+            MeshMessage persisted = MessageDbService.getInstance().findByPacketId(7013, "channel", "2", "!12345678");
+            assertNotNull(persisted);
+            assertFalse(persisted.isViaMqtt());
+            assertEquals(5, persisted.getHopStart());
+            assertEquals(2, persisted.getHopLimit());
+        } finally {
+            AppPreferences.setNotificationsEnabled(notificationsEnabled);
+        }
+    }
+
+    @Test
+    void onMeshPacketKeepsLoraWhenDuplicateArrivesLaterViaMqtt() {
+        boolean notificationsEnabled = AppPreferences.isNotificationsEnabled();
+        AppPreferences.setNotificationsEnabled(false);
+        try {
+            MeshProtos.MeshPacket loraPacket = MeshProtos.MeshPacket.newBuilder()
+                    .setFrom(0x11111111)
+                    .setTo(0xFFFFFFFF)
+                    .setChannel(2)
+                    .setId(7014)
+                    .setHopStart(4)
+                    .setHopLimit(1)
+                    .setTransportMechanism(MeshProtos.MeshPacket.TransportMechanism.TRANSPORT_LORA)
+                    .setDecoded(MeshProtos.Data.newBuilder()
+                            .setPortnum(Portnums.PortNum.TEXT_MESSAGE_APP)
+                            .setPayload(ByteString.copyFrom("hello channel", StandardCharsets.UTF_8))
+                            .build())
+                    .build();
+            service.onMeshPacket(loraPacket);
+
+            MeshProtos.MeshPacket mqttPacket = MeshProtos.MeshPacket.newBuilder()
+                    .setFrom(0x11111111)
+                    .setTo(0xFFFFFFFF)
+                    .setChannel(2)
+                    .setId(7014)
+                    .setViaMqtt(true)
+                    .setDecoded(MeshProtos.Data.newBuilder()
+                            .setPortnum(Portnums.PortNum.TEXT_MESSAGE_APP)
+                            .setPayload(ByteString.copyFrom("hello channel", StandardCharsets.UTF_8))
+                            .build())
+                    .build();
+            service.onMeshPacket(mqttPacket);
+
+            MeshMessage inMemory = state.getMessages(2).getFirst();
+            assertFalse(inMemory.isViaMqtt());
+            assertEquals(4, inMemory.getHopStart());
+            assertEquals(1, inMemory.getHopLimit());
+
+            MeshMessage persisted = MessageDbService.getInstance().findByPacketId(7014, "channel", "2", "!12345678");
+            assertNotNull(persisted);
+            assertFalse(persisted.isViaMqtt());
+            assertEquals(4, persisted.getHopStart());
+            assertEquals(1, persisted.getHopLimit());
         } finally {
             AppPreferences.setNotificationsEnabled(notificationsEnabled);
         }

@@ -294,10 +294,28 @@ public final class MessageDbService {
                         THEN ?
                         ELSE reply_text
                     END,
+                    hop_start = CASE
+                        WHEN ? = FALSE AND ? <> 0 THEN ?
+                        WHEN ? = TRUE AND hop_start = 0 AND ? <> 0 THEN ?
+                        ELSE hop_start
+                    END,
+                    hop_limit = CASE
+                        WHEN ? = FALSE AND ? <> 0 THEN ?
+                        WHEN ? = TRUE AND hop_limit = 0 AND ? <> 0 THEN ?
+                        ELSE hop_limit
+                    END,
                     sender_name = COALESCE(?, sender_name),
-                    rx_rssi = CASE WHEN ? <> 0 THEN ? ELSE rx_rssi END,
-                    rx_snr = CASE WHEN ? <> 0 THEN ? ELSE rx_snr END,
-                    via_mqtt = CASE WHEN ? THEN TRUE ELSE via_mqtt END
+                    rx_rssi = CASE
+                        WHEN ? = FALSE AND ? <> 0 THEN ?
+                        WHEN ? = TRUE AND rx_rssi = 0 AND ? <> 0 THEN ?
+                        ELSE rx_rssi
+                    END,
+                    rx_snr = CASE
+                        WHEN ? = FALSE AND ? <> 0 THEN ?
+                        WHEN ? = TRUE AND rx_snr = 0 AND ? <> 0 THEN ?
+                        ELSE rx_snr
+                    END,
+                    via_mqtt = CASE WHEN ? THEN via_mqtt ELSE FALSE END
                 WHERE id = ?
                 """)) {
             ps.setString(1, msg.getStatus() != null ? msg.getStatus().name() : null);
@@ -307,13 +325,33 @@ public final class MessageDbService {
             ps.setString(5, msg.getReplyText());
             ps.setString(6, msg.getReplyText());
             ps.setString(7, msg.getReplyText());
-            ps.setString(8, msg.getSenderName());
-            ps.setInt(9, msg.getRxRssi());
-            ps.setInt(10, msg.getRxRssi());
-            ps.setFloat(11, msg.getRxSnr());
-            ps.setFloat(12, msg.getRxSnr());
-            ps.setBoolean(13, msg.isViaMqtt());
-            ps.setLong(14, dbId);
+            ps.setBoolean(8, msg.isViaMqtt());
+            ps.setInt(9, msg.getHopStart());
+            ps.setInt(10, msg.getHopStart());
+            ps.setBoolean(11, msg.isViaMqtt());
+            ps.setInt(12, msg.getHopStart());
+            ps.setInt(13, msg.getHopStart());
+            ps.setBoolean(14, msg.isViaMqtt());
+            ps.setInt(15, msg.getHopLimit());
+            ps.setInt(16, msg.getHopLimit());
+            ps.setBoolean(17, msg.isViaMqtt());
+            ps.setInt(18, msg.getHopLimit());
+            ps.setInt(19, msg.getHopLimit());
+            ps.setString(20, msg.getSenderName());
+            ps.setBoolean(21, msg.isViaMqtt());
+            ps.setInt(22, msg.getRxRssi());
+            ps.setInt(23, msg.getRxRssi());
+            ps.setBoolean(24, msg.isViaMqtt());
+            ps.setInt(25, msg.getRxRssi());
+            ps.setInt(26, msg.getRxRssi());
+            ps.setBoolean(27, msg.isViaMqtt());
+            ps.setFloat(28, msg.getRxSnr());
+            ps.setFloat(29, msg.getRxSnr());
+            ps.setBoolean(30, msg.isViaMqtt());
+            ps.setFloat(31, msg.getRxSnr());
+            ps.setFloat(32, msg.getRxSnr());
+            ps.setBoolean(33, msg.isViaMqtt());
+            ps.setLong(34, dbId);
             ps.executeUpdate();
         }
     }

@@ -48,6 +48,31 @@ class MessageStoreTest {
     }
 
     @Test
+    void addMessageDuplicatePromotesStoredCopyFromMqttToLora() {
+        MessageStore store = new MessageStore();
+
+        MeshMessage mqtt = createMessage("First", 0, 100);
+        mqtt.setViaMqtt(true);
+        store.addMessage(mqtt);
+
+        MeshMessage lora = createMessage("First", 0, 100);
+        lora.setViaMqtt(false);
+        lora.setHopStart(5);
+        lora.setHopLimit(2);
+        lora.setRxRssi(-91);
+        lora.setRxSnr(7.5f);
+        store.addMessage(lora);
+
+        MeshMessage stored = store.getMessages(0).getFirst();
+        assertEquals(1, store.getMessages(0).size());
+        assertTrue(!stored.isViaMqtt());
+        assertEquals(5, stored.getHopStart());
+        assertEquals(2, stored.getHopLimit());
+        assertEquals(-91, stored.getRxRssi());
+        assertEquals(7.5f, stored.getRxSnr());
+    }
+
+    @Test
     void addMessageKeepsMax100Messages() {
         MessageStore store = new MessageStore();
         
@@ -107,6 +132,27 @@ class MessageStoreTest {
         
         List<MeshMessage> messages = store.getDirectMessages("!peer1");
         assertEquals(1, messages.size());
+    }
+
+    @Test
+    void addDirectMessageDuplicateKeepsLoraWhenMqttCopyArrivesLater() {
+        MessageStore store = new MessageStore();
+
+        MeshMessage lora = createMessage("First", 0, 200);
+        lora.setViaMqtt(false);
+        lora.setHopStart(4);
+        lora.setHopLimit(1);
+        store.addDirectMessage(lora, "!peer1");
+
+        MeshMessage mqtt = createMessage("First", 0, 200);
+        mqtt.setViaMqtt(true);
+        store.addDirectMessage(mqtt, "!peer1");
+
+        MeshMessage stored = store.getDirectMessages("!peer1").getFirst();
+        assertEquals(1, store.getDirectMessages("!peer1").size());
+        assertTrue(!stored.isViaMqtt());
+        assertEquals(4, stored.getHopStart());
+        assertEquals(1, stored.getHopLimit());
     }
 
     @Test

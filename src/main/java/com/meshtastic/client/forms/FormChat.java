@@ -791,21 +791,24 @@ public class FormChat extends Form {
         if (selectedChat == null) { return; }
         ChatScrollState preservedScrollState = !formVisible ? captureViewportAnchor() : null;
         boolean wasAtLiveTail = formVisible && isAtLiveTail();
+        String chatType = currentChatType();
+        String chatKey = currentChatKey();
+        String ownerNodeId = currentOwnerNodeId();
 
         // Обновить статусы доставки для отправленных сообщений (ACK/NAK)
         MessageDbService db = MessageDbService.getInstance();
         pendingStatusLabels.entrySet().removeIf(entry -> {
-            MeshMessage updated = db.findByPacketId(entry.getKey());
+            MeshMessage updated = db.findByPacketId(entry.getKey(), chatType, chatKey, ownerNodeId);
             if (updated != null && updated.getStatus() != null
                     && updated.getStatus() != MeshMessage.DeliveryStatus.SENDING) {
-                MeshMessage loaded = syncLoadedMessageDeliveryStatus(updated);
+                MeshMessage loaded = syncLoadedMessageMetadata(updated);
                 bubbleFactory.refreshStatusLabel(entry.getValue(), loaded != null ? loaded : updated);
                 return true;
             }
             return false;
         });
-        String chatType = currentChatType();
-        String chatKey = currentChatKey();
+
+        syncLoadedMqttMetadata(db, chatType, chatKey, ownerNodeId);
 
         List<MeshMessage> newMsgs = db.loadAfter(chatType, chatKey, latestKnownDbId, currentOwnerNodeId());
         if (newMsgs.isEmpty() && shouldReloadChatAfterDatabaseReset(db, chatType, chatKey)) {
@@ -892,18 +895,84 @@ public class FormChat extends Form {
         });
     }
 
-    private MeshMessage syncLoadedMessageDeliveryStatus(MeshMessage updated) {
+    private void syncLoadedMqttMetadata(MessageDbService db,
+                                        String chatType,
+                                        String chatKey,
+                                        String ownerNodeId) {
+        if (db == null || chatType == null || chatKey == null || ownerNodeId == null) {
+            return;
+        }
+        for (MeshMessage loaded : loadedMessages) {
+            if (loaded.getPacketId() == 0 || !loaded.isViaMqtt()) {
+                continue;
+            }
+            MeshMessage updated = db.findByPacketId(loaded.getPacketId(), chatType, chatKey, ownerNodeId);
+            if (updated != null) {
+                syncLoadedMessageMetadata(updated);
+            }
+        }
+    }
+
+    private MeshMessage syncLoadedMessageMetadata(MeshMessage updated) {
         if (updated == null || updated.getPacketId() == 0) {
             return null;
         }
         for (MeshMessage loaded : loadedMessages) {
             if (loaded.getPacketId() == updated.getPacketId()) {
-                loaded.setStatus(updated.getStatus());
-                loaded.setErrorReason(updated.getErrorReason());
+                copyLoadedMessageMetadata(loaded, updated);
                 return loaded;
             }
         }
         return null;
+    }
+
+    static boolean copyLoadedMessageMetadata(MeshMessage loaded, MeshMessage updated) {
+        if (loaded == null || updated == null || loaded.getPacketId() != updated.getPacketId()) {
+            return false;
+        }
+
+        boolean changed = false;
+        if (loaded.getStatus() != updated.getStatus()) {
+            loaded.setStatus(updated.getStatus());
+            changed = true;
+        }
+        if (!Objects.equals(loaded.getErrorReason(), updated.getErrorReason())) {
+            loaded.setErrorReason(updated.getErrorReason());
+            changed = true;
+        }
+        if (loaded.getReplyId() != updated.getReplyId()) {
+            loaded.setReplyId(updated.getReplyId());
+            changed = true;
+        }
+        if (!Objects.equals(loaded.getReplyText(), updated.getReplyText())) {
+            loaded.setReplyText(updated.getReplyText());
+            changed = true;
+        }
+        if (loaded.getHopStart() != updated.getHopStart()) {
+            loaded.setHopStart(updated.getHopStart());
+            changed = true;
+        }
+        if (loaded.getHopLimit() != updated.getHopLimit()) {
+            loaded.setHopLimit(updated.getHopLimit());
+            changed = true;
+        }
+        if (loaded.getRxRssi() != updated.getRxRssi()) {
+            loaded.setRxRssi(updated.getRxRssi());
+            changed = true;
+        }
+        if (Float.compare(loaded.getRxSnr(), updated.getRxSnr()) != 0) {
+            loaded.setRxSnr(updated.getRxSnr());
+            changed = true;
+        }
+        if (!Objects.equals(loaded.getSenderName(), updated.getSenderName())) {
+            loaded.setSenderName(updated.getSenderName());
+            changed = true;
+        }
+        if (loaded.isViaMqtt() != updated.isViaMqtt()) {
+            loaded.setViaMqtt(updated.isViaMqtt());
+            changed = true;
+        }
+        return changed;
     }
 
     /**

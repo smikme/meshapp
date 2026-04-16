@@ -52,19 +52,31 @@ public class MessageStore {
     public void addMessage(MeshMessage msg) {
         List<MeshMessage> list = messagesByChannel
                 .computeIfAbsent(msg.getChannelIndex(), k -> Collections.synchronizedList(new ArrayList<>()));
+        boolean notifyListeners = false;
         synchronized (list) {
             // Дедупликация по packetId
             if (msg.getPacketId() != 0) {
                 for (MeshMessage existing : list) {
-                    if (existing.getPacketId() == msg.getPacketId()) { return; }
+                    if (existing.getPacketId() == msg.getPacketId()) {
+                        notifyListeners = mergeDuplicateMessage(existing, msg);
+                        if (!notifyListeners) {
+                            return;
+                        }
+                        break;
+                    }
                 }
             }
-            list.add(msg);
-            while (list.size() > MAX_MESSAGES_IN_MEMORY) {
-                list.remove(0);
+            if (!notifyListeners) {
+                list.add(msg);
+                while (list.size() > MAX_MESSAGES_IN_MEMORY) {
+                    list.remove(0);
+                }
+                notifyListeners = true;
             }
         }
-        fireMessageListeners();
+        if (notifyListeners) {
+            fireMessageListeners();
+        }
     }
 
     /**
@@ -96,18 +108,30 @@ public class MessageStore {
     public void addDirectMessage(MeshMessage msg, String peerNodeId) {
         List<MeshMessage> list = directMessages
                 .computeIfAbsent(peerNodeId, k -> Collections.synchronizedList(new ArrayList<>()));
+        boolean notifyListeners = false;
         synchronized (list) {
             if (msg.getPacketId() != 0) {
                 for (MeshMessage existing : list) {
-                    if (existing.getPacketId() == msg.getPacketId()) { return; }
+                    if (existing.getPacketId() == msg.getPacketId()) {
+                        notifyListeners = mergeDuplicateMessage(existing, msg);
+                        if (!notifyListeners) {
+                            return;
+                        }
+                        break;
+                    }
                 }
             }
-            list.add(msg);
-            while (list.size() > MAX_MESSAGES_IN_MEMORY) {
-                list.remove(0);
+            if (!notifyListeners) {
+                list.add(msg);
+                while (list.size() > MAX_MESSAGES_IN_MEMORY) {
+                    list.remove(0);
+                }
+                notifyListeners = true;
             }
         }
-        fireMessageListeners();
+        if (notifyListeners) {
+            fireMessageListeners();
+        }
     }
 
     /**
@@ -301,5 +325,87 @@ public class MessageStore {
      */
     public ConcurrentHashMap<Integer, PendingAckEntry> getPendingAcks() {
         return pendingAcks;
+    }
+
+    private boolean mergeDuplicateMessage(MeshMessage existing, MeshMessage incoming) {
+        if (existing == null || incoming == null) {
+            return false;
+        }
+
+        boolean changed = false;
+        boolean existingViaMqtt = existing.isViaMqtt();
+        boolean incomingViaMqtt = incoming.isViaMqtt();
+        boolean preferIncomingTransportMetadata = !incomingViaMqtt || existingViaMqtt == incomingViaMqtt;
+
+        MeshMessage.DeliveryStatus incomingStatus = incoming.getStatus();
+        if (incomingStatus != null && shouldReplaceStatus(existing.getStatus(), incomingStatus)) {
+            existing.setStatus(incomingStatus);
+            changed = true;
+        }
+
+        if (!hasText(existing.getErrorReason()) && hasText(incoming.getErrorReason())) {
+            existing.setErrorReason(incoming.getErrorReason());
+            changed = true;
+        }
+        if (existing.getReplyId() == 0 && incoming.getReplyId() != 0) {
+            existing.setReplyId(incoming.getReplyId());
+            changed = true;
+        }
+        if (!hasText(existing.getReplyText()) && hasText(incoming.getReplyText())) {
+            existing.setReplyText(incoming.getReplyText());
+            changed = true;
+        }
+        if (!hasText(existing.getSenderName()) && hasText(incoming.getSenderName())) {
+            existing.setSenderName(incoming.getSenderName());
+            changed = true;
+        }
+
+        if (preferIncomingTransportMetadata) {
+            if (incoming.getHopStart() != 0 && existing.getHopStart() != incoming.getHopStart()) {
+                existing.setHopStart(incoming.getHopStart());
+                changed = true;
+            }
+            if (incoming.getHopLimit() != 0 && existing.getHopLimit() != incoming.getHopLimit()) {
+                existing.setHopLimit(incoming.getHopLimit());
+                changed = true;
+            }
+            if (incoming.getRxRssi() != 0 && existing.getRxRssi() != incoming.getRxRssi()) {
+                existing.setRxRssi(incoming.getRxRssi());
+                changed = true;
+            }
+            if (incoming.getRxSnr() != 0 && Float.compare(existing.getRxSnr(), incoming.getRxSnr()) != 0) {
+                existing.setRxSnr(incoming.getRxSnr());
+                changed = true;
+            }
+        }
+
+        boolean mergedViaMqtt = existingViaMqtt && incomingViaMqtt;
+        if (existing.isViaMqtt() != mergedViaMqtt) {
+            existing.setViaMqtt(mergedViaMqtt);
+            changed = true;
+        }
+        if (!existing.isSystemMessage() && incoming.isSystemMessage()) {
+            existing.setSystemMessage(true);
+            changed = true;
+        }
+        return changed;
+    }
+
+    private static boolean shouldReplaceStatus(MeshMessage.DeliveryStatus current,
+                                               MeshMessage.DeliveryStatus incoming) {
+        if (incoming == null || incoming == current) {
+            return false;
+        }
+        if (current == null) {
+            return true;
+        }
+        if (current == MeshMessage.DeliveryStatus.SENDING) {
+            return incoming != MeshMessage.DeliveryStatus.SENDING;
+        }
+        return false;
+    }
+
+    private static boolean hasText(String value) {
+        return value != null && !value.isBlank();
     }
 }
