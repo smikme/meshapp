@@ -1782,7 +1782,9 @@ public class FormChat extends Form {
 
     /** Запрос traceroute до указанной ноды — ответ показывается как системное сообщение */
     private void requestTraceroute(NodeData targetNode) {
-        if (state == null || protocolHandler == null) { return; }
+        DeviceState requestState = state;
+        ProtocolHandler requestHandler = protocolHandler;
+        if (requestState == null || requestHandler == null) { return; }
         if (targetNode == null) {
             return;
         }
@@ -1803,7 +1805,7 @@ public class FormChat extends Form {
         holder[0] = (fromNodeNum, route) -> {
             // Фильтр: реагируем только на ответ от целевой ноды
             if (fromNodeNum != targetNum) { return; }
-            state.removeTracerouteListener(holder[0]);
+            requestState.removeTracerouteListener(holder[0]);
             Platform.runLater(() -> {
                 timer.stop();
                 finishCountdown(pc);
@@ -1813,21 +1815,21 @@ public class FormChat extends Form {
 
         timer.setOnFinished(e -> {
             if (!pc.done[0]) {
-                state.removeTracerouteListener(holder[0]);
+                requestState.removeTracerouteListener(holder[0]);
                 finishCountdown(pc);
                 addSystemMessageTo(chatType, chatKey, "❌ Traceroute → " + name + ": ответ не получен");
             }
         });
 
         pc.cancelAction = () -> {
-            state.removeTracerouteListener(holder[0]);
+            requestState.removeTracerouteListener(holder[0]);
             timer.stop();
             finishCountdown(pc);
         };
 
-        state.addTracerouteListener(holder[0]);
+        requestState.addTracerouteListener(holder[0]);
         timer.play();
-        MessageService.requestTraceroute(protocolHandler, state, targetNum);
+        MessageService.requestTraceroute(requestHandler, requestState, targetNum);
     }
 
     /** Запрос информации о ноде — всегда запрашивает актуальные данные по сети */
@@ -1837,7 +1839,9 @@ public class FormChat extends Form {
 
     /** Запрос информации о ноде — всегда запрашивает актуальные данные по сети */
     private void requestNodeInfo(NodeData targetNode) {
-        if (state == null || protocolHandler == null) { return; }
+        DeviceState requestState = state;
+        ProtocolHandler requestHandler = protocolHandler;
+        if (requestState == null || requestHandler == null) { return; }
         if (targetNode == null) {
             return;
         }
@@ -1856,12 +1860,12 @@ public class FormChat extends Form {
 
         holder[0] = nodeNum -> {
             if (nodeNum != targetNum) { return; }
-            state.removeNodeUpdateListener(holder[0]);
+            requestState.removeNodeUpdateListener(holder[0]);
             Platform.runLater(() -> {
                 timer.stop();
                 finishCountdown(pc);
 
-                NodeData n = state.getNodeDb().get(targetNum);
+                NodeData n = requestState.getNodeDb().get(targetNum);
                 if (n == null) {
                     addSystemMessageTo(chatType, chatKey, "📋 Нода " + name + " не найдена");
                     return;
@@ -1872,21 +1876,21 @@ public class FormChat extends Form {
 
         timer.setOnFinished(e -> {
             if (!pc.done[0]) {
-                state.removeNodeUpdateListener(holder[0]);
+                requestState.removeNodeUpdateListener(holder[0]);
                 finishCountdown(pc);
                 addSystemMessageTo(chatType, chatKey, "❌ Информация о " + name + ": ответ не получен");
             }
         });
 
         pc.cancelAction = () -> {
-            state.removeNodeUpdateListener(holder[0]);
+            requestState.removeNodeUpdateListener(holder[0]);
             timer.stop();
             finishCountdown(pc);
         };
 
-        state.addNodeUpdateListener(holder[0]);
+        requestState.addNodeUpdateListener(holder[0]);
         timer.play();
-        MessageService.requestNodeInfo(protocolHandler, state, targetNum);
+        MessageService.requestNodeInfo(requestHandler, requestState, targetNum);
     }
 
     private void updateInputEnabled() {
