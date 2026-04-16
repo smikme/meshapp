@@ -221,10 +221,17 @@ public class ProtocolHandler {
             }
             case PACKET -> {
                 MeshProtos.MeshPacket pkt = fromRadio.getPacket();
-                log.debug("Received MeshPacket: from={} to={} portnum={}",
+                log.debug("Received MeshPacket: id={} from={} to={} channel={} portnum={} viaMqtt={} transport={} rxTime={} hopStart={} hopLimit={}",
+                        pkt.getId(),
                         String.format("!%08x", pkt.getFrom()),
                         String.format("!%08x", pkt.getTo()),
-                        pkt.hasDecoded() ? pkt.getDecoded().getPortnum() : "encrypted");
+                        pkt.getChannel(),
+                        pkt.hasDecoded() ? pkt.getDecoded().getPortnum() : "encrypted",
+                        pkt.getViaMqtt(),
+                        pkt.getTransportMechanism(),
+                        pkt.getRxTime(),
+                        pkt.getHopStart(),
+                        pkt.getHopLimit());
                 PacketMonitorService monitorService = PacketMonitorService.getIfInitialized();
                 if (monitorService != null) {
                     monitorService.recordIncoming(connectionId, pkt);

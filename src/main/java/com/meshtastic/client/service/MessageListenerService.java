@@ -125,10 +125,14 @@ public class MessageListenerService implements FromRadioListener {
         }
 
         boolean outgoing = from == deviceState.getMyNodeNum();
-        if (outgoing) { return; } // outgoing messages are already added by MessageService
+        if (outgoing) {
+            log.debug("Skipping outgoing text packet {} from local node: channel={} viaMqtt={} transport={}",
+                    packet.getId(), packet.getChannel(), isMqttPacket(packet), packet.getTransportMechanism());
+            return; // outgoing messages are already added by MessageService
+        }
         if (!isDirect && !deviceState.hasEnabledChannel(packet.getChannel())) {
-            log.warn("Dropping broadcast packet {}: channel {} is still unknown after deferred processing",
-                    packet.getId(), packet.getChannel());
+            log.warn("Dropping broadcast packet {}: channel {} is still unknown after deferred processing (viaMqtt={}, transport={})",
+                    packet.getId(), packet.getChannel(), isMqttPacket(packet), packet.getTransportMechanism());
             return;
         }
 
@@ -152,8 +156,8 @@ public class MessageListenerService implements FromRadioListener {
             return;
         }
         if (!isDirect && !deviceState.hasEnabledChannel(channel)) {
-            log.warn("Dropping broadcast packet {} from {}: unknown or disabled channel {}",
-                    packet.getId(), fromNodeId, channel);
+            log.warn("Dropping broadcast packet {} from {}: unknown or disabled channel {} (viaMqtt={}, transport={})",
+                    packet.getId(), fromNodeId, channel, isMqttPacket(packet), packet.getTransportMechanism());
             return;
         }
         if (isReactionPacket(data)) {
@@ -184,13 +188,15 @@ public class MessageListenerService implements FromRadioListener {
         String ownerNodeId = String.format("!%08x", deviceState.getMyNodeNum());
         int payloadBytes = data.getPayload().size();
         int textLength = text.length();
+        boolean viaMqtt = msg.isViaMqtt();
         if (isDirect) {
             msg.setStatus(MeshMessage.DeliveryStatus.DELIVERED);
             hydrateReplyText(msg, ownerNodeId, "dm", fromNodeId);
             MessageDbService.getInstance().save(msg, "dm", fromNodeId, ownerNodeId);
             deviceState.addDirectMessage(msg, fromNodeId);
-            log.info("Received DM from {} (packetId={}, chars={}, bytes={}, replyId={})",
-                    fromNodeId, packet.getId(), textLength, payloadBytes, data.getReplyId());
+            log.info("Received DM from {} (packetId={}, channel={}, chars={}, bytes={}, replyId={}, viaMqtt={}, transport={})",
+                    fromNodeId, packet.getId(), channel, textLength, payloadBytes, data.getReplyId(),
+                    viaMqtt, packet.getTransportMechanism());
             try {
                 notificationManager.onIncomingMessage(msg, "dm", fromNodeId);
             } catch (Throwable t) {
@@ -202,8 +208,9 @@ public class MessageListenerService implements FromRadioListener {
             hydrateReplyText(msg, ownerNodeId, "channel", chatKey);
             MessageDbService.getInstance().save(msg, "channel", chatKey, ownerNodeId);
             deviceState.addMessage(msg);
-            log.info("Received channel {} message from {} (packetId={}, chars={}, bytes={}, replyId={})",
-                    channel, fromNodeId, packet.getId(), textLength, payloadBytes, data.getReplyId());
+            log.info("Received channel {} message from {} (packetId={}, chars={}, bytes={}, replyId={}, viaMqtt={}, transport={})",
+                    channel, fromNodeId, packet.getId(), textLength, payloadBytes, data.getReplyId(),
+                    viaMqtt, packet.getTransportMechanism());
             try {
                 notificationManager.onIncomingMessage(msg, "channel", String.valueOf(channel));
             } catch (Throwable t) {

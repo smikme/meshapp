@@ -297,6 +297,9 @@ public class ConfigExchangeService implements FromRadioListener {
         if (aborted.get()) {
             return;
         }
+        if (moduleConfig.getPayloadVariantCase() == ModuleConfigProtos.ModuleConfig.PayloadVariantCase.MQTT) {
+            log.debug("onModuleConfig MQTT {}", describeMqttConfig(moduleConfig.getMqtt()));
+        }
         deviceState.addModuleConfig(moduleConfig);
     }
 
@@ -305,7 +308,44 @@ public class ConfigExchangeService implements FromRadioListener {
         if (aborted.get()) {
             return;
         }
+        log.debug("onChannel {}", describeChannel(channel));
         deviceState.addChannel(channel);
+    }
+
+    private static String describeMqttConfig(ModuleConfigProtos.ModuleConfig.MQTTConfig mqtt) {
+        if (mqtt == null) {
+            return "null";
+        }
+        return "enabled=" + mqtt.getEnabled()
+                + ", proxyToClient=" + mqtt.getProxyToClientEnabled()
+                + ", root='" + mqtt.getRoot() + "'"
+                + ", address='" + mqtt.getAddress() + "'"
+                + ", tls=" + mqtt.getTlsEnabled()
+                + ", encryption=" + mqtt.getEncryptionEnabled()
+                + ", json=" + mqtt.getJsonEnabled()
+                + ", mapReporting=" + mqtt.getMapReportingEnabled()
+                + ", usernameSet=" + !mqtt.getUsername().isBlank()
+                + ", passwordSet=" + !mqtt.getPassword().isBlank();
+    }
+
+    private static String describeChannel(ChannelProtos.Channel channel) {
+        if (channel == null) {
+            return "null";
+        }
+        if (!channel.hasSettings()) {
+            return "index=" + channel.getIndex()
+                    + ", role=" + channel.getRole()
+                    + ", settings=absent";
+        }
+        ChannelProtos.ChannelSettings settings = channel.getSettings();
+        return "index=" + channel.getIndex()
+                + ", role=" + channel.getRole()
+                + ", name='" + settings.getName() + "'"
+                + ", id=" + Integer.toUnsignedLong(settings.getId())
+                + ", uplink=" + settings.getUplinkEnabled()
+                + ", downlink=" + settings.getDownlinkEnabled()
+                + ", muted=" + settings.getModuleSettings().getIsMuted()
+                + ", pskBytes=" + settings.getPsk().size();
     }
 
     private void checkUnreadMessages(String ownerNodeId) {

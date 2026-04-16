@@ -11,8 +11,10 @@ import java.nio.charset.StandardCharsets;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class MqttProxyServiceTest {
 
@@ -94,5 +96,38 @@ class MqttProxyServiceTest {
 
         assertArrayEquals(new byte[] {0x01, 0x02, 0x03}, MqttProxyService.extractPayload(binaryMessage));
         assertArrayEquals("hello".getBytes(StandardCharsets.UTF_8), MqttProxyService.extractPayload(textMessage));
+    }
+
+    @Test
+    void localEchoSuppressorConsumesMatchingPublicationOnlyOnce() {
+        MqttProxyService.LocalEchoSuppressor suppressor =
+                new MqttProxyService.LocalEchoSuppressor(MqttProxyService.LOCAL_ECHO_TTL_MS);
+        byte[] publishedPayload = new byte[] {0x01, 0x02, 0x03};
+
+        suppressor.remember("msh/test", publishedPayload);
+        publishedPayload[0] = 0x09;
+
+        assertTrue(suppressor.consume("msh/test", new byte[] {0x01, 0x02, 0x03}));
+        assertFalse(suppressor.consume("msh/test", new byte[] {0x01, 0x02, 0x03}));
+    }
+
+    @Test
+    void localEchoSuppressorKeepsDifferentPayloadDistinct() {
+        MqttProxyService.LocalEchoSuppressor suppressor =
+                new MqttProxyService.LocalEchoSuppressor(MqttProxyService.LOCAL_ECHO_TTL_MS);
+
+        suppressor.remember("msh/test", new byte[] {0x01});
+
+        assertFalse(suppressor.consume("msh/test", new byte[] {0x02}));
+        assertTrue(suppressor.consume("msh/test", new byte[] {0x01}));
+    }
+
+    @Test
+    void localEchoSuppressorExpiresOldPublications() {
+        MqttProxyService.LocalEchoSuppressor suppressor = new MqttProxyService.LocalEchoSuppressor(-1);
+
+        suppressor.remember("msh/test", new byte[] {0x01});
+
+        assertFalse(suppressor.consume("msh/test", new byte[] {0x01}));
     }
 }
