@@ -132,10 +132,7 @@ public class RootPane extends BorderPane {
 
         // Traffic light кнопки
         Button closeBtn = createWindowButton("window-btn-close");
-        closeBtn.setOnAction(e -> {
-            Stage stage = MeshApp.getPrimaryStage();
-            if (stage != null) { stage.close(); }
-        });
+        closeBtn.setOnAction(e -> AppTrayManager.getInstance().exitApplication());
 
         Button minimizeBtn = createWindowButton("window-btn-minimize");
         minimizeBtn.setOnAction(e -> AppTrayManager.getInstance().requestMinimize());
