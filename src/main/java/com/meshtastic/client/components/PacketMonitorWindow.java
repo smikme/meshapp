@@ -203,6 +203,7 @@ public final class PacketMonitorWindow {
     private double normalWindowWidth = DEFAULT_WINDOW_WIDTH;
     private double normalWindowHeight = DEFAULT_WINDOW_HEIGHT;
     private boolean restoreWindowMaximized;
+    private boolean closeRequested;
     private volatile boolean exportInProgress;
 
     private PacketMonitorWindow() {
@@ -226,6 +227,41 @@ public final class PacketMonitorWindow {
     }
 
     /**
+     * Скрывает уже открытое окно без уничтожения singleton-состояния.
+     * Используется, когда приложение целиком уходит в tray или скрывается системой.
+     */
+    public static void hideWindowIfOpen() {
+        if (Platform.isFxApplicationThread()) {
+            hideWindowIfOpenInternal();
+        } else {
+            Platform.runLater(PacketMonitorWindow::hideWindowIfOpenInternal);
+        }
+    }
+
+    /**
+     * Возвращает ранее скрытое окно, только если пользователь уже открывал его в этой сессии.
+     */
+    public static void restoreWindowIfOpen() {
+        if (Platform.isFxApplicationThread()) {
+            restoreWindowIfOpenInternal();
+        } else {
+            Platform.runLater(PacketMonitorWindow::restoreWindowIfOpenInternal);
+        }
+    }
+
+    /**
+     * Полностью закрывает окно мониторинга, если оно уже было создано.
+     * Используется при завершении приложения, когда состояние singleton больше не нужно сохранять в памяти.
+     */
+    public static void closeWindowIfOpen() {
+        if (Platform.isFxApplicationThread()) {
+            closeWindowIfOpenInternal();
+        } else {
+            Platform.runLater(PacketMonitorWindow::closeWindowIfOpenInternal);
+        }
+    }
+
+    /**
      * Создаёт singleton-окно при первом вызове и показывает его повторно при последующих.
      * Состояние окна живёт до фактического закрытия stage.
      */
@@ -233,15 +269,64 @@ public final class PacketMonitorWindow {
         if (instance == null) {
             instance = new PacketMonitorWindow();
         }
-        instance.ensureWindowVisible();
-        instance.stage.show();
-        if (instance.restoreWindowMaximized) {
-            instance.captureCurrentWindowBounds();
-            instance.stage.setMaximized(true);
-            instance.restoreWindowMaximized = false;
+        instance.showStage(true);
+    }
+
+    private static void hideWindowIfOpenInternal() {
+        if (instance == null || instance.stage == null || !instance.stage.isShowing()) {
+            return;
         }
-        instance.stage.toFront();
-        instance.stage.requestFocus();
+        instance.stage.hide();
+    }
+
+    private static void restoreWindowIfOpenInternal() {
+        if (instance == null) {
+            return;
+        }
+        instance.showStage(false);
+    }
+
+    private static void closeWindowIfOpenInternal() {
+        if (instance == null || instance.stage == null) {
+            return;
+        }
+        instance.closeRequested = true;
+        instance.stage.close();
+    }
+
+    private void showStage(boolean requestFocus) {
+        boolean restoringHiddenOrIconified = stage.isIconified() || !stage.isShowing();
+        ensureWindowVisible();
+        if (stage.isIconified()) {
+            stage.setIconified(false);
+        }
+        if (!stage.isShowing()) {
+            stage.show();
+        }
+        restoreMaximizedStateAfterShow();
+        if (restoringHiddenOrIconified) {
+            stage.toFront();
+        }
+        if (requestFocus) {
+            stage.requestFocus();
+        }
+    }
+
+    private void restoreMaximizedStateAfterShow() {
+        if (!restoreWindowMaximized || stage.isMaximized()) {
+            return;
+        }
+        captureCurrentWindowBounds();
+        stage.setMaximized(true);
+        restoreWindowMaximized = false;
+    }
+
+    private void handleHidden() {
+        boolean shouldDispose = closeRequested;
+        closeRequested = false;
+        if (shouldDispose) {
+            dispose();
+        }
     }
 
     /**
@@ -271,8 +356,9 @@ public final class PacketMonitorWindow {
         stage.setScene(scene);
         restoreWindowState();
         trackWindowBounds();
+        stage.setOnCloseRequest(event -> closeRequested = true);
         stage.setOnHiding(event -> saveWindowState());
-        stage.setOnHidden(event -> dispose());
+        stage.setOnHidden(event -> handleHidden());
     }
 
     private HBox createHeader() {

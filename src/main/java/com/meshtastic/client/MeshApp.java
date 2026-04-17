@@ -159,7 +159,10 @@ public class MeshApp extends Application {
 
         // Сохранять состояние окна при закрытии (setOnHiding срабатывает и при
         // программном stage.close() из кастомного title bar, и при нативном закрытии)
-        stage.setOnCloseRequest(e -> Platform.setImplicitExit(true));
+        stage.setOnCloseRequest(e -> {
+            e.consume();
+            AppTrayManager.getInstance().exitApplication();
+        });
         stage.setOnHiding(e -> saveWindowState(stage, rootPane));
 
         handlePendingCrashLog(stage);
