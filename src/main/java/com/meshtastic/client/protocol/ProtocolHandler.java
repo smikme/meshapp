@@ -12,11 +12,13 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.PriorityBlockingQueue;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Диспетчер протокола Meshtastic. Принимает сырые protobuf-payload из
@@ -35,6 +37,9 @@ public class ProtocolHandler {
     private static final int HEARTBEAT_INTERVAL_SEC = 5;
     /** Задержка перед первым heartbeat (секунды). 0 = отправить сразу после config exchange. */
     private static final int HEARTBEAT_INITIAL_DELAY_SEC = 0;
+    private static final int OUTBOUND_PRIORITY_DEFAULT = 0;
+    private static final int OUTBOUND_PRIORITY_HEARTBEAT = 1;
+    private static final int OUTBOUND_PRIORITY_MQTT_PROXY = 2;
 
     private final MeshtasticConnection connection;
     private final String connectionId;
@@ -43,8 +48,12 @@ public class ProtocolHandler {
     /** Очередь входящих пакетов — разделяет reader-поток и обработку,
      *  чтобы reader не блокировался на listeners и не терял данные из serial-буфера. */
     private final BlockingQueue<byte[]> incomingQueue = new LinkedBlockingQueue<>(256);
+    /** Очередь исходящих пакетов с приоритетом обычных команд над MQTT downlink. */
+    private final PriorityBlockingQueue<OutboundFrame> outgoingQueue = new PriorityBlockingQueue<>();
     private final Thread dispatcherThread;
+    private final Thread senderThread;
     private final AtomicBoolean shutdownRequested = new AtomicBoolean(false);
+    private final AtomicLong outboundSequence = new AtomicLong();
 
     private final ScheduledExecutorService heartbeatScheduler =
             Executors.newSingleThreadScheduledExecutor(r -> {
@@ -66,6 +75,9 @@ public class ProtocolHandler {
         dispatcherThread = new Thread(this::dispatchLoop, "proto-dispatcher");
         dispatcherThread.setDaemon(true);
         dispatcherThread.start();
+        senderThread = new Thread(this::sendLoop, "proto-sender");
+        senderThread.setDaemon(true);
+        senderThread.start();
     }
 
     /**
@@ -105,13 +117,15 @@ public class ProtocolHandler {
      *                                 {@code false} для keepalive
      */
     public void sendToRadio(MeshProtos.ToRadio toRadio, boolean expectResponseAfterWrite) {
-        byte[] frame = PacketFramer.frame(toRadio);
-        log.debug("Sending ToRadio: {} ({} bytes framed)", toRadio.getPayloadVariantCase(), frame.length);
-        PacketMonitorService monitorService = PacketMonitorService.getIfInitialized();
-        if (monitorService != null && toRadio.hasPacket()) {
-            monitorService.recordOutgoing(connectionId, toRadio.getPacket());
+        if (toRadio == null || shutdownRequested.get()) {
+            return;
         }
-        connection.sendBytes(frame, expectResponseAfterWrite);
+        outgoingQueue.offer(new OutboundFrame(
+                classifyOutboundPriority(toRadio),
+                outboundSequence.getAndIncrement(),
+                toRadio,
+                expectResponseAfterWrite
+        ));
     }
 
     /**
@@ -159,6 +173,8 @@ public class ProtocolHandler {
         }
         connection.setDataListener(null);
         incomingQueue.clear();
+        outgoingQueue.clear();
+        senderThread.interrupt();
         incomingQueue.offer(SHUTDOWN_MARKER);
     }
 
@@ -191,6 +207,44 @@ public class ProtocolHandler {
             }
         }
         log.debug("Proto dispatcher thread exiting");
+    }
+
+    private void sendLoop() {
+        log.debug("Proto sender thread started");
+        while (!Thread.currentThread().isInterrupted()) {
+            try {
+                OutboundFrame outbound = outgoingQueue.take();
+                if (shutdownRequested.get()) {
+                    break;
+                }
+                sendOutboundFrame(outbound);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            } catch (Exception e) {
+                log.error("Error sending ToRadio", e);
+            }
+        }
+        log.debug("Proto sender thread exiting");
+    }
+
+    private void sendOutboundFrame(OutboundFrame outbound) {
+        MeshProtos.ToRadio toRadio = outbound.toRadio();
+        byte[] frame = PacketFramer.frame(toRadio);
+        log.debug("Sending ToRadio: {} ({} bytes framed)", toRadio.getPayloadVariantCase(), frame.length);
+        PacketMonitorService monitorService = PacketMonitorService.getIfInitialized();
+        if (monitorService != null && toRadio.hasPacket()) {
+            monitorService.recordOutgoing(connectionId, toRadio.getPacket());
+        }
+        connection.sendBytes(frame, outbound.expectResponseAfterWrite());
+    }
+
+    private static int classifyOutboundPriority(MeshProtos.ToRadio toRadio) {
+        return switch (toRadio.getPayloadVariantCase()) {
+            case MQTTCLIENTPROXYMESSAGE -> OUTBOUND_PRIORITY_MQTT_PROXY;
+            case HEARTBEAT -> OUTBOUND_PRIORITY_HEARTBEAT;
+            default -> OUTBOUND_PRIORITY_DEFAULT;
+        };
     }
 
     private void dispatchFromRadio(MeshProtos.FromRadio fromRadio) {
@@ -265,6 +319,21 @@ public class ProtocolHandler {
             } catch (Exception e) {
                 log.error("Error in FromRadioListener {}", l.getClass().getSimpleName(), e);
             }
+        }
+    }
+
+    private record OutboundFrame(int priority,
+                                 long sequence,
+                                 MeshProtos.ToRadio toRadio,
+                                 boolean expectResponseAfterWrite) implements Comparable<OutboundFrame> {
+
+        @Override
+        public int compareTo(OutboundFrame other) {
+            int priorityCompare = Integer.compare(priority, other.priority);
+            if (priorityCompare != 0) {
+                return priorityCompare;
+            }
+            return Long.compare(sequence, other.sequence);
         }
     }
 }

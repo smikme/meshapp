@@ -18,6 +18,7 @@ import org.meshtastic.proto.ModuleConfigProtos;
 import org.meshtastic.proto.Portnums;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.nio.file.Path;
 import java.util.concurrent.CountDownLatch;
@@ -54,7 +55,7 @@ class ProtocolHandlerTest {
     }
 
     @Test
-    void sendToRadioFramesAndWritesToConnection() {
+    void sendToRadioFramesAndWritesToConnection() throws Exception {
         FakeConnection connection = new FakeConnection();
         ProtocolHandler handler = track(new ProtocolHandler(connection));
 
@@ -64,7 +65,52 @@ class ProtocolHandlerTest {
 
         handler.sendToRadio(toRadio);
 
+        assertTrue(connection.awaitSendCountAtLeast(1));
         assertArrayEquals(PacketFramer.frame(toRadio), connection.lastSentBytes());
+    }
+
+    @Test
+    void packetTrafficIsPrioritizedAheadOfQueuedMqttDownlink() throws Exception {
+        FakeConnection connection = new FakeConnection();
+        connection.blockSends();
+        ProtocolHandler handler = track(new ProtocolHandler(connection));
+
+        MeshProtos.ToRadio firstMqtt = MeshProtos.ToRadio.newBuilder()
+                .setMqttClientProxyMessage(MeshProtos.MqttClientProxyMessage.newBuilder()
+                        .setTopic("msh/test/first")
+                        .setText("first")
+                        .build())
+                .build();
+        MeshProtos.ToRadio secondMqtt = MeshProtos.ToRadio.newBuilder()
+                .setMqttClientProxyMessage(MeshProtos.MqttClientProxyMessage.newBuilder()
+                        .setTopic("msh/test/second")
+                        .setText("second")
+                        .build())
+                .build();
+        MeshProtos.ToRadio packet = MeshProtos.ToRadio.newBuilder()
+                .setPacket(MeshProtos.MeshPacket.newBuilder()
+                        .setId(501)
+                        .setFrom(1)
+                        .setTo(0xFFFFFFFF)
+                        .build())
+                .build();
+
+        handler.sendToRadio(firstMqtt, false);
+        handler.sendToRadio(secondMqtt, false);
+        handler.sendToRadio(packet);
+
+        Thread.sleep(50);
+        connection.releaseSends();
+
+        assertTrue(connection.awaitSendCountAtLeast(3));
+
+        List<MeshProtos.ToRadio> sentMessages = connection.sentMessages();
+        int packetIndex = indexOfPacket(sentMessages);
+        int secondMqttIndex = indexOfMqttTopic(sentMessages, "msh/test/second");
+
+        assertTrue(packetIndex >= 0);
+        assertTrue(secondMqttIndex >= 0);
+        assertTrue(packetIndex < secondMqttIndex);
     }
 
     @Test
@@ -269,7 +315,8 @@ class ProtocolHandlerTest {
         private volatile boolean lastExpectResponseAfterWrite = true;
         private volatile boolean connected;
         private final AtomicInteger sendCount = new AtomicInteger();
-        private final CountDownLatch firstSendLatch = new CountDownLatch(1);
+        private final List<byte[]> sentFrames = Collections.synchronizedList(new ArrayList<>());
+        private volatile CountDownLatch sendBlockLatch;
 
         @Override
         public void connect() throws ConnectionException {
@@ -299,10 +346,19 @@ class ProtocolHandlerTest {
 
         @Override
         public void sendBytes(byte[] data, boolean expectResponseAfterWrite) {
+            CountDownLatch gate = sendBlockLatch;
+            if (gate != null) {
+                try {
+                    gate.await(1, TimeUnit.SECONDS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+            }
             lastSentBytes = data;
             lastExpectResponseAfterWrite = expectResponseAfterWrite;
+            sentFrames.add(data.clone());
             sendCount.incrementAndGet();
-            firstSendLatch.countDown();
         }
 
         @Override
@@ -327,11 +383,63 @@ class ProtocolHandlerTest {
         }
 
         boolean awaitSendCountAtLeast(int minimum) throws InterruptedException {
-            if (sendCount.get() >= minimum) {
-                return true;
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(1);
+            while (System.nanoTime() < deadline) {
+                if (sendCount.get() >= minimum) {
+                    return true;
+                }
+                Thread.sleep(10);
             }
-            return firstSendLatch.await(1, TimeUnit.SECONDS) && sendCount.get() >= minimum;
+            return sendCount.get() >= minimum;
         }
+
+        void blockSends() {
+            sendBlockLatch = new CountDownLatch(1);
+        }
+
+        void releaseSends() {
+            CountDownLatch gate = sendBlockLatch;
+            sendBlockLatch = null;
+            if (gate != null) {
+                gate.countDown();
+            }
+        }
+
+        List<MeshProtos.ToRadio> sentMessages() {
+            List<byte[]> snapshot;
+            synchronized (sentFrames) {
+                snapshot = new ArrayList<>(sentFrames);
+            }
+            List<MeshProtos.ToRadio> messages = new ArrayList<>(snapshot.size());
+            for (byte[] frame : snapshot) {
+                try {
+                    messages.add(MeshProtos.ToRadio.parseFrom(unframe(frame)));
+                } catch (Exception e) {
+                    throw new IllegalStateException("Failed to parse sent frame", e);
+                }
+            }
+            return messages;
+        }
+    }
+
+    private static int indexOfPacket(List<MeshProtos.ToRadio> sentMessages) {
+        for (int i = 0; i < sentMessages.size(); i++) {
+            if (sentMessages.get(i).hasPacket()) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private static int indexOfMqttTopic(List<MeshProtos.ToRadio> sentMessages, String topic) {
+        for (int i = 0; i < sentMessages.size(); i++) {
+            MeshProtos.ToRadio toRadio = sentMessages.get(i);
+            if (toRadio.hasMqttClientProxyMessage()
+                    && topic.equals(toRadio.getMqttClientProxyMessage().getTopic())) {
+                return i;
+            }
+        }
+        return -1;
     }
 
     private static final class RecordingListener implements FromRadioListener {

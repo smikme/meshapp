@@ -34,6 +34,7 @@ public class SerialConnection implements MeshtasticConnection {
     public static final int DEFAULT_BAUD_RATE = 115200;
     private static final int DEFAULT_READ_TIMEOUT_MS = 500;
     private static final int DEFAULT_PORT_INIT_DELAY_MS = 500;
+    private static final int DEFAULT_PARTIAL_FRAME_SILENCE_TIMEOUT_MS = 2_000;
     private static final long DEFAULT_WRITE_RESPONSE_TIMEOUT_MS = 15_000L;
     private static final long DEFAULT_READ_CALL_STALL_TIMEOUT_MS = 5_000L;
     private static final long DEFAULT_READ_WATCHDOG_PERIOD_MS = 1_000L;
@@ -44,6 +45,7 @@ public class SerialConnection implements MeshtasticConnection {
     private final LongSupplier currentTimeMillis;
     private final int readTimeoutMs;
     private final int portInitDelayMs;
+    private final int partialFrameSilenceTimeoutMs;
     private final long writeResponseTimeoutMs;
     private final long readCallStallTimeoutMs;
     private final long readWatchdogPeriodMs;
@@ -67,7 +69,8 @@ public class SerialConnection implements MeshtasticConnection {
     public SerialConnection(String portName, int baudRate) {
         this(portName, baudRate, NativeSerialPortFactory::create, System::currentTimeMillis,
                 DEFAULT_READ_TIMEOUT_MS, DEFAULT_PORT_INIT_DELAY_MS, DEFAULT_WRITE_RESPONSE_TIMEOUT_MS,
-                DEFAULT_READ_CALL_STALL_TIMEOUT_MS, DEFAULT_READ_WATCHDOG_PERIOD_MS);
+                DEFAULT_READ_CALL_STALL_TIMEOUT_MS, DEFAULT_READ_WATCHDOG_PERIOD_MS,
+                DEFAULT_PARTIAL_FRAME_SILENCE_TIMEOUT_MS);
     }
 
     public SerialConnection(String portName) {
@@ -81,7 +84,8 @@ public class SerialConnection implements MeshtasticConnection {
                      int portInitDelayMs,
                      long writeResponseTimeoutMs) {
         this(portName, baudRate, portFactory, currentTimeMillis, readTimeoutMs, portInitDelayMs,
-                writeResponseTimeoutMs, DEFAULT_READ_CALL_STALL_TIMEOUT_MS, DEFAULT_READ_WATCHDOG_PERIOD_MS);
+                writeResponseTimeoutMs, DEFAULT_READ_CALL_STALL_TIMEOUT_MS, DEFAULT_READ_WATCHDOG_PERIOD_MS,
+                DEFAULT_PARTIAL_FRAME_SILENCE_TIMEOUT_MS);
     }
 
     SerialConnection(String portName, int baudRate,
@@ -92,12 +96,27 @@ public class SerialConnection implements MeshtasticConnection {
                      long writeResponseTimeoutMs,
                      long readCallStallTimeoutMs,
                      long readWatchdogPeriodMs) {
+        this(portName, baudRate, portFactory, currentTimeMillis, readTimeoutMs, portInitDelayMs,
+                writeResponseTimeoutMs, readCallStallTimeoutMs, readWatchdogPeriodMs,
+                DEFAULT_PARTIAL_FRAME_SILENCE_TIMEOUT_MS);
+    }
+
+    SerialConnection(String portName, int baudRate,
+                     Supplier<NativeSerialPort> portFactory,
+                     LongSupplier currentTimeMillis,
+                     int readTimeoutMs,
+                     int portInitDelayMs,
+                     long writeResponseTimeoutMs,
+                     long readCallStallTimeoutMs,
+                     long readWatchdogPeriodMs,
+                     int partialFrameSilenceTimeoutMs) {
         this.portName = portName;
         this.baudRate = baudRate;
         this.portFactory = portFactory;
         this.currentTimeMillis = currentTimeMillis;
         this.readTimeoutMs = readTimeoutMs;
         this.portInitDelayMs = portInitDelayMs;
+        this.partialFrameSilenceTimeoutMs = partialFrameSilenceTimeoutMs;
         this.writeResponseTimeoutMs = writeResponseTimeoutMs;
         this.readCallStallTimeoutMs = readCallStallTimeoutMs;
         this.readWatchdogPeriodMs = readWatchdogPeriodMs;
@@ -255,9 +274,11 @@ public class SerialConnection implements MeshtasticConnection {
                     break;
                 }
                 if (bytesRead == 0) {
-                    if (parser.hasPartialFrame()) {
-                        log.debug("Resetting serial frame parser on {} after {} ms inter-byte gap",
-                                portName, readTimeoutMs);
+                    long nowMillis = currentTimeMillis.getAsLong();
+                    if (shouldResetPartialFrame(parser, nowMillis)) {
+                        long silentForMs = Math.max(0L, nowMillis - lastReceiveAtMillis);
+                        log.debug("Resetting serial frame parser on {} after {} ms inter-byte gap (threshold={} ms)",
+                                portName, silentForMs, partialFrameSilenceTimeoutMs);
                         parser.reset();
                     }
                     // Таймаут — данных нет, проверяем что порт ещё открыт
@@ -329,6 +350,13 @@ public class SerialConnection implements MeshtasticConnection {
     private void clearAwaitingResponseAfterWrite() {
         awaitingResponseAfterWrite = false;
         readTimeoutsSinceWrite = 0;
+    }
+
+    private boolean shouldResetPartialFrame(FrameParser parser, long now) {
+        if (!parser.hasPartialFrame()) {
+            return false;
+        }
+        return Math.max(0L, now - lastReceiveAtMillis) >= partialFrameSilenceTimeoutMs;
     }
 
     private boolean isReceiveStalledAfterWrite() {
