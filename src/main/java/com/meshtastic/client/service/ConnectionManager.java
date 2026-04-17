@@ -367,6 +367,7 @@ public final class ConnectionManager {
     public void disconnectForDeviceReboot(String id) {
         ConnectionEntry entry;
         MeshtasticConnection conn;
+        MqttProxyService mqttProxy;
         synchronized (connectionLock) {
             userDisconnectedIds.remove(id);
             userDisconnectReasons.remove(id);
@@ -375,6 +376,12 @@ public final class ConnectionManager {
                 return;
             }
             conn = activeConnections.get(id);
+            mqttProxy = mqttProxyServices.remove(id);
+        }
+
+        if (mqttProxy != null) {
+            log.info("Stopping MQTT proxy for '{}' before reboot reconnect handoff", entry.getName());
+            mqttProxy.close();
         }
 
         if (conn != null) {

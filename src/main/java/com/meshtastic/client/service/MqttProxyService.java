@@ -44,6 +44,7 @@ public final class MqttProxyService implements FromRadioListener, AutoCloseable 
     static final int DEFAULT_TCP_PORT = 1883;
     static final int DEFAULT_TLS_PORT = 8883;
     static final long LOCAL_ECHO_TTL_MS = 10_000;
+    private static final long DOWNLINK_SEND_MIN_INTERVAL_MS = 75L;
     private static final int MQTT_QOS = 0;
     private static final int DISCONNECTED_BUFFER_SIZE = 256;
     private static final int DOWNLINK_QUEUE_SIZE = 1_024;
@@ -60,6 +61,7 @@ public final class MqttProxyService implements FromRadioListener, AutoCloseable 
     private volatile boolean listenerRegistered;
     private volatile MqttAsyncClient client;
     private volatile ProxyConfig activeConfig;
+    private volatile long lastDownlinkForwardAtMillis;
 
     public MqttProxyService(String connectionId,
                             String connectionName,
@@ -391,6 +393,9 @@ public final class MqttProxyService implements FromRadioListener, AutoCloseable 
         if (closed) {
             return;
         }
+        if (!awaitDownlinkSendWindow()) {
+            return;
+        }
         try {
             MessageService.sendMqttClientProxyMessage(protocolHandler, topic, payload, retained);
         } catch (RuntimeException e) {
@@ -399,6 +404,26 @@ public final class MqttProxyService implements FromRadioListener, AutoCloseable 
         }
         log.debug("Forwarded MQTT downlink for '{}': topic='{}' bytes={} retained={}",
                 connectionName, topic, payload.length, retained);
+    }
+
+    private boolean awaitDownlinkSendWindow() {
+        long lastForwardAt = lastDownlinkForwardAtMillis;
+        long now = System.currentTimeMillis();
+        long waitMs = DOWNLINK_SEND_MIN_INTERVAL_MS - (now - lastForwardAt);
+        if (waitMs > 0) {
+            try {
+                Thread.sleep(waitMs);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return false;
+            }
+            now = System.currentTimeMillis();
+        }
+        if (closed) {
+            return false;
+        }
+        lastDownlinkForwardAtMillis = now;
+        return true;
     }
 
     private void subscribeToBroker(ProxyConfig config, boolean reconnect) {
