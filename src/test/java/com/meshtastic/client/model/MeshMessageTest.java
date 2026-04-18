@@ -45,6 +45,13 @@ class MeshMessageTest {
     }
 
     @Test
+    void constructorSanitizesBrokenUnicodeText() {
+        MeshMessage msg = new MeshMessage("!00000001", "!ffffffff", 0, "A\uD83DB\uDC00C", 1_700_000_000L, false);
+
+        assertEquals("ABC", msg.getText());
+    }
+
+    @Test
     void getTimestamp() {
         MeshMessage msg = createMessage();
         
@@ -141,6 +148,15 @@ class MeshMessageTest {
     }
 
     @Test
+    void setReplyTextSanitizesBrokenUnicode() {
+        MeshMessage msg = createMessage();
+
+        msg.setReplyText("Q\uD83DW\uDC00E");
+
+        assertEquals("QWE", msg.getReplyText());
+    }
+
+    @Test
     void getHopStartDefaultsToZero() {
         MeshMessage msg = createMessage();
         
@@ -218,6 +234,15 @@ class MeshMessageTest {
         msg.setSenderName("Device1");
         
         assertEquals("Device1", msg.getSenderName());
+    }
+
+    @Test
+    void setSenderNameSanitizesBrokenUnicode() {
+        MeshMessage msg = createMessage();
+
+        msg.setSenderName("A\uD83DB\uDC00C");
+
+        assertEquals("ABC", msg.getSenderName());
     }
 
     @Test

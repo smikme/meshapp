@@ -1,5 +1,7 @@
 package com.meshtastic.client.model;
 
+import com.meshtastic.client.utils.UnicodeTextUtils;
+
 /**
  * Реакция на сообщение, доставляемая отдельным TEXT_MESSAGE_APP пакетом
  * с {@code reply_id} и выставленным protobuf-полем {@code emoji}.
@@ -25,7 +27,7 @@ public class MessageReaction {
                            boolean outgoing) {
         this.targetPacketId = targetPacketId;
         this.fromNodeId = fromNodeId;
-        this.emoji = emoji;
+        this.emoji = UnicodeTextUtils.sanitize(emoji);
         this.timestamp = timestamp;
         this.outgoing = outgoing;
     }
@@ -46,10 +48,10 @@ public class MessageReaction {
     public void setStatus(MeshMessage.DeliveryStatus status) { this.status = status; }
 
     public String getErrorReason() { return errorReason; }
-    public void setErrorReason(String errorReason) { this.errorReason = errorReason; }
+    public void setErrorReason(String errorReason) { this.errorReason = UnicodeTextUtils.sanitize(errorReason); }
 
     public String getSenderName() { return senderName; }
-    public void setSenderName(String senderName) { this.senderName = senderName; }
+    public void setSenderName(String senderName) { this.senderName = UnicodeTextUtils.sanitize(senderName); }
 
     public boolean isVisible() {
         return status != MeshMessage.DeliveryStatus.FAILED;

@@ -5,6 +5,7 @@ import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.platform.OsDetect;
 import com.meshtastic.client.utils.AppPreferences;
+import com.meshtastic.client.utils.UnicodeTextUtils;
 import org.meshtastic.proto.ChannelProtos;
 import javafx.application.Platform;
 import javafx.stage.Stage;
@@ -165,9 +166,7 @@ public class NotificationManager {
 
     private static String truncate(String text) {
         if (text == null) { return ""; }
-        return text.length() > MAX_BODY_LENGTH
-                ? text.substring(0, MAX_BODY_LENGTH) + "..."
-                : text;
+        return UnicodeTextUtils.truncateWithSuffix(text, MAX_BODY_LENGTH, "...");
     }
 
     private static NotificationService createPlatformService() {

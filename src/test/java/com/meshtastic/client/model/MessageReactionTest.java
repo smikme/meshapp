@@ -27,6 +27,19 @@ class MessageReactionTest {
     }
 
     @Test
+    void constructorSanitizesBrokenUnicodeEmoji() {
+        MessageReaction reaction = new MessageReaction(
+            123,
+            "!00000002",
+            "A\uD83DB\uDC00C",
+            1_700_000_000L,
+            false
+        );
+
+        assertEquals("ABC", reaction.getEmoji());
+    }
+
+    @Test
     void isOutgoingReturnsTrueForOutgoing() {
         MessageReaction reaction = new MessageReaction(
             123,
@@ -177,6 +190,21 @@ class MessageReactionTest {
         reaction.setSenderName("Device1");
         
         assertEquals("Device1", reaction.getSenderName());
+    }
+
+    @Test
+    void setSenderNameSanitizesBrokenUnicode() {
+        MessageReaction reaction = new MessageReaction(
+            123,
+            "!00000002",
+            "thumbsup",
+            1_700_000_000L,
+            false
+        );
+
+        reaction.setSenderName("A\uD83DB\uDC00C");
+
+        assertEquals("ABC", reaction.getSenderName());
     }
 
     @Test

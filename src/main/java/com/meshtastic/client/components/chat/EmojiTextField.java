@@ -3,6 +3,7 @@ package com.meshtastic.client.components.chat;
 import com.meshtastic.client.components.EmojiImageCache;
 import com.meshtastic.client.components.EmojiTextFlow;
 import com.meshtastic.client.themes.TypographyManager;
+import com.meshtastic.client.utils.UnicodeTextUtils;
 import javafx.animation.KeyFrame;
 import javafx.animation.Timeline;
 import javafx.beans.property.ReadOnlyIntegerProperty;
@@ -240,8 +241,9 @@ public class EmojiTextField extends StackPane {
     }
 
     public void setText(String value) {
-        text.set(value != null ? value : "");
-        caretPosition.set(Math.min(caretPosition.get(), text.get().length()));
+        String sanitized = UnicodeTextUtils.sanitize(value != null ? value : "");
+        text.set(sanitized != null ? sanitized : "");
+        caretPosition.set(clampCaret(Math.min(caretPosition.get(), text.get().length())));
     }
 
     public StringProperty textProperty() {
@@ -262,10 +264,12 @@ public class EmojiTextField extends StackPane {
 
     public void insertText(int index, String insertion) {
         if (disabled || insertion == null || insertion.isEmpty()) { return; }
+        String safeInsertion = UnicodeTextUtils.sanitize(insertion);
+        if (safeInsertion == null || safeInsertion.isEmpty()) { return; }
         String t = text.get();
-        int idx = Math.min(Math.max(index, 0), t.length());
-        text.set(t.substring(0, idx) + insertion + t.substring(idx));
-        caretPosition.set(idx + insertion.length());
+        int idx = clampCaret(index);
+        text.set(t.substring(0, idx) + safeInsertion + t.substring(idx));
+        caretPosition.set(idx + safeInsertion.length());
     }
 
     public void clear() {
@@ -276,7 +280,8 @@ public class EmojiTextField extends StackPane {
     }
 
     public void setPromptText(String prompt) {
-        this.promptText = prompt != null ? prompt : "";
+        String sanitized = UnicodeTextUtils.sanitize(prompt != null ? prompt : "");
+        this.promptText = sanitized != null ? sanitized : "";
         promptNode.setText(this.promptText);
         updatePromptVisibility();
     }
@@ -311,7 +316,7 @@ public class EmojiTextField extends StackPane {
 
     private void handleKeyTyped(KeyEvent e) {
         if (disabled) { return; }
-        String ch = e.getCharacter();
+        String ch = UnicodeTextUtils.sanitize(e.getCharacter());
         if (ch == null || ch.isEmpty() || Character.isISOControl(ch.charAt(0))
                 || e.isControlDown() || e.isMetaDown()) {
             return;
@@ -610,11 +615,7 @@ public class EmojiTextField extends StackPane {
                 return seg.charStart;
             }
         }
-        int prev = pos - 1;
-        if (prev > 0 && prev < text.length() && Character.isLowSurrogate(text.charAt(prev))) {
-            prev--;
-        }
-        return prev;
+        return UnicodeTextUtils.previousCodePointBoundary(text, pos);
     }
 
     /** Следующая граница символа. */
@@ -625,11 +626,7 @@ public class EmojiTextField extends StackPane {
                 return seg.charEnd;
             }
         }
-        int next = pos + 1;
-        if (next < text.length() && Character.isLowSurrogate(text.charAt(next))) {
-            next++;
-        }
-        return next;
+        return UnicodeTextUtils.nextCodePointBoundary(text, pos);
     }
 
     // === Удаление ===
@@ -681,8 +678,10 @@ public class EmojiTextField extends StackPane {
     private void deleteSelection() {
         if (!hasSelection()) { return; }
         String t = text.get();
-        text.set(t.substring(0, selectionStart) + t.substring(selectionEnd));
-        caretPosition.set(selectionStart);
+        int start = clampCaret(selectionStart);
+        int end = clampCaret(selectionEnd);
+        text.set(t.substring(0, start) + t.substring(end));
+        caretPosition.set(start);
         clearSelection();
     }
 
@@ -691,7 +690,9 @@ public class EmojiTextField extends StackPane {
     private void copySelection() {
         if (!hasSelection()) { return; }
         String t = text.get();
-        String selected = t.substring(selectionStart, selectionEnd);
+        int start = clampCaret(selectionStart);
+        int end = clampCaret(selectionEnd);
+        String selected = t.substring(start, end);
         ClipboardContent cc = new ClipboardContent();
         cc.putString(selected);
         Clipboard.getSystemClipboard().setContent(cc);
@@ -705,12 +706,15 @@ public class EmojiTextField extends StackPane {
     private void paste() {
         String clip = Clipboard.getSystemClipboard().getString();
         if (clip == null || clip.isEmpty()) { return; }
-        clip = clip.replace("\n", " ").replace("\r", "");
+        clip = UnicodeTextUtils.sanitize(clip.replace("\n", " ").replace("\r", ""));
+        if (clip == null || clip.isEmpty()) { return; }
 
         // Обрезать буфер по лимиту байт, если задан
         if (maxBytesSupplier != null) {
             int maxBytes = maxBytesSupplier.getAsInt();
             String current = text.get();
+            int selectionStart = clampCaret(this.selectionStart);
+            int selectionEnd = clampCaret(this.selectionEnd);
             int selBytes = hasSelection()
                     ? current.substring(selectionStart, selectionEnd)
                              .getBytes(StandardCharsets.UTF_8).length
@@ -780,7 +784,14 @@ public class EmojiTextField extends StackPane {
         contentFlow.getChildren().clear();
         segments.clear();
 
-        String t = text.get();
+        String t = UnicodeTextUtils.sanitize(text.get());
+        if (t == null) {
+            t = "";
+        }
+        if (!t.equals(text.get())) {
+            text.set(t);
+            return;
+        }
         if (t == null || t.isEmpty()) {
             updateHeight();
             updateCaretVisual();
@@ -844,7 +855,7 @@ public class EmojiTextField extends StackPane {
     }
 
     private Text createTextNode(String content) {
-        Text t = new Text(content);
+        Text t = new Text(UnicodeTextUtils.sanitize(content));
         t.getStyleClass().add("emoji-text-field-text");
         t.setFont(Font.font("Roboto", currentFontSize()));
         return t;
@@ -883,7 +894,7 @@ public class EmojiTextField extends StackPane {
         } else {
             // Измеряем высоту текста через Text с wrappingWidth —
             // надёжнее, чем читать позиции детей TextFlow
-            Text helper = new Text(t);
+            Text helper = new Text(UnicodeTextUtils.sanitize(t));
             helper.setFont(Font.font("Roboto", currentFontSize()));
             helper.setWrappingWidth(flowWidth);
             contentH = helper.getBoundsInLocal().getHeight();
@@ -971,7 +982,10 @@ public class EmojiTextField extends StackPane {
                     }
                 } else {
                     Text textNode = (Text) node;
-                    int offset = pos - seg.charStart;
+                    int offset = UnicodeTextUtils.clampToCodePointBoundary(
+                            textNode.getText(),
+                            pos - seg.charStart
+                    );
                     String sub = textNode.getText().substring(0, offset);
                     Text measure = new Text(sub);
                     measure.setFont(textNode.getFont());
@@ -1124,7 +1138,7 @@ public class EmojiTextField extends StackPane {
         double nodeX = textNode.getLayoutX();
         double bestDist = Double.MAX_VALUE;
         int bestPos = seg.charStart;
-        for (int i = 0; i <= content.length(); i++) {
+        for (int i = 0; ; i = UnicodeTextUtils.nextCodePointBoundary(content, i)) {
             String sub = content.substring(0, i);
             Text measure = new Text(sub);
             measure.setFont(textNode.getFont());
@@ -1133,6 +1147,9 @@ public class EmojiTextField extends StackPane {
             if (dist < bestDist) {
                 bestDist = dist;
                 bestPos = seg.charStart + i;
+            }
+            if (i >= content.length()) {
+                break;
             }
         }
         return bestPos;
@@ -1165,12 +1182,18 @@ public class EmojiTextField extends StackPane {
                 x2 = overlapEnd >= seg.charEnd ? nodeX + nodeW : nodeX;
             } else {
                 Text textNode = (Text) node;
-                int startOff = overlapStart - seg.charStart;
+                int startOff = UnicodeTextUtils.clampToCodePointBoundary(
+                        textNode.getText(),
+                        overlapStart - seg.charStart
+                );
                 Text m1 = new Text(textNode.getText().substring(0, startOff));
                 m1.setFont(textNode.getFont());
                 x1 = nodeX + m1.getBoundsInLocal().getWidth();
 
-                int endOff = overlapEnd - seg.charStart;
+                int endOff = UnicodeTextUtils.clampToCodePointBoundary(
+                        textNode.getText(),
+                        overlapEnd - seg.charStart
+                );
                 Text m2 = new Text(textNode.getText().substring(0, endOff));
                 m2.setFont(textNode.getFont());
                 x2 = nodeX + m2.getBoundsInLocal().getWidth();
@@ -1198,7 +1221,8 @@ public class EmojiTextField extends StackPane {
     }
 
     private int clampCaret(int pos) {
-        return Math.max(0, Math.min(pos, text.get().length()));
+        String current = UnicodeTextUtils.sanitize(text.get());
+        return UnicodeTextUtils.clampToCodePointBoundary(current != null ? current : "", pos);
     }
 
     /** Визуальный сегмент: связь между Node и диапазоном символов в тексте. */

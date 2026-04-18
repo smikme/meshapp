@@ -15,6 +15,7 @@ import com.meshtastic.client.utils.AppPreferences;
 import com.meshtastic.client.utils.NodeUtils;
 import com.meshtastic.client.utils.SvgIconLoader;
 import com.meshtastic.client.utils.SystemForm;
+import com.meshtastic.client.utils.UnicodeTextUtils;
 import javafx.application.Platform;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
@@ -655,16 +656,15 @@ public class FormNodes extends Form {
             String displayName = node.getLongName() != null && !node.getLongName().isEmpty()
                     ? node.getLongName()
                     : node.getNodeId() != null ? node.getNodeId() : "?";
+            displayName = UnicodeTextUtils.sanitize(displayName);
             nameLabel.setText(displayName);
 
             // Аватар: shortName целиком или первые 4 символа имени
             String avatarText;
             if (node.getShortName() != null && !node.getShortName().isEmpty()) {
-                avatarText = node.getShortName().toUpperCase(Locale.ROOT);
+                avatarText = UnicodeTextUtils.sanitize(node.getShortName()).toUpperCase(Locale.ROOT);
             } else {
-                avatarText = displayName.length() > 4
-                        ? displayName.substring(0, 4).toUpperCase(Locale.ROOT)
-                        : displayName.toUpperCase(Locale.ROOT);
+                avatarText = UnicodeTextUtils.prefixByCodePoints(displayName, 4).toUpperCase(Locale.ROOT);
             }
             avatarLabel.setText(avatarText);
             avatarLabel.setFont(Font.font("Roboto", FontWeight.BOLD, NodeUtils.avatarFontSize(avatarText, 40)));

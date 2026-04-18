@@ -30,6 +30,7 @@ import com.meshtastic.client.system.DrawerManager;
 import com.meshtastic.client.system.Form;
 import com.meshtastic.client.utils.NodeUtils;
 import com.meshtastic.client.utils.SystemForm;
+import com.meshtastic.client.utils.UnicodeTextUtils;
 import javafx.animation.KeyFrame;
 import javafx.animation.Timeline;
 import javafx.application.Platform;
@@ -2204,9 +2205,7 @@ public class FormChat extends Form {
     /** Подтверждение и удаление одного сообщения */
     private void confirmDeleteMessage(MeshMessage msg, HBox bubbleRow) {
         String preview = msg.getText();
-        if (preview != null && preview.length() > 40) {
-            preview = preview.substring(0, 40) + "…";
-        }
+        preview = UnicodeTextUtils.truncateWithSuffix(preview, 40, "…");
         ModalPane.showConfirm(
                 "Удалить сообщение?",
                 preview != null ? preview : "",
