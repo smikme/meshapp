@@ -1,5 +1,6 @@
 package com.meshtastic.client.model;
 
+import com.meshtastic.client.utils.UnicodeTextUtils;
 import org.meshtastic.proto.ChannelProtos;
 import java.util.Locale;
 
@@ -60,9 +61,10 @@ public final class ChatItem {
         if (name == null || name.isEmpty()) {
             name = channel.getIndex() == 0 ? "Primary" : "Ch " + channel.getIndex();
         }
+        name = UnicodeTextUtils.sanitize(name);
 
         // Аватар: # + первые 3 символа имени
-        String abbr = name.length() > 3 ? name.substring(0, 3) : name;
+        String abbr = UnicodeTextUtils.prefixByCodePoints(name, 3);
         String avatarText = "#" + abbr;
 
         String color = CHANNEL_COLORS[channel.getIndex() % CHANNEL_COLORS.length];
@@ -103,15 +105,12 @@ public final class ChatItem {
         } else {
             displayName = peerNodeId;
         }
+        displayName = UnicodeTextUtils.sanitize(displayName);
 
         if (peerNode != null && peerNode.getShortName() != null && !peerNode.getShortName().isEmpty()) {
-            avatarText = peerNode.getShortName().length() > 4
-                    ? peerNode.getShortName().substring(0, 4).toUpperCase(Locale.ROOT)
-                    : peerNode.getShortName().toUpperCase(Locale.ROOT);
+            avatarText = UnicodeTextUtils.prefixByCodePoints(peerNode.getShortName(), 4).toUpperCase(Locale.ROOT);
         } else {
-            avatarText = displayName.length() > 4
-                    ? displayName.substring(0, 4).toUpperCase(Locale.ROOT)
-                    : displayName.toUpperCase(Locale.ROOT);
+            avatarText = UnicodeTextUtils.prefixByCodePoints(displayName, 4).toUpperCase(Locale.ROOT);
         }
 
         String color = CHANNEL_COLORS[Math.abs(peerNodeId.hashCode()) % CHANNEL_COLORS.length];
@@ -142,8 +141,9 @@ public final class ChatItem {
         if (name == null || name.isEmpty()) {
             name = channel.getIndex() == 0 ? "Primary" : "Ch " + channel.getIndex();
         }
+        name = UnicodeTextUtils.sanitize(name);
 
-        String abbr = name.length() > 3 ? name.substring(0, 3) : name;
+        String abbr = UnicodeTextUtils.prefixByCodePoints(name, 3);
         String avatarText = "#" + abbr;
         String color = CHANNEL_COLORS[channel.getIndex() % CHANNEL_COLORS.length];
 
@@ -175,15 +175,12 @@ public final class ChatItem {
         } else {
             displayName = peerNodeId;
         }
+        displayName = UnicodeTextUtils.sanitize(displayName);
 
         if (peerNode != null && peerNode.getShortName() != null && !peerNode.getShortName().isEmpty()) {
-            avatarText = peerNode.getShortName().length() > 4
-                    ? peerNode.getShortName().substring(0, 4).toUpperCase(Locale.ROOT)
-                    : peerNode.getShortName().toUpperCase(Locale.ROOT);
+            avatarText = UnicodeTextUtils.prefixByCodePoints(peerNode.getShortName(), 4).toUpperCase(Locale.ROOT);
         } else {
-            avatarText = displayName.length() > 4
-                    ? displayName.substring(0, 4).toUpperCase(Locale.ROOT)
-                    : displayName.toUpperCase(Locale.ROOT);
+            avatarText = UnicodeTextUtils.prefixByCodePoints(displayName, 4).toUpperCase(Locale.ROOT);
         }
 
         String color = CHANNEL_COLORS[Math.abs(peerNodeId.hashCode()) % CHANNEL_COLORS.length];
@@ -202,9 +199,7 @@ public final class ChatItem {
     private static String truncate(String text) {
         if (text == null) { return null; }
         text = text.replace('\n', ' ').replace('\r', ' ');
-        return text.length() > MAX_PREVIEW_LENGTH
-                ? text.substring(0, MAX_PREVIEW_LENGTH) + "…"
-                : text;
+        return UnicodeTextUtils.truncateWithSuffix(text, MAX_PREVIEW_LENGTH, "…");
     }
 
     public ChatType getType() { return type; }

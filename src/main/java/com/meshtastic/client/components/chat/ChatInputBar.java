@@ -3,6 +3,7 @@ package com.meshtastic.client.components.chat;
 import com.meshtastic.client.components.EmojiImageCache;
 import com.meshtastic.client.components.EmojiPicker;
 import com.meshtastic.client.model.MeshMessage;
+import com.meshtastic.client.utils.UnicodeTextUtils;
 import javafx.application.Platform;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
@@ -199,12 +200,11 @@ public class ChatInputBar extends VBox {
         }
         replyToMessage = msg;
 
-        String preview = msg.getText();
-        if (preview != null && preview.length() > 80) {
-            preview = preview.substring(0, 80) + "…";
-        }
+        String preview = UnicodeTextUtils.truncateWithSuffix(msg.getText(), 80, "…");
         replyQuoteLabel.setText(
-                senderName + ": " + (preview != null ? preview : ""));
+                UnicodeTextUtils.sanitize(senderName != null ? senderName : "")
+                        + ": "
+                        + (preview != null ? preview : ""));
 
         replyBar.setVisible(true);
         replyBar.setManaged(true);

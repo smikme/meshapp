@@ -13,6 +13,7 @@ import com.meshtastic.client.system.AllForms;
 import com.meshtastic.client.system.FormManager;
 import com.meshtastic.client.utils.NodeUtils;
 import com.meshtastic.client.utils.SvgIconLoader;
+import com.meshtastic.client.utils.UnicodeTextUtils;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import javafx.geometry.Insets;
@@ -56,8 +57,9 @@ public class NodeDetailContent extends HBox {
         this.protocolHandler = handler;
         this.state = state;
 
-        String displayName = node.getLongName() != null && !node.getLongName().isEmpty()
+        String rawDisplayName = node.getLongName() != null && !node.getLongName().isEmpty()
                 ? node.getLongName() : node.getNodeId() != null ? node.getNodeId() : "?";
+        final String displayName = UnicodeTextUtils.sanitize(rawDisplayName);
 
         // === Вертикальный тулбар слева (56px, структура как DrawerPane) ===
         StackPane toolbarPane = new StackPane();
@@ -201,11 +203,9 @@ public class NodeDetailContent extends HBox {
         // === Заголовок: большой аватар + имя + nodeId ===
         String avatarText;
         if (node.getShortName() != null && !node.getShortName().isEmpty()) {
-            avatarText = node.getShortName().toUpperCase(java.util.Locale.ROOT);
+            avatarText = UnicodeTextUtils.sanitize(node.getShortName()).toUpperCase(java.util.Locale.ROOT);
         } else {
-            avatarText = displayName.length() > 4
-                    ? displayName.substring(0, 4).toUpperCase(java.util.Locale.ROOT)
-                    : displayName.toUpperCase(java.util.Locale.ROOT);
+            avatarText = UnicodeTextUtils.prefixByCodePoints(displayName, 4).toUpperCase(java.util.Locale.ROOT);
         }
         String color = NodeUtils.roleColor(node.getRole());
 
@@ -222,7 +222,7 @@ public class NodeDetailContent extends HBox {
         Label nameLabel = new Label(displayName);
         nameLabel.getStyleClass().add("node-detail-name-label");
 
-        Label nodeIdLabel = new Label(node.getNodeId() != null ? node.getNodeId() : "");
+        Label nodeIdLabel = new Label(UnicodeTextUtils.sanitize(node.getNodeId() != null ? node.getNodeId() : ""));
         nodeIdLabel.setStyle("-fx-opacity: 0.6;");
 
         VBox headerText = new VBox(2, nameLabel, nodeIdLabel);

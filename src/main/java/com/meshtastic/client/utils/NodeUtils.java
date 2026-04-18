@@ -136,6 +136,7 @@ public final class NodeUtils {
         if (text == null || text.isEmpty()) {
             return avatarFontSize(1, circleSize);
         }
+        text = UnicodeTextUtils.sanitize(text);
 
         double size = avatarFontSize(text.length(), circleSize);
         double minSize = Math.max(8.0, circleSize * 0.24);

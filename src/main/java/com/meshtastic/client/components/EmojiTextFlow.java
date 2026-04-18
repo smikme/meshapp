@@ -1,5 +1,6 @@
 package com.meshtastic.client.components;
 
+import com.meshtastic.client.utils.UnicodeTextUtils;
 import javafx.scene.image.ImageView;
 import javafx.scene.layout.Region;
 import javafx.scene.text.Text;
@@ -44,10 +45,12 @@ public class EmojiTextFlow extends TextFlow {
     }
 
     public void setText(String text) {
-        if (text != null && text.equals(this.rawText)) {
+        String sanitized = UnicodeTextUtils.sanitize(text);
+        if ((sanitized == null && this.rawText == null)
+                || (sanitized != null && sanitized.equals(this.rawText))) {
             return; // Тот же текст - ничего не делать
         }
-        this.rawText = text;
+        this.rawText = sanitized;
         rebuild();
     }
 
@@ -184,7 +187,7 @@ public class EmojiTextFlow extends TextFlow {
     }
 
     private void addTextNode(String text) {
-        Text t = new Text(text);
+        Text t = new Text(UnicodeTextUtils.sanitize(text));
         if (textStyleClass != null) {
             t.getStyleClass().add(textStyleClass);
         }
@@ -196,7 +199,11 @@ public class EmojiTextFlow extends TextFlow {
      * Использует жадный поиск — сначала пробует самую длинную последовательность.
      */
     public static List<Segment> parseSegments(String text) {
+        text = UnicodeTextUtils.sanitize(text);
         List<Segment> segments = new ArrayList<>();
+        if (text == null || text.isEmpty()) {
+            return segments;
+        }
         StringBuilder plain = new StringBuilder();
         int i = 0;
         while (i < text.length()) {
