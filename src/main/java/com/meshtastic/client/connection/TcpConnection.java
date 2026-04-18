@@ -63,6 +63,9 @@ public class TcpConnection implements MeshtasticConnection {
     @Override
     public void disconnect() {
         running = false;
+        // Closing the socket first wakes a blocking read(), so shutdown does not
+        // spend the full join timeout waiting for the reader thread to exit.
+        closeSocket();
         if (readerThread != null) {
             readerThread.interrupt();
             try {
@@ -72,8 +75,6 @@ public class TcpConnection implements MeshtasticConnection {
             }
             readerThread = null;
         }
-
-        closeSocket();
 
         ConnectionListener listener = connectionListener;
         if (listener != null) {

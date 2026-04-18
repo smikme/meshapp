@@ -86,6 +86,26 @@ class ConnectionManagerTest {
     }
 
     @Test
+    void shutdownAllDoesNotBlockOnTcpReaderJoinTimeout() throws Exception {
+        try (TcpMeshtasticStubServer server = new TcpMeshtasticStubServer(0x1234ABCD)) {
+            ConnectionManager manager = ConnectionManager.getInstance();
+            ConnectionEntry entry = new ConnectionEntry("stub", "127.0.0.1", server.port());
+            manager.addEntry(entry);
+
+            manager.connect(entry.getId());
+            manager.getConfigFuture(entry.getId()).get(5, TimeUnit.SECONDS);
+
+            long startedAt = System.nanoTime();
+            manager.shutdownAll();
+            long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt);
+
+            assertTrue(elapsedMs < 1_200, "shutdownAll should not wait for the TCP reader join timeout");
+            assertFalse(entry.isConnected());
+            assertFalse(manager.hasActiveConnection());
+        }
+    }
+
+    @Test
     void connectRejectsSecondActiveConnection() throws Exception {
         try (TcpMeshtasticStubServer serverA = new TcpMeshtasticStubServer(0x11111111);
              TcpMeshtasticStubServer serverB = new TcpMeshtasticStubServer(0x22222222)) {
