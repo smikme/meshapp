@@ -556,13 +556,31 @@ public final class ConnectionManager {
                 .whenComplete((routingError, throwable) -> {
                     if (throwable != null) {
                         deviceState.removeDeviceMetadataListener(listenerHolder[0]);
-                        log.debug("Device metadata request failed for '{}'", entry.getName(), throwable);
+                        if (isExpectedDisconnectAbort(throwable)) {
+                            log.debug("Device metadata request for '{}' aborted during disconnect",
+                                    entry.getName());
+                        } else {
+                            log.debug("Device metadata request failed for '{}'", entry.getName(), throwable);
+                        }
                     } else if (routingError != null && routingError != MeshProtos.Routing.Error.NONE) {
                         deviceState.removeDeviceMetadataListener(listenerHolder[0]);
                         log.debug("Device metadata request for '{}' completed with {}",
                                 entry.getName(), routingError);
                     }
                 });
+    }
+
+    private static boolean isExpectedDisconnectAbort(Throwable throwable) {
+        Throwable current = throwable;
+        while (current != null) {
+            String message = current.getMessage();
+            if (message != null && (message.contains("Packet ACK waiter aborted: DISCONNECTED")
+                    || message.contains("Packet ACK waiter aborted: STATE_CLEARED"))) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
     }
 
     private void logNodeConnectionContext(ConnectionEntry entry, DeviceState deviceState) {
