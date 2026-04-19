@@ -12,6 +12,7 @@ import com.meshtastic.client.utils.SvgIconLoader;
 import com.meshtastic.client.utils.NodeUtils;
 import javafx.beans.property.ReadOnlyDoubleProperty;
 import javafx.geometry.Bounds;
+import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Cursor;
 import javafx.scene.Node;
@@ -66,6 +67,9 @@ public class MessageBubbleFactory {
     private static final int META_PRESENT_THRESHOLD = 0;
     private static final int POPUP_VERTICAL_OFFSET = 6;
     private static final int RETRY_ICON_SIZE = 12;
+    private static final int MQTT_BADGE_SIZE = 18;
+    private static final int MQTT_ICON_WIDTH = 14;
+    private static final int MQTT_ICON_HEIGHT = 10;
     private static final int RETRY_ACTION_GAP = 4;
     private static final double MESSAGE_TEXT_EMOJI_SIZE = 18;
     private static final double QUOTE_TEXT_EMOJI_SIZE = 14;
@@ -84,6 +88,7 @@ public class MessageBubbleFactory {
     private static final String REACTION_UNAVAILABLE_TOOLTIP = "Реакция недоступна: у сообщения нет packet id";
     private static final String RETRY_TOOLTIP = "Повторить отправку";
     private static final String RETRY_ICON_PATH = "/icons/refresh.svg";
+    private static final Insets MQTT_BADGE_MARGIN = new Insets(3, 4, 0, 0);
     private static final List<List<String>> REACTION_EMOJI_ROWS = List.of(
             List.of("⭐", "✅", "👍", "👋", "💯", "🔥", "🤝", "😁", "😂", "🤣", "😀"),
             List.of("👌", "❎", "👎", "🤔", "👀", "👽", "🙏", "💪", "🤡", "😄", "🫡"),
@@ -241,7 +246,8 @@ public class MessageBubbleFactory {
                 buildIncomingFooter(msg, reactionBar)
         ));
 
-        HBox row = createMessageRow(Pos.BOTTOM_LEFT, "chat-message-row-incoming", avatar, content);
+        Node bubbleNode = wrapWithMqttBadge(content, msg);
+        HBox row = createMessageRow(Pos.BOTTOM_LEFT, "chat-message-row-incoming", avatar, bubbleNode);
         attachReplyOnDoubleClick(content, msg);
         attachIncomingContextMenu(content, msg, row);
         return row;
@@ -265,8 +271,8 @@ public class MessageBubbleFactory {
         StackPane avatar = buildAvatar(ChatNodeDisplayHelper.resolveOutgoingAvatar(state));
         Region spacer = createFlexibleSpacer();
 
-        HBox row = createMessageRow(Pos.BOTTOM_RIGHT, "chat-message-row-outgoing", spacer, content, avatar);
-        attachReplyOnDoubleClick(content, msg);
+        Node bubbleNode = wrapWithMqttBadge(content, msg);
+        HBox row = createMessageRow(Pos.BOTTOM_RIGHT, "chat-message-row-outgoing", spacer, bubbleNode, avatar);
         attachCopyDeleteMenu(content, msg, row);
         return row;
     }
@@ -395,6 +401,51 @@ public class MessageBubbleFactory {
         bindBubbleWidth(content, hasReactions, defaultWidthRatio);
         content.setMinHeight(Region.USE_PREF_SIZE);
         return content;
+    }
+
+    /**
+     * Накладывает монохромный индикатор MQTT поверх правого верхнего угла bubble.
+     *
+     * @param content bubble-контент
+     * @param msg сообщение
+     * @return исходный content или wrapper с badge
+     */
+    private static Node wrapWithMqttBadge(VBox content, MeshMessage msg) {
+        if (msg == null || !msg.isViaMqtt()) {
+            return content;
+        }
+
+        content.getStyleClass().add("chat-bubble-with-mqtt-badge");
+
+        StackPane badge = createMqttBadge();
+        StackPane wrapper = new StackPane(content, badge);
+        wrapper.setMinHeight(Region.USE_PREF_SIZE);
+        wrapper.setAlignment(Pos.TOP_LEFT);
+        StackPane.setAlignment(content, Pos.TOP_LEFT);
+        StackPane.setAlignment(badge, Pos.TOP_RIGHT);
+        StackPane.setMargin(badge, MQTT_BADGE_MARGIN);
+        return wrapper;
+    }
+
+    /**
+     * Создаёт облако MQTT без цветного акцента; цвет задаётся темой через CSS.
+     *
+     * @return badge с shape-иконкой
+     */
+    private static StackPane createMqttBadge() {
+        Region icon = new Region();
+        icon.getStyleClass().add("chat-bubble-mqtt-icon");
+        icon.setMinSize(MQTT_ICON_WIDTH, MQTT_ICON_HEIGHT);
+        icon.setPrefSize(MQTT_ICON_WIDTH, MQTT_ICON_HEIGHT);
+        icon.setMaxSize(MQTT_ICON_WIDTH, MQTT_ICON_HEIGHT);
+
+        StackPane badge = new StackPane(icon);
+        badge.getStyleClass().add("chat-bubble-mqtt-badge");
+        badge.setMinSize(MQTT_BADGE_SIZE, MQTT_BADGE_SIZE);
+        badge.setPrefSize(MQTT_BADGE_SIZE, MQTT_BADGE_SIZE);
+        badge.setMaxSize(MQTT_BADGE_SIZE, MQTT_BADGE_SIZE);
+        badge.setMouseTransparent(true);
+        return badge;
     }
 
     /**

@@ -19,8 +19,10 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Comparator;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Stream;
 
 public final class CrashReportFlow {
 
@@ -45,7 +47,7 @@ public final class CrashReportFlow {
                             decision.comment(),
                             false,
                             new SubmissionHooks(
-                                    () -> SessionCrashLogManager.deletePendingCrashLog(crashLog),
+                                    null,
                                     () -> SessionCrashLogManager.deletePendingCrashLog(crashLog),
                                     null,
                                     onFinished,
@@ -192,8 +194,13 @@ public final class CrashReportFlow {
     }
 
     private static void deleteReportSnapshot(Path snapshot) {
-        try {
-            Files.deleteIfExists(snapshot);
+        if (snapshot == null) {
+            return;
+        }
+        try (Stream<Path> files = Files.walk(snapshot)) {
+            for (Path current : files.sorted(Comparator.reverseOrder()).toList()) {
+                Files.deleteIfExists(current);
+            }
         } catch (Exception e) {
             log.warn("Failed to delete temporary report snapshot {}", snapshot, e);
         }

@@ -133,7 +133,7 @@ class SerialConnectionTest {
         CountDownLatch errorLatch = new CountDownLatch(1);
         AtomicReference<byte[]> packetRef = new AtomicReference<>();
         SerialConnection connection = new SerialConnection(
-                "COM3", 115200, () -> port, System::currentTimeMillis, 5, 0, 80);
+                "COM3", 115200, () -> port, System::currentTimeMillis, 5, 0, 80, 5_000, 1_000, 15);
         connection.setConnectionListener(new TestConnectionListener(errorLatch));
         connection.setDataListener(packet -> {
             packetRef.set(packet);
@@ -157,6 +157,45 @@ class SerialConnectionTest {
 
         assertTrue(packetLatch.await(1, TimeUnit.SECONDS));
         assertNotNull(packetRef.get());
+        assertArrayEquals(new byte[]{0x08, 0x01}, packetRef.get());
+        assertFalse(errorLatch.await(50, TimeUnit.MILLISECONDS));
+
+        feeder.join(1000);
+        connection.disconnect();
+        assertTrue(port.awaitClose());
+    }
+
+    @Test
+    void partialFrameSurvivesShortUsbGapAndCompletesPacket() throws Exception {
+        FakeSerialPort port = new FakeSerialPort();
+        CountDownLatch packetLatch = new CountDownLatch(1);
+        CountDownLatch errorLatch = new CountDownLatch(1);
+        AtomicReference<byte[]> packetRef = new AtomicReference<>();
+        SerialConnection connection = new SerialConnection(
+                "COM3", 115200, () -> port, System::currentTimeMillis, 5, 0, 80, 5_000, 1_000, 40);
+        connection.setConnectionListener(new TestConnectionListener(errorLatch));
+        connection.setDataListener(packet -> {
+            packetRef.set(packet);
+            packetLatch.countDown();
+        });
+
+        connection.connect();
+        port.enqueueIncoming(
+                FrameParser.START_BYTE_1, FrameParser.START_BYTE_2,
+                (byte) 0x00, (byte) 0x02, (byte) 0x08
+        );
+
+        Thread feeder = new Thread(() -> {
+            try {
+                Thread.sleep(20);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            port.enqueueIncoming((byte) 0x01);
+        });
+        feeder.start();
+
+        assertTrue(packetLatch.await(1, TimeUnit.SECONDS));
         assertArrayEquals(new byte[]{0x08, 0x01}, packetRef.get());
         assertFalse(errorLatch.await(50, TimeUnit.MILLISECONDS));
 

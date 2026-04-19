@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -60,6 +61,28 @@ class FormChatTest {
                 120,
                 List.of(newestPersisted),
                 List.of(loaded)));
+    }
+
+    @Test
+    void copyLoadedMessageMetadataRefreshesMqttBadgeAndLoraMetrics() {
+        MeshMessage loaded = incoming("existing");
+        loaded.setPacketId(42);
+        loaded.setViaMqtt(true);
+
+        MeshMessage updated = incoming("existing");
+        updated.setPacketId(42);
+        updated.setViaMqtt(false);
+        updated.setHopStart(5);
+        updated.setHopLimit(2);
+        updated.setRxRssi(-84);
+        updated.setRxSnr(6.0f);
+
+        assertTrue(FormChat.copyLoadedMessageMetadata(loaded, updated));
+        assertFalse(loaded.isViaMqtt());
+        assertEquals(5, loaded.getHopStart());
+        assertEquals(2, loaded.getHopLimit());
+        assertEquals(-84, loaded.getRxRssi());
+        assertEquals(6.0f, loaded.getRxSnr());
     }
 
     private static MeshMessage incoming(String text) {

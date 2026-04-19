@@ -24,6 +24,9 @@ import java.util.Arrays;
 import java.util.Deque;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Desktop-side MQTT bridge for nodes that proxy MQTT through the connected client.
@@ -41,20 +44,24 @@ public final class MqttProxyService implements FromRadioListener, AutoCloseable 
     static final int DEFAULT_TCP_PORT = 1883;
     static final int DEFAULT_TLS_PORT = 8883;
     static final long LOCAL_ECHO_TTL_MS = 10_000;
+    private static final long DOWNLINK_SEND_MIN_INTERVAL_MS = 75L;
     private static final int MQTT_QOS = 0;
     private static final int DISCONNECTED_BUFFER_SIZE = 256;
+    private static final int DOWNLINK_QUEUE_SIZE = 1_024;
 
     private final String connectionId;
     private final String connectionName;
     private final ProtocolHandler protocolHandler;
     private final DeviceState deviceState;
     private final Object lifecycleLock = new Object();
-    private final Deque<RecentPublication> recentPublications = new ArrayDeque<>();
+    private final LocalEchoSuppressor localEchoSuppressor = new LocalEchoSuppressor(LOCAL_ECHO_TTL_MS);
+    private final ThreadPoolExecutor downlinkExecutor;
 
     private volatile boolean closed;
     private volatile boolean listenerRegistered;
     private volatile MqttAsyncClient client;
     private volatile ProxyConfig activeConfig;
+    private volatile long lastDownlinkForwardAtMillis;
 
     public MqttProxyService(String connectionId,
                             String connectionName,
@@ -64,6 +71,30 @@ public final class MqttProxyService implements FromRadioListener, AutoCloseable 
         this.connectionName = connectionName;
         this.protocolHandler = protocolHandler;
         this.deviceState = deviceState;
+        this.downlinkExecutor = new ThreadPoolExecutor(
+                1,
+                1,
+                0L,
+                TimeUnit.MILLISECONDS,
+                new LinkedBlockingQueue<>(DOWNLINK_QUEUE_SIZE),
+                r -> {
+                    Thread t = new Thread(r, "mqtt-proxy-downlink-" + sanitizeThreadSuffix(connectionId));
+                    t.setDaemon(true);
+                    return t;
+                },
+                (task, executor) -> {
+                    if (!executor.isShutdown()) {
+                        log.warn("MQTT downlink queue saturated for '{}'; waiting for radio write backlog to drain",
+                                connectionName);
+                        try {
+                            executor.getQueue().put(task);
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                            log.warn("Interrupted while waiting to enqueue MQTT downlink for '{}'", connectionName);
+                        }
+                    }
+                }
+        );
     }
 
     /**
@@ -139,12 +170,14 @@ public final class MqttProxyService implements FromRadioListener, AutoCloseable 
         }
 
         byte[] payload = extractPayload(proxyMessage);
+        // The broker can echo QoS 0 publishes back to this subscribed client before publish() returns.
+        RecentPublication publication = localEchoSuppressor.remember(proxyMessage.getTopic(), payload);
         try {
             mqttClient.publish(proxyMessage.getTopic(), payload, MQTT_QOS, proxyMessage.getRetained());
-            rememberLocalPublication(proxyMessage.getTopic(), proxyMessage.getRetained(), payload);
             log.debug("Forwarded MQTT uplink for '{}': topic='{}' bytes={} retained={}",
                     connectionName, proxyMessage.getTopic(), payload.length, proxyMessage.getRetained());
         } catch (MqttException e) {
+            localEchoSuppressor.forget(publication);
             log.warn("Failed to publish MQTT proxy uplink for '{}' topic='{}'",
                     connectionName, proxyMessage.getTopic(), e);
         }
@@ -159,6 +192,7 @@ public final class MqttProxyService implements FromRadioListener, AutoCloseable 
             closed = true;
         }
         stopClient(true);
+        downlinkExecutor.shutdownNow();
     }
 
     static ProxyConfig loadProxyConfig(DeviceState state) {
@@ -304,7 +338,7 @@ public final class MqttProxyService implements FromRadioListener, AutoCloseable 
             mqttClient = client;
             client = null;
             activeConfig = null;
-            recentPublications.clear();
+            localEchoSuppressor.clear();
             if (removeListener && listenerRegistered) {
                 protocolHandler.removeListener(this);
                 listenerRegistered = false;
@@ -338,15 +372,58 @@ public final class MqttProxyService implements FromRadioListener, AutoCloseable 
         byte[] payload = mqttMessage.getPayload();
         if (payload == null) {
             payload = new byte[0];
+        } else {
+            payload = payload.clone();
         }
-        if (consumeLocalEcho(topic, mqttMessage.isRetained(), payload)) {
-            log.trace("Suppressed MQTT loopback for '{}' topic='{}'", connectionName, topic);
+        boolean retained = mqttMessage.isRetained();
+        if (localEchoSuppressor.consume(topic, payload)) {
+            log.debug("Suppressed MQTT loopback for '{}' topic='{}' bytes={} retained={}",
+                    connectionName, topic, payload.length, retained);
             return;
         }
 
-        MessageService.sendMqttClientProxyMessage(protocolHandler, topic, payload, mqttMessage.isRetained());
+        int queueDepth = downlinkExecutor.getQueue().size();
+        log.debug("Received MQTT downlink for '{}': topic='{}' bytes={} retained={} queueDepth={}/{}",
+                connectionName, topic, payload.length, retained, queueDepth, DOWNLINK_QUEUE_SIZE);
+        byte[] downlinkPayload = payload;
+        downlinkExecutor.execute(() -> forwardBrokerMessageToRadio(topic, downlinkPayload, retained));
+    }
+
+    private void forwardBrokerMessageToRadio(String topic, byte[] payload, boolean retained) {
+        if (closed) {
+            return;
+        }
+        if (!awaitDownlinkSendWindow()) {
+            return;
+        }
+        try {
+            MessageService.sendMqttClientProxyMessage(protocolHandler, topic, payload, retained);
+        } catch (RuntimeException e) {
+            log.warn("Failed to forward MQTT downlink for '{}' topic='{}'", connectionName, topic, e);
+            return;
+        }
         log.debug("Forwarded MQTT downlink for '{}': topic='{}' bytes={} retained={}",
-                connectionName, topic, payload.length, mqttMessage.isRetained());
+                connectionName, topic, payload.length, retained);
+    }
+
+    private boolean awaitDownlinkSendWindow() {
+        long lastForwardAt = lastDownlinkForwardAtMillis;
+        long now = System.currentTimeMillis();
+        long waitMs = DOWNLINK_SEND_MIN_INTERVAL_MS - (now - lastForwardAt);
+        if (waitMs > 0) {
+            try {
+                Thread.sleep(waitMs);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return false;
+            }
+            now = System.currentTimeMillis();
+        }
+        if (closed) {
+            return false;
+        }
+        lastDownlinkForwardAtMillis = now;
+        return true;
     }
 
     private void subscribeToBroker(ProxyConfig config, boolean reconnect) {
@@ -365,44 +442,12 @@ public final class MqttProxyService implements FromRadioListener, AutoCloseable 
         }
     }
 
-    private void rememberLocalPublication(String topic, boolean retained, byte[] payload) {
-        synchronized (recentPublications) {
-            purgeExpiredPublications(System.currentTimeMillis());
-            recentPublications.addLast(new RecentPublication(
-                    topic,
-                    retained,
-                    payload.clone(),
-                    System.currentTimeMillis() + LOCAL_ECHO_TTL_MS
-            ));
+    private static String sanitizeThreadSuffix(String value) {
+        String sanitized = value == null ? "" : value.replaceAll("[^A-Za-z0-9]+", "");
+        if (sanitized.isBlank()) {
+            return Long.toHexString(System.nanoTime());
         }
-    }
-
-    private boolean consumeLocalEcho(String topic, boolean retained, byte[] payload) {
-        synchronized (recentPublications) {
-            purgeExpiredPublications(System.currentTimeMillis());
-            for (var it = recentPublications.iterator(); it.hasNext(); ) {
-                RecentPublication recent = it.next();
-                if (!recent.topic.equals(topic) || recent.retained != retained) {
-                    continue;
-                }
-                if (!Arrays.equals(recent.payload, payload)) {
-                    continue;
-                }
-                it.remove();
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private void purgeExpiredPublications(long nowMillis) {
-        while (!recentPublications.isEmpty()) {
-            RecentPublication first = recentPublications.peekFirst();
-            if (first == null || first.expiresAtMillis > nowMillis) {
-                return;
-            }
-            recentPublications.removeFirst();
-        }
+        return sanitized.length() > 16 ? sanitized.substring(0, 16) : sanitized;
     }
 
     record ProxyConfig(String address,
@@ -414,9 +459,74 @@ public final class MqttProxyService implements FromRadioListener, AutoCloseable 
     record ProxyState(ProxyConfig config, String reason) {}
 
     private record RecentPublication(String topic,
-                                     boolean retained,
                                      byte[] payload,
                                      long expiresAtMillis) {}
+
+    static final class LocalEchoSuppressor {
+        private final long ttlMillis;
+        private final Deque<RecentPublication> recentPublications = new ArrayDeque<>();
+
+        LocalEchoSuppressor(long ttlMillis) {
+            this.ttlMillis = ttlMillis;
+        }
+
+        RecentPublication remember(String topic, byte[] payload) {
+            synchronized (recentPublications) {
+                long nowMillis = System.currentTimeMillis();
+                purgeExpiredPublications(nowMillis);
+                RecentPublication publication = new RecentPublication(
+                        topic,
+                        payload.clone(),
+                        nowMillis + ttlMillis
+                );
+                recentPublications.addLast(publication);
+                return publication;
+            }
+        }
+
+        void forget(RecentPublication publication) {
+            if (publication == null) {
+                return;
+            }
+            synchronized (recentPublications) {
+                recentPublications.remove(publication);
+            }
+        }
+
+        boolean consume(String topic, byte[] payload) {
+            synchronized (recentPublications) {
+                purgeExpiredPublications(System.currentTimeMillis());
+                for (var it = recentPublications.iterator(); it.hasNext(); ) {
+                    RecentPublication recent = it.next();
+                    if (!recent.topic.equals(topic)) {
+                        continue;
+                    }
+                    if (!Arrays.equals(recent.payload, payload)) {
+                        continue;
+                    }
+                    it.remove();
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        void clear() {
+            synchronized (recentPublications) {
+                recentPublications.clear();
+            }
+        }
+
+        private void purgeExpiredPublications(long nowMillis) {
+            while (!recentPublications.isEmpty()) {
+                RecentPublication first = recentPublications.peekFirst();
+                if (first == null || first.expiresAtMillis > nowMillis) {
+                    return;
+                }
+                recentPublications.removeFirst();
+            }
+        }
+    }
 
     private final class ProxyCallback implements MqttCallbackExtended {
 

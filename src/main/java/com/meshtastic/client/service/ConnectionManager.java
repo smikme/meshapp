@@ -239,9 +239,15 @@ public final class ConnectionManager {
         boolean cancelledDuringConnect = false;
 
         synchronized (connectionLock) {
-            boolean shouldCancel = pendingConnections.get(id) != conn
-                    || findEntry(id) == null
-                    || userDisconnectedIds.contains(id);
+            MeshtasticConnection pendingConn = pendingConnections.get(id);
+            boolean entryRemoved = findEntry(id) == null;
+            boolean userCancelled = userDisconnectedIds.contains(id);
+            boolean replacedDuringConnect = pendingConn != null && pendingConn != conn;
+            boolean pendingClearedDuringConnect = pendingConn == null;
+            boolean shouldCancel = entryRemoved
+                    || userCancelled
+                    || replacedDuringConnect
+                    || (pendingClearedDuringConnect && !conn.isConnected());
             pendingConnections.remove(id, conn);
             if (shouldCancel) {
                 cancelledDuringConnect = true;
@@ -250,6 +256,10 @@ public final class ConnectionManager {
                 mqttProxyService = null;
                 future = null;
             } else {
+                if (pendingClearedDuringConnect) {
+                    log.warn("Connection '{}' reported disconnect during connect, but transport remained connected; promoting transport to active",
+                            entry.getName());
+                }
                 activeConnections.put(id, conn);
 
                 protocolHandler = new ProtocolHandler(id, conn);
@@ -286,6 +296,7 @@ public final class ConnectionManager {
             return;
         }
 
+        ReconnectService.getInstance().cancelReconnect(id);
         future.thenAccept(ds -> {
             if (activeConnections.get(id) != conn || !entry.isConnected()) {
                 log.debug("Skipping post-connect actions for '{}' because transport is no longer active",
@@ -356,6 +367,7 @@ public final class ConnectionManager {
     public void disconnectForDeviceReboot(String id) {
         ConnectionEntry entry;
         MeshtasticConnection conn;
+        MqttProxyService mqttProxy;
         synchronized (connectionLock) {
             userDisconnectedIds.remove(id);
             userDisconnectReasons.remove(id);
@@ -364,6 +376,12 @@ public final class ConnectionManager {
                 return;
             }
             conn = activeConnections.get(id);
+            mqttProxy = mqttProxyServices.remove(id);
+        }
+
+        if (mqttProxy != null) {
+            log.info("Stopping MQTT proxy for '{}' before reboot reconnect handoff", entry.getName());
+            mqttProxy.close();
         }
 
         if (conn != null) {
@@ -538,13 +556,31 @@ public final class ConnectionManager {
                 .whenComplete((routingError, throwable) -> {
                     if (throwable != null) {
                         deviceState.removeDeviceMetadataListener(listenerHolder[0]);
-                        log.debug("Device metadata request failed for '{}'", entry.getName(), throwable);
+                        if (isExpectedDisconnectAbort(throwable)) {
+                            log.debug("Device metadata request for '{}' aborted during disconnect",
+                                    entry.getName());
+                        } else {
+                            log.debug("Device metadata request failed for '{}'", entry.getName(), throwable);
+                        }
                     } else if (routingError != null && routingError != MeshProtos.Routing.Error.NONE) {
                         deviceState.removeDeviceMetadataListener(listenerHolder[0]);
                         log.debug("Device metadata request for '{}' completed with {}",
                                 entry.getName(), routingError);
                     }
                 });
+    }
+
+    private static boolean isExpectedDisconnectAbort(Throwable throwable) {
+        Throwable current = throwable;
+        while (current != null) {
+            String message = current.getMessage();
+            if (message != null && (message.contains("Packet ACK waiter aborted: DISCONNECTED")
+                    || message.contains("Packet ACK waiter aborted: STATE_CLEARED"))) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
     }
 
     private void logNodeConnectionContext(ConnectionEntry entry, DeviceState deviceState) {

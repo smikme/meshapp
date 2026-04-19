@@ -57,7 +57,10 @@ public class FormLogs extends Form {
             DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss");
 
     private final ObservableList<LogEntry> logData = FXCollections.observableArrayList();
-    private boolean autoScrollEnabled = true;
+    private final Object logViewStateLock = new Object();
+    private boolean logViewUpdatesPaused;
+    private boolean logBufferChangedWhilePaused;
+    private boolean rebuildingLogView;
 
     private TableView<LogEntry> logTable;
     private Button btnPause;
@@ -86,10 +89,10 @@ public class FormLogs extends Form {
         actionToolbar.getStyleClass().add("logs-toolbar");
 
         btnPause = createToolbarButton(
-                "Пауза автопрокрутки",
-                "Приостановить автоматическую прокрутку к новым логам",
+                "Пауза логов",
+                "Остановить обновление лога на экране",
                 ICON_PAUSE,
-                this::toggleAutoScroll
+                this::toggleLogViewUpdates
         );
         btnPauseTooltip = btnPause.getTooltip();
         updatePauseButtonState();
@@ -207,12 +210,8 @@ public class FormLogs extends Form {
     @Override
     public void formOpen() {
         // Обновить из буфера при каждом открытии
-        logData.setAll(UiLogAppender.getBuffer());
-        trimVisibleLogEntries(logData, MAX_VISIBLE_LOG_ENTRIES);
+        reloadVisibleLogsFromBuffer();
         installLiveLogListener();
-        if (autoScrollEnabled) {
-            scrollToBottom();
-        }
     }
 
     @Override
@@ -221,15 +220,30 @@ public class FormLogs extends Form {
     }
 
     private void installLiveLogListener() {
-        UiLogAppender.setLiveListener(entry -> Platform.runLater(() -> appendLogEntry(entry)));
+        UiLogAppender.setLiveListener(this::handleLiveLogEntry);
+    }
+
+    private void handleLiveLogEntry(LogEntry entry) {
+        synchronized (logViewStateLock) {
+            if (logViewUpdatesPaused || rebuildingLogView) {
+                logBufferChangedWhilePaused = true;
+                return;
+            }
+        }
+        Platform.runLater(() -> appendLogEntry(entry));
     }
 
     private void appendLogEntry(LogEntry entry) {
         logData.add(entry);
         trimVisibleLogEntries(logData, MAX_VISIBLE_LOG_ENTRIES);
-        if (autoScrollEnabled) {
-            scrollToBottom();
-        }
+        scrollToBottom();
+    }
+
+    private void reloadVisibleLogsFromBuffer() {
+        List<LogEntry> bufferSnapshot = UiLogAppender.getBuffer();
+        trimVisibleLogEntries(bufferSnapshot, MAX_VISIBLE_LOG_ENTRIES);
+        logData.setAll(bufferSnapshot);
+        scrollToBottom();
     }
 
     static void trimVisibleLogEntries(List<?> entries, int maxEntries) {
@@ -255,24 +269,65 @@ public class FormLogs extends Form {
         }
     }
 
-    private void toggleAutoScroll() {
-        autoScrollEnabled = !autoScrollEnabled;
-        updatePauseButtonState();
-        if (autoScrollEnabled) {
-            scrollToBottom();
-            Toast.show(Toast.Type.INFO, "Автопрокрутка логов включена");
+    private void toggleLogViewUpdates() {
+        if (logViewUpdatesPaused) {
+            resumeLogViewUpdates();
         } else {
-            Toast.show(Toast.Type.INFO, "Автопрокрутка логов приостановлена");
+            pauseLogViewUpdates();
+        }
+        updatePauseButtonState();
+        Toast.show(
+                Toast.Type.INFO,
+                logViewUpdatesPaused
+                        ? "Обновление лога на экране приостановлено"
+                        : "Обновление лога на экране возобновлено"
+        );
+    }
+
+    private void pauseLogViewUpdates() {
+        synchronized (logViewStateLock) {
+            logViewUpdatesPaused = true;
+            logBufferChangedWhilePaused = false;
+        }
+    }
+
+    private void resumeLogViewUpdates() {
+        synchronized (logViewStateLock) {
+            rebuildingLogView = true;
+        }
+
+        int remainingPasses = 3;
+        try {
+            while (remainingPasses-- > 0) {
+                synchronized (logViewStateLock) {
+                    logBufferChangedWhilePaused = false;
+                }
+                reloadVisibleLogsFromBuffer();
+
+                synchronized (logViewStateLock) {
+                    if (!logBufferChangedWhilePaused) {
+                        logViewUpdatesPaused = false;
+                        rebuildingLogView = false;
+                        return;
+                    }
+                }
+            }
+        } finally {
+            synchronized (logViewStateLock) {
+                logViewUpdatesPaused = false;
+                rebuildingLogView = false;
+                logBufferChangedWhilePaused = false;
+            }
         }
     }
 
     private void updatePauseButtonState() {
         if (btnPause != null) {
-            String title = autoScrollEnabled ? "Пауза автопрокрутки" : "Продолжить автопрокрутку";
-            String description = autoScrollEnabled
-                    ? "Остановить автоматическую прокрутку таблицы при новых сообщениях"
-                    : "Снова автоматически прокручивать таблицу к новым логам";
-            setToolbarButtonGraphic(btnPause, autoScrollEnabled ? ICON_PAUSE : ICON_PLAY, title);
+            String title = logViewUpdatesPaused ? "Продолжить логи" : "Пауза логов";
+            String description = logViewUpdatesPaused
+                    ? "Перестроить лог из памяти и снова обновлять экран"
+                    : "Остановить обновление лога на экране, не останавливая сбор записей";
+            setToolbarButtonGraphic(btnPause, logViewUpdatesPaused ? ICON_PLAY : ICON_PAUSE, title);
             btnPause.setAccessibleText(title);
             if (btnPauseTooltip != null) {
                 btnPauseTooltip.setText(title + "\n" + description);

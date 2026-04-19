@@ -95,8 +95,6 @@ public final class MessageService {
         msg.setPacketId(packetId);
         if (replyId != 0) {
             msg.setReplyId(replyId);
-            MeshMessage original = state.findMessageByPacketId(replyId);
-            if (original != null) { msg.setReplyText(original.getText()); }
         }
 
         if (myNode != null && myNode.getLongName() != null) {
@@ -104,7 +102,10 @@ public final class MessageService {
         }
 
         String ownerNodeId = String.format("!%08x", state.getMyNodeNum());
-        MessageDbService.getInstance().save(msg, "channel", String.valueOf(channelIndex), ownerNodeId);
+        String chatType = "channel";
+        String chatKey = String.valueOf(channelIndex);
+        hydrateReplyText(state, msg, ownerNodeId, chatType, chatKey);
+        MessageDbService.getInstance().save(msg, chatType, chatKey, ownerNodeId);
         state.addMessage(msg);
         state.registerPendingAck(packetId, msg);
         return msg;
@@ -159,8 +160,6 @@ public final class MessageService {
         msg.setPacketId(packetId);
         if (replyId != 0) {
             msg.setReplyId(replyId);
-            MeshMessage original = state.findMessageByPacketId(replyId);
-            if (original != null) { msg.setReplyText(original.getText()); }
         }
 
         if (myNode != null && myNode.getLongName() != null) {
@@ -168,7 +167,10 @@ public final class MessageService {
         }
 
         String ownerNodeId = String.format("!%08x", state.getMyNodeNum());
-        MessageDbService.getInstance().save(msg, "dm", peerNodeId, ownerNodeId);
+        String chatType = "dm";
+        String chatKey = peerNodeId;
+        hydrateReplyText(state, msg, ownerNodeId, chatType, chatKey);
+        MessageDbService.getInstance().save(msg, chatType, chatKey, ownerNodeId);
         state.addDirectMessage(msg, peerNodeId);
         if (usePkiTransport) {
             preparePeerForPkiDirectMessage(handler, state, peerNode)
@@ -193,6 +195,49 @@ public final class MessageService {
                     packetId, directChannel, false, msg);
         }
         return msg;
+    }
+
+    private static void hydrateReplyText(DeviceState state,
+                                         MeshMessage msg,
+                                         String ownerNodeId,
+                                         String chatType,
+                                         String chatKey) {
+        if (msg.getReplyId() == 0 || msg.getReplyText() != null) {
+            return;
+        }
+
+        MeshMessage original = MessageDbService.getInstance()
+                .findByPacketId(msg.getReplyId(), chatType, chatKey, ownerNodeId);
+        if (original == null) {
+            original = findInMemoryReplyTarget(state, msg.getReplyId(), chatType, chatKey);
+        }
+        if (original != null) {
+            msg.setReplyText(original.getText());
+        }
+    }
+
+    private static MeshMessage findInMemoryReplyTarget(DeviceState state,
+                                                       int replyId,
+                                                       String chatType,
+                                                       String chatKey) {
+        MeshMessage original = state.findRuntimeMessageByPacketId(replyId);
+        if (original == null) {
+            return null;
+        }
+        return isMessageInChatScope(original, chatType, chatKey) ? original : null;
+    }
+
+    private static boolean isMessageInChatScope(MeshMessage message, String chatType, String chatKey) {
+        if ("channel".equals(chatType)) {
+            return BROADCAST_NODE_ID.equalsIgnoreCase(message.getToNodeId())
+                    && String.valueOf(message.getChannelIndex()).equals(chatKey);
+        }
+        if ("dm".equals(chatType)) {
+            return chatKey != null
+                    && (chatKey.equalsIgnoreCase(message.getFromNodeId())
+                    || chatKey.equalsIgnoreCase(message.getToNodeId()));
+        }
+        return false;
     }
 
     /**

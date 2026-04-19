@@ -2,6 +2,7 @@ package com.meshtastic.client;
 
 import com.meshtastic.client.components.CrashReportFlow;
 import com.meshtastic.client.components.EmojiImageCache;
+import com.meshtastic.client.logging.JfrDiagnosticSupport;
 import com.meshtastic.client.logging.SessionCrashLogManager;
 import com.meshtastic.client.modal.ModalPane;
 import com.meshtastic.client.platform.NativeWindowHelper;
@@ -30,10 +31,15 @@ import javafx.stage.Stage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.time.Duration;
 import java.nio.file.Path;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 public class MeshApp extends Application {
 
@@ -83,7 +89,15 @@ public class MeshApp extends Application {
     }
 
     private static Stage primaryStage;
+    private static final long UI_THREAD_STALL_THRESHOLD_NANOS = TimeUnit.SECONDS.toNanos(15);
+    private static final long UI_THREAD_STALL_CAPTURE_COOLDOWN_NANOS = TimeUnit.MINUTES.toNanos(1);
+
     private final AtomicBoolean deferredStartupTasksStarted = new AtomicBoolean(false);
+    private final AtomicLong lastUiHeartbeatNanos = new AtomicLong(System.nanoTime());
+    private final AtomicBoolean uiFreezeCaptureInProgress = new AtomicBoolean(false);
+
+    private ScheduledExecutorService uiWatchdog;
+    private volatile long lastUiFreezeCaptureNanos;
 
     @Override
     public void start(Stage stage) {
@@ -159,9 +173,13 @@ public class MeshApp extends Application {
 
         // Сохранять состояние окна при закрытии (setOnHiding срабатывает и при
         // программном stage.close() из кастомного title bar, и при нативном закрытии)
-        stage.setOnCloseRequest(e -> Platform.setImplicitExit(true));
+        stage.setOnCloseRequest(e -> {
+            e.consume();
+            AppTrayManager.getInstance().exitApplication();
+        });
         stage.setOnHiding(e -> saveWindowState(stage, rootPane));
 
+        startUiWatchdog();
         handlePendingCrashLog(stage);
     }
 
@@ -263,9 +281,11 @@ public class MeshApp extends Application {
 
     @Override
     public void stop() {
+        stopUiWatchdog();
         AppTrayManager.getInstance().dispose();
         ConnectionManager.getInstance().shutdownAll();
         SessionCrashLogManager.markNormalShutdown();
+        JfrDiagnosticSupport.stop();
         System.exit(0);
     }
 
@@ -278,8 +298,10 @@ public class MeshApp extends Application {
         if (System.getProperty("prism.order") == null && AppPreferences.isSoftwareRendering()) {
             System.setProperty("prism.order", "sw");
         }
-        Thread.setDefaultUncaughtExceptionHandler((thread, throwable) ->
-                log.error("Uncaught exception in thread '{}'", thread.getName(), throwable));
+        Thread.setDefaultUncaughtExceptionHandler((thread, throwable) -> {
+            SessionCrashLogManager.captureUncaughtException(thread, throwable);
+            log.error("Uncaught exception in thread '{}'", thread.getName(), throwable);
+        });
         logStartupContext();
         launch(args);
     }
@@ -300,6 +322,56 @@ public class MeshApp extends Application {
         }
         if (AppPreferences.isCheckUpdates()) {
             UpdateCheckService.checkAsync(ModalPane::showUpdateAvailable);
+        }
+    }
+
+    private void startUiWatchdog() {
+        stopUiWatchdog();
+        lastUiHeartbeatNanos.set(System.nanoTime());
+        uiWatchdog = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "javafx-ui-watchdog");
+            t.setDaemon(true);
+            return t;
+        });
+        uiWatchdog.scheduleAtFixedRate(() -> {
+            try {
+                Platform.runLater(() -> lastUiHeartbeatNanos.set(System.nanoTime()));
+            } catch (IllegalStateException ignored) {
+                // JavaFX toolkit is already shutting down.
+            }
+        }, 0, 1, TimeUnit.SECONDS);
+        uiWatchdog.scheduleAtFixedRate(this::checkUiThreadHealth, 5, 5, TimeUnit.SECONDS);
+    }
+
+    private void stopUiWatchdog() {
+        ScheduledExecutorService watchdog = uiWatchdog;
+        uiWatchdog = null;
+        if (watchdog != null) {
+            watchdog.shutdownNow();
+        }
+    }
+
+    private void checkUiThreadHealth() {
+        long stallNanos = System.nanoTime() - lastUiHeartbeatNanos.get();
+        if (stallNanos < UI_THREAD_STALL_THRESHOLD_NANOS) {
+            return;
+        }
+
+        long now = System.nanoTime();
+        if (now - lastUiFreezeCaptureNanos < UI_THREAD_STALL_CAPTURE_COOLDOWN_NANOS) {
+            return;
+        }
+        if (!uiFreezeCaptureInProgress.compareAndSet(false, true)) {
+            return;
+        }
+
+        lastUiFreezeCaptureNanos = now;
+        try {
+            SessionCrashLogManager.captureUiFreezeDiagnostic(Duration.ofNanos(stallNanos));
+        } catch (Exception e) {
+            log.warn("Failed to capture JavaFX thread stall diagnostics", e);
+        } finally {
+            uiFreezeCaptureInProgress.set(false);
         }
     }
 }

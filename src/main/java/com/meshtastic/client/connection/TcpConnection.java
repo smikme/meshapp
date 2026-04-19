@@ -16,6 +16,7 @@ public class TcpConnection implements MeshtasticConnection {
 
     public static final int DEFAULT_PORT = 4403;
     private static final int CONNECT_TIMEOUT_MS = 5000;
+    private static final long READER_JOIN_TIMEOUT_MS = 500L;
 
     private final String host;
     private final int port;
@@ -63,17 +64,23 @@ public class TcpConnection implements MeshtasticConnection {
     @Override
     public void disconnect() {
         running = false;
-        if (readerThread != null) {
-            readerThread.interrupt();
+        // Closing the socket first wakes a blocking read(), so shutdown does not
+        // spend the full fallback window waiting for the reader thread to exit.
+        closeSocket();
+        Thread thread = readerThread;
+        if (thread != null) {
+            thread.interrupt();
             try {
-                readerThread.join(2000);
+                thread.join(READER_JOIN_TIMEOUT_MS);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             }
+            if (thread.isAlive()) {
+                log.debug("TCP reader thread did not exit within {} ms after socket close; continuing disconnect",
+                        READER_JOIN_TIMEOUT_MS);
+            }
             readerThread = null;
         }
-
-        closeSocket();
 
         ConnectionListener listener = connectionListener;
         if (listener != null) {

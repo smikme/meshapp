@@ -6,6 +6,7 @@ import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.service.NodeCacheService;
 import com.meshtastic.client.utils.NodeUtils;
+import com.meshtastic.client.utils.UnicodeTextUtils;
 
 import java.util.List;
 import java.util.Locale;
@@ -250,9 +251,7 @@ final class ChatNodeDisplayHelper {
     private static String nodeIdTail(String nodeId) {
         return isBlank(nodeId)
                 ? null
-                : nodeId.length() > MAX_AVATAR_TEXT_LENGTH
-                ? nodeId.substring(nodeId.length() - MAX_AVATAR_TEXT_LENGTH)
-                : nodeId;
+                : UnicodeTextUtils.suffixByCodePoints(nodeId, MAX_AVATAR_TEXT_LENGTH);
     }
 
     /**
@@ -262,10 +261,9 @@ final class ChatNodeDisplayHelper {
      * @return безопасный текст для маленького круглого аватара
      */
     private static String normalizeAvatarText(String value) {
-        String normalized = firstNonBlank(value, UNKNOWN_AVATAR_TEXT).toUpperCase(Locale.ROOT);
-        return normalized.length() > MAX_AVATAR_TEXT_LENGTH
-                ? normalized.substring(0, MAX_AVATAR_TEXT_LENGTH)
-                : normalized;
+        String normalized = UnicodeTextUtils.sanitize(firstNonBlank(value, UNKNOWN_AVATAR_TEXT))
+                .toUpperCase(Locale.ROOT);
+        return UnicodeTextUtils.prefixByCodePoints(normalized, MAX_AVATAR_TEXT_LENGTH);
     }
 
     /**
@@ -278,6 +276,7 @@ final class ChatNodeDisplayHelper {
         return Stream.of(values)
                 .filter(Objects::nonNull)
                 .map(String::trim)
+                .map(UnicodeTextUtils::sanitize)
                 .filter(Predicate.not(String::isBlank))
                 .findFirst()
                 .orElse("");

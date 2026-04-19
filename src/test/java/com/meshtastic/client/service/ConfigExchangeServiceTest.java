@@ -22,6 +22,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -37,6 +38,7 @@ class ConfigExchangeServiceTest {
     Path tempHome;
 
     private final List<ProtocolHandler> handlersToShutdown = new ArrayList<>();
+    private final List<ConfigExchangeService> servicesToAbort = new ArrayList<>();
 
     @BeforeEach
     void setUp() {
@@ -49,6 +51,9 @@ class ConfigExchangeServiceTest {
 
     @AfterEach
     void tearDown() {
+        for (ConfigExchangeService service : servicesToAbort) {
+            service.abort("test cleanup");
+        }
         for (ProtocolHandler handler : handlersToShutdown) {
             handler.shutdown();
         }
@@ -62,7 +67,7 @@ class ConfigExchangeServiceTest {
         DeviceState state = new DeviceState();
         state.setMyNodeNum(1);
         state.getOrCreateNode(1).setLongName("stale");
-        ConfigExchangeService service = new ConfigExchangeService(handler, state);
+        ConfigExchangeService service = track(new ConfigExchangeService(handler, state));
 
         // startConfigExchange должен сбрасывать runtime-state перед новым потоком конфигурации.
         CompletableFuture<DeviceState> future = service.startConfigExchange();
@@ -70,8 +75,7 @@ class ConfigExchangeServiceTest {
         assertNotNull(future);
         assertEquals(0, state.getMyNodeNum());
         assertTrue(state.getNodeDb().isEmpty());
-        assertNotNull(connection.lastWantConfigId);
-        assertNotEquals(0, connection.lastWantConfigId.intValue());
+        assertNotEquals(0, connection.awaitLastWantConfigId());
     }
 
     @Test
@@ -81,7 +85,7 @@ class ConfigExchangeServiceTest {
         DeviceState state = new DeviceState();
         state.setMyNodeNum(0x12345678);
         state.setPendingFixedPosition(55.7558, 37.6173, 205);
-        ConfigExchangeService service = new ConfigExchangeService(handler, state);
+        ConfigExchangeService service = track(new ConfigExchangeService(handler, state));
 
         // Для своей ноды берём сохранённую пользователем fixed position,
         // а не потенциально устаревшие координаты из устройства.
@@ -114,7 +118,7 @@ class ConfigExchangeServiceTest {
         ProtocolHandler handler = track(new ProtocolHandler(connection));
         DeviceState state = new DeviceState();
         state.setMyNodeNum(0x12345678);
-        ConfigExchangeService service = new ConfigExchangeService(handler, state);
+        ConfigExchangeService service = track(new ConfigExchangeService(handler, state));
 
         service.onNodeInfo(MeshProtos.NodeInfo.newBuilder()
                 .setNum(0x12345678)
@@ -132,7 +136,7 @@ class ConfigExchangeServiceTest {
         FakeConnection connection = new FakeConnection();
         ProtocolHandler handler = track(new ProtocolHandler(connection));
         DeviceState state = new DeviceState();
-        ConfigExchangeService service = new ConfigExchangeService(handler, state);
+        ConfigExchangeService service = track(new ConfigExchangeService(handler, state));
 
         service.onNodeInfo(MeshProtos.NodeInfo.newBuilder()
                 .setNum(0xCAFEBABE)
@@ -176,10 +180,10 @@ class ConfigExchangeServiceTest {
         FakeConnection connection = new FakeConnection();
         ProtocolHandler handler = track(new ProtocolHandler(connection));
         DeviceState state = new DeviceState();
-        ConfigExchangeService service = new ConfigExchangeService(handler, state);
+        ConfigExchangeService service = track(new ConfigExchangeService(handler, state));
 
         CompletableFuture<DeviceState> future = service.startConfigExchange();
-        int wantConfigId = connection.lastWantConfigId;
+        int wantConfigId = connection.awaitLastWantConfigId();
 
         service.onMyNodeInfo(MeshProtos.MyNodeInfo.newBuilder().setMyNodeNum(0x12345678).build());
         service.onNodeInfo(MeshProtos.NodeInfo.newBuilder()
@@ -207,10 +211,10 @@ class ConfigExchangeServiceTest {
         FakeConnection connection = new FakeConnection();
         ProtocolHandler handler = track(new ProtocolHandler(connection));
         DeviceState state = new DeviceState();
-        ConfigExchangeService service = new ConfigExchangeService(handler, state);
+        ConfigExchangeService service = track(new ConfigExchangeService(handler, state));
 
         CompletableFuture<DeviceState> future = service.startConfigExchange();
-        int wantConfigId = connection.lastWantConfigId;
+        int wantConfigId = connection.awaitLastWantConfigId();
 
         service.onNodeInfo(MeshProtos.NodeInfo.newBuilder()
                 .setNum(0xCAFEBABE)
@@ -237,10 +241,10 @@ class ConfigExchangeServiceTest {
         FakeConnection connection = new FakeConnection();
         ProtocolHandler handler = track(new ProtocolHandler(connection));
         DeviceState state = new DeviceState();
-        ConfigExchangeService service = new ConfigExchangeService(handler, state);
+        ConfigExchangeService service = track(new ConfigExchangeService(handler, state));
 
         CompletableFuture<DeviceState> future = service.startConfigExchange();
-        int wantConfigId = connection.lastWantConfigId;
+        int wantConfigId = connection.awaitLastWantConfigId();
 
         service.onMyNodeInfo(MeshProtos.MyNodeInfo.newBuilder().setMyNodeNum(0x12345678).build());
         service.onChannel(ChannelProtos.Channel.newBuilder()
@@ -293,14 +297,14 @@ class ConfigExchangeServiceTest {
     }
 
     @Test
-    void onConfigCompleteIgnoresUnexpectedConfigId() {
+    void onConfigCompleteIgnoresUnexpectedConfigId() throws Exception {
         FakeConnection connection = new FakeConnection();
         ProtocolHandler handler = track(new ProtocolHandler(connection));
         DeviceState state = new DeviceState();
-        ConfigExchangeService service = new ConfigExchangeService(handler, state);
+        ConfigExchangeService service = track(new ConfigExchangeService(handler, state));
 
         CompletableFuture<DeviceState> future = service.startConfigExchange();
-        int expectedId = connection.lastWantConfigId;
+        int expectedId = connection.awaitLastWantConfigId();
 
         service.onConfigComplete(expectedId + 1);
 
@@ -312,10 +316,10 @@ class ConfigExchangeServiceTest {
         FakeConnection connection = new FakeConnection();
         ProtocolHandler handler = track(new ProtocolHandler(connection));
         DeviceState state = new DeviceState();
-        ConfigExchangeService service = new ConfigExchangeService(handler, state);
+        ConfigExchangeService service = track(new ConfigExchangeService(handler, state));
 
         CompletableFuture<DeviceState> future = service.startConfigExchange();
-        int wantConfigId = connection.lastWantConfigId;
+        int wantConfigId = connection.awaitLastWantConfigId();
 
         service.abort("connection cleanup");
 
@@ -341,11 +345,16 @@ class ConfigExchangeServiceTest {
         return handler;
     }
 
+    private ConfigExchangeService track(ConfigExchangeService service) {
+        servicesToAbort.add(service);
+        return service;
+    }
+
     private static final class FakeConnection implements MeshtasticConnection {
         // Нам нужен только факт отправки want_config_id; входящие события вызываем напрямую у сервиса.
         private Consumer<byte[]> dataListener;
         private ConnectionListener connectionListener;
-        private Integer lastWantConfigId;
+        private volatile Integer lastWantConfigId;
 
         @Override
         public void connect() throws ConnectionException {
@@ -382,6 +391,19 @@ class ConfigExchangeServiceTest {
         @Override
         public void setConnectionListener(ConnectionListener listener) {
             this.connectionListener = listener;
+        }
+
+        int awaitLastWantConfigId() throws InterruptedException {
+            long deadlineNanos = System.nanoTime() + TimeUnit.SECONDS.toNanos(1);
+            Integer current = lastWantConfigId;
+            while (current == null && System.nanoTime() < deadlineNanos) {
+                Thread.sleep(10);
+                current = lastWantConfigId;
+            }
+            if (current == null) {
+                throw new AssertionError("Timed out waiting for want_config_id to be sent");
+            }
+            return current;
         }
     }
 }

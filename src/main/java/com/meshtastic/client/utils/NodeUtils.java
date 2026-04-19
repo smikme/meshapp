@@ -17,9 +17,6 @@ import javafx.scene.image.ImageView;
 import javafx.scene.input.Clipboard;
 import javafx.scene.input.ClipboardContent;
 import javafx.scene.layout.HBox;
-import javafx.scene.text.Font;
-import javafx.scene.text.FontWeight;
-import javafx.scene.text.Text;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -128,32 +125,84 @@ public final class NodeUtils {
     }
 
     /**
-     * Размер шрифта аватара с учётом реальной ширины текста.
-     * Это убирает platform-specific clipping/ellipsis у 4-символьных аватаров
-     * вроде {@code #GAM} в фиксированном круге.
+     * Размер шрифта аватара по эвристике ширины glyph'ов, без JavaFX text measurement.
+     * Это сохраняет emoji в аватаре и избегает native glyph-bounds path в CoreText.
      */
     public static double avatarFontSize(String text, int circleSize) {
-        if (text == null || text.isEmpty()) {
+        String sanitized = UnicodeTextUtils.sanitize(text);
+        if (sanitized.isEmpty()) {
             return avatarFontSize(1, circleSize);
         }
 
-        double size = avatarFontSize(text.length(), circleSize);
+        int codePointCount = sanitized.codePointCount(0, sanitized.length());
+        double size = avatarFontSize(codePointCount, circleSize);
         double minSize = Math.max(8.0, circleSize * 0.24);
         double targetWidth = circleSize * 0.78;
-        double targetHeight = circleSize * 0.44;
+        double estimatedWidth = estimateAvatarWidthUnits(sanitized) * size;
 
-        while (size > minSize) {
-            Text probe = new Text(text);
-            probe.setFont(Font.font("Roboto", FontWeight.BOLD, size));
-
-            if (probe.getLayoutBounds().getWidth() <= targetWidth
-                    && probe.getLayoutBounds().getHeight() <= targetHeight) {
-                return size;
-            }
-            size -= 0.5;
+        if (estimatedWidth <= targetWidth) {
+            return size;
         }
 
-        return minSize;
+        double scaledSize = size * (targetWidth / estimatedWidth);
+        return Math.max(minSize, roundDownToHalfStep(scaledSize));
+    }
+
+    private static double estimateAvatarWidthUnits(String text) {
+        double units = 0.0;
+        for (int offset = 0; offset < text.length();) {
+            int codePoint = text.codePointAt(offset);
+            units += estimateGlyphWidthUnit(codePoint);
+            offset += Character.charCount(codePoint);
+        }
+        return units;
+    }
+
+    private static double estimateGlyphWidthUnit(int codePoint) {
+        if (Character.isWhitespace(codePoint)) {
+            return 0.3;
+        }
+        if (isAsciiNarrowGlyph(codePoint)) {
+            return 0.38;
+        }
+        if (isAsciiWideGlyph(codePoint)) {
+            return 0.78;
+        }
+        if (codePoint > Character.MAX_VALUE) {
+            return 0.9;
+        }
+        if (isEastAsianGlyph(codePoint)) {
+            return 0.88;
+        }
+        if (Character.isUpperCase(codePoint) || Character.isDigit(codePoint)) {
+            return 0.64;
+        }
+        if (Character.isLowerCase(codePoint)) {
+            return 0.58;
+        }
+        return 0.5;
+    }
+
+    private static boolean isAsciiNarrowGlyph(int codePoint) {
+        return ".,:;!|`'ijlI1 ".indexOf(codePoint) >= 0;
+    }
+
+    private static boolean isAsciiWideGlyph(int codePoint) {
+        return "MW@#%&QO08".indexOf(codePoint) >= 0;
+    }
+
+    private static boolean isEastAsianGlyph(int codePoint) {
+        Character.UnicodeBlock block = Character.UnicodeBlock.of(codePoint);
+        return block == Character.UnicodeBlock.CJK_UNIFIED_IDEOGRAPHS
+                || block == Character.UnicodeBlock.CJK_UNIFIED_IDEOGRAPHS_EXTENSION_A
+                || block == Character.UnicodeBlock.CJK_SYMBOLS_AND_PUNCTUATION
+                || block == Character.UnicodeBlock.HANGUL_SYLLABLES
+                || block == Character.UnicodeBlock.HIRAGANA
+                || block == Character.UnicodeBlock.KATAKANA;
+    }
+
+    private static double roundDownToHalfStep(double value) {
+        return Math.floor(value * 2.0) / 2.0;
     }
 
     /**

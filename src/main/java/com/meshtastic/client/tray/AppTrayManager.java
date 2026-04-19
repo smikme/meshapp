@@ -1,5 +1,6 @@
 package com.meshtastic.client.tray;
 
+import com.meshtastic.client.components.PacketMonitorWindow;
 import com.meshtastic.client.platform.NativeWindowHelper;
 import com.meshtastic.client.platform.OsDetect;
 import com.meshtastic.client.utils.AppPreferences;
@@ -8,6 +9,8 @@ import javafx.stage.Stage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.awt.Desktop;
+import java.awt.desktop.AppReopenedListener;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -16,6 +19,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public final class AppTrayManager {
 
     private static final Logger log = LoggerFactory.getLogger(AppTrayManager.class);
+    private static final long HARD_EXIT_FALLBACK_DELAY_MS = 1500L;
 
     private static final AppTrayManager INSTANCE = new AppTrayManager();
 
@@ -27,6 +31,7 @@ public final class AppTrayManager {
     private boolean trayAvailable;
     private boolean suppressIconifiedHook;
     private boolean macWindowHiddenToTray;
+    private AppReopenedListener macAppReopenedListener;
 
     public static AppTrayManager getInstance() {
         return INSTANCE;
@@ -52,17 +57,20 @@ public final class AppTrayManager {
         }
 
         installStageHooks(stage);
+        installMacAppReopenedHandler();
         initialized = true;
     }
 
     public synchronized void dispose() {
         service.dispose();
+        uninstallMacAppReopenedHandler();
         service = new NoOpTrayService();
         trayAvailable = false;
         primaryStage = null;
         initialized = false;
         suppressIconifiedHook = false;
         macWindowHiddenToTray = false;
+        macAppReopenedListener = null;
         exiting.set(false);
         runOnFxThread(() -> Platform.setImplicitExit(true));
     }
@@ -103,6 +111,7 @@ public final class AppTrayManager {
             suppressIconifiedHook = true;
             try {
                 Platform.setImplicitExit(false);
+                PacketMonitorWindow.hideWindowIfOpen();
                 if (OsDetect.isMacOs()) {
                     if (AppPreferences.isDisableEffectsEffective()) {
                         if (stage.isShowing()) {
@@ -168,6 +177,7 @@ public final class AppTrayManager {
                 if (exiting.get()) {
                     return;
                 }
+                PacketMonitorWindow.restoreWindowIfOpen();
                 if (OsDetect.isWindows()) {
                     NativeWindowHelper.applyNativeEffects(stage, AppPreferences.isDarkMode());
                 }
@@ -188,15 +198,31 @@ public final class AppTrayManager {
         if (!exiting.compareAndSet(false, true)) {
             return;
         }
+        scheduleHardExitFallback();
         runOnFxThread(() -> {
+            PacketMonitorWindow.closeWindowIfOpen();
             Platform.setImplicitExit(true);
             Platform.exit();
         });
     }
 
     private void installStageHooks(Stage stage) {
-        if (OsDetect.isMacOs() && !AppPreferences.isDisableEffectsEffective()) {
-            return;
+        if (OsDetect.isMacOs()) {
+            stage.showingProperty().addListener((obs, wasShowing, isShowing) -> {
+                if (!isShowing || exiting.get()) {
+                    return;
+                }
+                Platform.runLater(this::restoreAuxiliaryWindows);
+            });
+            stage.iconifiedProperty().addListener((obs, wasIconified, isIconified) -> {
+                if (isIconified || suppressIconifiedHook || exiting.get()) {
+                    return;
+                }
+                Platform.runLater(this::restoreAuxiliaryWindows);
+            });
+            if (!AppPreferences.isDisableEffectsEffective()) {
+                return;
+            }
         }
         stage.iconifiedProperty().addListener((obs, wasIconified, isIconified) -> {
             if (!isIconified || suppressIconifiedHook || exiting.get()) {
@@ -207,6 +233,44 @@ public final class AppTrayManager {
             }
             Platform.runLater(this::hideToTray);
         });
+    }
+
+    private void restoreAuxiliaryWindows() {
+        if (exiting.get()) {
+            return;
+        }
+        PacketMonitorWindow.restoreWindowIfOpen();
+    }
+
+    private synchronized void installMacAppReopenedHandler() {
+        if (!OsDetect.isMacOs() || macAppReopenedListener != null) {
+            return;
+        }
+        if (!Desktop.isDesktopSupported()) {
+            return;
+        }
+        try {
+            Desktop desktop = Desktop.getDesktop();
+            if (!desktop.isSupported(Desktop.Action.APP_EVENT_REOPENED)) {
+                return;
+            }
+            macAppReopenedListener = event -> restoreWindow();
+            desktop.addAppEventListener(macAppReopenedListener);
+        } catch (Throwable t) {
+            macAppReopenedListener = null;
+            log.debug("Failed to install macOS app reopen handler", t);
+        }
+    }
+
+    private synchronized void uninstallMacAppReopenedHandler() {
+        if (macAppReopenedListener == null || !Desktop.isDesktopSupported()) {
+            return;
+        }
+        try {
+            Desktop.getDesktop().removeAppEventListener(macAppReopenedListener);
+        } catch (Throwable t) {
+            log.debug("Failed to remove macOS app reopen handler", t);
+        }
     }
 
     private boolean shouldMinimizeToTray() {
@@ -228,6 +292,21 @@ public final class AppTrayManager {
         } else {
             Platform.runLater(action);
         }
+    }
+
+    private void scheduleHardExitFallback() {
+        Thread fallbackThread = new Thread(() -> {
+            try {
+                Thread.sleep(HARD_EXIT_FALLBACK_DELAY_MS);
+            } catch (InterruptedException ignored) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+            log.warn("JavaFX shutdown fallback triggered, forcing JVM exit");
+            System.exit(0);
+        }, "meshapp-exit-fallback");
+        fallbackThread.setDaemon(true);
+        fallbackThread.start();
     }
 
     private AppTrayManager() {}

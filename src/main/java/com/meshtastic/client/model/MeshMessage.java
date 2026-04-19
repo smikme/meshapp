@@ -1,5 +1,7 @@
 package com.meshtastic.client.model;
 
+import com.meshtastic.client.utils.UnicodeTextUtils;
+
 import java.util.Collections;
 import java.util.List;
 
@@ -43,6 +45,7 @@ public class MeshMessage {
     private int rxRssi;
     private float rxSnr;
     private String senderName;
+    private boolean viaMqtt;
     private boolean systemMessage;
     private long dbId;
     private List<MessageReaction> reactions = Collections.emptyList();
@@ -61,7 +64,7 @@ public class MeshMessage {
         this.fromNodeId = fromNodeId;
         this.toNodeId = toNodeId;
         this.channelIndex = channelIndex;
-        this.text = text;
+        this.text = UnicodeTextUtils.sanitize(text);
         this.timestamp = timestamp;
         this.outgoing = outgoing;
     }
@@ -80,13 +83,13 @@ public class MeshMessage {
     public void setPacketId(int packetId) { this.packetId = packetId; }
 
     public String getErrorReason() { return errorReason; }
-    public void setErrorReason(String errorReason) { this.errorReason = errorReason; }
+    public void setErrorReason(String errorReason) { this.errorReason = UnicodeTextUtils.sanitize(errorReason); }
 
     public int getReplyId() { return replyId; }
     public void setReplyId(int replyId) { this.replyId = replyId; }
 
     public String getReplyText() { return replyText; }
-    public void setReplyText(String replyText) { this.replyText = replyText; }
+    public void setReplyText(String replyText) { this.replyText = UnicodeTextUtils.sanitize(replyText); }
 
     public int getHopStart() { return hopStart; }
     public void setHopStart(int hopStart) { this.hopStart = hopStart; }
@@ -101,7 +104,10 @@ public class MeshMessage {
     public void setRxSnr(float rxSnr) { this.rxSnr = rxSnr; }
 
     public String getSenderName() { return senderName; }
-    public void setSenderName(String senderName) { this.senderName = senderName; }
+    public void setSenderName(String senderName) { this.senderName = UnicodeTextUtils.sanitize(senderName); }
+
+    public boolean isViaMqtt() { return viaMqtt; }
+    public void setViaMqtt(boolean viaMqtt) { this.viaMqtt = viaMqtt; }
 
     public boolean isSystemMessage() { return systemMessage; }
     public void setSystemMessage(boolean systemMessage) { this.systemMessage = systemMessage; }

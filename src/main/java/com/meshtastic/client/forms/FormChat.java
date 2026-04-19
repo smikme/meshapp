@@ -30,6 +30,7 @@ import com.meshtastic.client.system.DrawerManager;
 import com.meshtastic.client.system.Form;
 import com.meshtastic.client.utils.NodeUtils;
 import com.meshtastic.client.utils.SystemForm;
+import com.meshtastic.client.utils.UnicodeTextUtils;
 import javafx.animation.KeyFrame;
 import javafx.animation.Timeline;
 import javafx.application.Platform;
@@ -660,8 +661,10 @@ public class FormChat extends Form {
             MessageDbService db = MessageDbService.getInstance();
             String chatType = currentChatType();
             String chatKey = currentChatKey();
+            String ownerNodeId = currentOwnerNodeId();
 
-            List<MeshMessage> msgs = db.loadLast(chatType, chatKey, PAGE_SIZE, currentOwnerNodeId());
+            db.backfillMissingReplyTexts(chatType, chatKey, ownerNodeId);
+            List<MeshMessage> msgs = db.loadLast(chatType, chatKey, PAGE_SIZE, ownerNodeId);
             attachReactions(msgs);
 
             clearLoadedMessageState();
@@ -789,21 +792,24 @@ public class FormChat extends Form {
         if (selectedChat == null) { return; }
         ChatScrollState preservedScrollState = !formVisible ? captureViewportAnchor() : null;
         boolean wasAtLiveTail = formVisible && isAtLiveTail();
+        String chatType = currentChatType();
+        String chatKey = currentChatKey();
+        String ownerNodeId = currentOwnerNodeId();
 
         // Обновить статусы доставки для отправленных сообщений (ACK/NAK)
         MessageDbService db = MessageDbService.getInstance();
         pendingStatusLabels.entrySet().removeIf(entry -> {
-            MeshMessage updated = db.findByPacketId(entry.getKey());
+            MeshMessage updated = db.findByPacketId(entry.getKey(), chatType, chatKey, ownerNodeId);
             if (updated != null && updated.getStatus() != null
                     && updated.getStatus() != MeshMessage.DeliveryStatus.SENDING) {
-                MeshMessage loaded = syncLoadedMessageDeliveryStatus(updated);
+                MeshMessage loaded = syncLoadedMessageMetadata(updated);
                 bubbleFactory.refreshStatusLabel(entry.getValue(), loaded != null ? loaded : updated);
                 return true;
             }
             return false;
         });
-        String chatType = currentChatType();
-        String chatKey = currentChatKey();
+
+        syncLoadedMqttMetadata(db, chatType, chatKey, ownerNodeId);
 
         List<MeshMessage> newMsgs = db.loadAfter(chatType, chatKey, latestKnownDbId, currentOwnerNodeId());
         if (newMsgs.isEmpty() && shouldReloadChatAfterDatabaseReset(db, chatType, chatKey)) {
@@ -890,18 +896,84 @@ public class FormChat extends Form {
         });
     }
 
-    private MeshMessage syncLoadedMessageDeliveryStatus(MeshMessage updated) {
+    private void syncLoadedMqttMetadata(MessageDbService db,
+                                        String chatType,
+                                        String chatKey,
+                                        String ownerNodeId) {
+        if (db == null || chatType == null || chatKey == null || ownerNodeId == null) {
+            return;
+        }
+        for (MeshMessage loaded : loadedMessages) {
+            if (loaded.getPacketId() == 0 || !loaded.isViaMqtt()) {
+                continue;
+            }
+            MeshMessage updated = db.findByPacketId(loaded.getPacketId(), chatType, chatKey, ownerNodeId);
+            if (updated != null) {
+                syncLoadedMessageMetadata(updated);
+            }
+        }
+    }
+
+    private MeshMessage syncLoadedMessageMetadata(MeshMessage updated) {
         if (updated == null || updated.getPacketId() == 0) {
             return null;
         }
         for (MeshMessage loaded : loadedMessages) {
             if (loaded.getPacketId() == updated.getPacketId()) {
-                loaded.setStatus(updated.getStatus());
-                loaded.setErrorReason(updated.getErrorReason());
+                copyLoadedMessageMetadata(loaded, updated);
                 return loaded;
             }
         }
         return null;
+    }
+
+    static boolean copyLoadedMessageMetadata(MeshMessage loaded, MeshMessage updated) {
+        if (loaded == null || updated == null || loaded.getPacketId() != updated.getPacketId()) {
+            return false;
+        }
+
+        boolean changed = false;
+        if (loaded.getStatus() != updated.getStatus()) {
+            loaded.setStatus(updated.getStatus());
+            changed = true;
+        }
+        if (!Objects.equals(loaded.getErrorReason(), updated.getErrorReason())) {
+            loaded.setErrorReason(updated.getErrorReason());
+            changed = true;
+        }
+        if (loaded.getReplyId() != updated.getReplyId()) {
+            loaded.setReplyId(updated.getReplyId());
+            changed = true;
+        }
+        if (!Objects.equals(loaded.getReplyText(), updated.getReplyText())) {
+            loaded.setReplyText(updated.getReplyText());
+            changed = true;
+        }
+        if (loaded.getHopStart() != updated.getHopStart()) {
+            loaded.setHopStart(updated.getHopStart());
+            changed = true;
+        }
+        if (loaded.getHopLimit() != updated.getHopLimit()) {
+            loaded.setHopLimit(updated.getHopLimit());
+            changed = true;
+        }
+        if (loaded.getRxRssi() != updated.getRxRssi()) {
+            loaded.setRxRssi(updated.getRxRssi());
+            changed = true;
+        }
+        if (Float.compare(loaded.getRxSnr(), updated.getRxSnr()) != 0) {
+            loaded.setRxSnr(updated.getRxSnr());
+            changed = true;
+        }
+        if (!Objects.equals(loaded.getSenderName(), updated.getSenderName())) {
+            loaded.setSenderName(updated.getSenderName());
+            changed = true;
+        }
+        if (loaded.isViaMqtt() != updated.isViaMqtt()) {
+            loaded.setViaMqtt(updated.isViaMqtt());
+            changed = true;
+        }
+        return changed;
     }
 
     /**
@@ -1004,11 +1076,17 @@ public class FormChat extends Form {
         if (messages == null || messages.isEmpty() || selectedChat == null) {
             return;
         }
+        MessageDbService db = MessageDbService.getInstance();
+        String chatType = currentChatType();
+        String chatKey = currentChatKey();
+        String ownerNodeId = currentOwnerNodeId();
+        db.hydrateReplyTexts(messages, chatType, chatKey, ownerNodeId);
+
         Map<Integer, List<com.meshtastic.client.model.MessageReaction>> reactionsByTarget =
-                MessageDbService.getInstance().loadReactionsByTargetPacketIds(
-                        currentChatType(),
-                        currentChatKey(),
-                        currentOwnerNodeId(),
+                db.loadReactionsByTargetPacketIds(
+                        chatType,
+                        chatKey,
+                        ownerNodeId,
                         messages.stream().map(MeshMessage::getPacketId).toList());
         for (MeshMessage message : messages) {
             message.setReactions(reactionsByTarget.get(message.getPacketId()));
@@ -1774,7 +1852,9 @@ public class FormChat extends Form {
 
     /** Запрос traceroute до указанной ноды — ответ показывается как системное сообщение */
     private void requestTraceroute(NodeData targetNode) {
-        if (state == null || protocolHandler == null) { return; }
+        DeviceState requestState = state;
+        ProtocolHandler requestHandler = protocolHandler;
+        if (requestState == null || requestHandler == null) { return; }
         if (targetNode == null) {
             return;
         }
@@ -1795,7 +1875,7 @@ public class FormChat extends Form {
         holder[0] = (fromNodeNum, route) -> {
             // Фильтр: реагируем только на ответ от целевой ноды
             if (fromNodeNum != targetNum) { return; }
-            state.removeTracerouteListener(holder[0]);
+            requestState.removeTracerouteListener(holder[0]);
             Platform.runLater(() -> {
                 timer.stop();
                 finishCountdown(pc);
@@ -1805,21 +1885,21 @@ public class FormChat extends Form {
 
         timer.setOnFinished(e -> {
             if (!pc.done[0]) {
-                state.removeTracerouteListener(holder[0]);
+                requestState.removeTracerouteListener(holder[0]);
                 finishCountdown(pc);
                 addSystemMessageTo(chatType, chatKey, "❌ Traceroute → " + name + ": ответ не получен");
             }
         });
 
         pc.cancelAction = () -> {
-            state.removeTracerouteListener(holder[0]);
+            requestState.removeTracerouteListener(holder[0]);
             timer.stop();
             finishCountdown(pc);
         };
 
-        state.addTracerouteListener(holder[0]);
+        requestState.addTracerouteListener(holder[0]);
         timer.play();
-        MessageService.requestTraceroute(protocolHandler, state, targetNum);
+        MessageService.requestTraceroute(requestHandler, requestState, targetNum);
     }
 
     /** Запрос информации о ноде — всегда запрашивает актуальные данные по сети */
@@ -1829,7 +1909,9 @@ public class FormChat extends Form {
 
     /** Запрос информации о ноде — всегда запрашивает актуальные данные по сети */
     private void requestNodeInfo(NodeData targetNode) {
-        if (state == null || protocolHandler == null) { return; }
+        DeviceState requestState = state;
+        ProtocolHandler requestHandler = protocolHandler;
+        if (requestState == null || requestHandler == null) { return; }
         if (targetNode == null) {
             return;
         }
@@ -1848,12 +1930,12 @@ public class FormChat extends Form {
 
         holder[0] = nodeNum -> {
             if (nodeNum != targetNum) { return; }
-            state.removeNodeUpdateListener(holder[0]);
+            requestState.removeNodeUpdateListener(holder[0]);
             Platform.runLater(() -> {
                 timer.stop();
                 finishCountdown(pc);
 
-                NodeData n = state.getNodeDb().get(targetNum);
+                NodeData n = requestState.getNodeDb().get(targetNum);
                 if (n == null) {
                     addSystemMessageTo(chatType, chatKey, "📋 Нода " + name + " не найдена");
                     return;
@@ -1864,21 +1946,21 @@ public class FormChat extends Form {
 
         timer.setOnFinished(e -> {
             if (!pc.done[0]) {
-                state.removeNodeUpdateListener(holder[0]);
+                requestState.removeNodeUpdateListener(holder[0]);
                 finishCountdown(pc);
                 addSystemMessageTo(chatType, chatKey, "❌ Информация о " + name + ": ответ не получен");
             }
         });
 
         pc.cancelAction = () -> {
-            state.removeNodeUpdateListener(holder[0]);
+            requestState.removeNodeUpdateListener(holder[0]);
             timer.stop();
             finishCountdown(pc);
         };
 
-        state.addNodeUpdateListener(holder[0]);
+        requestState.addNodeUpdateListener(holder[0]);
         timer.play();
-        MessageService.requestNodeInfo(protocolHandler, state, targetNum);
+        MessageService.requestNodeInfo(requestHandler, requestState, targetNum);
     }
 
     private void updateInputEnabled() {
@@ -2123,9 +2205,7 @@ public class FormChat extends Form {
     /** Подтверждение и удаление одного сообщения */
     private void confirmDeleteMessage(MeshMessage msg, HBox bubbleRow) {
         String preview = msg.getText();
-        if (preview != null && preview.length() > 40) {
-            preview = preview.substring(0, 40) + "…";
-        }
+        preview = UnicodeTextUtils.truncateWithSuffix(preview, 40, "…");
         ModalPane.showConfirm(
                 "Удалить сообщение?",
                 preview != null ? preview : "",
