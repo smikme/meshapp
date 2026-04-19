@@ -240,6 +240,20 @@ class MessageDbServiceTest {
     }
 
     @Test
+    void saveKeepsDistinctChannelMessagesWhenPacketIdsMatchAcrossDifferentSenders() {
+        MeshMessage first = message("alice", 991, 10);
+        MeshMessage second = new MeshMessage("!00000002", "!ffffffff", 0, "bob", 20, false);
+        second.setPacketId(991);
+
+        service.save(first, "channel", "0", "!owner");
+        service.save(second, "channel", "0", "!owner");
+
+        List<MeshMessage> loaded = service.loadLast("channel", "0", 10, "!owner");
+        assertEquals(2, loaded.size());
+        assertEquals(List.of("alice", "bob"), loaded.stream().map(MeshMessage::getText).toList());
+    }
+
+    @Test
     void saveDuplicateRemovesMqttFlagWhenLoraCopyArrivesLater() {
         MeshMessage mqtt = message("first", 991, 10);
         mqtt.setViaMqtt(true);

@@ -563,7 +563,17 @@ public class FormSetting extends Form {
         checkUpdatesCb.selectedProperty().addListener((obs, old, val) ->
                 AppPreferences.setCheckUpdates(val));
 
-        VBox integrationsGroup = new VBox(8, integrationsHeader, checkUpdatesCb);
+        CheckBox jfrDiagnosticsCb = new CheckBox("JFR-диагностика зависаний и сбоев");
+        jfrDiagnosticsCb.setSelected(AppPreferences.isJfrDiagnosticsEnabled());
+        jfrDiagnosticsCb.selectedProperty().addListener((obs, old, val) ->
+                AppPreferences.setJfrDiagnosticsEnabled(val));
+
+        Label diagnosticsNote = new Label(
+                "Увеличивает нагрузку на приложение. Включайте только для диагностики по запросу поддержки. Требует перезапуска.");
+        diagnosticsNote.getStyleClass().add("muted-note-label");
+        diagnosticsNote.setWrapText(true);
+
+        VBox integrationsGroup = new VBox(8, integrationsHeader, checkUpdatesCb, jfrDiagnosticsCb, diagnosticsNote);
 
         panel.getChildren().addAll(appearanceGroup, new Separator(), integrationsGroup);
         return panel;

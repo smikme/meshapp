@@ -1,5 +1,6 @@
 package com.meshtastic.client.logging;
 
+import com.meshtastic.client.utils.AppPreferences;
 import jdk.jfr.Configuration;
 import jdk.jfr.Recording;
 
@@ -14,6 +15,7 @@ import java.util.Locale;
  */
 public final class JfrDiagnosticSupport {
 
+    static final String JFR_ENABLED_PROPERTY = "meshapp.diagnostics.jfr.enabled";
     private static final Object LOCK = new Object();
     private static final long MAX_JFR_SIZE_BYTES = 16L * 1024 * 1024;
     private static final Duration MAX_JFR_AGE = Duration.ofHours(2);
@@ -28,9 +30,15 @@ public final class JfrDiagnosticSupport {
             if (initialized) {
                 return;
             }
+            if (!isEnabled()) {
+                recording = null;
+                return;
+            }
             initialized = true;
             try {
-                Recording newRecording = new Recording(Configuration.getConfiguration("profile"));
+                // JFR is explicitly opt-in because even bounded background
+                // recording can add visible overhead in UI-heavy flows.
+                Recording newRecording = new Recording(loadPreferredConfiguration());
                 applyPlatformSafetyWorkarounds(newRecording,
                         System.getProperty("os.name", ""),
                         System.getProperty("os.version", ""));
@@ -44,6 +52,30 @@ public final class JfrDiagnosticSupport {
                 recording = null;
                 System.err.println("[MeshApp] JFR diagnostics unavailable: " + t.getMessage());
             }
+        }
+    }
+
+    static boolean isEnabled() {
+        String propertyValue = System.getProperty(JFR_ENABLED_PROPERTY);
+        String envValue = System.getenv("MESHAPP_JFR");
+        return isEnabled(propertyValue, envValue, AppPreferences.isJfrDiagnosticsEnabled());
+    }
+
+    static boolean isEnabled(String propertyValue, String envValue, boolean preferenceEnabled) {
+        if (propertyValue != null) {
+            return Boolean.parseBoolean(propertyValue);
+        }
+        if (envValue != null) {
+            return Boolean.parseBoolean(envValue);
+        }
+        return preferenceEnabled;
+    }
+
+    private static Configuration loadPreferredConfiguration() throws Throwable {
+        try {
+            return Configuration.getConfiguration("default");
+        } catch (Throwable ignored) {
+            return Configuration.getConfiguration("profile");
         }
     }
 

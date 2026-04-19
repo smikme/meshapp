@@ -26,6 +26,7 @@ public class AppPreferences {
     public static final String KEY_SOFTWARE_RENDERING = "softwareRendering";
     public static final String KEY_CHECK_UPDATES = "checkUpdates";
     public static final String KEY_MINIMIZE_TO_TRAY = "minimizeToTray";
+    public static final String KEY_JFR_DIAGNOSTICS = "jfrDiagnostics";
     public static final String KEY_APP_FONT_SIZE = "appFontSize";
     public static final String KEY_CHAT_FONT_SIZE = "chatFontSize";
     public static final String KEY_PACKET_MONITOR_WINDOW_X = "packetMonitorWindowX";
@@ -122,6 +123,14 @@ public class AppPreferences {
 
     public static void setMinimizeToTray(boolean value) {
         state().putBoolean(KEY_MINIMIZE_TO_TRAY, value);
+    }
+
+    public static boolean isJfrDiagnosticsEnabled() {
+        return state().getBoolean(KEY_JFR_DIAGNOSTICS, false);
+    }
+
+    public static void setJfrDiagnosticsEnabled(boolean value) {
+        state().putBoolean(KEY_JFR_DIAGNOSTICS, value);
     }
 
     public static int getAppFontSize() {
