@@ -5,10 +5,6 @@ import ch.qos.logback.classic.spi.IThrowableProxy;
 import ch.qos.logback.classic.spi.ThrowableProxyUtil;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
-import com.meshtastic.client.model.ConnectionEntry;
-import com.meshtastic.client.model.ConnectionType;
-import com.meshtastic.client.model.DeviceState;
-import com.meshtastic.client.model.NodeData;
 
 import java.io.BufferedWriter;
 import java.io.IOException;
@@ -26,10 +22,8 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
-import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.Deque;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -40,7 +34,7 @@ import java.util.stream.Stream;
  * Управляет crash-bundle текущей сессии:
  * <ul>
  *     <li>ведёт ограниченный по размеру session.log;</li>
- *     <li>сохраняет metadata/breadcrumbs/thread dumps в активный каталог диагностики;</li>
+ *     <li>сохраняет thread dumps / fatal marker / JFR в активный каталог диагностики;</li>
  *     <li>при следующем запуске переносит нештатно завершившийся bundle в pending-каталог;</li>
  *     <li>чистит старые bundle по возрасту, количеству и суммарному объёму.</li>
  * </ul>
@@ -54,8 +48,6 @@ public final class SessionCrashLogManager {
     static final String ACTIVE_BUNDLE_DIR_NAME = "active";
     static final String ACTIVE_LOG_NAME = "meshapp-session.log";
     static final String NORMAL_EXIT_MARKER_NAME = "meshapp-session.clean-exit";
-    static final String METADATA_FILE_NAME = "meta.json";
-    static final String BREADCRUMBS_FILE_NAME = "breadcrumbs.json";
     static final String THREAD_DUMPS_FILE_NAME = "thread-dumps.txt";
     static final String FATAL_MARKER_FILE_NAME = "fatal-marker.json";
     static final String JFR_DUMP_FILE_NAME = "last.jfr";
@@ -76,20 +68,9 @@ public final class SessionCrashLogManager {
     private static final long MAX_SESSION_LOG_BYTES = 10L * 1024 * 1024;
     private static final long SESSION_LOG_TRIM_TO_BYTES = 8L * 1024 * 1024;
     private static final long MAX_THREAD_DUMPS_BYTES = 2L * 1024 * 1024;
-    private static final int MAX_BREADCRUMBS = 200;
     private static final int MAX_PENDING_BUNDLES = 3;
     private static final long MAX_PENDING_BYTES = 64L * 1024 * 1024;
     private static final Duration MAX_PENDING_AGE = Duration.ofDays(14);
-
-    private static final List<String> BREADCRUMB_LOGGER_PREFIXES = List.of(
-            "com.meshtastic.client.MeshApp",
-            "com.meshtastic.client.service.ConnectionManager",
-            "com.meshtastic.client.service.ConfigExchangeService",
-            "com.meshtastic.client.components.CrashReportFlow",
-            "com.meshtastic.client.service.UpdateCheckService",
-            "com.meshtastic.client.service.DatabaseProvider",
-            "com.meshtastic.client.service.DatabaseMigrator"
-    );
 
     private static volatile boolean shutdownHookInstalled;
 
@@ -99,8 +80,6 @@ public final class SessionCrashLogManager {
     private static Path pendingDir = logsDir.resolve(PENDING_DIR_NAME);
     private static Path activeBundleDir = diagnosticsDir.resolve(ACTIVE_BUNDLE_DIR_NAME);
     private static Path activeLogPath = activeBundleDir.resolve(ACTIVE_LOG_NAME);
-    private static Path metadataPath = activeBundleDir.resolve(METADATA_FILE_NAME);
-    private static Path breadcrumbsPath = activeBundleDir.resolve(BREADCRUMBS_FILE_NAME);
     private static Path threadDumpsPath = activeBundleDir.resolve(THREAD_DUMPS_FILE_NAME);
     private static Path fatalMarkerPath = activeBundleDir.resolve(FATAL_MARKER_FILE_NAME);
     private static Path normalExitMarkerPath = logsDir.resolve(NORMAL_EXIT_MARKER_NAME);
@@ -108,9 +87,6 @@ public final class SessionCrashLogManager {
 
     private static BufferedWriter writer;
     private static boolean prepared;
-    private static String sessionId = "unknown";
-    private static final Deque<Map<String, Object>> breadcrumbs = new ArrayDeque<>();
-    private static final Map<String, Object> metadata = new LinkedHashMap<>();
 
     private SessionCrashLogManager() {}
 
@@ -159,10 +135,6 @@ public final class SessionCrashLogManager {
                 writer.flush();
                 trimFileIfNeeded(activeLogPath, MAX_SESSION_LOG_BYTES, SESSION_LOG_TRIM_TO_BYTES,
                         "[MeshApp] session log truncated to stay within diagnostic size limits");
-
-                if (shouldRecordBreadcrumb(event)) {
-                    addBreadcrumbLocked(buildBreadcrumb(event));
-                }
             } catch (IOException e) {
                 System.err.println("[MeshApp] Failed to append session log: " + e.getMessage());
             }
@@ -173,9 +145,6 @@ public final class SessionCrashLogManager {
         synchronized (LOCK) {
             refreshPaths();
             ensureDirectories();
-            recordBreadcrumbLocked("lifecycle", "Normal shutdown requested", "INFO");
-            putMetadataValueLocked("session.shutdownRequestedAt", nowString());
-            persistStateFilesLocked();
             try {
                 Files.writeString(
                         normalExitMarkerPath,
@@ -223,7 +192,6 @@ public final class SessionCrashLogManager {
             refreshPaths();
             ensureDirectories();
             flushWriterQuietly();
-            persistStateFilesLocked();
             snapshotDir = Files.createTempDirectory("meshapp-session-report-");
             copyDirectoryContents(activeBundleDir, snapshotDir);
         }
@@ -231,93 +199,6 @@ public final class SessionCrashLogManager {
         writeThreadDump(snapshotDir.resolve("thread-dump-manual-report.txt"), "manual-report");
         JfrDiagnosticSupport.dumpSnapshot(snapshotDir.resolve("manual-report.jfr"));
         return snapshotDir;
-    }
-
-    public static void recordStartupContext(String applicationVersion, int versionCode) {
-        synchronized (LOCK) {
-            ensureReadyForAppend();
-            putMetadataValueLocked("app.version", safeText(applicationVersion));
-            putMetadataValueLocked("app.versionCode", versionCode);
-            putMetadataValueLocked("app.startedAt", nowString());
-            recordBreadcrumbLocked("lifecycle",
-                    "Application startup: version=" + safeText(applicationVersion) + ", build=" + versionCode,
-                    "INFO");
-        }
-    }
-
-    public static void recordUiReady() {
-        synchronized (LOCK) {
-            ensureReadyForAppend();
-            putMetadataValueLocked("ui.stageShownAt", nowString());
-            recordBreadcrumbLocked("ui", "Primary stage shown", "INFO");
-        }
-    }
-
-    public static void updateConnectionMetadata(ConnectionEntry entry, DeviceState deviceState, String stateLabel) {
-        if (entry == null) {
-            return;
-        }
-        synchronized (LOCK) {
-            ensureReadyForAppend();
-            Map<String, Object> connection = ensureObjectMapLocked(metadata, "connection");
-            connection.put("status", safeText(stateLabel));
-            connection.put("updatedAt", nowString());
-            connection.put("id", safeText(entry.getId()));
-            connection.put("name", safeText(entry.getName()));
-            ConnectionType type = entry.getEffectiveType();
-            connection.put("type", type.name());
-            connection.put("params", describeConnection(entry));
-            if (entry.getNodeId() != null && !entry.getNodeId().isBlank()) {
-                connection.put("savedNodeId", entry.getNodeId().trim());
-            }
-
-            if (deviceState != null) {
-                NodeData node = resolveLocalNode(deviceState);
-                connection.put("nodeId", resolveLocalNodeId(deviceState));
-                connection.put("nodeName", resolveLocalNodeName(deviceState));
-                if (node != null && node.getShortName() != null && !node.getShortName().isBlank()) {
-                    connection.put("nodeShortName", node.getShortName().trim());
-                }
-                if (node != null && node.getHwModel() != null && !node.getHwModel().isBlank()) {
-                    connection.put("hwModel", node.getHwModel().trim());
-                }
-                if (deviceState.getDeviceMetadata() != null
-                        && deviceState.getDeviceMetadata().getFirmwareVersion() != null
-                        && !deviceState.getDeviceMetadata().getFirmwareVersion().isBlank()) {
-                    connection.put("firmwareVersion", deviceState.getDeviceMetadata().getFirmwareVersion().trim());
-                }
-            }
-
-            recordBreadcrumbLocked(
-                    "connection",
-                    "Connection metadata updated: state=" + safeText(stateLabel)
-                            + ", name=" + safeText(entry.getName())
-                            + ", type=" + type.name(),
-                    "INFO"
-            );
-        }
-    }
-
-    public static void recordConnectionDisconnected(ConnectionEntry entry, String reason) {
-        if (entry == null) {
-            return;
-        }
-        synchronized (LOCK) {
-            ensureReadyForAppend();
-            Map<String, Object> connection = ensureObjectMapLocked(metadata, "connection");
-            connection.put("status", "disconnected");
-            connection.put("updatedAt", nowString());
-            connection.put("disconnectReason", safeText(reason));
-            connection.put("id", safeText(entry.getId()));
-            connection.put("name", safeText(entry.getName()));
-            connection.put("type", entry.getEffectiveType().name());
-            recordBreadcrumbLocked(
-                    "connection",
-                    "Connection disconnected: name=" + safeText(entry.getName())
-                            + ", reason=" + safeText(reason),
-                    "WARN"
-            );
-        }
     }
 
     public static void captureUncaughtException(Thread thread, Throwable throwable) {
@@ -333,13 +214,6 @@ public final class SessionCrashLogManager {
                 marker.put("message", safeText(throwable.getMessage()));
             }
             writeJsonQuietly(fatalMarkerPath, marker);
-            recordBreadcrumbLocked(
-                    "fatal",
-                    "Uncaught exception in thread '"
-                            + (thread != null ? safeText(thread.getName()) : "unknown")
-                            + "'",
-                    "ERROR"
-            );
             writeThreadDump(threadDumpsPath, "uncaught-exception");
             jfrPath = activeBundleDir.resolve(JFR_DUMP_FILE_NAME);
         }
@@ -355,12 +229,6 @@ public final class SessionCrashLogManager {
             marker.put("capturedAt", nowString());
             marker.put("stallMillis", stallDuration != null ? stallDuration.toMillis() : -1L);
             writeJsonQuietly(fatalMarkerPath, marker);
-            recordBreadcrumbLocked(
-                    "ui",
-                    "JavaFX thread stall detected: "
-                            + (stallDuration != null ? stallDuration.toMillis() + " ms" : "unknown duration"),
-                    "ERROR"
-            );
             writeThreadDump(threadDumpsPath, "ui-stall");
             jfrPath = activeBundleDir.resolve(JFR_DUMP_FILE_NAME);
         }
@@ -395,28 +263,11 @@ public final class SessionCrashLogManager {
         }
     }
 
-    static Path getMetadataPath() {
-        synchronized (LOCK) {
-            refreshPaths();
-            return metadataPath;
-        }
-    }
-
-    static Path getBreadcrumbsPath() {
-        synchronized (LOCK) {
-            refreshPaths();
-            return breadcrumbsPath;
-        }
-    }
-
     static void resetForTests() {
         synchronized (LOCK) {
             closeWriterQuietly();
             refreshPaths();
             prepared = false;
-            breadcrumbs.clear();
-            metadata.clear();
-            sessionId = "unknown";
         }
     }
 
@@ -454,8 +305,6 @@ public final class SessionCrashLogManager {
         pendingDir = logsDir.resolve(PENDING_DIR_NAME);
         activeBundleDir = diagnosticsDir.resolve(ACTIVE_BUNDLE_DIR_NAME);
         activeLogPath = activeBundleDir.resolve(ACTIVE_LOG_NAME);
-        metadataPath = activeBundleDir.resolve(METADATA_FILE_NAME);
-        breadcrumbsPath = activeBundleDir.resolve(BREADCRUMBS_FILE_NAME);
         threadDumpsPath = activeBundleDir.resolve(THREAD_DUMPS_FILE_NAME);
         fatalMarkerPath = activeBundleDir.resolve(FATAL_MARKER_FILE_NAME);
         normalExitMarkerPath = logsDir.resolve(NORMAL_EXIT_MARKER_NAME);
@@ -482,24 +331,6 @@ public final class SessionCrashLogManager {
         } catch (IOException e) {
             throw new IllegalStateException("Failed to create active diagnostics bundle", e);
         }
-
-        breadcrumbs.clear();
-        metadata.clear();
-
-        sessionId = FILE_TIME_FORMAT.format(Instant.now()) + "-pid" + ProcessHandle.current().pid();
-        putMetadataValueLocked("bundleFormat", 2);
-        putMetadataValueLocked("session.id", sessionId);
-        putMetadataValueLocked("session.startedAt", nowString());
-        putMetadataValueLocked("session.pid", ProcessHandle.current().pid());
-        putMetadataValueLocked("environment.osName", System.getProperty("os.name", "unknown").trim());
-        putMetadataValueLocked("environment.osVersion", System.getProperty("os.version", "unknown").trim());
-        putMetadataValueLocked("environment.osArch", System.getProperty("os.arch", "unknown").trim());
-        putMetadataValueLocked("environment.javaVersion", System.getProperty("java.version", "unknown").trim());
-        putMetadataValueLocked("environment.javaVendor", System.getProperty("java.vendor", "unknown").trim());
-        putMetadataValueLocked("environment.javaVmName", System.getProperty("java.vm.name", "unknown").trim());
-        putMetadataValueLocked("environment.javaVmVersion", System.getProperty("java.vm.version", "unknown").trim());
-        putMetadataValueLocked("environment.userHome", System.getProperty("user.home", "unknown").trim());
-        recordBreadcrumbLocked("lifecycle", "Diagnostics bundle initialized", "INFO");
     }
 
     private static boolean bundleHasPayload(Path bundleDir) {
@@ -659,124 +490,6 @@ public final class SessionCrashLogManager {
         }
 
         return sb.toString();
-    }
-
-    private static Map<String, Object> buildBreadcrumb(ILoggingEvent event) {
-        Map<String, Object> breadcrumb = new LinkedHashMap<>();
-        breadcrumb.put("time", jsonTime(event.getTimeStamp()));
-        breadcrumb.put("level", event.getLevel().toString());
-        breadcrumb.put("thread", safeText(event.getThreadName()));
-        breadcrumb.put("logger", safeText(event.getLoggerName()));
-        breadcrumb.put("message", safeText(event.getFormattedMessage()));
-        IThrowableProxy throwable = event.getThrowableProxy();
-        if (throwable != null) {
-            breadcrumb.put("throwable", safeText(throwable.getClassName()));
-        }
-        return breadcrumb;
-    }
-
-    private static boolean shouldRecordBreadcrumb(ILoggingEvent event) {
-        if (event == null || event.getLevel() == null) {
-            return false;
-        }
-        if (event.getLevel().isGreaterOrEqual(ch.qos.logback.classic.Level.WARN)) {
-            return true;
-        }
-        String loggerName = event.getLoggerName();
-        if (loggerName == null) {
-            return false;
-        }
-        for (String prefix : BREADCRUMB_LOGGER_PREFIXES) {
-            if (loggerName.startsWith(prefix)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private static void addBreadcrumbLocked(Map<String, Object> breadcrumb) {
-        breadcrumbs.addLast(breadcrumb);
-        while (breadcrumbs.size() > MAX_BREADCRUMBS) {
-            breadcrumbs.removeFirst();
-        }
-        persistStateFilesLocked();
-    }
-
-    private static void recordBreadcrumbLocked(String category, String message, String level) {
-        Map<String, Object> breadcrumb = new LinkedHashMap<>();
-        breadcrumb.put("time", nowString());
-        breadcrumb.put("level", safeText(level));
-        breadcrumb.put("category", safeText(category));
-        breadcrumb.put("message", safeText(message));
-        addBreadcrumbLocked(breadcrumb);
-    }
-
-    private static void persistStateFilesLocked() {
-        putMetadataValueLocked("session.lastUpdatedAt", nowString());
-        writeJsonQuietly(metadataPath, metadata);
-        writeJsonQuietly(breadcrumbsPath, new ArrayList<>(breadcrumbs));
-    }
-
-    @SuppressWarnings("unchecked")
-    private static Map<String, Object> ensureObjectMapLocked(Map<String, Object> root, String key) {
-        Object existing = root.get(key);
-        if (existing instanceof Map<?, ?> existingMap) {
-            return (Map<String, Object>) existingMap;
-        }
-        Map<String, Object> created = new LinkedHashMap<>();
-        root.put(key, created);
-        return created;
-    }
-
-    private static void putMetadataValueLocked(String dottedKey, Object value) {
-        String[] parts = dottedKey.split("\\.");
-        Map<String, Object> current = metadata;
-        for (int i = 0; i < parts.length - 1; i++) {
-            current = ensureObjectMapLocked(current, parts[i]);
-        }
-        current.put(parts[parts.length - 1], value);
-    }
-
-    private static NodeData resolveLocalNode(DeviceState deviceState) {
-        if (deviceState == null || deviceState.getMyNodeNum() == 0) {
-            return null;
-        }
-        return deviceState.getNodeDb().get(deviceState.getMyNodeNum());
-    }
-
-    private static String resolveLocalNodeId(DeviceState deviceState) {
-        NodeData node = resolveLocalNode(deviceState);
-        if (node != null && node.getNodeId() != null && !node.getNodeId().isBlank()) {
-            return node.getNodeId().trim();
-        }
-        int myNodeNum = deviceState != null ? deviceState.getMyNodeNum() : 0;
-        return myNodeNum != 0 ? String.format("!%08x", myNodeNum) : "?";
-    }
-
-    private static String resolveLocalNodeName(DeviceState deviceState) {
-        NodeData node = resolveLocalNode(deviceState);
-        if (node == null) {
-            return resolveLocalNodeId(deviceState);
-        }
-        if (node.getLongName() != null && !node.getLongName().isBlank()) {
-            return node.getLongName().trim();
-        }
-        if (node.getShortName() != null && !node.getShortName().isBlank()) {
-            return node.getShortName().trim();
-        }
-        return resolveLocalNodeId(deviceState);
-    }
-
-    private static String describeConnection(ConnectionEntry entry) {
-        ConnectionType type = entry.getEffectiveType();
-        return switch (type) {
-            case TCP -> String.format("type=TCP, host=%s, port=%d",
-                    safeText(entry.getHost()), entry.getPort());
-            case SERIAL -> String.format("type=SERIAL, port=%s, baud=%d",
-                    safeText(entry.getPortName()), entry.getBaudRate());
-            case BLE -> String.format("type=BLE, address=%s, device=%s",
-                    safeText(entry.getBleAddress()), safeText(entry.getBleDeviceName()));
-        };
     }
 
     private static void writeThreadDump(Path targetPath, String reason) {
@@ -974,9 +687,5 @@ public final class SessionCrashLogManager {
 
     private static String nowString() {
         return JSON_TIME_FORMAT.format(Instant.now());
-    }
-
-    private static String jsonTime(long millis) {
-        return JSON_TIME_FORMAT.format(Instant.ofEpochMilli(millis));
     }
 }

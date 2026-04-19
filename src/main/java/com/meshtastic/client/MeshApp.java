@@ -179,7 +179,6 @@ public class MeshApp extends Application {
         });
         stage.setOnHiding(e -> saveWindowState(stage, rootPane));
 
-        SessionCrashLogManager.recordUiReady();
         startUiWatchdog();
         handlePendingCrashLog(stage);
     }
@@ -303,7 +302,6 @@ public class MeshApp extends Application {
             SessionCrashLogManager.captureUncaughtException(thread, throwable);
             log.error("Uncaught exception in thread '{}'", thread.getName(), throwable);
         });
-        SessionCrashLogManager.recordStartupContext(APPLICATION_VERSION, VERSION_CODE);
         logStartupContext();
         launch(args);
     }

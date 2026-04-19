@@ -165,7 +165,7 @@ class CrashReportServiceTest {
 
         Path bundleDir = Files.createTempDirectory("meshapp-bundle-");
         Files.writeString(bundleDir.resolve("meshapp-session.log"), "fatal: boom");
-        Files.writeString(bundleDir.resolve("meta.json"), "{\"session\":\"abc\"}");
+        Files.writeString(bundleDir.resolve("fatal-marker.json"), "{\"type\":\"uncaught-exception\"}");
 
         CrashReportService service = new CrashReportService(
                 URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/api/v1"),
@@ -185,7 +185,7 @@ class CrashReportServiceTest {
         byte[] zipBytes = extractZipPayload(uploadBody.get(), uploadContentType.get());
         List<String> entryNames = readZipEntryNames(zipBytes);
         assertTrue(entryNames.stream().anyMatch(name -> name.endsWith("/meshapp-session.log")));
-        assertTrue(entryNames.stream().anyMatch(name -> name.endsWith("/meta.json")));
+        assertTrue(entryNames.stream().anyMatch(name -> name.endsWith("/fatal-marker.json")));
     }
 
     private static byte[] extractZipPayload(byte[] multipartBody, String contentType) {

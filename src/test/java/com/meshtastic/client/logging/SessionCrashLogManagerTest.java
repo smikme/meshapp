@@ -84,8 +84,6 @@ class SessionCrashLogManagerTest {
             assertTrue(Files.isDirectory(snapshot));
             assertEquals("current session log", Files.readString(activeLog));
             assertEquals("current session log", Files.readString(snapshot.resolve(SessionCrashLogManager.ACTIVE_LOG_NAME)));
-            assertTrue(Files.exists(snapshot.resolve(SessionCrashLogManager.METADATA_FILE_NAME)));
-            assertTrue(Files.exists(snapshot.resolve(SessionCrashLogManager.BREADCRUMBS_FILE_NAME)));
             assertTrue(Files.exists(snapshot.resolve("thread-dump-manual-report.txt")));
         } finally {
             try (Stream<Path> files = Files.walk(snapshot)) {
