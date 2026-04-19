@@ -333,6 +333,8 @@ flatpak --user install -y flathub org.freedesktop.Platform//24.08 org.freedeskto
 
 При необходимости runtime можно переопределить через `-PflatpakRuntime=...`, `-PflatpakRuntimeVersion=...`, `-PflatpakSdk=...` и `-PflatpakBranch=...`.
 
+Для `jpackage` можно явно указать JDK, из которого будет собран bundled runtime: `-PpackagingJavaHome=/path/to/jdk` или `PACKAGING_JAVA_HOME=/path/to/jdk`. На macOS сборка дополнительно проверяет `.app` через `otool -L` и завершится ошибкой, если внутри bundle останутся внешние зависимости вроде `/opt/homebrew/...` или `/usr/local/...`.
+
 Во время `processResources` Gradle автоматически собирает платформенные native-компоненты:
 
 - **Windows** — `meshapp-ble.dll` для BLE через WinRT
