@@ -5,6 +5,7 @@ import com.google.gson.GsonBuilder;
 import com.google.gson.reflect.TypeToken;
 import com.meshtastic.client.connection.*;
 import com.meshtastic.client.connection.ble.BleConnection;
+import com.meshtastic.client.logging.SessionCrashLogManager;
 import com.meshtastic.client.model.ConnectionEntry;
 import com.meshtastic.client.model.ConnectionType;
 import com.meshtastic.client.model.DeviceState;
@@ -162,6 +163,7 @@ public final class ConnectionManager {
             public void onConnected() {
                 log.info("Connection '{}' transport connected ({})",
                         entry.getName(), formatConnectionParams(entry));
+                SessionCrashLogManager.updateConnectionMetadata(entry, null, "transport-connected");
                 entry.setConnected(true);
                 fireChanged();
             }
@@ -179,6 +181,12 @@ public final class ConnectionManager {
                 } else {
                     log.warn("Connection '{}' disconnected unexpectedly", entry.getName());
                 }
+                SessionCrashLogManager.recordConnectionDisconnected(
+                        entry,
+                        userInitiated
+                                ? (disconnectReason != null && !disconnectReason.isBlank() ? disconnectReason : "user disconnect")
+                                : "unexpected disconnect"
+                );
                 entry.setConnected(false);
                 cleanupConnection(id, conn);
                 fireChanged();
@@ -208,6 +216,12 @@ public final class ConnectionManager {
                         log.warn("Connection '{}' error: {}", entry.getName(), message);
                     }
                 }
+                SessionCrashLogManager.recordConnectionDisconnected(
+                        entry,
+                        userInitiated && disconnectReason != null && !disconnectReason.isBlank()
+                                ? disconnectReason + ": " + message
+                                : message
+                );
                 entry.setConnected(false);
                 cleanupConnection(id, conn);
                 fireChanged();
@@ -307,6 +321,7 @@ public final class ConnectionManager {
             entry.setNodeId(nodeId);
             save();
             logNodeConnectionContext(entry, ds);
+            SessionCrashLogManager.updateConnectionMetadata(entry, ds, "identified");
             mqttProxyService.startIfEnabled();
             requestAndLogDeviceMetadata(entry, protocolHandler, ds);
             fireChanged();
@@ -544,6 +559,7 @@ public final class ConnectionManager {
                     resolveLocalNodeId(deviceState),
                     safeText(metadata.getFirmwareVersion()),
                     formatConnectionParams(entry));
+            SessionCrashLogManager.updateConnectionMetadata(entry, deviceState, "firmware-identified");
         };
 
         deviceState.addDeviceMetadataListener(listenerHolder[0]);

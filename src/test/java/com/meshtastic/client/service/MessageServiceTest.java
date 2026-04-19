@@ -23,6 +23,7 @@ import org.meshtastic.proto.Portnums;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.nio.file.Path;
 
@@ -280,7 +281,7 @@ class MessageServiceTest {
     }
 
     private static MeshProtos.ToRadio parseLastToRadio(RecordingConnection connection) throws Exception {
-        byte[] frame = connection.lastSentBytes();
+        byte[] frame = connection.awaitLastSentBytes();
         int payloadLength = ((frame[2] & 0xFF) << 8) | (frame[3] & 0xFF);
         byte[] payload = new byte[payloadLength];
         System.arraycopy(frame, 4, payload, 0, payloadLength);
@@ -320,8 +321,17 @@ class MessageServiceTest {
             // no-op
         }
 
-        byte[] lastSentBytes() {
-            return lastSentBytes;
+        byte[] awaitLastSentBytes() throws InterruptedException {
+            long deadlineNanos = System.nanoTime() + TimeUnit.SECONDS.toNanos(1);
+            byte[] frame = lastSentBytes;
+            while (frame == null && System.nanoTime() < deadlineNanos) {
+                Thread.sleep(10);
+                frame = lastSentBytes;
+            }
+            if (frame == null) {
+                throw new AssertionError("Timed out waiting for outbound frame");
+            }
+            return frame;
         }
     }
 }

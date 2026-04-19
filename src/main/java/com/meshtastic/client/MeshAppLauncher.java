@@ -1,5 +1,6 @@
 package com.meshtastic.client;
 
+import com.meshtastic.client.logging.JfrDiagnosticSupport;
 import com.meshtastic.client.logging.SessionCrashLogManager;
 import com.meshtastic.client.utils.AppPreferences;
 
@@ -14,6 +15,7 @@ public final class MeshAppLauncher {
     public static void main(String[] args) {
         AppPreferences.init();
         SessionCrashLogManager.prepareForLaunch();
+        JfrDiagnosticSupport.start();
         if (System.getProperty("prism.order") == null && AppPreferences.isSoftwareRendering()) {
             System.setProperty("prism.order", "sw");
         }
