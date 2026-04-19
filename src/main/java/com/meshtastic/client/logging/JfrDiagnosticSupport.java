@@ -6,6 +6,7 @@ import jdk.jfr.Recording;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.Locale;
 
 /**
  * Лёгкая JFR-диагностика: держит bounded recording в фоне и умеет по запросу
@@ -29,12 +30,16 @@ public final class JfrDiagnosticSupport {
             }
             initialized = true;
             try {
-                recording = new Recording(Configuration.getConfiguration("profile"));
-                recording.setName("MeshApp diagnostics");
-                recording.setToDisk(true);
-                recording.setMaxAge(MAX_JFR_AGE);
-                recording.setMaxSize(MAX_JFR_SIZE_BYTES);
-                recording.start();
+                Recording newRecording = new Recording(Configuration.getConfiguration("profile"));
+                applyPlatformSafetyWorkarounds(newRecording,
+                        System.getProperty("os.name", ""),
+                        System.getProperty("os.version", ""));
+                newRecording.setName("MeshApp diagnostics");
+                newRecording.setToDisk(true);
+                newRecording.setMaxAge(MAX_JFR_AGE);
+                newRecording.setMaxSize(MAX_JFR_SIZE_BYTES);
+                newRecording.start();
+                recording = newRecording;
             } catch (Throwable t) {
                 recording = null;
                 System.err.println("[MeshApp] JFR diagnostics unavailable: " + t.getMessage());
@@ -81,5 +86,38 @@ public final class JfrDiagnosticSupport {
                 initialized = false;
             }
         }
+    }
+
+    static void applyPlatformSafetyWorkarounds(Recording recording, String osName, String osVersion) {
+        if (recording == null || !shouldDisableExecutionSampling(osName)) {
+            return;
+        }
+        // CoreBluetooth/JNA callback threads on macOS can trip HotSpot's JFR sampler
+        // (observed as a fatal crash in JFR Thread Sampler / PosixSignals::do_suspend).
+        disableEvent(recording, "jdk.ExecutionSample");
+        disableEvent(recording, "jdk.NativeMethodSample");
+        System.err.println("[MeshApp] JFR execution sampling disabled on "
+                + formatPlatform(osName, osVersion)
+                + " to avoid a known macOS/JNA JVM crash");
+    }
+
+    static boolean shouldDisableExecutionSampling(String osName) {
+        return osName != null && osName.toLowerCase(Locale.ROOT).contains("mac");
+    }
+
+    private static void disableEvent(Recording recording, String eventName) {
+        try {
+            recording.disable(eventName);
+        } catch (IllegalArgumentException ignored) {
+            // Event is not present in this runtime/profile; nothing to disable.
+        }
+    }
+
+    private static String formatPlatform(String osName, String osVersion) {
+        String normalizedName = osName == null || osName.isBlank() ? "unknown OS" : osName.trim();
+        if (osVersion == null || osVersion.isBlank()) {
+            return normalizedName;
+        }
+        return normalizedName + " " + osVersion.trim();
     }
 }
