@@ -339,7 +339,73 @@ tasks.named('test') {
 	}
 }
 
+def parseReleasePackageVersion = { rawTag ->
+	if (rawTag == null) {
+		return null
+	}
+	def matcher = rawTag.trim() =~ /^v?(\d+)\.(\d+)\.(\d+)$/
+	if (!matcher.matches()) {
+		return null
+	}
+	return "${matcher[0][1]}.${matcher[0][2]}.${matcher[0][3]}"
+}
+
+def resolveReleasePackageVersion = {
+	def explicitTag = findProperty('releaseTag')?.toString()
+	def packageVersion = parseReleasePackageVersion(explicitTag)
+	if (packageVersion != null) {
+		return packageVersion
+	}
+
+	def envTag = System.getenv('GITHUB_REF_NAME')
+	packageVersion = parseReleasePackageVersion(envTag)
+	if (packageVersion != null) {
+		return packageVersion
+	}
+
+	def envRef = System.getenv('GITHUB_REF')
+	if (envRef?.startsWith('refs/tags/')) {
+		packageVersion = parseReleasePackageVersion(envRef.substring('refs/tags/'.length()))
+		if (packageVersion != null) {
+			return packageVersion
+		}
+	}
+
+	try {
+		def tags = 'git tag --points-at HEAD'.execute().text.readLines()
+			.collect { it.trim() }
+			.findAll { !it.isEmpty() }
+			.collect { tag ->
+				def version = parseReleasePackageVersion(tag)
+				version == null ? null : [tag: tag, version: version]
+			}
+			.findAll { it != null }
+			.sort { a, b ->
+				def left = a.version.tokenize('.').collect { it.toInteger() }
+				def right = b.version.tokenize('.').collect { it.toInteger() }
+				for (int i = 0; i < 3; i++) {
+					def cmp = right[i] <=> left[i]
+					if (cmp != 0) {
+						return cmp
+					}
+				}
+				return a.tag <=> b.tag
+			}
+		if (!tags.isEmpty()) {
+			return tags[0].version
+		}
+	} catch (ignored) {
+		return null
+	}
+
+	return null
+}
+
 def resolvePackageVersion = { os ->
+	def releasePackageVersion = resolveReleasePackageVersion()
+	if (releasePackageVersion != null) {
+		return releasePackageVersion
+	}
 	try {
 		def count = 'git rev-list --count HEAD'.execute().text.trim()
 		if (os.isMacOsX()) {
@@ -347,7 +413,8 @@ def resolvePackageVersion = { os ->
 			return "1.3.${count}"
 		}
 		def hash = 'git rev-parse --short=4 HEAD'.execute().text.trim()
-		// Доп. разряд из хеша (0-65535) — чтобы MSI всегда считал версию новой
+		// Fallback для dev-сборок без release-тега; у MSI upgrade всё равно
+		// ориентируется на первые три компонента версии.
 		def minor = Integer.parseInt(hash, 16) % 65536
 		return "1.3.${count}.${minor}"
 	} catch (ignored) {
