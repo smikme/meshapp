@@ -1,3 +1,4 @@
+import groovy.io.FileType
 import groovy.json.JsonOutput
 
 plugins {
@@ -355,7 +356,20 @@ def resolvePackageVersion = { os ->
 }
 
 def resolvePackagingJavaHome = {
-	javaToolchains.launcherFor {
+	def configuredJavaHome = (findProperty('packagingJavaHome') ?: System.getenv('PACKAGING_JAVA_HOME'))
+		?.toString()
+		?.trim()
+	if (configuredJavaHome) {
+		def configured = file(configuredJavaHome)
+		if (!configured.isDirectory()) {
+			throw new GradleException(
+				"packaging: configured packagingJavaHome/PACKAGING_JAVA_HOME not found: ${configured}"
+			)
+		}
+		return configured.absolutePath
+	}
+
+	return javaToolchains.launcherFor {
 		languageVersion = JavaLanguageVersion.of(21)
 	}.get().executablePath.asFile.parentFile.parentFile.absolutePath
 }
@@ -370,6 +384,16 @@ def buildPackagingJvmArgs = {
 	jvmArgsList << "--add-modules"
 	jvmArgsList << "javafx.controls"
 	return jvmArgsList
+}
+
+def buildPackagingJlinkOptions = {
+	[
+		'--strip-native-commands',
+		'--strip-debug',
+		'--no-man-pages',
+		'--no-header-files',
+		'--vm', 'server'
+	].join(' ')
 }
 
 def relocateJavaFxJars = { File libDir ->
@@ -523,20 +547,129 @@ def resolveBuildOption = { String propertyName, String envName ->
 	return envValue ?: null
 }
 
-def executePackagingCommand = { List<?> args, String failureMessage, File workingDir = project.projectDir ->
+def executePackagingCommand = { List<?> args, String failureMessage, File workingDir = project.projectDir, boolean logOutput = true ->
 	def process = new ProcessBuilder(args.collect { it.toString() })
 		.directory(workingDir)
 		.redirectErrorStream(true)
 		.start()
 	def output = process.inputStream.text
 	process.waitFor()
-	if (output) {
+	if (output && logOutput) {
 		logger.lifecycle(output.trim())
 	}
 	if (process.exitValue() != 0) {
 		throw new GradleException(output ? "${failureMessage}: ${output}" : failureMessage)
 	}
 	return output
+}
+
+def collectMacDependencyScanFiles = { File appDir ->
+	def scanFiles = [] as Set<File>
+
+	[new File(appDir, 'Contents/MacOS'), new File(appDir, 'Contents/runtime/Contents/MacOS')].each { dir ->
+		if (dir.isDirectory()) {
+			dir.listFiles()?.findAll { it.isFile() }?.each { scanFiles << it }
+		}
+	}
+
+	[new File(appDir, 'Contents/app'), new File(appDir, 'Contents/runtime/Contents/Home/lib')].each { dir ->
+		if (dir.isDirectory()) {
+			dir.eachFileRecurse(FileType.FILES) { f ->
+				def lowerName = f.name.toLowerCase(java.util.Locale.ROOT)
+				if (lowerName.endsWith('.dylib') || lowerName.endsWith('.jnilib')) {
+					scanFiles << f
+				}
+			}
+		}
+	}
+
+	return scanFiles.toList().sort { it.absolutePath }
+}
+
+def readMacLinkedLibraries = { File binary, String taskName ->
+	def output = executePackagingCommand(
+		['otool', '-L', binary.absolutePath],
+		"${taskName}: failed to inspect native dependencies for ${binary}",
+		project.projectDir,
+		false
+	)
+	def lines = output.readLines()
+	if (lines.size() <= 1) {
+		return []
+	}
+	return lines.tail()
+		.collect { line ->
+			def trimmed = line.trim()
+			if (!trimmed) {
+				return null
+			}
+			return trimmed.split(/\s+\(/, 2)[0]
+		}
+		.findAll { it != null }
+}
+
+def readMacInstallName = { File binary, String taskName ->
+	def output = executePackagingCommand(
+		['otool', '-D', binary.absolutePath],
+		"${taskName}: failed to inspect install name for ${binary}",
+		project.projectDir,
+		false
+	)
+	def lines = output.readLines()
+	if (lines.size() <= 1) {
+		return null
+	}
+	return lines[1].trim()
+}
+
+def isAllowedMacNativeDependency = { String dependency ->
+	dependency.startsWith('@rpath/')
+		|| dependency.startsWith('@loader_path/')
+		|| dependency.startsWith('@executable_path/')
+		|| dependency.startsWith('/System/Library/')
+		|| dependency.startsWith('/usr/lib/')
+		|| dependency.startsWith('/Library/Apple/')
+}
+
+def normalizeMacBundleInstallNames = { File appDir, String taskName ->
+	collectMacDependencyScanFiles(appDir).each { binary ->
+		def lowerName = binary.name.toLowerCase(java.util.Locale.ROOT)
+		if (lowerName.endsWith('.dylib') || lowerName.endsWith('.jnilib')) {
+			def installName = readMacInstallName(binary, taskName)
+			if (installName != null && !isAllowedMacNativeDependency(installName)) {
+				def normalizedInstallName = "@rpath/${binary.name}"
+				executePackagingCommand(
+					['install_name_tool', '-id', normalizedInstallName, binary.absolutePath],
+					"${taskName}: failed to normalize install name for ${binary}",
+					project.projectDir,
+					false
+				)
+				logger.lifecycle("${taskName}: normalized install name for ${binary.name} -> ${normalizedInstallName}")
+			}
+		}
+	}
+}
+
+def assertMacBundleSelfContained = { File appDir, String taskName ->
+	if (!org.gradle.internal.os.OperatingSystem.current().isMacOsX()) {
+		return
+	}
+
+	def violations = []
+	collectMacDependencyScanFiles(appDir).each { binary ->
+		readMacLinkedLibraries(binary, taskName).each { dependency ->
+			if (!isAllowedMacNativeDependency(dependency)) {
+				violations << "${binary.absolutePath} -> ${dependency}"
+			}
+		}
+	}
+
+	if (!violations.isEmpty()) {
+		def details = violations.unique().sort().collect { " - ${it}" }.join('\n')
+		throw new GradleException("""${taskName}: macOS bundle contains external native dependencies outside the app bundle.
+${details}
+Use a self-contained JDK for packaging via -PpackagingJavaHome=/path/to/jdk or PACKAGING_JAVA_HOME=/path/to/jdk.""")
+	}
 }
 
 def appendMacSigningOptions = { List args, Map signingConfig, boolean includeEntitlements = false, File entitlementsFile = null ->
@@ -796,6 +929,7 @@ def buildLinuxAppImage = { File installDir, File workDir, String taskName ->
 	def libDir = preparePackagingLibDir(os, installDir, new File(workDir, 'input'))
 	def jvmArgsList = buildPackagingJvmArgs()
 	def linuxResourceDir = prepareLinuxPackagingResources()
+	def jlinkOptions = buildPackagingJlinkOptions()
 	def iconSource = file('src/main/resources/logo/icon_512.png')
 	if (!iconSource.exists()) {
 		throw new GradleException("${taskName}: icon not found: ${iconSource}")
@@ -810,6 +944,7 @@ def buildLinuxAppImage = { File installDir, File workDir, String taskName ->
 		'--copyright', 'Copyright © Konstantin A. Smirnov',
 		'--dest', workDir.absolutePath,
 		'--input', libDir.absolutePath,
+		'--jlink-options', jlinkOptions,
 		'--main-jar', "${project.name}-${project.version}.jar",
 		'--main-class', application.mainClass.get(),
 		'--resource-dir', linuxResourceDir.absolutePath
@@ -1056,6 +1191,7 @@ tasks.register('jpackage') {
 		def appVersion = resolvePackageVersion(os)
 
 		def javaHome = resolvePackagingJavaHome()
+		logger.lifecycle("jpackage: using Java runtime from ${javaHome}")
 
 		def jpackageBin = os.isWindows()
 			? "${javaHome}/bin/jpackage.exe"
@@ -1063,6 +1199,7 @@ tasks.register('jpackage') {
 
 		def libDir = preparePackagingLibDir(os, installDir, new File(outputDir, 'input'))
 		def jvmArgsList = buildPackagingJvmArgs()
+		def jlinkOptions = buildPackagingJlinkOptions()
 
 		// macOS: app-image → копируем Icon Composer ресурсы → DMG
 		def macBuild = os.isMacOsX()
@@ -1081,6 +1218,7 @@ tasks.register('jpackage') {
 			'--copyright', 'Copyright © Konstantin A. Smirnov',
 			'--dest', outputDir.absolutePath,
 			'--input', libDir.absolutePath,
+			'--jlink-options', jlinkOptions,
 			'--main-jar', "${project.name}-${project.version}.jar",
 			'--main-class', application.mainClass.get(),
 		]
@@ -1176,6 +1314,12 @@ tasks.register('jpackage') {
 				java.nio.file.Files.copy(assetsCar.toPath(), new File(resourcesDir, assetsCar.name).toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
 				logger.lifecycle("jpackage: Assets.car скопирован в бандл")
 			}
+
+			normalizeMacBundleInstallNames(appDir, 'jpackage')
+
+			// Release bundle должен быть самодостаточным: допускаем только @rpath/@loader_path
+			// и системные Apple библиотеки. Любые /opt/homebrew, /usr/local, $HOME и т.п. запрещены.
+			assertMacBundleSelfContained(appDir, 'jpackage')
 
 			def entitlements = file('src/main/resources/macos/entitlements.plist')
 			def macSigningConfig = resolveMacSigningConfig()
