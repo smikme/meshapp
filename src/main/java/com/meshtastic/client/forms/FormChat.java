@@ -189,6 +189,8 @@ public class FormChat extends Form {
     private int scrollStateSyncSuspendCount;
     private final AtomicBoolean messageRefreshQueued = new AtomicBoolean();
     private final AtomicBoolean messageRefreshDirty = new AtomicBoolean();
+    private final AtomicBoolean viewportLayoutQueued = new AtomicBoolean();
+    private final AtomicBoolean viewportLayoutDirty = new AtomicBoolean();
 
     private final Runnable messageListener = this::scheduleMessageRefresh;
     private final Runnable connectionListener = () -> Platform.runLater(this::rebindState);
@@ -663,7 +665,6 @@ public class FormChat extends Form {
             String chatKey = currentChatKey();
             String ownerNodeId = currentOwnerNodeId();
 
-            db.backfillMissingReplyTexts(chatType, chatKey, ownerNodeId);
             List<MeshMessage> msgs = db.loadLast(chatType, chatKey, PAGE_SIZE, ownerNodeId);
             attachReactions(msgs);
 
@@ -1118,13 +1119,26 @@ public class FormChat extends Form {
     /**
      * После переключения DM -> channel ScrollPane иногда остаётся в геометрии
      * предыдущего короткого чата до следующего resize/pulse. Принудительно
-     * инвалидируем и пересчитываем viewport, чтобы сообщения появились сразу.
+     * инвалидируем viewport, но коалесим burst-вызовы в один проход, чтобы
+     * не дёргать applyCss/layout синхронно на каждом переключении чата.
      */
     private void requestMessageViewportLayout() {
+        viewportLayoutDirty.set(true);
+        if (!viewportLayoutQueued.compareAndSet(false, true)) {
+            return;
+        }
+        Platform.runLater(this::flushQueuedViewportLayout);
+    }
+
+    private void flushQueuedViewportLayout() {
+        viewportLayoutDirty.getAndSet(false);
         relayoutMessageViewport();
         Platform.runLater(() -> {
             relayoutMessageViewport();
-            Platform.runLater(this::relayoutMessageViewport);
+            viewportLayoutQueued.set(false);
+            if (viewportLayoutDirty.get() && viewportLayoutQueued.compareAndSet(false, true)) {
+                Platform.runLater(this::flushQueuedViewportLayout);
+            }
         });
     }
 

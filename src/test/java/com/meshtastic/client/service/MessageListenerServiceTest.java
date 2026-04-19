@@ -224,6 +224,47 @@ class MessageListenerServiceTest {
     }
 
     @Test
+    void onMeshPacketKeepsDistinctChannelMessagesWhenPacketIdsMatchAcrossDifferentSenders() {
+        boolean notificationsEnabled = AppPreferences.isNotificationsEnabled();
+        AppPreferences.setNotificationsEnabled(false);
+        try {
+            MeshProtos.MeshPacket firstPacket = MeshProtos.MeshPacket.newBuilder()
+                    .setFrom(0x11111111)
+                    .setTo(0xFFFFFFFF)
+                    .setChannel(2)
+                    .setId(7015)
+                    .setDecoded(MeshProtos.Data.newBuilder()
+                            .setPortnum(Portnums.PortNum.TEXT_MESSAGE_APP)
+                            .setPayload(ByteString.copyFrom("alice", StandardCharsets.UTF_8))
+                            .build())
+                    .build();
+            MeshProtos.MeshPacket secondPacket = MeshProtos.MeshPacket.newBuilder()
+                    .setFrom(0x22222222)
+                    .setTo(0xFFFFFFFF)
+                    .setChannel(2)
+                    .setId(7015)
+                    .setDecoded(MeshProtos.Data.newBuilder()
+                            .setPortnum(Portnums.PortNum.TEXT_MESSAGE_APP)
+                            .setPayload(ByteString.copyFrom("bob", StandardCharsets.UTF_8))
+                            .build())
+                    .build();
+
+            service.onMeshPacket(firstPacket);
+            service.onMeshPacket(secondPacket);
+
+            List<MeshMessage> inMemory = state.getMessages(2);
+            assertEquals(2, inMemory.size());
+            assertEquals(List.of("alice", "bob"), inMemory.stream().map(MeshMessage::getText).toList());
+
+            List<MeshMessage> persisted = MessageDbService.getInstance().loadLast("channel", "2", 10, "!12345678");
+            assertEquals(2, persisted.size());
+            assertEquals(List.of("alice", "bob"), persisted.stream().map(MeshMessage::getText).toList());
+        } finally {
+            AppPreferences.setNotificationsEnabled(notificationsEnabled);
+        }
+    }
+
+    @Test
     void onMeshPacketDoesNotLogIncomingMessageText() {
         boolean notificationsEnabled = AppPreferences.isNotificationsEnabled();
         AppPreferences.setNotificationsEnabled(false);

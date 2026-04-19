@@ -45,7 +45,8 @@ public class MessageStore {
     private final CopyOnWriteArrayList<Runnable> messageListeners = new CopyOnWriteArrayList<>();
 
     /**
-     * Добавляет канальное сообщение с дедупликацией по {@code packetId}.
+     * Добавляет канальное сообщение с дедупликацией по идентичности пакета
+     * ({@code packetId + from/to + outgoing + channel}).
      *
      * @param msg сообщение для добавления
      */
@@ -54,10 +55,11 @@ public class MessageStore {
                 .computeIfAbsent(msg.getChannelIndex(), k -> Collections.synchronizedList(new ArrayList<>()));
         boolean notifyListeners = false;
         synchronized (list) {
-            // Дедупликация по packetId
+            // В канале packetId сам по себе недостаточен: у разных sender'ов
+            // может совпасть идентификатор пакета.
             if (msg.getPacketId() != 0) {
                 for (MeshMessage existing : list) {
-                    if (existing.getPacketId() == msg.getPacketId()) {
+                    if (isDuplicateMessage(existing, msg)) {
                         notifyListeners = mergeDuplicateMessage(existing, msg);
                         if (!notifyListeners) {
                             return;
@@ -100,7 +102,8 @@ public class MessageStore {
     }
 
     /**
-     * Добавляет личное сообщение с дедупликацией по {@code packetId}.
+     * Добавляет личное сообщение с дедупликацией по идентичности пакета
+     * ({@code packetId + from/to + outgoing + channel}).
      *
      * @param msg        сообщение для добавления
      * @param peerNodeId node_id собеседника (ключ группировки)
@@ -112,7 +115,7 @@ public class MessageStore {
         synchronized (list) {
             if (msg.getPacketId() != 0) {
                 for (MeshMessage existing : list) {
-                    if (existing.getPacketId() == msg.getPacketId()) {
+                    if (isDuplicateMessage(existing, msg)) {
                         notifyListeners = mergeDuplicateMessage(existing, msg);
                         if (!notifyListeners) {
                             return;
@@ -389,6 +392,17 @@ public class MessageStore {
             changed = true;
         }
         return changed;
+    }
+
+    private static boolean isDuplicateMessage(MeshMessage existing, MeshMessage incoming) {
+        return existing != null
+                && incoming != null
+                && existing.getPacketId() != 0
+                && existing.getPacketId() == incoming.getPacketId()
+                && existing.getChannelIndex() == incoming.getChannelIndex()
+                && existing.isOutgoing() == incoming.isOutgoing()
+                && Objects.equals(existing.getFromNodeId(), incoming.getFromNodeId())
+                && Objects.equals(existing.getToNodeId(), incoming.getToNodeId());
     }
 
     private static boolean shouldReplaceStatus(MeshMessage.DeliveryStatus current,

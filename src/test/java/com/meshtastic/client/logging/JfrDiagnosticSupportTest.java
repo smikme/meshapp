@@ -2,6 +2,7 @@ package com.meshtastic.client.logging;
 
 import jdk.jfr.Configuration;
 import jdk.jfr.Recording;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -9,6 +10,11 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class JfrDiagnosticSupportTest {
+
+    @AfterEach
+    void clearJfrProperty() {
+        System.clearProperty(JfrDiagnosticSupport.JFR_ENABLED_PROPERTY);
+    }
 
     @Test
     void applyPlatformSafetyWorkaroundsDisablesThreadSamplingOnMacOs() throws Exception {
@@ -37,5 +43,29 @@ class JfrDiagnosticSupportTest {
         assertTrue(JfrDiagnosticSupport.shouldDisableExecutionSampling("Mac OS X"));
         assertTrue(JfrDiagnosticSupport.shouldDisableExecutionSampling("macOS"));
         assertFalse(JfrDiagnosticSupport.shouldDisableExecutionSampling("Windows 11"));
+    }
+
+    @Test
+    void isEnabledIsFalseByDefaultAndTrueOnlyWhenPropertyIsSet() {
+        assertFalse(JfrDiagnosticSupport.isEnabled(null, null, false));
+        assertTrue(JfrDiagnosticSupport.isEnabled(null, null, true));
+
+        System.setProperty(JfrDiagnosticSupport.JFR_ENABLED_PROPERTY, "true");
+        assertTrue(JfrDiagnosticSupport.isEnabled(
+                System.getProperty(JfrDiagnosticSupport.JFR_ENABLED_PROPERTY),
+                null,
+                false));
+
+        System.setProperty(JfrDiagnosticSupport.JFR_ENABLED_PROPERTY, "false");
+        assertFalse(JfrDiagnosticSupport.isEnabled(
+                System.getProperty(JfrDiagnosticSupport.JFR_ENABLED_PROPERTY),
+                null,
+                true));
+    }
+
+    @Test
+    void envValueOverridesPreferenceWhenPropertyIsAbsent() {
+        assertTrue(JfrDiagnosticSupport.isEnabled(null, "true", false));
+        assertFalse(JfrDiagnosticSupport.isEnabled(null, "false", true));
     }
 }
