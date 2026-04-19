@@ -13,7 +13,10 @@ import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.zip.ZipInputStream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -135,5 +138,92 @@ class CrashReportServiceTest {
         assertTrue(issueBody.get().contains("Автоматически созданный отчёт о проблеме MeshApp."));
         assertTrue(issueBody.get().contains("Не открывается окно помощи"));
         assertTrue(issueBody.get().contains("текущей сессии"));
+    }
+
+    @Test
+    void submitCrashReportArchivesDirectoryPayload() throws Exception {
+        AtomicReference<byte[]> uploadBody = new AtomicReference<>();
+        AtomicReference<String> uploadContentType = new AtomicReference<>();
+
+        server.createContext("/api/v1/repos/covox/meshapp/issues", exchange -> {
+            byte[] response = "{\"index\":99}".getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(201, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+
+        server.createContext("/api/v1/repos/covox/meshapp/issues/99/assets", exchange -> {
+            uploadContentType.set(exchange.getRequestHeaders().getFirst("Content-Type"));
+            uploadBody.set(exchange.getRequestBody().readAllBytes());
+            byte[] response = "{}".getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(201, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+
+        Path bundleDir = Files.createTempDirectory("meshapp-bundle-");
+        Files.writeString(bundleDir.resolve("meshapp-session.log"), "fatal: boom");
+        Files.writeString(bundleDir.resolve("fatal-marker.json"), "{\"type\":\"uncaught-exception\"}");
+
+        CrashReportService service = new CrashReportService(
+                URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/api/v1"),
+                "covox",
+                "meshapp",
+                "test-token",
+                HttpClient.newHttpClient(),
+                Clock.fixed(Instant.parse("2026-04-10T10:15:30Z"), ZoneOffset.UTC)
+        );
+
+        service.submitCrashReport(
+                bundleDir,
+                "Падает без стектрейса",
+                new CrashReportService.CrashContext("1.2.3", 77, "Windows", "10", "x86_64")
+        );
+
+        byte[] zipBytes = extractZipPayload(uploadBody.get(), uploadContentType.get());
+        List<String> entryNames = readZipEntryNames(zipBytes);
+        assertTrue(entryNames.stream().anyMatch(name -> name.endsWith("/meshapp-session.log")));
+        assertTrue(entryNames.stream().anyMatch(name -> name.endsWith("/fatal-marker.json")));
+    }
+
+    private static byte[] extractZipPayload(byte[] multipartBody, String contentType) {
+        String boundary = contentType.substring(contentType.indexOf("boundary=") + "boundary=".length());
+        byte[] boundaryBytes = ("--" + boundary).getBytes(StandardCharsets.UTF_8);
+        byte[] headerDelimiter = "\r\n\r\n".getBytes(StandardCharsets.UTF_8);
+        byte[] trailerDelimiter = ("\r\n--" + boundary).getBytes(StandardCharsets.UTF_8);
+
+        int partStart = indexOf(multipartBody, boundaryBytes, 0);
+        int payloadStart = indexOf(multipartBody, headerDelimiter, partStart) + headerDelimiter.length;
+        int payloadEnd = indexOf(multipartBody, trailerDelimiter, payloadStart);
+
+        byte[] zip = new byte[payloadEnd - payloadStart];
+        System.arraycopy(multipartBody, payloadStart, zip, 0, zip.length);
+        return zip;
+    }
+
+    private static List<String> readZipEntryNames(byte[] zipBytes) throws Exception {
+        List<String> entryNames = new ArrayList<>();
+        try (ZipInputStream zip = new ZipInputStream(new java.io.ByteArrayInputStream(zipBytes))) {
+            java.util.zip.ZipEntry entry;
+            while ((entry = zip.getNextEntry()) != null) {
+                entryNames.add(entry.getName());
+            }
+        }
+        return entryNames;
+    }
+
+    private static int indexOf(byte[] haystack, byte[] needle, int fromIndex) {
+        outer:
+        for (int i = Math.max(0, fromIndex); i <= haystack.length - needle.length; i++) {
+            for (int j = 0; j < needle.length; j++) {
+                if (haystack[i + j] != needle[j]) {
+                    continue outer;
+                }
+            }
+            return i;
+        }
+        throw new IllegalArgumentException("Needle not found in multipart payload");
     }
 }

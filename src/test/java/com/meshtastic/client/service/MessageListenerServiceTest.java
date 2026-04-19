@@ -29,8 +29,10 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
 import org.slf4j.LoggerFactory;
@@ -636,9 +638,10 @@ class MessageListenerServiceTest {
             service.onMeshPacket(packet);
 
             assertTrue(state.getAllDirectMessages().containsKey("!cafed00d"));
-            assertEquals(1, connection.sentFrames.size());
+            List<byte[]> sentFrames = connection.awaitSentFrames(1);
+            assertEquals(1, sentFrames.size());
 
-            MeshProtos.ToRadio seedContact = parseToRadio(connection.sentFrames.get(0));
+            MeshProtos.ToRadio seedContact = parseToRadio(sentFrames.get(0));
             MeshProtos.MeshPacket seedPacket = seedContact.getPacket();
             assertEquals(Portnums.PortNum.ADMIN_APP, seedPacket.getDecoded().getPortnum());
             AdminProtos.AdminMessage adminMessage = AdminProtos.AdminMessage.parseFrom(seedPacket.getDecoded().getPayload());
@@ -658,7 +661,7 @@ class MessageListenerServiceTest {
 
     private static final class RecordingConnection implements MeshtasticConnection {
 
-        private final List<byte[]> sentFrames = new ArrayList<>();
+        private final List<byte[]> sentFrames = Collections.synchronizedList(new ArrayList<>());
 
         @Override
         public void connect() throws ConnectionException {
@@ -693,6 +696,26 @@ class MessageListenerServiceTest {
         @Override
         public void setConnectionListener(ConnectionListener listener) {
             // no-op for tests
+        }
+
+        List<byte[]> awaitSentFrames(int expectedCount) throws InterruptedException {
+            long deadlineNanos = System.nanoTime() + TimeUnit.SECONDS.toNanos(1);
+            List<byte[]> snapshot = snapshotSentFrames();
+            while (snapshot.size() < expectedCount && System.nanoTime() < deadlineNanos) {
+                Thread.sleep(10);
+                snapshot = snapshotSentFrames();
+            }
+            if (snapshot.size() < expectedCount) {
+                throw new AssertionError("Timed out waiting for " + expectedCount
+                        + " outbound frames, got " + snapshot.size());
+            }
+            return snapshot;
+        }
+
+        List<byte[]> snapshotSentFrames() {
+            synchronized (sentFrames) {
+                return new ArrayList<>(sentFrames);
+            }
         }
     }
 }

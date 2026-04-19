@@ -20,7 +20,8 @@ application {
 		'--add-exports', 'javafx.graphics/com.sun.javafx.scene=ALL-UNNAMED',
 		'--add-opens', 'javafx.graphics/com.sun.javafx.tk=ALL-UNNAMED',
 		'--add-opens', 'javafx.graphics/com.sun.javafx.tk.quantum=ALL-UNNAMED',
-		'--add-opens', 'javafx.graphics/com.sun.glass.ui=ALL-UNNAMED'
+		'--add-opens', 'javafx.graphics/com.sun.glass.ui=ALL-UNNAMED',
+		'-XX:ErrorFile=%h/.meshapp/logs/diagnostics/active/hs_err_pid%p.log'
 	]
 	if (org.gradle.internal.os.OperatingSystem.current().isWindows()) {
 		jvmArgs += ['--add-opens', 'javafx.graphics/com.sun.glass.ui.win=ALL-UNNAMED']

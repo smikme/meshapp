@@ -20,6 +20,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.stream.Stream;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
@@ -87,8 +88,8 @@ public final class CrashReportService {
         Objects.requireNonNull(logFile, "logFile");
         Objects.requireNonNull(context, "context");
         Objects.requireNonNull(reportType, "reportType");
-        if (!Files.isRegularFile(logFile)) {
-            throw new IOException("Report log file not found: " + logFile);
+        if (!Files.exists(logFile)) {
+            throw new IOException("Report payload not found: " + logFile);
         }
 
         Path archive = createArchive(logFile);
@@ -160,10 +161,23 @@ public final class CrashReportService {
     private Path createArchive(Path logFile) throws IOException {
         Path archive = Files.createTempFile("meshapp-crash-", ".zip");
         try (ZipOutputStream zip = new ZipOutputStream(Files.newOutputStream(archive))) {
-            ZipEntry entry = new ZipEntry(logFile.getFileName().toString());
-            zip.putNextEntry(entry);
-            Files.copy(logFile, zip);
-            zip.closeEntry();
+            if (Files.isDirectory(logFile)) {
+                String rootName = logFile.getFileName() != null ? logFile.getFileName().toString() : "meshapp-report";
+                try (Stream<Path> files = Files.walk(logFile)) {
+                    for (Path file : files.filter(Files::isRegularFile).toList()) {
+                        String entryName = rootName + "/" + logFile.relativize(file).toString().replace('\\', '/');
+                        ZipEntry entry = new ZipEntry(entryName);
+                        zip.putNextEntry(entry);
+                        Files.copy(file, zip);
+                        zip.closeEntry();
+                    }
+                }
+            } else {
+                ZipEntry entry = new ZipEntry(logFile.getFileName().toString());
+                zip.putNextEntry(entry);
+                Files.copy(logFile, zip);
+                zip.closeEntry();
+            }
         }
         return archive;
     }
