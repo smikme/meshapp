@@ -237,6 +237,35 @@ class ConfigExchangeServiceTest {
     }
 
     @Test
+    void partialConfigResponseBeforeMyNodeInfoSuppressesRetry() throws Exception {
+        FakeConnection connection = new FakeConnection();
+        ProtocolHandler handler = track(new ProtocolHandler(connection));
+        DeviceState state = new DeviceState();
+        ConfigExchangeService service = track(new ConfigExchangeService(handler, state));
+
+        CompletableFuture<DeviceState> future = service.startConfigExchange();
+        int initialWantConfigId = connection.awaitLastWantConfigId();
+
+        service.onChannel(ChannelProtos.Channel.newBuilder()
+                .setIndex(2)
+                .setRole(ChannelProtos.Channel.Role.SECONDARY)
+                .build());
+
+        TimeUnit.MILLISECONDS.sleep(3_200);
+
+        assertEquals(initialWantConfigId, connection.awaitLastWantConfigId());
+        assertFalse(future.isDone());
+
+        service.onMyNodeInfo(MeshProtos.MyNodeInfo.newBuilder().setMyNodeNum(0x12345678).build());
+        service.onConfigComplete(initialWantConfigId);
+
+        assertTrue(future.isDone());
+        assertTrue(state.isChannelCatalogReady());
+        assertEquals(1, state.getChannels().size());
+        assertEquals(2, state.getChannels().getFirst().getIndex());
+    }
+
+    @Test
     void onConfigCompletePersistsNodeFlagsAndCompletesFuture() throws Exception {
         FakeConnection connection = new FakeConnection();
         ProtocolHandler handler = track(new ProtocolHandler(connection));

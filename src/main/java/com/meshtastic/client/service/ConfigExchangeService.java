@@ -159,12 +159,16 @@ public class ConfigExchangeService implements FromRadioListener {
         }
     }
 
+    private void markReceivedAnyResponse() {
+        receivedAny.set(true);
+    }
+
     @Override
     public void onMyNodeInfo(MeshProtos.MyNodeInfo myInfo) {
         if (aborted.get()) {
             return;
         }
-        receivedAny.set(true);
+        markReceivedAnyResponse();
         deviceState.setMyNodeNum(myInfo.getMyNodeNum());
         log.info("My node number: {}", myInfo.getMyNodeNum());
         flushDeferredConfigState();
@@ -175,6 +179,7 @@ public class ConfigExchangeService implements FromRadioListener {
         if (aborted.get()) {
             return;
         }
+        markReceivedAnyResponse();
         if (deviceState.getMyNodeNum() == 0) {
             deferNodeInfo(nodeInfo);
             return;
@@ -286,6 +291,7 @@ public class ConfigExchangeService implements FromRadioListener {
         if (aborted.get()) {
             return;
         }
+        markReceivedAnyResponse();
         if (config.getPayloadVariantCase() == ConfigProtos.Config.PayloadVariantCase.LORA) {
             log.debug("onConfig LORA ignore_incoming {}", ConfigDebugFormatter.describeIgnoreIncoming(config));
         }
@@ -297,6 +303,7 @@ public class ConfigExchangeService implements FromRadioListener {
         if (aborted.get()) {
             return;
         }
+        markReceivedAnyResponse();
         if (moduleConfig.getPayloadVariantCase() == ModuleConfigProtos.ModuleConfig.PayloadVariantCase.MQTT) {
             log.debug("onModuleConfig MQTT {}", describeMqttConfig(moduleConfig.getMqtt()));
         }
@@ -308,6 +315,7 @@ public class ConfigExchangeService implements FromRadioListener {
         if (aborted.get()) {
             return;
         }
+        markReceivedAnyResponse();
         log.debug("onChannel {}", describeChannel(channel));
         deviceState.addChannel(channel);
     }
@@ -382,6 +390,7 @@ public class ConfigExchangeService implements FromRadioListener {
             log.warn("Received config_complete_id {} but expected {}", configCompleteId, sentConfigId);
             return;
         }
+        markReceivedAnyResponse();
         if (deviceState.getMyNodeNum() == 0) {
             deferConfigComplete(configCompleteId);
             return;
