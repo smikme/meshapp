@@ -237,6 +237,56 @@ class ConfigExchangeServiceTest {
     }
 
     @Test
+    void partialConfigResponseBeforeMyNodeInfoSoftRetriesSameConfigId() throws Exception {
+        FakeConnection connection = new FakeConnection();
+        ProtocolHandler handler = track(new ProtocolHandler(connection));
+        DeviceState state = new DeviceState();
+        ConfigExchangeService service = track(new ConfigExchangeService(handler, state));
+
+        CompletableFuture<DeviceState> future = service.startConfigExchange();
+        int initialWantConfigId = connection.awaitLastWantConfigId();
+
+        service.onChannel(ChannelProtos.Channel.newBuilder()
+                .setIndex(2)
+                .setRole(ChannelProtos.Channel.Role.SECONDARY)
+                .build());
+
+        connection.awaitWantConfigSendCount(2, 4_500);
+
+        assertEquals(initialWantConfigId, connection.awaitLastWantConfigId());
+        assertEquals(List.of(initialWantConfigId, initialWantConfigId), connection.snapshotWantConfigIds());
+        assertFalse(future.isDone());
+
+        service.onMyNodeInfo(MeshProtos.MyNodeInfo.newBuilder().setMyNodeNum(0x12345678).build());
+        service.onConfigComplete(initialWantConfigId);
+
+        assertTrue(future.isDone());
+        assertTrue(state.isChannelCatalogReady());
+        assertEquals(1, state.getChannels().size());
+        assertEquals(2, state.getChannels().getFirst().getIndex());
+    }
+
+    @Test
+    void noResponseTriggersHardRetryWithNewConfigId() throws Exception {
+        FakeConnection connection = new FakeConnection();
+        ProtocolHandler handler = track(new ProtocolHandler(connection));
+        DeviceState state = new DeviceState();
+        ConfigExchangeService service = track(new ConfigExchangeService(handler, state));
+
+        service.startConfigExchange();
+        int initialWantConfigId = connection.awaitLastWantConfigId();
+
+        connection.awaitWantConfigSendCount(2, 4_500);
+
+        List<Integer> sentWantConfigIds = connection.snapshotWantConfigIds();
+        assertEquals(2, sentWantConfigIds.size());
+        assertEquals(initialWantConfigId, sentWantConfigIds.getFirst());
+        assertNotEquals(initialWantConfigId, sentWantConfigIds.get(1));
+        assertEquals(0, state.getMyNodeNum());
+        assertFalse(state.isChannelCatalogReady());
+    }
+
+    @Test
     void onConfigCompletePersistsNodeFlagsAndCompletesFuture() throws Exception {
         FakeConnection connection = new FakeConnection();
         ProtocolHandler handler = track(new ProtocolHandler(connection));
@@ -355,6 +405,7 @@ class ConfigExchangeServiceTest {
         private Consumer<byte[]> dataListener;
         private ConnectionListener connectionListener;
         private volatile Integer lastWantConfigId;
+        private final List<Integer> sentWantConfigIds = new ArrayList<>();
 
         @Override
         public void connect() throws ConnectionException {
@@ -377,6 +428,9 @@ class ConfigExchangeServiceTest {
                 MeshProtos.ToRadio toRadio = MeshProtos.ToRadio.parseFrom(payload);
                 if (toRadio.hasWantConfigId()) {
                     lastWantConfigId = toRadio.getWantConfigId();
+                    synchronized (sentWantConfigIds) {
+                        sentWantConfigIds.add(lastWantConfigId);
+                    }
                 }
             } catch (Exception e) {
                 throw new RuntimeException(e);
@@ -404,6 +458,23 @@ class ConfigExchangeServiceTest {
                 throw new AssertionError("Timed out waiting for want_config_id to be sent");
             }
             return current;
+        }
+
+        void awaitWantConfigSendCount(int expectedCount, long timeoutMillis) throws InterruptedException {
+            long deadlineNanos = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMillis);
+            while (snapshotWantConfigIds().size() < expectedCount && System.nanoTime() < deadlineNanos) {
+                Thread.sleep(10);
+            }
+            if (snapshotWantConfigIds().size() < expectedCount) {
+                throw new AssertionError("Timed out waiting for " + expectedCount
+                        + " want_config_id sends, got " + snapshotWantConfigIds().size());
+            }
+        }
+
+        List<Integer> snapshotWantConfigIds() {
+            synchronized (sentWantConfigIds) {
+                return new ArrayList<>(sentWantConfigIds);
+            }
         }
     }
 }

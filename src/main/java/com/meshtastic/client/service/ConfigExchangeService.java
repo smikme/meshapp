@@ -121,14 +121,27 @@ public class ConfigExchangeService implements FromRadioListener {
         }
         try {
             retryFuture = retryScheduler.schedule(() -> {
-                if (aborted.get()) {
+                if (aborted.get() || future.isDone()) {
                     return;
                 }
-                if (!receivedAny.get() && !future.isDone()) {
+
+                if (!receivedAny.get()) {
                     log.info("No response from device, retrying want_config_id (attempt {}/{})", attempt, MAX_RETRIES);
                     deviceState.clear();
                     resetDeferredConfigState();
                     sentConfigId = ThreadLocalRandom.current().nextInt(1, Integer.MAX_VALUE);
+                    sendWantConfig();
+                    scheduleRetry(attempt + 1);
+                    return;
+                }
+
+                if (deviceState.getMyNodeNum() == 0 || !deviceState.isChannelCatalogReady()) {
+                    log.info("Config exchange is still incomplete (myNodeKnown={}, channelCatalogReady={}), retrying want_config_id={} (attempt {}/{})",
+                            deviceState.getMyNodeNum() != 0,
+                            deviceState.isChannelCatalogReady(),
+                            sentConfigId,
+                            attempt,
+                            MAX_RETRIES);
                     sendWantConfig();
                     scheduleRetry(attempt + 1);
                 }
@@ -159,12 +172,16 @@ public class ConfigExchangeService implements FromRadioListener {
         }
     }
 
+    private void markReceivedAnyResponse() {
+        receivedAny.set(true);
+    }
+
     @Override
     public void onMyNodeInfo(MeshProtos.MyNodeInfo myInfo) {
         if (aborted.get()) {
             return;
         }
-        receivedAny.set(true);
+        markReceivedAnyResponse();
         deviceState.setMyNodeNum(myInfo.getMyNodeNum());
         log.info("My node number: {}", myInfo.getMyNodeNum());
         flushDeferredConfigState();
@@ -175,6 +192,7 @@ public class ConfigExchangeService implements FromRadioListener {
         if (aborted.get()) {
             return;
         }
+        markReceivedAnyResponse();
         if (deviceState.getMyNodeNum() == 0) {
             deferNodeInfo(nodeInfo);
             return;
@@ -286,6 +304,7 @@ public class ConfigExchangeService implements FromRadioListener {
         if (aborted.get()) {
             return;
         }
+        markReceivedAnyResponse();
         if (config.getPayloadVariantCase() == ConfigProtos.Config.PayloadVariantCase.LORA) {
             log.debug("onConfig LORA ignore_incoming {}", ConfigDebugFormatter.describeIgnoreIncoming(config));
         }
@@ -297,6 +316,7 @@ public class ConfigExchangeService implements FromRadioListener {
         if (aborted.get()) {
             return;
         }
+        markReceivedAnyResponse();
         if (moduleConfig.getPayloadVariantCase() == ModuleConfigProtos.ModuleConfig.PayloadVariantCase.MQTT) {
             log.debug("onModuleConfig MQTT {}", describeMqttConfig(moduleConfig.getMqtt()));
         }
@@ -308,6 +328,7 @@ public class ConfigExchangeService implements FromRadioListener {
         if (aborted.get()) {
             return;
         }
+        markReceivedAnyResponse();
         log.debug("onChannel {}", describeChannel(channel));
         deviceState.addChannel(channel);
     }
@@ -382,6 +403,7 @@ public class ConfigExchangeService implements FromRadioListener {
             log.warn("Received config_complete_id {} but expected {}", configCompleteId, sentConfigId);
             return;
         }
+        markReceivedAnyResponse();
         if (deviceState.getMyNodeNum() == 0) {
             deferConfigComplete(configCompleteId);
             return;

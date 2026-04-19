@@ -222,7 +222,15 @@ public final class MessageDbService {
         }
         String normalizedOwnerNodeId = ownerNodeId != null ? ownerNodeId : "";
         try {
-            Long existingDbId = findExistingMessageDbId(msg.getPacketId(), chatType, chatKey, normalizedOwnerNodeId);
+            Long existingDbId = findExistingMessageDbId(
+                    msg.getPacketId(),
+                    chatType,
+                    chatKey,
+                    normalizedOwnerNodeId,
+                    msg.getChannelIndex(),
+                    msg.isOutgoing(),
+                    msg.getFromNodeId(),
+                    msg.getToNodeId());
             if (existingDbId != null) {
                 msg.setDbId(existingDbId);
                 updateExistingMessageMetadata(existingDbId, msg);
@@ -262,7 +270,14 @@ public final class MessageDbService {
         }
     }
 
-    private Long findExistingMessageDbId(int packetId, String chatType, String chatKey, String ownerNodeId) throws SQLException {
+    private Long findExistingMessageDbId(int packetId,
+                                         String chatType,
+                                         String chatKey,
+                                         String ownerNodeId,
+                                         int channelIndex,
+                                         boolean outgoing,
+                                         String fromNodeId,
+                                         String toNodeId) throws SQLException {
         if (dbConnection == null || packetId == 0) {
             return null;
         }
@@ -270,12 +285,21 @@ public final class MessageDbService {
                 SELECT id FROM messages
                 WHERE owner_node_id = ? AND chat_type = ? AND chat_key = ?
                   AND packet_id = ? AND packet_id <> 0
+                  AND channel_idx = ? AND outgoing = ?
+                  AND ((from_node_id = ?) OR (from_node_id IS NULL AND ? IS NULL))
+                  AND ((to_node_id = ?) OR (to_node_id IS NULL AND ? IS NULL))
                 ORDER BY id ASC LIMIT 1
                 """)) {
             ps.setString(1, ownerNodeId);
             ps.setString(2, chatType);
             ps.setString(3, chatKey);
             ps.setInt(4, packetId);
+            ps.setInt(5, channelIndex);
+            ps.setBoolean(6, outgoing);
+            ps.setString(7, fromNodeId);
+            ps.setString(8, fromNodeId);
+            ps.setString(9, toNodeId);
+            ps.setString(10, toNodeId);
             try (ResultSet rs = ps.executeQuery()) {
                 return rs.next() ? rs.getLong("id") : null;
             }

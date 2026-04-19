@@ -100,18 +100,20 @@ public class About extends VBox {
         sysTitle.getStyleClass().add("section-title");
 
         String version = MeshApp.APPLICATION_VERSION;
+        String build = MeshApp.VERSION_CODE > 0 ? Integer.toString(MeshApp.VERSION_CODE) : "dev";
         String java = System.getProperty("java.vendor") + " - v" + System.getProperty("java.version");
         String system = System.getProperty("os.name") + " " + System.getProperty("os.arch")
                 + " - v" + System.getProperty("os.version");
 
         Label sysVersion = new Label("Version: " + version);
+        Label sysBuild = new Label("Build: " + build);
         Label sysJava = new Label("Java: " + java);
         Label sysOs = new Label("System: " + system);
 
         Label memTitle = new Label("Память:");
         MemoryBar memoryBar = new MemoryBar();
 
-        sysInfo.getChildren().addAll(sysTitle, sysVersion, sysJava, sysOs, memTitle, memoryBar);
+        sysInfo.getChildren().addAll(sysTitle, sysVersion, sysBuild, sysJava, sysOs, memTitle, memoryBar);
 
         VBox reportBox = new VBox(8);
         reportBox.setPadding(new Insets(10));
