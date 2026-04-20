@@ -42,13 +42,15 @@ import java.util.List;
 public class MessageListenerService implements FromRadioListener {
 
     private static final Logger log = LoggerFactory.getLogger(MessageListenerService.class);
-    private static final int MAX_DEFERRED_MESH_PACKETS = 200;
+    private static final int DEFERRED_MESH_WARN_THRESHOLD = 200;
+    private static final int DEFERRED_MESH_WARN_STEP = 200;
 
     private final DeviceState deviceState;
     private final NotificationManager notificationManager;
     private final ProtocolHandler protocolHandler;
     private final Object deferredMeshLock = new Object();
     private final List<DeferredMeshPacket> deferredMeshPackets = new ArrayList<>();
+    private int deferredMeshWarnBucket;
 
     private record DeferredMeshPacket(long channelCatalogEpoch, MeshProtos.MeshPacket packet) {}
 
@@ -268,20 +270,14 @@ public class MessageListenerService implements FromRadioListener {
             return false;
         }
 
-        DeferredMeshPacket dropped = null;
+        int queuedPackets;
         synchronized (deferredMeshLock) {
-            if (deferredMeshPackets.size() >= MAX_DEFERRED_MESH_PACKETS) {
-                dropped = deferredMeshPackets.remove(0);
-            }
             deferredMeshPackets.add(new DeferredMeshPacket(deviceState.getChannelCatalogEpoch(), packet));
+            queuedPackets = deferredMeshPackets.size();
+            maybeLogDeferredMeshBacklogLocked(queuedPackets, reason);
         }
-
-        if (dropped != null) {
-            log.warn("Deferred mesh queue full, dropping oldest packet {}",
-                    dropped.packet().getId());
-        }
-        log.info("Deferring mesh packet {} on channel {} until {}",
-                packet.getId(), packet.getChannel(), reason);
+        log.info("Deferring mesh packet {} on channel {} until {} (backlog={})",
+                packet.getId(), packet.getChannel(), reason, queuedPackets);
         return true;
     }
 
@@ -293,6 +289,7 @@ public class MessageListenerService implements FromRadioListener {
             }
             deferred = new ArrayList<>(deferredMeshPackets);
             deferredMeshPackets.clear();
+            deferredMeshWarnBucket = 0;
         }
 
         long currentEpoch = deviceState.getChannelCatalogEpoch();
@@ -315,6 +312,21 @@ public class MessageListenerService implements FromRadioListener {
             return;
         }
         flushDeferredMeshPackets();
+    }
+
+    private void maybeLogDeferredMeshBacklogLocked(int queuedPackets, String reason) {
+        if (queuedPackets < DEFERRED_MESH_WARN_THRESHOLD) {
+            return;
+        }
+
+        int bucket = ((queuedPackets - DEFERRED_MESH_WARN_THRESHOLD) / DEFERRED_MESH_WARN_STEP) + 1;
+        if (bucket <= deferredMeshWarnBucket) {
+            return;
+        }
+
+        deferredMeshWarnBucket = bucket;
+        log.warn("Deferred mesh backlog grew to {} packets while waiting for {}",
+                queuedPackets, reason);
     }
 
     private boolean isReactionPacket(MeshProtos.Data data) {

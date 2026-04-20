@@ -33,6 +33,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 
 import org.slf4j.LoggerFactory;
@@ -412,6 +413,52 @@ class MessageListenerServiceTest {
     }
 
     @Test
+    void onMeshPacketDoesNotDropDeferredBroadcastBurstWhileChannelCatalogLoads() throws Exception {
+        state.clear();
+        state.setMyNodeNum(0x12345678);
+        state.addChannel(ChannelProtos.Channel.newBuilder()
+                .setIndex(0)
+                .setRole(ChannelProtos.Channel.Role.PRIMARY)
+                .build());
+        state.addChannel(ChannelProtos.Channel.newBuilder()
+                .setIndex(2)
+                .setRole(ChannelProtos.Channel.Role.SECONDARY)
+                .build());
+
+        int packetCount = 250;
+        for (int i = 0; i < packetCount; i++) {
+            MeshProtos.MeshPacket packet = MeshProtos.MeshPacket.newBuilder()
+                    .setFrom(0x11111111)
+                    .setTo(0xFFFFFFFF)
+                    .setChannel(2)
+                    .setId(7_100 + i)
+                    .setDecoded(MeshProtos.Data.newBuilder()
+                            .setPortnum(Portnums.PortNum.TEXT_MESSAGE_APP)
+                            .setPayload(ByteString.copyFrom("deferred-" + i, StandardCharsets.UTF_8))
+                            .build())
+                    .build();
+            service.onMeshPacket(packet);
+        }
+
+        assertTrue(state.getMessages(2).isEmpty());
+        assertNull(MessageDbService.getInstance().findByPacketId(7_100));
+        assertNull(MessageDbService.getInstance().findByPacketId(7_100 + packetCount - 1));
+
+        state.setChannelCatalogReady(true);
+        service.onConfigComplete(1);
+
+        assertTrue(waitUntil(() ->
+                        MessageDbService.getInstance().loadLast("channel", "2", packetCount + 10, "!12345678").size() == packetCount,
+                5_000));
+
+        List<MeshMessage> persisted = MessageDbService.getInstance()
+                .loadLast("channel", "2", packetCount + 10, "!12345678");
+        assertEquals(packetCount, persisted.size());
+        assertEquals("deferred-0", persisted.getFirst().getText());
+        assertEquals("deferred-" + (packetCount - 1), persisted.getLast().getText());
+    }
+
+    @Test
     void onMeshPacketDropsBroadcastMessagesForUnknownChannel() {
         MeshProtos.MeshPacket packet = MeshProtos.MeshPacket.newBuilder()
                 .setFrom(0x11111111)
@@ -698,6 +745,17 @@ class MessageListenerServiceTest {
         int payloadLength = ((frame[2] & 0xFF) << 8) | (frame[3] & 0xFF);
         byte[] payload = Arrays.copyOfRange(frame, 4, 4 + payloadLength);
         return MeshProtos.ToRadio.parseFrom(payload);
+    }
+
+    private static boolean waitUntil(BooleanSupplier condition, long timeoutMs) throws InterruptedException {
+        long deadlineNanos = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs);
+        while (System.nanoTime() < deadlineNanos) {
+            if (condition.getAsBoolean()) {
+                return true;
+            }
+            Thread.sleep(10);
+        }
+        return condition.getAsBoolean();
     }
 
     private static final class RecordingConnection implements MeshtasticConnection {
