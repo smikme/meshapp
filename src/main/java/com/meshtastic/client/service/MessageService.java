@@ -1309,8 +1309,10 @@ public final class MessageService {
 
         NodeData myNode = state.getNodeDb().get(state.getMyNodeNum());
         MeshProtos.User ownerInfo = state.getOwnerInfo();
+        MeshProtos.DeviceMetadata deviceMetadata = state.getDeviceMetadata();
         ByteString securityPublicKey = extractSecurityPublicKey(state);
-        if (myNode == null && ownerInfo == null && (securityPublicKey == null || securityPublicKey.isEmpty())) {
+        if (myNode == null && ownerInfo == null && deviceMetadata == null
+                && (securityPublicKey == null || securityPublicKey.isEmpty())) {
             return null;
         }
 
@@ -1349,7 +1351,80 @@ public final class MessageService {
             hasMeaningfulField = true;
         }
 
+        ConfigProtos.Config.DeviceConfig.Role role = resolveLocalUserRole(myNode, ownerInfo, deviceMetadata);
+        if (role != null && role != ConfigProtos.Config.DeviceConfig.Role.CLIENT) {
+            builder.setRole(role);
+            hasMeaningfulField = true;
+        }
+
+        MeshProtos.HardwareModel hwModel = resolveLocalUserHwModel(myNode, ownerInfo, deviceMetadata);
+        if (hwModel != null && hwModel != MeshProtos.HardwareModel.UNSET) {
+            builder.setHwModel(hwModel);
+            hasMeaningfulField = true;
+        }
+
+        Boolean unmessagable = resolveLocalUserUnmessagable(myNode, ownerInfo);
+        if (unmessagable != null) {
+            builder.setIsUnmessagable(unmessagable);
+            hasMeaningfulField = true;
+        }
+
         return hasMeaningfulField ? builder.build() : null;
+    }
+
+    private static ConfigProtos.Config.DeviceConfig.Role resolveLocalUserRole(NodeData myNode,
+                                                                              MeshProtos.User ownerInfo,
+                                                                              MeshProtos.DeviceMetadata deviceMetadata) {
+        if (ownerInfo != null && ownerInfo.getRole() != ConfigProtos.Config.DeviceConfig.Role.CLIENT) {
+            return ownerInfo.getRole();
+        }
+        if (deviceMetadata != null && deviceMetadata.getRole() != ConfigProtos.Config.DeviceConfig.Role.CLIENT) {
+            return deviceMetadata.getRole();
+        }
+        return parseNodeRole(myNode);
+    }
+
+    private static MeshProtos.HardwareModel resolveLocalUserHwModel(NodeData myNode,
+                                                                    MeshProtos.User ownerInfo,
+                                                                    MeshProtos.DeviceMetadata deviceMetadata) {
+        if (ownerInfo != null && ownerInfo.getHwModel() != MeshProtos.HardwareModel.UNSET) {
+            return ownerInfo.getHwModel();
+        }
+        if (deviceMetadata != null && deviceMetadata.getHwModel() != MeshProtos.HardwareModel.UNSET) {
+            return deviceMetadata.getHwModel();
+        }
+        return parseNodeHwModel(myNode);
+    }
+
+    private static Boolean resolveLocalUserUnmessagable(NodeData myNode, MeshProtos.User ownerInfo) {
+        if (ownerInfo != null && ownerInfo.hasIsUnmessagable()) {
+            return ownerInfo.getIsUnmessagable();
+        }
+        return myNode != null ? myNode.getUnmessagable() : null;
+    }
+
+    private static ConfigProtos.Config.DeviceConfig.Role parseNodeRole(NodeData node) {
+        if (node == null || node.getRole() == null || node.getRole().isEmpty()) {
+            return null;
+        }
+        try {
+            return ConfigProtos.Config.DeviceConfig.Role.valueOf(node.getRole());
+        } catch (IllegalArgumentException ignored) {
+            log.debug("Skipping unknown local role '{}'", node.getRole());
+            return null;
+        }
+    }
+
+    private static MeshProtos.HardwareModel parseNodeHwModel(NodeData node) {
+        if (node == null || node.getHwModel() == null || node.getHwModel().isEmpty()) {
+            return null;
+        }
+        try {
+            return MeshProtos.HardwareModel.valueOf(node.getHwModel());
+        } catch (IllegalArgumentException ignored) {
+            log.debug("Skipping unknown local hwModel '{}'", node.getHwModel());
+            return null;
+        }
     }
 
     private static ByteString extractSecurityPublicKey(DeviceState state) {
