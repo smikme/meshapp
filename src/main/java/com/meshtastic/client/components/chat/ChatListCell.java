@@ -6,6 +6,7 @@ import com.meshtastic.client.model.ChatItem;
 import com.meshtastic.client.themes.TypographyManager;
 import com.meshtastic.client.utils.NodeUtils;
 import com.meshtastic.client.utils.SvgIconLoader;
+import com.meshtastic.client.utils.UnicodeTextUtils;
 import javafx.scene.Cursor;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
@@ -180,13 +181,14 @@ public class ChatListCell extends ListCell<ChatItem> {
             return;
         }
 
-        avatarLabel.setText(item.getAvatarText());
+        String safeAvatarText = UnicodeTextUtils.sanitizeForJavaFxDisplay(item.getAvatarText());
+        avatarLabel.setText(safeAvatarText);
         avatarLabel.setFont(Font.font("Roboto", FontWeight.BOLD,
-                NodeUtils.chatAvatarFontSize(item.getAvatarText().length(), 40)));
+                NodeUtils.chatAvatarFontSize(safeAvatarText, 40)));
         avatarPane.setStyle("-fx-background-color: " + item.getAvatarColor()
                 + "; -fx-background-radius: 20;");
 
-        nameLabel.setText(item.getDisplayName());
+        nameLabel.setText(UnicodeTextUtils.sanitizeForJavaFxDisplay(item.getDisplayName()));
         muteIconLabel.setText(null);
         muteIconLabel.setGraphic(createMuteIcon(item.isMuted()));
         muteIconTooltip.setText(item.isMuted()

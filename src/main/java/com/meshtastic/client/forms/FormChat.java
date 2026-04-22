@@ -580,12 +580,13 @@ public class FormChat extends Form {
         this.selectedChat = chat;
 
         // Обновить заголовок
-        headerAvatarLabel.setText(chat.getAvatarText());
+        String safeAvatarText = UnicodeTextUtils.sanitizeForJavaFxDisplay(chat.getAvatarText());
+        headerAvatarLabel.setText(safeAvatarText);
         headerAvatarLabel.setFont(Font.font("Roboto", FontWeight.BOLD,
-                NodeUtils.chatAvatarFontSize(chat.getAvatarText().length(), 36)));
+                NodeUtils.chatAvatarFontSize(safeAvatarText, 36)));
         headerAvatarPane.setStyle("-fx-background-color: " + chat.getAvatarColor() +
                 "; -fx-background-radius: 18;");
-        headerNameLabel.setText(chat.getDisplayName());
+        headerNameLabel.setText(UnicodeTextUtils.sanitizeForJavaFxDisplay(chat.getDisplayName()));
 
         // Показать header + messages + input
         detailPane.getChildren().clear();

@@ -786,54 +786,7 @@ public class FormSetting extends Form {
      * отбрасываем glyph-комбинации, которые уже приводили JavaFX/CoreText к native crash.
      */
     static String sanitizeCacheDisplayText(String value) {
-        String sanitized = com.meshtastic.client.utils.UnicodeTextUtils.sanitize(value);
-        if (sanitized == null || sanitized.isEmpty()) {
-            return "";
-        }
-
-        StringBuilder safe = new StringBuilder(sanitized.length());
-        boolean previousWasWhitespace = false;
-
-        for (int i = 0; i < sanitized.length(); ) {
-            int codePoint = sanitized.codePointAt(i);
-            i += Character.charCount(codePoint);
-
-            if (isUnsafeCacheDisplayCodePoint(codePoint)) {
-                continue;
-            }
-
-            if (Character.isWhitespace(codePoint)) {
-                if (!previousWasWhitespace && safe.length() > 0) {
-                    safe.append(' ');
-                    previousWasWhitespace = true;
-                }
-                continue;
-            }
-
-            safe.appendCodePoint(codePoint);
-            previousWasWhitespace = false;
-        }
-
-        int length = safe.length();
-        if (length > 0 && safe.charAt(length - 1) == ' ') {
-            safe.setLength(length - 1);
-        }
-        return safe.toString();
-    }
-
-    private static boolean isUnsafeCacheDisplayCodePoint(int codePoint) {
-        if (Character.isSupplementaryCodePoint(codePoint) || Character.isISOControl(codePoint)) {
-            return true;
-        }
-
-        return switch (Character.getType(codePoint)) {
-            case Character.NON_SPACING_MARK,
-                    Character.COMBINING_SPACING_MARK,
-                    Character.ENCLOSING_MARK,
-                    Character.FORMAT,
-                    Character.SURROGATE -> true;
-            default -> false;
-        };
+        return com.meshtastic.client.utils.UnicodeTextUtils.sanitizeForJavaFxDisplay(value);
     }
 
     // ==================== Config Tab ====================

@@ -10,6 +10,7 @@ import com.meshtastic.client.service.MessageDbService;
 import com.meshtastic.client.themes.TypographyManager;
 import com.meshtastic.client.utils.SvgIconLoader;
 import com.meshtastic.client.utils.NodeUtils;
+import com.meshtastic.client.utils.UnicodeTextUtils;
 import javafx.beans.property.ReadOnlyDoubleProperty;
 import javafx.geometry.Bounds;
 import javafx.geometry.Insets;
@@ -340,8 +341,10 @@ public class MessageBubbleFactory {
         avatar.setStyle("-fx-background-color: " + descriptor.color()
                 + "; -fx-background-radius: " + SMALL_AVATAR_RADIUS + ";");
 
-        Label label = new Label(descriptor.text());
-        label.setFont(Font.font("Roboto", FontWeight.BOLD, NodeUtils.avatarFontSize(descriptor.text(), (int) SMALL_AVATAR_SIZE)));
+        String safeAvatarText = UnicodeTextUtils.sanitizeForJavaFxDisplay(descriptor.text());
+        Label label = new Label(safeAvatarText);
+        label.setFont(Font.font("Roboto", FontWeight.BOLD,
+                NodeUtils.avatarFontSize(safeAvatarText, (int) SMALL_AVATAR_SIZE)));
         label.setStyle(AVATAR_LABEL_STYLE);
         avatar.getChildren().add(label);
         return avatar;
@@ -482,7 +485,7 @@ public class MessageBubbleFactory {
      * @return стилизованный label имени
      */
     private static Label createSenderNameLabel(String senderName) {
-        Label nameLabel = new Label(senderName);
+        Label nameLabel = new Label(UnicodeTextUtils.sanitizeForJavaFxDisplay(senderName));
         nameLabel.getStyleClass().add("chat-bubble-sender");
         return nameLabel;
     }
@@ -1079,7 +1082,8 @@ public class MessageBubbleFactory {
     }
 
     private static Node createEmojiFallbackLabel(String emoji, double size) {
-        Label fallback = new Label(emoji);
+        String safeEmoji = UnicodeTextUtils.sanitizeForJavaFxDisplay(emoji);
+        Label fallback = new Label(safeEmoji.isEmpty() ? "□" : safeEmoji);
         fallback.setFont(Font.font(size));
         return fallback;
     }
