@@ -106,6 +106,15 @@ class FormSettingTest {
     }
 
     @Test
+    void shouldSanitizeCacheDisplayTextWithoutTouchingReadableBmpText() {
+        assertEquals("Blue Goose 86b8", FormSetting.sanitizeCacheDisplayText("Blue Goose 🪿86b8"));
+        assertEquals("ioann", FormSetting.sanitizeCacheDisplayText("i͞oan͢n"));
+        assertEquals("Бердск ps27", FormSetting.sanitizeCacheDisplayText("Бердск ps27"));
+        assertEquals("Röyksopp", FormSetting.sanitizeCacheDisplayText("Röyksopp"));
+        assertEquals("", FormSetting.sanitizeCacheDisplayText(null));
+    }
+
+    @Test
     void shouldAddExtraSettleDelayBeforeCommitForAllTransports() {
         FormSetting form = onFxThread(FormSetting::new);
 

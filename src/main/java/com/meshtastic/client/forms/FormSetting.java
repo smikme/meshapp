@@ -658,12 +658,12 @@ public class FormSetting extends Form {
 
         TableColumn<NodeData, String> colLongName = new TableColumn<>("Имя");
         colLongName.setCellValueFactory(cd -> new SimpleStringProperty(
-                cd.getValue().getLongName() != null ? cd.getValue().getLongName() : ""));
+                sanitizeCacheDisplayText(cd.getValue().getLongName())));
         colLongName.setPrefWidth(150);
 
         TableColumn<NodeData, String> colShortName = new TableColumn<>("Короткое");
         colShortName.setCellValueFactory(cd -> new SimpleStringProperty(
-                cd.getValue().getShortName() != null ? cd.getValue().getShortName() : ""));
+                sanitizeCacheDisplayText(cd.getValue().getShortName())));
         colShortName.setPrefWidth(80);
 
         TableColumn<NodeData, String> colNodeId = new TableColumn<>("ID ноды");
@@ -779,6 +779,61 @@ public class FormSetting extends Form {
         } else {
             cacheStatusLabel.setText("Показано %d из %d (прокрутите для загрузки)".formatted(loaded, cacheTotalInDb));
         }
+    }
+
+    /**
+     * Вкладка «Кэш» показывает имена только для чтения, поэтому на macOS
+     * отбрасываем glyph-комбинации, которые уже приводили JavaFX/CoreText к native crash.
+     */
+    static String sanitizeCacheDisplayText(String value) {
+        String sanitized = com.meshtastic.client.utils.UnicodeTextUtils.sanitize(value);
+        if (sanitized == null || sanitized.isEmpty()) {
+            return "";
+        }
+
+        StringBuilder safe = new StringBuilder(sanitized.length());
+        boolean previousWasWhitespace = false;
+
+        for (int i = 0; i < sanitized.length(); ) {
+            int codePoint = sanitized.codePointAt(i);
+            i += Character.charCount(codePoint);
+
+            if (isUnsafeCacheDisplayCodePoint(codePoint)) {
+                continue;
+            }
+
+            if (Character.isWhitespace(codePoint)) {
+                if (!previousWasWhitespace && safe.length() > 0) {
+                    safe.append(' ');
+                    previousWasWhitespace = true;
+                }
+                continue;
+            }
+
+            safe.appendCodePoint(codePoint);
+            previousWasWhitespace = false;
+        }
+
+        int length = safe.length();
+        if (length > 0 && safe.charAt(length - 1) == ' ') {
+            safe.setLength(length - 1);
+        }
+        return safe.toString();
+    }
+
+    private static boolean isUnsafeCacheDisplayCodePoint(int codePoint) {
+        if (Character.isSupplementaryCodePoint(codePoint) || Character.isISOControl(codePoint)) {
+            return true;
+        }
+
+        return switch (Character.getType(codePoint)) {
+            case Character.NON_SPACING_MARK,
+                    Character.COMBINING_SPACING_MARK,
+                    Character.ENCLOSING_MARK,
+                    Character.FORMAT,
+                    Character.SURROGATE -> true;
+            default -> false;
+        };
     }
 
     // ==================== Config Tab ====================
