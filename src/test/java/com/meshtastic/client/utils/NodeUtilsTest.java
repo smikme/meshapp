@@ -26,4 +26,9 @@ class NodeUtilsTest {
     void avatarFontSizeFallsBackAfterSanitize() {
         assertEquals(NodeUtils.avatarFontSize(1, 40), NodeUtils.avatarFontSize("A\uD83D", 40));
     }
+
+    @Test
+    void chatAvatarFontSizeFallsBackAfterDisplaySanitize() {
+        assertEquals(NodeUtils.chatAvatarFontSize(1, 40), NodeUtils.chatAvatarFontSize("📡", 40));
+    }
 }

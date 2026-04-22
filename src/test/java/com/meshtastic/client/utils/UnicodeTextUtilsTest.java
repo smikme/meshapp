@@ -26,4 +26,16 @@ class UnicodeTextUtilsTest {
         String text = "a".repeat(59) + "😀" + "z";
         assertEquals("a".repeat(59) + "😀…", UnicodeTextUtils.truncateWithSuffix(text, 60, "…"));
     }
+
+    @Test
+    void sanitizeForJavaFxDisplayDropsUnsafeGlyphs() {
+        assertEquals("ABCDE",
+                UnicodeTextUtils.sanitizeForJavaFxDisplay("A😀B\u200DC\u0301D\u0007E"));
+    }
+
+    @Test
+    void sanitizeForJavaFxDisplayCollapsesWhitespaceSafely() {
+        assertEquals("A B\nC",
+                UnicodeTextUtils.sanitizeForJavaFxDisplay(" A\t\tB \n\n C "));
+    }
 }
