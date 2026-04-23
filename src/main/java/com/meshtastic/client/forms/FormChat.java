@@ -1128,6 +1128,9 @@ public class FormChat extends Form {
         if (!viewportLayoutQueued.compareAndSet(false, true)) {
             return;
         }
+        // Первый синхронный проход нужен при резком переключении короткий DM -> длинный канал:
+        // без него restoreSavedScrollPosition() может попасть в старую геометрию viewport.
+        relayoutMessageViewport();
         Platform.runLater(this::flushQueuedViewportLayout);
     }
 
