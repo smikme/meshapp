@@ -9,7 +9,7 @@ plugins {
 	id 'org.openjfx.javafxplugin' version '0.1.0'
 }
 
-def javaFxVersion = '21.0.10'
+def javaFxVersion = '21.0.11'
 
 application {
 	mainClass = 'com.meshtastic.client.MeshAppLauncher'

@@ -1,5 +1,6 @@
 package com.meshtastic.client.components;
 
+import com.meshtastic.client.utils.UnicodeTextUtils;
 import javafx.geometry.Bounds;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
@@ -16,6 +17,7 @@ import javafx.scene.layout.Priority;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 import javafx.stage.Popup;
+import javafx.scene.text.Font;
 
 import java.util.List;
 import java.util.function.Consumer;
@@ -30,6 +32,8 @@ public class EmojiPicker {
     private static final double PICKER_HEIGHT = 400;
     private static final int GRID_COLUMNS = 8;
     private static final double CELL_SIZE = 36;
+    // Используем clock emoji с существующим PNG-ассетом, чтобы не уходить в fallback-квадрат.
+    private static final String RECENT_CATEGORY_ICON = "\uD83D\uDD50";
 
     private final Popup popup;
     private final VBox root;
@@ -57,7 +61,8 @@ public class EmojiPicker {
 
         // Поиск
         searchField = new TextField();
-        searchField.setPromptText("\uD83D\uDD0D Поиск emoji...");
+        // На macOS TextField с emoji в prompt может уйти в небезопасный CoreText path.
+        searchField.setPromptText("Поиск emoji...");
         searchField.getStyleClass().add("emoji-picker-search");
         searchField.textProperty().addListener((obs, old, val) -> onSearchChanged(val));
         searchField.setOnKeyPressed(e -> {
@@ -153,7 +158,7 @@ public class EmojiPicker {
         List<String> recent = EmojiRecentStore.getRecent();
         if (!recent.isEmpty()) {
             categoryBar.getChildren().add(
-                    createCategoryButton("recent", "\uD83D\uDD53", "Недавние"));
+                    createCategoryButton("recent", RECENT_CATEGORY_ICON, "Недавние"));
         }
 
         // Кнопки остальных категорий
@@ -165,12 +170,7 @@ public class EmojiPicker {
 
     private StackPane createCategoryButton(String id, String icon, String tooltipText) {
         StackPane btn = new StackPane();
-        ImageView iv = EmojiImageCache.createImageView(icon, 18);
-        if (iv != null) {
-            btn.getChildren().add(iv);
-        } else {
-            btn.getChildren().add(new Label(icon));
-        }
+        btn.getChildren().add(createEmojiGraphic(icon, 18));
         btn.getStyleClass().add("emoji-cat-btn");
         Tooltip.install(btn, new Tooltip(tooltipText));
         btn.setUserData(id);
@@ -224,12 +224,7 @@ public class EmojiPicker {
     /** Создать ячейку сетки для одного эмодзи */
     private StackPane createEmojiCell(String emoji) {
         StackPane cell = new StackPane();
-        ImageView iv = EmojiImageCache.createImageView(emoji, 24);
-        if (iv != null) {
-            cell.getChildren().add(iv);
-        } else {
-            cell.getChildren().add(new Label(emoji));
-        }
+        cell.getChildren().add(createEmojiGraphic(emoji, 24));
         cell.getStyleClass().add("emoji-cell");
         cell.setMinSize(CELL_SIZE, CELL_SIZE);
         cell.setMaxSize(CELL_SIZE, CELL_SIZE);
@@ -251,5 +246,17 @@ public class EmojiPicker {
                 node.getStyleClass().add("emoji-cat-btn-active");
             }
         }
+    }
+
+    private Node createEmojiGraphic(String emoji, double size) {
+        ImageView iv = EmojiImageCache.createImageView(emoji, size);
+        if (iv != null) {
+            return iv;
+        }
+
+        String safeEmoji = UnicodeTextUtils.sanitizeForJavaFxDisplay(emoji);
+        Label fallback = new Label(safeEmoji.isEmpty() ? "□" : safeEmoji);
+        fallback.setFont(Font.font(size));
+        return fallback;
     }
 }
