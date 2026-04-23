@@ -4,6 +4,7 @@ import com.meshtastic.client.platform.OsDetect;
 
 import java.util.Collections;
 import java.util.List;
+import java.util.prefs.BackingStoreException;
 import java.util.prefs.Preferences;
 
 public class AppPreferences {
@@ -173,6 +174,7 @@ public class AppPreferences {
         state().putDouble(KEY_WINDOW_WIDTH, w);
         state().putDouble(KEY_WINDOW_HEIGHT, h);
         state().putBoolean(KEY_WINDOW_MAXIMIZED, maximized);
+        flushState();
     }
 
     /**
@@ -232,6 +234,15 @@ public class AppPreferences {
         state().putDouble(KEY_PACKET_MONITOR_WINDOW_WIDTH, w);
         state().putDouble(KEY_PACKET_MONITOR_WINDOW_HEIGHT, h);
         state().putBoolean(KEY_PACKET_MONITOR_WINDOW_MAXIMIZED, maximized);
+        flushState();
+    }
+
+    private static void flushState() {
+        try {
+            state().flush();
+        } catch (BackingStoreException ignored) {
+            // Best-effort persist for shutdown-sensitive window state.
+        }
     }
 
     // ==================== Recent Search ====================

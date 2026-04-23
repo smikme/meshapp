@@ -175,6 +175,7 @@ public class MeshApp extends Application {
         // программном stage.close() из кастомного title bar, и при нативном закрытии)
         stage.setOnCloseRequest(e -> {
             e.consume();
+            savePrimaryWindowStateIfPossible();
             AppTrayManager.getInstance().exitApplication();
         });
         stage.setOnHiding(e -> saveWindowState(stage, rootPane));
@@ -230,6 +231,20 @@ public class MeshApp extends Application {
         AppPreferences.saveWindowBounds(x, y, w, h, maximized);
     }
 
+    private void savePrimaryWindowStateIfPossible() {
+        Stage stage = primaryStage;
+        if (stage == null) {
+            return;
+        }
+
+        Scene scene = stage.getScene();
+        if (scene == null || !(scene.getRoot() instanceof RootPane)) {
+            return;
+        }
+
+        saveWindowState(stage, (RootPane) scene.getRoot());
+    }
+
     private void installWindowStateGuards(Stage stage, RootPane rootPane) {
         if (OsDetect.isMacOs() || AppPreferences.isDisableEffectsEffective()) {
             return;
@@ -281,6 +296,7 @@ public class MeshApp extends Application {
 
     @Override
     public void stop() {
+        savePrimaryWindowStateIfPossible();
         stopUiWatchdog();
         AppTrayManager.getInstance().dispose();
         ConnectionManager.getInstance().shutdownAll();
