@@ -16,6 +16,7 @@ import javafx.scene.control.Label;
 import javafx.scene.control.ProgressIndicator;
 import javafx.scene.control.Separator;
 import javafx.scene.control.TextArea;
+import javafx.scene.control.TextField;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyEvent;
 import javafx.scene.layout.HBox;
@@ -25,6 +26,8 @@ import javafx.stage.Stage;
 import javafx.stage.Window;
 import javafx.util.Duration;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
@@ -42,7 +45,7 @@ public final class CrashReportPrompt {
     public static void show(Window owner, Content content, Consumer<Decision> callback) {
         ModalPane modalPane = ModalPane.getInstance();
         if (modalPane == null) {
-            callback.accept(new Decision(false, ""));
+            callback.accept(new Decision(false, "", ""));
             return;
         }
 
@@ -54,6 +57,10 @@ public final class CrashReportPrompt {
 
         Label lead = new Label(content.lead());
         lead.setWrapText(true);
+
+        Label emailLabel = new Label(content.emailLabel());
+        TextField emailField = new TextField();
+        emailField.setPromptText(content.emailPrompt());
 
         Label commentLabel = new Label(content.commentLabel());
         TextArea commentArea = new TextArea();
@@ -73,15 +80,21 @@ public final class CrashReportPrompt {
         buttonRow.setAlignment(Pos.CENTER_RIGHT);
         buttonRow.setPadding(new Insets(10, 0, 0, 0));
 
-        VBox panel = new VBox(12,
-                title,
-                new Separator(),
-                lead,
-                commentLabel,
-                commentArea,
-                privacy,
-                buttonRow
-        );
+        List<Node> panelChildren = new ArrayList<>();
+        panelChildren.add(title);
+        panelChildren.add(new Separator());
+        panelChildren.add(lead);
+        if (content.collectsEmail()) {
+            panelChildren.add(emailLabel);
+            panelChildren.add(emailField);
+        }
+        panelChildren.add(commentLabel);
+        panelChildren.add(commentArea);
+        panelChildren.add(privacy);
+        panelChildren.add(buttonRow);
+
+        VBox panel = new VBox(12);
+        panel.getChildren().addAll(panelChildren);
         panel.setPadding(new Insets(20, 30, 20, 30));
         panel.setPrefWidth(420);
         panel.setMaxWidth(420);
@@ -89,11 +102,11 @@ public final class CrashReportPrompt {
         panel.getStyleClass().add("modal-side-panel");
 
         cancelButton.setOnAction(event -> {
-            result.value = new Decision(false, commentArea.getText());
+            result.value = new Decision(false, commentArea.getText(), emailField.getText());
             modalPane.hide();
         });
         sendButton.setOnAction(event -> {
-            result.value = new Decision(true, commentArea.getText());
+            result.value = new Decision(true, commentArea.getText(), emailField.getText());
             modalPane.hide();
         });
 
@@ -162,10 +175,18 @@ public final class CrashReportPrompt {
         return progressDialog;
     }
 
-    public record Decision(boolean sendReport, String comment) {}
+    public record Decision(boolean sendReport, String comment, String email) {
+
+        public Decision {
+            comment = comment == null ? "" : comment;
+            email = email == null ? "" : email.trim();
+        }
+    }
 
     public record Content(String title,
                           String lead,
+                          String emailLabel,
+                          String emailPrompt,
                           String commentLabel,
                           String commentPrompt,
                           String privacy,
@@ -174,16 +195,27 @@ public final class CrashReportPrompt {
         public Content {
             title = requireText(title, "title");
             lead = requireText(lead, "lead");
+            emailLabel = normalizeOptionalText(emailLabel);
+            emailPrompt = normalizeOptionalText(emailPrompt);
+            if (emailLabel.isBlank() != emailPrompt.isBlank()) {
+                throw new IllegalArgumentException("emailLabel and emailPrompt must both be blank or both be set");
+            }
             commentLabel = requireText(commentLabel, "commentLabel");
             commentPrompt = requireText(commentPrompt, "commentPrompt");
             privacy = requireText(privacy, "privacy");
             sendButtonText = requireText(sendButtonText, "sendButtonText");
         }
 
+        public boolean collectsEmail() {
+            return !emailLabel.isBlank();
+        }
+
         public static Content startupCrash() {
             return new Content(
                     "Отчёт о сбое",
                     "Прошлый запуск приложения завершился ошибкой. Мы сохранили технический лог, чтобы можно было отправить его разработчикам.",
+                    "E-Mail для обратной связи (необязательно):",
+                    "you@example.com",
                     "Комментарий к случившемуся:",
                     "Опишите, что происходило перед сбоем",
                     "Никакая конфиденциальная информация не передаётся: отправляется только технический лог приложения и ваш необязательный комментарий.",
@@ -195,6 +227,8 @@ public final class CrashReportPrompt {
             return new Content(
                     "Сообщить о проблеме",
                     "Опишите проблему, а мы приложим к отчёту технический лог текущей сессии приложения.",
+                    "E-Mail для обратной связи (необязательно):",
+                    "you@example.com",
                     "Что произошло:",
                     "Опишите шаги, ожидаемое и фактическое поведение",
                     "Никакая конфиденциальная информация не передаётся: отправляется только технический лог текущей сессии и ваш необязательный комментарий.",
@@ -262,6 +296,10 @@ public final class CrashReportPrompt {
             throw new IllegalArgumentException(fieldName + " must not be blank");
         }
         return value.trim();
+    }
+
+    private static String normalizeOptionalText(String value) {
+        return value == null ? "" : value.trim();
     }
 
     static void requestFocusAfterShow(Node animatedNode, Runnable focusAction) {
@@ -395,7 +433,7 @@ public final class CrashReportPrompt {
     }
 
     private static final class DecisionHolder {
-        private Decision value = new Decision(false, "");
+        private Decision value = new Decision(false, "", "");
     }
 
     private static final class TextInputGuard {
