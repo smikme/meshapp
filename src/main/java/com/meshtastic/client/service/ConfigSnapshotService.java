@@ -81,7 +81,7 @@ public final class ConfigSnapshotService {
         }
     }
 
-    public record OwnerInfo(String longName, String shortName) {}
+    public record OwnerInfo(String longName, String shortName, boolean isLicensed) {}
     public record FixedPosition(double latitude, double longitude, int altitude) {}
 
     public record ConfigSnapshot(
@@ -129,6 +129,7 @@ public final class ConfigSnapshotService {
             JsonObject owner = new JsonObject();
             owner.addProperty("longName", snapshot.ownerInfo().longName());
             owner.addProperty("shortName", snapshot.ownerInfo().shortName());
+            owner.addProperty("isLicensed", snapshot.ownerInfo().isLicensed());
             root.add("ownerInfo", owner);
         }
 
@@ -172,7 +173,8 @@ public final class ConfigSnapshotService {
             JsonObject owner = root.getAsJsonObject("ownerInfo");
             ownerInfo = new OwnerInfo(
                     owner.has("longName") ? owner.get("longName").getAsString() : "",
-                    owner.has("shortName") ? owner.get("shortName").getAsString() : ""
+                    owner.has("shortName") ? owner.get("shortName").getAsString() : "",
+                    owner.has("isLicensed") && owner.get("isLicensed").getAsBoolean()
             );
         }
 

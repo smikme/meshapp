@@ -569,9 +569,20 @@ public final class MessageService {
      */
     public static void setOwnerInfo(ProtocolHandler handler, DeviceState state,
                                     String longName, String shortName, ByteString sessionPasskey) {
+        setOwnerInfo(handler, state, longName, shortName, resolveOwnerLicensed(state), sessionPasskey);
+    }
+
+    /**
+     * Устанавливает owner info (longName, shortName, isLicensed) на подключённом радио.
+     * Требует session_passkey, полученный из предварительного get_owner_request.
+     */
+    public static void setOwnerInfo(ProtocolHandler handler, DeviceState state,
+                                    String longName, String shortName, boolean isLicensed,
+                                    ByteString sessionPasskey) {
         MeshProtos.User user = MeshProtos.User.newBuilder()
                 .setLongName(longName)
                 .setShortName(shortName)
+                .setIsLicensed(isLicensed)
                 .build();
 
         AdminProtos.AdminMessage.Builder adminBuilder = AdminProtos.AdminMessage.newBuilder()
@@ -582,6 +593,16 @@ public final class MessageService {
         AdminProtos.AdminMessage adminMsg = adminBuilder.build();
 
         sendAdminMessage(handler, state, adminMsg);
+    }
+
+    private static boolean resolveOwnerLicensed(DeviceState state) {
+        if (state == null) { return false; }
+        MeshProtos.User ownerInfo = state.getOwnerInfo();
+        if (ownerInfo != null) {
+            return ownerInfo.getIsLicensed();
+        }
+        NodeData myNode = state.getNodeDb().get(state.getMyNodeNum());
+        return myNode != null && myNode.isLicensed();
     }
 
     /**
@@ -1346,6 +1367,12 @@ public final class MessageService {
             hasMeaningfulField = true;
         }
 
+        Boolean licensed = resolveLocalUserLicensed(myNode, ownerInfo);
+        if (Boolean.TRUE.equals(licensed)) {
+            builder.setIsLicensed(true);
+            hasMeaningfulField = true;
+        }
+
         if (securityPublicKey != null && !securityPublicKey.isEmpty()) {
             builder.setPublicKey(securityPublicKey);
             hasMeaningfulField = true;
@@ -1370,6 +1397,13 @@ public final class MessageService {
         }
 
         return hasMeaningfulField ? builder.build() : null;
+    }
+
+    private static Boolean resolveLocalUserLicensed(NodeData myNode, MeshProtos.User ownerInfo) {
+        if (ownerInfo != null && ownerInfo.getIsLicensed()) {
+            return true;
+        }
+        return myNode != null ? myNode.getLicensed() : null;
     }
 
     private static ConfigProtos.Config.DeviceConfig.Role resolveLocalUserRole(NodeData myNode,

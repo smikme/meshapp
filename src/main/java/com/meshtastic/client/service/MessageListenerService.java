@@ -647,6 +647,7 @@ public class MessageListenerService implements FromRadioListener {
         if (!owner.getPublicKey().isEmpty()) {
             node.setPublicKey(owner.getPublicKey().toByteArray());
         }
+        node.setLicensed(owner.getIsLicensed());
         if (owner.hasIsUnmessagable()) {
             node.setUnmessagable(owner.getIsUnmessagable());
         }

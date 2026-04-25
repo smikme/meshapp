@@ -121,6 +121,10 @@ public class FormSetting extends Form {
     private static final int DEVICE_POWER_ACTION_DELAY_SECONDS = 1;
     /** Сколько максимум ждём routing ACK для reboot/shutdown перед fallback-поведением. */
     private static final long DEVICE_POWER_ACTION_ACK_TIMEOUT_MS = 2_500;
+    private static final String OWNER_INFO_CONFIG_TYPE = "owner_info";
+    private static final String OWNER_LONG_NAME_FIELD = "long_name";
+    private static final String OWNER_SHORT_NAME_FIELD = "short_name";
+    private static final String OWNER_IS_LICENSED_FIELD = "is_licensed";
 
     private DeviceState state;
     private ProtocolHandler handler;
@@ -1681,13 +1685,14 @@ public class FormSetting extends Form {
     }
 
     private ConfigSnapshotService.OwnerInfo extractOwnerInfo(TreeItem<ConfigTreeItem> root) {
-        TreeItem<ConfigTreeItem> ownerSection = findTopLevelSection(root, "owner_info");
+        TreeItem<ConfigTreeItem> ownerSection = findTopLevelSection(root, OWNER_INFO_CONFIG_TYPE);
         if (ownerSection == null) {
             return null;
         }
         return new ConfigSnapshotService.OwnerInfo(
-                stringValue(ownerSection, "long_name"),
-                stringValue(ownerSection, "short_name")
+                stringValue(ownerSection, OWNER_LONG_NAME_FIELD),
+                stringValue(ownerSection, OWNER_SHORT_NAME_FIELD),
+                booleanValue(ownerSection, OWNER_IS_LICENSED_FIELD)
         );
     }
 
@@ -1772,12 +1777,13 @@ public class FormSetting extends Form {
         if (ownerInfo == null) {
             return;
         }
-        TreeItem<ConfigTreeItem> ownerSection = findTopLevelSection(root, "owner_info");
+        TreeItem<ConfigTreeItem> ownerSection = findTopLevelSection(root, OWNER_INFO_CONFIG_TYPE);
         if (ownerSection == null) {
             return;
         }
-        setTreeFieldValue(ownerSection, "long_name", ownerInfo.longName());
-        setTreeFieldValue(ownerSection, "short_name", ownerInfo.shortName());
+        setTreeFieldValue(ownerSection, OWNER_LONG_NAME_FIELD, ownerInfo.longName());
+        setTreeFieldValue(ownerSection, OWNER_SHORT_NAME_FIELD, ownerInfo.shortName());
+        setTreeFieldValue(ownerSection, OWNER_IS_LICENSED_FIELD, ownerInfo.isLicensed());
     }
 
     private void applyFixedPosition(ConfigSnapshotService.FixedPosition fixedPosition, TreeItem<ConfigTreeItem> root) {
@@ -1955,6 +1961,11 @@ public class FormSetting extends Form {
         return value instanceof Number number ? number.intValue() : 0;
     }
 
+    private boolean booleanValue(TreeItem<ConfigTreeItem> section, String fieldName) {
+        Object value = findTreeFieldValue(section, fieldName);
+        return value instanceof Boolean bool ? bool : Boolean.parseBoolean(String.valueOf(value));
+    }
+
     private Object findTreeFieldValue(TreeItem<ConfigTreeItem> section, String fieldName) {
         for (TreeItem<ConfigTreeItem> child : section.getChildren()) {
             ConfigTreeItem data = child.getValue();
@@ -2072,15 +2083,20 @@ public class FormSetting extends Form {
 
         // Виртуальная секция: Имя устройства
         TreeItem<ConfigTreeItem> ownerSection = new TreeItem<>(
-                new ConfigTreeItem("Имя устройства", "owner_info", 0));
-        String longName = myNode != null && myNode.getLongName() != null ? myNode.getLongName() : "";
+                new ConfigTreeItem("Имя устройства", OWNER_INFO_CONFIG_TYPE, 0));
+        MeshProtos.User ownerInfo = state.getOwnerInfo();
+        String longName = resolveOwnerLongName(ownerInfo, myNode);
         ownerSection.getChildren().add(new TreeItem<>(
-                new ConfigTreeItem("Длинное имя", "long_name", longName, String.class,
-                        null, null, "owner_info", 0)));
-        String shortName = myNode != null && myNode.getShortName() != null ? myNode.getShortName() : "";
+                new ConfigTreeItem("Длинное имя", OWNER_LONG_NAME_FIELD, longName, String.class,
+                        null, null, OWNER_INFO_CONFIG_TYPE, 0)));
+        String shortName = resolveOwnerShortName(ownerInfo, myNode);
         ownerSection.getChildren().add(new TreeItem<>(
-                new ConfigTreeItem("Короткое имя", "short_name", shortName, String.class,
-                        null, null, "owner_info", 0)));
+                new ConfigTreeItem("Короткое имя", OWNER_SHORT_NAME_FIELD, shortName, String.class,
+                        null, null, OWNER_INFO_CONFIG_TYPE, 0)));
+        ownerSection.getChildren().add(new TreeItem<>(
+                new ConfigTreeItem("Лицензированный оператор", OWNER_IS_LICENSED_FIELD,
+                        resolveOwnerLicensed(ownerInfo, myNode), Boolean.class,
+                        null, null, OWNER_INFO_CONFIG_TYPE, 0)));
         root.getChildren().add(ownerSection);
 
         // Виртуальная секция: Фиксированная позиция
@@ -2132,6 +2148,27 @@ public class FormSetting extends Form {
             configStatusLabel.setText("Загружено: %d секций, %d параметров".formatted(
                     originalConfigs.size() + originalModuleConfigs.size(), totalFields));
         }
+    }
+
+    private String resolveOwnerLongName(MeshProtos.User ownerInfo, NodeData myNode) {
+        if (ownerInfo != null && ownerInfo.getLongName() != null && !ownerInfo.getLongName().isEmpty()) {
+            return ownerInfo.getLongName();
+        }
+        return myNode != null && myNode.getLongName() != null ? myNode.getLongName() : "";
+    }
+
+    private String resolveOwnerShortName(MeshProtos.User ownerInfo, NodeData myNode) {
+        if (ownerInfo != null && ownerInfo.getShortName() != null && !ownerInfo.getShortName().isEmpty()) {
+            return ownerInfo.getShortName();
+        }
+        return myNode != null && myNode.getShortName() != null ? myNode.getShortName() : "";
+    }
+
+    private boolean resolveOwnerLicensed(MeshProtos.User ownerInfo, NodeData myNode) {
+        if (ownerInfo != null) {
+            return ownerInfo.getIsLicensed();
+        }
+        return myNode != null && myNode.isLicensed();
     }
 
     /**
@@ -2261,6 +2298,9 @@ public class FormSetting extends Form {
         boolean ownerModified = false;
         String newLongName = null;
         String newShortName = null;
+        boolean newIsLicensed = resolveOwnerLicensed(
+                actionState.getOwnerInfo(),
+                actionState.getNodeDb().get(actionState.getMyNodeNum()));
         boolean positionModified = false;
         double newLat = 0;
         double newLon = 0;
@@ -2275,12 +2315,15 @@ public class FormSetting extends Form {
             if (topData == null) { continue; }
 
             // Виртуальная секция: Имя устройства
-            if ("owner_info".equals(topData.getConfigType()) && hasMoifiedFields(topLevel)) {
+            if (OWNER_INFO_CONFIG_TYPE.equals(topData.getConfigType()) && hasMoifiedFields(topLevel)) {
                 ownerModified = true;
                 for (TreeItem<ConfigTreeItem> child : topLevel.getChildren()) {
                     ConfigTreeItem ci = child.getValue();
-                    if ("long_name".equals(ci.getFieldName())) { newLongName = ci.getValue().toString(); }
-                    if ("short_name".equals(ci.getFieldName())) { newShortName = ci.getValue().toString(); }
+                    if (OWNER_LONG_NAME_FIELD.equals(ci.getFieldName())) { newLongName = ci.getValue().toString(); }
+                    if (OWNER_SHORT_NAME_FIELD.equals(ci.getFieldName())) { newShortName = ci.getValue().toString(); }
+                    if (OWNER_IS_LICENSED_FIELD.equals(ci.getFieldName())) {
+                        newIsLicensed = Boolean.TRUE.equals(ci.getValue());
+                    }
                 }
             }
 
@@ -2344,6 +2387,7 @@ public class FormSetting extends Form {
         final boolean fOwnerModified = ownerModified;
         final String fLongName = newLongName;
         final String fShortName = newShortName;
+        final boolean fIsLicensed = newIsLicensed;
         final boolean fPositionModified = positionModified;
         final double fLat = newLat;
         final double fLon = newLon;
@@ -2360,7 +2404,7 @@ public class FormSetting extends Form {
             if (saveDispatchStarted.compareAndSet(false, true)) {
                 sendConfigChanges(activeEntry, actionState, actionHandler,
                         modifiedConfigs, modifiedModuleConfigs, modifiedChannels,
-                        fOwnerModified, fLongName, fShortName,
+                        fOwnerModified, fLongName, fShortName, fIsLicensed,
                         fPositionModified, fLat, fLon, fAlt,
                         totalChanges);
             }
@@ -2376,7 +2420,7 @@ public class FormSetting extends Form {
                     configStatusLabel.setText("Отправка без session key...");
                     sendConfigChanges(activeEntry, actionState, actionHandler,
                             modifiedConfigs, modifiedModuleConfigs, modifiedChannels,
-                            fOwnerModified, fLongName, fShortName,
+                            fOwnerModified, fLongName, fShortName, fIsLicensed,
                             fPositionModified, fLat, fLon, fAlt,
                             totalChanges);
                 }
@@ -2400,6 +2444,7 @@ public class FormSetting extends Form {
                                    List<ModuleConfigProtos.ModuleConfig> moduleConfigs,
                                    List<ChannelProtos.Channel> channels,
                                    boolean ownerModified, String newLongName, String newShortName,
+                                   boolean newIsLicensed,
                                    boolean positionModified, double newLat, double newLon, int newAlt,
                                    int totalChanges) {
         configStatusLabel.setText("Отправка настроек...");
@@ -2410,11 +2455,21 @@ public class FormSetting extends Form {
         // Виртуальные секции — отправить напрямую
         if (ownerModified && newLongName != null && newShortName != null) {
             MessageService.setOwnerInfo(actionHandler, actionState,
-                    newLongName, newShortName, actionState.getSessionPasskey());
+                    newLongName, newShortName, newIsLicensed, actionState.getSessionPasskey());
+            MeshProtos.User currentOwnerInfo = actionState.getOwnerInfo();
+            MeshProtos.User updatedOwnerInfo = (currentOwnerInfo != null
+                    ? currentOwnerInfo.toBuilder()
+                    : MeshProtos.User.newBuilder())
+                    .setLongName(newLongName)
+                    .setShortName(newShortName)
+                    .setIsLicensed(newIsLicensed)
+                    .build();
+            actionState.setOwnerInfo(updatedOwnerInfo);
             NodeData myNode = actionState.getNodeDb().get(actionState.getMyNodeNum());
             if (myNode != null) {
                 myNode.setLongName(newLongName);
                 myNode.setShortName(newShortName);
+                myNode.setLicensed(newIsLicensed);
                 actionState.fireNodeUpdateListeners(actionState.getMyNodeNum());
             }
         }

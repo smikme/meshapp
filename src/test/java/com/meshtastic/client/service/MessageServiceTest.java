@@ -118,6 +118,26 @@ class MessageServiceTest {
     }
 
     @Test
+    void setOwnerInfoSendsLicensedFlag() throws Exception {
+        RecordingConnection connection = new RecordingConnection();
+        ProtocolHandler handler = track(new ProtocolHandler(connection));
+        DeviceState state = new DeviceState();
+        state.setMyNodeNum(0x04c5b420);
+        ByteString passkey = ByteString.copyFromUtf8("passkey");
+
+        MessageService.setOwnerInfo(handler, state, "CALLSIGN", "CS", true, passkey);
+
+        MeshProtos.ToRadio sent = parseLastToRadio(connection);
+        AdminProtos.AdminMessage admin =
+                AdminProtos.AdminMessage.parseFrom(sent.getPacket().getDecoded().getPayload());
+        assertTrue(admin.hasSetOwner());
+        assertEquals("CALLSIGN", admin.getSetOwner().getLongName());
+        assertEquals("CS", admin.getSetOwner().getShortName());
+        assertTrue(admin.getSetOwner().getIsLicensed());
+        assertEquals(passkey, admin.getSessionPasskey());
+    }
+
+    @Test
     void sendChannelReactionSetsReplyIdAndEmojiFlagAndPersistsReaction() throws Exception {
         RecordingConnection connection = new RecordingConnection();
         ProtocolHandler handler = track(new ProtocolHandler(connection));

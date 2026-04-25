@@ -222,6 +222,7 @@ public class ConfigExchangeService implements FromRadioListener {
             if (!user.getPublicKey().isEmpty()) {
                 node.setPublicKey(user.getPublicKey().toByteArray());
             }
+            node.setLicensed(user.getIsLicensed());
             if (user.hasIsUnmessagable()) {
                 node.setUnmessagable(user.getIsUnmessagable());
             }
