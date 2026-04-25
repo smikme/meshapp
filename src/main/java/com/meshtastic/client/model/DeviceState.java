@@ -126,7 +126,7 @@ public class DeviceState {
     /**
      * Возвращает внутренний map узлов (для backward compatibility).
      *
-     * @return ConcurrentHashMap<Integer, NodeData>
+     * @return {@code ConcurrentHashMap<Integer, NodeData>}
      */
     public ConcurrentHashMap<Integer, NodeData> getNodeDb() { return nodeDatabase.getNodeDb(); }
 
@@ -512,7 +512,8 @@ public class DeviceState {
     }
 
     /**
-     * Returns {@code true} if a fixed position was set by the user recently (< 120s ago).
+     * Возвращает {@code true}, если фиксированная позиция была недавно задана пользователем
+     * (менее 120 секунд назад).
      */
     public boolean hasPendingFixedPosition() {
         long setAt = pendingFixedSetAt;

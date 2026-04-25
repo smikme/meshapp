@@ -95,7 +95,7 @@ public class MessageStore {
     /**
      * Возвращает все канальные сообщения.
      *
-     * @return Map<channelIndex, List<MeshMessage>>
+     * @return {@code Map<channelIndex, List<MeshMessage>>}
      */
     public Map<Integer, List<MeshMessage>> getAllChannelMessages() {
         return messagesByChannel;
@@ -151,7 +151,7 @@ public class MessageStore {
     /**
      * Возвращает все личные сообщения.
      *
-     * @return Map<peerNodeId, List<MeshMessage>>
+     * @return {@code Map<peerNodeId, List<MeshMessage>>}
      */
     public Map<String, List<MeshMessage>> getAllDirectMessages() {
         return directMessages;
@@ -324,7 +324,7 @@ public class MessageStore {
     /**
      * Возвращает internal map pending ACK (для ACK sweep).
      *
-     * @return ConcurrentHashMap<Integer, PendingAckEntry>
+     * @return {@code ConcurrentHashMap<Integer, PendingAckEntry>}
      */
     public ConcurrentHashMap<Integer, PendingAckEntry> getPendingAcks() {
         return pendingAcks;

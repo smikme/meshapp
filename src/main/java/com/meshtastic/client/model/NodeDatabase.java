@@ -138,7 +138,7 @@ public class NodeDatabase {
     /**
      * Возвращает внутренний map узлов (для backward compatibility).
      *
-     * @return ConcurrentHashMap<Integer, NodeData>
+     * @return {@code ConcurrentHashMap<Integer, NodeData>}
      */
     public ConcurrentHashMap<Integer, NodeData> getNodeDb() {
         return nodeDb;
