@@ -1,15 +1,51 @@
 package com.meshtastic.client.forms;
 
+import com.meshtastic.client.TestEnvironmentSupport;
+import com.meshtastic.client.model.ChatItem;
 import com.meshtastic.client.model.MeshMessage;
+import javafx.application.Platform;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.meshtastic.proto.ChannelProtos;
 
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class FormChatTest {
+
+    @BeforeAll
+    static void startJavaFx() {
+        TestEnvironmentSupport.ensureJavaFxStarted();
+    }
+
+    @Test
+    void shouldNotSaveScrollStateWhenLoadedWindowBelongsToPreviousChat() {
+        onFxThread(() -> {
+            FormChat form = new FormChat();
+            ChatItem channel = channel(0);
+            ChatItem directMessage = directMessage("!00000002");
+
+            MeshMessage staleDirectMessage = incoming("stale dm row");
+            staleDirectMessage.setDbId(42);
+
+            form.selectedChat = channel;
+            form.loadedChatScrollCacheKey = form.chatScrollCacheKey(directMessage);
+            form.loadedMessages.add(staleDirectMessage);
+            form.newestLoadedDbId = staleDirectMessage.getDbId();
+            form.latestKnownDbId = staleDirectMessage.getDbId();
+
+            form.saveCurrentChatScrollState();
+
+            assertFalse(form.savedChatScrollStates.containsKey(form.chatScrollCacheKey(channel)));
+            return null;
+        });
+    }
 
     @Test
     void shouldMarkNewMessagesReadImmediatelyWhenVisibleAndAtTail() {
@@ -91,5 +127,58 @@ class FormChatTest {
 
     private static MeshMessage outgoing(String text) {
         return new MeshMessage("!00000001", "!ffffffff", 0, text, 10, true);
+    }
+
+    private static ChatItem channel(int index) {
+        ChannelProtos.Channel channel = ChannelProtos.Channel.newBuilder()
+                .setIndex(index)
+                .setRole(index == 0
+                        ? ChannelProtos.Channel.Role.PRIMARY
+                        : ChannelProtos.Channel.Role.SECONDARY)
+                .setSettings(ChannelProtos.ChannelSettings.newBuilder().setName("Ch " + index))
+                .build();
+        return ChatItem.fromChannel(channel, (MeshMessage) null, 0, false);
+    }
+
+    private static ChatItem directMessage(String nodeId) {
+        return ChatItem.fromDirectMessage(nodeId, null, (MeshMessage) null, 0, false);
+    }
+
+    private static <T> T onFxThread(FxSupplier<T> supplier) {
+        CountDownLatch latch = new CountDownLatch(1);
+        AtomicReference<T> result = new AtomicReference<>();
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+
+        Platform.runLater(() -> {
+            try {
+                result.set(supplier.get());
+            } catch (Throwable t) {
+                failure.set(t);
+            } finally {
+                latch.countDown();
+            }
+        });
+
+        await(latch);
+        if (failure.get() != null) {
+            throw new AssertionError("JavaFX task failed", failure.get());
+        }
+        return result.get();
+    }
+
+    private static void await(CountDownLatch latch) {
+        try {
+            if (!latch.await(5, TimeUnit.SECONDS)) {
+                throw new AssertionError("Timed out waiting for JavaFX task");
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new AssertionError("Interrupted while waiting for JavaFX task", e);
+        }
+    }
+
+    @FunctionalInterface
+    private interface FxSupplier<T> {
+        T get() throws Exception;
     }
 }

@@ -108,6 +108,7 @@ abstract class FormChatBase extends Form {
     protected boolean loadingNewerMessages = false;
     protected final List<MeshMessage> loadedMessages = new ArrayList<>();
     protected final Map<Long, HBox> loadedMessageRows = new HashMap<>();
+    protected String loadedChatScrollCacheKey;
     protected int openingChatUnreadCount = 0;
     protected final Map<String, ChatScrollState> savedChatScrollStates = new HashMap<>();
     // Трекинг статусов исходящих сообщений для обновления при ACK/NAK
@@ -188,6 +189,8 @@ abstract class FormChatBase extends Form {
     protected abstract void rebindState();
     protected abstract void handleChatFontSizeChanged();
     protected abstract void saveCurrentChatScrollState();
+    protected abstract void suspendScrollStateSync();
+    protected abstract void resumeScrollStateSyncLater();
     protected abstract boolean isScrollStateSyncSuspended();
     protected abstract boolean isCurrentScrollOperation(long generation);
     protected abstract void clearLoadedMessageState();

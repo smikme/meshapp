@@ -321,6 +321,9 @@ abstract class FormChatUi extends FormChatBase {
     }
 
     private void handleMessageScroll(double vvalue) {
+        if (isScrollStateSyncSuspended()) {
+            return;
+        }
         loadAdjacentPagesIfNeeded(vvalue);
         boolean atBottom = isAtLiveTail();
         scrollDownBtn.setVisible(!atBottom);
@@ -469,35 +472,40 @@ abstract class FormChatUi extends FormChatBase {
     }
 
     protected void openChat(ChatItem chat) {
-        bubbleFactory.hideOpenReactionPopup();
-        scrollOperationGeneration++;
-        this.selectedChat = chat;
+        suspendScrollStateSync();
+        try {
+            bubbleFactory.hideOpenReactionPopup();
+            scrollOperationGeneration++;
+            this.selectedChat = chat;
 
-        // Обновить заголовок
-        String safeAvatarText = UnicodeTextUtils.sanitizeForJavaFxDisplay(chat.getAvatarText());
-        headerAvatarLabel.setText(safeAvatarText);
-        headerAvatarLabel.setFont(Font.font("Roboto", FontWeight.BOLD,
-                NodeUtils.chatAvatarFontSize(safeAvatarText, 36)));
-        headerAvatarPane.setStyle("-fx-background-color: " + chat.getAvatarColor() +
-                "; -fx-background-radius: 18;");
-        headerNameLabel.setText(UnicodeTextUtils.sanitizeForJavaFxDisplay(chat.getDisplayName()));
+            // Обновить заголовок
+            String safeAvatarText = UnicodeTextUtils.sanitizeForJavaFxDisplay(chat.getAvatarText());
+            headerAvatarLabel.setText(safeAvatarText);
+            headerAvatarLabel.setFont(Font.font("Roboto", FontWeight.BOLD,
+                    NodeUtils.chatAvatarFontSize(safeAvatarText, 36)));
+            headerAvatarPane.setStyle("-fx-background-color: " + chat.getAvatarColor() +
+                    "; -fx-background-radius: 18;");
+            headerNameLabel.setText(UnicodeTextUtils.sanitizeForJavaFxDisplay(chat.getDisplayName()));
 
-        // Показать заголовок, сообщения и панель ввода
-        detailPane.getChildren().clear();
-        detailPane.getChildren().addAll(
-                chatHeader, headerSep, messageArea,
-                chatInputBar.getInputSeparator(), chatInputBar);
+            // Показать заголовок, сообщения и панель ввода
+            detailPane.getChildren().clear();
+            detailPane.getChildren().addAll(
+                    chatHeader, headerSep, messageArea,
+                    chatInputBar.getInputSeparator(), chatInputBar);
 
-        // Сбросить режим ответа при переключении чата
-        chatInputBar.cancelReply();
+            // Сбросить режим ответа при переключении чата
+            chatInputBar.cancelReply();
 
-        // Загрузить последние сообщения из БД
-        loadInitialMessages(true);
-        // Восстановить пузыри активных запросов (трассировка/инфо) для этого чата
-        restorePendingCountdowns();
+            // Загрузить последние сообщения из БД
+            loadInitialMessages(true);
+            // Восстановить пузыри активных запросов (трассировка/инфо) для этого чата
+            restorePendingCountdowns();
 
-        updateInputEnabled();
-        chatInputBar.focusInput();
+            updateInputEnabled();
+            chatInputBar.focusInput();
+        } finally {
+            resumeScrollStateSyncLater();
+        }
     }
 
     protected void handleChatFontSizeChanged() {

@@ -25,6 +25,8 @@ import org.meshtastic.proto.MeshProtos;
  */
 abstract class FormChatMessages extends FormChatUi {
 
+    private static final int VIEWPORT_ANCHOR_RESTORE_PULSES = 6;
+
     /**
      * Загрузить последние PAGE_SIZE сообщений из БД.
      * Если накопилось несколько непрочитанных, показать верхнюю границу непрочитанного окна.
@@ -43,7 +45,9 @@ abstract class FormChatMessages extends FormChatUi {
             List<MeshMessage> msgs = db.loadLast(chatType, chatKey, PAGE_SIZE, ownerNodeId);
             attachReactions(msgs);
 
+            String loadedChatKey = chatScrollCacheKey(selectedChat);
             clearLoadedMessageState();
+            loadedChatScrollCacheKey = loadedChatKey;
             messageContainer.getChildren().clear();
             for (MeshMessage msg : msgs) {
                 appendLoadedMessageRow(msg);
@@ -415,6 +419,7 @@ abstract class FormChatMessages extends FormChatUi {
     protected void clearLoadedMessageState() {
         loadedMessages.clear();
         loadedMessageRows.clear();
+        loadedChatScrollCacheKey = null;
         oldestLoadedDbId = Long.MAX_VALUE;
         newestLoadedDbId = 0;
         latestKnownDbId = 0;
@@ -600,7 +605,18 @@ abstract class FormChatMessages extends FormChatUi {
             if (scrollStateSyncSuspendCount > 0) {
                 scrollStateSyncSuspendCount--;
             }
+            if (scrollStateSyncSuspendCount == 0) {
+                refreshAfterProgrammaticScroll();
+            }
         }));
+    }
+
+    private void refreshAfterProgrammaticScroll() {
+        if (selectedChat == null || messageScrollPane == null || messageContainer == null) {
+            return;
+        }
+        refreshUnreadTailIndicator();
+        markCurrentChatAsReadIfViewingTailLater();
     }
 
     protected boolean isScrollStateSyncSuspended() {
@@ -666,7 +682,7 @@ abstract class FormChatMessages extends FormChatUi {
     }
 
     protected void saveCurrentChatScrollState() {
-        if (selectedChat == null || loadedMessages.isEmpty()) {
+        if (selectedChat == null || loadedMessages.isEmpty() || !isLoadedMessageWindowFor(selectedChat)) {
             return;
         }
         ChatScrollState scrollState = captureCurrentChatScrollState();
@@ -683,7 +699,7 @@ abstract class FormChatMessages extends FormChatUi {
     }
 
     protected ChatScrollState captureCurrentChatScrollState() {
-        if (selectedChat == null || loadedMessages.isEmpty()) {
+        if (selectedChat == null || loadedMessages.isEmpty() || !isLoadedMessageWindowFor(selectedChat)) {
             return null;
         }
 
@@ -695,7 +711,7 @@ abstract class FormChatMessages extends FormChatUi {
     }
 
     protected ChatScrollState captureViewportAnchor() {
-        if (selectedChat == null || loadedMessages.isEmpty()) {
+        if (selectedChat == null || loadedMessages.isEmpty() || !isLoadedMessageWindowFor(selectedChat)) {
             return null;
         }
 
@@ -725,21 +741,36 @@ abstract class FormChatMessages extends FormChatUi {
         return new ChatScrollState(lastLoaded.getDbId(), 0, false);
     }
 
+    protected boolean isLoadedMessageWindowFor(ChatItem chat) {
+        return chat != null && Objects.equals(loadedChatScrollCacheKey, chatScrollCacheKey(chat));
+    }
+
     protected void restoreViewportAnchorLater(ChatScrollState viewportAnchor) {
         if (viewportAnchor == null) {
             return;
         }
         long generation = scrollOperationGeneration;
+        suspendScrollStateSync();
+        restoreViewportAnchorAcrossPulses(viewportAnchor, generation, VIEWPORT_ANCHOR_RESTORE_PULSES);
+    }
+
+    private void restoreViewportAnchorAcrossPulses(ChatScrollState viewportAnchor,
+                                                   long generation,
+                                                   int pulsesRemaining) {
         Platform.runLater(() -> {
-            if (!isCurrentScrollOperation(generation)) {
-                return;
-            }
-            alignMessageToViewport(viewportAnchor.anchorDbId(), viewportAnchor.anchorOffset());
-            Platform.runLater(() -> {
-                if (isCurrentScrollOperation(generation)) {
-                    alignMessageToViewport(viewportAnchor.anchorDbId(), viewportAnchor.anchorOffset());
+            try {
+                if (!isCurrentScrollOperation(generation)) {
+                    return;
                 }
-            });
+                alignMessageToViewport(viewportAnchor.anchorDbId(), viewportAnchor.anchorOffset());
+                if (pulsesRemaining > 1) {
+                    restoreViewportAnchorAcrossPulses(viewportAnchor, generation, pulsesRemaining - 1);
+                }
+            } finally {
+                if (pulsesRemaining <= 1 || !isCurrentScrollOperation(generation)) {
+                    resumeScrollStateSyncLater();
+                }
+            }
         });
     }
 
@@ -882,7 +913,16 @@ abstract class FormChatMessages extends FormChatUi {
     }
 
     protected void refreshUnreadTailIndicator() {
-        if (selectedChat == null || isAtLiveTail()) {
+        if (selectedChat == null) {
+            newMessageWhileScrolled = 0;
+            scrollDownBtn.setVisible(false);
+            updateScrollDownBadge();
+            return;
+        }
+
+        boolean atLiveTail = isAtLiveTail();
+        scrollDownBtn.setVisible(!atLiveTail);
+        if (atLiveTail) {
             newMessageWhileScrolled = 0;
             updateScrollDownBadge();
             return;
@@ -970,17 +1010,9 @@ abstract class FormChatMessages extends FormChatUi {
 
     protected void scrollToMessage(long dbId, double anchorOffset) {
         long generation = scrollOperationGeneration;
-        Platform.runLater(() -> {
-            if (!isCurrentScrollOperation(generation)) {
-                return;
-            }
-            alignMessageToViewport(dbId, anchorOffset);
-            Platform.runLater(() -> {
-                if (isCurrentScrollOperation(generation)) {
-                    alignMessageToViewport(dbId, anchorOffset);
-                }
-            });
-        });
+        ChatScrollState viewportAnchor = new ChatScrollState(dbId, anchorOffset, false);
+        suspendScrollStateSync();
+        restoreViewportAnchorAcrossPulses(viewportAnchor, generation, VIEWPORT_ANCHOR_RESTORE_PULSES);
     }
 
     protected void alignMessageToViewport(long dbId, double anchorOffset) {
