@@ -187,6 +187,7 @@ public class FormChat extends Form {
     private boolean suppressSelectionListener;
     private boolean formVisible;
     private int scrollStateSyncSuspendCount;
+    private long scrollOperationGeneration;
     private final AtomicBoolean messageRefreshQueued = new AtomicBoolean();
     private final AtomicBoolean messageRefreshDirty = new AtomicBoolean();
     private final AtomicBoolean viewportLayoutQueued = new AtomicBoolean();
@@ -489,8 +490,15 @@ public class FormChat extends Form {
         // При изменении высоты контента (перенос строк при ресайзе) —
         // держать скролл внизу, чтобы баблы расширялись визуально вверх
         messageContainer.heightProperty().addListener((obs, oldH, newH) -> {
-            if (formVisible && isAtLiveTail()) {
-                Platform.runLater(() -> messageScrollPane.setVvalue(1.0));
+            if (formVisible && !isScrollStateSyncSuspended() && isAtLiveTail()) {
+                long generation = scrollOperationGeneration;
+                Platform.runLater(() -> {
+                    if (isCurrentScrollOperation(generation)
+                            && !isScrollStateSyncSuspended()
+                            && isAtLiveTail()) {
+                        messageScrollPane.setVvalue(1.0);
+                    }
+                });
             }
         });
 
@@ -577,6 +585,7 @@ public class FormChat extends Form {
 
     private void openChat(ChatItem chat) {
         bubbleFactory.hideOpenReactionPopup();
+        scrollOperationGeneration++;
         this.selectedChat = chat;
 
         // Обновить заголовок
@@ -627,6 +636,7 @@ public class FormChat extends Form {
     private void closeChat() {
         saveCurrentChatScrollState();
         bubbleFactory.hideOpenReactionPopup();
+        scrollOperationGeneration++;
         this.selectedChat = null;
         clearLoadedMessageState();
         detailPane.getChildren().clear();
@@ -1186,6 +1196,10 @@ public class FormChat extends Form {
         return scrollStateSyncSuspendCount > 0;
     }
 
+    private boolean isCurrentScrollOperation(long generation) {
+        return generation == scrollOperationGeneration;
+    }
+
     private boolean isScrolledToBottom() {
         if (messageContainer == null || messageScrollPane == null) {
             return true;
@@ -1318,10 +1332,17 @@ public class FormChat extends Form {
         if (viewportAnchor == null) {
             return;
         }
+        long generation = scrollOperationGeneration;
         Platform.runLater(() -> {
+            if (!isCurrentScrollOperation(generation)) {
+                return;
+            }
             alignMessageToViewport(viewportAnchor.anchorDbId, viewportAnchor.anchorOffset);
-            Platform.runLater(() ->
-                    alignMessageToViewport(viewportAnchor.anchorDbId, viewportAnchor.anchorOffset));
+            Platform.runLater(() -> {
+                if (isCurrentScrollOperation(generation)) {
+                    alignMessageToViewport(viewportAnchor.anchorDbId, viewportAnchor.anchorOffset);
+                }
+            });
         });
     }
 
@@ -1528,12 +1549,20 @@ public class FormChat extends Form {
 
     /** Прокрутка сообщений вниз с принудительным layout */
     private void scrollToBottom() {
+        long generation = scrollOperationGeneration;
         Platform.runLater(() -> {
+            if (!isCurrentScrollOperation(generation)) {
+                return;
+            }
             messageScrollPane.applyCss();
             messageScrollPane.layout();
             messageScrollPane.setVvalue(1.0);
             // Повторно после следующего pulse — ScrollPane может ещё не знать новый размер контента
-            Platform.runLater(() -> messageScrollPane.setVvalue(1.0));
+            Platform.runLater(() -> {
+                if (isCurrentScrollOperation(generation)) {
+                    messageScrollPane.setVvalue(1.0);
+                }
+            });
         });
     }
 
@@ -1545,9 +1574,17 @@ public class FormChat extends Form {
     }
 
     private void scrollToMessage(long dbId, double anchorOffset) {
+        long generation = scrollOperationGeneration;
         Platform.runLater(() -> {
+            if (!isCurrentScrollOperation(generation)) {
+                return;
+            }
             alignMessageToViewport(dbId, anchorOffset);
-            Platform.runLater(() -> alignMessageToViewport(dbId, anchorOffset));
+            Platform.runLater(() -> {
+                if (isCurrentScrollOperation(generation)) {
+                    alignMessageToViewport(dbId, anchorOffset);
+                }
+            });
         });
     }
 
