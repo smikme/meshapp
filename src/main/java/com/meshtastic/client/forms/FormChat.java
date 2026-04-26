@@ -32,13 +32,20 @@ public class FormChat extends FormChatData {
     @Override
     public void formOpen() {
         formVisible = true;
+        scrollOperationGeneration++;
         rebindState();
         if (selectedChat != null) {
             suspendScrollStateSync();
             try {
+                requestMessageViewportLayout();
+                refreshLoadedMessageRows();
                 ChatScrollState savedState = getSavedScrollState(selectedChat);
-                if (savedState != null && !savedState.atBottom()) {
-                    restoreSavedScrollPosition(savedState);
+                if (savedState != null) {
+                    if (savedState.atBottom()) {
+                        scrollToBottom();
+                    } else {
+                        restoreSavedScrollPosition(savedState);
+                    }
                     refreshUnreadTailIndicatorLater();
                     return;
                 }
@@ -55,6 +62,7 @@ public class FormChat extends FormChatData {
     @Override
     public void formClose() {
         saveCurrentChatScrollState();
+        scrollOperationGeneration++;
         formVisible = false;
         if (bubbleFactory != null) {
             bubbleFactory.hideOpenReactionPopup();

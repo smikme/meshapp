@@ -58,6 +58,7 @@ class MessageListenerServiceTest {
         TestEnvironmentSupport.setUserHome(tempHome);
         TestEnvironmentSupport.ensureJavaFxStarted();
         TestEnvironmentSupport.resetSingletons();
+        AppPreferences.setNotificationsEnabled(false);
         MessageDbService.getInstance();
         state = new DeviceState();
         state.setMyNodeNum(0x12345678);
@@ -575,6 +576,83 @@ class MessageListenerServiceTest {
         assertTrue(MessageDbService.getInstance()
                 .loadReactionsByTargetPacketIds("channel", "2", "!12345678", List.of(42))
                 .isEmpty());
+    }
+
+    @Test
+    void onMeshPacketFiresTracerouteListenerForRoutePayloadWithoutRequestId() {
+        int fromNode = (int) 0xBBA9341CL;
+        MeshProtos.RouteDiscovery route = MeshProtos.RouteDiscovery.newBuilder()
+                .addRoute(48730296)
+                .addRoute(1236700080)
+                .addSnrTowards(-44)
+                .addSnrTowards(-18)
+                .addSnrTowards(-40)
+                .build();
+        List<Integer> fromNodes = new ArrayList<>();
+        List<MeshProtos.RouteDiscovery> routes = new ArrayList<>();
+        state.addTracerouteListener((nodeNum, receivedRoute) -> {
+            fromNodes.add(nodeNum);
+            routes.add(receivedRoute);
+        });
+
+        MeshProtos.MeshPacket packet = MeshProtos.MeshPacket.newBuilder()
+                .setFrom(fromNode)
+                .setTo(state.getMyNodeNum())
+                .setId(480384382)
+                .setDecoded(MeshProtos.Data.newBuilder()
+                        .setPortnum(Portnums.PortNum.TRACEROUTE_APP)
+                        .setWantResponse(true)
+                        .setPayload(route.toByteString())
+                        .build())
+                .build();
+
+        service.onMeshPacket(packet);
+
+        assertEquals(List.of(fromNode), fromNodes);
+        assertEquals(List.of(route), routes);
+    }
+
+    @Test
+    void onMeshPacketIgnoresEmptyTraceroutePayloadWithoutRequestId() {
+        List<MeshProtos.RouteDiscovery> routes = new ArrayList<>();
+        state.addTracerouteListener((nodeNum, route) -> routes.add(route));
+
+        MeshProtos.MeshPacket packet = MeshProtos.MeshPacket.newBuilder()
+                .setFrom(0x11111111)
+                .setTo(state.getMyNodeNum())
+                .setId(7006)
+                .setDecoded(MeshProtos.Data.newBuilder()
+                        .setPortnum(Portnums.PortNum.TRACEROUTE_APP)
+                        .setPayload(MeshProtos.RouteDiscovery.newBuilder().build().toByteString())
+                        .build())
+                .build();
+
+        service.onMeshPacket(packet);
+
+        assertTrue(routes.isEmpty());
+    }
+
+    @Test
+    void onMeshPacketIgnoresTraceroutePayloadWithoutRequestIdWhenNotAddressedToLocalNode() {
+        List<MeshProtos.RouteDiscovery> routes = new ArrayList<>();
+        state.addTracerouteListener((nodeNum, route) -> routes.add(route));
+
+        MeshProtos.MeshPacket packet = MeshProtos.MeshPacket.newBuilder()
+                .setFrom(0x11111111)
+                .setTo(0x22222222)
+                .setId(7007)
+                .setDecoded(MeshProtos.Data.newBuilder()
+                        .setPortnum(Portnums.PortNum.TRACEROUTE_APP)
+                        .setPayload(MeshProtos.RouteDiscovery.newBuilder()
+                                .addRoute(0x33333333)
+                                .build()
+                                .toByteString())
+                        .build())
+                .build();
+
+        service.onMeshPacket(packet);
+
+        assertTrue(routes.isEmpty());
     }
 
     @Test

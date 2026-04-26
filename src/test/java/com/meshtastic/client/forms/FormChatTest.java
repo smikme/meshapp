@@ -1,13 +1,19 @@
 package com.meshtastic.client.forms;
 
 import com.meshtastic.client.TestEnvironmentSupport;
+import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.ChatItem;
 import com.meshtastic.client.model.MeshMessage;
+import com.meshtastic.client.service.MessageDbService;
 import javafx.application.Platform;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.meshtastic.proto.ChannelProtos;
 
+import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -19,9 +25,23 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class FormChatTest {
 
+    @TempDir
+    Path tempHome;
+
     @BeforeAll
     static void startJavaFx() {
         TestEnvironmentSupport.ensureJavaFxStarted();
+    }
+
+    @BeforeEach
+    void setUp() {
+        TestEnvironmentSupport.setUserHome(tempHome);
+        TestEnvironmentSupport.resetSingletons();
+    }
+
+    @AfterEach
+    void tearDown() {
+        TestEnvironmentSupport.resetSingletons();
     }
 
     @Test
@@ -43,6 +63,96 @@ class FormChatTest {
             form.saveCurrentChatScrollState();
 
             assertFalse(form.savedChatScrollStates.containsKey(form.chatScrollCacheKey(channel)));
+            return null;
+        });
+    }
+
+    @Test
+    void shouldIgnoreScrollEventsWhileFormIsHidden() {
+        onFxThread(() -> {
+            FormChat form = new FormChat();
+            ChatItem channel = channel(0);
+            MeshMessage loaded = incoming("loaded");
+            loaded.setDbId(77);
+
+            form.selectedChat = channel;
+            form.loadedChatScrollCacheKey = form.chatScrollCacheKey(channel);
+            form.loadedMessages.add(loaded);
+            form.newestLoadedDbId = loaded.getDbId();
+            form.latestKnownDbId = loaded.getDbId();
+
+            FormChatBase.ChatScrollState saved = new FormChatBase.ChatScrollState(77, 18.5, false);
+            form.savedChatScrollStates.put(form.chatScrollCacheKey(channel), saved);
+            form.formVisible = false;
+
+            form.messageScrollPane.setVvalue(1.0);
+
+            FormChatBase.ChatScrollState actual = form.savedChatScrollStates.get(form.chatScrollCacheKey(channel));
+            assertEquals(saved.anchorDbId(), actual.anchorDbId());
+            assertEquals(saved.anchorOffset(), actual.anchorOffset());
+            assertEquals(saved.atBottom(), actual.atBottom());
+            return null;
+        });
+    }
+
+    @Test
+    void formCloseInvalidatesQueuedScrollOperations() {
+        onFxThread(() -> {
+            FormChat form = new FormChat();
+            form.formVisible = true;
+            long generation = form.scrollOperationGeneration;
+
+            form.formClose();
+
+            assertFalse(form.formVisible);
+            assertEquals(generation + 1, form.scrollOperationGeneration);
+            return null;
+        });
+    }
+
+    @Test
+    void hiddenIncomingMessageDoesNotTouchViewportState() {
+        onFxThread(() -> {
+            MessageDbService db = MessageDbService.getInstance();
+            DeviceState state = new DeviceState();
+            try {
+                state.setMyNodeNum(0x12345678);
+                FormChat form = new FormChat();
+                ChatItem channel = channel(0);
+                MeshMessage first = incoming("first");
+                first.setPacketId(101);
+                db.save(first, "channel", "0", "!12345678");
+
+                form.state = state;
+                form.selectedChat = channel;
+                form.loadedChatScrollCacheKey = form.chatScrollCacheKey(channel);
+                form.appendLoadedMessageRow(first);
+                form.recalcLoadedBounds();
+                form.latestKnownDbId = first.getDbId();
+                form.formVisible = false;
+                form.messageScrollPane.setVvalue(0.42);
+
+                FormChatBase.ChatScrollState saved =
+                        new FormChatBase.ChatScrollState(first.getDbId(), 18.5, false);
+                form.savedChatScrollStates.put(form.chatScrollCacheKey(channel), saved);
+
+                MeshMessage second = incoming("second");
+                second.setPacketId(102);
+                db.save(second, "channel", "0", "!12345678");
+
+                form.refreshCurrentChat();
+
+                assertEquals(2, form.loadedMessages.size());
+                assertFalse(form.viewportLayoutQueued.get());
+                assertEquals(0.42, form.messageScrollPane.getVvalue());
+                FormChatBase.ChatScrollState actual =
+                        form.savedChatScrollStates.get(form.chatScrollCacheKey(channel));
+                assertEquals(saved.anchorDbId(), actual.anchorDbId());
+                assertEquals(saved.anchorOffset(), actual.anchorOffset());
+                assertEquals(saved.atBottom(), actual.atBottom());
+            } finally {
+                state.shutdown();
+            }
             return null;
         });
     }

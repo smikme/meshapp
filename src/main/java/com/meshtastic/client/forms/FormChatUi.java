@@ -321,7 +321,7 @@ abstract class FormChatUi extends FormChatBase {
     }
 
     private void handleMessageScroll(double vvalue) {
-        if (isScrollStateSyncSuspended()) {
+        if (!formVisible || isScrollStateSyncSuspended()) {
             return;
         }
         loadAdjacentPagesIfNeeded(vvalue);

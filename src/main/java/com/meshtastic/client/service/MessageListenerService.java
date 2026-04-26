@@ -662,18 +662,31 @@ public class MessageListenerService implements FromRadioListener {
             log.debug("Ignoring outgoing TRACEROUTE_APP echo from self");
             return;
         }
-        if (data.getRequestId() == 0) {
-            log.debug("Ignoring TRACEROUTE_APP packet without requestId (not a response)");
-            return;
-        }
-
         try {
             MeshProtos.RouteDiscovery route = MeshProtos.RouteDiscovery.parseFrom(data.getPayload());
+            if (data.getRequestId() == 0) {
+                if (!hasRouteDiscoveryData(route)) {
+                    log.debug("Ignoring TRACEROUTE_APP packet without requestId or route data");
+                    return;
+                }
+                if (packet.getTo() != myNodeNum) {
+                    log.debug("Ignoring TRACEROUTE_APP route data without requestId addressed to !{}",
+                            Integer.toHexString(packet.getTo()));
+                    return;
+                }
+            }
             deviceState.fireTracerouteListeners(packet.getFrom(), route);
             log.info("Received TRACEROUTE_APP response from !{}: route={}, route_back={}",
                     Integer.toHexString(packet.getFrom()), route.getRouteList(), route.getRouteBackList());
         } catch (InvalidProtocolBufferException e) {
             log.warn("Failed to parse RouteDiscovery from TRACEROUTE_APP packet", e);
         }
+    }
+
+    private static boolean hasRouteDiscoveryData(MeshProtos.RouteDiscovery route) {
+        return route.getRouteCount() > 0
+                || route.getSnrTowardsCount() > 0
+                || route.getRouteBackCount() > 0
+                || route.getSnrBackCount() > 0;
     }
 }

@@ -293,11 +293,18 @@ class ProtocolHandlerTest {
 
         List<PacketLogEntry> entries = monitorService.loadAll();
         assertEquals(2, entries.size());
-        assertEquals(PacketLogEntry.Direction.INCOMING, entries.getFirst().getDirection());
-        assertEquals("ROUTING_APP", entries.getFirst().getPacketType());
-        assertEquals("TRANSPORT_LORA", entries.getLast().getTransportMechanism());
-        assertEquals(PacketLogEntry.Direction.OUTGOING, entries.getLast().getDirection());
-        assertEquals("TEXT_MESSAGE_APP", entries.getLast().getPacketType());
+        PacketLogEntry incomingEntry = entries.stream()
+                .filter(entry -> entry.getDirection() == PacketLogEntry.Direction.INCOMING)
+                .findFirst()
+                .orElseThrow();
+        PacketLogEntry outgoingEntry = entries.stream()
+                .filter(entry -> entry.getDirection() == PacketLogEntry.Direction.OUTGOING)
+                .findFirst()
+                .orElseThrow();
+        assertEquals("ROUTING_APP", incomingEntry.getPacketType());
+        assertEquals("TRANSPORT_LORA", incomingEntry.getTransportMechanism());
+        assertEquals("TEXT_MESSAGE_APP", outgoingEntry.getPacketType());
+        assertEquals("TRANSPORT_LORA", outgoingEntry.getTransportMechanism());
     }
 
     @Test

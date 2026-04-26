@@ -175,8 +175,8 @@ abstract class FormChatMessages extends FormChatUi {
      */
     protected void refreshCurrentChat() {
         if (selectedChat == null) { return; }
-        ChatScrollState preservedScrollState = !formVisible ? captureViewportAnchor() : null;
         boolean wasAtLiveTail = formVisible && isAtLiveTail();
+        ChatScrollState preservedScrollState = formVisible && !wasAtLiveTail ? captureViewportAnchor() : null;
         String chatType = currentChatType();
         String chatKey = currentChatKey();
         String ownerNodeId = currentOwnerNodeId();
@@ -191,12 +191,16 @@ abstract class FormChatMessages extends FormChatUi {
             return;
         }
         if (newMsgs.isEmpty()) {
-            refreshLoadedMessageRows();
+            if (formVisible) {
+                refreshLoadedMessageRows();
+            }
             return;
         }
 
         handleNewMessages(newMsgs, preservedScrollState, wasAtLiveTail);
-        refreshLoadedMessageRows();
+        if (formVisible) {
+            refreshLoadedMessageRows();
+        }
     }
 
     private void refreshPendingDeliveryStatuses(MessageDbService db,
@@ -250,7 +254,9 @@ abstract class FormChatMessages extends FormChatUi {
         appendNewerMessages(newMessages);
         trimLoadedWindowFromTopIfNeeded();
         allNewerHistoryLoaded = true;
-        requestMessageViewportLayout();
+        if (formVisible) {
+            requestMessageViewportLayout();
+        }
 
         if (!wasAtLiveTail) {
             restoreOrRefreshTailIndicator(preservedScrollState);
@@ -271,6 +277,9 @@ abstract class FormChatMessages extends FormChatUi {
 
     private void restoreOrRefreshTailIndicator(ChatScrollState preservedScrollState) {
         if (!formVisible) {
+            return;
+        }
+        if (preservedScrollState != null) {
             restoreViewportAnchorLater(preservedScrollState);
         }
         refreshUnreadTailIndicatorLater();
