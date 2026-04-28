@@ -125,6 +125,8 @@ public class FormSetting extends Form {
     private static final String OWNER_LONG_NAME_FIELD = "long_name";
     private static final String OWNER_SHORT_NAME_FIELD = "short_name";
     private static final String OWNER_IS_LICENSED_FIELD = "is_licensed";
+    private static final String RINGTONE_CONFIG_TYPE = "ringtone";
+    private static final String RINGTONE_FIELD = "ringtone";
 
     private DeviceState state;
     private ProtocolHandler handler;
@@ -158,6 +160,9 @@ public class FormSetting extends Form {
     private Button shutdownHardwareBtn;
     private Tab configTab;
     private volatile CompletableFuture<DeviceState> observedConfigLoadFuture;
+    private volatile DeviceState ringtoneListenerState;
+    private volatile Runnable ringtoneListener;
+    private volatile DeviceState ringtoneRequestState;
 
     // Оригинальные protobuf-объекты для пересборки при сохранении
     private List<ConfigProtos.Config> originalConfigs = new ArrayList<>();
@@ -229,6 +234,7 @@ public class FormSetting extends Form {
         }
         this.state = newState;
         this.handler = newHandler;
+        observeRingtoneState(newState);
     }
 
     /**
@@ -236,9 +242,11 @@ public class FormSetting extends Form {
      * Нужен при disconnect, чтобы редактор не держал stale-конфигурацию.
      */
     private void clearConfigContext() {
+        observeRingtoneState(null);
         state = null;
         handler = null;
         observedConfigLoadFuture = null;
+        ringtoneRequestState = null;
         fullConfigRoot = null;
         originalConfigs = new ArrayList<>();
         originalModuleConfigs = new ArrayList<>();
@@ -250,6 +258,30 @@ public class FormSetting extends Form {
         if (configSearchField != null) {
             configSearchField.clear();
         }
+    }
+
+    private void observeRingtoneState(DeviceState newState) {
+        if (ringtoneListenerState == newState) {
+            return;
+        }
+        if (ringtoneListenerState != null && ringtoneListener != null) {
+            ringtoneListenerState.removeRingtoneListener(ringtoneListener);
+        }
+        ringtoneListenerState = null;
+        ringtoneListener = null;
+        ringtoneRequestState = null;
+
+        if (newState == null) {
+            return;
+        }
+
+        DeviceState observedState = newState;
+        ringtoneListener = () -> Platform.runLater(() -> {
+            ringtoneRequestState = null;
+            applyLoadedRingtoneToEditor(observedState);
+        });
+        observedState.addRingtoneListener(ringtoneListener);
+        ringtoneListenerState = observedState;
     }
 
     /**
@@ -300,6 +332,54 @@ public class FormSetting extends Form {
             }
             reloadConfigTree();
         }));
+    }
+
+    private void requestRingtoneIfNeeded(DeviceState actionState, ProtocolHandler actionHandler) {
+        if (actionState == null || actionHandler == null || actionState.isRingtoneLoaded()) {
+            return;
+        }
+        if (ringtoneRequestState == actionState) {
+            return;
+        }
+
+        ringtoneRequestState = actionState;
+        MessageService.requestRingtone(actionHandler, actionState)
+                .orTimeout(CONFIG_SAVE_ACK_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+                .whenComplete((error, ex) -> {
+                    if (ringtoneRequestState == actionState) {
+                        ringtoneRequestState = null;
+                    }
+                    if (ex != null) {
+                        log.debug("Ringtone request ACK was not observed: {}", rootCauseMessage(ex));
+                    } else if (error != null && error != MeshProtos.Routing.Error.NONE) {
+                        log.warn("Ringtone request returned {}", error);
+                    }
+                });
+    }
+
+    private void applyLoadedRingtoneToEditor(DeviceState sourceState) {
+        if (sourceState == null || sourceState != state || !sourceState.isRingtoneLoaded()) {
+            return;
+        }
+
+        TreeItem<ConfigTreeItem> root = currentEditorRoot();
+        if (root == null) {
+            return;
+        }
+        TreeItem<ConfigTreeItem> ringtoneSection = findTopLevelSection(root, RINGTONE_CONFIG_TYPE);
+        if (ringtoneSection == null || hasMoifiedFields(ringtoneSection)) {
+            return;
+        }
+
+        for (TreeItem<ConfigTreeItem> child : ringtoneSection.getChildren()) {
+            ConfigTreeItem data = child.getValue();
+            if (data != null && RINGTONE_FIELD.equals(data.getFieldName())) {
+                data.setValue(sourceState.getRingtone());
+                data.resetOriginal();
+                refreshConfigTreeView();
+                return;
+            }
+        }
     }
 
     /**
@@ -1510,6 +1590,7 @@ public class FormSetting extends Form {
                     kind,
                     extractOwnerInfo(root),
                     extractFixedPosition(root),
+                    extractRingtone(root),
                     collectCurrentConfigMessages(root),
                     collectCurrentModuleConfigMessages(root),
                     getWorkingChannelsSnapshot()
@@ -1708,6 +1789,17 @@ public class FormSetting extends Form {
         );
     }
 
+    private String extractRingtone(TreeItem<ConfigTreeItem> root) {
+        TreeItem<ConfigTreeItem> ringtoneSection = findTopLevelSection(root, RINGTONE_CONFIG_TYPE);
+        if (ringtoneSection == null) {
+            return null;
+        }
+        if (state != null && !state.isRingtoneLoaded() && !hasMoifiedFields(ringtoneSection)) {
+            return null;
+        }
+        return stringValue(ringtoneSection, RINGTONE_FIELD);
+    }
+
     private List<ConfigProtos.Config> collectCurrentConfigMessages(TreeItem<ConfigTreeItem> root) {
         TreeItem<ConfigTreeItem> configRoot = findTopLevelSection(root, "config");
         List<ConfigProtos.Config> result = new ArrayList<>();
@@ -1768,6 +1860,7 @@ public class FormSetting extends Form {
 
         applyOwnerInfo(snapshot.ownerInfo(), root);
         applyFixedPosition(snapshot.fixedPosition(), root);
+        applyRingtone(snapshot.ringtone(), root);
         applyConfigSnapshot(snapshot.configs(), root);
         applyModuleConfigSnapshot(snapshot.moduleConfigs(), root);
         applyChannelSnapshot(snapshot.channels());
@@ -1797,6 +1890,17 @@ public class FormSetting extends Form {
         setTreeFieldValue(positionSection, "latitude", fixedPosition.latitude());
         setTreeFieldValue(positionSection, "longitude", fixedPosition.longitude());
         setTreeFieldValue(positionSection, "altitude", fixedPosition.altitude());
+    }
+
+    private void applyRingtone(String ringtone, TreeItem<ConfigTreeItem> root) {
+        if (ringtone == null) {
+            return;
+        }
+        TreeItem<ConfigTreeItem> ringtoneSection = findTopLevelSection(root, RINGTONE_CONFIG_TYPE);
+        if (ringtoneSection == null) {
+            return;
+        }
+        setTreeFieldValue(ringtoneSection, RINGTONE_FIELD, ringtone);
     }
 
     private void applyConfigSnapshot(List<com.google.gson.JsonObject> configs, TreeItem<ConfigTreeItem> root) {
@@ -2116,6 +2220,15 @@ public class FormSetting extends Form {
                         null, null, "fixed_position", 0)));
         root.getChildren().add(posSection);
 
+        // Виртуальная секция: RTTTL ringtone для External Notification
+        TreeItem<ConfigTreeItem> ringtoneSection = new TreeItem<>(
+                new ConfigTreeItem("Мелодия уведомления", RINGTONE_CONFIG_TYPE, 0));
+        ringtoneSection.getChildren().add(new TreeItem<>(
+                new ConfigTreeItem("RTTTL", RINGTONE_FIELD,
+                        state.isRingtoneLoaded() ? state.getRingtone() : "",
+                        String.class, null, null, RINGTONE_CONFIG_TYPE, 0)));
+        root.getChildren().add(ringtoneSection);
+
         // Конфигурация устройства
         if (!originalConfigs.isEmpty()) {
             TreeItem<ConfigTreeItem> configRoot = ProtobufTreeBuilder.buildConfigTree(originalConfigs);
@@ -2142,6 +2255,7 @@ public class FormSetting extends Form {
             saveConfigBtn.setDisable(true);
             setSyncDateTimeButtonDisabled(true);
         } else {
+            requestRingtoneIfNeeded(state, handler);
             saveConfigBtn.setDisable(false);
             setSyncDateTimeButtonDisabled(findLoadedDeviceConfig() == null);
             int totalFields = countFields(root);
@@ -2305,6 +2419,8 @@ public class FormSetting extends Form {
         double newLat = 0;
         double newLon = 0;
         int newAlt = 0;
+        boolean ringtoneModified = false;
+        String newRingtone = "";
 
         // Собрать protobuf-изменения
         List<ConfigProtos.Config> modifiedConfigs = new ArrayList<>();
@@ -2336,6 +2452,12 @@ public class FormSetting extends Form {
                     if ("longitude".equals(ci.getFieldName())) { newLon = ((Number) ci.getValue()).doubleValue(); }
                     if ("altitude".equals(ci.getFieldName())) { newAlt = ((Number) ci.getValue()).intValue(); }
                 }
+            }
+
+            // Виртуальная секция: Ringtone
+            if (RINGTONE_CONFIG_TYPE.equals(topData.getConfigType()) && hasMoifiedFields(topLevel)) {
+                ringtoneModified = true;
+                newRingtone = stringValue(topLevel, RINGTONE_FIELD);
             }
 
             // Protobuf-секции: "Конфигурация устройства" / "Конфигурация модулей"
@@ -2371,6 +2493,7 @@ public class FormSetting extends Form {
         List<ChannelProtos.Channel> modifiedChannels = collectModifiedChannels();
 
         if (!ownerModified && !positionModified
+                && !ringtoneModified
                 && modifiedConfigs.isEmpty() && modifiedModuleConfigs.isEmpty()
                 && modifiedChannels.isEmpty()) {
             configStatusLabel.setText("Нет изменений для сохранения");
@@ -2379,7 +2502,8 @@ public class FormSetting extends Form {
 
         int totalChanges = modifiedConfigs.size() + modifiedModuleConfigs.size()
                 + modifiedChannels.size()
-                + (ownerModified ? 1 : 0) + (positionModified ? 1 : 0);
+                + (ownerModified ? 1 : 0) + (positionModified ? 1 : 0)
+                + (ringtoneModified ? 1 : 0);
         saveConfigBtn.setDisable(true);
         configStatusLabel.setText("Запрос session key...");
 
@@ -2392,6 +2516,8 @@ public class FormSetting extends Form {
         final double fLat = newLat;
         final double fLon = newLon;
         final int fAlt = newAlt;
+        final boolean fRingtoneModified = ringtoneModified;
+        final String fRingtone = newRingtone;
 
         // Запрашиваем session key → отправляем настройки.
         // OwnerInfo listener и timeout fallback работают параллельно, поэтому нужен
@@ -2406,6 +2532,7 @@ public class FormSetting extends Form {
                         modifiedConfigs, modifiedModuleConfigs, modifiedChannels,
                         fOwnerModified, fLongName, fShortName, fIsLicensed,
                         fPositionModified, fLat, fLon, fAlt,
+                        fRingtoneModified, fRingtone,
                         totalChanges);
             }
         });
@@ -2422,6 +2549,7 @@ public class FormSetting extends Form {
                             modifiedConfigs, modifiedModuleConfigs, modifiedChannels,
                             fOwnerModified, fLongName, fShortName, fIsLicensed,
                             fPositionModified, fLat, fLon, fAlt,
+                            fRingtoneModified, fRingtone,
                             totalChanges);
                 }
             });
@@ -2446,6 +2574,7 @@ public class FormSetting extends Form {
                                    boolean ownerModified, String newLongName, String newShortName,
                                    boolean newIsLicensed,
                                    boolean positionModified, double newLat, double newLon, int newAlt,
+                                   boolean ringtoneModified, String newRingtone,
                                    int totalChanges) {
         configStatusLabel.setText("Отправка настроек...");
         ConnectionType activeTransport = activeEntry != null
@@ -2489,6 +2618,14 @@ public class FormSetting extends Form {
                     actionState.fireNodeUpdateListeners(actionState.getMyNodeNum());
                 }
             }
+        }
+
+        if (ringtoneModified) {
+            String ringtone = newRingtone != null ? newRingtone : "";
+            observeOptionalConfigSaveAck(
+                    MessageService.setRingtone(actionHandler, actionState, ringtone),
+                    "setRingtone");
+            actionState.setRingtone(ringtone);
         }
 
         // Protobuf-секции обычно идут через begin/commit edit с задержками между сообщениями.

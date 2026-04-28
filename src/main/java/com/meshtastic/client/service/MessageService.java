@@ -522,6 +522,18 @@ public final class MessageService {
     }
 
     /**
+     * Запрашивает RTTTL ringtone, используемый External Notification.
+     * Ответ придёт как AdminMessage.get_ringtone_response через ADMIN_APP.
+     */
+    public static CompletableFuture<MeshProtos.Routing.Error> requestRingtone(ProtocolHandler handler,
+                                                                              DeviceState state) {
+        AdminProtos.AdminMessage adminMsg = AdminProtos.AdminMessage.newBuilder()
+                .setGetRingtoneRequest(true)
+                .build();
+        return sendAdminMessage(handler, state, adminMsg, true);
+    }
+
+    /**
      * Проксирует MQTT payload с desktop/phone клиента на устройство.
      * Payload всегда отправляется как bytes, чтобы не терять бинарные данные.
      */
@@ -685,6 +697,24 @@ public final class MessageService {
                                         ModuleConfigProtos.ModuleConfig moduleConfig) {
         AdminProtos.AdminMessage.Builder adminBuilder = AdminProtos.AdminMessage.newBuilder()
                 .setSetModuleConfig(moduleConfig);
+        ByteString passkey = state.getSessionPasskey();
+        if (passkey != null) {
+            adminBuilder.setSessionPasskey(passkey);
+        }
+
+        return sendAdminMessage(handler, state, adminBuilder.build());
+    }
+
+    /**
+     * Отправляет set_ringtone_message на устройство.
+     *
+     * @return future с routing ACK/NAK для отправленного admin-пакета
+     */
+    public static CompletableFuture<MeshProtos.Routing.Error> setRingtone(ProtocolHandler handler,
+                                                                          DeviceState state,
+                                                                          String ringtone) {
+        AdminProtos.AdminMessage.Builder adminBuilder = AdminProtos.AdminMessage.newBuilder()
+                .setSetRingtoneMessage(ringtone != null ? ringtone : "");
         ByteString passkey = state.getSessionPasskey();
         if (passkey != null) {
             adminBuilder.setSessionPasskey(passkey);

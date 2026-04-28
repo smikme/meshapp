@@ -33,6 +33,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 
@@ -80,6 +81,29 @@ class MessageListenerServiceTest {
             state.shutdown();
         }
         TestEnvironmentSupport.resetSingletons();
+    }
+
+    @Test
+    void adminRingtoneResponseStoresRingtoneAndNotifiesListeners() {
+        AtomicBoolean notified = new AtomicBoolean(false);
+        state.addRingtoneListener(() -> notified.set(true));
+        AdminProtos.AdminMessage admin = AdminProtos.AdminMessage.newBuilder()
+                .setGetRingtoneResponse("ring:d=4,o=5,b=120:c")
+                .build();
+        MeshProtos.MeshPacket packet = MeshProtos.MeshPacket.newBuilder()
+                .setFrom(state.getMyNodeNum())
+                .setTo(state.getMyNodeNum())
+                .setDecoded(MeshProtos.Data.newBuilder()
+                        .setPortnum(Portnums.PortNum.ADMIN_APP)
+                        .setPayload(admin.toByteString())
+                        .build())
+                .build();
+
+        service.onMeshPacket(packet);
+
+        assertTrue(state.isRingtoneLoaded());
+        assertEquals("ring:d=4,o=5,b=120:c", state.getRingtone());
+        assertTrue(notified.get());
     }
 
     @Test

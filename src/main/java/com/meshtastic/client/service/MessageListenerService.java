@@ -616,6 +616,10 @@ public class MessageListenerService implements FromRadioListener {
                 deviceState.fireDeviceMetadataListeners();
                 log.debug("Received device metadata: firmwareVersion='{}', role={}",
                         metadata.getFirmwareVersion(), metadata.getRole());
+            } else if (adminMsg.hasGetRingtoneResponse()) {
+                deviceState.setRingtone(adminMsg.getGetRingtoneResponse());
+                deviceState.fireRingtoneListeners();
+                log.debug("Received ringtone response ({} chars)", adminMsg.getGetRingtoneResponse().length());
             } else if (hasSessionPasskey) {
                 // Session passkey is attached to get_x_response packets, not only owner info.
                 // Save/channel edit flows wait on the same listener to unblock when the key arrives.
