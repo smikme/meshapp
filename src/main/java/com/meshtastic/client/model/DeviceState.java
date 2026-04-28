@@ -94,6 +94,9 @@ public class DeviceState {
     private final CopyOnWriteArrayList<Runnable> ownerInfoListeners = new CopyOnWriteArrayList<>();
     private volatile MeshProtos.DeviceMetadata deviceMetadata;
     private final CopyOnWriteArrayList<Runnable> deviceMetadataListeners = new CopyOnWriteArrayList<>();
+    private volatile String ringtone;
+    private volatile boolean ringtoneLoaded;
+    private final CopyOnWriteArrayList<Runnable> ringtoneListeners = new CopyOnWriteArrayList<>();
 
     // Pending fixed position
     private volatile double pendingFixedLat;
@@ -420,6 +423,13 @@ public class DeviceState {
     public MeshProtos.DeviceMetadata getDeviceMetadata() { return deviceMetadata; }
     public void setDeviceMetadata(MeshProtos.DeviceMetadata deviceMetadata) { this.deviceMetadata = deviceMetadata; }
 
+    public String getRingtone() { return ringtone != null ? ringtone : ""; }
+    public boolean isRingtoneLoaded() { return ringtoneLoaded; }
+    public void setRingtone(String ringtone) {
+        this.ringtone = ringtone != null ? ringtone : "";
+        this.ringtoneLoaded = true;
+    }
+
     /**
      * Listeners are notified when admin owner info arrives or when a fresh
      * {@code session_passkey} is received via any ADMIN_APP response.
@@ -439,6 +449,15 @@ public class DeviceState {
         for (Runnable r : deviceMetadataListeners) {
             try { r.run(); }
             catch (Exception e) { log.error("Exception in device metadata listener", e); }
+        }
+    }
+
+    public void addRingtoneListener(Runnable listener) { ringtoneListeners.add(listener); }
+    public void removeRingtoneListener(Runnable listener) { ringtoneListeners.remove(listener); }
+    public void fireRingtoneListeners() {
+        for (Runnable r : ringtoneListeners) {
+            try { r.run(); }
+            catch (Exception e) { log.error("Exception in ringtone listener", e); }
         }
     }
 
@@ -539,6 +558,8 @@ public class DeviceState {
         ownerInfo = null;
         sessionPasskey = null;
         deviceMetadata = null;
+        ringtone = null;
+        ringtoneLoaded = false;
         synchronized (telemetryHistory) {
             telemetryHistory.clear();
         }

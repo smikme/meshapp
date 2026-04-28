@@ -91,6 +91,7 @@ public final class ConfigSnapshotService {
             String exportedAt,
             OwnerInfo ownerInfo,
             FixedPosition fixedPosition,
+            String ringtone,
             List<JsonObject> configs,
             List<JsonObject> moduleConfigs,
             List<JsonObject> channels
@@ -101,6 +102,7 @@ public final class ConfigSnapshotService {
     public static ConfigSnapshot createSnapshot(SnapshotKind kind,
                                                 OwnerInfo ownerInfo,
                                                 FixedPosition fixedPosition,
+                                                String ringtone,
                                                 List<ConfigProtos.Config> configs,
                                                 List<ModuleConfigProtos.ModuleConfig> moduleConfigs,
                                                 List<ChannelProtos.Channel> channels) {
@@ -111,6 +113,7 @@ public final class ConfigSnapshotService {
                 Instant.now().toString(),
                 ownerInfo,
                 fixedPosition,
+                ringtone,
                 toJsonObjects(configs),
                 toJsonObjects(moduleConfigs),
                 toJsonObjects(channels)
@@ -139,6 +142,10 @@ public final class ConfigSnapshotService {
             fixed.addProperty("longitude", snapshot.fixedPosition().longitude());
             fixed.addProperty("altitude", snapshot.fixedPosition().altitude());
             root.add("fixedPosition", fixed);
+        }
+
+        if (snapshot.ringtone() != null) {
+            root.addProperty("ringtone", snapshot.ringtone());
         }
 
         root.add("configs", toJsonArray(snapshot.configs()));
@@ -195,6 +202,9 @@ public final class ConfigSnapshotService {
                 exportedAt,
                 ownerInfo,
                 fixedPosition,
+                root.has("ringtone") && !root.get("ringtone").isJsonNull()
+                        ? root.get("ringtone").getAsString()
+                        : null,
                 readObjectArray(root, "configs"),
                 readObjectArray(root, "moduleConfigs"),
                 readObjectArray(root, "channels")
@@ -225,6 +235,7 @@ public final class ConfigSnapshotService {
                 source.version(),
                 SnapshotKind.TEMPLATE,
                 source.exportedAt(),
+                null,
                 null,
                 null,
                 sanitizeObjectList(source.configs()),
