@@ -21,6 +21,6 @@ class ChatItemTest {
 
         ChatItem item = ChatItem.fromDirectMessage("!00000002", null, List.of(message), 0, false);
 
-        assertEquals("a".repeat(59) + "😀…", item.getLastMessageText());
+        assertEquals("a".repeat(59) + "😀...", item.getLastMessageText());
     }
 }

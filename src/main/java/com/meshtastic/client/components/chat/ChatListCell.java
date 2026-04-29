@@ -7,6 +7,7 @@ import com.meshtastic.client.themes.TypographyManager;
 import com.meshtastic.client.utils.NodeUtils;
 import com.meshtastic.client.utils.SvgIconLoader;
 import com.meshtastic.client.utils.UnicodeTextUtils;
+import javafx.application.Platform;
 import javafx.scene.Cursor;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
@@ -19,6 +20,7 @@ import javafx.scene.control.SeparatorMenuItem;
 import javafx.scene.control.Tooltip;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
+import javafx.scene.layout.Region;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 import javafx.scene.paint.Color;
@@ -26,6 +28,7 @@ import javafx.scene.shape.Rectangle;
 import javafx.scene.shape.SVGPath;
 import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
+import javafx.scene.text.Text;
 
 import java.util.function.Consumer;
 
@@ -36,6 +39,9 @@ public class ChatListCell extends ListCell<ChatItem> {
     private static final String BELL_ICON_PATH = "/drawer/icon/bell.svg";
     private static final String BELL_OFF_ICON_PATH = "/drawer/icon/bell-off.svg";
     private static final double MUTE_ICON_SIZE = 12;
+    private static final double PREVIEW_FONT_SIZE = 12;
+    private static final double PREVIEW_TWO_LINE_HEIGHT = 30;
+    private static final String ELLIPSIS = "...";
 
     private final HBox root = new HBox(10);
     private final StackPane avatarPane = new StackPane();
@@ -49,6 +55,8 @@ public class ChatListCell extends ListCell<ChatItem> {
     private final HBox timeBox = new HBox(6);
     private final Label timeLabel = new Label();
     private final Label unreadBadge = new Label();
+    private String previewSourceText = "";
+    private boolean previewUpdateQueued;
 
     /**
      * @param onDeleteChat      колбэк удаления чата (вызывается из контекстного меню удаления/отключения)
@@ -61,6 +69,9 @@ public class ChatListCell extends ListCell<ChatItem> {
         root.setAlignment(Pos.CENTER_LEFT);
         root.setPadding(new Insets(8, 10, 8, 10));
         root.getStyleClass().add("chat-list-cell-root");
+        root.setMinWidth(0);
+        root.prefWidthProperty().bind(widthProperty());
+        root.maxWidthProperty().bind(widthProperty());
 
         avatarPane.setMinSize(40, 40);
         avatarPane.setPrefSize(40, 40);
@@ -71,6 +82,7 @@ public class ChatListCell extends ListCell<ChatItem> {
         avatarPane.getChildren().add(avatarLabel);
 
         nameLabel.getStyleClass().add("chat-name-label");
+        nameLabel.setMinWidth(0);
 
         muteIconLabel.getStyleClass().add("chat-mute-icon");
         muteIconLabel.setMinWidth(Label.USE_PREF_SIZE);
@@ -88,6 +100,7 @@ public class ChatListCell extends ListCell<ChatItem> {
 
         messagePreview.getStyleClass().add("chat-preview-label");
         messagePreview.setTextStyleClass("chat-preview-text-node");
+        messagePreview.setMinWidth(0);
         Rectangle clip = new Rectangle();
         clip.widthProperty().bind(messagePreview.widthProperty());
         clip.heightProperty().bind(messagePreview.heightProperty());
@@ -99,7 +112,10 @@ public class ChatListCell extends ListCell<ChatItem> {
         HBox.setHgrow(textBox, Priority.ALWAYS);
 
         nameLabel.maxWidthProperty().bind(textBox.widthProperty());
+        messagePreview.prefWidthProperty().bind(textBox.widthProperty());
         messagePreview.maxWidthProperty().bind(textBox.widthProperty());
+        textBox.widthProperty().addListener((obs, oldWidth, newWidth) -> queuePreviewTextUpdate());
+        sceneProperty().addListener((obs, oldScene, newScene) -> queuePreviewTextUpdate());
 
         timeLabel.getStyleClass().add("chat-time-label");
 
@@ -110,7 +126,7 @@ public class ChatListCell extends ListCell<ChatItem> {
         timeBox.getChildren().addAll(timeLabel, muteIconLabel);
 
         metaBox.setAlignment(Pos.TOP_RIGHT);
-        metaBox.setMinWidth(50);
+        metaBox.setMinWidth(Region.USE_PREF_SIZE);
         metaBox.getChildren().addAll(timeBox, unreadBadge);
 
         root.getChildren().addAll(avatarPane, textBox, metaBox);
@@ -176,6 +192,8 @@ public class ChatListCell extends ListCell<ChatItem> {
     protected void updateItem(ChatItem item, boolean empty) {
         super.updateItem(item, empty);
         if (empty || item == null) {
+            previewSourceText = "";
+            messagePreview.setText("");
             setGraphic(null);
             setText(null);
             return;
@@ -194,13 +212,10 @@ public class ChatListCell extends ListCell<ChatItem> {
         muteIconTooltip.setText(item.isMuted()
                 ? "Оповещения чата выключены"
                 : "Оповещения чата включены");
-        messagePreview.setText(
-                item.getLastMessageText() != null ? item.getLastMessageText() : "");
-        messagePreview.setEmojiSize(TypographyManager.scaleChat(12));
-        double previewHeight = TypographyManager.scaleChat(34);
-        messagePreview.setMinHeight(previewHeight);
-        messagePreview.setPrefHeight(previewHeight);
-        messagePreview.setMaxHeight(previewHeight);
+        previewSourceText = item.getLastMessageText() != null ? item.getLastMessageText() : "";
+        messagePreview.setEmojiSize(TypographyManager.scaleChat(PREVIEW_FONT_SIZE));
+        applyFixedPreviewHeight();
+        updatePreviewTextForWidth();
 
         if (item.getLastMessageTime() > 0) {
             timeLabel.setText(
@@ -227,5 +242,97 @@ public class ChatListCell extends ListCell<ChatItem> {
 
     private SVGPath createMuteIcon(boolean muted) {
         return SvgIconLoader.load(muted ? BELL_OFF_ICON_PATH : BELL_ICON_PATH, MUTE_ICON_SIZE);
+    }
+
+    private void applyFixedPreviewHeight() {
+        double previewHeight = previewTwoLineHeight();
+        messagePreview.setMinHeight(previewHeight);
+        messagePreview.setPrefHeight(previewHeight);
+        messagePreview.setMaxHeight(previewHeight);
+    }
+
+    private void queuePreviewTextUpdate() {
+        if (previewUpdateQueued) {
+            return;
+        }
+        previewUpdateQueued = true;
+        Platform.runLater(() -> {
+            previewUpdateQueued = false;
+            updatePreviewTextForWidth();
+        });
+    }
+
+    private void updatePreviewTextForWidth() {
+        double width = textBox.getWidth();
+        if (width <= 1) {
+            messagePreview.setText(previewSourceText);
+            return;
+        }
+
+        String fitted = fitPreviewToVisibleLines(previewSourceText, width);
+        messagePreview.setText(fitted);
+    }
+
+    private String fitPreviewToVisibleLines(String text, double width) {
+        if (text == null || text.isEmpty() || previewFits(text, width)) {
+            return text == null ? "" : text;
+        }
+
+        int codePoints = text.codePointCount(0, text.length());
+        int low = 0;
+        int high = codePoints;
+        String best = ELLIPSIS;
+
+        while (low <= high) {
+            int mid = (low + high) >>> 1;
+            String candidate = previewCandidate(text, mid);
+            if (previewFits(candidate, width)) {
+                best = candidate;
+                low = mid + 1;
+            } else {
+                high = mid - 1;
+            }
+        }
+
+        return best;
+    }
+
+    private String previewCandidate(String text, int codePoints) {
+        String prefix = UnicodeTextUtils.prefixByCodePoints(text, codePoints);
+        if (prefix == null || prefix.isBlank()) {
+            return ELLIPSIS;
+        }
+        return prefix.stripTrailing() + ELLIPSIS;
+    }
+
+    private boolean previewFits(String text, double width) {
+        if (text == null || text.isEmpty()) {
+            return true;
+        }
+        if (width <= 1) {
+            return false;
+        }
+
+        Text measure = new Text(toMeasurementText(text));
+        measure.setFont(Font.font("Roboto", TypographyManager.scaleChat(PREVIEW_FONT_SIZE)));
+        measure.setWrappingWidth(width);
+        double requiredHeight = measure.getLayoutBounds().getHeight();
+        return requiredHeight <= previewTwoLineHeight() + 0.5;
+    }
+
+    private String toMeasurementText(String text) {
+        StringBuilder measured = new StringBuilder(text.length());
+        for (EmojiTextFlow.Segment segment : EmojiTextFlow.parseSegments(text)) {
+            if (segment.isEmoji()) {
+                measured.append('M');
+            } else {
+                measured.append(UnicodeTextUtils.sanitizeForJavaFxDisplay(segment.text()));
+            }
+        }
+        return measured.toString();
+    }
+
+    private double previewTwoLineHeight() {
+        return TypographyManager.scaleChat(PREVIEW_TWO_LINE_HEIGHT);
     }
 }
