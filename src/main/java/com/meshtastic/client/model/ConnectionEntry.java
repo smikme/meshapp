@@ -3,7 +3,7 @@ package com.meshtastic.client.model;
 import java.util.UUID;
 
 /**
- * Профиль подключения к Meshtastic-устройству.
+ * Профиль подключения к устройству или endpoint-у поддерживаемого протокола.
  * <p>
  * Сериализуется в JSON ({@code ~/.meshapp/connections.json}) через Gson.
  * Поддерживает три типа транспорта: TCP (host + port), Serial (portName + baudRate)
@@ -11,6 +11,8 @@ import java.util.UUID;
  * <p>
  * Поле {@code type} может быть {@code null} для legacy-записей —
  * в этом случае {@link #getEffectiveType()} возвращает {@link ConnectionType#TCP}.
+ * Поле {@code protocol} может быть {@code null} для legacy-записей —
+ * в этом случае {@link #getEffectiveProtocol()} возвращает {@link ProtocolType#MESHTASTIC}.
  * Поля {@code connected} и {@code reconnecting} помечены как {@code transient} —
  * не сохраняются, отражают текущее runtime-состояние.
  */
@@ -18,6 +20,7 @@ public class ConnectionEntry {
 
     private String id;
     private String name;
+    private ProtocolType protocol;
     private ConnectionType type;
     private String host;
     private int port;
@@ -31,12 +34,14 @@ public class ConnectionEntry {
 
     public ConnectionEntry() {
         this.id = UUID.randomUUID().toString();
+        this.protocol = ProtocolType.MESHTASTIC;
         this.port = 4403;
     }
 
     /** Конструктор для TCP-подключения. */
     public ConnectionEntry(String name, String host, int port) {
         this.id = UUID.randomUUID().toString();
+        this.protocol = ProtocolType.MESHTASTIC;
         this.type = ConnectionType.TCP;
         this.name = name;
         this.host = host;
@@ -46,6 +51,7 @@ public class ConnectionEntry {
     /** Конструктор для Serial-подключения (USB / Bluetooth SPP). */
     public ConnectionEntry(String name, String portName, int baudRate, ConnectionType type) {
         this.id = UUID.randomUUID().toString();
+        this.protocol = ProtocolType.MESHTASTIC;
         this.type = type;
         this.name = name;
         this.portName = portName;
@@ -55,6 +61,7 @@ public class ConnectionEntry {
     /** Конструктор для BLE-подключения. */
     public ConnectionEntry(String name, String bleAddress, String bleDeviceName) {
         this.id = UUID.randomUUID().toString();
+        this.protocol = ProtocolType.MESHTASTIC;
         this.type = ConnectionType.BLE;
         this.name = name;
         this.bleAddress = bleAddress;
@@ -67,6 +74,14 @@ public class ConnectionEntry {
      */
     public ConnectionType getEffectiveType() {
         return type != null ? type : ConnectionType.TCP;
+    }
+
+    /**
+     * Возвращает эффективный протокол подключения.
+     * Для legacy-записей (protocol == null) возвращает {@link ProtocolType#MESHTASTIC}.
+     */
+    public ProtocolType getEffectiveProtocol() {
+        return protocol != null ? protocol : ProtocolType.MESHTASTIC;
     }
 
     public String getId() {
@@ -83,6 +98,27 @@ public class ConnectionEntry {
 
     public void setName(String name) {
         this.name = name;
+    }
+
+    /**
+     * Возвращает явно сохранённый протокол подключения.
+     * <p>
+     * Для старых JSON-записей может быть {@code null}; в бизнес-логике обычно
+     * нужно использовать {@link #getEffectiveProtocol()}.
+     *
+     * @return сохранённый тип протокола или {@code null}
+     */
+    public ProtocolType getProtocol() {
+        return protocol;
+    }
+
+    /**
+     * Задаёт протокол, который будет поднят поверх выбранного транспорта.
+     *
+     * @param protocol тип протокола для сохранения в профиле подключения
+     */
+    public void setProtocol(ProtocolType protocol) {
+        this.protocol = protocol;
     }
 
     public ConnectionType getType() {

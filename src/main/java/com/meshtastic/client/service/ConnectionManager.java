@@ -4,13 +4,15 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.reflect.TypeToken;
 import com.meshtastic.client.connection.*;
-import com.meshtastic.client.connection.ble.BleConnection;
 import com.meshtastic.client.model.ConnectionEntry;
-import com.meshtastic.client.model.ConnectionType;
 import com.meshtastic.client.model.DeviceState;
-import com.meshtastic.client.model.NodeData;
+import com.meshtastic.client.model.ProtocolType;
+import com.meshtastic.client.protocol.ProtocolRegistry;
+import com.meshtastic.client.protocol.ProtocolRuntime;
+import com.meshtastic.client.protocol.ProtocolRuntimeContext;
 import com.meshtastic.client.protocol.ProtocolHandler;
-import org.meshtastic.proto.MeshProtos;
+import com.meshtastic.client.protocol.meshtastic.MeshtasticProtocol;
+import com.meshtastic.client.protocol.meshtastic.MeshtasticProtocolRuntime;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -26,13 +28,13 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
- * Менеджер соединений с Meshtastic-устройствами (singleton).
+ * Менеджер транспортных подключений и протокольных runtime-адаптеров (singleton).
  * <p>
  * Управляет жизненным циклом соединений (TCP, Serial и BLE): хранит профили подключений
  * ({@link ConnectionEntry}) в JSON-файле {@code ~/.meshapp/connections.json},
- * создаёт/разрывает соединения, инициирует config exchange
- * и предоставляет доступ к {@link DeviceState} и {@link ProtocolHandler}
- * для каждого активного соединения.
+ * создаёт/разрывает транспорт, выбирает коммуникационный протокол и поднимает
+ * соответствующий runtime. Для существующего UI сохраняет доступ к Meshtastic
+ * {@link DeviceState} и {@link ProtocolHandler}.
  * <p>
  * Каждое соединение идентифицируется по строковому {@code id} из {@link ConnectionEntry}.
  */
@@ -44,13 +46,13 @@ public final class ConnectionManager {
 
     private final Object connectionLock = new Object();
     private final List<ConnectionEntry> entries = new CopyOnWriteArrayList<>();
-    private final Map<String, MeshtasticConnection> pendingConnections = new ConcurrentHashMap<>();
-    private final Map<String, MeshtasticConnection> activeConnections = new ConcurrentHashMap<>();
+    private final Map<String, TransportConnection> pendingConnections = new ConcurrentHashMap<>();
+    private final Map<String, TransportConnection> activeConnections = new ConcurrentHashMap<>();
+    private final Map<String, ProtocolRuntime<?>> protocolRuntimes = new ConcurrentHashMap<>();
+    private final Map<String, CompletableFuture<?>> protocolReadyFutures = new ConcurrentHashMap<>();
     private final Map<String, DeviceState> deviceStates = new ConcurrentHashMap<>();
     private final Map<String, ProtocolHandler> protocolHandlers = new ConcurrentHashMap<>();
     private final Map<String, MessageListenerService> messageListenerServices = new ConcurrentHashMap<>();
-    private final Map<String, MqttProxyService> mqttProxyServices = new ConcurrentHashMap<>();
-    private final Map<String, ConfigExchangeService> configExchangeServices = new ConcurrentHashMap<>();
     private final Map<String, CompletableFuture<DeviceState>> configFutures = new ConcurrentHashMap<>();
     private final Set<String> userDisconnectedIds = ConcurrentHashMap.newKeySet();
     private final Map<String, String> userDisconnectReasons = new ConcurrentHashMap<>();
@@ -77,6 +79,12 @@ public final class ConnectionManager {
         return instance;
     }
 
+    /**
+     * Загружает сохранённые профили подключений из {@code ~/.meshapp/connections.json}.
+     * <p>
+     * Runtime-поля вроде {@code connected} и {@code reconnecting} в файл не входят
+     * и выставляются только во время работы приложения.
+     */
     public synchronized void load() {
         if (!Files.exists(configPath)) {
             return;
@@ -93,6 +101,9 @@ public final class ConnectionManager {
         }
     }
 
+    /**
+     * Сохраняет текущий список профилей подключений в {@code ~/.meshapp/connections.json}.
+     */
     public synchronized void save() {
         try {
             Files.createDirectories(configPath.getParent());
@@ -131,15 +142,19 @@ public final class ConnectionManager {
 
     /**
      * Устанавливает соединение по идентификатору профиля.
-     * Создаёт transport (TCP, Serial или BLE), {@link ProtocolHandler}, {@link DeviceState}
-     * и запускает config exchange. Если соединение с этим id уже активно, вызов игнорируется.
+     * <p>
+     * Метод последовательно создаёт transport (TCP, Serial или BLE), открывает его,
+     * выбирает протокольный адаптер из {@link ProtocolRegistry}, создаёт
+     * {@link ProtocolRuntime} и запускает начальную синхронизацию протокола.
+     * Если соединение с этим id уже активно или находится в процессе подключения,
+     * вызов игнорируется.
      *
      * @param id идентификатор профиля подключения
      * @throws ConnectionException если профиль не найден или соединение не удалось
      */
     public void connect(String id) throws ConnectionException {
         ConnectionEntry entry;
-        MeshtasticConnection conn;
+        TransportConnection conn;
         synchronized (connectionLock) {
             userDisconnectedIds.remove(id);
             userDisconnectReasons.remove(id);
@@ -232,14 +247,12 @@ public final class ConnectionManager {
             throw e;
         }
 
-        ProtocolHandler protocolHandler;
-        DeviceState deviceState;
-        MqttProxyService mqttProxyService;
-        CompletableFuture<DeviceState> future;
+        ProtocolRuntime<?> protocolRuntime;
+        CompletableFuture<?> future;
         boolean cancelledDuringConnect = false;
 
         synchronized (connectionLock) {
-            MeshtasticConnection pendingConn = pendingConnections.get(id);
+            TransportConnection pendingConn = pendingConnections.get(id);
             boolean entryRemoved = findEntry(id) == null;
             boolean userCancelled = userDisconnectedIds.contains(id);
             boolean replacedDuringConnect = pendingConn != null && pendingConn != conn;
@@ -251,9 +264,7 @@ public final class ConnectionManager {
             pendingConnections.remove(id, conn);
             if (shouldCancel) {
                 cancelledDuringConnect = true;
-                protocolHandler = null;
-                deviceState = null;
-                mqttProxyService = null;
+                protocolRuntime = null;
                 future = null;
             } else {
                 if (pendingClearedDuringConnect) {
@@ -262,30 +273,11 @@ public final class ConnectionManager {
                 }
                 activeConnections.put(id, conn);
 
-                protocolHandler = new ProtocolHandler(id, conn);
-                protocolHandlers.put(id, protocolHandler);
-
-                // Heartbeat нужен для transport-ов, которые либо закрываются по idle (TCP),
-                // либо требуют периодического keepalive на serial-соединении.
-                // В mesh.proto heartbeat отдельно помечен как keepalive для serial.
-                if (shouldStartHeartbeat(entry)) {
-                    protocolHandler.startHeartbeat();
-                }
-
-                deviceState = new DeviceState();
-                deviceStates.put(id, deviceState);
-
-                MessageListenerService messageListener = new MessageListenerService(deviceState, protocolHandler);
-                messageListenerServices.put(id, messageListener);
-                protocolHandler.addListener(messageListener);
-
-                mqttProxyService = new MqttProxyService(id, entry.getName(), protocolHandler, deviceState);
-                mqttProxyServices.put(id, mqttProxyService);
-
-                ConfigExchangeService configExchange = new ConfigExchangeService(protocolHandler, deviceState);
-                configExchangeServices.put(id, configExchange);
-                future = configExchange.startConfigExchange();
-                configFutures.put(id, future);
+                protocolRuntime = createProtocolRuntime(id, entry, conn);
+                protocolRuntimes.put(id, protocolRuntime);
+                future = protocolRuntime.start();
+                protocolReadyFutures.put(id, future);
+                cacheMeshtasticRuntime(id, protocolRuntime);
 
                 entry.setConnected(true);
             }
@@ -297,18 +289,19 @@ public final class ConnectionManager {
         }
 
         ReconnectService.getInstance().cancelReconnect(id);
-        future.thenAccept(ds -> {
+        ProtocolRuntime<?> activeRuntime = protocolRuntime;
+        future.thenAccept(ignored -> {
             if (activeConnections.get(id) != conn || !entry.isConnected()) {
                 log.debug("Skipping post-connect actions for '{}' because transport is no longer active",
                         entry.getName());
                 return;
             }
-            String nodeId = resolveLocalNodeId(ds);
-            entry.setNodeId(nodeId);
+            String nodeId = activeRuntime.getOwnerId();
+            if (nodeId != null && !nodeId.isBlank() && !"?".equals(nodeId)) {
+                entry.setNodeId(nodeId);
+            }
             save();
-            logNodeConnectionContext(entry, ds);
-            mqttProxyService.startIfEnabled();
-            requestAndLogDeviceMetadata(entry, protocolHandler, ds);
+            activeRuntime.onReady();
             fireChanged();
         });
         fireChanged();
@@ -325,8 +318,8 @@ public final class ConnectionManager {
     }
 
     private void disconnect(String id, String reason) {
-        MeshtasticConnection conn;
-        MeshtasticConnection pendingConn;
+        TransportConnection conn;
+        TransportConnection pendingConn;
         ConnectionEntry entry;
         String connectionName;
         synchronized (connectionLock) {
@@ -366,8 +359,8 @@ public final class ConnectionManager {
      */
     public void disconnectForDeviceReboot(String id) {
         ConnectionEntry entry;
-        MeshtasticConnection conn;
-        MqttProxyService mqttProxy;
+        TransportConnection conn;
+        ProtocolRuntime<?> protocolRuntime;
         synchronized (connectionLock) {
             userDisconnectedIds.remove(id);
             userDisconnectReasons.remove(id);
@@ -376,12 +369,12 @@ public final class ConnectionManager {
                 return;
             }
             conn = activeConnections.get(id);
-            mqttProxy = mqttProxyServices.remove(id);
+            protocolRuntime = protocolRuntimes.get(id);
         }
 
-        if (mqttProxy != null) {
-            log.info("Stopping MQTT proxy for '{}' before reboot reconnect handoff", entry.getName());
-            mqttProxy.close();
+        if (protocolRuntime instanceof MeshtasticProtocolRuntime meshtasticRuntime) {
+            log.info("Preparing Meshtastic runtime for '{}' before reboot reconnect handoff", entry.getName());
+            meshtasticRuntime.prepareForReconnectHandoff();
         }
 
         if (conn != null) {
@@ -398,35 +391,88 @@ public final class ConnectionManager {
         }
     }
 
+    /**
+     * Проверяет, есть ли активное или ещё подключающееся соединение.
+     *
+     * @return {@code true}, если приложение уже занято одним transport-подключением
+     */
     public boolean hasActiveConnection() {
         return !activeConnections.isEmpty() || !pendingConnections.isEmpty();
     }
 
+    /**
+     * Возвращает копию списка сохранённых профилей подключений.
+     *
+     * @return список профилей, безопасный для чтения вызывающим кодом
+     */
     public List<ConnectionEntry> getEntries() {
         return new ArrayList<>(entries);
     }
 
+    /**
+     * Возвращает Meshtastic {@link DeviceState} для активного подключения.
+     * <p>
+     * Метод оставлен для совместимости существующих форм. При добавлении новых
+     * протоколов они должны предоставлять собственный typed accessor или работать
+     * через {@link ProtocolRuntime#getState()}.
+     *
+     * @param id идентификатор профиля подключения
+     * @return состояние Meshtastic-устройства или {@code null}
+     */
     public DeviceState getDeviceState(String id) {
-        return deviceStates.get(id);
+        MeshtasticProtocolRuntime runtime = getMeshtasticRuntime(id);
+        return runtime != null ? runtime.getDeviceState() : deviceStates.get(id);
     }
 
+    /**
+     * Возвращает Meshtastic protocol handler для активного подключения.
+     *
+     * @param id идентификатор профиля подключения
+     * @return handler Meshtastic-протокола или {@code null}
+     */
     public ProtocolHandler getProtocolHandler(String id) {
-        return protocolHandlers.get(id);
+        MeshtasticProtocolRuntime runtime = getMeshtasticRuntime(id);
+        return runtime != null ? runtime.getProtocolHandler() : protocolHandlers.get(id);
     }
 
+    /**
+     * Возвращает сервис обработки входящих Meshtastic-сообщений.
+     *
+     * @param id идентификатор профиля подключения
+     * @return сервис входящих сообщений или {@code null}
+     */
     public MessageListenerService getMessageListenerService(String id) {
-        return messageListenerServices.get(id);
+        MeshtasticProtocolRuntime runtime = getMeshtasticRuntime(id);
+        return runtime != null ? runtime.getMessageListenerService() : messageListenerServices.get(id);
     }
 
+    /**
+     * Возвращает future завершения Meshtastic config exchange.
+     *
+     * @param id идентификатор профиля подключения
+     * @return future с заполненным {@link DeviceState} или {@code null}
+     */
     public CompletableFuture<DeviceState> getConfigFuture(String id) {
-        return configFutures.get(id);
+        MeshtasticProtocolRuntime runtime = getMeshtasticRuntime(id);
+        return runtime != null ? runtime.getReadyFuture() : configFutures.get(id);
     }
 
     /**
      * Возвращает nodeId устройства для указанного подключения.
-     * Сначала пытается получить из DeviceState (актуальный), затем из ConnectionEntry (кеш).
+     * Сначала пытается получить id из активного protocol runtime, затем из
+     * совместимого Meshtastic-кэша и только потом из сохранённого {@link ConnectionEntry}.
+     *
+     * @param id идентификатор профиля подключения
+     * @return nodeId владельца или {@code null}, если он неизвестен
      */
     public String getOwnerNodeId(String id) {
+        ProtocolRuntime<?> runtime = protocolRuntimes.get(id);
+        if (runtime != null) {
+            String ownerId = runtime.getOwnerId();
+            if (ownerId != null && !ownerId.isBlank() && !"?".equals(ownerId)) {
+                return ownerId;
+            }
+        }
         DeviceState ds = deviceStates.get(id);
         if (ds != null && ds.getMyNodeNum() != 0) {
             return String.format("!%08x", ds.getMyNodeNum());
@@ -435,10 +481,20 @@ public final class ConnectionManager {
         return entry != null ? entry.getNodeId() : null;
     }
 
+    /**
+     * Добавляет слушателя изменений списка профилей или runtime-состояния подключений.
+     *
+     * @param listener callback, вызываемый после изменения состояния
+     */
     public void addListener(Runnable listener) {
         listeners.add(listener);
     }
 
+    /**
+     * Удаляет ранее зарегистрированный слушатель изменений.
+     *
+     * @param listener callback для удаления
+     */
     public void removeListener(Runnable listener) {
         listeners.remove(listener);
     }
@@ -460,14 +516,20 @@ public final class ConnectionManager {
         userDisconnectReasons.remove(id);
     }
 
-    private void abortPendingConnection(String id, MeshtasticConnection conn) {
+    /**
+     * Убирает transport из pending-карты после ошибки или отмены подключения.
+     */
+    private void abortPendingConnection(String id, TransportConnection conn) {
         synchronized (connectionLock) {
             pendingConnections.remove(id, conn);
         }
         clearUserDisconnectStateIfIdle(id);
     }
 
-    private void disconnectStalePendingConnection(String id, ConnectionEntry entry, MeshtasticConnection conn) {
+    /**
+     * Закрывает transport, который успел подключиться уже после удаления/отмены профиля.
+     */
+    private void disconnectStalePendingConnection(String id, ConnectionEntry entry, TransportConnection conn) {
         log.info("Connection '{}' completed after cancellation; disconnecting stale transport", entry.getName());
         try {
             conn.disconnect();
@@ -478,6 +540,9 @@ public final class ConnectionManager {
         }
     }
 
+    /**
+     * Очищает флаги пользовательского disconnect-а, когда для id больше нет runtime-а.
+     */
     private void clearUserDisconnectStateIfIdle(String id) {
         synchronized (connectionLock) {
             if (!activeConnections.containsKey(id) && !pendingConnections.containsKey(id)) {
@@ -486,7 +551,10 @@ public final class ConnectionManager {
         }
     }
 
-    private void cleanupConnection(String id, MeshtasticConnection expectedConnection) {
+    /**
+     * Удаляет transport из runtime-карт после disconnect/error callback-а.
+     */
+    private void cleanupConnection(String id, TransportConnection expectedConnection) {
         synchronized (connectionLock) {
             boolean removedActive = activeConnections.remove(id, expectedConnection);
             boolean removedPending = pendingConnections.remove(id, expectedConnection);
@@ -498,162 +566,71 @@ public final class ConnectionManager {
         }
     }
 
+    /**
+     * Освобождает протокольный runtime и совместимые Meshtastic-кэши.
+     */
     private void cleanupRuntimeState(String id) {
-        DeviceState ds = deviceStates.remove(id);
-        if (ds != null) {
-            ds.failAllPendingAcks("DISCONNECTED");
-            ds.failAllPendingPacketAcks("DISCONNECTED");
-            ds.shutdown();
+        ProtocolRuntime<?> runtime = protocolRuntimes.remove(id);
+        if (runtime != null) {
+            runtime.close();
         }
-        MessageListenerService mls = messageListenerServices.remove(id);
-        if (mls != null) {
-            mls.getNotificationManager().dispose();
-        }
-        MqttProxyService mqttProxy = mqttProxyServices.remove(id);
-        if (mqttProxy != null) {
-            mqttProxy.close();
-        }
-        ConfigExchangeService configExchange = configExchangeServices.remove(id);
-        if (configExchange != null) {
-            configExchange.abort("connection cleanup");
-        }
-        ProtocolHandler ph = protocolHandlers.remove(id);
-        if (ph != null) {
-            ph.shutdown();
-        }
+        protocolReadyFutures.remove(id);
+        deviceStates.remove(id);
+        protocolHandlers.remove(id);
+        messageListenerServices.remove(id);
         configFutures.remove(id);
     }
 
-    private void requestAndLogDeviceMetadata(ConnectionEntry entry,
-                                             ProtocolHandler protocolHandler,
-                                             DeviceState deviceState) {
-        if (protocolHandler == null || deviceState == null || deviceState.getMyNodeNum() == 0) {
-            return;
-        }
-
-        Runnable[] listenerHolder = new Runnable[1];
-        listenerHolder[0] = () -> {
-            MeshProtos.DeviceMetadata metadata = deviceState.getDeviceMetadata();
-            if (metadata == null) {
-                return;
-            }
-            deviceState.removeDeviceMetadataListener(listenerHolder[0]);
-            log.info("Connection '{}' firmware identified: name='{}', nodeId={}, firmware='{}', params={}",
-                    entry.getName(),
-                    resolveLocalNodeName(deviceState),
-                    resolveLocalNodeId(deviceState),
-                    safeText(metadata.getFirmwareVersion()),
-                    formatConnectionParams(entry));
-        };
-
-        deviceState.addDeviceMetadataListener(listenerHolder[0]);
-        if (deviceState.getDeviceMetadata() != null) {
-            listenerHolder[0].run();
-            return;
-        }
-
-        MessageService.requestDeviceMetadata(protocolHandler, deviceState)
-                .whenComplete((routingError, throwable) -> {
-                    if (throwable != null) {
-                        deviceState.removeDeviceMetadataListener(listenerHolder[0]);
-                        if (isExpectedDisconnectAbort(throwable)) {
-                            log.debug("Device metadata request for '{}' aborted during disconnect",
-                                    entry.getName());
-                        } else {
-                            log.debug("Device metadata request failed for '{}'", entry.getName(), throwable);
-                        }
-                    } else if (routingError != null && routingError != MeshProtos.Routing.Error.NONE) {
-                        deviceState.removeDeviceMetadataListener(listenerHolder[0]);
-                        log.debug("Device metadata request for '{}' completed with {}",
-                                entry.getName(), routingError);
-                    }
-                });
-    }
-
-    private static boolean isExpectedDisconnectAbort(Throwable throwable) {
-        Throwable current = throwable;
-        while (current != null) {
-            String message = current.getMessage();
-            if (message != null && (message.contains("Packet ACK waiter aborted: DISCONNECTED")
-                    || message.contains("Packet ACK waiter aborted: STATE_CLEARED"))) {
-                return true;
-            }
-            current = current.getCause();
-        }
-        return false;
-    }
-
-    private void logNodeConnectionContext(ConnectionEntry entry, DeviceState deviceState) {
-        NodeData node = resolveLocalNode(deviceState);
-        log.info("Connection '{}' node identified: name='{}', short='{}', nodeId={}, hwModel={}, params={}",
-                entry.getName(),
-                resolveLocalNodeName(deviceState),
-                node != null ? safeText(node.getShortName()) : "?",
-                resolveLocalNodeId(deviceState),
-                node != null ? safeText(node.getHwModel()) : "?",
-                formatConnectionParams(entry));
-    }
-
-    private static NodeData resolveLocalNode(DeviceState deviceState) {
-        if (deviceState == null || deviceState.getMyNodeNum() == 0) {
-            return null;
-        }
-        return deviceState.getNodeDb().get(deviceState.getMyNodeNum());
-    }
-
-    private static String resolveLocalNodeName(DeviceState deviceState) {
-        NodeData node = resolveLocalNode(deviceState);
-        if (node == null) {
-            return resolveLocalNodeId(deviceState);
-        }
-        if (node.getLongName() != null && !node.getLongName().isBlank()) {
-            return node.getLongName().trim();
-        }
-        if (node.getShortName() != null && !node.getShortName().isBlank()) {
-            return node.getShortName().trim();
-        }
-        if (node.getNodeId() != null && !node.getNodeId().isBlank()) {
-            return node.getNodeId().trim();
-        }
-        return resolveLocalNodeId(deviceState);
-    }
-
-    private static String resolveLocalNodeId(DeviceState deviceState) {
-        NodeData node = resolveLocalNode(deviceState);
-        if (node != null && node.getNodeId() != null && !node.getNodeId().isBlank()) {
-            return node.getNodeId().trim();
-        }
-        int myNodeNum = deviceState != null ? deviceState.getMyNodeNum() : 0;
-        return myNodeNum != 0 ? String.format("!%08x", myNodeNum) : "?";
-    }
-
+    /**
+     * Делегирует форматирование параметров транспорта общей transport-фабрике.
+     */
     private static String formatConnectionParams(ConnectionEntry entry) {
-        ConnectionType type = entry.getEffectiveType();
-        return switch (type) {
-            case TCP -> String.format("type=TCP, host=%s, port=%d",
-                    safeText(entry.getHost()), entry.getPort());
-            case SERIAL -> String.format("type=SERIAL, port=%s, baud=%d",
-                    safeText(entry.getPortName()),
-                    entry.getBaudRate() > 0 ? entry.getBaudRate() : SerialConnection.DEFAULT_BAUD_RATE);
-            case BLE -> String.format("type=BLE, address=%s, deviceName=%s",
-                    safeText(entry.getBleAddress()), safeText(entry.getBleDeviceName()));
-        };
+        return TransportConnectionFactory.describe(entry);
     }
 
-    private static String safeText(String value) {
-        return value == null || value.isBlank() ? "?" : value.trim();
+    /**
+     * Создаёт transport по профилю подключения, не запуская протокольную логику.
+     */
+    private TransportConnection createConnection(ConnectionEntry entry) {
+        return TransportConnectionFactory.create(entry,
+                () -> BleDeviceDiscoveryService.getInstance().getPlatform());
     }
 
-    private MeshtasticConnection createConnection(ConnectionEntry entry) {
-        return switch (entry.getEffectiveType()) {
-            case TCP -> new TcpConnection(entry.getHost(), entry.getPort());
-            case SERIAL -> new SerialConnection(
-                    entry.getPortName(),
-                    entry.getBaudRate() > 0 ? entry.getBaudRate() : SerialConnection.DEFAULT_BAUD_RATE
-            );
-            case BLE -> new BleConnection(entry.getBleAddress(),
-                    BleDeviceDiscoveryService.getInstance().getPlatform());
-        };
+    /**
+     * Создаёт protocol runtime поверх уже открытого transport-а.
+     */
+    private ProtocolRuntime<?> createProtocolRuntime(String id, ConnectionEntry entry, TransportConnection conn) {
+        ProtocolType protocolType = entry.getEffectiveProtocol();
+        ProtocolRuntimeContext context = new ProtocolRuntimeContext(
+                id,
+                entry,
+                conn,
+                formatConnectionParams(entry)
+        );
+        return ProtocolRegistry.get(protocolType).createRuntime(context);
+    }
+
+    /**
+     * Возвращает Meshtastic runtime, если указанное подключение использует Meshtastic.
+     */
+    private MeshtasticProtocolRuntime getMeshtasticRuntime(String id) {
+        ProtocolRuntime<?> runtime = protocolRuntimes.get(id);
+        return runtime instanceof MeshtasticProtocolRuntime meshtasticRuntime ? meshtasticRuntime : null;
+    }
+
+    /**
+     * Заполняет старые Meshtastic-карты, которыми ещё пользуются формы и тесты.
+     * <p>
+     * Эти карты являются compatibility layer на время постепенного перевода UI
+     * на протокольные runtime-абстракции.
+     */
+    private void cacheMeshtasticRuntime(String id, ProtocolRuntime<?> runtime) {
+        if (runtime instanceof MeshtasticProtocolRuntime meshtasticRuntime) {
+            deviceStates.put(id, meshtasticRuntime.getDeviceState());
+            protocolHandlers.put(id, meshtasticRuntime.getProtocolHandler());
+            messageListenerServices.put(id, meshtasticRuntime.getMessageListenerService());
+            configFutures.put(id, meshtasticRuntime.getReadyFuture());
+        }
     }
 
     /**
@@ -661,10 +638,12 @@ public final class ConnectionManager {
      * В текущем протоколе heartbeat нужен для TCP и Serial, но не для BLE.
      */
     static boolean shouldStartHeartbeat(ConnectionEntry entry) {
-        ConnectionType type = entry.getEffectiveType();
-        return type == ConnectionType.TCP || type == ConnectionType.SERIAL;
+        return MeshtasticProtocol.shouldStartHeartbeat(entry);
     }
 
+    /**
+     * Ищет сохранённый профиль подключения по id.
+     */
     ConnectionEntry findEntry(String id) {
         for (ConnectionEntry e : entries) {
             if (e.getId().equals(id)) {
@@ -674,6 +653,9 @@ public final class ConnectionManager {
         return null;
     }
 
+    /**
+     * Оповещает UI и сервисы о том, что список подключений или их runtime-состояние изменились.
+     */
     void fireChanged() {
         for (Runnable listener : listeners) {
             listener.run();
