@@ -7,7 +7,7 @@ import org.meshtastic.proto.*;
  * <p>
  * Все методы имеют пустую реализацию по умолчанию ({@code default}),
  * что позволяет реализовывать только нужные callback-и.
- * Вызываются из потока TCP-reader при получении и парсинге {@code FromRadio}.
+ * Вызываются из transport reader-потока при получении и парсинге {@code FromRadio}.
  *
  * @see ProtocolHandler
  */

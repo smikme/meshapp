@@ -35,19 +35,22 @@
 
 **MeshApp** — полнофункциональный кроссплатформенный десктопный клиент для [Meshtastic](https://meshtastic.org), работающий по **TCP**, **Serial / USB** и **BLE**. Приложение предназначено для управления устройствами, обмена сообщениями, мониторинга сети и редактирования конфигурации радиомодулей с ПК на Windows, macOS и Linux.
 
+Кодовая база подготовлена к поддержке нескольких коммуникационных протоколов: транспортный слой отделён от протокольного runtime-а. Сейчас реализован протокол **Meshtastic**, а новые протоколы можно добавлять как отдельные адаптеры поверх существующих или новых transport-реализаций.
+
 Meshtastic — открытый проект, превращающий недорогие LoRa-модули в узлы децентрализованной mesh-сети. Сообщения передаются на расстояние от сотен метров до десятков километров — без интернета, вышек сотовой связи и какой-либо инфраструктуры.
 
 ```
                      +------------------------------------------------------+
                      |                       MeshApp                         |
                      |                                                      |
- TCP (IP:4403) ----->|  +----------------+  +-----------+  +-------------+  |
- USB Serial -------->|  |   Transport    |->| Protocol  |->|  UI / Forms |  |
- BLE / GATT -------->|  | TCP / USB / BLE|  |  Handler  |  |   JavaFX    |  |
-                     |  +----------------+  +-----------+  +-------------+  |
-                     |           |                 |               |         |
-                     |           v                 v               v         |
-                     |   Native serial / BLE   DeviceState      H2 / Logs   |
+ TCP (IP:4403) ----->|  +----------------+  +----------------+ +---------+ |
+ USB Serial -------->|  |   Transport    |->| Protocol       | | UI /    | |
+ BLE / GATT -------->|  | TCP/Serial/BLE |  | Runtime        | | Forms   | |
+                     |  +----------------+  | Meshtastic/... | +---------+ |
+                     |           |          +----------------+      |       |
+                     |           v                  |               v       |
+                     |   Native serial / BLE        v            H2 / Logs  |
+                     |                         DeviceState / services       |
                      +------------------------------------------------------+
 ```
 
@@ -55,6 +58,7 @@ Meshtastic — открытый проект, превращающий недо�
 
 ## Новые возможности
 
+- **Архитектура под несколько протоколов** — транспортный слой (`TCP`, `Serial`, `BLE`) отделён от протокольных адаптеров; Meshtastic вынесен в отдельный runtime
 - **Команды в поле ввода** — `@tracebot` и `@infobot` с автодополнением по нодам для быстрого `Traceroute` и запроса `NodeInfo`
 - **Оповещения по чатам** — mute/unmute отдельно для каждого канала и личного диалога, с сохранением настройки локально
 - **Crash / problem reporting** — предложение отправить лог после аварийного завершения и ручная отправка отчёта из окна помощи
@@ -132,6 +136,7 @@ Meshtastic — открытый проект, превращающий недо�
 </p>
 
 - **TCP, Serial / USB и BLE** — подключение по сети, через COM/tty-порт или Bluetooth LE
+- **Отдельные transport и protocol слои** — подключение открывает низкоуровневый transport, а затем запускает выбранный протокольный runtime
 - **Поиск устройств** — автопоиск serial-портов и BLE-сканирование Meshtastic-устройств
 - **Профили подключений** — сохранение адресов, портов и BLE-устройств для быстрого повторного подключения
 - **Одно активное подключение** — в каждый момент времени приложение работает с одним выбранным устройством
@@ -267,7 +272,9 @@ cd meshapp
 | Компонент | Технология | Назначение |
 |-----------|-----------|------------|
 | UI | JavaFX 21 + AtlantaFX | Интерфейс с нативным оформлением |
-| Протокол | Protobuf 4.33 | Сериализация mesh-пакетов |
+| Protocol runtime | `CommunicationProtocol` + `ProtocolRuntime` | Запуск протокольных адаптеров поверх открытого транспорта |
+| Meshtastic protocol | Protobuf 4.33 + Meshtastic schemas | Сериализация `ToRadio` / `FromRadio` и обработка mesh-пакетов |
+| Transport layer | `TransportConnection` | Единый контракт для TCP, Serial, BLE и будущих transport-реализаций |
 | База данных | H2 (embedded) | Локальное хранение сообщений и телеметрии |
 | MQTT bridge | Eclipse Paho MQTT | Desktop-side proxy к внешнему MQTT-брокеру для `proxy_to_client` |
 | TCP | `java.net.Socket` | Подключение к Meshtastic TCP API |
@@ -278,16 +285,42 @@ cd meshapp
 
 ---
 
+## Архитектура протоколов
+
+Подключение в MeshApp теперь разделено на два независимых уровня:
+
+- **Transport** — отвечает только за доставку байтов: открыть/закрыть соединение, записать данные, передать входящий payload выше. Общий контракт находится в `TransportConnection`, фабрика transport-ов — в `TransportConnectionFactory`.
+- **Protocol runtime** — отвечает за смысл этих байтов: framing, parsing, handshake/config exchange, runtime state и протокольные сервисы. Общие контракты находятся в `CommunicationProtocol`, `ProtocolRuntime`, `ProtocolRuntimeContext` и `ProtocolRegistry`.
+
+Сейчас зарегистрирован один протокол:
+
+| ProtocolType | Runtime | Назначение |
+|--------------|---------|------------|
+| `MESHTASTIC` | `MeshtasticProtocolRuntime` | `ProtocolHandler`, `DeviceState`, config exchange, обработка входящих mesh-пакетов, MQTT proxy |
+
+Чтобы добавить новый протокол:
+
+1. Добавить значение в `ProtocolType`
+2. Реализовать `CommunicationProtocol<S>` и `ProtocolRuntime<S>`
+3. Зарегистрировать адаптер в `ProtocolRegistry`
+4. Добавить UI/сервисы, которые работают с состоянием нового runtime-а
+5. При необходимости расширить `ConnectionEntry` и `TransportConnectionFactory`, если протоколу нужен новый тип транспорта
+
+Существующий UI пока использует совместимые Meshtastic accessors из `ConnectionManager` (`getDeviceState`, `getProtocolHandler`, `getConfigFuture`). Новые протоколы должны получать своё состояние через runtime-абстракцию или отдельные typed accessors.
+
+---
+
 ## Структура проекта
 
 ```
 meshapp/
 |-- src/main/java/com/meshtastic/client/
 |   |-- MeshApp.java              # Entry point (JavaFX Application)
-|   |-- connection/               # TCP transport и общие connection API
+|   |-- connection/               # TransportConnection, TCP/Serial/BLE transport layer
 |   |   |-- ble/                  # BLE transport + platform backends
 |   |   \-- serial/               # Native serial I/O (Win/macOS/Linux)
-|   |-- protocol/                 # Meshtastic protocol parsing
+|   |-- protocol/                 # Общие protocol runtime API и registry
+|   |   \-- meshtastic/           # Meshtastic protocol adapter/runtime
 |   |-- model/                    # Data models и runtime state
 |   |-- service/                  # Persistence, discovery, reconnect, config exchange
 |   |-- forms/                    # Основные экраны приложения

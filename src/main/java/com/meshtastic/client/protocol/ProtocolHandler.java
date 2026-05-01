@@ -2,7 +2,7 @@ package com.meshtastic.client.protocol;
 
 import org.meshtastic.proto.MeshProtos;
 import com.google.protobuf.InvalidProtocolBufferException;
-import com.meshtastic.client.connection.MeshtasticConnection;
+import com.meshtastic.client.connection.TransportConnection;
 import com.meshtastic.client.service.PacketMonitorService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -22,7 +22,7 @@ import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Диспетчер протокола Meshtastic. Принимает сырые protobuf-payload из
- * {@link MeshtasticConnection}, парсит {@code FromRadio} и распределяет
+ * {@link TransportConnection}, парсит {@code FromRadio} и распределяет
  * по зарегистрированным {@link FromRadioListener}-ам.
  * <p>
  * Также предоставляет метод отправки {@code ToRadio} на устройство
@@ -43,7 +43,7 @@ public class ProtocolHandler {
     private static final int OUTBOUND_PRIORITY_HEARTBEAT = 1;
     private static final int OUTBOUND_PRIORITY_MQTT_PROXY = 2;
 
-    private final MeshtasticConnection connection;
+    private final TransportConnection connection;
     private final String connectionId;
     private final List<FromRadioListener> listeners = new CopyOnWriteArrayList<>();
 
@@ -67,11 +67,11 @@ public class ProtocolHandler {
     private volatile ScheduledFuture<?> heartbeatFuture;
     private final AtomicInteger heartbeatNonce = new AtomicInteger(0);
 
-    public ProtocolHandler(MeshtasticConnection connection) {
+    public ProtocolHandler(TransportConnection connection) {
         this(null, connection);
     }
 
-    public ProtocolHandler(String connectionId, MeshtasticConnection connection) {
+    public ProtocolHandler(String connectionId, TransportConnection connection) {
         this.connectionId = connectionId;
         this.connection = connection;
         connection.setDataListener(this::handleRawPacket);
