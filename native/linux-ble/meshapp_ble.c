@@ -34,10 +34,18 @@
 #define PROPS_IFACE        "org.freedesktop.DBus.Properties"
 #define OBJMGR_IFACE       "org.freedesktop.DBus.ObjectManager"
 
+#define PROFILE_AUTO       -1
+#define PROFILE_MESHTASTIC 0
+#define PROFILE_MESHCORE   1
+
 #define SERVICE_UUID       "6ba1b218-15a8-461f-9fa8-5dcae273eafd"
 #define FROM_RADIO_UUID    "2c55e69e-4993-11ed-b878-0242ac120002"
 #define TO_RADIO_UUID      "f75c76d2-129e-4dad-a1dd-7866124401e7"
 #define FROM_NUM_UUID      "ed9da18c-a800-4f66-a670-aa7547e34453"
+
+#define MESHCORE_SERVICE_UUID "6e400001-b5a3-f393-e0a9-e50e24dcca9e"
+#define MESHCORE_RX_UUID      "6e400002-b5a3-f393-e0a9-e50e24dcca9e"
+#define MESHCORE_TX_UUID      "6e400003-b5a3-f393-e0a9-e50e24dcca9e"
 
 #define MAX_PATH           1024
 #define MAX_DRAIN          100
@@ -134,6 +142,7 @@ static atomic_bool g_initialized;
 static atomic_bool g_connected;
 static atomic_bool g_notifications_active;
 static atomic_bool g_cancel_connect_requested;
+static atomic_int g_profile;
 
 static task_queue_t g_tasks;
 static int g_wake_pipe[2] = {-1, -1};
@@ -164,6 +173,27 @@ static sd_bus_slot* g_from_radio_notify_slot = NULL;
 static meshble_passkey_request_cb g_passkey_callback = NULL;
 static sd_bus_message* g_pending_passkey_msg = NULL;
 static sd_bus_slot* g_agent_slot = NULL;
+
+static int active_profile(void) {
+    int profile = atomic_load(&g_profile);
+    return profile == PROFILE_MESHCORE ? PROFILE_MESHCORE : PROFILE_MESHTASTIC;
+}
+
+static const char* active_service_uuid(void) {
+    return active_profile() == PROFILE_MESHCORE ? MESHCORE_SERVICE_UUID : SERVICE_UUID;
+}
+
+static const char* active_inbound_uuid(void) {
+    return active_profile() == PROFILE_MESHCORE ? MESHCORE_TX_UUID : FROM_RADIO_UUID;
+}
+
+static const char* active_outbound_uuid(void) {
+    return active_profile() == PROFILE_MESHCORE ? MESHCORE_RX_UUID : TO_RADIO_UUID;
+}
+
+static const char* active_notify_trigger_uuid(void) {
+    return active_profile() == PROFILE_MESHCORE ? NULL : FROM_NUM_UUID;
+}
 
 /* ==================== Wake + Dispatch ==================== */
 
@@ -323,15 +353,18 @@ static int find_gatt_characteristics(sd_bus* bus, const char* device_path) {
                         const char* uuid = NULL;
                         sd_bus_message_read(reply, "v", "s", &uuid);
                         if (uuid) {
-                            if (strcasecmp(uuid, FROM_RADIO_UUID) == 0) {
+                            const char* inbound_uuid = active_inbound_uuid();
+                            const char* outbound_uuid = active_outbound_uuid();
+                            const char* trigger_uuid = active_notify_trigger_uuid();
+                            if (strcasecmp(uuid, inbound_uuid) == 0) {
                                 strncpy(g_from_radio_char_path, path, MAX_PATH - 1);
-                                log_msg("[meshble] fromRadio: %s", path);
-                            } else if (strcasecmp(uuid, TO_RADIO_UUID) == 0) {
+                                log_msg("[meshble] inbound: %s", path);
+                            } else if (strcasecmp(uuid, outbound_uuid) == 0) {
                                 strncpy(g_to_radio_char_path, path, MAX_PATH - 1);
-                                log_msg("[meshble] toRadio: %s", path);
-                            } else if (strcasecmp(uuid, FROM_NUM_UUID) == 0) {
+                                log_msg("[meshble] outbound: %s", path);
+                            } else if (trigger_uuid && strcasecmp(uuid, trigger_uuid) == 0) {
                                 strncpy(g_from_num_char_path, path, MAX_PATH - 1);
-                                log_msg("[meshble] fromNum: %s", path);
+                                log_msg("[meshble] notify trigger: %s", path);
                             }
                         }
                     } else {
@@ -411,6 +444,20 @@ static int acquire_notify(sd_bus* bus, const char* char_path, uint16_t* mtu_out)
     if (mtu_out) *mtu_out = mtu;
     log_msg("[meshble] AcquireNotify fd=%d mtu=%d", real_fd, mtu);
     return real_fd;
+}
+
+static int start_notify(sd_bus* bus, const char* char_path) {
+    sd_bus_error error = SD_BUS_ERROR_NULL;
+    int r = sd_bus_call_method(bus, BLUEZ_BUS, char_path,
+                               CHAR_IFACE, "StartNotify",
+                               &error, NULL, "");
+    if (r < 0) {
+        log_msg("[meshble] StartNotify failed: %s (%s)", error.message, error.name);
+        sd_bus_error_free(&error);
+        return r;
+    }
+    sd_bus_error_free(&error);
+    return 0;
 }
 
 /* ==================== WriteValue / ReadValue (D-Bus fallback) ==================== */
@@ -861,7 +908,13 @@ static void do_start_scan(void* arg) {
         sd_bus_message_append(m, "s", "UUIDs");
         sd_bus_message_open_container(m, 'v', "as");
         sd_bus_message_open_container(m, 'a', "s");
-        sd_bus_message_append(m, "s", SERVICE_UUID);
+        int scan_profile = atomic_load(&g_profile);
+        if (scan_profile == PROFILE_AUTO) {
+            sd_bus_message_append(m, "s", SERVICE_UUID);
+            sd_bus_message_append(m, "s", MESHCORE_SERVICE_UUID);
+        } else {
+            sd_bus_message_append(m, "s", active_service_uuid());
+        }
         sd_bus_message_close_container(m);
         sd_bus_message_close_container(m);
         sd_bus_message_close_container(m);
@@ -1074,14 +1127,40 @@ static void do_connect(void* arg) {
     atomic_store(&g_use_dbus_write, true);
     g_to_radio_fd = -1;
 
-    /* fromRadio: ReadValue polling (now works after pairing) */
-    log_msg("[meshble] Using ReadValue for fromRadio: %s", g_from_radio_char_path);
-    atomic_store(&g_use_dbus_read, true);
-    g_from_radio_fd = -1;
+    const char* trigger_uuid = active_notify_trigger_uuid();
+    if (trigger_uuid) {
+        /* Meshtastic fromRadio: ReadValue polling (now works after pairing) */
+        log_msg("[meshble] Using ReadValue for inbound characteristic: %s", g_from_radio_char_path);
+        atomic_store(&g_use_dbus_read, true);
+        g_from_radio_fd = -1;
+        atomic_store(&g_notifications_active, false);
+        log_msg("[meshble] Connected (write=WriteValue, read=ReadValue)");
+    } else {
+        /* MeshCore Companion TX: prefer notifications on the inbound characteristic. */
+        sd_bus_match_signal(g_bus, &g_from_radio_notify_slot,
+                            BLUEZ_BUS, g_from_radio_char_path,
+                            PROPS_IFACE, "PropertiesChanged",
+                            on_from_radio_changed, NULL);
+        int fd = acquire_notify(g_bus, g_from_radio_char_path, &g_from_radio_mtu);
+        if (fd >= 0) {
+            g_from_radio_fd = fd;
+            atomic_store(&g_use_dbus_read, false);
+            atomic_store(&g_notifications_active, true);
+            log_msg("[meshble] Connected (write=WriteValue, read=AcquireNotify)");
+        } else if (start_notify(g_bus, g_from_radio_char_path) >= 0) {
+            g_from_radio_fd = -1;
+            atomic_store(&g_use_dbus_read, false);
+            atomic_store(&g_notifications_active, true);
+            log_msg("[meshble] Connected (write=WriteValue, read=StartNotify)");
+        } else {
+            log_msg("[meshble] Notifications unavailable; falling back to ReadValue");
+            atomic_store(&g_use_dbus_read, true);
+            g_from_radio_fd = -1;
+            atomic_store(&g_notifications_active, false);
+        }
+    }
 
     atomic_store(&g_connected, true);
-    atomic_store(&g_notifications_active, false);
-    log_msg("[meshble] Connected (write=WriteValue, read=ReadValue)");
 
     if (g_state_callback) g_state_callback(0, NULL);
     ctx->result = 0;
@@ -1268,6 +1347,7 @@ MESHBLE_API int meshble_init(void) {
     fcntl(g_wake_pipe[1], F_SETFL, O_NONBLOCK);
 
     tq_init(&g_tasks);
+    atomic_store(&g_profile, PROFILE_MESHTASTIC);
     atomic_store(&g_worker_running, true);
     pthread_create(&g_worker_thread, NULL, worker_loop, NULL);
 
@@ -1306,6 +1386,14 @@ MESHBLE_API int meshble_get_adapter_state(void) {
     adapter_state_ctx_t ctx = { .result = 0 };
     run_on_worker(do_get_adapter_state, &ctx);
     return ctx.result;
+}
+
+MESHBLE_API void meshble_set_profile(int profile) {
+    if (profile == PROFILE_AUTO || profile == PROFILE_MESHCORE) {
+        atomic_store(&g_profile, profile);
+    } else {
+        atomic_store(&g_profile, PROFILE_MESHTASTIC);
+    }
 }
 
 MESHBLE_API int meshble_start_scan(meshble_device_cb callback) {

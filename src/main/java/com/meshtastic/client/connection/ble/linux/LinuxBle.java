@@ -48,6 +48,7 @@ public class LinuxBle implements BlePlatform {
     private volatile Consumer<BleState> stateListener;
     private volatile Consumer<String> passkeyRequestHandler;
     private volatile boolean connected;
+    private volatile BleProtocolProfile profile = BleProtocolProfile.MESHTASTIC;
 
     // Polling (fromRadio data also comes via fd notifications in native code,
     // but polling ensures nothing is missed — same approach as Windows/macOS)
@@ -95,13 +96,14 @@ public class LinuxBle implements BlePlatform {
     @Override
     public void startScan(Consumer<BleDevice> onDeviceFound) {
         this.scanConsumer = onDeviceFound;
+        lib.meshble_set_profile(profile.nativeCode());
 
         // Static callback — prevent GC
         scanCallback = (address, name, rssi) -> {
             Consumer<BleDevice> consumer = scanConsumer;
             if (consumer != null && address != null) {
                 String deviceName = (name != null) ? name : "Unknown";
-                consumer.accept(new BleDevice(address, deviceName, rssi));
+                consumer.accept(new BleDevice(address, deviceName, rssi, profile.protocolType()));
             }
         };
 
@@ -125,6 +127,7 @@ public class LinuxBle implements BlePlatform {
     @Override
     public void connect(String address) throws ConnectionException {
         log.info("Подключение к BLE устройству: {}", address);
+        lib.meshble_set_profile(profile.nativeCode());
 
         // Setup data callback (static, prevent GC)
         dataCallback = (dataPtr, length) -> {
@@ -167,8 +170,12 @@ public class LinuxBle implements BlePlatform {
             case 0 -> {
                 connected = true;
                 log.info("BLE подключено: {}", address);
-                log.info("Запуск polling fromRadio ({}ms)", POLL_INTERVAL_MS);
-                startPolling();
+                if (lib.meshble_notifications_active() == 0) {
+                    log.info("Запуск polling fromRadio ({}ms)", POLL_INTERVAL_MS);
+                    startPolling();
+                } else {
+                    log.info("BLE notifications активны; polling не запускается");
+                }
             }
             case -1 -> throw new ConnectionException("BLE таймаут подключения: " + address);
             case -2 -> throw new ConnectionException("BLE устройство не найдено: " + address);
@@ -207,7 +214,9 @@ public class LinuxBle implements BlePlatform {
             return false;
         } else {
             log.debug("Отправлено {} байт в toRadio", protobufPayload.length);
-            scheduleDrainAfterWrite();
+            if (lib.meshble_notifications_active() == 0) {
+                scheduleDrainAfterWrite();
+            }
             return true;
         }
     }
@@ -251,6 +260,17 @@ public class LinuxBle implements BlePlatform {
             case 4 -> AdapterState.UNAUTHORIZED;
             default -> AdapterState.UNKNOWN;
         };
+    }
+
+    @Override
+    public void setProfile(BleProtocolProfile profile) {
+        this.profile = profile == null ? BleProtocolProfile.MESHTASTIC : profile;
+        lib.meshble_set_profile(this.profile.nativeCode());
+    }
+
+    @Override
+    public BleProtocolProfile getProfile() {
+        return profile;
     }
 
     @Override

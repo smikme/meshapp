@@ -9,6 +9,7 @@ import com.meshtastic.client.model.ConnectionType;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.protocol.ProtocolHandler;
+import com.meshtastic.client.protocol.meshcore.MeshCoreCompanionState;
 import com.meshtastic.client.service.ConnectionManager;
 import com.meshtastic.client.service.ConfigSnapshotService;
 import com.meshtastic.client.service.DatabaseResetService;
@@ -130,6 +131,7 @@ public class FormSetting extends Form {
 
     private DeviceState state;
     private ProtocolHandler handler;
+    private MeshCoreCompanionState meshCoreCompanionState;
     private volatile String pendingTimeOnlySyncConnectionId;
     private final Runnable connectionListener = () -> Platform.runLater(() -> {
         reloadConfigTree();
@@ -225,15 +227,18 @@ public class FormSetting extends Form {
         ConnectionManager mgr = ConnectionManager.getInstance();
         DeviceState newState = null;
         ProtocolHandler newHandler = null;
+        MeshCoreCompanionState newMeshCoreState = null;
         for (ConnectionEntry entry : mgr.getEntries()) {
             if (entry.isConnected()) {
                 newState = mgr.getDeviceState(entry.getId());
                 newHandler = mgr.getProtocolHandler(entry.getId());
+                newMeshCoreState = mgr.getMeshCoreCompanionState(entry.getId());
                 if (newState != null) { break; }
             }
         }
         this.state = newState;
         this.handler = newHandler;
+        this.meshCoreCompanionState = newMeshCoreState;
         observeRingtoneState(newState);
     }
 
@@ -245,6 +250,7 @@ public class FormSetting extends Form {
         observeRingtoneState(null);
         state = null;
         handler = null;
+        meshCoreCompanionState = null;
         observedConfigLoadFuture = null;
         ringtoneRequestState = null;
         fullConfigRoot = null;
@@ -2148,14 +2154,21 @@ public class FormSetting extends Form {
     private void reloadConfigTree() {
         refreshConnection();
 
-        boolean connected = state != null && handler != null;
-        setDevicePowerButtonsDisabled(!connected);
-        setSyncDateTimeButtonDisabled(!connected);
+        boolean meshtasticConnected = state != null && handler != null;
+        boolean meshCoreConnected = state != null && meshCoreCompanionState != null;
+        boolean connected = meshtasticConnected || meshCoreConnected;
+        setDevicePowerButtonsDisabled(!meshtasticConnected);
+        setSyncDateTimeButtonDisabled(!meshtasticConnected);
 
         if (!connected) {
             clearConfigContext();
             configStatusLabel.setText("Нет подключения к радио");
             saveConfigBtn.setDisable(true);
+            return;
+        }
+
+        if (meshCoreConnected && !meshtasticConnected) {
+            showMeshCoreSettingsTree(meshCoreCompanionState);
             return;
         }
 
@@ -2262,6 +2275,111 @@ public class FormSetting extends Form {
             configStatusLabel.setText("Загружено: %d секций, %d параметров".formatted(
                     originalConfigs.size() + originalModuleConfigs.size(), totalFields));
         }
+    }
+
+    /**
+     * Строит read-only дерево настроек MeshCore Companion Protocol.
+     * <p>
+     * MeshCore Companion не отдаёт Meshtastic Admin protobuf-конфиг, поэтому
+     * вкладка показывает доступные metadata, radio-параметры, storage и каналы,
+     * а действия сохранения/перезагрузки Meshtastic-конфига отключаются.
+     *
+     * @param meshCoreState runtime-состояние MeshCore Companion
+     */
+    private void showMeshCoreSettingsTree(MeshCoreCompanionState meshCoreState) {
+        originalConfigs = new ArrayList<>();
+        originalModuleConfigs = new ArrayList<>();
+        originalChannels = new ArrayList<>(state != null ? state.getChannels() : List.of());
+        workingChannels = new ArrayList<>(originalChannels);
+
+        TreeItem<ConfigTreeItem> root = new TreeItem<>(new ConfigTreeItem("Корень", null, 0));
+        root.setExpanded(true);
+
+        TreeItem<ConfigTreeItem> deviceSection = section("MeshCore устройство", "meshcore_device");
+        addValue(deviceSection, "Имя", "device_name", valueOrDash(meshCoreState.getDeviceName()), String.class);
+        addValue(deviceSection, "Owner ID", "owner_id", valueOrDash(meshCoreState.getOwnerId()), String.class);
+        addValue(deviceSection, "Public key", "public_key", valueOrDash(meshCoreState.getPublicKeyHex()), String.class);
+        addValue(deviceSection, "Модель", "model", valueOrDash(meshCoreState.getModel()), String.class);
+        addValue(deviceSection, "Firmware", "firmware_version",
+                valueOrDash(meshCoreState.getFirmwareVersion()), String.class);
+        addValue(deviceSection, "Build", "firmware_build",
+                valueOrDash(meshCoreState.getFirmwareBuild()), String.class);
+        addValue(deviceSection, "Protocol version", "protocol_version",
+                valueOrDash(meshCoreState.getFirmwareProtocolVersion()), String.class);
+        addValue(deviceSection, "BLE PIN", "ble_pin", valueOrDash(meshCoreState.getBlePin()), String.class);
+        root.getChildren().add(deviceSection);
+
+        TreeItem<ConfigTreeItem> radioSection = section("MeshCore radio", "meshcore_radio");
+        addValue(radioSection, "TX power (dBm)", "tx_power",
+                valueOrDash(meshCoreState.getTxPowerDbm()), String.class);
+        addValue(radioSection, "Max TX power (dBm)", "max_tx_power",
+                valueOrDash(meshCoreState.getMaxTxPowerDbm()), String.class);
+        addValue(radioSection, "Frequency (kHz)", "frequency",
+                valueOrDash(meshCoreState.getRadioFrequencyKhz()), String.class);
+        addValue(radioSection, "Bandwidth (kHz)", "bandwidth",
+                valueOrDash(meshCoreState.getRadioBandwidthKhz()), String.class);
+        addValue(radioSection, "Spreading factor", "spreading_factor",
+                valueOrDash(meshCoreState.getRadioSpreadingFactor()), String.class);
+        addValue(radioSection, "Coding rate", "coding_rate",
+                valueOrDash(meshCoreState.getRadioCodingRate()), String.class);
+        root.getChildren().add(radioSection);
+
+        TreeItem<ConfigTreeItem> limitsSection = section("MeshCore данные", "meshcore_limits");
+        addValue(limitsSection, "Max contacts", "max_contacts",
+                valueOrDash(meshCoreState.getMaxContacts()), String.class);
+        addValue(limitsSection, "Contact count", "contact_count",
+                valueOrDash(meshCoreState.getContactCount()), String.class);
+        addValue(limitsSection, "Max channels", "max_channels",
+                valueOrDash(meshCoreState.getMaxChannels()), String.class);
+        addValue(limitsSection, "Battery (mV)", "battery_mv",
+                valueOrDash(meshCoreState.getBatteryMillivolts()), String.class);
+        addValue(limitsSection, "Storage used (KB)", "storage_used",
+                valueOrDash(meshCoreState.getUsedStorageKb()), String.class);
+        addValue(limitsSection, "Storage total (KB)", "storage_total",
+                valueOrDash(meshCoreState.getTotalStorageKb()), String.class);
+        addValue(limitsSection, "Last error", "last_error",
+                valueOrDash(meshCoreState.getLastError()), String.class);
+        root.getChildren().add(limitsSection);
+
+        TreeItem<ConfigTreeItem> channelsSection = section("MeshCore каналы", "meshcore_channels");
+        for (ChannelProtos.Channel channel : state.getChannels()) {
+            String role = channel.getRole().name();
+            String name = channel.hasSettings() ? channel.getSettings().getName() : "";
+            addValue(channelsSection, "Канал " + channel.getIndex(),
+                    "channel_" + channel.getIndex(),
+                    (name == null || name.isBlank() ? "Ch " + channel.getIndex() : name) + " (" + role + ")",
+                    String.class);
+        }
+        root.getChildren().add(channelsSection);
+
+        fullConfigRoot = root;
+        configTree.setRoot(root);
+        configSearchField.clear();
+        saveConfigBtn.setDisable(true);
+        setSyncDateTimeButtonDisabled(true);
+        configStatusLabel.setText("MeshCore Companion: metadata загружены, запись настроек недоступна");
+    }
+
+    private TreeItem<ConfigTreeItem> section(String name, String configType) {
+        return new TreeItem<>(new ConfigTreeItem(name, configType, 0));
+    }
+
+    private void addValue(TreeItem<ConfigTreeItem> section,
+                          String name,
+                          String fieldName,
+                          Object value,
+                          Class<?> valueType) {
+        section.getChildren().add(new TreeItem<>(
+                new ConfigTreeItem(name, fieldName, value, valueType, null, null,
+                        section.getValue().getConfigType(), 0)));
+    }
+
+    private String valueOrDash(Object value) {
+        if (value == null) {
+            return "—";
+        }
+        String text = String.valueOf(value);
+        return text.isBlank() ? "—" : text;
     }
 
     private String resolveOwnerLongName(MeshProtos.User ownerInfo, NodeData myNode) {

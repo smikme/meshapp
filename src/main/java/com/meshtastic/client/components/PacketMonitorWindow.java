@@ -1199,7 +1199,10 @@ public final class PacketMonitorWindow {
         hexPreview.setText(currentHexPreview.hexText());
         asciiPreview.setText(currentHexPreview.asciiText());
         clearPreviewSelection();
-        TreeItem<PacketTreeNode> root = PacketDebugFormatter.buildPacketTree(entry.getPacketBytes());
+        TreeItem<PacketTreeNode> root = entry.getPacketType() != null
+                && entry.getPacketType().startsWith("MeshCore Companion")
+                ? PacketDebugFormatter.buildRawPacketTree(entry.getPacketType(), entry.getPacketBytes())
+                : PacketDebugFormatter.buildPacketTree(entry.getPacketBytes());
         expandTree(root);
         packetTree.setRoot(root);
         packetTree.getSelectionModel().clearSelection();

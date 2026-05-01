@@ -386,7 +386,8 @@ abstract class FormChatUi extends FormChatBase {
     }
 
     private void sendChatMessage(ChatInputBar.SendRequest request) {
-        if (selectedChat == null || state == null || protocolHandler == null) {
+        if (selectedChat == null || state == null
+                || (protocolHandler == null && meshCoreCompanionRuntime == null)) {
             return;
         }
 
@@ -400,6 +401,12 @@ abstract class FormChatUi extends FormChatBase {
     }
 
     private boolean sendChannelMessage(ChatInputBar.SendRequest request) {
+        if (meshCoreCompanionRuntime != null) {
+            return meshCoreCompanionRuntime.sendChannelMessage(
+                    selectedChat.getChannelIndex(),
+                    request.text(),
+                    request.replyId()) != null;
+        }
         MessageService.sendChannelMessage(
                 protocolHandler,
                 state,
@@ -413,6 +420,18 @@ abstract class FormChatUi extends FormChatBase {
         NodeData peerNode = NodeUtils.resolveNode(state, selectedChat.getPeerNodeId());
         if (peerNode != null && peerNode.isUnmessagable()) {
             Toast.show(Toast.Type.WARNING, "Нода объявила, что не принимает личные сообщения");
+            return false;
+        }
+
+        if (meshCoreCompanionRuntime != null) {
+            MeshMessage sent = meshCoreCompanionRuntime.sendDirectMessage(
+                    selectedChat.getPeerNodeId(),
+                    request.text(),
+                    request.replyId());
+            if (sent != null) {
+                return true;
+            }
+            Toast.show(Toast.Type.ERROR, "Не удалось определить MeshCore contact для DM");
             return false;
         }
 
@@ -554,6 +573,6 @@ abstract class FormChatUi extends FormChatBase {
     }
 
     protected String currentOwnerNodeId() {
-        return state != null ? String.format("!%08x", state.getMyNodeNum()) : "";
+        return state != null && state.getOwnerNodeId() != null ? state.getOwnerNodeId() : "";
     }
 }

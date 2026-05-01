@@ -8,6 +8,15 @@ package com.meshtastic.client.model;
  * транспортов.
  */
 public enum ProtocolType {
+    /** Автоматическое определение протокола при подключении. */
+    AUTO,
+
     /** Протокол Meshtastic поверх TCP, Serial или BLE транспорта. */
-    MESHTASTIC
+    MESHTASTIC,
+
+    /** MeshCore KISS modem protocol поверх TCP или Serial byte stream. */
+    MESHCORE_KISS,
+
+    /** MeshCore Companion Protocol поверх BLE RX/TX или raw TCP/Serial byte stream. */
+    MESHCORE_COMPANION
 }

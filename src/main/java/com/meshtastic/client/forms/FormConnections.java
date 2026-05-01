@@ -8,6 +8,7 @@ import com.meshtastic.client.model.ConnectionEntry;
 import com.meshtastic.client.model.ConnectionType;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.NodeData;
+import com.meshtastic.client.model.ProtocolType;
 import com.meshtastic.client.service.ConnectionManager;
 import com.meshtastic.client.service.SerialPortDiscoveryService;
 import com.meshtastic.client.simple.SimpleConnectionForm;
@@ -146,6 +147,9 @@ public class FormConnections extends Form {
         } else {
             addressText = "TCP: " + entry.getHost() + ":" + entry.getPort();
         }
+        ProtocolType protocolType = ConnectionManager.getInstance().getActiveProtocolType(entry.getId());
+        addressText += " · Протокол: " + formatProtocol(protocolType);
+
         Label lblAddress = new Label(addressText);
         lblAddress.setStyle("-fx-opacity: 0.6;");
 
@@ -242,5 +246,17 @@ public class FormConnections extends Form {
 
         modalPane.show(form);
         form.formOpen();
+    }
+
+    private static String formatProtocol(ProtocolType protocolType) {
+        if (protocolType == null) {
+            return "?";
+        }
+        return switch (protocolType) {
+            case AUTO -> "авто";
+            case MESHTASTIC -> "Meshtastic";
+            case MESHCORE_KISS -> "MeshCore KISS";
+            case MESHCORE_COMPANION -> "MeshCore Companion";
+        };
     }
 }

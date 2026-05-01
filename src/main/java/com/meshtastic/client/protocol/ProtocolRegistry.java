@@ -1,6 +1,8 @@
 package com.meshtastic.client.protocol;
 
 import com.meshtastic.client.model.ProtocolType;
+import com.meshtastic.client.protocol.meshcore.MeshCoreCompanionProtocol;
+import com.meshtastic.client.protocol.meshcore.MeshCoreKissProtocol;
 import com.meshtastic.client.protocol.meshtastic.MeshtasticProtocol;
 
 import java.util.EnumMap;
@@ -20,6 +22,8 @@ public final class ProtocolRegistry {
 
     static {
         register(new MeshtasticProtocol());
+        register(new MeshCoreKissProtocol());
+        register(new MeshCoreCompanionProtocol());
     }
 
     private ProtocolRegistry() {

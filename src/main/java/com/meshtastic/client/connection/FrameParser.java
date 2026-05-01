@@ -4,10 +4,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * State machine for parsing Meshtastic serial/TCP frames.
- * Frame format: [0x94][0xC3][len_msb][len_lsb][payload...]
+ * Конечный автомат для parsing-а Meshtastic serial/TCP frame-ов.
+ * <p>
+ * Формат frame-а: {@code [0x94][0xC3][len_msb][len_lsb][payload...]}.
  */
-public class FrameParser {
+public class FrameParser implements StreamFrameParser {
 
     private static final Logger log = LoggerFactory.getLogger(FrameParser.class);
 
@@ -33,6 +34,7 @@ public class FrameParser {
      * @param b очередной байт
      * @return полный protobuf-payload при завершении фрейма, или {@code null} если фрейм не собран
      */
+    @Override
     public byte[] processByte(byte b) {
         switch (state) {
             case WAIT_START1:
@@ -92,6 +94,7 @@ public class FrameParser {
      * Возвращает {@code true}, если парсер находится внутри частично прочитанного фрейма
      * и ожидает оставшиеся байты заголовка или payload.
      */
+    @Override
     public boolean hasPartialFrame() {
         return state != State.WAIT_START1;
     }
@@ -112,6 +115,7 @@ public class FrameParser {
      * Сбрасывает парсер в начальное состояние.
      * Используется при переподключении или обнаружении ошибки синхронизации.
      */
+    @Override
     public void reset() {
         state = State.WAIT_START1;
         payloadLength = 0;

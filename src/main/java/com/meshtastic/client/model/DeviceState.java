@@ -576,10 +576,10 @@ public class DeviceState {
     /**
      * Возвращает nodeId устройства-владельца из ownerInfo.
      */
-    private String getOwnerNodeId() {
+    public String getOwnerNodeId() {
         if (ownerInfo != null) {
             return ownerInfo.getId();
         }
-        return null;
+        return myNodeNum != 0 ? String.format("!%08x", myNodeNum) : null;
     }
 }

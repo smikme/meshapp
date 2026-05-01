@@ -22,12 +22,13 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 /**
- * BLE-транспорт для Meshtastic-устройств.
+ * BLE-транспорт для Meshtastic и MeshCore Companion устройств.
  * <p>
  * Реализует {@link MeshtasticConnection}, делегируя BLE-операции
  * платформо-зависимому {@link BlePlatform}. В отличие от TCP/Serial,
- * BLE не использует serial-фрейминг ({@code [0x94][0xC3][len][payload]}) —
- * GATT-характеристики передают protobuf напрямую.
+ * Meshtastic BLE не использует serial-фрейминг ({@code [0x94][0xC3][len][payload]}) —
+ * GATT-характеристики передают protobuf напрямую. MeshCore Companion передаёт
+ * собственные бинарные BLE-пакеты без Meshtastic serial-заголовка.
  * <p>
  * {@link #sendBytes(byte[])} ожидает фреймированные данные от
  * {@link com.meshtastic.client.protocol.PacketFramer} и автоматически
@@ -42,6 +43,7 @@ public class BleConnection implements MeshtasticConnection {
 
     private final String address;
     private final BlePlatform platform;
+    private final BleProtocolProfile requestedProfile;
     private final Object sendInfrastructureLock = new Object();
     private final AtomicLong writeSequence = new AtomicLong();
     private final AtomicLong connectionGeneration = new AtomicLong();
@@ -50,12 +52,21 @@ public class BleConnection implements MeshtasticConnection {
     private volatile Consumer<byte[]> dataListener;
     private volatile ConnectionListener connectionListener;
     private volatile boolean connected;
+    private volatile BleProtocolProfile resolvedProfile;
     private volatile ThreadPoolExecutor writeExecutor;
     private volatile ScheduledExecutorService writeWatchdog;
 
     public BleConnection(String address, BlePlatform platform) {
+        this(address, platform, BleProtocolProfile.MESHTASTIC);
+    }
+
+    public BleConnection(String address, BlePlatform platform, BleProtocolProfile profile) {
         this.address = address;
         this.platform = platform;
+        this.requestedProfile = profile == null ? BleProtocolProfile.MESHTASTIC : profile;
+        this.resolvedProfile = this.requestedProfile == BleProtocolProfile.AUTO
+                ? null
+                : this.requestedProfile;
     }
 
     /**
@@ -67,7 +78,7 @@ public class BleConnection implements MeshtasticConnection {
      */
     @Override
     public void connect() throws ConnectionException {
-        log.info("Connecting to BLE device: {}", address);
+        log.info("Connecting to BLE device: {} ({})", address, requestedProfile.displayName());
         connectionGeneration.incrementAndGet();
         ensureSendInfrastructure();
         // Linux/Windows already emit BleState.Connected from native callbacks, while macOS
@@ -75,6 +86,7 @@ public class BleConnection implements MeshtasticConnection {
         AtomicBoolean connectedEventDelivered = new AtomicBoolean(false);
         // If connect() synchronously surfaces Disconnected/Error, do not backfill success afterwards.
         AtomicBoolean terminalStateObserved = new AtomicBoolean(false);
+        AtomicBoolean suppressTerminalStateEvents = new AtomicBoolean(false);
 
         // Устанавливаем слушатели перед подключением — при reconnect они могут быть stale
         platform.setFromRadioListener(data -> {
@@ -88,6 +100,9 @@ public class BleConnection implements MeshtasticConnection {
             switch (state) {
                 case BleState.Connected ignored -> {
                     connected = true;
+                    if (suppressTerminalStateEvents.get()) {
+                        return;
+                    }
                     if (connectedEventDelivered.compareAndSet(false, true)) {
                         ConnectionListener listener = connectionListener;
                         if (listener != null) { listener.onConnected(); }
@@ -95,14 +110,20 @@ public class BleConnection implements MeshtasticConnection {
                 }
                 case BleState.Disconnected ignored -> {
                     connected = false;
+                    if (suppressTerminalStateEvents.get()) {
+                        return;
+                    }
                     terminalStateObserved.set(true);
                     ConnectionListener listener = connectionListener;
                     if (listener != null) { listener.onDisconnected(); }
                 }
                 case BleState.Error e -> {
                     connected = false;
-                    terminalStateObserved.set(true);
                     log.error("BLE error: {}", e.message(), e.cause());
+                    if (suppressTerminalStateEvents.get()) {
+                        return;
+                    }
+                    terminalStateObserved.set(true);
                     ConnectionListener listener = connectionListener;
                     if (listener != null) { listener.onConnectionError(e.message(), e.cause()); }
                 }
@@ -117,7 +138,8 @@ public class BleConnection implements MeshtasticConnection {
                                 platform::respondPasskey,
                                 platform::cancelPasskey)));
 
-        platform.connect(address);
+        BleProtocolProfile connectedProfile = connectWithProfileSelection(suppressTerminalStateEvents);
+        resolvedProfile = connectedProfile;
         // Fallback for platforms that complete connect() successfully but do not emit Connected state.
         if (!terminalStateObserved.get() && connectedEventDelivered.compareAndSet(false, true)) {
             connected = true;
@@ -126,7 +148,7 @@ public class BleConnection implements MeshtasticConnection {
                 listener.onConnected();
             }
         }
-        log.info("Connected to BLE device: {}", address);
+        log.info("Connected to BLE device: {} ({})", address, connectedProfile.displayName());
     }
 
     @Override
@@ -168,15 +190,16 @@ public class BleConnection implements MeshtasticConnection {
             log.warn("Cannot send: BLE not connected to {}", address);
             return;
         }
-        if (data.length <= BleConstants.SERIAL_FRAME_HEADER_SIZE) {
+        BleProtocolProfile activeProfile = activePayloadProfile();
+        if (activeProfile.usesSerialFramePayload() && data.length <= BleConstants.SERIAL_FRAME_HEADER_SIZE) {
             log.warn("BLE send: data too short ({} bytes), expected > {} header bytes",
                     data.length, BleConstants.SERIAL_FRAME_HEADER_SIZE);
             return;
         }
 
-        // Вырезаем 4-байтный serial-заголовок — BLE передаёт protobuf напрямую
-        byte[] payload = new byte[data.length - BleConstants.SERIAL_FRAME_HEADER_SIZE];
-        System.arraycopy(data, BleConstants.SERIAL_FRAME_HEADER_SIZE, payload, 0, payload.length);
+        byte[] payload = activeProfile.usesSerialFramePayload()
+                ? stripSerialFrameHeader(data)
+                : data.clone();
 
         ensureSendInfrastructure();
 
@@ -238,6 +261,77 @@ public class BleConnection implements MeshtasticConnection {
                 });
             }
         }
+    }
+
+    public BleProtocolProfile getRequestedProfile() {
+        return requestedProfile;
+    }
+
+    public BleProtocolProfile getResolvedProfile() {
+        return resolvedProfile;
+    }
+
+    private BleProtocolProfile connectWithProfileSelection(AtomicBoolean suppressTerminalStateEvents)
+            throws ConnectionException {
+        if (requestedProfile != BleProtocolProfile.AUTO) {
+            return connectUsingProfile(requestedProfile, false, suppressTerminalStateEvents);
+        }
+
+        ConnectionException firstError = null;
+        for (BleProtocolProfile candidate : List.of(
+                BleProtocolProfile.MESHTASTIC,
+                BleProtocolProfile.MESHCORE_COMPANION)) {
+            try {
+                return connectUsingProfile(candidate, true, suppressTerminalStateEvents);
+            } catch (ConnectionException e) {
+                if (firstError == null) {
+                    firstError = e;
+                }
+                log.info("BLE auto-detect profile {} failed for {}: {}",
+                        candidate.displayName(), address, e.getMessage());
+                suppressTerminalStateEvents.set(true);
+                try {
+                    platform.disconnect();
+                } catch (RuntimeException disconnectError) {
+                    log.debug("BLE disconnect after failed profile probe failed", disconnectError);
+                } finally {
+                    connected = false;
+                    suppressTerminalStateEvents.set(false);
+                }
+            }
+        }
+        throw new ConnectionException("BLE protocol auto-detect failed for " + address,
+                firstError);
+    }
+
+    private BleProtocolProfile connectUsingProfile(BleProtocolProfile profile,
+                                                   boolean suppressTerminalEvents,
+                                                   AtomicBoolean suppressTerminalStateEvents)
+            throws ConnectionException {
+        platform.setProfile(profile);
+        suppressTerminalStateEvents.set(suppressTerminalEvents);
+        try {
+            platform.connect(address);
+            return profile;
+        } finally {
+            suppressTerminalStateEvents.set(false);
+        }
+    }
+
+    private BleProtocolProfile activePayloadProfile() {
+        BleProtocolProfile profile = resolvedProfile;
+        if (profile == null || profile == BleProtocolProfile.AUTO) {
+            return requestedProfile == BleProtocolProfile.AUTO
+                    ? BleProtocolProfile.MESHTASTIC
+                    : requestedProfile;
+        }
+        return profile;
+    }
+
+    private static byte[] stripSerialFrameHeader(byte[] data) {
+        byte[] payload = new byte[data.length - BleConstants.SERIAL_FRAME_HEADER_SIZE];
+        System.arraycopy(data, BleConstants.SERIAL_FRAME_HEADER_SIZE, payload, 0, payload.length);
+        return payload;
     }
 
     private void shutdownSendInfrastructure(String reason) {

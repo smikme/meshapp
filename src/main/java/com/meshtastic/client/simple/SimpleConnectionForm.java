@@ -2,8 +2,10 @@ package com.meshtastic.client.simple;
 
 import com.meshtastic.client.connection.ble.BleDevice;
 import com.meshtastic.client.connection.ble.BlePlatformFactory;
+import com.meshtastic.client.connection.ble.BleProtocolProfile;
 import com.meshtastic.client.model.ConnectionEntry;
 import com.meshtastic.client.model.ConnectionType;
+import com.meshtastic.client.model.ProtocolType;
 import com.meshtastic.client.service.BleDeviceDiscoveryService;
 import com.meshtastic.client.service.SerialPortDiscoveryService;
 import com.meshtastic.client.service.SerialPortDiscoveryService.DiscoveredPort;
@@ -26,6 +28,7 @@ import java.util.function.Consumer;
 public class SimpleConnectionForm extends VBox {
 
     private final ComboBox<String> cmbType;
+    private final ComboBox<String> cmbProtocol;
     private final TextField txtName;
 
     // TCP fields
@@ -66,7 +69,20 @@ public class SimpleConnectionForm extends VBox {
         }
         cmbType.getSelectionModel().selectFirst();
         cmbType.setMaxWidth(Double.MAX_VALUE);
-        cmbType.setOnAction(e -> updateFieldVisibility());
+
+        // Протокол
+        cmbProtocol = new ComboBox<>();
+        cmbProtocol.setMaxWidth(Double.MAX_VALUE);
+        cmbProtocol.setOnAction(e -> {
+            if (isBleMode()) {
+                refreshBleDevices();
+            }
+        });
+        updateProtocolOptions();
+        cmbType.setOnAction(e -> {
+            updateProtocolOptions();
+            updateFieldVisibility();
+        });
 
         // Название
         txtName = new TextField();
@@ -146,6 +162,7 @@ public class SimpleConnectionForm extends VBox {
         getChildren().addAll(
                 title, new Separator(),
                 new Label("Тип подключения"), cmbType,
+                new Label("Протокол"), cmbProtocol,
                 new Label("Название"), txtName,
                 tcpFields,
                 serialFields,
@@ -188,7 +205,9 @@ public class SimpleConnectionForm extends VBox {
             if (device == null) {
                 return null;
             }
-            return new ConnectionEntry(name, device.address(), device.displayName());
+            ConnectionEntry entry = new ConnectionEntry(name, device.address(), device.displayName());
+            entry.setProtocol(selectedProtocolForDevice(device));
+            return entry;
         } else if (isSerialMode()) {
             String selectedPort = cmbPort.getValue();
             if (selectedPort == null || selectedPort.isEmpty()) {
@@ -201,7 +220,9 @@ public class SimpleConnectionForm extends VBox {
             } catch (NumberFormatException e) {
                 return null;
             }
-            return new ConnectionEntry(name, portName, baudRate, ConnectionType.SERIAL);
+            ConnectionEntry entry = new ConnectionEntry(name, portName, baudRate, ConnectionType.SERIAL);
+            entry.setProtocol(selectedProtocolType());
+            return entry;
         } else {
             String host = txtHost.getText().trim();
             if (host.isEmpty()) {
@@ -213,7 +234,9 @@ public class SimpleConnectionForm extends VBox {
             } catch (NumberFormatException e) {
                 return null;
             }
-            return new ConnectionEntry(name, host, port);
+            ConnectionEntry entry = new ConnectionEntry(name, host, port);
+            entry.setProtocol(selectedProtocolType());
+            return entry;
         }
     }
 
@@ -259,6 +282,22 @@ public class SimpleConnectionForm extends VBox {
         }
     }
 
+    private void updateProtocolOptions() {
+        ProtocolType previous = selectedProtocolType();
+        cmbProtocol.getItems().clear();
+        if (isBleMode()) {
+            cmbProtocol.getItems().addAll("Авто", "Meshtastic", "MeshCore Companion");
+        } else {
+            cmbProtocol.getItems().addAll("Авто", "Meshtastic", "MeshCore KISS", "MeshCore Companion");
+        }
+        String previousLabel = labelForProtocol(previous);
+        if (cmbProtocol.getItems().contains(previousLabel)) {
+            cmbProtocol.setValue(previousLabel);
+        } else {
+            cmbProtocol.setValue("Авто");
+        }
+    }
+
     private void refreshPorts() {
         List<DiscoveredPort> ports = SerialPortDiscoveryService.getInstance().scanNow();
         populatePortCombo(ports);
@@ -267,6 +306,7 @@ public class SimpleConnectionForm extends VBox {
     private void refreshBleDevices() {
         lblBleStatus.setText("Сканирование...");
         BleDeviceDiscoveryService discovery = BleDeviceDiscoveryService.getInstance();
+        discovery.setScanProfile(BleProtocolProfile.forProtocol(selectedProtocolType()));
         discovery.addListener(bleDiscoveryListener);
         discovery.startScanning();
 
@@ -382,5 +422,39 @@ public class SimpleConnectionForm extends VBox {
             return formatted.substring(start + 1, end);
         }
         return formatted;
+    }
+
+    private ProtocolType selectedProtocolForDevice(BleDevice device) {
+        ProtocolType selected = selectedProtocolType();
+        if (selected != ProtocolType.AUTO) {
+            return selected;
+        }
+        ProtocolType deviceProtocol = device.protocolType();
+        return deviceProtocol != null ? deviceProtocol : ProtocolType.AUTO;
+    }
+
+    private ProtocolType selectedProtocolType() {
+        String value = cmbProtocol == null ? null : cmbProtocol.getValue();
+        if (value == null || value.isBlank()) {
+            return ProtocolType.AUTO;
+        }
+        return switch (value) {
+            case "Meshtastic" -> ProtocolType.MESHTASTIC;
+            case "MeshCore KISS" -> ProtocolType.MESHCORE_KISS;
+            case "MeshCore Companion" -> ProtocolType.MESHCORE_COMPANION;
+            default -> ProtocolType.AUTO;
+        };
+    }
+
+    private static String labelForProtocol(ProtocolType protocolType) {
+        if (protocolType == null) {
+            return "Авто";
+        }
+        return switch (protocolType) {
+            case AUTO -> "Авто";
+            case MESHTASTIC -> "Meshtastic";
+            case MESHCORE_KISS -> "MeshCore KISS";
+            case MESHCORE_COMPANION -> "MeshCore Companion";
+        };
     }
 }

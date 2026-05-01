@@ -176,6 +176,7 @@ public class PacketLogEntry {
             case "TRANSPORT_LORA_ALT1" -> "LoRa alt 1";
             case "TRANSPORT_LORA_ALT2" -> "LoRa alt 2";
             case "TRANSPORT_LORA_ALT3" -> "LoRa alt 3";
+            case "MESHCORE_COMPANION" -> "MeshCore Companion";
             case "TRANSPORT_MQTT" -> "MQTT";
             case "TRANSPORT_MULTICAST_UDP" -> "Multicast UDP";
             case "TRANSPORT_API" -> "API";

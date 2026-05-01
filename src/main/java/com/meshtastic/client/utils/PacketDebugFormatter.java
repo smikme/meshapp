@@ -789,6 +789,32 @@ public final class PacketDebugFormatter {
     }
 
     /**
+     * Строит дерево для raw-пакета, который не является {@link MeshProtos.MeshPacket}.
+     *
+     * @param rootLabel подпись корневого узла
+     * @param packetBytes исходные байты packet-а
+     * @return дерево с типом packet-а и byte-range для подсветки HEX/ASCII
+     */
+    public static TreeItem<PacketTreeNode> buildRawPacketTree(String rootLabel, byte[] packetBytes) {
+        byte[] bytes = packetBytes != null ? packetBytes : new byte[0];
+        TreeItem<PacketTreeNode> root = new TreeItem<>(
+                new PacketTreeNode(rootLabel == null || rootLabel.isBlank() ? "Raw packet" : rootLabel,
+                        0, bytes.length));
+        root.setExpanded(true);
+        if (bytes.length == 0) {
+            root.getChildren().add(new TreeItem<>(new PacketTreeNode("Нет данных")));
+            return root;
+        }
+        root.getChildren().add(new TreeItem<>(
+                new PacketTreeNode("type = 0x%02X".formatted(bytes[0] & 0xFF), 0, 1)));
+        if (bytes.length > 1) {
+            root.getChildren().add(new TreeItem<>(
+                    new PacketTreeNode("payload (%d bytes)".formatted(bytes.length - 1), 1, bytes.length)));
+        }
+        return root;
+    }
+
+    /**
      * Строит дерево разбора из уже декодированного protobuf-пакета.
      *
      * @param packet protobuf-пакет

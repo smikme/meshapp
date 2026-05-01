@@ -242,6 +242,34 @@ public final class PacketMonitorService {
     }
 
     /**
+     * Регистрирует входящий raw-пакет протокола, который не является Meshtastic protobuf.
+     * <p>
+     * Используется MeshCore Companion Protocol: монитор хранит байты, HEX/ASCII
+     * предпросмотр и человекочитаемый тип packet-а, не пытаясь конвертировать
+     * его в {@link MeshProtos.MeshPacket}.
+     *
+     * @param connectionId идентификатор подключения в {@link ConnectionManager}
+     * @param packetType тип raw packet-а для UI-фильтра
+     * @param payloadText краткое описание payload-а
+     * @param packetBytes исходные байты packet-а
+     */
+    public void recordRawIncoming(String connectionId, String packetType, String payloadText, byte[] packetBytes) {
+        recordRawPacket(Direction.INCOMING, connectionId, packetType, payloadText, packetBytes);
+    }
+
+    /**
+     * Регистрирует исходящий raw-пакет протокола, который не является Meshtastic protobuf.
+     *
+     * @param connectionId идентификатор подключения в {@link ConnectionManager}
+     * @param packetType тип raw packet-а для UI-фильтра
+     * @param payloadText краткое описание payload-а
+     * @param packetBytes исходные байты packet-а
+     */
+    public void recordRawOutgoing(String connectionId, String packetType, String payloadText, byte[] packetBytes) {
+        recordRawPacket(Direction.OUTGOING, connectionId, packetType, payloadText, packetBytes);
+    }
+
+    /**
      * Внутренняя точка записи пакета в журнал.
      * Контракт:
      * - если сбор выключен, пакет тихо игнорируется
@@ -279,6 +307,41 @@ public final class PacketMonitorService {
                 packet.toByteArray()
         );
 
+        persistEntry(entry);
+    }
+
+    private synchronized void recordRawPacket(Direction direction,
+                                              String connectionId,
+                                              String packetType,
+                                              String payloadText,
+                                              byte[] packetBytes) {
+        if (!captureEnabled.get() || packetBytes == null || packetBytes.length == 0) {
+            return;
+        }
+        if (insertStmt == null) {
+            log.warn("Packet monitor DB not initialized — raw packet dropped");
+            return;
+        }
+
+        String ownerNodeId = resolveOwnerNodeId(connectionId);
+        PacketLogEntry entry = new PacketLogEntry(
+                ownerNodeId,
+                System.currentTimeMillis(),
+                direction,
+                packetType != null && !packetType.isBlank() ? packetType : "RAW",
+                "MESHCORE_COMPANION",
+                direction == Direction.OUTGOING ? ownerNodeId : "MeshCore",
+                direction == Direction.OUTGOING ? "MeshCore" : ownerNodeId,
+                payloadText,
+                packetBytes
+        );
+        persistEntry(entry);
+    }
+
+    private void persistEntry(PacketLogEntry entry) {
+        if (entry == null || insertStmt == null) {
+            return;
+        }
         try {
             insertStmt.setString(1, entry.getOwnerNodeId());
             insertStmt.setLong(2, entry.getCapturedAt());
@@ -1023,7 +1086,8 @@ public final class PacketMonitorService {
                     'TRANSPORT_LORA',
                     'TRANSPORT_LORA_ALT1',
                     'TRANSPORT_LORA_ALT2',
-                    'TRANSPORT_LORA_ALT3'
+                    'TRANSPORT_LORA_ALT3',
+                    'MESHCORE_COMPANION'
                 )
                 """);
 
@@ -1056,6 +1120,7 @@ public final class PacketMonitorService {
                             WHEN transport_mechanism = 'TRANSPORT_LORA_ALT1' THEN 'lora alt 1'
                             WHEN transport_mechanism = 'TRANSPORT_LORA_ALT2' THEN 'lora alt 2'
                             WHEN transport_mechanism = 'TRANSPORT_LORA_ALT3' THEN 'lora alt 3'
+                            WHEN transport_mechanism = 'MESHCORE_COMPANION' THEN 'meshcore companion'
                             WHEN transport_mechanism = 'TRANSPORT_MQTT' THEN 'mqtt'
                             WHEN transport_mechanism = 'TRANSPORT_MULTICAST_UDP' THEN 'multicast udp'
                             WHEN transport_mechanism = 'TRANSPORT_API' THEN 'api'

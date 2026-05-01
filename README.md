@@ -6,7 +6,7 @@
 
 <p align="center">
   Кросс-платформенный десктопный клиент для mesh-сети
-  <a href="https://meshtastic.org">Meshtastic</a>
+  <a href="https://meshtastic.org">Meshtastic</a> и MeshCore
   <br/>
   <b>Java 21 &nbsp;·&nbsp; JavaFX &nbsp;·&nbsp; Protobuf &nbsp;·&nbsp; LoRa</b>
 </p>
@@ -33,11 +33,13 @@
 
 ## О проекте
 
-**MeshApp** — полнофункциональный кроссплатформенный десктопный клиент для [Meshtastic](https://meshtastic.org), работающий по **TCP**, **Serial / USB** и **BLE**. Приложение предназначено для управления устройствами, обмена сообщениями, мониторинга сети и редактирования конфигурации радиомодулей с ПК на Windows, macOS и Linux.
+**MeshApp** — полнофункциональный кроссплатформенный десктопный клиент для [Meshtastic](https://meshtastic.org) и MeshCore, работающий по **TCP**, **Serial / USB** и **BLE**. Приложение предназначено для управления устройствами, обмена сообщениями, мониторинга сети и редактирования конфигурации радиомодулей с ПК на Windows, macOS и Linux.
 
-Кодовая база подготовлена к поддержке нескольких коммуникационных протоколов: транспортный слой отделён от протокольного runtime-а. Сейчас реализован протокол **Meshtastic**, а новые протоколы можно добавлять как отдельные адаптеры поверх существующих или новых transport-реализаций.
+Кодовая база поддерживает несколько коммуникационных протоколов: транспортный слой отделён от протокольного runtime-а. Сейчас реализованы **Meshtastic**, runtime **MeshCore KISS** поверх TCP/Serial byte stream и runtime **MeshCore Companion Protocol** для BLE и raw TCP/Serial byte stream; новые подключения по умолчанию используют автоопределение протокола.
 
 Meshtastic — открытый проект, превращающий недорогие LoRa-модули в узлы децентрализованной mesh-сети. Сообщения передаются на расстояние от сотен метров до десятков километров — без интернета, вышек сотовой связи и какой-либо инфраструктуры.
+
+MeshCore — лёгкий mesh-протокол для LoRa и других packet-radio устройств. В MeshApp поддержаны режим **MeshCore KISS modem** для TCP/Serial и **MeshCore Companion Protocol** для BLE, TCP и Serial endpoint-ов, которые передают raw Companion packets.
 
 ```
                      +------------------------------------------------------+
@@ -46,7 +48,8 @@ Meshtastic — открытый проект, превращающий недо�
  TCP (IP:4403) ----->|  +----------------+  +----------------+ +---------+ |
  USB Serial -------->|  |   Transport    |->| Protocol       | | UI /    | |
  BLE / GATT -------->|  | TCP/Serial/BLE |  | Runtime        | | Forms   | |
-                     |  +----------------+  | Meshtastic/... | +---------+ |
+                     |  +----------------+  | Meshtastic /   | +---------+ |
+                     |                      | MeshCore        |             |
                      |           |          +----------------+      |       |
                      |           v                  |               v       |
                      |   Native serial / BLE        v            H2 / Logs  |
@@ -58,7 +61,9 @@ Meshtastic — открытый проект, превращающий недо�
 
 ## Новые возможности
 
-- **Архитектура под несколько протоколов** — транспортный слой (`TCP`, `Serial`, `BLE`) отделён от протокольных адаптеров; Meshtastic вынесен в отдельный runtime
+- **Архитектура под несколько протоколов** — транспортный слой (`TCP`, `Serial`, `BLE`) отделён от протокольных адаптеров; Meshtastic, MeshCore KISS и MeshCore Companion вынесены в отдельные runtime-ы
+- **Автоопределение протокола** — новые TCP/Serial-подключения пробуют MeshCore KISS, MeshCore Companion и Meshtastic handshake, а BLE-подключения могут автоматически выбрать Meshtastic или MeshCore Companion profile
+- **MeshCore Companion в основных экранах** — Chat, Nodes, DM, Dashboard, Settings и LoRa Monitor используют общий `DeviceState` bridge для MeshCore Companion Protocol
 - **Команды в поле ввода** — `@tracebot` и `@infobot` с автодополнением по нодам для быстрого `Traceroute` и запроса `NodeInfo`
 - **Оповещения по чатам** — mute/unmute отдельно для каждого канала и личного диалога, с сохранением настройки локально
 - **Crash / problem reporting** — предложение отправить лог после аварийного завершения и ручная отправка отчёта из окна помощи
@@ -136,14 +141,43 @@ Meshtastic — открытый проект, превращающий недо�
 </p>
 
 - **TCP, Serial / USB и BLE** — подключение по сети, через COM/tty-порт или Bluetooth LE
-- **Отдельные transport и protocol слои** — подключение открывает низкоуровневый transport, а затем запускает выбранный протокольный runtime
-- **Поиск устройств** — автопоиск serial-портов и BLE-сканирование Meshtastic-устройств
+- **Отдельные transport и protocol слои** — подключение открывает низкоуровневый transport, определяет протокол при необходимости, а затем запускает выбранный runtime
+- **Поиск устройств** — автопоиск serial-портов и BLE-сканирование Meshtastic/MeshCore-устройств
 - **Профили подключений** — сохранение адресов, портов и BLE-устройств для быстрого повторного подключения
 - **Одно активное подключение** — в каждый момент времени приложение работает с одним выбранным устройством
 - **BLE-сопряжение** — passkey/pairing flow, когда этого требует устройство или платформа
 - **Автообмен конфигурацией** — автоматическое получение параметров устройства при подключении
 - **Автопереподключение** — повторные попытки восстановления соединения после разрыва
 - **Надёжный Serial для USB-UART мостов** — корректная работа с CH340/CP210x/FTDI, чтобы не провоцировать лишний reset ESP32; отдельная совместимость для Windows + Silicon Labs / CP210x
+
+#### MeshCore
+
+Текущая MeshCore-интеграция в MeshApp поддерживает **MeshCore KISS modem protocol** поверх **Serial / USB** или **TCP**, а также **MeshCore Companion Protocol** поверх **BLE**, **TCP** и **Serial**. Для новых профилей включён режим `AUTO`: TCP/Serial сначала пробуют MeshCore KISS handshake (`GetDeviceName` / `Ping` через `SetHardware`), затем Companion `APP_START`, затем Meshtastic handshake; BLE-подключение пробует Meshtastic GATT profile и затем MeshCore Companion profile.
+
+MeshCore Companion не использует KISS framing. Для BLE используется service `6E400001-B5A3-F393-E0A9-E50E24DCCA9E`, RX characteristic `6E400002-B5A3-F393-E0A9-E50E24DCCA9E` и TX notifications `6E400003-B5A3-F393-E0A9-E50E24DCCA9E`. Для TCP/Serial поддерживаются endpoint-ы, которые передают raw Companion packets без KISS-обёртки.
+
+Что уже поддерживается:
+
+- стандартное KISS-фреймирование (`FEND`, `FESC`, escape-последовательности) для TCP/Serial byte stream
+- автоопределение `MESHCORE_KISS` без отдельного выбора протокола в форме подключения
+- чтение базовых metadata через MeshCore `SetHardware`: имя устройства, версия, identity, radio parameters, TX power, battery, stats, RSSI/SNR metadata и TX status
+- BLE-профиль MeshCore Companion с отдельными RX/TX UUID, подпиской на TX notifications и `APP_START` handshake
+- `FrameFormat.MESHCORE_COMPANION` для TCP/Serial raw Companion packets
+- чтение Companion metadata: self-info, public key, имя устройства, device info и battery/storage packet
+- синхронизация MeshCore contacts и channel info в общий список Nodes/Chat
+- входящие channel messages и DM из очереди Companion Protocol
+- отправка channel messages и DM через MeshCore Companion Protocol
+- read-only MeshCore metadata в Settings
+- raw MeshCore Companion packets в LoRa Monitor
+- отображение фактически выбранного протокола в карточке подключения
+
+Текущие ограничения:
+
+- MeshCore KISS поддерживается только для TCP/Serial; MeshCore Companion по TCP/Serial требует endpoint, который действительно отдаёт raw Companion packets
+- MeshCore KISS остаётся modem/metadata-интеграцией; application workflow реализован через MeshCore Companion Protocol
+- для MeshCore Companion недоступны Meshtastic-only функции: Admin protobuf save-flow, reactions, traceroute и Meshtastic bot-команды
+
+Подробности вынесены в [docs/meshcore-support.md](docs/meshcore-support.md).
 
 ---
 
@@ -258,12 +292,12 @@ cd meshapp
 
 ### Подключение к устройству
 
-1. Подключите Meshtastic-устройство по USB, убедитесь, что оно доступно по TCP, или включите на нём BLE
-2. В разделе **Подключения** добавьте новый профиль и выберите тип: **TCP**, **Serial / USB** или **BLE**
-3. Для **Serial / USB** выберите найденный порт, для **BLE** запустите сканирование и выберите устройство из списка
-4. Если платформа или устройство требуют сопряжения, подтвердите pairing / введите passkey
-5. Нажмите **Подключить** — MeshApp автоматически обменяется конфигурацией с устройством
-6. Переключитесь в **Чат** для обмена сообщениями, **Узлы** для мониторинга сети или **Настройки** для конфигурации устройства
+1. Подключите Meshtastic- или MeshCore-устройство по USB/TCP/BLE.
+2. В разделе **Подключения** добавьте новый профиль и выберите тип: **TCP**, **Serial / USB** или **BLE**.
+3. Для **Serial / USB** выберите найденный порт; для **BLE** запустите сканирование и выберите устройство из списка.
+4. Если платформа или устройство требуют сопряжения, подтвердите pairing / введите passkey.
+5. Нажмите **Подключить** — MeshApp автоматически определит протокол. Для Meshtastic будет запущен config exchange; для MeshCore KISS будет выполнен SetHardware handshake; для MeshCore Companion будет выполнен `APP_START` handshake.
+6. Для Meshtastic переключитесь в **Чат**, **Узлы** или **Настройки**. Для MeshCore Companion доступны **Чат**, **Узлы**, **DM**, **Статистика**, **Настройки** и **LoRa Monitor**; для MeshCore KISS отображается modem metadata.
 
 ---
 
@@ -273,12 +307,15 @@ cd meshapp
 |-----------|-----------|------------|
 | UI | JavaFX 21 + AtlantaFX | Интерфейс с нативным оформлением |
 | Protocol runtime | `CommunicationProtocol` + `ProtocolRuntime` | Запуск протокольных адаптеров поверх открытого транспорта |
+| Protocol auto-detect | `ProtocolAutodetector` | Выбор Meshtastic, MeshCore KISS или MeshCore Companion runtime |
 | Meshtastic protocol | Protobuf 4.33 + Meshtastic schemas | Сериализация `ToRadio` / `FromRadio` и обработка mesh-пакетов |
+| MeshCore KISS protocol | KISS framing + MeshCore `SetHardware` | Базовый handshake и чтение metadata MeshCore KISS modem |
+| MeshCore Companion protocol | MeshCore Companion Protocol + BLE RX/TX или raw TCP/Serial packets | Handshake, metadata, contacts, channels, Chat/DM и raw packet monitor |
 | Transport layer | `TransportConnection` | Единый контракт для TCP, Serial, BLE и будущих transport-реализаций |
 | База данных | H2 (embedded) | Локальное хранение сообщений и телеметрии |
 | MQTT bridge | Eclipse Paho MQTT | Desktop-side proxy к внешнему MQTT-брокеру для `proxy_to_client` |
-| TCP | `java.net.Socket` | Подключение к Meshtastic TCP API |
-| Serial | Native JNA backends + jSerialComm discovery | Нативный доступ к COM/tty без jSerialComm I/O |
+| TCP | `java.net.Socket` | Подключение к Meshtastic TCP API, MeshCore KISS endpoint или raw MeshCore Companion endpoint |
+| Serial | Native JNA backends + jSerialComm discovery | Нативный доступ к COM/tty без jSerialComm I/O; Meshtastic, MeshCore KISS и MeshCore Companion framing |
 | BLE | CoreBluetooth / WinRT / BlueZ через JNA | BLE-сканирование, GATT и pairing на поддерживаемых платформах |
 | Нативные интеграции | JNA + platform bridges | Mica (Win), vibrancy (macOS), tray/status item, системные bridge-слои |
 | Сборка | Gradle 8.13 + Protobuf + CMake + jpackage | Компиляция Java/native слоёв и сборка инсталляторов |
@@ -292,11 +329,16 @@ cd meshapp
 - **Transport** — отвечает только за доставку байтов: открыть/закрыть соединение, записать данные, передать входящий payload выше. Общий контракт находится в `TransportConnection`, фабрика transport-ов — в `TransportConnectionFactory`.
 - **Protocol runtime** — отвечает за смысл этих байтов: framing, parsing, handshake/config exchange, runtime state и протокольные сервисы. Общие контракты находятся в `CommunicationProtocol`, `ProtocolRuntime`, `ProtocolRuntimeContext` и `ProtocolRegistry`.
 
-Сейчас зарегистрирован один протокол:
+Сейчас зарегистрированы протоколы:
 
 | ProtocolType | Runtime | Назначение |
 |--------------|---------|------------|
+| `AUTO` | auto-detect до запуска runtime | выбор `MESHTASTIC`, `MESHCORE_KISS` или `MESHCORE_COMPANION` для новых подключений |
 | `MESHTASTIC` | `MeshtasticProtocolRuntime` | `ProtocolHandler`, `DeviceState`, config exchange, обработка входящих mesh-пакетов, MQTT proxy |
+| `MESHCORE_KISS` | `MeshCoreKissProtocolRuntime` | KISS SetHardware handshake, device name/version/identity/radio/battery/stats metadata |
+| `MESHCORE_COMPANION` | `MeshCoreCompanionProtocolRuntime` | MeshCore Companion `APP_START`, self-info/device-info/battery, contacts, channel info, Chat/DM |
+
+Автоопределение работает после открытия transport-а. Для TCP/Serial на время probe transport переводится в `AUTO` framing, который принимает Meshtastic serial/TCP frames (`0x94 0xC3 ...`), KISS frames (`0xC0 ... 0xC0`) и raw MeshCore Companion packets. Если устройство отвечает MeshCore `SetHardware`, запускается `MeshCoreKissProtocolRuntime`; если приходит распознанный Companion response на `APP_START`, запускается `MeshCoreCompanionProtocolRuntime`; если приходит валидный Meshtastic `FromRadio`, запускается `MeshtasticProtocolRuntime`; при таймауте используется Meshtastic fallback для совместимости со старыми профилями. Для BLE transport пробует Meshtastic GATT UUID, затем MeshCore Companion UUID и передаёт выбранный profile в autodetector.
 
 Чтобы добавить новый протокол:
 
@@ -320,6 +362,7 @@ meshapp/
 |   |   |-- ble/                  # BLE transport + platform backends
 |   |   \-- serial/               # Native serial I/O (Win/macOS/Linux)
 |   |-- protocol/                 # Общие protocol runtime API и registry
+|   |   |-- meshcore/              # MeshCore KISS и Companion protocol adapters/runtimes
 |   |   \-- meshtastic/           # Meshtastic protocol adapter/runtime
 |   |-- model/                    # Data models и runtime state
 |   |-- service/                  # Persistence, discovery, reconnect, config exchange

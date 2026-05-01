@@ -165,6 +165,53 @@ class BleConnectionTest {
         assertEquals(1, writeCalls.get());
     }
 
+    @Test
+    void meshCoreBleWritesRawCompanionPacketsWithoutSerialHeader() throws Exception {
+        FakePlatform platform = new FakePlatform();
+        platform.connectAction = p -> p.connected = true;
+
+        BleConnection connection = new BleConnection(
+                "device", platform, BleProtocolProfile.MESHCORE_COMPANION);
+        connection.connect();
+
+        byte[] companionPacket = new byte[]{0x01, 0x02, 0x03};
+        CountDownLatch written = new CountDownLatch(1);
+        platform.writeAction = (p, payload) -> {
+            p.lastPayload = payload;
+            written.countDown();
+            return true;
+        };
+
+        connection.sendBytes(companionPacket);
+
+        assertTrue(written.await(1, TimeUnit.SECONDS));
+        assertEquals(BleProtocolProfile.MESHCORE_COMPANION, platform.profile);
+        assertEquals(BleProtocolProfile.MESHCORE_COMPANION, connection.getResolvedProfile());
+        assertEquals(3, platform.lastPayload.length);
+        assertEquals(0x01, platform.lastPayload[0]);
+        assertEquals(0x02, platform.lastPayload[1]);
+        assertEquals(0x03, platform.lastPayload[2]);
+    }
+
+    @Test
+    void autoProfileRetriesMeshCoreAfterMeshtasticGattFails() throws Exception {
+        FakePlatform platform = new FakePlatform();
+        platform.connectAction = p -> {
+            if (p.profile == BleProtocolProfile.MESHTASTIC) {
+                throw new ConnectionException("missing meshtastic service");
+            }
+            p.connected = true;
+        };
+
+        BleConnection connection = new BleConnection("device", platform, BleProtocolProfile.AUTO);
+
+        connection.connect();
+
+        assertTrue(connection.isConnected());
+        assertEquals(BleProtocolProfile.MESHCORE_COMPANION, connection.getResolvedProfile());
+        assertEquals(2, platform.connectCalls);
+    }
+
     private static byte[] frame(byte payloadByte) {
         return new byte[]{(byte) 0x94, (byte) 0xC3, 0x00, 0x01, payloadByte};
     }
@@ -177,6 +224,9 @@ class BleConnectionTest {
         private ConnectAction connectAction = p -> p.connected = true;
         private WriteAction writeAction = (p, payload) -> p.connected;
         private volatile String lastWriteThread;
+        private volatile BleProtocolProfile profile = BleProtocolProfile.MESHTASTIC;
+        private volatile byte[] lastPayload;
+        private int connectCalls;
 
         @Override
         public void startScan(Consumer<BleDevice> onDeviceFound) {
@@ -188,6 +238,7 @@ class BleConnectionTest {
 
         @Override
         public void connect(String address) throws ConnectionException {
+            connectCalls++;
             connectAction.run(this);
         }
 
@@ -219,6 +270,16 @@ class BleConnectionTest {
         @Override
         public void setPasskeyRequestHandler(Consumer<String> handler) {
             this.passkeyRequestHandler = handler;
+        }
+
+        @Override
+        public void setProfile(BleProtocolProfile profile) {
+            this.profile = profile;
+        }
+
+        @Override
+        public BleProtocolProfile getProfile() {
+            return profile;
         }
 
         @Override

@@ -42,8 +42,11 @@ public interface LinuxBleLibrary extends Library {
 
     // ==================== Scanning ====================
 
+    /** Настраивает BLE profile: -1=AUTO, 0=Meshtastic, 1=MeshCore Companion. */
+    void meshble_set_profile(int profile);
+
     /**
-     * Запуск сканирования BLE с фильтром по Meshtastic service UUID.
+     * Запуск сканирования BLE с фильтром по service UUID выбранного profile.
      * @return 0 при успехе, отрицательное при ошибке
      */
     int meshble_start_scan(DeviceCallback callback);

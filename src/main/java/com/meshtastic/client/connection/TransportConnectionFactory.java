@@ -2,6 +2,7 @@ package com.meshtastic.client.connection;
 
 import com.meshtastic.client.connection.ble.BleConnection;
 import com.meshtastic.client.connection.ble.BlePlatform;
+import com.meshtastic.client.connection.ble.BleProtocolProfile;
 import com.meshtastic.client.model.ConnectionEntry;
 import com.meshtastic.client.model.ConnectionType;
 
@@ -28,13 +29,19 @@ public final class TransportConnectionFactory {
      * @return transport-объект, готовый к вызову {@link TransportConnection#connect()}
      */
     public static TransportConnection create(ConnectionEntry entry, Supplier<BlePlatform> blePlatformSupplier) {
+        FrameFormat frameFormat = FrameFormat.forProtocol(entry.getEffectiveProtocol());
         return switch (entry.getEffectiveType()) {
-            case TCP -> new TcpConnection(entry.getHost(), entry.getPort());
+            case TCP -> new TcpConnection(entry.getHost(), entry.getPort(), frameFormat);
             case SERIAL -> new SerialConnection(
                     entry.getPortName(),
-                    entry.getBaudRate() > 0 ? entry.getBaudRate() : SerialConnection.DEFAULT_BAUD_RATE
+                    entry.getBaudRate() > 0 ? entry.getBaudRate() : SerialConnection.DEFAULT_BAUD_RATE,
+                    frameFormat
             );
-            case BLE -> new BleConnection(entry.getBleAddress(), blePlatformSupplier.get());
+            case BLE -> new BleConnection(
+                    entry.getBleAddress(),
+                    blePlatformSupplier.get(),
+                    BleProtocolProfile.forProtocol(entry.getEffectiveProtocol())
+            );
         };
     }
 

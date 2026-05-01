@@ -105,6 +105,27 @@ class PacketMonitorServiceTest {
     }
 
     @Test
+    void recordRawPacketPersistsMeshCoreCompanionBytes() {
+        service.startCapture();
+        byte[] packet = new byte[]{0x08, 0x00, 0x01, 0x00, 0x11, 0x22};
+
+        service.recordRawIncoming(
+                "meshcore",
+                "MeshCore Companion CHANNEL_MSG",
+                "channel message",
+                packet);
+
+        List<PacketLogEntry> entries = service.loadAll();
+        assertEquals(1, entries.size());
+        PacketLogEntry entry = entries.getFirst();
+        assertEquals(PacketLogEntry.Direction.INCOMING, entry.getDirection());
+        assertEquals("MeshCore Companion CHANNEL_MSG", entry.getPacketType());
+        assertEquals("MESHCORE_COMPANION", entry.getTransportMechanism());
+        assertEquals("channel message", entry.getPayloadText());
+        assertArrayEquals(packet, entry.getPacketBytes());
+    }
+
+    @Test
     void ignoresIncomingPacketFromLocalNodeWithoutRadio() {
         DeviceState state = deviceState();
         service.startCapture();

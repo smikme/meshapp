@@ -27,7 +27,7 @@ import java.util.function.Supplier;
  * jSerialComm используется только для обнаружения портов ({@code getCommPorts()})
  * и определения типа адаптера ({@code getDescriptivePortName()}).
  */
-public class SerialConnection implements MeshtasticConnection {
+public class SerialConnection implements MeshtasticConnection, FrameFormatAwareConnection {
 
     private static final Logger log = LoggerFactory.getLogger(SerialConnection.class);
 
@@ -53,6 +53,8 @@ public class SerialConnection implements MeshtasticConnection {
     private volatile NativeSerialPort nativePort;
     private volatile Consumer<byte[]> dataListener;
     private volatile ConnectionListener connectionListener;
+    private volatile FrameFormat frameFormat;
+    private volatile StreamFrameParser frameParser;
     private volatile boolean running;
     private volatile long lastReceiveAtMillis;
     private volatile long lastPacketReceiveAtMillis;
@@ -71,6 +73,11 @@ public class SerialConnection implements MeshtasticConnection {
                 DEFAULT_READ_TIMEOUT_MS, DEFAULT_PORT_INIT_DELAY_MS, DEFAULT_WRITE_RESPONSE_TIMEOUT_MS,
                 DEFAULT_READ_CALL_STALL_TIMEOUT_MS, DEFAULT_READ_WATCHDOG_PERIOD_MS,
                 DEFAULT_PARTIAL_FRAME_SILENCE_TIMEOUT_MS);
+    }
+
+    public SerialConnection(String portName, int baudRate, FrameFormat frameFormat) {
+        this(portName, baudRate);
+        setFrameFormat(frameFormat);
     }
 
     public SerialConnection(String portName) {
@@ -120,6 +127,8 @@ public class SerialConnection implements MeshtasticConnection {
         this.writeResponseTimeoutMs = writeResponseTimeoutMs;
         this.readCallStallTimeoutMs = readCallStallTimeoutMs;
         this.readWatchdogPeriodMs = readWatchdogPeriodMs;
+        this.frameFormat = FrameFormat.MESHTASTIC;
+        this.frameParser = FrameParsers.create(this.frameFormat);
     }
 
     @Override
@@ -237,6 +246,19 @@ public class SerialConnection implements MeshtasticConnection {
         this.connectionListener = listener;
     }
 
+    @Override
+    public void setFrameFormat(FrameFormat frameFormat) {
+        FrameFormat newFormat = frameFormat != null ? frameFormat : FrameFormat.MESHTASTIC;
+        this.frameFormat = newFormat;
+        this.frameParser = FrameParsers.create(newFormat);
+        log.debug("Serial {} frame format set to {}", portName, newFormat);
+    }
+
+    @Override
+    public FrameFormat getFrameFormat() {
+        return frameFormat;
+    }
+
     /**
      * Цикл чтения данных из serial-порта.
      * <p>
@@ -246,7 +268,6 @@ public class SerialConnection implements MeshtasticConnection {
      */
     private void readLoop() {
         log.debug("Serial reader thread started for {}", portName);
-        FrameParser parser = new FrameParser();
 
         String errorMessage = null;
         Throwable errorCause = null;
@@ -275,11 +296,18 @@ public class SerialConnection implements MeshtasticConnection {
                 }
                 if (bytesRead == 0) {
                     long nowMillis = currentTimeMillis.getAsLong();
-                    if (shouldResetPartialFrame(parser, nowMillis)) {
+                    if (shouldResetPartialFrame(frameParser, nowMillis)) {
                         long silentForMs = Math.max(0L, nowMillis - lastReceiveAtMillis);
-                        log.debug("Resetting serial frame parser on {} after {} ms inter-byte gap (threshold={} ms)",
-                                portName, silentForMs, partialFrameSilenceTimeoutMs);
-                        parser.reset();
+                        byte[] packet = frameParser.flushPartialFrame();
+                        if (packet != null) {
+                            log.debug("Flushing serial frame parser on {} after {} ms inter-byte gap (threshold={} ms)",
+                                    portName, silentForMs, partialFrameSilenceTimeoutMs);
+                            deliverPacket(packet);
+                        } else {
+                            log.debug("Resetting serial frame parser on {} after {} ms inter-byte gap (threshold={} ms)",
+                                    portName, silentForMs, partialFrameSilenceTimeoutMs);
+                            frameParser.reset();
+                        }
                     }
                     // Таймаут — данных нет, проверяем что порт ещё открыт
                     if (!port.isOpen()) {
@@ -304,13 +332,10 @@ public class SerialConnection implements MeshtasticConnection {
                 }
                 markByteReceiveProgress();
                 for (int i = 0; i < bytesRead; i++) {
+                    StreamFrameParser parser = frameParser;
                     byte[] packet = parser.processByte(buf[i]);
                     if (packet != null) {
-                        markPacketReceiveProgress();
-                        Consumer<byte[]> listener = dataListener;
-                        if (listener != null) {
-                            listener.accept(packet);
-                        }
+                        deliverPacket(packet);
                     }
                 }
             }
@@ -333,6 +358,14 @@ public class SerialConnection implements MeshtasticConnection {
         log.debug("Serial reader thread exiting for {}", portName);
     }
 
+    private void deliverPacket(byte[] packet) {
+        markPacketReceiveProgress();
+        Consumer<byte[]> listener = dataListener;
+        if (listener != null) {
+            listener.accept(packet);
+        }
+    }
+
     private void markByteReceiveProgress() {
         lastReceiveAtMillis = currentTimeMillis.getAsLong();
         if (awaitingResponseAfterWrite) {
@@ -352,7 +385,7 @@ public class SerialConnection implements MeshtasticConnection {
         readTimeoutsSinceWrite = 0;
     }
 
-    private boolean shouldResetPartialFrame(FrameParser parser, long now) {
+    private boolean shouldResetPartialFrame(StreamFrameParser parser, long now) {
         if (!parser.hasPartialFrame()) {
             return false;
         }
