@@ -139,9 +139,24 @@ public final class ProtocolAutodetector {
             parseError.set(e);
         }
 
-        if (MeshCoreCompanionFrames.isRecognizedResponsePacket(frame)) {
+        if (isMeshCoreCompanionHandshakeResponse(frame)) {
             detected.complete(ProtocolType.MESHCORE_COMPANION);
         }
+    }
+
+    /**
+     * Распознаёт только достаточно сильный ответ Companion handshake-а.
+     * <p>
+     * Serial Meshtastic устройства могут писать в UART boot/debug-текст. В режиме
+     * auto frame parser одиночный байт вроде LF (0x0A) совпадает с некоторыми
+     * Companion packet type-ами, поэтому broad проверка по первому байту даёт
+     * ложное определение MeshCore Companion. Для выбора runtime-а нужен ответ,
+     * который всё равно требуется Companion runtime-у для готовности: SELF_INFO.
+     */
+    private static boolean isMeshCoreCompanionHandshakeResponse(byte[] frame) {
+        return frame != null
+                && frame.length >= 36
+                && (frame[0] & 0xFF) == MeshCoreCompanionFrames.PACKET_SELF_INFO;
     }
 
     /**

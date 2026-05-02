@@ -130,6 +130,48 @@ public final class ConnectionManager {
     }
 
     /**
+     * Обновляет сохранённые параметры существующего профиля подключения.
+     * Активные и переподключающиеся профили не изменяются, чтобы не менять
+     * transport-параметры под уже открытым runtime.
+     *
+     * @param updated профиль с тем же id и новыми параметрами
+     */
+    public void updateEntry(ConnectionEntry updated) {
+        if (updated == null || updated.getId() == null || updated.getId().isBlank()) {
+            throw new IllegalArgumentException("Connection entry id is required");
+        }
+
+        synchronized (connectionLock) {
+            ConnectionEntry existing = findEntry(updated.getId());
+            if (existing == null) {
+                throw new IllegalArgumentException("Connection entry not found: " + updated.getId());
+            }
+            if (existing.isConnected()
+                    || existing.isReconnecting()
+                    || activeConnections.containsKey(updated.getId())
+                    || pendingConnections.containsKey(updated.getId())) {
+                throw new IllegalStateException(
+                        "Нельзя редактировать активное подключение. Отключитесь перед изменением параметров.");
+            }
+
+            updated.setConnected(existing.isConnected());
+            updated.setReconnecting(existing.isReconnecting());
+            if (updated.getNodeId() == null || updated.getNodeId().isBlank()) {
+                updated.setNodeId(existing.getNodeId());
+            }
+
+            for (int i = 0; i < entries.size(); i++) {
+                if (entries.get(i).getId().equals(updated.getId())) {
+                    entries.set(i, updated);
+                    break;
+                }
+            }
+        }
+        save();
+        fireChanged();
+    }
+
+    /**
      * Удаляет профиль подключения. Предварительно разрывает соединение,
      * если оно активно. Сохраняет в JSON и оповещает слушателей.
      *

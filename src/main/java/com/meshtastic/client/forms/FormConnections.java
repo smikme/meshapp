@@ -133,10 +133,14 @@ public class FormConnections extends Form {
             btnConnect.setDisable(true);
         }
 
+        Button btnEdit = new Button("Изменить");
+        btnEdit.setDisable(connected || reconnecting);
+        btnEdit.setOnAction(e -> showEditDialog(entry));
+
         Button btnDelete = new Button("Удалить");
         btnDelete.setOnAction(e -> doDelete(entry));
 
-        topRow.getChildren().addAll(indicator, lblName, lblStatus, spacer, btnConnect, btnDelete);
+        topRow.getChildren().addAll(indicator, lblName, lblStatus, spacer, btnConnect, btnEdit, btnDelete);
 
         String addressText;
         if (entry.getEffectiveType() == ConnectionType.BLE) {
@@ -242,6 +246,31 @@ public class FormConnections extends Form {
             modalPane.hide();
             ConnectionManager.getInstance().addEntry(entry);
             Toast.show(Toast.Type.SUCCESS, "Добавлено: " + entry.getName());
+        });
+
+        modalPane.show(form);
+        form.formOpen();
+    }
+
+    private void showEditDialog(ConnectionEntry entry) {
+        if (entry.isConnected() || entry.isReconnecting()) {
+            Toast.show(Toast.Type.WARNING, "Отключите подключение перед изменением параметров");
+            return;
+        }
+
+        ModalPane modalPane = ModalPane.getInstance();
+        if (modalPane == null) { return; }
+
+        SimpleConnectionForm form = new SimpleConnectionForm(entry);
+        form.setOnSave(updated -> {
+            try {
+                ConnectionManager.getInstance().updateEntry(updated);
+                form.cleanup();
+                modalPane.hide();
+                Toast.show(Toast.Type.SUCCESS, "Сохранено: " + updated.getName());
+            } catch (RuntimeException ex) {
+                Toast.show(Toast.Type.ERROR, "Ошибка сохранения: " + ex.getMessage());
+            }
         });
 
         modalPane.show(form);

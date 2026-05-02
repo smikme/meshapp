@@ -228,6 +228,47 @@ class ConnectionManagerTest {
     }
 
     @Test
+    void updateEntryReplacesStoredParametersAndPreservesProfileMetadata() {
+        ConnectionManager manager = ConnectionManager.getInstance();
+        ConnectionEntry entry = new ConnectionEntry("home", "127.0.0.1", 4403);
+        entry.setNodeId("!12345678");
+        manager.addEntry(entry);
+
+        ConnectionEntry updated = new ConnectionEntry("office", "192.0.2.10", 4404);
+        updated.setId(entry.getId());
+        updated.setProtocol(ProtocolType.MESHCORE_KISS);
+
+        manager.updateEntry(updated);
+
+        ConnectionEntry stored = manager.findEntry(entry.getId());
+        assertNotNull(stored);
+        assertEquals(1, manager.getEntries().size());
+        assertEquals(entry.getId(), stored.getId());
+        assertEquals("office", stored.getName());
+        assertEquals("192.0.2.10", stored.getHost());
+        assertEquals(4404, stored.getPort());
+        assertEquals("!12345678", stored.getNodeId());
+        assertEquals(ProtocolType.MESHCORE_KISS, stored.getProtocol());
+    }
+
+    @Test
+    void updateEntryRejectsActiveProfile() {
+        ConnectionManager manager = ConnectionManager.getInstance();
+        ConnectionEntry entry = new ConnectionEntry("home", "127.0.0.1", 4403);
+        manager.addEntry(entry);
+        entry.setConnected(true);
+
+        ConnectionEntry updated = new ConnectionEntry("office", "192.0.2.10", 4404);
+        updated.setId(entry.getId());
+
+        IllegalStateException error = assertThrows(IllegalStateException.class,
+                () -> manager.updateEntry(updated));
+
+        assertTrue(error.getMessage().contains("Нельзя редактировать активное подключение"));
+        assertEquals("home", manager.findEntry(entry.getId()).getName());
+    }
+
+    @Test
     void disconnectForDeviceRebootKeepsReconnectEnabled() throws Exception {
         try (TcpMeshtasticStubServer server = new TcpMeshtasticStubServer(0xCAFEBABE)) {
             ConnectionManager manager = ConnectionManager.getInstance();

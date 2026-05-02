@@ -44,6 +44,18 @@ class ProtocolAutodetectorTest {
     }
 
     @Test
+    void ignoresSerialNoiseThatLooksLikeOneByteCompanionPacket() throws Exception {
+        FakeTransportConnection transport = new FakeTransportConnection(FakeMode.MESHTASTIC_WITH_SERIAL_NOISE);
+        ConnectionEntry entry = new ConnectionEntry("serial", "COM3", 115200,
+                com.meshtastic.client.model.ConnectionType.SERIAL);
+
+        ProtocolType protocolType = ProtocolAutodetector.detect(new ProtocolRuntimeContext(
+                entry.getId(), entry, transport, "type=SERIAL"));
+
+        assertEquals(ProtocolType.MESHTASTIC, protocolType);
+    }
+
+    @Test
     void detectsMeshCoreCompanionFromSelfInfoResponse() throws Exception {
         FakeTransportConnection transport = new FakeTransportConnection(FakeMode.MESHCORE_COMPANION);
         ConnectionEntry entry = new ConnectionEntry("tcp", "127.0.0.1", 4403);
@@ -58,7 +70,8 @@ class ProtocolAutodetectorTest {
     private enum FakeMode {
         MESHCORE,
         MESHCORE_COMPANION,
-        MESHTASTIC
+        MESHTASTIC,
+        MESHTASTIC_WITH_SERIAL_NOISE
     }
 
     private static final class FakeTransportConnection implements TransportConnection, FrameFormatAwareConnection {
@@ -105,7 +118,13 @@ class ProtocolAutodetectorTest {
                     && data.length > 0
                     && (data[0] & 0xFF) == MeshCoreCompanionFrames.CMD_APP_START) {
                 listener.accept(selfInfo());
-            } else if (mode == FakeMode.MESHTASTIC && data.length >= 4 && data[0] == (byte) 0x94) {
+            } else if (mode == FakeMode.MESHTASTIC_WITH_SERIAL_NOISE
+                    && data.length > 0
+                    && data[0] == com.meshtastic.client.connection.KissFrameParser.FEND) {
+                listener.accept(new byte[]{'\n'});
+            } else if ((mode == FakeMode.MESHTASTIC || mode == FakeMode.MESHTASTIC_WITH_SERIAL_NOISE)
+                    && data.length >= 4
+                    && data[0] == (byte) 0x94) {
                 listener.accept(MeshProtos.FromRadio.newBuilder()
                         .setMyInfo(MeshProtos.MyNodeInfo.newBuilder().setMyNodeNum(0x1234).build())
                         .build()
