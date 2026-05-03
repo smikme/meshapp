@@ -151,10 +151,10 @@ public class MeshApp extends Application {
             );
         }
 
-        // Восстановить позицию/размер окна из предыдущей сессии
-        restoreWindowBounds(stage);
-
         stage.setScene(scene);
+        // Восстановить позицию/размер окна после setScene(), иначе JavaFX может
+        // заново применить размеры сцены и перетереть сохранённые Stage bounds.
+        restoreWindowBounds(stage);
         stage.show();
         AppTrayManager.getInstance().initialize(stage);
 

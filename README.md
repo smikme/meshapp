@@ -8,12 +8,12 @@
   Кросс-платформенный десктопный клиент для mesh-сети
   <a href="https://meshtastic.org">Meshtastic</a> и MeshCore
   <br/>
-  <b>Java 21 &nbsp;·&nbsp; JavaFX &nbsp;·&nbsp; Protobuf &nbsp;·&nbsp; LoRa</b>
+  <b>Java 25 &nbsp;·&nbsp; JavaFX &nbsp;·&nbsp; Protobuf &nbsp;·&nbsp; LoRa</b>
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Java-21-orange?logo=openjdk" alt="Java 21"/>
-  <img src="https://img.shields.io/badge/JavaFX-21.0.10-blue?logo=java" alt="JavaFX"/>
+  <img src="https://img.shields.io/badge/Java-25-orange?logo=openjdk" alt="Java 25"/>
+  <img src="https://img.shields.io/badge/JavaFX-25.0.3-blue?logo=java" alt="JavaFX"/>
   <img src="https://img.shields.io/badge/Platform-Win%20%7C%20macOS%20%7C%20Linux-brightgreen" alt="Platform"/>
   <img src="https://img.shields.io/badge/License-GPL--3.0-blue" alt="License"/>
   <a href="https://t.me/+SRaOd1gftoo5MWRi">
@@ -262,7 +262,7 @@ MeshCore Companion не использует KISS framing. Для BLE испол
 
 Для сборки и запуска из исходников:
 
-- **JDK 21+** (скачивается автоматически через Gradle Toolchain)
+- **JDK 25 toolchain** (скачивается автоматически через Gradle Toolchain)
 - **Git** для клонирования репозитория
 - **macOS**: Xcode Command Line Tools (`cc`) для сборки `libmeshapp-serial.dylib` и `libmeshapp-tray.dylib`
 - **Windows**: CMake + MSVC Build Tools для сборки `meshapp-ble.dll`
@@ -305,7 +305,7 @@ cd meshapp
 
 | Компонент | Технология | Назначение |
 |-----------|-----------|------------|
-| UI | JavaFX 21 + AtlantaFX | Интерфейс с нативным оформлением |
+| UI | JavaFX 25.0.3 + AtlantaFX | Интерфейс с нативным оформлением |
 | Protocol runtime | `CommunicationProtocol` + `ProtocolRuntime` | Запуск протокольных адаптеров поверх открытого транспорта |
 | Protocol auto-detect | `ProtocolAutodetector` | Выбор Meshtastic, MeshCore KISS или MeshCore Companion runtime |
 | Meshtastic protocol | Protobuf 4.33 + Meshtastic schemas | Сериализация `ToRadio` / `FromRadio` и обработка mesh-пакетов |
@@ -318,7 +318,7 @@ cd meshapp
 | Serial | Native JNA backends + jSerialComm discovery | Нативный доступ к COM/tty без jSerialComm I/O; Meshtastic, MeshCore KISS и MeshCore Companion framing |
 | BLE | CoreBluetooth / WinRT / BlueZ через JNA | BLE-сканирование, GATT и pairing на поддерживаемых платформах |
 | Нативные интеграции | JNA + platform bridges | Mica (Win), vibrancy (macOS), tray/status item, системные bridge-слои |
-| Сборка | Gradle 8.13 + Protobuf + CMake + jpackage | Компиляция Java/native слоёв и сборка инсталляторов |
+| Сборка | Gradle 9.4.1 + Protobuf + CMake + jpackage | Компиляция Java/native слоёв и сборка инсталляторов |
 
 ---
 

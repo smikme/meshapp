@@ -9,7 +9,8 @@ plugins {
 	id 'org.openjfx.javafxplugin' version '0.1.0'
 }
 
-def javaFxVersion = '21.0.11'
+def javaVersion = 25
+def javaFxVersion = '25.0.3'
 
 application {
 	mainClass = 'com.meshtastic.client.MeshAppLauncher'
@@ -49,7 +50,7 @@ version = {
 
 java {
 	toolchain {
-		languageVersion = JavaLanguageVersion.of(21)
+		languageVersion = JavaLanguageVersion.of(javaVersion)
 	}
 }
 
@@ -62,7 +63,7 @@ configurations.configureEach {
 		if (details.requested.group == 'org.openjfx' && details.requested.name.startsWith('javafx-')) {
 			// Любой транзитивный org.openjfx должен совпадать с версией,
 			// заданной через org.openjfx.javafxplugin, иначе Gradle берёт
-			// старшую и можно незаметно уехать с JavaFX 21 на 23.
+			// старшую и можно незаметно уехать на другую JavaFX-линейку.
 			details.useVersion(javaFxVersion)
 			details.because("Keep all JavaFX modules aligned with the configured project version ${javaFxVersion}")
 		}
@@ -78,13 +79,14 @@ dependencies {
 	implementation 'com.h2database:h2:2.3.232'
 	implementation('io.github.mkpaz:atlantafx-base:2.1.0') {
 		// AtlantaFX публикует собственный org.openjfx version, который иначе
-		// поднимает проект с JavaFX 21.0.10 до JavaFX 23 через conflict resolution.
+		// может поднять проект на другую JavaFX-линейку через conflict resolution.
 		exclude group: 'org.openjfx'
 	}
 	implementation 'net.java.dev.jna:jna:5.16.0'
 	implementation 'net.java.dev.jna:jna-platform:5.16.0'
 	implementation 'org.eclipse.paho:org.eclipse.paho.client.mqttv3:1.2.5'
 	testImplementation 'org.junit.jupiter:junit-jupiter:5.11.4'
+	// У TestFX Monocle пока нет 25.x-артефакта; org.openjfx модули всё равно фиксируются на javaFxVersion выше.
 	testRuntimeOnly 'org.testfx:openjfx-monocle:21.0.2'
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
@@ -197,7 +199,7 @@ if (org.gradle.internal.os.OperatingSystem.current().isMacOsX()) {
 			outputDir.mkdirs()
 
 			def javaLauncher = javaToolchains.launcherFor {
-				languageVersion = JavaLanguageVersion.of(21)
+				languageVersion = JavaLanguageVersion.of(javaVersion)
 			}.get()
 			def javaHome = javaLauncher.executablePath.asFile.parentFile.parentFile.absolutePath
 
@@ -437,7 +439,7 @@ def resolvePackagingJavaHome = {
 	}
 
 	return javaToolchains.launcherFor {
-		languageVersion = JavaLanguageVersion.of(21)
+		languageVersion = JavaLanguageVersion.of(javaVersion)
 	}.get().executablePath.asFile.parentFile.parentFile.absolutePath
 }
 
@@ -1701,7 +1703,7 @@ if (org.gradle.internal.os.OperatingSystem.current().isMacOsX()) {
 
 			// Java из toolchain
 			def javaLauncher = javaToolchains.launcherFor {
-				languageVersion = JavaLanguageVersion.of(21)
+				languageVersion = JavaLanguageVersion.of(javaVersion)
 			}.get()
 			def javaPath = javaLauncher.executablePath.asFile.absolutePath
 

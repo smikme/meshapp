@@ -20,6 +20,7 @@ import javafx.scene.control.MenuItem;
 import javafx.scene.control.SeparatorMenuItem;
 import javafx.scene.input.Clipboard;
 import javafx.scene.input.ClipboardContent;
+import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyEvent;
 import javafx.scene.input.MouseEvent;
 import javafx.scene.layout.StackPane;
@@ -432,11 +433,15 @@ public class EmojiTextField extends StackPane {
                 if (shortcutDown) {
                     selectAll();
                     e.consume();
+                } else if (isTextProducingKeyPress(e)) {
+                    e.consume();
                 }
             }
             case C -> {
                 if (shortcutDown) {
                     copySelection();
+                    e.consume();
+                } else if (isTextProducingKeyPress(e)) {
                     e.consume();
                 }
             }
@@ -444,16 +449,55 @@ public class EmojiTextField extends StackPane {
                 if (shortcutDown) {
                     cutSelection();
                     e.consume();
+                } else if (isTextProducingKeyPress(e)) {
+                    e.consume();
                 }
             }
             case V -> {
                 if (shortcutDown) {
                     paste();
                     e.consume();
+                } else if (isTextProducingKeyPress(e)) {
+                    e.consume();
                 }
             }
-            default -> {}
+            default -> {
+                if (isTextProducingKeyPress(e)) {
+                    // Вставка делается в KEY_TYPED. KEY_PRESSED тоже нужно считать
+                    // обработанным, иначе macOS/JavaFX 25 проигрывает invalid-input sound
+                    // для кастомного поля, не являющегося TextInputControl.
+                    e.consume();
+                }
+            }
         }
+    }
+
+    private boolean isTextProducingKeyPress(KeyEvent e) {
+        if (e.isControlDown() || e.isMetaDown()) {
+            return false;
+        }
+
+        KeyCode code = e.getCode();
+        if (code == null || code == KeyCode.UNDEFINED
+                || code.isFunctionKey()
+                || code.isMediaKey()
+                || code.isModifierKey()
+                || code.isNavigationKey()
+                || code.isArrowKey()) {
+            return false;
+        }
+
+        if (code.isLetterKey()
+                || code.isDigitKey()
+                || code.isKeypadKey()
+                || code.isWhitespaceKey()) {
+            return true;
+        }
+
+        String keyText = e.getText();
+        return keyText != null
+                && !keyText.isEmpty()
+                && keyText.codePoints().noneMatch(Character::isISOControl);
     }
 
     private void handleMousePressed(MouseEvent e) {
