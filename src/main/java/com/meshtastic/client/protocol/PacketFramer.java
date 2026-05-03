@@ -8,6 +8,8 @@ import com.google.protobuf.MessageLite;
  * Формат фрейма: {@code [0x94][0xC3][len_msb][len_lsb][protobuf payload]}.
  * BLE transport использует тот же входной формат на уровне {@link ProtocolHandler},
  * но перед записью в GATT-характеристику вырезает 4-байтный заголовок.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class PacketFramer {
 

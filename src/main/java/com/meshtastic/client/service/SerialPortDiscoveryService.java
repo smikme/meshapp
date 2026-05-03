@@ -16,6 +16,8 @@ import java.util.function.Consumer;
  * Периодически сканирует доступные serial-порты через jSerialComm
  * и определяет по эвристике, какие из них вероятнее всего являются Meshtastic-устройствами.
  * Оповещает подписчиков при изменении списка портов.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public final class SerialPortDiscoveryService {
 

@@ -50,6 +50,9 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+/**
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
+ */
 class FormSettingTest {
 
     @TempDir

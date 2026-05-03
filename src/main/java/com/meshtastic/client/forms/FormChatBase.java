@@ -11,6 +11,7 @@ import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.protocol.ProtocolHandler;
+import com.meshtastic.client.protocol.meshcore.MeshCoreCompanionProtocolRuntime;
 import com.meshtastic.client.system.Form;
 
 import javafx.application.Platform;
@@ -42,6 +43,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * <p>Публичная форма остаётся небольшой, а пакетные слои разделяют построение
  * интерфейса, окно загруженных сообщений, обработку запросов и привязку данных.
  * Состояние, общее для этих слоёв, хранится здесь.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 abstract class FormChatBase extends Form {
 
@@ -94,6 +97,7 @@ abstract class FormChatBase extends Form {
     // === Данные ===
     protected DeviceState state;
     protected ProtocolHandler protocolHandler;
+    protected MeshCoreCompanionProtocolRuntime meshCoreCompanionRuntime;
 
     // Трекинг непрочитанных: ключи вида "ch:INDEX" или "dm:NODEID" → кол-во прочитанных сообщений
     protected final Map<String, Integer> lastReadCounts = new HashMap<>();

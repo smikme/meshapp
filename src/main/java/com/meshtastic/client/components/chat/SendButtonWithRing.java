@@ -20,6 +20,8 @@ import javafx.scene.shape.StrokeLineCap;
  *
  * <p>Рисование выполняется на {@link Canvas} поверх кнопки — гарантированная
  * отрисовка независимо от z-order Button/Region.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class SendButtonWithRing extends StackPane {
 

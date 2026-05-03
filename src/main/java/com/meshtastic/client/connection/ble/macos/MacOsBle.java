@@ -29,6 +29,8 @@ import static com.meshtastic.client.connection.ble.macos.ObjCRuntime.*;
  *
  * <h3>CBManagerState</h3>
  * 0=Unknown, 1=Resetting, 2=Unsupported, 3=Unauthorized, 4=PoweredOff, 5=PoweredOn
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class MacOsBle implements BlePlatform {
 
@@ -71,6 +73,7 @@ public class MacOsBle implements BlePlatform {
     private volatile long fromNumCharacteristic;
     private volatile boolean connected;
     private volatile AdapterState adapterState = AdapterState.UNKNOWN;
+    private volatile BleProtocolProfile profile = BleProtocolProfile.MESHTASTIC;
 
     private volatile Consumer<BleDevice> scanCallback;
     private volatile Consumer<byte[]> fromRadioListener;
@@ -146,11 +149,10 @@ public class MacOsBle implements BlePlatform {
         waitForPoweredOn();
         log.info("BLE adapter state: {}", adapterState);
 
-        long serviceUuid = cbUuid(BleConstants.SERVICE_UUID);
-        long serviceArray = nsArrayWith(serviceUuid);
+        long serviceArray = serviceUuidArray(profile);
 
         msgSend(centralManager, "scanForPeripheralsWithServices:options:", serviceArray, 0L);
-        log.info("BLE scan started (filter: Meshtastic service UUID)");
+        log.info("BLE scan started (filter: {} service UUID)", profile.displayName());
     }
 
     @Override
@@ -223,8 +225,7 @@ public class MacOsBle implements BlePlatform {
 
             // Обнаруживаем сервисы
             log.info("[BLE] Step 3: discoverServices...");
-            long serviceUuid = cbUuid(BleConstants.SERVICE_UUID);
-            long serviceArray = nsArrayWith(serviceUuid);
+            long serviceArray = serviceUuidArray(profile);
             msgSend(peripheral, "discoverServices:", serviceArray);
 
             if (!serviceDiscoveryLatch.await(
@@ -246,17 +247,14 @@ public class MacOsBle implements BlePlatform {
             long serviceCount = msgSend(services, "count");
             if (serviceCount == 0) {
                 disconnect();
-                throw new ConnectionException("Meshtastic GATT service not found on: " + address);
+                throw new ConnectionException(profile.displayName() + " GATT service not found on: " + address);
             }
             long service = msgSend(services, "objectAtIndex:", 0L);
 
             log.info("[BLE] Step 4: discoverCharacteristics...");
-            long fromRadioUuid = cbUuid(BleConstants.FROM_RADIO_UUID);
-            long toRadioUuid = cbUuid(BleConstants.TO_RADIO_UUID);
-            long fromNumUuid = cbUuid(BleConstants.FROM_NUM_UUID);
-            long charUuids = cls("NSArray");
-            charUuids = ObjCRuntime.msgSendPtrLong(charUuids, "arrayWithObjects:count:",
-                    buildPointerArray(fromRadioUuid, toRadioUuid, fromNumUuid), 3L);
+            long inboundUuid = cbUuid(profile.inboundCharacteristicUuid());
+            long outboundUuid = cbUuid(profile.outboundCharacteristicUuid());
+            long charUuids = characteristicUuidArray(profile, inboundUuid, outboundUuid);
 
             msgSend(peripheral, "discoverCharacteristics:forService:", charUuids, service);
 
@@ -272,41 +270,48 @@ public class MacOsBle implements BlePlatform {
                 throw new ConnectionException("BLE characteristic discovery failed: "
                         + characteristicDiscoveryErrorMessage);
             }
-            log.info("[BLE] Step 4 done: fromRadio={}, toRadio={}, fromNum={}",
+            log.info("[BLE] Step 4 done: inbound={}, outbound={}, trigger={}",
                     fromRadioCharacteristic != 0, toRadioCharacteristic != 0,
                     fromNumCharacteristic != 0);
 
             if (toRadioCharacteristic == 0 || fromRadioCharacteristic == 0) {
                 disconnect();
                 throw new ConnectionException(
-                        "Required Meshtastic GATT characteristics not found on: " + address);
+                        "Required " + profile.displayName() + " GATT characteristics not found on: " + address);
             }
 
-            // fromRadio НЕ поддерживает notifications — используем polling.
-            // fromNum поддерживает — подписываемся как быстрый триггер drain.
-            log.info("[BLE] Step 5: subscribe to fromNum notifications...");
-
-            if (fromNumCharacteristic != 0) {
+            if (profile.hasNotifyTriggerCharacteristic()) {
+                // Meshtastic: fromRadio НЕ поддерживает notifications — используем polling.
+                // fromNum поддерживает — подписываемся как быстрый триггер drain.
+                log.info("[BLE] Step 5: subscribe to fromNum notifications...");
                 notifyLatch = new CountDownLatch(1);
                 setNotify(peripheral, true, fromNumCharacteristic);
                 if (!notifyLatch.await(5, TimeUnit.SECONDS)) {
                     log.warn("[BLE] fromNum notification subscription timeout");
                 }
                 failIfConnectErrored();
+
+                // Drain stale fromRadio data
+                log.info("[BLE] Step 6: initial drain of fromRadio...");
+                drainInProgress.set(true);
+                drainLatch = new CountDownLatch(1);
+                drainFromRadio();
+                drainLatch.await(3, TimeUnit.SECONDS);
+                failIfConnectErrored();
+                log.info("[BLE] Step 6 done: initial drain complete");
+
+                // Step 7: start periodic polling of fromRadio
+                startPolling();
+                failIfConnectErrored();
+            } else {
+                log.info("[BLE] Step 5: subscribe to inbound notifications...");
+                notifyLatch = new CountDownLatch(1);
+                setNotify(peripheral, true, fromRadioCharacteristic);
+                if (!notifyLatch.await(5, TimeUnit.SECONDS)) {
+                    log.warn("[BLE] inbound notification subscription timeout");
+                }
+                failIfConnectErrored();
             }
-
-            // Drain stale fromRadio data
-            log.info("[BLE] Step 6: initial drain of fromRadio...");
-            drainInProgress.set(true);
-            drainLatch = new CountDownLatch(1);
-            drainFromRadio();
-            drainLatch.await(3, TimeUnit.SECONDS);
-            failIfConnectErrored();
-            log.info("[BLE] Step 6 done: initial drain complete");
-
-            // Step 7: start periodic polling of fromRadio
-            startPolling();
-            failIfConnectErrored();
 
             connected = true;
             log.info("[BLE] connect() DONE — fully connected to {}", address);
@@ -323,7 +328,9 @@ public class MacOsBle implements BlePlatform {
         stopPolling();
         synchronized (connectionIoLock) {
             long peripheral = connectedPeripheral;
-            long notificationCharacteristic = fromNumCharacteristic;
+            long notificationCharacteristic = fromNumCharacteristic != 0
+                    ? fromNumCharacteristic
+                    : fromRadioCharacteristic;
             if (peripheral != 0) {
                 if (notificationCharacteristic != 0) {
                     setNotify(peripheral, false, notificationCharacteristic);
@@ -356,13 +363,15 @@ public class MacOsBle implements BlePlatform {
                 log.warn("Cannot write: BLE not connected or toRadio characteristic missing");
                 return false;
             }
-            log.debug("[BLE] writeToRadio: {} bytes", protobufPayload.length);
+            log.debug("[BLE] writeToRadio: {} bytes ({})", protobufPayload.length, profile.displayName());
             long nsData = nsData(protobufPayload);
             writeValueForCharacteristic(peripheral, nsData, characteristic, CB_WRITE_WITH_RESPONSE);
         }
 
-        // Kickstart drain after write — не ждём poll cycle
-        pollScheduler.schedule(this::triggerDrain, 200, TimeUnit.MILLISECONDS);
+        if (profile.hasNotifyTriggerCharacteristic()) {
+            // Kickstart drain after write — не ждём poll cycle
+            pollScheduler.schedule(this::triggerDrain, 200, TimeUnit.MILLISECONDS);
+        }
         return true;
     }
 
@@ -379,6 +388,16 @@ public class MacOsBle implements BlePlatform {
     @Override
     public AdapterState getAdapterState() {
         return adapterState;
+    }
+
+    @Override
+    public void setProfile(BleProtocolProfile profile) {
+        this.profile = profile == null ? BleProtocolProfile.MESHTASTIC : profile;
+    }
+
+    @Override
+    public BleProtocolProfile getProfile() {
+        return profile;
     }
 
     @Override
@@ -520,6 +539,34 @@ public class MacOsBle implements BlePlatform {
             mem.setLong((long) i * com.sun.jna.Native.POINTER_SIZE, objects[i]);
         }
         return mem;
+    }
+
+    private static long serviceUuidArray(BleProtocolProfile profile) {
+        long[] uuids = profile == BleProtocolProfile.AUTO
+                ? new long[]{
+                    cbUuid(BleConstants.SERVICE_UUID),
+                    cbUuid(BleConstants.MESHCORE_SERVICE_UUID)
+                }
+                : new long[]{cbUuid(profile.primaryServiceUuid())};
+        long charUuids = cls("NSArray");
+        return ObjCRuntime.msgSendPtrLong(charUuids, "arrayWithObjects:count:",
+                buildPointerArray(uuids), uuids.length);
+    }
+
+    private static long characteristicUuidArray(BleProtocolProfile profile, long inboundUuid, long outboundUuid) {
+        long[] uuids;
+        if (profile.hasNotifyTriggerCharacteristic()) {
+            uuids = new long[]{
+                    inboundUuid,
+                    outboundUuid,
+                    cbUuid(profile.notifyTriggerCharacteristicUuid())
+            };
+        } else {
+            uuids = new long[]{inboundUuid, outboundUuid};
+        }
+        long charUuids = cls("NSArray");
+        return ObjCRuntime.msgSendPtrLong(charUuids, "arrayWithObjects:count:",
+                buildPointerArray(uuids), uuids.length);
     }
 
     /** Запускает drain если ещё не активен (вызывается poll-таймером и fromNum). */
@@ -746,15 +793,16 @@ public class MacOsBle implements BlePlatform {
 
                 if (uuidJava != null) {
                     String lower = uuidJava.toLowerCase(Locale.ROOT);
-                    if (lower.equals(BleConstants.FROM_RADIO_UUID)) {
+                    if (lower.equals(me.profile.inboundCharacteristicUuid())) {
                         me.fromRadioCharacteristic = characteristic;
-                        log.info("Found fromRadio characteristic");
-                    } else if (lower.equals(BleConstants.TO_RADIO_UUID)) {
+                        log.info("Found inbound characteristic");
+                    } else if (lower.equals(me.profile.outboundCharacteristicUuid())) {
                         me.toRadioCharacteristic = characteristic;
-                        log.info("Found toRadio characteristic");
-                    } else if (lower.equals(BleConstants.FROM_NUM_UUID)) {
+                        log.info("Found outbound characteristic");
+                    } else if (me.profile.hasNotifyTriggerCharacteristic()
+                            && lower.equals(me.profile.notifyTriggerCharacteristicUuid())) {
                         me.fromNumCharacteristic = characteristic;
-                        log.info("Found fromNum characteristic");
+                        log.info("Found notification trigger characteristic");
                     }
                 }
             }
@@ -785,7 +833,7 @@ public class MacOsBle implements BlePlatform {
                 long value = msgSend(characteristic, "value");
                 byte[] data = toBytes(value);
                 if (data.length > 0) {
-                    log.debug("[BLE] Received {} bytes from fromRadio", data.length);
+                    log.debug("[BLE] Received {} bytes from inbound characteristic", data.length);
                     Consumer<byte[]> listener = me.fromRadioListener;
                     if (listener != null) {
                         try {
@@ -794,8 +842,10 @@ public class MacOsBle implements BlePlatform {
                             log.error("[BLE] Error in fromRadioListener", e);
                         }
                     }
-                    // Продолжаем чтение — chain drain (без guard, мы уже в drain)
-                    me.drainFromRadio();
+                    if (me.profile.hasNotifyTriggerCharacteristic()) {
+                        // Продолжаем чтение — chain drain (без guard, мы уже в drain)
+                        me.drainFromRadio();
+                    }
                 } else {
                     me.drainInProgress.set(false);
                     CountDownLatch latch = me.drainLatch;

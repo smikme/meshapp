@@ -15,6 +15,8 @@ import java.util.concurrent.CopyOnWriteArrayList;
  * Сервис управления игнорируемыми нодами.
  * Делегирует персистентность в {@link NodeCacheService} (H2, колонка {@code ignored}).
  * При изменении из UI отправляет AdminMessage на устройство для двусторонней синхронизации.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public final class IgnoredNodeService {
 

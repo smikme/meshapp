@@ -19,6 +19,8 @@ import java.util.stream.Collectors;
  * Загрузчик SVG-иконок из ресурсов.
  * Парсит SVG файл, извлекает path data и viewBox, создаёт JavaFX SVGPath.
  * Цвет fill управляется через CSS (-fx-fill), что позволяет адаптировать иконки к теме.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public final class SvgIconLoader {
 

@@ -1,6 +1,7 @@
 package com.meshtastic.client.connection;
 
 import com.meshtastic.client.connection.serial.NativeSerialPort;
+import com.meshtastic.client.protocol.meshcore.MeshCoreCompanionFrames;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
@@ -15,6 +16,9 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+/**
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
+ */
 class SerialConnectionTest {
 
     @Test
@@ -205,6 +209,31 @@ class SerialConnectionTest {
     }
 
     @Test
+    void companionVariablePacketFlushesAfterInterByteSilence() throws Exception {
+        FakeSerialPort port = new FakeSerialPort();
+        CountDownLatch packetLatch = new CountDownLatch(1);
+        AtomicReference<byte[]> packetRef = new AtomicReference<>();
+        SerialConnection connection = new SerialConnection(
+                "COM3", 115200, () -> port, System::currentTimeMillis, 5, 0, 80, 5_000, 1_000, 15);
+        connection.setFrameFormat(FrameFormat.MESHCORE_COMPANION);
+        connection.setDataListener(packet -> {
+            packetRef.set(packet);
+            packetLatch.countDown();
+        });
+
+        connection.connect();
+        byte[] selfInfo = companionSelfInfo();
+        port.enqueueIncoming(Arrays.copyOfRange(selfInfo, 0, 20));
+        port.enqueueIncoming(Arrays.copyOfRange(selfInfo, 20, selfInfo.length));
+
+        assertTrue(packetLatch.await(1, TimeUnit.SECONDS));
+        assertArrayEquals(selfInfo, packetRef.get());
+
+        connection.disconnect();
+        assertTrue(port.awaitClose());
+    }
+
+    @Test
     void shouldAssertDtrForWindowsCp210Bridge() {
         assertTrue(SerialConnection.shouldAssertDtr(
                 "COM3",
@@ -252,6 +281,20 @@ class SerialConnectionTest {
         frame[3] = (byte) (payload.length & 0xFF);
         System.arraycopy(payload, 0, frame, 4, payload.length);
         return frame;
+    }
+
+    private static byte[] companionSelfInfo() {
+        byte[] name = "meshcore-serial".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        byte[] packet = new byte[58 + name.length];
+        packet[0] = (byte) MeshCoreCompanionFrames.PACKET_SELF_INFO;
+        packet[1] = 1;
+        packet[2] = 10;
+        packet[3] = 20;
+        for (int i = 0; i < 32; i++) {
+            packet[4 + i] = (byte) i;
+        }
+        System.arraycopy(name, 0, packet, 58, name.length);
+        return packet;
     }
 
     private static final class FakeSerialPort implements NativeSerialPort {

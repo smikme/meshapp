@@ -12,6 +12,9 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
+/**
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
+ */
 class EmojiImageCacheTest {
 
     @BeforeAll

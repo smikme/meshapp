@@ -1,6 +1,8 @@
 package com.meshtastic.client.protocol;
 
 import com.meshtastic.client.model.ProtocolType;
+import com.meshtastic.client.protocol.meshcore.MeshCoreCompanionProtocol;
+import com.meshtastic.client.protocol.meshcore.MeshCoreKissProtocol;
 import com.meshtastic.client.protocol.meshtastic.MeshtasticProtocol;
 
 import java.util.EnumMap;
@@ -13,6 +15,8 @@ import java.util.Map;
  * {@link ProtocolType} из профиля подключения получить нужный протокольный
  * адаптер. Для добавления нового протокола нужно зарегистрировать здесь
  * соответствующую реализацию {@link CommunicationProtocol}.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public final class ProtocolRegistry {
 
@@ -20,6 +24,8 @@ public final class ProtocolRegistry {
 
     static {
         register(new MeshtasticProtocol());
+        register(new MeshCoreKissProtocol());
+        register(new MeshCoreCompanionProtocol());
     }
 
     private ProtocolRegistry() {

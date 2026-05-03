@@ -10,6 +10,9 @@ import javafx.util.Duration;
 
 import java.util.Locale;
 
+/**
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
+ */
 public class Toast {
 
     private Toast() {}

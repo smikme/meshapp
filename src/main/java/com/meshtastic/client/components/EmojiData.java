@@ -5,6 +5,8 @@ import java.util.*;
 /**
  * Статические данные эмодзи: категории, символы, ключевые слова для поиска.
  * ~240 наиболее популярных эмодзи (без вариантов тона кожи, без флагов).
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class EmojiData {
 

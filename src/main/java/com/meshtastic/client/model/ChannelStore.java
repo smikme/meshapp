@@ -24,6 +24,8 @@ import java.util.Collections;
  *   <li>Поиск доступных слотов для SECONDARY каналов</li>
  *   <li>Проверка наличия активных каналов</li>
  * </ul>
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class ChannelStore {
 

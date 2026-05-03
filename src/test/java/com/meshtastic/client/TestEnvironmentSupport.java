@@ -11,6 +11,9 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+/**
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
+ */
 public final class TestEnvironmentSupport {
 
     // JavaFX toolkit можно поднять только один раз на JVM.

@@ -13,6 +13,8 @@ import java.time.format.DateTimeFormatter;
  * <p>
  * Создаётся через {@link DeviceState#getOrCreateNode(int)} или напрямую по номеру ноды.
  * Поле {@code nodeId} генерируется автоматически в формате {@code !XXXXXXXX} (hex).
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class NodeData {
 

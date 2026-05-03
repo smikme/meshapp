@@ -3,6 +3,8 @@ package com.meshtastic.client.notification;
 /**
  * Платформенная доставка OS-уведомлений.
  * Реализации должны быть потокобезопасными.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public interface NotificationService {
 

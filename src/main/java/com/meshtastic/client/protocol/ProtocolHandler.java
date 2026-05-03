@@ -27,6 +27,8 @@ import java.util.concurrent.atomic.AtomicLong;
  * <p>
  * Также предоставляет метод отправки {@code ToRadio} на устройство
  * через фреймирование ({@link PacketFramer}) и транспорт.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class ProtocolHandler {
 

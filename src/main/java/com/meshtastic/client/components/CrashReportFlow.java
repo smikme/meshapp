@@ -24,6 +24,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Stream;
 
+/**
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
+ */
 public final class CrashReportFlow {
 
     private static final Logger log = LoggerFactory.getLogger(CrashReportFlow.class);

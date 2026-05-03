@@ -25,6 +25,8 @@ import java.util.function.Consumer;
 /**
  * Всплывающий пикер эмодзи. Показывается как Popup привязанный к кнопке.
  * Содержит: поиск, категории, сетку эмодзи.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class EmojiPicker {
 

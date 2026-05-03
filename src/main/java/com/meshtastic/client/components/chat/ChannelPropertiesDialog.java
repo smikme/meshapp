@@ -28,6 +28,8 @@ import java.util.List;
  * Модальная панель свойств канала с возможностью редактирования.
  *
  * <p>Вызывается статическим методом {@link #show(DeviceState, ProtocolHandler, int, Runnable)}.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public final class ChannelPropertiesDialog {
 

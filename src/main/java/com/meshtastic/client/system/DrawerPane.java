@@ -5,11 +5,11 @@ import javafx.geometry.Pos;
 import javafx.scene.Node;
 import javafx.scene.control.Button;
 import javafx.scene.control.ContentDisplay;
+import javafx.scene.control.ScrollPane;
 import javafx.scene.control.Separator;
 import javafx.scene.control.ToolBar;
 import javafx.scene.control.Tooltip;
 import javafx.scene.layout.Priority;
-import javafx.scene.layout.Region;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 import javafx.scene.shape.Circle;
@@ -25,6 +25,9 @@ import com.meshtastic.client.utils.SvgIconLoader;
 
 import java.util.List;
 
+/**
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
+ */
 public class DrawerPane extends StackPane {
 
     public static final double TOOLBAR_WIDTH = 56;
@@ -53,10 +56,19 @@ public class DrawerPane extends StackPane {
         notifButton = createNotificationButton();
         themeButton = createThemeButton();
 
-        Region spacer = new Region();
-        VBox.setVgrow(spacer, Priority.ALWAYS);
+        StackPane menuContent = new StackPane(toolBar);
+        menuContent.getStyleClass().add("drawer-toolbar-scroll-content");
+        menuContent.setAlignment(Pos.TOP_CENTER);
 
-        VBox container = new VBox(toolBar, spacer, notifButton, themeButton);
+        ScrollPane menuScroll = new ScrollPane(menuContent);
+        menuScroll.getStyleClass().add("drawer-toolbar-scroll");
+        menuScroll.setFitToWidth(true);
+        menuScroll.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
+        menuScroll.setVbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
+        menuScroll.setPannable(true);
+        VBox.setVgrow(menuScroll, Priority.ALWAYS);
+
+        VBox container = new VBox(menuScroll, notifButton, themeButton);
         container.setAlignment(Pos.TOP_CENTER);
         container.setPadding(new javafx.geometry.Insets(0, 0, 8, 0));
         if (OsDetect.isWindows() && !AppPreferences.isDisableEffectsEffective()) {

@@ -33,6 +33,8 @@ import com.meshtastic.client.service.MessageDbService;
  * После рефакторинга: делегирует большую часть операций компонентам
  * ({@link NodeDatabase}, {@link ChannelStore}, {@link ConfigStore}, {@link MessageStore}).
  * UI-обновления выполняются через {@code Platform.runLater()}.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class DeviceState {
 
@@ -576,10 +578,10 @@ public class DeviceState {
     /**
      * Возвращает nodeId устройства-владельца из ownerInfo.
      */
-    private String getOwnerNodeId() {
+    public String getOwnerNodeId() {
         if (ownerInfo != null) {
             return ownerInfo.getId();
         }
-        return null;
+        return myNodeNum != 0 ? String.format("!%08x", myNodeNum) : null;
     }
 }

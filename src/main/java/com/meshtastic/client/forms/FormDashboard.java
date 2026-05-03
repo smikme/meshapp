@@ -37,6 +37,8 @@ import java.util.List;
  * Использует переиспользуемый компонент {@link TelemetryChartPanel} для графика и фильтра периода.
  * Таблица логов телеметрии внизу.
  * Данные загружаются из H2 (архив) + live из DeviceState.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 @SystemForm(name = "Статистика", description = "Телеметрия устройства")
 public class FormDashboard extends Form {

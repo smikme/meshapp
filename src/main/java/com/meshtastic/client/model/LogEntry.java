@@ -6,6 +6,8 @@ import java.time.format.DateTimeFormatter;
 
 /**
  * Строка лога для отображения в TableView.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class LogEntry {
 

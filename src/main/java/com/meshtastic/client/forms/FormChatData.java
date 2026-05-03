@@ -11,6 +11,8 @@ import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.protocol.ProtocolHandler;
+import com.meshtastic.client.protocol.ProtocolRuntime;
+import com.meshtastic.client.protocol.meshcore.MeshCoreCompanionProtocolRuntime;
 import com.meshtastic.client.service.ConnectionManager;
 import com.meshtastic.client.service.MessageDbService;
 import com.meshtastic.client.service.MessageListenerService;
@@ -40,13 +42,19 @@ import org.meshtastic.proto.ChannelProtos;
  * счётчики прочитанных, удаление каналов и личных чатов, состояние заглушения и
  * точки входа в модальные окна. Окно сообщений и запросы ботов остаются в
  * нижних слоях.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 abstract class FormChatData extends FormChatRequests {
 
-    private record ActiveConnection(DeviceState state, ProtocolHandler handler) {}
+    private record ActiveConnection(DeviceState state,
+                                    ProtocolHandler handler,
+                                    MeshCoreCompanionProtocolRuntime meshCoreRuntime) {}
 
     protected void updateInputEnabled() {
-        boolean canSend = state != null && protocolHandler != null && selectedChat != null;
+        boolean canSend = state != null
+                && (protocolHandler != null || meshCoreCompanionRuntime != null)
+                && selectedChat != null;
         chatInputBar.setInputEnabled(canSend);
     }
 
@@ -71,6 +79,7 @@ abstract class FormChatData extends FormChatRequests {
         unbindPreviousState();
         this.state = newState;
         this.protocolHandler = activeConnection.handler();
+        this.meshCoreCompanionRuntime = activeConnection.meshCoreRuntime();
 
         bindStateDependentComponents(newState);
         refreshReadCounts();
@@ -90,10 +99,15 @@ abstract class FormChatData extends FormChatRequests {
             }
             DeviceState candidateState = mgr.getDeviceState(entry.getId());
             if (candidateState != null) {
-                return new ActiveConnection(candidateState, mgr.getProtocolHandler(entry.getId()));
+                ProtocolRuntime<?> runtime = mgr.getProtocolRuntime(entry.getId());
+                MeshCoreCompanionProtocolRuntime meshRuntime =
+                        runtime instanceof MeshCoreCompanionProtocolRuntime companionRuntime
+                                ? companionRuntime
+                                : null;
+                return new ActiveConnection(candidateState, mgr.getProtocolHandler(entry.getId()), meshRuntime);
             }
         }
-        return new ActiveConnection(null, null);
+        return new ActiveConnection(null, null, null);
     }
 
     private void unbindPreviousState() {
@@ -171,6 +185,8 @@ abstract class FormChatData extends FormChatRequests {
     protected void reloadChatList() {
         if (state == null) {
             chatItems.clear();
+            protocolHandler = null;
+            meshCoreCompanionRuntime = null;
             return;
         }
 
@@ -262,6 +278,10 @@ abstract class FormChatData extends FormChatRequests {
             return;
         }
         if (state == null || protocolHandler == null) {
+            if (meshCoreCompanionRuntime != null) {
+                Toast.show(Toast.Type.WARNING, "Свойства канала доступны только для Meshtastic");
+                return;
+            }
             Toast.show(Toast.Type.WARNING, "Нет подключения к радио");
             return;
         }
@@ -383,6 +403,10 @@ abstract class FormChatData extends FormChatRequests {
     }
 
     protected void showCreateChannelDialog() {
+        if (protocolHandler == null) {
+            Toast.show(Toast.Type.WARNING, "Создание каналов доступно только для Meshtastic");
+            return;
+        }
         CreateChannelDialog.show(state, protocolHandler, this::reloadChatList);
     }
 

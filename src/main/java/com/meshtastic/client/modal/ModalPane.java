@@ -32,6 +32,8 @@ import java.util.function.Consumer;
  * In-scene модальная панель — полупрозрачный оверлей с контентом справа.
  * Контент выезжает справа с анимацией slide + fade.
  * Используется для всех встроенных диалогов (confirm, info, error, about).
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class ModalPane extends StackPane {
 

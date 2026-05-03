@@ -7,6 +7,8 @@ import java.util.stream.Collectors;
 
 /**
  * Вспомогательное форматирование для отладки проблем сохранения конфигурации.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public final class ConfigDebugFormatter {
 

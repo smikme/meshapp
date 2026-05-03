@@ -20,6 +20,8 @@ import java.util.stream.Stream;
  *
  * <p>Класс отделяет правила выбора отображаемого имени от JavaFX-рендеринга,
  * чтобы фабрика пузырей и другие чат-компоненты не дублировали одинаковые fallback-цепочки.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 final class ChatNodeDisplayHelper {
 

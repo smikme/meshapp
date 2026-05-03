@@ -17,6 +17,7 @@ package com.meshtastic.client.model;
  * }</pre>
  *
  * @author Meshtastic Team
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class TelemetryEntry {
 

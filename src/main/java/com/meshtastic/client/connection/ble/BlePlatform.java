@@ -13,6 +13,8 @@ import java.util.function.Consumer;
  *   <li>Linux — BlueZ через D-Bus</li>
  *   <li>Windows — WinRT Bluetooth LE</li>
  * </ul>
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public interface BlePlatform {
 
@@ -22,8 +24,9 @@ public interface BlePlatform {
     }
 
     /**
-     * Запускает BLE-сканирование. Найденные устройства с Meshtastic-сервисом
-     * передаются в {@code onDeviceFound}. Повторные находки обновляют RSSI.
+     * Запускает BLE-сканирование. Найденные устройства с service UUID текущего
+     * {@link BleProtocolProfile} передаются в {@code onDeviceFound}. Повторные
+     * находки обновляют RSSI.
      *
      * @param onDeviceFound callback для каждого обнаруженного устройства
      */
@@ -41,6 +44,21 @@ public interface BlePlatform {
      */
     void connect(String address) throws ConnectionException;
 
+    /**
+     * Настраивает BLE service/characteristic UUID для следующего scan/connect.
+     * Реализации по умолчанию остаются в Meshtastic-режиме для совместимости.
+     *
+     * @param profile профиль BLE-протокола
+     */
+    default void setProfile(BleProtocolProfile profile) {}
+
+    /**
+     * @return текущий BLE-профиль backend-а
+     */
+    default BleProtocolProfile getProfile() {
+        return BleProtocolProfile.MESHTASTIC;
+    }
+
     /** Отключает текущее BLE-соединение. Безопасен при повторном вызове. */
     void disconnect();
 
@@ -48,19 +66,19 @@ public interface BlePlatform {
     boolean isConnected();
 
     /**
-     * Записывает protobuf-payload в toRadio-характеристику.
+     * Записывает payload в outbound GATT characteristic текущего BLE-профиля.
      * Данные передаются без serial-фрейминга (без заголовка 0x94 0xC3).
      *
-     * @param protobufPayload сериализованный protobuf ToRadio
+     * @param protobufPayload сериализованный протокольный payload
      * @return true при успешной записи, false при ошибке
      */
     boolean writeToRadio(byte[] protobufPayload);
 
     /**
-     * Устанавливает слушателя входящих FromRadio protobuf.
-     * Вызывается из потока BLE-уведомлений при получении данных из fromRadio-характеристики.
+     * Устанавливает слушателя входящих payload-ов из inbound characteristic.
+     * Вызывается из потока BLE-уведомлений или polling при получении данных.
      *
-     * @param listener callback для приёма protobuf-данных
+     * @param listener callback для приёма протокольных payload-ов
      */
     void setFromRadioListener(Consumer<byte[]> listener);
 

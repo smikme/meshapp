@@ -29,6 +29,8 @@ import java.util.function.BiPredicate;
  * </ul>
  * Потокобезопасность: вызывается из потока чтения TCP/BLE (через MessageListenerService).
  * {@code Stage.isFocused()} обновляется через volatile-снимок из FX-потока.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class NotificationManager {
 

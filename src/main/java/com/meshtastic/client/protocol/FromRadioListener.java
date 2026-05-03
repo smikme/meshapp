@@ -10,6 +10,8 @@ import org.meshtastic.proto.*;
  * Вызываются из transport reader-потока при получении и парсинге {@code FromRadio}.
  *
  * @see ProtocolHandler
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public interface FromRadioListener {
 

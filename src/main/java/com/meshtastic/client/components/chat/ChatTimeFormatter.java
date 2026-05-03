@@ -18,6 +18,8 @@ import java.util.Locale;
  *   <li>{@link #formatMessageTime} — пузыри сообщений: сегодня HH:mm,
  *       старые dd.MM HH:mm.</li>
  * </ul>
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public final class ChatTimeFormatter {
 

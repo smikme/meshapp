@@ -7,6 +7,9 @@ import java.util.List;
 import java.util.prefs.BackingStoreException;
 import java.util.prefs.Preferences;
 
+/**
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
+ */
 public class AppPreferences {
 
     private AppPreferences() {} // utility class
@@ -37,9 +40,16 @@ public class AppPreferences {
     public static final String KEY_PACKET_MONITOR_WINDOW_MAXIMIZED = "packetMonitorWindowMaximized";
     public static final String KEY_PACKET_MONITOR_COLUMN_TIME_WIDTH = "packetMonitorColumnTimeWidth";
     public static final String KEY_PACKET_MONITOR_COLUMN_TYPE_WIDTH = "packetMonitorColumnTypeWidth";
+    public static final String KEY_PACKET_MONITOR_COLUMN_TRANSPORT_WIDTH = "packetMonitorColumnTransportWidth";
     public static final String KEY_PACKET_MONITOR_COLUMN_FROM_WIDTH = "packetMonitorColumnFromWidth";
     public static final String KEY_PACKET_MONITOR_COLUMN_TO_WIDTH = "packetMonitorColumnToWidth";
     public static final String KEY_PACKET_MONITOR_COLUMN_PAYLOAD_WIDTH = "packetMonitorColumnPayloadWidth";
+    public static final String KEY_MAP_CENTER_LATITUDE = "mapCenterLatitude";
+    public static final String KEY_MAP_CENTER_LONGITUDE = "mapCenterLongitude";
+    public static final String KEY_MAP_ZOOM = "mapZoom";
+    public static final String KEY_MAP_OFFLINE_MODE = "mapOfflineMode";
+    public static final String KEY_MAP_NIGHT_MODE = "mapNightMode";
+    public static final String KEY_MAP_TILE_DIRECTORY = "mapTileDirectory";
 
     private static Preferences state;
 
@@ -234,6 +244,96 @@ public class AppPreferences {
         state().putDouble(KEY_PACKET_MONITOR_WINDOW_WIDTH, w);
         state().putDouble(KEY_PACKET_MONITOR_WINDOW_HEIGHT, h);
         state().putBoolean(KEY_PACKET_MONITOR_WINDOW_MAXIMIZED, maximized);
+        flushState();
+    }
+
+    // ==================== Map ====================
+
+    /**
+     * Возвращает сохранённую широту центра карты.
+     */
+    public static double getMapCenterLatitude() {
+        return state().getDouble(KEY_MAP_CENTER_LATITUDE, 20);
+    }
+
+    /**
+     * Возвращает сохранённую долготу центра карты.
+     */
+    public static double getMapCenterLongitude() {
+        return state().getDouble(KEY_MAP_CENTER_LONGITUDE, 0);
+    }
+
+    /**
+     * Возвращает сохранённый масштаб карты.
+     */
+    public static int getMapZoom() {
+        return state().getInt(KEY_MAP_ZOOM, 2);
+    }
+
+    /**
+     * Проверяет, был ли пользовательский центр карты уже сохранён.
+     */
+    public static boolean hasMapView() {
+        return !Double.isNaN(state().getDouble(KEY_MAP_CENTER_LATITUDE, Double.NaN))
+                && !Double.isNaN(state().getDouble(KEY_MAP_CENTER_LONGITUDE, Double.NaN));
+    }
+
+    /**
+     * Сохраняет текущий центр и масштаб карты.
+     */
+    public static void saveMapView(double latitude, double longitude, int zoom) {
+        state().putDouble(KEY_MAP_CENTER_LATITUDE, latitude);
+        state().putDouble(KEY_MAP_CENTER_LONGITUDE, longitude);
+        state().putInt(KEY_MAP_ZOOM, zoom);
+        flushState();
+    }
+
+    /**
+     * Возвращает состояние режима «только локальные тайлы».
+     */
+    public static boolean isMapOfflineMode() {
+        return state().getBoolean(KEY_MAP_OFFLINE_MODE, false);
+    }
+
+    /**
+     * Сохраняет состояние режима «только локальные тайлы».
+     */
+    public static void setMapOfflineMode(boolean offline) {
+        state().putBoolean(KEY_MAP_OFFLINE_MODE, offline);
+        flushState();
+    }
+
+    /**
+     * Возвращает состояние ночного режима карты.
+     */
+    public static boolean isMapNightMode() {
+        return state().getBoolean(KEY_MAP_NIGHT_MODE, false);
+    }
+
+    /**
+     * Сохраняет состояние ночного режима карты.
+     */
+    public static void setMapNightMode(boolean nightMode) {
+        state().putBoolean(KEY_MAP_NIGHT_MODE, nightMode);
+        flushState();
+    }
+
+    /**
+     * Возвращает сохранённый внешний каталог оффлайн-тайлов.
+     */
+    public static String getMapTileDirectory() {
+        return state().get(KEY_MAP_TILE_DIRECTORY, "");
+    }
+
+    /**
+     * Сохраняет внешний каталог оффлайн-тайлов или очищает настройку при пустом значении.
+     */
+    public static void setMapTileDirectory(String directory) {
+        if (directory == null || directory.isBlank()) {
+            state().remove(KEY_MAP_TILE_DIRECTORY);
+        } else {
+            state().put(KEY_MAP_TILE_DIRECTORY, directory);
+        }
         flushState();
     }
 

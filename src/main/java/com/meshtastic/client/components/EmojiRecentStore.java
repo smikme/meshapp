@@ -9,6 +9,8 @@ import java.util.List;
 /**
  * Хранение недавно использованных эмодзи в AppPreferences.
  * Максимум 32 элемента. Самый новый — первый в списке.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class EmojiRecentStore {
 

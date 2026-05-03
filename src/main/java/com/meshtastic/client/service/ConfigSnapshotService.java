@@ -28,6 +28,8 @@ import java.util.Set;
 
 /**
  * Чтение/запись snapshot-файлов конфигурации MeshApp (.mcf/.mtp).
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public final class ConfigSnapshotService {
 

@@ -15,6 +15,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Единая точка управления tray icon/status item и поведением minimize-to-tray.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public final class AppTrayManager {
 

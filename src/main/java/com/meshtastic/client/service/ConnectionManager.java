@@ -9,8 +9,11 @@ import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.ProtocolType;
 import com.meshtastic.client.protocol.ProtocolRegistry;
 import com.meshtastic.client.protocol.ProtocolRuntime;
+import com.meshtastic.client.protocol.ProtocolAutodetector;
 import com.meshtastic.client.protocol.ProtocolRuntimeContext;
 import com.meshtastic.client.protocol.ProtocolHandler;
+import com.meshtastic.client.protocol.meshcore.MeshCoreCompanionState;
+import com.meshtastic.client.protocol.meshcore.MeshCoreKissState;
 import com.meshtastic.client.protocol.meshtastic.MeshtasticProtocol;
 import com.meshtastic.client.protocol.meshtastic.MeshtasticProtocolRuntime;
 import org.slf4j.Logger;
@@ -37,6 +40,8 @@ import java.util.concurrent.CopyOnWriteArrayList;
  * {@link DeviceState} и {@link ProtocolHandler}.
  * <p>
  * Каждое соединение идентифицируется по строковому {@code id} из {@link ConnectionEntry}.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public final class ConnectionManager {
 
@@ -127,6 +132,48 @@ public final class ConnectionManager {
     }
 
     /**
+     * Обновляет сохранённые параметры существующего профиля подключения.
+     * Активные и переподключающиеся профили не изменяются, чтобы не менять
+     * transport-параметры под уже открытым runtime.
+     *
+     * @param updated профиль с тем же id и новыми параметрами
+     */
+    public void updateEntry(ConnectionEntry updated) {
+        if (updated == null || updated.getId() == null || updated.getId().isBlank()) {
+            throw new IllegalArgumentException("Connection entry id is required");
+        }
+
+        synchronized (connectionLock) {
+            ConnectionEntry existing = findEntry(updated.getId());
+            if (existing == null) {
+                throw new IllegalArgumentException("Connection entry not found: " + updated.getId());
+            }
+            if (existing.isConnected()
+                    || existing.isReconnecting()
+                    || activeConnections.containsKey(updated.getId())
+                    || pendingConnections.containsKey(updated.getId())) {
+                throw new IllegalStateException(
+                        "Нельзя редактировать активное подключение. Отключитесь перед изменением параметров.");
+            }
+
+            updated.setConnected(existing.isConnected());
+            updated.setReconnecting(existing.isReconnecting());
+            if (updated.getNodeId() == null || updated.getNodeId().isBlank()) {
+                updated.setNodeId(existing.getNodeId());
+            }
+
+            for (int i = 0; i < entries.size(); i++) {
+                if (entries.get(i).getId().equals(updated.getId())) {
+                    entries.set(i, updated);
+                    break;
+                }
+            }
+        }
+        save();
+        fireChanged();
+    }
+
+    /**
      * Удаляет профиль подключения. Предварительно разрывает соединение,
      * если оно активно. Сохраняет в JSON и оповещает слушателей.
      *
@@ -168,6 +215,7 @@ public final class ConnectionManager {
             if (!activeConnections.isEmpty() || !pendingConnections.isEmpty()) {
                 throw new ConnectionException("Уже есть активное подключение. Отключитесь перед подключением к другому устройству.");
             }
+            validateProtocolTransportCombination(entry, entry.getEffectiveProtocol());
             conn = createConnection(entry);
             pendingConnections.put(id, conn);
         }
@@ -249,7 +297,22 @@ public final class ConnectionManager {
 
         ProtocolRuntime<?> protocolRuntime;
         CompletableFuture<?> future;
+        ProtocolType resolvedProtocolType;
         boolean cancelledDuringConnect = false;
+
+        try {
+            resolvedProtocolType = resolveProtocolType(id, entry, conn);
+        } catch (ConnectionException e) {
+            abortPendingConnection(id, conn);
+            conn.setConnectionListener(null);
+            conn.disconnect();
+            throw e;
+        } catch (RuntimeException e) {
+            abortPendingConnection(id, conn);
+            conn.setConnectionListener(null);
+            conn.disconnect();
+            throw e;
+        }
 
         synchronized (connectionLock) {
             TransportConnection pendingConn = pendingConnections.get(id);
@@ -273,7 +336,7 @@ public final class ConnectionManager {
                 }
                 activeConnections.put(id, conn);
 
-                protocolRuntime = createProtocolRuntime(id, entry, conn);
+                protocolRuntime = createProtocolRuntime(id, entry, conn, resolvedProtocolType);
                 protocolRuntimes.put(id, protocolRuntime);
                 future = protocolRuntime.start();
                 protocolReadyFutures.put(id, future);
@@ -410,18 +473,25 @@ public final class ConnectionManager {
     }
 
     /**
-     * Возвращает Meshtastic {@link DeviceState} для активного подключения.
+     * Возвращает UI-совместимый {@link DeviceState} для активного подключения.
      * <p>
-     * Метод оставлен для совместимости существующих форм. При добавлении новых
-     * протоколов они должны предоставлять собственный typed accessor или работать
-     * через {@link ProtocolRuntime#getState()}.
+     * Для Meshtastic это нативное состояние protobuf runtime-а. Для MeshCore
+     * Companion Protocol возвращается bridge-состояние, которое заполняется
+     * контактами, каналами, сообщениями и телеметрией MeshCore.
      *
      * @param id идентификатор профиля подключения
-     * @return состояние Meshtastic-устройства или {@code null}
+     * @return состояние устройства для UI или {@code null}
      */
     public DeviceState getDeviceState(String id) {
         MeshtasticProtocolRuntime runtime = getMeshtasticRuntime(id);
-        return runtime != null ? runtime.getDeviceState() : deviceStates.get(id);
+        if (runtime != null) {
+            return runtime.getDeviceState();
+        }
+        ProtocolRuntime<?> activeRuntime = protocolRuntimes.get(id);
+        if (activeRuntime != null && activeRuntime.getState() instanceof MeshCoreCompanionState meshCoreState) {
+            return meshCoreState.getDeviceState();
+        }
+        return deviceStates.get(id);
     }
 
     /**
@@ -479,6 +549,64 @@ public final class ConnectionManager {
         }
         ConnectionEntry entry = findEntry(id);
         return entry != null ? entry.getNodeId() : null;
+    }
+
+    /**
+     * Возвращает активный protocol runtime любого поддерживаемого типа.
+     *
+     * @param id идентификатор профиля подключения
+     * @return runtime активного протокола или {@code null}
+     */
+    public ProtocolRuntime<?> getProtocolRuntime(String id) {
+        return protocolRuntimes.get(id);
+    }
+
+    /**
+     * Возвращает future готовности активного protocol runtime-а.
+     *
+     * @param id идентификатор профиля подключения
+     * @return future готовности или {@code null}
+     */
+    public CompletableFuture<?> getProtocolReadyFuture(String id) {
+        return protocolReadyFutures.get(id);
+    }
+
+    /**
+     * Возвращает runtime-состояние MeshCore KISS, если подключение использует этот протокол.
+     *
+     * @param id идентификатор профиля подключения
+     * @return состояние MeshCore KISS или {@code null}
+     */
+    public MeshCoreKissState getMeshCoreKissState(String id) {
+        ProtocolRuntime<?> runtime = protocolRuntimes.get(id);
+        return runtime != null && runtime.getState() instanceof MeshCoreKissState meshCoreState
+                ? meshCoreState
+                : null;
+    }
+
+    /**
+     * Возвращает runtime-состояние MeshCore Companion, если подключение использует Companion Protocol.
+     *
+     * @param id идентификатор профиля подключения
+     * @return состояние MeshCore Companion или {@code null}
+     */
+    public MeshCoreCompanionState getMeshCoreCompanionState(String id) {
+        ProtocolRuntime<?> runtime = protocolRuntimes.get(id);
+        return runtime != null && runtime.getState() instanceof MeshCoreCompanionState meshCoreState
+                ? meshCoreState
+                : null;
+    }
+
+    /**
+     * Возвращает фактически активный протокол или сохранённый выбор профиля.
+     */
+    public ProtocolType getActiveProtocolType(String id) {
+        ProtocolRuntime<?> runtime = protocolRuntimes.get(id);
+        if (runtime != null) {
+            return runtime.getProtocolType();
+        }
+        ConnectionEntry entry = findEntry(id);
+        return entry != null ? entry.getEffectiveProtocol() : null;
     }
 
     /**
@@ -599,8 +727,46 @@ public final class ConnectionManager {
     /**
      * Создаёт protocol runtime поверх уже открытого transport-а.
      */
-    private ProtocolRuntime<?> createProtocolRuntime(String id, ConnectionEntry entry, TransportConnection conn) {
-        ProtocolType protocolType = entry.getEffectiveProtocol();
+    private ProtocolType resolveProtocolType(String id, ConnectionEntry entry, TransportConnection conn) throws ConnectionException {
+        ProtocolType requestedProtocol = entry.getEffectiveProtocol();
+        validateProtocolTransportCombination(entry, requestedProtocol);
+        ProtocolRuntimeContext context = new ProtocolRuntimeContext(
+                id,
+                entry,
+                conn,
+                formatConnectionParams(entry)
+        );
+        ProtocolType resolvedProtocol = requestedProtocol == ProtocolType.AUTO
+                ? ProtocolAutodetector.detect(context)
+                : requestedProtocol;
+        configureFrameFormat(conn, resolvedProtocol);
+        return resolvedProtocol;
+    }
+
+    private void validateProtocolTransportCombination(ConnectionEntry entry,
+                                                      ProtocolType requestedProtocol) throws ConnectionException {
+        if (requestedProtocol == ProtocolType.AUTO) {
+            return;
+        }
+        switch (entry.getEffectiveType()) {
+            case BLE -> {
+                if (requestedProtocol == ProtocolType.MESHCORE_KISS) {
+                    throw new ConnectionException("MeshCore KISS не поддерживается по BLE. Выберите MeshCore Companion.");
+                }
+            }
+            case TCP, SERIAL -> {
+                // MeshCore Companion can run on byte streams when the endpoint carries raw Companion packets.
+            }
+        }
+    }
+
+    /**
+     * Создаёт protocol runtime поверх уже открытого transport-а.
+     */
+    private ProtocolRuntime<?> createProtocolRuntime(String id,
+                                                     ConnectionEntry entry,
+                                                     TransportConnection conn,
+                                                     ProtocolType protocolType) {
         ProtocolRuntimeContext context = new ProtocolRuntimeContext(
                 id,
                 entry,
@@ -608,6 +774,12 @@ public final class ConnectionManager {
                 formatConnectionParams(entry)
         );
         return ProtocolRegistry.get(protocolType).createRuntime(context);
+    }
+
+    private void configureFrameFormat(TransportConnection conn, ProtocolType protocolType) {
+        if (conn instanceof com.meshtastic.client.connection.FrameFormatAwareConnection frameAware) {
+            frameAware.setFrameFormat(com.meshtastic.client.connection.FrameFormat.forProtocol(protocolType));
+        }
     }
 
     /**

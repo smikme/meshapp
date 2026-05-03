@@ -41,6 +41,9 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
+/**
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
+ */
 public class MeshApp extends Application {
 
     private static final Logger log = LoggerFactory.getLogger(MeshApp.class);
@@ -151,10 +154,10 @@ public class MeshApp extends Application {
             );
         }
 
-        // Восстановить позицию/размер окна из предыдущей сессии
-        restoreWindowBounds(stage);
-
         stage.setScene(scene);
+        // Восстановить позицию/размер окна после setScene(), иначе JavaFX может
+        // заново применить размеры сцены и перетереть сохранённые Stage bounds.
+        restoreWindowBounds(stage);
         stage.show();
         AppTrayManager.getInstance().initialize(stage);
 

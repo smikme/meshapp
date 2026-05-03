@@ -52,6 +52,8 @@ import java.util.stream.Stream;
  *
  * <p>Класс отвечает только за JavaFX-рендеринг и делегирует выбор имён,
  * аватаров и агрегирование реакций специализированным helper-классам.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class MessageBubbleFactory {
 

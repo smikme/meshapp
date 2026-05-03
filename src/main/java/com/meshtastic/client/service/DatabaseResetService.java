@@ -13,6 +13,8 @@ import org.slf4j.LoggerFactory;
  *   <li>выполняется {@code DROP ALL OBJECTS}</li>
  *   <li>сервисы заново инициализируют таблицы и JDBC-ресурсы</li>
  * </ol>
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public final class DatabaseResetService {
 

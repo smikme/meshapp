@@ -11,6 +11,8 @@ import com.sun.jna.ptr.IntByReference;
  * прямой вызов этого API через JNA может завершить JVM abort'ом из-за отличий ABI.
  * Поэтому Java-код вызывает маленькую native-библиотеку с фиксированными сигнатурами,
  * а уже она делает {@code ioctl(TIOCMBIS/TIOCMBIC/TIOCMGET)} внутри C.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 final class MacOsSerialLibrary {
 

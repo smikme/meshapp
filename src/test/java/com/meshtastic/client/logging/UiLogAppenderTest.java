@@ -17,6 +17,9 @@ import java.nio.file.Path;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+/**
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
+ */
 class UiLogAppenderTest {
 
     @TempDir

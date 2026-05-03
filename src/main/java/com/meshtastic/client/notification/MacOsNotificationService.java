@@ -12,6 +12,8 @@ import org.slf4j.LoggerFactory;
  * активирует окно MeshApp, а не Script Editor.
  * <p>
  * При недоступности нативного API используется fallback через {@code osascript}.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class MacOsNotificationService implements NotificationService {
 

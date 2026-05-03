@@ -13,6 +13,8 @@ import com.meshtastic.client.protocol.ProtocolRuntimeContext;
  * Отвечает за создание runtime-а Meshtastic поверх уже открытого транспорта.
  * Сам адаптер не хранит состояние подключения: всё runtime-состояние находится
  * в {@link MeshtasticProtocolRuntime}.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public final class MeshtasticProtocol implements CommunicationProtocol<DeviceState> {
 

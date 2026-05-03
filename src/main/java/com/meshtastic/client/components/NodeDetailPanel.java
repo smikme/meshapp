@@ -15,6 +15,8 @@ import javafx.scene.layout.VBox;
  * Делегирует содержимое в {@link NodeDetailContent}.
  * <p>
  * Использование: {@code NodeDetailPanel.showForNode(state, node);}
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class NodeDetailPanel extends VBox {
 

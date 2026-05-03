@@ -38,6 +38,8 @@ import org.meshtastic.proto.MeshProtos;
  * <p>Сюда относятся ответы, реакции, повторная отправка, команды tracebot/infobot
  * и временные пузыри обратного отсчёта, которые показываются во время ожидания
  * ответа от радио.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 abstract class FormChatRequests extends FormChatMessages {
 
@@ -121,8 +123,12 @@ abstract class FormChatRequests extends FormChatMessages {
 
     protected void sendReaction(MeshMessage msg, String emoji) {
         if (msg == null || emoji == null || emoji.isEmpty()) { return; }
-        if (selectedChat == null || state == null || protocolHandler == null) {
+        if (selectedChat == null || state == null || (protocolHandler == null && meshCoreCompanionRuntime == null)) {
             Toast.show(Toast.Type.WARNING, "Нет подключения к радио");
+            return;
+        }
+        if (meshCoreCompanionRuntime != null) {
+            Toast.show(Toast.Type.WARNING, "Реакции пока недоступны для MeshCore Companion Protocol");
             return;
         }
         if (msg.getPacketId() == 0) {
@@ -150,13 +156,21 @@ abstract class FormChatRequests extends FormChatMessages {
         if (msg == null || !msg.isOutgoing() || msg.getStatus() != MeshMessage.DeliveryStatus.FAILED) {
             return false;
         }
-        if (state == null || protocolHandler == null) {
+        if (state == null || (protocolHandler == null && meshCoreCompanionRuntime == null)) {
             Toast.show(Toast.Type.WARNING, "Нет подключения к радио");
             return false;
         }
 
         if (!canRetryTarget(msg)) {
             return false;
+        }
+        if (meshCoreCompanionRuntime != null) {
+            if (!meshCoreCompanionRuntime.retryMessage(msg)) {
+                showRetryFailedToast(msg);
+                return false;
+            }
+            reloadChatList();
+            return true;
         }
         if (!MessageService.retryMessage(protocolHandler, state, msg)) {
             showRetryFailedToast(msg);
@@ -192,7 +206,7 @@ abstract class FormChatRequests extends FormChatMessages {
         if (command == null || !command.isCommand()) {
             return false;
         }
-        if (selectedChat == null || state == null || protocolHandler == null) {
+        if (selectedChat == null || state == null || (protocolHandler == null && meshCoreCompanionRuntime == null)) {
             Toast.show(Toast.Type.WARNING, "Нет подключения к радио");
             return false;
         }
@@ -221,10 +235,19 @@ abstract class FormChatRequests extends FormChatMessages {
 
         return switch (command.action()) {
             case TRACEROUTE -> {
+                if (meshCoreCompanionRuntime != null) {
+                    Toast.show(Toast.Type.WARNING, "Traceroute недоступен для MeshCore Companion Protocol");
+                    yield true;
+                }
                 requestTraceroute(resolution.node());
                 yield true;
             }
             case NODE_INFO -> {
+                if (meshCoreCompanionRuntime != null) {
+                    addSystemMessageTo(currentChatType(), currentChatKey(),
+                            NodeInfoFormatter.format(resolution.node()));
+                    yield true;
+                }
                 requestNodeInfo(resolution.node());
                 yield true;
             }
@@ -270,7 +293,7 @@ abstract class FormChatRequests extends FormChatMessages {
         }
 
         String nodeId = msg.getFromNodeId();
-        if (nodeId == null || nodeId.length() < 2) {
+        if (nodeId == null || nodeId.length() < 2 || !nodeId.startsWith("!")) {
             return null;
         }
 
@@ -289,7 +312,12 @@ abstract class FormChatRequests extends FormChatMessages {
     protected void requestTraceroute(NodeData targetNode) {
         DeviceState requestState = state;
         ProtocolHandler requestHandler = protocolHandler;
-        if (requestState == null || requestHandler == null) { return; }
+        if (requestState == null || requestHandler == null) {
+            if (meshCoreCompanionRuntime != null) {
+                Toast.show(Toast.Type.WARNING, "Traceroute недоступен для MeshCore Companion Protocol");
+            }
+            return;
+        }
         if (targetNode == null) {
             return;
         }
@@ -346,7 +374,12 @@ abstract class FormChatRequests extends FormChatMessages {
     protected void requestNodeInfo(NodeData targetNode) {
         DeviceState requestState = state;
         ProtocolHandler requestHandler = protocolHandler;
-        if (requestState == null || requestHandler == null) { return; }
+        if (requestState == null || requestHandler == null) {
+            if (meshCoreCompanionRuntime != null && targetNode != null) {
+                addSystemMessageTo(currentChatType(), currentChatKey(), NodeInfoFormatter.format(targetNode));
+            }
+            return;
+        }
         if (targetNode == null) {
             return;
         }

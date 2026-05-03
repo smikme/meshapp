@@ -79,11 +79,19 @@ static uint64_t string_to_mac(const char* str) {
 
 /* ==================== BLE State (heap-allocated, no static WinRT) ==================== */
 
-// Meshtastic BLE UUIDs — plain GUID structs, safe as statics
+// BLE UUIDs — plain GUID structs, safe as statics
+static constexpr int PROFILE_AUTO = -1;
+static constexpr int PROFILE_MESHTASTIC = 0;
+static constexpr int PROFILE_MESHCORE = 1;
+
 static const GUID SVC_UUID  = {0x6ba1b218,0x15a8,0x461f,{0x9f,0xa8,0x5d,0xca,0xe2,0x73,0xea,0xfd}};
 static const GUID FR_UUID   = {0x2c55e69e,0x4993,0x11ed,{0xb8,0x78,0x02,0x42,0xac,0x12,0x00,0x02}};
 static const GUID TR_UUID   = {0xf75c76d2,0x129e,0x4dad,{0xa1,0xdd,0x78,0x66,0x12,0x44,0x01,0xe7}};
 static const GUID FN_UUID   = {0xed9da18c,0xa800,0x4f66,{0xa6,0x70,0xaa,0x75,0x47,0xe3,0x44,0x53}};
+
+static const GUID MC_SVC_UUID = {0x6e400001,0xb5a3,0xf393,{0xe0,0xa9,0xe5,0x0e,0x24,0xdc,0xca,0x9e}};
+static const GUID MC_RX_UUID  = {0x6e400002,0xb5a3,0xf393,{0xe0,0xa9,0xe5,0x0e,0x24,0xdc,0xca,0x9e}};
+static const GUID MC_TX_UUID  = {0x6e400003,0xb5a3,0xf393,{0xe0,0xa9,0xe5,0x0e,0x24,0xdc,0xca,0x9e}};
 
 static inline guid to_guid(const GUID& g) {
     return *reinterpret_cast<const guid*>(&g);
@@ -115,6 +123,7 @@ static std::atomic<bool> g_connected{false};
 static std::atomic<bool> g_notifications_active{false};
 // Write option auto-detection: -1=unknown, 0=WriteWithResponse, 1=WriteWithoutResponse
 static std::atomic<int> g_write_option{-1};
+static std::atomic<int> g_profile{PROFILE_MESHTASTIC};
 static meshble_device_cb g_device_callback = nullptr;
 static meshble_data_cb g_data_callback = nullptr;
 static meshble_state_cb g_state_callback = nullptr;
@@ -126,6 +135,26 @@ static bool g_pairing_request_active = false;
 static bool g_pairing_response_ready = false;
 static bool g_pairing_request_cancelled = false;
 static std::string g_pairing_request_pin;
+
+static int active_profile() {
+    return g_profile.load() == PROFILE_MESHCORE ? PROFILE_MESHCORE : PROFILE_MESHTASTIC;
+}
+
+static guid active_service_uuid() {
+    return active_profile() == PROFILE_MESHCORE ? to_guid(MC_SVC_UUID) : to_guid(SVC_UUID);
+}
+
+static guid active_inbound_uuid() {
+    return active_profile() == PROFILE_MESHCORE ? to_guid(MC_TX_UUID) : to_guid(FR_UUID);
+}
+
+static guid active_outbound_uuid() {
+    return active_profile() == PROFILE_MESHCORE ? to_guid(MC_RX_UUID) : to_guid(TR_UUID);
+}
+
+static bool active_has_notify_trigger() {
+    return active_profile() != PROFILE_MESHCORE;
+}
 
 /* ==================== Worker Thread ==================== */
 
@@ -585,6 +614,14 @@ MESHBLE_API int meshble_get_adapter_state(void) {
     } catch (...) { return 0; }
 }
 
+MESHBLE_API void meshble_set_profile(int profile) {
+    if (profile == PROFILE_AUTO || profile == PROFILE_MESHCORE) {
+        g_profile = profile;
+    } else {
+        g_profile = PROFILE_MESHTASTIC;
+    }
+}
+
 MESHBLE_API int meshble_start_scan(meshble_device_cb callback) {
     if (!g_initialized || !callback) return -1;
     try {
@@ -597,7 +634,12 @@ MESHBLE_API int meshble_start_scan(meshble_device_cb callback) {
 
                 auto filter = BluetoothLEAdvertisementFilter();
                 auto adv = BluetoothLEAdvertisement();
-                adv.ServiceUuids().Append(to_guid(SVC_UUID));
+                if (g_profile.load() == PROFILE_AUTO) {
+                    adv.ServiceUuids().Append(to_guid(SVC_UUID));
+                    adv.ServiceUuids().Append(to_guid(MC_SVC_UUID));
+                } else {
+                    adv.ServiceUuids().Append(active_service_uuid());
+                }
                 filter.Advertisement(adv);
                 g_ble->watcher.AdvertisementFilter(filter);
 
@@ -687,7 +729,7 @@ MESHBLE_API int meshble_connect(const char* address, int timeout_ms) {
                 log_msg("[meshble] Discovering GATT services...");
                 auto svc_result = await_async_result(
                         g_ble->device.GetGattServicesForUuidAsync(
-                                to_guid(SVC_UUID),
+                                active_service_uuid(),
                                 BluetoothCacheMode::Uncached),
                         step_timeout,
                         "GetGattServicesForUuidAsync");
@@ -698,23 +740,37 @@ MESHBLE_API int meshble_connect(const char* address, int timeout_ms) {
                 g_ble->service = svc_result.Services().GetAt(0);
 
                 log_msg("[meshble] Discovering characteristics...");
-                g_ble->from_radio = find_characteristic(g_ble->service, to_guid(FR_UUID), step_timeout);
-                g_ble->to_radio   = find_characteristic(g_ble->service, to_guid(TR_UUID), step_timeout);
-                g_ble->from_num   = find_characteristic(g_ble->service, to_guid(FN_UUID), step_timeout);
+                g_ble->from_radio = find_characteristic(g_ble->service, active_inbound_uuid(), step_timeout);
+                g_ble->to_radio   = find_characteristic(g_ble->service, active_outbound_uuid(), step_timeout);
+                g_ble->from_num   = active_has_notify_trigger()
+                        ? find_characteristic(g_ble->service, to_guid(FN_UUID), step_timeout)
+                        : nullptr;
 
                 if (!g_ble->to_radio || !g_ble->from_radio) {
                     log_msg("[meshble] Required characteristics not found");
                     do_disconnect(); return -3;
                 }
 
-                // fromRadio notifications are unreliable on many Windows BLE adapters:
-                // subscription succeeds but notifications are never delivered.
-                // Use a single Java-side polling path in this mode. Mixing native
-                // callback drains with Java polling crosses the JNA boundary from
-                // multiple directions during heavy config exchange and can hard-crash
-                // the process without a Java exception.
-                g_notifications_active = false;
-                log_msg("[meshble] fromRadio: using polling only (native drains disabled)");
+                if (active_has_notify_trigger()) {
+                    // Meshtastic fromRadio notifications are unreliable on many Windows BLE adapters:
+                    // keep the existing Java-side polling path.
+                    g_notifications_active = false;
+                    log_msg("[meshble] inbound: using polling only (native drains disabled)");
+                } else {
+                    auto status = g_ble->from_radio
+                            .WriteClientCharacteristicConfigurationDescriptorAsync(
+                                    GattClientCharacteristicConfigurationDescriptorValue::Notify)
+                            .get();
+                    if (status == GattCommunicationStatus::Success) {
+                        g_ble->from_radio_notify_token =
+                                g_ble->from_radio.ValueChanged(on_from_radio_value_changed);
+                        g_notifications_active = true;
+                        log_msg("[meshble] inbound: using notifications");
+                    } else {
+                        g_notifications_active = false;
+                        log_msg("[meshble] inbound notifications unavailable; Java polling fallback");
+                    }
+                }
 
                 g_connected = true;
                 log_msg("[meshble] Connected (notifications=%s)", g_notifications_active.load() ? "yes" : "polling");

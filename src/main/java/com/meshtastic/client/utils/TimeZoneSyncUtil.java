@@ -19,6 +19,8 @@ import java.util.Optional;
  *   <li>сравнить его с текущим {@code tzdef} ноды</li>
  *   <li>сгенерировать безопасный fixed-offset {@code tzdef} для записи на ноду</li>
  * </ul>
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public final class TimeZoneSyncUtil {
 

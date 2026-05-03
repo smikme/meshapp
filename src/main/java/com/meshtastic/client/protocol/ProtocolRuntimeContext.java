@@ -10,6 +10,8 @@ import com.meshtastic.client.model.ConnectionEntry;
  * @param connectionEntry сохранённый профиль подключения
  * @param transportConnection открытый transport, через который протокол пишет и читает байты
  * @param transportDescription человекочитаемое описание транспорта для логов
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public record ProtocolRuntimeContext(String connectionId,
                                      ConnectionEntry connectionEntry,

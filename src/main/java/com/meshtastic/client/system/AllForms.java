@@ -4,6 +4,9 @@ import java.lang.reflect.InvocationTargetException;
 import java.util.HashMap;
 import java.util.Map;
 
+/**
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
+ */
 public final class AllForms {
 
     private static AllForms instance;

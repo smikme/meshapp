@@ -12,6 +12,8 @@ import org.slf4j.LoggerFactory;
 /**
  * Оркестратор нативных оконных эффектов.
  * Единая точка входа для Mica (Windows) и vibrancy (macOS).
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public final class NativeWindowHelper {
 

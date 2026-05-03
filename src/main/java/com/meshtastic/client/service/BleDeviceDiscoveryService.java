@@ -3,6 +3,8 @@ package com.meshtastic.client.service;
 import com.meshtastic.client.connection.ble.BleDevice;
 import com.meshtastic.client.connection.ble.BlePlatform;
 import com.meshtastic.client.connection.ble.BlePlatformFactory;
+import com.meshtastic.client.connection.ble.BleProtocolProfile;
+import com.meshtastic.client.model.ProtocolType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -11,13 +13,15 @@ import java.util.concurrent.*;
 import java.util.function.Consumer;
 
 /**
- * Сервис автоматического обнаружения BLE-устройств Meshtastic (singleton).
+ * Сервис автоматического обнаружения BLE-устройств Meshtastic и MeshCore (singleton).
  * <p>
  * Использует платформо-зависимый {@link BlePlatform} для BLE-сканирования
- * с фильтром по Meshtastic service UUID. Оповещает подписчиков при
+ * с фильтром по service UUID выбранного BLE-профиля. Оповещает подписчиков при
  * обнаружении новых устройств или изменении RSSI.
  * <p>
  * Паттерн аналогичен {@link SerialPortDiscoveryService}.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public final class BleDeviceDiscoveryService {
 
@@ -28,6 +32,7 @@ public final class BleDeviceDiscoveryService {
     private final List<Consumer<List<BleDevice>>> listeners = new CopyOnWriteArrayList<>();
     private final Map<String, BleDevice> discoveredDevices = new ConcurrentHashMap<>();
     private volatile boolean scanning;
+    private volatile BleProtocolProfile scanProfile = BleProtocolProfile.AUTO;
     private BlePlatform platform;
 
     private BleDeviceDiscoveryService() {}
@@ -40,7 +45,7 @@ public final class BleDeviceDiscoveryService {
     }
 
     /**
-     * Запускает BLE-сканирование. Обнаруженные устройства с Meshtastic service UUID
+     * Запускает BLE-сканирование. Обнаруженные устройства с выбранным service UUID
      * добавляются в список и оповещают подписчиков.
      */
     public void startScanning() {
@@ -62,13 +67,17 @@ public final class BleDeviceDiscoveryService {
 
         scanning = true;
         discoveredDevices.clear();
+        platform.setProfile(scanProfile);
 
         platform.startScan(device -> {
             BleDevice existing = discoveredDevices.get(device.address());
-            discoveredDevices.put(device.address(), device);
+            BleDevice profiledDevice = device.protocolType() == null || device.protocolType() == ProtocolType.AUTO
+                    ? new BleDevice(device.address(), device.name(), device.rssi(), scanProfile.protocolType())
+                    : device;
+            discoveredDevices.put(device.address(), profiledDevice);
 
             // Оповещаем при новом устройстве или значительном изменении RSSI
-            if (existing == null || Math.abs(existing.rssi() - device.rssi()) > 5) {
+            if (existing == null || Math.abs(existing.rssi() - profiledDevice.rssi()) > 5) {
                 fireChanged();
             }
         });
@@ -108,6 +117,28 @@ public final class BleDeviceDiscoveryService {
     /** Проверяет, идёт ли сейчас сканирование. */
     public boolean isScanning() {
         return scanning;
+    }
+
+    /**
+     * Меняет BLE-профиль для следующего сканирования. Если сканирование уже идёт,
+     * оно перезапускается с новым фильтром UUID.
+     *
+     * @param profile BLE-профиль или AUTO
+     */
+    public void setScanProfile(BleProtocolProfile profile) {
+        BleProtocolProfile newProfile = profile == null ? BleProtocolProfile.AUTO : profile;
+        if (newProfile == scanProfile) {
+            return;
+        }
+        scanProfile = newProfile;
+        if (scanning) {
+            stopScanning();
+            startScanning();
+        }
+    }
+
+    public BleProtocolProfile getScanProfile() {
+        return scanProfile;
     }
 
     public void addListener(Consumer<List<BleDevice>> listener) {

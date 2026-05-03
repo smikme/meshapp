@@ -8,6 +8,8 @@ import java.util.List;
 
 /**
  * Элемент списка чатов — обёртка для канала или DM.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public final class ChatItem {
 
