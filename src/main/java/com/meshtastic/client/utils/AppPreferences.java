@@ -40,6 +40,7 @@ public class AppPreferences {
     public static final String KEY_PACKET_MONITOR_WINDOW_MAXIMIZED = "packetMonitorWindowMaximized";
     public static final String KEY_PACKET_MONITOR_COLUMN_TIME_WIDTH = "packetMonitorColumnTimeWidth";
     public static final String KEY_PACKET_MONITOR_COLUMN_TYPE_WIDTH = "packetMonitorColumnTypeWidth";
+    public static final String KEY_PACKET_MONITOR_COLUMN_TRANSPORT_WIDTH = "packetMonitorColumnTransportWidth";
     public static final String KEY_PACKET_MONITOR_COLUMN_FROM_WIDTH = "packetMonitorColumnFromWidth";
     public static final String KEY_PACKET_MONITOR_COLUMN_TO_WIDTH = "packetMonitorColumnToWidth";
     public static final String KEY_PACKET_MONITOR_COLUMN_PAYLOAD_WIDTH = "packetMonitorColumnPayloadWidth";
