@@ -8,6 +8,8 @@ import java.io.ByteArrayOutputStream;
  * Companion Protocol естественно работает с packet boundaries BLE write/notification.
  * TCP и Serial таких границ не сохраняют, поэтому packets фиксированной длины возвращаются
  * сразу, а variable-size packets завершаются по inter-byte silence через {@link #flushPartialFrame()}.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public final class MeshCoreCompanionFrameParser implements StreamFrameParser {
 

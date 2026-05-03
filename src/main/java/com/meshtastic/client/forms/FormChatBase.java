@@ -43,6 +43,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * <p>Публичная форма остаётся небольшой, а пакетные слои разделяют построение
  * интерфейса, окно загруженных сообщений, обработку запросов и привязку данных.
  * Состояние, общее для этих слоёв, хранится здесь.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 abstract class FormChatBase extends Form {
 

@@ -16,6 +16,8 @@ import java.util.concurrent.ConcurrentHashMap;
  *
  * <p>Парсит текст, разбивает на сегменты (обычный текст и эмодзи),
  * рендерит обычный текст как {@link Text}, а эмодзи как {@link ImageView}.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class EmojiTextFlow extends TextFlow {
 

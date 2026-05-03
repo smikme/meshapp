@@ -21,6 +21,8 @@ import java.util.concurrent.CopyOnWriteArrayList;
  *   <li>Удаление узлов с оповещением listener'ов</li>
  *   <li>Подсчет количества узлов</li>
  * </ul>
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class NodeDatabase {
 

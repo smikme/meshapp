@@ -33,6 +33,8 @@ import java.util.function.Consumer;
 
 /**
  * Crash-report панели, встроенные в общую стилистику приложения через ModalPane.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public final class CrashReportPrompt {
 

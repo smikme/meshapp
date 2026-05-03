@@ -38,6 +38,8 @@ import java.util.stream.Stream;
  * <p>
  * Используется в FormDashboard (телеметрия локальной ноды) и в FormNodes (телеметрия выбранной ноды).
  * Жизненный цикл: {@link #bind(DeviceState, String)} / {@link #unbind()}.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class TelemetryChartPanel extends VBox {
 

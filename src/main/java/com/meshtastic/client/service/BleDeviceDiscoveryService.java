@@ -20,6 +20,8 @@ import java.util.function.Consumer;
  * обнаружении новых устройств или изменении RSSI.
  * <p>
  * Паттерн аналогичен {@link SerialPortDiscoveryService}.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public final class BleDeviceDiscoveryService {
 

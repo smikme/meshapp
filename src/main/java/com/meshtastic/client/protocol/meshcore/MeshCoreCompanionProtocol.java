@@ -6,6 +6,8 @@ import com.meshtastic.client.protocol.ProtocolRuntimeContext;
 
 /**
  * Адаптер MeshCore Companion Protocol для общего protocol registry.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public final class MeshCoreCompanionProtocol implements CommunicationProtocol<MeshCoreCompanionState> {
 

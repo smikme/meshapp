@@ -38,6 +38,8 @@ import org.meshtastic.proto.MeshProtos;
  * <p>Сюда относятся ответы, реакции, повторная отправка, команды tracebot/infobot
  * и временные пузыри обратного отсчёта, которые показываются во время ожидания
  * ответа от радио.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 abstract class FormChatRequests extends FormChatMessages {
 

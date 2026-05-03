@@ -33,6 +33,8 @@ import java.util.function.Consumer;
  * {@link #sendBytes(byte[])} ожидает фреймированные данные от
  * {@link com.meshtastic.client.protocol.PacketFramer} и автоматически
  * вырезает 4-байтный заголовок перед записью в toRadio-характеристику.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class BleConnection implements MeshtasticConnection {
 

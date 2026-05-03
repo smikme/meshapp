@@ -8,6 +8,8 @@ import com.meshtastic.client.model.ProtocolType;
  * TCP и Serial не сохраняют границы протокольных сообщений, поэтому перед
  * запуском runtime-а transport выбирает парсер, соответствующий активному
  * протоколу. BLE обычно передаёт уже готовые payload-ы и этот enum не использует.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public enum FrameFormat {
     /** Meshtastic serial/TCP framing с заголовком {@code 0x94 0xC3}. */

@@ -15,6 +15,8 @@ import java.util.function.Consumer;
 /**
  * Logback appender — складывает события в in-memory буфер для отображения в UI.
  * Регистрируется в logback.xml. Доступ к буферу через статические методы.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class UiLogAppender extends UnsynchronizedAppenderBase<ILoggingEvent> {
 

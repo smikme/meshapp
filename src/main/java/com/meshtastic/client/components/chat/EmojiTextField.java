@@ -44,6 +44,8 @@ import java.util.function.Predicate;
  * Визуально рендерится как TextFlow с Text + ImageView узлами.
  * Текст переносится по словам, поле растёт вертикально (до MAX_HEIGHT).
  * Поддерживает: ввод текста, каретку, выделение, clipboard, навигацию стрелками.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class EmojiTextField extends StackPane {
 

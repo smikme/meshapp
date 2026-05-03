@@ -17,6 +17,9 @@ import java.util.Set;
 import java.util.WeakHashMap;
 import java.util.stream.Collectors;
 
+/**
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
+ */
 public class ThemeManager {
 
     private ThemeManager() {} // utility class

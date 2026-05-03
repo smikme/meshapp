@@ -7,6 +7,8 @@ import java.util.List;
 /**
  * Модель данных для узла дерева конфигурации.
  * Представляет одно поле protobuf-конфига или категорию (секцию).
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class ConfigTreeItem {
 

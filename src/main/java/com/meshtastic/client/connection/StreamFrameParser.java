@@ -6,6 +6,8 @@ package com.meshtastic.client.connection;
  * TCP и Serial отдают произвольные куски байтов, поэтому parser хранит промежуточное
  * состояние между вызовами и возвращает frame только после получения полной границы
  * сообщения.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public interface StreamFrameParser {
 

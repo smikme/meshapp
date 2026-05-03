@@ -2,6 +2,8 @@ package com.meshtastic.client.connection;
 
 /**
  * Фабрика stream parser-ов для TCP/Serial transport-ов.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 final class FrameParsers {
 

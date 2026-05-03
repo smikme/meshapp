@@ -11,6 +11,8 @@ import com.meshtastic.client.model.ProtocolType;
  * и возвращает runtime-объект для управления жизненным циклом и состоянием.
  *
  * @param <S> тип состояния, которое ведёт конкретный протокол
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public interface CommunicationProtocol<S> {
 

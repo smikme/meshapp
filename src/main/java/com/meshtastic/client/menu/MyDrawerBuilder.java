@@ -12,6 +12,9 @@ import com.meshtastic.client.system.DrawerManager;
 import com.meshtastic.client.system.DrawerPane;
 import com.meshtastic.client.system.FormManager;
 
+/**
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
+ */
 public class MyDrawerBuilder {
 
     private MyDrawerBuilder() {}

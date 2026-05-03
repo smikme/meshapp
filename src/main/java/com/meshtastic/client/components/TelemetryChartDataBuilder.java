@@ -16,6 +16,9 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
+/**
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
+ */
 final class TelemetryChartDataBuilder {
 
     enum ChartKind {

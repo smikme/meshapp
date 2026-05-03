@@ -6,6 +6,8 @@ package com.meshtastic.client.connection;
  * Первый байт frame-а выбирает временный режим parsing-а: Meshtastic, KISS или
  * MeshCore Companion. Это не даёт raw Companion packets ошибочно поглощать
  * Meshtastic/KISS framing bytes и сохраняет один общий входной callback transport-а.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 final class AutoDetectFrameParser implements StreamFrameParser {
 

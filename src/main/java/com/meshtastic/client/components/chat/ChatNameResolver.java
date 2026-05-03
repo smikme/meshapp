@@ -8,6 +8,8 @@ import com.meshtastic.client.model.MeshMessage;
  *
  * <p>Инстанс хранит ссылку на {@link DeviceState}, которая обновляется
  * при переподключении через {@link #setState(DeviceState)}.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class ChatNameResolver {
 

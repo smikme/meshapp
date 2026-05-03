@@ -22,6 +22,8 @@ import java.util.*;
  *   <li>{@code "channel"} — канальные сообщения, {@code chat_key} = channelIndex</li>
  *   <li>{@code "dm"} — личные сообщения, {@code chat_key} = peerNodeNum</li>
  * </ul>
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public final class MessageDbService {
 

@@ -15,6 +15,8 @@ import java.sql.SQLException;
  * <p>
  * Используется всеми сервисами ({@link MessageDbService}, {@link NodeCacheService})
  * вместо создания отдельных соединений к одному файлу.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public final class DatabaseProvider {
 

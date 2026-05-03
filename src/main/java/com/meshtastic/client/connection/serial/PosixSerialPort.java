@@ -20,6 +20,8 @@ import org.slf4j.LoggerFactory;
  * На macOS для modem lines используется отдельный native shim: системный
  * {@code ioctl()} variadic, и его прямой вызов через JNA на Apple Silicon
  * может abort'ить JVM.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 class PosixSerialPort implements NativeSerialPort {
 

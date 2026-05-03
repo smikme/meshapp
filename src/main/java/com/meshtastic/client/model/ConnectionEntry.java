@@ -16,6 +16,8 @@ import java.util.UUID;
  * в этом случае {@link #getEffectiveProtocol()} возвращает {@link ProtocolType#MESHTASTIC}.
  * Поля {@code connected} и {@code reconnecting} помечены как {@code transient} —
  * не сохраняются, отражают текущее runtime-состояние.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class ConnectionEntry {
 

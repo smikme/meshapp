@@ -22,6 +22,8 @@ import org.meshtastic.proto.MeshProtos;
  * <p>История в БД может быть длинной, поэтому слой держит ограниченное окно
  * сообщений, догружает реакции и цитаты, восстанавливает якоря прокрутки и
  * обновляет индикаторы непрочитанных при поступлении новых сообщений.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 abstract class FormChatMessages extends FormChatUi {
 

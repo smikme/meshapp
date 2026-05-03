@@ -38,6 +38,8 @@ import java.util.function.Function;
 
 /**
  * Форматирование и построение дерева для отладки LoRa-пакетов.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public final class PacketDebugFormatter {
 

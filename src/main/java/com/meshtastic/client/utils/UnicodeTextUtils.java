@@ -5,6 +5,8 @@ package com.meshtastic.client.utils;
  *
  * <p>Помогают не создавать строки с одиночными суррогатами и не резать текст
  * внутри суррогатных пар при обрезке, позиционировании каретки и измерении.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public final class UnicodeTextUtils {
 

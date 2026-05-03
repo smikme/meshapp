@@ -38,6 +38,8 @@ import java.util.List;
  * </ul>
  * Обновляет {@link com.meshtastic.client.model.DeviceState}, сохраняет сообщения
  * в БД через {@link MessageDbService}, синхронизирует кэш нод через {@link NodeCacheService}.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class MessageListenerService implements FromRadioListener {
 

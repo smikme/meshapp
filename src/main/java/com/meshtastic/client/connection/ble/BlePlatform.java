@@ -13,6 +13,8 @@ import java.util.function.Consumer;
  *   <li>Linux — BlueZ через D-Bus</li>
  *   <li>Windows — WinRT Bluetooth LE</li>
  * </ul>
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public interface BlePlatform {
 

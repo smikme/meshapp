@@ -6,6 +6,8 @@ import com.meshtastic.client.protocol.ProtocolRuntimeContext;
 
 /**
  * Адаптер MeshCore KISS modem protocol для общего protocol registry.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public final class MeshCoreKissProtocol implements CommunicationProtocol<MeshCoreKissState> {
 

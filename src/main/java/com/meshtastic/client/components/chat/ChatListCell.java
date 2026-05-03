@@ -34,6 +34,8 @@ import java.util.function.Consumer;
 
 /**
  * Ячейка списка чатов: аватар, имя, превью последнего сообщения, время, badge непрочитанных.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class ChatListCell extends ListCell<ChatItem> {
     private static final String BELL_ICON_PATH = "/drawer/icon/bell.svg";

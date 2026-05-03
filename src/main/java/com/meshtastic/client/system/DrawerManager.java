@@ -1,5 +1,8 @@
 package com.meshtastic.client.system;
 
+/**
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
+ */
 public class DrawerManager {
 
     private DrawerManager() {}

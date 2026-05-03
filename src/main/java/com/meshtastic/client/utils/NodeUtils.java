@@ -23,6 +23,8 @@ import org.slf4j.LoggerFactory;
 /**
  * Общие утилиты для работы с нодами — аватары, цвета, таблица деталей.
  * Используется из FormNodes, FormChat, NodeDetailPanel.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public final class NodeUtils {
 

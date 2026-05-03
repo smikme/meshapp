@@ -9,6 +9,8 @@ import java.util.Map;
 /**
  * Информация о новой версии приложения.
  * Десериализуется из JSON с сервера обновлений.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class UpdateInfo {
 

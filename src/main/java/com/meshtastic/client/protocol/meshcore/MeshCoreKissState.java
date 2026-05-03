@@ -2,6 +2,8 @@ package com.meshtastic.client.protocol.meshcore;
 
 /**
  * Runtime-состояние, собранное из MeshCore KISS {@code SetHardware} responses.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class MeshCoreKissState {
 

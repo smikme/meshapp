@@ -19,6 +19,8 @@ import java.util.concurrent.ConcurrentHashMap;
  *
  * Для установки размера NSVisualEffectView используем Auto Layout constraints
  * вместо initWithFrame: (передача CGRect struct через JNA на arm64 проблематична).
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class NativeMacOsWindowControl {
 

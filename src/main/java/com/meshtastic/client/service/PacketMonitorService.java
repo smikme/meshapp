@@ -31,6 +31,8 @@ import java.util.regex.Pattern;
  *
  * Публичные методы допускают вызов из произвольных потоков. Операции, которые
  * работают с БД и общим состоянием сервиса, синхронизированы на экземпляре.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public final class PacketMonitorService {
 

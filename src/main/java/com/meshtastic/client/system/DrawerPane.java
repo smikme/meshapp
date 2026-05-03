@@ -25,6 +25,9 @@ import com.meshtastic.client.utils.SvgIconLoader;
 
 import java.util.List;
 
+/**
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
+ */
 public class DrawerPane extends StackPane {
 
     public static final double TOOLBAR_WIDTH = 56;

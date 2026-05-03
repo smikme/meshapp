@@ -9,6 +9,8 @@ import java.util.Arrays;
  * Одна запись журнала LoRa-пакетов для окна мониторинга.
  * Экземпляр immutable по всем данным пакета, кроме {@link #id}, который
  * заполняется после сохранения записи в БД.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class PacketLogEntry {
 

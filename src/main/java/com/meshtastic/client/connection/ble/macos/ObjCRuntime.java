@@ -12,6 +12,8 @@ import com.sun.jna.Native;
  * <p>
  * На arm64 (Apple Silicon) нельзя использовать variadic objc_msgSend через JNA —
  * все вызовы используют {@code Function.invoke*()} с фиксированными типами.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public final class ObjCRuntime {
 

@@ -12,6 +12,8 @@ import java.util.concurrent.CompletableFuture;
  * post-connect действиями.
  *
  * @param <S> тип состояния, специфичный для протокола
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public interface ProtocolRuntime<S> extends AutoCloseable {
 

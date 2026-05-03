@@ -15,6 +15,8 @@ import com.sun.jna.Pointer;
  * должен обеспечить thread-safety.
  *
  * @see LinuxBle
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public interface LinuxBleLibrary extends Library {
 

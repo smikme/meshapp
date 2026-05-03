@@ -57,6 +57,8 @@ import java.util.function.Consumer;
  * Компонент сам управляет загрузкой тайлов, масштабированием, сдвигом карты,
  * ночным режимом, маркерами нод, измерением расстояния, выделением области
  * и визуализацией трейсов.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class TileMapView extends StackPane {
 

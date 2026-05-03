@@ -10,6 +10,8 @@ import java.util.Arrays;
  * <p>
  * Методы этого класса работают с телом KISS frame-а: первый byte является KISS command,
  * второй byte для {@code SetHardware} является MeshCore sub-command.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public final class MeshCoreKissFrames {
 

@@ -28,6 +28,9 @@ import javafx.scene.layout.VBox;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
+/**
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
+ */
 @SystemForm(name = "Подключения", description = "Менеджер соединений", tags = {"connections", "options"})
 public class FormConnections extends Form {
 

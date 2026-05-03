@@ -18,6 +18,8 @@ import java.util.concurrent.Future;
  * <p>Имена файлов соответствуют формату Twemoji: hex-кодпоинты через дефис.
  * Для совместимости с разными версиями ассетов loader умеет искать и точное имя,
  * и вариант без U+FE0F.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public final class EmojiImageCache {
 

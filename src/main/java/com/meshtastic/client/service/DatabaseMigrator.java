@@ -23,6 +23,8 @@ import java.util.regex.Pattern;
  * удаляются ({@code DROP ALL OBJECTS}) и схема создаётся с нуля.
  * <p>
  * Вызывается из {@link DatabaseProvider#getConnection()} при первом создании соединения.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public final class DatabaseMigrator {
 

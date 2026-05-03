@@ -15,6 +15,8 @@ import java.util.regex.Pattern;
 
 /**
  * Разбор команд встроенных чат-ботов и подготовка подсказок для autocomplete.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public final class ChatBotCommandHelper {
 

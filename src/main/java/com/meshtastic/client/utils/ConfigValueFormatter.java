@@ -16,6 +16,8 @@ import java.util.Set;
  * и обратно. Используется для IPv4-адресов, которые в protobuf хранятся
  * как fixed32 little-endian числа, и для bitmask-полей, которые удобнее
  * редактировать как набор флагов, а не как сырое число.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public final class ConfigValueFormatter {
 

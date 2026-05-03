@@ -2,6 +2,8 @@ package com.meshtastic.client.connection.ble;
 
 /**
  * Константы BLE-протоколов Meshtastic и MeshCore Companion.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public final class BleConstants {
 

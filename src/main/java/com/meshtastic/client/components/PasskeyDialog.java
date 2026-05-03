@@ -16,6 +16,8 @@ import java.util.function.IntConsumer;
 /**
  * Модальный диалог ввода PIN-кода (passkey) для BLE pairing.
  * Вызывается из нативного BlueZ agent callback при сопряжении с устройством.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public final class PasskeyDialog {
 

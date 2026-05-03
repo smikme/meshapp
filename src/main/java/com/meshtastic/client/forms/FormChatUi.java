@@ -51,6 +51,8 @@ import java.util.Objects;
  * <p>Слой намеренно отвечает только за интерфейс: связывает контролы,
  * делегирует загрузку сообщений слою сообщений и делегирует сохранение
  * слою данных.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 abstract class FormChatUi extends FormChatBase {
 

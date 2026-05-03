@@ -9,6 +9,8 @@ package com.meshtastic.client.components.map;
  * @param latitude   широта в градусах WGS84
  * @param longitude  долгота в градусах WGS84
  * @param local      {@code true}, если маркер показывает собственную ноду пользователя
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public record MapMarker(
         String id,

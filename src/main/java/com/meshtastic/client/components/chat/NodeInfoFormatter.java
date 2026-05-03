@@ -4,6 +4,8 @@ import com.meshtastic.client.model.NodeData;
 
 /**
  * Форматирование информации о ноде в текст системного сообщения чата.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public final class NodeInfoFormatter {
 

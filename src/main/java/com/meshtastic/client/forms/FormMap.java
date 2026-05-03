@@ -63,6 +63,8 @@ import java.util.regex.Pattern;
  * собирает ноды из текущего {@link DeviceState} и кэша, применяет фильтры,
  * парсит сохранённые traceroute-сообщения и передаёт готовые маркеры/сегменты
  * в карту.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 @SystemForm(name = "Карты", description = "OSM-карта с онлайн/оффлайн тайлами", tags = {"карта", "maps", "osm"})
 public class FormMap extends Form {

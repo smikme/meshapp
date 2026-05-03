@@ -33,6 +33,8 @@ import com.meshtastic.client.service.MessageDbService;
  * После рефакторинга: делегирует большую часть операций компонентам
  * ({@link NodeDatabase}, {@link ChannelStore}, {@link ConfigStore}, {@link MessageStore}).
  * UI-обновления выполняются через {@code Platform.runLater()}.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class DeviceState {
 

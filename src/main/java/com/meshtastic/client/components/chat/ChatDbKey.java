@@ -12,6 +12,8 @@ import java.util.Objects;
  * пары вроде {@code channel/0} и {@code dm/!abcd1234}. Запись держит эти
  * преобразования в одном месте, чтобы код формы не дублировал ветвления
  * канал/личный чат.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public record ChatDbKey(
         String dbType,

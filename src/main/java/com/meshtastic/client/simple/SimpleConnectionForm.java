@@ -25,6 +25,9 @@ import javafx.scene.layout.VBox;
 import java.util.List;
 import java.util.function.Consumer;
 
+/**
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
+ */
 public class SimpleConnectionForm extends VBox {
 
     private final ConnectionEntry editingEntry;

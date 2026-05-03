@@ -10,6 +10,8 @@ import java.io.ByteArrayOutputStream;
  * <p>
  * На вход получает поток байтов с {@code FEND}/{@code FESC} delimiters и escape-последовательностями.
  * На выход отдаёт тело frame-а: первый byte является KISS command/type, остальные байты уже unescaped.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class KissFrameParser implements StreamFrameParser {
 

@@ -35,6 +35,9 @@ import javafx.scene.text.FontWeight;
 import java.util.*;
 import java.util.function.IntConsumer;
 
+/**
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
+ */
 @SystemForm(name = "Ноды", description = "Список нод в сети", tags = {"ноды", "nodes", "устройства", "mesh"})
 public class FormNodes extends Form {
 

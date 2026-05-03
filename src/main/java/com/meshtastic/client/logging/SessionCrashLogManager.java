@@ -38,6 +38,8 @@ import java.util.stream.Stream;
  *     <li>при следующем запуске переносит нештатно завершившийся bundle в pending-каталог;</li>
  *     <li>чистит старые bundle по возрасту, количеству и суммарному объёму.</li>
  * </ul>
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public final class SessionCrashLogManager {
 

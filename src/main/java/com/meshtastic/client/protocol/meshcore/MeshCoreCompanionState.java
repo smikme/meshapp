@@ -14,6 +14,8 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Runtime-состояние, собранное из MeshCore Companion packets.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class MeshCoreCompanionState {
 

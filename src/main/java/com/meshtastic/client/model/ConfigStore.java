@@ -21,6 +21,8 @@ import java.util.List;
  *   <li>Хранение ModuleConfigProtos.ModuleConfig</li>
  *   <li>Добавление и получение конфигов</li>
  * </ul>
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class ConfigStore {
 

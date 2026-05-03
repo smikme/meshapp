@@ -21,6 +21,8 @@ import java.util.function.Consumer;
  *   <li>Отслеживание pending ACK для исходящих сообщений</li>
  *   <li>Дедупликация сообщений по packetId</li>
  * </ul>
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class MessageStore {
 

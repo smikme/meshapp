@@ -21,6 +21,9 @@ import javafx.stage.Window;
 
 import com.meshtastic.client.components.MemoryBar;
 
+/**
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
+ */
 public class About extends VBox {
 
     private static final String BORDER_STYLE =

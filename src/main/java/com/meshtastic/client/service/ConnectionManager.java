@@ -40,6 +40,8 @@ import java.util.concurrent.CopyOnWriteArrayList;
  * {@link DeviceState} и {@link ProtocolHandler}.
  * <p>
  * Каждое соединение идентифицируется по строковому {@code id} из {@link ConnectionEntry}.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public final class ConnectionManager {
 

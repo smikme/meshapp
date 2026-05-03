@@ -8,6 +8,8 @@ import java.util.Arrays;
  * <p>
  * Эти packets используются одинаково поверх BLE RX/TX characteristics и raw
  * TCP/Serial byte stream endpoint-ов.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public final class MeshCoreCompanionFrames {
 

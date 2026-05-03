@@ -5,6 +5,8 @@ import com.meshtastic.client.utils.UnicodeTextUtils;
 /**
  * Реакция на сообщение, доставляемая отдельным TEXT_MESSAGE_APP пакетом
  * с {@code reply_id} и выставленным protobuf-полем {@code emoji}.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class MessageReaction {
 

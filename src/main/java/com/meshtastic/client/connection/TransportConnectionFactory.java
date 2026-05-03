@@ -14,6 +14,8 @@ import java.util.function.Supplier;
  * Класс знает только о способе доставки байтов (TCP, Serial, BLE). Настройка
  * протокола, handshake и сервисы более высокого уровня остаются в реализациях
  * {@code CommunicationProtocol}.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public final class TransportConnectionFactory {
 

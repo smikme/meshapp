@@ -12,6 +12,8 @@ import java.util.Locale;
 /**
  * Лёгкая JFR-диагностика: держит bounded recording в фоне и умеет по запросу
  * сбрасывать snapshot в указанный файл.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public final class JfrDiagnosticSupport {
 

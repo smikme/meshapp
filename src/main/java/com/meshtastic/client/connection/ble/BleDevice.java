@@ -9,6 +9,8 @@ import com.meshtastic.client.model.ProtocolType;
  * @param name     рекламируемое имя (может быть {@code null})
  * @param rssi     уровень сигнала (dBm)
  * @param protocolType протокол, если он известен из режима сканирования
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public record BleDevice(String address, String name, int rssi, ProtocolType protocolType) {
 

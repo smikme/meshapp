@@ -29,6 +29,8 @@ import static com.meshtastic.client.connection.ble.macos.ObjCRuntime.*;
  *
  * <h3>CBManagerState</h3>
  * 0=Unknown, 1=Resetting, 2=Unsupported, 3=Unauthorized, 4=PoweredOff, 5=PoweredOn
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class MacOsBle implements BlePlatform {
 

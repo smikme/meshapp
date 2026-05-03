@@ -35,6 +35,8 @@ import java.time.format.DateTimeFormatter;
  * - шаг часов и минут всегда равен {@code 1};
  * - изменение значения коммитится только по кнопке {@code Применить};
  * - отсутствие времени трактуется как режим {@code Весь день}.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public final class DateTimePicker extends HBox {
 

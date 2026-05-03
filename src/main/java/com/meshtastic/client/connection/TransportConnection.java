@@ -9,6 +9,8 @@ import java.util.function.Consumer;
  * закрыть соединение, отправить подготовленные байты и передать входящие payload-ы
  * на уровень протокола. В этом интерфейсе не должно быть бизнес-логики конкретной
  * радиосети или сетевого протокола.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public interface TransportConnection {
 

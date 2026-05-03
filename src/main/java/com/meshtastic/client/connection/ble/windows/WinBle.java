@@ -29,6 +29,8 @@ import java.util.function.Consumer;
  *
  * @see WinBleLibrary
  * @see BlePlatform
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class WinBle implements BlePlatform {
 

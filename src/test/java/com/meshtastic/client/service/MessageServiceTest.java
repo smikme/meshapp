@@ -36,6 +36,9 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.slf4j.LoggerFactory;
 
+/**
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
+ */
 class MessageServiceTest {
 
     @TempDir

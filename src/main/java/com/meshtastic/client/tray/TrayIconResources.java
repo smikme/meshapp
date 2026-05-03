@@ -19,6 +19,8 @@ import java.util.Objects;
 
 /**
  * Подбор и масштабирование tray-иконки под фактический размер системного слота.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 final class TrayIconResources {
 

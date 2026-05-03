@@ -22,6 +22,8 @@ import java.util.concurrent.TimeUnit;
  * <p>
  * Runtime переключает byte-stream transport в KISS framing, отправляет базовые
  * {@code SetHardware} requests и собирает metadata устройства в {@link MeshCoreKissState}.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public final class MeshCoreKissProtocolRuntime implements ProtocolRuntime<MeshCoreKissState> {
 

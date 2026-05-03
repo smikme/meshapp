@@ -34,6 +34,8 @@ import org.slf4j.LoggerFactory;
  * <p>
  * На macOS resize делегируется нативному {@code NSWindowStyleMaskResizable}.
  * На Windows/Linux используются кастомные обработчики мыши по краям/углам окна.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class RootPane extends BorderPane {
 

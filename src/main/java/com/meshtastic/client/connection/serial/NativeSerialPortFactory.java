@@ -4,6 +4,8 @@ import com.meshtastic.client.platform.OsDetect;
 
 /**
  * Фабрика для создания платформо-специфичного {@link NativeSerialPort}.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public final class NativeSerialPortFactory {
 

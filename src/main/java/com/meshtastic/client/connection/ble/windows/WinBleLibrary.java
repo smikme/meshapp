@@ -15,6 +15,8 @@ import com.sun.jna.Pointer;
  * должен обеспечить thread-safety.
  *
  * @see WinBle
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public interface WinBleLibrary extends Library {
 

@@ -35,6 +35,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *   <li>Traceroute (TRACEROUTE_APP)</li>
  *   <li>Admin-операции: owner info, каналы, конфигурация</li>
  * </ul>
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public final class MessageService {
 

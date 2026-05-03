@@ -42,6 +42,8 @@ import org.meshtastic.proto.ChannelProtos;
  * счётчики прочитанных, удаление каналов и личных чатов, состояние заглушения и
  * точки входа в модальные окна. Окно сообщений и запросы ботов остаются в
  * нижних слоях.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 abstract class FormChatData extends FormChatRequests {
 

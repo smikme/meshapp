@@ -11,6 +11,9 @@ import java.net.Socket;
 import java.net.SocketTimeoutException;
 import java.util.function.Consumer;
 
+/**
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
+ */
 public class TcpConnection implements MeshtasticConnection, FrameFormatAwareConnection {
 
     private static final Logger log = LoggerFactory.getLogger(TcpConnection.class);

@@ -2,6 +2,8 @@ package com.meshtastic.client.tray;
 
 /**
  * Платформенный tray/status item приложения.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public interface AppTrayService {
 

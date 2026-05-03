@@ -9,6 +9,8 @@ import java.util.List;
 
 /**
  * Открывает внешние URL через нативные системные команды, не затрагивая AWT/Desktop.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public final class ExternalUrlLauncher {
 

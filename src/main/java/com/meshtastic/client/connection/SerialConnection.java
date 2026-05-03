@@ -26,6 +26,8 @@ import java.util.function.Supplier;
  * <p>
  * jSerialComm используется только для обнаружения портов ({@code getCommPorts()})
  * и определения типа адаптера ({@code getDescriptivePortName()}).
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class SerialConnection implements MeshtasticConnection, FrameFormatAwareConnection {
 

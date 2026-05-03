@@ -16,6 +16,9 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
+/**
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
+ */
 class CrashReportPromptTest {
 
     @AfterEach

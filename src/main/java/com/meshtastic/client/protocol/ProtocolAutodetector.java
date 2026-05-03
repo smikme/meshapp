@@ -26,6 +26,8 @@ import java.util.concurrent.atomic.AtomicReference;
  * Для TCP/Serial transport временно переводится в {@link FrameFormat#AUTO}, после чего
  * последовательно проверяются MeshCore KISS, MeshCore Companion и Meshtastic. Для BLE
  * итоговый protocol type берётся из выбранного GATT profile.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public final class ProtocolAutodetector {
 

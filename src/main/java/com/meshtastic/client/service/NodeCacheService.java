@@ -31,6 +31,8 @@ import java.util.concurrent.ConcurrentHashMap;
  * Обновляется при получении данных через config exchange и live-пакеты
  * (NODEINFO_APP, POSITION_APP, TELEMETRY_APP). Запись в БД происходит
  * немедленно (MERGE INTO), без debounce.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public final class NodeCacheService {
 

@@ -34,6 +34,8 @@ import javafx.scene.text.FontWeight;
  *   <li>{@link NodeDetailPanel} — модальная панель (выезжает справа, с кнопкой «Назад»)</li>
  *   <li>{@code FormNodes} — встроенная панель в SplitPane (без кнопки «Назад»)</li>
  * </ul>
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class NodeDetailContent extends HBox {
 

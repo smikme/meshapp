@@ -26,6 +26,8 @@ import java.util.function.Consumer;
  *
  * @see LinuxBleLibrary
  * @see BlePlatform
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class LinuxBle implements BlePlatform {
 

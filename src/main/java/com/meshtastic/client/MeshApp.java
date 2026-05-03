@@ -41,6 +41,9 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
+/**
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
+ */
 public class MeshApp extends Application {
 
     private static final Logger log = LoggerFactory.getLogger(MeshApp.class);

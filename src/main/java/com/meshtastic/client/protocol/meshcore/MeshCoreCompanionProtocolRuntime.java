@@ -27,6 +27,8 @@ import java.util.concurrent.atomic.AtomicInteger;
  * Runtime работает поверх BLE RX/TX или raw TCP/Serial byte stream, отправляет
  * {@code APP_START}, запрашивает metadata устройства и сохраняет результат в
  * {@link MeshCoreCompanionState}.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public final class MeshCoreCompanionProtocolRuntime implements ProtocolRuntime<MeshCoreCompanionState> {
 

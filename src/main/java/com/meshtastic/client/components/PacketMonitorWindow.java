@@ -83,6 +83,8 @@ import java.util.concurrent.Executors;
  * - если пользователь изучает уже выбранный пакет, приход новых данных не должен
  *   сбрасывать выделение строки, дерева и HEX/ASCII подсветку;
  * - дерево и предпросмотр перестраиваются только при фактической смене выбранного пакета.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public final class PacketMonitorWindow {
 

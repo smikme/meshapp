@@ -7,6 +7,8 @@ import org.slf4j.LoggerFactory;
  * Конечный автомат для parsing-а Meshtastic serial/TCP frame-ов.
  * <p>
  * Формат frame-а: {@code [0x94][0xC3][len_msb][len_lsb][payload...]}.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class FrameParser implements StreamFrameParser {
 

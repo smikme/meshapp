@@ -9,6 +9,8 @@ import java.util.List;
  * <p>
  * Это transport-level профиль BLE-подключения, а не отдельный communication protocol:
  * MeshCore Companion остаётся одним protocol type для BLE, TCP и Serial.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public enum BleProtocolProfile {
     AUTO(

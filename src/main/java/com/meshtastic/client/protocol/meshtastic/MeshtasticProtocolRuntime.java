@@ -26,6 +26,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * обработчик входящих сообщений, config exchange и MQTT proxy. Благодаря этому
  * {@code ConnectionManager} управляет только transport lifecycle, а вся
  * Meshtastic-специфичная функциональность остаётся в одном адаптере.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public final class MeshtasticProtocolRuntime implements ProtocolRuntime<DeviceState> {
 

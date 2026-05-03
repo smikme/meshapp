@@ -11,6 +11,8 @@ import com.meshtastic.client.utils.SystemForm;
  * <p>Класс намеренно содержит только жизненный цикл формы. Отрисовка,
  * пагинация сообщений, обработка запросов и привязка данных вынесены
  * в пакетные слои, от которых он наследуется.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 @SystemForm(name = "Чат", description = "Чаты пользователя", tags = {"чаты", "каналы"})
 public class FormChat extends FormChatData {
