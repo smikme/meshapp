@@ -635,6 +635,42 @@ public final class MessageDbService {
     // ═══════════════════════════════════════════════════════════
 
     /**
+     * Загружает последние системные сообщения, начинающиеся с указанного префикса.
+     *
+     * @param textPrefix  префикс текста системного сообщения
+     * @param limit       максимальное количество
+     * @param ownerNodeId nodeId устройства-владельца
+     * @return список сообщений (новые → старые)
+     */
+    public List<MeshMessage> loadRecentSystemMessagesByPrefix(String textPrefix, int limit, String ownerNodeId) {
+        List<MeshMessage> result = new ArrayList<>();
+        if (dbConnection == null || textPrefix == null || textPrefix.isBlank() || limit <= 0) {
+            return result;
+        }
+        String sql = """
+            SELECT * FROM messages
+            WHERE owner_node_id = ?
+              AND system_msg = TRUE
+              AND CAST(text AS VARCHAR) LIKE ?
+            ORDER BY id DESC
+            LIMIT ?
+            """;
+        try (PreparedStatement ps = dbConnection.prepareStatement(sql)) {
+            ps.setString(1, ownerNodeId != null ? ownerNodeId : "");
+            ps.setString(2, textPrefix + "%");
+            ps.setInt(3, limit);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    result.add(readMessage(rs));
+                }
+            }
+        } catch (SQLException e) {
+            log.error("Failed to load recent system messages by prefix (limit={})", limit, e);
+        }
+        return result;
+    }
+
+    /**
      * Находит сообщение по packetId (для reply_text).
      */
     public MeshMessage findByPacketId(int packetId) {

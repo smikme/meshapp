@@ -5,6 +5,7 @@ import com.meshtastic.client.forms.FormChat;
 import com.meshtastic.client.forms.FormConnections;
 import com.meshtastic.client.forms.FormDashboard;
 import com.meshtastic.client.forms.FormLogs;
+import com.meshtastic.client.forms.FormMap;
 import com.meshtastic.client.forms.FormNodes;
 import com.meshtastic.client.forms.FormSetting;
 import com.meshtastic.client.system.DrawerManager;
@@ -40,6 +41,8 @@ public class MyDrawerBuilder {
                         MenuManager.MenuItem.Type.ITEM, FormChat.class))
                 .add(new MenuManager.MenuItem("Ноды", null, "/drawer/icon/nodes.svg",
                         MenuManager.MenuItem.Type.ITEM, FormNodes.class))
+                .add(new MenuManager.MenuItem("Карты", null, "/drawer/icon/map.svg",
+                        MenuManager.MenuItem.Type.ITEM, FormMap.class))
                 .add(new MenuManager.MenuItem("Телеметрия", null, "/drawer/icon/chart.svg",
                         MenuManager.MenuItem.Type.ITEM, FormDashboard.class))
                 .add(new MenuManager.MenuItem("Подключение", null, "/drawer/icon/plugin.svg",
