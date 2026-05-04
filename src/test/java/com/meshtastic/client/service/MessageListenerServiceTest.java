@@ -131,12 +131,16 @@ class MessageListenerServiceTest {
                             .build())
                     .build();
 
+            long beforeReceive = System.currentTimeMillis() / 1000;
             service.onMeshPacket(packet);
+            long afterReceive = System.currentTimeMillis() / 1000;
 
             MeshMessage inMemory = state.getMessages(2).getFirst();
             assertEquals("hello channel", inMemory.getText());
             assertEquals("!11111111", inMemory.getFromNodeId());
             assertEquals("!ffffffff", inMemory.getToNodeId());
+            assertTrue(inMemory.getTimestamp() >= beforeReceive);
+            assertTrue(inMemory.getTimestamp() <= afterReceive);
             assertEquals(MeshMessage.DeliveryStatus.DELIVERED, inMemory.getStatus());
             assertEquals(-77, inMemory.getRxRssi());
             assertEquals(8.5f, inMemory.getRxSnr());
@@ -145,6 +149,7 @@ class MessageListenerServiceTest {
             MeshMessage persisted = MessageDbService.getInstance().findByPacketId(7001);
             assertNotNull(persisted);
             assertEquals("hello channel", persisted.getText());
+            assertEquals(inMemory.getTimestamp(), persisted.getTimestamp());
             assertEquals(MeshMessage.DeliveryStatus.DELIVERED, persisted.getStatus());
             assertTrue(persisted.isViaMqtt());
         } finally {
@@ -541,7 +546,9 @@ class MessageListenerServiceTest {
                         .build())
                 .build();
 
+        long beforeReceive = System.currentTimeMillis() / 1000;
         service.onMeshPacket(packet);
+        long afterReceive = System.currentTimeMillis() / 1000;
 
         assertTrue(state.getMessages(2).isEmpty());
         assertNull(MessageDbService.getInstance().findByPacketId(7003));
@@ -550,6 +557,8 @@ class MessageListenerServiceTest {
                 .loadReactionsByTargetPacketIds("channel", "2", "!12345678", List.of(42));
         MessageReaction stored = reactions.get(42).getFirst();
         assertEquals("👍", stored.getEmoji());
+        assertTrue(stored.getTimestamp() >= beforeReceive);
+        assertTrue(stored.getTimestamp() <= afterReceive);
         assertEquals(MeshMessage.DeliveryStatus.DELIVERED, stored.getStatus());
         assertEquals("!11111111", stored.getFromNodeId());
     }

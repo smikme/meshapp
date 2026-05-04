@@ -10,7 +10,7 @@ import org.slf4j.LoggerFactory;
 
 import java.util.List;
 import java.util.concurrent.Executors;
-import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.PriorityBlockingQueue;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -39,7 +39,9 @@ import java.util.function.Consumer;
 public class BleConnection implements MeshtasticConnection {
 
     private static final Logger log = LoggerFactory.getLogger(BleConnection.class);
-    private static final int SEND_QUEUE_CAPACITY = 256;
+    private static final int WRITE_QUEUE_INITIAL_CAPACITY = 256;
+    private static final int LOW_PRIORITY_SEND_QUEUE_CAPACITY = 8;
+    private static final int LOW_PRIORITY_MAX_PAYLOAD_BYTES = 256;
     private static final long WRITE_WARN_THRESHOLD_MS = 2_000;
     private static final long WRITE_ERROR_THRESHOLD_MS = 10_000;
 
@@ -214,12 +216,22 @@ public class BleConnection implements MeshtasticConnection {
         long generation = connectionGeneration.get();
         String callerThread = Thread.currentThread().getName();
         int queueDepth = executor.getQueue().size();
+        if (!expectResponseAfterWrite && payload.length > LOW_PRIORITY_MAX_PAYLOAD_BYTES) {
+            log.warn("Dropping oversized low-priority BLE write #{} ({} bytes, limit={}, queueDepth={})",
+                    opId, payload.length, LOW_PRIORITY_MAX_PAYLOAD_BYTES, queueDepth);
+            return;
+        }
+        if (!expectResponseAfterWrite && queueDepth >= LOW_PRIORITY_SEND_QUEUE_CAPACITY) {
+            log.warn("Dropping low-priority BLE write #{} ({} bytes, queueDepth={}, limit={})",
+                    opId, payload.length, queueDepth, LOW_PRIORITY_SEND_QUEUE_CAPACITY);
+            return;
+        }
 
         log.debug("Queued BLE write #{} ({} bytes, expectResponseAfterWrite={}, callerThread={}, queueDepth={})",
                 opId, payload.length, expectResponseAfterWrite, callerThread, queueDepth);
 
         try {
-            executor.execute(() -> performWrite(
+            executor.execute(new BleWriteTask(
                     opId, payload, expectResponseAfterWrite, callerThread, queuedAtNanos, generation));
         } catch (RejectedExecutionException e) {
             log.warn("BLE send queue rejected write #{} ({} bytes, queueDepth={})",
@@ -245,7 +257,7 @@ public class BleConnection implements MeshtasticConnection {
                         1,
                         0L,
                         TimeUnit.MILLISECONDS,
-                        new LinkedBlockingQueue<>(SEND_QUEUE_CAPACITY),
+                        new PriorityBlockingQueue<>(WRITE_QUEUE_INITIAL_CAPACITY),
                         r -> {
                             Thread t = new Thread(r, "ble-send-" + threadSuffix());
                             t.setDaemon(true);
@@ -435,6 +447,47 @@ public class BleConnection implements MeshtasticConnection {
                         diagnostics.writeThread(), diagnostics.expectResponseAfterWrite());
             }
         }, thresholdMs, TimeUnit.MILLISECONDS);
+    }
+
+    private final class BleWriteTask implements Runnable, Comparable<BleWriteTask> {
+        private final long opId;
+        private final byte[] payload;
+        private final boolean expectResponseAfterWrite;
+        private final String callerThread;
+        private final long queuedAtNanos;
+        private final long generation;
+
+        private BleWriteTask(long opId,
+                             byte[] payload,
+                             boolean expectResponseAfterWrite,
+                             String callerThread,
+                             long queuedAtNanos,
+                             long generation) {
+            this.opId = opId;
+            this.payload = payload;
+            this.expectResponseAfterWrite = expectResponseAfterWrite;
+            this.callerThread = callerThread;
+            this.queuedAtNanos = queuedAtNanos;
+            this.generation = generation;
+        }
+
+        @Override
+        public void run() {
+            performWrite(opId, payload, expectResponseAfterWrite, callerThread, queuedAtNanos, generation);
+        }
+
+        @Override
+        public int compareTo(BleWriteTask other) {
+            int priorityComparison = Integer.compare(priority(), other.priority());
+            if (priorityComparison != 0) {
+                return priorityComparison;
+            }
+            return Long.compare(opId, other.opId);
+        }
+
+        private int priority() {
+            return expectResponseAfterWrite ? 0 : 1;
+        }
     }
 
     private String threadSuffix() {

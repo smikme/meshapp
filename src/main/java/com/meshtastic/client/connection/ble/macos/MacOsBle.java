@@ -38,6 +38,9 @@ public class MacOsBle implements BlePlatform {
 
     private static final long CB_MANAGER_STATE_POWERED_ON = 5;
     private static final long CB_WRITE_WITH_RESPONSE = 0;
+    private static final int DRAIN_READ_TIMEOUT_MS = 2_000;
+    private static final int WRITE_RESPONSE_TIMEOUT_MS = 10_000;
+    private static final int FALLBACK_MAX_WRITE_WITH_RESPONSE_BYTES = 512;
 
     // Статические Obj-C delegate классы (создаются один раз)
     private static long centralDelegateClass;
@@ -94,6 +97,8 @@ public class MacOsBle implements BlePlatform {
     private volatile CountDownLatch characteristicDiscoveryLatch;
     private volatile CountDownLatch notifyLatch;
     private volatile CountDownLatch drainLatch;
+    private volatile CountDownLatch writeLatch;
+    private volatile String writeErrorMessage;
     // connect() advances through several async CoreBluetooth phases; callbacks store the first
     // terminal error here so the blocking connect() method can fail fast instead of reporting success.
     private volatile String connectErrorMessage;
@@ -109,6 +114,7 @@ public class MacOsBle implements BlePlatform {
             });
     private volatile ScheduledFuture<?> pollFuture;
     private final AtomicBoolean drainInProgress = new AtomicBoolean(false);
+    private volatile ScheduledFuture<?> drainTimeoutFuture;
     /**
      * Protects stored CoreBluetooth object pointers from concurrent use-after-release.
      * <p>
@@ -117,6 +123,7 @@ public class MacOsBle implements BlePlatform {
      * under one lock so disconnect cannot release a peripheral while ble-poll is still reading.
      */
     private final Object connectionIoLock = new Object();
+    private final Object writeResponseLock = new Object();
 
     public MacOsBle() {
         initCentralManager();
@@ -345,6 +352,11 @@ public class MacOsBle implements BlePlatform {
             toRadioCharacteristic = 0;
             fromNumCharacteristic = 0;
             drainInProgress.set(false);
+            CountDownLatch pendingWrite = writeLatch;
+            if (pendingWrite != null) {
+                writeErrorMessage = "BLE disconnected";
+                pendingWrite.countDown();
+            }
         }
         log.info("BLE disconnected");
     }
@@ -356,16 +368,58 @@ public class MacOsBle implements BlePlatform {
 
     @Override
     public boolean writeToRadio(byte[] protobufPayload) {
-        synchronized (connectionIoLock) {
-            long peripheral = connectedPeripheral;
-            long characteristic = toRadioCharacteristic;
-            if (!connected || peripheral == 0 || characteristic == 0) {
-                log.warn("Cannot write: BLE not connected or toRadio characteristic missing");
+        synchronized (writeResponseLock) {
+            CountDownLatch latch = new CountDownLatch(1);
+            synchronized (connectionIoLock) {
+                long peripheral = connectedPeripheral;
+                long characteristic = toRadioCharacteristic;
+                if (!connected || peripheral == 0 || characteristic == 0) {
+                    log.warn("Cannot write: BLE not connected or toRadio characteristic missing");
+                    return false;
+                }
+                long maxWriteLength = maxWriteValueLength(peripheral);
+                if (maxWriteLength > 0 && protobufPayload.length > maxWriteLength) {
+                    log.warn("[BLE] Dropping oversized write: {} bytes exceeds CoreBluetooth maximum {} bytes ({})",
+                            protobufPayload.length, maxWriteLength, profile.displayName());
+                    return false;
+                }
+                log.debug("[BLE] writeToRadio: {} bytes ({})", protobufPayload.length, profile.displayName());
+                writeErrorMessage = null;
+                writeLatch = latch;
+                long nsData = nsData(protobufPayload);
+                writeValueForCharacteristic(peripheral, nsData, characteristic, CB_WRITE_WITH_RESPONSE);
+            }
+
+            try {
+                if (!latch.await(WRITE_RESPONSE_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
+                    writeLatch = null;
+                    String message = "Timed out waiting for CoreBluetooth write response";
+                    writeErrorMessage = message;
+                    log.error("[BLE] Write timeout after {} ms", WRITE_RESPONSE_TIMEOUT_MS);
+                    disconnect();
+                    emitStateError(message);
+                    return false;
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                writeLatch = null;
+                writeErrorMessage = "Interrupted while waiting for CoreBluetooth write response";
                 return false;
             }
-            log.debug("[BLE] writeToRadio: {} bytes ({})", protobufPayload.length, profile.displayName());
-            long nsData = nsData(protobufPayload);
-            writeValueForCharacteristic(peripheral, nsData, characteristic, CB_WRITE_WITH_RESPONSE);
+
+            String error = writeErrorMessage;
+            writeLatch = null;
+            writeErrorMessage = null;
+            if (error != null) {
+                if (isRecoverableWriteError(error)) {
+                    log.warn("[BLE] Recoverable write failure without disconnect: {}", error);
+                    return false;
+                }
+                log.error("[BLE] Write failed: {}", error);
+                disconnect();
+                emitStateError("BLE write failed: " + error);
+                return false;
+            }
         }
 
         if (profile.hasNotifyTriggerCharacteristic()) {
@@ -458,6 +512,13 @@ public class MacOsBle implements BlePlatform {
         }
     }
 
+    private void emitStateError(String message) {
+        Consumer<BleState> listener = stateListener;
+        if (listener != null) {
+            listener.accept(new BleState.Error(message, null));
+        }
+    }
+
     /**
      * Caches a CoreBluetooth peripheral under its stable identifier.
      * <p>
@@ -532,6 +593,26 @@ public class MacOsBle implements BlePlatform {
         });
     }
 
+    private long maxWriteValueLength(long peripheral) {
+        try {
+            long maxLength = msgSend(peripheral, "maximumWriteValueLengthForType:", CB_WRITE_WITH_RESPONSE);
+            return maxLength > 0 ? maxLength : FALLBACK_MAX_WRITE_WITH_RESPONSE_BYTES;
+        } catch (RuntimeException e) {
+            log.debug("[BLE] Could not query maximum write length; using fallback {} bytes",
+                    FALLBACK_MAX_WRITE_WITH_RESPONSE_BYTES, e);
+            return FALLBACK_MAX_WRITE_WITH_RESPONSE_BYTES;
+        }
+    }
+
+    private static boolean isRecoverableWriteError(String error) {
+        if (error == null) {
+            return false;
+        }
+        String normalized = error.toLowerCase(Locale.ROOT);
+        return normalized.contains("length is invalid")
+                || normalized.contains("invalid length");
+    }
+
     private static Pointer buildPointerArray(long... objects) {
         com.sun.jna.Memory mem = new com.sun.jna.Memory(
                 (long) objects.length * com.sun.jna.Native.POINTER_SIZE);
@@ -575,10 +656,12 @@ public class MacOsBle implements BlePlatform {
             long peripheral = connectedPeripheral;
             long characteristic = fromRadioCharacteristic;
             if (peripheral == 0 || characteristic == 0) {
+                clearDrainTimeout();
                 drainInProgress.set(false);
                 return;
             }
             msgSend(peripheral, "readValueForCharacteristic:", characteristic);
+            armDrainTimeout();
         }
     }
 
@@ -594,6 +677,27 @@ public class MacOsBle implements BlePlatform {
         if (f != null) {
             f.cancel(false);
             pollFuture = null;
+        }
+        clearDrainTimeout();
+    }
+
+    private void armDrainTimeout() {
+        clearDrainTimeout();
+        drainTimeoutFuture = pollScheduler.schedule(() -> {
+            if (drainInProgress.compareAndSet(true, false)) {
+                log.warn("[BLE] fromRadio drain timed out after {} ms; allowing next trigger",
+                        DRAIN_READ_TIMEOUT_MS);
+                CountDownLatch latch = drainLatch;
+                if (latch != null) { latch.countDown(); }
+            }
+        }, DRAIN_READ_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+    }
+
+    private void clearDrainTimeout() {
+        ScheduledFuture<?> f = drainTimeoutFuture;
+        if (f != null) {
+            f.cancel(false);
+            drainTimeoutFuture = null;
         }
     }
 
@@ -712,6 +816,11 @@ public class MacOsBle implements BlePlatform {
                 CountDownLatch notifyLatch = me.notifyLatch;
                 if (notifyLatch != null) { notifyLatch.countDown(); }
             }
+            CountDownLatch writeLatch = me.writeLatch;
+            if (writeLatch != null) {
+                me.writeErrorMessage = disconnectMessage;
+                writeLatch.countDown();
+            }
             CountDownLatch drainLatch = me.drainLatch;
             if (drainLatch != null) { drainLatch.countDown(); }
             Consumer<BleState> listener = me.stateListener;
@@ -814,6 +923,7 @@ public class MacOsBle implements BlePlatform {
             if (error != 0) {
                 String message = localizedError(error, "Unknown read error");
                 log.error("[BLE] Read error: {}", message);
+                me.clearDrainTimeout();
                 me.drainInProgress.set(false);
                 CountDownLatch latch = me.drainLatch;
                 if (latch != null) { latch.countDown(); }
@@ -825,6 +935,7 @@ public class MacOsBle implements BlePlatform {
                 log.debug("[BLE] fromNum notification → triggering drain...");
                 me.triggerDrain();
             } else if (characteristic == me.fromRadioCharacteristic) {
+                me.clearDrainTimeout();
                 long value = msgSend(characteristic, "value");
                 byte[] data = toBytes(value);
                 if (data.length > 0) {
@@ -855,12 +966,17 @@ public class MacOsBle implements BlePlatform {
 
         cbDidWriteValue = (PeripheralDelegateWithErrorCallback)
                 (self, cmd, peripheral, characteristic, error) -> {
+            MacOsBle me = resolve(self);
+            if (me == null) { return; }
             if (error != 0) {
-                long desc = msgSend(error, "localizedDescription");
-                log.error("[BLE] Write error: {}", toJavaString(desc));
+                String message = localizedError(error, "Unknown write error");
+                me.writeErrorMessage = message;
+                log.error("[BLE] Write error: {}", message);
             } else {
                 log.debug("[BLE] Write successful");
             }
+            CountDownLatch latch = me.writeLatch;
+            if (latch != null) { latch.countDown(); }
         };
         addMethod(cls, "peripheral:didWriteValueForCharacteristic:error:",
                 cbDidWriteValue, "v@:@@@");

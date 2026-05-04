@@ -4,6 +4,8 @@ import com.meshtastic.client.connection.ConnectionException;
 import com.meshtastic.client.connection.ConnectionListener;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -169,6 +171,112 @@ class BleConnectionTest {
     }
 
     @Test
+    void responseBleWritesBypassQueuedLowPriorityWrites() throws Exception {
+        FakePlatform platform = new FakePlatform();
+        CountDownLatch firstWriteStarted = new CountDownLatch(1);
+        CountDownLatch allowFirstWriteFinish = new CountDownLatch(1);
+        CountDownLatch writesFinished = new CountDownLatch(3);
+        AtomicInteger writeCalls = new AtomicInteger();
+        CopyOnWriteArrayList<Byte> payloads = new CopyOnWriteArrayList<>();
+        platform.connectAction = p -> p.connected = true;
+        platform.writeAction = (p, payload) -> {
+            int call = writeCalls.incrementAndGet();
+            payloads.add(payload[0]);
+            writesFinished.countDown();
+            if (call == 1) {
+                firstWriteStarted.countDown();
+                try {
+                    allowFirstWriteFinish.await(1, TimeUnit.SECONDS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return false;
+                }
+            }
+            return true;
+        };
+
+        BleConnection connection = new BleConnection("device", platform);
+        connection.connect();
+
+        connection.sendBytes(frame((byte) 0x11), false);
+        assertTrue(firstWriteStarted.await(1, TimeUnit.SECONDS));
+        connection.sendBytes(frame((byte) 0x22), false);
+        connection.sendBytes(frame((byte) 0x33), true);
+
+        allowFirstWriteFinish.countDown();
+
+        assertTrue(writesFinished.await(1, TimeUnit.SECONDS));
+        assertEquals(List.of((byte) 0x11, (byte) 0x33, (byte) 0x22), payloads);
+    }
+
+    @Test
+    void lowPriorityBleBacklogIsCappedWhileResponseWritesStillPass() throws Exception {
+        FakePlatform platform = new FakePlatform();
+        CountDownLatch firstWriteStarted = new CountDownLatch(1);
+        CountDownLatch allowFirstWriteFinish = new CountDownLatch(1);
+        CountDownLatch writesFinished = new CountDownLatch(10);
+        AtomicInteger writeCalls = new AtomicInteger();
+        CopyOnWriteArrayList<Byte> payloads = new CopyOnWriteArrayList<>();
+        platform.connectAction = p -> p.connected = true;
+        platform.writeAction = (p, payload) -> {
+            int call = writeCalls.incrementAndGet();
+            payloads.add(payload[0]);
+            writesFinished.countDown();
+            if (call == 1) {
+                firstWriteStarted.countDown();
+                try {
+                    allowFirstWriteFinish.await(1, TimeUnit.SECONDS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return false;
+                }
+            }
+            return true;
+        };
+
+        BleConnection connection = new BleConnection("device", platform);
+        connection.connect();
+
+        connection.sendBytes(frame((byte) 0x11), false);
+        assertTrue(firstWriteStarted.await(1, TimeUnit.SECONDS));
+        for (int i = 0; i < 24; i++) {
+            connection.sendBytes(frame((byte) (0x20 + i)), false);
+        }
+        connection.sendBytes(frame((byte) 0x7F), true);
+
+        allowFirstWriteFinish.countDown();
+
+        assertTrue(writesFinished.await(1, TimeUnit.SECONDS));
+        assertEquals(10, writeCalls.get());
+        assertEquals(List.of((byte) 0x11, (byte) 0x7F), payloads.subList(0, 2));
+    }
+
+    @Test
+    void oversizedLowPriorityBleWriteIsDroppedWhileResponseWriteStillPasses() throws Exception {
+        FakePlatform platform = new FakePlatform();
+        CountDownLatch written = new CountDownLatch(1);
+        AtomicInteger writeCalls = new AtomicInteger();
+        platform.connectAction = p -> p.connected = true;
+        platform.writeAction = (p, payload) -> {
+            writeCalls.incrementAndGet();
+            p.lastPayload = payload;
+            written.countDown();
+            return true;
+        };
+
+        BleConnection connection = new BleConnection("device", platform);
+        connection.connect();
+
+        connection.sendBytes(frame((byte) 0x44, 257), false);
+        connection.sendBytes(frame((byte) 0x55, 257), true);
+
+        assertTrue(written.await(1, TimeUnit.SECONDS));
+        assertEquals(1, writeCalls.get());
+        assertEquals(257, platform.lastPayload.length);
+        assertEquals(0x55, platform.lastPayload[0]);
+    }
+
+    @Test
     void meshCoreBleWritesRawCompanionPacketsWithoutSerialHeader() throws Exception {
         FakePlatform platform = new FakePlatform();
         platform.connectAction = p -> p.connected = true;
@@ -198,6 +306,16 @@ class BleConnectionTest {
 
     private static byte[] frame(byte payloadByte) {
         return new byte[]{(byte) 0x94, (byte) 0xC3, 0x00, 0x01, payloadByte};
+    }
+
+    private static byte[] frame(byte firstPayloadByte, int payloadSize) {
+        byte[] data = new byte[payloadSize + 4];
+        data[0] = (byte) 0x94;
+        data[1] = (byte) 0xC3;
+        data[2] = (byte) ((payloadSize >>> 8) & 0xFF);
+        data[3] = (byte) (payloadSize & 0xFF);
+        data[4] = firstPayloadByte;
+        return data;
     }
 
     private static final class FakePlatform implements BlePlatform {

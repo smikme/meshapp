@@ -54,7 +54,9 @@ public class MessageListenerService implements FromRadioListener {
     private final List<DeferredMeshPacket> deferredMeshPackets = new ArrayList<>();
     private int deferredMeshWarnBucket;
 
-    private record DeferredMeshPacket(long channelCatalogEpoch, MeshProtos.MeshPacket packet) {}
+    private record DeferredMeshPacket(long channelCatalogEpoch,
+                                      MeshProtos.MeshPacket packet,
+                                      long receivedAtSeconds) {}
 
     public MessageListenerService(DeviceState deviceState) {
         this(deviceState, null);
@@ -82,9 +84,13 @@ public class MessageListenerService implements FromRadioListener {
 
     @Override
     public void onMeshPacket(MeshProtos.MeshPacket packet) {
+        onMeshPacket(packet, System.currentTimeMillis() / 1000);
+    }
+
+    private void onMeshPacket(MeshProtos.MeshPacket packet, long receivedAtSeconds) {
         if (!packet.hasDecoded()) { return; }
         if (deviceState.getMyNodeNum() == 0) {
-            deferMeshPacket(packet, "local node id is unknown");
+            deferMeshPacket(packet, receivedAtSeconds, "local node id is unknown");
             return;
         }
 
@@ -98,12 +104,14 @@ public class MessageListenerService implements FromRadioListener {
         }
 
         MeshProtos.Data data = packet.getDecoded();
-        dispatchDecodedPacket(packet, data);
+        dispatchDecodedPacket(packet, data, receivedAtSeconds);
     }
 
-    private void dispatchDecodedPacket(MeshProtos.MeshPacket packet, MeshProtos.Data data) {
+    private void dispatchDecodedPacket(MeshProtos.MeshPacket packet,
+                                       MeshProtos.Data data,
+                                       long receivedAtSeconds) {
         if (data.getPortnum() == Portnums.PortNum.TEXT_MESSAGE_APP) {
-            handleTextMessage(packet, data);
+            handleTextMessage(packet, data, receivedAtSeconds);
         } else if (data.getPortnum() == Portnums.PortNum.ROUTING_APP) {
             handleRoutingAck(packet, data);
         } else if (data.getPortnum() == Portnums.PortNum.NODEINFO_APP) {
@@ -119,12 +127,14 @@ public class MessageListenerService implements FromRadioListener {
         }
     }
 
-    private void handleTextMessage(MeshProtos.MeshPacket packet, MeshProtos.Data data) {
+    private void handleTextMessage(MeshProtos.MeshPacket packet,
+                                   MeshProtos.Data data,
+                                   long receivedAtSeconds) {
         int from = packet.getFrom();
         int to = packet.getTo();
         boolean isDirect = to != 0xFFFFFFFF;
         if (!isDirect && !deviceState.isChannelCatalogReady()) {
-            deferMeshPacket(packet, "channel catalog is not ready");
+            deferMeshPacket(packet, receivedAtSeconds, "channel catalog is not ready");
             return;
         }
 
@@ -140,17 +150,18 @@ public class MessageListenerService implements FromRadioListener {
             return;
         }
 
-        processIncomingTextMessage(packet, data, isDirect);
+        processIncomingTextMessage(packet, data, isDirect, receivedAtSeconds);
     }
 
     private void processIncomingTextMessage(MeshProtos.MeshPacket packet,
                                             MeshProtos.Data data,
-                                            boolean isDirect) {
+                                            boolean isDirect,
+                                            long receivedAtSeconds) {
         int from = packet.getFrom();
         int to = packet.getTo();
         int channel = packet.getChannel();
         String text = data.getPayload().toString(StandardCharsets.UTF_8);
-        long timestamp = packet.getRxTime() > 0 ? packet.getRxTime() : System.currentTimeMillis() / 1000;
+        long timestamp = receivedAtSeconds;
 
         NodeData fromNode = deviceState.getOrCreateNode(from);
         String fromNodeId = fromNode.getNodeId();
@@ -267,14 +278,15 @@ public class MessageListenerService implements FromRadioListener {
                 || packet.getTransportMechanism() == MeshProtos.MeshPacket.TransportMechanism.TRANSPORT_MQTT;
     }
 
-    private boolean deferMeshPacket(MeshProtos.MeshPacket packet, String reason) {
+    private boolean deferMeshPacket(MeshProtos.MeshPacket packet, long receivedAtSeconds, String reason) {
         if (packet == null) {
             return false;
         }
 
         int queuedPackets;
         synchronized (deferredMeshLock) {
-            deferredMeshPackets.add(new DeferredMeshPacket(deviceState.getChannelCatalogEpoch(), packet));
+            deferredMeshPackets.add(new DeferredMeshPacket(
+                    deviceState.getChannelCatalogEpoch(), packet, receivedAtSeconds));
             queuedPackets = deferredMeshPackets.size();
             maybeLogDeferredMeshBacklogLocked(queuedPackets, reason);
         }
@@ -305,7 +317,7 @@ public class MessageListenerService implements FromRadioListener {
             if (!packet.hasDecoded()) {
                 continue;
             }
-            onMeshPacket(packet);
+            onMeshPacket(packet, queued.receivedAtSeconds());
         }
     }
 
