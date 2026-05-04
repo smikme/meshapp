@@ -70,12 +70,13 @@ MESHBLE_API void meshble_stop_scan(void);
 
 /**
  * Connect to a BLE device by MAC address. Blocks until GATT services and
- * characteristics are discovered, or timeout expires.
+ * characteristics are discovered, timeout expires, or a terminal failure occurs.
  *
  * @param address     MAC address as "AA:BB:CC:DD:EE:FF"
  * @param timeout_ms  connection timeout in milliseconds
- * @return 0 on success, -1 on timeout, -2 on device not found,
- *         -3 on GATT error, -4 on access denied (pairing required)
+ * @return 0 on success, -1 on timeout/disconnect, -2 on device not found,
+ *         -3 on GATT error, -4 on access denied (pairing required),
+ *         -5 on cancellation
  */
 MESHBLE_API int meshble_connect(const char* address, int timeout_ms);
 

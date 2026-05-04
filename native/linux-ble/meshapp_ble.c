@@ -242,6 +242,24 @@ static int64_t now_ms(void) {
     return (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
 }
 
+static bool contains_text(const char* haystack, const char* needle) {
+    return haystack && needle && strstr(haystack, needle) != NULL;
+}
+
+static int map_bluez_connect_error(const char* name, const char* message) {
+    if (contains_text(name, "UnknownObject") || contains_text(name, "DoesNotExist")) {
+        return -2;
+    }
+    if (contains_text(name, "Authentication") || contains_text(name, "NotAuthorized") ||
+        contains_text(name, "NotPermitted") || contains_text(message, "Authentication")) {
+        return -4;
+    }
+    if (contains_text(name, "Timeout") || contains_text(message, "timed out")) {
+        return -1;
+    }
+    return -3;
+}
+
 /* ==================== BlueZ D-Bus Helpers (worker thread only) ==================== */
 
 static int find_adapter(sd_bus* bus, char* out, int outsize) {
@@ -626,11 +644,17 @@ static int on_interfaces_added(sd_bus_message* msg, void* userdata, sd_bus_error
     return 0;
 }
 
+typedef struct {
+    int services_resolved;
+    int disconnected_seen;
+} device_props_ctx_t;
+
 static int on_device_props_changed(sd_bus_message* msg, void* userdata, sd_bus_error* err) {
     (void)err;
     const char* iface = NULL;
     sd_bus_message_read(msg, "s", &iface);
     if (!iface || strcmp(iface, DEVICE_IFACE) != 0) return 0;
+    device_props_ctx_t* props = (device_props_ctx_t*)userdata;
 
     sd_bus_message_enter_container(msg, 'a', "{sv}");
     while (sd_bus_message_enter_container(msg, 'e', "sv") > 0) {
@@ -641,6 +665,9 @@ static int on_device_props_changed(sd_bus_message* msg, void* userdata, sd_bus_e
             int val = 0;
             sd_bus_message_read(msg, "v", "b", &val);
             log_msg("[meshble] Device Connected=%d", val);
+            if (!val && props) {
+                props->disconnected_seen = 1;
+            }
             if (!val && atomic_load(&g_connected)) {
                 atomic_store(&g_connected, false);
                 atomic_store(&g_notifications_active, false);
@@ -653,9 +680,8 @@ static int on_device_props_changed(sd_bus_message* msg, void* userdata, sd_bus_e
             int val = 0;
             sd_bus_message_read(msg, "v", "b", &val);
             log_msg("[meshble] ServicesResolved=%d", val);
-            if (val && userdata) {
-                int* flag = (int*)userdata;
-                *flag = 1;
+            if (val && props) {
+                props->services_resolved = 1;
             }
         } else {
             sd_bus_message_skip(msg, "v");
@@ -960,6 +986,34 @@ typedef struct {
     int result;
 } connect_ctx_t;
 
+typedef struct {
+    int done;
+    int result;
+    char error_name[128];
+    char error_msg[256];
+} connect_reply_ctx_t;
+
+static int on_connect_reply(sd_bus_message* msg, void* userdata, sd_bus_error* ret_error) {
+    (void)ret_error;
+    connect_reply_ctx_t* ctx = (connect_reply_ctx_t*)userdata;
+    if (!ctx) return 0;
+
+    if (sd_bus_message_is_method_error(msg, NULL) > 0) {
+        const sd_bus_error* error = sd_bus_message_get_error(msg);
+        const char* name = (error && error->name) ? error->name : "unknown";
+        const char* message = (error && error->message) ? error->message : "";
+        snprintf(ctx->error_name, sizeof(ctx->error_name), "%s", name);
+        snprintf(ctx->error_msg, sizeof(ctx->error_msg), "%s", message);
+        ctx->result = map_bluez_connect_error(ctx->error_name, ctx->error_msg);
+        log_msg("[meshble] Connect reply error: %s (%s)", ctx->error_msg, ctx->error_name);
+    } else {
+        ctx->result = 0;
+        log_msg("[meshble] Connect reply OK");
+    }
+    ctx->done = 1;
+    return 1;
+}
+
 static void do_connect(void* arg) {
     connect_ctx_t* ctx = (connect_ctx_t*)arg;
     int r;
@@ -971,26 +1025,17 @@ static void do_connect(void* arg) {
     log_msg("[meshble] Connecting to %s (%s)...", ctx->address, g_device_path);
 
     /* Subscribe to property changes for disconnect detection + ServicesResolved */
-    volatile int services_resolved = 0;
+    device_props_ctx_t props = {0};
     sd_bus_match_signal(g_bus, &g_props_changed_slot,
                         BLUEZ_BUS, g_device_path,
                         PROPS_IFACE, "PropertiesChanged",
-                        on_device_props_changed, (void*)&services_resolved);
+                        on_device_props_changed, &props);
 
     set_bool_prop(g_bus, g_device_path, DEVICE_IFACE, "Trusted", 1);
 
     /* Connect via async sd_bus_call — allows agent RequestPasskey to be
        processed on the worker thread during the Connect call */
-    volatile int connect_done = 0;
-    volatile int connect_result = 0;
-    volatile const char* connect_error_name = NULL;
-    volatile const char* connect_error_msg = NULL;
-
-    /* Async callback for Connect reply */
-    typedef struct { volatile int* done; volatile int* result;
-                     volatile const char** err_name; volatile const char** err_msg; } connect_async_t;
-    connect_async_t async_ctx = { &connect_done, &connect_result,
-                                   &connect_error_name, &connect_error_msg };
+    connect_reply_ctx_t connect_reply = {0};
 
     sd_bus_message* conn_msg = NULL;
     r = sd_bus_message_new_method_call(g_bus, &conn_msg, BLUEZ_BUS, g_device_path,
@@ -1004,11 +1049,15 @@ static void do_connect(void* arg) {
 
     sd_bus_slot* connect_slot = NULL;
     r = sd_bus_call_async(g_bus, &connect_slot, conn_msg,
-        /* inline callback: */ NULL, NULL, (uint64_t)ctx->timeout_ms * 1000);
+                          on_connect_reply, &connect_reply,
+                          (uint64_t)ctx->timeout_ms * 1000);
     sd_bus_message_unref(conn_msg);
-
-    /* sd_bus_call_async with NULL callback doesn't work — use polling approach instead */
-    if (connect_slot) sd_bus_slot_unref(connect_slot);
+    if (r < 0) {
+        log_msg("[meshble] Connect call failed: %s", strerror(-r));
+        do_disconnect();
+        ctx->result = -3;
+        return;
+    }
 
     /* Poll-based async Connect: process bus events until we see Connected=1 or timeout */
     int64_t connect_deadline = now_ms() + ctx->timeout_ms;
@@ -1016,6 +1065,7 @@ static void do_connect(void* arg) {
     while (now_ms() < connect_deadline) {
         if (atomic_load(&g_cancel_connect_requested)) {
             log_msg("[meshble] Connect cancelled before Connected=1");
+            if (connect_slot) sd_bus_slot_unref(connect_slot);
             do_disconnect();
             ctx->result = -5;
             return;
@@ -1024,6 +1074,15 @@ static void do_connect(void* arg) {
         for (;;) {
             r = sd_bus_process(g_bus, NULL);
             if (r <= 0) break;
+        }
+
+        if (connect_reply.done && connect_reply.result < 0) {
+            log_msg("[meshble] Connect failed before Connected=1: %s (%s)",
+                    connect_reply.error_msg, connect_reply.error_name);
+            if (connect_slot) sd_bus_slot_unref(connect_slot);
+            do_disconnect();
+            ctx->result = connect_reply.result;
+            return;
         }
 
         /* Check if Connected property is set */
@@ -1039,6 +1098,7 @@ static void do_connect(void* arg) {
 
     if (!connected_ok) {
         log_msg("[meshble] Connect timeout — device not connected");
+        if (connect_slot) sd_bus_slot_unref(connect_slot);
         do_disconnect();
         ctx->result = -1;
         return;
@@ -1054,6 +1114,7 @@ static void do_connect(void* arg) {
     while (now_ms() < deadline) {
         if (atomic_load(&g_cancel_connect_requested)) {
             log_msg("[meshble] Connect cancelled while waiting for ServicesResolved");
+            if (connect_slot) sd_bus_slot_unref(connect_slot);
             do_disconnect();
             ctx->result = -5;
             return;
@@ -1065,8 +1126,38 @@ static void do_connect(void* arg) {
             if (r <= 0) break;
         }
 
+        if (connect_reply.done && connect_reply.result < 0) {
+            log_msg("[meshble] Connect failed while waiting for ServicesResolved: %s (%s)",
+                    connect_reply.error_msg, connect_reply.error_name);
+            if (connect_slot) sd_bus_slot_unref(connect_slot);
+            do_disconnect();
+            ctx->result = connect_reply.result;
+            return;
+        }
+
+        int conn_val = 0;
+        int conn_rr = get_bool_prop(g_bus, g_device_path, DEVICE_IFACE, "Connected", &conn_val);
+        if (conn_rr < 0) {
+            log_msg("[meshble] Connected property unavailable while waiting for ServicesResolved: %s",
+                    strerror(-conn_rr));
+            if (connect_slot) sd_bus_slot_unref(connect_slot);
+            do_disconnect();
+            ctx->result = -1;
+            return;
+        }
+        if (!conn_val) {
+            log_msg("[meshble] Device disconnected before ServicesResolved");
+            if (props.disconnected_seen) {
+                log_msg("[meshble] Early disconnect signal observed during service discovery");
+            }
+            if (connect_slot) sd_bus_slot_unref(connect_slot);
+            do_disconnect();
+            ctx->result = -1;
+            return;
+        }
+
         /* Check signal flag */
-        if (services_resolved) {
+        if (props.services_resolved) {
             log_msg("[meshble] ServicesResolved=true (signal)");
             resolved_ok = 1;
             break;
@@ -1091,6 +1182,7 @@ static void do_connect(void* arg) {
 
     if (!resolved_ok) {
         log_msg("[meshble] ServicesResolved timeout — GATT not ready");
+        if (connect_slot) sd_bus_slot_unref(connect_slot);
         do_disconnect();
         ctx->result = -3;
         return;
@@ -1101,6 +1193,7 @@ static void do_connect(void* arg) {
     get_bool_prop(g_bus, g_device_path, DEVICE_IFACE, "Connected", &connected_check);
     if (!connected_check) {
         log_msg("[meshble] Device disconnected during service discovery");
+        if (connect_slot) sd_bus_slot_unref(connect_slot);
         do_disconnect();
         ctx->result = -1;
         return;
@@ -1110,6 +1203,7 @@ static void do_connect(void* arg) {
     r = find_gatt_characteristics(g_bus, g_device_path);
     if (r < 0) {
         log_msg("[meshble] GATT characteristics not found");
+        if (connect_slot) sd_bus_slot_unref(connect_slot);
         do_disconnect();
         ctx->result = -3;
         return;
@@ -1155,7 +1249,18 @@ static void do_connect(void* arg) {
 
     atomic_store(&g_connected, true);
 
+    /* Keep disconnect detection after connect() returns, but drop stack-local state. */
+    if (g_props_changed_slot) { sd_bus_slot_unref(g_props_changed_slot); g_props_changed_slot = NULL; }
+    r = sd_bus_match_signal(g_bus, &g_props_changed_slot,
+                            BLUEZ_BUS, g_device_path,
+                            PROPS_IFACE, "PropertiesChanged",
+                            on_device_props_changed, NULL);
+    if (r < 0) {
+        log_msg("[meshble] PropertiesChanged resubscribe failed: %s", strerror(-r));
+    }
+
     if (g_state_callback) g_state_callback(0, NULL);
+    if (connect_slot) sd_bus_slot_unref(connect_slot);
     ctx->result = 0;
 }
 

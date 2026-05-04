@@ -59,8 +59,9 @@ public interface LinuxBleLibrary extends Library {
     // ==================== Connection ====================
 
     /**
-     * Подключение к BLE-устройству. Блокирует до обнаружения GATT или таймаута.
-     * @return 0=OK, -1=timeout, -2=not found, -3=GATT error, -4=access denied
+     * Подключение к BLE-устройству. Блокирует до обнаружения GATT, таймаута или конечной ошибки.
+     * @return 0=OK, -1=timeout/disconnect, -2=not found, -3=GATT error,
+     *         -4=access denied, -5=cancelled
      */
     int meshble_connect(String address, int timeoutMs);
 

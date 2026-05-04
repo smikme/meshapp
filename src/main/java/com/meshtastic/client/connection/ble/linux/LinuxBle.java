@@ -179,7 +179,7 @@ public class LinuxBle implements BlePlatform {
                     log.info("BLE notifications активны; polling не запускается");
                 }
             }
-            case -1 -> throw new ConnectionException("BLE таймаут подключения: " + address);
+            case -1 -> throw new ConnectionException("BLE таймаут или разрыв подключения: " + address);
             case -2 -> throw new ConnectionException("BLE устройство не найдено: " + address);
             case -3 -> throw new ConnectionException("GATT ошибка при подключении к: " + address);
             case -4 -> throw new ConnectionException(
