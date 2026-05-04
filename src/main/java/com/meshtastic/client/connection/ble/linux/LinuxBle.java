@@ -2,6 +2,7 @@ package com.meshtastic.client.connection.ble.linux;
 
 import com.meshtastic.client.connection.ConnectionException;
 import com.meshtastic.client.connection.ble.*;
+import com.meshtastic.client.platform.OsDetect;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -76,7 +77,7 @@ public class LinuxBle implements BlePlatform {
 
         int result = lib.meshble_init();
         if (result != 0) {
-            throw new RuntimeException("BlueZ BLE инициализация не удалась: error=" + result);
+            throw new UnsupportedOperationException(bluezInitFailureMessage(result));
         }
 
         // Forward native log_msg() to SLF4J (static callback = GC protection)
@@ -93,6 +94,15 @@ public class LinuxBle implements BlePlatform {
         lib.meshble_set_passkey_request_callback(passkeyCallback);
 
         log.info("BlueZ BLE инициализирован (нативная библиотека)");
+    }
+
+    private static String bluezInitFailureMessage(int errorCode) {
+        if (OsDetect.isLinuxFlatpak()) {
+            return "BlueZ BLE инициализация не удалась в Flatpak sandbox (error=" + errorCode
+                    + "). Проверьте, что Flatpak-пакет запущен с доступом к system D-Bus/BlueZ.";
+        }
+        return "BlueZ BLE инициализация не удалась (error=" + errorCode
+                + "). Проверьте, что bluetoothd запущен и BLE-адаптер доступен.";
     }
 
     // ==================== BlePlatform: Scanning ====================
@@ -113,7 +123,9 @@ public class LinuxBle implements BlePlatform {
 
         int result = lib.meshble_start_scan(scanCallback);
         if (result != 0) {
-            log.error("BLE scan не удалось запустить: error={}", result);
+            String message = "BLE scan не удалось запустить: error=" + result;
+            log.error(message);
+            throw new IllegalStateException(message);
         } else {
             log.info("BLE сканирование запущено");
         }

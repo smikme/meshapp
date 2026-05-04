@@ -215,7 +215,11 @@ public final class ConnectionManager {
                 throw new ConnectionException("Уже есть активное подключение. Отключитесь перед подключением к другому устройству.");
             }
             validateProtocolTransportCombination(entry, entry.getEffectiveProtocol());
-            conn = createConnection(entry);
+            try {
+                conn = createConnection(entry);
+            } catch (RuntimeException e) {
+                throw new ConnectionException("Не удалось создать транспорт подключения: " + e.getMessage(), e);
+            }
             pendingConnections.put(id, conn);
         }
 

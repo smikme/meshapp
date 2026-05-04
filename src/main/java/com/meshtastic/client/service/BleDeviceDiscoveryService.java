@@ -33,6 +33,7 @@ public final class BleDeviceDiscoveryService {
     private final Map<String, BleDevice> discoveredDevices = new ConcurrentHashMap<>();
     private volatile boolean scanning;
     private volatile BleProtocolProfile scanProfile = BleProtocolProfile.MESHTASTIC;
+    private volatile String lastErrorMessage;
     private BlePlatform platform;
 
     private BleDeviceDiscoveryService() {}
@@ -51,7 +52,8 @@ public final class BleDeviceDiscoveryService {
     public void startScanning() {
         if (scanning) { return; }
         if (!BlePlatformFactory.isSupported()) {
-            log.warn("BLE not supported on this platform");
+            lastErrorMessage = "BLE не поддерживается на этой платформе";
+            log.warn(lastErrorMessage);
             return;
         }
 
@@ -59,28 +61,36 @@ public final class BleDeviceDiscoveryService {
         if (platform == null) {
             try {
                 platform = BlePlatformFactory.create();
-            } catch (UnsupportedOperationException e) {
+            } catch (RuntimeException e) {
+                lastErrorMessage = e.getMessage();
                 log.warn("BLE not available: {}", e.getMessage());
                 return;
             }
         }
 
         scanning = true;
+        lastErrorMessage = null;
         discoveredDevices.clear();
-        platform.setProfile(scanProfile);
+        try {
+            platform.setProfile(scanProfile);
+            platform.startScan(device -> {
+                BleDevice existing = discoveredDevices.get(device.address());
+                BleDevice profiledDevice = device.protocolType() == null
+                        ? new BleDevice(device.address(), device.name(), device.rssi(), scanProfile.protocolType())
+                        : device;
+                discoveredDevices.put(device.address(), profiledDevice);
 
-        platform.startScan(device -> {
-            BleDevice existing = discoveredDevices.get(device.address());
-            BleDevice profiledDevice = device.protocolType() == null
-                    ? new BleDevice(device.address(), device.name(), device.rssi(), scanProfile.protocolType())
-                    : device;
-            discoveredDevices.put(device.address(), profiledDevice);
-
-            // Оповещаем при новом устройстве или значительном изменении RSSI
-            if (existing == null || Math.abs(existing.rssi() - profiledDevice.rssi()) > 5) {
-                fireChanged();
-            }
-        });
+                // Оповещаем при новом устройстве или значительном изменении RSSI
+                if (existing == null || Math.abs(existing.rssi() - profiledDevice.rssi()) > 5) {
+                    fireChanged();
+                }
+            });
+        } catch (RuntimeException e) {
+            scanning = false;
+            lastErrorMessage = e.getMessage();
+            log.warn("BLE scanning failed: {}", e.getMessage());
+            return;
+        }
 
         log.info("BLE scanning started");
     }
@@ -120,6 +130,13 @@ public final class BleDeviceDiscoveryService {
     }
 
     /**
+     * Возвращает последнюю ошибку запуска BLE discovery, если сканирование не стартовало.
+     */
+    public String getLastErrorMessage() {
+        return lastErrorMessage;
+    }
+
+    /**
      * Меняет BLE-профиль для следующего сканирования. Если сканирование уже идёт,
      * оно перезапускается с новым фильтром UUID.
      *
@@ -155,7 +172,13 @@ public final class BleDeviceDiscoveryService {
      */
     public BlePlatform getPlatform() {
         if (platform == null) {
-            platform = BlePlatformFactory.create();
+            try {
+                platform = BlePlatformFactory.create();
+                lastErrorMessage = null;
+            } catch (RuntimeException e) {
+                lastErrorMessage = e.getMessage();
+                throw e;
+            }
         }
         return platform;
     }

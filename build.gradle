@@ -1093,8 +1093,10 @@ def writeFlatpakManifest = { File manifestFile, File sourceDir, String runtime, 
 			// JavaFX on Linux uses the GTK/X11 backend, so Wayland + fallback-x11
 			// breaks startup inside Flatpak on Wayland sessions ("Unable to open DISPLAY").
 			'--socket=x11',
+			'--socket=system-bus',
 			'--device=dri',
 			'--device=all',
+			'--allow=bluetooth',
 			'--filesystem=home',
 			'--system-talk-name=org.bluez'
 		],

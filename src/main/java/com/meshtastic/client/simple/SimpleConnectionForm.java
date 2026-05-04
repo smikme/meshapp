@@ -381,6 +381,13 @@ public class SimpleConnectionForm extends VBox {
         discovery.setScanProfile(BleProtocolProfile.forProtocol(selectedProtocolType()));
         discovery.addListener(bleDiscoveryListener);
         discovery.startScanning();
+        if (!discovery.isScanning()) {
+            String errorMessage = discovery.getLastErrorMessage();
+            lblBleStatus.setText(errorMessage == null || errorMessage.isBlank()
+                    ? "BLE сканирование не запущено."
+                    : errorMessage);
+            return;
+        }
 
         // Показать уже найденные устройства
         List<BleDevice> devices = discovery.getDiscoveredDevices();
