@@ -47,27 +47,6 @@ class MeshCoreCompanionFrameParserTest {
         assertFalse(parser.hasPartialFrame());
     }
 
-    @Test
-    void eagerModeEmitsSelfInfoAtMinimumLengthForAutodetect() {
-        MeshCoreCompanionFrameParser parser = new MeshCoreCompanionFrameParser(true);
-        byte[] packet = selfInfo("meshcore-stream");
-
-        byte[] emitted = null;
-        for (byte b : packet) {
-            emitted = parser.processByte(b);
-            if (emitted != null) {
-                break;
-            }
-        }
-
-        assertTrue(emitted.length >= 58);
-        assertEqualsPacketType(MeshCoreCompanionFrames.PACKET_SELF_INFO, emitted);
-    }
-
-    private static void assertEqualsPacketType(int expected, byte[] packet) {
-        org.junit.jupiter.api.Assertions.assertEquals(expected, packet[0] & 0xFF);
-    }
-
     private static byte[] selfInfo(String name) {
         byte[] nameBytes = name.getBytes(StandardCharsets.UTF_8);
         byte[] packet = new byte[58 + nameBytes.length];

@@ -11,7 +11,7 @@ import java.util.UUID;
  * <p>
  * Поле {@code type} может быть {@code null} для legacy-записей —
  * в этом случае {@link #getEffectiveType()} возвращает {@link ConnectionType#TCP}.
- * Новые профили по умолчанию используют {@link ProtocolType#AUTO}.
+ * Новые профили по умолчанию используют {@link ProtocolType#MESHTASTIC}.
  * Поле {@code protocol} может быть {@code null} для legacy-записей —
  * в этом случае {@link #getEffectiveProtocol()} возвращает {@link ProtocolType#MESHTASTIC}.
  * Поля {@code connected} и {@code reconnecting} помечены как {@code transient} —
@@ -37,14 +37,14 @@ public class ConnectionEntry {
 
     public ConnectionEntry() {
         this.id = UUID.randomUUID().toString();
-        this.protocol = ProtocolType.AUTO;
+        this.protocol = ProtocolType.MESHTASTIC;
         this.port = 4403;
     }
 
     /** Конструктор для TCP-подключения. */
     public ConnectionEntry(String name, String host, int port) {
         this.id = UUID.randomUUID().toString();
-        this.protocol = ProtocolType.AUTO;
+        this.protocol = ProtocolType.MESHTASTIC;
         this.type = ConnectionType.TCP;
         this.name = name;
         this.host = host;
@@ -54,7 +54,7 @@ public class ConnectionEntry {
     /** Конструктор для Serial-подключения (USB / Bluetooth SPP). */
     public ConnectionEntry(String name, String portName, int baudRate, ConnectionType type) {
         this.id = UUID.randomUUID().toString();
-        this.protocol = ProtocolType.AUTO;
+        this.protocol = ProtocolType.MESHTASTIC;
         this.type = type;
         this.name = name;
         this.portName = portName;
@@ -64,7 +64,7 @@ public class ConnectionEntry {
     /** Конструктор для BLE-подключения. */
     public ConnectionEntry(String name, String bleAddress, String bleDeviceName) {
         this.id = UUID.randomUUID().toString();
-        this.protocol = ProtocolType.AUTO;
+        this.protocol = ProtocolType.MESHTASTIC;
         this.type = ConnectionType.BLE;
         this.name = name;
         this.bleAddress = bleAddress;

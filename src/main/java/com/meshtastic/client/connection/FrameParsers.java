@@ -13,7 +13,7 @@ final class FrameParsers {
     /**
      * Создаёт parser для указанного формата фрейминга.
      *
-     * @param frameFormat формат, выбранный пользователем или auto-detect-ом
+     * @param frameFormat формат, выбранный protocol runtime-ом
      * @return новый parser с пустым внутренним состоянием
      */
     static StreamFrameParser create(FrameFormat frameFormat) {
@@ -21,7 +21,6 @@ final class FrameParsers {
             case MESHTASTIC -> new FrameParser();
             case KISS -> new KissFrameParser();
             case MESHCORE_COMPANION -> new MeshCoreCompanionFrameParser();
-            case AUTO -> new AutoDetectFrameParser();
         };
     }
 }

@@ -11,17 +11,17 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 class ConnectionEntryProtocolTest {
 
     @Test
-    void constructorsDefaultToAutomaticProtocol() {
+    void constructorsDefaultToMeshtasticProtocol() {
         ConnectionEntry tcp = new ConnectionEntry("tcp", "127.0.0.1", 4403);
         ConnectionEntry serial = new ConnectionEntry("serial", "COM3", 115200, ConnectionType.SERIAL);
         ConnectionEntry ble = new ConnectionEntry("ble", "AA:BB:CC:DD:EE:FF", "Test BLE");
 
-        assertEquals(ProtocolType.AUTO, tcp.getProtocol());
-        assertEquals(ProtocolType.AUTO, serial.getProtocol());
-        assertEquals(ProtocolType.AUTO, ble.getProtocol());
-        assertEquals(ProtocolType.AUTO, tcp.getEffectiveProtocol());
-        assertEquals(ProtocolType.AUTO, serial.getEffectiveProtocol());
-        assertEquals(ProtocolType.AUTO, ble.getEffectiveProtocol());
+        assertEquals(ProtocolType.MESHTASTIC, tcp.getProtocol());
+        assertEquals(ProtocolType.MESHTASTIC, serial.getProtocol());
+        assertEquals(ProtocolType.MESHTASTIC, ble.getProtocol());
+        assertEquals(ProtocolType.MESHTASTIC, tcp.getEffectiveProtocol());
+        assertEquals(ProtocolType.MESHTASTIC, serial.getEffectiveProtocol());
+        assertEquals(ProtocolType.MESHTASTIC, ble.getEffectiveProtocol());
     }
 
     @Test
@@ -32,4 +32,5 @@ class ConnectionEntryProtocolTest {
         assertNull(legacy.getProtocol());
         assertEquals(ProtocolType.MESHTASTIC, legacy.getEffectiveProtocol());
     }
+
 }

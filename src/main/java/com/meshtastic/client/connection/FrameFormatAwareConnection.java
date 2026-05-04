@@ -4,8 +4,8 @@ package com.meshtastic.client.connection;
  * Transport-подключение, в котором можно переключить парсер потока перед запуском protocol runtime-а.
  * <p>
  * Интерфейс реализуют byte-stream transport-ы: TCP и Serial. Это позволяет сначала
- * открыть соединение, затем выполнить auto-detect и только после этого закрепить
- * Meshtastic, KISS или MeshCore Companion framing.
+ * открыть соединение, а затем закрепить Meshtastic, KISS или MeshCore Companion
+ * framing выбранного protocol runtime-а.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */

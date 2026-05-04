@@ -32,7 +32,7 @@ public final class BleDeviceDiscoveryService {
     private final List<Consumer<List<BleDevice>>> listeners = new CopyOnWriteArrayList<>();
     private final Map<String, BleDevice> discoveredDevices = new ConcurrentHashMap<>();
     private volatile boolean scanning;
-    private volatile BleProtocolProfile scanProfile = BleProtocolProfile.AUTO;
+    private volatile BleProtocolProfile scanProfile = BleProtocolProfile.MESHTASTIC;
     private BlePlatform platform;
 
     private BleDeviceDiscoveryService() {}
@@ -71,7 +71,7 @@ public final class BleDeviceDiscoveryService {
 
         platform.startScan(device -> {
             BleDevice existing = discoveredDevices.get(device.address());
-            BleDevice profiledDevice = device.protocolType() == null || device.protocolType() == ProtocolType.AUTO
+            BleDevice profiledDevice = device.protocolType() == null
                     ? new BleDevice(device.address(), device.name(), device.rssi(), scanProfile.protocolType())
                     : device;
             discoveredDevices.put(device.address(), profiledDevice);
@@ -123,10 +123,10 @@ public final class BleDeviceDiscoveryService {
      * Меняет BLE-профиль для следующего сканирования. Если сканирование уже идёт,
      * оно перезапускается с новым фильтром UUID.
      *
-     * @param profile BLE-профиль или AUTO
+     * @param profile BLE-профиль; null трактуется как Meshtastic
      */
     public void setScanProfile(BleProtocolProfile profile) {
-        BleProtocolProfile newProfile = profile == null ? BleProtocolProfile.AUTO : profile;
+        BleProtocolProfile newProfile = profile == null ? BleProtocolProfile.MESHTASTIC : profile;
         if (newProfile == scanProfile) {
             return;
         }

@@ -34,7 +34,6 @@
 #define PROPS_IFACE        "org.freedesktop.DBus.Properties"
 #define OBJMGR_IFACE       "org.freedesktop.DBus.ObjectManager"
 
-#define PROFILE_AUTO       -1
 #define PROFILE_MESHTASTIC 0
 #define PROFILE_MESHCORE   1
 
@@ -908,13 +907,7 @@ static void do_start_scan(void* arg) {
         sd_bus_message_append(m, "s", "UUIDs");
         sd_bus_message_open_container(m, 'v', "as");
         sd_bus_message_open_container(m, 'a', "s");
-        int scan_profile = atomic_load(&g_profile);
-        if (scan_profile == PROFILE_AUTO) {
-            sd_bus_message_append(m, "s", SERVICE_UUID);
-            sd_bus_message_append(m, "s", MESHCORE_SERVICE_UUID);
-        } else {
-            sd_bus_message_append(m, "s", active_service_uuid());
-        }
+        sd_bus_message_append(m, "s", active_service_uuid());
         sd_bus_message_close_container(m);
         sd_bus_message_close_container(m);
         sd_bus_message_close_container(m);
@@ -1389,7 +1382,7 @@ MESHBLE_API int meshble_get_adapter_state(void) {
 }
 
 MESHBLE_API void meshble_set_profile(int profile) {
-    if (profile == PROFILE_AUTO || profile == PROFILE_MESHCORE) {
+    if (profile == PROFILE_MESHCORE) {
         atomic_store(&g_profile, profile);
     } else {
         atomic_store(&g_profile, PROFILE_MESHTASTIC);

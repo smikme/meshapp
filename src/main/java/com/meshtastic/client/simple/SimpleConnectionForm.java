@@ -358,15 +358,15 @@ public class SimpleConnectionForm extends VBox {
         ProtocolType previous = selectedProtocolType();
         cmbProtocol.getItems().clear();
         if (isBleMode()) {
-            cmbProtocol.getItems().addAll("Авто", "Meshtastic", "MeshCore Companion");
+            cmbProtocol.getItems().addAll("Meshtastic", "MeshCore Companion");
         } else {
-            cmbProtocol.getItems().addAll("Авто", "Meshtastic", "MeshCore KISS", "MeshCore Companion");
+            cmbProtocol.getItems().addAll("Meshtastic", "MeshCore KISS", "MeshCore Companion");
         }
         String previousLabel = labelForProtocol(previous);
         if (cmbProtocol.getItems().contains(previousLabel)) {
             cmbProtocol.setValue(previousLabel);
         } else {
-            cmbProtocol.setValue("Авто");
+            cmbProtocol.setValue("Meshtastic");
         }
     }
 
@@ -579,33 +579,27 @@ public class SimpleConnectionForm extends VBox {
     }
 
     private ProtocolType selectedProtocolForDevice(BleDevice device) {
-        ProtocolType selected = selectedProtocolType();
-        if (selected != ProtocolType.AUTO) {
-            return selected;
-        }
-        ProtocolType deviceProtocol = device.protocolType();
-        return deviceProtocol != null ? deviceProtocol : ProtocolType.AUTO;
+        return selectedProtocolType();
     }
 
     private ProtocolType selectedProtocolType() {
         String value = cmbProtocol == null ? null : cmbProtocol.getValue();
         if (value == null || value.isBlank()) {
-            return ProtocolType.AUTO;
+            return ProtocolType.MESHTASTIC;
         }
         return switch (value) {
             case "Meshtastic" -> ProtocolType.MESHTASTIC;
             case "MeshCore KISS" -> ProtocolType.MESHCORE_KISS;
             case "MeshCore Companion" -> ProtocolType.MESHCORE_COMPANION;
-            default -> ProtocolType.AUTO;
+            default -> ProtocolType.MESHTASTIC;
         };
     }
 
     private static String labelForProtocol(ProtocolType protocolType) {
         if (protocolType == null) {
-            return "Авто";
+            return "Meshtastic";
         }
         return switch (protocolType) {
-            case AUTO -> "Авто";
             case MESHTASTIC -> "Meshtastic";
             case MESHCORE_KISS -> "MeshCore KISS";
             case MESHCORE_COMPANION -> "MeshCore Companion";

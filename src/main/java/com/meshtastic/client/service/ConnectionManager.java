@@ -9,7 +9,6 @@ import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.ProtocolType;
 import com.meshtastic.client.protocol.ProtocolRegistry;
 import com.meshtastic.client.protocol.ProtocolRuntime;
-import com.meshtastic.client.protocol.ProtocolAutodetector;
 import com.meshtastic.client.protocol.ProtocolRuntimeContext;
 import com.meshtastic.client.protocol.ProtocolHandler;
 import com.meshtastic.client.protocol.meshcore.MeshCoreCompanionState;
@@ -730,24 +729,12 @@ public final class ConnectionManager {
     private ProtocolType resolveProtocolType(String id, ConnectionEntry entry, TransportConnection conn) throws ConnectionException {
         ProtocolType requestedProtocol = entry.getEffectiveProtocol();
         validateProtocolTransportCombination(entry, requestedProtocol);
-        ProtocolRuntimeContext context = new ProtocolRuntimeContext(
-                id,
-                entry,
-                conn,
-                formatConnectionParams(entry)
-        );
-        ProtocolType resolvedProtocol = requestedProtocol == ProtocolType.AUTO
-                ? ProtocolAutodetector.detect(context)
-                : requestedProtocol;
-        configureFrameFormat(conn, resolvedProtocol);
-        return resolvedProtocol;
+        configureFrameFormat(conn, requestedProtocol);
+        return requestedProtocol;
     }
 
     private void validateProtocolTransportCombination(ConnectionEntry entry,
                                                       ProtocolType requestedProtocol) throws ConnectionException {
-        if (requestedProtocol == ProtocolType.AUTO) {
-            return;
-        }
         switch (entry.getEffectiveType()) {
             case BLE -> {
                 if (requestedProtocol == ProtocolType.MESHCORE_KISS) {

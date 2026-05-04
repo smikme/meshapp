@@ -285,7 +285,6 @@ public class FormConnections extends Form {
             return "?";
         }
         return switch (protocolType) {
-            case AUTO -> "авто";
             case MESHTASTIC -> "Meshtastic";
             case MESHCORE_KISS -> "MeshCore KISS";
             case MESHCORE_COMPANION -> "MeshCore Companion";

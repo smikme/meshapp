@@ -542,12 +542,7 @@ public class MacOsBle implements BlePlatform {
     }
 
     private static long serviceUuidArray(BleProtocolProfile profile) {
-        long[] uuids = profile == BleProtocolProfile.AUTO
-                ? new long[]{
-                    cbUuid(BleConstants.SERVICE_UUID),
-                    cbUuid(BleConstants.MESHCORE_SERVICE_UUID)
-                }
-                : new long[]{cbUuid(profile.primaryServiceUuid())};
+        long[] uuids = new long[]{cbUuid(profile.primaryServiceUuid())};
         long charUuids = cls("NSArray");
         return ObjCRuntime.msgSendPtrLong(charUuids, "arrayWithObjects:count:",
                 buildPointerArray(uuids), uuids.length);

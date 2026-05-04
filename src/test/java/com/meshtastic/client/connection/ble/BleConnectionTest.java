@@ -196,25 +196,6 @@ class BleConnectionTest {
         assertEquals(0x03, platform.lastPayload[2]);
     }
 
-    @Test
-    void autoProfileRetriesMeshCoreAfterMeshtasticGattFails() throws Exception {
-        FakePlatform platform = new FakePlatform();
-        platform.connectAction = p -> {
-            if (p.profile == BleProtocolProfile.MESHTASTIC) {
-                throw new ConnectionException("missing meshtastic service");
-            }
-            p.connected = true;
-        };
-
-        BleConnection connection = new BleConnection("device", platform, BleProtocolProfile.AUTO);
-
-        connection.connect();
-
-        assertTrue(connection.isConnected());
-        assertEquals(BleProtocolProfile.MESHCORE_COMPANION, connection.getResolvedProfile());
-        assertEquals(2, platform.connectCalls);
-    }
-
     private static byte[] frame(byte payloadByte) {
         return new byte[]{(byte) 0x94, (byte) 0xC3, 0x00, 0x01, payloadByte};
     }

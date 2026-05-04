@@ -9,13 +9,13 @@ MeshApp поддерживает MeshCore-устройства через два
 
 ## Что изменилось
 
-- Добавлен `ProtocolType.AUTO`, который используется по умолчанию для новых профилей подключений.
+- Новые профили подключений по умолчанию используют `ProtocolType.MESHTASTIC`; legacy-профили без поля `protocol` трактуются как Meshtastic.
 - Добавлены `ProtocolType.MESHCORE_KISS`, `ProtocolType.MESHCORE_COMPANION`, `MeshCoreKissProtocolRuntime` и `MeshCoreCompanionProtocolRuntime`.
 - Добавлено KISS-фреймирование для TCP и Serial transport-ов.
 - Добавлен `FrameFormat.MESHCORE_COMPANION` и stream parser для MeshCore Companion packets на TCP/Serial.
 - Добавлен BLE profile для MeshCore Companion service/RX/TX UUID.
-- Добавлено автоопределение протокола перед запуском runtime-а: TCP/Serial определяют Meshtastic, MeshCore KISS или MeshCore Companion, BLE выбирает Meshtastic или MeshCore Companion profile.
-- В карточке подключения отображается фактически активный протокол после detection.
+- Протокол выбирается явно перед запуском runtime-а: `MeshCore KISS` или `MeshCore Companion` нужно выбрать в профиле подключения.
+- В карточке подключения отображается выбранный/активный протокол.
 - MeshCore Companion теперь заполняет общий UI state для экранов Chat, Nodes, Dashboard, Settings и LoRa Monitor.
 - Добавлена отправка канальных сообщений и DM через MeshCore Companion Protocol.
 - Добавлена синхронизация MeshCore contacts, channel info и входящих сообщений из очереди Companion Protocol.
@@ -31,21 +31,17 @@ MeshApp поддерживает MeshCore-устройства через два
 | TCP | Companion Protocol | Работает с bridge/server endpoint-ами, которые передают raw Companion packets через byte stream. |
 | BLE | Companion Protocol | Использует отдельный BLE service/RX/TX UUID, TX notifications и raw Companion packets. |
 
-## Как работает автоопределение
+## Как выбирается протокол
 
-Для новых TCP/Serial-профилей `ConnectionEntry.protocol` по умолчанию равен `AUTO`.
+Для новых профилей `ConnectionEntry.protocol` по умолчанию равен `MESHTASTIC`.
 
-1. MeshApp сначала открывает выбранный transport.
-2. На время проверки transport переводится в `AUTO` framing.
-3. MeshApp отправляет MeshCore KISS probes: `GetDeviceName` и `Ping` как `SetHardware` (`0x06`) frames.
-4. Если приходит распознанный MeshCore `SetHardware` response, запускается `MeshCoreKissProtocolRuntime`.
-5. Если KISS быстро не отвечает, MeshApp отправляет Companion `APP_START` probe.
-6. Если приходит распознанный Companion response (`SELF_INFO`, `DEVICE_INFO`, `BATTERY`, `OK` или ошибка), запускается `MeshCoreCompanionProtocolRuntime`.
-7. Если Companion не отвечает, MeshApp отправляет Meshtastic `want_config_id` probe.
-8. Если приходит валидный Meshtastic `FromRadio`, запускается `MeshtasticProtocolRuntime`.
-9. Если detection завершается по таймауту, MeshApp использует Meshtastic fallback для совместимости со старыми профилями.
+1. MeshApp открывает выбранный transport.
+2. TCP/Serial transport сразу получает `FrameFormat`, соответствующий сохранённому `ProtocolType`.
+3. BLE transport сразу выбирает GATT profile сохранённого `ProtocolType`.
+4. `ConnectionManager` запускает runtime из `ProtocolRegistry`: `MeshtasticProtocolRuntime`, `MeshCoreKissProtocolRuntime` или `MeshCoreCompanionProtocolRuntime`.
+5. Legacy-профили без поля `protocol` используют `MESHTASTIC`.
 
-Для BLE `AUTO` сначала пробует Meshtastic GATT profile, затем MeshCore Companion profile. Также можно явно выбрать `MeshCore Companion` в поле протокола при создании подключения.
+Для MeshCore нужно явно выбрать `MeshCore KISS` или `MeshCore Companion` в поле протокола при создании подключения.
 
 ## MeshCore Companion
 
@@ -57,8 +53,8 @@ MeshCore Companion Protocol использует не KISS framing, а собс�
 
 Для BLE в MeshApp добавлен отдельный profile для этих UUID:
 
-- scan в режиме `AUTO` ищет Meshtastic и MeshCore service UUID;
-- connect в режиме `AUTO` пробует Meshtastic profile, затем MeshCore Companion profile;
+- scan ищет service UUID выбранного profile-а;
+- connect сразу использует выбранный profile;
 - для MeshCore Companion transport пишет raw Companion packets в RX characteristic;
 - входящие данные приходят из TX characteristic через notifications;
 - `MeshCoreCompanionProtocolRuntime` отправляет `APP_START`, разбирает `SELF_INFO`, `DEVICE_INFO`, `BATTERY`, contacts, channel info и queued messages.
@@ -135,9 +131,9 @@ MeshApp передаёт протокольному runtime-у уже unescaped 
 ## Поведение в интерфейсе
 
 - Пользователь создаёт обычное TCP-, Serial- или BLE-подключение.
-- Protocol остаётся автоматическим или явно выбирается как `MeshCore Companion`.
-- После нажатия **Подключить** MeshApp выполняет detection.
-- В карточке подключения появляется `Meshtastic`, `MeshCore KISS` или `MeshCore Companion`.
+- Protocol по умолчанию равен `Meshtastic`; для MeshCore пользователь явно выбирает `MeshCore KISS` или `MeshCore Companion`.
+- После нажатия **Подключить** MeshApp запускает runtime выбранного протокола.
+- В карточке подключения отображается `Meshtastic`, `MeshCore KISS` или `MeshCore Companion`.
 - Для MeshCore Companion открываются Chat, Nodes, Dashboard, Settings и LoRa Monitor. Функции, которые завязаны на Meshtastic Admin/Traceroute/Reaction protobuf, остаются недоступны и явно сообщают об этом в UI.
 - Для MeshCore KISS показывается подключение и metadata modem runtime-а; application screens используют Companion Protocol.
 
@@ -145,10 +141,8 @@ MeshApp передаёт протокольному runtime-у уже unescaped 
 
 Основные классы:
 
-- `com.meshtastic.client.protocol.ProtocolAutodetector`
 - `com.meshtastic.client.connection.KissFrameParser`
 - `com.meshtastic.client.connection.MeshCoreCompanionFrameParser`
-- `com.meshtastic.client.connection.AutoDetectFrameParser`
 - `com.meshtastic.client.protocol.meshcore.MeshCoreKissProtocol`
 - `com.meshtastic.client.protocol.meshcore.MeshCoreKissProtocolRuntime`
 - `com.meshtastic.client.protocol.meshcore.MeshCoreKissState`
@@ -168,11 +162,9 @@ MeshApp передаёт протокольному runtime-у уже unescaped 
 - KISS escaping и parsing
 - Companion packet parsing на byte stream transport-ах
 - регистрация протокола в registry
-- protocol auto-detection
-- запуск MeshCore KISS runtime
-- запуск MeshCore Companion runtime
-- end-to-end TCP auto-detection через `ConnectionManager`
-- end-to-end BLE auto-detection через `ConnectionManager` с fake BLE backend
+- запуск MeshCore KISS runtime при явном выборе протокола
+- запуск MeshCore Companion runtime при явном выборе протокола
+- end-to-end TCP/BLE runtime selection через `ConnectionManager`
 - MeshCore Companion bridge в `DeviceState` для Chat/Nodes/Dashboard
 - отправка MeshCore channel messages и DM
 - raw MeshCore Companion entries в LoRa Monitor

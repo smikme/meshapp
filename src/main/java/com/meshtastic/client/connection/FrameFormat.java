@@ -19,15 +19,12 @@ public enum FrameFormat {
     KISS,
 
     /** Raw MeshCore Companion packets без KISS-обёртки. */
-    MESHCORE_COMPANION,
-
-    /** Временный режим, который принимает несколько форматов во время auto-detect. */
-    AUTO;
+    MESHCORE_COMPANION;
 
     /**
      * Возвращает формат фрейминга, который должен быть включён для указанного протокола.
      *
-     * @param protocolType выбранный или автоматически определённый протокол
+     * @param protocolType выбранный протокол
      * @return формат фрейминга для TCP/Serial transport-а
      */
     public static FrameFormat forProtocol(ProtocolType protocolType) {
@@ -36,9 +33,6 @@ public enum FrameFormat {
         }
         if (protocolType == ProtocolType.MESHCORE_COMPANION) {
             return MESHCORE_COMPANION;
-        }
-        if (protocolType == ProtocolType.AUTO) {
-            return AUTO;
         }
         return MESHTASTIC;
     }

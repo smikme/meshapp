@@ -65,10 +65,8 @@ public class BleConnection implements MeshtasticConnection {
     public BleConnection(String address, BlePlatform platform, BleProtocolProfile profile) {
         this.address = address;
         this.platform = platform;
-        this.requestedProfile = profile == null ? BleProtocolProfile.MESHTASTIC : profile;
-        this.resolvedProfile = this.requestedProfile == BleProtocolProfile.AUTO
-                ? null
-                : this.requestedProfile;
+        this.requestedProfile = normalizeProfile(profile);
+        this.resolvedProfile = this.requestedProfile;
     }
 
     /**
@@ -275,35 +273,7 @@ public class BleConnection implements MeshtasticConnection {
 
     private BleProtocolProfile connectWithProfileSelection(AtomicBoolean suppressTerminalStateEvents)
             throws ConnectionException {
-        if (requestedProfile != BleProtocolProfile.AUTO) {
-            return connectUsingProfile(requestedProfile, false, suppressTerminalStateEvents);
-        }
-
-        ConnectionException firstError = null;
-        for (BleProtocolProfile candidate : List.of(
-                BleProtocolProfile.MESHTASTIC,
-                BleProtocolProfile.MESHCORE_COMPANION)) {
-            try {
-                return connectUsingProfile(candidate, true, suppressTerminalStateEvents);
-            } catch (ConnectionException e) {
-                if (firstError == null) {
-                    firstError = e;
-                }
-                log.info("BLE auto-detect profile {} failed for {}: {}",
-                        candidate.displayName(), address, e.getMessage());
-                suppressTerminalStateEvents.set(true);
-                try {
-                    platform.disconnect();
-                } catch (RuntimeException disconnectError) {
-                    log.debug("BLE disconnect after failed profile probe failed", disconnectError);
-                } finally {
-                    connected = false;
-                    suppressTerminalStateEvents.set(false);
-                }
-            }
-        }
-        throw new ConnectionException("BLE protocol auto-detect failed for " + address,
-                firstError);
+        return connectUsingProfile(requestedProfile, false, suppressTerminalStateEvents);
     }
 
     private BleProtocolProfile connectUsingProfile(BleProtocolProfile profile,
@@ -322,12 +292,14 @@ public class BleConnection implements MeshtasticConnection {
 
     private BleProtocolProfile activePayloadProfile() {
         BleProtocolProfile profile = resolvedProfile;
-        if (profile == null || profile == BleProtocolProfile.AUTO) {
-            return requestedProfile == BleProtocolProfile.AUTO
-                    ? BleProtocolProfile.MESHTASTIC
-                    : requestedProfile;
+        if (profile == null) {
+            return requestedProfile;
         }
         return profile;
+    }
+
+    private static BleProtocolProfile normalizeProfile(BleProtocolProfile profile) {
+        return profile == null ? BleProtocolProfile.MESHTASTIC : profile;
     }
 
     private static byte[] stripSerialFrameHeader(byte[] data) {

@@ -80,7 +80,6 @@ static uint64_t string_to_mac(const char* str) {
 /* ==================== BLE State (heap-allocated, no static WinRT) ==================== */
 
 // BLE UUIDs — plain GUID structs, safe as statics
-static constexpr int PROFILE_AUTO = -1;
 static constexpr int PROFILE_MESHTASTIC = 0;
 static constexpr int PROFILE_MESHCORE = 1;
 
@@ -615,7 +614,7 @@ MESHBLE_API int meshble_get_adapter_state(void) {
 }
 
 MESHBLE_API void meshble_set_profile(int profile) {
-    if (profile == PROFILE_AUTO || profile == PROFILE_MESHCORE) {
+    if (profile == PROFILE_MESHCORE) {
         g_profile = profile;
     } else {
         g_profile = PROFILE_MESHTASTIC;
@@ -634,12 +633,7 @@ MESHBLE_API int meshble_start_scan(meshble_device_cb callback) {
 
                 auto filter = BluetoothLEAdvertisementFilter();
                 auto adv = BluetoothLEAdvertisement();
-                if (g_profile.load() == PROFILE_AUTO) {
-                    adv.ServiceUuids().Append(to_guid(SVC_UUID));
-                    adv.ServiceUuids().Append(to_guid(MC_SVC_UUID));
-                } else {
-                    adv.ServiceUuids().Append(active_service_uuid());
-                }
+                adv.ServiceUuids().Append(active_service_uuid());
                 filter.Advertisement(adv);
                 g_ble->watcher.AdvertisementFilter(filter);
 

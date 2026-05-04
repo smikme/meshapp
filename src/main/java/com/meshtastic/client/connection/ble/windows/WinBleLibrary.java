@@ -44,7 +44,7 @@ public interface WinBleLibrary extends Library {
 
     // ==================== Scanning ====================
 
-    /** Настраивает BLE profile: -1=AUTO, 0=Meshtastic, 1=MeshCore Companion. */
+    /** Настраивает BLE profile: 0=Meshtastic, 1=MeshCore Companion. */
     void meshble_set_profile(int profile);
 
     /**

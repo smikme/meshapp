@@ -10,9 +10,6 @@ package com.meshtastic.client.model;
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public enum ProtocolType {
-    /** Автоматическое определение протокола при подключении. */
-    AUTO,
-
     /** Протокол Meshtastic поверх TCP, Serial или BLE транспорта. */
     MESHTASTIC,
 

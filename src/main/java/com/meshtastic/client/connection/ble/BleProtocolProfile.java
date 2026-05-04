@@ -13,19 +13,6 @@ import java.util.List;
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public enum BleProtocolProfile {
-    AUTO(
-            -1,
-            ProtocolType.AUTO,
-            "Auto",
-            List.of(
-                    BleConstants.SERVICE_UUID,
-                    BleConstants.MESHCORE_SERVICE_UUID
-            ),
-            null,
-            null,
-            null,
-            false
-    ),
     MESHTASTIC(
             0,
             ProtocolType.MESHTASTIC,
@@ -77,7 +64,7 @@ public enum BleProtocolProfile {
     /**
      * Возвращает код profile-а для native BLE backend-ов.
      *
-     * @return {@code -1} для AUTO, {@code 0} для Meshtastic, {@code 1} для MeshCore Companion
+     * @return {@code 0} для Meshtastic, {@code 1} для MeshCore Companion
      */
     public int nativeCode() {
         return nativeCode;
@@ -86,7 +73,7 @@ public enum BleProtocolProfile {
     /**
      * Возвращает communication protocol, связанный с BLE profile-ом.
      *
-     * @return protocol type или {@link ProtocolType#AUTO}
+     * @return protocol type, связанный с profile-ом
      */
     public ProtocolType protocolType() {
         return protocolType;
@@ -180,11 +167,10 @@ public enum BleProtocolProfile {
      * @return BLE profile, который нужно использовать при connect-е
      */
     public static BleProtocolProfile forProtocol(ProtocolType protocolType) {
-        if (protocolType == null || protocolType == ProtocolType.AUTO) {
-            return AUTO;
+        if (protocolType == null) {
+            return MESHTASTIC;
         }
         return switch (protocolType) {
-            case AUTO -> AUTO;
             case MESHTASTIC -> MESHTASTIC;
             case MESHCORE_KISS -> MESHTASTIC;
             case MESHCORE_COMPANION -> MESHCORE_COMPANION;

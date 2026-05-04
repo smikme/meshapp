@@ -43,7 +43,7 @@ MESHBLE_API int meshble_get_adapter_state(void);
 
 /**
  * Select BLE profile for subsequent scanning/connection.
- * @param profile -1=AUTO, 0=Meshtastic, 1=MeshCore Companion
+ * @param profile 0=Meshtastic, 1=MeshCore Companion
  */
 MESHBLE_API void meshble_set_profile(int profile);
 

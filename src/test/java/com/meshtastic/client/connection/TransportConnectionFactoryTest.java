@@ -30,7 +30,7 @@ class TransportConnectionFactoryTest {
         TransportConnection connection = TransportConnectionFactory.create(entry, FakeBlePlatform::new);
 
         assertInstanceOf(TcpConnection.class, connection);
-        assertEquals(FrameFormat.AUTO, ((FrameFormatAwareConnection) connection).getFrameFormat());
+        assertEquals(FrameFormat.MESHTASTIC, ((FrameFormatAwareConnection) connection).getFrameFormat());
         assertEquals("type=TCP, host=192.0.2.10, port=4403",
                 TransportConnectionFactory.describe(entry));
     }
@@ -42,7 +42,7 @@ class TransportConnectionFactoryTest {
         TransportConnection connection = TransportConnectionFactory.create(entry, FakeBlePlatform::new);
 
         assertInstanceOf(SerialConnection.class, connection);
-        assertEquals(FrameFormat.AUTO, ((FrameFormatAwareConnection) connection).getFrameFormat());
+        assertEquals(FrameFormat.MESHTASTIC, ((FrameFormatAwareConnection) connection).getFrameFormat());
         assertEquals("type=SERIAL, port=/dev/ttyUSB0, baud=" + SerialConnection.DEFAULT_BAUD_RATE,
                 TransportConnectionFactory.describe(entry));
     }
@@ -58,6 +58,8 @@ class TransportConnectionFactoryTest {
         });
 
         assertInstanceOf(BleConnection.class, connection);
+        assertEquals(BleProtocolProfile.MESHTASTIC,
+                ((BleConnection) connection).getRequestedProfile());
         assertTrue(supplierCalled.get());
         assertEquals("type=BLE, address=AA:BB:CC:DD:EE:FF, deviceName=Test BLE",
                 TransportConnectionFactory.describe(entry));

@@ -15,7 +15,7 @@ import com.meshtastic.client.model.ProtocolType;
 public record BleDevice(String address, String name, int rssi, ProtocolType protocolType) {
 
     public BleDevice(String address, String name, int rssi) {
-        this(address, name, rssi, ProtocolType.AUTO);
+        this(address, name, rssi, null);
     }
 
     /**

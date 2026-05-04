@@ -98,10 +98,11 @@ class ConnectionManagerTest {
     }
 
     @Test
-    void connectAutoDetectsMeshCoreKissRuntime() throws Exception {
+    void connectUsesExplicitMeshCoreKissRuntime() throws Exception {
         try (TcpMeshCoreKissStubServer server = new TcpMeshCoreKissStubServer("meshcore-test")) {
             ConnectionManager manager = ConnectionManager.getInstance();
             ConnectionEntry entry = new ConnectionEntry("meshcore", "127.0.0.1", server.port());
+            entry.setProtocol(ProtocolType.MESHCORE_KISS);
             manager.addEntry(entry);
 
             manager.connect(entry.getId());
@@ -123,12 +124,13 @@ class ConnectionManagerTest {
     }
 
     @Test
-    void connectAutoDetectsMeshCoreCompanionRuntime() throws Exception {
+    void connectUsesExplicitMeshCoreCompanionBleRuntime() throws Exception {
         MeshCoreCompanionPlatform platform = new MeshCoreCompanionPlatform();
         installBlePlatform(platform);
 
         ConnectionManager manager = ConnectionManager.getInstance();
         ConnectionEntry entry = new ConnectionEntry("meshcore-companion", "AA:BB:CC:DD:EE:FF", "MeshCore Companion");
+        entry.setProtocol(ProtocolType.MESHCORE_COMPANION);
         manager.addEntry(entry);
 
         manager.connect(entry.getId());
@@ -152,11 +154,12 @@ class ConnectionManagerTest {
     }
 
     @Test
-    void connectAutoDetectsMeshCoreCompanionTcpRuntime() throws Exception {
+    void connectUsesExplicitMeshCoreCompanionTcpRuntime() throws Exception {
         try (TcpMeshCoreCompanionStubServer server =
                      new TcpMeshCoreCompanionStubServer("meshcore-companion-tcp")) {
             ConnectionManager manager = ConnectionManager.getInstance();
             ConnectionEntry entry = new ConnectionEntry("meshcore-companion", "127.0.0.1", server.port());
+            entry.setProtocol(ProtocolType.MESHCORE_COMPANION);
             manager.addEntry(entry);
 
             manager.connect(entry.getId());

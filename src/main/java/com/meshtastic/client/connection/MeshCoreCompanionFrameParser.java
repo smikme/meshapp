@@ -15,7 +15,6 @@ public final class MeshCoreCompanionFrameParser implements StreamFrameParser {
 
     private static final int MAX_FRAME_SIZE = 512;
 
-    private final boolean eagerVariableFrames;
     private final ByteArrayOutputStream buffer = new ByteArrayOutputStream(128);
 
     /**
@@ -25,19 +24,6 @@ public final class MeshCoreCompanionFrameParser implements StreamFrameParser {
      * чтобы не обрезать полезную нагрузку раньше окончания stream-паузы.
      */
     public MeshCoreCompanionFrameParser() {
-        this(false);
-    }
-
-    /**
-     * Создаёт parser с возможностью eager-выдачи variable-size packets.
-     * <p>
-     * Такой режим используется auto-detect-ом, где достаточно распознать тип ответа
-     * и не требуется дождаться полного текстового хвоста packet-а.
-     *
-     * @param eagerVariableFrames {@code true}, если variable-size packet можно вернуть сразу после минимальной длины
-     */
-    MeshCoreCompanionFrameParser(boolean eagerVariableFrames) {
-        this.eagerVariableFrames = eagerVariableFrames;
     }
 
     /**
@@ -64,12 +50,6 @@ public final class MeshCoreCompanionFrameParser implements StreamFrameParser {
             return take(expectedLength);
         }
 
-        if (eagerVariableFrames) {
-            int minLength = minimumLength();
-            if (minLength > 0 && buffer.size() >= minLength) {
-                return take(buffer.size());
-            }
-        }
         return null;
     }
 
