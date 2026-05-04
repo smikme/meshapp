@@ -34,6 +34,8 @@ public class LinuxBle implements BlePlatform {
     private static final Logger log = LoggerFactory.getLogger(LinuxBle.class);
 
     private static final int POLL_INTERVAL_MS = 200;
+    private static final int POST_WRITE_DRAIN_ATTEMPTS = 10;
+    private static final int POST_WRITE_DRAIN_INTERVAL_MS = 300;
     private static final int READ_BUFFER_SIZE = 512;
 
     private final LinuxBleLibrary lib;
@@ -216,9 +218,7 @@ public class LinuxBle implements BlePlatform {
             return false;
         } else {
             log.debug("Отправлено {} байт в toRadio", protobufPayload.length);
-            if (lib.meshble_notifications_active() == 0) {
-                scheduleDrainAfterWrite();
-            }
+            scheduleDrainAfterWrite();
             return true;
         }
     }
@@ -317,6 +317,7 @@ public class LinuxBle implements BlePlatform {
 
                 byte[] data = new byte[outLen[0]];
                 System.arraycopy(buffer, 0, data, 0, outLen[0]);
+                log.debug("Linux BLE drained {} bytes from fromRadio", outLen[0]);
 
                 Consumer<byte[]> listener = fromRadioListener;
                 if (listener != null) {
@@ -331,10 +332,13 @@ public class LinuxBle implements BlePlatform {
     }
 
     /**
-     * После каждого writeToRadio — дополнительный drain через 200ms.
-     * Паттерн из WinBle/MacOsBle: ускоряет получение ответа на отправленный запрос.
+     * После каждого writeToRadio — короткий drain burst.
+     * На BlueZ fromNum notifications могут не прийти, хотя WriteValue уже завершился успешно.
      */
     private void scheduleDrainAfterWrite() {
-        pollScheduler.schedule(this::pollFromRadio, POLL_INTERVAL_MS, TimeUnit.MILLISECONDS);
+        for (int i = 1; i <= POST_WRITE_DRAIN_ATTEMPTS; i++) {
+            long delayMs = (long) i * POST_WRITE_DRAIN_INTERVAL_MS;
+            pollScheduler.schedule(this::pollFromRadio, delayMs, TimeUnit.MILLISECONDS);
+        }
     }
 }
