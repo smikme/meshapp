@@ -253,7 +253,11 @@ static int map_bluez_connect_error(const char* name, const char* message) {
         return -2;
     }
     if (contains_text(name, "AlreadyExists") || contains_text(name, "AlreadyPaired") ||
-        contains_text(name, "AlreadyConnected")) {
+        contains_text(name, "AlreadyConnected") ||
+        contains_text(message, "Already connected") ||
+        contains_text(message, "already connected") ||
+        contains_text(message, "Already paired") ||
+        contains_text(message, "already paired")) {
         return 0;
     }
     if (contains_text(name, "Authentication") || contains_text(name, "NotAuthorized") ||
@@ -1184,6 +1188,20 @@ static void do_connect(void* arg) {
 
     set_bool_prop(g_bus, g_device_path, DEVICE_IFACE, "Trusted", 1);
 
+    const char* trigger_uuid = active_notify_trigger_uuid();
+    if (trigger_uuid) {
+        int pair_result = ensure_device_paired(g_bus, g_device_path, ctx->timeout_ms);
+        if (pair_result < 0) {
+            log_msg("[meshble] Pairing failed before Meshtastic connect: %d", pair_result);
+            do_disconnect();
+            ctx->result = pair_result;
+            return;
+        }
+
+        props.services_resolved = 0;
+        props.disconnected_seen = 0;
+    }
+
     /* Connect via async sd_bus_call — allows agent RequestPasskey to be
        processed on the worker thread during the Connect call */
     connect_reply_ctx_t connect_reply = {0};
@@ -1350,49 +1368,6 @@ static void do_connect(void* arg) {
         do_disconnect();
         ctx->result = -1;
         return;
-    }
-
-    const char* trigger_uuid = active_notify_trigger_uuid();
-    if (trigger_uuid) {
-        int pair_result = ensure_device_paired(g_bus, g_device_path, ctx->timeout_ms);
-        if (pair_result < 0) {
-            log_msg("[meshble] Pairing failed before Meshtastic GATT I/O: %d", pair_result);
-            if (connect_slot) sd_bus_slot_unref(connect_slot);
-            do_disconnect();
-            ctx->result = pair_result;
-            return;
-        }
-
-        int64_t post_pair_deadline = now_ms() + 5000;
-        int post_pair_ready = 0;
-        while (now_ms() < post_pair_deadline) {
-            for (;;) {
-                r = sd_bus_process(g_bus, NULL);
-                if (r <= 0) break;
-            }
-            process_tasks();
-
-            int conn_val = 0;
-            if (get_bool_prop(g_bus, g_device_path, DEVICE_IFACE, "Connected", &conn_val) < 0 || !conn_val) {
-                break;
-            }
-            int resolved = 0;
-            if (get_bool_prop(g_bus, g_device_path, DEVICE_IFACE, "ServicesResolved", &resolved) >= 0 && resolved) {
-                post_pair_ready = 1;
-                break;
-            }
-
-            struct pollfd pfd = { .fd = sd_bus_get_fd(g_bus), .events = POLLIN };
-            poll(&pfd, 1, 100);
-        }
-
-        if (!post_pair_ready) {
-            log_msg("[meshble] Device not GATT-ready after pairing");
-            if (connect_slot) sd_bus_slot_unref(connect_slot);
-            do_disconnect();
-            ctx->result = -3;
-            return;
-        }
     }
 
     /* Now find GATT characteristics — services are resolved, objects are valid */
