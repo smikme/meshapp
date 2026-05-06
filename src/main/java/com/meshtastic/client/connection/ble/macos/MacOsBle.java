@@ -36,6 +36,10 @@ public class MacOsBle implements BlePlatform {
 
     private static final Logger log = LoggerFactory.getLogger(MacOsBle.class);
 
+    private static final long CB_MANAGER_STATE_RESETTING = 1;
+    private static final long CB_MANAGER_STATE_UNSUPPORTED = 2;
+    private static final long CB_MANAGER_STATE_UNAUTHORIZED = 3;
+    private static final long CB_MANAGER_STATE_POWERED_OFF = 4;
     private static final long CB_MANAGER_STATE_POWERED_ON = 5;
     private static final long CB_WRITE_WITH_RESPONSE = 0;
     private static final int DRAIN_READ_TIMEOUT_MS = 2_000;
@@ -98,6 +102,7 @@ public class MacOsBle implements BlePlatform {
     private volatile CountDownLatch notifyLatch;
     private volatile CountDownLatch drainLatch;
     private volatile CountDownLatch writeLatch;
+    private volatile boolean connectInProgress;
     private volatile String writeErrorMessage;
     // connect() advances through several async CoreBluetooth phases; callbacks store the first
     // terminal error here so the blocking connect() method can fail fast instead of reporting success.
@@ -213,10 +218,11 @@ public class MacOsBle implements BlePlatform {
         serviceDiscoveryErrorMessage = null;
         characteristicDiscoveryErrorMessage = null;
 
-        log.info("[BLE] Step 2: connectPeripheral...");
-        msgSend(centralManager, "connectPeripheral:options:", peripheral, 0L);
-
+        connectInProgress = true;
         try {
+            log.info("[BLE] Step 2: connectPeripheral...");
+            msgSend(centralManager, "connectPeripheral:options:", peripheral, 0L);
+
             if (!connectLatch.await(BleConstants.CONNECT_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
                 msgSend(centralManager, "cancelPeripheralConnection:", peripheral);
                 throw new ConnectionException("BLE connect timeout (" +
@@ -326,6 +332,8 @@ public class MacOsBle implements BlePlatform {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new ConnectionException("BLE connect interrupted: " + address, e);
+        } finally {
+            connectInProgress = false;
         }
     }
 
@@ -519,6 +527,118 @@ public class MacOsBle implements BlePlatform {
         }
     }
 
+    private void handleCentralManagerStateChanged(long state) {
+        if (state != CB_MANAGER_STATE_POWERED_ON) {
+            // The latch must be reset before publishing the non-powered adapter state so
+            // waitForPoweredOn() cannot reuse a previously-counted-down latch after wake.
+            poweredOnLatch = new CountDownLatch(1);
+        }
+
+        adapterState = adapterStateFromCoreBluetoothState(state);
+        if (state == CB_MANAGER_STATE_POWERED_ON) {
+            poweredOnLatch.countDown();
+            return;
+        }
+
+        tearDownLocalSessionAfterCentralManagerLoss(state);
+    }
+
+    private static AdapterState adapterStateFromCoreBluetoothState(long state) {
+        return switch ((int) state) {
+            case (int) CB_MANAGER_STATE_POWERED_ON -> AdapterState.POWERED_ON;
+            case (int) CB_MANAGER_STATE_POWERED_OFF -> AdapterState.POWERED_OFF;
+            case (int) CB_MANAGER_STATE_UNSUPPORTED -> AdapterState.UNSUPPORTED;
+            case (int) CB_MANAGER_STATE_UNAUTHORIZED -> AdapterState.UNAUTHORIZED;
+            default -> AdapterState.UNKNOWN;
+        };
+    }
+
+    private void tearDownLocalSessionAfterCentralManagerLoss(long state) {
+        String message = "CoreBluetooth manager became " + coreBluetoothStateName(state);
+        boolean shouldNotifyDisconnected = false;
+        boolean shouldNotifyError = false;
+
+        synchronized (connectionIoLock) {
+            boolean hadSession = connected
+                    || connectedPeripheral != 0
+                    || fromRadioCharacteristic != 0
+                    || toRadioCharacteristic != 0
+                    || fromNumCharacteristic != 0;
+            boolean pendingConnect = connectInProgress;
+            if (!hadSession && !pendingConnect) {
+                return;
+            }
+
+            log.warn("[BLE] {}; clearing local BLE session without native cleanup", message);
+            stopPolling();
+
+            long peripheral = connectedPeripheral;
+            if (peripheral != 0) {
+                dropCachedPeripheralReference(peripheral);
+            }
+
+            connected = false;
+            connectedPeripheral = 0;
+            fromRadioCharacteristic = 0;
+            toRadioCharacteristic = 0;
+            fromNumCharacteristic = 0;
+            drainInProgress.set(false);
+
+            if (pendingConnect) {
+                if (connectErrorMessage == null) {
+                    connectErrorMessage = message;
+                }
+                if (serviceDiscoveryErrorMessage == null) {
+                    serviceDiscoveryErrorMessage = message;
+                }
+                if (characteristicDiscoveryErrorMessage == null) {
+                    characteristicDiscoveryErrorMessage = message;
+                }
+                countDown(connectLatch);
+                countDown(serviceDiscoveryLatch);
+                countDown(characteristicDiscoveryLatch);
+                countDown(notifyLatch);
+                shouldNotifyError = !hadSession;
+            }
+
+            CountDownLatch pendingWrite = writeLatch;
+            if (pendingWrite != null) {
+                writeErrorMessage = message;
+                pendingWrite.countDown();
+            }
+            countDown(drainLatch);
+            shouldNotifyDisconnected = hadSession;
+        }
+
+        Consumer<BleState> listener = stateListener;
+        if (listener == null) {
+            return;
+        }
+        if (shouldNotifyDisconnected) {
+            listener.accept(new BleState.Disconnected());
+        } else if (shouldNotifyError) {
+            listener.accept(new BleState.Error(message, null));
+        }
+    }
+
+    private static void countDown(CountDownLatch latch) {
+        if (latch != null) {
+            latch.countDown();
+        }
+    }
+
+    private static String coreBluetoothStateName(long state) {
+        return switch ((int) state) {
+            case 0 -> "Unknown";
+            case (int) CB_MANAGER_STATE_RESETTING -> "Resetting";
+            case (int) CB_MANAGER_STATE_UNSUPPORTED -> "Unsupported";
+            case (int) CB_MANAGER_STATE_UNAUTHORIZED -> "Unauthorized";
+            case (int) CB_MANAGER_STATE_POWERED_OFF -> "PoweredOff";
+            case (int) CB_MANAGER_STATE_POWERED_ON -> "PoweredOn";
+            default -> "state " + state;
+        };
+    }
+
     /**
      * Caches a CoreBluetooth peripheral under its stable identifier.
      * <p>
@@ -561,6 +681,29 @@ public class MacOsBle implements BlePlatform {
                     && discoveredPeripherals.remove(entry.getKey(), cachedPeripheral)) {
                 msgSend(peripheral, "release");
                 log.info("[BLE] Evicted cached peripheral {} after disconnect", entry.getKey());
+                return;
+            }
+        }
+    }
+
+    /**
+     * Removes stale reconnect cache entries without sending Objective-C messages to them.
+     * <p>
+     * This path is used when CoreBluetooth has already left PoweredOn. Calling release or
+     * cancelPeripheralConnection on old CoreBluetooth objects during sleep/wake can crash
+     * below the Java exception boundary, so correctness here is to stop reusing the pointer.
+     */
+    private void dropCachedPeripheralReference(long peripheral) {
+        if (peripheral == 0) {
+            return;
+        }
+        for (Map.Entry<String, Long> entry : discoveredPeripherals.entrySet()) {
+            Long cachedPeripheral = entry.getValue();
+            if (cachedPeripheral != null
+                    && cachedPeripheral == peripheral
+                    && discoveredPeripherals.remove(entry.getKey(), cachedPeripheral)) {
+                log.info("[BLE] Dropped cached peripheral reference {} after CoreBluetooth state loss",
+                        entry.getKey());
                 return;
             }
         }
@@ -728,16 +871,7 @@ public class MacOsBle implements BlePlatform {
             if (me == null) { return; }
             long state = msgSend(central, "state");
             log.info("CBCentralManager state changed: {}", state);
-            me.adapterState = switch ((int) state) {
-                case 5 -> AdapterState.POWERED_ON;
-                case 4 -> AdapterState.POWERED_OFF;
-                case 2 -> AdapterState.UNSUPPORTED;
-                case 3 -> AdapterState.UNAUTHORIZED;
-                default -> AdapterState.UNKNOWN;
-            };
-            if (state == CB_MANAGER_STATE_POWERED_ON) {
-                me.poweredOnLatch.countDown();
-            }
+            me.handleCentralManagerStateChanged(state);
         };
         addMethod(cls, "centralManagerDidUpdateState:", cbDidUpdateState, "v@:@");
 
