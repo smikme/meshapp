@@ -585,20 +585,32 @@ public class TileMapView extends StackPane {
         return visibleTileKeys().size();
     }
 
+    /**
+     * Возвращает количество тайлов, которые будут загружены кнопкой оффлайн-сохранения.
+     * Если область выделена, учитываются все масштабы этой области; иначе текущий viewport.
+     */
+    public int downloadTileCount() {
+        return downloadTileKeys().size();
+    }
+
     /** @return путь к встроенному локальному кэшу тайлов */
     public Path cacheRoot() {
         return CACHE_ROOT;
     }
 
     /**
-     * Загружает все тайлы, видимые при текущем центре и масштабе, во встроенный кэш.
+     * Загружает тайлы во встроенный кэш.
+     * <p>
+     * Если пользователь выделил область, скачиваются все тайлы этой области на всех
+     * поддерживаемых масштабах. Без выделенной области сохраняется прежнее поведение:
+     * загружаются видимые тайлы текущего масштаба.
      *
      * @param progressConsumer обработчик прогресса загрузки
      */
     public void downloadVisibleTiles(Consumer<DownloadProgress> progressConsumer) {
-        List<TileKey> keys = visibleTileKeys();
+        List<TileKey> keys = downloadTileKeys();
         if (keys.isEmpty()) {
-            progressConsumer.accept(new DownloadProgress(0, 0, 0, "Нет видимых тайлов"));
+            progressConsumer.accept(new DownloadProgress(0, 0, 0, "Нет тайлов для загрузки"));
             return;
         }
 
@@ -1007,6 +1019,59 @@ public class TileMapView extends StackPane {
             }
         }
         return keys;
+    }
+
+    /**
+     * Рассчитывает ключи тайлов для оффлайн-загрузки.
+     */
+    private List<TileKey> downloadTileKeys() {
+        if (selectedArea != null) {
+            return areaTileKeys(selectedArea, MIN_ZOOM, MAX_ZOOM);
+        }
+        return visibleTileKeys();
+    }
+
+    /**
+     * Рассчитывает все тайлы, пересекающие географическую область на заданном диапазоне масштабов.
+     */
+    private static List<TileKey> areaTileKeys(GeoBounds area, int minZoom, int maxZoom) {
+        if (area == null) {
+            return List.of();
+        }
+
+        List<TileKey> keys = new ArrayList<>();
+        int startZoom = clampZoom(minZoom);
+        int endZoom = clampZoom(maxZoom);
+        if (startZoom > endZoom) {
+            return keys;
+        }
+
+        for (int tileZoom = startZoom; tileZoom <= endZoom; tileZoom++) {
+            int tileCount = 1 << tileZoom;
+            double westTile = lonToPixelX(area.west(), tileZoom) / TILE_SIZE;
+            double eastTile = lonToPixelX(area.east(), tileZoom) / TILE_SIZE;
+            double northTile = latToPixelY(area.north(), tileZoom) / TILE_SIZE;
+            double southTile = latToPixelY(area.south(), tileZoom) / TILE_SIZE;
+
+            int startX = clampTileIndex((int) Math.floor(Math.min(westTile, eastTile)), tileCount);
+            int endX = clampTileIndex((int) Math.floor(Math.max(westTile, eastTile)), tileCount);
+            int startY = clampTileIndex((int) Math.floor(Math.min(northTile, southTile)), tileCount);
+            int endY = clampTileIndex((int) Math.floor(Math.max(northTile, southTile)), tileCount);
+
+            for (int x = startX; x <= endX; x++) {
+                for (int y = startY; y <= endY; y++) {
+                    keys.add(new TileKey(tileZoom, x, y));
+                }
+            }
+        }
+        return keys;
+    }
+
+    /**
+     * Ограничивает индекс тайла валидным диапазоном для масштаба.
+     */
+    private static int clampTileIndex(int value, int tileCount) {
+        return Math.max(0, Math.min(tileCount - 1, value));
     }
 
     /**

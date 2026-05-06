@@ -29,6 +29,7 @@ import javafx.scene.control.CustomMenuItem;
 import javafx.scene.control.Label;
 import javafx.scene.control.MenuItem;
 import javafx.scene.control.OverrunStyle;
+import javafx.scene.control.ProgressBar;
 import javafx.scene.control.SeparatorMenuItem;
 import javafx.scene.control.TextField;
 import javafx.scene.control.ToggleButton;
@@ -71,6 +72,8 @@ public class FormMap extends Form {
 
     private static final int RECENT_TRACE_LIMIT = 20;
     private static final int TRACE_NODE_CACHE_LIMIT = 2_000;
+    private static final double DOWNLOAD_PROGRESS_WIDTH = 180;
+    private static final double STATUS_LEGEND_WIDTH = 260;
     private static final Pattern TRACE_SEGMENT_PATTERN = Pattern.compile(" →(-?\\d+[.,]\\d+)dB→ | → ");
     private static final Pattern TRACE_NODE_ID_PATTERN = Pattern.compile("!([0-9a-fA-F]{1,8})");
     private static final Pattern TRACE_SECTION_LABEL_PATTERN = Pattern.compile("(?iu)^\\s*(?:прямой|обратный)\\s*:\\s*");
@@ -81,6 +84,7 @@ public class FormMap extends Form {
     private final Label measureLabel = new Label();
     private final Label areaLabel = new Label();
     private final Label tileDirectoryLabel = new Label();
+    private final ProgressBar downloadProgressBar = new ProgressBar(0);
     private final TextField searchField = new TextField();
     private final ContextMenu searchSuggestionMenu = new ContextMenu();
     private final Button favoriteFilterButton = new Button();
@@ -251,7 +255,8 @@ public class FormMap extends Form {
         Button zoomOutButton = iconButton("−", "Отдалить");
         zoomOutButton.setOnAction(event -> mapView.zoomOut());
 
-        downloadButton.setTooltip(new Tooltip("Скачать видимые OSM-тайлы текущего масштаба в локальный кэш"));
+        downloadButton.setTooltip(new Tooltip(
+                "Скачать выделенную область на всех масштабах; без выделения — видимые тайлы текущего масштаба"));
         downloadButton.setOnAction(event -> downloadVisibleTiles());
 
         Button tileDirectoryButton = new Button("Каталог тайлов");
@@ -282,14 +287,30 @@ public class FormMap extends Form {
 
         pointerLabel.getStyleClass().add("map-status-label");
         statusLabel.getStyleClass().add("map-status-label");
+        statusLabel.setTextOverrun(OverrunStyle.ELLIPSIS);
+        statusLabel.setMinWidth(STATUS_LEGEND_WIDTH);
+        statusLabel.setPrefWidth(STATUS_LEGEND_WIDTH);
+        statusLabel.setMaxWidth(STATUS_LEGEND_WIDTH);
         measureLabel.getStyleClass().add("map-status-label");
         areaLabel.getStyleClass().add("map-status-label");
         tileDirectoryLabel.getStyleClass().add("map-status-label");
         tileDirectoryLabel.setTextOverrun(OverrunStyle.LEADING_ELLIPSIS);
         tileDirectoryLabel.setMaxWidth(Double.MAX_VALUE);
+        downloadProgressBar.setMinWidth(DOWNLOAD_PROGRESS_WIDTH);
+        downloadProgressBar.setPrefWidth(DOWNLOAD_PROGRESS_WIDTH);
+        downloadProgressBar.setMaxWidth(DOWNLOAD_PROGRESS_WIDTH);
+        downloadProgressBar.setVisible(false);
         updateTileDirectoryLabel();
 
-        HBox statusBar = new HBox(16, statusLabel, pointerLabel, measureLabel, areaLabel, tileDirectoryLabel);
+        HBox statusBar = new HBox(
+                16,
+                downloadProgressBar,
+                statusLabel,
+                pointerLabel,
+                measureLabel,
+                areaLabel,
+                tileDirectoryLabel
+        );
         statusBar.getStyleClass().add("map-status-bar");
         statusBar.setAlignment(Pos.CENTER_LEFT);
         HBox.setHgrow(tileDirectoryLabel, Priority.ALWAYS);
@@ -1403,23 +1424,38 @@ public class FormMap extends Form {
     }
 
     /**
-     * Запускает загрузку видимых тайлов в локальный кэш и отображает прогресс.
+     * Запускает загрузку тайлов в локальный кэш и отображает прогресс.
      */
     private void downloadVisibleTiles() {
         downloadButton.setDisable(true);
-        int count = mapView.visibleTileCount();
+        int count = mapView.downloadTileCount();
         statusLabel.setText("Загрузка " + count + " тайлов...");
+        showDownloadProgress(0);
         mapView.downloadVisibleTiles(progress -> {
             statusLabel.setText(progress.message());
             if (progress.total() == 0) {
                 downloadButton.setDisable(false);
+                hideDownloadProgress();
                 return;
             }
+            showDownloadProgress((double) progress.completed() / progress.total());
             if (progress.completed() >= progress.total()) {
                 downloadButton.setDisable(false);
-                statusLabel.setText("Доступно " + progress.available() + " из " + progress.total() + " тайлов");
+                String message = "Доступно " + progress.available() + " из " + progress.total() + " тайлов";
+                statusLabel.setText(message);
+                hideDownloadProgress();
             }
         });
+    }
+
+    private void showDownloadProgress(double progress) {
+        downloadProgressBar.setVisible(true);
+        downloadProgressBar.setProgress(Math.max(0, Math.min(1, progress)));
+    }
+
+    private void hideDownloadProgress() {
+        downloadProgressBar.setProgress(0);
+        downloadProgressBar.setVisible(false);
     }
 
     /**
