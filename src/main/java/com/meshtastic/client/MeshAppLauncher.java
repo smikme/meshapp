@@ -7,6 +7,8 @@ import com.meshtastic.client.utils.AppPreferences;
 /**
  * Точка входа до загрузки JavaFX Application.
  * Нужна для ранней установки JVM/System properties вроде prism.order.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public final class MeshAppLauncher {
 

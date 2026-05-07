@@ -2,8 +2,10 @@ package com.meshtastic.client.simple;
 
 import com.meshtastic.client.connection.ble.BleDevice;
 import com.meshtastic.client.connection.ble.BlePlatformFactory;
+import com.meshtastic.client.connection.ble.BleProtocolProfile;
 import com.meshtastic.client.model.ConnectionEntry;
 import com.meshtastic.client.model.ConnectionType;
+import com.meshtastic.client.model.ProtocolType;
 import com.meshtastic.client.service.BleDeviceDiscoveryService;
 import com.meshtastic.client.service.SerialPortDiscoveryService;
 import com.meshtastic.client.service.SerialPortDiscoveryService.DiscoveredPort;
@@ -23,9 +25,14 @@ import javafx.scene.layout.VBox;
 import java.util.List;
 import java.util.function.Consumer;
 
+/**
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
+ */
 public class SimpleConnectionForm extends VBox {
 
+    private final ConnectionEntry editingEntry;
     private final ComboBox<String> cmbType;
+    private final ComboBox<String> cmbProtocol;
     private final TextField txtName;
 
     // TCP fields
@@ -44,10 +51,18 @@ public class SimpleConnectionForm extends VBox {
     private final Label lblBleStatus;
 
     private Consumer<ConnectionEntry> onSave;
+    private String savedPortName;
+    private String savedBleDeviceLabel;
     private final Consumer<List<DiscoveredPort>> discoveryListener = this::onPortsDiscovered;
     private final Consumer<List<BleDevice>> bleDiscoveryListener = this::onBleDevicesDiscovered;
 
     public SimpleConnectionForm() {
+        this(null);
+    }
+
+    public SimpleConnectionForm(ConnectionEntry editingEntry) {
+        this.editingEntry = editingEntry;
+
         setSpacing(8);
         setPadding(new Insets(20, 30, 20, 30));
         setPrefWidth(340);
@@ -55,18 +70,32 @@ public class SimpleConnectionForm extends VBox {
         setMaxHeight(Double.MAX_VALUE);
         getStyleClass().add("modal-side-panel");
 
-        Label title = new Label("Новое подключение");
+        Label title = new Label(editingEntry == null ? "Новое подключение" : "Редактирование подключения");
         title.getStyleClass().add("dialog-title");
 
         // Тип подключения
         cmbType = new ComboBox<>();
         cmbType.getItems().addAll("TCP", "Serial / USB");
-        if (BlePlatformFactory.isSupported()) {
+        if (BlePlatformFactory.isSupported()
+                || (editingEntry != null && editingEntry.getEffectiveType() == ConnectionType.BLE)) {
             cmbType.getItems().add("BLE");
         }
         cmbType.getSelectionModel().selectFirst();
         cmbType.setMaxWidth(Double.MAX_VALUE);
-        cmbType.setOnAction(e -> updateFieldVisibility());
+
+        // Протокол
+        cmbProtocol = new ComboBox<>();
+        cmbProtocol.setMaxWidth(Double.MAX_VALUE);
+        cmbProtocol.setOnAction(e -> {
+            if (isBleMode()) {
+                refreshBleDevices();
+            }
+        });
+        updateProtocolOptions();
+        cmbType.setOnAction(e -> {
+            updateProtocolOptions();
+            updateFieldVisibility();
+        });
 
         // Название
         txtName = new TextField();
@@ -86,6 +115,7 @@ public class SimpleConnectionForm extends VBox {
 
         // --- Serial fields ---
         cmbPort = new ComboBox<>();
+        cmbPort.setEditable(true);
         cmbPort.setPromptText("Выберите порт...");
         cmbPort.setMaxWidth(Double.MAX_VALUE);
         HBox.setHgrow(cmbPort, Priority.ALWAYS);
@@ -109,6 +139,7 @@ public class SimpleConnectionForm extends VBox {
 
         // --- BLE fields ---
         cmbBleDevice = new ComboBox<>();
+        cmbBleDevice.setEditable(true);
         cmbBleDevice.setPromptText("Поиск устройств...");
         cmbBleDevice.setMaxWidth(Double.MAX_VALUE);
         HBox.setHgrow(cmbBleDevice, Priority.ALWAYS);
@@ -146,12 +177,15 @@ public class SimpleConnectionForm extends VBox {
         getChildren().addAll(
                 title, new Separator(),
                 new Label("Тип подключения"), cmbType,
+                new Label("Протокол"), cmbProtocol,
                 new Label("Название"), txtName,
                 tcpFields,
                 serialFields,
                 bleFields,
                 buttons
         );
+
+        populateFromEntry(editingEntry);
     }
 
     public void setOnSave(Consumer<ConnectionEntry> onSave) {
@@ -186,9 +220,17 @@ public class SimpleConnectionForm extends VBox {
             }
             BleDevice device = findBleDeviceByLabel(selectedDevice);
             if (device == null) {
-                return null;
+                String address = extractBleAddress(selectedDevice);
+                if (address == null || address.isBlank()) {
+                    return null;
+                }
+                ConnectionEntry entry = new ConnectionEntry(name, address, extractBleDeviceName(selectedDevice));
+                entry.setProtocol(selectedProtocolType());
+                return withEditingMetadata(entry);
             }
-            return new ConnectionEntry(name, device.address(), device.displayName());
+            ConnectionEntry entry = new ConnectionEntry(name, device.address(), device.displayName());
+            entry.setProtocol(selectedProtocolForDevice(device));
+            return withEditingMetadata(entry);
         } else if (isSerialMode()) {
             String selectedPort = cmbPort.getValue();
             if (selectedPort == null || selectedPort.isEmpty()) {
@@ -201,7 +243,9 @@ public class SimpleConnectionForm extends VBox {
             } catch (NumberFormatException e) {
                 return null;
             }
-            return new ConnectionEntry(name, portName, baudRate, ConnectionType.SERIAL);
+            ConnectionEntry entry = new ConnectionEntry(name, portName, baudRate, ConnectionType.SERIAL);
+            entry.setProtocol(selectedProtocolType());
+            return withEditingMetadata(entry);
         } else {
             String host = txtHost.getText().trim();
             if (host.isEmpty()) {
@@ -213,7 +257,9 @@ public class SimpleConnectionForm extends VBox {
             } catch (NumberFormatException e) {
                 return null;
             }
-            return new ConnectionEntry(name, host, port);
+            ConnectionEntry entry = new ConnectionEntry(name, host, port);
+            entry.setProtocol(selectedProtocolType());
+            return withEditingMetadata(entry);
         }
     }
 
@@ -231,7 +277,7 @@ public class SimpleConnectionForm extends VBox {
     }
 
     private boolean isSerialMode() {
-        return cmbType.getSelectionModel().getSelectedIndex() == 1;
+        return "Serial / USB".equals(cmbType.getSelectionModel().getSelectedItem());
     }
 
     private boolean isBleMode() {
@@ -259,6 +305,71 @@ public class SimpleConnectionForm extends VBox {
         }
     }
 
+    private void populateFromEntry(ConnectionEntry entry) {
+        if (entry == null) {
+            updateFieldVisibility();
+            return;
+        }
+
+        txtName.setText(valueOrEmpty(entry.getName()));
+        selectConnectionType(entry.getEffectiveType());
+        updateProtocolOptions();
+        String protocolLabel = labelForProtocol(entry.getEffectiveProtocol());
+        if (cmbProtocol.getItems().contains(protocolLabel)) {
+            cmbProtocol.setValue(protocolLabel);
+        }
+
+        switch (entry.getEffectiveType()) {
+            case TCP -> {
+                txtHost.setText(valueOrEmpty(entry.getHost()));
+                txtPort.setText(String.valueOf(entry.getPort() > 0 ? entry.getPort() : 4403));
+            }
+            case SERIAL -> {
+                savedPortName = entry.getPortName();
+                if (savedPortName != null && !savedPortName.isBlank()) {
+                    cmbPort.setValue(savedPortName);
+                }
+                txtBaudRate.setText(String.valueOf(entry.getBaudRate() > 0 ? entry.getBaudRate() : 115200));
+            }
+            case BLE -> {
+                savedBleDeviceLabel = savedBleDeviceLabel(entry);
+                if (savedBleDeviceLabel != null) {
+                    cmbBleDevice.getItems().add(savedBleDeviceLabel);
+                    cmbBleDevice.setValue(savedBleDeviceLabel);
+                }
+            }
+        }
+
+        updateFieldVisibility();
+    }
+
+    private void selectConnectionType(ConnectionType type) {
+        if (type == ConnectionType.BLE && !cmbType.getItems().contains("BLE")) {
+            cmbType.getItems().add("BLE");
+        }
+        cmbType.setValue(switch (type) {
+            case SERIAL -> "Serial / USB";
+            case BLE -> "BLE";
+            case TCP -> "TCP";
+        });
+    }
+
+    private void updateProtocolOptions() {
+        ProtocolType previous = selectedProtocolType();
+        cmbProtocol.getItems().clear();
+        if (isBleMode()) {
+            cmbProtocol.getItems().addAll("Meshtastic", "MeshCore Companion");
+        } else {
+            cmbProtocol.getItems().addAll("Meshtastic", "MeshCore KISS", "MeshCore Companion");
+        }
+        String previousLabel = labelForProtocol(previous);
+        if (cmbProtocol.getItems().contains(previousLabel)) {
+            cmbProtocol.setValue(previousLabel);
+        } else {
+            cmbProtocol.setValue("Meshtastic");
+        }
+    }
+
     private void refreshPorts() {
         List<DiscoveredPort> ports = SerialPortDiscoveryService.getInstance().scanNow();
         populatePortCombo(ports);
@@ -267,8 +378,16 @@ public class SimpleConnectionForm extends VBox {
     private void refreshBleDevices() {
         lblBleStatus.setText("Сканирование...");
         BleDeviceDiscoveryService discovery = BleDeviceDiscoveryService.getInstance();
+        discovery.setScanProfile(BleProtocolProfile.forProtocol(selectedProtocolType()));
         discovery.addListener(bleDiscoveryListener);
         discovery.startScanning();
+        if (!discovery.isScanning()) {
+            String errorMessage = discovery.getLastErrorMessage();
+            lblBleStatus.setText(errorMessage == null || errorMessage.isBlank()
+                    ? "BLE сканирование не запущено."
+                    : errorMessage);
+            return;
+        }
 
         // Показать уже найденные устройства
         List<BleDevice> devices = discovery.getDiscoveredDevices();
@@ -289,12 +408,19 @@ public class SimpleConnectionForm extends VBox {
         String previousSelection = cmbPort.getValue();
         cmbPort.getItems().clear();
 
+        boolean savedPortDiscovered = false;
         for (DiscoveredPort port : ports) {
             String label = port.descriptivePortName() + " (" + port.systemPortName() + ")";
             if (port.likelyMeshtastic()) {
                 label += " \u2713";
             }
+            if (savedPortName != null && savedPortName.equals(port.systemPortName())) {
+                savedPortDiscovered = true;
+            }
             cmbPort.getItems().add(label);
+        }
+        if (savedPortName != null && !savedPortName.isBlank() && !savedPortDiscovered) {
+            cmbPort.getItems().add(savedPortName);
         }
 
         // Восстановить предыдущий выбор
@@ -323,15 +449,22 @@ public class SimpleConnectionForm extends VBox {
         String previousSelection = cmbBleDevice.getValue();
         cmbBleDevice.getItems().clear();
 
+        if (savedBleDeviceLabel != null) {
+            cmbBleDevice.getItems().add(savedBleDeviceLabel);
+        }
+
         for (BleDevice device : devices) {
-            String label = device.displayName() + " (" + device.rssi() + " dBm)";
+            String label = bleDeviceLabel(device);
+            if (sameBleAddress(savedBleDeviceLabel, device.address())) {
+                continue;
+            }
             cmbBleDevice.getItems().add(label);
         }
 
         // Восстановить предыдущий выбор
         if (previousSelection != null) {
             for (String item : cmbBleDevice.getItems()) {
-                if (item.startsWith(previousSelection.split(" \\(")[0])) {
+                if (sameBleSelection(previousSelection, item)) {
                     cmbBleDevice.setValue(item);
                     break;
                 }
@@ -355,9 +488,9 @@ public class SimpleConnectionForm extends VBox {
      */
     private BleDevice findBleDeviceByLabel(String label) {
         List<BleDevice> devices = BleDeviceDiscoveryService.getInstance().getDiscoveredDevices();
+        String selectedAddress = extractBleAddress(label);
         for (BleDevice device : devices) {
-            String expected = device.displayName() + " (" + device.rssi() + " dBm)";
-            if (label.equals(expected)) {
+            if (selectedAddress != null && selectedAddress.equalsIgnoreCase(device.address())) {
                 return device;
             }
         }
@@ -368,6 +501,14 @@ public class SimpleConnectionForm extends VBox {
             }
         }
         return null;
+    }
+
+    private ConnectionEntry withEditingMetadata(ConnectionEntry entry) {
+        if (editingEntry != null) {
+            entry.setId(editingEntry.getId());
+            entry.setNodeId(editingEntry.getNodeId());
+        }
+        return entry;
     }
 
     /**
@@ -382,5 +523,93 @@ public class SimpleConnectionForm extends VBox {
             return formatted.substring(start + 1, end);
         }
         return formatted;
+    }
+
+    private static String savedBleDeviceLabel(ConnectionEntry entry) {
+        if (entry.getBleAddress() == null || entry.getBleAddress().isBlank()) {
+            return null;
+        }
+        String name = entry.getBleDeviceName() != null && !entry.getBleDeviceName().isBlank()
+                ? entry.getBleDeviceName()
+                : entry.getBleAddress();
+        return name + " (" + entry.getBleAddress() + ")";
+    }
+
+    private static String bleDeviceLabel(BleDevice device) {
+        return device.displayName() + " (" + device.address() + ", " + device.rssi() + " dBm)";
+    }
+
+    private static boolean sameBleSelection(String left, String right) {
+        String leftAddress = extractBleAddress(left);
+        String rightAddress = extractBleAddress(right);
+        if (leftAddress != null && rightAddress != null) {
+            return leftAddress.equalsIgnoreCase(rightAddress);
+        }
+        return left != null && left.equals(right);
+    }
+
+    private static boolean sameBleAddress(String label, String address) {
+        String labelAddress = extractBleAddress(label);
+        return labelAddress != null && address != null && labelAddress.equalsIgnoreCase(address);
+    }
+
+    private static String extractBleAddress(String label) {
+        if (label == null || label.isBlank()) {
+            return null;
+        }
+        int start = label.lastIndexOf('(');
+        int end = label.lastIndexOf(')');
+        if (start >= 0 && end > start) {
+            String address = label.substring(start + 1, end);
+            int comma = address.indexOf(',');
+            if (comma >= 0) {
+                address = address.substring(0, comma);
+            }
+            return address.trim();
+        }
+        return label.trim();
+    }
+
+    private static String extractBleDeviceName(String label) {
+        if (label == null || label.isBlank()) {
+            return null;
+        }
+        int start = label.lastIndexOf(" (");
+        if (start > 0) {
+            return label.substring(0, start).trim();
+        }
+        return label.trim();
+    }
+
+    private static String valueOrEmpty(String value) {
+        return value != null ? value : "";
+    }
+
+    private ProtocolType selectedProtocolForDevice(BleDevice device) {
+        return selectedProtocolType();
+    }
+
+    private ProtocolType selectedProtocolType() {
+        String value = cmbProtocol == null ? null : cmbProtocol.getValue();
+        if (value == null || value.isBlank()) {
+            return ProtocolType.MESHTASTIC;
+        }
+        return switch (value) {
+            case "Meshtastic" -> ProtocolType.MESHTASTIC;
+            case "MeshCore KISS" -> ProtocolType.MESHCORE_KISS;
+            case "MeshCore Companion" -> ProtocolType.MESHCORE_COMPANION;
+            default -> ProtocolType.MESHTASTIC;
+        };
+    }
+
+    private static String labelForProtocol(ProtocolType protocolType) {
+        if (protocolType == null) {
+            return "Meshtastic";
+        }
+        return switch (protocolType) {
+            case MESHTASTIC -> "Meshtastic";
+            case MESHCORE_KISS -> "MeshCore KISS";
+            case MESHCORE_COMPANION -> "MeshCore Companion";
+        };
     }
 }

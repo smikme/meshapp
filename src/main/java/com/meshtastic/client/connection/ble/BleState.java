@@ -2,6 +2,8 @@ package com.meshtastic.client.connection.ble;
 
 /**
  * Событие изменения состояния BLE-соединения.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public sealed interface BleState {
 

@@ -30,6 +30,8 @@ import java.util.function.Predicate;
  * + кнопка отправки + полоса ответа.
  *
  * <p>Расширяет VBox (содержит replyBar + inputBar).
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class ChatInputBar extends VBox {
 

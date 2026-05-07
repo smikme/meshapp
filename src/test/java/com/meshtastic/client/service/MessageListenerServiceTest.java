@@ -33,6 +33,8 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 
 import org.slf4j.LoggerFactory;
@@ -44,6 +46,9 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+/**
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
+ */
 class MessageListenerServiceTest {
 
     @TempDir
@@ -57,6 +62,7 @@ class MessageListenerServiceTest {
         TestEnvironmentSupport.setUserHome(tempHome);
         TestEnvironmentSupport.ensureJavaFxStarted();
         TestEnvironmentSupport.resetSingletons();
+        AppPreferences.setNotificationsEnabled(false);
         MessageDbService.getInstance();
         state = new DeviceState();
         state.setMyNodeNum(0x12345678);
@@ -81,6 +87,29 @@ class MessageListenerServiceTest {
     }
 
     @Test
+    void adminRingtoneResponseStoresRingtoneAndNotifiesListeners() {
+        AtomicBoolean notified = new AtomicBoolean(false);
+        state.addRingtoneListener(() -> notified.set(true));
+        AdminProtos.AdminMessage admin = AdminProtos.AdminMessage.newBuilder()
+                .setGetRingtoneResponse("ring:d=4,o=5,b=120:c")
+                .build();
+        MeshProtos.MeshPacket packet = MeshProtos.MeshPacket.newBuilder()
+                .setFrom(state.getMyNodeNum())
+                .setTo(state.getMyNodeNum())
+                .setDecoded(MeshProtos.Data.newBuilder()
+                        .setPortnum(Portnums.PortNum.ADMIN_APP)
+                        .setPayload(admin.toByteString())
+                        .build())
+                .build();
+
+        service.onMeshPacket(packet);
+
+        assertTrue(state.isRingtoneLoaded());
+        assertEquals("ring:d=4,o=5,b=120:c", state.getRingtone());
+        assertTrue(notified.get());
+    }
+
+    @Test
     void onMeshPacketStoresIncomingChannelMessageInStateAndDatabase() {
         boolean notificationsEnabled = AppPreferences.isNotificationsEnabled();
         AppPreferences.setNotificationsEnabled(false);
@@ -102,12 +131,16 @@ class MessageListenerServiceTest {
                             .build())
                     .build();
 
+            long beforeReceive = System.currentTimeMillis() / 1000;
             service.onMeshPacket(packet);
+            long afterReceive = System.currentTimeMillis() / 1000;
 
             MeshMessage inMemory = state.getMessages(2).getFirst();
             assertEquals("hello channel", inMemory.getText());
             assertEquals("!11111111", inMemory.getFromNodeId());
             assertEquals("!ffffffff", inMemory.getToNodeId());
+            assertTrue(inMemory.getTimestamp() >= beforeReceive);
+            assertTrue(inMemory.getTimestamp() <= afterReceive);
             assertEquals(MeshMessage.DeliveryStatus.DELIVERED, inMemory.getStatus());
             assertEquals(-77, inMemory.getRxRssi());
             assertEquals(8.5f, inMemory.getRxSnr());
@@ -116,6 +149,7 @@ class MessageListenerServiceTest {
             MeshMessage persisted = MessageDbService.getInstance().findByPacketId(7001);
             assertNotNull(persisted);
             assertEquals("hello channel", persisted.getText());
+            assertEquals(inMemory.getTimestamp(), persisted.getTimestamp());
             assertEquals(MeshMessage.DeliveryStatus.DELIVERED, persisted.getStatus());
             assertTrue(persisted.isViaMqtt());
         } finally {
@@ -412,6 +446,52 @@ class MessageListenerServiceTest {
     }
 
     @Test
+    void onMeshPacketDoesNotDropDeferredBroadcastBurstWhileChannelCatalogLoads() throws Exception {
+        state.clear();
+        state.setMyNodeNum(0x12345678);
+        state.addChannel(ChannelProtos.Channel.newBuilder()
+                .setIndex(0)
+                .setRole(ChannelProtos.Channel.Role.PRIMARY)
+                .build());
+        state.addChannel(ChannelProtos.Channel.newBuilder()
+                .setIndex(2)
+                .setRole(ChannelProtos.Channel.Role.SECONDARY)
+                .build());
+
+        int packetCount = 250;
+        for (int i = 0; i < packetCount; i++) {
+            MeshProtos.MeshPacket packet = MeshProtos.MeshPacket.newBuilder()
+                    .setFrom(0x11111111)
+                    .setTo(0xFFFFFFFF)
+                    .setChannel(2)
+                    .setId(7_100 + i)
+                    .setDecoded(MeshProtos.Data.newBuilder()
+                            .setPortnum(Portnums.PortNum.TEXT_MESSAGE_APP)
+                            .setPayload(ByteString.copyFrom("deferred-" + i, StandardCharsets.UTF_8))
+                            .build())
+                    .build();
+            service.onMeshPacket(packet);
+        }
+
+        assertTrue(state.getMessages(2).isEmpty());
+        assertNull(MessageDbService.getInstance().findByPacketId(7_100));
+        assertNull(MessageDbService.getInstance().findByPacketId(7_100 + packetCount - 1));
+
+        state.setChannelCatalogReady(true);
+        service.onConfigComplete(1);
+
+        assertTrue(waitUntil(() ->
+                        MessageDbService.getInstance().loadLast("channel", "2", packetCount + 10, "!12345678").size() == packetCount,
+                5_000));
+
+        List<MeshMessage> persisted = MessageDbService.getInstance()
+                .loadLast("channel", "2", packetCount + 10, "!12345678");
+        assertEquals(packetCount, persisted.size());
+        assertEquals("deferred-0", persisted.getFirst().getText());
+        assertEquals("deferred-" + (packetCount - 1), persisted.getLast().getText());
+    }
+
+    @Test
     void onMeshPacketDropsBroadcastMessagesForUnknownChannel() {
         MeshProtos.MeshPacket packet = MeshProtos.MeshPacket.newBuilder()
                 .setFrom(0x11111111)
@@ -466,7 +546,9 @@ class MessageListenerServiceTest {
                         .build())
                 .build();
 
+        long beforeReceive = System.currentTimeMillis() / 1000;
         service.onMeshPacket(packet);
+        long afterReceive = System.currentTimeMillis() / 1000;
 
         assertTrue(state.getMessages(2).isEmpty());
         assertNull(MessageDbService.getInstance().findByPacketId(7003));
@@ -475,6 +557,8 @@ class MessageListenerServiceTest {
                 .loadReactionsByTargetPacketIds("channel", "2", "!12345678", List.of(42));
         MessageReaction stored = reactions.get(42).getFirst();
         assertEquals("👍", stored.getEmoji());
+        assertTrue(stored.getTimestamp() >= beforeReceive);
+        assertTrue(stored.getTimestamp() <= afterReceive);
         assertEquals(MeshMessage.DeliveryStatus.DELIVERED, stored.getStatus());
         assertEquals("!11111111", stored.getFromNodeId());
     }
@@ -528,6 +612,83 @@ class MessageListenerServiceTest {
         assertTrue(MessageDbService.getInstance()
                 .loadReactionsByTargetPacketIds("channel", "2", "!12345678", List.of(42))
                 .isEmpty());
+    }
+
+    @Test
+    void onMeshPacketFiresTracerouteListenerForRoutePayloadWithoutRequestId() {
+        int fromNode = (int) 0xBBA9341CL;
+        MeshProtos.RouteDiscovery route = MeshProtos.RouteDiscovery.newBuilder()
+                .addRoute(48730296)
+                .addRoute(1236700080)
+                .addSnrTowards(-44)
+                .addSnrTowards(-18)
+                .addSnrTowards(-40)
+                .build();
+        List<Integer> fromNodes = new ArrayList<>();
+        List<MeshProtos.RouteDiscovery> routes = new ArrayList<>();
+        state.addTracerouteListener((nodeNum, receivedRoute) -> {
+            fromNodes.add(nodeNum);
+            routes.add(receivedRoute);
+        });
+
+        MeshProtos.MeshPacket packet = MeshProtos.MeshPacket.newBuilder()
+                .setFrom(fromNode)
+                .setTo(state.getMyNodeNum())
+                .setId(480384382)
+                .setDecoded(MeshProtos.Data.newBuilder()
+                        .setPortnum(Portnums.PortNum.TRACEROUTE_APP)
+                        .setWantResponse(true)
+                        .setPayload(route.toByteString())
+                        .build())
+                .build();
+
+        service.onMeshPacket(packet);
+
+        assertEquals(List.of(fromNode), fromNodes);
+        assertEquals(List.of(route), routes);
+    }
+
+    @Test
+    void onMeshPacketIgnoresEmptyTraceroutePayloadWithoutRequestId() {
+        List<MeshProtos.RouteDiscovery> routes = new ArrayList<>();
+        state.addTracerouteListener((nodeNum, route) -> routes.add(route));
+
+        MeshProtos.MeshPacket packet = MeshProtos.MeshPacket.newBuilder()
+                .setFrom(0x11111111)
+                .setTo(state.getMyNodeNum())
+                .setId(7006)
+                .setDecoded(MeshProtos.Data.newBuilder()
+                        .setPortnum(Portnums.PortNum.TRACEROUTE_APP)
+                        .setPayload(MeshProtos.RouteDiscovery.newBuilder().build().toByteString())
+                        .build())
+                .build();
+
+        service.onMeshPacket(packet);
+
+        assertTrue(routes.isEmpty());
+    }
+
+    @Test
+    void onMeshPacketIgnoresTraceroutePayloadWithoutRequestIdWhenNotAddressedToLocalNode() {
+        List<MeshProtos.RouteDiscovery> routes = new ArrayList<>();
+        state.addTracerouteListener((nodeNum, route) -> routes.add(route));
+
+        MeshProtos.MeshPacket packet = MeshProtos.MeshPacket.newBuilder()
+                .setFrom(0x11111111)
+                .setTo(0x22222222)
+                .setId(7007)
+                .setDecoded(MeshProtos.Data.newBuilder()
+                        .setPortnum(Portnums.PortNum.TRACEROUTE_APP)
+                        .setPayload(MeshProtos.RouteDiscovery.newBuilder()
+                                .addRoute(0x33333333)
+                                .build()
+                                .toByteString())
+                        .build())
+                .build();
+
+        service.onMeshPacket(packet);
+
+        assertTrue(routes.isEmpty());
     }
 
     @Test
@@ -698,6 +859,17 @@ class MessageListenerServiceTest {
         int payloadLength = ((frame[2] & 0xFF) << 8) | (frame[3] & 0xFF);
         byte[] payload = Arrays.copyOfRange(frame, 4, 4 + payloadLength);
         return MeshProtos.ToRadio.parseFrom(payload);
+    }
+
+    private static boolean waitUntil(BooleanSupplier condition, long timeoutMs) throws InterruptedException {
+        long deadlineNanos = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs);
+        while (System.nanoTime() < deadlineNanos) {
+            if (condition.getAsBoolean()) {
+                return true;
+            }
+            Thread.sleep(10);
+        }
+        return condition.getAsBoolean();
     }
 
     private static final class RecordingConnection implements MeshtasticConnection {

@@ -1,8 +1,11 @@
 package com.meshtastic.client.service;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.DriverManager;
@@ -15,10 +18,28 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+/**
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
+ */
 class DatabaseMigratorTest {
 
     @TempDir
     Path tempDir;
+    private String originalUserHome;
+
+    @BeforeEach
+    void isolateUserHome() throws Exception {
+        originalUserHome = System.getProperty("user.home");
+        System.setProperty("user.home", tempDir.toString());
+        Files.createDirectories(tempDir.resolve(".meshapp"));
+    }
+
+    @AfterEach
+    void restoreUserHome() {
+        if (originalUserHome != null) {
+            System.setProperty("user.home", originalUserHome);
+        }
+    }
 
     @Test
     void migrateWithoutSchemaVersionDropsLegacyObjectsAndSetsCurrentVersion() throws Exception {
@@ -37,7 +58,7 @@ class DatabaseMigratorTest {
     }
 
     @Test
-    void migrateFromV2AddsOwnerIsolationAndIgnoredColumn() throws Exception {
+    void migrateFromV2AddsOwnerIsolationAndIgnoredColumnWithoutDeletingHistory() throws Exception {
         try (Connection connection = openConnection("upgrade-v2")) {
             createSchemaVersion(connection, 2);
 
@@ -117,9 +138,12 @@ class DatabaseMigratorTest {
             assertTrue(columnExists(connection, "TELEMETRY_HISTORY", "OWNER_NODE_ID"));
             assertTrue(columnExists(connection, "NODES", "IGNORED"));
 
-            assertEquals(0, countRows(connection, "messages"));
-            assertEquals(0, countRows(connection, "chat_read_counts"));
-            assertEquals(0, countRows(connection, "telemetry_history"));
+            assertEquals(1, countRows(connection, "messages"));
+            assertEquals(1, countRows(connection, "chat_read_counts"));
+            assertEquals(1, countRows(connection, "telemetry_history"));
+            assertEquals("", firstOwnerNodeId(connection, "messages"));
+            assertEquals("", firstOwnerNodeId(connection, "chat_read_counts"));
+            assertEquals("", firstOwnerNodeId(connection, "telemetry_history"));
         }
     }
 
@@ -242,6 +266,35 @@ class DatabaseMigratorTest {
         }
     }
 
+    @Test
+    void migrateLegacyAppDatabaseWithoutSchemaVersionPreservesMessages() throws Exception {
+        try (Connection connection = openConnection("legacy-app-preserve")) {
+            try (Statement stmt = connection.createStatement()) {
+                stmt.execute("""
+                        CREATE TABLE messages (
+                            id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                            chat_type VARCHAR(10) NOT NULL,
+                            chat_key VARCHAR(20) NOT NULL,
+                            from_node_id VARCHAR(20) NOT NULL,
+                            to_node_id VARCHAR(20) NOT NULL,
+                            channel_idx INT NOT NULL,
+                            text CLOB,
+                            timestamp BIGINT NOT NULL,
+                            outgoing BOOLEAN NOT NULL
+                        )
+                        """);
+                stmt.execute("INSERT INTO messages (chat_type, chat_key, from_node_id, to_node_id, channel_idx, text, timestamp, outgoing) VALUES ('channel', '0', '!1', '!ffffffff', 0, 'legacy hello', 1, FALSE)");
+            }
+
+            DatabaseMigrator.migrate(connection);
+
+            assertEquals(DatabaseMigrator.CURRENT_VERSION, schemaVersion(connection));
+            assertTrue(columnExists(connection, "MESSAGES", "OWNER_NODE_ID"));
+            assertEquals(1, countRows(connection, "messages"));
+            assertEquals("legacy hello", firstMessageText(connection));
+        }
+    }
+
     private Connection openConnection(String name) throws SQLException {
         return DriverManager.getConnection("jdbc:h2:" + tempDir.resolve(name) + ";AUTO_SERVER=FALSE;TRACE_LEVEL_FILE=0");
     }
@@ -322,6 +375,22 @@ class DatabaseMigratorTest {
              ResultSet rs = stmt.executeQuery("SELECT via_mqtt FROM messages ORDER BY id LIMIT 1")) {
             rs.next();
             return rs.getBoolean(1);
+        }
+    }
+
+    private static String firstOwnerNodeId(Connection connection, String tableName) throws SQLException {
+        try (Statement stmt = connection.createStatement();
+             ResultSet rs = stmt.executeQuery("SELECT owner_node_id FROM " + tableName + " ORDER BY 1 LIMIT 1")) {
+            rs.next();
+            return rs.getString(1);
+        }
+    }
+
+    private static String firstMessageText(Connection connection) throws SQLException {
+        try (Statement stmt = connection.createStatement();
+             ResultSet rs = stmt.executeQuery("SELECT text FROM messages ORDER BY id LIMIT 1")) {
+            rs.next();
+            return rs.getString(1);
         }
     }
 }

@@ -15,6 +15,8 @@ import java.util.List;
  * <p>
  * Поле {@code status} объявлено как {@code volatile} для безопасного
  * обновления из потока TCP-reader с последующим чтением из UI-потока.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class MeshMessage {
 

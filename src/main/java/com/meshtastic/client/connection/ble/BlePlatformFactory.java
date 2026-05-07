@@ -10,6 +10,8 @@ import org.slf4j.LoggerFactory;
 /**
  * Фабрика платформо-зависимых BLE-реализаций.
  * Выбирает реализацию на основе текущей ОС ({@link OsDetect}).
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public final class BlePlatformFactory {
 

@@ -5,8 +5,12 @@ import com.meshtastic.client.TestEnvironmentSupport;
 import com.meshtastic.client.connection.ConnectionException;
 import com.meshtastic.client.connection.ConnectionListener;
 import com.meshtastic.client.connection.MeshtasticConnection;
+import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.PacketLogEntry;
+import com.meshtastic.client.service.MessageDbService;
+import com.meshtastic.client.service.MessageListenerService;
 import com.meshtastic.client.service.PacketMonitorService;
+import com.meshtastic.client.utils.AppPreferences;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -25,6 +29,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
@@ -33,6 +38,9 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+/**
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
+ */
 class ProtocolHandlerTest {
 
     @TempDir
@@ -43,6 +51,7 @@ class ProtocolHandlerTest {
     @BeforeEach
     void setUp() {
         TestEnvironmentSupport.setUserHome(tempHome);
+        TestEnvironmentSupport.ensureJavaFxStarted();
         TestEnvironmentSupport.resetSingletons();
     }
 
@@ -287,16 +296,109 @@ class ProtocolHandlerTest {
 
         List<PacketLogEntry> entries = monitorService.loadAll();
         assertEquals(2, entries.size());
-        assertEquals(PacketLogEntry.Direction.INCOMING, entries.getFirst().getDirection());
-        assertEquals("ROUTING_APP", entries.getFirst().getPacketType());
-        assertEquals("TRANSPORT_LORA", entries.getLast().getTransportMechanism());
-        assertEquals(PacketLogEntry.Direction.OUTGOING, entries.getLast().getDirection());
-        assertEquals("TEXT_MESSAGE_APP", entries.getLast().getPacketType());
+        PacketLogEntry incomingEntry = entries.stream()
+                .filter(entry -> entry.getDirection() == PacketLogEntry.Direction.INCOMING)
+                .findFirst()
+                .orElseThrow();
+        PacketLogEntry outgoingEntry = entries.stream()
+                .filter(entry -> entry.getDirection() == PacketLogEntry.Direction.OUTGOING)
+                .findFirst()
+                .orElseThrow();
+        assertEquals("ROUTING_APP", incomingEntry.getPacketType());
+        assertEquals("TRANSPORT_LORA", incomingEntry.getTransportMechanism());
+        assertEquals("TEXT_MESSAGE_APP", outgoingEntry.getPacketType());
+        assertEquals("TRANSPORT_LORA", outgoingEntry.getTransportMechanism());
+    }
+
+    @Test
+    void burstIncomingPacketsReachChatDbAndMonitorWithoutDrops() throws Exception {
+        boolean notificationsEnabled = AppPreferences.isNotificationsEnabled();
+        AppPreferences.setNotificationsEnabled(false);
+        try {
+            PacketMonitorService monitorService = PacketMonitorService.getInstance();
+            monitorService.startCapture();
+
+            FakeConnection connection = new FakeConnection();
+            ProtocolHandler handler = track(new ProtocolHandler(connection));
+
+            DeviceState state = new DeviceState();
+            state.setMyNodeNum(0x12345678);
+            state.addChannel(ChannelProtos.Channel.newBuilder()
+                    .setIndex(0)
+                    .setRole(ChannelProtos.Channel.Role.PRIMARY)
+                    .build());
+            state.addChannel(ChannelProtos.Channel.newBuilder()
+                    .setIndex(2)
+                    .setRole(ChannelProtos.Channel.Role.SECONDARY)
+                    .build());
+            state.setChannelCatalogReady(true);
+            handler.addListener(new MessageListenerService(state));
+
+            CountDownLatch firstPacketEntered = new CountDownLatch(1);
+            CountDownLatch releaseFirstPacket = new CountDownLatch(1);
+            AtomicBoolean holdFirstPacket = new AtomicBoolean(true);
+            handler.addListener(new FromRadioListener() {
+                @Override
+                public void onMeshPacket(MeshProtos.MeshPacket packet) {
+                    if (!holdFirstPacket.compareAndSet(true, false)) {
+                        return;
+                    }
+                    firstPacketEntered.countDown();
+                    try {
+                        releaseFirstPacket.await(2, TimeUnit.SECONDS);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                }
+            });
+
+            int packetCount = 400;
+            connection.emit(wrapPacket(channelTextPacket(0)).toByteArray());
+            assertTrue(firstPacketEntered.await(1, TimeUnit.SECONDS));
+            for (int i = 1; i < packetCount; i++) {
+                connection.emit(wrapPacket(channelTextPacket(i)).toByteArray());
+            }
+
+            releaseFirstPacket.countDown();
+
+            assertTrue(waitUntil(() ->
+                            MessageDbService.getInstance().loadLast("channel", "2", packetCount + 10, "!12345678").size() == packetCount,
+                    5_000));
+            assertTrue(waitUntil(() -> PacketMonitorService.getInstance().loadAll().size() == packetCount, 5_000));
+
+            List<PacketLogEntry> packets = PacketMonitorService.getInstance().loadAll();
+            assertEquals(packetCount, packets.size());
+            assertEquals(packetCount,
+                    MessageDbService.getInstance().loadLast("channel", "2", packetCount + 10, "!12345678").size());
+
+            state.shutdown();
+        } finally {
+            AppPreferences.setNotificationsEnabled(notificationsEnabled);
+        }
     }
 
     private ProtocolHandler track(ProtocolHandler handler) {
         handlersToShutdown.add(handler);
         return handler;
+    }
+
+    private static MeshProtos.FromRadio wrapPacket(MeshProtos.MeshPacket packet) {
+        return MeshProtos.FromRadio.newBuilder().setPacket(packet).build();
+    }
+
+    private static MeshProtos.MeshPacket channelTextPacket(int sequence) {
+        return MeshProtos.MeshPacket.newBuilder()
+                .setFrom(0x11111111)
+                .setTo(0xFFFFFFFF)
+                .setChannel(2)
+                .setId(9_000 + sequence)
+                .setRxTime(1_710_100_000 + sequence)
+                .setTransportMechanism(MeshProtos.MeshPacket.TransportMechanism.TRANSPORT_LORA)
+                .setDecoded(MeshProtos.Data.newBuilder()
+                        .setPortnum(Portnums.PortNum.TEXT_MESSAGE_APP)
+                        .setPayload(ByteString.copyFromUtf8("burst-" + sequence))
+                        .build())
+                .build();
     }
 
     private static byte[] unframe(byte[] frame) {
@@ -305,6 +407,17 @@ class ProtocolHandlerTest {
         byte[] payload = new byte[payloadLength];
         System.arraycopy(frame, 4, payload, 0, payloadLength);
         return payload;
+    }
+
+    private static boolean waitUntil(BooleanSupplier condition, long timeoutMs) throws InterruptedException {
+        long deadlineNanos = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs);
+        while (System.nanoTime() < deadlineNanos) {
+            if (condition.getAsBoolean()) {
+                return true;
+            }
+            Thread.sleep(10);
+        }
+        return condition.getAsBoolean();
     }
 
     private static final class FakeConnection implements MeshtasticConnection {

@@ -34,14 +34,22 @@
 #define PROPS_IFACE        "org.freedesktop.DBus.Properties"
 #define OBJMGR_IFACE       "org.freedesktop.DBus.ObjectManager"
 
+#define PROFILE_MESHTASTIC 0
+#define PROFILE_MESHCORE   1
+
 #define SERVICE_UUID       "6ba1b218-15a8-461f-9fa8-5dcae273eafd"
 #define FROM_RADIO_UUID    "2c55e69e-4993-11ed-b878-0242ac120002"
 #define TO_RADIO_UUID      "f75c76d2-129e-4dad-a1dd-7866124401e7"
 #define FROM_NUM_UUID      "ed9da18c-a800-4f66-a670-aa7547e34453"
 
+#define MESHCORE_SERVICE_UUID "6e400001-b5a3-f393-e0a9-e50e24dcca9e"
+#define MESHCORE_RX_UUID      "6e400002-b5a3-f393-e0a9-e50e24dcca9e"
+#define MESHCORE_TX_UUID      "6e400003-b5a3-f393-e0a9-e50e24dcca9e"
+
 #define MAX_PATH           1024
 #define MAX_DRAIN          100
 #define POLL_TIMEOUT_MS    100
+#define PAIR_TIMEOUT_MS    60000
 
 /* ==================== Logging ==================== */
 
@@ -134,6 +142,7 @@ static atomic_bool g_initialized;
 static atomic_bool g_connected;
 static atomic_bool g_notifications_active;
 static atomic_bool g_cancel_connect_requested;
+static atomic_int g_profile;
 
 static task_queue_t g_tasks;
 static int g_wake_pipe[2] = {-1, -1};
@@ -159,11 +168,33 @@ static meshble_state_cb g_state_callback = NULL;
 static sd_bus_slot* g_iface_added_slot = NULL;
 static sd_bus_slot* g_props_changed_slot = NULL;
 static sd_bus_slot* g_from_radio_notify_slot = NULL;
+static sd_bus_slot* g_from_num_notify_slot = NULL;
 
 /* Pairing agent */
 static meshble_passkey_request_cb g_passkey_callback = NULL;
 static sd_bus_message* g_pending_passkey_msg = NULL;
 static sd_bus_slot* g_agent_slot = NULL;
+
+static int active_profile(void) {
+    int profile = atomic_load(&g_profile);
+    return profile == PROFILE_MESHCORE ? PROFILE_MESHCORE : PROFILE_MESHTASTIC;
+}
+
+static const char* active_service_uuid(void) {
+    return active_profile() == PROFILE_MESHCORE ? MESHCORE_SERVICE_UUID : SERVICE_UUID;
+}
+
+static const char* active_inbound_uuid(void) {
+    return active_profile() == PROFILE_MESHCORE ? MESHCORE_TX_UUID : FROM_RADIO_UUID;
+}
+
+static const char* active_outbound_uuid(void) {
+    return active_profile() == PROFILE_MESHCORE ? MESHCORE_RX_UUID : TO_RADIO_UUID;
+}
+
+static const char* active_notify_trigger_uuid(void) {
+    return active_profile() == PROFILE_MESHCORE ? NULL : FROM_NUM_UUID;
+}
 
 /* ==================== Wake + Dispatch ==================== */
 
@@ -211,6 +242,34 @@ static int64_t now_ms(void) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
+
+static bool contains_text(const char* haystack, const char* needle) {
+    return haystack && needle && strstr(haystack, needle) != NULL;
+}
+
+static int map_bluez_connect_error(const char* name, const char* message) {
+    if (contains_text(name, "UnknownObject") || contains_text(name, "DoesNotExist")) {
+        return -2;
+    }
+    if (contains_text(name, "AlreadyExists") || contains_text(name, "AlreadyPaired") ||
+        contains_text(name, "AlreadyConnected") ||
+        contains_text(message, "Already connected") ||
+        contains_text(message, "already connected") ||
+        contains_text(message, "Already paired") ||
+        contains_text(message, "already paired")) {
+        return 0;
+    }
+    if (contains_text(name, "Authentication") || contains_text(name, "NotAuthorized") ||
+        contains_text(name, "NotPermitted") || contains_text(name, "Rejected") ||
+        contains_text(name, "Canceled") || contains_text(name, "Cancelled") ||
+        contains_text(message, "Authentication")) {
+        return -4;
+    }
+    if (contains_text(name, "Timeout") || contains_text(message, "timed out")) {
+        return -1;
+    }
+    return -3;
 }
 
 /* ==================== BlueZ D-Bus Helpers (worker thread only) ==================== */
@@ -323,15 +382,18 @@ static int find_gatt_characteristics(sd_bus* bus, const char* device_path) {
                         const char* uuid = NULL;
                         sd_bus_message_read(reply, "v", "s", &uuid);
                         if (uuid) {
-                            if (strcasecmp(uuid, FROM_RADIO_UUID) == 0) {
+                            const char* inbound_uuid = active_inbound_uuid();
+                            const char* outbound_uuid = active_outbound_uuid();
+                            const char* trigger_uuid = active_notify_trigger_uuid();
+                            if (strcasecmp(uuid, inbound_uuid) == 0) {
                                 strncpy(g_from_radio_char_path, path, MAX_PATH - 1);
-                                log_msg("[meshble] fromRadio: %s", path);
-                            } else if (strcasecmp(uuid, TO_RADIO_UUID) == 0) {
+                                log_msg("[meshble] inbound: %s", path);
+                            } else if (strcasecmp(uuid, outbound_uuid) == 0) {
                                 strncpy(g_to_radio_char_path, path, MAX_PATH - 1);
-                                log_msg("[meshble] toRadio: %s", path);
-                            } else if (strcasecmp(uuid, FROM_NUM_UUID) == 0) {
+                                log_msg("[meshble] outbound: %s", path);
+                            } else if (trigger_uuid && strcasecmp(uuid, trigger_uuid) == 0) {
                                 strncpy(g_from_num_char_path, path, MAX_PATH - 1);
-                                log_msg("[meshble] fromNum: %s", path);
+                                log_msg("[meshble] notify trigger: %s", path);
                             }
                         }
                     } else {
@@ -411,6 +473,20 @@ static int acquire_notify(sd_bus* bus, const char* char_path, uint16_t* mtu_out)
     if (mtu_out) *mtu_out = mtu;
     log_msg("[meshble] AcquireNotify fd=%d mtu=%d", real_fd, mtu);
     return real_fd;
+}
+
+static int start_notify(sd_bus* bus, const char* char_path) {
+    sd_bus_error error = SD_BUS_ERROR_NULL;
+    int r = sd_bus_call_method(bus, BLUEZ_BUS, char_path,
+                               CHAR_IFACE, "StartNotify",
+                               &error, NULL, "");
+    if (r < 0) {
+        log_msg("[meshble] StartNotify failed: %s (%s)", error.message, error.name);
+        sd_bus_error_free(&error);
+        return r;
+    }
+    sd_bus_error_free(&error);
+    return 0;
 }
 
 /* ==================== WriteValue / ReadValue (D-Bus fallback) ==================== */
@@ -530,6 +606,28 @@ static int dbus_read_value(sd_bus* bus, const char* char_path,
     return -1;
 }
 
+static int drain_from_radio_via_dbus(sd_bus* bus) {
+    if (!bus || !g_from_radio_char_path[0]) return -1;
+
+    unsigned char data[512];
+    int result = 0;
+    for (int i = 0; i < MAX_DRAIN; i++) {
+        int out_len = 0;
+        int r = dbus_read_value(bus, g_from_radio_char_path,
+                                data, sizeof(data), &out_len);
+        if (r != 0) {
+            result = r;
+            break;
+        }
+        if (out_len <= 0) break;
+
+        log_msg("[meshble] fromRadio ReadValue after trigger: %d bytes", out_len);
+        meshble_data_cb cb = g_data_callback;
+        if (cb) cb(data, out_len);
+    }
+    return result;
+}
+
 /* ==================== Signal Handlers (worker thread) ==================== */
 
 static int on_interfaces_added(sd_bus_message* msg, void* userdata, sd_bus_error* err) {
@@ -580,11 +678,17 @@ static int on_interfaces_added(sd_bus_message* msg, void* userdata, sd_bus_error
     return 0;
 }
 
+typedef struct {
+    int services_resolved;
+    int disconnected_seen;
+} device_props_ctx_t;
+
 static int on_device_props_changed(sd_bus_message* msg, void* userdata, sd_bus_error* err) {
     (void)err;
     const char* iface = NULL;
     sd_bus_message_read(msg, "s", &iface);
     if (!iface || strcmp(iface, DEVICE_IFACE) != 0) return 0;
+    device_props_ctx_t* props = (device_props_ctx_t*)userdata;
 
     sd_bus_message_enter_container(msg, 'a', "{sv}");
     while (sd_bus_message_enter_container(msg, 'e', "sv") > 0) {
@@ -595,6 +699,9 @@ static int on_device_props_changed(sd_bus_message* msg, void* userdata, sd_bus_e
             int val = 0;
             sd_bus_message_read(msg, "v", "b", &val);
             log_msg("[meshble] Device Connected=%d", val);
+            if (!val && props) {
+                props->disconnected_seen = 1;
+            }
             if (!val && atomic_load(&g_connected)) {
                 atomic_store(&g_connected, false);
                 atomic_store(&g_notifications_active, false);
@@ -607,9 +714,8 @@ static int on_device_props_changed(sd_bus_message* msg, void* userdata, sd_bus_e
             int val = 0;
             sd_bus_message_read(msg, "v", "b", &val);
             log_msg("[meshble] ServicesResolved=%d", val);
-            if (val && userdata) {
-                int* flag = (int*)userdata;
-                *flag = 1;
+            if (val && props) {
+                props->services_resolved = 1;
             }
         } else {
             sd_bus_message_skip(msg, "v");
@@ -645,6 +751,41 @@ static int on_from_radio_changed(sd_bus_message* msg, void* userdata, sd_bus_err
             sd_bus_message_skip(msg, "v");
         }
         sd_bus_message_exit_container(msg);
+    }
+    return 0;
+}
+
+/** PropertiesChanged handler for Meshtastic fromNum characteristic.
+ *  fromNum is a notification trigger; the actual protobuf is read from fromRadio. */
+static int on_from_num_changed(sd_bus_message* msg, void* userdata, sd_bus_error* err) {
+    (void)userdata; (void)err;
+    const char* iface = NULL;
+    sd_bus_message_read(msg, "s", &iface);
+    if (!iface || strcmp(iface, CHAR_IFACE) != 0) return 0;
+
+    int triggered = 0;
+    sd_bus_message_enter_container(msg, 'a', "{sv}");
+    while (sd_bus_message_enter_container(msg, 'e', "sv") > 0) {
+        const char* pname = NULL;
+        sd_bus_message_read(msg, "s", &pname);
+
+        if (pname && strcmp(pname, "Value") == 0) {
+            sd_bus_message_enter_container(msg, 'v', "ay");
+            const void* data = NULL;
+            size_t data_len = 0;
+            if (sd_bus_message_read_array(msg, 'y', &data, &data_len) >= 0) {
+                log_msg("[meshble] fromNum notify trigger: %d bytes", (int)data_len);
+                triggered = 1;
+            }
+            sd_bus_message_exit_container(msg);
+        } else {
+            sd_bus_message_skip(msg, "v");
+        }
+        sd_bus_message_exit_container(msg);
+    }
+
+    if (triggered) {
+        drain_from_radio_via_dbus(g_bus);
     }
     return 0;
 }
@@ -812,6 +953,7 @@ static void do_disconnect(void) {
     if (g_to_radio_fd >= 0) { close(g_to_radio_fd); g_to_radio_fd = -1; }
 
     if (g_from_radio_notify_slot) { sd_bus_slot_unref(g_from_radio_notify_slot); g_from_radio_notify_slot = NULL; }
+    if (g_from_num_notify_slot) { sd_bus_slot_unref(g_from_num_notify_slot); g_from_num_notify_slot = NULL; }
     if (g_props_changed_slot) { sd_bus_slot_unref(g_props_changed_slot); g_props_changed_slot = NULL; }
 
     if (g_device_path[0] && g_bus) {
@@ -861,7 +1003,7 @@ static void do_start_scan(void* arg) {
         sd_bus_message_append(m, "s", "UUIDs");
         sd_bus_message_open_container(m, 'v', "as");
         sd_bus_message_open_container(m, 'a', "s");
-        sd_bus_message_append(m, "s", SERVICE_UUID);
+        sd_bus_message_append(m, "s", active_service_uuid());
         sd_bus_message_close_container(m);
         sd_bus_message_close_container(m);
         sd_bus_message_close_container(m);
@@ -914,6 +1056,119 @@ typedef struct {
     int result;
 } connect_ctx_t;
 
+typedef struct {
+    int done;
+    int result;
+    char error_name[128];
+    char error_msg[256];
+} connect_reply_ctx_t;
+
+static int on_connect_reply(sd_bus_message* msg, void* userdata, sd_bus_error* ret_error) {
+    (void)ret_error;
+    connect_reply_ctx_t* ctx = (connect_reply_ctx_t*)userdata;
+    if (!ctx) return 0;
+
+    if (sd_bus_message_is_method_error(msg, NULL) > 0) {
+        const sd_bus_error* error = sd_bus_message_get_error(msg);
+        const char* name = (error && error->name) ? error->name : "unknown";
+        const char* message = (error && error->message) ? error->message : "";
+        snprintf(ctx->error_name, sizeof(ctx->error_name), "%s", name);
+        snprintf(ctx->error_msg, sizeof(ctx->error_msg), "%s", message);
+        ctx->result = map_bluez_connect_error(ctx->error_name, ctx->error_msg);
+        log_msg("[meshble] Connect reply error: %s (%s)", ctx->error_msg, ctx->error_name);
+    } else {
+        ctx->result = 0;
+        log_msg("[meshble] Connect reply OK");
+    }
+    ctx->done = 1;
+    return 1;
+}
+
+static int on_pair_reply(sd_bus_message* msg, void* userdata, sd_bus_error* ret_error) {
+    (void)ret_error;
+    connect_reply_ctx_t* ctx = (connect_reply_ctx_t*)userdata;
+    if (!ctx) return 0;
+
+    if (sd_bus_message_is_method_error(msg, NULL) > 0) {
+        const sd_bus_error* error = sd_bus_message_get_error(msg);
+        const char* name = (error && error->name) ? error->name : "unknown";
+        const char* message = (error && error->message) ? error->message : "";
+        snprintf(ctx->error_name, sizeof(ctx->error_name), "%s", name);
+        snprintf(ctx->error_msg, sizeof(ctx->error_msg), "%s", message);
+        ctx->result = map_bluez_connect_error(ctx->error_name, ctx->error_msg);
+        if (ctx->result == 0) {
+            log_msg("[meshble] Pair reply already paired: %s (%s)", ctx->error_msg, ctx->error_name);
+        } else {
+            log_msg("[meshble] Pair reply error: %s (%s)", ctx->error_msg, ctx->error_name);
+        }
+    } else {
+        ctx->result = 0;
+        log_msg("[meshble] Pair reply OK");
+    }
+    ctx->done = 1;
+    return 1;
+}
+
+static int ensure_device_paired(sd_bus* bus, const char* device_path, int timeout_ms) {
+    int paired = 0;
+    if (get_bool_prop(bus, device_path, DEVICE_IFACE, "Paired", &paired) >= 0 && paired) {
+        log_msg("[meshble] Device already paired");
+        return 0;
+    }
+
+    int pair_timeout_ms = timeout_ms > PAIR_TIMEOUT_MS ? timeout_ms : PAIR_TIMEOUT_MS;
+    log_msg("[meshble] Pairing required before Meshtastic GATT I/O (timeout=%dms)", pair_timeout_ms);
+
+    connect_reply_ctx_t pair_reply = {0};
+    sd_bus_message* pair_msg = NULL;
+    int r = sd_bus_message_new_method_call(bus, &pair_msg, BLUEZ_BUS, device_path,
+                                            DEVICE_IFACE, "Pair");
+    if (r < 0) {
+        log_msg("[meshble] Pair msg failed: %s", strerror(-r));
+        return -3;
+    }
+
+    sd_bus_slot* pair_slot = NULL;
+    r = sd_bus_call_async(bus, &pair_slot, pair_msg,
+                          on_pair_reply, &pair_reply,
+                          (uint64_t)pair_timeout_ms * 1000);
+    sd_bus_message_unref(pair_msg);
+    if (r < 0) {
+        log_msg("[meshble] Pair call failed: %s", strerror(-r));
+        return -3;
+    }
+
+    int64_t deadline = now_ms() + pair_timeout_ms;
+    while (now_ms() < deadline) {
+        if (atomic_load(&g_cancel_connect_requested)) {
+            log_msg("[meshble] Pair cancelled");
+            if (pair_slot) sd_bus_slot_unref(pair_slot);
+            return -5;
+        }
+
+        for (;;) {
+            r = sd_bus_process(bus, NULL);
+            if (r <= 0) break;
+        }
+        process_tasks();
+
+        if (pair_reply.done) {
+            if (pair_slot) sd_bus_slot_unref(pair_slot);
+            if (pair_reply.result == 0) {
+                set_bool_prop(bus, device_path, DEVICE_IFACE, "Trusted", 1);
+            }
+            return pair_reply.result;
+        }
+
+        struct pollfd pfd = { .fd = sd_bus_get_fd(bus), .events = POLLIN };
+        poll(&pfd, 1, 100);
+    }
+
+    log_msg("[meshble] Pair timeout");
+    if (pair_slot) sd_bus_slot_unref(pair_slot);
+    return -4;
+}
+
 static void do_connect(void* arg) {
     connect_ctx_t* ctx = (connect_ctx_t*)arg;
     int r;
@@ -925,26 +1180,31 @@ static void do_connect(void* arg) {
     log_msg("[meshble] Connecting to %s (%s)...", ctx->address, g_device_path);
 
     /* Subscribe to property changes for disconnect detection + ServicesResolved */
-    volatile int services_resolved = 0;
+    device_props_ctx_t props = {0};
     sd_bus_match_signal(g_bus, &g_props_changed_slot,
                         BLUEZ_BUS, g_device_path,
                         PROPS_IFACE, "PropertiesChanged",
-                        on_device_props_changed, (void*)&services_resolved);
+                        on_device_props_changed, &props);
 
     set_bool_prop(g_bus, g_device_path, DEVICE_IFACE, "Trusted", 1);
 
+    const char* trigger_uuid = active_notify_trigger_uuid();
+    if (trigger_uuid) {
+        int pair_result = ensure_device_paired(g_bus, g_device_path, ctx->timeout_ms);
+        if (pair_result < 0) {
+            log_msg("[meshble] Pairing failed before Meshtastic connect: %d", pair_result);
+            do_disconnect();
+            ctx->result = pair_result;
+            return;
+        }
+
+        props.services_resolved = 0;
+        props.disconnected_seen = 0;
+    }
+
     /* Connect via async sd_bus_call — allows agent RequestPasskey to be
        processed on the worker thread during the Connect call */
-    volatile int connect_done = 0;
-    volatile int connect_result = 0;
-    volatile const char* connect_error_name = NULL;
-    volatile const char* connect_error_msg = NULL;
-
-    /* Async callback for Connect reply */
-    typedef struct { volatile int* done; volatile int* result;
-                     volatile const char** err_name; volatile const char** err_msg; } connect_async_t;
-    connect_async_t async_ctx = { &connect_done, &connect_result,
-                                   &connect_error_name, &connect_error_msg };
+    connect_reply_ctx_t connect_reply = {0};
 
     sd_bus_message* conn_msg = NULL;
     r = sd_bus_message_new_method_call(g_bus, &conn_msg, BLUEZ_BUS, g_device_path,
@@ -958,11 +1218,15 @@ static void do_connect(void* arg) {
 
     sd_bus_slot* connect_slot = NULL;
     r = sd_bus_call_async(g_bus, &connect_slot, conn_msg,
-        /* inline callback: */ NULL, NULL, (uint64_t)ctx->timeout_ms * 1000);
+                          on_connect_reply, &connect_reply,
+                          (uint64_t)ctx->timeout_ms * 1000);
     sd_bus_message_unref(conn_msg);
-
-    /* sd_bus_call_async with NULL callback doesn't work — use polling approach instead */
-    if (connect_slot) sd_bus_slot_unref(connect_slot);
+    if (r < 0) {
+        log_msg("[meshble] Connect call failed: %s", strerror(-r));
+        do_disconnect();
+        ctx->result = -3;
+        return;
+    }
 
     /* Poll-based async Connect: process bus events until we see Connected=1 or timeout */
     int64_t connect_deadline = now_ms() + ctx->timeout_ms;
@@ -970,6 +1234,7 @@ static void do_connect(void* arg) {
     while (now_ms() < connect_deadline) {
         if (atomic_load(&g_cancel_connect_requested)) {
             log_msg("[meshble] Connect cancelled before Connected=1");
+            if (connect_slot) sd_bus_slot_unref(connect_slot);
             do_disconnect();
             ctx->result = -5;
             return;
@@ -978,6 +1243,16 @@ static void do_connect(void* arg) {
         for (;;) {
             r = sd_bus_process(g_bus, NULL);
             if (r <= 0) break;
+        }
+        process_tasks();
+
+        if (connect_reply.done && connect_reply.result < 0) {
+            log_msg("[meshble] Connect failed before Connected=1: %s (%s)",
+                    connect_reply.error_msg, connect_reply.error_name);
+            if (connect_slot) sd_bus_slot_unref(connect_slot);
+            do_disconnect();
+            ctx->result = connect_reply.result;
+            return;
         }
 
         /* Check if Connected property is set */
@@ -993,6 +1268,7 @@ static void do_connect(void* arg) {
 
     if (!connected_ok) {
         log_msg("[meshble] Connect timeout — device not connected");
+        if (connect_slot) sd_bus_slot_unref(connect_slot);
         do_disconnect();
         ctx->result = -1;
         return;
@@ -1008,6 +1284,7 @@ static void do_connect(void* arg) {
     while (now_ms() < deadline) {
         if (atomic_load(&g_cancel_connect_requested)) {
             log_msg("[meshble] Connect cancelled while waiting for ServicesResolved");
+            if (connect_slot) sd_bus_slot_unref(connect_slot);
             do_disconnect();
             ctx->result = -5;
             return;
@@ -1018,9 +1295,40 @@ static void do_connect(void* arg) {
             r = sd_bus_process(g_bus, NULL);
             if (r <= 0) break;
         }
+        process_tasks();
+
+        if (connect_reply.done && connect_reply.result < 0) {
+            log_msg("[meshble] Connect failed while waiting for ServicesResolved: %s (%s)",
+                    connect_reply.error_msg, connect_reply.error_name);
+            if (connect_slot) sd_bus_slot_unref(connect_slot);
+            do_disconnect();
+            ctx->result = connect_reply.result;
+            return;
+        }
+
+        int conn_val = 0;
+        int conn_rr = get_bool_prop(g_bus, g_device_path, DEVICE_IFACE, "Connected", &conn_val);
+        if (conn_rr < 0) {
+            log_msg("[meshble] Connected property unavailable while waiting for ServicesResolved: %s",
+                    strerror(-conn_rr));
+            if (connect_slot) sd_bus_slot_unref(connect_slot);
+            do_disconnect();
+            ctx->result = -1;
+            return;
+        }
+        if (!conn_val) {
+            log_msg("[meshble] Device disconnected before ServicesResolved");
+            if (props.disconnected_seen) {
+                log_msg("[meshble] Early disconnect signal observed during service discovery");
+            }
+            if (connect_slot) sd_bus_slot_unref(connect_slot);
+            do_disconnect();
+            ctx->result = -1;
+            return;
+        }
 
         /* Check signal flag */
-        if (services_resolved) {
+        if (props.services_resolved) {
             log_msg("[meshble] ServicesResolved=true (signal)");
             resolved_ok = 1;
             break;
@@ -1045,6 +1353,7 @@ static void do_connect(void* arg) {
 
     if (!resolved_ok) {
         log_msg("[meshble] ServicesResolved timeout — GATT not ready");
+        if (connect_slot) sd_bus_slot_unref(connect_slot);
         do_disconnect();
         ctx->result = -3;
         return;
@@ -1055,6 +1364,7 @@ static void do_connect(void* arg) {
     get_bool_prop(g_bus, g_device_path, DEVICE_IFACE, "Connected", &connected_check);
     if (!connected_check) {
         log_msg("[meshble] Device disconnected during service discovery");
+        if (connect_slot) sd_bus_slot_unref(connect_slot);
         do_disconnect();
         ctx->result = -1;
         return;
@@ -1064,6 +1374,7 @@ static void do_connect(void* arg) {
     r = find_gatt_characteristics(g_bus, g_device_path);
     if (r < 0) {
         log_msg("[meshble] GATT characteristics not found");
+        if (connect_slot) sd_bus_slot_unref(connect_slot);
         do_disconnect();
         ctx->result = -3;
         return;
@@ -1074,16 +1385,68 @@ static void do_connect(void* arg) {
     atomic_store(&g_use_dbus_write, true);
     g_to_radio_fd = -1;
 
-    /* fromRadio: ReadValue polling (now works after pairing) */
-    log_msg("[meshble] Using ReadValue for fromRadio: %s", g_from_radio_char_path);
-    atomic_store(&g_use_dbus_read, true);
-    g_from_radio_fd = -1;
+    if (trigger_uuid) {
+        /* Meshtastic uses fromNum as notification trigger; payload is read from fromRadio. */
+        int match_result = sd_bus_match_signal(g_bus, &g_from_num_notify_slot,
+                            BLUEZ_BUS, g_from_num_char_path,
+                            PROPS_IFACE, "PropertiesChanged",
+                            on_from_num_changed, NULL);
+        if (match_result >= 0 && start_notify(g_bus, g_from_num_char_path) >= 0) {
+            log_msg("[meshble] Using fromNum notifications as fromRadio trigger: %s", g_from_num_char_path);
+            atomic_store(&g_use_dbus_read, true);
+            g_from_radio_fd = -1;
+            atomic_store(&g_notifications_active, true);
+            log_msg("[meshble] Connected (write=WriteValue, read=fromNum notify + ReadValue)");
+        } else {
+            if (g_from_num_notify_slot) {
+                sd_bus_slot_unref(g_from_num_notify_slot);
+                g_from_num_notify_slot = NULL;
+            }
+            log_msg("[meshble] fromNum notifications unavailable; falling back to ReadValue polling");
+            atomic_store(&g_use_dbus_read, true);
+            g_from_radio_fd = -1;
+            atomic_store(&g_notifications_active, false);
+            log_msg("[meshble] Connected (write=WriteValue, read=ReadValue polling)");
+        }
+    } else {
+        /* MeshCore Companion TX: prefer notifications on the inbound characteristic. */
+        sd_bus_match_signal(g_bus, &g_from_radio_notify_slot,
+                            BLUEZ_BUS, g_from_radio_char_path,
+                            PROPS_IFACE, "PropertiesChanged",
+                            on_from_radio_changed, NULL);
+        int fd = acquire_notify(g_bus, g_from_radio_char_path, &g_from_radio_mtu);
+        if (fd >= 0) {
+            g_from_radio_fd = fd;
+            atomic_store(&g_use_dbus_read, false);
+            atomic_store(&g_notifications_active, true);
+            log_msg("[meshble] Connected (write=WriteValue, read=AcquireNotify)");
+        } else if (start_notify(g_bus, g_from_radio_char_path) >= 0) {
+            g_from_radio_fd = -1;
+            atomic_store(&g_use_dbus_read, false);
+            atomic_store(&g_notifications_active, true);
+            log_msg("[meshble] Connected (write=WriteValue, read=StartNotify)");
+        } else {
+            log_msg("[meshble] Notifications unavailable; falling back to ReadValue");
+            atomic_store(&g_use_dbus_read, true);
+            g_from_radio_fd = -1;
+            atomic_store(&g_notifications_active, false);
+        }
+    }
 
     atomic_store(&g_connected, true);
-    atomic_store(&g_notifications_active, false);
-    log_msg("[meshble] Connected (write=WriteValue, read=ReadValue)");
+
+    /* Keep disconnect detection after connect() returns, but drop stack-local state. */
+    if (g_props_changed_slot) { sd_bus_slot_unref(g_props_changed_slot); g_props_changed_slot = NULL; }
+    r = sd_bus_match_signal(g_bus, &g_props_changed_slot,
+                            BLUEZ_BUS, g_device_path,
+                            PROPS_IFACE, "PropertiesChanged",
+                            on_device_props_changed, NULL);
+    if (r < 0) {
+        log_msg("[meshble] PropertiesChanged resubscribe failed: %s", strerror(-r));
+    }
 
     if (g_state_callback) g_state_callback(0, NULL);
+    if (connect_slot) sd_bus_slot_unref(connect_slot);
     ctx->result = 0;
 }
 
@@ -1268,6 +1631,7 @@ MESHBLE_API int meshble_init(void) {
     fcntl(g_wake_pipe[1], F_SETFL, O_NONBLOCK);
 
     tq_init(&g_tasks);
+    atomic_store(&g_profile, PROFILE_MESHTASTIC);
     atomic_store(&g_worker_running, true);
     pthread_create(&g_worker_thread, NULL, worker_loop, NULL);
 
@@ -1306,6 +1670,14 @@ MESHBLE_API int meshble_get_adapter_state(void) {
     adapter_state_ctx_t ctx = { .result = 0 };
     run_on_worker(do_get_adapter_state, &ctx);
     return ctx.result;
+}
+
+MESHBLE_API void meshble_set_profile(int profile) {
+    if (profile == PROFILE_MESHCORE) {
+        atomic_store(&g_profile, profile);
+    } else {
+        atomic_store(&g_profile, PROFILE_MESHTASTIC);
+    }
 }
 
 MESHBLE_API int meshble_start_scan(meshble_device_cb callback) {

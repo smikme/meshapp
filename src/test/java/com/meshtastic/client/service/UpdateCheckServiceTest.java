@@ -9,6 +9,9 @@ import java.net.http.HttpRequest;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
+/**
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
+ */
 class UpdateCheckServiceTest {
 
     @Test

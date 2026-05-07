@@ -15,6 +15,8 @@ import com.sun.jna.Pointer;
  * должен обеспечить thread-safety.
  *
  * @see LinuxBle
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public interface LinuxBleLibrary extends Library {
 
@@ -42,8 +44,11 @@ public interface LinuxBleLibrary extends Library {
 
     // ==================== Scanning ====================
 
+    /** Настраивает BLE profile: 0=Meshtastic, 1=MeshCore Companion. */
+    void meshble_set_profile(int profile);
+
     /**
-     * Запуск сканирования BLE с фильтром по Meshtastic service UUID.
+     * Запуск сканирования BLE с фильтром по service UUID выбранного profile.
      * @return 0 при успехе, отрицательное при ошибке
      */
     int meshble_start_scan(DeviceCallback callback);
@@ -54,8 +59,9 @@ public interface LinuxBleLibrary extends Library {
     // ==================== Connection ====================
 
     /**
-     * Подключение к BLE-устройству. Блокирует до обнаружения GATT или таймаута.
-     * @return 0=OK, -1=timeout, -2=not found, -3=GATT error, -4=access denied
+     * Подключение к BLE-устройству. Блокирует до обнаружения GATT, таймаута или конечной ошибки.
+     * @return 0=OK, -1=timeout/disconnect, -2=not found, -3=GATT error,
+     *         -4=access denied, -5=cancelled
      */
     int meshble_connect(String address, int timeoutMs);
 

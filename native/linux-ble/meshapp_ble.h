@@ -43,6 +43,12 @@ MESHBLE_API int meshble_get_adapter_state(void);
 /* ==================== Scanning ==================== */
 
 /**
+ * Select BLE profile for subsequent scanning/connection.
+ * @param profile 0=Meshtastic, 1=MeshCore Companion
+ */
+MESHBLE_API void meshble_set_profile(int profile);
+
+/**
  * Callback for discovered BLE devices.
  * @param address  MAC address as "AA:BB:CC:DD:EE:FF"
  * @param name     advertised device name (may be NULL)
@@ -51,7 +57,7 @@ MESHBLE_API int meshble_get_adapter_state(void);
 typedef void (*meshble_device_cb)(const char* address, const char* name, int rssi);
 
 /**
- * Start scanning for Meshtastic BLE devices (filtered by service UUID).
+ * Start scanning for BLE devices matching the selected profile service UUID.
  * @param callback  called for each discovered device (from worker thread)
  * @return 0 on success, negative on error
  */
@@ -64,12 +70,13 @@ MESHBLE_API void meshble_stop_scan(void);
 
 /**
  * Connect to a BLE device by MAC address. Blocks until GATT services and
- * characteristics are discovered, or timeout expires.
+ * characteristics are discovered, timeout expires, or a terminal failure occurs.
  *
  * @param address     MAC address as "AA:BB:CC:DD:EE:FF"
  * @param timeout_ms  connection timeout in milliseconds
- * @return 0 on success, -1 on timeout, -2 on device not found,
- *         -3 on GATT error, -4 on access denied (pairing required)
+ * @return 0 on success, -1 on timeout/disconnect, -2 on device not found,
+ *         -3 on GATT error, -4 on access denied (pairing required),
+ *         -5 on cancellation
  */
 MESHBLE_API int meshble_connect(const char* address, int timeout_ms);
 

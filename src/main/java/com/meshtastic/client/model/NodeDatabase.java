@@ -21,6 +21,8 @@ import java.util.concurrent.CopyOnWriteArrayList;
  *   <li>Удаление узлов с оповещением listener'ов</li>
  *   <li>Подсчет количества узлов</li>
  * </ul>
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class NodeDatabase {
 
@@ -138,7 +140,7 @@ public class NodeDatabase {
     /**
      * Возвращает внутренний map узлов (для backward compatibility).
      *
-     * @return ConcurrentHashMap<Integer, NodeData>
+     * @return {@code ConcurrentHashMap<Integer, NodeData>}
      */
     public ConcurrentHashMap<Integer, NodeData> getNodeDb() {
         return nodeDb;

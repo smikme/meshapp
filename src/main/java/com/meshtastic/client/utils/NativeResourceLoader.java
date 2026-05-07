@@ -10,6 +10,8 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Загрузка нативных библиотек и бинарных ресурсов из classpath resources.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public final class NativeResourceLoader {
 

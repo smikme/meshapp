@@ -83,6 +83,8 @@ import java.util.concurrent.Executors;
  * - если пользователь изучает уже выбранный пакет, приход новых данных не должен
  *   сбрасывать выделение строки, дерева и HEX/ASCII подсветку;
  * - дерево и предпросмотр перестраиваются только при фактической смене выбранного пакета.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public final class PacketMonitorWindow {
 
@@ -629,7 +631,7 @@ public final class PacketMonitorWindow {
      */
     private TableView<PacketLogEntry> createPacketTable() {
         TableView<PacketLogEntry> table = new TableView<>(packetItems);
-        table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
+        table.setColumnResizePolicy(TableView.UNCONSTRAINED_RESIZE_POLICY);
         table.setFixedCellSize(PACKET_TABLE_FIXED_CELL_SIZE);
 
         TableColumn<PacketLogEntry, String> colTime = new TableColumn<>("Дата/время");
@@ -665,6 +667,7 @@ public final class PacketMonitorWindow {
         restorePacketTableColumnWidths(colTime, colType, colTransport, colFrom, colTo, colPayload);
         trackPacketTableColumnWidth(colTime, AppPreferences.KEY_PACKET_MONITOR_COLUMN_TIME_WIDTH);
         trackPacketTableColumnWidth(colType, AppPreferences.KEY_PACKET_MONITOR_COLUMN_TYPE_WIDTH);
+        trackPacketTableColumnWidth(colTransport, AppPreferences.KEY_PACKET_MONITOR_COLUMN_TRANSPORT_WIDTH);
         trackPacketTableColumnWidth(colFrom, AppPreferences.KEY_PACKET_MONITOR_COLUMN_FROM_WIDTH);
         trackPacketTableColumnWidth(colTo, AppPreferences.KEY_PACKET_MONITOR_COLUMN_TO_WIDTH);
         trackPacketTableColumnWidth(colPayload, AppPreferences.KEY_PACKET_MONITOR_COLUMN_PAYLOAD_WIDTH);
@@ -761,6 +764,9 @@ public final class PacketMonitorWindow {
         applyPacketTableColumnWidth(colType,
                 AppPreferences.KEY_PACKET_MONITOR_COLUMN_TYPE_WIDTH,
                 PACKET_TABLE_TYPE_COLUMN_WIDTH);
+        applyPacketTableColumnWidth(colTransport,
+                AppPreferences.KEY_PACKET_MONITOR_COLUMN_TRANSPORT_WIDTH,
+                PACKET_TABLE_TRANSPORT_COLUMN_WIDTH);
         applyPacketTableColumnWidth(colFrom,
                 AppPreferences.KEY_PACKET_MONITOR_COLUMN_FROM_WIDTH,
                 PACKET_TABLE_NODE_COLUMN_WIDTH);
@@ -1199,7 +1205,10 @@ public final class PacketMonitorWindow {
         hexPreview.setText(currentHexPreview.hexText());
         asciiPreview.setText(currentHexPreview.asciiText());
         clearPreviewSelection();
-        TreeItem<PacketTreeNode> root = PacketDebugFormatter.buildPacketTree(entry.getPacketBytes());
+        TreeItem<PacketTreeNode> root = entry.getPacketType() != null
+                && entry.getPacketType().startsWith("MeshCore Companion")
+                ? PacketDebugFormatter.buildRawPacketTree(entry.getPacketType(), entry.getPacketBytes())
+                : PacketDebugFormatter.buildPacketTree(entry.getPacketBytes());
         expandTree(root);
         packetTree.setRoot(root);
         packetTree.getSelectionModel().clearSelection();

@@ -1,5 +1,6 @@
 package com.meshtastic.client.model;
 
+import com.google.protobuf.ByteString;
 import org.junit.jupiter.api.Test;
 import org.meshtastic.proto.ChannelProtos;
 
@@ -11,6 +12,9 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+/**
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
+ */
 class ChannelStoreTest {
 
     @Test
@@ -50,6 +54,21 @@ class ChannelStoreTest {
     }
 
     @Test
+    void addChannelPreservesExistingPskWhenIncomingChannelOmitsPsk() {
+        ChannelStore store = new ChannelStore();
+        ByteString psk = ByteString.copyFrom(new byte[] {1, 2, 3});
+
+        store.addChannel(createChannelWithSettings(2, ChannelProtos.Channel.Role.SECONDARY, "secure", psk));
+        store.addChannel(createChannelWithSettings(2, ChannelProtos.Channel.Role.SECONDARY, "renamed",
+                ByteString.EMPTY));
+
+        List<ChannelProtos.Channel> channels = store.getChannels();
+        assertEquals(1, channels.size());
+        assertEquals("renamed", channels.getFirst().getSettings().getName());
+        assertEquals(psk, channels.getFirst().getSettings().getPsk());
+    }
+
+    @Test
     void updateChannelAddsNewChannel() {
         ChannelStore store = new ChannelStore();
         
@@ -73,6 +92,20 @@ class ChannelStoreTest {
         List<ChannelProtos.Channel> channels = store.getChannels();
         assertEquals(1, channels.size());
         assertEquals(ChannelProtos.Channel.Role.PRIMARY, channels.getFirst().getRole());
+    }
+
+    @Test
+    void updateChannelAllowsClearingExistingPsk() {
+        ChannelStore store = new ChannelStore();
+        ByteString psk = ByteString.copyFrom(new byte[] {4, 5, 6});
+
+        store.addChannel(createChannelWithSettings(3, ChannelProtos.Channel.Role.SECONDARY, "secure", psk));
+        store.updateChannel(createChannelWithSettings(3, ChannelProtos.Channel.Role.SECONDARY, "secure",
+                ByteString.EMPTY));
+
+        List<ChannelProtos.Channel> channels = store.getChannels();
+        assertEquals(1, channels.size());
+        assertEquals(0, channels.getFirst().getSettings().getPsk().size());
     }
 
     @Test
@@ -188,6 +221,18 @@ class ChannelStoreTest {
         return ChannelProtos.Channel.newBuilder()
                 .setIndex(index)
                 .setRole(role)
+                .build();
+    }
+
+    private static ChannelProtos.Channel createChannelWithSettings(int index, ChannelProtos.Channel.Role role,
+                                                                   String name, ByteString psk) {
+        return ChannelProtos.Channel.newBuilder()
+                .setIndex(index)
+                .setRole(role)
+                .setSettings(ChannelProtos.ChannelSettings.newBuilder()
+                        .setName(name)
+                        .setPsk(psk)
+                        .build())
                 .build();
     }
 }

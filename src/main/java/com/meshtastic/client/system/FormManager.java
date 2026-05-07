@@ -9,6 +9,8 @@ import com.meshtastic.client.modal.ModalPane;
  * Статический менеджер. Инициализируется через {@link #install(RootPane)},
  * после чего {@link #showForm(Form)} переключает активную форму
  * внутри {@link MainForm}. Навигация блокируется при открытом модальном окне.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class FormManager {
 

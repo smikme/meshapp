@@ -3,9 +3,14 @@ package com.meshtastic.client.system;
 import com.meshtastic.client.MeshApp;
 import com.meshtastic.client.modal.ModalPane;
 import com.meshtastic.client.modal.Toast;
+import com.meshtastic.client.model.ConnectionEntry;
+import com.meshtastic.client.model.DeviceState;
+import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.platform.OsDetect;
+import com.meshtastic.client.service.ConnectionManager;
 import com.meshtastic.client.tray.AppTrayManager;
 import com.meshtastic.client.utils.AppPreferences;
+import javafx.application.Platform;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.geometry.Rectangle2D;
@@ -13,6 +18,7 @@ import javafx.scene.Cursor;
 import javafx.scene.Node;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
+import javafx.scene.control.OverrunStyle;
 import javafx.scene.input.MouseEvent;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.HBox;
@@ -34,6 +40,8 @@ import org.slf4j.LoggerFactory;
  * <p>
  * На macOS resize делегируется нативному {@code NSWindowStyleMaskResizable}.
  * На Windows/Linux используются кастомные обработчики мыши по краям/углам окна.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class RootPane extends BorderPane {
 
@@ -41,6 +49,7 @@ public class RootPane extends BorderPane {
 
     private static final double RESIZE_MARGIN = 8;
     private static final double CORNER_MARGIN = 16;
+    private static final String APPLICATION_TITLE = "MeshApp";
     /**
      * Для transparent/layered окна Windows нужен хотя бы минимальный alpha,
      * иначе hit-test проваливается сквозь полностью прозрачные пиксели.
@@ -51,6 +60,7 @@ public class RootPane extends BorderPane {
     private final DrawerPane drawerPane;
     private final MainForm mainForm;
     private final StackPane toastOverlay;
+    private final Runnable connectionTitleListener = () -> Platform.runLater(this::updateWindowTitle);
 
     private double dragStartX;
     private double dragStartY;
@@ -74,6 +84,7 @@ public class RootPane extends BorderPane {
     /** Узел, на котором мы принудительно подменили курсор; null если не подменяли */
     private Node cursorOverriddenNode;
     private Cursor cursorOverriddenOriginal;
+    private Label titleLabel;
 
     public RootPane() {
         drawerPane = new DrawerPane();
@@ -111,6 +122,9 @@ public class RootPane extends BorderPane {
 
         Toast.setOverlay(toastOverlay);
         ModalPane.install(modalPane);
+
+        ConnectionManager.getInstance().addListener(connectionTitleListener);
+        updateWindowTitle();
     }
 
     /**
@@ -147,8 +161,11 @@ public class RootPane extends BorderPane {
         HBox.setHgrow(spacer, Priority.ALWAYS);
         spacer.setMouseTransparent(true);
 
-        Label titleLabel = new Label("MeshApp");
+        titleLabel = new Label(APPLICATION_TITLE);
         titleLabel.getStyleClass().add("title-bar-label");
+        titleLabel.setMinWidth(0);
+        titleLabel.setMaxWidth(520);
+        titleLabel.setTextOverrun(OverrunStyle.ELLIPSIS);
         titleLabel.setMouseTransparent(true);
 
         Region spacer2 = new Region();
@@ -195,6 +212,80 @@ public class RootPane extends BorderPane {
         bar.setOnMouseReleased(event -> dragging = false);
 
         return bar;
+    }
+
+    private void updateWindowTitle() {
+        String title = buildWindowTitle();
+        if (titleLabel != null) {
+            titleLabel.setText(title);
+        }
+        Stage stage = MeshApp.getPrimaryStage();
+        if (stage != null) {
+            stage.setTitle(title);
+        }
+    }
+
+    private String buildWindowTitle() {
+        ConnectionManager manager = ConnectionManager.getInstance();
+        ConnectionEntry entry = findCurrentConnection(manager);
+        if (entry == null) {
+            return APPLICATION_TITLE;
+        }
+
+        String nodeTitle = resolveNodeTitle(manager, entry);
+        if (entry.isReconnecting() && !entry.isConnected()) {
+            nodeTitle += " (переподключение)";
+        }
+        return APPLICATION_TITLE + ": " + nodeTitle;
+    }
+
+    private static ConnectionEntry findCurrentConnection(ConnectionManager manager) {
+        ConnectionEntry reconnectingEntry = null;
+        for (ConnectionEntry entry : manager.getEntries()) {
+            if (entry.isConnected()) {
+                return entry;
+            }
+            if (reconnectingEntry == null && entry.isReconnecting()) {
+                reconnectingEntry = entry;
+            }
+        }
+        return reconnectingEntry;
+    }
+
+    private static String resolveNodeTitle(ConnectionManager manager, ConnectionEntry entry) {
+        NodeData node = findLocalNode(manager, entry);
+        String nodeName = firstText(
+                node != null ? node.getLongName() : null,
+                node != null ? node.getShortName() : null,
+                entry.getName()
+        );
+        String nodeId = firstText(
+                node != null ? node.getNodeId() : null,
+                manager.getOwnerNodeId(entry.getId()),
+                entry.getNodeId()
+        );
+
+        if (nodeId == null || nodeId.equals(nodeName)) {
+            return nodeName != null ? nodeName : entry.getName();
+        }
+        return (nodeName != null ? nodeName : entry.getName()) + " (" + nodeId + ")";
+    }
+
+    private static NodeData findLocalNode(ConnectionManager manager, ConnectionEntry entry) {
+        DeviceState state = manager.getDeviceState(entry.getId());
+        if (state == null || state.getMyNodeNum() == 0) {
+            return null;
+        }
+        return state.getNodeDb().get(state.getMyNodeNum());
+    }
+
+    private static String firstText(String... values) {
+        for (String value : values) {
+            if (value != null && !value.isBlank() && !"?".equals(value.trim())) {
+                return value.trim();
+            }
+        }
+        return null;
     }
 
     private Button createWindowButton(String styleClass) {

@@ -9,6 +9,7 @@ import com.meshtastic.client.model.ConnectionType;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.protocol.ProtocolHandler;
+import com.meshtastic.client.protocol.meshcore.MeshCoreCompanionState;
 import com.meshtastic.client.service.ConnectionManager;
 import com.meshtastic.client.service.ConfigSnapshotService;
 import com.meshtastic.client.service.DatabaseResetService;
@@ -80,6 +81,9 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+/**
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
+ */
 @SystemForm(name = "Настройки", description = "Настройки клиента", tags = {"settings", "options"})
 public class FormSetting extends Form {
 
@@ -121,9 +125,16 @@ public class FormSetting extends Form {
     private static final int DEVICE_POWER_ACTION_DELAY_SECONDS = 1;
     /** Сколько максимум ждём routing ACK для reboot/shutdown перед fallback-поведением. */
     private static final long DEVICE_POWER_ACTION_ACK_TIMEOUT_MS = 2_500;
+    private static final String OWNER_INFO_CONFIG_TYPE = "owner_info";
+    private static final String OWNER_LONG_NAME_FIELD = "long_name";
+    private static final String OWNER_SHORT_NAME_FIELD = "short_name";
+    private static final String OWNER_IS_LICENSED_FIELD = "is_licensed";
+    private static final String RINGTONE_CONFIG_TYPE = "ringtone";
+    private static final String RINGTONE_FIELD = "ringtone";
 
     private DeviceState state;
     private ProtocolHandler handler;
+    private MeshCoreCompanionState meshCoreCompanionState;
     private volatile String pendingTimeOnlySyncConnectionId;
     private final Runnable connectionListener = () -> Platform.runLater(() -> {
         reloadConfigTree();
@@ -154,6 +165,9 @@ public class FormSetting extends Form {
     private Button shutdownHardwareBtn;
     private Tab configTab;
     private volatile CompletableFuture<DeviceState> observedConfigLoadFuture;
+    private volatile DeviceState ringtoneListenerState;
+    private volatile Runnable ringtoneListener;
+    private volatile DeviceState ringtoneRequestState;
 
     // Оригинальные protobuf-объекты для пересборки при сохранении
     private List<ConfigProtos.Config> originalConfigs = new ArrayList<>();
@@ -216,15 +230,19 @@ public class FormSetting extends Form {
         ConnectionManager mgr = ConnectionManager.getInstance();
         DeviceState newState = null;
         ProtocolHandler newHandler = null;
+        MeshCoreCompanionState newMeshCoreState = null;
         for (ConnectionEntry entry : mgr.getEntries()) {
             if (entry.isConnected()) {
                 newState = mgr.getDeviceState(entry.getId());
                 newHandler = mgr.getProtocolHandler(entry.getId());
+                newMeshCoreState = mgr.getMeshCoreCompanionState(entry.getId());
                 if (newState != null) { break; }
             }
         }
         this.state = newState;
         this.handler = newHandler;
+        this.meshCoreCompanionState = newMeshCoreState;
+        observeRingtoneState(newState);
     }
 
     /**
@@ -232,9 +250,12 @@ public class FormSetting extends Form {
      * Нужен при disconnect, чтобы редактор не держал stale-конфигурацию.
      */
     private void clearConfigContext() {
+        observeRingtoneState(null);
         state = null;
         handler = null;
+        meshCoreCompanionState = null;
         observedConfigLoadFuture = null;
+        ringtoneRequestState = null;
         fullConfigRoot = null;
         originalConfigs = new ArrayList<>();
         originalModuleConfigs = new ArrayList<>();
@@ -246,6 +267,30 @@ public class FormSetting extends Form {
         if (configSearchField != null) {
             configSearchField.clear();
         }
+    }
+
+    private void observeRingtoneState(DeviceState newState) {
+        if (ringtoneListenerState == newState) {
+            return;
+        }
+        if (ringtoneListenerState != null && ringtoneListener != null) {
+            ringtoneListenerState.removeRingtoneListener(ringtoneListener);
+        }
+        ringtoneListenerState = null;
+        ringtoneListener = null;
+        ringtoneRequestState = null;
+
+        if (newState == null) {
+            return;
+        }
+
+        DeviceState observedState = newState;
+        ringtoneListener = () -> Platform.runLater(() -> {
+            ringtoneRequestState = null;
+            applyLoadedRingtoneToEditor(observedState);
+        });
+        observedState.addRingtoneListener(ringtoneListener);
+        ringtoneListenerState = observedState;
     }
 
     /**
@@ -296,6 +341,54 @@ public class FormSetting extends Form {
             }
             reloadConfigTree();
         }));
+    }
+
+    private void requestRingtoneIfNeeded(DeviceState actionState, ProtocolHandler actionHandler) {
+        if (actionState == null || actionHandler == null || actionState.isRingtoneLoaded()) {
+            return;
+        }
+        if (ringtoneRequestState == actionState) {
+            return;
+        }
+
+        ringtoneRequestState = actionState;
+        MessageService.requestRingtone(actionHandler, actionState)
+                .orTimeout(CONFIG_SAVE_ACK_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+                .whenComplete((error, ex) -> {
+                    if (ringtoneRequestState == actionState) {
+                        ringtoneRequestState = null;
+                    }
+                    if (ex != null) {
+                        log.debug("Ringtone request ACK was not observed: {}", rootCauseMessage(ex));
+                    } else if (error != null && error != MeshProtos.Routing.Error.NONE) {
+                        log.warn("Ringtone request returned {}", error);
+                    }
+                });
+    }
+
+    private void applyLoadedRingtoneToEditor(DeviceState sourceState) {
+        if (sourceState == null || sourceState != state || !sourceState.isRingtoneLoaded()) {
+            return;
+        }
+
+        TreeItem<ConfigTreeItem> root = currentEditorRoot();
+        if (root == null) {
+            return;
+        }
+        TreeItem<ConfigTreeItem> ringtoneSection = findTopLevelSection(root, RINGTONE_CONFIG_TYPE);
+        if (ringtoneSection == null || hasMoifiedFields(ringtoneSection)) {
+            return;
+        }
+
+        for (TreeItem<ConfigTreeItem> child : ringtoneSection.getChildren()) {
+            ConfigTreeItem data = child.getValue();
+            if (data != null && RINGTONE_FIELD.equals(data.getFieldName())) {
+                data.setValue(sourceState.getRingtone());
+                data.resetOriginal();
+                refreshConfigTreeView();
+                return;
+            }
+        }
     }
 
     /**
@@ -658,12 +751,12 @@ public class FormSetting extends Form {
 
         TableColumn<NodeData, String> colLongName = new TableColumn<>("Имя");
         colLongName.setCellValueFactory(cd -> new SimpleStringProperty(
-                cd.getValue().getLongName() != null ? cd.getValue().getLongName() : ""));
+                sanitizeCacheDisplayText(cd.getValue().getLongName())));
         colLongName.setPrefWidth(150);
 
         TableColumn<NodeData, String> colShortName = new TableColumn<>("Короткое");
         colShortName.setCellValueFactory(cd -> new SimpleStringProperty(
-                cd.getValue().getShortName() != null ? cd.getValue().getShortName() : ""));
+                sanitizeCacheDisplayText(cd.getValue().getShortName())));
         colShortName.setPrefWidth(80);
 
         TableColumn<NodeData, String> colNodeId = new TableColumn<>("ID ноды");
@@ -779,6 +872,14 @@ public class FormSetting extends Form {
         } else {
             cacheStatusLabel.setText("Показано %d из %d (прокрутите для загрузки)".formatted(loaded, cacheTotalInDb));
         }
+    }
+
+    /**
+     * Вкладка «Кэш» показывает имена только для чтения, поэтому на macOS
+     * отбрасываем glyph-комбинации, которые уже приводили JavaFX/CoreText к native crash.
+     */
+    static String sanitizeCacheDisplayText(String value) {
+        return com.meshtastic.client.utils.UnicodeTextUtils.sanitizeForJavaFxDisplay(value);
     }
 
     // ==================== Config Tab ====================
@@ -1498,6 +1599,7 @@ public class FormSetting extends Form {
                     kind,
                     extractOwnerInfo(root),
                     extractFixedPosition(root),
+                    extractRingtone(root),
                     collectCurrentConfigMessages(root),
                     collectCurrentModuleConfigMessages(root),
                     getWorkingChannelsSnapshot()
@@ -1673,13 +1775,14 @@ public class FormSetting extends Form {
     }
 
     private ConfigSnapshotService.OwnerInfo extractOwnerInfo(TreeItem<ConfigTreeItem> root) {
-        TreeItem<ConfigTreeItem> ownerSection = findTopLevelSection(root, "owner_info");
+        TreeItem<ConfigTreeItem> ownerSection = findTopLevelSection(root, OWNER_INFO_CONFIG_TYPE);
         if (ownerSection == null) {
             return null;
         }
         return new ConfigSnapshotService.OwnerInfo(
-                stringValue(ownerSection, "long_name"),
-                stringValue(ownerSection, "short_name")
+                stringValue(ownerSection, OWNER_LONG_NAME_FIELD),
+                stringValue(ownerSection, OWNER_SHORT_NAME_FIELD),
+                booleanValue(ownerSection, OWNER_IS_LICENSED_FIELD)
         );
     }
 
@@ -1693,6 +1796,17 @@ public class FormSetting extends Form {
                 doubleValue(positionSection, "longitude"),
                 intValue(positionSection, "altitude")
         );
+    }
+
+    private String extractRingtone(TreeItem<ConfigTreeItem> root) {
+        TreeItem<ConfigTreeItem> ringtoneSection = findTopLevelSection(root, RINGTONE_CONFIG_TYPE);
+        if (ringtoneSection == null) {
+            return null;
+        }
+        if (state != null && !state.isRingtoneLoaded() && !hasMoifiedFields(ringtoneSection)) {
+            return null;
+        }
+        return stringValue(ringtoneSection, RINGTONE_FIELD);
     }
 
     private List<ConfigProtos.Config> collectCurrentConfigMessages(TreeItem<ConfigTreeItem> root) {
@@ -1755,6 +1869,7 @@ public class FormSetting extends Form {
 
         applyOwnerInfo(snapshot.ownerInfo(), root);
         applyFixedPosition(snapshot.fixedPosition(), root);
+        applyRingtone(snapshot.ringtone(), root);
         applyConfigSnapshot(snapshot.configs(), root);
         applyModuleConfigSnapshot(snapshot.moduleConfigs(), root);
         applyChannelSnapshot(snapshot.channels());
@@ -1764,12 +1879,13 @@ public class FormSetting extends Form {
         if (ownerInfo == null) {
             return;
         }
-        TreeItem<ConfigTreeItem> ownerSection = findTopLevelSection(root, "owner_info");
+        TreeItem<ConfigTreeItem> ownerSection = findTopLevelSection(root, OWNER_INFO_CONFIG_TYPE);
         if (ownerSection == null) {
             return;
         }
-        setTreeFieldValue(ownerSection, "long_name", ownerInfo.longName());
-        setTreeFieldValue(ownerSection, "short_name", ownerInfo.shortName());
+        setTreeFieldValue(ownerSection, OWNER_LONG_NAME_FIELD, ownerInfo.longName());
+        setTreeFieldValue(ownerSection, OWNER_SHORT_NAME_FIELD, ownerInfo.shortName());
+        setTreeFieldValue(ownerSection, OWNER_IS_LICENSED_FIELD, ownerInfo.isLicensed());
     }
 
     private void applyFixedPosition(ConfigSnapshotService.FixedPosition fixedPosition, TreeItem<ConfigTreeItem> root) {
@@ -1783,6 +1899,17 @@ public class FormSetting extends Form {
         setTreeFieldValue(positionSection, "latitude", fixedPosition.latitude());
         setTreeFieldValue(positionSection, "longitude", fixedPosition.longitude());
         setTreeFieldValue(positionSection, "altitude", fixedPosition.altitude());
+    }
+
+    private void applyRingtone(String ringtone, TreeItem<ConfigTreeItem> root) {
+        if (ringtone == null) {
+            return;
+        }
+        TreeItem<ConfigTreeItem> ringtoneSection = findTopLevelSection(root, RINGTONE_CONFIG_TYPE);
+        if (ringtoneSection == null) {
+            return;
+        }
+        setTreeFieldValue(ringtoneSection, RINGTONE_FIELD, ringtone);
     }
 
     private void applyConfigSnapshot(List<com.google.gson.JsonObject> configs, TreeItem<ConfigTreeItem> root) {
@@ -1947,6 +2074,11 @@ public class FormSetting extends Form {
         return value instanceof Number number ? number.intValue() : 0;
     }
 
+    private boolean booleanValue(TreeItem<ConfigTreeItem> section, String fieldName) {
+        Object value = findTreeFieldValue(section, fieldName);
+        return value instanceof Boolean bool ? bool : Boolean.parseBoolean(String.valueOf(value));
+    }
+
     private Object findTreeFieldValue(TreeItem<ConfigTreeItem> section, String fieldName) {
         for (TreeItem<ConfigTreeItem> child : section.getChildren()) {
             ConfigTreeItem data = child.getValue();
@@ -2025,14 +2157,21 @@ public class FormSetting extends Form {
     private void reloadConfigTree() {
         refreshConnection();
 
-        boolean connected = state != null && handler != null;
-        setDevicePowerButtonsDisabled(!connected);
-        setSyncDateTimeButtonDisabled(!connected);
+        boolean meshtasticConnected = state != null && handler != null;
+        boolean meshCoreConnected = state != null && meshCoreCompanionState != null;
+        boolean connected = meshtasticConnected || meshCoreConnected;
+        setDevicePowerButtonsDisabled(!meshtasticConnected);
+        setSyncDateTimeButtonDisabled(!meshtasticConnected);
 
         if (!connected) {
             clearConfigContext();
             configStatusLabel.setText("Нет подключения к радио");
             saveConfigBtn.setDisable(true);
+            return;
+        }
+
+        if (meshCoreConnected && !meshtasticConnected) {
+            showMeshCoreSettingsTree(meshCoreCompanionState);
             return;
         }
 
@@ -2064,15 +2203,20 @@ public class FormSetting extends Form {
 
         // Виртуальная секция: Имя устройства
         TreeItem<ConfigTreeItem> ownerSection = new TreeItem<>(
-                new ConfigTreeItem("Имя устройства", "owner_info", 0));
-        String longName = myNode != null && myNode.getLongName() != null ? myNode.getLongName() : "";
+                new ConfigTreeItem("Имя устройства", OWNER_INFO_CONFIG_TYPE, 0));
+        MeshProtos.User ownerInfo = state.getOwnerInfo();
+        String longName = resolveOwnerLongName(ownerInfo, myNode);
         ownerSection.getChildren().add(new TreeItem<>(
-                new ConfigTreeItem("Длинное имя", "long_name", longName, String.class,
-                        null, null, "owner_info", 0)));
-        String shortName = myNode != null && myNode.getShortName() != null ? myNode.getShortName() : "";
+                new ConfigTreeItem("Длинное имя", OWNER_LONG_NAME_FIELD, longName, String.class,
+                        null, null, OWNER_INFO_CONFIG_TYPE, 0)));
+        String shortName = resolveOwnerShortName(ownerInfo, myNode);
         ownerSection.getChildren().add(new TreeItem<>(
-                new ConfigTreeItem("Короткое имя", "short_name", shortName, String.class,
-                        null, null, "owner_info", 0)));
+                new ConfigTreeItem("Короткое имя", OWNER_SHORT_NAME_FIELD, shortName, String.class,
+                        null, null, OWNER_INFO_CONFIG_TYPE, 0)));
+        ownerSection.getChildren().add(new TreeItem<>(
+                new ConfigTreeItem("Лицензированный оператор", OWNER_IS_LICENSED_FIELD,
+                        resolveOwnerLicensed(ownerInfo, myNode), Boolean.class,
+                        null, null, OWNER_INFO_CONFIG_TYPE, 0)));
         root.getChildren().add(ownerSection);
 
         // Виртуальная секция: Фиксированная позиция
@@ -2091,6 +2235,15 @@ public class FormSetting extends Form {
                 new ConfigTreeItem("Высота (м)", "altitude", alt, Integer.class,
                         null, null, "fixed_position", 0)));
         root.getChildren().add(posSection);
+
+        // Виртуальная секция: RTTTL ringtone для External Notification
+        TreeItem<ConfigTreeItem> ringtoneSection = new TreeItem<>(
+                new ConfigTreeItem("Мелодия уведомления", RINGTONE_CONFIG_TYPE, 0));
+        ringtoneSection.getChildren().add(new TreeItem<>(
+                new ConfigTreeItem("RTTTL", RINGTONE_FIELD,
+                        state.isRingtoneLoaded() ? state.getRingtone() : "",
+                        String.class, null, null, RINGTONE_CONFIG_TYPE, 0)));
+        root.getChildren().add(ringtoneSection);
 
         // Конфигурация устройства
         if (!originalConfigs.isEmpty()) {
@@ -2118,12 +2271,139 @@ public class FormSetting extends Form {
             saveConfigBtn.setDisable(true);
             setSyncDateTimeButtonDisabled(true);
         } else {
+            requestRingtoneIfNeeded(state, handler);
             saveConfigBtn.setDisable(false);
             setSyncDateTimeButtonDisabled(findLoadedDeviceConfig() == null);
             int totalFields = countFields(root);
             configStatusLabel.setText("Загружено: %d секций, %d параметров".formatted(
                     originalConfigs.size() + originalModuleConfigs.size(), totalFields));
         }
+    }
+
+    /**
+     * Строит read-only дерево настроек MeshCore Companion Protocol.
+     * <p>
+     * MeshCore Companion не отдаёт Meshtastic Admin protobuf-конфиг, поэтому
+     * вкладка показывает доступные metadata, radio-параметры, storage и каналы,
+     * а действия сохранения/перезагрузки Meshtastic-конфига отключаются.
+     *
+     * @param meshCoreState runtime-состояние MeshCore Companion
+     */
+    private void showMeshCoreSettingsTree(MeshCoreCompanionState meshCoreState) {
+        originalConfigs = new ArrayList<>();
+        originalModuleConfigs = new ArrayList<>();
+        originalChannels = new ArrayList<>(state != null ? state.getChannels() : List.of());
+        workingChannels = new ArrayList<>(originalChannels);
+
+        TreeItem<ConfigTreeItem> root = new TreeItem<>(new ConfigTreeItem("Корень", null, 0));
+        root.setExpanded(true);
+
+        TreeItem<ConfigTreeItem> deviceSection = section("MeshCore устройство", "meshcore_device");
+        addValue(deviceSection, "Имя", "device_name", valueOrDash(meshCoreState.getDeviceName()), String.class);
+        addValue(deviceSection, "Owner ID", "owner_id", valueOrDash(meshCoreState.getOwnerId()), String.class);
+        addValue(deviceSection, "Public key", "public_key", valueOrDash(meshCoreState.getPublicKeyHex()), String.class);
+        addValue(deviceSection, "Модель", "model", valueOrDash(meshCoreState.getModel()), String.class);
+        addValue(deviceSection, "Firmware", "firmware_version",
+                valueOrDash(meshCoreState.getFirmwareVersion()), String.class);
+        addValue(deviceSection, "Build", "firmware_build",
+                valueOrDash(meshCoreState.getFirmwareBuild()), String.class);
+        addValue(deviceSection, "Protocol version", "protocol_version",
+                valueOrDash(meshCoreState.getFirmwareProtocolVersion()), String.class);
+        addValue(deviceSection, "BLE PIN", "ble_pin", valueOrDash(meshCoreState.getBlePin()), String.class);
+        root.getChildren().add(deviceSection);
+
+        TreeItem<ConfigTreeItem> radioSection = section("MeshCore radio", "meshcore_radio");
+        addValue(radioSection, "TX power (dBm)", "tx_power",
+                valueOrDash(meshCoreState.getTxPowerDbm()), String.class);
+        addValue(radioSection, "Max TX power (dBm)", "max_tx_power",
+                valueOrDash(meshCoreState.getMaxTxPowerDbm()), String.class);
+        addValue(radioSection, "Frequency (kHz)", "frequency",
+                valueOrDash(meshCoreState.getRadioFrequencyKhz()), String.class);
+        addValue(radioSection, "Bandwidth (kHz)", "bandwidth",
+                valueOrDash(meshCoreState.getRadioBandwidthKhz()), String.class);
+        addValue(radioSection, "Spreading factor", "spreading_factor",
+                valueOrDash(meshCoreState.getRadioSpreadingFactor()), String.class);
+        addValue(radioSection, "Coding rate", "coding_rate",
+                valueOrDash(meshCoreState.getRadioCodingRate()), String.class);
+        root.getChildren().add(radioSection);
+
+        TreeItem<ConfigTreeItem> limitsSection = section("MeshCore данные", "meshcore_limits");
+        addValue(limitsSection, "Max contacts", "max_contacts",
+                valueOrDash(meshCoreState.getMaxContacts()), String.class);
+        addValue(limitsSection, "Contact count", "contact_count",
+                valueOrDash(meshCoreState.getContactCount()), String.class);
+        addValue(limitsSection, "Max channels", "max_channels",
+                valueOrDash(meshCoreState.getMaxChannels()), String.class);
+        addValue(limitsSection, "Battery (mV)", "battery_mv",
+                valueOrDash(meshCoreState.getBatteryMillivolts()), String.class);
+        addValue(limitsSection, "Storage used (KB)", "storage_used",
+                valueOrDash(meshCoreState.getUsedStorageKb()), String.class);
+        addValue(limitsSection, "Storage total (KB)", "storage_total",
+                valueOrDash(meshCoreState.getTotalStorageKb()), String.class);
+        addValue(limitsSection, "Last error", "last_error",
+                valueOrDash(meshCoreState.getLastError()), String.class);
+        root.getChildren().add(limitsSection);
+
+        TreeItem<ConfigTreeItem> channelsSection = section("MeshCore каналы", "meshcore_channels");
+        for (ChannelProtos.Channel channel : state.getChannels()) {
+            String role = channel.getRole().name();
+            String name = channel.hasSettings() ? channel.getSettings().getName() : "";
+            addValue(channelsSection, "Канал " + channel.getIndex(),
+                    "channel_" + channel.getIndex(),
+                    (name == null || name.isBlank() ? "Ch " + channel.getIndex() : name) + " (" + role + ")",
+                    String.class);
+        }
+        root.getChildren().add(channelsSection);
+
+        fullConfigRoot = root;
+        configTree.setRoot(root);
+        configSearchField.clear();
+        saveConfigBtn.setDisable(true);
+        setSyncDateTimeButtonDisabled(true);
+        configStatusLabel.setText("MeshCore Companion: metadata загружены, запись настроек недоступна");
+    }
+
+    private TreeItem<ConfigTreeItem> section(String name, String configType) {
+        return new TreeItem<>(new ConfigTreeItem(name, configType, 0));
+    }
+
+    private void addValue(TreeItem<ConfigTreeItem> section,
+                          String name,
+                          String fieldName,
+                          Object value,
+                          Class<?> valueType) {
+        section.getChildren().add(new TreeItem<>(
+                new ConfigTreeItem(name, fieldName, value, valueType, null, null,
+                        section.getValue().getConfigType(), 0)));
+    }
+
+    private String valueOrDash(Object value) {
+        if (value == null) {
+            return "—";
+        }
+        String text = String.valueOf(value);
+        return text.isBlank() ? "—" : text;
+    }
+
+    private String resolveOwnerLongName(MeshProtos.User ownerInfo, NodeData myNode) {
+        if (ownerInfo != null && ownerInfo.getLongName() != null && !ownerInfo.getLongName().isEmpty()) {
+            return ownerInfo.getLongName();
+        }
+        return myNode != null && myNode.getLongName() != null ? myNode.getLongName() : "";
+    }
+
+    private String resolveOwnerShortName(MeshProtos.User ownerInfo, NodeData myNode) {
+        if (ownerInfo != null && ownerInfo.getShortName() != null && !ownerInfo.getShortName().isEmpty()) {
+            return ownerInfo.getShortName();
+        }
+        return myNode != null && myNode.getShortName() != null ? myNode.getShortName() : "";
+    }
+
+    private boolean resolveOwnerLicensed(MeshProtos.User ownerInfo, NodeData myNode) {
+        if (ownerInfo != null) {
+            return ownerInfo.getIsLicensed();
+        }
+        return myNode != null && myNode.isLicensed();
     }
 
     /**
@@ -2253,10 +2533,15 @@ public class FormSetting extends Form {
         boolean ownerModified = false;
         String newLongName = null;
         String newShortName = null;
+        boolean newIsLicensed = resolveOwnerLicensed(
+                actionState.getOwnerInfo(),
+                actionState.getNodeDb().get(actionState.getMyNodeNum()));
         boolean positionModified = false;
         double newLat = 0;
         double newLon = 0;
         int newAlt = 0;
+        boolean ringtoneModified = false;
+        String newRingtone = "";
 
         // Собрать protobuf-изменения
         List<ConfigProtos.Config> modifiedConfigs = new ArrayList<>();
@@ -2267,12 +2552,15 @@ public class FormSetting extends Form {
             if (topData == null) { continue; }
 
             // Виртуальная секция: Имя устройства
-            if ("owner_info".equals(topData.getConfigType()) && hasMoifiedFields(topLevel)) {
+            if (OWNER_INFO_CONFIG_TYPE.equals(topData.getConfigType()) && hasMoifiedFields(topLevel)) {
                 ownerModified = true;
                 for (TreeItem<ConfigTreeItem> child : topLevel.getChildren()) {
                     ConfigTreeItem ci = child.getValue();
-                    if ("long_name".equals(ci.getFieldName())) { newLongName = ci.getValue().toString(); }
-                    if ("short_name".equals(ci.getFieldName())) { newShortName = ci.getValue().toString(); }
+                    if (OWNER_LONG_NAME_FIELD.equals(ci.getFieldName())) { newLongName = ci.getValue().toString(); }
+                    if (OWNER_SHORT_NAME_FIELD.equals(ci.getFieldName())) { newShortName = ci.getValue().toString(); }
+                    if (OWNER_IS_LICENSED_FIELD.equals(ci.getFieldName())) {
+                        newIsLicensed = Boolean.TRUE.equals(ci.getValue());
+                    }
                 }
             }
 
@@ -2285,6 +2573,12 @@ public class FormSetting extends Form {
                     if ("longitude".equals(ci.getFieldName())) { newLon = ((Number) ci.getValue()).doubleValue(); }
                     if ("altitude".equals(ci.getFieldName())) { newAlt = ((Number) ci.getValue()).intValue(); }
                 }
+            }
+
+            // Виртуальная секция: Ringtone
+            if (RINGTONE_CONFIG_TYPE.equals(topData.getConfigType()) && hasMoifiedFields(topLevel)) {
+                ringtoneModified = true;
+                newRingtone = stringValue(topLevel, RINGTONE_FIELD);
             }
 
             // Protobuf-секции: "Конфигурация устройства" / "Конфигурация модулей"
@@ -2320,6 +2614,7 @@ public class FormSetting extends Form {
         List<ChannelProtos.Channel> modifiedChannels = collectModifiedChannels();
 
         if (!ownerModified && !positionModified
+                && !ringtoneModified
                 && modifiedConfigs.isEmpty() && modifiedModuleConfigs.isEmpty()
                 && modifiedChannels.isEmpty()) {
             configStatusLabel.setText("Нет изменений для сохранения");
@@ -2328,7 +2623,8 @@ public class FormSetting extends Form {
 
         int totalChanges = modifiedConfigs.size() + modifiedModuleConfigs.size()
                 + modifiedChannels.size()
-                + (ownerModified ? 1 : 0) + (positionModified ? 1 : 0);
+                + (ownerModified ? 1 : 0) + (positionModified ? 1 : 0)
+                + (ringtoneModified ? 1 : 0);
         saveConfigBtn.setDisable(true);
         configStatusLabel.setText("Запрос session key...");
 
@@ -2336,10 +2632,13 @@ public class FormSetting extends Form {
         final boolean fOwnerModified = ownerModified;
         final String fLongName = newLongName;
         final String fShortName = newShortName;
+        final boolean fIsLicensed = newIsLicensed;
         final boolean fPositionModified = positionModified;
         final double fLat = newLat;
         final double fLon = newLon;
         final int fAlt = newAlt;
+        final boolean fRingtoneModified = ringtoneModified;
+        final String fRingtone = newRingtone;
 
         // Запрашиваем session key → отправляем настройки.
         // OwnerInfo listener и timeout fallback работают параллельно, поэтому нужен
@@ -2352,8 +2651,9 @@ public class FormSetting extends Form {
             if (saveDispatchStarted.compareAndSet(false, true)) {
                 sendConfigChanges(activeEntry, actionState, actionHandler,
                         modifiedConfigs, modifiedModuleConfigs, modifiedChannels,
-                        fOwnerModified, fLongName, fShortName,
+                        fOwnerModified, fLongName, fShortName, fIsLicensed,
                         fPositionModified, fLat, fLon, fAlt,
+                        fRingtoneModified, fRingtone,
                         totalChanges);
             }
         });
@@ -2368,8 +2668,9 @@ public class FormSetting extends Form {
                     configStatusLabel.setText("Отправка без session key...");
                     sendConfigChanges(activeEntry, actionState, actionHandler,
                             modifiedConfigs, modifiedModuleConfigs, modifiedChannels,
-                            fOwnerModified, fLongName, fShortName,
+                            fOwnerModified, fLongName, fShortName, fIsLicensed,
                             fPositionModified, fLat, fLon, fAlt,
+                            fRingtoneModified, fRingtone,
                             totalChanges);
                 }
             });
@@ -2392,7 +2693,9 @@ public class FormSetting extends Form {
                                    List<ModuleConfigProtos.ModuleConfig> moduleConfigs,
                                    List<ChannelProtos.Channel> channels,
                                    boolean ownerModified, String newLongName, String newShortName,
+                                   boolean newIsLicensed,
                                    boolean positionModified, double newLat, double newLon, int newAlt,
+                                   boolean ringtoneModified, String newRingtone,
                                    int totalChanges) {
         configStatusLabel.setText("Отправка настроек...");
         ConnectionType activeTransport = activeEntry != null
@@ -2402,11 +2705,21 @@ public class FormSetting extends Form {
         // Виртуальные секции — отправить напрямую
         if (ownerModified && newLongName != null && newShortName != null) {
             MessageService.setOwnerInfo(actionHandler, actionState,
-                    newLongName, newShortName, actionState.getSessionPasskey());
+                    newLongName, newShortName, newIsLicensed, actionState.getSessionPasskey());
+            MeshProtos.User currentOwnerInfo = actionState.getOwnerInfo();
+            MeshProtos.User updatedOwnerInfo = (currentOwnerInfo != null
+                    ? currentOwnerInfo.toBuilder()
+                    : MeshProtos.User.newBuilder())
+                    .setLongName(newLongName)
+                    .setShortName(newShortName)
+                    .setIsLicensed(newIsLicensed)
+                    .build();
+            actionState.setOwnerInfo(updatedOwnerInfo);
             NodeData myNode = actionState.getNodeDb().get(actionState.getMyNodeNum());
             if (myNode != null) {
                 myNode.setLongName(newLongName);
                 myNode.setShortName(newShortName);
+                myNode.setLicensed(newIsLicensed);
                 actionState.fireNodeUpdateListeners(actionState.getMyNodeNum());
             }
         }
@@ -2426,6 +2739,14 @@ public class FormSetting extends Form {
                     actionState.fireNodeUpdateListeners(actionState.getMyNodeNum());
                 }
             }
+        }
+
+        if (ringtoneModified) {
+            String ringtone = newRingtone != null ? newRingtone : "";
+            observeOptionalConfigSaveAck(
+                    MessageService.setRingtone(actionHandler, actionState, ringtone),
+                    "setRingtone");
+            actionState.setRingtone(ringtone);
         }
 
         // Protobuf-секции обычно идут через begin/commit edit с задержками между сообщениями.

@@ -5,6 +5,9 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+/**
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
+ */
 class NodeUtilsTest {
 
     @Test
@@ -25,5 +28,10 @@ class NodeUtilsTest {
     @Test
     void avatarFontSizeFallsBackAfterSanitize() {
         assertEquals(NodeUtils.avatarFontSize(1, 40), NodeUtils.avatarFontSize("A\uD83D", 40));
+    }
+
+    @Test
+    void chatAvatarFontSizeFallsBackAfterDisplaySanitize() {
+        assertEquals(NodeUtils.chatAvatarFontSize(1, 40), NodeUtils.chatAvatarFontSize("📡", 40));
     }
 }

@@ -13,6 +13,8 @@ import java.time.format.DateTimeFormatter;
  * <p>
  * Создаётся через {@link DeviceState#getOrCreateNode(int)} или напрямую по номеру ноды.
  * Поле {@code nodeId} генерируется автоматически в формате {@code !XXXXXXXX} (hex).
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class NodeData {
 
@@ -42,6 +44,7 @@ public class NodeData {
     private String hwModel;
     private byte[] publicKey;
     private Boolean unmessagable;
+    private Boolean licensed;
 
     /**
      * Создаёт ноду с указанным номером. Автоматически генерирует {@code nodeId}
@@ -131,6 +134,10 @@ public class NodeData {
     public Boolean getUnmessagable() { return unmessagable; }
     public void setUnmessagable(Boolean unmessagable) { this.unmessagable = unmessagable; }
     public boolean isUnmessagable() { return Boolean.TRUE.equals(unmessagable); }
+
+    public Boolean getLicensed() { return licensed; }
+    public void setLicensed(Boolean licensed) { this.licensed = licensed; }
+    public boolean isLicensed() { return Boolean.TRUE.equals(licensed); }
 
     /**
      * Проверяет, есть ли у ноды хотя бы одно непустое имя (longName или shortName).

@@ -15,6 +15,8 @@ import com.sun.jna.Pointer;
  * должен обеспечить thread-safety.
  *
  * @see WinBle
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public interface WinBleLibrary extends Library {
 
@@ -42,8 +44,11 @@ public interface WinBleLibrary extends Library {
 
     // ==================== Scanning ====================
 
+    /** Настраивает BLE profile: 0=Meshtastic, 1=MeshCore Companion. */
+    void meshble_set_profile(int profile);
+
     /**
-     * Запуск сканирования BLE с фильтром по Meshtastic service UUID.
+     * Запуск сканирования BLE с фильтром по service UUID выбранного profile.
      * @return 0 при успехе, отрицательное при ошибке
      */
     int meshble_start_scan(DeviceCallback callback);

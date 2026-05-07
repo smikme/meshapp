@@ -14,6 +14,8 @@ import java.io.IOException;
 
 /**
  * Tray icon для Windows/Linux через AWT {@link SystemTray}.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class AwtAppTrayService implements AppTrayService {
 

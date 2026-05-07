@@ -28,6 +28,8 @@ import java.util.Set;
 
 /**
  * Чтение/запись snapshot-файлов конфигурации MeshApp (.mcf/.mtp).
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public final class ConfigSnapshotService {
 
@@ -81,7 +83,7 @@ public final class ConfigSnapshotService {
         }
     }
 
-    public record OwnerInfo(String longName, String shortName) {}
+    public record OwnerInfo(String longName, String shortName, boolean isLicensed) {}
     public record FixedPosition(double latitude, double longitude, int altitude) {}
 
     public record ConfigSnapshot(
@@ -91,6 +93,7 @@ public final class ConfigSnapshotService {
             String exportedAt,
             OwnerInfo ownerInfo,
             FixedPosition fixedPosition,
+            String ringtone,
             List<JsonObject> configs,
             List<JsonObject> moduleConfigs,
             List<JsonObject> channels
@@ -101,6 +104,7 @@ public final class ConfigSnapshotService {
     public static ConfigSnapshot createSnapshot(SnapshotKind kind,
                                                 OwnerInfo ownerInfo,
                                                 FixedPosition fixedPosition,
+                                                String ringtone,
                                                 List<ConfigProtos.Config> configs,
                                                 List<ModuleConfigProtos.ModuleConfig> moduleConfigs,
                                                 List<ChannelProtos.Channel> channels) {
@@ -111,6 +115,7 @@ public final class ConfigSnapshotService {
                 Instant.now().toString(),
                 ownerInfo,
                 fixedPosition,
+                ringtone,
                 toJsonObjects(configs),
                 toJsonObjects(moduleConfigs),
                 toJsonObjects(channels)
@@ -129,6 +134,7 @@ public final class ConfigSnapshotService {
             JsonObject owner = new JsonObject();
             owner.addProperty("longName", snapshot.ownerInfo().longName());
             owner.addProperty("shortName", snapshot.ownerInfo().shortName());
+            owner.addProperty("isLicensed", snapshot.ownerInfo().isLicensed());
             root.add("ownerInfo", owner);
         }
 
@@ -138,6 +144,10 @@ public final class ConfigSnapshotService {
             fixed.addProperty("longitude", snapshot.fixedPosition().longitude());
             fixed.addProperty("altitude", snapshot.fixedPosition().altitude());
             root.add("fixedPosition", fixed);
+        }
+
+        if (snapshot.ringtone() != null) {
+            root.addProperty("ringtone", snapshot.ringtone());
         }
 
         root.add("configs", toJsonArray(snapshot.configs()));
@@ -172,7 +182,8 @@ public final class ConfigSnapshotService {
             JsonObject owner = root.getAsJsonObject("ownerInfo");
             ownerInfo = new OwnerInfo(
                     owner.has("longName") ? owner.get("longName").getAsString() : "",
-                    owner.has("shortName") ? owner.get("shortName").getAsString() : ""
+                    owner.has("shortName") ? owner.get("shortName").getAsString() : "",
+                    owner.has("isLicensed") && owner.get("isLicensed").getAsBoolean()
             );
         }
 
@@ -193,6 +204,9 @@ public final class ConfigSnapshotService {
                 exportedAt,
                 ownerInfo,
                 fixedPosition,
+                root.has("ringtone") && !root.get("ringtone").isJsonNull()
+                        ? root.get("ringtone").getAsString()
+                        : null,
                 readObjectArray(root, "configs"),
                 readObjectArray(root, "moduleConfigs"),
                 readObjectArray(root, "channels")
@@ -223,6 +237,7 @@ public final class ConfigSnapshotService {
                 source.version(),
                 SnapshotKind.TEMPLATE,
                 source.exportedAt(),
+                null,
                 null,
                 null,
                 sanitizeObjectList(source.configs()),

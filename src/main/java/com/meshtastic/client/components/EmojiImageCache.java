@@ -1,6 +1,5 @@
 package com.meshtastic.client.components;
 
-import javafx.application.Platform;
 import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
 
@@ -16,8 +15,11 @@ import java.util.concurrent.Future;
 /**
  * Кеш изображений эмодзи: загружает PNG из ресурсов {@code /emoji/} и кеширует как {@link Image}.
  *
- * <p>Имена файлов соответствуют формату Twemoji: hex-кодпоинты через дефис,
- * без вариационного селектора U+FE0F, например {@code 1f600.png}.
+ * <p>Имена файлов соответствуют формату Twemoji: hex-кодпоинты через дефис.
+ * Для совместимости с разными версиями ассетов loader умеет искать и точное имя,
+ * и вариант без U+FE0F.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public final class EmojiImageCache {
 
@@ -228,15 +230,20 @@ public final class EmojiImageCache {
     }
 
     /**
-     * Преобразовать строку эмодзи в имя файла Twemoji.
-     * Кодпоинты через дефис, строчные hex, U+FE0F пропускается.
+     * Преобразовать строку эмодзи в имя файла ресурса.
+     * Кодпоинты через дефис, строчные hex, U+FE0F опционально пропускается.
      */
     static String emojiToFilename(String emoji) {
+        return emojiToFilename(emoji, false);
+    }
+
+    private static String emojiToFilename(String emoji, boolean preserveVariationSelectors) {
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < emoji.length(); ) {
             int cp = emoji.codePointAt(i);
-            // Пропускаем Variation Selector 16 (U+FE0F)
-            if (cp != 0xFE0F) {
+            // Часть ресурсов хранится без FE0F, часть — с ним внутри ZWJ-последовательностей.
+            // Поэтому в loadImage() пробуем обе формы имени файла.
+            if (preserveVariationSelectors || cp != 0xFE0F) {
                 if (!sb.isEmpty()) {
                     sb.append('-');
                 }
@@ -247,12 +254,22 @@ public final class EmojiImageCache {
         return sb + ".png";
     }
 
-    private static Image loadImage(String emoji) {
-        String filename = emojiToFilename(emoji);
-        InputStream is = EmojiImageCache.class.getResourceAsStream("/emoji/" + filename);
-        if (is == null) {
-            return NOT_FOUND;
+    private static List<String> emojiToCandidateFilenames(String emoji) {
+        String exact = emojiToFilename(emoji, true);
+        String normalized = emojiToFilename(emoji, false);
+        if (exact.equals(normalized)) {
+            return List.of(exact);
         }
-        return new Image(is);
+        return List.of(exact, normalized);
+    }
+
+    private static Image loadImage(String emoji) {
+        for (String filename : emojiToCandidateFilenames(emoji)) {
+            InputStream is = EmojiImageCache.class.getResourceAsStream("/emoji/" + filename);
+            if (is != null) {
+                return new Image(is);
+            }
+        }
+        return NOT_FOUND;
     }
 }

@@ -23,6 +23,8 @@ import org.slf4j.LoggerFactory;
 /**
  * Общие утилиты для работы с нодами — аватары, цвета, таблица деталей.
  * Используется из FormNodes, FormChat, NodeDetailPanel.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public final class NodeUtils {
 
@@ -122,6 +124,30 @@ public final class NodeUtils {
         if (charCount == 2) { return base * 0.92; }
         if (charCount == 3) { return base * 0.78; }
         return base * 0.675; // 4+
+    }
+
+    /**
+     * Безопасный размер шрифта для чатовых аватаров без JavaFX text measurement.
+     * Использует display-safe текст, чтобы не заходить в native glyph-bounds path.
+     */
+    public static double chatAvatarFontSize(String text, int circleSize) {
+        String sanitized = UnicodeTextUtils.sanitizeForJavaFxDisplay(text);
+        if (sanitized.isEmpty()) {
+            return chatAvatarFontSize(1, circleSize);
+        }
+
+        int codePointCount = sanitized.codePointCount(0, sanitized.length());
+        double size = chatAvatarFontSize(codePointCount, circleSize);
+        double minSize = Math.max(8.0, circleSize * 0.24);
+        double targetWidth = circleSize * 0.78;
+        double estimatedWidth = estimateAvatarWidthUnits(sanitized) * size;
+
+        if (estimatedWidth <= targetWidth) {
+            return size;
+        }
+
+        double scaledSize = size * (targetWidth / estimatedWidth);
+        return Math.max(minSize, roundDownToHalfStep(scaledSize));
     }
 
     /**

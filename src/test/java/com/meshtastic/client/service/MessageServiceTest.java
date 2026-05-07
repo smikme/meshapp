@@ -36,6 +36,9 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.slf4j.LoggerFactory;
 
+/**
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
+ */
 class MessageServiceTest {
 
     @TempDir
@@ -75,6 +78,23 @@ class MessageServiceTest {
     }
 
     @Test
+    void requestRingtoneKeepsWantResponseEnabled() throws Exception {
+        RecordingConnection connection = new RecordingConnection();
+        ProtocolHandler handler = track(new ProtocolHandler(connection));
+        DeviceState state = new DeviceState();
+        state.setMyNodeNum(0x04c5b420);
+
+        MessageService.requestRingtone(handler, state);
+
+        MeshProtos.ToRadio sent = parseLastToRadio(connection);
+        assertTrue(sent.getPacket().getDecoded().getWantResponse());
+        AdminProtos.AdminMessage admin =
+                AdminProtos.AdminMessage.parseFrom(sent.getPacket().getDecoded().getPayload());
+        assertTrue(admin.hasGetRingtoneRequest());
+        assertTrue(admin.getGetRingtoneRequest());
+    }
+
+    @Test
     void setModuleConfigUsesRoutingAckWithoutAdminResponse() throws Exception {
         RecordingConnection connection = new RecordingConnection();
         ProtocolHandler handler = track(new ProtocolHandler(connection));
@@ -99,6 +119,25 @@ class MessageServiceTest {
     }
 
     @Test
+    void setRingtoneUsesRoutingAckWithoutAdminResponse() throws Exception {
+        RecordingConnection connection = new RecordingConnection();
+        ProtocolHandler handler = track(new ProtocolHandler(connection));
+        DeviceState state = new DeviceState();
+        state.setMyNodeNum(0x04c5b420);
+        state.setSessionPasskey(ByteString.copyFromUtf8("passkey"));
+
+        MessageService.setRingtone(handler, state, "ring:d=4,o=5,b=120:c");
+
+        MeshProtos.ToRadio sent = parseLastToRadio(connection);
+        assertFalse(sent.getPacket().getDecoded().getWantResponse());
+        AdminProtos.AdminMessage admin =
+                AdminProtos.AdminMessage.parseFrom(sent.getPacket().getDecoded().getPayload());
+        assertTrue(admin.hasSetRingtoneMessage());
+        assertEquals("ring:d=4,o=5,b=120:c", admin.getSetRingtoneMessage());
+        assertFalse(admin.getSessionPasskey().isEmpty());
+    }
+
+    @Test
     void setTimeOnlyUsesRoutingAckWithoutAdminResponse() throws Exception {
         RecordingConnection connection = new RecordingConnection();
         ProtocolHandler handler = track(new ProtocolHandler(connection));
@@ -115,6 +154,26 @@ class MessageServiceTest {
         assertTrue(admin.hasSetTimeOnly());
         assertEquals(1_775_000_123L, Integer.toUnsignedLong(admin.getSetTimeOnly()));
         assertFalse(admin.getSessionPasskey().isEmpty());
+    }
+
+    @Test
+    void setOwnerInfoSendsLicensedFlag() throws Exception {
+        RecordingConnection connection = new RecordingConnection();
+        ProtocolHandler handler = track(new ProtocolHandler(connection));
+        DeviceState state = new DeviceState();
+        state.setMyNodeNum(0x04c5b420);
+        ByteString passkey = ByteString.copyFromUtf8("passkey");
+
+        MessageService.setOwnerInfo(handler, state, "CALLSIGN", "CS", true, passkey);
+
+        MeshProtos.ToRadio sent = parseLastToRadio(connection);
+        AdminProtos.AdminMessage admin =
+                AdminProtos.AdminMessage.parseFrom(sent.getPacket().getDecoded().getPayload());
+        assertTrue(admin.hasSetOwner());
+        assertEquals("CALLSIGN", admin.getSetOwner().getLongName());
+        assertEquals("CS", admin.getSetOwner().getShortName());
+        assertTrue(admin.getSetOwner().getIsLicensed());
+        assertEquals(passkey, admin.getSessionPasskey());
     }
 
     @Test

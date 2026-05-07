@@ -9,6 +9,9 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+/**
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
+ */
 class FrameParserTest {
 
     private FrameParser parser;

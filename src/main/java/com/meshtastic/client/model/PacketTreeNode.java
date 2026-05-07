@@ -4,6 +4,8 @@ package com.meshtastic.client.model;
  * Узел дерева пакета с привязкой к диапазону байт в сериализованном {@code MeshPacket}.
  * Диапазон хранится как полуинтервал {@code [startByte, endByte)} и используется
  * для подсветки соответствующего фрагмента в HEX/ASCII предпросмотре.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class PacketTreeNode {
 

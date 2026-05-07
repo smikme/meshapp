@@ -5,6 +5,8 @@ import javafx.stage.Stage;
 
 /**
  * macOS tray/status item через in-process native bridge.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class MacOsNativeTrayService implements AppTrayService {
 

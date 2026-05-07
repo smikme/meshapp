@@ -8,14 +8,19 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.net.Socket;
+import java.net.SocketTimeoutException;
 import java.util.function.Consumer;
 
-public class TcpConnection implements MeshtasticConnection {
+/**
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
+ */
+public class TcpConnection implements MeshtasticConnection, FrameFormatAwareConnection {
 
     private static final Logger log = LoggerFactory.getLogger(TcpConnection.class);
 
     public static final int DEFAULT_PORT = 4403;
     private static final int CONNECT_TIMEOUT_MS = 5000;
+    private static final int READ_TIMEOUT_MS = 250;
     private static final long READER_JOIN_TIMEOUT_MS = 500L;
 
     private final String host;
@@ -25,12 +30,19 @@ public class TcpConnection implements MeshtasticConnection {
     private volatile OutputStream outputStream;
     private volatile Consumer<byte[]> dataListener;
     private volatile ConnectionListener connectionListener;
+    private volatile FrameFormat frameFormat;
+    private volatile StreamFrameParser frameParser;
     private volatile boolean running;
     private Thread readerThread;
 
     public TcpConnection(String host, int port) {
+        this(host, port, FrameFormat.MESHTASTIC);
+    }
+
+    public TcpConnection(String host, int port, FrameFormat frameFormat) {
         this.host = host;
         this.port = port;
+        setFrameFormat(frameFormat);
     }
 
     public TcpConnection(String host) {
@@ -42,6 +54,7 @@ public class TcpConnection implements MeshtasticConnection {
         try {
             socket = new Socket();
             socket.connect(new InetSocketAddress(host, port), CONNECT_TIMEOUT_MS);
+            socket.setSoTimeout(READ_TIMEOUT_MS);
             outputStream = socket.getOutputStream();
 
             log.info("Connected to {}:{}", host, port);
@@ -123,15 +136,33 @@ public class TcpConnection implements MeshtasticConnection {
         this.connectionListener = listener;
     }
 
+    @Override
+    public void setFrameFormat(FrameFormat frameFormat) {
+        FrameFormat newFormat = frameFormat != null ? frameFormat : FrameFormat.MESHTASTIC;
+        this.frameFormat = newFormat;
+        this.frameParser = FrameParsers.create(newFormat);
+        log.debug("TCP {}:{} frame format set to {}", host, port, newFormat);
+    }
+
+    @Override
+    public FrameFormat getFrameFormat() {
+        return frameFormat;
+    }
+
     private void readLoop() {
         log.debug("TCP reader thread started for {}:{}", host, port);
-        FrameParser parser = new FrameParser();
 
         byte[] buf = new byte[256];
         try {
             InputStream inputStream = socket.getInputStream();
             while (running && !Thread.currentThread().isInterrupted()) {
-                int bytesRead = inputStream.read(buf);
+                int bytesRead;
+                try {
+                    bytesRead = inputStream.read(buf);
+                } catch (SocketTimeoutException ignored) {
+                    flushPartialFrame();
+                    continue;
+                }
                 if (bytesRead < 0) {
                     if (running) {
                         log.info("TCP connection closed by remote host");
@@ -143,12 +174,10 @@ public class TcpConnection implements MeshtasticConnection {
                     break;
                 }
                 for (int i = 0; i < bytesRead; i++) {
+                    StreamFrameParser parser = frameParser;
                     byte[] packet = parser.processByte(buf[i]);
                     if (packet != null) {
-                        Consumer<byte[]> listener = dataListener;
-                        if (listener != null) {
-                            listener.accept(packet);
-                        }
+                        deliverPacket(packet);
                     }
                 }
             }
@@ -162,6 +191,21 @@ public class TcpConnection implements MeshtasticConnection {
             }
         }
         log.debug("TCP reader thread exiting");
+    }
+
+    private void flushPartialFrame() {
+        StreamFrameParser parser = frameParser;
+        byte[] packet = parser.flushPartialFrame();
+        if (packet != null) {
+            deliverPacket(packet);
+        }
+    }
+
+    private void deliverPacket(byte[] packet) {
+        Consumer<byte[]> listener = dataListener;
+        if (listener != null) {
+            listener.accept(packet);
+        }
     }
 
     private void closeSocket() {

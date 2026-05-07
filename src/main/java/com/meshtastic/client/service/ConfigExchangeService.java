@@ -41,6 +41,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *   <li>Завершение — future.complete(deviceState), снятие слушателя</li>
  * </ol>
  * После завершения обновляет {@link NodeCacheService}, загружает архив телеметрии из H2.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class ConfigExchangeService implements FromRadioListener {
 
@@ -222,6 +224,7 @@ public class ConfigExchangeService implements FromRadioListener {
             if (!user.getPublicKey().isEmpty()) {
                 node.setPublicKey(user.getPublicKey().toByteArray());
             }
+            node.setLicensed(user.getIsLicensed());
             if (user.hasIsUnmessagable()) {
                 node.setUnmessagable(user.getIsUnmessagable());
             }

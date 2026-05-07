@@ -10,7 +10,7 @@ import org.slf4j.LoggerFactory;
 
 import java.util.List;
 import java.util.concurrent.Executors;
-import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.PriorityBlockingQueue;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -22,26 +22,32 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 /**
- * BLE-транспорт для Meshtastic-устройств.
+ * BLE-транспорт для Meshtastic и MeshCore Companion устройств.
  * <p>
  * Реализует {@link MeshtasticConnection}, делегируя BLE-операции
  * платформо-зависимому {@link BlePlatform}. В отличие от TCP/Serial,
- * BLE не использует serial-фрейминг ({@code [0x94][0xC3][len][payload]}) —
- * GATT-характеристики передают protobuf напрямую.
+ * Meshtastic BLE не использует serial-фрейминг ({@code [0x94][0xC3][len][payload]}) —
+ * GATT-характеристики передают protobuf напрямую. MeshCore Companion передаёт
+ * собственные бинарные BLE-пакеты без Meshtastic serial-заголовка.
  * <p>
  * {@link #sendBytes(byte[])} ожидает фреймированные данные от
  * {@link com.meshtastic.client.protocol.PacketFramer} и автоматически
  * вырезает 4-байтный заголовок перед записью в toRadio-характеристику.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class BleConnection implements MeshtasticConnection {
 
     private static final Logger log = LoggerFactory.getLogger(BleConnection.class);
-    private static final int SEND_QUEUE_CAPACITY = 256;
+    private static final int WRITE_QUEUE_INITIAL_CAPACITY = 256;
+    private static final int LOW_PRIORITY_SEND_QUEUE_CAPACITY = 8;
+    private static final int LOW_PRIORITY_MAX_PAYLOAD_BYTES = 256;
     private static final long WRITE_WARN_THRESHOLD_MS = 2_000;
     private static final long WRITE_ERROR_THRESHOLD_MS = 10_000;
 
     private final String address;
     private final BlePlatform platform;
+    private final BleProtocolProfile requestedProfile;
     private final Object sendInfrastructureLock = new Object();
     private final AtomicLong writeSequence = new AtomicLong();
     private final AtomicLong connectionGeneration = new AtomicLong();
@@ -50,12 +56,19 @@ public class BleConnection implements MeshtasticConnection {
     private volatile Consumer<byte[]> dataListener;
     private volatile ConnectionListener connectionListener;
     private volatile boolean connected;
+    private volatile BleProtocolProfile resolvedProfile;
     private volatile ThreadPoolExecutor writeExecutor;
     private volatile ScheduledExecutorService writeWatchdog;
 
     public BleConnection(String address, BlePlatform platform) {
+        this(address, platform, BleProtocolProfile.MESHTASTIC);
+    }
+
+    public BleConnection(String address, BlePlatform platform, BleProtocolProfile profile) {
         this.address = address;
         this.platform = platform;
+        this.requestedProfile = normalizeProfile(profile);
+        this.resolvedProfile = this.requestedProfile;
     }
 
     /**
@@ -67,7 +80,7 @@ public class BleConnection implements MeshtasticConnection {
      */
     @Override
     public void connect() throws ConnectionException {
-        log.info("Connecting to BLE device: {}", address);
+        log.info("Connecting to BLE device: {} ({})", address, requestedProfile.displayName());
         connectionGeneration.incrementAndGet();
         ensureSendInfrastructure();
         // Linux/Windows already emit BleState.Connected from native callbacks, while macOS
@@ -75,6 +88,7 @@ public class BleConnection implements MeshtasticConnection {
         AtomicBoolean connectedEventDelivered = new AtomicBoolean(false);
         // If connect() synchronously surfaces Disconnected/Error, do not backfill success afterwards.
         AtomicBoolean terminalStateObserved = new AtomicBoolean(false);
+        AtomicBoolean suppressTerminalStateEvents = new AtomicBoolean(false);
 
         // Устанавливаем слушатели перед подключением — при reconnect они могут быть stale
         platform.setFromRadioListener(data -> {
@@ -88,6 +102,9 @@ public class BleConnection implements MeshtasticConnection {
             switch (state) {
                 case BleState.Connected ignored -> {
                     connected = true;
+                    if (suppressTerminalStateEvents.get()) {
+                        return;
+                    }
                     if (connectedEventDelivered.compareAndSet(false, true)) {
                         ConnectionListener listener = connectionListener;
                         if (listener != null) { listener.onConnected(); }
@@ -95,14 +112,20 @@ public class BleConnection implements MeshtasticConnection {
                 }
                 case BleState.Disconnected ignored -> {
                     connected = false;
+                    if (suppressTerminalStateEvents.get()) {
+                        return;
+                    }
                     terminalStateObserved.set(true);
                     ConnectionListener listener = connectionListener;
                     if (listener != null) { listener.onDisconnected(); }
                 }
                 case BleState.Error e -> {
                     connected = false;
-                    terminalStateObserved.set(true);
                     log.error("BLE error: {}", e.message(), e.cause());
+                    if (suppressTerminalStateEvents.get()) {
+                        return;
+                    }
+                    terminalStateObserved.set(true);
                     ConnectionListener listener = connectionListener;
                     if (listener != null) { listener.onConnectionError(e.message(), e.cause()); }
                 }
@@ -117,7 +140,8 @@ public class BleConnection implements MeshtasticConnection {
                                 platform::respondPasskey,
                                 platform::cancelPasskey)));
 
-        platform.connect(address);
+        BleProtocolProfile connectedProfile = connectWithProfileSelection(suppressTerminalStateEvents);
+        resolvedProfile = connectedProfile;
         // Fallback for platforms that complete connect() successfully but do not emit Connected state.
         if (!terminalStateObserved.get() && connectedEventDelivered.compareAndSet(false, true)) {
             connected = true;
@@ -126,7 +150,7 @@ public class BleConnection implements MeshtasticConnection {
                 listener.onConnected();
             }
         }
-        log.info("Connected to BLE device: {}", address);
+        log.info("Connected to BLE device: {} ({})", address, connectedProfile.displayName());
     }
 
     @Override
@@ -168,15 +192,16 @@ public class BleConnection implements MeshtasticConnection {
             log.warn("Cannot send: BLE not connected to {}", address);
             return;
         }
-        if (data.length <= BleConstants.SERIAL_FRAME_HEADER_SIZE) {
+        BleProtocolProfile activeProfile = activePayloadProfile();
+        if (activeProfile.usesSerialFramePayload() && data.length <= BleConstants.SERIAL_FRAME_HEADER_SIZE) {
             log.warn("BLE send: data too short ({} bytes), expected > {} header bytes",
                     data.length, BleConstants.SERIAL_FRAME_HEADER_SIZE);
             return;
         }
 
-        // Вырезаем 4-байтный serial-заголовок — BLE передаёт protobuf напрямую
-        byte[] payload = new byte[data.length - BleConstants.SERIAL_FRAME_HEADER_SIZE];
-        System.arraycopy(data, BleConstants.SERIAL_FRAME_HEADER_SIZE, payload, 0, payload.length);
+        byte[] payload = activeProfile.usesSerialFramePayload()
+                ? stripSerialFrameHeader(data)
+                : data.clone();
 
         ensureSendInfrastructure();
 
@@ -191,12 +216,22 @@ public class BleConnection implements MeshtasticConnection {
         long generation = connectionGeneration.get();
         String callerThread = Thread.currentThread().getName();
         int queueDepth = executor.getQueue().size();
+        if (!expectResponseAfterWrite && payload.length > LOW_PRIORITY_MAX_PAYLOAD_BYTES) {
+            log.warn("Dropping oversized low-priority BLE write #{} ({} bytes, limit={}, queueDepth={})",
+                    opId, payload.length, LOW_PRIORITY_MAX_PAYLOAD_BYTES, queueDepth);
+            return;
+        }
+        if (!expectResponseAfterWrite && queueDepth >= LOW_PRIORITY_SEND_QUEUE_CAPACITY) {
+            log.warn("Dropping low-priority BLE write #{} ({} bytes, queueDepth={}, limit={})",
+                    opId, payload.length, queueDepth, LOW_PRIORITY_SEND_QUEUE_CAPACITY);
+            return;
+        }
 
         log.debug("Queued BLE write #{} ({} bytes, expectResponseAfterWrite={}, callerThread={}, queueDepth={})",
                 opId, payload.length, expectResponseAfterWrite, callerThread, queueDepth);
 
         try {
-            executor.execute(() -> performWrite(
+            executor.execute(new BleWriteTask(
                     opId, payload, expectResponseAfterWrite, callerThread, queuedAtNanos, generation));
         } catch (RejectedExecutionException e) {
             log.warn("BLE send queue rejected write #{} ({} bytes, queueDepth={})",
@@ -222,7 +257,7 @@ public class BleConnection implements MeshtasticConnection {
                         1,
                         0L,
                         TimeUnit.MILLISECONDS,
-                        new LinkedBlockingQueue<>(SEND_QUEUE_CAPACITY),
+                        new PriorityBlockingQueue<>(WRITE_QUEUE_INITIAL_CAPACITY),
                         r -> {
                             Thread t = new Thread(r, "ble-send-" + threadSuffix());
                             t.setDaemon(true);
@@ -238,6 +273,51 @@ public class BleConnection implements MeshtasticConnection {
                 });
             }
         }
+    }
+
+    public BleProtocolProfile getRequestedProfile() {
+        return requestedProfile;
+    }
+
+    public BleProtocolProfile getResolvedProfile() {
+        return resolvedProfile;
+    }
+
+    private BleProtocolProfile connectWithProfileSelection(AtomicBoolean suppressTerminalStateEvents)
+            throws ConnectionException {
+        return connectUsingProfile(requestedProfile, false, suppressTerminalStateEvents);
+    }
+
+    private BleProtocolProfile connectUsingProfile(BleProtocolProfile profile,
+                                                   boolean suppressTerminalEvents,
+                                                   AtomicBoolean suppressTerminalStateEvents)
+            throws ConnectionException {
+        platform.setProfile(profile);
+        suppressTerminalStateEvents.set(suppressTerminalEvents);
+        try {
+            platform.connect(address);
+            return profile;
+        } finally {
+            suppressTerminalStateEvents.set(false);
+        }
+    }
+
+    private BleProtocolProfile activePayloadProfile() {
+        BleProtocolProfile profile = resolvedProfile;
+        if (profile == null) {
+            return requestedProfile;
+        }
+        return profile;
+    }
+
+    private static BleProtocolProfile normalizeProfile(BleProtocolProfile profile) {
+        return profile == null ? BleProtocolProfile.MESHTASTIC : profile;
+    }
+
+    private static byte[] stripSerialFrameHeader(byte[] data) {
+        byte[] payload = new byte[data.length - BleConstants.SERIAL_FRAME_HEADER_SIZE];
+        System.arraycopy(data, BleConstants.SERIAL_FRAME_HEADER_SIZE, payload, 0, payload.length);
+        return payload;
     }
 
     private void shutdownSendInfrastructure(String reason) {
@@ -367,6 +447,47 @@ public class BleConnection implements MeshtasticConnection {
                         diagnostics.writeThread(), diagnostics.expectResponseAfterWrite());
             }
         }, thresholdMs, TimeUnit.MILLISECONDS);
+    }
+
+    private final class BleWriteTask implements Runnable, Comparable<BleWriteTask> {
+        private final long opId;
+        private final byte[] payload;
+        private final boolean expectResponseAfterWrite;
+        private final String callerThread;
+        private final long queuedAtNanos;
+        private final long generation;
+
+        private BleWriteTask(long opId,
+                             byte[] payload,
+                             boolean expectResponseAfterWrite,
+                             String callerThread,
+                             long queuedAtNanos,
+                             long generation) {
+            this.opId = opId;
+            this.payload = payload;
+            this.expectResponseAfterWrite = expectResponseAfterWrite;
+            this.callerThread = callerThread;
+            this.queuedAtNanos = queuedAtNanos;
+            this.generation = generation;
+        }
+
+        @Override
+        public void run() {
+            performWrite(opId, payload, expectResponseAfterWrite, callerThread, queuedAtNanos, generation);
+        }
+
+        @Override
+        public int compareTo(BleWriteTask other) {
+            int priorityComparison = Integer.compare(priority(), other.priority());
+            if (priorityComparison != 0) {
+                return priorityComparison;
+            }
+            return Long.compare(opId, other.opId);
+        }
+
+        private int priority() {
+            return expectResponseAfterWrite ? 0 : 1;
+        }
     }
 
     private String threadSuffix() {

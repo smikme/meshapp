@@ -23,6 +23,8 @@ import java.util.stream.Collectors;
 /**
  * Утилита для построения дерева ConfigTreeItem из protobuf Config/ModuleConfig.
  * Использует protobuf reflection для автоматического обхода полей.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public final class ProtobufTreeBuilder {
 

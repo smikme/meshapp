@@ -1,5 +1,7 @@
 package com.meshtastic.client.service;
 
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -14,13 +16,18 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.zip.ZipInputStream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+/**
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
+ */
 class CrashReportServiceTest {
 
     private HttpServer server;
@@ -82,13 +89,21 @@ class CrashReportServiceTest {
         CrashReportService.SubmissionResult result = service.submitCrashReport(
                 logFile,
                 "Упал при открытии настроек",
+                "support@example.com",
                 new CrashReportService.CrashContext("1.2.3", 77, "Linux", "6.8", "x86_64")
         );
+
+        JsonObject payload = JsonParser.parseString(issueBody.get()).getAsJsonObject();
+        String body = payload.get("body").getAsString();
+        String encodedEmail = Base64.getEncoder().encodeToString("support@example.com".getBytes(StandardCharsets.UTF_8));
 
         assertEquals(42L, result.issueIndex());
         assertEquals("token test-token", issueAuth.get());
         assertEquals("token test-token", uploadAuth.get());
-        assertTrue(issueBody.get().contains("Упал при открытии настроек"));
+        assertTrue(body.contains("Упал при открытии настроек"));
+        assertTrue(body.contains(encodedEmail));
+        assertFalse(body.contains("support@example.com"));
+        assertFalse(body.contains("E-Mail"));
         assertTrue(issueBody.get().contains("\"title\""));
         assertTrue(uploadContentType.get().startsWith("multipart/form-data; boundary="));
         assertTrue(uploadBody.get().contains("name=\"attachment\""));
@@ -131,13 +146,22 @@ class CrashReportServiceTest {
         service.submitProblemReport(
                 logFile,
                 "Не открывается окно помощи",
+                "support@example.com",
                 new CrashReportService.CrashContext("1.2.3", 77, "Linux", "6.8", "x86_64")
         );
 
-        assertTrue(issueBody.get().contains("Problem report"));
-        assertTrue(issueBody.get().contains("Автоматически созданный отчёт о проблеме MeshApp."));
-        assertTrue(issueBody.get().contains("Не открывается окно помощи"));
-        assertTrue(issueBody.get().contains("текущей сессии"));
+        JsonObject payload = JsonParser.parseString(issueBody.get()).getAsJsonObject();
+        String title = payload.get("title").getAsString();
+        String body = payload.get("body").getAsString();
+
+        assertTrue(title.contains("Problem report"));
+        assertTrue(body.contains("Автоматически созданный отчёт о проблеме MeshApp."));
+        assertTrue(body.contains("Не открывается окно помощи"));
+        assertTrue(body.contains("текущей сессии"));
+        String encodedEmail = Base64.getEncoder().encodeToString("support@example.com".getBytes(StandardCharsets.UTF_8));
+        assertTrue(body.contains(encodedEmail));
+        assertFalse(body.contains("support@example.com"));
+        assertFalse(body.contains("E-Mail"));
     }
 
     @Test
@@ -179,6 +203,7 @@ class CrashReportServiceTest {
         service.submitCrashReport(
                 bundleDir,
                 "Падает без стектрейса",
+                "",
                 new CrashReportService.CrashContext("1.2.3", 77, "Windows", "10", "x86_64")
         );
 

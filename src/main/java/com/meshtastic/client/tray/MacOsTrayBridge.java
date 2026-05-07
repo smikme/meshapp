@@ -9,6 +9,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * JNI bridge к нативной macOS tray-библиотеке.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 final class MacOsTrayBridge {
 

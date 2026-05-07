@@ -21,6 +21,8 @@ import java.util.function.Consumer;
  * Проверка обновлений при запуске приложения.
  * Асинхронный HTTP-запрос к серверу, сравнение versionCode,
  * callback на FX-потоке если доступна новая версия.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public final class UpdateCheckService {
 

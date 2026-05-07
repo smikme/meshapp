@@ -24,6 +24,8 @@ import java.util.Collections;
  *   <li>Поиск доступных слотов для SECONDARY каналов</li>
  *   <li>Проверка наличия активных каналов</li>
  * </ul>
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class ChannelStore {
 
@@ -55,8 +57,9 @@ public class ChannelStore {
     public void addChannel(ChannelProtos.Channel channel) {
         synchronized (channels) {
             for (int i = 0; i < channels.size(); i++) {
-                if (channels.get(i).getIndex() == channel.getIndex()) {
-                    channels.set(i, channel);
+                ChannelProtos.Channel existing = channels.get(i);
+                if (existing.getIndex() == channel.getIndex()) {
+                    channels.set(i, preserveExistingPsk(existing, channel));
                     return;
                 }
             }
@@ -182,5 +185,19 @@ public class ChannelStore {
         channels.clear();
         channelCatalogReady = false;
         channelCatalogEpoch.set(0);
+    }
+
+    private static ChannelProtos.Channel preserveExistingPsk(ChannelProtos.Channel existing,
+                                                             ChannelProtos.Channel incoming) {
+        if (!existing.hasSettings() || !incoming.hasSettings()) {
+            return incoming;
+        }
+        if (incoming.getSettings().getPsk().size() != 0 || existing.getSettings().getPsk().size() == 0) {
+            return incoming;
+        }
+        return incoming.toBuilder()
+                .setSettings(incoming.getSettings().toBuilder()
+                        .setPsk(existing.getSettings().getPsk()))
+                .build();
     }
 }

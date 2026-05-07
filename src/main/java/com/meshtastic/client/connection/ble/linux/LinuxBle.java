@@ -2,6 +2,7 @@ package com.meshtastic.client.connection.ble.linux;
 
 import com.meshtastic.client.connection.ConnectionException;
 import com.meshtastic.client.connection.ble.*;
+import com.meshtastic.client.platform.OsDetect;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -26,12 +27,16 @@ import java.util.function.Consumer;
  *
  * @see LinuxBleLibrary
  * @see BlePlatform
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class LinuxBle implements BlePlatform {
 
     private static final Logger log = LoggerFactory.getLogger(LinuxBle.class);
 
     private static final int POLL_INTERVAL_MS = 200;
+    private static final int POST_WRITE_DRAIN_ATTEMPTS = 10;
+    private static final int POST_WRITE_DRAIN_INTERVAL_MS = 300;
     private static final int READ_BUFFER_SIZE = 512;
 
     private final LinuxBleLibrary lib;
@@ -48,6 +53,7 @@ public class LinuxBle implements BlePlatform {
     private volatile Consumer<BleState> stateListener;
     private volatile Consumer<String> passkeyRequestHandler;
     private volatile boolean connected;
+    private volatile BleProtocolProfile profile = BleProtocolProfile.MESHTASTIC;
 
     // Polling (fromRadio data also comes via fd notifications in native code,
     // but polling ensures nothing is missed — same approach as Windows/macOS)
@@ -71,7 +77,7 @@ public class LinuxBle implements BlePlatform {
 
         int result = lib.meshble_init();
         if (result != 0) {
-            throw new RuntimeException("BlueZ BLE инициализация не удалась: error=" + result);
+            throw new UnsupportedOperationException(bluezInitFailureMessage(result));
         }
 
         // Forward native log_msg() to SLF4J (static callback = GC protection)
@@ -90,24 +96,36 @@ public class LinuxBle implements BlePlatform {
         log.info("BlueZ BLE инициализирован (нативная библиотека)");
     }
 
+    private static String bluezInitFailureMessage(int errorCode) {
+        if (OsDetect.isLinuxFlatpak()) {
+            return "BlueZ BLE инициализация не удалась в Flatpak sandbox (error=" + errorCode
+                    + "). Проверьте, что Flatpak-пакет запущен с доступом к system D-Bus/BlueZ.";
+        }
+        return "BlueZ BLE инициализация не удалась (error=" + errorCode
+                + "). Проверьте, что bluetoothd запущен и BLE-адаптер доступен.";
+    }
+
     // ==================== BlePlatform: Scanning ====================
 
     @Override
     public void startScan(Consumer<BleDevice> onDeviceFound) {
         this.scanConsumer = onDeviceFound;
+        lib.meshble_set_profile(profile.nativeCode());
 
         // Static callback — prevent GC
         scanCallback = (address, name, rssi) -> {
             Consumer<BleDevice> consumer = scanConsumer;
             if (consumer != null && address != null) {
                 String deviceName = (name != null) ? name : "Unknown";
-                consumer.accept(new BleDevice(address, deviceName, rssi));
+                consumer.accept(new BleDevice(address, deviceName, rssi, profile.protocolType()));
             }
         };
 
         int result = lib.meshble_start_scan(scanCallback);
         if (result != 0) {
-            log.error("BLE scan не удалось запустить: error={}", result);
+            String message = "BLE scan не удалось запустить: error=" + result;
+            log.error(message);
+            throw new IllegalStateException(message);
         } else {
             log.info("BLE сканирование запущено");
         }
@@ -125,6 +143,7 @@ public class LinuxBle implements BlePlatform {
     @Override
     public void connect(String address) throws ConnectionException {
         log.info("Подключение к BLE устройству: {}", address);
+        lib.meshble_set_profile(profile.nativeCode());
 
         // Setup data callback (static, prevent GC)
         dataCallback = (dataPtr, length) -> {
@@ -167,10 +186,14 @@ public class LinuxBle implements BlePlatform {
             case 0 -> {
                 connected = true;
                 log.info("BLE подключено: {}", address);
-                log.info("Запуск polling fromRadio ({}ms)", POLL_INTERVAL_MS);
-                startPolling();
+                if (lib.meshble_notifications_active() == 0) {
+                    log.info("Запуск polling fromRadio ({}ms)", POLL_INTERVAL_MS);
+                    startPolling();
+                } else {
+                    log.info("BLE notifications активны; polling не запускается");
+                }
             }
-            case -1 -> throw new ConnectionException("BLE таймаут подключения: " + address);
+            case -1 -> throw new ConnectionException("BLE таймаут или разрыв подключения: " + address);
             case -2 -> throw new ConnectionException("BLE устройство не найдено: " + address);
             case -3 -> throw new ConnectionException("GATT ошибка при подключении к: " + address);
             case -4 -> throw new ConnectionException(
@@ -254,6 +277,17 @@ public class LinuxBle implements BlePlatform {
     }
 
     @Override
+    public void setProfile(BleProtocolProfile profile) {
+        this.profile = profile == null ? BleProtocolProfile.MESHTASTIC : profile;
+        lib.meshble_set_profile(this.profile.nativeCode());
+    }
+
+    @Override
+    public BleProtocolProfile getProfile() {
+        return profile;
+    }
+
+    @Override
     public void dispose() {
         stopPolling();
         pollScheduler.shutdownNow();
@@ -295,6 +329,7 @@ public class LinuxBle implements BlePlatform {
 
                 byte[] data = new byte[outLen[0]];
                 System.arraycopy(buffer, 0, data, 0, outLen[0]);
+                log.debug("Linux BLE drained {} bytes from fromRadio", outLen[0]);
 
                 Consumer<byte[]> listener = fromRadioListener;
                 if (listener != null) {
@@ -309,10 +344,13 @@ public class LinuxBle implements BlePlatform {
     }
 
     /**
-     * После каждого writeToRadio — дополнительный drain через 200ms.
-     * Паттерн из WinBle/MacOsBle: ускоряет получение ответа на отправленный запрос.
+     * После каждого writeToRadio — короткий drain burst.
+     * На BlueZ fromNum notifications могут не прийти, хотя WriteValue уже завершился успешно.
      */
     private void scheduleDrainAfterWrite() {
-        pollScheduler.schedule(this::pollFromRadio, POLL_INTERVAL_MS, TimeUnit.MILLISECONDS);
+        for (int i = 1; i <= POST_WRITE_DRAIN_ATTEMPTS; i++) {
+            long delayMs = (long) i * POST_WRITE_DRAIN_INTERVAL_MS;
+            pollScheduler.schedule(this::pollFromRadio, delayMs, TimeUnit.MILLISECONDS);
+        }
     }
 }

@@ -8,6 +8,7 @@ import com.meshtastic.client.model.ConnectionEntry;
 import com.meshtastic.client.model.ConnectionType;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.NodeData;
+import com.meshtastic.client.model.ProtocolType;
 import com.meshtastic.client.service.ConnectionManager;
 import com.meshtastic.client.service.SerialPortDiscoveryService;
 import com.meshtastic.client.simple.SimpleConnectionForm;
@@ -27,6 +28,9 @@ import javafx.scene.layout.VBox;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
+/**
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
+ */
 @SystemForm(name = "Подключения", description = "Менеджер соединений", tags = {"connections", "options"})
 public class FormConnections extends Form {
 
@@ -132,10 +136,14 @@ public class FormConnections extends Form {
             btnConnect.setDisable(true);
         }
 
+        Button btnEdit = new Button("Изменить");
+        btnEdit.setDisable(connected || reconnecting);
+        btnEdit.setOnAction(e -> showEditDialog(entry));
+
         Button btnDelete = new Button("Удалить");
         btnDelete.setOnAction(e -> doDelete(entry));
 
-        topRow.getChildren().addAll(indicator, lblName, lblStatus, spacer, btnConnect, btnDelete);
+        topRow.getChildren().addAll(indicator, lblName, lblStatus, spacer, btnConnect, btnEdit, btnDelete);
 
         String addressText;
         if (entry.getEffectiveType() == ConnectionType.BLE) {
@@ -146,6 +154,9 @@ public class FormConnections extends Form {
         } else {
             addressText = "TCP: " + entry.getHost() + ":" + entry.getPort();
         }
+        ProtocolType protocolType = ConnectionManager.getInstance().getActiveProtocolType(entry.getId());
+        addressText += " · Протокол: " + formatProtocol(protocolType);
+
         Label lblAddress = new Label(addressText);
         lblAddress.setStyle("-fx-opacity: 0.6;");
 
@@ -242,5 +253,41 @@ public class FormConnections extends Form {
 
         modalPane.show(form);
         form.formOpen();
+    }
+
+    private void showEditDialog(ConnectionEntry entry) {
+        if (entry.isConnected() || entry.isReconnecting()) {
+            Toast.show(Toast.Type.WARNING, "Отключите подключение перед изменением параметров");
+            return;
+        }
+
+        ModalPane modalPane = ModalPane.getInstance();
+        if (modalPane == null) { return; }
+
+        SimpleConnectionForm form = new SimpleConnectionForm(entry);
+        form.setOnSave(updated -> {
+            try {
+                ConnectionManager.getInstance().updateEntry(updated);
+                form.cleanup();
+                modalPane.hide();
+                Toast.show(Toast.Type.SUCCESS, "Сохранено: " + updated.getName());
+            } catch (RuntimeException ex) {
+                Toast.show(Toast.Type.ERROR, "Ошибка сохранения: " + ex.getMessage());
+            }
+        });
+
+        modalPane.show(form);
+        form.formOpen();
+    }
+
+    private static String formatProtocol(ProtocolType protocolType) {
+        if (protocolType == null) {
+            return "?";
+        }
+        return switch (protocolType) {
+            case MESHTASTIC -> "Meshtastic";
+            case MESHCORE_KISS -> "MeshCore KISS";
+            case MESHCORE_COMPANION -> "MeshCore Companion";
+        };
     }
 }

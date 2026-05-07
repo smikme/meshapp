@@ -16,6 +16,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 /**
  * Linux tray через GTK status icon.
  * Если GTK недоступен, откатывается на AWT tray.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public final class LinuxGtkTrayService implements AppTrayService {
 

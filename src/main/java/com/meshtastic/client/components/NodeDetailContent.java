@@ -34,6 +34,8 @@ import javafx.scene.text.FontWeight;
  *   <li>{@link NodeDetailPanel} — модальная панель (выезжает справа, с кнопкой «Назад»)</li>
  *   <li>{@code FormNodes} — встроенная панель в SplitPane (без кнопки «Назад»)</li>
  * </ul>
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class NodeDetailContent extends HBox {
 
@@ -59,7 +61,7 @@ public class NodeDetailContent extends HBox {
 
         String rawDisplayName = node.getLongName() != null && !node.getLongName().isEmpty()
                 ? node.getLongName() : node.getNodeId() != null ? node.getNodeId() : "?";
-        final String displayName = UnicodeTextUtils.sanitize(rawDisplayName);
+        final String displayName = UnicodeTextUtils.sanitizeForJavaFxDisplay(rawDisplayName);
 
         // === Вертикальный тулбар слева (56px, структура как DrawerPane) ===
         StackPane toolbarPane = new StackPane();
@@ -207,22 +209,24 @@ public class NodeDetailContent extends HBox {
         } else {
             avatarText = UnicodeTextUtils.prefixByCodePoints(displayName, 4).toUpperCase(java.util.Locale.ROOT);
         }
+        String safeAvatarText = UnicodeTextUtils.sanitizeForJavaFxDisplay(avatarText);
         String color = NodeUtils.roleColor(node.getRole());
 
         StackPane bigAvatar = new StackPane();
         bigAvatar.setMinSize(56, 56);
         bigAvatar.setMaxSize(56, 56);
         bigAvatar.setStyle("-fx-background-color: " + color + "; -fx-background-radius: 28;");
-        Label avatarLabel = new Label(avatarText);
+        Label avatarLabel = new Label(safeAvatarText);
         avatarLabel.setFont(Font.font("Roboto", FontWeight.BOLD,
-                NodeUtils.avatarFontSize(avatarText, 56)));
+                NodeUtils.avatarFontSize(safeAvatarText, 56)));
         avatarLabel.setStyle("-fx-text-fill: white; -fx-padding: 0;");
         bigAvatar.getChildren().add(avatarLabel);
 
         Label nameLabel = new Label(displayName);
         nameLabel.getStyleClass().add("node-detail-name-label");
 
-        Label nodeIdLabel = new Label(UnicodeTextUtils.sanitize(node.getNodeId() != null ? node.getNodeId() : ""));
+        Label nodeIdLabel = new Label(UnicodeTextUtils.sanitizeForJavaFxDisplay(
+                node.getNodeId() != null ? node.getNodeId() : ""));
         nodeIdLabel.setStyle("-fx-opacity: 0.6;");
 
         VBox headerText = new VBox(2, nameLabel, nodeIdLabel);

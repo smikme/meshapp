@@ -17,6 +17,8 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
@@ -26,6 +28,8 @@ import java.util.zip.ZipOutputStream;
 
 /**
  * Отправляет в Gitea отчёты о сбоях и проблемах, создавая issue и прикладывая ZIP-архив session-лога.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public final class CrashReportService {
 
@@ -71,18 +75,21 @@ public final class CrashReportService {
 
     public SubmissionResult submitCrashReport(Path logFile,
                                               String comment,
+                                              String contactEmail,
                                               CrashContext context) throws IOException, InterruptedException {
-        return submitReport(logFile, comment, context, ReportType.CRASH);
+        return submitReport(logFile, comment, contactEmail, context, ReportType.CRASH);
     }
 
     public SubmissionResult submitProblemReport(Path logFile,
                                                 String comment,
+                                                String contactEmail,
                                                 CrashContext context) throws IOException, InterruptedException {
-        return submitReport(logFile, comment, context, ReportType.PROBLEM);
+        return submitReport(logFile, comment, contactEmail, context, ReportType.PROBLEM);
     }
 
     private SubmissionResult submitReport(Path logFile,
                                           String comment,
+                                          String contactEmail,
                                           CrashContext context,
                                           ReportType reportType) throws IOException, InterruptedException {
         Objects.requireNonNull(logFile, "logFile");
@@ -94,7 +101,7 @@ public final class CrashReportService {
 
         Path archive = createArchive(logFile);
         try {
-            long issueIndex = createIssue(comment, context, reportType);
+            long issueIndex = createIssue(comment, contactEmail, context, reportType);
             uploadIssueAsset(issueIndex, archive);
             return new SubmissionResult(issueIndex, issuePageUri(issueIndex));
         } finally {
@@ -103,11 +110,12 @@ public final class CrashReportService {
     }
 
     private long createIssue(String comment,
+                             String contactEmail,
                              CrashContext context,
                              ReportType reportType) throws IOException, InterruptedException {
         JsonObject payload = new JsonObject();
         payload.addProperty("title", buildIssueTitle(context, reportType));
-        payload.addProperty("body", buildIssueBody(comment, context, reportType));
+        payload.addProperty("body", buildIssueBody(comment, contactEmail, context, reportType));
 
         HttpRequest request = HttpRequest.newBuilder(issueCollectionUri())
                 .header("Accept", "application/json")
@@ -191,24 +199,31 @@ public final class CrashReportService {
         );
     }
 
-    private String buildIssueBody(String comment, CrashContext context, ReportType reportType) {
+    private String buildIssueBody(String comment,
+                                  String contactEmail,
+                                  CrashContext context,
+                                  ReportType reportType) {
         String normalizedComment = comment == null || comment.isBlank()
                 ? "Комментарий не указан."
                 : comment.trim();
+        String normalizedContactEmail = normalizeOptionalText(contactEmail);
 
-        return String.join("\n", List.of(
-                reportType.bodyLead(),
-                "",
-                "Версия приложения: " + context.applicationVersion(),
-                "Код сборки: " + context.versionCode(),
-                "ОС: " + context.osName() + " " + context.osVersion() + " (" + context.osArch() + ")",
-                "Время отправки: " + TITLE_TIME_FORMAT.format(Instant.now(clock)),
-                "",
-                "Комментарий пользователя:",
-                normalizedComment,
-                "",
-                reportType.attachmentNote()
-        ));
+        List<String> lines = new ArrayList<>();
+        lines.add(reportType.bodyLead());
+        lines.add("");
+        lines.add("Версия приложения: " + context.applicationVersion());
+        lines.add("Код сборки: " + context.versionCode());
+        lines.add("ОС: " + context.osName() + " " + context.osVersion() + " (" + context.osArch() + ")");
+        lines.add("Время отправки: " + TITLE_TIME_FORMAT.format(Instant.now(clock)));
+        if (reportType.includesContactEmail() && !normalizedContactEmail.isBlank()) {
+            lines.add(encodeContactEmail(normalizedContactEmail));
+        }
+        lines.add("");
+        lines.add("Комментарий пользователя:");
+        lines.add(normalizedComment);
+        lines.add("");
+        lines.add(reportType.attachmentNote());
+        return String.join("\n", lines);
     }
 
     private URI issueCollectionUri() {
@@ -244,6 +259,14 @@ public final class CrashReportService {
         return value.trim();
     }
 
+    private static String normalizeOptionalText(String value) {
+        return value == null ? "" : value.trim();
+    }
+
+    private static String encodeContactEmail(String contactEmail) {
+        return Base64.getEncoder().encodeToString(contactEmail.getBytes(StandardCharsets.UTF_8));
+    }
+
     public record CrashContext(String applicationVersion,
                                int versionCode,
                                String osName,
@@ -264,22 +287,26 @@ public final class CrashReportService {
         CRASH(
                 "Crash report",
                 "Автоматически созданный отчёт о сбое MeshApp.",
-                "ZIP-архив session-лога приложен во вложениях issue."
+                "ZIP-архив session-лога приложен во вложениях issue.",
+                true
         ),
         PROBLEM(
                 "Problem report",
                 "Автоматически созданный отчёт о проблеме MeshApp.",
-                "ZIP-архив session-лога текущей сессии приложен во вложениях issue."
+                "ZIP-архив session-лога текущей сессии приложен во вложениях issue.",
+                true
         );
 
         private final String titlePrefix;
         private final String bodyLead;
         private final String attachmentNote;
+        private final boolean includesContactEmail;
 
-        ReportType(String titlePrefix, String bodyLead, String attachmentNote) {
+        ReportType(String titlePrefix, String bodyLead, String attachmentNote, boolean includesContactEmail) {
             this.titlePrefix = titlePrefix;
             this.bodyLead = bodyLead;
             this.attachmentNote = attachmentNote;
+            this.includesContactEmail = includesContactEmail;
         }
 
         private String titlePrefix() {
@@ -292,6 +319,10 @@ public final class CrashReportService {
 
         private String attachmentNote() {
             return attachmentNote;
+        }
+
+        private boolean includesContactEmail() {
+            return includesContactEmail;
         }
     }
 }

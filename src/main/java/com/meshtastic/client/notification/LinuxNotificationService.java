@@ -8,6 +8,8 @@ import org.slf4j.LoggerFactory;
  * <p>
  * {@code notify-send} доступен на всех основных DE (GNOME, KDE, XFCE и др.).
  * При отсутствии утилиты ошибка логируется, приложение продолжает работу.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class LinuxNotificationService implements NotificationService {
 

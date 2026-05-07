@@ -8,6 +8,8 @@ import java.util.List;
 
 /**
  * Элемент списка чатов — обёртка для канала или DM.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public final class ChatItem {
 
@@ -199,7 +201,7 @@ public final class ChatItem {
     private static String truncate(String text) {
         if (text == null) { return null; }
         text = text.replace('\n', ' ').replace('\r', ' ');
-        return UnicodeTextUtils.truncateWithSuffix(text, MAX_PREVIEW_LENGTH, "…");
+        return UnicodeTextUtils.truncateWithSuffix(text, MAX_PREVIEW_LENGTH, "...");
     }
 
     public ChatType getType() { return type; }

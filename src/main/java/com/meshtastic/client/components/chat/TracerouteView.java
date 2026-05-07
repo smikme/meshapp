@@ -41,6 +41,8 @@ import java.util.regex.Pattern;
  *   <li>Из protobuf {@link MeshProtos.RouteDiscovery} (live данные от устройства)</li>
  *   <li>Из текста БД (восстановление при загрузке истории)</li>
  * </ul>
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class TracerouteView {
 

@@ -22,6 +22,8 @@ import java.util.concurrent.*;
  * с экспоненциальным backoff (2с → 4с → 8с → 16с → 30с max).
  * Показывает статусные Toast-уведомления и обновляет состояние
  * {@link ConnectionEntry#isReconnecting()}.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public final class ReconnectService {
 

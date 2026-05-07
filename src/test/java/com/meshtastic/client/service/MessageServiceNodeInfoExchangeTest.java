@@ -28,6 +28,9 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+/**
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
+ */
 class MessageServiceNodeInfoExchangeTest {
 
     @Test
@@ -41,6 +44,9 @@ class MessageServiceNodeInfoExchangeTest {
         myNode.setNodeId("!10203040");
         myNode.setLongName("Mesh Owner");
         myNode.setShortName("MO");
+        myNode.setRole("ROUTER");
+        myNode.setHwModel("TBEAM");
+        myNode.setUnmessagable(false);
         state.addConfig(ConfigProtos.Config.newBuilder()
                 .setSecurity(ConfigProtos.Config.SecurityConfig.newBuilder()
                         .setPublicKey(com.google.protobuf.ByteString.copyFrom(new byte[] {1, 2, 3, 4}))
@@ -67,7 +73,11 @@ class MessageServiceNodeInfoExchangeTest {
             assertEquals("!10203040", sharedPayload.getId());
             assertEquals("Mesh Owner", sharedPayload.getLongName());
             assertEquals("MO", sharedPayload.getShortName());
+            assertEquals(ConfigProtos.Config.DeviceConfig.Role.ROUTER, sharedPayload.getRole());
+            assertEquals(MeshProtos.HardwareModel.TBEAM, sharedPayload.getHwModel());
             assertArrayEquals(new byte[] {1, 2, 3, 4}, sharedPayload.getPublicKey().toByteArray());
+            assertTrue(sharedPayload.hasIsUnmessagable());
+            assertFalse(sharedPayload.getIsUnmessagable());
 
             MeshProtos.ToRadio requestUser = parseToRadio(sentFrames.get(1));
             MeshProtos.MeshPacket requestPacket = requestUser.getPacket();
@@ -76,6 +86,44 @@ class MessageServiceNodeInfoExchangeTest {
             assertEquals(Portnums.PortNum.NODEINFO_APP, requestPacket.getDecoded().getPortnum());
             assertTrue(requestPacket.getDecoded().getWantResponse());
             assertTrue(requestPacket.getDecoded().getPayload().isEmpty());
+        } finally {
+            handler.shutdown();
+        }
+    }
+
+    @Test
+    void exchangeNodeUserInfoFallsBackToDeviceMetadataForRoleAndHwModel() throws Exception {
+        int myNodeNum = 0x10203040;
+        int targetNodeNum = 0x55667788;
+
+        DeviceState state = new DeviceState();
+        state.setMyNodeNum(myNodeNum);
+        NodeData myNode = state.getOrCreateNode(myNodeNum);
+        myNode.setNodeId("!10203040");
+        myNode.setLongName("Mesh Owner");
+        myNode.setShortName("MO");
+        state.setDeviceMetadata(MeshProtos.DeviceMetadata.newBuilder()
+                .setRole(ConfigProtos.Config.DeviceConfig.Role.CLIENT_BASE)
+                .setHwModel(MeshProtos.HardwareModel.RAK4631)
+                .build());
+        state.addConfig(ConfigProtos.Config.newBuilder()
+                .setSecurity(ConfigProtos.Config.SecurityConfig.newBuilder()
+                        .setPublicKey(com.google.protobuf.ByteString.copyFrom(new byte[] {1, 2, 3, 4}))
+                        .build())
+                .build());
+
+        RecordingConnection connection = new RecordingConnection();
+        ProtocolHandler handler = new ProtocolHandler(connection);
+        try {
+            MessageService.exchangeNodeUserInfo(handler, state, targetNodeNum);
+
+            List<byte[]> sentFrames = connection.awaitSentFrames(2);
+            assertEquals(2, sentFrames.size());
+
+            MeshProtos.ToRadio sharedUser = parseToRadio(sentFrames.get(0));
+            MeshProtos.User sharedPayload = MeshProtos.User.parseFrom(sharedUser.getPacket().getDecoded().getPayload());
+            assertEquals(ConfigProtos.Config.DeviceConfig.Role.CLIENT_BASE, sharedPayload.getRole());
+            assertEquals(MeshProtos.HardwareModel.RAK4631, sharedPayload.getHwModel());
         } finally {
             handler.shutdown();
         }
@@ -187,6 +235,9 @@ class MessageServiceNodeInfoExchangeTest {
         myNode.setNodeId("!11111111");
         myNode.setLongName("Base");
         myNode.setShortName("BAS");
+        myNode.setRole("TAK_TRACKER");
+        myNode.setHwModel("RAK4631");
+        myNode.setUnmessagable(false);
         state.addConfig(ConfigProtos.Config.newBuilder()
                 .setSecurity(ConfigProtos.Config.SecurityConfig.newBuilder()
                         .setPublicKey(com.google.protobuf.ByteString.copyFrom(new byte[] {1, 2, 3, 4}))
@@ -227,6 +278,9 @@ class MessageServiceNodeInfoExchangeTest {
         myNode.setNodeId("!11111111");
         myNode.setLongName("Base");
         myNode.setShortName("BAS");
+        myNode.setRole("TAK_TRACKER");
+        myNode.setHwModel("RAK4631");
+        myNode.setUnmessagable(false);
         state.addConfig(ConfigProtos.Config.newBuilder()
                 .setSecurity(ConfigProtos.Config.SecurityConfig.newBuilder()
                         .setPublicKey(com.google.protobuf.ByteString.copyFrom(new byte[] {1, 2, 3, 4}))
@@ -319,6 +373,9 @@ class MessageServiceNodeInfoExchangeTest {
         myNode.setNodeId("!11111111");
         myNode.setLongName("Base");
         myNode.setShortName("BAS");
+        myNode.setRole("TAK_TRACKER");
+        myNode.setHwModel("RAK4631");
+        myNode.setUnmessagable(false);
         state.addConfig(ConfigProtos.Config.newBuilder()
                 .setSecurity(ConfigProtos.Config.SecurityConfig.newBuilder()
                         .setPublicKey(com.google.protobuf.ByteString.copyFrom(new byte[] {1, 2, 3, 4}))
@@ -363,6 +420,9 @@ class MessageServiceNodeInfoExchangeTest {
         myNode.setNodeId("!11111111");
         myNode.setLongName("Base");
         myNode.setShortName("BAS");
+        myNode.setRole("TAK_TRACKER");
+        myNode.setHwModel("RAK4631");
+        myNode.setUnmessagable(false);
         state.addConfig(ConfigProtos.Config.newBuilder()
                 .setSecurity(ConfigProtos.Config.SecurityConfig.newBuilder()
                         .setPublicKey(com.google.protobuf.ByteString.copyFrom(new byte[] {1, 2, 3, 4}))
@@ -388,7 +448,11 @@ class MessageServiceNodeInfoExchangeTest {
             assertEquals(Portnums.PortNum.NODEINFO_APP, sharedUserPacket.getDecoded().getPortnum());
             MeshProtos.User sharedPayload = MeshProtos.User.parseFrom(sharedUserPacket.getDecoded().getPayload());
             assertEquals("!11111111", sharedPayload.getId());
+            assertEquals(ConfigProtos.Config.DeviceConfig.Role.TAK_TRACKER, sharedPayload.getRole());
+            assertEquals(MeshProtos.HardwareModel.RAK4631, sharedPayload.getHwModel());
             assertArrayEquals(new byte[] {1, 2, 3, 4}, sharedPayload.getPublicKey().toByteArray());
+            assertTrue(sharedPayload.hasIsUnmessagable());
+            assertFalse(sharedPayload.getIsUnmessagable());
 
             MeshProtos.ToRadio seedContact = parseToRadio(sentFrames.get(1));
             MeshProtos.MeshPacket seedPacket = seedContact.getPacket();

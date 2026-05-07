@@ -11,6 +11,9 @@ import javafx.util.Duration;
 import java.lang.management.ManagementFactory;
 import java.lang.management.MemoryUsage;
 
+/**
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
+ */
 public class MemoryBar extends StackPane {
 
     private final ProgressBar progressBar;

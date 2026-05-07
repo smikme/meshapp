@@ -38,19 +38,25 @@ import java.util.List;
  * </ul>
  * Обновляет {@link com.meshtastic.client.model.DeviceState}, сохраняет сообщения
  * в БД через {@link MessageDbService}, синхронизирует кэш нод через {@link NodeCacheService}.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class MessageListenerService implements FromRadioListener {
 
     private static final Logger log = LoggerFactory.getLogger(MessageListenerService.class);
-    private static final int MAX_DEFERRED_MESH_PACKETS = 200;
+    private static final int DEFERRED_MESH_WARN_THRESHOLD = 200;
+    private static final int DEFERRED_MESH_WARN_STEP = 200;
 
     private final DeviceState deviceState;
     private final NotificationManager notificationManager;
     private final ProtocolHandler protocolHandler;
     private final Object deferredMeshLock = new Object();
     private final List<DeferredMeshPacket> deferredMeshPackets = new ArrayList<>();
+    private int deferredMeshWarnBucket;
 
-    private record DeferredMeshPacket(long channelCatalogEpoch, MeshProtos.MeshPacket packet) {}
+    private record DeferredMeshPacket(long channelCatalogEpoch,
+                                      MeshProtos.MeshPacket packet,
+                                      long receivedAtSeconds) {}
 
     public MessageListenerService(DeviceState deviceState) {
         this(deviceState, null);
@@ -78,9 +84,13 @@ public class MessageListenerService implements FromRadioListener {
 
     @Override
     public void onMeshPacket(MeshProtos.MeshPacket packet) {
+        onMeshPacket(packet, System.currentTimeMillis() / 1000);
+    }
+
+    private void onMeshPacket(MeshProtos.MeshPacket packet, long receivedAtSeconds) {
         if (!packet.hasDecoded()) { return; }
         if (deviceState.getMyNodeNum() == 0) {
-            deferMeshPacket(packet, "local node id is unknown");
+            deferMeshPacket(packet, receivedAtSeconds, "local node id is unknown");
             return;
         }
 
@@ -94,12 +104,14 @@ public class MessageListenerService implements FromRadioListener {
         }
 
         MeshProtos.Data data = packet.getDecoded();
-        dispatchDecodedPacket(packet, data);
+        dispatchDecodedPacket(packet, data, receivedAtSeconds);
     }
 
-    private void dispatchDecodedPacket(MeshProtos.MeshPacket packet, MeshProtos.Data data) {
+    private void dispatchDecodedPacket(MeshProtos.MeshPacket packet,
+                                       MeshProtos.Data data,
+                                       long receivedAtSeconds) {
         if (data.getPortnum() == Portnums.PortNum.TEXT_MESSAGE_APP) {
-            handleTextMessage(packet, data);
+            handleTextMessage(packet, data, receivedAtSeconds);
         } else if (data.getPortnum() == Portnums.PortNum.ROUTING_APP) {
             handleRoutingAck(packet, data);
         } else if (data.getPortnum() == Portnums.PortNum.NODEINFO_APP) {
@@ -115,12 +127,14 @@ public class MessageListenerService implements FromRadioListener {
         }
     }
 
-    private void handleTextMessage(MeshProtos.MeshPacket packet, MeshProtos.Data data) {
+    private void handleTextMessage(MeshProtos.MeshPacket packet,
+                                   MeshProtos.Data data,
+                                   long receivedAtSeconds) {
         int from = packet.getFrom();
         int to = packet.getTo();
         boolean isDirect = to != 0xFFFFFFFF;
         if (!isDirect && !deviceState.isChannelCatalogReady()) {
-            deferMeshPacket(packet, "channel catalog is not ready");
+            deferMeshPacket(packet, receivedAtSeconds, "channel catalog is not ready");
             return;
         }
 
@@ -136,17 +150,18 @@ public class MessageListenerService implements FromRadioListener {
             return;
         }
 
-        processIncomingTextMessage(packet, data, isDirect);
+        processIncomingTextMessage(packet, data, isDirect, receivedAtSeconds);
     }
 
     private void processIncomingTextMessage(MeshProtos.MeshPacket packet,
                                             MeshProtos.Data data,
-                                            boolean isDirect) {
+                                            boolean isDirect,
+                                            long receivedAtSeconds) {
         int from = packet.getFrom();
         int to = packet.getTo();
         int channel = packet.getChannel();
         String text = data.getPayload().toString(StandardCharsets.UTF_8);
-        long timestamp = packet.getRxTime() > 0 ? packet.getRxTime() : System.currentTimeMillis() / 1000;
+        long timestamp = receivedAtSeconds;
 
         NodeData fromNode = deviceState.getOrCreateNode(from);
         String fromNodeId = fromNode.getNodeId();
@@ -263,25 +278,20 @@ public class MessageListenerService implements FromRadioListener {
                 || packet.getTransportMechanism() == MeshProtos.MeshPacket.TransportMechanism.TRANSPORT_MQTT;
     }
 
-    private boolean deferMeshPacket(MeshProtos.MeshPacket packet, String reason) {
+    private boolean deferMeshPacket(MeshProtos.MeshPacket packet, long receivedAtSeconds, String reason) {
         if (packet == null) {
             return false;
         }
 
-        DeferredMeshPacket dropped = null;
+        int queuedPackets;
         synchronized (deferredMeshLock) {
-            if (deferredMeshPackets.size() >= MAX_DEFERRED_MESH_PACKETS) {
-                dropped = deferredMeshPackets.remove(0);
-            }
-            deferredMeshPackets.add(new DeferredMeshPacket(deviceState.getChannelCatalogEpoch(), packet));
+            deferredMeshPackets.add(new DeferredMeshPacket(
+                    deviceState.getChannelCatalogEpoch(), packet, receivedAtSeconds));
+            queuedPackets = deferredMeshPackets.size();
+            maybeLogDeferredMeshBacklogLocked(queuedPackets, reason);
         }
-
-        if (dropped != null) {
-            log.warn("Deferred mesh queue full, dropping oldest packet {}",
-                    dropped.packet().getId());
-        }
-        log.info("Deferring mesh packet {} on channel {} until {}",
-                packet.getId(), packet.getChannel(), reason);
+        log.info("Deferring mesh packet {} on channel {} until {} (backlog={})",
+                packet.getId(), packet.getChannel(), reason, queuedPackets);
         return true;
     }
 
@@ -293,6 +303,7 @@ public class MessageListenerService implements FromRadioListener {
             }
             deferred = new ArrayList<>(deferredMeshPackets);
             deferredMeshPackets.clear();
+            deferredMeshWarnBucket = 0;
         }
 
         long currentEpoch = deviceState.getChannelCatalogEpoch();
@@ -306,7 +317,7 @@ public class MessageListenerService implements FromRadioListener {
             if (!packet.hasDecoded()) {
                 continue;
             }
-            onMeshPacket(packet);
+            onMeshPacket(packet, queued.receivedAtSeconds());
         }
     }
 
@@ -315,6 +326,21 @@ public class MessageListenerService implements FromRadioListener {
             return;
         }
         flushDeferredMeshPackets();
+    }
+
+    private void maybeLogDeferredMeshBacklogLocked(int queuedPackets, String reason) {
+        if (queuedPackets < DEFERRED_MESH_WARN_THRESHOLD) {
+            return;
+        }
+
+        int bucket = ((queuedPackets - DEFERRED_MESH_WARN_THRESHOLD) / DEFERRED_MESH_WARN_STEP) + 1;
+        if (bucket <= deferredMeshWarnBucket) {
+            return;
+        }
+
+        deferredMeshWarnBucket = bucket;
+        log.warn("Deferred mesh backlog grew to {} packets while waiting for {}",
+                queuedPackets, reason);
     }
 
     private boolean isReactionPacket(MeshProtos.Data data) {
@@ -604,6 +630,10 @@ public class MessageListenerService implements FromRadioListener {
                 deviceState.fireDeviceMetadataListeners();
                 log.debug("Received device metadata: firmwareVersion='{}', role={}",
                         metadata.getFirmwareVersion(), metadata.getRole());
+            } else if (adminMsg.hasGetRingtoneResponse()) {
+                deviceState.setRingtone(adminMsg.getGetRingtoneResponse());
+                deviceState.fireRingtoneListeners();
+                log.debug("Received ringtone response ({} chars)", adminMsg.getGetRingtoneResponse().length());
             } else if (hasSessionPasskey) {
                 // Session passkey is attached to get_x_response packets, not only owner info.
                 // Save/channel edit flows wait on the same listener to unblock when the key arrives.
@@ -635,6 +665,7 @@ public class MessageListenerService implements FromRadioListener {
         if (!owner.getPublicKey().isEmpty()) {
             node.setPublicKey(owner.getPublicKey().toByteArray());
         }
+        node.setLicensed(owner.getIsLicensed());
         if (owner.hasIsUnmessagable()) {
             node.setUnmessagable(owner.getIsUnmessagable());
         }
@@ -649,18 +680,31 @@ public class MessageListenerService implements FromRadioListener {
             log.debug("Ignoring outgoing TRACEROUTE_APP echo from self");
             return;
         }
-        if (data.getRequestId() == 0) {
-            log.debug("Ignoring TRACEROUTE_APP packet without requestId (not a response)");
-            return;
-        }
-
         try {
             MeshProtos.RouteDiscovery route = MeshProtos.RouteDiscovery.parseFrom(data.getPayload());
+            if (data.getRequestId() == 0) {
+                if (!hasRouteDiscoveryData(route)) {
+                    log.debug("Ignoring TRACEROUTE_APP packet without requestId or route data");
+                    return;
+                }
+                if (packet.getTo() != myNodeNum) {
+                    log.debug("Ignoring TRACEROUTE_APP route data without requestId addressed to !{}",
+                            Integer.toHexString(packet.getTo()));
+                    return;
+                }
+            }
             deviceState.fireTracerouteListeners(packet.getFrom(), route);
             log.info("Received TRACEROUTE_APP response from !{}: route={}, route_back={}",
                     Integer.toHexString(packet.getFrom()), route.getRouteList(), route.getRouteBackList());
         } catch (InvalidProtocolBufferException e) {
             log.warn("Failed to parse RouteDiscovery from TRACEROUTE_APP packet", e);
         }
+    }
+
+    private static boolean hasRouteDiscoveryData(MeshProtos.RouteDiscovery route) {
+        return route.getRouteCount() > 0
+                || route.getSnrTowardsCount() > 0
+                || route.getRouteBackCount() > 0
+                || route.getSnrBackCount() > 0;
     }
 }

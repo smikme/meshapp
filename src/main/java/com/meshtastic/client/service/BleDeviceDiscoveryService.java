@@ -3,6 +3,8 @@ package com.meshtastic.client.service;
 import com.meshtastic.client.connection.ble.BleDevice;
 import com.meshtastic.client.connection.ble.BlePlatform;
 import com.meshtastic.client.connection.ble.BlePlatformFactory;
+import com.meshtastic.client.connection.ble.BleProtocolProfile;
+import com.meshtastic.client.model.ProtocolType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -11,13 +13,15 @@ import java.util.concurrent.*;
 import java.util.function.Consumer;
 
 /**
- * Сервис автоматического обнаружения BLE-устройств Meshtastic (singleton).
+ * Сервис автоматического обнаружения BLE-устройств Meshtastic и MeshCore (singleton).
  * <p>
  * Использует платформо-зависимый {@link BlePlatform} для BLE-сканирования
- * с фильтром по Meshtastic service UUID. Оповещает подписчиков при
+ * с фильтром по service UUID выбранного BLE-профиля. Оповещает подписчиков при
  * обнаружении новых устройств или изменении RSSI.
  * <p>
  * Паттерн аналогичен {@link SerialPortDiscoveryService}.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public final class BleDeviceDiscoveryService {
 
@@ -28,6 +32,8 @@ public final class BleDeviceDiscoveryService {
     private final List<Consumer<List<BleDevice>>> listeners = new CopyOnWriteArrayList<>();
     private final Map<String, BleDevice> discoveredDevices = new ConcurrentHashMap<>();
     private volatile boolean scanning;
+    private volatile BleProtocolProfile scanProfile = BleProtocolProfile.MESHTASTIC;
+    private volatile String lastErrorMessage;
     private BlePlatform platform;
 
     private BleDeviceDiscoveryService() {}
@@ -40,13 +46,14 @@ public final class BleDeviceDiscoveryService {
     }
 
     /**
-     * Запускает BLE-сканирование. Обнаруженные устройства с Meshtastic service UUID
+     * Запускает BLE-сканирование. Обнаруженные устройства с выбранным service UUID
      * добавляются в список и оповещают подписчиков.
      */
     public void startScanning() {
         if (scanning) { return; }
         if (!BlePlatformFactory.isSupported()) {
-            log.warn("BLE not supported on this platform");
+            lastErrorMessage = "BLE не поддерживается на этой платформе";
+            log.warn(lastErrorMessage);
             return;
         }
 
@@ -54,24 +61,36 @@ public final class BleDeviceDiscoveryService {
         if (platform == null) {
             try {
                 platform = BlePlatformFactory.create();
-            } catch (UnsupportedOperationException e) {
+            } catch (RuntimeException e) {
+                lastErrorMessage = e.getMessage();
                 log.warn("BLE not available: {}", e.getMessage());
                 return;
             }
         }
 
         scanning = true;
+        lastErrorMessage = null;
         discoveredDevices.clear();
+        try {
+            platform.setProfile(scanProfile);
+            platform.startScan(device -> {
+                BleDevice existing = discoveredDevices.get(device.address());
+                BleDevice profiledDevice = device.protocolType() == null
+                        ? new BleDevice(device.address(), device.name(), device.rssi(), scanProfile.protocolType())
+                        : device;
+                discoveredDevices.put(device.address(), profiledDevice);
 
-        platform.startScan(device -> {
-            BleDevice existing = discoveredDevices.get(device.address());
-            discoveredDevices.put(device.address(), device);
-
-            // Оповещаем при новом устройстве или значительном изменении RSSI
-            if (existing == null || Math.abs(existing.rssi() - device.rssi()) > 5) {
-                fireChanged();
-            }
-        });
+                // Оповещаем при новом устройстве или значительном изменении RSSI
+                if (existing == null || Math.abs(existing.rssi() - profiledDevice.rssi()) > 5) {
+                    fireChanged();
+                }
+            });
+        } catch (RuntimeException e) {
+            scanning = false;
+            lastErrorMessage = e.getMessage();
+            log.warn("BLE scanning failed: {}", e.getMessage());
+            return;
+        }
 
         log.info("BLE scanning started");
     }
@@ -110,6 +129,35 @@ public final class BleDeviceDiscoveryService {
         return scanning;
     }
 
+    /**
+     * Возвращает последнюю ошибку запуска BLE discovery, если сканирование не стартовало.
+     */
+    public String getLastErrorMessage() {
+        return lastErrorMessage;
+    }
+
+    /**
+     * Меняет BLE-профиль для следующего сканирования. Если сканирование уже идёт,
+     * оно перезапускается с новым фильтром UUID.
+     *
+     * @param profile BLE-профиль; null трактуется как Meshtastic
+     */
+    public void setScanProfile(BleProtocolProfile profile) {
+        BleProtocolProfile newProfile = profile == null ? BleProtocolProfile.MESHTASTIC : profile;
+        if (newProfile == scanProfile) {
+            return;
+        }
+        scanProfile = newProfile;
+        if (scanning) {
+            stopScanning();
+            startScanning();
+        }
+    }
+
+    public BleProtocolProfile getScanProfile() {
+        return scanProfile;
+    }
+
     public void addListener(Consumer<List<BleDevice>> listener) {
         listeners.add(listener);
     }
@@ -124,7 +172,13 @@ public final class BleDeviceDiscoveryService {
      */
     public BlePlatform getPlatform() {
         if (platform == null) {
-            platform = BlePlatformFactory.create();
+            try {
+                platform = BlePlatformFactory.create();
+                lastErrorMessage = null;
+            } catch (RuntimeException e) {
+                lastErrorMessage = e.getMessage();
+                throw e;
+            }
         }
         return platform;
     }

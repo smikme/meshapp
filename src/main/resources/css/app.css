@@ -33,6 +33,19 @@
     -fx-alignment: top-center;
 }
 
+.drawer-toolbar-scroll,
+.drawer-toolbar-scroll > .viewport {
+    -fx-background-color: transparent;
+    -fx-background-insets: 0;
+    -fx-padding: 0;
+}
+
+.drawer-toolbar-scroll-content {
+    -fx-background-color: transparent;
+    -fx-padding: 0;
+    -fx-alignment: top-center;
+}
+
 .drawer-toolbar-button {
     -fx-background-color: transparent;
     -fx-background-radius: 10;
@@ -214,6 +227,229 @@
 
 .light-theme .config-status-label {
     -fx-text-fill: rgba(0, 0, 0, 0.55);
+}
+
+.map-form {
+    -fx-background-color: transparent;
+}
+
+.map-toolbar {
+    -fx-padding: 4 6 4 6;
+    -fx-spacing: 4;
+    -fx-background-color: rgba(255, 255, 255, 0.05);
+    -fx-background-radius: 10;
+    -fx-border-color: rgba(255, 255, 255, 0.08);
+    -fx-border-width: 1;
+    -fx-border-radius: 10;
+}
+
+.map-toolbar > .container {
+    -fx-spacing: 4;
+    -fx-alignment: center-left;
+}
+
+.light-theme .map-toolbar {
+    -fx-background-color: rgba(0, 0, 0, 0.03);
+    -fx-border-color: rgba(0, 0, 0, 0.1);
+}
+
+.map-icon-button {
+    -fx-min-width: 34;
+    -fx-pref-width: 34;
+    -fx-max-width: 34;
+    -fx-min-height: 34;
+    -fx-pref-height: 34;
+    -fx-max-height: 34;
+    -fx-padding: 0;
+    -fx-font-size: 1.2308em;
+}
+
+.map-icon-button .svg-icon {
+    -fx-fill: rgba(255, 255, 255, 0.75);
+}
+
+.map-icon-button:hover .svg-icon,
+.map-icon-button:selected .svg-icon {
+    -fx-fill: rgba(255, 255, 255, 0.95);
+}
+
+.light-theme .map-icon-button .svg-icon {
+    -fx-fill: rgba(0, 0, 0, 0.65);
+}
+
+.light-theme .map-icon-button:hover .svg-icon,
+.light-theme .map-icon-button:selected .svg-icon {
+    -fx-fill: rgba(0, 0, 0, 0.88);
+}
+
+.map-search-field {
+    -fx-min-width: 140;
+    -fx-pref-width: 180;
+    -fx-max-width: 260;
+}
+
+.map-search-suggestion-row {
+    -fx-padding: 7 10;
+    -fx-background-radius: 6;
+}
+
+.map-search-suggestion-row:hover,
+.map-search-suggestion-row-selected {
+    -fx-background-color: rgba(255, 255, 255, 0.12);
+}
+
+.light-theme .map-search-suggestion-row:hover,
+.light-theme .map-search-suggestion-row-selected {
+    -fx-background-color: rgba(0, 0, 0, 0.08);
+}
+
+.map-trace-line {
+    -fx-stroke-width: 3;
+    -fx-stroke-line-cap: round;
+    -fx-opacity: 0.82;
+}
+
+.map-trace-line-reverse {
+    -fx-stroke-dash-array: 10 7;
+}
+
+.map-trace-arrow {
+    -fx-opacity: 0.92;
+}
+
+.map-trace-signal-label {
+    -fx-background-color: rgba(0, 0, 0, 0.64);
+    -fx-background-radius: 5;
+    -fx-border-radius: 5;
+    -fx-border-width: 1;
+    -fx-padding: 2 6 2 6;
+    -fx-text-fill: rgba(255, 255, 255, 0.92);
+    -fx-font-size: 0.7692em;
+    -fx-font-weight: bold;
+}
+
+.light-theme .map-trace-signal-label {
+    -fx-background-color: rgba(255, 255, 255, 0.88);
+    -fx-text-fill: rgba(0, 0, 0, 0.76);
+}
+
+.tile-map-view {
+    -fx-background-color: #1f2933;
+    -fx-background-radius: 8;
+    -fx-border-color: -color-border-default;
+    -fx-border-radius: 8;
+    -fx-border-width: 1;
+}
+
+.tile-map-view.map-night-mode {
+    -fx-background-color: #07111f;
+    -fx-border-color: rgba(125, 170, 214, 0.25);
+}
+
+.map-tile-missing-bg {
+    -fx-fill: rgba(255, 255, 255, 0.04);
+    -fx-stroke: rgba(255, 255, 255, 0.06);
+    -fx-stroke-width: 1;
+}
+
+.light-theme .map-tile-missing-bg {
+    -fx-fill: rgba(0, 0, 0, 0.035);
+    -fx-stroke: rgba(0, 0, 0, 0.06);
+}
+
+.tile-map-view.map-night-mode .map-tile-missing-bg,
+.light-theme .tile-map-view.map-night-mode .map-tile-missing-bg {
+    -fx-fill: rgba(4, 17, 31, 0.94);
+    -fx-stroke: rgba(125, 170, 214, 0.18);
+}
+
+.map-tile-missing-label {
+    -fx-text-fill: rgba(255, 255, 255, 0.28);
+    -fx-font-size: 0.7692em;
+}
+
+.light-theme .map-tile-missing-label {
+    -fx-text-fill: rgba(0, 0, 0, 0.35);
+}
+
+.tile-map-view.map-night-mode .map-tile-missing-label,
+.light-theme .tile-map-view.map-night-mode .map-tile-missing-label {
+    -fx-text-fill: rgba(206, 222, 239, 0.42);
+}
+
+.map-attribution-label,
+.map-measure-segment-label {
+    -fx-background-color: rgba(0, 0, 0, 0.52);
+    -fx-background-radius: 4;
+    -fx-padding: 2 6 2 6;
+    -fx-text-fill: rgba(255, 255, 255, 0.86);
+    -fx-font-size: 0.7692em;
+}
+
+.light-theme .map-attribution-label,
+.light-theme .map-measure-segment-label {
+    -fx-background-color: rgba(255, 255, 255, 0.82);
+    -fx-text-fill: rgba(0, 0, 0, 0.72);
+}
+
+.tile-map-view.map-night-mode .map-attribution-label,
+.tile-map-view.map-night-mode .map-measure-segment-label,
+.light-theme .tile-map-view.map-night-mode .map-attribution-label,
+.light-theme .tile-map-view.map-night-mode .map-measure-segment-label {
+    -fx-background-color: rgba(2, 8, 18, 0.78);
+    -fx-text-fill: rgba(228, 238, 248, 0.9);
+}
+
+.map-node-marker {
+    -fx-background-color: -color-accent-emphasis;
+    -fx-background-radius: 16;
+    -fx-border-color: white;
+    -fx-border-radius: 16;
+    -fx-border-width: 2;
+    -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.35), 8, 0, 0, 2);
+}
+
+.map-node-marker-local {
+    -fx-background-color: -color-success-emphasis;
+}
+
+.map-node-marker-label {
+    -fx-text-fill: white;
+    -fx-font-weight: bold;
+}
+
+.map-measure-line {
+    -fx-stroke: #ffcc33;
+    -fx-stroke-width: 3;
+    -fx-stroke-line-cap: round;
+    -fx-stroke-line-join: round;
+}
+
+.map-measure-point {
+    -fx-fill: #ffcc33;
+    -fx-stroke: rgba(0, 0, 0, 0.75);
+    -fx-stroke-width: 2;
+}
+
+.map-area-selection {
+    -fx-fill: rgba(255, 204, 51, 0.16);
+    -fx-stroke: #ffcc33;
+    -fx-stroke-width: 2;
+}
+
+.map-selected-area {
+    -fx-fill: rgba(46, 160, 67, 0.15);
+    -fx-stroke: #2ea043;
+    -fx-stroke-width: 2;
+}
+
+.map-status-bar {
+    -fx-padding: 0 2 0 2;
+}
+
+.map-status-label {
+    -fx-text-fill: -color-fg-muted;
+    -fx-font-size: 0.8462em;
 }
 
 .packet-monitor-root {
@@ -1919,12 +2155,28 @@
     -fx-fill: #FFC107;
 }
 
+.map-traces-button-active .svg-icon {
+    -fx-fill: #58A6FF;
+}
+
+.map-traces-button-active:hover .svg-icon {
+    -fx-fill: #79C0FF;
+}
+
 .light-theme .favorite-btn-active .svg-icon {
     -fx-fill: #F9A825;
 }
 
 .light-theme .favorite-btn-active:hover .svg-icon {
     -fx-fill: #E65100;
+}
+
+.light-theme .map-traces-button-active .svg-icon {
+    -fx-fill: #0969DA;
+}
+
+.light-theme .map-traces-button-active:hover .svg-icon {
+    -fx-fill: #0550AE;
 }
 
 /* Звёздочка избранного в списке нод */

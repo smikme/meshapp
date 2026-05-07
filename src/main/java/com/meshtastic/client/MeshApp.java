@@ -41,6 +41,9 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
+/**
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
+ */
 public class MeshApp extends Application {
 
     private static final Logger log = LoggerFactory.getLogger(MeshApp.class);
@@ -151,10 +154,10 @@ public class MeshApp extends Application {
             );
         }
 
-        // Восстановить позицию/размер окна из предыдущей сессии
-        restoreWindowBounds(stage);
-
         stage.setScene(scene);
+        // Восстановить позицию/размер окна после setScene(), иначе JavaFX может
+        // заново применить размеры сцены и перетереть сохранённые Stage bounds.
+        restoreWindowBounds(stage);
         stage.show();
         AppTrayManager.getInstance().initialize(stage);
 
@@ -175,6 +178,7 @@ public class MeshApp extends Application {
         // программном stage.close() из кастомного title bar, и при нативном закрытии)
         stage.setOnCloseRequest(e -> {
             e.consume();
+            savePrimaryWindowStateIfPossible();
             AppTrayManager.getInstance().exitApplication();
         });
         stage.setOnHiding(e -> saveWindowState(stage, rootPane));
@@ -230,6 +234,20 @@ public class MeshApp extends Application {
         AppPreferences.saveWindowBounds(x, y, w, h, maximized);
     }
 
+    private void savePrimaryWindowStateIfPossible() {
+        Stage stage = primaryStage;
+        if (stage == null) {
+            return;
+        }
+
+        Scene scene = stage.getScene();
+        if (scene == null || !(scene.getRoot() instanceof RootPane)) {
+            return;
+        }
+
+        saveWindowState(stage, (RootPane) scene.getRoot());
+    }
+
     private void installWindowStateGuards(Stage stage, RootPane rootPane) {
         if (OsDetect.isMacOs() || AppPreferences.isDisableEffectsEffective()) {
             return;
@@ -281,6 +299,7 @@ public class MeshApp extends Application {
 
     @Override
     public void stop() {
+        savePrimaryWindowStateIfPossible();
         stopUiWatchdog();
         AppTrayManager.getInstance().dispose();
         ConnectionManager.getInstance().shutdownAll();

@@ -8,6 +8,8 @@ import javafx.scene.layout.StackPane;
  * Наследники (FormChat, FormNodes, FormDashboard и др.) переопределяют
  * методы жизненного цикла. Форма отображается внутри {@link MainForm}
  * через {@link FormManager#showForm(Form)}.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class Form extends StackPane {
 

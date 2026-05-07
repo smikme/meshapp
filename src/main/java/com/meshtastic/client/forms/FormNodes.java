@@ -35,6 +35,9 @@ import javafx.scene.text.FontWeight;
 import java.util.*;
 import java.util.function.IntConsumer;
 
+/**
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
+ */
 @SystemForm(name = "Ноды", description = "Список нод в сети", tags = {"ноды", "nodes", "устройства", "mesh"})
 public class FormNodes extends Form {
 
@@ -656,7 +659,7 @@ public class FormNodes extends Form {
             String displayName = node.getLongName() != null && !node.getLongName().isEmpty()
                     ? node.getLongName()
                     : node.getNodeId() != null ? node.getNodeId() : "?";
-            displayName = UnicodeTextUtils.sanitize(displayName);
+            displayName = UnicodeTextUtils.sanitizeForJavaFxDisplay(displayName);
             nameLabel.setText(displayName);
 
             // Аватар: shortName целиком или первые 4 символа имени
@@ -666,8 +669,10 @@ public class FormNodes extends Form {
             } else {
                 avatarText = UnicodeTextUtils.prefixByCodePoints(displayName, 4).toUpperCase(Locale.ROOT);
             }
-            avatarLabel.setText(avatarText);
-            avatarLabel.setFont(Font.font("Roboto", FontWeight.BOLD, NodeUtils.avatarFontSize(avatarText, 40)));
+            String safeAvatarText = UnicodeTextUtils.sanitizeForJavaFxDisplay(avatarText);
+            avatarLabel.setText(safeAvatarText);
+            avatarLabel.setFont(Font.font("Roboto", FontWeight.BOLD,
+                    NodeUtils.avatarFontSize(safeAvatarText, 40)));
 
             String color = NodeUtils.roleColor(node.getRole());
             avatarPane.setStyle("-fx-background-color: " + color + "; -fx-background-radius: 20;");

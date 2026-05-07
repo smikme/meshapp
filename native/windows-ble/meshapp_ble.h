@@ -42,6 +42,12 @@ MESHBLE_API int meshble_get_adapter_state(void);
 /* ==================== Scanning ==================== */
 
 /**
+ * Select BLE profile for subsequent scanning/connection.
+ * @param profile 0=Meshtastic, 1=MeshCore Companion
+ */
+MESHBLE_API void meshble_set_profile(int profile);
+
+/**
  * Callback for discovered BLE devices.
  * @param address  MAC address as "AA:BB:CC:DD:EE:FF"
  * @param name     advertised device name (may be NULL)
@@ -50,7 +56,7 @@ MESHBLE_API int meshble_get_adapter_state(void);
 typedef void (*meshble_device_cb)(const char* address, const char* name, int rssi);
 
 /**
- * Start scanning for Meshtastic BLE devices (filtered by service UUID).
+ * Start scanning for BLE devices matching the selected profile service UUID.
  * @param callback  called for each discovered device (from WinRT thread)
  * @return 0 on success, negative on error
  */

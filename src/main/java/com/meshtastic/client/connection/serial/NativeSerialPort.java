@@ -14,6 +14,8 @@ import com.meshtastic.client.connection.ConnectionException;
  *   <li>{@link WinSerialPort} — Windows (kernel32: CreateFileW, SetCommState)</li>
  *   <li>{@link PosixSerialPort} — macOS / Linux (libc: open, tcsetattr)</li>
  * </ul>
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public interface NativeSerialPort {
 

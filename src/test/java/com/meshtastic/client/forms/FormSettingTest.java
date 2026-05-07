@@ -50,6 +50,9 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+/**
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
+ */
 class FormSettingTest {
 
     @TempDir
@@ -103,6 +106,15 @@ class FormSettingTest {
                 ConnectionType.BLE, false, false, List.of(deviceConfig), List.of()));
         assertFalse(FormSetting.shouldUseImplicitBleModuleSave(
                 ConnectionType.BLE, false, false, List.of(), List.of(serialConfig)));
+    }
+
+    @Test
+    void shouldSanitizeCacheDisplayTextWithoutTouchingReadableBmpText() {
+        assertEquals("Blue Goose 86b8", FormSetting.sanitizeCacheDisplayText("Blue Goose 🪿86b8"));
+        assertEquals("ioann", FormSetting.sanitizeCacheDisplayText("i͞oan͢n"));
+        assertEquals("Бердск ps27", FormSetting.sanitizeCacheDisplayText("Бердск ps27"));
+        assertEquals("Röyksopp", FormSetting.sanitizeCacheDisplayText("Röyksopp"));
+        assertEquals("", FormSetting.sanitizeCacheDisplayText(null));
     }
 
     @Test
@@ -234,6 +246,41 @@ class FormSettingTest {
     }
 
     @Test
+    void reloadConfigTreeShowsLicensedOwnerSetting() {
+        ConnectionManager manager = ConnectionManager.getInstance();
+        ConnectionEntry entry = new ConnectionEntry("Test radio", "localhost", 4403);
+        entry.setConnected(true);
+        manager.addEntry(entry);
+
+        DeviceState state = new DeviceState();
+        state.setMyNodeNum(0x12345678);
+        state.setOwnerInfo(MeshProtos.User.newBuilder()
+                .setLongName("CALLSIGN")
+                .setShortName("CS")
+                .setIsLicensed(true)
+                .build());
+        state.addConfig(ConfigProtos.Config.newBuilder()
+                .setDevice(ConfigProtos.Config.DeviceConfig.newBuilder().build())
+                .build());
+        deviceStates(manager).put(entry.getId(), state);
+        protocolHandlers(manager).put(entry.getId(), track(new ProtocolHandler(new FakeConnection())));
+
+        FormSetting form = onFxThread(() -> {
+            FormSetting created = new FormSetting();
+            created.formInit();
+            created.formOpen();
+            return created;
+        });
+
+        ConfigTreeItem licensedItem = onFxThread(() ->
+                findConfigTreeField(configTree(form).getRoot(), "owner_info", "is_licensed"));
+
+        assertNotNull(licensedItem);
+        assertEquals(Boolean.class, licensedItem.getValueType());
+        assertEquals(Boolean.TRUE, licensedItem.getValue());
+    }
+
+    @Test
     void databaseResetConfirmRequiresAcknowledgementBeforeConfirmIsEnabled() {
         AtomicBoolean confirmed = new AtomicBoolean(false);
 
@@ -345,6 +392,27 @@ class FormSettingTest {
 
     private static Label statusLabel(FormSetting form) {
         return (Label) readField(form, "configStatusLabel");
+    }
+
+    private static ConfigTreeItem findConfigTreeField(TreeItem<ConfigTreeItem> root,
+                                                      String configType,
+                                                      String fieldName) {
+        if (root == null) {
+            return null;
+        }
+        ConfigTreeItem data = root.getValue();
+        if (data != null
+                && configType.equals(data.getConfigType())
+                && fieldName.equals(data.getFieldName())) {
+            return data;
+        }
+        for (TreeItem<ConfigTreeItem> child : root.getChildren()) {
+            ConfigTreeItem found = findConfigTreeField(child, configType, fieldName);
+            if (found != null) {
+                return found;
+            }
+        }
+        return null;
     }
 
     @SuppressWarnings("unchecked")

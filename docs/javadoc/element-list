@@ -1,6 +1,7 @@
 com.meshtastic.client
 com.meshtastic.client.components
 com.meshtastic.client.components.chat
+com.meshtastic.client.components.map
 com.meshtastic.client.connection
 com.meshtastic.client.connection.ble
 com.meshtastic.client.connection.ble.linux
@@ -15,6 +16,8 @@ com.meshtastic.client.model
 com.meshtastic.client.notification
 com.meshtastic.client.platform
 com.meshtastic.client.protocol
+com.meshtastic.client.protocol.meshcore
+com.meshtastic.client.protocol.meshtastic
 com.meshtastic.client.service
 com.meshtastic.client.simple
 com.meshtastic.client.system

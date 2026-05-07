@@ -24,6 +24,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Stream;
 
+/**
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
+ */
 public final class CrashReportFlow {
 
     private static final Logger log = LoggerFactory.getLogger(CrashReportFlow.class);
@@ -51,6 +54,7 @@ public final class CrashReportFlow {
                                     () -> SessionCrashLogManager.deletePendingCrashLog(crashLog),
                                     null,
                                     onFinished,
+                                    decision.email(),
                                     "Лог отправлен разработчикам: issue #"
                             )
                     );
@@ -86,6 +90,7 @@ public final class CrashReportFlow {
                             () -> deleteReportSnapshot(snapshot),
                             () -> deleteReportSnapshot(snapshot),
                             null,
+                            decision.email(),
                             "Отчёт отправлен разработчикам: issue #"
                     )
             );
@@ -114,8 +119,8 @@ public final class CrashReportFlow {
             try {
                 CrashReportService crashReportService = CrashReportService.createDefault();
                 CrashReportService.SubmissionResult result = problemReport
-                        ? crashReportService.submitProblemReport(logFile, comment, buildCrashContext())
-                        : crashReportService.submitCrashReport(logFile, comment, buildCrashContext());
+                        ? crashReportService.submitProblemReport(logFile, comment, hooks.contactEmail(), buildCrashContext())
+                        : crashReportService.submitCrashReport(logFile, comment, hooks.contactEmail(), buildCrashContext());
 
                 if (cancelled.get()) {
                     return;
@@ -284,5 +289,6 @@ public final class CrashReportFlow {
                                    Runnable onSuccess,
                                    Runnable onFailure,
                                    Runnable onFinished,
+                                   String contactEmail,
                                    String successMessagePrefix) {}
 }

@@ -28,6 +28,8 @@ import java.util.concurrent.ThreadLocalRandom;
  * Модальное окно создания SECONDARY канала на устройстве.
  *
  * <p>Вызывается статическим методом {@link #show(DeviceState, ProtocolHandler, Runnable)}.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public final class CreateChannelDialog {
 

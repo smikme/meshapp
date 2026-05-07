@@ -1,7 +1,9 @@
 package com.meshtastic.client.connection.ble;
 
 /**
- * Константы Meshtastic BLE-протокола: UUID сервиса и характеристик.
+ * Константы BLE-протоколов Meshtastic и MeshCore Companion.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public final class BleConstants {
 
@@ -16,6 +18,15 @@ public final class BleConstants {
 
     /** Характеристика-счётчик: уведомляет о наличии новых данных (Read, Notify). */
     public static final String FROM_NUM_UUID = "ed9da18c-a800-4f66-a670-aa7547e34453";
+
+    /** UUID GATT-сервиса MeshCore Companion. */
+    public static final String MESHCORE_SERVICE_UUID = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
+
+    /** MeshCore RX characteristic: приложение пишет команды, прошивка читает. */
+    public static final String MESHCORE_RX_UUID = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";
+
+    /** MeshCore TX characteristic: прошивка шлёт notifications, приложение читает. */
+    public static final String MESHCORE_TX_UUID = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";
 
     /** Таймаут подключения к периферии (мс). */
     public static final int CONNECT_TIMEOUT_MS = 20_000;

@@ -16,6 +16,8 @@ import org.slf4j.LoggerFactory;
  * DTR не активируется → ESP32 на CH340/CP210x не сбрасывается.
  * RTS активируется (LOW) → Q1 OFF → EN не удерживается в LOW.
  * {@code fAbortOnError = 0} → I/O не блокируется при ошибках драйвера.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 class WinSerialPort implements NativeSerialPort {
 

@@ -8,6 +8,9 @@ import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
+/**
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
+ */
 class ChatNodeDisplayHelperTest {
 
     @Test

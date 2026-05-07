@@ -16,6 +16,8 @@ import java.util.concurrent.ConcurrentHashMap;
  *
  * <p>Парсит текст, разбивает на сегменты (обычный текст и эмодзи),
  * рендерит обычный текст как {@link Text}, а эмодзи как {@link ImageView}.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class EmojiTextFlow extends TextFlow {
 
@@ -152,8 +154,9 @@ public class EmojiTextFlow extends TextFlow {
             } else {
                 if (child instanceof Text) {
                     Text textNode = (Text) child;
-                    if (!textNode.getText().equals(seg.text)) {
-                        textNode.setText(seg.text);
+                    String safeText = UnicodeTextUtils.sanitizeForJavaFxDisplay(seg.text);
+                    if (!textNode.getText().equals(safeText)) {
+                        textNode.setText(safeText);
                     }
                 } else {
                     getChildren().remove(i);
@@ -187,7 +190,7 @@ public class EmojiTextFlow extends TextFlow {
     }
 
     private void addTextNode(String text) {
-        Text t = new Text(UnicodeTextUtils.sanitize(text));
+        Text t = new Text(UnicodeTextUtils.sanitizeForJavaFxDisplay(text));
         if (textStyleClass != null) {
             t.getStyleClass().add(textStyleClass);
         }

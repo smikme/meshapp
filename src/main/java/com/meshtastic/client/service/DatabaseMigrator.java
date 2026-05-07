@@ -3,9 +3,14 @@ package com.meshtastic.client.service;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.sql.*;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Централизованное версионирование и миграция схемы H2 БД.
@@ -13,10 +18,13 @@ import java.util.List;
  * Хранит номер версии схемы в таблице {@code schema_version} (одна строка, одно число).
  * При запуске проверяет текущую версию и выполняет необходимые миграции последовательно.
  * <p>
- * Если таблица {@code schema_version} отсутствует — БД считается устаревшей,
- * все объекты удаляются ({@code DROP ALL OBJECTS}), и схема создаётся с нуля.
+ * Если таблица {@code schema_version} отсутствует — БД считается устаревшей.
+ * Известные таблицы приложения мигрируются с сохранением данных, чужие legacy-объекты
+ * удаляются ({@code DROP ALL OBJECTS}) и схема создаётся с нуля.
  * <p>
  * Вызывается из {@link DatabaseProvider#getConnection()} при первом создании соединения.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public final class DatabaseMigrator {
 
@@ -24,6 +32,16 @@ public final class DatabaseMigrator {
 
     /** Текущая версия схемы. Увеличивается при каждом изменении схемы. */
     static final int CURRENT_VERSION = 10;
+    private static final Pattern CONNECTION_NODE_ID_PATTERN =
+            Pattern.compile("\"nodeId\"\\s*:\\s*\"(![0-9a-fA-F]{8})\"");
+    private static final List<String> APPLICATION_TABLES = List.of(
+            "MESSAGES",
+            "CHAT_READ_COUNTS",
+            "NODES",
+            "TELEMETRY_HISTORY",
+            "MESSAGE_REACTIONS",
+            "LORA_PACKET_LOGS"
+    );
 
     private DatabaseMigrator() {}
 
@@ -38,14 +56,24 @@ public final class DatabaseMigrator {
                 List<String> tables = listAllTables(connection);
                 if (tables.isEmpty()) {
                     log.info("schema_version not found — database is empty (fresh install or incompatible H2 file)");
+                    dropAll(connection);
+                    createSchemaVersionTable(connection);
+                    setVersion(connection, CURRENT_VERSION);
+                    log.info("Database reset complete, schema version set to {}", CURRENT_VERSION);
+                    return;
+                }
+                if (containsApplicationTables(tables)) {
+                    log.info("schema_version not found — legacy app database with tables: {}, preserving data", tables);
+                    createSchemaVersionTable(connection);
+                    setVersion(connection, 1);
                 } else {
                     log.info("schema_version not found — legacy database with tables: {}", tables);
+                    dropAll(connection);
+                    createSchemaVersionTable(connection);
+                    setVersion(connection, CURRENT_VERSION);
+                    log.info("Database reset complete, schema version set to {}", CURRENT_VERSION);
+                    return;
                 }
-                dropAll(connection);
-                createSchemaVersionTable(connection);
-                setVersion(connection, CURRENT_VERSION);
-                log.info("Database reset complete, schema version set to {}", CURRENT_VERSION);
-                return;
             }
 
             int version = getCurrentVersion(connection);
@@ -124,32 +152,46 @@ public final class DatabaseMigrator {
 
     /** v3: колонка owner_node_id для изоляции данных между устройствами. */
     private static void migrateToV3(Connection connection) throws SQLException {
+        String ownerNodeId = inferOwnerNodeId();
         try (Statement stmt = connection.createStatement()) {
-            stmt.execute("DELETE FROM messages");
-            stmt.execute("DELETE FROM chat_read_counts");
-            stmt.execute("ALTER TABLE messages ADD COLUMN IF NOT EXISTS owner_node_id VARCHAR(20) NOT NULL DEFAULT ''");
-            stmt.execute("ALTER TABLE chat_read_counts ADD COLUMN IF NOT EXISTS owner_node_id VARCHAR(20) NOT NULL DEFAULT ''");
-            stmt.execute("ALTER TABLE chat_read_counts DROP PRIMARY KEY");
-            stmt.execute("ALTER TABLE chat_read_counts ADD PRIMARY KEY (owner_node_id, chat_type, chat_key)");
-            stmt.execute("DROP INDEX IF EXISTS idx_msg_chat");
-            stmt.execute("CREATE INDEX idx_msg_chat ON messages (owner_node_id, chat_type, chat_key, id)");
+            if (tableExists(connection, "MESSAGES")) {
+                stmt.execute("ALTER TABLE messages ADD COLUMN IF NOT EXISTS owner_node_id VARCHAR(20) NOT NULL DEFAULT ''");
+                backfillOwnerNodeId(connection, "messages", ownerNodeId);
+                stmt.execute("DROP INDEX IF EXISTS idx_msg_chat");
+                stmt.execute("CREATE INDEX IF NOT EXISTS idx_msg_chat ON messages (owner_node_id, chat_type, chat_key, id)");
+            }
+            if (tableExists(connection, "CHAT_READ_COUNTS")) {
+                stmt.execute("ALTER TABLE chat_read_counts ADD COLUMN IF NOT EXISTS owner_node_id VARCHAR(20) NOT NULL DEFAULT ''");
+                backfillOwnerNodeId(connection, "chat_read_counts", ownerNodeId);
+                dropPrimaryKeyIfPresent(stmt, "chat_read_counts");
+                stmt.execute("ALTER TABLE chat_read_counts ADD PRIMARY KEY (owner_node_id, chat_type, chat_key)");
+            }
         }
-        log.info("Migration v3: added 'owner_node_id' column, cleared old messages and read counts");
+        log.info("Migration v3: added 'owner_node_id' column without deleting messages/read counts");
     }
 
     /** v4: колонка owner_node_id для изоляции телеметрии между устройствами. */
     private static void migrateToV4(Connection connection) throws SQLException {
+        if (!tableExists(connection, "TELEMETRY_HISTORY")) {
+            log.info("Migration v4: skipped telemetry owner isolation because telemetry_history is absent");
+            return;
+        }
+        String ownerNodeId = inferOwnerNodeId();
         try (Statement stmt = connection.createStatement()) {
-            stmt.execute("DELETE FROM telemetry_history");
             stmt.execute("ALTER TABLE telemetry_history ADD COLUMN IF NOT EXISTS owner_node_id VARCHAR(20) NOT NULL DEFAULT ''");
+            backfillOwnerNodeId(connection, "telemetry_history", ownerNodeId);
             stmt.execute("DROP INDEX IF EXISTS idx_telemetry_node_ts");
             stmt.execute("CREATE INDEX idx_telemetry_node_ts ON telemetry_history (owner_node_id, node_id, ts)");
         }
-        log.info("Migration v4: added 'owner_node_id' to telemetry_history, cleared old telemetry data");
+        log.info("Migration v4: added 'owner_node_id' to telemetry_history without deleting telemetry data");
     }
 
     /** v5: колонка ignored для игнорируемых нод. */
     private static void migrateToV5(Connection connection) throws SQLException {
+        if (!tableExists(connection, "NODES")) {
+            log.info("Migration v5: skipped ignored column because nodes table is absent");
+            return;
+        }
         try (Statement stmt = connection.createStatement()) {
             stmt.execute("ALTER TABLE nodes ADD COLUMN IF NOT EXISTS ignored BOOLEAN DEFAULT FALSE");
         }
@@ -288,10 +330,59 @@ public final class DatabaseMigrator {
 
     /** v2: колонка favorite для избранных нод. */
     private static void migrateToV2(Connection connection) throws SQLException {
+        if (!tableExists(connection, "NODES")) {
+            log.info("Migration v2: skipped favorite column because nodes table is absent");
+            return;
+        }
         try (Statement stmt = connection.createStatement()) {
             stmt.execute("ALTER TABLE nodes ADD COLUMN IF NOT EXISTS favorite BOOLEAN DEFAULT FALSE");
         }
         log.info("Migration v2: added 'favorite' column to nodes");
+    }
+
+    private static boolean containsApplicationTables(List<String> tables) {
+        return tables.stream().anyMatch(APPLICATION_TABLES::contains);
+    }
+
+    private static void backfillOwnerNodeId(Connection connection, String tableName, String ownerNodeId) throws SQLException {
+        if (ownerNodeId == null || ownerNodeId.isBlank()) {
+            return;
+        }
+        try (PreparedStatement ps = connection.prepareStatement(
+                "UPDATE " + tableName + " SET owner_node_id = ? WHERE owner_node_id IS NULL OR owner_node_id = ''")) {
+            ps.setString(1, ownerNodeId);
+            int updated = ps.executeUpdate();
+            if (updated > 0) {
+                log.info("Migration: backfilled {}.owner_node_id for {} rows with {}", tableName, updated, ownerNodeId);
+            }
+        }
+    }
+
+    private static void dropPrimaryKeyIfPresent(Statement stmt, String tableName) throws SQLException {
+        try {
+            stmt.execute("ALTER TABLE " + tableName + " DROP PRIMARY KEY");
+        } catch (SQLException e) {
+            String state = e.getSQLState();
+            if (!"90057".equals(state) && !"90083".equals(state)) {
+                throw e;
+            }
+        }
+    }
+
+    private static String inferOwnerNodeId() {
+        Path connections = Path.of(System.getProperty("user.home", "."), ".meshapp", "connections.json");
+        if (!Files.isRegularFile(connections)) {
+            return "";
+        }
+        try {
+            Matcher matcher = CONNECTION_NODE_ID_PATTERN.matcher(Files.readString(connections));
+            if (matcher.find()) {
+                return matcher.group(1).toLowerCase(Locale.ROOT);
+            }
+        } catch (Exception e) {
+            log.debug("Failed to infer owner node id from {}", connections, e);
+        }
+        return "";
     }
 
     private static List<String> listAllTables(Connection connection) throws SQLException {

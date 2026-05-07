@@ -18,6 +18,8 @@ import java.util.stream.Stream;
  * <p>Helper агрегирует одинаковые emoji, сохраняет их исходный порядок появления
  * и вычисляет tooltip авторов за один проход группировки, чтобы UI-слой
  * не выполнял повторные линейные сканирования по всем реакциям.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 final class ChatReactionHelper {
 

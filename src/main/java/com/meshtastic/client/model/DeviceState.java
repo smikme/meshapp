@@ -33,6 +33,8 @@ import com.meshtastic.client.service.MessageDbService;
  * После рефакторинга: делегирует большую часть операций компонентам
  * ({@link NodeDatabase}, {@link ChannelStore}, {@link ConfigStore}, {@link MessageStore}).
  * UI-обновления выполняются через {@code Platform.runLater()}.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class DeviceState {
 
@@ -94,6 +96,9 @@ public class DeviceState {
     private final CopyOnWriteArrayList<Runnable> ownerInfoListeners = new CopyOnWriteArrayList<>();
     private volatile MeshProtos.DeviceMetadata deviceMetadata;
     private final CopyOnWriteArrayList<Runnable> deviceMetadataListeners = new CopyOnWriteArrayList<>();
+    private volatile String ringtone;
+    private volatile boolean ringtoneLoaded;
+    private final CopyOnWriteArrayList<Runnable> ringtoneListeners = new CopyOnWriteArrayList<>();
 
     // Pending fixed position
     private volatile double pendingFixedLat;
@@ -126,7 +131,7 @@ public class DeviceState {
     /**
      * Возвращает внутренний map узлов (для backward compatibility).
      *
-     * @return ConcurrentHashMap<Integer, NodeData>
+     * @return {@code ConcurrentHashMap<Integer, NodeData>}
      */
     public ConcurrentHashMap<Integer, NodeData> getNodeDb() { return nodeDatabase.getNodeDb(); }
 
@@ -420,6 +425,13 @@ public class DeviceState {
     public MeshProtos.DeviceMetadata getDeviceMetadata() { return deviceMetadata; }
     public void setDeviceMetadata(MeshProtos.DeviceMetadata deviceMetadata) { this.deviceMetadata = deviceMetadata; }
 
+    public String getRingtone() { return ringtone != null ? ringtone : ""; }
+    public boolean isRingtoneLoaded() { return ringtoneLoaded; }
+    public void setRingtone(String ringtone) {
+        this.ringtone = ringtone != null ? ringtone : "";
+        this.ringtoneLoaded = true;
+    }
+
     /**
      * Listeners are notified when admin owner info arrives or when a fresh
      * {@code session_passkey} is received via any ADMIN_APP response.
@@ -439,6 +451,15 @@ public class DeviceState {
         for (Runnable r : deviceMetadataListeners) {
             try { r.run(); }
             catch (Exception e) { log.error("Exception in device metadata listener", e); }
+        }
+    }
+
+    public void addRingtoneListener(Runnable listener) { ringtoneListeners.add(listener); }
+    public void removeRingtoneListener(Runnable listener) { ringtoneListeners.remove(listener); }
+    public void fireRingtoneListeners() {
+        for (Runnable r : ringtoneListeners) {
+            try { r.run(); }
+            catch (Exception e) { log.error("Exception in ringtone listener", e); }
         }
     }
 
@@ -512,7 +533,8 @@ public class DeviceState {
     }
 
     /**
-     * Returns {@code true} if a fixed position was set by the user recently (< 120s ago).
+     * Возвращает {@code true}, если фиксированная позиция была недавно задана пользователем
+     * (менее 120 секунд назад).
      */
     public boolean hasPendingFixedPosition() {
         long setAt = pendingFixedSetAt;
@@ -538,6 +560,8 @@ public class DeviceState {
         ownerInfo = null;
         sessionPasskey = null;
         deviceMetadata = null;
+        ringtone = null;
+        ringtoneLoaded = false;
         synchronized (telemetryHistory) {
             telemetryHistory.clear();
         }
@@ -554,10 +578,10 @@ public class DeviceState {
     /**
      * Возвращает nodeId устройства-владельца из ownerInfo.
      */
-    private String getOwnerNodeId() {
+    public String getOwnerNodeId() {
         if (ownerInfo != null) {
             return ownerInfo.getId();
         }
-        return null;
+        return myNodeNum != 0 ? String.format("!%08x", myNodeNum) : null;
     }
 }

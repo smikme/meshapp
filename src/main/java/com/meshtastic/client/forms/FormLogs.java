@@ -46,6 +46,9 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 
+/**
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
+ */
 @SystemForm(name = "Логирование", description = "Просмотр логов приложения", tags = {"logs", "logging"})
 public class FormLogs extends Form {
 

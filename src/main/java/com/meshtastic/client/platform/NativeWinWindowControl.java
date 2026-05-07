@@ -28,6 +28,8 @@ import java.lang.reflect.Method;
  * (идентичный macOS) и blur backdrop.
  * <p>
  * Drag и resize реализованы в RootPane через JavaFX EventFilter.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class NativeWinWindowControl {
 

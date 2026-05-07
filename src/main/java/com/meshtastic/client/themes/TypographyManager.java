@@ -5,6 +5,9 @@ import javafx.beans.property.IntegerProperty;
 import javafx.beans.property.ReadOnlyIntegerProperty;
 import javafx.beans.property.SimpleIntegerProperty;
 
+/**
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
+ */
 public final class TypographyManager {
 
     public static final int DEFAULT_APP_FONT_SIZE = 13;

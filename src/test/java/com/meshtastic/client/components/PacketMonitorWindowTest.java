@@ -8,6 +8,9 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
+/**
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
+ */
 class PacketMonitorWindowTest {
 
     @Test

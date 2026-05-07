@@ -35,6 +35,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *   <li>Traceroute (TRACEROUTE_APP)</li>
  *   <li>Admin-операции: owner info, каналы, конфигурация</li>
  * </ul>
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public final class MessageService {
 
@@ -522,6 +524,18 @@ public final class MessageService {
     }
 
     /**
+     * Запрашивает RTTTL ringtone, используемый External Notification.
+     * Ответ придёт как AdminMessage.get_ringtone_response через ADMIN_APP.
+     */
+    public static CompletableFuture<MeshProtos.Routing.Error> requestRingtone(ProtocolHandler handler,
+                                                                              DeviceState state) {
+        AdminProtos.AdminMessage adminMsg = AdminProtos.AdminMessage.newBuilder()
+                .setGetRingtoneRequest(true)
+                .build();
+        return sendAdminMessage(handler, state, adminMsg, true);
+    }
+
+    /**
      * Проксирует MQTT payload с desktop/phone клиента на устройство.
      * Payload всегда отправляется как bytes, чтобы не терять бинарные данные.
      */
@@ -569,9 +583,20 @@ public final class MessageService {
      */
     public static void setOwnerInfo(ProtocolHandler handler, DeviceState state,
                                     String longName, String shortName, ByteString sessionPasskey) {
+        setOwnerInfo(handler, state, longName, shortName, resolveOwnerLicensed(state), sessionPasskey);
+    }
+
+    /**
+     * Устанавливает owner info (longName, shortName, isLicensed) на подключённом радио.
+     * Требует session_passkey, полученный из предварительного get_owner_request.
+     */
+    public static void setOwnerInfo(ProtocolHandler handler, DeviceState state,
+                                    String longName, String shortName, boolean isLicensed,
+                                    ByteString sessionPasskey) {
         MeshProtos.User user = MeshProtos.User.newBuilder()
                 .setLongName(longName)
                 .setShortName(shortName)
+                .setIsLicensed(isLicensed)
                 .build();
 
         AdminProtos.AdminMessage.Builder adminBuilder = AdminProtos.AdminMessage.newBuilder()
@@ -582,6 +607,16 @@ public final class MessageService {
         AdminProtos.AdminMessage adminMsg = adminBuilder.build();
 
         sendAdminMessage(handler, state, adminMsg);
+    }
+
+    private static boolean resolveOwnerLicensed(DeviceState state) {
+        if (state == null) { return false; }
+        MeshProtos.User ownerInfo = state.getOwnerInfo();
+        if (ownerInfo != null) {
+            return ownerInfo.getIsLicensed();
+        }
+        NodeData myNode = state.getNodeDb().get(state.getMyNodeNum());
+        return myNode != null && myNode.isLicensed();
     }
 
     /**
@@ -664,6 +699,24 @@ public final class MessageService {
                                         ModuleConfigProtos.ModuleConfig moduleConfig) {
         AdminProtos.AdminMessage.Builder adminBuilder = AdminProtos.AdminMessage.newBuilder()
                 .setSetModuleConfig(moduleConfig);
+        ByteString passkey = state.getSessionPasskey();
+        if (passkey != null) {
+            adminBuilder.setSessionPasskey(passkey);
+        }
+
+        return sendAdminMessage(handler, state, adminBuilder.build());
+    }
+
+    /**
+     * Отправляет set_ringtone_message на устройство.
+     *
+     * @return future с routing ACK/NAK для отправленного admin-пакета
+     */
+    public static CompletableFuture<MeshProtos.Routing.Error> setRingtone(ProtocolHandler handler,
+                                                                          DeviceState state,
+                                                                          String ringtone) {
+        AdminProtos.AdminMessage.Builder adminBuilder = AdminProtos.AdminMessage.newBuilder()
+                .setSetRingtoneMessage(ringtone != null ? ringtone : "");
         ByteString passkey = state.getSessionPasskey();
         if (passkey != null) {
             adminBuilder.setSessionPasskey(passkey);
@@ -1309,8 +1362,10 @@ public final class MessageService {
 
         NodeData myNode = state.getNodeDb().get(state.getMyNodeNum());
         MeshProtos.User ownerInfo = state.getOwnerInfo();
+        MeshProtos.DeviceMetadata deviceMetadata = state.getDeviceMetadata();
         ByteString securityPublicKey = extractSecurityPublicKey(state);
-        if (myNode == null && ownerInfo == null && (securityPublicKey == null || securityPublicKey.isEmpty())) {
+        if (myNode == null && ownerInfo == null && deviceMetadata == null
+                && (securityPublicKey == null || securityPublicKey.isEmpty())) {
             return null;
         }
 
@@ -1344,12 +1399,98 @@ public final class MessageService {
             hasMeaningfulField = true;
         }
 
+        Boolean licensed = resolveLocalUserLicensed(myNode, ownerInfo);
+        if (Boolean.TRUE.equals(licensed)) {
+            builder.setIsLicensed(true);
+            hasMeaningfulField = true;
+        }
+
         if (securityPublicKey != null && !securityPublicKey.isEmpty()) {
             builder.setPublicKey(securityPublicKey);
             hasMeaningfulField = true;
         }
 
+        ConfigProtos.Config.DeviceConfig.Role role = resolveLocalUserRole(myNode, ownerInfo, deviceMetadata);
+        if (role != null && role != ConfigProtos.Config.DeviceConfig.Role.CLIENT) {
+            builder.setRole(role);
+            hasMeaningfulField = true;
+        }
+
+        MeshProtos.HardwareModel hwModel = resolveLocalUserHwModel(myNode, ownerInfo, deviceMetadata);
+        if (hwModel != null && hwModel != MeshProtos.HardwareModel.UNSET) {
+            builder.setHwModel(hwModel);
+            hasMeaningfulField = true;
+        }
+
+        Boolean unmessagable = resolveLocalUserUnmessagable(myNode, ownerInfo);
+        if (unmessagable != null) {
+            builder.setIsUnmessagable(unmessagable);
+            hasMeaningfulField = true;
+        }
+
         return hasMeaningfulField ? builder.build() : null;
+    }
+
+    private static Boolean resolveLocalUserLicensed(NodeData myNode, MeshProtos.User ownerInfo) {
+        if (ownerInfo != null && ownerInfo.getIsLicensed()) {
+            return true;
+        }
+        return myNode != null ? myNode.getLicensed() : null;
+    }
+
+    private static ConfigProtos.Config.DeviceConfig.Role resolveLocalUserRole(NodeData myNode,
+                                                                              MeshProtos.User ownerInfo,
+                                                                              MeshProtos.DeviceMetadata deviceMetadata) {
+        if (ownerInfo != null && ownerInfo.getRole() != ConfigProtos.Config.DeviceConfig.Role.CLIENT) {
+            return ownerInfo.getRole();
+        }
+        if (deviceMetadata != null && deviceMetadata.getRole() != ConfigProtos.Config.DeviceConfig.Role.CLIENT) {
+            return deviceMetadata.getRole();
+        }
+        return parseNodeRole(myNode);
+    }
+
+    private static MeshProtos.HardwareModel resolveLocalUserHwModel(NodeData myNode,
+                                                                    MeshProtos.User ownerInfo,
+                                                                    MeshProtos.DeviceMetadata deviceMetadata) {
+        if (ownerInfo != null && ownerInfo.getHwModel() != MeshProtos.HardwareModel.UNSET) {
+            return ownerInfo.getHwModel();
+        }
+        if (deviceMetadata != null && deviceMetadata.getHwModel() != MeshProtos.HardwareModel.UNSET) {
+            return deviceMetadata.getHwModel();
+        }
+        return parseNodeHwModel(myNode);
+    }
+
+    private static Boolean resolveLocalUserUnmessagable(NodeData myNode, MeshProtos.User ownerInfo) {
+        if (ownerInfo != null && ownerInfo.hasIsUnmessagable()) {
+            return ownerInfo.getIsUnmessagable();
+        }
+        return myNode != null ? myNode.getUnmessagable() : null;
+    }
+
+    private static ConfigProtos.Config.DeviceConfig.Role parseNodeRole(NodeData node) {
+        if (node == null || node.getRole() == null || node.getRole().isEmpty()) {
+            return null;
+        }
+        try {
+            return ConfigProtos.Config.DeviceConfig.Role.valueOf(node.getRole());
+        } catch (IllegalArgumentException ignored) {
+            log.debug("Skipping unknown local role '{}'", node.getRole());
+            return null;
+        }
+    }
+
+    private static MeshProtos.HardwareModel parseNodeHwModel(NodeData node) {
+        if (node == null || node.getHwModel() == null || node.getHwModel().isEmpty()) {
+            return null;
+        }
+        try {
+            return MeshProtos.HardwareModel.valueOf(node.getHwModel());
+        } catch (IllegalArgumentException ignored) {
+            log.debug("Skipping unknown local hwModel '{}'", node.getHwModel());
+            return null;
+        }
     }
 
     private static ByteString extractSecurityPublicKey(DeviceState state) {

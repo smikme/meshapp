@@ -2,7 +2,7 @@ package com.meshtastic.client.protocol;
 
 import org.meshtastic.proto.MeshProtos;
 import com.google.protobuf.InvalidProtocolBufferException;
-import com.meshtastic.client.connection.MeshtasticConnection;
+import com.meshtastic.client.connection.TransportConnection;
 import com.meshtastic.client.service.PacketMonitorService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -22,11 +22,13 @@ import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Диспетчер протокола Meshtastic. Принимает сырые protobuf-payload из
- * {@link MeshtasticConnection}, парсит {@code FromRadio} и распределяет
+ * {@link TransportConnection}, парсит {@code FromRadio} и распределяет
  * по зарегистрированным {@link FromRadioListener}-ам.
  * <p>
  * Также предоставляет метод отправки {@code ToRadio} на устройство
  * через фреймирование ({@link PacketFramer}) и транспорт.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class ProtocolHandler {
 
@@ -37,22 +39,25 @@ public class ProtocolHandler {
     private static final int HEARTBEAT_INTERVAL_SEC = 5;
     /** Задержка перед первым heartbeat (секунды). 0 = отправить сразу после config exchange. */
     private static final int HEARTBEAT_INITIAL_DELAY_SEC = 0;
+    private static final int INCOMING_QUEUE_WARN_THRESHOLD = 256;
+    private static final int INCOMING_QUEUE_WARN_STEP = 256;
     private static final int OUTBOUND_PRIORITY_DEFAULT = 0;
     private static final int OUTBOUND_PRIORITY_HEARTBEAT = 1;
     private static final int OUTBOUND_PRIORITY_MQTT_PROXY = 2;
 
-    private final MeshtasticConnection connection;
+    private final TransportConnection connection;
     private final String connectionId;
     private final List<FromRadioListener> listeners = new CopyOnWriteArrayList<>();
 
     /** Очередь входящих пакетов — разделяет reader-поток и обработку,
      *  чтобы reader не блокировался на listeners и не терял данные из serial-буфера. */
-    private final BlockingQueue<byte[]> incomingQueue = new LinkedBlockingQueue<>(256);
+    private final BlockingQueue<byte[]> incomingQueue = new LinkedBlockingQueue<>();
     /** Очередь исходящих пакетов с приоритетом обычных команд над MQTT downlink. */
     private final PriorityBlockingQueue<OutboundFrame> outgoingQueue = new PriorityBlockingQueue<>();
     private final Thread dispatcherThread;
     private final Thread senderThread;
     private final AtomicBoolean shutdownRequested = new AtomicBoolean(false);
+    private final AtomicInteger incomingQueueWarnBucket = new AtomicInteger(0);
     private final AtomicLong outboundSequence = new AtomicLong();
 
     private final ScheduledExecutorService heartbeatScheduler =
@@ -64,11 +69,11 @@ public class ProtocolHandler {
     private volatile ScheduledFuture<?> heartbeatFuture;
     private final AtomicInteger heartbeatNonce = new AtomicInteger(0);
 
-    public ProtocolHandler(MeshtasticConnection connection) {
+    public ProtocolHandler(TransportConnection connection) {
         this(null, connection);
     }
 
-    public ProtocolHandler(String connectionId, MeshtasticConnection connection) {
+    public ProtocolHandler(String connectionId, TransportConnection connection) {
         this.connectionId = connectionId;
         this.connection = connection;
         connection.setDataListener(this::handleRawPacket);
@@ -182,9 +187,8 @@ public class ProtocolHandler {
         if (shutdownRequested.get()) {
             return;
         }
-        if (!incomingQueue.offer(data)) {
-            log.warn("Incoming queue full, dropping packet ({} bytes)", data.length);
-        }
+        incomingQueue.offer(data);
+        logIncomingQueueBacklogIfNeeded(incomingQueue.size());
     }
 
     private void dispatchLoop() {
@@ -195,8 +199,12 @@ public class ProtocolHandler {
                 if (data == SHUTDOWN_MARKER) {
                     break;
                 }
-                MeshProtos.FromRadio fromRadio = MeshProtos.FromRadio.parseFrom(data);
-                dispatchFromRadio(fromRadio);
+                try {
+                    MeshProtos.FromRadio fromRadio = MeshProtos.FromRadio.parseFrom(data);
+                    dispatchFromRadio(fromRadio);
+                } finally {
+                    resetIncomingQueueBacklogWarningIfDrained(incomingQueue.size());
+                }
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 break;
@@ -226,6 +234,29 @@ public class ProtocolHandler {
             }
         }
         log.debug("Proto sender thread exiting");
+    }
+
+    private void logIncomingQueueBacklogIfNeeded(int queuedPackets) {
+        if (queuedPackets < INCOMING_QUEUE_WARN_THRESHOLD) {
+            return;
+        }
+
+        int bucket = ((queuedPackets - INCOMING_QUEUE_WARN_THRESHOLD) / INCOMING_QUEUE_WARN_STEP) + 1;
+        int previousBucket = incomingQueueWarnBucket.get();
+        while (bucket > previousBucket) {
+            if (incomingQueueWarnBucket.compareAndSet(previousBucket, bucket)) {
+                log.warn("Incoming packet backlog grew to {} frames; processing is lagging behind transport input",
+                        queuedPackets);
+                return;
+            }
+            previousBucket = incomingQueueWarnBucket.get();
+        }
+    }
+
+    private void resetIncomingQueueBacklogWarningIfDrained(int queuedPackets) {
+        if (queuedPackets < INCOMING_QUEUE_WARN_THRESHOLD) {
+            incomingQueueWarnBucket.set(0);
+        }
     }
 
     private void sendOutboundFrame(OutboundFrame outbound) {

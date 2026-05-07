@@ -34,6 +34,8 @@ import java.util.concurrent.TimeUnit;
  * The service intentionally stays transport-agnostic: it forwards topic/payload/retained
  * between Meshtastic {@code MqttClientProxyMessage} and the external broker without
  * trying to reinterpret Meshtastic MQTT envelopes.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public final class MqttProxyService implements FromRadioListener, AutoCloseable {
 
