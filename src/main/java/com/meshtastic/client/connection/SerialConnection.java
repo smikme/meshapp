@@ -551,10 +551,12 @@ public class SerialConnection implements MeshtasticConnection, FrameFormatAwareC
         }
 
         String lower = (portName + " " + desc).toLowerCase(java.util.Locale.ROOT);
-        // Windows + CP210x: некоторые драйверы держат RX "тихим", пока DTR не asserted.
-        // Для Heltec V3 это выглядит как "порт открыт, запись идёт, но ответов нет вообще".
-        // Разрешаем DTR именно для CP210x на Windows, а для CH340/FTDI сохраняем старое поведение.
-        return isWindows && (lower.contains("cp210") || lower.contains("silicon labs"));
+        // Windows + CP210x/CH9102: некоторые драйверы держат RX "тихим", пока DTR не asserted.
+        // Это выглядит как "порт открыт, запись идёт, но ответов нет вообще".
+        // Для CH340/FTDI сохраняем старое поведение, чтобы не провоцировать лишний reset ESP32.
+        return isWindows && (lower.contains("cp210")
+                || lower.contains("silicon labs")
+                || lower.contains("ch9102"));
     }
 
     private void closePort() {
