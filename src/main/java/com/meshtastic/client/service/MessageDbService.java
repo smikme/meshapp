@@ -104,6 +104,11 @@ public final class MessageDbService {
                     """);
 
                 stmt.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_msg_chat_packet
+                    ON messages (owner_node_id, chat_type, chat_key, packet_id, id)
+                    """);
+
+                stmt.execute("""
                     CREATE TABLE IF NOT EXISTS message_reactions (
                         id                 BIGINT AUTO_INCREMENT PRIMARY KEY,
                         owner_node_id      VARCHAR(20) NOT NULL DEFAULT '',

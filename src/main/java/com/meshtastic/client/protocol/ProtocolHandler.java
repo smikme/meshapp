@@ -262,7 +262,7 @@ public class ProtocolHandler {
     private void sendOutboundFrame(OutboundFrame outbound) {
         MeshProtos.ToRadio toRadio = outbound.toRadio();
         byte[] frame = PacketFramer.frame(toRadio);
-        log.debug("Sending ToRadio: {} ({} bytes framed)", toRadio.getPayloadVariantCase(), frame.length);
+        log.trace("Sending ToRadio: {} ({} bytes framed)", toRadio.getPayloadVariantCase(), frame.length);
         PacketMonitorService monitorService = PacketMonitorService.getIfInitialized();
         if (monitorService != null && toRadio.hasPacket()) {
             monitorService.recordOutgoing(connectionId, toRadio.getPacket());
@@ -306,17 +306,19 @@ public class ProtocolHandler {
             }
             case PACKET -> {
                 MeshProtos.MeshPacket pkt = fromRadio.getPacket();
-                log.debug("Received MeshPacket: id={} from={} to={} channel={} portnum={} viaMqtt={} transport={} rxTime={} hopStart={} hopLimit={}",
-                        pkt.getId(),
-                        String.format("!%08x", pkt.getFrom()),
-                        String.format("!%08x", pkt.getTo()),
-                        pkt.getChannel(),
-                        pkt.hasDecoded() ? pkt.getDecoded().getPortnum() : "encrypted",
-                        pkt.getViaMqtt(),
-                        pkt.getTransportMechanism(),
-                        pkt.getRxTime(),
-                        pkt.getHopStart(),
-                        pkt.getHopLimit());
+                if (log.isTraceEnabled()) {
+                    log.trace("Received MeshPacket: id={} from={} to={} channel={} portnum={} viaMqtt={} transport={} rxTime={} hopStart={} hopLimit={}",
+                            pkt.getId(),
+                            String.format("!%08x", pkt.getFrom()),
+                            String.format("!%08x", pkt.getTo()),
+                            pkt.getChannel(),
+                            pkt.hasDecoded() ? pkt.getDecoded().getPortnum() : "encrypted",
+                            pkt.getViaMqtt(),
+                            pkt.getTransportMechanism(),
+                            pkt.getRxTime(),
+                            pkt.getHopStart(),
+                            pkt.getHopLimit());
+                }
                 PacketMonitorService monitorService = PacketMonitorService.getIfInitialized();
                 if (monitorService != null) {
                     monitorService.recordIncoming(connectionId, pkt);
@@ -335,7 +337,7 @@ public class ProtocolHandler {
             }
             case QUEUESTATUS -> {
                 var qs = fromRadio.getQueueStatus();
-                log.debug("QueueStatus: res={} free={}/{} meshPacketId={}",
+                log.trace("QueueStatus: res={} free={}/{} meshPacketId={}",
                         qs.getRes(), qs.getFree(), qs.getMaxlen(), qs.getMeshPacketId());
                 notifyListeners(l -> l.onQueueStatus(qs));
             }

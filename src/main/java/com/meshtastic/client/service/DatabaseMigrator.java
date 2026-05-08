@@ -31,7 +31,7 @@ public final class DatabaseMigrator {
     private static final Logger log = LoggerFactory.getLogger(DatabaseMigrator.class);
 
     /** Текущая версия схемы. Увеличивается при каждом изменении схемы. */
-    static final int CURRENT_VERSION = 10;
+    static final int CURRENT_VERSION = 11;
     private static final Pattern CONNECTION_NODE_ID_PATTERN =
             Pattern.compile("\"nodeId\"\\s*:\\s*\"(![0-9a-fA-F]{8})\"");
     private static final List<String> APPLICATION_TABLES = List.of(
@@ -94,6 +94,7 @@ public final class DatabaseMigrator {
             if (version < 8) { migrateToV8(connection); version = 8; }
             if (version < 9) { migrateToV9(connection); version = 9; }
             if (version < 10) { migrateToV10(connection); version = 10; }
+            if (version < 11) { migrateToV11(connection); version = 11; }
 
             setVersion(connection, CURRENT_VERSION);
             log.info("Database migration complete, schema version = {}", CURRENT_VERSION);
@@ -326,6 +327,28 @@ public final class DatabaseMigrator {
             stmt.execute("ALTER TABLE messages ADD COLUMN IF NOT EXISTS via_mqtt BOOLEAN DEFAULT FALSE");
         }
         log.info("Migration v10: added 'via_mqtt' to messages");
+    }
+
+    /** v11: индекс для поиска сообщений по packet_id внутри owner/chat scope. */
+    private static void migrateToV11(Connection connection) throws SQLException {
+        if (!tableExists(connection, "MESSAGES")) {
+            log.info("Migration v11: skipped message packet lookup index because messages table is absent");
+            return;
+        }
+        if (!columnExists(connection, "MESSAGES", "OWNER_NODE_ID")
+                || !columnExists(connection, "MESSAGES", "CHAT_TYPE")
+                || !columnExists(connection, "MESSAGES", "CHAT_KEY")
+                || !columnExists(connection, "MESSAGES", "PACKET_ID")) {
+            log.info("Migration v11: skipped message packet lookup index because messages table is missing required columns");
+            return;
+        }
+        try (Statement stmt = connection.createStatement()) {
+            stmt.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_msg_chat_packet
+                    ON messages (owner_node_id, chat_type, chat_key, packet_id, id)
+                    """);
+        }
+        log.info("Migration v11: added scoped message packet lookup index");
     }
 
     /** v2: колонка favorite для избранных нод. */

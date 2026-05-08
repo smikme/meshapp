@@ -225,7 +225,7 @@ public class SerialConnection implements MeshtasticConnection, FrameFormatAwareC
         }
         try {
             nativePort.write(data, 0, data.length);
-            log.debug("Sent {} bytes to serial {}", data.length, portName);
+            log.trace("Sent {} bytes to serial {}", data.length, portName);
         } catch (ConnectionException e) {
             if (expectResponseAfterWrite) {
                 awaitingResponseAfterWrite = false;
