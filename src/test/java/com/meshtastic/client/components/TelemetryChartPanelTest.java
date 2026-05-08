@@ -130,6 +130,25 @@ class TelemetryChartPanelTest {
         assertSeriesValues(txChart, "Relay Canceled", 1.0, 0.0);
     }
 
+    @Test
+    void ignoresInvalidHopPairsWhenBuildingHopsSeries() {
+        TelemetryChartPanel panel = onFxThread(() -> new TelemetryChartPanel(false));
+
+        TelemetryEntry first = hopEntry(1_700_000_000L, 7, 5);
+        TelemetryEntry invalid = hopEntry(1_700_000_060L, 4, 6);
+        TelemetryEntry second = hopEntry(1_700_000_120L, 7, 4);
+
+        onFxThread(() -> {
+            invokeUpdateChart(panel, List.of(), List.of(first, invalid, second));
+            return null;
+        });
+
+        AreaChart<Number, Number> hopsChart = chartField(panel, "hopsChart");
+        assertSeriesValues(hopsChart, "Макс", 2.0, 3.0);
+        assertSeriesValues(hopsChart, "Мин", 2.0, 3.0);
+        assertSeriesValues(hopsChart, "Среднее", 2.0, 3.0);
+    }
+
     private static List<String> seriesNames(AreaChart<Number, Number> chart) {
         return chart.getData().stream()
                 .map(XYChart.Series::getName)
@@ -170,6 +189,13 @@ class TelemetryChartPanelTest {
         entry.setNumTxDropped(txDropped);
         entry.setNumTxRelay(txRelay);
         entry.setNumTxRelayCanceled(txCanceled);
+        return entry;
+    }
+
+    private static TelemetryEntry hopEntry(long timestamp, int hopStart, int hopLimit) {
+        TelemetryEntry entry = new TelemetryEntry(timestamp, "!test");
+        entry.setHopStart(hopStart);
+        entry.setHopLimit(hopLimit);
         return entry;
     }
 

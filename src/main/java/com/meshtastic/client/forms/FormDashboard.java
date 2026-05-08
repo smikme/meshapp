@@ -342,7 +342,7 @@ public class FormDashboard extends Form {
 
             this.snr = (e.getRxSnr() != 0) ? String.format("%.1f", e.getRxSnr()) : "—";
             this.rssi = (e.getRxRssi() != 0) ? String.valueOf(e.getRxRssi()) : "—";
-            this.hops = e.getHopStart() > 0 ? String.valueOf(e.getHopsTraveled()) : "—";
+            this.hops = e.hasValidHopData() ? String.valueOf(e.getHopsTraveled()) : "—";
 
             // Имя ноды
             String nodeName = e.getNodeId() != null ? e.getNodeId() : "?";

@@ -126,14 +126,25 @@ public class MeshMessage {
     public boolean hasReactions() { return !reactions.isEmpty(); }
 
     /**
+     * Проверяет, можно ли безопасно рассчитать количество пройденных хопов.
+     * {@code hopLimit} не должен превышать исходный {@code hopStart}; иначе
+     * пара полей считается некорректной и не используется в UI.
+     *
+     * @return {@code true}, если hop-данные заданы и внутренне согласованы
+     */
+    public boolean hasValidHopData() {
+        return hopStart > 0 && hopLimit >= 0 && hopLimit <= hopStart;
+    }
+
+    /**
      * Вычисляет количество хопов, которое прошло сообщение.
      * Рассчитывается как {@code hopStart - hopLimit}. Если {@code hopStart}
-     * не задан (0), возвращает 0.
+     * не задан (0) или данные некорректны, возвращает 0.
      *
      * @return количество хопов или 0 если данные недоступны
      */
     public int getHopsTraveled() {
-        return hopStart > 0 ? hopStart - hopLimit : 0;
+        return hasValidHopData() ? hopStart - hopLimit : 0;
     }
 
 }

@@ -116,5 +116,11 @@ public class TelemetryEntry {
     public int getHopLimit() { return hopLimit; }
     public void setHopLimit(int hopLimit) { this.hopLimit = hopLimit; }
 
-    public int getHopsTraveled() { return hopStart > 0 ? hopStart - hopLimit : 0; }
+    public boolean hasValidHopData() {
+        return hopStart > 0 && hopLimit >= 0 && hopLimit <= hopStart;
+    }
+
+    public int getHopsTraveled() {
+        return hasValidHopData() ? hopStart - hopLimit : 0;
+    }
 }
