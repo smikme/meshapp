@@ -116,7 +116,7 @@ public class TcpConnection implements MeshtasticConnection, FrameFormatAwareConn
         try {
             outputStream.write(data);
             outputStream.flush();
-            log.debug("Sent {} bytes to TCP {}:{}", data.length, host, port);
+            log.trace("Sent {} bytes to TCP {}:{}", data.length, host, port);
         } catch (IOException e) {
             log.error("Write failed to {}:{}", host, port, e);
             ConnectionListener listener = connectionListener;
