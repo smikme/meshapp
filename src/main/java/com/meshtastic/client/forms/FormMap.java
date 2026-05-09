@@ -1197,22 +1197,20 @@ public class FormMap extends Form {
     }
 
     /**
-     * Привязывает форму к первому активному подключению и перевешивает listener обновления нод.
+     * Привязывает форму к выбранному активному подключению и перевешивает listener обновления нод.
      */
     private void rebindState() {
         DeviceState oldState = state;
         DeviceState newState = null;
         int newLocalNodeNum = 0;
 
-        for (ConnectionEntry entry : ConnectionManager.getInstance().getEntries()) {
-            if (!entry.isConnected()) {
-                continue;
-            }
-            DeviceState candidate = ConnectionManager.getInstance().getDeviceState(entry.getId());
+        ConnectionManager manager = ConnectionManager.getInstance();
+        ConnectionEntry entry = manager.getSelectedConnectionEntry();
+        if (entry != null && entry.isConnected()) {
+            DeviceState candidate = manager.getDeviceState(entry.getId());
             if (candidate != null) {
                 newState = candidate;
                 newLocalNodeNum = candidate.getMyNodeNum();
-                break;
             }
         }
 

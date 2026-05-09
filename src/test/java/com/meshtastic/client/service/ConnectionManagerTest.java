@@ -203,7 +203,7 @@ class ConnectionManagerTest {
     }
 
     @Test
-    void connectRejectsSecondActiveConnection() throws Exception {
+    void connectAllowsMultipleActiveConnectionsAndTracksSelectedConnection() throws Exception {
         try (TcpMeshtasticStubServer serverA = new TcpMeshtasticStubServer(0x11111111);
              TcpMeshtasticStubServer serverB = new TcpMeshtasticStubServer(0x22222222)) {
             ConnectionManager manager = ConnectionManager.getInstance();
@@ -214,9 +214,73 @@ class ConnectionManagerTest {
 
             manager.connect(first.getId());
             manager.getConfigFuture(first.getId()).get(5, TimeUnit.SECONDS);
+            assertEquals(first.getId(), manager.getSelectedConnectionId());
 
-            ConnectionException error = assertThrows(ConnectionException.class, () -> manager.connect(second.getId()));
-            assertTrue(error.getMessage().contains("Уже есть активное подключение"));
+            manager.connect(second.getId());
+            manager.getConfigFuture(second.getId()).get(5, TimeUnit.SECONDS);
+
+            assertTrue(first.isConnected());
+            assertTrue(second.isConnected());
+            assertEquals(2, manager.getActiveConnectionEntries().size());
+
+            manager.setSelectedConnectionId(second.getId());
+            assertEquals(second.getId(), manager.getSelectedConnectionId());
+
+            manager.disconnect(second.getId());
+            assertFalse(second.isConnected());
+            assertEquals(first.getId(), manager.getSelectedConnectionId());
+
+            manager.disconnect(first.getId());
+            assertNull(manager.getSelectedConnectionId());
+        }
+    }
+
+    @Test
+    void connectRejectsKnownDuplicateNodeIdBeforeOpeningTransport() throws Exception {
+        try (TcpMeshtasticStubServer server = new TcpMeshtasticStubServer(0x11111111)) {
+            ConnectionManager manager = ConnectionManager.getInstance();
+            ConnectionEntry active = new ConnectionEntry("tcp", "127.0.0.1", server.port());
+            ConnectionEntry duplicate = new ConnectionEntry("ble", "AA:BB:CC:DD:EE:FF", "same node");
+            duplicate.setNodeId("!11111111");
+            manager.addEntry(active);
+            manager.addEntry(duplicate);
+
+            manager.connect(active.getId());
+            manager.getConfigFuture(active.getId()).get(5, TimeUnit.SECONDS);
+
+            ConnectionException error = assertThrows(ConnectionException.class,
+                    () -> manager.connect(duplicate.getId()));
+
+            assertTrue(error.getMessage().contains("уже подключена"));
+            assertFalse(duplicate.isConnected());
+            assertEquals(1, manager.getActiveConnectionEntries().size());
+
+            manager.disconnect(active.getId());
+        }
+    }
+
+    @Test
+    void connectDisconnectsDuplicateWhenNodeIdIsResolvedAfterHandshake() throws Exception {
+        try (TcpMeshtasticStubServer serverA = new TcpMeshtasticStubServer(0x11111111);
+             TcpMeshtasticStubServer serverB = new TcpMeshtasticStubServer(0x11111111)) {
+            ConnectionManager manager = ConnectionManager.getInstance();
+            ConnectionEntry first = new ConnectionEntry("tcp", "127.0.0.1", serverA.port());
+            ConnectionEntry duplicate = new ConnectionEntry("tcp duplicate", "127.0.0.1", serverB.port());
+            manager.addEntry(first);
+            manager.addEntry(duplicate);
+
+            manager.connect(first.getId());
+            manager.getConfigFuture(first.getId()).get(5, TimeUnit.SECONDS);
+
+            manager.connect(duplicate.getId());
+            manager.getConfigFuture(duplicate.getId()).get(5, TimeUnit.SECONDS);
+
+            assertTrue(waitUntil(() -> !duplicate.isConnected(), 2_000));
+            assertTrue(first.isConnected());
+            assertFalse(duplicate.isConnected());
+            assertEquals("!11111111", duplicate.getNodeId());
+            assertNull(manager.getDeviceState(duplicate.getId()));
+            assertEquals(1, manager.getActiveConnectionEntries().size());
 
             manager.disconnect(first.getId());
         }
@@ -333,6 +397,22 @@ class ConnectionManagerTest {
         Field platformField = BleDeviceDiscoveryService.class.getDeclaredField("platform");
         platformField.setAccessible(true);
         platformField.set(discovery, platform);
+    }
+
+    private static boolean waitUntil(CheckedBooleanSupplier condition, long timeoutMs) throws Exception {
+        long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs);
+        while (System.nanoTime() < deadline) {
+            if (condition.getAsBoolean()) {
+                return true;
+            }
+            Thread.sleep(25);
+        }
+        return condition.getAsBoolean();
+    }
+
+    @FunctionalInterface
+    private interface CheckedBooleanSupplier {
+        boolean getAsBoolean() throws Exception;
     }
 
     private static final class BlockingBlePlatform implements BlePlatform {

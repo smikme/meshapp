@@ -148,12 +148,163 @@ jobs:
   build-macos:
     needs: create-release
     runs-on: macos
+    env:
+      MAC_SIGNING_KEY_USER_NAME: ${{ secrets.MAC_SIGNING_KEY_USER_NAME }}
+      MAC_SIGNING_KEYCHAIN: ${{ secrets.MAC_SIGNING_KEYCHAIN }}
+      MAC_SIGNING_KEYCHAIN_PASSWORD: ${{ secrets.MAC_SIGNING_KEYCHAIN_PASSWORD }}
+      MAC_PACKAGE_SIGNING_PREFIX: ${{ secrets.MAC_PACKAGE_SIGNING_PREFIX }}
+      MAC_SIGNING_CERTIFICATE_P12: ${{ secrets.MAC_SIGNING_CERTIFICATE_P12 }}
+      MAC_SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.MAC_SIGNING_CERTIFICATE_PASSWORD }}
+      MAC_NOTARY_KEYCHAIN_PROFILE: ${{ secrets.MAC_NOTARY_KEYCHAIN_PROFILE }}
+      MAC_NOTARY_APPLE_ID: ${{ secrets.MAC_NOTARY_APPLE_ID }}
+      MAC_NOTARY_TEAM_ID: ${{ secrets.MAC_NOTARY_TEAM_ID }}
+      MAC_NOTARY_PASSWORD: ${{ secrets.MAC_NOTARY_PASSWORD }}
+      MAC_NOTARY_KEY_FILE: ${{ secrets.MAC_NOTARY_KEY_FILE }}
+      MAC_NOTARY_KEY_FILE_BASE64: ${{ secrets.MAC_NOTARY_KEY_FILE_BASE64 }}
+      MAC_NOTARY_KEY_ID: ${{ secrets.MAC_NOTARY_KEY_ID }}
+      MAC_NOTARY_ISSUER: ${{ secrets.MAC_NOTARY_ISSUER }}
     steps:
       - run: |
           git clone "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git" .
           git checkout "${GITHUB_SHA}"
 
-      - run: ./gradlew jpackage --no-daemon
+      - name: Prepare macOS signing keychain
+        run: |
+          TEMP_DIR="${RUNNER_TEMP:-${TMPDIR:-$PWD/build/tmp}}"
+          mkdir -p "${TEMP_DIR}"
+
+          if [ -n "${MAC_SIGNING_CERTIFICATE_P12:-}" ]; then
+            if [ -z "${MAC_SIGNING_CERTIFICATE_PASSWORD:-}" ] || [ -z "${MAC_SIGNING_KEYCHAIN_PASSWORD:-}" ]; then
+              echo "::error::MAC_SIGNING_CERTIFICATE_PASSWORD and MAC_SIGNING_KEYCHAIN_PASSWORD are required with MAC_SIGNING_CERTIFICATE_P12"
+              exit 1
+            fi
+
+            KEYCHAIN_PATH="${TEMP_DIR}/meshapp-signing.keychain-db"
+            CERT_PATH="${TEMP_DIR}/meshapp-signing.p12"
+            rm -f "${KEYCHAIN_PATH}" "${CERT_PATH}"
+
+            if ! printf '%s' "${MAC_SIGNING_CERTIFICATE_P12}" | base64 --decode > "${CERT_PATH}" 2>/dev/null; then
+              printf '%s' "${MAC_SIGNING_CERTIFICATE_P12}" | base64 -D > "${CERT_PATH}"
+            fi
+
+            security create-keychain -p "${MAC_SIGNING_KEYCHAIN_PASSWORD}" "${KEYCHAIN_PATH}"
+            security set-keychain-settings -lut 21600 "${KEYCHAIN_PATH}"
+            security unlock-keychain -p "${MAC_SIGNING_KEYCHAIN_PASSWORD}" "${KEYCHAIN_PATH}"
+            security import "${CERT_PATH}" -k "${KEYCHAIN_PATH}" -P "${MAC_SIGNING_CERTIFICATE_PASSWORD}" -T /usr/bin/codesign -T /usr/bin/productsign -T /usr/bin/security
+            security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "${MAC_SIGNING_KEYCHAIN_PASSWORD}" "${KEYCHAIN_PATH}"
+            security list-keychains -d user -s "${KEYCHAIN_PATH}"
+            security default-keychain -s "${KEYCHAIN_PATH}"
+
+            printf 'MAC_SIGNING_KEYCHAIN=%s\n' "${KEYCHAIN_PATH}" >> "${GITHUB_ENV}"
+            export MAC_SIGNING_KEYCHAIN="${KEYCHAIN_PATH}"
+            rm -f "${CERT_PATH}"
+          elif [ -n "${MAC_SIGNING_KEYCHAIN:-}" ] && [ -n "${MAC_SIGNING_KEYCHAIN_PASSWORD:-}" ]; then
+            security unlock-keychain -p "${MAC_SIGNING_KEYCHAIN_PASSWORD}" "${MAC_SIGNING_KEYCHAIN}"
+            security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "${MAC_SIGNING_KEYCHAIN_PASSWORD}" "${MAC_SIGNING_KEYCHAIN}"
+          elif [ -n "${MAC_SIGNING_KEYCHAIN_PASSWORD:-}" ]; then
+            security unlock-keychain -p "${MAC_SIGNING_KEYCHAIN_PASSWORD}" || true
+          fi
+
+          if [ -n "${MAC_NOTARY_KEY_FILE_BASE64:-}" ]; then
+            NOTARY_KEY_PATH="${TEMP_DIR}/AuthKey_${MAC_NOTARY_KEY_ID}.p8"
+            if ! printf '%s' "${MAC_NOTARY_KEY_FILE_BASE64}" | base64 --decode > "${NOTARY_KEY_PATH}" 2>/dev/null; then
+              printf '%s' "${MAC_NOTARY_KEY_FILE_BASE64}" | base64 -D > "${NOTARY_KEY_PATH}"
+            fi
+            chmod 600 "${NOTARY_KEY_PATH}"
+            printf 'MAC_NOTARY_KEY_FILE=%s\n' "${NOTARY_KEY_PATH}" >> "${GITHUB_ENV}"
+            export MAC_NOTARY_KEY_FILE="${NOTARY_KEY_PATH}"
+          fi
+
+      - name: Resolve macOS signing setup
+        run: |
+          MACOS_SIGNING_MODE="developer-id"
+
+          if [ -z "${MAC_SIGNING_KEY_USER_NAME:-}" ]; then
+            if [ -n "${MAC_SIGNING_KEYCHAIN:-}" ]; then
+              IDENTITY_SOURCE="$(security find-identity -v -p codesigning "${MAC_SIGNING_KEYCHAIN}")"
+            else
+              IDENTITY_SOURCE="$(security find-identity -v -p codesigning)"
+            fi
+
+            IDENTITY="$(printf '%s\n' "${IDENTITY_SOURCE}" \
+              | sed -n 's/.*"Developer ID Application: \(.*\)".*/\1/p' \
+              | head -n 1)"
+
+            if [ -n "${IDENTITY}" ]; then
+              printf 'MAC_SIGNING_KEY_USER_NAME=%s\n' "${IDENTITY}" >> "${GITHUB_ENV}"
+              export MAC_SIGNING_KEY_USER_NAME="${IDENTITY}"
+              echo "Using Developer ID Application identity from the runner keychain"
+            else
+              if printf '%s\n' "${IDENTITY_SOURCE}" | grep -q '"Apple Development:'; then
+                echo "::warning::Only Apple Development identity was found. The macOS artifact will be built with ad-hoc signing."
+              else
+                echo "::warning::No Developer ID Application identity was found. The macOS artifact will be built with ad-hoc signing."
+              fi
+              printf '%s\n' "${IDENTITY_SOURCE}"
+              MACOS_SIGNING_MODE="adhoc"
+            fi
+          fi
+
+          printf 'MACOS_SIGNING_MODE=%s\n' "${MACOS_SIGNING_MODE}" >> "${GITHUB_ENV}"
+
+          if [ "${MACOS_SIGNING_MODE}" != "developer-id" ]; then
+            {
+              echo 'MAC_SIGNING_KEY_USER_NAME='
+              echo 'MAC_NOTARY_KEYCHAIN_PROFILE='
+              echo 'MAC_NOTARY_APPLE_ID='
+              echo 'MAC_NOTARY_TEAM_ID='
+              echo 'MAC_NOTARY_PASSWORD='
+              echo 'MAC_NOTARY_KEY_FILE='
+              echo 'MAC_NOTARY_KEY_FILE_BASE64='
+              echo 'MAC_NOTARY_KEY_ID='
+              echo 'MAC_NOTARY_ISSUER='
+            } >> "${GITHUB_ENV}"
+            exit 0
+          fi
+
+          NOTARY_MODES=0
+
+          if [ -n "${MAC_NOTARY_KEYCHAIN_PROFILE:-}" ]; then
+            NOTARY_MODES=$((NOTARY_MODES + 1))
+          fi
+
+          if [ -n "${MAC_NOTARY_APPLE_ID:-}" ] || [ -n "${MAC_NOTARY_TEAM_ID:-}" ] || [ -n "${MAC_NOTARY_PASSWORD:-}" ]; then
+            if [ -z "${MAC_NOTARY_APPLE_ID:-}" ] || [ -z "${MAC_NOTARY_TEAM_ID:-}" ] || [ -z "${MAC_NOTARY_PASSWORD:-}" ]; then
+              echo "::error::MAC_NOTARY_APPLE_ID, MAC_NOTARY_TEAM_ID and MAC_NOTARY_PASSWORD must be set together"
+              exit 1
+            fi
+            NOTARY_MODES=$((NOTARY_MODES + 1))
+          fi
+
+          if [ -n "${MAC_NOTARY_KEY_FILE:-}" ] || [ -n "${MAC_NOTARY_KEY_ID:-}" ] || [ -n "${MAC_NOTARY_ISSUER:-}" ]; then
+            if [ -z "${MAC_NOTARY_KEY_FILE:-}" ] || [ -z "${MAC_NOTARY_KEY_ID:-}" ] || [ -z "${MAC_NOTARY_ISSUER:-}" ]; then
+              echo "::error::MAC_NOTARY_KEY_FILE, MAC_NOTARY_KEY_ID and MAC_NOTARY_ISSUER must be set together"
+              exit 1
+            fi
+            NOTARY_MODES=$((NOTARY_MODES + 1))
+          fi
+
+          if [ "${NOTARY_MODES}" -eq 0 ]; then
+            echo "::error::One macOS notarization mode must be configured for release builds"
+            exit 1
+          fi
+
+      - name: Build macOS artifact
+        run: ./gradlew jpackage --no-daemon
+
+      - name: Verify macOS artifact
+        run: |
+          codesign --verify --deep --strict --verbose=2 build/jpackage/MeshApp.app
+          codesign -dv --verbose=4 build/jpackage/MeshApp.app
+          if [ "${MACOS_SIGNING_MODE:-adhoc}" = "developer-id" ]; then
+            for file in build/jpackage/*.dmg; do
+              [ -f "$file" ] || continue
+              xcrun stapler validate "$file"
+              spctl -a -vvv --type open "$file"
+            done
+          else
+            echo "::warning::Ad-hoc macOS artifact was produced. Downloaded builds may require removing quarantine on user machines."
+          fi
 
       - name: Upload to Gitea Release
         env:

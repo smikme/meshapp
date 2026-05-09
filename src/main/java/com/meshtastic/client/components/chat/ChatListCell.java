@@ -57,6 +57,7 @@ public class ChatListCell extends ListCell<ChatItem> {
     private final HBox timeBox = new HBox(6);
     private final Label timeLabel = new Label();
     private final Label unreadBadge = new Label();
+    private final ContextMenu chatContextMenu;
     private String previewSourceText = "";
     private boolean previewUpdateQueued;
 
@@ -151,14 +152,17 @@ public class ChatListCell extends ListCell<ChatItem> {
         });
 
         MenuItem closeItem = new MenuItem("Удалить локально");
-        ContextMenu ctxMenu = new ContextMenu(propertiesItem, notificationsItem, new SeparatorMenuItem(), closeItem);
-        setContextMenu(ctxMenu);
+        chatContextMenu = new ContextMenu(propertiesItem, notificationsItem, new SeparatorMenuItem(), closeItem);
 
         // «Свойства» только для каналов
-        ctxMenu.setOnShowing(ev -> {
+        chatContextMenu.setOnShowing(ev -> {
             ChatItem chatItem = getItem();
-            boolean isChannel = chatItem != null
-                    && chatItem.getType() == ChatItem.ChatType.CHANNEL;
+            if (chatItem == null || isEmpty()) {
+                ev.consume();
+                chatContextMenu.hide();
+                return;
+            }
+            boolean isChannel = chatItem.getType() == ChatItem.ChatType.CHANNEL;
             propertiesItem.setVisible(isChannel);
             if (chatItem != null) {
                 notificationsItem.setText(chatItem.isMuted()
@@ -198,6 +202,7 @@ public class ChatListCell extends ListCell<ChatItem> {
             messagePreview.setText("");
             setGraphic(null);
             setText(null);
+            setContextMenu(null);
             return;
         }
 
@@ -240,6 +245,7 @@ public class ChatListCell extends ListCell<ChatItem> {
 
         setGraphic(root);
         setText(null);
+        setContextMenu(chatContextMenu);
     }
 
     private SVGPath createMuteIcon(boolean muted) {

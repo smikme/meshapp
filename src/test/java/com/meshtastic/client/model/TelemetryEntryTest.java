@@ -3,6 +3,7 @@ package com.meshtastic.client.model;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
@@ -333,6 +334,17 @@ class TelemetryEntryTest {
         
         entry.setHopLimit(2);
         
+        assertEquals(0, entry.getHopsTraveled());
+    }
+
+    @Test
+    void getHopsTraveledReturnsZeroWhenHopLimitExceedsHopStart() {
+        TelemetryEntry entry = createEntry();
+
+        entry.setHopStart(4);
+        entry.setHopLimit(6);
+
+        assertFalse(entry.hasValidHopData());
         assertEquals(0, entry.getHopsTraveled());
     }
 }

@@ -124,14 +124,10 @@ public class FormDashboard extends Form {
 
     private void rebindState() {
         var mgr = ConnectionManager.getInstance();
-        DeviceState newState = null;
-
-        for (ConnectionEntry entry : mgr.getEntries()) {
-            if (entry.isConnected()) {
-                newState = mgr.getDeviceState(entry.getId());
-                if (newState != null) { break; }
-            }
-        }
+        ConnectionEntry entry = mgr.getSelectedConnectionEntry();
+        DeviceState newState = entry != null && entry.isConnected()
+                ? mgr.getDeviceState(entry.getId())
+                : null;
 
         this.state = newState;
         refresh();
@@ -342,7 +338,7 @@ public class FormDashboard extends Form {
 
             this.snr = (e.getRxSnr() != 0) ? String.format("%.1f", e.getRxSnr()) : "—";
             this.rssi = (e.getRxRssi() != 0) ? String.valueOf(e.getRxRssi()) : "—";
-            this.hops = e.getHopStart() > 0 ? String.valueOf(e.getHopsTraveled()) : "—";
+            this.hops = e.hasValidHopData() ? String.valueOf(e.getHopsTraveled()) : "—";
 
             // Имя ноды
             String nodeName = e.getNodeId() != null ? e.getNodeId() : "?";

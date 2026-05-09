@@ -137,6 +137,7 @@ class DatabaseMigratorTest {
             assertTrue(columnExists(connection, "CHAT_READ_COUNTS", "OWNER_NODE_ID"));
             assertTrue(columnExists(connection, "TELEMETRY_HISTORY", "OWNER_NODE_ID"));
             assertTrue(columnExists(connection, "NODES", "IGNORED"));
+            assertTrue(indexExists(connection, "IDX_MSG_CHAT_PACKET"));
 
             assertEquals(1, countRows(connection, "messages"));
             assertEquals(1, countRows(connection, "chat_read_counts"));

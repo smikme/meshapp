@@ -240,6 +240,11 @@ class SerialConnectionTest {
                 "Silicon Labs CP210x USB to UART Bridge (COM3)",
                 true
         ));
+        assertTrue(SerialConnection.shouldAssertDtr(
+                "COM4",
+                "USB-Enhanced-SERIAL CH9102 (COM4)",
+                true
+        ));
         assertFalse(SerialConnection.shouldAssertDtr(
                 "COM4",
                 "USB-SERIAL CH340 (COM4)",

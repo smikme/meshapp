@@ -29,13 +29,13 @@ class EmojiPickerTest {
     }
 
     @Test
-    void searchPromptUsesPlainText() {
+    void searchPromptCanUseEmoji() {
         onFxThread(() -> {
             EmojiPicker picker = new EmojiPicker(emoji -> {});
             Field searchFieldRef = EmojiPicker.class.getDeclaredField("searchField");
             searchFieldRef.setAccessible(true);
             TextField searchField = (TextField) searchFieldRef.get(picker);
-            assertEquals("Поиск emoji...", searchField.getPromptText());
+            assertEquals("🔍 Поиск emoji...", searchField.getPromptText());
             return null;
         });
     }
@@ -80,7 +80,7 @@ class EmojiPickerTest {
             Node fallback = (Node) createEmojiGraphic.invoke(picker, "⚠️", 24d);
 
             assertTrue(fallback instanceof Label);
-            assertEquals("⚠", ((Label) fallback).getText());
+            assertEquals("⚠️", ((Label) fallback).getText());
             return null;
         });
     }

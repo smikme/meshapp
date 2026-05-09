@@ -109,11 +109,12 @@ class FormSettingTest {
     }
 
     @Test
-    void shouldSanitizeCacheDisplayTextWithoutTouchingReadableBmpText() {
-        assertEquals("Blue Goose 86b8", FormSetting.sanitizeCacheDisplayText("Blue Goose 🪿86b8"));
-        assertEquals("ioann", FormSetting.sanitizeCacheDisplayText("i͞oan͢n"));
+    void shouldSanitizeCacheDisplayTextWithoutRemovingValidEmoji() {
+        assertEquals("Blue Goose 🪿86b8", FormSetting.sanitizeCacheDisplayText("Blue Goose 🪿86b8"));
+        assertEquals("i͞oan͢n", FormSetting.sanitizeCacheDisplayText("i͞oan͢n"));
         assertEquals("Бердск ps27", FormSetting.sanitizeCacheDisplayText("Бердск ps27"));
         assertEquals("Röyksopp", FormSetting.sanitizeCacheDisplayText("Röyksopp"));
+        assertEquals("AB", FormSetting.sanitizeCacheDisplayText("A\uD83DB"));
         assertEquals("", FormSetting.sanitizeCacheDisplayText(null));
     }
 

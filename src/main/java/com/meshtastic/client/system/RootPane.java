@@ -59,6 +59,7 @@ public class RootPane extends BorderPane {
 
     private final DrawerPane drawerPane;
     private final MainForm mainForm;
+    private final ConnectionTabsPane connectionTabsPane;
     private final StackPane toastOverlay;
     private final Runnable connectionTitleListener = () -> Platform.runLater(this::updateWindowTitle);
 
@@ -89,6 +90,7 @@ public class RootPane extends BorderPane {
     public RootPane() {
         drawerPane = new DrawerPane();
         mainForm = new MainForm();
+        connectionTabsPane = new ConnectionTabsPane();
         ModalPane modalPane = new ModalPane();
         toastOverlay = new StackPane();
         toastOverlay.setPickOnBounds(false);
@@ -119,6 +121,7 @@ public class RootPane extends BorderPane {
 
         setLeft(drawerPane);
         setCenter(centerStack);
+        setBottom(connectionTabsPane);
 
         Toast.setOverlay(toastOverlay);
         ModalPane.install(modalPane);
@@ -240,16 +243,7 @@ public class RootPane extends BorderPane {
     }
 
     private static ConnectionEntry findCurrentConnection(ConnectionManager manager) {
-        ConnectionEntry reconnectingEntry = null;
-        for (ConnectionEntry entry : manager.getEntries()) {
-            if (entry.isConnected()) {
-                return entry;
-            }
-            if (reconnectingEntry == null && entry.isReconnecting()) {
-                reconnectingEntry = entry;
-            }
-        }
-        return reconnectingEntry;
+        return manager.getSelectedConnectionEntry();
     }
 
     private static String resolveNodeTitle(ConnectionManager manager, ConnectionEntry entry) {
@@ -303,17 +297,23 @@ public class RootPane extends BorderPane {
         Stage stage = MeshApp.getPrimaryStage();
         if (stage == null) { return; }
 
-        if (OsDetect.isMacOs()) {
-            // На macOS нативный NSWindowStyleMaskResizable корректно обрабатывает maximize
+        if (usesNativeMaximize()) {
             stage.setMaximized(!stage.isMaximized());
-        } else {
-            // Windows/Linux: stage.setMaximized() при TRANSPARENT перекрывает панель задач
-            if (customMaximized) {
-                restoreFromMaximize(stage);
-            } else {
-                maximizeToVisualBounds(stage);
-            }
+            return;
         }
+
+        // В seamless-режиме не используем stage.setMaximized(): на macOS после
+        // восстановления maximized-состояния оно может потерять корректный
+        // restore-frame и увести transparent окно с экрана при unmaximize.
+        if (customMaximized) {
+            restoreFromMaximize(stage);
+        } else {
+            maximizeToVisualBounds(stage);
+        }
+    }
+
+    private boolean usesNativeMaximize() {
+        return OsDetect.isMacOs() && AppPreferences.isDisableEffectsEffective();
     }
 
     private void maximizeToVisualBounds(Stage stage) {

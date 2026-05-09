@@ -358,4 +358,15 @@ class MeshMessageTest {
         
         assertEquals(2, msg.getHopsTraveled());
     }
+
+    @Test
+    void getHopsTraveledReturnsZeroWhenHopLimitExceedsHopStart() {
+        MeshMessage msg = createMessage();
+
+        msg.setHopStart(4);
+        msg.setHopLimit(6);
+
+        assertFalse(msg.hasValidHopData());
+        assertEquals(0, msg.getHopsTraveled());
+    }
 }

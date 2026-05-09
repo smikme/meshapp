@@ -69,7 +69,7 @@ final class TelemetryChartDataBuilder {
     private static final Predicate<TelemetryEntry> HAS_TX_COUNTERS = entry -> entry.getNumPacketsTx() > 0;
     private static final Predicate<TelemetryEntry> HAS_QUALITY =
             entry -> entry.getRxSnr() != 0 || entry.getRxRssi() != 0;
-    private static final Predicate<TelemetryEntry> HAS_HOPS = entry -> entry.getHopStart() > 0;
+    private static final Predicate<TelemetryEntry> HAS_HOPS = TelemetryEntry::hasValidHopData;
 
     private TelemetryChartDataBuilder() {
     }

@@ -15,6 +15,7 @@ import com.meshtastic.client.service.PacketMonitorService;
 import com.meshtastic.client.service.UpdateCheckService;
 import com.meshtastic.client.system.FormManager;
 import com.meshtastic.client.system.RootPane;
+import com.meshtastic.client.system.SingleInstanceGuard;
 import com.meshtastic.client.themes.ThemeManager;
 import com.meshtastic.client.tray.AppTrayManager;
 import com.meshtastic.client.utils.AppPreferences;
@@ -31,6 +32,7 @@ import javafx.stage.Stage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
 import java.time.Duration;
 import java.nio.file.Path;
 import java.util.Objects;
@@ -92,8 +94,11 @@ public class MeshApp extends Application {
     }
 
     private static Stage primaryStage;
+    private static final Object SINGLE_INSTANCE_LOCK = new Object();
     private static final long UI_THREAD_STALL_THRESHOLD_NANOS = TimeUnit.SECONDS.toNanos(15);
     private static final long UI_THREAD_STALL_CAPTURE_COOLDOWN_NANOS = TimeUnit.MINUTES.toNanos(1);
+
+    private static SingleInstanceGuard singleInstanceGuard;
 
     private final AtomicBoolean deferredStartupTasksStarted = new AtomicBoolean(false);
     private final AtomicLong lastUiHeartbeatNanos = new AtomicLong(System.nanoTime());
@@ -160,10 +165,11 @@ public class MeshApp extends Application {
         restoreWindowBounds(stage);
         stage.show();
         AppTrayManager.getInstance().initialize(stage);
+        installSingleInstanceActivationHandler();
 
         // Восстановить maximize ПОСЛЕ show()
         if (AppPreferences.isWindowMaximized()) {
-            if (OsDetect.isMacOs()) {
+            if (usesNativeMaximize()) {
                 stage.setMaximized(true);
             } else {
                 rootPane.maximizeToVisualBounds();
@@ -212,13 +218,15 @@ public class MeshApp extends Application {
         double w;
         double h;
 
-        if (OsDetect.isMacOs()) {
+        if (rootPane.isCustomMaximized()) {
+            maximized = true;
+        } else if (OsDetect.isMacOs()) {
             maximized = stage.isMaximized();
         } else {
-            maximized = rootPane.isCustomMaximized();
+            maximized = false;
         }
 
-        if (maximized && !OsDetect.isMacOs()) {
+        if (rootPane.isCustomMaximized()) {
             // Для custom maximize сохраняем restore-координаты
             x = rootPane.getRestoreX();
             y = rootPane.getRestoreY();
@@ -305,6 +313,7 @@ public class MeshApp extends Application {
         ConnectionManager.getInstance().shutdownAll();
         SessionCrashLogManager.markNormalShutdown();
         JfrDiagnosticSupport.stop();
+        releaseSingleInstanceGuard();
         System.exit(0);
     }
 
@@ -314,6 +323,9 @@ public class MeshApp extends Application {
 
     public static void main(String[] args) {
         AppPreferences.init();
+        if (!acquireSingleInstanceGuard()) {
+            return;
+        }
         if (System.getProperty("prism.order") == null && AppPreferences.isSoftwareRendering()) {
             System.setProperty("prism.order", "sw");
         }
@@ -323,6 +335,63 @@ public class MeshApp extends Application {
         });
         logStartupContext();
         launch(args);
+    }
+
+    /**
+     * Захватывает межпроцессный single-instance guard до запуска JavaFX.
+     * Если активный экземпляр уже есть, ему отправляется команда активации окна,
+     * а текущий процесс завершается без показа UI.
+     *
+     * @return {@code true}, если текущему процессу можно продолжать запуск
+     */
+    public static boolean acquireSingleInstanceGuard() {
+        synchronized (SINGLE_INSTANCE_LOCK) {
+            if (singleInstanceGuard != null) {
+                return true;
+            }
+            try {
+                Optional<SingleInstanceGuard> guard = SingleInstanceGuard.acquire(resolveAppDirectory());
+                if (guard.isEmpty()) {
+                    return false;
+                }
+                singleInstanceGuard = guard.get();
+                return true;
+            } catch (IOException e) {
+                // Не блокируем запуск из-за проблем с ~/.meshapp: это лучше, чем
+                // оставить пользователя без возможности открыть приложение.
+                log.warn("Failed to initialize single-instance guard; continuing without duplicate launch protection", e);
+                return true;
+            }
+        }
+    }
+
+    private static void installSingleInstanceActivationHandler() {
+        SingleInstanceGuard guard;
+        synchronized (SINGLE_INSTANCE_LOCK) {
+            guard = singleInstanceGuard;
+        }
+        if (guard != null) {
+            guard.setActivationHandler(() -> AppTrayManager.getInstance().restoreWindow());
+        }
+    }
+
+    private static void releaseSingleInstanceGuard() {
+        SingleInstanceGuard guard;
+        synchronized (SINGLE_INSTANCE_LOCK) {
+            guard = singleInstanceGuard;
+            singleInstanceGuard = null;
+        }
+        if (guard != null) {
+            guard.close();
+        }
+    }
+
+    private static Path resolveAppDirectory() {
+        return Path.of(System.getProperty("user.home", "."), ".meshapp");
+    }
+
+    private static boolean usesNativeMaximize() {
+        return OsDetect.isMacOs() && AppPreferences.isDisableEffectsEffective();
     }
 
     private void handlePendingCrashLog(Stage stage) {

@@ -385,7 +385,7 @@ public final class MqttProxyService implements FromRadioListener, AutoCloseable 
         }
 
         int queueDepth = downlinkExecutor.getQueue().size();
-        log.debug("Received MQTT downlink for '{}': topic='{}' bytes={} retained={} queueDepth={}/{}",
+        log.trace("Received MQTT downlink for '{}': topic='{}' bytes={} retained={} queueDepth={}/{}",
                 connectionName, topic, payload.length, retained, queueDepth, DOWNLINK_QUEUE_SIZE);
         byte[] downlinkPayload = payload;
         downlinkExecutor.execute(() -> forwardBrokerMessageToRadio(topic, downlinkPayload, retained));
@@ -404,7 +404,7 @@ public final class MqttProxyService implements FromRadioListener, AutoCloseable 
             log.warn("Failed to forward MQTT downlink for '{}' topic='{}'", connectionName, topic, e);
             return;
         }
-        log.debug("Forwarded MQTT downlink for '{}': topic='{}' bytes={} retained={}",
+        log.trace("Forwarded MQTT downlink for '{}': topic='{}' bytes={} retained={}",
                 connectionName, topic, payload.length, retained);
     }
 

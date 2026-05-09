@@ -643,6 +643,112 @@
     -fx-fill: #e53935;
 }
 
+/* Нижние вкладки активных подключений */
+.connection-tabs-pane {
+    -fx-min-height: 30;
+    -fx-pref-height: 30;
+    -fx-max-height: 30;
+    -fx-background-color: -color-bg-default;
+    -fx-border-color: -color-border-default;
+    -fx-border-width: 1 0 0 0;
+}
+
+.connection-tabs-pane-transparent {
+    -fx-background-color: transparent;
+    -fx-background-insets: 0;
+}
+
+.connection-tabs-pane > .tab-content-area {
+    -fx-min-height: 0;
+    -fx-pref-height: 0;
+    -fx-max-height: 0;
+    -fx-padding: 0;
+    -fx-background-color: transparent;
+}
+
+.connection-tabs-pane > .tab-header-area {
+    -fx-padding: 0 10 0 10;
+    -fx-background-color: transparent;
+    -fx-background-insets: 0;
+}
+
+.connection-tabs-pane > .tab-header-area > .headers-region {
+    -fx-translate-y: 0;
+}
+
+.connection-tabs-pane > .tab-header-area > .tab-header-background {
+    -fx-background-color: transparent;
+    -fx-background-insets: 0;
+}
+
+.connection-tabs-pane-transparent > .tab-header-area,
+.connection-tabs-pane-transparent > .tab-content-area,
+.connection-tabs-pane-transparent > .tab-header-area > .headers-region,
+.connection-tabs-pane-transparent > .tab-header-area > .tab-header-background,
+.connection-tabs-pane-transparent > .tab-header-area > .control-buttons-tab {
+    -fx-background-color: transparent;
+    -fx-background-insets: 0;
+}
+
+.connection-tabs-pane .tab {
+    -fx-background-color: -color-bg-subtle;
+    -fx-background-radius: 8 8 0 0;
+    -fx-border-color: transparent;
+    -fx-padding: 2 10 5 10;
+    -fx-alignment: top-center;
+}
+
+.connection-tabs-pane-transparent .tab {
+    -fx-background-color: rgba(255, 255, 255, 0.08);
+}
+
+.light-theme .connection-tabs-pane-transparent .tab {
+    -fx-background-color: rgba(0, 0, 0, 0.06);
+}
+
+.connection-tabs-pane .tab:selected {
+    -fx-background-color: -color-bg-default;
+}
+
+.connection-tabs-pane-transparent .tab:selected {
+    -fx-background-color: rgba(255, 255, 255, 0.16);
+}
+
+.light-theme .connection-tabs-pane .tab:selected {
+    -fx-background-color: -color-bg-default;
+}
+
+.light-theme .connection-tabs-pane-transparent .tab:selected {
+    -fx-background-color: rgba(0, 0, 0, 0.12);
+}
+
+.connection-tab-header {
+    -fx-alignment: center;
+}
+
+.connection-tab-name {
+    -fx-text-fill: -color-fg-default;
+    -fx-font-weight: bold;
+    -fx-font-size: 0.9231em;
+}
+
+.connection-tab-id {
+    -fx-text-fill: -color-fg-muted;
+    -fx-font-size: 0.8462em;
+}
+
+.connection-tab-unread-badge {
+    -fx-background-color: -color-accent-emphasis;
+    -fx-background-radius: 999;
+    -fx-text-fill: white;
+    -fx-font-size: 0.7692em;
+    -fx-font-weight: bold;
+    -fx-min-width: 20;
+    -fx-min-height: 20;
+    -fx-padding: 1 6 1 6;
+    -fx-alignment: center;
+}
+
 /* Кастомный title bar (полная ширина окна) */
 .custom-title-bar {
     -fx-background-color: transparent;

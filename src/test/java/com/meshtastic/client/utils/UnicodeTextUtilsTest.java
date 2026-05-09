@@ -31,14 +31,20 @@ class UnicodeTextUtilsTest {
     }
 
     @Test
-    void sanitizeForJavaFxDisplayDropsUnsafeGlyphs() {
-        assertEquals("ABCDE",
+    void sanitizeForJavaFxDisplayKeepsEmojiAndFormattingCodePoints() {
+        assertEquals("A😀B\u200DC\u0301D\u0007E",
                 UnicodeTextUtils.sanitizeForJavaFxDisplay("A😀B\u200DC\u0301D\u0007E"));
     }
 
     @Test
-    void sanitizeForJavaFxDisplayCollapsesWhitespaceSafely() {
-        assertEquals("A B\nC",
+    void sanitizeForJavaFxDisplayOnlyDropsOrphanSurrogates() {
+        assertEquals("AB😀",
+                UnicodeTextUtils.sanitizeForJavaFxDisplay("A\uD83DB😀"));
+    }
+
+    @Test
+    void sanitizeForJavaFxDisplayPreservesWhitespace() {
+        assertEquals(" A\t\tB \n\n C ",
                 UnicodeTextUtils.sanitizeForJavaFxDisplay(" A\t\tB \n\n C "));
     }
 }

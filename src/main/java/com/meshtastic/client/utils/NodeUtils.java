@@ -128,7 +128,6 @@ public final class NodeUtils {
 
     /**
      * Безопасный размер шрифта для чатовых аватаров без JavaFX text measurement.
-     * Использует display-safe текст, чтобы не заходить в native glyph-bounds path.
      */
     public static double chatAvatarFontSize(String text, int circleSize) {
         String sanitized = UnicodeTextUtils.sanitizeForJavaFxDisplay(text);
@@ -152,7 +151,6 @@ public final class NodeUtils {
 
     /**
      * Размер шрифта аватара по эвристике ширины glyph'ов, без JavaFX text measurement.
-     * Это сохраняет emoji в аватаре и избегает native glyph-bounds path в CoreText.
      */
     public static double avatarFontSize(String text, int circleSize) {
         String sanitized = UnicodeTextUtils.sanitize(text);
