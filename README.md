@@ -428,11 +428,18 @@ flatpak --user install -y flathub org.freedesktop.Platform//24.08 org.freedeskto
 - `MAC_SIGNING_KEYCHAIN` или `-PmacSigningKeychain=...` — optional keychain с сертификатом
 - `MAC_PACKAGE_SIGNING_PREFIX` или `-PmacPackageSigningPrefix=...` — optional signing prefix, по умолчанию `com.meshtastic`
 
+Для Gitea runner в daemon-режиме предпочтительно не полагаться на пользовательский `login.keychain`, а импортировать сертификат в temporary keychain из secrets:
+
+- `MAC_SIGNING_CERTIFICATE_P12` — base64 от `.p12` с `Developer ID Application` сертификатом
+- `MAC_SIGNING_CERTIFICATE_PASSWORD` — пароль от `.p12`
+- `MAC_SIGNING_KEYCHAIN_PASSWORD` — пароль для temporary keychain
+
 И один из вариантов notarization:
 
 - `MAC_NOTARY_KEYCHAIN_PROFILE` или `-PmacNotaryKeychainProfile=...`
 - `MAC_NOTARY_APPLE_ID` + `MAC_NOTARY_TEAM_ID` + `MAC_NOTARY_PASSWORD`
 - `MAC_NOTARY_KEY_FILE` + `MAC_NOTARY_KEY_ID` + `MAC_NOTARY_ISSUER`
+- В CI вместо `MAC_NOTARY_KEY_FILE` можно передать `MAC_NOTARY_KEY_FILE_BASE64`; workflow создаст `.p8` файл сам.
 
 После этого обычный `./gradlew jpackage` соберёт signed `.app`, signed `.dmg` и выполнит `notarytool submit --wait` + `stapler`.
 
