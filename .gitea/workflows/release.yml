@@ -148,12 +148,68 @@ jobs:
   build-macos:
     needs: create-release
     runs-on: macos
+    env:
+      MAC_SIGNING_KEY_USER_NAME: ${{ secrets.MAC_SIGNING_KEY_USER_NAME }}
+      MAC_SIGNING_KEYCHAIN: ${{ secrets.MAC_SIGNING_KEYCHAIN }}
+      MAC_PACKAGE_SIGNING_PREFIX: ${{ secrets.MAC_PACKAGE_SIGNING_PREFIX }}
+      MAC_NOTARY_KEYCHAIN_PROFILE: ${{ secrets.MAC_NOTARY_KEYCHAIN_PROFILE }}
+      MAC_NOTARY_APPLE_ID: ${{ secrets.MAC_NOTARY_APPLE_ID }}
+      MAC_NOTARY_TEAM_ID: ${{ secrets.MAC_NOTARY_TEAM_ID }}
+      MAC_NOTARY_PASSWORD: ${{ secrets.MAC_NOTARY_PASSWORD }}
+      MAC_NOTARY_KEY_FILE: ${{ secrets.MAC_NOTARY_KEY_FILE }}
+      MAC_NOTARY_KEY_ID: ${{ secrets.MAC_NOTARY_KEY_ID }}
+      MAC_NOTARY_ISSUER: ${{ secrets.MAC_NOTARY_ISSUER }}
     steps:
       - run: |
           git clone "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git" .
           git checkout "${GITHUB_SHA}"
 
-      - run: ./gradlew jpackage --no-daemon
+      - name: Check macOS signing setup
+        run: |
+          if [ -z "${MAC_SIGNING_KEY_USER_NAME:-}" ]; then
+            echo "::error::MAC_SIGNING_KEY_USER_NAME secret is required for macOS release signing"
+            exit 1
+          fi
+
+          NOTARY_MODES=0
+
+          if [ -n "${MAC_NOTARY_KEYCHAIN_PROFILE:-}" ]; then
+            NOTARY_MODES=$((NOTARY_MODES + 1))
+          fi
+
+          if [ -n "${MAC_NOTARY_APPLE_ID:-}" ] || [ -n "${MAC_NOTARY_TEAM_ID:-}" ] || [ -n "${MAC_NOTARY_PASSWORD:-}" ]; then
+            if [ -z "${MAC_NOTARY_APPLE_ID:-}" ] || [ -z "${MAC_NOTARY_TEAM_ID:-}" ] || [ -z "${MAC_NOTARY_PASSWORD:-}" ]; then
+              echo "::error::MAC_NOTARY_APPLE_ID, MAC_NOTARY_TEAM_ID and MAC_NOTARY_PASSWORD must be set together"
+              exit 1
+            fi
+            NOTARY_MODES=$((NOTARY_MODES + 1))
+          fi
+
+          if [ -n "${MAC_NOTARY_KEY_FILE:-}" ] || [ -n "${MAC_NOTARY_KEY_ID:-}" ] || [ -n "${MAC_NOTARY_ISSUER:-}" ]; then
+            if [ -z "${MAC_NOTARY_KEY_FILE:-}" ] || [ -z "${MAC_NOTARY_KEY_ID:-}" ] || [ -z "${MAC_NOTARY_ISSUER:-}" ]; then
+              echo "::error::MAC_NOTARY_KEY_FILE, MAC_NOTARY_KEY_ID and MAC_NOTARY_ISSUER must be set together"
+              exit 1
+            fi
+            NOTARY_MODES=$((NOTARY_MODES + 1))
+          fi
+
+          if [ "${NOTARY_MODES}" -eq 0 ]; then
+            echo "::error::One macOS notarization mode must be configured for release builds"
+            exit 1
+          fi
+
+      - name: Build signed macOS artifact
+        run: ./gradlew jpackage --no-daemon
+
+      - name: Verify macOS artifact
+        run: |
+          codesign --verify --deep --strict --verbose=2 build/jpackage/MeshApp.app
+          codesign -dv --verbose=4 build/jpackage/MeshApp.app
+          for file in build/jpackage/*.dmg; do
+            [ -f "$file" ] || continue
+            xcrun stapler validate "$file"
+            spctl -a -vvv --type open "$file"
+          done
 
       - name: Upload to Gitea Release
         env:
