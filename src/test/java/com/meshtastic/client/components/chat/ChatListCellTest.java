@@ -1,17 +1,21 @@
 package com.meshtastic.client.components.chat;
 
 import com.meshtastic.client.TestEnvironmentSupport;
+import com.meshtastic.client.model.ChatItem;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Method;
+import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 import javafx.application.Platform;
 
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -36,6 +40,21 @@ class ChatListCellTest {
             assertNotEquals(text, fitted);
             assertTrue(fitted.endsWith("..."));
             assertTrue(previewFits(cell, fitted, width));
+            return null;
+        });
+    }
+
+    @Test
+    void contextMenuIsAttachedOnlyForNonEmptyCells() {
+        onFxThread(() -> {
+            ChatListCell cell = new ChatListCell(item -> {}, item -> {}, item -> {});
+            ChatItem chat = ChatItem.fromDirectMessage("!peer1", null, List.of(), 0, false);
+
+            cell.updateItem(chat, false);
+            assertNotNull(cell.getContextMenu());
+
+            cell.updateItem(null, true);
+            assertNull(cell.getContextMenu());
             return null;
         });
     }
