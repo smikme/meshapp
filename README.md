@@ -445,7 +445,7 @@ flatpak --user install -y flathub org.freedesktop.Platform//24.08 org.freedeskto
 
 После этого обычный `./gradlew jpackage` соберёт signed `.app`, signed `.dmg` и выполнит `notarytool submit --wait` + `stapler`.
 
-Если в Gitea runner нет `Developer ID Application`, workflow всё равно соберёт macOS артефакт, но переименует DMG в `*-unsigned.dmg` и пропустит `spctl`/notarization-проверку.
+Если в Gitea runner нет `Developer ID Application`, workflow всё равно соберёт macOS артефакт с прежним именем, но пропустит `spctl`/notarization-проверку.
 
 ### Установка на macOS
 
