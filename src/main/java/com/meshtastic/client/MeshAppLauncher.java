@@ -16,6 +16,9 @@ public final class MeshAppLauncher {
 
     public static void main(String[] args) {
         AppPreferences.init();
+        if (!MeshApp.acquireSingleInstanceGuard()) {
+            return;
+        }
         SessionCrashLogManager.prepareForLaunch();
         JfrDiagnosticSupport.start();
         if (System.getProperty("prism.order") == null && AppPreferences.isSoftwareRendering()) {
