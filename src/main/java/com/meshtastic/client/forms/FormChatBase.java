@@ -98,9 +98,13 @@ abstract class FormChatBase extends Form {
     protected DeviceState state;
     protected ProtocolHandler protocolHandler;
     protected MeshCoreCompanionProtocolRuntime meshCoreCompanionRuntime;
+    /** Идентификатор подключения, к которому сейчас привязана форма чата. */
+    protected String boundConnectionId;
 
     // Трекинг непрочитанных: ключи вида "ch:INDEX" или "dm:NODEID" → кол-во прочитанных сообщений
     protected final Map<String, Integer> lastReadCounts = new HashMap<>();
+    /** Последний выбранный канал/DM для каждого подключения. */
+    protected final Map<String, ChatSelection> selectedChatsByConnectionId = new HashMap<>();
 
     // Пагинация сообщений из БД
     protected long oldestLoadedDbId = Long.MAX_VALUE;
@@ -148,6 +152,20 @@ abstract class FormChatBase extends Form {
      * @param atBottom была ли область просмотра в живом хвосте чата
      */
     protected record ChatScrollState(long anchorDbId, double anchorOffset, boolean atBottom) {}
+
+    /**
+     * Стабильный ключ выбранного чата, не зависящий от пересоздания {@link ChatItem}
+     * при обновлении списка чатов.
+     *
+     * @param type тип чата
+     * @param channelIndex индекс канала для {@link ChatItem.ChatType#CHANNEL}
+     * @param peerNodeId nodeId собеседника для {@link ChatItem.ChatType#DIRECT_MESSAGE}
+     */
+    protected record ChatSelection(ChatItem.ChatType type, int channelIndex, String peerNodeId) {
+        static ChatSelection from(ChatItem item) {
+            return new ChatSelection(item.getType(), item.getChannelIndex(), item.getPeerNodeId());
+        }
+    }
 
     protected boolean suppressSelectionListener;
     protected boolean formVisible;
@@ -233,6 +251,43 @@ abstract class FormChatBase extends Form {
         return a.getType() == ChatItem.ChatType.CHANNEL
                 ? a.getChannelIndex() == b.getChannelIndex()
                 : Objects.equals(a.getPeerNodeId(), b.getPeerNodeId());
+    }
+
+    /**
+     * Запоминает текущий выбранный чат для подключения, к которому привязана форма.
+     */
+    protected void rememberSelectedChatForBoundConnection() {
+        if (boundConnectionId != null && selectedChat != null) {
+            selectedChatsByConnectionId.put(boundConnectionId, ChatSelection.from(selectedChat));
+        }
+    }
+
+    /**
+     * Сбрасывает сохранённый выбранный чат для текущего подключения.
+     */
+    protected void clearSelectedChatForBoundConnection() {
+        if (boundConnectionId != null) {
+            selectedChatsByConnectionId.remove(boundConnectionId);
+        }
+    }
+
+    /**
+     * Возвращает сохранённый выбранный чат для текущего подключения.
+     */
+    protected ChatSelection selectedChatForBoundConnection() {
+        return boundConnectionId != null ? selectedChatsByConnectionId.get(boundConnectionId) : null;
+    }
+
+    /**
+     * Проверяет, соответствует ли элемент списка сохранённому ключу чата.
+     */
+    protected static boolean chatItemMatchesSelection(ChatItem item, ChatSelection selection) {
+        if (item == null || selection == null || item.getType() != selection.type()) {
+            return false;
+        }
+        return item.getType() == ChatItem.ChatType.CHANNEL
+                ? item.getChannelIndex() == selection.channelIndex()
+                : Objects.equals(item.getPeerNodeId(), selection.peerNodeId());
     }
 
     protected static boolean containsIgnoreCase(String text, String query) {

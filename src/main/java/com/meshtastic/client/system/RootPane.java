@@ -59,6 +59,7 @@ public class RootPane extends BorderPane {
 
     private final DrawerPane drawerPane;
     private final MainForm mainForm;
+    private final ConnectionTabsPane connectionTabsPane;
     private final StackPane toastOverlay;
     private final Runnable connectionTitleListener = () -> Platform.runLater(this::updateWindowTitle);
 
@@ -89,6 +90,7 @@ public class RootPane extends BorderPane {
     public RootPane() {
         drawerPane = new DrawerPane();
         mainForm = new MainForm();
+        connectionTabsPane = new ConnectionTabsPane();
         ModalPane modalPane = new ModalPane();
         toastOverlay = new StackPane();
         toastOverlay.setPickOnBounds(false);
@@ -119,6 +121,7 @@ public class RootPane extends BorderPane {
 
         setLeft(drawerPane);
         setCenter(centerStack);
+        setBottom(connectionTabsPane);
 
         Toast.setOverlay(toastOverlay);
         ModalPane.install(modalPane);
@@ -240,16 +243,7 @@ public class RootPane extends BorderPane {
     }
 
     private static ConnectionEntry findCurrentConnection(ConnectionManager manager) {
-        ConnectionEntry reconnectingEntry = null;
-        for (ConnectionEntry entry : manager.getEntries()) {
-            if (entry.isConnected()) {
-                return entry;
-            }
-            if (reconnectingEntry == null && entry.isReconnecting()) {
-                reconnectingEntry = entry;
-            }
-        }
-        return reconnectingEntry;
+        return manager.getSelectedConnectionEntry();
     }
 
     private static String resolveNodeTitle(ConnectionManager manager, ConnectionEntry entry) {

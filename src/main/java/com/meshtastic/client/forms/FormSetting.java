@@ -224,20 +224,18 @@ public class FormSetting extends Form {
     }
 
     /**
-     * Находит активное подключение и обновляет ссылки state/handler.
+     * Находит выбранное активное подключение и обновляет ссылки state/handler.
      */
     private void refreshConnection() {
         ConnectionManager mgr = ConnectionManager.getInstance();
         DeviceState newState = null;
         ProtocolHandler newHandler = null;
         MeshCoreCompanionState newMeshCoreState = null;
-        for (ConnectionEntry entry : mgr.getEntries()) {
-            if (entry.isConnected()) {
-                newState = mgr.getDeviceState(entry.getId());
-                newHandler = mgr.getProtocolHandler(entry.getId());
-                newMeshCoreState = mgr.getMeshCoreCompanionState(entry.getId());
-                if (newState != null) { break; }
-            }
+        ConnectionEntry entry = mgr.getSelectedConnectionEntry();
+        if (entry != null && entry.isConnected()) {
+            newState = mgr.getDeviceState(entry.getId());
+            newHandler = mgr.getProtocolHandler(entry.getId());
+            newMeshCoreState = mgr.getMeshCoreCompanionState(entry.getId());
         }
         this.state = newState;
         this.handler = newHandler;
@@ -300,12 +298,8 @@ public class FormSetting extends Form {
      */
     private ConnectionEntry findActiveConnectionEntry() {
         ConnectionManager mgr = ConnectionManager.getInstance();
-        for (ConnectionEntry entry : mgr.getEntries()) {
-            if (entry.isConnected()) {
-                return entry;
-            }
-        }
-        return null;
+        ConnectionEntry entry = mgr.getSelectedConnectionEntry();
+        return entry != null && entry.isConnected() ? entry : null;
     }
 
     /**

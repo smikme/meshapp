@@ -36,7 +36,7 @@ import java.util.Set;
 import org.meshtastic.proto.ChannelProtos;
 
 /**
- * Связывает интерфейс чата с текущим подключением к радио и сохранёнными данными.
+ * Связывает интерфейс чата с выбранным подключением к радио и сохранёнными данными.
  *
  * <p>Слой отвечает за перепривязку устройства, составление списка чатов,
  * счётчики прочитанных, удаление каналов и личных чатов, состояние заглушения и
@@ -49,7 +49,8 @@ abstract class FormChatData extends FormChatRequests {
 
     private record ActiveConnection(DeviceState state,
                                     ProtocolHandler handler,
-                                    MeshCoreCompanionProtocolRuntime meshCoreRuntime) {}
+                                    MeshCoreCompanionProtocolRuntime meshCoreRuntime,
+                                    String connectionId) {}
 
     protected void updateInputEnabled() {
         boolean canSend = state != null
@@ -59,7 +60,7 @@ abstract class FormChatData extends FormChatRequests {
     }
 
     /**
-     * Перепривязывает форму к первому подключённому радио и обновляет зависимое
+     * Перепривязывает форму к выбранному подключённому радио и обновляет зависимое
      * состояние интерфейса. Метод намеренно линейный: найти подключение,
      * отвязать старое состояние, привязать новое, обновить данные и затем
      * по возможности снова открыть выбранный чат.
@@ -68,18 +69,28 @@ abstract class FormChatData extends FormChatRequests {
         var mgr = ConnectionManager.getInstance();
         ActiveConnection activeConnection = findActiveConnection(mgr);
         DeviceState newState = activeConnection.state();
-        boolean stateChanged = newState != this.state;
+        String newConnectionId = activeConnection.connectionId();
+        boolean connectionChanged = !Objects.equals(newConnectionId, this.boundConnectionId);
+        boolean stateChanged = newState != this.state || connectionChanged;
 
-        if (newState == this.state) {
+        if (!stateChanged) {
             refreshReadCounts();
             reloadChatList();
             return;
         }
 
+        if (selectedChat != null) {
+            saveCurrentChatScrollState();
+            rememberSelectedChatForBoundConnection();
+        }
         unbindPreviousState();
         this.state = newState;
         this.protocolHandler = activeConnection.handler();
         this.meshCoreCompanionRuntime = activeConnection.meshCoreRuntime();
+        this.boundConnectionId = newConnectionId;
+        if (connectionChanged) {
+            selectedChat = null;
+        }
 
         bindStateDependentComponents(newState);
         refreshReadCounts();
@@ -93,21 +104,17 @@ abstract class FormChatData extends FormChatRequests {
     }
 
     private ActiveConnection findActiveConnection(ConnectionManager mgr) {
-        for (ConnectionEntry entry : mgr.getEntries()) {
-            if (!entry.isConnected()) {
-                continue;
-            }
+        ConnectionEntry entry = mgr.getSelectedConnectionEntry();
+        if (entry != null && entry.isConnected()) {
             DeviceState candidateState = mgr.getDeviceState(entry.getId());
-            if (candidateState != null) {
-                ProtocolRuntime<?> runtime = mgr.getProtocolRuntime(entry.getId());
-                MeshCoreCompanionProtocolRuntime meshRuntime =
-                        runtime instanceof MeshCoreCompanionProtocolRuntime companionRuntime
-                                ? companionRuntime
-                                : null;
-                return new ActiveConnection(candidateState, mgr.getProtocolHandler(entry.getId()), meshRuntime);
-            }
+            ProtocolRuntime<?> runtime = mgr.getProtocolRuntime(entry.getId());
+            MeshCoreCompanionProtocolRuntime meshRuntime =
+                    runtime instanceof MeshCoreCompanionProtocolRuntime companionRuntime
+                            ? companionRuntime
+                            : null;
+            return new ActiveConnection(candidateState, mgr.getProtocolHandler(entry.getId()), meshRuntime, entry.getId());
         }
-        return new ActiveConnection(null, null, null);
+        return new ActiveConnection(null, null, null, null);
     }
 
     private void unbindPreviousState() {
@@ -131,19 +138,19 @@ abstract class FormChatData extends FormChatRequests {
     }
 
     private void registerConnectedStateListeners(ConnectionManager mgr) {
-        if (state == null) {
-            return;
-        }
-
-        state.addMessageListener(messageListener);
+        String selectedConnectionId = mgr.getSelectedConnectionId();
         for (ConnectionEntry entry : mgr.getEntries()) {
-            if (!entry.isConnected()) {
-                continue;
-            }
             MessageListenerService messageService = mgr.getMessageListenerService(entry.getId());
             if (messageService != null) {
-                messageService.getNotificationManager().setActiveChatChecker(this::isCurrentChat);
+                messageService.getNotificationManager().setActiveChatChecker(
+                        state != null && Objects.equals(entry.getId(), selectedConnectionId)
+                                ? this::isCurrentChat
+                                : null);
             }
+        }
+
+        if (state != null) {
+            state.addMessageListener(messageListener);
         }
     }
 
@@ -160,6 +167,10 @@ abstract class FormChatData extends FormChatRequests {
         }
 
         if (selectedChat == null) {
+            clearLoadedMessageState();
+            detailPane.getChildren().clear();
+            detailPane.getChildren().add(placeholderBox);
+            updateInputEnabled();
             return;
         }
 
@@ -255,19 +266,34 @@ abstract class FormChatData extends FormChatRequests {
         suppressSelectionListener = true;
         try {
             chatItems.setAll(items);
-            if (selectedChat == null) {
+            ChatItem matched = findRestorableChatItem();
+            if (matched == null) {
+                selectedChat = null;
+                chatListView.getSelectionModel().clearSelection();
                 return;
             }
-            chatListView.getItems().stream()
-                    .filter(item -> chatItemMatches(item, selectedChat))
-                    .findFirst()
-                    .ifPresent(item -> {
-                        selectedChat = item;
-                        chatListView.getSelectionModel().select(item);
-                    });
+            selectedChat = matched;
+            chatListView.getSelectionModel().select(matched);
         } finally {
             suppressSelectionListener = false;
         }
+    }
+
+    private ChatItem findRestorableChatItem() {
+        ChatSelection savedSelection = selectedChatForBoundConnection();
+        if (savedSelection != null) {
+            return chatListView.getItems().stream()
+                    .filter(item -> chatItemMatchesSelection(item, savedSelection))
+                    .findFirst()
+                    .orElse(null);
+        }
+        if (selectedChat == null) {
+            return null;
+        }
+        return chatListView.getItems().stream()
+                .filter(item -> chatItemMatches(item, selectedChat))
+                .findFirst()
+                .orElse(null);
     }
 
     /**
@@ -379,6 +405,9 @@ abstract class FormChatData extends FormChatRequests {
         lastReadCounts.put(key.readKey(), count);
         db.saveReadCount(key.dbType(), key.dbKey(), count, ownerId);
         reloadChatList();
+        if (state != null) {
+            state.fireMessageListeners();
+        }
     }
 
     protected void showNewChatDialog() {

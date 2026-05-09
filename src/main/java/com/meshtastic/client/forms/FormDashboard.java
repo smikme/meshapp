@@ -124,14 +124,10 @@ public class FormDashboard extends Form {
 
     private void rebindState() {
         var mgr = ConnectionManager.getInstance();
-        DeviceState newState = null;
-
-        for (ConnectionEntry entry : mgr.getEntries()) {
-            if (entry.isConnected()) {
-                newState = mgr.getDeviceState(entry.getId());
-                if (newState != null) { break; }
-            }
-        }
+        ConnectionEntry entry = mgr.getSelectedConnectionEntry();
+        DeviceState newState = entry != null && entry.isConnected()
+                ? mgr.getDeviceState(entry.getId())
+                : null;
 
         this.state = newState;
         refresh();

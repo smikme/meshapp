@@ -82,7 +82,11 @@ public final class ReconnectService {
         log.info("Starting auto-reconnect for '{}'", entry.getName());
         entry.setReconnecting(true);
         attemptCounts.put(id, 0);
-        ConnectionManager.getInstance().fireChanged();
+        ConnectionManager manager = ConnectionManager.getInstance();
+        if (manager.getSelectedConnectionEntry() == null) {
+            manager.setSelectedConnectionId(id);
+        }
+        manager.fireChanged();
         scheduleNextAttempt(id);
     }
 
@@ -131,10 +135,9 @@ public final class ReconnectService {
             return;
         }
 
-        // Не реконнектить если пользователь подключил другое устройство
         ConnectionManager mgr = ConnectionManager.getInstance();
-        if (mgr.hasActiveConnection()) {
-            log.info("Another connection is active, cancelling reconnect for '{}'", entry.getName());
+        if (mgr.isConnectionActiveOrPending(id)) {
+            log.info("Connection '{}' is already active or pending, cancelling duplicate reconnect", entry.getName());
             cancelReconnect(id);
             return;
         }

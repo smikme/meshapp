@@ -783,13 +783,11 @@ public class FormNodes extends Form {
         ProtocolHandler newHandler = null;
         String newConnId = null;
 
-        for (ConnectionEntry entry : mgr.getEntries()) {
-            if (entry.isConnected()) {
-                newState = mgr.getDeviceState(entry.getId());
-                newHandler = mgr.getProtocolHandler(entry.getId());
-                newConnId = entry.getId();
-                if (newState != null) { break; }
-            }
+        ConnectionEntry entry = mgr.getSelectedConnectionEntry();
+        if (entry != null && entry.isConnected()) {
+            newState = mgr.getDeviceState(entry.getId());
+            newHandler = mgr.getProtocolHandler(entry.getId());
+            newConnId = entry.getId();
         }
 
         if (newState == this.state) {
