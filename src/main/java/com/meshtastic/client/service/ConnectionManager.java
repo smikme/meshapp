@@ -63,6 +63,7 @@ public final class ConnectionManager {
     private final List<Runnable> listeners = new CopyOnWriteArrayList<>();
     private final Gson gson = new GsonBuilder().setPrettyPrinting().create();
     private final Path configPath;
+    private volatile String selectedConnectionId;
 
     private ConnectionManager() {
         String home = System.getProperty("user.home");
@@ -211,9 +212,7 @@ public final class ConnectionManager {
             if (activeConnections.containsKey(id) || pendingConnections.containsKey(id)) {
                 return;
             }
-            if (!activeConnections.isEmpty() || !pendingConnections.isEmpty()) {
-                throw new ConnectionException("Уже есть активное подключение. Отключитесь перед подключением к другому устройству.");
-            }
+            ensureNoDuplicateNodeConnectionLocked(id, entry);
             validateProtocolTransportCombination(entry, entry.getEffectiveProtocol());
             try {
                 conn = createConnection(entry);
@@ -247,6 +246,9 @@ public final class ConnectionManager {
                 }
                 entry.setConnected(false);
                 cleanupConnection(id, conn);
+                if (!userInitiated) {
+                    selectConnectionIfNeeded();
+                }
                 fireChanged();
                 if (!userInitiated) {
                     log.info("Scheduling auto-reconnect for '{}' after disconnect", entry.getName());
@@ -276,6 +278,9 @@ public final class ConnectionManager {
                 }
                 entry.setConnected(false);
                 cleanupConnection(id, conn);
+                if (!userInitiated) {
+                    selectConnectionIfNeeded();
+                }
                 fireChanged();
                 if (!userInitiated) {
                     log.info("Scheduling auto-reconnect for '{}' after connection error", entry.getName());
@@ -346,6 +351,9 @@ public final class ConnectionManager {
                 cacheMeshtasticRuntime(id, protocolRuntime);
 
                 entry.setConnected(true);
+                if (selectedConnectionId == null || !isSelectableConnectionIdLocked(selectedConnectionId)) {
+                    selectedConnectionId = id;
+                }
             }
         }
 
@@ -365,8 +373,16 @@ public final class ConnectionManager {
             String nodeId = activeRuntime.getOwnerId();
             if (nodeId != null && !nodeId.isBlank() && !"?".equals(nodeId)) {
                 entry.setNodeId(nodeId);
+                save();
+
+                ConnectionEntry duplicateEntry = findDuplicateNodeConnection(id, nodeId);
+                if (duplicateEntry != null) {
+                    log.warn("Connection '{}' resolved to duplicate nodeId {} already active as '{}'; disconnecting new connection",
+                            entry.getName(), nodeId, duplicateEntry.getName());
+                    disconnect(id, "duplicate node id " + nodeId + " already active as " + duplicateEntry.getName());
+                    return;
+                }
             }
-            save();
             activeRuntime.onReady();
             fireChanged();
         });
@@ -402,6 +418,7 @@ public final class ConnectionManager {
             if (entry != null) {
                 entry.setConnected(false);
             }
+            selectConnectionIfNeededLocked();
         }
 
         log.info("Disconnect requested for '{}' ({})", connectionName, reason);
@@ -452,6 +469,7 @@ public final class ConnectionManager {
 
         if (!entry.isReconnecting() && !pendingConnections.containsKey(id)) {
             entry.setConnected(false);
+            selectConnectionIfNeeded();
             fireChanged();
             ReconnectService.getInstance().startReconnect(id);
         }
@@ -467,12 +485,81 @@ public final class ConnectionManager {
     }
 
     /**
+     * Проверяет, занято ли конкретное подключение активным или pending transport-ом.
+     *
+     * @param id идентификатор профиля
+     * @return {@code true}, если это подключение уже открыто или открывается
+     */
+    public boolean isConnectionActiveOrPending(String id) {
+        return activeConnections.containsKey(id) || pendingConnections.containsKey(id);
+    }
+
+    /**
      * Возвращает копию списка сохранённых профилей подключений.
      *
      * @return список профилей, безопасный для чтения вызывающим кодом
      */
     public List<ConnectionEntry> getEntries() {
         return new ArrayList<>(entries);
+    }
+
+    /**
+     * Возвращает активные для UI подключения: подключённые, открывающиеся
+     * и находящиеся в auto-reconnect.
+     *
+     * @return список активных профилей в порядке сохранённых подключений
+     */
+    public List<ConnectionEntry> getActiveConnectionEntries() {
+        List<ConnectionEntry> result = new ArrayList<>();
+        for (ConnectionEntry entry : entries) {
+            if (isSelectableConnection(entry)) {
+                result.add(entry);
+            }
+        }
+        return result;
+    }
+
+    /**
+     * Возвращает выбранное в UI подключение или первый доступный активный профиль.
+     *
+     * @return выбранный профиль подключения или {@code null}
+     */
+    public ConnectionEntry getSelectedConnectionEntry() {
+        synchronized (connectionLock) {
+            if (selectedConnectionId != null && isSelectableConnectionIdLocked(selectedConnectionId)) {
+                return findEntry(selectedConnectionId);
+            }
+            return firstSelectableConnectionLocked();
+        }
+    }
+
+    /**
+     * Возвращает id выбранного UI-подключения.
+     */
+    public String getSelectedConnectionId() {
+        ConnectionEntry entry = getSelectedConnectionEntry();
+        return entry != null ? entry.getId() : null;
+    }
+
+    /**
+     * Выбирает активное подключение для всех форм приложения.
+     *
+     * @param id идентификатор профиля подключения
+     */
+    public void setSelectedConnectionId(String id) {
+        boolean changed;
+        synchronized (connectionLock) {
+            String previous = selectedConnectionId;
+            if (id != null && isSelectableConnectionIdLocked(id)) {
+                selectedConnectionId = id;
+            } else {
+                selectConnectionIfNeededLocked();
+            }
+            changed = !Objects.equals(previous, selectedConnectionId);
+        }
+        if (changed) {
+            fireChanged();
+        }
     }
 
     /**
@@ -694,7 +781,103 @@ public final class ConnectionManager {
             } else if (!removedPending) {
                 return;
             }
+            selectConnectionIfNeededLocked();
         }
+    }
+
+    private void selectConnectionIfNeeded() {
+        synchronized (connectionLock) {
+            selectConnectionIfNeededLocked();
+        }
+    }
+
+    private void ensureNoDuplicateNodeConnectionLocked(String id, ConnectionEntry entry) throws ConnectionException {
+        String nodeId = normalizeNodeId(entry != null ? entry.getNodeId() : null);
+        if (nodeId == null) {
+            return;
+        }
+
+        ConnectionEntry duplicateEntry = findDuplicateNodeConnectionLocked(id, nodeId);
+        if (duplicateEntry == null) {
+            return;
+        }
+
+        throw new ConnectionException("Нода " + entry.getNodeId()
+                + " уже подключена через \"" + duplicateEntry.getName()
+                + "\" (" + duplicateEntry.getEffectiveType() + ")");
+    }
+
+    private ConnectionEntry findDuplicateNodeConnection(String id, String nodeId) {
+        String normalizedNodeId = normalizeNodeId(nodeId);
+        if (normalizedNodeId == null) {
+            return null;
+        }
+        synchronized (connectionLock) {
+            return findDuplicateNodeConnectionLocked(id, normalizedNodeId);
+        }
+    }
+
+    private ConnectionEntry findDuplicateNodeConnectionLocked(String id, String normalizedNodeId) {
+        for (ConnectionEntry entry : entries) {
+            if (entry.getId().equals(id) || !isSelectableConnection(entry)) {
+                continue;
+            }
+
+            String entryNodeId = normalizeNodeId(firstText(
+                    getOwnerNodeId(entry.getId()),
+                    entry.getNodeId()));
+            if (normalizedNodeId.equals(entryNodeId)) {
+                return entry;
+            }
+        }
+        return null;
+    }
+
+    private void selectConnectionIfNeededLocked() {
+        if (selectedConnectionId != null && isSelectableConnectionIdLocked(selectedConnectionId)) {
+            return;
+        }
+        ConnectionEntry fallback = firstSelectableConnectionLocked();
+        selectedConnectionId = fallback != null ? fallback.getId() : null;
+    }
+
+    private ConnectionEntry firstSelectableConnectionLocked() {
+        for (ConnectionEntry entry : entries) {
+            if (isSelectableConnection(entry)) {
+                return entry;
+            }
+        }
+        return null;
+    }
+
+    private boolean isSelectableConnectionIdLocked(String id) {
+        ConnectionEntry entry = findEntry(id);
+        return entry != null && isSelectableConnection(entry);
+    }
+
+    private boolean isSelectableConnection(ConnectionEntry entry) {
+        return entry != null
+                && (entry.isConnected()
+                || entry.isReconnecting()
+                || activeConnections.containsKey(entry.getId())
+                || pendingConnections.containsKey(entry.getId()));
+    }
+
+    private static String normalizeNodeId(String nodeId) {
+        if (nodeId == null) {
+            return null;
+        }
+        String normalized = nodeId.trim().toLowerCase(Locale.ROOT);
+        return normalized.isBlank() || "?".equals(normalized) ? null : normalized;
+    }
+
+    private static String firstText(String... values) {
+        for (String value : values) {
+            if (value != null && !value.isBlank() && !"?".equals(value.trim())) {
+                return value.trim();
+            }
+        }
+        return null;
     }
 
     /**

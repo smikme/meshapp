@@ -1096,6 +1096,65 @@ public final class MessageDbService {
         return result;
     }
 
+    /**
+     * Считает суммарное количество непрочитанных сообщений по всем чатам владельца.
+     *
+     * @param ownerNodeId nodeId устройства-владельца
+     * @return сумма непрочитанных входящих сообщений
+     */
+    public int getTotalUnreadCount(String ownerNodeId) {
+        if (dbConnection == null) { return 0; }
+
+        String normalizedOwnerNodeId = ownerNodeId != null ? ownerNodeId : "";
+        Map<String, Integer> unreadEligibleCounts = new HashMap<>();
+        Map<String, Integer> readCounts = new HashMap<>();
+
+        try (PreparedStatement ps = dbConnection.prepareStatement("""
+                SELECT chat_type, chat_key, COUNT(*) AS unread_count
+                FROM messages
+                WHERE owner_node_id = ? AND outgoing = FALSE
+                GROUP BY chat_type, chat_key
+                """)) {
+            ps.setString(1, normalizedOwnerNodeId);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    unreadEligibleCounts.put(
+                            readCountKey(rs.getString("chat_type"), rs.getString("chat_key")),
+                            rs.getInt("unread_count"));
+                }
+            }
+        } catch (SQLException e) {
+            log.error("Failed to count total unread messages", e);
+            return 0;
+        }
+
+        try (PreparedStatement ps = dbConnection.prepareStatement(
+                "SELECT chat_type, chat_key, read_count FROM chat_read_counts WHERE owner_node_id = ?")) {
+            ps.setString(1, normalizedOwnerNodeId);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    readCounts.put(
+                            readCountKey(rs.getString("chat_type"), rs.getString("chat_key")),
+                            rs.getInt("read_count"));
+                }
+            }
+        } catch (SQLException e) {
+            log.error("Failed to load read counts for total unread calculation", e);
+            return 0;
+        }
+
+        int totalUnread = 0;
+        for (Map.Entry<String, Integer> entry : unreadEligibleCounts.entrySet()) {
+            int read = readCounts.getOrDefault(entry.getKey(), 0);
+            totalUnread += Math.max(0, entry.getValue() - read);
+        }
+        return totalUnread;
+    }
+
+    private static String readCountKey(String chatType, String chatKey) {
+        return (chatType != null ? chatType : "") + "\u0000" + (chatKey != null ? chatKey : "");
+    }
+
     // ═══════════════════════════════════════════════════════════
     //  Миграция JSON → H2
     // ═══════════════════════════════════════════════════════════

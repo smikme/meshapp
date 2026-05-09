@@ -47,15 +47,11 @@ public class NodeDetailPanel extends VBox {
         }
     }
 
-    /** Найти ProtocolHandler активного соединения */
+    /** Найти ProtocolHandler выбранного соединения */
     private static ProtocolHandler findActiveProtocolHandler() {
         ConnectionManager mgr = ConnectionManager.getInstance();
-        for (ConnectionEntry entry : mgr.getEntries()) {
-            if (entry.isConnected()) {
-                return mgr.getProtocolHandler(entry.getId());
-            }
-        }
-        return null;
+        ConnectionEntry entry = mgr.getSelectedConnectionEntry();
+        return entry != null && entry.isConnected() ? mgr.getProtocolHandler(entry.getId()) : null;
     }
 
     /**

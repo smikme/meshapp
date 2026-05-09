@@ -128,6 +128,26 @@ class MessageDbServiceTest {
     }
 
     @Test
+    void totalUnreadCountSubtractsReadCountsAcrossChatsAndOwners() {
+        MeshMessage channelOne = message("channel-one", 31, 10);
+        MeshMessage channelTwo = message("channel-two", 32, 20);
+        MeshMessage dm = new MeshMessage("!peer", "!owner", 0, "dm", 30, false);
+        dm.setPacketId(33);
+        MeshMessage outgoing = new MeshMessage("!owner", "!ffffffff", 0, "outgoing", 40, true);
+        outgoing.setPacketId(34);
+
+        service.save(channelOne, "channel", "0", "!owner");
+        service.save(channelTwo, "channel", "0", "!owner");
+        service.save(dm, "dm", "!peer", "!owner");
+        service.save(outgoing, "channel", "0", "!owner");
+        service.save(message("other-owner", 35, 50), "channel", "0", "!other");
+        service.saveReadCount("channel", "0", 1, "!owner");
+
+        assertEquals(2, service.getTotalUnreadCount("!owner"));
+        assertEquals(1, service.getTotalUnreadCount("!other"));
+    }
+
+    @Test
     void updateStatusAndFindByPacketIdReturnPersistedMetadata() {
         MeshMessage message = message("payload", 777, 10);
         message.setStatus(MeshMessage.DeliveryStatus.SENDING);

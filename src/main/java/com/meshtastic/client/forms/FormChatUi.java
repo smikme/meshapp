@@ -159,6 +159,7 @@ abstract class FormChatUi extends FormChatBase {
         }
 
         selectedChat = newItem;
+        rememberSelectedChatForBoundConnection();
         openingChatUnreadCount = newItem.getUnreadCount();
         openChat(newItem);
     }
@@ -498,6 +499,7 @@ abstract class FormChatUi extends FormChatBase {
             bubbleFactory.hideOpenReactionPopup();
             scrollOperationGeneration++;
             this.selectedChat = chat;
+            rememberSelectedChatForBoundConnection();
 
             // Обновить заголовок
             String safeAvatarText = UnicodeTextUtils.sanitizeForJavaFxDisplay(chat.getAvatarText());
@@ -549,6 +551,7 @@ abstract class FormChatUi extends FormChatBase {
 
     protected void closeChat() {
         saveCurrentChatScrollState();
+        clearSelectedChatForBoundConnection();
         bubbleFactory.hideOpenReactionPopup();
         scrollOperationGeneration++;
         this.selectedChat = null;
