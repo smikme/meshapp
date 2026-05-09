@@ -169,7 +169,7 @@ public class MeshApp extends Application {
 
         // Восстановить maximize ПОСЛЕ show()
         if (AppPreferences.isWindowMaximized()) {
-            if (OsDetect.isMacOs()) {
+            if (usesNativeMaximize()) {
                 stage.setMaximized(true);
             } else {
                 rootPane.maximizeToVisualBounds();
@@ -218,13 +218,15 @@ public class MeshApp extends Application {
         double w;
         double h;
 
-        if (OsDetect.isMacOs()) {
+        if (rootPane.isCustomMaximized()) {
+            maximized = true;
+        } else if (OsDetect.isMacOs()) {
             maximized = stage.isMaximized();
         } else {
-            maximized = rootPane.isCustomMaximized();
+            maximized = false;
         }
 
-        if (maximized && !OsDetect.isMacOs()) {
+        if (rootPane.isCustomMaximized()) {
             // Для custom maximize сохраняем restore-координаты
             x = rootPane.getRestoreX();
             y = rootPane.getRestoreY();
@@ -386,6 +388,10 @@ public class MeshApp extends Application {
 
     private static Path resolveAppDirectory() {
         return Path.of(System.getProperty("user.home", "."), ".meshapp");
+    }
+
+    private static boolean usesNativeMaximize() {
+        return OsDetect.isMacOs() && AppPreferences.isDisableEffectsEffective();
     }
 
     private void handlePendingCrashLog(Stage stage) {

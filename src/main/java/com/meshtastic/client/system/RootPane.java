@@ -297,17 +297,23 @@ public class RootPane extends BorderPane {
         Stage stage = MeshApp.getPrimaryStage();
         if (stage == null) { return; }
 
-        if (OsDetect.isMacOs()) {
-            // На macOS нативный NSWindowStyleMaskResizable корректно обрабатывает maximize
+        if (usesNativeMaximize()) {
             stage.setMaximized(!stage.isMaximized());
-        } else {
-            // Windows/Linux: stage.setMaximized() при TRANSPARENT перекрывает панель задач
-            if (customMaximized) {
-                restoreFromMaximize(stage);
-            } else {
-                maximizeToVisualBounds(stage);
-            }
+            return;
         }
+
+        // В seamless-режиме не используем stage.setMaximized(): на macOS после
+        // восстановления maximized-состояния оно может потерять корректный
+        // restore-frame и увести transparent окно с экрана при unmaximize.
+        if (customMaximized) {
+            restoreFromMaximize(stage);
+        } else {
+            maximizeToVisualBounds(stage);
+        }
+    }
+
+    private boolean usesNativeMaximize() {
+        return OsDetect.isMacOs() && AppPreferences.isDisableEffectsEffective();
     }
 
     private void maximizeToVisualBounds(Stage stage) {
