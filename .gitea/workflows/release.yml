@@ -233,7 +233,12 @@ jobs:
               export MAC_SIGNING_KEY_USER_NAME="${IDENTITY}"
               echo "Using Developer ID Application identity from the runner keychain"
             else
-              echo "::error::MAC_SIGNING_KEY_USER_NAME secret is required when the runner keychain has no Developer ID Application identity"
+              if printf '%s\n' "${IDENTITY_SOURCE}" | grep -q '"Apple Development:'; then
+                echo "::error::Only Apple Development identity was found. macOS release DMG requires a Developer ID Application certificate, otherwise Gatekeeper can report the app as damaged."
+              else
+                echo "::error::No Developer ID Application identity was found in the runner keychain."
+              fi
+              echo "::error::Install/export a Developer ID Application certificate or provide it through MAC_SIGNING_CERTIFICATE_P12."
               printf '%s\n' "${IDENTITY_SOURCE}"
               exit 1
             fi

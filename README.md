@@ -434,6 +434,8 @@ flatpak --user install -y flathub org.freedesktop.Platform//24.08 org.freedeskto
 - `MAC_SIGNING_CERTIFICATE_PASSWORD` — пароль от `.p12`
 - `MAC_SIGNING_KEYCHAIN_PASSWORD` — пароль для temporary keychain
 
+Сертификат `Apple Development` для release DMG не подходит: он предназначен для разработки. Для скачиваемых сборок нужен именно `Developer ID Application`.
+
 И один из вариантов notarization:
 
 - `MAC_NOTARY_KEYCHAIN_PROFILE` или `-PmacNotaryKeychainProfile=...`
