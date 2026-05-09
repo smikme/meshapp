@@ -55,85 +55,13 @@ public final class UnicodeTextUtils {
     /**
      * Санитизирует пользовательский текст перед передачей в JavaFX {@code Label}/{@code Text}.
      *
-     * <p>Удаляет кодпоинты, которые уже приводили JavaFX/CoreText к нативным падениям:
-     * supplementary glyphs, control/format/private-use символы и combining marks.
-     * Метод предназначен только для display-only UI-путей.
+     * <p>JavaFX 25 корректно переживает supplementary emoji, variation selectors,
+     * ZWJ-последовательности и combining marks, поэтому метод больше не вырезает
+     * такие символы. Оставляем только общую защиту от одиночных суррогатов.
      */
     public static String sanitizeForJavaFxDisplay(String value) {
         String sanitized = sanitize(value);
-        if (sanitized == null || sanitized.isEmpty()) {
-            return "";
-        }
-
-        StringBuilder safe = new StringBuilder(sanitized.length());
-        boolean previousWasSpace = false;
-        boolean previousWasNewline = false;
-
-        for (int i = 0; i < sanitized.length();) {
-            int codePoint = sanitized.codePointAt(i);
-            i += Character.charCount(codePoint);
-
-            if (isUnsafeJavaFxDisplayCodePoint(codePoint)) {
-                continue;
-            }
-
-            if (codePoint == '\r') {
-                continue;
-            }
-
-            if (codePoint == '\n') {
-                trimTrailingSpaces(safe);
-                if (!safe.isEmpty() && !previousWasNewline) {
-                    safe.append('\n');
-                    previousWasNewline = true;
-                }
-                previousWasSpace = false;
-                continue;
-            }
-
-            if (Character.isWhitespace(codePoint)) {
-                if (!previousWasSpace && !previousWasNewline && !safe.isEmpty()) {
-                    safe.append(' ');
-                    previousWasSpace = true;
-                }
-                continue;
-            }
-
-            safe.appendCodePoint(codePoint);
-            previousWasSpace = false;
-            previousWasNewline = false;
-        }
-
-        trimTrailingSpaces(safe);
-        while (!safe.isEmpty() && safe.charAt(safe.length() - 1) == '\n') {
-            safe.setLength(safe.length() - 1);
-        }
-        return safe.toString();
-    }
-
-    private static boolean isUnsafeJavaFxDisplayCodePoint(int codePoint) {
-        if (Character.isSupplementaryCodePoint(codePoint)) {
-            return true;
-        }
-        if (Character.isISOControl(codePoint) && codePoint != '\n' && codePoint != '\t') {
-            return true;
-        }
-
-        return switch (Character.getType(codePoint)) {
-            case Character.NON_SPACING_MARK,
-                    Character.COMBINING_SPACING_MARK,
-                    Character.ENCLOSING_MARK,
-                    Character.FORMAT,
-                    Character.PRIVATE_USE,
-                    Character.SURROGATE -> true;
-            default -> false;
-        };
-    }
-
-    private static void trimTrailingSpaces(StringBuilder value) {
-        while (!value.isEmpty() && value.charAt(value.length() - 1) == ' ') {
-            value.setLength(value.length() - 1);
-        }
+        return sanitized == null ? "" : sanitized;
     }
 
     public static int clampToCodePointBoundary(String text, int index) {

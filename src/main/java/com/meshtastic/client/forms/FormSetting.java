@@ -869,8 +869,8 @@ public class FormSetting extends Form {
     }
 
     /**
-     * Вкладка «Кэш» показывает имена только для чтения, поэтому на macOS
-     * отбрасываем glyph-комбинации, которые уже приводили JavaFX/CoreText к native crash.
+     * Вкладка «Кэш» показывает имена только для чтения. Оставляем общую
+     * нормализацию пользовательского Unicode без удаления валидных emoji.
      */
     static String sanitizeCacheDisplayText(String value) {
         return com.meshtastic.client.utils.UnicodeTextUtils.sanitizeForJavaFxDisplay(value);

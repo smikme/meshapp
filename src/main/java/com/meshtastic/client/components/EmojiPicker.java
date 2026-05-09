@@ -63,8 +63,7 @@ public class EmojiPicker {
 
         // Поиск
         searchField = new TextField();
-        // На macOS TextField с emoji в prompt может уйти в небезопасный CoreText path.
-        searchField.setPromptText("Поиск emoji...");
+        searchField.setPromptText("🔍 Поиск emoji...");
         searchField.getStyleClass().add("emoji-picker-search");
         searchField.textProperty().addListener((obs, old, val) -> onSearchChanged(val));
         searchField.setOnKeyPressed(e -> {
