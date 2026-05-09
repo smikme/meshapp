@@ -217,6 +217,8 @@ jobs:
 
       - name: Resolve macOS signing setup
         run: |
+          MACOS_SIGNING_MODE="developer-id"
+
           if [ -z "${MAC_SIGNING_KEY_USER_NAME:-}" ]; then
             if [ -n "${MAC_SIGNING_KEYCHAIN:-}" ]; then
               IDENTITY_SOURCE="$(security find-identity -v -p codesigning "${MAC_SIGNING_KEYCHAIN}")"
@@ -234,14 +236,30 @@ jobs:
               echo "Using Developer ID Application identity from the runner keychain"
             else
               if printf '%s\n' "${IDENTITY_SOURCE}" | grep -q '"Apple Development:'; then
-                echo "::error::Only Apple Development identity was found. macOS release DMG requires a Developer ID Application certificate, otherwise Gatekeeper can report the app as damaged."
+                echo "::warning::Only Apple Development identity was found. The macOS artifact will be built with ad-hoc signing and marked as unsigned."
               else
-                echo "::error::No Developer ID Application identity was found in the runner keychain."
+                echo "::warning::No Developer ID Application identity was found. The macOS artifact will be built with ad-hoc signing and marked as unsigned."
               fi
-              echo "::error::Install/export a Developer ID Application certificate or provide it through MAC_SIGNING_CERTIFICATE_P12."
               printf '%s\n' "${IDENTITY_SOURCE}"
-              exit 1
+              MACOS_SIGNING_MODE="adhoc"
             fi
+          fi
+
+          printf 'MACOS_SIGNING_MODE=%s\n' "${MACOS_SIGNING_MODE}" >> "${GITHUB_ENV}"
+
+          if [ "${MACOS_SIGNING_MODE}" != "developer-id" ]; then
+            {
+              echo 'MAC_SIGNING_KEY_USER_NAME='
+              echo 'MAC_NOTARY_KEYCHAIN_PROFILE='
+              echo 'MAC_NOTARY_APPLE_ID='
+              echo 'MAC_NOTARY_TEAM_ID='
+              echo 'MAC_NOTARY_PASSWORD='
+              echo 'MAC_NOTARY_KEY_FILE='
+              echo 'MAC_NOTARY_KEY_FILE_BASE64='
+              echo 'MAC_NOTARY_KEY_ID='
+              echo 'MAC_NOTARY_ISSUER='
+            } >> "${GITHUB_ENV}"
+            exit 0
           fi
 
           NOTARY_MODES=0
@@ -271,18 +289,33 @@ jobs:
             exit 1
           fi
 
-      - name: Build signed macOS artifact
+      - name: Build macOS artifact
         run: ./gradlew jpackage --no-daemon
+
+      - name: Mark unsigned macOS artifact
+        run: |
+          if [ "${MACOS_SIGNING_MODE:-adhoc}" = "developer-id" ]; then
+            exit 0
+          fi
+
+          for file in build/jpackage/*.dmg; do
+            [ -f "$file" ] || continue
+            mv "$file" "${file%.dmg}-unsigned.dmg"
+          done
 
       - name: Verify macOS artifact
         run: |
           codesign --verify --deep --strict --verbose=2 build/jpackage/MeshApp.app
           codesign -dv --verbose=4 build/jpackage/MeshApp.app
-          for file in build/jpackage/*.dmg; do
-            [ -f "$file" ] || continue
-            xcrun stapler validate "$file"
-            spctl -a -vvv --type open "$file"
-          done
+          if [ "${MACOS_SIGNING_MODE:-adhoc}" = "developer-id" ]; then
+            for file in build/jpackage/*.dmg; do
+              [ -f "$file" ] || continue
+              xcrun stapler validate "$file"
+              spctl -a -vvv --type open "$file"
+            done
+          else
+            echo "::warning::Unsigned/ad-hoc macOS artifact was produced. It is suitable for source-based/open-source distribution, but downloaded builds may require removing quarantine on user machines."
+          fi
 
       - name: Upload to Gitea Release
         env:
