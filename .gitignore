@@ -37,3 +37,4 @@ out/
 .vscode/
 /.claude/
 /CLAUDE.md
+docs/.DS_Store
