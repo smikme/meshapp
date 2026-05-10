@@ -86,6 +86,8 @@ public class FormMap extends Form {
     private final Label areaLabel = new Label();
     private final Label tileDirectoryLabel = new Label();
     private final ProgressBar downloadProgressBar = new ProgressBar(0);
+    private final Button downloadPauseButton = new Button();
+    private final Button downloadCancelButton = new Button();
     private final TextField searchField = new TextField();
     private final ContextMenu searchSuggestionMenu = new ContextMenu();
     private final Button favoriteFilterButton = new Button();
@@ -113,6 +115,8 @@ public class FormMap extends Form {
     private List<String> currentSearchInsertTexts = List.of();
     private List<CustomMenuItem> currentSearchSuggestionItems = List.of();
     private int selectedSearchSuggestionIndex = -1;
+    private TileMapView.DownloadHandle activeDownload;
+    private boolean downloadPaused;
     private final Map<Long, ParsedTrace> selectedTraces = new LinkedHashMap<>();
     private List<ParsedTrace> recentTraces = List.of();
     private boolean suppressSearchSuggestions;
@@ -299,12 +303,19 @@ public class FormMap extends Form {
         downloadProgressBar.setMinWidth(DOWNLOAD_PROGRESS_WIDTH);
         downloadProgressBar.setPrefWidth(DOWNLOAD_PROGRESS_WIDTH);
         downloadProgressBar.setMaxWidth(DOWNLOAD_PROGRESS_WIDTH);
-        downloadProgressBar.setVisible(false);
+        configureDownloadControlButton(downloadPauseButton, "/icons/pause.svg", "Пауза скачивания", "||");
+        configureDownloadControlButton(downloadCancelButton, "/icons/close.svg", "Отменить скачивание", "x");
+        downloadPauseButton.setOnAction(event -> toggleDownloadPause());
+        downloadCancelButton.setOnAction(event -> cancelDownload());
+        hideDownloadProgress();
         updateTileDirectoryLabel();
+
+        HBox downloadProgressBox = new HBox(4, downloadProgressBar, downloadPauseButton, downloadCancelButton);
+        downloadProgressBox.setAlignment(Pos.CENTER_LEFT);
 
         HBox statusBar = new HBox(
                 16,
-                downloadProgressBar,
+                downloadProgressBox,
                 statusLabel,
                 pointerLabel,
                 measureLabel,
@@ -1168,6 +1179,32 @@ public class FormMap extends Form {
     }
 
     /**
+     * Настраивает компактную кнопку управления загрузкой рядом с progress bar.
+     */
+    private void configureDownloadControlButton(Button button, String iconPath, String tooltip, String fallbackText) {
+        button.getStyleClass().add("map-progress-icon-button");
+        button.setFocusTraversable(false);
+        button.setTooltip(new Tooltip(tooltip));
+        setButtonIcon(button, iconPath, fallbackText, 14);
+    }
+
+    /**
+     * Обновляет иконку кнопки, оставляя текстовый fallback для отсутствующего SVG.
+     */
+    private void setButtonIcon(Button button, String iconPath, String fallbackText, double size) {
+        SVGPath icon = SvgIconLoader.load(iconPath, size);
+        if (icon != null) {
+            button.setGraphic(icon);
+            button.setText(null);
+            button.setContentDisplay(ContentDisplay.GRAPHIC_ONLY);
+        } else {
+            button.setGraphic(null);
+            button.setText(fallbackText);
+            button.setContentDisplay(ContentDisplay.TEXT_ONLY);
+        }
+    }
+
+    /**
      * Настраивает переключаемую кнопку панели карт как иконку с подсказкой.
      */
     private void configureIconToggleButton(ToggleButton button, String iconPath, String tooltip) {
@@ -1435,33 +1472,111 @@ public class FormMap extends Form {
 
         downloadButton.setDisable(true);
         long count = mapView.downloadTileCount();
+        if (count <= 0) {
+            downloadButton.setDisable(false);
+            String message = "Нет тайлов для загрузки";
+            statusLabel.setText(message);
+            Toast.show(Toast.Type.WARNING, message);
+            return;
+        }
+
+        downloadPaused = false;
+        updateDownloadPauseButton();
         statusLabel.setText("Загрузка " + count + " тайлов...");
         showDownloadProgress(0);
-        mapView.downloadSelectedAreaTiles(progress -> {
-            statusLabel.setText(progress.message());
-            if (progress.total() == 0) {
-                downloadButton.setDisable(false);
-                hideDownloadProgress();
+
+        TileMapView.DownloadHandle[] handleRef = new TileMapView.DownloadHandle[1];
+        TileMapView.DownloadHandle handle = mapView.downloadSelectedAreaTiles(progress -> {
+            if (activeDownload != handleRef[0]) {
                 return;
             }
-            showDownloadProgress((double) progress.completed() / progress.total());
-            if (progress.completed() >= progress.total()) {
-                downloadButton.setDisable(false);
-                String message = "Доступно " + progress.available() + " из " + progress.total() + " тайлов";
-                statusLabel.setText(message);
-                hideDownloadProgress();
-            }
+            handleDownloadProgress(progress);
         });
+        handleRef[0] = handle;
+        activeDownload = handle;
+    }
+
+    private void handleDownloadProgress(TileMapView.DownloadProgress progress) {
+        if (progress.total() == 0) {
+            finishDownload(progress.message());
+            return;
+        }
+
+        showDownloadProgress((double) progress.completed() / progress.total());
+        if (progress.state() == TileMapView.DownloadState.CANCELLED) {
+            finishDownload(progress.message());
+            return;
+        }
+        if (progress.state() == TileMapView.DownloadState.COMPLETED || progress.completed() >= progress.total()) {
+            finishDownload("Доступно " + progress.available() + " из " + progress.total() + " тайлов");
+            return;
+        }
+
+        statusLabel.setText(downloadPaused
+                ? "Загрузка приостановлена: " + progress.completed() + " из " + progress.total()
+                : progress.message());
+    }
+
+    private void toggleDownloadPause() {
+        if (activeDownload == null) {
+            return;
+        }
+        if (downloadPaused) {
+            activeDownload.resume();
+            downloadPaused = false;
+            statusLabel.setText("Загрузка продолжена");
+        } else {
+            activeDownload.pause();
+            downloadPaused = true;
+            statusLabel.setText("Загрузка приостановлена");
+        }
+        updateDownloadPauseButton();
+    }
+
+    private void updateDownloadPauseButton() {
+        if (downloadPaused) {
+            setButtonIcon(downloadPauseButton, "/icons/play.svg", ">", 14);
+            downloadPauseButton.setTooltip(new Tooltip("Продолжить скачивание"));
+        } else {
+            setButtonIcon(downloadPauseButton, "/icons/pause.svg", "||", 14);
+            downloadPauseButton.setTooltip(new Tooltip("Пауза скачивания"));
+        }
+    }
+
+    private void cancelDownload() {
+        if (activeDownload == null) {
+            return;
+        }
+        activeDownload.cancel();
+        finishDownload("Загрузка отменена");
+    }
+
+    private void finishDownload(String message) {
+        activeDownload = null;
+        downloadPaused = false;
+        downloadButton.setDisable(false);
+        statusLabel.setText(message);
+        updateDownloadPauseButton();
+        hideDownloadProgress();
     }
 
     private void showDownloadProgress(double progress) {
-        downloadProgressBar.setVisible(true);
+        setDownloadProgressVisible(true);
         downloadProgressBar.setProgress(Math.max(0, Math.min(1, progress)));
     }
 
     private void hideDownloadProgress() {
         downloadProgressBar.setProgress(0);
-        downloadProgressBar.setVisible(false);
+        setDownloadProgressVisible(false);
+    }
+
+    private void setDownloadProgressVisible(boolean visible) {
+        downloadProgressBar.setVisible(visible);
+        downloadProgressBar.setManaged(visible);
+        downloadPauseButton.setVisible(visible);
+        downloadPauseButton.setManaged(visible);
+        downloadCancelButton.setVisible(visible);
+        downloadCancelButton.setManaged(visible);
     }
 
     /**

@@ -47,6 +47,8 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
@@ -611,22 +613,47 @@ public class TileMapView extends StackPane {
      *
      * @param progressConsumer обработчик прогресса загрузки
      */
-    public void downloadSelectedAreaTiles(Consumer<DownloadProgress> progressConsumer) {
+    public DownloadHandle downloadSelectedAreaTiles(Consumer<DownloadProgress> progressConsumer) {
         TileDownloadPlan plan = downloadTilePlan();
         if (plan.isEmpty()) {
-            progressConsumer.accept(new DownloadProgress(0, 0, 0, "Выделите область для загрузки тайлов"));
-            return;
+            progressConsumer.accept(new DownloadProgress(
+                    0,
+                    0,
+                    0,
+                    "Выделите область для загрузки тайлов",
+                    DownloadState.CANCELLED
+            ));
+            return DownloadHandle.inactive();
         }
 
-        tileExecutor.submit(() -> {
+        DownloadHandle handle = new DownloadHandle();
+        Future<?> future = tileExecutor.submit(() -> {
             AtomicLong completed = new AtomicLong();
             AtomicLong available = new AtomicLong();
             long total = plan.totalTiles();
             long lastUiUpdate = 0;
+            boolean cancelled = false;
 
+            downloadLoop:
             for (TileRange range : plan.ranges()) {
                 for (int x = range.startX(); x <= range.endX(); x++) {
                     for (int y = range.startY(); y <= range.endY(); y++) {
+                        if (handle.isCancelled()) {
+                            cancelled = true;
+                            break downloadLoop;
+                        }
+                        try {
+                            handle.awaitIfPaused();
+                        } catch (InterruptedException ignored) {
+                            Thread.currentThread().interrupt();
+                            cancelled = true;
+                            break downloadLoop;
+                        }
+                        if (handle.isCancelled()) {
+                            cancelled = true;
+                            break downloadLoop;
+                        }
+
                         TileKey key = new TileKey(range.zoom(), x, y);
                         boolean ok = false;
                         try {
@@ -636,7 +663,8 @@ public class TileMapView extends StackPane {
                             }
                         } catch (InterruptedException ignored) {
                             Thread.currentThread().interrupt();
-                            break;
+                            cancelled = true;
+                            break downloadLoop;
                         } catch (IOException ignored) {
                             // Partial downloads are still useful for offline use.
                         }
@@ -650,24 +678,33 @@ public class TileMapView extends StackPane {
                                     done,
                                     total,
                                     cached,
-                                    "Загружено " + done + " из " + total
+                                    "Загружено " + done + " из " + total,
+                                    DownloadState.RUNNING
                             )));
                         }
                         if (Thread.currentThread().isInterrupted()) {
-                            break;
+                            cancelled = true;
+                            break downloadLoop;
                         }
                     }
-                    if (Thread.currentThread().isInterrupted()) {
-                        break;
-                    }
-                }
-                if (Thread.currentThread().isInterrupted()) {
-                    break;
                 }
             }
 
-            Platform.runLater(this::render);
+            long done = completed.get();
+            long cached = available.get();
+            DownloadState finalState = cancelled || handle.isCancelled()
+                    ? DownloadState.CANCELLED
+                    : DownloadState.COMPLETED;
+            String message = finalState == DownloadState.CANCELLED
+                    ? "Загрузка отменена: " + done + " из " + total
+                    : "Загружено " + done + " из " + total;
+            Platform.runLater(() -> {
+                progressConsumer.accept(new DownloadProgress(done, total, cached, message, finalState));
+                render();
+            });
         });
+        handle.attach(future);
+        return handle;
     }
 
     /**
@@ -1669,8 +1706,72 @@ public class TileMapView extends StackPane {
      * @param total     общее количество тайлов
      * @param available количество тайлов, которые доступны локально после обработки
      * @param message   пользовательский текст прогресса
+     * @param state     текущее состояние загрузки
      */
-    public record DownloadProgress(long completed, long total, long available, String message) {
+    public record DownloadProgress(long completed, long total, long available, String message, DownloadState state) {
+    }
+
+    /**
+     * Состояние фоновой загрузки тайлов.
+     */
+    public enum DownloadState {
+        RUNNING, CANCELLED, COMPLETED
+    }
+
+    /**
+     * Управляет активной фоновой загрузкой тайлов.
+     */
+    public static final class DownloadHandle {
+        private final AtomicBoolean paused = new AtomicBoolean(false);
+        private final AtomicBoolean cancelled = new AtomicBoolean(false);
+        private final Object pauseLock = new Object();
+        private volatile Future<?> future;
+
+        private static DownloadHandle inactive() {
+            return new DownloadHandle();
+        }
+
+        private void attach(Future<?> future) {
+            this.future = future;
+        }
+
+        public void pause() {
+            if (!cancelled.get()) {
+                paused.set(true);
+            }
+        }
+
+        public void resume() {
+            paused.set(false);
+            synchronized (pauseLock) {
+                pauseLock.notifyAll();
+            }
+        }
+
+        public void cancel() {
+            cancelled.set(true);
+            resume();
+            Future<?> task = future;
+            if (task != null) {
+                task.cancel(true);
+            }
+        }
+
+        public boolean isPaused() {
+            return paused.get();
+        }
+
+        public boolean isCancelled() {
+            return cancelled.get();
+        }
+
+        private void awaitIfPaused() throws InterruptedException {
+            synchronized (pauseLock) {
+                while (paused.get() && !cancelled.get()) {
+                    pauseLock.wait();
+                }
+            }
+        }
     }
 
     /**
