@@ -5,6 +5,7 @@ import com.meshtastic.client.components.chat.ChatBotCommandHelper;
 import com.meshtastic.client.components.chat.TracerouteView;
 import com.meshtastic.client.components.map.MapMarker;
 import com.meshtastic.client.components.map.TileMapView;
+import com.meshtastic.client.modal.Toast;
 import com.meshtastic.client.model.ConnectionEntry;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.MeshMessage;
@@ -255,9 +256,8 @@ public class FormMap extends Form {
         Button zoomOutButton = iconButton("−", "Отдалить");
         zoomOutButton.setOnAction(event -> mapView.zoomOut());
 
-        downloadButton.setTooltip(new Tooltip(
-                "Скачать выделенную область на всех масштабах; без выделения — видимые тайлы текущего масштаба"));
-        downloadButton.setOnAction(event -> downloadVisibleTiles());
+        downloadButton.setTooltip(new Tooltip("Скачать явно выделенную область на всех масштабах"));
+        downloadButton.setOnAction(event -> downloadSelectedAreaTiles());
 
         Button tileDirectoryButton = new Button("Каталог тайлов");
         tileDirectoryButton.setTooltip(new Tooltip("Выбрать локальный каталог формата z/x/y.png|jpg|jpeg"));
@@ -1424,12 +1424,20 @@ public class FormMap extends Form {
     /**
      * Запускает загрузку тайлов в локальный кэш и отображает прогресс.
      */
-    private void downloadVisibleTiles() {
+    private void downloadSelectedAreaTiles() {
+        if (!mapView.hasSelectedArea()) {
+            String message = "Сначала выделите область на карте";
+            statusLabel.setText(message);
+            hideDownloadProgress();
+            Toast.show(Toast.Type.WARNING, message);
+            return;
+        }
+
         downloadButton.setDisable(true);
-        int count = mapView.downloadTileCount();
+        long count = mapView.downloadTileCount();
         statusLabel.setText("Загрузка " + count + " тайлов...");
         showDownloadProgress(0);
-        mapView.downloadVisibleTiles(progress -> {
+        mapView.downloadSelectedAreaTiles(progress -> {
             statusLabel.setText(progress.message());
             if (progress.total() == 0) {
                 downloadButton.setDisable(false);

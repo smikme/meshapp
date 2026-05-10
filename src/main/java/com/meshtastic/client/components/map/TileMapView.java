@@ -47,7 +47,7 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
 /**
@@ -586,11 +586,15 @@ public class TileMapView extends StackPane {
     }
 
     /**
-     * Возвращает количество тайлов, которые будут загружены кнопкой оффлайн-сохранения.
-     * Если область выделена, учитываются все масштабы этой области; иначе текущий viewport.
+     * Возвращает количество тайлов, которые будут загружены для выбранной области.
      */
-    public int downloadTileCount() {
-        return downloadTileKeys().size();
+    public long downloadTileCount() {
+        return downloadTilePlan().totalTiles();
+    }
+
+    /** @return {@code true}, если пользователь явно выделил область для загрузки */
+    public boolean hasSelectedArea() {
+        return selectedArea != null;
     }
 
     /** @return путь к встроенному локальному кэшу тайлов */
@@ -601,45 +605,65 @@ public class TileMapView extends StackPane {
     /**
      * Загружает тайлы во встроенный кэш.
      * <p>
-     * Если пользователь выделил область, скачиваются все тайлы этой области на всех
-     * поддерживаемых масштабах. Без выделенной области сохраняется прежнее поведение:
-     * загружаются видимые тайлы текущего масштаба.
+     * Скачиваются только тайлы явно выделенной области на всех поддерживаемых масштабах.
+     * План загрузки хранится как набор диапазонов, чтобы большие области не создавали
+     * миллионы объектов ключей в памяти.
      *
      * @param progressConsumer обработчик прогресса загрузки
      */
-    public void downloadVisibleTiles(Consumer<DownloadProgress> progressConsumer) {
-        List<TileKey> keys = downloadTileKeys();
-        if (keys.isEmpty()) {
-            progressConsumer.accept(new DownloadProgress(0, 0, 0, "Нет тайлов для загрузки"));
+    public void downloadSelectedAreaTiles(Consumer<DownloadProgress> progressConsumer) {
+        TileDownloadPlan plan = downloadTilePlan();
+        if (plan.isEmpty()) {
+            progressConsumer.accept(new DownloadProgress(0, 0, 0, "Выделите область для загрузки тайлов"));
             return;
         }
 
         tileExecutor.submit(() -> {
-            AtomicInteger completed = new AtomicInteger();
-            AtomicInteger available = new AtomicInteger();
-            int total = keys.size();
+            AtomicLong completed = new AtomicLong();
+            AtomicLong available = new AtomicLong();
+            long total = plan.totalTiles();
+            long lastUiUpdate = 0;
 
-            for (TileKey key : keys) {
-                boolean ok = false;
-                try {
-                    ok = hasLocalTile(key) || downloadTileFromNetwork(key);
-                    if (ok) {
-                        available.incrementAndGet();
+            for (TileRange range : plan.ranges()) {
+                for (int x = range.startX(); x <= range.endX(); x++) {
+                    for (int y = range.startY(); y <= range.endY(); y++) {
+                        TileKey key = new TileKey(range.zoom(), x, y);
+                        boolean ok = false;
+                        try {
+                            ok = hasLocalTile(key) || downloadTileFromNetwork(key);
+                            if (ok) {
+                                available.incrementAndGet();
+                            }
+                        } catch (InterruptedException ignored) {
+                            Thread.currentThread().interrupt();
+                            break;
+                        } catch (IOException ignored) {
+                            // Partial downloads are still useful for offline use.
+                        }
+
+                        long done = completed.incrementAndGet();
+                        long cached = available.get();
+                        long now = System.nanoTime();
+                        if (done >= total || now - lastUiUpdate >= 250_000_000L) {
+                            lastUiUpdate = now;
+                            Platform.runLater(() -> progressConsumer.accept(new DownloadProgress(
+                                    done,
+                                    total,
+                                    cached,
+                                    "Загружено " + done + " из " + total
+                            )));
+                        }
+                        if (Thread.currentThread().isInterrupted()) {
+                            break;
+                        }
                     }
-                } catch (InterruptedException ignored) {
-                    Thread.currentThread().interrupt();
-                    break;
-                } catch (IOException ignored) {
-                    // Partial downloads are still useful for offline use.
+                    if (Thread.currentThread().isInterrupted()) {
+                        break;
+                    }
                 }
-                int done = completed.incrementAndGet();
-                int cached = available.get();
-                Platform.runLater(() -> progressConsumer.accept(new DownloadProgress(
-                        done,
-                        total,
-                        cached,
-                        "Загружено " + done + " из " + total
-                )));
+                if (Thread.currentThread().isInterrupted()) {
+                    break;
+                }
             }
 
             Platform.runLater(this::render);
@@ -1022,28 +1046,29 @@ public class TileMapView extends StackPane {
     }
 
     /**
-     * Рассчитывает ключи тайлов для оффлайн-загрузки.
+     * Рассчитывает план загрузки тайлов без материализации каждого ключа.
      */
-    private List<TileKey> downloadTileKeys() {
-        if (selectedArea != null) {
-            return areaTileKeys(selectedArea, MIN_ZOOM, MAX_ZOOM);
+    private TileDownloadPlan downloadTilePlan() {
+        if (selectedArea == null) {
+            return TileDownloadPlan.empty();
         }
-        return visibleTileKeys();
+        return areaTilePlan(selectedArea, MIN_ZOOM, MAX_ZOOM);
     }
 
     /**
-     * Рассчитывает все тайлы, пересекающие географическую область на заданном диапазоне масштабов.
+     * Рассчитывает диапазоны тайлов, пересекающих географическую область.
      */
-    private static List<TileKey> areaTileKeys(GeoBounds area, int minZoom, int maxZoom) {
+    private static TileDownloadPlan areaTilePlan(GeoBounds area, int minZoom, int maxZoom) {
         if (area == null) {
-            return List.of();
+            return TileDownloadPlan.empty();
         }
 
-        List<TileKey> keys = new ArrayList<>();
+        List<TileRange> ranges = new ArrayList<>();
+        long totalTiles = 0;
         int startZoom = clampZoom(minZoom);
         int endZoom = clampZoom(maxZoom);
         if (startZoom > endZoom) {
-            return keys;
+            return TileDownloadPlan.empty();
         }
 
         for (int tileZoom = startZoom; tileZoom <= endZoom; tileZoom++) {
@@ -1058,13 +1083,11 @@ public class TileMapView extends StackPane {
             int startY = clampTileIndex((int) Math.floor(Math.min(northTile, southTile)), tileCount);
             int endY = clampTileIndex((int) Math.floor(Math.max(northTile, southTile)), tileCount);
 
-            for (int x = startX; x <= endX; x++) {
-                for (int y = startY; y <= endY; y++) {
-                    keys.add(new TileKey(tileZoom, x, y));
-                }
-            }
+            TileRange range = new TileRange(tileZoom, startX, endX, startY, endY);
+            ranges.add(range);
+            totalTiles += range.count();
         }
-        return keys;
+        return new TileDownloadPlan(List.copyOf(ranges), totalTiles);
     }
 
     /**
@@ -1640,14 +1663,14 @@ public class TileMapView extends StackPane {
     }
 
     /**
-     * Прогресс загрузки видимых тайлов.
+     * Прогресс загрузки тайлов выбранной области.
      *
      * @param completed количество обработанных тайлов
      * @param total     общее количество тайлов
      * @param available количество тайлов, которые доступны локально после обработки
      * @param message   пользовательский текст прогресса
      */
-    public record DownloadProgress(int completed, int total, int available, String message) {
+    public record DownloadProgress(long completed, long total, long available, String message) {
     }
 
     /**
@@ -1689,6 +1712,28 @@ public class TileMapView extends StackPane {
             double west = Math.min(first.longitude(), second.longitude());
             double east = Math.max(first.longitude(), second.longitude());
             return new GeoBounds(north, south, west, east);
+        }
+    }
+
+    /**
+     * План оффлайн-загрузки, представленный диапазонами тайлов вместо полного списка ключей.
+     */
+    private record TileDownloadPlan(List<TileRange> ranges, long totalTiles) {
+        static TileDownloadPlan empty() {
+            return new TileDownloadPlan(List.of(), 0);
+        }
+
+        boolean isEmpty() {
+            return totalTiles <= 0 || ranges.isEmpty();
+        }
+    }
+
+    /**
+     * Прямоугольный диапазон тайлов одного масштаба.
+     */
+    private record TileRange(int zoom, int startX, int endX, int startY, int endY) {
+        long count() {
+            return ((long) endX - startX + 1) * ((long) endY - startY + 1);
         }
     }
 
