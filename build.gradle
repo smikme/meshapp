@@ -452,6 +452,7 @@ def buildPackagingJvmArgs = {
 	jvmArgsList << '$APPDIR/fx'
 	jvmArgsList << "--add-modules"
 	jvmArgsList << "javafx.controls"
+	jvmArgsList << "-DjSerialComm.library.path=\$APPDIR"
 	return jvmArgsList
 }
 
@@ -558,6 +559,40 @@ def preparePackagingLibDir = { os, installDir, stagingRoot ->
 			)
 			logger.lifecycle("packaging: meshapp-ble.dll скопирован в lib/")
 		}
+
+		def arch = System.getProperty('os.arch').toLowerCase(java.util.Locale.ROOT)
+		def jSerialCommArch
+		if (['amd64', 'x86_64'].contains(arch)) {
+			jSerialCommArch = 'x86_64'
+		} else if (['aarch64', 'arm64'].contains(arch)) {
+			jSerialCommArch = 'aarch64'
+		} else if (['x86', 'i386', 'i686'].contains(arch)) {
+			jSerialCommArch = 'x86'
+		} else {
+			throw new GradleException("packaging: unsupported Windows architecture for jSerialComm: ${arch}")
+		}
+		def jSerialCommJar = libDir.listFiles()?.find {
+			it.name ==~ /jSerialComm-[0-9].*\.jar/
+		}
+		if (jSerialCommJar == null) {
+			throw new GradleException("packaging: jSerialComm jar not found in ${libDir}")
+		}
+		def jSerialCommEntryName = "Windows/${jSerialCommArch}/jSerialComm.dll"
+		def jSerialCommDll = new File(libDir, 'jSerialComm.dll')
+		new java.util.jar.JarFile(jSerialCommJar).withCloseable { jarFile ->
+			def entry = jarFile.getEntry(jSerialCommEntryName)
+			if (entry == null) {
+				throw new GradleException("packaging: ${jSerialCommEntryName} not found in ${jSerialCommJar.name}")
+			}
+			jarFile.getInputStream(entry).withCloseable { input ->
+				java.nio.file.Files.copy(
+					input,
+					jSerialCommDll.toPath(),
+					java.nio.file.StandardCopyOption.REPLACE_EXISTING
+				)
+			}
+		}
+		logger.lifecycle("packaging: jSerialComm.dll (${jSerialCommArch}) извлечён в lib/")
 	}
 
 	// Linux: скопировать libmeshapp-ble.so (BlueZ BLE) в lib/ для упаковки

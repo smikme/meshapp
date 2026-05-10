@@ -526,7 +526,7 @@ public class SerialConnection implements MeshtasticConnection, FrameFormatAwareC
                     return port.getDescriptivePortName();
                 }
             }
-        } catch (Exception e) {
+        } catch (LinkageError | Exception e) {
             log.debug("Failed to get descriptive name for {}", systemName, e);
         }
         return systemName;

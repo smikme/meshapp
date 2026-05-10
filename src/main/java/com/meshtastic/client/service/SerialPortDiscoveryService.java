@@ -38,6 +38,7 @@ public final class SerialPortDiscoveryService {
     private final List<Consumer<List<DiscoveredPort>>> listeners = new CopyOnWriteArrayList<>();
     private volatile List<DiscoveredPort> lastDiscoveredPorts = List.of();
     private volatile boolean scanning;
+    private volatile boolean nativeDiscoveryUnavailable;
 
     /**
      * Описание обнаруженного serial-порта.
@@ -106,6 +107,9 @@ public final class SerialPortDiscoveryService {
     }
 
     private void scan() {
+        if (nativeDiscoveryUnavailable) {
+            return;
+        }
         try {
             SerialPort[] ports = SerialPort.getCommPorts();
             List<DiscoveredPort> discovered = new ArrayList<>();
@@ -130,20 +134,28 @@ public final class SerialPortDiscoveryService {
             // Сортировка: вероятные Meshtastic-устройства в начале
             discovered.sort((a, b) -> Boolean.compare(b.likelyMeshtastic, a.likelyMeshtastic));
 
-            // Оповещаем только при изменении списка
-            if (!discovered.equals(lastDiscoveredPorts)) {
-                lastDiscoveredPorts = List.copyOf(discovered);
-                log.debug("Serial ports changed: {}", discovered.size());
-                for (Consumer<List<DiscoveredPort>> listener : listeners) {
-                    try {
-                        listener.accept(lastDiscoveredPorts);
-                    } catch (Exception e) {
-                        log.warn("Error in discovery listener", e);
-                    }
-                }
-            }
+            publishIfChanged(discovered);
+        } catch (LinkageError e) {
+            nativeDiscoveryUnavailable = true;
+            publishIfChanged(List.of());
+            log.warn("Serial port discovery disabled: jSerialComm native library failed to initialize", e);
         } catch (Exception e) {
             log.warn("Serial port scan failed", e);
+        }
+    }
+
+    private void publishIfChanged(List<DiscoveredPort> discovered) {
+        if (discovered.equals(lastDiscoveredPorts)) {
+            return;
+        }
+        lastDiscoveredPorts = List.copyOf(discovered);
+        log.debug("Serial ports changed: {}", discovered.size());
+        for (Consumer<List<DiscoveredPort>> listener : listeners) {
+            try {
+                listener.accept(lastDiscoveredPorts);
+            } catch (Exception e) {
+                log.warn("Error in discovery listener", e);
+            }
         }
     }
 
