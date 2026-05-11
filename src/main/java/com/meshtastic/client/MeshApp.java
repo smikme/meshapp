@@ -11,6 +11,7 @@ import com.meshtastic.client.service.DatabaseProvider;
 import com.meshtastic.client.service.MessageDbService;
 import com.meshtastic.client.service.NodeCacheService;
 import com.meshtastic.client.service.ConnectionManager;
+import com.meshtastic.client.service.BleDeviceDiscoveryService;
 import com.meshtastic.client.service.PacketMonitorService;
 import com.meshtastic.client.service.UpdateCheckService;
 import com.meshtastic.client.system.FormManager;
@@ -311,6 +312,7 @@ public class MeshApp extends Application {
         stopUiWatchdog();
         AppTrayManager.getInstance().dispose();
         ConnectionManager.getInstance().shutdownAll();
+        BleDeviceDiscoveryService.getInstance().dispose();
         SessionCrashLogManager.markNormalShutdown();
         JfrDiagnosticSupport.stop();
         releaseSingleInstanceGuard();

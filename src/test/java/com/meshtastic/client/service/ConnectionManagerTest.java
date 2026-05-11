@@ -28,11 +28,12 @@ import org.meshtastic.proto.MeshProtos;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.lang.reflect.Field;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayDeque;
+import java.util.Queue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -126,7 +127,7 @@ class ConnectionManagerTest {
     @Test
     void connectUsesExplicitMeshCoreCompanionBleRuntime() throws Exception {
         MeshCoreCompanionPlatform platform = new MeshCoreCompanionPlatform();
-        installBlePlatform(platform);
+        installBlePlatformFactory(() -> platform, true);
 
         ConnectionManager manager = ConnectionManager.getInstance();
         ConnectionEntry entry = new ConnectionEntry("meshcore-companion", "AA:BB:CC:DD:EE:FF", "MeshCore Companion");
@@ -151,6 +152,66 @@ class ConnectionManagerTest {
         assertTrue(platform.appStartReceived.await(1, TimeUnit.SECONDS));
 
         manager.disconnect(entry.getId());
+    }
+
+    @Test
+    void connectUsesSeparateBlePlatformForParallelBleConnections() throws Exception {
+        MeshCoreCompanionPlatform firstPlatform =
+                new MeshCoreCompanionPlatform("meshcore-one", (byte) 0xA0);
+        MeshCoreCompanionPlatform secondPlatform =
+                new MeshCoreCompanionPlatform("meshcore-two", (byte) 0xC0);
+        Queue<BlePlatform> platforms = new ArrayDeque<>();
+        platforms.add(firstPlatform);
+        platforms.add(secondPlatform);
+        installBlePlatformFactory(platforms::remove, true);
+
+        ConnectionManager manager = ConnectionManager.getInstance();
+        ConnectionEntry first = new ConnectionEntry("ble-one", "AA:BB:CC:DD:EE:01", "BLE One");
+        first.setProtocol(ProtocolType.MESHCORE_COMPANION);
+        ConnectionEntry second = new ConnectionEntry("ble-two", "AA:BB:CC:DD:EE:02", "BLE Two");
+        second.setProtocol(ProtocolType.MESHCORE_COMPANION);
+        manager.addEntry(first);
+        manager.addEntry(second);
+
+        manager.connect(first.getId());
+        manager.getProtocolReadyFuture(first.getId()).get(5, TimeUnit.SECONDS);
+        manager.connect(second.getId());
+        manager.getProtocolReadyFuture(second.getId()).get(5, TimeUnit.SECONDS);
+
+        assertTrue(first.isConnected());
+        assertTrue(second.isConnected());
+        assertEquals(2, manager.getActiveConnectionEntries().size());
+        assertTrue(firstPlatform.appStartReceived.await(1, TimeUnit.SECONDS));
+        assertTrue(secondPlatform.appStartReceived.await(1, TimeUnit.SECONDS));
+
+        manager.disconnect(second.getId());
+        manager.disconnect(first.getId());
+    }
+
+    @Test
+    void connectRejectsParallelBleWhenPlatformBackendIsSingleton() throws Exception {
+        MeshCoreCompanionPlatform platform = new MeshCoreCompanionPlatform();
+        installBlePlatformFactory(() -> platform, false);
+
+        ConnectionManager manager = ConnectionManager.getInstance();
+        ConnectionEntry first = new ConnectionEntry("ble-one", "AA:BB:CC:DD:EE:01", "BLE One");
+        first.setProtocol(ProtocolType.MESHCORE_COMPANION);
+        ConnectionEntry second = new ConnectionEntry("ble-two", "AA:BB:CC:DD:EE:02", "BLE Two");
+        second.setProtocol(ProtocolType.MESHCORE_COMPANION);
+        manager.addEntry(first);
+        manager.addEntry(second);
+
+        manager.connect(first.getId());
+        manager.getProtocolReadyFuture(first.getId()).get(5, TimeUnit.SECONDS);
+
+        ConnectionException error = assertThrows(ConnectionException.class,
+                () -> manager.connect(second.getId()));
+
+        assertTrue(error.getMessage().contains("Параллельные BLE-подключения"));
+        assertTrue(first.isConnected());
+        assertFalse(second.isConnected());
+
+        manager.disconnect(first.getId());
     }
 
     @Test
@@ -359,7 +420,7 @@ class ConnectionManagerTest {
     @Test
     void removeEntryDoesNotBlockWhileBleConnectIsPending() throws Exception {
         BlockingBlePlatform platform = new BlockingBlePlatform();
-        installBlePlatform(platform);
+        installBlePlatformFactory(() -> platform, true);
 
         ConnectionManager manager = ConnectionManager.getInstance();
         ConnectionEntry entry = new ConnectionEntry("ble", "AA:BB:CC:DD:EE:FF", "Test BLE");
@@ -392,11 +453,11 @@ class ConnectionManagerTest {
                 "late BLE connect should be disconnected after removal");
     }
 
-    private static void installBlePlatform(BlePlatform platform) throws Exception {
+    private static void installBlePlatformFactory(java.util.function.Supplier<BlePlatform> platformFactory,
+                                                  boolean supportsParallelConnections) {
         BleDeviceDiscoveryService discovery = BleDeviceDiscoveryService.getInstance();
-        Field platformField = BleDeviceDiscoveryService.class.getDeclaredField("platform");
-        platformField.setAccessible(true);
-        platformField.set(discovery, platform);
+        discovery.setPlatformFactoryForTests(platformFactory);
+        discovery.setParallelConnectionSupportForTests(supportsParallelConnections);
     }
 
     private static boolean waitUntil(CheckedBooleanSupplier condition, long timeoutMs) throws Exception {
@@ -493,10 +554,21 @@ class ConnectionManagerTest {
 
     private static final class MeshCoreCompanionPlatform implements BlePlatform {
         private final CountDownLatch appStartReceived = new CountDownLatch(1);
+        private final String deviceName;
+        private final byte publicKeyBase;
         private volatile Consumer<byte[]> fromRadioListener;
         private volatile Consumer<BleState> stateListener;
         private volatile BleProtocolProfile profile = BleProtocolProfile.MESHTASTIC;
         private volatile boolean connected;
+
+        private MeshCoreCompanionPlatform() {
+            this("meshcore-companion-test", (byte) 0xA0);
+        }
+
+        private MeshCoreCompanionPlatform(String deviceName, byte publicKeyBase) {
+            this.deviceName = deviceName;
+            this.publicKeyBase = publicKeyBase;
+        }
 
         @Override
         public void startScan(Consumer<BleDevice> onDeviceFound) {
@@ -535,7 +607,7 @@ class ConnectionManagerTest {
                 appStartReceived.countDown();
                 Consumer<byte[]> listener = fromRadioListener;
                 if (listener != null) {
-                    listener.accept(meshCoreSelfInfo("meshcore-companion-test"));
+                    listener.accept(meshCoreSelfInfo(deviceName, publicKeyBase));
                 }
             }
             return connected;
@@ -576,6 +648,10 @@ class ConnectionManagerTest {
     }
 
     private static byte[] meshCoreSelfInfo(String name) {
+        return meshCoreSelfInfo(name, (byte) 0xA0);
+    }
+
+    private static byte[] meshCoreSelfInfo(String name, byte publicKeyBase) {
         byte[] nameBytes = name.getBytes(StandardCharsets.UTF_8);
         byte[] packet = new byte[58 + nameBytes.length];
         packet[0] = (byte) MeshCoreCompanionFrames.PACKET_SELF_INFO;
@@ -583,7 +659,7 @@ class ConnectionManagerTest {
         packet[2] = 10;
         packet[3] = 20;
         for (int i = 0; i < 32; i++) {
-            packet[4 + i] = (byte) (0xA0 + i);
+            packet[4 + i] = (byte) (publicKeyBase + i);
         }
         System.arraycopy(nameBytes, 0, packet, 58, nameBytes.length);
         return packet;

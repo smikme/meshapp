@@ -20,7 +20,8 @@ import java.util.function.Consumer;
  * <p>
  * Паттерн аналогичен {@link com.meshtastic.client.connection.ble.windows.WinBle}:
  * <ul>
- *   <li>Static JNA callbacks для защиты от GC</li>
+ *   <li>Изолированная копия native SO на экземпляр для параллельных BLE-сессий</li>
+ *   <li>Instance JNA callbacks для защиты от GC без перетирания соседних подключений</li>
  *   <li>Polling fallback (200ms) для вычитки fromRadio</li>
  *   <li>Drain chain после каждой записи</li>
  * </ul>
@@ -41,12 +42,12 @@ public class LinuxBle implements BlePlatform {
 
     private final LinuxBleLibrary lib;
 
-    // Static JNA callbacks — prevent GC (same pattern as WinBle/MacOsBle)
-    private static LinuxBleLibrary.LogCallback logCallback;
-    private static LinuxBleLibrary.DeviceCallback scanCallback;
-    private static LinuxBleLibrary.DataCallback dataCallback;
-    private static LinuxBleLibrary.StateCallback stateCallback;
-    private static LinuxBleLibrary.PasskeyRequestCallback passkeyCallback;
+    // Instance callbacks must stay strongly reachable while this isolated SO copy is loaded.
+    private LinuxBleLibrary.LogCallback logCallback;
+    private LinuxBleLibrary.DeviceCallback scanCallback;
+    private LinuxBleLibrary.DataCallback dataCallback;
+    private LinuxBleLibrary.StateCallback stateCallback;
+    private LinuxBleLibrary.PasskeyRequestCallback passkeyCallback;
 
     private volatile Consumer<BleDevice> scanConsumer;
     private volatile Consumer<byte[]> fromRadioListener;
@@ -68,8 +69,8 @@ public class LinuxBle implements BlePlatform {
 
     public LinuxBle() {
         try {
-            lib = LinuxBleLibrary.INSTANCE;
-        } catch (UnsatisfiedLinkError e) {
+            lib = LinuxBleLibrary.loadIsolated();
+        } catch (RuntimeException | UnsatisfiedLinkError e) {
             log.error("Не удалось загрузить libmeshapp-ble.so: {}", e.getMessage());
             throw new UnsupportedOperationException(
                     "libmeshapp-ble.so не найден. BLE на Linux недоступен.", e);

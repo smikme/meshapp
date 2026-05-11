@@ -21,6 +21,12 @@ public final class NativeResourceLoader {
         return LOADED_LIBRARIES.computeIfAbsent(baseName, NativeResourceLoader::extractAndLoadLibrary);
     }
 
+    public static Path extractLibraryResource(String baseName) {
+        String mappedName = System.mapLibraryName(baseName);
+        String resourcePath = "/" + resourcePlatformPrefix() + "/" + mappedName;
+        return extractResource(resourcePath, baseName + "-", mappedName.substring(mappedName.lastIndexOf('.')));
+    }
+
     public static Path extractResource(String resourcePath, String prefix, String suffix) {
         String safePrefix = sanitizePrefix(prefix);
         String safeSuffix = sanitizeSuffix(suffix);
@@ -39,9 +45,7 @@ public final class NativeResourceLoader {
     }
 
     private static Path extractAndLoadLibrary(String baseName) {
-        String mappedName = System.mapLibraryName(baseName);
-        String resourcePath = "/" + resourcePlatformPrefix() + "/" + mappedName;
-        Path libraryPath = extractResource(resourcePath, baseName + "-", mappedName.substring(mappedName.lastIndexOf('.')));
+        Path libraryPath = extractLibraryResource(baseName);
         System.load(libraryPath.toAbsolutePath().toString());
         return libraryPath;
     }

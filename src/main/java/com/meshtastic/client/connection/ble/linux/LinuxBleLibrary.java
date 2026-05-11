@@ -4,6 +4,9 @@ import com.sun.jna.Callback;
 import com.sun.jna.Library;
 import com.sun.jna.Native;
 import com.sun.jna.Pointer;
+import com.meshtastic.client.utils.NativeResourceLoader;
+
+import java.nio.file.Path;
 
 /**
  * JNA-маппинг нативной библиотеки libmeshapp-ble.so (BlueZ BLE через sd-bus).
@@ -20,9 +23,12 @@ import com.sun.jna.Pointer;
  */
 public interface LinuxBleLibrary extends Library {
 
-    LinuxBleLibrary INSTANCE = loadLibrary();
+    static LinuxBleLibrary loadIsolated() {
+        Path libraryPath = NativeResourceLoader.extractLibraryResource("meshapp-ble");
+        return Native.load(libraryPath.toAbsolutePath().toString(), LinuxBleLibrary.class);
+    }
 
-    private static LinuxBleLibrary loadLibrary() {
+    static LinuxBleLibrary loadShared() {
         return Native.load("meshapp-ble", LinuxBleLibrary.class);
     }
 

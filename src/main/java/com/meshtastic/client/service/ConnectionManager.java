@@ -5,6 +5,7 @@ import com.google.gson.GsonBuilder;
 import com.google.gson.reflect.TypeToken;
 import com.meshtastic.client.connection.*;
 import com.meshtastic.client.model.ConnectionEntry;
+import com.meshtastic.client.model.ConnectionType;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.ProtocolType;
 import com.meshtastic.client.protocol.ProtocolRegistry;
@@ -212,6 +213,7 @@ public final class ConnectionManager {
             if (activeConnections.containsKey(id) || pendingConnections.containsKey(id)) {
                 return;
             }
+            ensureBleConcurrencyAllowedLocked(id, entry);
             ensureNoDuplicateNodeConnectionLocked(id, entry);
             validateProtocolTransportCombination(entry, entry.getEffectiveProtocol());
             try {
@@ -492,6 +494,15 @@ public final class ConnectionManager {
      */
     public boolean isConnectionActiveOrPending(String id) {
         return activeConnections.containsKey(id) || pendingConnections.containsKey(id);
+    }
+
+    /**
+     * Проверяет, есть ли открытое или открывающееся BLE transport-подключение.
+     */
+    public boolean hasActiveBleTransport() {
+        synchronized (connectionLock) {
+            return findActiveBleTransportLocked(null) != null;
+        }
     }
 
     /**
@@ -807,6 +818,37 @@ public final class ConnectionManager {
                 + "\" (" + duplicateEntry.getEffectiveType() + ")");
     }
 
+    private void ensureBleConcurrencyAllowedLocked(String id, ConnectionEntry entry) throws ConnectionException {
+        if (entry == null || entry.getEffectiveType() != ConnectionType.BLE) {
+            return;
+        }
+        BleDeviceDiscoveryService discovery = BleDeviceDiscoveryService.getInstance();
+        if (discovery.supportsParallelConnections()) {
+            return;
+        }
+        ConnectionEntry activeBle = findActiveBleTransportLocked(id);
+        if (activeBle == null) {
+            return;
+        }
+        throw new ConnectionException("Параллельные BLE-подключения на этой платформе пока не поддерживаются. "
+                + "Отключите \"" + activeBle.getName() + "\" перед подключением \"" + entry.getName() + "\".");
+    }
+
+    private ConnectionEntry findActiveBleTransportLocked(String excludeId) {
+        for (ConnectionEntry candidate : entries) {
+            if (candidate == null || candidate.getEffectiveType() != ConnectionType.BLE) {
+                continue;
+            }
+            if (excludeId != null && excludeId.equals(candidate.getId())) {
+                continue;
+            }
+            if (activeConnections.containsKey(candidate.getId()) || pendingConnections.containsKey(candidate.getId())) {
+                return candidate;
+            }
+        }
+        return null;
+    }
+
     private ConnectionEntry findDuplicateNodeConnection(String id, String nodeId) {
         String normalizedNodeId = normalizeNodeId(nodeId);
         if (normalizedNodeId == null) {
@@ -906,8 +948,11 @@ public final class ConnectionManager {
      * Создаёт transport по профилю подключения, не запуская протокольную логику.
      */
     private TransportConnection createConnection(ConnectionEntry entry) {
-        return TransportConnectionFactory.create(entry,
-                () -> BleDeviceDiscoveryService.getInstance().getPlatform());
+        BleDeviceDiscoveryService discovery = BleDeviceDiscoveryService.getInstance();
+        return TransportConnectionFactory.create(
+                entry,
+                discovery::createConnectionPlatform,
+                discovery.shouldDisposeConnectionPlatform());
     }
 
     /**

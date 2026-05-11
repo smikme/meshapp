@@ -88,6 +88,20 @@ class BleConnectionTest {
     }
 
     @Test
+    void disconnectDisposesOwnedPlatform() throws ConnectionException {
+        FakePlatform platform = new FakePlatform();
+        platform.connectAction = p -> p.connected = true;
+
+        BleConnection connection = new BleConnection(
+                "device", platform, BleProtocolProfile.MESHTASTIC, true);
+
+        connection.connect();
+        connection.disconnect();
+
+        assertEquals(1, platform.disposeCalls);
+    }
+
+    @Test
     void connectInstallsPasskeyHandlerBeforePlatformConnect() throws ConnectionException {
         FakePlatform platform = new FakePlatform();
         platform.connectAction = p -> {
@@ -329,6 +343,7 @@ class BleConnectionTest {
         private volatile BleProtocolProfile profile = BleProtocolProfile.MESHTASTIC;
         private volatile byte[] lastPayload;
         private int connectCalls;
+        private int disposeCalls;
 
         @Override
         public void startScan(Consumer<BleDevice> onDeviceFound) {
@@ -391,6 +406,7 @@ class BleConnectionTest {
 
         @Override
         public void dispose() {
+            disposeCalls++;
         }
     }
 
