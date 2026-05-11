@@ -1324,6 +1324,7 @@ public class FormSetting extends Form {
                 }
 
                 long epochSeconds = Instant.now().getEpochSecond();
+                MessageService.sendPhoneTimePosition(actionHandler, actionState, epochSeconds);
                 waitForTransportRequiredConfigSaveAck(transport,
                         MessageService.setTimeOnly(actionHandler, actionState, epochSeconds),
                         "setTimeOnly");

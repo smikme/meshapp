@@ -578,6 +578,36 @@ public final class MessageService {
     }
 
     /**
+     * Отправляет текущее Unix-время через {@code POSITION_APP}, как time-only
+     * пакет от локального PhoneAPI-клиента. Часть прошивок обрабатывает время
+     * от телефона именно этим путём, до появления {@code set_time_only}.
+     */
+    public static void sendPhoneTimePosition(ProtocolHandler handler,
+                                             DeviceState state,
+                                             long epochSeconds) {
+        if (handler == null || state == null || state.getMyNodeNum() == 0) {
+            return;
+        }
+
+        MeshProtos.Position position = MeshProtos.Position.newBuilder()
+                .setTime((int) epochSeconds)
+                .build();
+        MeshProtos.Data data = MeshProtos.Data.newBuilder()
+                .setPortnum(Portnums.PortNum.POSITION_APP)
+                .setPayload(position.toByteString())
+                .build();
+        MeshProtos.MeshPacket packet = MeshProtos.MeshPacket.newBuilder()
+                .setFrom(0)
+                .setTo(state.getMyNodeNum())
+                .setDecoded(data)
+                .build();
+
+        handler.sendToRadio(MeshProtos.ToRadio.newBuilder()
+                .setPacket(packet)
+                .build());
+    }
+
+    /**
      * Устанавливает owner info (longName, shortName) на подключённом радио.
      * Требует session_passkey, полученный из предварительного get_owner_request.
      */
@@ -905,8 +935,10 @@ public final class MessageService {
 
         int packetId = ThreadLocalRandom.current().nextInt(1, Integer.MAX_VALUE);
 
+        // PhoneAPI treats from=0 as a local client command; from=myNodeNum is
+        // handled by firmware as remote admin and requires admin-channel/PKI auth.
         MeshProtos.MeshPacket packet = MeshProtos.MeshPacket.newBuilder()
-                .setFrom(state.getMyNodeNum())
+                .setFrom(0)
                 .setTo(state.getMyNodeNum())
                 .setDecoded(data)
                 .setId(packetId)
