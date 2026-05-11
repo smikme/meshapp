@@ -136,6 +136,28 @@ class MessageDbServiceTest {
     }
 
     @Test
+    void messageSearchMatchesRussianWordFormsByStemPrefix() {
+        MeshMessage plural = message("ремонт дверей", 54, 10);
+        MeshMessage adjective = message("дверной замок", 55, 20);
+        MeshMessage unrelated = message("доверие к связи", 56, 30);
+
+        service.save(plural, "channel", "0", "!owner");
+        service.save(adjective, "channel", "0", "!owner");
+        service.save(unrelated, "channel", "0", "!owner");
+
+        MessageDbService.MessageSearchCount count =
+                service.countMessageSearchMatchesLimited("channel", "0", "дверь", "!owner");
+        assertEquals(2, count.count());
+        assertFalse(count.limited());
+        assertEquals(adjective.getDbId(),
+                service.findLatestMessageSearchMatch("channel", "0", "дверь", "!owner"));
+        assertEquals(plural.getDbId(),
+                service.findPreviousMessageSearchMatch("channel", "0", "дверь", "!owner", adjective.getDbId()));
+        assertTrue(service.messageMatchesSearch("channel", "0", "дверь", "!owner", adjective.getDbId()));
+        assertFalse(service.messageMatchesSearch("channel", "0", "дверь", "!owner", unrelated.getDbId()));
+    }
+
+    @Test
     void messageSearchRequiresAllFullTextTermsInsideChatScope() {
         MeshMessage alphaPayload = message("alpha payload", 47, 10);
         MeshMessage alphaOnly = message("alpha", 48, 20);

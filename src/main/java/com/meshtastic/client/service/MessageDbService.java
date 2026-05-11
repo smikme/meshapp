@@ -32,6 +32,16 @@ public final class MessageDbService {
     private static final int MESSAGE_SEARCH_CANDIDATE_BATCH_SIZE = 256;
     private static final int MESSAGE_SEARCH_COUNT_LIMIT = 1000;
     private static final int MESSAGE_SEARCH_COUNT_CANDIDATE_LIMIT = 16_384;
+    private static final int MESSAGE_SEARCH_WORD_ALTERNATIVE_LIMIT = 128;
+    private static final int MESSAGE_SEARCH_MIN_PREFIX_LENGTH = 4;
+    private static final List<String> RUSSIAN_SEARCH_SUFFIXES = List.of(
+            "ОСТЯМИ", "ОСТЯХ", "ОСТЯМ", "ОСТЕЙ",
+            "ИЯМИ", "ИЯХ", "ИЯМ", "ИЕЙ",
+            "НОГО", "НОМУ", "НЫМИ",
+            "АМИ", "ЯМИ", "ЕГО", "ОГО", "ЕМУ", "ОМУ", "ЫМИ", "ИМИ",
+            "НОЙ", "НАЯ", "НОЕ", "НЫЕ", "НЫЙ", "НЫМ", "НЫХ",
+            "НУЮ", "ЬЮ", "ЕЙ", "ИЙ", "ЫЙ", "ОЙ", "АЯ", "ЯЯ", "ОЕ", "ЕЕ", "ЫЕ", "ИЕ",
+            "ОМ", "ЕМ", "АМ", "ЯМ", "АХ", "ЯХ", "ОВ", "ЕВ", "ИЯ", "ИЕ", "ИЙ");
 
     private static MessageDbService instance;
 
@@ -772,23 +782,36 @@ public final class MessageDbService {
         if (rowId == null) {
             return false;
         }
-        String placeholders = String.join(", ", Collections.nCopies(searchQuery.wordIds().size(), "?"));
+        for (List<Integer> wordIdGroup : searchQuery.wordIdGroups()) {
+            if (!fullTextRowContainsAnyWord(rowId, wordIdGroup)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private boolean fullTextRowContainsAnyWord(long rowId, List<Integer> wordIds) {
+        if (wordIds.isEmpty()) {
+            return false;
+        }
+        String placeholders = placeholders(wordIds.size());
         try (PreparedStatement ps = dbConnection.prepareStatement("""
-                SELECT COUNT(DISTINCT WORDID)
+                SELECT 1
                 FROM FT.MAP
                 WHERE ROWID = ?
                   AND WORDID IN (%s)
+                LIMIT 1
                 """.formatted(placeholders))) {
             int parameterIndex = 1;
             ps.setLong(parameterIndex++, rowId);
-            for (Integer wordId : searchQuery.wordIds()) {
+            for (Integer wordId : wordIds) {
                 ps.setInt(parameterIndex++, wordId);
             }
             try (ResultSet rs = ps.executeQuery()) {
-                return rs.next() && rs.getInt(1) == searchQuery.wordIds().size();
+                return rs.next();
             }
         } catch (SQLException e) {
-            log.error("Failed to check message search match ({}, {}, {})", chatType, chatKey, dbId, e);
+            log.error("Failed to check fulltext row words ({})", rowId, e);
             return false;
         }
     }
@@ -1105,33 +1128,39 @@ public final class MessageDbService {
     private List<FullTextCandidate> loadFullTextCandidates(MessageSearchQuery searchQuery,
                                                            long cursorRowId,
                                                            boolean newestFirst) {
-        if (searchQuery.wordIds().isEmpty()) {
+        if (searchQuery.wordIdGroups().isEmpty() || searchQuery.wordIdGroups().getFirst().isEmpty()) {
             return List.of();
         }
 
+        List<Integer> firstWordIdGroup = searchQuery.wordIdGroups().getFirst();
         String sql = """
-                SELECT ft_map.ROWID, ft_row."KEY"
+                SELECT DISTINCT ft_map.ROWID, ft_row."KEY"
                 FROM FT.MAP ft_map
                 JOIN FT.ROWS ft_row
                   ON ft_row.ID = ft_map.ROWID
-                WHERE ft_map.WORDID = ?
+                WHERE ft_map.WORDID IN (%s)
                   AND ft_map.ROWID %s ?
                   AND ft_row.INDEXID = ?
                   %s
                 ORDER BY ft_map.ROWID %s
                 LIMIT ?
                 """.formatted(
+                placeholders(firstWordIdGroup.size()),
                 newestFirst ? "<" : ">",
                 additionalFullTextTermClauses(searchQuery),
                 newestFirst ? "DESC" : "ASC");
         List<FullTextCandidate> candidates = new ArrayList<>(MESSAGE_SEARCH_CANDIDATE_BATCH_SIZE);
         try (PreparedStatement ps = dbConnection.prepareStatement(sql)) {
             int parameterIndex = 1;
-            ps.setInt(parameterIndex++, searchQuery.wordIds().getFirst());
+            for (Integer wordId : firstWordIdGroup) {
+                ps.setInt(parameterIndex++, wordId);
+            }
             ps.setLong(parameterIndex++, cursorRowId);
             ps.setInt(parameterIndex++, searchQuery.indexId());
-            for (int i = 1; i < searchQuery.wordIds().size(); i++) {
-                ps.setInt(parameterIndex++, searchQuery.wordIds().get(i));
+            for (int i = 1; i < searchQuery.wordIdGroups().size(); i++) {
+                for (Integer wordId : searchQuery.wordIdGroups().get(i)) {
+                    ps.setInt(parameterIndex++, wordId);
+                }
             }
             ps.setInt(parameterIndex, MESSAGE_SEARCH_CANDIDATE_BATCH_SIZE);
             try (ResultSet rs = ps.executeQuery()) {
@@ -1150,16 +1179,16 @@ public final class MessageDbService {
 
     private static String additionalFullTextTermClauses(MessageSearchQuery searchQuery) {
         StringBuilder sql = new StringBuilder();
-        for (int i = 1; i < searchQuery.wordIds().size(); i++) {
+        for (int i = 1; i < searchQuery.wordIdGroups().size(); i++) {
             sql.append("""
 
                   AND EXISTS (
                       SELECT 1
                       FROM FT.MAP other_map
-                      WHERE other_map.WORDID = ?
+                      WHERE other_map.WORDID IN (%s)
                         AND other_map.ROWID = ft_map.ROWID
                   )
-                    """);
+                    """.formatted(placeholders(searchQuery.wordIdGroups().get(i).size())));
         }
         return sql.toString();
     }
@@ -1243,28 +1272,64 @@ public final class MessageDbService {
             if (indexId == null) {
                 return null;
             }
-            List<Integer> wordIds = fullTextWordIds(terms);
-            return wordIds.size() == terms.size() ? new MessageSearchQuery(indexId, wordIds) : null;
+            List<List<Integer>> wordIdGroups = fullTextWordIdGroups(terms);
+            return wordIdGroups.size() == terms.size() ? new MessageSearchQuery(indexId, wordIdGroups) : null;
         } catch (SQLException e) {
             log.error("Failed to resolve message fulltext index id", e);
             return null;
         }
     }
 
-    private List<Integer> fullTextWordIds(List<String> terms) throws SQLException {
-        List<Integer> wordIds = new ArrayList<>(terms.size());
+    private List<List<Integer>> fullTextWordIdGroups(List<String> terms) throws SQLException {
+        List<List<Integer>> wordIdGroups = new ArrayList<>(terms.size());
+        for (String term : terms) {
+            List<Integer> wordIds = fullTextWordIdsForTerm(term);
+            if (wordIds.isEmpty()) {
+                return List.of();
+            }
+            wordIdGroups.add(wordIds);
+        }
+        return wordIdGroups;
+    }
+
+    private List<Integer> fullTextWordIdsForTerm(String term) throws SQLException {
+        LinkedHashSet<Integer> wordIds = new LinkedHashSet<>();
+        addExactFullTextWordId(term, wordIds);
+
+        String prefix = searchPrefixForTerm(term);
+        if (prefix.length() >= MESSAGE_SEARCH_MIN_PREFIX_LENGTH && containsCyrillic(prefix)) {
+            addPrefixFullTextWordIds(prefix, wordIds);
+        }
+        return List.copyOf(wordIds);
+    }
+
+    private void addExactFullTextWordId(String term, Set<Integer> wordIds) throws SQLException {
         try (PreparedStatement ps = dbConnection.prepareStatement("SELECT ID FROM FT.WORDS WHERE NAME = ?")) {
-            for (String term : terms) {
-                ps.setString(1, term);
-                try (ResultSet rs = ps.executeQuery()) {
-                    if (!rs.next()) {
-                        return List.of();
-                    }
+            ps.setString(1, term);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
                     wordIds.add(rs.getInt("ID"));
                 }
             }
         }
-        return wordIds;
+    }
+
+    private void addPrefixFullTextWordIds(String prefix, Set<Integer> wordIds) throws SQLException {
+        try (PreparedStatement ps = dbConnection.prepareStatement("""
+                SELECT ID
+                FROM FT.WORDS
+                WHERE NAME LIKE ?
+                ORDER BY NAME
+                LIMIT ?
+                """)) {
+            ps.setString(1, prefix + "%");
+            ps.setInt(2, MESSAGE_SEARCH_WORD_ALTERNATIVE_LIMIT);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    wordIds.add(rs.getInt("ID"));
+                }
+            }
+        }
     }
 
     private static int bindMessageSearchScope(PreparedStatement ps,
@@ -1295,6 +1360,51 @@ public final class MessageDbService {
         return fromNodeId != null && !fromNodeId.isBlank();
     }
 
+    private static String placeholders(int count) {
+        return String.join(", ", Collections.nCopies(count, "?"));
+    }
+
+    private static String searchPrefixForTerm(String term) {
+        if (term == null || term.isBlank() || !containsCyrillic(term)) {
+            return term != null ? term : "";
+        }
+        for (String suffix : RUSSIAN_SEARCH_SUFFIXES) {
+            if (term.endsWith(suffix) && term.length() - suffix.length() >= MESSAGE_SEARCH_MIN_PREFIX_LENGTH) {
+                return term.substring(0, term.length() - suffix.length());
+            }
+        }
+        char lastChar = term.charAt(term.length() - 1);
+        if ((lastChar == 'Ь' || lastChar == 'Ъ' || lastChar == 'Й')
+                && term.length() - 1 >= MESSAGE_SEARCH_MIN_PREFIX_LENGTH) {
+            return term.substring(0, term.length() - 1);
+        }
+        if (isRussianVowel(lastChar) && term.length() - 1 >= MESSAGE_SEARCH_MIN_PREFIX_LENGTH) {
+            return term.substring(0, term.length() - 1);
+        }
+        return term;
+    }
+
+    private static boolean isRussianVowel(char value) {
+        return "АЕЁИОУЫЭЮЯ".indexOf(value) >= 0;
+    }
+
+    private static boolean containsCyrillic(String value) {
+        if (value == null) {
+            return false;
+        }
+        for (int i = 0; i < value.length(); i++) {
+            Character.UnicodeBlock block = Character.UnicodeBlock.of(value.charAt(i));
+            if (block == Character.UnicodeBlock.CYRILLIC
+                    || block == Character.UnicodeBlock.CYRILLIC_SUPPLEMENTARY
+                    || block == Character.UnicodeBlock.CYRILLIC_EXTENDED_A
+                    || block == Character.UnicodeBlock.CYRILLIC_EXTENDED_B
+                    || block == Character.UnicodeBlock.CYRILLIC_EXTENDED_C) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private static List<String> parseFullTextSearchTerms(String query) {
         if (query == null || query.isBlank()) {
             return List.of();
@@ -1310,7 +1420,7 @@ public final class MessageDbService {
         return List.copyOf(terms);
     }
 
-    private record MessageSearchQuery(int indexId, List<Integer> wordIds) {}
+    private record MessageSearchQuery(int indexId, List<List<Integer>> wordIdGroups) {}
 
     private record FullTextCandidate(long rowId, long messageId) {}
 
