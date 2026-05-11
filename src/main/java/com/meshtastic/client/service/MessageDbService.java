@@ -28,6 +28,10 @@ import java.util.*;
 public final class MessageDbService {
 
     private static final Logger log = LoggerFactory.getLogger(MessageDbService.class);
+    private static final String H2_FULLTEXT_WHITESPACE = " \t\n\r\f+\"*%&/()=?'!,.;:-_#@|^~`{}[]<>\\";
+    private static final int MESSAGE_SEARCH_CANDIDATE_BATCH_SIZE = 256;
+    private static final int MESSAGE_SEARCH_COUNT_LIMIT = 1000;
+    private static final int MESSAGE_SEARCH_COUNT_CANDIDATE_LIMIT = 16_384;
 
     private static MessageDbService instance;
 
@@ -145,6 +149,7 @@ public final class MessageDbService {
                     )
                     """);
             }
+            ensureMessageFullTextIndex();
 
             insertStmt = dbConnection.prepareStatement("""
                 INSERT INTO messages (chat_type, chat_key, from_node_id, to_node_id, channel_idx,
@@ -175,6 +180,21 @@ public final class MessageDbService {
             log.info("Message DB initialized (table 'messages' in nodedb)");
         } catch (Exception e) {
             log.error("Failed to initialize message DB", e);
+        }
+    }
+
+    /**
+     * Проверяет наличие полнотекстового индекса сообщений на старте сервиса.
+     * <p>
+     * Основной путь создания индекса — миграция БД, но эта проверка оставлена
+     * для новых баз и для восстановления после ручного повреждения служебных
+     * объектов H2 full-text.
+     */
+    private void ensureMessageFullTextIndex() {
+        try {
+            MessageFullTextIndex.ensureExists(dbConnection);
+        } catch (SQLException e) {
+            log.error("Failed to initialize fulltext index for messages", e);
         }
     }
 
@@ -637,6 +657,38 @@ public final class MessageDbService {
         return result;
     }
 
+    /**
+     * Загружает одно сообщение чата по id БД.
+     *
+     * @param chatType    "channel" или "dm"
+     * @param chatKey     channelIndex (как строка) или peerNodeId
+     * @param dbId        id сообщения в БД
+     * @param ownerNodeId nodeId устройства-владельца
+     * @return сообщение или {@code null}, если оно не принадлежит указанному чату
+     */
+    public MeshMessage findByDbId(String chatType, String chatKey, long dbId, String ownerNodeId) {
+        if (dbConnection == null || dbId <= 0) { return null; }
+        try (PreparedStatement ps = dbConnection.prepareStatement("""
+                SELECT * FROM messages
+                WHERE owner_node_id = ?
+                  AND chat_type = ?
+                  AND chat_key = ?
+                  AND id = ?
+                LIMIT 1
+                """)) {
+            ps.setString(1, ownerNodeId != null ? ownerNodeId : "");
+            ps.setString(2, chatType);
+            ps.setString(3, chatKey);
+            ps.setLong(4, dbId);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next() ? readMessage(rs) : null;
+            }
+        } catch (SQLException e) {
+            log.error("Failed to find message by dbId {} ({}, {})", dbId, chatType, chatKey, e);
+            return null;
+        }
+    }
+
     // ═══════════════════════════════════════════════════════════
     //  Чтение — поиск и метаданные
     // ═══════════════════════════════════════════════════════════
@@ -676,6 +728,600 @@ public final class MessageDbService {
         }
         return result;
     }
+
+    /**
+     * Проверяет, совпадает ли конкретное сообщение с поисковым запросом.
+     *
+     * @param chatType    тип чата
+     * @param chatKey     ключ чата
+     * @param query       поисковая строка
+     * @param ownerNodeId nodeId устройства-владельца
+     * @param dbId        id сообщения в БД
+     * @return {@code true}, если сообщение найдено full-text индексом
+     */
+    public boolean messageMatchesSearch(String chatType, String chatKey, String query, String ownerNodeId, long dbId) {
+        return messageMatchesSearch(chatType, chatKey, query, ownerNodeId, null, dbId);
+    }
+
+    /**
+     * Проверяет, совпадает ли конкретное сообщение с поисковым запросом и
+     * опциональным фильтром автора.
+     *
+     * @param chatType    тип чата
+     * @param chatKey     ключ чата
+     * @param query       поисковая строка
+     * @param ownerNodeId nodeId устройства-владельца
+     * @param fromNodeId  nodeId автора сообщения; пустое значение отключает фильтр
+     * @param dbId        id сообщения в БД
+     * @return {@code true}, если сообщение найдено full-text индексом
+     */
+    public boolean messageMatchesSearch(String chatType,
+                                        String chatKey,
+                                        String query,
+                                        String ownerNodeId,
+                                        String fromNodeId,
+                                        long dbId) {
+        if (dbId <= 0) {
+            return false;
+        }
+        MessageSearchQuery searchQuery = prepareMessageSearchQuery(query);
+        if (searchQuery == null || !messageExistsInChat(chatType, chatKey, ownerNodeId, fromNodeId, dbId)) {
+            return false;
+        }
+        Long rowId = fullTextRowIdForMessage(searchQuery.indexId(), dbId);
+        if (rowId == null) {
+            return false;
+        }
+        String placeholders = String.join(", ", Collections.nCopies(searchQuery.wordIds().size(), "?"));
+        try (PreparedStatement ps = dbConnection.prepareStatement("""
+                SELECT COUNT(DISTINCT WORDID)
+                FROM FT.MAP
+                WHERE ROWID = ?
+                  AND WORDID IN (%s)
+                """.formatted(placeholders))) {
+            int parameterIndex = 1;
+            ps.setLong(parameterIndex++, rowId);
+            for (Integer wordId : searchQuery.wordIds()) {
+                ps.setInt(parameterIndex++, wordId);
+            }
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next() && rs.getInt(1) == searchQuery.wordIds().size();
+            }
+        } catch (SQLException e) {
+            log.error("Failed to check message search match ({}, {}, {})", chatType, chatKey, dbId, e);
+            return false;
+        }
+    }
+
+    /**
+     * Считает совпадения поиска через полнотекстовый индекс с верхним лимитом.
+     * <p>
+     * Точный {@code COUNT(*)} по частому слову может проходить очень большой
+     * набор FT-строк. Поэтому UI получает точное число только в обычных
+     * сценариях, а для слишком частых запросов — ограниченное значение с
+     * признаком {@link MessageSearchCount#limited()}.
+     *
+     * @param chatType    тип чата
+     * @param chatKey     ключ чата
+     * @param query       поисковая строка
+     * @param ownerNodeId nodeId устройства-владельца
+     * @return количество совпадений, возможно ограниченное сверху
+     */
+    public MessageSearchCount countMessageSearchMatchesLimited(String chatType,
+                                                               String chatKey,
+                                                               String query,
+                                                               String ownerNodeId) {
+        return countMessageSearchMatchesLimited(chatType, chatKey, query, ownerNodeId, null);
+    }
+
+    /**
+     * Считает совпадения поиска через полнотекстовый индекс с верхним лимитом
+     * и опциональным фильтром автора сообщения.
+     *
+     * @param chatType    тип чата
+     * @param chatKey     ключ чата
+     * @param query       поисковая строка
+     * @param ownerNodeId nodeId устройства-владельца
+     * @param fromNodeId  nodeId автора сообщения; пустое значение отключает фильтр
+     * @return количество совпадений, возможно ограниченное сверху
+     */
+    public MessageSearchCount countMessageSearchMatchesLimited(String chatType,
+                                                               String chatKey,
+                                                               String query,
+                                                               String ownerNodeId,
+                                                               String fromNodeId) {
+        MessageSearchQuery searchQuery = prepareMessageSearchQuery(query);
+        if (searchQuery == null || chatType == null || chatKey == null) {
+            return new MessageSearchCount(0, false);
+        }
+
+        int count = 0;
+        int scannedCandidates = 0;
+        long cursorRowId = 0;
+        while (count < MESSAGE_SEARCH_COUNT_LIMIT
+                && scannedCandidates < MESSAGE_SEARCH_COUNT_CANDIDATE_LIMIT) {
+            List<FullTextCandidate> candidates = loadFullTextCandidates(searchQuery, cursorRowId, false);
+            if (candidates.isEmpty()) {
+                return new MessageSearchCount(count, false);
+            }
+
+            count += countScopedCandidateMessages(candidates, chatType, chatKey, ownerNodeId, fromNodeId);
+            scannedCandidates += candidates.size();
+            cursorRowId = candidates.getLast().rowId();
+        }
+        return new MessageSearchCount(Math.min(count, MESSAGE_SEARCH_COUNT_LIMIT), true);
+    }
+
+    private int countScopedCandidateMessages(List<FullTextCandidate> candidates,
+                                             String chatType,
+                                             String chatKey,
+                                             String ownerNodeId,
+                                             String fromNodeId) {
+        if (candidates.isEmpty()) {
+            return 0;
+        }
+
+        String placeholders = String.join(", ", Collections.nCopies(candidates.size(), "?"));
+        String sql = """
+                SELECT COUNT(*)
+                FROM messages m
+                WHERE m.owner_node_id = ?
+                  AND m.chat_type = ?
+                  AND m.chat_key = ?
+                  %s
+                  AND m.id IN (%s)
+                """.formatted(senderFilterClause(fromNodeId), placeholders);
+        try (PreparedStatement ps = dbConnection.prepareStatement(sql)) {
+            int parameterIndex = bindMessageSearchScope(ps, ownerNodeId, chatType, chatKey, 1);
+            parameterIndex = bindSenderFilter(ps, fromNodeId, parameterIndex);
+            for (FullTextCandidate candidate : candidates) {
+                ps.setLong(parameterIndex++, candidate.messageId());
+            }
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next() ? Math.max(0, rs.getInt(1)) : 0;
+            }
+        } catch (SQLException e) {
+            log.error("Failed to count scoped message search candidates ({}, {})", chatType, chatKey, e);
+            return 0;
+        }
+    }
+
+    private boolean messageExistsInChat(String chatType, String chatKey, String ownerNodeId, long dbId) {
+        return messageExistsInChat(chatType, chatKey, ownerNodeId, null, dbId);
+    }
+
+    private boolean messageExistsInChat(String chatType,
+                                        String chatKey,
+                                        String ownerNodeId,
+                                        String fromNodeId,
+                                        long dbId) {
+        if (dbConnection == null || chatType == null || chatKey == null || dbId <= 0) {
+            return false;
+        }
+        try (PreparedStatement ps = dbConnection.prepareStatement("""
+                SELECT 1
+                FROM messages
+                WHERE owner_node_id = ?
+                  AND chat_type = ?
+                  AND chat_key = ?
+                  %s
+                  AND id = ?
+                LIMIT 1
+                """.formatted(senderFilterClause(fromNodeId)))) {
+            ps.setString(1, ownerNodeId != null ? ownerNodeId : "");
+            ps.setString(2, chatType);
+            ps.setString(3, chatKey);
+            int parameterIndex = bindSenderFilter(ps, fromNodeId, 4);
+            ps.setLong(parameterIndex, dbId);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next();
+            }
+        } catch (SQLException e) {
+            log.error("Failed to check message scope ({}, {}, {})", chatType, chatKey, dbId, e);
+            return false;
+        }
+    }
+
+    /**
+     * Находит самое новое сообщение, совпадающее с поисковым запросом.
+     *
+     * @param chatType    тип чата
+     * @param chatKey     ключ чата
+     * @param query       поисковая строка
+     * @param ownerNodeId nodeId устройства-владельца
+     * @return id сообщения или {@code 0}, если совпадений нет
+     */
+    public long findLatestMessageSearchMatch(String chatType, String chatKey, String query, String ownerNodeId) {
+        return findLatestMessageSearchMatch(chatType, chatKey, query, ownerNodeId, null);
+    }
+
+    /**
+     * Находит самое новое сообщение, совпадающее с поисковым запросом и
+     * опциональным фильтром автора.
+     *
+     * @param chatType    тип чата
+     * @param chatKey     ключ чата
+     * @param query       поисковая строка
+     * @param ownerNodeId nodeId устройства-владельца
+     * @param fromNodeId  nodeId автора сообщения; пустое значение отключает фильтр
+     * @return id сообщения или {@code 0}, если совпадений нет
+     */
+    public long findLatestMessageSearchMatch(String chatType,
+                                             String chatKey,
+                                             String query,
+                                             String ownerNodeId,
+                                             String fromNodeId) {
+        return findMessageSearchMatch(chatType, chatKey, query, ownerNodeId, fromNodeId, 0, null, "DESC");
+    }
+
+    /**
+     * Находит ближайшее предыдущее совпадение перед указанным сообщением.
+     *
+     * @param chatType    тип чата
+     * @param chatKey     ключ чата
+     * @param query       поисковая строка
+     * @param ownerNodeId nodeId устройства-владельца
+     * @param beforeDbId  id сообщения, перед которым нужно искать
+     * @return id сообщения или {@code 0}, если предыдущего совпадения нет
+     */
+    public long findPreviousMessageSearchMatch(String chatType,
+                                               String chatKey,
+                                               String query,
+                                               String ownerNodeId,
+                                               long beforeDbId) {
+        if (beforeDbId <= 0) {
+            return 0;
+        }
+        return findPreviousMessageSearchMatch(chatType, chatKey, query, ownerNodeId, null, beforeDbId);
+    }
+
+    /**
+     * Находит ближайшее предыдущее совпадение перед указанным сообщением с
+     * опциональным фильтром автора.
+     *
+     * @param chatType    тип чата
+     * @param chatKey     ключ чата
+     * @param query       поисковая строка
+     * @param ownerNodeId nodeId устройства-владельца
+     * @param fromNodeId  nodeId автора сообщения; пустое значение отключает фильтр
+     * @param beforeDbId  id сообщения, перед которым нужно искать
+     * @return id сообщения или {@code 0}, если предыдущего совпадения нет
+     */
+    public long findPreviousMessageSearchMatch(String chatType,
+                                               String chatKey,
+                                               String query,
+                                               String ownerNodeId,
+                                               String fromNodeId,
+                                               long beforeDbId) {
+        if (beforeDbId <= 0) {
+            return 0;
+        }
+        return findMessageSearchMatch(chatType, chatKey, query, ownerNodeId, fromNodeId, beforeDbId, "m.id < ?", "DESC");
+    }
+
+    /**
+     * Находит ближайшее следующее совпадение после указанного сообщения.
+     *
+     * @param chatType    тип чата
+     * @param chatKey     ключ чата
+     * @param query       поисковая строка
+     * @param ownerNodeId nodeId устройства-владельца
+     * @param afterDbId   id сообщения, после которого нужно искать
+     * @return id сообщения или {@code 0}, если следующего совпадения нет
+     */
+    public long findNextMessageSearchMatch(String chatType,
+                                           String chatKey,
+                                           String query,
+                                           String ownerNodeId,
+                                           long afterDbId) {
+        if (afterDbId <= 0) {
+            return 0;
+        }
+        return findNextMessageSearchMatch(chatType, chatKey, query, ownerNodeId, null, afterDbId);
+    }
+
+    /**
+     * Находит ближайшее следующее совпадение после указанного сообщения с
+     * опциональным фильтром автора.
+     *
+     * @param chatType    тип чата
+     * @param chatKey     ключ чата
+     * @param query       поисковая строка
+     * @param ownerNodeId nodeId устройства-владельца
+     * @param fromNodeId  nodeId автора сообщения; пустое значение отключает фильтр
+     * @param afterDbId   id сообщения, после которого нужно искать
+     * @return id сообщения или {@code 0}, если следующего совпадения нет
+     */
+    public long findNextMessageSearchMatch(String chatType,
+                                           String chatKey,
+                                           String query,
+                                           String ownerNodeId,
+                                           String fromNodeId,
+                                           long afterDbId) {
+        if (afterDbId <= 0) {
+            return 0;
+        }
+        return findMessageSearchMatch(chatType, chatKey, query, ownerNodeId, fromNodeId, afterDbId, "m.id > ?", "ASC");
+    }
+
+    private long findMessageSearchMatch(String chatType,
+                                        String chatKey,
+                                        String query,
+                                        String ownerNodeId,
+                                        String fromNodeId,
+                                        long boundDbId,
+                                        String boundClause,
+                                        String sortDirection) {
+        MessageSearchQuery searchQuery = prepareMessageSearchQuery(query);
+        if (searchQuery == null || chatType == null || chatKey == null) {
+            return 0;
+        }
+
+        boolean newestFirst = "DESC".equals(sortDirection);
+        Long rowIdBound = boundDbId > 0 ? fullTextRowIdForMessage(searchQuery.indexId(), boundDbId) : null;
+        long cursorRowId = rowIdBound != null
+                ? rowIdBound
+                : newestFirst ? Long.MAX_VALUE : 0;
+        while (true) {
+            List<FullTextCandidate> candidates = loadFullTextCandidates(searchQuery, cursorRowId, newestFirst);
+            if (candidates.isEmpty()) {
+                return 0;
+            }
+            long messageId = firstScopedCandidateMessageId(
+                    candidates,
+                    chatType,
+                    chatKey,
+                    ownerNodeId,
+                    fromNodeId,
+                    boundDbId,
+                    boundClause,
+                    sortDirection);
+            if (messageId > 0) {
+                return messageId;
+            }
+            cursorRowId = candidates.getLast().rowId();
+        }
+    }
+
+    private Long fullTextRowIdForMessage(int indexId, long dbId) {
+        try (PreparedStatement ps = dbConnection.prepareStatement("""
+                SELECT ID
+                FROM FT.ROWS
+                WHERE INDEXID = ?
+                  AND "KEY" = ?
+                LIMIT 1
+                """)) {
+            ps.setInt(1, indexId);
+            ps.setString(2, fullTextMessageKey(dbId));
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next() ? rs.getLong("ID") : null;
+            }
+        } catch (SQLException e) {
+            log.error("Failed to resolve fulltext row id for message {}", dbId, e);
+            return null;
+        }
+    }
+
+    private List<FullTextCandidate> loadFullTextCandidates(MessageSearchQuery searchQuery,
+                                                           long cursorRowId,
+                                                           boolean newestFirst) {
+        if (searchQuery.wordIds().isEmpty()) {
+            return List.of();
+        }
+
+        String sql = """
+                SELECT ft_map.ROWID, ft_row."KEY"
+                FROM FT.MAP ft_map
+                JOIN FT.ROWS ft_row
+                  ON ft_row.ID = ft_map.ROWID
+                WHERE ft_map.WORDID = ?
+                  AND ft_map.ROWID %s ?
+                  AND ft_row.INDEXID = ?
+                  %s
+                ORDER BY ft_map.ROWID %s
+                LIMIT ?
+                """.formatted(
+                newestFirst ? "<" : ">",
+                additionalFullTextTermClauses(searchQuery),
+                newestFirst ? "DESC" : "ASC");
+        List<FullTextCandidate> candidates = new ArrayList<>(MESSAGE_SEARCH_CANDIDATE_BATCH_SIZE);
+        try (PreparedStatement ps = dbConnection.prepareStatement(sql)) {
+            int parameterIndex = 1;
+            ps.setInt(parameterIndex++, searchQuery.wordIds().getFirst());
+            ps.setLong(parameterIndex++, cursorRowId);
+            ps.setInt(parameterIndex++, searchQuery.indexId());
+            for (int i = 1; i < searchQuery.wordIds().size(); i++) {
+                ps.setInt(parameterIndex++, searchQuery.wordIds().get(i));
+            }
+            ps.setInt(parameterIndex, MESSAGE_SEARCH_CANDIDATE_BATCH_SIZE);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    long messageId = parseFullTextMessageId(rs.getString("KEY"));
+                    if (messageId > 0) {
+                        candidates.add(new FullTextCandidate(rs.getLong("ROWID"), messageId));
+                    }
+                }
+            }
+        } catch (SQLException e) {
+            log.error("Failed to load fulltext search candidates", e);
+        }
+        return candidates;
+    }
+
+    private static String additionalFullTextTermClauses(MessageSearchQuery searchQuery) {
+        StringBuilder sql = new StringBuilder();
+        for (int i = 1; i < searchQuery.wordIds().size(); i++) {
+            sql.append("""
+
+                  AND EXISTS (
+                      SELECT 1
+                      FROM FT.MAP other_map
+                      WHERE other_map.WORDID = ?
+                        AND other_map.ROWID = ft_map.ROWID
+                  )
+                    """);
+        }
+        return sql.toString();
+    }
+
+    private long firstScopedCandidateMessageId(List<FullTextCandidate> candidates,
+                                               String chatType,
+                                               String chatKey,
+                                               String ownerNodeId,
+                                               String fromNodeId,
+                                               long boundDbId,
+                                               String boundClause,
+                                               String sortDirection) {
+        if (candidates.isEmpty()) {
+            return 0;
+        }
+
+        String placeholders = String.join(", ", Collections.nCopies(candidates.size(), "?"));
+        String sql = """
+                SELECT m.id
+                FROM messages m
+                WHERE m.owner_node_id = ?
+                  AND m.chat_type = ?
+                  AND m.chat_key = ?
+                  %s
+                  %s
+                  AND m.id IN (%s)
+                ORDER BY m.id %s
+                LIMIT 1
+                """.formatted(
+                senderFilterClause(fromNodeId),
+                boundClause == null ? "" : "AND " + boundClause,
+                placeholders,
+                sortDirection);
+        try (PreparedStatement ps = dbConnection.prepareStatement(sql)) {
+            int parameterIndex = bindMessageSearchScope(ps, ownerNodeId, chatType, chatKey, 1);
+            parameterIndex = bindSenderFilter(ps, fromNodeId, parameterIndex);
+            if (boundClause != null) {
+                ps.setLong(parameterIndex++, boundDbId);
+            }
+            for (FullTextCandidate candidate : candidates) {
+                ps.setLong(parameterIndex++, candidate.messageId());
+            }
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next() ? rs.getLong("id") : 0;
+            }
+        } catch (SQLException e) {
+            log.error("Failed to filter message search candidates ({}, {})", chatType, chatKey, e);
+            return 0;
+        }
+    }
+
+    private static String fullTextMessageKey(long dbId) {
+        return "\"ID\"=" + dbId;
+    }
+
+    private static long parseFullTextMessageId(String key) {
+        if (key == null) {
+            return 0;
+        }
+        int delimiter = key.lastIndexOf('=');
+        if (delimiter < 0 || delimiter >= key.length() - 1) {
+            return 0;
+        }
+        try {
+            return Long.parseLong(key.substring(delimiter + 1));
+        } catch (NumberFormatException e) {
+            return 0;
+        }
+    }
+
+    private MessageSearchQuery prepareMessageSearchQuery(String query) {
+        if (dbConnection == null) {
+            return null;
+        }
+        List<String> terms = parseFullTextSearchTerms(query);
+        if (terms.isEmpty()) {
+            return null;
+        }
+        try {
+            Integer indexId = MessageFullTextIndex.indexId(dbConnection);
+            if (indexId == null) {
+                return null;
+            }
+            List<Integer> wordIds = fullTextWordIds(terms);
+            return wordIds.size() == terms.size() ? new MessageSearchQuery(indexId, wordIds) : null;
+        } catch (SQLException e) {
+            log.error("Failed to resolve message fulltext index id", e);
+            return null;
+        }
+    }
+
+    private List<Integer> fullTextWordIds(List<String> terms) throws SQLException {
+        List<Integer> wordIds = new ArrayList<>(terms.size());
+        try (PreparedStatement ps = dbConnection.prepareStatement("SELECT ID FROM FT.WORDS WHERE NAME = ?")) {
+            for (String term : terms) {
+                ps.setString(1, term);
+                try (ResultSet rs = ps.executeQuery()) {
+                    if (!rs.next()) {
+                        return List.of();
+                    }
+                    wordIds.add(rs.getInt("ID"));
+                }
+            }
+        }
+        return wordIds;
+    }
+
+    private static int bindMessageSearchScope(PreparedStatement ps,
+                                              String ownerNodeId,
+                                              String chatType,
+                                              String chatKey,
+                                              int parameterIndex) throws SQLException {
+        ps.setString(parameterIndex++, ownerNodeId != null ? ownerNodeId : "");
+        ps.setString(parameterIndex++, chatType);
+        ps.setString(parameterIndex++, chatKey);
+        return parameterIndex;
+    }
+
+    private static String senderFilterClause(String fromNodeId) {
+        return hasSenderFilter(fromNodeId) ? "AND from_node_id = ?" : "";
+    }
+
+    private static int bindSenderFilter(PreparedStatement ps,
+                                        String fromNodeId,
+                                        int parameterIndex) throws SQLException {
+        if (hasSenderFilter(fromNodeId)) {
+            ps.setString(parameterIndex++, fromNodeId.trim());
+        }
+        return parameterIndex;
+    }
+
+    private static boolean hasSenderFilter(String fromNodeId) {
+        return fromNodeId != null && !fromNodeId.isBlank();
+    }
+
+    private static List<String> parseFullTextSearchTerms(String query) {
+        if (query == null || query.isBlank()) {
+            return List.of();
+        }
+        Set<String> terms = new LinkedHashSet<>();
+        StringTokenizer tokenizer = new StringTokenizer(query, H2_FULLTEXT_WHITESPACE);
+        while (tokenizer.hasMoreTokens()) {
+            String term = tokenizer.nextToken().toUpperCase();
+            if (!term.isBlank()) {
+                terms.add(term);
+            }
+        }
+        return List.copyOf(terms);
+    }
+
+    private record MessageSearchQuery(int indexId, List<Integer> wordIds) {}
+
+    private record FullTextCandidate(long rowId, long messageId) {}
+
+    /**
+     * Результат ограниченного подсчета совпадений поиска.
+     *
+     * @param count   найденное количество совпадений
+     * @param limited {@code true}, если подсчет остановлен по лимиту и
+     *                фактическое количество может быть больше
+     */
+    public record MessageSearchCount(int count, boolean limited) {}
 
     /**
      * Находит сообщение по packetId (для reply_text).

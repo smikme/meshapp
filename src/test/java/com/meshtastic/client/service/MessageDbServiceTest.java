@@ -97,6 +97,126 @@ class MessageDbServiceTest {
     }
 
     @Test
+    void messageSearchMatchesTextCaseInsensitivelyAndKeepsChatScope() {
+        MeshMessage first = message("Alpha payload", 41, 10);
+        MeshMessage second = message("beta alpha", 42, 20);
+        MeshMessage otherChat = message("alpha from another channel", 43, 30);
+        MeshMessage otherOwner = message("alpha from another owner", 44, 40);
+
+        service.save(first, "channel", "0", "!owner");
+        service.save(second, "channel", "0", "!owner");
+        service.save(otherChat, "channel", "1", "!owner");
+        service.save(otherOwner, "channel", "0", "!other");
+
+        MessageDbService.MessageSearchCount count =
+                service.countMessageSearchMatchesLimited("channel", "0", "ALPHA", "!owner");
+        assertEquals(2, count.count());
+        assertFalse(count.limited());
+        assertEquals(second.getDbId(), service.findLatestMessageSearchMatch("channel", "0", "ALPHA", "!owner"));
+        assertEquals(first.getDbId(),
+                service.findPreviousMessageSearchMatch("channel", "0", "ALPHA", "!owner", second.getDbId()));
+        assertEquals(second.getDbId(),
+                service.findNextMessageSearchMatch("channel", "0", "ALPHA", "!owner", first.getDbId()));
+        assertEquals(0,
+                service.findNextMessageSearchMatch("channel", "0", "ALPHA", "!owner", second.getDbId()));
+    }
+
+    @Test
+    void messageSearchUsesFullTextWordsAndDoesNotMatchPartialTerms() {
+        MeshMessage alpha = message("alpha payload", 45, 10);
+        MeshMessage alphabet = message("alphabet soup", 46, 20);
+
+        service.save(alpha, "channel", "0", "!owner");
+        service.save(alphabet, "channel", "0", "!owner");
+
+        assertEquals(alpha.getDbId(), service.findLatestMessageSearchMatch("channel", "0", "alpha", "!owner"));
+        assertEquals(1, service.countMessageSearchMatchesLimited("channel", "0", "alpha", "!owner").count());
+        assertEquals(0, service.findLatestMessageSearchMatch("channel", "0", "alp", "!owner"));
+        assertEquals(0, service.countMessageSearchMatchesLimited("channel", "0", "alp", "!owner").count());
+    }
+
+    @Test
+    void messageSearchRequiresAllFullTextTermsInsideChatScope() {
+        MeshMessage alphaPayload = message("alpha payload", 47, 10);
+        MeshMessage alphaOnly = message("alpha", 48, 20);
+        MeshMessage payloadOtherChat = message("payload", 49, 30);
+
+        service.save(alphaPayload, "channel", "0", "!owner");
+        service.save(alphaOnly, "channel", "0", "!owner");
+        service.save(payloadOtherChat, "channel", "1", "!owner");
+
+        assertTrue(service.messageMatchesSearch(
+                "channel",
+                "0",
+                "alpha payload",
+                "!owner",
+                alphaPayload.getDbId()));
+        assertFalse(service.messageMatchesSearch(
+                "channel",
+                "0",
+                "alpha payload",
+                "!owner",
+                alphaOnly.getDbId()));
+    }
+
+    @Test
+    void messageSearchUsesRealtimeFullTextIndexUpdates() {
+        assertEquals(0, service.findLatestMessageSearchMatch("channel", "0", "later", "!owner"));
+
+        MeshMessage insertedAfterIndexCreation = message("later indexed message", 50, 10);
+        service.save(insertedAfterIndexCreation, "channel", "0", "!owner");
+
+        assertEquals(insertedAfterIndexCreation.getDbId(),
+                service.findLatestMessageSearchMatch("channel", "0", "later", "!owner"));
+    }
+
+    @Test
+    void messageSearchCanBeFilteredBySenderNode() {
+        MeshMessage fromFirstNode = messageFrom("!00000001", "alpha from first node", 52, 10);
+        MeshMessage fromSecondNode = messageFrom("!00000002", "alpha from second node", 53, 20);
+
+        service.save(fromFirstNode, "channel", "0", "!owner");
+        service.save(fromSecondNode, "channel", "0", "!owner");
+
+        MessageDbService.MessageSearchCount firstNodeCount =
+                service.countMessageSearchMatchesLimited("channel", "0", "alpha", "!owner", "!00000001");
+        assertEquals(1, firstNodeCount.count());
+        assertFalse(firstNodeCount.limited());
+        assertEquals(fromFirstNode.getDbId(),
+                service.findLatestMessageSearchMatch("channel", "0", "alpha", "!owner", "!00000001"));
+        assertEquals(fromSecondNode.getDbId(),
+                service.findLatestMessageSearchMatch("channel", "0", "alpha", "!owner", "!00000002"));
+        assertEquals(0,
+                service.findLatestMessageSearchMatch("channel", "0", "alpha", "!owner", "!00000003"));
+        assertTrue(service.messageMatchesSearch(
+                "channel",
+                "0",
+                "alpha",
+                "!owner",
+                "!00000001",
+                fromFirstNode.getDbId()));
+        assertFalse(service.messageMatchesSearch(
+                "channel",
+                "0",
+                "alpha",
+                "!owner",
+                "!00000002",
+                fromFirstNode.getDbId()));
+    }
+
+    @Test
+    void fullTextIndexInitializationIsIdempotentAcrossServiceRestarts() {
+        MeshMessage persisted = message("restart searchable", 51, 10);
+        service.save(persisted, "channel", "0", "!owner");
+
+        TestEnvironmentSupport.resetSingletons();
+        service = MessageDbService.getInstance();
+
+        assertEquals(persisted.getDbId(),
+                service.findLatestMessageSearchMatch("channel", "0", "restart", "!owner"));
+    }
+
+    @Test
     void unreadEligibleCountIncludesIncomingSystemMessagesButExcludesOutgoing() {
         MeshMessage incoming = message("incoming", 10, 10);
         MeshMessage outgoing = new MeshMessage("!00000001", "!ffffffff", 0, "outgoing", 20, true);
@@ -395,7 +515,12 @@ class MessageDbServiceTest {
     }
 
     private static MeshMessage message(String text, int packetId, long timestamp) {
-        MeshMessage message = new MeshMessage("!00000001", "!ffffffff", 0, text, timestamp, false);
+        MeshMessage message = messageFrom("!00000001", text, packetId, timestamp);
+        return message;
+    }
+
+    private static MeshMessage messageFrom(String fromNodeId, String text, int packetId, long timestamp) {
+        MeshMessage message = new MeshMessage(fromNodeId, "!ffffffff", 0, text, timestamp, false);
         message.setPacketId(packetId);
         return message;
     }

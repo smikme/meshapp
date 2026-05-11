@@ -268,6 +268,29 @@ class DatabaseMigratorTest {
     }
 
     @Test
+    void migrateFromV11CreatesMessageFullTextIndex() throws Exception {
+        try (Connection connection = openConnection("upgrade-v11")) {
+            createSchemaVersion(connection, 11);
+
+            try (Statement stmt = connection.createStatement()) {
+                stmt.execute("""
+                        CREATE TABLE messages (
+                            id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                            text CLOB
+                        )
+                        """);
+                stmt.execute("INSERT INTO messages (text) VALUES ('searchable migration payload')");
+            }
+
+            DatabaseMigrator.migrate(connection);
+
+            assertEquals(DatabaseMigrator.CURRENT_VERSION, schemaVersion(connection));
+            assertTrue(MessageFullTextIndex.indexId(connection) != null);
+            assertTrue(fullTextWordIsMapped(connection, "SEARCHABLE"));
+        }
+    }
+
+    @Test
     void migrateLegacyAppDatabaseWithoutSchemaVersionPreservesMessages() throws Exception {
         try (Connection connection = openConnection("legacy-app-preserve")) {
             try (Statement stmt = connection.createStatement()) {
@@ -342,6 +365,21 @@ class DatabaseMigratorTest {
         try (PreparedStatement ps = connection.prepareStatement(
                 "SELECT 1 FROM INFORMATION_SCHEMA.INDEXES WHERE INDEX_NAME = ?")) {
             ps.setString(1, indexName);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next();
+            }
+        }
+    }
+
+    private static boolean fullTextWordIsMapped(Connection connection, String word) throws SQLException {
+        try (PreparedStatement ps = connection.prepareStatement(
+                """
+                        SELECT 1
+                        FROM FT.WORDS word
+                        JOIN FT.MAP map ON map.WORDID = word.ID
+                        WHERE word.NAME = ?
+                        """)) {
+            ps.setString(1, word);
             try (ResultSet rs = ps.executeQuery()) {
                 return rs.next();
             }

@@ -10,6 +10,7 @@ import javafx.application.Platform;
 import javafx.scene.control.Label;
 import javafx.scene.layout.HBox;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -200,6 +201,7 @@ abstract class FormChatMessages extends FormChatUi {
         }
 
         handleNewMessages(newMsgs, preservedScrollState, wasAtLiveTail);
+        refreshMessageSearchResults(false);
         if (formVisible) {
             refreshLoadedMessageRows();
         }
@@ -443,6 +445,7 @@ abstract class FormChatMessages extends FormChatUi {
     protected void appendLoadedMessageRow(MeshMessage msg) {
         loadedMessages.add(msg);
         HBox row = bubbleFactory.build(msg);
+        applyMessageSearchHighlight(row, msg.getDbId());
         loadedMessageRows.put(msg.getDbId(), row);
         messageContainer.getChildren().add(row);
     }
@@ -450,6 +453,7 @@ abstract class FormChatMessages extends FormChatUi {
     protected void prependLoadedMessageRow(MeshMessage msg) {
         loadedMessages.add(0, msg);
         HBox row = bubbleFactory.build(msg);
+        applyMessageSearchHighlight(row, msg.getDbId());
         loadedMessageRows.put(msg.getDbId(), row);
         messageContainer.getChildren().addFirst(row);
     }
@@ -548,6 +552,7 @@ abstract class FormChatMessages extends FormChatUi {
                 continue;
             }
             HBox newRow = bubbleFactory.build(message);
+            applyMessageSearchHighlight(newRow, message.getDbId());
             messageContainer.getChildren().set(index, newRow);
             loadedMessageRows.put(message.getDbId(), newRow);
         }
@@ -803,43 +808,44 @@ abstract class FormChatMessages extends FormChatUi {
             return;
         }
 
+        loadMessageWindowAround(dbId);
+    }
+
+    private void loadMessageWindowAround(long dbId) {
         MessageDbService db = MessageDbService.getInstance();
-        while (!loadedMessageRows.containsKey(dbId)) {
-            if (dbId < oldestLoadedDbId && !allHistoryLoaded) {
-                List<MeshMessage> older = db.loadBefore(
-                        currentChatType(),
-                        currentChatKey(),
-                        oldestLoadedDbId,
-                        PAGE_SIZE,
-                        currentOwnerNodeId());
-                if (older.isEmpty()) {
-                    allHistoryLoaded = true;
-                    break;
-                }
-                prependOlderMessages(older);
-                allHistoryLoaded = older.size() < PAGE_SIZE;
-                trimLoadedWindowFromBottomIfNeeded();
-                continue;
-            }
+        String chatType = currentChatType();
+        String chatKey = currentChatKey();
+        String ownerNodeId = currentOwnerNodeId();
+        int olderLimit = PAGE_SIZE / 2;
+        int newerLimit = PAGE_SIZE - olderLimit - 1;
 
-            if (dbId > newestLoadedDbId && !allNewerHistoryLoaded) {
-                List<MeshMessage> newer = db.loadAfter(
-                        currentChatType(),
-                        currentChatKey(),
-                        newestLoadedDbId,
-                        PAGE_SIZE,
-                        currentOwnerNodeId());
-                if (newer.isEmpty()) {
-                    allNewerHistoryLoaded = newestLoadedDbId >= latestKnownDbId;
-                    break;
-                }
-                appendNewerMessages(newer);
-                trimLoadedWindowFromTopIfNeeded();
-                allNewerHistoryLoaded = newestLoadedDbId >= latestKnownDbId;
-                continue;
-            }
+        MeshMessage target = db.findByDbId(chatType, chatKey, dbId, ownerNodeId);
+        if (target == null) {
+            return;
+        }
 
-            break;
+        List<MeshMessage> older = db.loadBefore(chatType, chatKey, dbId, olderLimit, ownerNodeId);
+        List<MeshMessage> newer = db.loadAfter(chatType, chatKey, dbId, newerLimit, ownerNodeId);
+        List<MeshMessage> window = new ArrayList<>(older.size() + 1 + newer.size());
+        window.addAll(older);
+        window.add(target);
+        window.addAll(newer);
+        attachReactions(window);
+
+        long previousLatestKnownDbId = Math.max(latestKnownDbId, newestLoadedDbId);
+        clearLoadedMessageState();
+        loadedChatScrollCacheKey = chatScrollCacheKey(selectedChat);
+        messageContainer.getChildren().clear();
+        for (MeshMessage message : window) {
+            appendLoadedMessageRow(message);
+        }
+        recalcLoadedBounds();
+        allHistoryLoaded = older.size() < olderLimit;
+        allNewerHistoryLoaded = newer.size() < newerLimit;
+        if (allNewerHistoryLoaded) {
+            latestKnownDbId = newestLoadedDbId;
+        } else {
+            latestKnownDbId = Math.max(previousLatestKnownDbId, newestLoadedDbId);
         }
     }
 
@@ -1092,6 +1098,7 @@ abstract class FormChatMessages extends FormChatUi {
         appendLoadedMessageRow(systemMessage);
         trimLoadedWindowFromTopIfNeeded();
         allNewerHistoryLoaded = true;
+        refreshMessageSearchResults(false);
         requestMessageViewportLayout();
         scrollToBottom();
         markAsRead(selectedChat);
