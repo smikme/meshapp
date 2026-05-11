@@ -90,8 +90,9 @@ public class MessageBubbleFactory {
     private static final String LIGHT_THEME_STYLE_CLASS = "light-theme";
     private static final String REACTION_UNAVAILABLE_TOOLTIP = "Реакция недоступна: у сообщения нет packet id";
     private static final String RETRY_TOOLTIP = "Повторить отправку";
-    private static final String DIRECT_DELIVERED_STATUS_TEXT = "OK";
     private static final String RETRY_ICON_PATH = "/icons/refresh.svg";
+    private static final String OK_STATUS_ICON_PATH = "/icons/status-ok-flat.svg";
+    private static final int OK_STATUS_ICON_SIZE = 18;
     private static final Insets MQTT_BADGE_MARGIN = new Insets(3, 4, 0, 0);
     private static final List<List<String>> REACTION_EMOJI_ROWS = List.of(
             List.of("⭐", "✅", "👍", "👋", "💯", "🔥", "🤝", "😁", "😂", "🤣", "😀"),
@@ -213,9 +214,12 @@ public class MessageBubbleFactory {
             case SENDING -> label.setText("⏳");
             case DELIVERED -> label.setText("✓");
             case CONFIRMED -> {
-                label.setText(directMessage ? DIRECT_DELIVERED_STATUS_TEXT : "✓");
                 if (directMessage) {
+                    label.setGraphic(createOkStatusIcon());
+                    label.setContentDisplay(ContentDisplay.GRAPHIC_ONLY);
                     label.getStyleClass().add("chat-bubble-status-ok");
+                } else {
+                    label.setText("✓");
                 }
             }
             case FAILED -> label.setText("✗");
@@ -223,6 +227,15 @@ public class MessageBubbleFactory {
         if (status == MeshMessage.DeliveryStatus.FAILED) {
             label.getStyleClass().add("chat-bubble-status-failed");
         }
+    }
+
+    private static Node createOkStatusIcon() {
+        SVGPath icon = SvgIconLoader.load(OK_STATUS_ICON_PATH, OK_STATUS_ICON_SIZE);
+        if (icon != null) {
+            icon.getStyleClass().add("chat-bubble-status-ok-icon");
+            return icon;
+        }
+        return createEmojiNode("\uD83C\uDD97", OK_STATUS_ICON_SIZE);
     }
 
     /**
@@ -1138,8 +1151,6 @@ public class MessageBubbleFactory {
     }
 
     private void configureStatusLabelInteraction(Label statusLabel, MeshMessage msg) {
-        statusLabel.setGraphic(null);
-        statusLabel.setContentDisplay(ContentDisplay.TEXT_ONLY);
         statusLabel.setGraphicTextGap(ZERO_VALUE);
 
         if (msg.getStatus() != MeshMessage.DeliveryStatus.FAILED || !msg.isOutgoing()) {

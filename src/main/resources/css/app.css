@@ -1954,11 +1954,10 @@
     -fx-max-height: 18;
     -fx-alignment: center;
     -fx-padding: 0;
-    -fx-border-color: -color-fg-muted;
-    -fx-border-width: 1;
-    -fx-border-radius: 2;
-    -fx-background-radius: 2;
-    -fx-font-size: 0.6923em;
+}
+
+.chat-bubble-status-ok-icon {
+    -fx-fill: -color-fg-muted;
 }
 
 .chat-bubble-status-failed {

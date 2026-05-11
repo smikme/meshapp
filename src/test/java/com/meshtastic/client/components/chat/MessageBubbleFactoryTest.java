@@ -11,6 +11,7 @@ import javafx.scene.layout.HBox;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
+import javafx.scene.shape.SVGPath;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
@@ -115,7 +116,9 @@ class MessageBubbleFactoryTest {
             Label status = findNodeWithStyle(row, "chat-bubble-status", Label.class).orElse(null);
 
             assertNotNull(status);
-            assertEquals("OK", status.getText());
+            assertNull(status.getText());
+            assertNotNull(status.getGraphic());
+            assertTrue(status.getGraphic() instanceof SVGPath);
             assertTrue(status.getStyleClass().contains("chat-bubble-status-ok"));
             return null;
         });
