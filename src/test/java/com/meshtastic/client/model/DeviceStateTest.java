@@ -9,6 +9,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.meshtastic.proto.ChannelProtos;
 import org.meshtastic.proto.MeshProtos;
 
+import java.lang.reflect.Method;
 import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -110,6 +111,44 @@ class DeviceStateTest {
     }
 
     @Test
+    void ackSweepMarksExpiredDirectMessageDeliveredButChannelMessageFailed() throws Exception {
+        DeviceState state = createDeviceStateWithOwner();
+        MeshMessage direct = new MeshMessage("!owner", "!peer", 0, "dm pending", 1_700_000_000L, true);
+        direct.setPacketId(880);
+        direct.setStatus(MeshMessage.DeliveryStatus.SENDING);
+        state.addDirectMessage(direct, "!peer");
+
+        MeshMessage channel = new MeshMessage("!owner", "!ffffffff", 0, "channel pending", 1_700_000_000L, true);
+        channel.setPacketId(881);
+        channel.setStatus(MeshMessage.DeliveryStatus.SENDING);
+        state.addMessage(channel);
+
+        long expiredAt = System.currentTimeMillis() - 300_000;
+        state.getMessageStore().getPendingAcks().put(880, new MessageStore.PendingAckEntry(direct, expiredAt));
+        state.getMessageStore().getPendingAcks().put(881, new MessageStore.PendingAckEntry(channel, expiredAt));
+
+        invokeAckSweep(state);
+
+        assertEquals(MeshMessage.DeliveryStatus.DELIVERED, direct.getStatus());
+        assertNull(direct.getErrorReason());
+        assertEquals(MeshMessage.DeliveryStatus.FAILED, channel.getStatus());
+        assertEquals("TIMEOUT", channel.getErrorReason());
+        assertTrue(state.getMessageStore().getPendingAcks().isEmpty());
+
+        MeshMessage persistedDirect = MessageDbService.getInstance().findByPacketId(880);
+        assertNotNull(persistedDirect);
+        assertEquals(MeshMessage.DeliveryStatus.DELIVERED, persistedDirect.getStatus());
+        assertNull(persistedDirect.getErrorReason());
+
+        MeshMessage persistedChannel = MessageDbService.getInstance().findByPacketId(881);
+        assertNotNull(persistedChannel);
+        assertEquals(MeshMessage.DeliveryStatus.FAILED, persistedChannel.getStatus());
+        assertEquals("TIMEOUT", persistedChannel.getErrorReason());
+
+        state.shutdown();
+    }
+
+    @Test
     void clearResetsRuntimeStateButKeepsPendingFixedPosition() {
         DeviceState state = createDeviceStateWithOwner();
         state.setMyNodeNum(42);
@@ -173,5 +212,11 @@ class DeviceStateTest {
         MeshMessage message = new MeshMessage("!00000001", "!ffffffff", channelIndex, text, 1_700_000_000L, false);
         message.setPacketId(packetId);
         return message;
+    }
+
+    private static void invokeAckSweep(DeviceState state) throws Exception {
+        Method method = DeviceState.class.getDeclaredMethod("sweepExpiredAcks");
+        method.setAccessible(true);
+        method.invoke(state);
     }
 }

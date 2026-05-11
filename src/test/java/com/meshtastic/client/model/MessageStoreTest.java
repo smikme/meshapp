@@ -159,6 +159,25 @@ class MessageStoreTest {
     }
 
     @Test
+    void addDirectMessageDuplicatePromotesDeliveredToConfirmed() {
+        MessageStore store = new MessageStore();
+
+        MeshMessage delivered = new MeshMessage("!00000001", "!peer1", 0, "First", 1_700_000_000L, true);
+        delivered.setPacketId(201);
+        delivered.setStatus(MeshMessage.DeliveryStatus.DELIVERED);
+        store.addDirectMessage(delivered, "!peer1");
+
+        MeshMessage confirmed = new MeshMessage("!00000001", "!peer1", 0, "First", 1_700_000_000L, true);
+        confirmed.setPacketId(201);
+        confirmed.setStatus(MeshMessage.DeliveryStatus.CONFIRMED);
+        store.addDirectMessage(confirmed, "!peer1");
+
+        MeshMessage stored = store.getDirectMessages("!peer1").getFirst();
+        assertEquals(1, store.getDirectMessages("!peer1").size());
+        assertEquals(MeshMessage.DeliveryStatus.CONFIRMED, stored.getStatus());
+    }
+
+    @Test
     void addDirectMessageKeepsMax100Messages() {
         MessageStore store = new MessageStore();
         

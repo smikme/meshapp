@@ -20,6 +20,8 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -73,6 +75,48 @@ class MessageBubbleFactoryTest {
             assertNotNull(badge);
             assertNotNull(icon);
             assertTrue(content.getStyleClass().contains("chat-bubble-with-mqtt-badge"));
+            return null;
+        });
+    }
+
+    @Test
+    void outgoingDirectDeliveredBubbleShowsCheckStatus() {
+        onFxThread(() -> {
+            MessageBubbleFactory factory = new MessageBubbleFactory(
+                    null,
+                    new SimpleDoubleProperty(600),
+                    new NoOpBubbleActions(),
+                    new HashMap<>());
+            MeshMessage direct = new MeshMessage("!00000001", "!00000002", 0, "direct", 10, true);
+            direct.setStatus(MeshMessage.DeliveryStatus.DELIVERED);
+
+            HBox row = factory.build(direct);
+            Label status = findNodeWithStyle(row, "chat-bubble-status", Label.class).orElse(null);
+
+            assertNotNull(status);
+            assertEquals("✓", status.getText());
+            assertFalse(status.getStyleClass().contains("chat-bubble-status-ok"));
+            return null;
+        });
+    }
+
+    @Test
+    void outgoingDirectConfirmedBubbleShowsOkStatus() {
+        onFxThread(() -> {
+            MessageBubbleFactory factory = new MessageBubbleFactory(
+                    null,
+                    new SimpleDoubleProperty(600),
+                    new NoOpBubbleActions(),
+                    new HashMap<>());
+            MeshMessage direct = new MeshMessage("!00000001", "!00000002", 0, "direct", 10, true);
+            direct.setStatus(MeshMessage.DeliveryStatus.CONFIRMED);
+
+            HBox row = factory.build(direct);
+            Label status = findNodeWithStyle(row, "chat-bubble-status", Label.class).orElse(null);
+
+            assertNotNull(status);
+            assertEquals("OK", status.getText());
+            assertTrue(status.getStyleClass().contains("chat-bubble-status-ok"));
             return null;
         });
     }

@@ -394,7 +394,12 @@ public class MessageListenerService implements FromRadioListener {
 
         try {
             MeshProtos.Routing routing = MeshProtos.Routing.parseFrom(data.getPayload());
-            MeshMessage pending = deviceState.resolvePendingAck(requestId);
+            var pendingEntry = deviceState.getMessageStore().getPendingAcks().get(requestId);
+            MeshMessage pending = pendingEntry != null ? pendingEntry.message() : null;
+            if (pending != null) {
+                handlePendingMessageRoutingAck(packet, routing, requestId, pending);
+                return;
+            }
             boolean completedPacketAck = deviceState.completePendingPacketAck(requestId, routing.getErrorReason());
             MeshMessage.DeliveryStatus reactionStatus =
                     routing.getErrorReason() == MeshProtos.Routing.Error.NONE
@@ -420,21 +425,56 @@ public class MessageListenerService implements FromRadioListener {
                 }
                 return;
             }
-
-            if (routing.getErrorReason() == MeshProtos.Routing.Error.NONE) {
-                pending.setStatus(MeshMessage.DeliveryStatus.DELIVERED);
-                MessageDbService.getInstance().updateStatus(requestId, pending.getStatus(), null);
-                deviceState.fireMessageListeners();
-                log.debug("ACK received for packet {}", requestId);
-            } else {
-                pending.setStatus(MeshMessage.DeliveryStatus.FAILED);
-                pending.setErrorReason(routing.getErrorReason().name());
-                MessageDbService.getInstance().updateStatus(requestId, pending.getStatus(), pending.getErrorReason());
-                deviceState.fireMessageListeners();
-                log.warn("NAK received for packet {}: {}", requestId, routing.getErrorReason());
-            }
         } catch (Exception e) {
             log.warn("Failed to parse routing ACK for packet {}", requestId, e);
+        }
+    }
+
+    private void handlePendingMessageRoutingAck(MeshProtos.MeshPacket packet,
+                                                MeshProtos.Routing routing,
+                                                int requestId,
+                                                MeshMessage pending) {
+        if (routing.getErrorReason() != MeshProtos.Routing.Error.NONE) {
+            deviceState.resolvePendingAck(requestId);
+            pending.setStatus(MeshMessage.DeliveryStatus.FAILED);
+            pending.setErrorReason(routing.getErrorReason().name());
+            MessageDbService.getInstance().updateStatus(requestId, pending.getStatus(), pending.getErrorReason());
+            deviceState.fireMessageListeners();
+            log.warn("NAK received for packet {}: {}", requestId, routing.getErrorReason());
+            return;
+        }
+
+        if (pending.isDirectMessage() && nodeIdMatchesNodeNum(pending.getToNodeId(), packet.getFrom())) {
+            deviceState.resolvePendingAck(requestId);
+            pending.setStatus(MeshMessage.DeliveryStatus.CONFIRMED);
+            pending.setErrorReason(null);
+            MessageDbService.getInstance().updateStatus(requestId, pending.getStatus(), null);
+            deviceState.fireMessageListeners();
+            log.debug("Recipient ACK received for DM packet {}", requestId);
+            return;
+        }
+
+        pending.setStatus(MeshMessage.DeliveryStatus.DELIVERED);
+        pending.setErrorReason(null);
+        MessageDbService.getInstance().updateStatus(requestId, pending.getStatus(), null);
+        deviceState.fireMessageListeners();
+        if (pending.isDirectMessage()) {
+            log.debug("Non-recipient ACK received for DM packet {} from !{}; waiting for ACK from {}",
+                    requestId, Integer.toHexString(packet.getFrom()), pending.getToNodeId());
+        } else {
+            deviceState.resolvePendingAck(requestId);
+            log.debug("ACK received for packet {}", requestId);
+        }
+    }
+
+    private static boolean nodeIdMatchesNodeNum(String nodeId, int nodeNum) {
+        if (nodeId == null || nodeId.length() != 9 || nodeId.charAt(0) != '!') {
+            return false;
+        }
+        try {
+            return (int) Long.parseUnsignedLong(nodeId.substring(1), 16) == nodeNum;
+        } catch (NumberFormatException e) {
+            return false;
         }
     }
 

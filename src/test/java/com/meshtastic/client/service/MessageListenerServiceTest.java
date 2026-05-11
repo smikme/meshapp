@@ -723,6 +723,52 @@ class MessageListenerServiceTest {
     }
 
     @Test
+    void onMeshPacketMarksDirectMessageConfirmedOnlyWhenRecipientAckArrives() {
+        MeshMessage pending = new MeshMessage("!12345678", "!22222222", 0, "pending dm", 1_700_000_000L, true);
+        pending.setPacketId(43);
+        pending.setStatus(MeshMessage.DeliveryStatus.SENDING);
+        state.addDirectMessage(pending, "!22222222");
+        state.registerPendingAck(43, pending);
+
+        MeshProtos.Routing routing = MeshProtos.Routing.newBuilder()
+                .setErrorReason(MeshProtos.Routing.Error.NONE)
+                .build();
+        MeshProtos.MeshPacket nonRecipientAck = MeshProtos.MeshPacket.newBuilder()
+                .setFrom(0x11111111)
+                .setDecoded(MeshProtos.Data.newBuilder()
+                        .setPortnum(Portnums.PortNum.ROUTING_APP)
+                        .setRequestId(43)
+                        .setPayload(routing.toByteString())
+                        .build())
+                .build();
+
+        service.onMeshPacket(nonRecipientAck);
+
+        assertEquals(MeshMessage.DeliveryStatus.DELIVERED, pending.getStatus());
+        assertTrue(state.getMessageStore().getPendingAcks().containsKey(43));
+        MeshMessage deliveredWithoutRecipientAck = MessageDbService.getInstance().findByPacketId(43);
+        assertNotNull(deliveredWithoutRecipientAck);
+        assertEquals(MeshMessage.DeliveryStatus.DELIVERED, deliveredWithoutRecipientAck.getStatus());
+
+        MeshProtos.MeshPacket recipientAck = MeshProtos.MeshPacket.newBuilder()
+                .setFrom(0x22222222)
+                .setDecoded(MeshProtos.Data.newBuilder()
+                        .setPortnum(Portnums.PortNum.ROUTING_APP)
+                        .setRequestId(43)
+                        .setPayload(routing.toByteString())
+                        .build())
+                .build();
+
+        service.onMeshPacket(recipientAck);
+
+        assertEquals(MeshMessage.DeliveryStatus.CONFIRMED, pending.getStatus());
+        assertNull(state.resolvePendingAck(43));
+        MeshMessage confirmed = MessageDbService.getInstance().findByPacketId(43);
+        assertNotNull(confirmed);
+        assertEquals(MeshMessage.DeliveryStatus.CONFIRMED, confirmed.getStatus());
+    }
+
+    @Test
     void onMeshPacketMarksPendingMessageFailedWhenNakArrives() {
         MeshMessage pending = new MeshMessage("!12345678", "!ffffffff", 0, "pending", 1_700_000_000L, true);
         pending.setPacketId(77);

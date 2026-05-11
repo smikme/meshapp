@@ -90,6 +90,7 @@ public class MessageBubbleFactory {
     private static final String LIGHT_THEME_STYLE_CLASS = "light-theme";
     private static final String REACTION_UNAVAILABLE_TOOLTIP = "Реакция недоступна: у сообщения нет packet id";
     private static final String RETRY_TOOLTIP = "Повторить отправку";
+    private static final String DIRECT_DELIVERED_STATUS_TEXT = "OK";
     private static final String RETRY_ICON_PATH = "/icons/refresh.svg";
     private static final Insets MQTT_BADGE_MARGIN = new Insets(3, 4, 0, 0);
     private static final List<List<String>> REACTION_EMOJI_ROWS = List.of(
@@ -189,6 +190,16 @@ public class MessageBubbleFactory {
      */
     public static void updateStatusLabel(Label label,
                                          MeshMessage.DeliveryStatus status) {
+        updateStatusLabel(label, status, false);
+    }
+
+    private static void updateStatusLabel(Label label, MeshMessage msg) {
+        updateStatusLabel(label, msg.getStatus(), msg.isDirectMessage());
+    }
+
+    private static void updateStatusLabel(Label label,
+                                          MeshMessage.DeliveryStatus status,
+                                          boolean directMessage) {
         if (status == null) {
             return;
         }
@@ -197,9 +208,16 @@ public class MessageBubbleFactory {
         label.setGraphic(null);
         label.setContentDisplay(ContentDisplay.TEXT_ONLY);
         label.getStyleClass().remove("chat-bubble-status-failed");
+        label.getStyleClass().remove("chat-bubble-status-ok");
         switch (status) {
             case SENDING -> label.setText("⏳");
             case DELIVERED -> label.setText("✓");
+            case CONFIRMED -> {
+                label.setText(directMessage ? DIRECT_DELIVERED_STATUS_TEXT : "✓");
+                if (directMessage) {
+                    label.getStyleClass().add("chat-bubble-status-ok");
+                }
+            }
             case FAILED -> label.setText("✗");
         }
         if (status == MeshMessage.DeliveryStatus.FAILED) {
@@ -217,7 +235,7 @@ public class MessageBubbleFactory {
         if (label == null || msg == null || msg.getStatus() == null) {
             return;
         }
-        updateStatusLabel(label, msg.getStatus());
+        updateStatusLabel(label, msg);
         configureStatusLabelInteraction(label, msg);
         if (msg.getStatus() == MeshMessage.DeliveryStatus.SENDING && msg.getPacketId() != ZERO_VALUE) {
             pendingStatusLabels.put(msg.getPacketId(), label);

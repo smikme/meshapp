@@ -40,7 +40,7 @@ public class DeviceState {
 
     private static final Logger log = LoggerFactory.getLogger(DeviceState.class);
 
-    /** Таймаут ожидания ACK: если за это время ACK не пришёл — статус → FAILED */
+    /** Таймаут ожидания ACK: DM без ACK получателя остаётся отправленным, каналы получают FAILED. */
     private static final long ACK_TIMEOUT_MS = 240_000;
     /** Интервал проверки просроченных pending ACK */
     private static final long ACK_SWEEP_INTERVAL_MS = 10_000;
@@ -499,9 +499,15 @@ public class DeviceState {
                 MessageStore.PendingAckEntry removed = messageStore.getPendingAcks().remove(packetId);
                 if (removed != null) {
                     MeshMessage msg = removed.message();
-                    msg.setStatus(MeshMessage.DeliveryStatus.FAILED);
-                    msg.setErrorReason("TIMEOUT");
-                    log.warn("ACK timeout for packetId {}", packetId);
+                    if (msg.isDirectMessage()) {
+                        msg.setStatus(MeshMessage.DeliveryStatus.DELIVERED);
+                        msg.setErrorReason(null);
+                        log.info("Recipient ACK timeout for DM packetId {}, marking as delivered", packetId);
+                    } else {
+                        msg.setStatus(MeshMessage.DeliveryStatus.FAILED);
+                        msg.setErrorReason("TIMEOUT");
+                        log.warn("ACK timeout for packetId {}", packetId);
+                    }
                     
                     // Обновляем в БД
                     if (packetId > 0) {

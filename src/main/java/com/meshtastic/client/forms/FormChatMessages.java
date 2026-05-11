@@ -229,7 +229,15 @@ abstract class FormChatMessages extends FormChatUi {
 
         MeshMessage loaded = syncLoadedMessageMetadata(updated);
         bubbleFactory.refreshStatusLabel(statusLabel, loaded != null ? loaded : updated);
-        return true;
+        return !shouldKeepTrackingRecipientAck(packetId, updated);
+    }
+
+    private boolean shouldKeepTrackingRecipientAck(int packetId, MeshMessage updated) {
+        return state != null
+                && updated != null
+                && updated.isDirectMessage()
+                && updated.getStatus() == MeshMessage.DeliveryStatus.DELIVERED
+                && state.getMessageStore().getPendingAcks().containsKey(packetId);
     }
 
     private boolean reloadAfterDatabaseResetIfNeeded(MessageDbService db,

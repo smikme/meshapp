@@ -1945,6 +1945,22 @@
     -fx-font-size: 0.8462em;
 }
 
+.chat-bubble-status-ok {
+    -fx-min-width: 18;
+    -fx-pref-width: 18;
+    -fx-max-width: 18;
+    -fx-min-height: 18;
+    -fx-pref-height: 18;
+    -fx-max-height: 18;
+    -fx-alignment: center;
+    -fx-padding: 0;
+    -fx-border-color: -color-fg-muted;
+    -fx-border-width: 1;
+    -fx-border-radius: 2;
+    -fx-background-radius: 2;
+    -fx-font-size: 0.6923em;
+}
+
 .chat-bubble-status-failed {
     -fx-text-fill: #E53935;
 }
