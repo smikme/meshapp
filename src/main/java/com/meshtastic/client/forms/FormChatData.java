@@ -391,6 +391,7 @@ abstract class FormChatData extends FormChatRequests {
         loadedMessageRows.remove(msg.getDbId());
         recalcLoadedBounds();
         messageContainer.getChildren().remove(bubbleRow);
+        refreshMessageSearchResults(false);
         reloadChatList();
     }
 
