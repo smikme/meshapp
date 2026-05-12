@@ -25,7 +25,6 @@ import javafx.scene.control.Label;
 import javafx.scene.control.ListView;
 import javafx.scene.control.ScrollPane;
 import javafx.scene.control.Separator;
-import javafx.scene.control.TextField;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
@@ -75,13 +74,6 @@ abstract class FormChatBase extends Form {
     protected StackPane headerAvatarPane;
     protected Label headerAvatarLabel;
     protected Label headerNameLabel;
-    protected Button messageSearchButton;
-    protected HBox messageSearchControls;
-    protected TextField messageSearchField;
-    protected Label messageSearchCounterLabel;
-    protected Button messageSearchPreviousButton;
-    protected Button messageSearchNextButton;
-    protected Button messageSearchCloseButton;
     protected Separator headerSep;
 
     // Область сообщений
@@ -127,14 +119,6 @@ abstract class FormChatBase extends Form {
     protected String loadedChatScrollCacheKey;
     protected int openingChatUnreadCount = 0;
     protected final Map<String, ChatScrollState> savedChatScrollStates = new HashMap<>();
-    protected boolean messageSearchActive = false;
-    protected String messageSearchQuery = "";
-    protected int messageSearchResultCount = 0;
-    protected int messageSearchResultIndex = -1;
-    protected boolean messageSearchResultCountLimited = false;
-    protected boolean messageSearchHasPrevious = false;
-    protected boolean messageSearchHasNext = false;
-    protected long highlightedSearchDbId = 0;
     // Трекинг статусов исходящих сообщений для обновления при ACK/NAK
     protected final Map<Integer, Label> pendingStatusLabels = new HashMap<>();
 

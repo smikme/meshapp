@@ -11,26 +11,18 @@ import com.meshtastic.client.modal.Toast;
 import com.meshtastic.client.model.ChatItem;
 import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.model.NodeData;
-import com.meshtastic.client.platform.OsDetect;
-import com.meshtastic.client.service.MessageDbService;
 import com.meshtastic.client.service.MessageService;
 import com.meshtastic.client.themes.TypographyManager;
 import com.meshtastic.client.utils.AppPreferences;
 import com.meshtastic.client.utils.NodeUtils;
-import com.meshtastic.client.utils.SvgIconLoader;
 import com.meshtastic.client.utils.UnicodeTextUtils;
 
-import javafx.animation.PauseTransition;
 import javafx.application.Platform;
 import javafx.collections.transformation.FilteredList;
 import javafx.collections.transformation.SortedList;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
-import javafx.geometry.Side;
-import javafx.scene.Node;
 import javafx.scene.control.Button;
-import javafx.scene.control.ContextMenu;
-import javafx.scene.control.CustomMenuItem;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListView;
 import javafx.scene.control.ScrollPane;
@@ -38,7 +30,6 @@ import javafx.scene.control.Separator;
 import javafx.scene.control.SplitPane;
 import javafx.scene.control.TextField;
 import javafx.scene.control.Tooltip;
-import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyEvent;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
@@ -48,11 +39,8 @@ import javafx.scene.layout.VBox;
 import javafx.scene.paint.Color;
 import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
-import javafx.util.Duration;
 
-import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 
@@ -67,20 +55,8 @@ import java.util.Objects;
  */
 abstract class FormChatUi extends FormChatBase {
 
-    private static final Duration MESSAGE_SEARCH_INPUT_PAUSE = Duration.millis(500);
-
     private Region headerSpacer;
-    private PauseTransition messageSearchInputPause;
-    private final ContextMenu messageSearchNodeMenu = new ContextMenu();
-    private boolean messageSearchTextDirty = false;
-    private Button messageSearchNodeButton;
-    private boolean messageSearchNodeLookupActive = false;
-    private String messageSearchNodeFilterId = "";
-    private String messageSearchNodeFilterLabel = "";
-    private String messageSearchTextBeforeNodeLookup = "";
-    private List<NodeData> currentMessageSearchNodeMatches = List.of();
-    private List<CustomMenuItem> currentMessageSearchNodeItems = List.of();
-    private int selectedMessageSearchNodeIndex = -1;
+    private FormChatMessageSearchController messageSearchController;
 
     /**
      * Создаёт раздельную компоновку и переиспользуемые контролы активного чата.
@@ -103,7 +79,7 @@ abstract class FormChatUi extends FormChatBase {
     private VBox buildLeftPane() {
         VBox leftPane = new VBox();
         leftPane.getStyleClass().add("chat-list-pane");
-        applyWindowsHitTestBackground(leftPane);
+        FormChatUiSupport.applyWindowsHitTestBackground(leftPane);
 
         TextField searchField = createSearchField();
         newChatBtn = createNewChatButton();
@@ -157,7 +133,7 @@ abstract class FormChatUi extends FormChatBase {
 
         ListView<ChatItem> listView = new ListView<>(sortedChats);
         listView.getStyleClass().add("chat-list-view");
-        applyWindowsHitTestBackground(listView);
+        FormChatUiSupport.applyWindowsHitTestBackground(listView);
         listView.setCellFactory(view -> new ChatListCell(
                 this::deleteChat,
                 this::showChannelProperties,
@@ -209,12 +185,6 @@ abstract class FormChatUi extends FormChatBase {
         return splitPane;
     }
 
-    private void applyWindowsHitTestBackground(javafx.scene.Node node) {
-        if (OsDetect.isWindows() && !AppPreferences.isDisableEffectsEffective()) {
-            node.setStyle(WINDOWS_HIT_TEST_BACKGROUND);
-        }
-    }
-
     /**
      * Один раз создаёт контролы правой панели и переиспользует их для всех чатов.
      */
@@ -260,93 +230,35 @@ abstract class FormChatUi extends FormChatBase {
         headerNameLabel = new Label();
         headerNameLabel.getStyleClass().add("chat-header-name");
 
-        messageSearchButton = createMessageSearchButton();
-        messageSearchControls = createMessageSearchControls();
         headerSpacer = new Region();
+        messageSearchController = createMessageSearchController();
 
         chatHeader = new HBox(10,
                 headerAvatarPane,
                 headerNameLabel,
                 headerSpacer,
-                messageSearchButton,
-                messageSearchControls);
+                messageSearchController.searchButton(),
+                messageSearchController.controls());
         chatHeader.setAlignment(Pos.CENTER_LEFT);
         chatHeader.setPadding(new Insets(10, 15, 10, 15));
         chatHeader.getStyleClass().add("chat-header");
         HBox.setHgrow(headerSpacer, Priority.ALWAYS);
-        HBox.setHgrow(messageSearchControls, Priority.ALWAYS);
+        HBox.setHgrow(messageSearchController.controls(), Priority.ALWAYS);
 
         headerSep = new Separator();
         headerSep.getStyleClass().add("chat-header-separator");
     }
 
-    private Button createMessageSearchButton() {
-        Button button = createHeaderIconButton("/icons/search.svg", "Поиск сообщений", "🔍");
-        button.setOnAction(event -> openMessageSearch());
-        return button;
-    }
-
-    private HBox createMessageSearchControls() {
-        messageSearchField = new TextField();
-        messageSearchField.setPromptText("Поиск сообщений");
-        messageSearchField.setMinWidth(54);
-        messageSearchField.getStyleClass().add("chat-message-search-field");
-        messageSearchInputPause = new PauseTransition(MESSAGE_SEARCH_INPUT_PAUSE);
-        messageSearchInputPause.setOnFinished(event -> runPendingMessageSearch(true));
-        messageSearchField.textProperty().addListener((obs, oldValue, newValue) ->
-                handleMessageSearchTextChanged(newValue));
-        messageSearchField.addEventFilter(KeyEvent.KEY_PRESSED, this::handleMessageSearchFieldKeyPressed);
-        messageSearchNodeMenu.addEventFilter(KeyEvent.KEY_PRESSED, this::handleMessageSearchNodeMenuKeyPressed);
-
-        messageSearchNodeButton = createHeaderIconButton("/icons/user.svg", "Фильтр по ноде", "👤");
-        messageSearchNodeButton.setOnAction(event -> toggleMessageSearchNodeLookup());
-
-        messageSearchCounterLabel = new Label();
-        messageSearchCounterLabel.getStyleClass().add("chat-message-search-counter");
-
-        messageSearchPreviousButton = createMessageSearchNavButton("↑", "Предыдущее совпадение");
-        messageSearchPreviousButton.setOnAction(event -> showPreviousMessageSearchResult());
-
-        messageSearchNextButton = createMessageSearchNavButton("↓", "Следующее совпадение");
-        messageSearchNextButton.setOnAction(event -> showNextMessageSearchResult());
-
-        messageSearchCloseButton = createHeaderIconButton("/icons/close.svg", "Закрыть поиск", "×");
-        messageSearchCloseButton.getStyleClass().add("chat-message-search-close-btn");
-        messageSearchCloseButton.setOnAction(event -> closeMessageSearch(true));
-
-        HBox controls = new HBox(4,
-                messageSearchNodeButton,
-                messageSearchField,
-                messageSearchCounterLabel,
-                messageSearchPreviousButton,
-                messageSearchNextButton,
-                messageSearchCloseButton);
-        controls.setAlignment(Pos.CENTER_LEFT);
-        controls.getStyleClass().add("chat-message-search-controls");
-        HBox.setHgrow(messageSearchField, Priority.ALWAYS);
-        setVisibleManaged(controls, false);
-        updateMessageSearchControlsState();
-        return controls;
-    }
-
-    private Button createHeaderIconButton(String iconPath, String tooltip, String fallbackText) {
-        Button button = new Button();
-        button.getStyleClass().add("chat-header-icon-btn");
-        Node icon = SvgIconLoader.load(iconPath, 17);
-        if (icon != null) {
-            button.setGraphic(icon);
-        } else {
-            button.setText(fallbackText);
-        }
-        button.setTooltip(new Tooltip(tooltip));
-        return button;
-    }
-
-    private Button createMessageSearchNavButton(String text, String tooltip) {
-        Button button = new Button(text);
-        button.getStyleClass().addAll("chat-header-icon-btn", "chat-message-search-nav-btn");
-        button.setTooltip(new Tooltip(tooltip));
-        return button;
+    /**
+     * Создаёт компонент поиска сообщений и связывает его с минимальным набором
+     * действий формы: текущий чат, загруженные строки и прокрутка остаются во
+     * внешнем слое, а вся логика поиска живёт внутри компонента.
+     */
+    private FormChatMessageSearchController createMessageSearchController() {
+        return new FormChatMessageSearchController(
+                new FormChatMessageSearchHost(this),
+                headerNameLabel,
+                headerSpacer);
     }
 
     private VBox createMessageContainer() {
@@ -372,8 +284,12 @@ abstract class FormChatUi extends FormChatBase {
                     @Override public void startReply(MeshMessage msg) { FormChatUi.this.startReply(msg); }
                     @Override public void requestTraceroute(MeshMessage msg) { FormChatUi.this.requestTraceroute(msg); }
                     @Override public void requestNodeInfo(MeshMessage msg) { FormChatUi.this.requestNodeInfo(msg); }
-                    @Override public void sendReaction(MeshMessage msg, String emoji) { FormChatUi.this.sendReaction(msg, emoji); }
-                    @Override public void confirmDeleteMessage(MeshMessage msg, HBox row) { FormChatUi.this.confirmDeleteMessage(msg, row); }
+                    @Override public void sendReaction(MeshMessage msg, String emoji) {
+                        FormChatUi.this.sendReaction(msg, emoji);
+                    }
+                    @Override public void confirmDeleteMessage(MeshMessage msg, HBox row) {
+                        FormChatUi.this.confirmDeleteMessage(msg, row);
+                    }
                     @Override public boolean retryMessage(MeshMessage msg) { return FormChatUi.this.retryMessage(msg); }
                 },
                 pendingStatusLabels);
@@ -488,662 +404,33 @@ abstract class FormChatUi extends FormChatBase {
     }
 
     private void handleDetailPaneKeyPressed(KeyEvent event) {
-        if (selectedChat == null) {
-            return;
+        if (messageSearchController != null) {
+            messageSearchController.handleDetailPaneKeyPressed(event);
         }
-        if (event.isShortcutDown() && event.getCode() == KeyCode.F) {
-            openMessageSearch();
-            event.consume();
-            return;
-        }
-        if (messageSearchActive && event.getCode() == KeyCode.ESCAPE) {
-            closeMessageSearch(true);
-            event.consume();
-        }
-    }
-
-    private void handleMessageSearchFieldKeyPressed(KeyEvent event) {
-        if (event.getCode() == KeyCode.ESCAPE) {
-            if (messageSearchNodeLookupActive) {
-                cancelMessageSearchNodeLookup();
-            } else {
-                closeMessageSearch(true);
-            }
-            event.consume();
-            return;
-        }
-        if (messageSearchNodeLookupActive && event.getCode() == KeyCode.DOWN) {
-            ensureMessageSearchNodeSuggestions();
-            moveMessageSearchNodeSelection(1);
-            event.consume();
-            return;
-        }
-        if (messageSearchNodeLookupActive && event.getCode() == KeyCode.UP) {
-            ensureMessageSearchNodeSuggestions();
-            moveMessageSearchNodeSelection(-1);
-            event.consume();
-            return;
-        }
-        if (event.getCode() == KeyCode.ENTER) {
-            if (messageSearchNodeLookupActive) {
-                selectCurrentMessageSearchNode();
-                event.consume();
-                return;
-            }
-            if (messageSearchTextDirty) {
-                runPendingMessageSearch(true);
-                event.consume();
-                return;
-            }
-            if (event.isShiftDown()) {
-                showPreviousMessageSearchResult();
-            } else {
-                showNextMessageSearchResult();
-            }
-            event.consume();
-        }
-    }
-
-    private void handleMessageSearchNodeMenuKeyPressed(KeyEvent event) {
-        if (!messageSearchNodeLookupActive) {
-            return;
-        }
-        if (event.getCode() == KeyCode.ENTER) {
-            selectCurrentMessageSearchNode();
-            event.consume();
-            return;
-        }
-        if (event.getCode() == KeyCode.DOWN) {
-            moveMessageSearchNodeSelection(1);
-            event.consume();
-            return;
-        }
-        if (event.getCode() == KeyCode.UP) {
-            moveMessageSearchNodeSelection(-1);
-            event.consume();
-            return;
-        }
-        if (event.getCode() == KeyCode.ESCAPE) {
-            cancelMessageSearchNodeLookup();
-            event.consume();
-        }
-    }
-
-    private void openMessageSearch() {
-        if (selectedChat == null) {
-            return;
-        }
-        if (!messageSearchActive) {
-            messageSearchActive = true;
-            setVisibleManaged(messageSearchButton, false);
-            setVisibleManaged(headerNameLabel, false);
-            setVisibleManaged(headerSpacer, false);
-            setVisibleManaged(messageSearchControls, true);
-            messageSearchButton.getStyleClass().add("chat-header-icon-btn-active");
-            updateMessageSearchFieldPrompt();
-            updateMessageSearchControlsState();
-        }
-        Platform.runLater(() -> {
-            messageSearchField.requestFocus();
-            messageSearchField.selectAll();
-        });
     }
 
     protected void closeMessageSearch(boolean focusInput) {
-        messageSearchActive = false;
-        stopMessageSearchInputPause();
-        messageSearchTextDirty = false;
-        messageSearchQuery = "";
-        messageSearchResultCount = 0;
-        messageSearchResultIndex = -1;
-        messageSearchResultCountLimited = false;
-        messageSearchHasPrevious = false;
-        messageSearchHasNext = false;
-        highlightedSearchDbId = 0;
-        messageSearchNodeLookupActive = false;
-        messageSearchNodeFilterId = "";
-        messageSearchNodeFilterLabel = "";
-        messageSearchTextBeforeNodeLookup = "";
-        hideMessageSearchNodeSuggestions();
-        if (messageSearchButton != null) {
-            messageSearchButton.getStyleClass().remove("chat-header-icon-btn-active");
-            setVisibleManaged(messageSearchButton, true);
-        }
-        if (messageSearchField != null) {
-            messageSearchField.clear();
-        }
-        if (headerNameLabel != null) {
-            setVisibleManaged(headerNameLabel, true);
-        }
-        if (headerSpacer != null) {
-            setVisibleManaged(headerSpacer, true);
-        }
-        if (messageSearchControls != null) {
-            setVisibleManaged(messageSearchControls, false);
-        }
-        refreshMessageSearchHighlight();
-        updateMessageSearchFieldPrompt();
-        updateMessageSearchControlsState();
-        if (focusInput && selectedChat != null && chatInputBar != null) {
-            chatInputBar.focusInput();
+        if (messageSearchController != null) {
+            messageSearchController.close(focusInput);
         }
     }
 
     protected void refreshMessageSearchResults(boolean jumpToLatest) {
-        if (!messageSearchActive || messageSearchField == null || selectedChat == null
-                || messageSearchNodeLookupActive) {
-            return;
+        if (messageSearchController != null) {
+            messageSearchController.refreshResults(jumpToLatest);
         }
-        if (messageSearchTextDirty) {
-            return;
-        }
-
-        long previousHighlightedDbId = highlightedSearchDbId;
-        int previousResultIndex = messageSearchResultIndex;
-        String query = messageSearchField.getText() == null ? "" : messageSearchField.getText().trim();
-        messageSearchQuery = query;
-        messageSearchResultCount = 0;
-        messageSearchResultIndex = -1;
-        messageSearchResultCountLimited = false;
-        messageSearchHasPrevious = false;
-        messageSearchHasNext = false;
-        highlightedSearchDbId = 0;
-
-        if (!query.isEmpty()) {
-            restoreMessageSearchResult(query, jumpToLatest, previousHighlightedDbId, previousResultIndex);
-        }
-
-        updateMessageSearchControlsState();
-        refreshMessageSearchHighlight();
-        if (jumpToLatest && highlightedSearchDbId > 0) {
-            showCurrentMessageSearchResult();
-        }
-    }
-
-    private void handleMessageSearchTextChanged(String newValue) {
-        if (!messageSearchActive) {
-            return;
-        }
-
-        stopMessageSearchInputPause();
-        resetMessageSearchResultState();
-        messageSearchQuery = newValue == null ? "" : newValue.trim();
-        if (messageSearchNodeLookupActive) {
-            messageSearchTextDirty = false;
-            refreshMessageSearchHighlight();
-            updateMessageSearchControlsState();
-            refreshMessageSearchNodeSuggestions();
-            return;
-        }
-        if (messageSearchQuery.isEmpty()) {
-            messageSearchTextDirty = false;
-            refreshMessageSearchHighlight();
-            updateMessageSearchControlsState();
-            return;
-        }
-
-        messageSearchTextDirty = true;
-        refreshMessageSearchHighlight();
-        updateMessageSearchControlsState();
-        messageSearchInputPause.playFromStart();
-    }
-
-    private void runPendingMessageSearch(boolean jumpToLatest) {
-        stopMessageSearchInputPause();
-        if (!messageSearchActive || messageSearchField == null || messageSearchNodeLookupActive) {
-            return;
-        }
-        messageSearchTextDirty = false;
-        refreshMessageSearchResults(jumpToLatest);
-    }
-
-    private void stopMessageSearchInputPause() {
-        if (messageSearchInputPause != null) {
-            messageSearchInputPause.stop();
-        }
-    }
-
-    private void resetMessageSearchResultState() {
-        messageSearchResultCount = 0;
-        messageSearchResultIndex = -1;
-        messageSearchResultCountLimited = false;
-        messageSearchHasPrevious = false;
-        messageSearchHasNext = false;
-        highlightedSearchDbId = 0;
-    }
-
-    private void restoreMessageSearchResult(String query,
-                                            boolean jumpToLatest,
-                                            long previousHighlightedDbId,
-                                            int previousResultIndex) {
-        MessageDbService db = MessageDbService.getInstance();
-        String chatType = currentChatType();
-        String chatKey = currentChatKey();
-        String ownerNodeId = currentOwnerNodeId();
-        String fromNodeId = currentMessageSearchNodeFilterId();
-        if (!jumpToLatest && previousHighlightedDbId > 0
-                && db.messageMatchesSearch(chatType, chatKey, query, ownerNodeId, fromNodeId, previousHighlightedDbId)) {
-            highlightedSearchDbId = previousHighlightedDbId;
-            refreshMessageSearchCount(db, chatType, chatKey, query, ownerNodeId, fromNodeId);
-            messageSearchResultIndex = messageSearchResultCountLimited
-                    ? 0
-                    : Math.min(Math.max(previousResultIndex, 0), Math.max(0, messageSearchResultCount - 1));
-            refreshMessageSearchNavigationAvailability();
-            return;
-        }
-
-        highlightedSearchDbId = db.findLatestMessageSearchMatch(chatType, chatKey, query, ownerNodeId, fromNodeId);
-        if (highlightedSearchDbId > 0) {
-            refreshMessageSearchCount(db, chatType, chatKey, query, ownerNodeId, fromNodeId);
-            messageSearchResultIndex = messageSearchResultCountLimited ? 0 : Math.max(0, messageSearchResultCount - 1);
-            refreshMessageSearchNavigationAvailability();
-        }
-    }
-
-    private void refreshMessageSearchCount(MessageDbService db,
-                                           String chatType,
-                                           String chatKey,
-                                           String query,
-                                           String ownerNodeId,
-                                           String fromNodeId) {
-        MessageDbService.MessageSearchCount count = db.countMessageSearchMatchesLimited(
-                chatType,
-                chatKey,
-                query,
-                ownerNodeId,
-                fromNodeId);
-        messageSearchResultCount = Math.max(count.count(), highlightedSearchDbId > 0 ? 1 : 0);
-        messageSearchResultCountLimited = count.limited();
-    }
-
-    private void showPreviousMessageSearchResult() {
-        if (!messageSearchHasPrevious || messageSearchQuery.isBlank() || highlightedSearchDbId <= 0) {
-            return;
-        }
-        long previousDbId = MessageDbService.getInstance().findPreviousMessageSearchMatch(
-                currentChatType(),
-                currentChatKey(),
-                messageSearchQuery,
-                currentOwnerNodeId(),
-                currentMessageSearchNodeFilterId(),
-                highlightedSearchDbId);
-        if (previousDbId <= 0) {
-            return;
-        }
-        highlightedSearchDbId = previousDbId;
-        if (!messageSearchResultCountLimited && messageSearchResultIndex > 0) {
-            messageSearchResultIndex--;
-        }
-        refreshMessageSearchNavigationAvailability();
-        showCurrentMessageSearchResult();
-    }
-
-    private void showNextMessageSearchResult() {
-        if (!messageSearchHasNext
-                || messageSearchQuery.isBlank()
-                || highlightedSearchDbId <= 0) {
-            return;
-        }
-        long nextDbId = MessageDbService.getInstance().findNextMessageSearchMatch(
-                currentChatType(),
-                currentChatKey(),
-                messageSearchQuery,
-                currentOwnerNodeId(),
-                currentMessageSearchNodeFilterId(),
-                highlightedSearchDbId);
-        if (nextDbId <= 0) {
-            return;
-        }
-        highlightedSearchDbId = nextDbId;
-        if (!messageSearchResultCountLimited && messageSearchResultIndex < messageSearchResultCount - 1) {
-            messageSearchResultIndex++;
-        }
-        refreshMessageSearchNavigationAvailability();
-        showCurrentMessageSearchResult();
-    }
-
-    private void showCurrentMessageSearchResult() {
-        if (messageSearchResultIndex < 0
-                || messageSearchResultCount <= 0
-                || highlightedSearchDbId <= 0) {
-            highlightedSearchDbId = 0;
-            refreshMessageSearchHighlight();
-            updateMessageSearchControlsState();
-            return;
-        }
-
-        ensureMessageLoaded(highlightedSearchDbId);
-        requestMessageViewportLayout();
-        refreshMessageSearchHighlight();
-        scrollToMessage(highlightedSearchDbId, 0);
-        updateMessageSearchControlsState();
-    }
-
-    private void refreshMessageSearchNavigationAvailability() {
-        messageSearchHasPrevious = false;
-        messageSearchHasNext = false;
-        if (highlightedSearchDbId <= 0 || messageSearchQuery.isBlank()) {
-            return;
-        }
-
-        MessageDbService db = MessageDbService.getInstance();
-        String chatType = currentChatType();
-        String chatKey = currentChatKey();
-        String ownerNodeId = currentOwnerNodeId();
-        String fromNodeId = currentMessageSearchNodeFilterId();
-        messageSearchHasPrevious = db.findPreviousMessageSearchMatch(
-                chatType,
-                chatKey,
-                messageSearchQuery,
-                ownerNodeId,
-                fromNodeId,
-                highlightedSearchDbId) > 0;
-        messageSearchHasNext = db.findNextMessageSearchMatch(
-                chatType,
-                chatKey,
-                messageSearchQuery,
-                ownerNodeId,
-                fromNodeId,
-                highlightedSearchDbId) > 0;
     }
 
     protected void refreshMessageSearchHighlight() {
-        if (loadedMessageRows == null || loadedMessageRows.isEmpty()) {
-            return;
-        }
-        for (var entry : loadedMessageRows.entrySet()) {
-            applyMessageSearchHighlight(entry.getValue(), entry.getKey());
+        if (messageSearchController != null) {
+            messageSearchController.refreshHighlight();
         }
     }
 
     protected void applyMessageSearchHighlight(HBox row, long dbId) {
-        if (row == null) {
-            return;
+        if (messageSearchController != null) {
+            messageSearchController.applyHighlight(row, dbId);
         }
-        row.getStyleClass().remove("chat-message-search-hit");
-        if (highlightedSearchDbId > 0 && highlightedSearchDbId == dbId) {
-            row.getStyleClass().add("chat-message-search-hit");
-        }
-    }
-
-    private void toggleMessageSearchNodeLookup() {
-        if (!messageSearchActive || messageSearchField == null) {
-            return;
-        }
-        if (messageSearchNodeLookupActive) {
-            cancelMessageSearchNodeLookup();
-            return;
-        }
-        activateMessageSearchNodeLookup();
-    }
-
-    private void activateMessageSearchNodeLookup() {
-        messageSearchTextBeforeNodeLookup = messageSearchField.getText() == null
-                ? ""
-                : messageSearchField.getText();
-        messageSearchNodeLookupActive = true;
-        stopMessageSearchInputPause();
-        messageSearchTextDirty = false;
-        messageSearchQuery = "";
-        resetMessageSearchResultState();
-        updateMessageSearchFieldPrompt();
-        messageSearchField.clear();
-        refreshMessageSearchHighlight();
-        updateMessageSearchControlsState();
-        Platform.runLater(() -> {
-            messageSearchField.requestFocus();
-            refreshMessageSearchNodeSuggestions();
-        });
-    }
-
-    private void cancelMessageSearchNodeLookup() {
-        String restoredText = messageSearchTextBeforeNodeLookup == null ? "" : messageSearchTextBeforeNodeLookup;
-        messageSearchTextBeforeNodeLookup = "";
-        messageSearchNodeLookupActive = false;
-        hideMessageSearchNodeSuggestions();
-        updateMessageSearchFieldPrompt();
-        messageSearchField.setText(restoredText);
-        messageSearchField.positionCaret(messageSearchField.getText().length());
-        if (restoredText == null || restoredText.trim().isEmpty()) {
-            resetMessageSearchResultState();
-            updateMessageSearchControlsState();
-        } else {
-            runPendingMessageSearch(true);
-        }
-        messageSearchField.requestFocus();
-    }
-
-    private void selectMessageSearchNode(NodeData node) {
-        if (node == null || messageSearchField == null) {
-            return;
-        }
-
-        messageSearchNodeFilterId = messageSearchNodeId(node);
-        messageSearchNodeFilterLabel = ChatBotCommandHelper.displayName(node);
-        String restoredText = messageSearchTextBeforeNodeLookup == null ? "" : messageSearchTextBeforeNodeLookup;
-        messageSearchTextBeforeNodeLookup = "";
-        messageSearchNodeLookupActive = false;
-        hideMessageSearchNodeSuggestions();
-        updateMessageSearchFieldPrompt();
-        messageSearchField.setText(restoredText);
-        messageSearchField.positionCaret(messageSearchField.getText().length());
-        if (restoredText == null || restoredText.trim().isEmpty()) {
-            resetMessageSearchResultState();
-            refreshMessageSearchHighlight();
-            updateMessageSearchControlsState();
-        } else {
-            runPendingMessageSearch(true);
-        }
-        messageSearchField.requestFocus();
-    }
-
-    private void refreshMessageSearchNodeSuggestions() {
-        if (!messageSearchNodeLookupActive || messageSearchField == null) {
-            hideMessageSearchNodeSuggestions();
-            return;
-        }
-
-        String query = messageSearchField.getText() == null ? "" : messageSearchField.getText().trim();
-        List<NodeData> candidates = listBotCommandNodes();
-        List<ChatBotCommandHelper.NodeSuggestion> suggestions =
-                ChatBotCommandHelper.suggestNodes(candidates, query, 8);
-        if (suggestions.isEmpty()) {
-            hideMessageSearchNodeSuggestions();
-            return;
-        }
-
-        List<NodeData> matches = new ArrayList<>();
-        List<CustomMenuItem> items = new ArrayList<>();
-        for (ChatBotCommandHelper.NodeSuggestion suggestion : suggestions) {
-            ChatBotCommandHelper.NodeResolution resolution =
-                    ChatBotCommandHelper.resolveTarget(suggestion.insertText(), candidates);
-            if (resolution.status() != ChatBotCommandHelper.NodeResolutionStatus.FOUND || resolution.node() == null) {
-                continue;
-            }
-            NodeData node = resolution.node();
-            matches.add(node);
-            CustomMenuItem item = buildMessageSearchNodeSuggestionItem(suggestion, node);
-            int index = items.size();
-            item.getContent().setOnMouseEntered(event -> {
-                selectedMessageSearchNodeIndex = index;
-                updateMessageSearchNodeSelection();
-            });
-            items.add(item);
-        }
-
-        if (items.isEmpty()) {
-            hideMessageSearchNodeSuggestions();
-            return;
-        }
-
-        currentMessageSearchNodeMatches = List.copyOf(matches);
-        currentMessageSearchNodeItems = List.copyOf(items);
-        selectedMessageSearchNodeIndex = 0;
-        messageSearchNodeMenu.getItems().setAll(items);
-        updateMessageSearchNodeSelection();
-        if (!messageSearchNodeMenu.isShowing() && messageSearchField.getScene() != null) {
-            messageSearchNodeMenu.show(messageSearchField, Side.BOTTOM, 0, 0);
-        }
-    }
-
-    private CustomMenuItem buildMessageSearchNodeSuggestionItem(ChatBotCommandHelper.NodeSuggestion suggestion,
-                                                                NodeData node) {
-        Label primary = new Label(suggestion.primaryText());
-        primary.getStyleClass().add("chat-command-suggestion-primary");
-
-        Label secondary = new Label(suggestion.secondaryText());
-        secondary.getStyleClass().add("chat-command-suggestion-secondary");
-        boolean hasSecondary = suggestion.secondaryText() != null && !suggestion.secondaryText().isBlank();
-        secondary.setVisible(hasSecondary);
-        secondary.setManaged(hasSecondary);
-
-        VBox labels = new VBox(2, primary, secondary);
-        labels.setAlignment(Pos.CENTER_LEFT);
-        labels.getStyleClass().add("map-search-suggestion-row");
-        labels.setPrefWidth(Math.max(220, messageSearchField.getWidth()));
-
-        CustomMenuItem item = new CustomMenuItem(labels, true);
-        item.setOnAction(event -> selectMessageSearchNode(node));
-        return item;
-    }
-
-    private void ensureMessageSearchNodeSuggestions() {
-        if (currentMessageSearchNodeMatches.isEmpty()) {
-            refreshMessageSearchNodeSuggestions();
-        } else if (!messageSearchNodeMenu.isShowing() && messageSearchField.getScene() != null) {
-            messageSearchNodeMenu.show(messageSearchField, Side.BOTTOM, 0, 0);
-        }
-    }
-
-    private void moveMessageSearchNodeSelection(int delta) {
-        if (currentMessageSearchNodeMatches.isEmpty()) {
-            return;
-        }
-        if (selectedMessageSearchNodeIndex < 0
-                || selectedMessageSearchNodeIndex >= currentMessageSearchNodeMatches.size()) {
-            selectedMessageSearchNodeIndex = delta > 0 ? 0 : currentMessageSearchNodeMatches.size() - 1;
-        } else {
-            selectedMessageSearchNodeIndex = Math.floorMod(
-                    selectedMessageSearchNodeIndex + delta,
-                    currentMessageSearchNodeMatches.size());
-        }
-        updateMessageSearchNodeSelection();
-    }
-
-    private void selectCurrentMessageSearchNode() {
-        ensureMessageSearchNodeSuggestions();
-        if (selectedMessageSearchNodeIndex < 0
-                || selectedMessageSearchNodeIndex >= currentMessageSearchNodeMatches.size()) {
-            return;
-        }
-        selectMessageSearchNode(currentMessageSearchNodeMatches.get(selectedMessageSearchNodeIndex));
-    }
-
-    private void updateMessageSearchNodeSelection() {
-        for (int i = 0; i < currentMessageSearchNodeItems.size(); i++) {
-            Node content = currentMessageSearchNodeItems.get(i).getContent();
-            content.getStyleClass().remove("map-search-suggestion-row-selected");
-            if (i == selectedMessageSearchNodeIndex) {
-                content.getStyleClass().add("map-search-suggestion-row-selected");
-            }
-        }
-    }
-
-    private void hideMessageSearchNodeSuggestions() {
-        currentMessageSearchNodeMatches = List.of();
-        currentMessageSearchNodeItems = List.of();
-        selectedMessageSearchNodeIndex = -1;
-        messageSearchNodeMenu.hide();
-    }
-
-    private String currentMessageSearchNodeFilterId() {
-        return messageSearchNodeFilterId == null || messageSearchNodeFilterId.isBlank()
-                ? null
-                : messageSearchNodeFilterId;
-    }
-
-    private String messageSearchNodeId(NodeData node) {
-        String nodeId = node.getNodeId();
-        if (nodeId == null || nodeId.isBlank()) {
-            return String.format("!%08x", node.getNodeNum());
-        }
-        return nodeId.trim();
-    }
-
-    private void updateMessageSearchFieldPrompt() {
-        if (messageSearchField == null) {
-            return;
-        }
-        if (messageSearchNodeLookupActive) {
-            messageSearchField.setPromptText("Поиск ноды");
-        } else if (currentMessageSearchNodeFilterId() != null) {
-            messageSearchField.setPromptText("Поиск сообщений от " + messageSearchNodeFilterLabel);
-        } else {
-            messageSearchField.setPromptText("Поиск сообщений");
-        }
-    }
-
-    private void updateMessageSearchNodeButtonState() {
-        if (messageSearchNodeButton == null) {
-            return;
-        }
-        messageSearchNodeButton.getStyleClass().remove("chat-header-icon-btn-active");
-        if (messageSearchNodeLookupActive || currentMessageSearchNodeFilterId() != null) {
-            messageSearchNodeButton.getStyleClass().add("chat-header-icon-btn-active");
-        }
-        String tooltip = messageSearchNodeLookupActive
-                ? "Выбор ноды"
-                : currentMessageSearchNodeFilterId() == null
-                        ? "Фильтр по ноде"
-                        : "Фильтр: " + messageSearchNodeFilterLabel;
-        messageSearchNodeButton.setTooltip(new Tooltip(tooltip));
-    }
-
-    private void updateMessageSearchControlsState() {
-        if (messageSearchCounterLabel == null) {
-            return;
-        }
-
-        updateMessageSearchNodeButtonState();
-        if (messageSearchNodeLookupActive) {
-            messageSearchCounterLabel.setText("");
-            messageSearchPreviousButton.setDisable(true);
-            messageSearchNextButton.setDisable(true);
-            return;
-        }
-
-        boolean hasQuery = messageSearchField != null
-                && messageSearchField.getText() != null
-                && !messageSearchField.getText().trim().isEmpty();
-        if (hasQuery && messageSearchTextDirty) {
-            messageSearchCounterLabel.setText("...");
-            messageSearchPreviousButton.setDisable(true);
-            messageSearchNextButton.setDisable(true);
-            return;
-        }
-        boolean hasResults = messageSearchResultCount > 0 && messageSearchResultIndex >= 0 && highlightedSearchDbId > 0;
-        messageSearchCounterLabel.setText(!hasQuery
-                ? ""
-                : hasResults
-                        ? messageSearchCounterText()
-                        : "0");
-        messageSearchPreviousButton.setDisable(!hasResults || !messageSearchHasPrevious);
-        messageSearchNextButton.setDisable(!hasResults || !messageSearchHasNext);
-    }
-
-    private String messageSearchCounterText() {
-        if (messageSearchResultCountLimited) {
-            return messageSearchResultCount + "+";
-        }
-        return (messageSearchResultIndex + 1) + "/" + messageSearchResultCount;
-    }
-
-    private void setVisibleManaged(Node node, boolean visible) {
-        if (node == null) {
-            return;
-        }
-        node.setVisible(visible);
-        node.setManaged(visible);
     }
 
     private ChatInputBar createChatInputBar() {
