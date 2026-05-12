@@ -8,6 +8,8 @@ import javafx.scene.Node;
 import javafx.scene.control.Button;
 import javafx.scene.control.Tooltip;
 
+import java.util.Optional;
+
 /**
  * Малые UI-хелперы формы чата, не завязанные на состояние выбранного чата.
  *
@@ -38,13 +40,8 @@ final class FormChatUiSupport {
     static Button createHeaderIconButton(String iconPath, String tooltip, String fallbackText) {
         Button button = new Button();
         button.getStyleClass().add("chat-header-icon-btn");
-        Node icon = SvgIconLoader.load(iconPath, 17);
-        if (icon != null) {
-            button.setGraphic(icon);
-            button.setTooltip(new Tooltip(tooltip));
-            return button;
-        }
-        button.setText(fallbackText);
+        Optional.ofNullable(SvgIconLoader.load(iconPath, 17))
+                .ifPresentOrElse(button::setGraphic, () -> button.setText(fallbackText));
         button.setTooltip(new Tooltip(tooltip));
         return button;
     }
@@ -64,10 +61,9 @@ final class FormChatUiSupport {
      * занимал место в layout.
      */
     static void setVisibleManaged(Node node, boolean visible) {
-        if (node == null) {
-            return;
-        }
-        node.setVisible(visible);
-        node.setManaged(visible);
+        Optional.ofNullable(node).ifPresent(target -> {
+            target.setVisible(visible);
+            target.setManaged(visible);
+        });
     }
 }

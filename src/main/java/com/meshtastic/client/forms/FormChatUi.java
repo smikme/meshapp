@@ -43,6 +43,7 @@ import javafx.scene.text.FontWeight;
 import java.util.Comparator;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.Optional;
 
 /**
  * Создаёт и хранит JavaFX-структуру формы чата.
@@ -120,7 +121,10 @@ abstract class FormChatUi extends FormChatBase {
     }
 
     private boolean chatMatchesSearch(ChatItem chat, String rawQuery) {
-        String query = rawQuery == null ? "" : rawQuery.trim().toLowerCase(Locale.ROOT);
+        String query = Optional.ofNullable(rawQuery)
+                .map(String::trim)
+                .map(value -> value.toLowerCase(Locale.ROOT))
+                .orElse("");
         return query.isEmpty()
                 || containsIgnoreCase(chat.getDisplayName(), query)
                 || containsIgnoreCase(chat.getLastMessageText(), query);
@@ -155,15 +159,14 @@ abstract class FormChatUi extends FormChatBase {
             return;
         }
         saveCurrentChatScrollState();
-        if (newItem == null) {
-            closeChat();
-            return;
-        }
+        Optional.ofNullable(newItem).ifPresentOrElse(this::selectChat, this::closeChat);
+    }
 
-        selectedChat = newItem;
+    private void selectChat(ChatItem chat) {
+        selectedChat = chat;
         rememberSelectedChatForBoundConnection();
-        openingChatUnreadCount = newItem.getUnreadCount();
-        openChat(newItem);
+        openingChatUnreadCount = chat.getUnreadCount();
+        openChat(chat);
     }
 
     private VBox buildDetailPane() {
@@ -379,9 +382,11 @@ abstract class FormChatUi extends FormChatBase {
     }
 
     private void markSelectedChatReadWhenViewingTail() {
-        if (formVisible && selectedChat != null && isAtLiveTail() && getUnreadCount(selectedChat) > 0) {
-            markAsRead(selectedChat);
-        }
+        Optional.ofNullable(selectedChat)
+                .filter(chat -> formVisible)
+                .filter(chat -> isAtLiveTail())
+                .filter(chat -> getUnreadCount(chat) > 0)
+                .ifPresent(this::markAsRead);
     }
 
     private void saveScrollStateAfterUserScroll() {
@@ -404,33 +409,28 @@ abstract class FormChatUi extends FormChatBase {
     }
 
     private void handleDetailPaneKeyPressed(KeyEvent event) {
-        if (messageSearchController != null) {
-            messageSearchController.handleDetailPaneKeyPressed(event);
-        }
+        Optional.ofNullable(messageSearchController)
+                .ifPresent(controller -> controller.handleDetailPaneKeyPressed(event));
     }
 
     protected void closeMessageSearch(boolean focusInput) {
-        if (messageSearchController != null) {
-            messageSearchController.close(focusInput);
-        }
+        Optional.ofNullable(messageSearchController)
+                .ifPresent(controller -> controller.close(focusInput));
     }
 
     protected void refreshMessageSearchResults(boolean jumpToLatest) {
-        if (messageSearchController != null) {
-            messageSearchController.refreshResults(jumpToLatest);
-        }
+        Optional.ofNullable(messageSearchController)
+                .ifPresent(controller -> controller.refreshResults(jumpToLatest));
     }
 
     protected void refreshMessageSearchHighlight() {
-        if (messageSearchController != null) {
-            messageSearchController.refreshHighlight();
-        }
+        Optional.ofNullable(messageSearchController)
+                .ifPresent(FormChatMessageSearchController::refreshHighlight);
     }
 
     protected void applyMessageSearchHighlight(HBox row, long dbId) {
-        if (messageSearchController != null) {
-            messageSearchController.applyHighlight(row, dbId);
-        }
+        Optional.ofNullable(messageSearchController)
+                .ifPresent(controller -> controller.applyHighlight(row, dbId));
     }
 
     private ChatInputBar createChatInputBar() {
@@ -442,8 +442,10 @@ abstract class FormChatUi extends FormChatBase {
     }
 
     private void sendChatMessage(ChatInputBar.SendRequest request) {
-        if (selectedChat == null || state == null
-                || (protocolHandler == null && meshCoreCompanionRuntime == null)) {
+        if (Optional.ofNullable(selectedChat).isEmpty()
+                || Optional.ofNullable(state).isEmpty()
+                || (Optional.ofNullable(protocolHandler).isEmpty()
+                        && Optional.ofNullable(meshCoreCompanionRuntime).isEmpty())) {
             return;
         }
 
@@ -457,52 +459,54 @@ abstract class FormChatUi extends FormChatBase {
     }
 
     private boolean sendChannelMessage(ChatInputBar.SendRequest request) {
-        if (meshCoreCompanionRuntime != null) {
-            return meshCoreCompanionRuntime.sendChannelMessage(
-                    selectedChat.getChannelIndex(),
-                    request.text(),
-                    request.replyId()) != null;
-        }
-        MessageService.sendChannelMessage(
-                protocolHandler,
-                state,
-                selectedChat.getChannelIndex(),
-                request.text(),
-                request.replyId());
-        return true;
+        return Optional.ofNullable(meshCoreCompanionRuntime)
+                .map(runtime -> Optional.ofNullable(runtime.sendChannelMessage(
+                        selectedChat.getChannelIndex(),
+                        request.text(),
+                        request.replyId())).isPresent())
+                .orElseGet(() -> {
+                    MessageService.sendChannelMessage(
+                            protocolHandler,
+                            state,
+                            selectedChat.getChannelIndex(),
+                            request.text(),
+                            request.replyId());
+                    return true;
+                });
     }
 
     private boolean sendDirectMessage(ChatInputBar.SendRequest request) {
         NodeData peerNode = NodeUtils.resolveNode(state, selectedChat.getPeerNodeId());
-        if (peerNode != null && peerNode.isUnmessagable()) {
+        if (Optional.ofNullable(peerNode).filter(NodeData::isUnmessagable).isPresent()) {
             Toast.show(Toast.Type.WARNING, "Нода объявила, что не принимает личные сообщения");
             return false;
         }
 
-        if (meshCoreCompanionRuntime != null) {
-            MeshMessage sent = meshCoreCompanionRuntime.sendDirectMessage(
-                    selectedChat.getPeerNodeId(),
-                    request.text(),
-                    request.replyId());
-            if (sent != null) {
-                return true;
-            }
-            Toast.show(Toast.Type.ERROR, "Не удалось определить MeshCore contact для DM");
-            return false;
-        }
-
-        MeshMessage sent = MessageService.sendDirectMessage(
-                protocolHandler,
-                state,
-                selectedChat.getPeerNodeId(),
-                request.text(),
-                request.replyId());
-        if (sent != null) {
-            return true;
-        }
-
-        Toast.show(Toast.Type.ERROR, "Не удалось определить ноду для DM");
-        return false;
+        return Optional.ofNullable(meshCoreCompanionRuntime)
+                .map(runtime -> {
+                    MeshMessage sent = runtime.sendDirectMessage(
+                            selectedChat.getPeerNodeId(),
+                            request.text(),
+                            request.replyId());
+                    if (Optional.ofNullable(sent).isPresent()) {
+                        return true;
+                    }
+                    Toast.show(Toast.Type.ERROR, "Не удалось определить MeshCore contact для DM");
+                    return false;
+                })
+                .orElseGet(() -> {
+                    MeshMessage sent = MessageService.sendDirectMessage(
+                            protocolHandler,
+                            state,
+                            selectedChat.getPeerNodeId(),
+                            request.text(),
+                            request.replyId());
+                    if (Optional.ofNullable(sent).isPresent()) {
+                        return true;
+                    }
+                    Toast.show(Toast.Type.ERROR, "Не удалось определить ноду для DM");
+                    return false;
+                });
     }
 
     // ==================== Правая панель: открытие/закрытие чата ====================
@@ -587,20 +591,16 @@ abstract class FormChatUi extends FormChatBase {
 
     protected void handleChatFontSizeChanged() {
         applyChatTypography();
-        if (chatListView != null) {
-            chatListView.refresh();
-        }
-        if (selectedChat != null) {
-            refreshLoadedMessageRows();
-        }
+        Optional.ofNullable(chatListView).ifPresent(ListView::refresh);
+        Optional.ofNullable(selectedChat).ifPresent(chat -> refreshLoadedMessageRows());
     }
 
     protected void applyChatTypography() {
         setStyle("-fx-font-size: " + TypographyManager.getChatFontSize() + "px;");
-        if (getScene() != null) {
+        Optional.ofNullable(getScene()).ifPresent(scene -> {
             applyCss();
             requestLayout();
-        }
+        });
     }
 
     protected void closeChat() {
@@ -619,20 +619,26 @@ abstract class FormChatUi extends FormChatBase {
 
     /** Определить тип и ключ чата для запросов к MessageDbService */
     protected String currentChatType() {
-        ChatDbKey key = currentChatDbKey();
-        return key == null ? null : key.dbType();
+        return Optional.ofNullable(currentChatDbKey())
+                .map(ChatDbKey::dbType)
+                .orElse(null);
     }
 
     protected String currentChatKey() {
-        ChatDbKey key = currentChatDbKey();
-        return key == null ? null : key.dbKey();
+        return Optional.ofNullable(currentChatDbKey())
+                .map(ChatDbKey::dbKey)
+                .orElse(null);
     }
 
     protected ChatDbKey currentChatDbKey() {
-        return selectedChat == null ? null : ChatDbKey.from(selectedChat);
+        return Optional.ofNullable(selectedChat)
+                .map(ChatDbKey::from)
+                .orElse(null);
     }
 
     protected String currentOwnerNodeId() {
-        return state != null && state.getOwnerNodeId() != null ? state.getOwnerNodeId() : "";
+        return Optional.ofNullable(state)
+                .map(deviceState -> deviceState.getOwnerNodeId())
+                .orElse("");
     }
 }

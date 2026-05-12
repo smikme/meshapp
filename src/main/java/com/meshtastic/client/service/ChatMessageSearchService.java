@@ -7,6 +7,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
+import java.util.Optional;
 
 /**
  * Выполняет полнотекстовый поиск сообщений вне JavaFX Application Thread.
@@ -358,10 +359,9 @@ public final class ChatMessageSearchService implements AutoCloseable {
     }
 
     private void cancelCurrentTask() {
-        Future<?> task = currentTask;
-        if (task != null && !task.isDone()) {
-            task.cancel(true);
-        }
+        Optional.ofNullable(currentTask)
+                .filter(task -> !task.isDone())
+                .ifPresent(task -> task.cancel(true));
     }
 
     /**

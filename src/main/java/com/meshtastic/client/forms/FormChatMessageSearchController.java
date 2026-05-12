@@ -21,6 +21,7 @@ import javafx.util.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 
 /**
  * Управляет поиском сообщений внутри заголовка активного чата.
@@ -255,11 +256,10 @@ final class FormChatMessageSearchController {
      * Обновляет подсветку найденного сообщения на уже загруженных строках.
      */
     void refreshHighlight() {
-        Map<Long, HBox> rows = host.loadedMessageRows();
-        if (rows == null || rows.isEmpty()) {
-            return;
-        }
-        rows.entrySet().stream()
+        Optional.ofNullable(host.loadedMessageRows())
+                .filter(rows -> !rows.isEmpty())
+                .stream()
+                .flatMap(rows -> rows.entrySet().stream())
                 .forEach(entry -> applyHighlight(entry.getValue(), entry.getKey()));
     }
 
@@ -267,13 +267,12 @@ final class FormChatMessageSearchController {
      * Применяет CSS-класс найденного сообщения к одной строке.
      */
     void applyHighlight(HBox row, long dbId) {
-        if (row == null) {
-            return;
-        }
-        row.getStyleClass().remove("chat-message-search-hit");
-        if (highlightedDbId > 0 && highlightedDbId == dbId) {
-            row.getStyleClass().add("chat-message-search-hit");
-        }
+        Optional.ofNullable(row).ifPresent(messageRow -> {
+            messageRow.getStyleClass().remove("chat-message-search-hit");
+            if (highlightedDbId > 0 && highlightedDbId == dbId) {
+                messageRow.getStyleClass().add("chat-message-search-hit");
+            }
+        });
     }
 
     /**
@@ -423,7 +422,7 @@ final class FormChatMessageSearchController {
         invalidateSearchWork();
         stopInputPause();
         resetResultState();
-        query = newValue == null ? "" : newValue.trim();
+        query = trimmedText(newValue);
         if (nodeLookupActive) {
             textDirty = false;
             refreshVisualState();
@@ -515,7 +514,7 @@ final class FormChatMessageSearchController {
     }
 
     private String currentSearchText() {
-        return searchField.getText() == null ? "" : searchField.getText().trim();
+        return trimmedText(searchField.getText());
     }
 
     private void stopInputPause() {
@@ -635,7 +634,7 @@ final class FormChatMessageSearchController {
     }
 
     private void activateNodeLookup() {
-        textBeforeNodeLookup = searchField.getText() == null ? "" : searchField.getText();
+        textBeforeNodeLookup = Optional.ofNullable(searchField.getText()).orElse("");
         nodeLookupActive = true;
         stopInputPause();
         textDirty = false;
@@ -656,17 +655,15 @@ final class FormChatMessageSearchController {
     }
 
     private void selectNode(NodeData node) {
-        if (node == null) {
-            return;
-        }
-
-        nodeFilterId = nodeId(node);
-        nodeFilterLabel = ChatBotCommandHelper.displayName(node);
-        finishNodeLookup(restoredLookupText(), true);
+        Optional.ofNullable(node).ifPresent(selectedNode -> {
+            nodeFilterId = nodeId(selectedNode);
+            nodeFilterLabel = ChatBotCommandHelper.displayName(selectedNode);
+            finishNodeLookup(restoredLookupText(), true);
+        });
     }
 
     private String restoredLookupText() {
-        return textBeforeNodeLookup == null ? "" : textBeforeNodeLookup;
+        return Optional.ofNullable(textBeforeNodeLookup).orElse("");
     }
 
     private void finishNodeLookup(String restoredText, boolean refreshWhenEmpty) {
@@ -692,37 +689,43 @@ final class FormChatMessageSearchController {
     }
 
     private String currentNodeFilterId() {
-        return nodeFilterId == null || nodeFilterId.isBlank() ? null : nodeFilterId;
+        return Optional.ofNullable(nodeFilterId)
+                .filter(id -> !id.isBlank())
+                .orElse(null);
     }
 
     private String nodeId(NodeData node) {
-        String rawNodeId = node.getNodeId();
-        return rawNodeId == null || rawNodeId.isBlank()
-                ? String.format("!%08x", node.getNodeNum())
-                : rawNodeId.trim();
+        return Optional.ofNullable(node.getNodeId())
+                .filter(rawNodeId -> !rawNodeId.isBlank())
+                .map(String::trim)
+                .orElseGet(() -> String.format("!%08x", node.getNodeNum()));
     }
 
     private void updateFieldPrompt() {
         String prompt = nodeLookupActive
                 ? "Поиск ноды"
-                : currentNodeFilterId() == null
-                        ? "Поиск сообщений"
-                        : "Поиск сообщений от " + nodeFilterLabel;
+                : Optional.ofNullable(currentNodeFilterId())
+                        .map(id -> "Поиск сообщений от " + nodeFilterLabel)
+                        .orElse("Поиск сообщений");
         searchField.setPromptText(prompt);
     }
 
     private void updateNodeButtonState() {
         nodeButton.getStyleClass().remove("chat-header-icon-btn-active");
         String filterId = currentNodeFilterId();
-        if (nodeLookupActive || filterId != null) {
+        if (nodeLookupActive || Optional.ofNullable(filterId).isPresent()) {
             nodeButton.getStyleClass().add("chat-header-icon-btn-active");
         }
         String tooltip = nodeLookupActive
                 ? "Выбор ноды"
-                : filterId == null
-                        ? "Фильтр по ноде"
-                        : "Фильтр: " + nodeFilterLabel;
+                : Optional.ofNullable(filterId)
+                        .map(id -> "Фильтр: " + nodeFilterLabel)
+                        .orElse("Фильтр по ноде");
         nodeButton.setTooltip(new Tooltip(tooltip));
+    }
+
+    private String trimmedText(String value) {
+        return Optional.ofNullable(value).map(String::trim).orElse("");
     }
 
     private void updateControlsState() {

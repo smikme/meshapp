@@ -6,6 +6,7 @@ import javafx.scene.layout.HBox;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * Адаптер между формой чата и компонентом поиска сообщений.
@@ -26,7 +27,7 @@ final class FormChatMessageSearchHost implements FormChatMessageSearchController
 
     @Override
     public boolean hasSelectedChat() {
-        return form.selectedChat != null;
+        return Optional.ofNullable(form.selectedChat).isPresent();
     }
 
     @Override
@@ -71,8 +72,6 @@ final class FormChatMessageSearchHost implements FormChatMessageSearchController
 
     @Override
     public void focusChatInput() {
-        if (form.chatInputBar != null) {
-            form.chatInputBar.focusInput();
-        }
+        Optional.ofNullable(form.chatInputBar).ifPresent(bar -> bar.focusInput());
     }
 }

@@ -14,7 +14,6 @@ import javafx.scene.input.KeyEvent;
 import javafx.scene.layout.VBox;
 
 import java.util.List;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
@@ -84,7 +83,7 @@ final class FormChatMessageSearchNodeLookup {
             return;
         }
 
-        String nodeQuery = searchField.getText() == null ? "" : searchField.getText().trim();
+        String nodeQuery = currentFieldText();
         List<NodeData> candidates = nodeSupplier.get();
         List<ChatBotCommandHelper.NodeSuggestion> suggestions =
                 ChatBotCommandHelper.suggestNodes(candidates, nodeQuery, 8);
@@ -186,7 +185,7 @@ final class FormChatMessageSearchNodeLookup {
         return Optional.of(ChatBotCommandHelper.resolveTarget(suggestion.insertText(), candidates))
                 .filter(resolution -> resolution.status() == ChatBotCommandHelper.NodeResolutionStatus.FOUND)
                 .map(ChatBotCommandHelper.NodeResolution::node)
-                .filter(Objects::nonNull)
+                .flatMap(Optional::ofNullable)
                 .map(node -> new SuggestionRow(node, buildSuggestionItem(suggestion, node)));
     }
 
@@ -196,7 +195,9 @@ final class FormChatMessageSearchNodeLookup {
 
         Label secondary = new Label(suggestion.secondaryText());
         secondary.getStyleClass().add("chat-command-suggestion-secondary");
-        boolean hasSecondary = suggestion.secondaryText() != null && !suggestion.secondaryText().isBlank();
+        boolean hasSecondary = Optional.ofNullable(suggestion.secondaryText())
+                .filter(text -> !text.isBlank())
+                .isPresent();
         secondary.setVisible(hasSecondary);
         secondary.setManaged(hasSecondary);
 
@@ -233,8 +234,12 @@ final class FormChatMessageSearchNodeLookup {
     }
 
     private void showIfNeeded() {
-        if (!nodeMenu.isShowing() && searchField.getScene() != null) {
-            nodeMenu.show(searchField, Side.BOTTOM, 0, 0);
-        }
+        Optional.ofNullable(searchField.getScene())
+                .filter(scene -> !nodeMenu.isShowing())
+                .ifPresent(scene -> nodeMenu.show(searchField, Side.BOTTOM, 0, 0));
+    }
+
+    private String currentFieldText() {
+        return Optional.ofNullable(searchField.getText()).map(String::trim).orElse("");
     }
 }
