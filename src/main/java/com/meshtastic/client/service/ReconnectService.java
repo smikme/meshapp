@@ -69,7 +69,7 @@ public final class ReconnectService {
      * Запускает цикл переподключения для указанного соединения.
      * Идемпотентен — повторный вызов для того же id игнорируется.
      */
-    public void startReconnect(String id) {
+    public synchronized void startReconnect(String id) {
         if (pendingReconnects.containsKey(id)) {
             return;
         }

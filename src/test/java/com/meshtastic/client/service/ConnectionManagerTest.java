@@ -418,6 +418,41 @@ class ConnectionManagerTest {
     }
 
     @Test
+    void staleDisconnectCallbackDoesNotStartReconnectAfterNewConnectionIsActive() throws Exception {
+        ControlledBlePlatform firstPlatform = new ControlledBlePlatform();
+        ControlledBlePlatform secondPlatform = new ControlledBlePlatform();
+        Queue<BlePlatform> platforms = new ArrayDeque<>();
+        platforms.add(firstPlatform);
+        platforms.add(secondPlatform);
+        installBlePlatformFactory(platforms::remove, true);
+
+        ConnectionManager manager = ConnectionManager.getInstance();
+        ConnectionEntry entry = new ConnectionEntry("ble", "AA:BB:CC:DD:EE:FF", "Test BLE");
+        manager.addEntry(entry);
+
+        manager.connect(entry.getId());
+        assertTrue(entry.isConnected());
+
+        firstPlatform.emitDisconnected();
+        assertTrue(waitUntil(entry::isReconnecting, 1_000));
+        assertFalse(entry.isConnected());
+        assertFalse(manager.hasActiveConnection());
+
+        manager.connect(entry.getId());
+        assertTrue(entry.isConnected());
+        assertFalse(entry.isReconnecting());
+        assertTrue(manager.hasActiveConnection());
+
+        firstPlatform.emitDisconnected();
+
+        assertTrue(entry.isConnected());
+        assertFalse(entry.isReconnecting());
+        assertTrue(manager.hasActiveConnection());
+
+        manager.disconnect(entry.getId());
+    }
+
+    @Test
     void removeEntryDoesNotBlockWhileBleConnectIsPending() throws Exception {
         BlockingBlePlatform platform = new BlockingBlePlatform();
         installBlePlatformFactory(() -> platform, true);
@@ -474,6 +509,73 @@ class ConnectionManagerTest {
     @FunctionalInterface
     private interface CheckedBooleanSupplier {
         boolean getAsBoolean() throws Exception;
+    }
+
+    private static final class ControlledBlePlatform implements BlePlatform {
+        private volatile Consumer<BleState> stateListener;
+        private volatile boolean connected;
+
+        @Override
+        public void startScan(Consumer<BleDevice> onDeviceFound) {
+        }
+
+        @Override
+        public void stopScan() {
+        }
+
+        @Override
+        public void connect(String address) {
+            connected = true;
+            Consumer<BleState> listener = stateListener;
+            if (listener != null) {
+                listener.accept(new BleState.Connected());
+            }
+        }
+
+        @Override
+        public void disconnect() {
+            connected = false;
+            Consumer<BleState> listener = stateListener;
+            if (listener != null) {
+                listener.accept(new BleState.Disconnected());
+            }
+        }
+
+        @Override
+        public boolean isConnected() {
+            return connected;
+        }
+
+        @Override
+        public boolean writeToRadio(byte[] protobufPayload) {
+            return connected;
+        }
+
+        @Override
+        public void setFromRadioListener(Consumer<byte[]> listener) {
+        }
+
+        @Override
+        public void setStateListener(Consumer<BleState> listener) {
+            this.stateListener = listener;
+        }
+
+        @Override
+        public AdapterState getAdapterState() {
+            return AdapterState.POWERED_ON;
+        }
+
+        @Override
+        public void dispose() {
+        }
+
+        private void emitDisconnected() {
+            connected = false;
+            Consumer<BleState> listener = stateListener;
+            if (listener != null) {
+                listener.accept(new BleState.Disconnected());
+            }
+        }
     }
 
     private static final class BlockingBlePlatform implements BlePlatform {

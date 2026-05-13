@@ -237,6 +237,12 @@ public final class ConnectionManager {
             public void onDisconnected() {
                 boolean userInitiated = userDisconnectedIds.contains(id);
                 String disconnectReason = userDisconnectReasons.get(id);
+                boolean connectionWasCurrent = cleanupConnection(id, conn);
+                if (!connectionWasCurrent) {
+                    log.debug("Ignoring stale disconnect callback for '{}'", entry.getName());
+                    clearUserDisconnectStateIfIdle(id);
+                    return;
+                }
                 if (userInitiated) {
                     if (disconnectReason != null && !disconnectReason.isBlank()) {
                         log.info("Connection '{}' disconnected by user ({})", entry.getName(), disconnectReason);
@@ -247,10 +253,7 @@ public final class ConnectionManager {
                     log.warn("Connection '{}' disconnected unexpectedly", entry.getName());
                 }
                 entry.setConnected(false);
-                cleanupConnection(id, conn);
-                if (!userInitiated) {
-                    selectConnectionIfNeeded();
-                }
+                selectConnectionIfNeeded();
                 fireChanged();
                 if (!userInitiated) {
                     log.info("Scheduling auto-reconnect for '{}' after disconnect", entry.getName());
@@ -263,6 +266,12 @@ public final class ConnectionManager {
             public void onConnectionError(String message, Throwable cause) {
                 boolean userInitiated = userDisconnectedIds.contains(id);
                 String disconnectReason = userDisconnectReasons.get(id);
+                boolean connectionWasCurrent = cleanupConnection(id, conn);
+                if (!connectionWasCurrent) {
+                    log.debug("Ignoring stale connection error callback for '{}': {}", entry.getName(), message);
+                    clearUserDisconnectStateIfIdle(id);
+                    return;
+                }
                 if (cause != null) {
                     if (userInitiated && disconnectReason != null && !disconnectReason.isBlank()) {
                         log.warn("Connection '{}' error during requested disconnect ({}): {}",
@@ -279,10 +288,7 @@ public final class ConnectionManager {
                     }
                 }
                 entry.setConnected(false);
-                cleanupConnection(id, conn);
-                if (!userInitiated) {
-                    selectConnectionIfNeeded();
-                }
+                selectConnectionIfNeeded();
                 fireChanged();
                 if (!userInitiated) {
                     log.info("Scheduling auto-reconnect for '{}' after connection error", entry.getName());
@@ -782,17 +788,19 @@ public final class ConnectionManager {
 
     /**
      * Удаляет transport из runtime-карт после disconnect/error callback-а.
+     *
+     * @return {@code true}, если callback относится к текущему active/pending transport-у
      */
-    private void cleanupConnection(String id, TransportConnection expectedConnection) {
+    private boolean cleanupConnection(String id, TransportConnection expectedConnection) {
         synchronized (connectionLock) {
             boolean removedActive = activeConnections.remove(id, expectedConnection);
             boolean removedPending = pendingConnections.remove(id, expectedConnection);
             if (removedActive) {
                 cleanupRuntimeState(id);
             } else if (!removedPending) {
-                return;
+                return false;
             }
-            selectConnectionIfNeededLocked();
+            return true;
         }
     }
 
