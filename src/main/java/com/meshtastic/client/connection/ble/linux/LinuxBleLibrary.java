@@ -81,7 +81,7 @@ public interface LinuxBleLibrary extends Library {
 
     /**
      * Запись protobuf в toRadio GATT characteristic.
-     * @return 0 при успехе, отрицательное при ошибке
+     * @return 0 при успехе, -4 если BLE bond не прошёл authentication/MITM, иначе отрицательное при ошибке
      */
     int meshble_write_to_radio(byte[] data, int length);
 
