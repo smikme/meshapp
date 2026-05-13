@@ -43,6 +43,7 @@ public class SimpleConnectionForm extends VBox {
     // Serial fields
     private final VBox serialFields;
     private final ComboBox<String> cmbPort;
+    private final Label lblSerialStatus;
     private final TextField txtBaudRate;
 
     // BLE fields
@@ -53,6 +54,7 @@ public class SimpleConnectionForm extends VBox {
     private Consumer<ConnectionEntry> onSave;
     private String savedPortName;
     private String savedBleDeviceLabel;
+    private List<DiscoveredPort> lastDiscoveredPorts = List.of();
     private final Consumer<List<DiscoveredPort>> discoveryListener = this::onPortsDiscovered;
     private final Consumer<List<BleDevice>> bleDiscoveryListener = this::onBleDevicesDiscovered;
 
@@ -118,6 +120,7 @@ public class SimpleConnectionForm extends VBox {
         cmbPort.setEditable(true);
         cmbPort.setPromptText("Выберите порт...");
         cmbPort.setMaxWidth(Double.MAX_VALUE);
+        cmbPort.setOnAction(e -> updateSerialAccessStatus());
         HBox.setHgrow(cmbPort, Priority.ALWAYS);
 
         Button btnRefresh = new Button("\u27F3");
@@ -127,11 +130,18 @@ public class SimpleConnectionForm extends VBox {
         HBox portRow = new HBox(6, cmbPort, btnRefresh);
         portRow.setAlignment(Pos.CENTER_LEFT);
 
+        lblSerialStatus = new Label();
+        lblSerialStatus.getStyleClass().add("text-muted");
+        lblSerialStatus.setWrapText(true);
+        lblSerialStatus.setVisible(false);
+        lblSerialStatus.setManaged(false);
+
         txtBaudRate = new TextField("115200");
 
         serialFields = new VBox(8);
         serialFields.getChildren().addAll(
                 new Label("Порт устройства"), portRow,
+                lblSerialStatus,
                 new Label("Скорость (бод)"), txtBaudRate
         );
         serialFields.setVisible(false);
@@ -405,13 +415,16 @@ public class SimpleConnectionForm extends VBox {
     }
 
     private void populatePortCombo(List<DiscoveredPort> ports) {
+        lastDiscoveredPorts = List.copyOf(ports);
         String previousSelection = cmbPort.getValue();
         cmbPort.getItems().clear();
 
         boolean savedPortDiscovered = false;
         for (DiscoveredPort port : ports) {
             String label = port.descriptivePortName() + " (" + port.systemPortName() + ")";
-            if (port.likelyMeshtastic()) {
+            if (!port.accessible()) {
+                label += " !";
+            } else if (port.likelyMeshtastic()) {
                 label += " \u2713";
             }
             if (savedPortName != null && savedPortName.equals(port.systemPortName())) {
@@ -443,6 +456,49 @@ public class SimpleConnectionForm extends VBox {
                 }
             }
         }
+        updateSerialAccessStatus();
+    }
+
+    private void updateSerialAccessStatus() {
+        if (!isSerialMode()) {
+            clearSerialAccessStatus();
+            return;
+        }
+        DiscoveredPort selectedPort = findSelectedDiscoveredPort();
+        if (selectedPort != null && !selectedPort.accessible()) {
+            showSerialAccessStatus(selectedPort.accessWarning());
+            return;
+        }
+        clearSerialAccessStatus();
+    }
+
+    private DiscoveredPort findSelectedDiscoveredPort() {
+        String selected = cmbPort.getValue();
+        if (selected == null || selected.isBlank()) {
+            return null;
+        }
+        String selectedSystemName = extractSystemPortName(selected);
+        for (DiscoveredPort port : lastDiscoveredPorts) {
+            if (port.systemPortName().equals(selectedSystemName)) {
+                return port;
+            }
+        }
+        return null;
+    }
+
+    private void showSerialAccessStatus(String message) {
+        lblSerialStatus.setText(message == null || message.isBlank()
+                ? "Нет доступа к выбранному serial-порту."
+                : message);
+        lblSerialStatus.setStyle("-fx-text-fill: #B45309;");
+        lblSerialStatus.setVisible(true);
+        lblSerialStatus.setManaged(true);
+    }
+
+    private void clearSerialAccessStatus() {
+        lblSerialStatus.setText("");
+        lblSerialStatus.setVisible(false);
+        lblSerialStatus.setManaged(false);
     }
 
     private void populateBleDeviceCombo(List<BleDevice> devices) {

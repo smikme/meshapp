@@ -9,4 +9,34 @@ if command -v update-desktop-database >/dev/null 2>&1; then
     update-desktop-database -q /usr/share/applications || true
 fi
 
+RULE_FILE="/etc/udev/rules.d/78-mm-meshapp-serial.rules"
+if [ -d /etc/udev/rules.d ]; then
+    cat > "$RULE_FILE" <<'EOF'
+# MeshApp USB serial access for common Meshtastic boards.
+# TAG+="uaccess" grants the active local user access through systemd-logind.
+# ID_MM_DEVICE_IGNORE keeps ModemManager from probing non-modem radio boards.
+ACTION!="add|change|move|bind", GOTO="meshapp_serial_end"
+SUBSYSTEM!="tty", GOTO="meshapp_serial_end"
+
+# Silicon Labs CP210x
+SUBSYSTEMS=="usb", ATTRS{idVendor}=="10c4", TAG+="uaccess", ENV{ID_MM_DEVICE_IGNORE}="1", ENV{ID_MM_PORT_IGNORE}="1"
+# WCH CH340 / CH341 / CH9102
+SUBSYSTEMS=="usb", ATTRS{idVendor}=="1a86", TAG+="uaccess", ENV{ID_MM_DEVICE_IGNORE}="1", ENV{ID_MM_PORT_IGNORE}="1"
+# FTDI USB serial
+SUBSYSTEMS=="usb", ATTRS{idVendor}=="0403", TAG+="uaccess", ENV{ID_MM_DEVICE_IGNORE}="1", ENV{ID_MM_PORT_IGNORE}="1"
+# Espressif native USB CDC
+SUBSYSTEMS=="usb", ATTRS{idVendor}=="303a", TAG+="uaccess", ENV{ID_MM_DEVICE_IGNORE}="1", ENV{ID_MM_PORT_IGNORE}="1"
+# Nordic / Adafruit / Raspberry Pi UF2 or CDC boards used by several nRF52/RP2040 radios
+SUBSYSTEMS=="usb", ATTRS{idVendor}=="1915", TAG+="uaccess", ENV{ID_MM_DEVICE_IGNORE}="1", ENV{ID_MM_PORT_IGNORE}="1"
+SUBSYSTEMS=="usb", ATTRS{idVendor}=="239a", TAG+="uaccess", ENV{ID_MM_DEVICE_IGNORE}="1", ENV{ID_MM_PORT_IGNORE}="1"
+SUBSYSTEMS=="usb", ATTRS{idVendor}=="2e8a", TAG+="uaccess", ENV{ID_MM_DEVICE_IGNORE}="1", ENV{ID_MM_PORT_IGNORE}="1"
+
+LABEL="meshapp_serial_end"
+EOF
+    if command -v udevadm >/dev/null 2>&1; then
+        udevadm control --reload-rules || true
+        udevadm trigger --subsystem-match=tty || true
+    fi
+fi
+
 exit 0

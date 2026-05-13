@@ -1,6 +1,7 @@
 package com.meshtastic.client.service;
 
 import com.fazecast.jSerialComm.SerialPort;
+import com.meshtastic.client.connection.serial.SerialPortAccessAdvisor;
 import com.meshtastic.client.platform.OsDetect;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -46,12 +47,22 @@ public final class SerialPortDiscoveryService {
      * @param systemPortName      системное имя порта (e.g. "cu.usbserial-1234", "COM3")
      * @param descriptivePortName описательное имя (e.g. "CP2104 USB to UART Bridge Controller")
      * @param likelyMeshtastic    эвристическая оценка — вероятно Meshtastic-устройство
+     * @param accessible          есть ли у текущего пользователя read/write доступ к device node
+     * @param accessWarning       человекочитаемая подсказка по исправлению прав
      */
     public record DiscoveredPort(
             String systemPortName,
             String descriptivePortName,
-            boolean likelyMeshtastic
-    ) {}
+            boolean likelyMeshtastic,
+            boolean accessible,
+            String accessWarning
+    ) {
+        public DiscoveredPort(String systemPortName,
+                              String descriptivePortName,
+                              boolean likelyMeshtastic) {
+            this(systemPortName, descriptivePortName, likelyMeshtastic, true, null);
+        }
+    }
 
     private SerialPortDiscoveryService() {
         ThreadFactory tf = r -> {
@@ -128,7 +139,13 @@ public final class SerialPortDiscoveryService {
 
                 String desc = port.getDescriptivePortName();
                 boolean likely = isLikelyMeshtastic(desc);
-                discovered.add(new DiscoveredPort(sysName, desc, likely));
+                SerialPortAccessAdvisor.PortAccess access = SerialPortAccessAdvisor.check(sysName);
+                discovered.add(new DiscoveredPort(
+                        sysName,
+                        desc,
+                        likely,
+                        access.accessible(),
+                        access.warning()));
             }
 
             // Сортировка: вероятные Meshtastic-устройства в начале

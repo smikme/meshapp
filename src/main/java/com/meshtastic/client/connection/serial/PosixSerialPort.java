@@ -161,13 +161,24 @@ class PosixSerialPort implements NativeSerialPort {
         // Дополняем путь /dev/ если нужно
         String path = portName.startsWith("/dev/") ? portName : "/dev/" + portName;
         boolean isMac = OsDetect.isMacOs();
+        if (!isMac) {
+            SerialPortAccessAdvisor.PortAccess access = SerialPortAccessAdvisor.check(path);
+            if (!access.accessible()) {
+                throw new ConnectionException(access.warning());
+            }
+        }
 
         int flags = O_RDWR;
         flags |= isMac ? (O_NOCTTY | O_NONBLOCK_MAC) : (O_NOCTTY_LINUX | O_NONBLOCK_LINUX);
 
         int result = CLib.INSTANCE.open(path, flags);
         if (result < 0) {
-            throw new ConnectionException("Cannot open " + path + ": " + CLib.INSTANCE.strerror(errno()));
+            int err = errno();
+            throw new ConnectionException(SerialPortAccessAdvisor.openFailureMessage(
+                    path,
+                    CLib.INSTANCE.strerror(err),
+                    err,
+                    !isMac));
         }
         this.fd = result;
 
