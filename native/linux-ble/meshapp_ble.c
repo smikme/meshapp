@@ -1605,7 +1605,47 @@ static int agent_request_passkey(sd_bus_message* msg, void* userdata, sd_bus_err
     return 1; /* positive = we'll reply later (async) */
 }
 
-static int agent_auto_accept(sd_bus_message* msg, void* userdata, sd_bus_error* err) {
+static int agent_request_pincode(sd_bus_message* msg, void* userdata, sd_bus_error* err) {
+    (void)userdata; (void)err;
+    const char* device_path = NULL;
+    sd_bus_message_read(msg, "o", &device_path);
+    log_msg("[meshble] Agent: RequestPinCode for %s rejected (legacy PIN not supported)",
+            device_path ? device_path : "?");
+    return sd_bus_reply_method_errorf(msg, "org.bluez.Error.Rejected", "Legacy PIN code pairing is not supported");
+}
+
+static int agent_display_pincode(sd_bus_message* msg, void* userdata, sd_bus_error* err) {
+    (void)userdata; (void)err;
+    const char* device_path = NULL;
+    const char* pincode = NULL;
+    sd_bus_message_read(msg, "os", &device_path, &pincode);
+    (void)pincode;
+    log_msg("[meshble] Agent: DisplayPinCode for %s", device_path ? device_path : "?");
+    return sd_bus_reply_method_return(msg, "");
+}
+
+static int agent_display_passkey(sd_bus_message* msg, void* userdata, sd_bus_error* err) {
+    (void)userdata; (void)err;
+    const char* device_path = NULL;
+    uint32_t passkey = 0;
+    uint16_t entered = 0;
+    sd_bus_message_read(msg, "ouq", &device_path, &passkey, &entered);
+    log_msg("[meshble] Agent: DisplayPasskey for %s passkey=%06u entered=%u",
+            device_path ? device_path : "?", passkey, entered);
+    return sd_bus_reply_method_return(msg, "");
+}
+
+static int agent_request_confirmation(sd_bus_message* msg, void* userdata, sd_bus_error* err) {
+    (void)userdata; (void)err;
+    const char* device_path = NULL;
+    uint32_t passkey = 0;
+    sd_bus_message_read(msg, "ou", &device_path, &passkey);
+    log_msg("[meshble] Agent: RequestConfirmation for %s passkey=%06u (auto-accepted)",
+            device_path ? device_path : "?", passkey);
+    return sd_bus_reply_method_return(msg, "");
+}
+
+static int agent_auto_authorize(sd_bus_message* msg, void* userdata, sd_bus_error* err) {
     (void)userdata; (void)err;
     return sd_bus_reply_method_return(msg, "");
 }
@@ -1623,13 +1663,13 @@ static int agent_cancel(sd_bus_message* msg, void* userdata, sd_bus_error* err) 
 static const sd_bus_vtable agent_vtable[] = {
     SD_BUS_VTABLE_START(0),
     SD_BUS_METHOD("Release", "", "", agent_release, SD_BUS_VTABLE_UNPRIVILEGED),
-    SD_BUS_METHOD("RequestPinCode", "o", "s", agent_auto_accept, SD_BUS_VTABLE_UNPRIVILEGED),
+    SD_BUS_METHOD("RequestPinCode", "o", "s", agent_request_pincode, SD_BUS_VTABLE_UNPRIVILEGED),
     SD_BUS_METHOD("RequestPasskey", "o", "u", agent_request_passkey, SD_BUS_VTABLE_UNPRIVILEGED),
-    SD_BUS_METHOD("DisplayPinCode", "os", "", agent_auto_accept, SD_BUS_VTABLE_UNPRIVILEGED),
-    SD_BUS_METHOD("DisplayPasskey", "ouu", "", agent_auto_accept, SD_BUS_VTABLE_UNPRIVILEGED),
-    SD_BUS_METHOD("RequestConfirmation", "ou", "", agent_auto_accept, SD_BUS_VTABLE_UNPRIVILEGED),
-    SD_BUS_METHOD("RequestAuthorization", "o", "", agent_auto_accept, SD_BUS_VTABLE_UNPRIVILEGED),
-    SD_BUS_METHOD("AuthorizeService", "os", "", agent_auto_accept, SD_BUS_VTABLE_UNPRIVILEGED),
+    SD_BUS_METHOD("DisplayPinCode", "os", "", agent_display_pincode, SD_BUS_VTABLE_UNPRIVILEGED),
+    SD_BUS_METHOD("DisplayPasskey", "ouq", "", agent_display_passkey, SD_BUS_VTABLE_UNPRIVILEGED),
+    SD_BUS_METHOD("RequestConfirmation", "ou", "", agent_request_confirmation, SD_BUS_VTABLE_UNPRIVILEGED),
+    SD_BUS_METHOD("RequestAuthorization", "o", "", agent_auto_authorize, SD_BUS_VTABLE_UNPRIVILEGED),
+    SD_BUS_METHOD("AuthorizeService", "os", "", agent_auto_authorize, SD_BUS_VTABLE_UNPRIVILEGED),
     SD_BUS_METHOD("Cancel", "", "", agent_cancel, SD_BUS_VTABLE_UNPRIVILEGED),
     SD_BUS_VTABLE_END,
 };

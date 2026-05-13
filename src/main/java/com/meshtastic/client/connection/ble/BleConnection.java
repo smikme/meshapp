@@ -149,10 +149,32 @@ public class BleConnection implements MeshtasticConnection {
         // Pairing UI поднимается в общий BLE-контракт: Linux/Windows могут запросить passkey
         // из native backend, а macOS просто никогда не вызовет этот handler.
         platform.setPasskeyRequestHandler(deviceAddress ->
-                Platform.runLater(() ->
+                Platform.runLater(() -> {
+                    try {
                         PasskeyDialog.show(deviceAddress,
-                                platform::respondPasskey,
-                                platform::cancelPasskey)));
+                                passkey -> {
+                                    try {
+                                        platform.respondPasskey(passkey);
+                                    } catch (RuntimeException e) {
+                                        log.error("Failed to send BLE passkey response", e);
+                                    }
+                                },
+                                () -> {
+                                    try {
+                                        platform.cancelPasskey();
+                                    } catch (RuntimeException e) {
+                                        log.error("Failed to cancel BLE passkey request", e);
+                                    }
+                                });
+                    } catch (RuntimeException e) {
+                        log.error("Failed to show BLE passkey dialog", e);
+                        try {
+                            platform.cancelPasskey();
+                        } catch (RuntimeException cancelError) {
+                            log.error("Failed to cancel BLE passkey request after dialog error", cancelError);
+                        }
+                    }
+                }));
 
         BleProtocolProfile connectedProfile = connectWithProfileSelection(suppressTerminalStateEvents);
         resolvedProfile = connectedProfile;
