@@ -23,7 +23,9 @@ import com.meshtastic.client.themes.ThemeManager;
 import com.meshtastic.client.utils.AppPreferences;
 import com.meshtastic.client.utils.SvgIconLoader;
 
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
@@ -32,10 +34,14 @@ public class DrawerPane extends StackPane {
 
     public static final double TOOLBAR_WIDTH = 56;
     private static final String WINDOWS_HIT_TEST_BACKGROUND = "-fx-background-color: rgba(0,0,0,0.004);";
+    private static final String ORIGINAL_TOOLTIP_KEY = "drawer.originalTooltip";
+    private static final String NAVIGATION_BLOCKED_TOOLTIP =
+            "Дождитесь завершения сохранения конфигурации и переподключения";
 
     private final ToolBar toolBar;
     private final Button themeButton;
     private final Button notifButton;
+    private final Set<Class<?>> navigationBlockedItemClasses = new HashSet<>();
     private Class<?> selectedItemClass;
     private Circle chatBadgeDot;
 
@@ -127,9 +133,11 @@ public class DrawerPane extends StackPane {
         }
         btn.getStyleClass().add("drawer-toolbar-button");
         btn.setTooltip(new Tooltip(item.name()));
+        btn.getProperties().put(ORIGINAL_TOOLTIP_KEY, item.name());
         if (item.formClass() != null) {
             btn.setUserData(item.formClass());
         }
+        updateNavigationBlockState(btn);
         btn.setOnAction(e -> {
             if (item.action() != null) {
                 item.action().run();
@@ -216,6 +224,35 @@ public class DrawerPane extends StackPane {
                 }
             }
         }
+    }
+
+    public void setNavigationBlockedItemClasses(Set<Class<?>> formClasses) {
+        navigationBlockedItemClasses.clear();
+        if (formClasses != null) {
+            navigationBlockedItemClasses.addAll(formClasses);
+        }
+        updateNavigationBlockState();
+    }
+
+    private void updateNavigationBlockState() {
+        for (Node node : toolBar.getItems()) {
+            if (node instanceof Button btn) {
+                updateNavigationBlockState(btn);
+            }
+        }
+    }
+
+    private void updateNavigationBlockState(Button btn) {
+        Object userData = btn.getUserData();
+        boolean blocked = userData instanceof Class<?> formClass
+                && navigationBlockedItemClasses.contains(formClass);
+        btn.setDisable(blocked);
+
+        Object originalTooltip = btn.getProperties().get(ORIGINAL_TOOLTIP_KEY);
+        String tooltipText = blocked
+                ? NAVIGATION_BLOCKED_TOOLTIP
+                : originalTooltip instanceof String text ? text : null;
+        btn.setTooltip(tooltipText != null ? new Tooltip(tooltipText) : null);
     }
 
     public void setChatUnreadDot(boolean visible) {

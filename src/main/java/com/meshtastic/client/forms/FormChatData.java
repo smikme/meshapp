@@ -76,6 +76,7 @@ abstract class FormChatData extends FormChatRequests {
         if (!stateChanged) {
             refreshReadCounts();
             reloadChatList();
+            reopenVisibleSelectedChatIfNeeded();
             return;
         }
 
@@ -101,6 +102,12 @@ abstract class FormChatData extends FormChatRequests {
             reopenSelectedChatIfPossible();
         }
         updateInputEnabled();
+    }
+
+    protected void reopenVisibleSelectedChatIfNeeded() {
+        if (formVisible && selectedChat != null && !isChatDetailOpenFor(selectedChat)) {
+            reopenSelectedChatIfPossible();
+        }
     }
 
     private ActiveConnection findActiveConnection(ConnectionManager mgr) {
@@ -268,8 +275,7 @@ abstract class FormChatData extends FormChatRequests {
             chatItems.setAll(items);
             ChatItem matched = findRestorableChatItem();
             if (matched == null) {
-                selectedChat = null;
-                chatListView.getSelectionModel().clearSelection();
+                clearUnavailableChatSelection();
                 return;
             }
             selectedChat = matched;
@@ -277,6 +283,21 @@ abstract class FormChatData extends FormChatRequests {
         } finally {
             suppressSelectionListener = false;
         }
+    }
+
+    private void clearUnavailableChatSelection() {
+        if (selectedChat != null) {
+            closeChat();
+        } else {
+            clearSelectedChatForBoundConnection();
+            clearLoadedMessageState();
+            if (detailPane != null) {
+                detailPane.getChildren().clear();
+                detailPane.getChildren().add(placeholderBox);
+            }
+        }
+        chatListView.getSelectionModel().clearSelection();
+        updateInputEnabled();
     }
 
     private ChatItem findRestorableChatItem() {

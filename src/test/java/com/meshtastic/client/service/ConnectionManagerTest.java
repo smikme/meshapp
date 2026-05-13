@@ -28,14 +28,18 @@ import org.meshtastic.proto.MeshProtos;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.lang.reflect.Field;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
+import java.util.Map;
 import java.util.Queue;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
@@ -414,7 +418,112 @@ class ConnectionManagerTest {
             assertFalse(entry.isConnected());
             assertTrue(entry.isReconnecting());
             assertFalse(manager.hasActiveConnection());
+            assertTrue(deviceRebootReconnectIds().contains(entry.getId()));
+            assertFalse(expectedDeviceRebootIds(manager).contains(entry.getId()));
         }
+    }
+
+    @Test
+    void expectedDeviceRebootDisconnectUsesRebootAwareReconnect() throws Exception {
+        ControlledBlePlatform platform = new ControlledBlePlatform();
+        installBlePlatformFactory(() -> platform, true);
+
+        ConnectionManager manager = ConnectionManager.getInstance();
+        ConnectionEntry entry = new ConnectionEntry("ble", "AA:BB:CC:DD:EE:FF", "Test BLE");
+        manager.addEntry(entry);
+
+        manager.connect(entry.getId());
+        assertTrue(entry.isConnected());
+
+        manager.expectDeviceReboot(entry.getId());
+        platform.emitDisconnected();
+
+        assertTrue(waitUntil(entry::isReconnecting, 1_000));
+        assertFalse(entry.isConnected());
+        assertFalse(manager.hasActiveConnection());
+        assertTrue(deviceRebootReconnectIds().contains(entry.getId()));
+        assertFalse(expectedDeviceRebootIds(manager).contains(entry.getId()));
+    }
+
+    @Test
+    void lateDeviceRebootHandoffDoesNotLeaveExpectedRebootFlag() throws Exception {
+        ControlledBlePlatform platform = new ControlledBlePlatform();
+        installBlePlatformFactory(() -> platform, true);
+
+        ConnectionManager manager = ConnectionManager.getInstance();
+        ConnectionEntry entry = new ConnectionEntry("ble", "AA:BB:CC:DD:EE:FF", "Test BLE");
+        manager.addEntry(entry);
+
+        manager.connect(entry.getId());
+        assertTrue(entry.isConnected());
+
+        manager.expectDeviceReboot(entry.getId());
+        platform.emitDisconnected();
+        assertTrue(waitUntil(entry::isReconnecting, 1_000));
+
+        manager.disconnectForDeviceReboot(entry.getId());
+
+        assertTrue(entry.isReconnecting());
+        assertTrue(deviceRebootReconnectIds().contains(entry.getId()));
+        assertFalse(expectedDeviceRebootIds(manager).contains(entry.getId()));
+    }
+
+    @Test
+    void staleDeviceRebootHandoffDoesNotDisconnectFreshReconnect() throws Exception {
+        ControlledBlePlatform firstPlatform = new ControlledBlePlatform();
+        ControlledBlePlatform secondPlatform = new ControlledBlePlatform();
+        Queue<BlePlatform> platforms = new ArrayDeque<>();
+        platforms.add(firstPlatform);
+        platforms.add(secondPlatform);
+        installBlePlatformFactory(platforms::remove, true);
+
+        ConnectionManager manager = ConnectionManager.getInstance();
+        ConnectionEntry entry = new ConnectionEntry("ble", "AA:BB:CC:DD:EE:FF", "Test BLE");
+        manager.addEntry(entry);
+
+        manager.connect(entry.getId());
+        assertTrue(entry.isConnected());
+        long oldGeneration = manager.getConnectionGeneration(entry.getId());
+
+        manager.expectDeviceReboot(entry.getId());
+        firstPlatform.emitDisconnected();
+        assertTrue(waitUntil(entry::isReconnecting, 1_000));
+
+        manager.connect(entry.getId());
+        assertTrue(entry.isConnected());
+        assertFalse(entry.isReconnecting());
+        assertTrue(manager.getConnectionGeneration(entry.getId()) > oldGeneration);
+
+        manager.disconnectForDeviceReboot(entry.getId(), oldGeneration);
+
+        assertTrue(entry.isConnected());
+        assertFalse(entry.isReconnecting());
+        assertTrue(manager.hasActiveConnection());
+
+        manager.disconnect(entry.getId());
+    }
+
+    @Test
+    void rebootAwareReconnectReschedulesExistingShortReconnect() {
+        ConnectionManager manager = ConnectionManager.getInstance();
+        ConnectionEntry entry = new ConnectionEntry("stub", "127.0.0.1", 4403);
+        manager.addEntry(entry);
+
+        ReconnectService service = ReconnectService.getInstance();
+        service.startReconnect(entry.getId());
+        ScheduledFuture<?> normalFuture = pendingReconnects().get(entry.getId());
+        assertNotNull(normalFuture);
+        long normalDelayMs = normalFuture.getDelay(TimeUnit.MILLISECONDS);
+
+        service.startReconnectAfterDeviceReboot(entry.getId());
+
+        ScheduledFuture<?> rebootFuture = pendingReconnects().get(entry.getId());
+        assertNotNull(rebootFuture);
+        assertTrue(rebootFuture != normalFuture);
+        assertTrue(deviceRebootReconnectIds().contains(entry.getId()));
+        assertTrue(rebootFuture.getDelay(TimeUnit.MILLISECONDS) > normalDelayMs + 2_000);
+
+        service.cancelReconnect(entry.getId());
     }
 
     @Test
@@ -509,6 +618,31 @@ class ConnectionManagerTest {
     @FunctionalInterface
     private interface CheckedBooleanSupplier {
         boolean getAsBoolean() throws Exception;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Set<String> deviceRebootReconnectIds() {
+        return (Set<String>) readField(ReconnectService.getInstance(), "deviceRebootReconnects");
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Set<String> expectedDeviceRebootIds(ConnectionManager manager) {
+        return (Set<String>) readField(manager, "expectedDeviceRebootIds");
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, ScheduledFuture<?>> pendingReconnects() {
+        return (Map<String, ScheduledFuture<?>>) readField(ReconnectService.getInstance(), "pendingReconnects");
+    }
+
+    private static Object readField(Object target, String fieldName) {
+        try {
+            Field field = target.getClass().getDeclaredField(fieldName);
+            field.setAccessible(true);
+            return field.get(target);
+        } catch (ReflectiveOperationException e) {
+            throw new AssertionError("Failed to read field " + fieldName, e);
+        }
     }
 
     private static final class ControlledBlePlatform implements BlePlatform {

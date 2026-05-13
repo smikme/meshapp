@@ -615,6 +615,14 @@ abstract class FormChatUi extends FormChatBase {
         detailPane.getChildren().add(placeholderBox);
     }
 
+    protected boolean isChatDetailOpenFor(ChatItem chat) {
+        return chat != null
+                && selectedChat != null
+                && chatItemMatches(selectedChat, chat)
+                && detailPane != null
+                && detailPane.getChildren().contains(messageArea);
+    }
+
     // ==================== Сообщения: загрузка из БД с пагинацией ====================
 
     /** Определить тип и ключ чата для запросов к MessageDbService */

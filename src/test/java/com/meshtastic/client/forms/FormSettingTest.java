@@ -10,6 +10,7 @@ import com.meshtastic.client.model.ConnectionType;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.protocol.ProtocolHandler;
 import com.meshtastic.client.service.ConnectionManager;
+import com.meshtastic.client.system.FormManager;
 import javafx.application.Platform;
 import javafx.scene.Node;
 import javafx.scene.Parent;
@@ -135,6 +136,31 @@ class FormSettingTest {
 
         assertEquals(1_200L, tcpDelay);
         assertEquals(1_350L, bleDelay);
+    }
+
+    @Test
+    void tcpConfigSaveWaitsForNaturalRebootDisconnectBeforeFallbackHandoff() {
+        FormSetting form = onFxThread(FormSetting::new);
+
+        long tcpDelay = onFxThread(() -> (Long) invokeReturning(
+                form,
+                "getConfigSaveRebootHandoffDelayMs",
+                new Class<?>[] { ConnectionType.class },
+                ConnectionType.TCP));
+        long bleDelay = onFxThread(() -> (Long) invokeReturning(
+                form,
+                "getConfigSaveRebootHandoffDelayMs",
+                new Class<?>[] { ConnectionType.class },
+                ConnectionType.BLE));
+        long tcpPowerDelay = onFxThread(() -> (Long) invokeReturning(
+                form,
+                "getDevicePowerActionHandoffDelayMs",
+                new Class<?>[] { ConnectionType.class },
+                ConnectionType.TCP));
+
+        assertEquals(60_000L, tcpDelay);
+        assertEquals(4_000L, bleDelay);
+        assertEquals(1_000L, tcpPowerDelay);
     }
 
     @Test
@@ -343,6 +369,7 @@ class FormSettingTest {
 
         assertEquals(1, ownerInfoListeners(actionState).size());
         assertEquals("Запрос session key...", onFxThread(() -> statusLabel(form).getText()));
+        assertTrue(FormManager.isConfigSaveNavigationBlocked());
 
         onFxThread(() -> {
             writeField(form, "state", null);
@@ -355,6 +382,7 @@ class FormSettingTest {
         assertTrue(ownerInfoListeners(actionState).isEmpty());
         assertEquals("Отправлено секций: 1", onFxThread(() -> statusLabel(form).getText()));
         assertFalse(onFxThread(() -> saveButton(form).isDisable()));
+        assertFalse(FormManager.isConfigSaveNavigationBlocked());
     }
 
     private ProtocolHandler track(ProtocolHandler handler) {

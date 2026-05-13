@@ -18,6 +18,7 @@ import com.meshtastic.client.service.NodeCacheService;
 import com.meshtastic.client.platform.OsDetect;
 import com.meshtastic.client.utils.ConfigValueFormatter;
 import com.meshtastic.client.system.Form;
+import com.meshtastic.client.system.FormManager;
 import com.meshtastic.client.themes.TypographyManager;
 import com.meshtastic.client.utils.AppPreferences;
 import com.meshtastic.client.utils.ProtobufTreeBuilder;
@@ -107,11 +108,12 @@ public class FormSetting extends Form {
      */
     private static final long CONFIG_SAVE_PRE_COMMIT_SETTLE_DELAY_MS = 1_000;
     /**
-     * Сколько ждём после последнего admin-пакета перед handoff в reconnect flow.
-     * Для BLE оставляем больше времени, чтобы commit успел дойти и устройство
-     * начало собственный disconnect/reboot без одновременного ручного разрыва.
+     * TCP/Serial после commit может держать socket живым ещё десятки секунд,
+     * а потом закрыть его уже во время реального reboot. Поэтому для non-BLE
+     * не форсируем disconnect сразу: ждём естественный разрыв и используем это
+     * значение только как fallback, если устройство так и не закрыло transport.
      */
-    private static final long CONFIG_SAVE_REBOOT_HANDOFF_DELAY_MS = 1_000;
+    private static final long CONFIG_SAVE_REBOOT_HANDOFF_DELAY_MS = 60_000;
     private static final long BLE_CONFIG_SAVE_REBOOT_HANDOFF_DELAY_MS = 4_000;
     /**
      * Последний BLE set_config/set_module_config отправляется асинхронно на уровне GATT write.
@@ -123,6 +125,7 @@ public class FormSetting extends Form {
     private static final long CONFIG_SAVE_ACK_TIMEOUT_MS = 8_000;
     /** Короткая задержка перед reboot/shutdown, чтобы routing ACK успел вернуться до разрыва линка. */
     private static final int DEVICE_POWER_ACTION_DELAY_SECONDS = 1;
+    private static final long DEVICE_POWER_ACTION_HANDOFF_DELAY_MS = 1_000;
     /** Сколько максимум ждём routing ACK для reboot/shutdown перед fallback-поведением. */
     private static final long DEVICE_POWER_ACTION_ACK_TIMEOUT_MS = 2_500;
     private static final String OWNER_INFO_CONFIG_TYPE = "owner_info";
@@ -136,6 +139,9 @@ public class FormSetting extends Form {
     private ProtocolHandler handler;
     private MeshCoreCompanionState meshCoreCompanionState;
     private volatile String pendingTimeOnlySyncConnectionId;
+    private volatile String configSaveNavigationLockConnectionId;
+    private volatile boolean configSaveNavigationLockAwaitingReconnect;
+    private volatile boolean configSaveNavigationLockDisconnectObserved;
     private final Runnable connectionListener = () -> Platform.runLater(() -> {
         reloadConfigTree();
         maybeResumeDeferredTimeOnlySync();
@@ -300,6 +306,75 @@ public class FormSetting extends Form {
         ConnectionManager mgr = ConnectionManager.getInstance();
         ConnectionEntry entry = mgr.getSelectedConnectionEntry();
         return entry != null && entry.isConnected() ? entry : null;
+    }
+
+    private void beginConfigSaveNavigationBlock(ConnectionEntry activeEntry) {
+        configSaveNavigationLockConnectionId = activeEntry != null ? activeEntry.getId() : null;
+        configSaveNavigationLockAwaitingReconnect = false;
+        configSaveNavigationLockDisconnectObserved = false;
+        FormManager.setConfigSaveNavigationBlocked(true);
+    }
+
+    private void markConfigSaveNavigationBlockAwaitingReconnect(ConnectionEntry activeEntry) {
+        if (activeEntry == null) {
+            return;
+        }
+        String lockedConnectionId = configSaveNavigationLockConnectionId;
+        if (lockedConnectionId == null || lockedConnectionId.equals(activeEntry.getId())) {
+            configSaveNavigationLockConnectionId = activeEntry.getId();
+            configSaveNavigationLockAwaitingReconnect = true;
+            configSaveNavigationLockDisconnectObserved = false;
+        }
+    }
+
+    private void finishConfigSaveNavigationBlock() {
+        configSaveNavigationLockConnectionId = null;
+        configSaveNavigationLockAwaitingReconnect = false;
+        configSaveNavigationLockDisconnectObserved = false;
+        FormManager.setConfigSaveNavigationBlocked(false);
+    }
+
+    private void maybeFinishConfigSaveNavigationBlockAfterReconnect(ConnectionEntry activeEntry,
+                                                                    boolean configExchangeInProgress) {
+        String lockedConnectionId = configSaveNavigationLockConnectionId;
+        if (lockedConnectionId == null || !configSaveNavigationLockAwaitingReconnect) {
+            return;
+        }
+
+        ConnectionManager mgr = ConnectionManager.getInstance();
+        ConnectionEntry lockedEntry = findConnectionEntryById(lockedConnectionId);
+        boolean activeOrPending = mgr.isConnectionActiveOrPending(lockedConnectionId);
+        if (lockedEntry == null || (!lockedEntry.isReconnecting() && !activeOrPending)) {
+            finishConfigSaveNavigationBlock();
+            return;
+        }
+
+        if (lockedEntry.isReconnecting()
+                || !activeOrPending
+                || activeEntry == null
+                || !activeEntry.isConnected()) {
+            configSaveNavigationLockDisconnectObserved = true;
+        }
+
+        if (configSaveNavigationLockDisconnectObserved
+                && activeEntry != null
+                && lockedConnectionId.equals(activeEntry.getId())
+                && activeEntry.isConnected()
+                && !configExchangeInProgress) {
+            finishConfigSaveNavigationBlock();
+        }
+    }
+
+    private ConnectionEntry findConnectionEntryById(String id) {
+        if (id == null || id.isBlank()) {
+            return null;
+        }
+        for (ConnectionEntry entry : ConnectionManager.getInstance().getEntries()) {
+            if (id.equals(entry.getId())) {
+                return entry;
+            }
+        }
+        return null;
     }
 
     /**
@@ -1277,6 +1352,12 @@ public class FormSetting extends Form {
         ConnectionType transport = activeEntry != null
                 ? activeEntry.getEffectiveType()
                 : ConnectionType.TCP;
+        long reconnectHandoffGeneration = !gmtMatches && activeEntry != null
+                ? ConnectionManager.getInstance().getConnectionGeneration(activeEntry.getId())
+                : -1;
+        if (!gmtMatches && activeEntry != null) {
+            ConnectionManager.getInstance().expectDeviceReboot(activeEntry.getId());
+        }
 
         Thread syncThread = new Thread(() -> {
             try {
@@ -1307,12 +1388,15 @@ public class FormSetting extends Form {
 
                     Thread.sleep(getDevicePowerActionHandoffDelayMs(transport));
                     if (activeEntry != null) {
-                        ConnectionManager.getInstance().disconnectForDeviceReboot(activeEntry.getId());
-                        Platform.runLater(() -> {
-                            state = null;
-                            handler = null;
-                            reloadConfigTree();
-                        });
+                        boolean handoffStarted = ConnectionManager.getInstance().disconnectForDeviceReboot(
+                                activeEntry.getId(), reconnectHandoffGeneration);
+                        if (handoffStarted) {
+                            Platform.runLater(() -> {
+                                state = null;
+                                handler = null;
+                                reloadConfigTree();
+                            });
+                        }
                     } else {
                         Platform.runLater(() -> {
                             setSyncDateTimeButtonDisabled(false);
@@ -1337,9 +1421,15 @@ public class FormSetting extends Form {
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 log.warn("Time sync thread interrupted");
+                if (!gmtMatches && activeEntry != null) {
+                    ConnectionManager.getInstance().clearExpectedDeviceReboot(activeEntry.getId());
+                }
                 Platform.runLater(() -> setSyncDateTimeButtonDisabled(false));
             } catch (Exception e) {
                 log.error("Time sync failed", e);
+                if (!gmtMatches && activeEntry != null) {
+                    ConnectionManager.getInstance().clearExpectedDeviceReboot(activeEntry.getId());
+                }
                 if (activeEntry != null && activeEntry.getId().equals(pendingTimeOnlySyncConnectionId)) {
                     pendingTimeOnlySyncConnectionId = null;
                 }
@@ -1485,6 +1575,12 @@ public class FormSetting extends Form {
         String actionLabel = reboot ? "перезапуска" : "выключения";
         String stepName = reboot ? "rebootDevice" : "shutdownDevice";
         ConnectionType transport = activeEntry.getEffectiveType();
+        long reconnectHandoffGeneration = reboot
+                ? ConnectionManager.getInstance().getConnectionGeneration(activeEntry.getId())
+                : -1;
+        if (reboot) {
+            ConnectionManager.getInstance().expectDeviceReboot(activeEntry.getId());
+        }
 
         configStatusLabel.setText("Отправка команды " + actionLabel + "...");
 
@@ -1495,6 +1591,9 @@ public class FormSetting extends Form {
                     : MessageService.shutdownDevice(actionHandler, actionState, DEVICE_POWER_ACTION_DELAY_SECONDS);
         } catch (Exception e) {
             log.error("Device {} command send failed", stepName, e);
+            if (reboot) {
+                ConnectionManager.getInstance().clearExpectedDeviceReboot(activeEntry.getId());
+            }
             setDevicePowerButtonsDisabled(false);
             configStatusLabel.setText("Ошибка отправки команды " + actionLabel);
             return;
@@ -1523,12 +1622,15 @@ public class FormSetting extends Form {
                 Thread.sleep(getDevicePowerActionHandoffDelayMs(transport));
 
                 if (reboot) {
-                    ConnectionManager.getInstance().disconnectForDeviceReboot(activeEntry.getId());
-                    Platform.runLater(() -> {
-                        state = null;
-                        handler = null;
-                        reloadConfigTree();
-                    });
+                    boolean handoffStarted = ConnectionManager.getInstance().disconnectForDeviceReboot(
+                            activeEntry.getId(), reconnectHandoffGeneration);
+                    if (handoffStarted) {
+                        Platform.runLater(() -> {
+                            state = null;
+                            handler = null;
+                            reloadConfigTree();
+                        });
+                    }
                 } else if (ackConfirmed) {
                     ConnectionManager.getInstance().disconnect(activeEntry.getId());
                     Platform.runLater(() -> {
@@ -1542,9 +1644,15 @@ public class FormSetting extends Form {
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 log.warn("Device power action thread interrupted: {}", stepName);
+                if (reboot) {
+                    ConnectionManager.getInstance().clearExpectedDeviceReboot(activeEntry.getId());
+                }
                 Platform.runLater(() -> setDevicePowerButtonsDisabled(false));
             } catch (Exception e) {
                 log.error("Device power action '{}' failed", stepName, e);
+                if (reboot) {
+                    ConnectionManager.getInstance().clearExpectedDeviceReboot(activeEntry.getId());
+                }
                 Platform.runLater(() -> {
                     setDevicePowerButtonsDisabled(false);
                     configStatusLabel.setText("Ошибка отправки команды " + actionLabel + ": " +
@@ -1574,6 +1682,12 @@ public class FormSetting extends Form {
     }
 
     private long getDevicePowerActionHandoffDelayMs(ConnectionType transport) {
+        return transport == ConnectionType.BLE
+                ? BLE_CONFIG_SAVE_REBOOT_HANDOFF_DELAY_MS
+                : DEVICE_POWER_ACTION_HANDOFF_DELAY_MS;
+    }
+
+    private long getConfigSaveRebootHandoffDelayMs(ConnectionType transport) {
         return transport == ConnectionType.BLE
                 ? BLE_CONFIG_SAVE_REBOOT_HANDOFF_DELAY_MS
                 : CONFIG_SAVE_REBOOT_HANDOFF_DELAY_MS;
@@ -2159,6 +2273,7 @@ public class FormSetting extends Form {
         setSyncDateTimeButtonDisabled(!meshtasticConnected);
 
         if (!connected) {
+            maybeFinishConfigSaveNavigationBlockAfterReconnect(null, false);
             clearConfigContext();
             configStatusLabel.setText("Нет подключения к радио");
             saveConfigBtn.setDisable(true);
@@ -2173,6 +2288,7 @@ public class FormSetting extends Form {
         NodeData myNode = state.getNodeDb().get(state.getMyNodeNum());
         ConnectionEntry activeEntry = findActiveConnectionEntry();
         boolean configExchangeInProgress = isConfigExchangeInProgress(activeEntry);
+        maybeFinishConfigSaveNavigationBlockAfterReconnect(activeEntry, configExchangeInProgress);
 
         // Сохраняем оригинальные protobuf для пересборки
         List<ConfigProtos.Config> stateConfigs;
@@ -2616,6 +2732,7 @@ public class FormSetting extends Form {
             return;
         }
 
+        beginConfigSaveNavigationBlock(activeEntry);
         int totalChanges = modifiedConfigs.size() + modifiedModuleConfigs.size()
                 + modifiedChannels.size()
                 + (ownerModified ? 1 : 0) + (positionModified ? 1 : 0)
@@ -2673,7 +2790,13 @@ public class FormSetting extends Form {
         timeoutThread.setDaemon(true);
         timeoutThread.start();
 
-        MessageService.requestSessionPasskey(actionHandler, actionState);
+        try {
+            MessageService.requestSessionPasskey(actionHandler, actionState);
+        } catch (RuntimeException e) {
+            actionState.removeOwnerInfoListener(listenerHolder[0]);
+            finishConfigSaveNavigationBlock();
+            throw e;
+        }
     }
 
     /**
@@ -2752,6 +2875,12 @@ public class FormSetting extends Form {
             AtomicBoolean saveFailed = new AtomicBoolean(false);
             AtomicBoolean saveCompletionAnnounced = new AtomicBoolean(false);
             boolean requiresReconnect = !configs.isEmpty() || !moduleConfigs.isEmpty();
+            long reconnectHandoffGeneration = requiresReconnect && activeEntry != null
+                    ? ConnectionManager.getInstance().getConnectionGeneration(activeEntry.getId())
+                    : -1;
+            if (requiresReconnect && activeEntry != null) {
+                ConnectionManager.getInstance().expectDeviceReboot(activeEntry.getId());
+            }
             boolean useImplicitBleModuleSave = shouldUseImplicitBleModuleSave(
                     activeTransport, ownerModified, positionModified, configs, moduleConfigs)
                     && channels.isEmpty();
@@ -2831,9 +2960,7 @@ public class FormSetting extends Form {
                 });
             }
 
-            long rebootHandoffDelay = activeTransport == ConnectionType.BLE
-                    ? BLE_CONFIG_SAVE_REBOOT_HANDOFF_DELAY_MS
-                    : CONFIG_SAVE_REBOOT_HANDOFF_DELAY_MS;
+            long rebootHandoffDelay = getConfigSaveRebootHandoffDelayMs(activeTransport);
 
             Thread saveThread = new Thread(() -> {
                 try {
@@ -2854,7 +2981,11 @@ public class FormSetting extends Form {
                             saveFailed.set(true);
                             log.error("Config save task {} failed: {}", i,
                                     e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName(), e);
+                            if (activeEntry != null) {
+                                ConnectionManager.getInstance().clearExpectedDeviceReboot(activeEntry.getId());
+                            }
                             Platform.runLater(() -> {
+                                finishConfigSaveNavigationBlock();
                                 saveConfigBtn.setDisable(false);
                                 configStatusLabel.setText("Ошибка сохранения: " +
                                         (e.getMessage() != null ? e.getMessage() : "см. лог"));
@@ -2877,6 +3008,9 @@ public class FormSetting extends Form {
                     }
 
                     saveCompletionAnnounced.set(true);
+                    if (requiresReconnect) {
+                        markConfigSaveNavigationBlockAwaitingReconnect(activeEntry);
+                    }
                     Platform.runLater(() -> {
                         resetModifiedFlags(fullConfigRoot != null ? fullConfigRoot : configTree.getRoot());
                         originalChannels = getWorkingChannelsSnapshot();
@@ -2896,6 +3030,7 @@ public class FormSetting extends Form {
                     // и запрещает auto-reconnect, а BLE как раз нуждается в мягком handoff
                     // на время device reboot / повторной рекламы.
                     if (!requiresReconnect) {
+                        finishConfigSaveNavigationBlock();
                         return;
                     }
                     Thread.sleep(rebootHandoffDelay);
@@ -2905,9 +3040,14 @@ public class FormSetting extends Form {
                     if (activeEntry != null) {
                         log.info("Config save: handoff to reboot reconnect flow (transport={})",
                                 activeTransport);
-                        ConnectionManager.getInstance().disconnectForDeviceReboot(activeEntry.getId());
+                        boolean handoffStarted = ConnectionManager.getInstance().disconnectForDeviceReboot(
+                                activeEntry.getId(), reconnectHandoffGeneration);
+                        if (!handoffStarted) {
+                            return;
+                        }
                     } else {
                         log.warn("Config save: no active connection to hand off after commit");
+                        finishConfigSaveNavigationBlock();
                     }
                     Platform.runLater(() -> {
                         if (state == actionState) {
@@ -2921,8 +3061,16 @@ public class FormSetting extends Form {
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                     log.warn("Config save thread interrupted");
+                    if (activeEntry != null) {
+                        ConnectionManager.getInstance().clearExpectedDeviceReboot(activeEntry.getId());
+                    }
+                    finishConfigSaveNavigationBlock();
                 } catch (Exception e) {
                     log.error("Config save: disconnect failed", e);
+                    if (activeEntry != null) {
+                        ConnectionManager.getInstance().clearExpectedDeviceReboot(activeEntry.getId());
+                    }
+                    finishConfigSaveNavigationBlock();
                 }
             }, "config-save-sender");
             saveThread.setDaemon(true);
@@ -2934,6 +3082,7 @@ public class FormSetting extends Form {
             originalChannels = getWorkingChannelsSnapshot();
             saveConfigBtn.setDisable(false);
             configStatusLabel.setText("Отправлено секций: " + totalChanges);
+            finishConfigSaveNavigationBlock();
         }
     }
 

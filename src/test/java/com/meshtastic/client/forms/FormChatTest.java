@@ -1,9 +1,11 @@
 package com.meshtastic.client.forms;
 
 import com.meshtastic.client.TestEnvironmentSupport;
+import com.meshtastic.client.model.ConnectionEntry;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.ChatItem;
 import com.meshtastic.client.model.MeshMessage;
+import com.meshtastic.client.service.ConnectionManager;
 import com.meshtastic.client.service.MessageDbService;
 import javafx.application.Platform;
 import org.junit.jupiter.api.AfterEach;
@@ -13,14 +15,17 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.meshtastic.proto.ChannelProtos;
 
+import java.lang.reflect.Field;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -111,6 +116,75 @@ class FormChatTest {
             assertEquals(generation + 1, form.scrollOperationGeneration);
             return null;
         });
+    }
+
+    @Test
+    void formOpenReopensRestoredSelectionWhenDetailPaneIsPlaceholder() {
+        onFxThread(() -> {
+            ConnectionManager manager = ConnectionManager.getInstance();
+            ConnectionEntry entry = new ConnectionEntry("test", "127.0.0.1", 4403);
+            manager.addEntry(entry);
+            entry.setConnected(true);
+            manager.setSelectedConnectionId(entry.getId());
+
+            DeviceState state = new DeviceState();
+            try {
+                state.setMyNodeNum(0x12345678);
+                state.addChannel(channelProto(0));
+                deviceStates(manager).put(entry.getId(), state);
+
+                FormChat form = new FormChat();
+                form.state = state;
+                form.boundConnectionId = entry.getId();
+                form.selectedChat = null;
+                form.selectedChatsByConnectionId.put(entry.getId(), FormChatBase.ChatSelection.from(channel(0)));
+                form.detailPane.getChildren().setAll(form.placeholderBox);
+
+                form.formOpen();
+
+                assertNotNull(form.selectedChat);
+                assertTrue(form.isChatDetailOpenFor(form.selectedChat));
+                assertTrue(form.detailPane.getChildren().contains(form.messageArea));
+            } finally {
+                state.shutdown();
+            }
+            return null;
+        });
+        waitForFxEvents();
+        waitForFxEvents();
+    }
+
+    @Test
+    void reloadChatListClearsSelectionWhenRestoredChatNoLongerExists() {
+        onFxThread(() -> {
+            DeviceState state = new DeviceState();
+            try {
+                state.setMyNodeNum(0x12345678);
+                state.addChannel(channelProto(0));
+
+                FormChat form = new FormChat();
+                form.state = state;
+                form.boundConnectionId = "connection-1";
+                form.selectedChat = channel(1);
+                form.selectedChatsByConnectionId.put(
+                        "connection-1",
+                        FormChatBase.ChatSelection.from(channel(1)));
+                form.detailPane.getChildren().setAll(form.messageArea);
+
+                form.reloadChatList();
+
+                assertEquals(null, form.selectedChat);
+                assertTrue(form.chatListView.getSelectionModel().isEmpty());
+                assertFalse(form.selectedChatsByConnectionId.containsKey("connection-1"));
+                assertTrue(form.detailPane.getChildren().contains(form.placeholderBox));
+                assertFalse(form.detailPane.getChildren().contains(form.messageArea));
+            } finally {
+                state.shutdown();
+            }
+            return null;
+        });
+        waitForFxEvents();
+        waitForFxEvents();
     }
 
     @Test
@@ -243,18 +317,40 @@ class FormChatTest {
     }
 
     private static ChatItem channel(int index) {
-        ChannelProtos.Channel channel = ChannelProtos.Channel.newBuilder()
+        return ChatItem.fromChannel(channelProto(index), (MeshMessage) null, 0, false);
+    }
+
+    private static ChannelProtos.Channel channelProto(int index) {
+        return ChannelProtos.Channel.newBuilder()
                 .setIndex(index)
                 .setRole(index == 0
                         ? ChannelProtos.Channel.Role.PRIMARY
                         : ChannelProtos.Channel.Role.SECONDARY)
                 .setSettings(ChannelProtos.ChannelSettings.newBuilder().setName("Ch " + index))
                 .build();
-        return ChatItem.fromChannel(channel, (MeshMessage) null, 0, false);
     }
 
     private static ChatItem directMessage(String nodeId) {
         return ChatItem.fromDirectMessage(nodeId, null, (MeshMessage) null, 0, false);
+    }
+
+    private static void waitForFxEvents() {
+        onFxThread(() -> null);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, DeviceState> deviceStates(ConnectionManager manager) {
+        return (Map<String, DeviceState>) readField(manager, "deviceStates");
+    }
+
+    private static Object readField(Object target, String fieldName) {
+        try {
+            Field field = target.getClass().getDeclaredField(fieldName);
+            field.setAccessible(true);
+            return field.get(target);
+        } catch (ReflectiveOperationException e) {
+            throw new AssertionError("Failed to read field " + fieldName, e);
+        }
     }
 
     private static <T> T onFxThread(FxSupplier<T> supplier) {
