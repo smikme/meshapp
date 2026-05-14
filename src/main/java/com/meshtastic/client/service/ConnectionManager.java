@@ -485,6 +485,24 @@ public final class ConnectionManager {
      * иначе мог бы отключить уже свежее соединение после самостоятельного reconnect.
      */
     public boolean disconnectForDeviceReboot(String id, long expectedConnectionGeneration) {
+        return disconnectForDeviceReboot(id, expectedConnectionGeneration, null);
+    }
+
+    /**
+     * Разрывает соединение для reboot только если сигнал пришёл от текущего runtime-а.
+     * Это защищает свежее переподключение от поздних {@code FromRadio.REBOOTED}
+     * из уже закрытой протокольной сессии.
+     */
+    public boolean disconnectForDeviceRebootFromRuntime(String id, ProtocolRuntime<?> expectedRuntime) {
+        if (expectedRuntime == null) {
+            return false;
+        }
+        return disconnectForDeviceReboot(id, -1, expectedRuntime);
+    }
+
+    private boolean disconnectForDeviceReboot(String id,
+                                              long expectedConnectionGeneration,
+                                              ProtocolRuntime<?> expectedRuntime) {
         ConnectionEntry entry;
         TransportConnection conn;
         ProtocolRuntime<?> protocolRuntime;
@@ -506,6 +524,11 @@ public final class ConnectionManager {
             }
             conn = activeConnections.get(id);
             protocolRuntime = protocolRuntimes.get(id);
+            if (expectedRuntime != null && protocolRuntime != expectedRuntime) {
+                log.info("Skipping stale protocol reboot signal for '{}': runtime is no longer current",
+                        entry.getName());
+                return false;
+            }
             pendingConnection = pendingConnections.containsKey(id);
             if (conn != null) {
                 expectedDeviceRebootIds.add(id);

@@ -152,17 +152,19 @@ class ProtocolHandlerTest {
         connection.emit(MeshProtos.FromRadio.newBuilder().setModuleConfig(moduleConfig).build().toByteArray());
         connection.emit(MeshProtos.FromRadio.newBuilder().setChannel(channel).build().toByteArray());
         connection.emit(MeshProtos.FromRadio.newBuilder().setConfigCompleteId(99).build().toByteArray());
+        connection.emit(MeshProtos.FromRadio.newBuilder().setRebooted(true).build().toByteArray());
         connection.emit(MeshProtos.FromRadio.newBuilder().setPacket(packet).build().toByteArray());
         connection.emit(MeshProtos.FromRadio.newBuilder().setLogRecord(logRecord).build().toByteArray());
         connection.emit(MeshProtos.FromRadio.newBuilder().setQueueStatus(queueStatus).build().toByteArray());
 
-        assertTrue(listener.awaitEvents(9));
+        assertTrue(listener.awaitEvents(10));
         assertEquals(0x12345678, listener.myNodeNum.get());
         assertEquals(0xCAFEBABE, listener.nodeNum.get());
         assertEquals(ConfigProtos.Config.PayloadVariantCase.DEVICE, listener.configType);
         assertEquals(ModuleConfigProtos.ModuleConfig.PayloadVariantCase.MQTT, listener.moduleConfigType);
         assertEquals(3, listener.channelIndex.get());
         assertEquals(99, listener.configCompleteId.get());
+        assertTrue(listener.rebooted.get());
         assertEquals(1, listener.packetFrom.get());
         assertEquals("log", listener.logMessage);
         assertEquals(77, listener.queuePacketId.get());
@@ -564,7 +566,8 @@ class ProtocolHandlerTest {
         private final AtomicInteger configCompleteId = new AtomicInteger();
         private final AtomicInteger packetFrom = new AtomicInteger();
         private final AtomicInteger queuePacketId = new AtomicInteger();
-        private final CountDownLatch eventLatch = new CountDownLatch(9);
+        private final AtomicBoolean rebooted = new AtomicBoolean(false);
+        private final CountDownLatch eventLatch = new CountDownLatch(10);
         private volatile ConfigProtos.Config.PayloadVariantCase configType;
         private volatile ModuleConfigProtos.ModuleConfig.PayloadVariantCase moduleConfigType;
         private volatile String logMessage;
@@ -602,6 +605,12 @@ class ProtocolHandlerTest {
         @Override
         public void onConfigComplete(int configCompleteId) {
             this.configCompleteId.set(configCompleteId);
+            seen();
+        }
+
+        @Override
+        public void onRebooted() {
+            rebooted.set(true);
             seen();
         }
 

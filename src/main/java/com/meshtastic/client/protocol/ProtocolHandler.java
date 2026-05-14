@@ -304,6 +304,10 @@ public class ProtocolHandler {
                 log.info("Received config_complete_id: {}", fromRadio.getConfigCompleteId());
                 notifyListeners(l -> l.onConfigComplete(fromRadio.getConfigCompleteId()));
             }
+            case REBOOTED -> {
+                log.info("Received radio reboot marker");
+                notifyListeners(FromRadioListener::onRebooted);
+            }
             case PACKET -> {
                 MeshProtos.MeshPacket pkt = fromRadio.getPacket();
                 if (log.isTraceEnabled()) {

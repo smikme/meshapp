@@ -33,6 +33,9 @@ public interface FromRadioListener {
     /** Config exchange завершён. {@code configCompleteId} должен совпадать с отправленным {@code want_config_id}. */
     default void onConfigComplete(int configCompleteId) {}
 
+    /** Радио сообщило, что только что перезагрузилось. */
+    default void onRebooted() {}
+
     /** Получен mesh-пакет (текстовое сообщение, телеметрия, routing ACK и др.). */
     default void onMeshPacket(MeshProtos.MeshPacket packet) {}
 

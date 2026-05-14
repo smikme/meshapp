@@ -424,6 +424,30 @@ class ConnectionManagerTest {
     }
 
     @Test
+    void fromRadioRebootMarkerStartsRebootAwareReconnect() throws Exception {
+        try (TcpMeshtasticStubServer server = new TcpMeshtasticStubServer(0xCAFEBABE)) {
+            ConnectionManager manager = ConnectionManager.getInstance();
+            ConnectionEntry entry = new ConnectionEntry("stub", "127.0.0.1", server.port());
+            manager.addEntry(entry);
+
+            manager.connect(entry.getId());
+            manager.getConfigFuture(entry.getId()).get(5, TimeUnit.SECONDS);
+            assertTrue(entry.isConnected());
+            assertTrue(manager.hasActiveConnection());
+
+            server.sendRebooted();
+
+            assertTrue(waitUntil(entry::isReconnecting, 2_000));
+            assertFalse(entry.isConnected());
+            assertFalse(manager.hasActiveConnection());
+            assertTrue(deviceRebootReconnectIds().contains(entry.getId()));
+            assertFalse(expectedDeviceRebootIds(manager).contains(entry.getId()));
+
+            ReconnectService.getInstance().cancelReconnect(entry.getId());
+        }
+    }
+
+    @Test
     void expectedDeviceRebootDisconnectUsesRebootAwareReconnect() throws Exception {
         ControlledBlePlatform platform = new ControlledBlePlatform();
         installBlePlatformFactory(() -> platform, true);
@@ -907,6 +931,7 @@ class ConnectionManagerTest {
         private final CountDownLatch wantConfigLatch = new CountDownLatch(1);
         private final Thread acceptThread;
         private volatile Socket clientSocket;
+        private volatile OutputStream clientOutput;
         private volatile boolean running = true;
 
         private TcpMeshtasticStubServer(int myNodeNum) throws IOException {
@@ -930,6 +955,7 @@ class ConnectionManagerTest {
                 clientSocket = socket;
                 InputStream in = socket.getInputStream();
                 OutputStream out = socket.getOutputStream();
+                clientOutput = out;
                 FrameParser parser = new FrameParser();
                 byte[] buffer = new byte[256];
 
@@ -964,6 +990,18 @@ class ConnectionManagerTest {
         private void send(OutputStream out, MessageLite message) throws IOException {
             out.write(PacketFramer.frame(message));
             out.flush();
+        }
+
+        void sendRebooted() throws Exception {
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(1);
+            while (clientOutput == null && System.nanoTime() < deadline) {
+                Thread.sleep(10);
+            }
+            OutputStream out = clientOutput;
+            assertNotNull(out);
+            send(out, MeshProtos.FromRadio.newBuilder()
+                    .setRebooted(true)
+                    .build());
         }
 
         @Override
