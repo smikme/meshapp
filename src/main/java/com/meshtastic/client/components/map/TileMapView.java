@@ -147,6 +147,7 @@ public class TileMapView extends StackPane {
     private Consumer<GeoPoint> pointerListener = point -> {};
     private Consumer<String> measureListener = text -> {};
     private Consumer<String> areaSelectionListener = text -> {};
+    private Consumer<MapMarker> markerClickListener = marker -> {};
 
     /**
      * Создаёт карту и настраивает обработчики мыши для сдвига, масштабирования,
@@ -301,6 +302,15 @@ public class TileMapView extends StackPane {
     public void setAreaSelectionListener(Consumer<String> areaSelectionListener) {
         this.areaSelectionListener = areaSelectionListener != null ? areaSelectionListener : text -> {};
         notifyAreaSelection();
+    }
+
+    /**
+     * Устанавливает обработчик клика по маркеру ноды.
+     *
+     * @param markerClickListener обработчик выбранного маркера
+     */
+    public void setMarkerClickListener(Consumer<MapMarker> markerClickListener) {
+        this.markerClickListener = markerClickListener != null ? markerClickListener : marker -> {};
     }
 
     /**
@@ -1381,9 +1391,17 @@ public class TileMapView extends StackPane {
         if (marker.local()) {
             pin.getStyleClass().add("map-node-marker-local");
         }
+        pin.setCursor(measuring || areaSelectionMode ? Cursor.CROSSHAIR : Cursor.HAND);
         pin.setMinSize(MARKER_SIZE, MARKER_SIZE);
         pin.setPrefSize(MARKER_SIZE, MARKER_SIZE);
         pin.setMaxSize(MARKER_SIZE, MARKER_SIZE);
+        pin.setOnMouseClicked(event -> {
+            if (event.getButton() != MouseButton.PRIMARY || measuring || areaSelectionMode || dragged) {
+                return;
+            }
+            markerClickListener.accept(marker);
+            event.consume();
+        });
 
         String tooltipText = marker.title()
                 + "\n" + formatCoordinate(marker.latitude(), marker.longitude());

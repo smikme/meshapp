@@ -1,6 +1,7 @@
 package com.meshtastic.client.forms;
 
 import com.meshtastic.client.MeshApp;
+import com.meshtastic.client.components.NodeDetailPanel;
 import com.meshtastic.client.components.chat.ChatBotCommandHelper;
 import com.meshtastic.client.components.chat.TracerouteView;
 import com.meshtastic.client.components.map.MapMarker;
@@ -119,6 +120,7 @@ public class FormMap extends Form {
     private boolean downloadPaused;
     private final Map<Long, ParsedTrace> selectedTraces = new LinkedHashMap<>();
     private List<ParsedTrace> recentTraces = List.of();
+    private Map<String, NodeData> currentMarkerNodes = Map.of();
     private boolean suppressSearchSuggestions;
 
     private final Runnable connectionListener = () -> Platform.runLater(this::rebindState);
@@ -187,6 +189,7 @@ public class FormMap extends Form {
         mapView.setPointerListener(point -> pointerLabel.setText(TileMapView.formatCoordinate(point.latitude(), point.longitude())));
         mapView.setMeasureListener(measureLabel::setText);
         mapView.setAreaSelectionListener(areaLabel::setText);
+        mapView.setMarkerClickListener(this::showMarkerDetails);
 
         configureSearchControls();
 
@@ -1269,6 +1272,7 @@ public class FormMap extends Form {
      */
     private void reloadMarkers() {
         List<MapMarker> markers = new ArrayList<>();
+        Map<String, NodeData> markerNodes = new LinkedHashMap<>();
         for (NodeData node : collectMapNodes()) {
             if (!hasCoordinate(node)) {
                 continue;
@@ -1286,9 +1290,13 @@ public class FormMap extends Form {
                     node.getLongitude(),
                     isLocalNode
             ));
+            if (node.getNodeId() != null && !node.getNodeId().isBlank()) {
+                markerNodes.put(node.getNodeId(), node);
+            }
         }
 
         markers.sort(Comparator.comparing(MapMarker::local).reversed().thenComparing(MapMarker::title, String.CASE_INSENSITIVE_ORDER));
+        currentMarkerNodes = Map.copyOf(markerNodes);
         mapView.setMarkers(markers);
         refreshSelectedTraceOverlay(false);
         fitNodesButton.setDisable(markers.isEmpty());
@@ -1298,6 +1306,44 @@ public class FormMap extends Form {
             autoFitPending = false;
             Platform.runLater(mapView::fitMarkers);
         }
+    }
+
+    /**
+     * Открывает переиспользуемую панель информации о ноде по клику на маркер карты.
+     */
+    private void showMarkerDetails(MapMarker marker) {
+        if (marker == null || marker.id() == null || marker.id().isBlank()) {
+            statusLabel.setText("Не удалось определить ноду на карте");
+            return;
+        }
+
+        NodeData node = resolveMarkerNode(marker.id());
+        if (node == null) {
+            statusLabel.setText("Нода не найдена: " + marker.title());
+            return;
+        }
+
+        NodeCacheService.getInstance().enrichFromCache(node);
+        NodeDetailPanel.showForNode(state, node);
+        statusLabel.setText("Открыта информация о ноде: " + nodeTitle(node));
+    }
+
+    /**
+     * Находит NodeData для маркера среди текущих маркеров, активного DeviceState и кэша.
+     */
+    private NodeData resolveMarkerNode(String nodeId) {
+        NodeData node = currentMarkerNodes.get(nodeId);
+        if (node != null) {
+            return node;
+        }
+        if (state != null) {
+            for (NodeData candidate : state.getNodeDb().values()) {
+                if (nodeId.equals(candidate.getNodeId())) {
+                    return candidate;
+                }
+            }
+        }
+        return NodeCacheService.getInstance().get(nodeId);
     }
 
     /**
