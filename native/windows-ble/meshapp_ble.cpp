@@ -190,6 +190,9 @@ auto run_on_worker(F&& func) -> decltype(func()) {
     auto future = promise->get_future();
     {
         std::lock_guard<std::mutex> lock(g_queue_mutex);
+        if (!g_worker_running.load()) {
+            throw std::runtime_error("BLE worker is not running");
+        }
         if constexpr (std::is_void_v<R>) {
             g_task_queue.push([p = std::move(promise), f = std::forward<F>(func)]() {
                 try { f(); p->set_value(); }
@@ -209,9 +212,18 @@ auto run_on_worker(F&& func) -> decltype(func()) {
 static void post_to_worker(std::function<void()> func) {
     {
         std::lock_guard<std::mutex> lock(g_queue_mutex);
+        if (!g_worker_running.load()) {
+            return;
+        }
         g_task_queue.push(std::move(func));
     }
     g_queue_cv.notify_one();
+}
+
+static void clear_worker_queue() {
+    std::lock_guard<std::mutex> lock(g_queue_mutex);
+    std::queue<std::function<void()>> empty;
+    g_task_queue.swap(empty);
 }
 
 /* ==================== WinRT Helpers (called on worker thread only) ==================== */
@@ -586,6 +598,7 @@ MESHBLE_API void meshble_cleanup(void) {
     g_worker_running = false;
     g_queue_cv.notify_one();
     if (g_worker_thread.joinable()) g_worker_thread.join();
+    clear_worker_queue();
 
     g_initialized = false;
     log_msg("[meshble] Cleanup done");

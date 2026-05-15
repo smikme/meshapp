@@ -1138,6 +1138,7 @@ static void do_start_scan(void* arg) {
     if (r < 0) {
         log_msg("[meshble] StartDiscovery failed: %s", error.message);
         sd_bus_error_free(&error);
+        do_stop_scan();
         ctx->result = -1;
         return;
     }
@@ -1508,26 +1509,32 @@ static void do_connect(void* arg) {
         }
     } else {
         /* MeshCore Companion TX: prefer notifications on the inbound characteristic. */
-        sd_bus_match_signal(g_bus, &g_from_radio_notify_slot,
-                            BLUEZ_BUS, g_from_radio_char_path,
-                            PROPS_IFACE, "PropertiesChanged",
-                            on_from_radio_changed, NULL);
         int fd = acquire_notify(g_bus, g_from_radio_char_path, &g_from_radio_mtu);
         if (fd >= 0) {
             g_from_radio_fd = fd;
             atomic_store(&g_use_dbus_read, false);
             atomic_store(&g_notifications_active, true);
             log_msg("[meshble] Connected (write=WriteValue, read=AcquireNotify)");
-        } else if (start_notify(g_bus, g_from_radio_char_path) >= 0) {
-            g_from_radio_fd = -1;
-            atomic_store(&g_use_dbus_read, false);
-            atomic_store(&g_notifications_active, true);
-            log_msg("[meshble] Connected (write=WriteValue, read=StartNotify)");
         } else {
-            log_msg("[meshble] Notifications unavailable; falling back to ReadValue");
-            atomic_store(&g_use_dbus_read, true);
-            g_from_radio_fd = -1;
-            atomic_store(&g_notifications_active, false);
+            int match_result = sd_bus_match_signal(g_bus, &g_from_radio_notify_slot,
+                                BLUEZ_BUS, g_from_radio_char_path,
+                                PROPS_IFACE, "PropertiesChanged",
+                                on_from_radio_changed, NULL);
+            if (match_result >= 0 && start_notify(g_bus, g_from_radio_char_path) >= 0) {
+                g_from_radio_fd = -1;
+                atomic_store(&g_use_dbus_read, false);
+                atomic_store(&g_notifications_active, true);
+                log_msg("[meshble] Connected (write=WriteValue, read=StartNotify)");
+            } else {
+                if (g_from_radio_notify_slot) {
+                    sd_bus_slot_unref(g_from_radio_notify_slot);
+                    g_from_radio_notify_slot = NULL;
+                }
+                log_msg("[meshble] Notifications unavailable; falling back to ReadValue");
+                atomic_store(&g_use_dbus_read, true);
+                g_from_radio_fd = -1;
+                atomic_store(&g_notifications_active, false);
+            }
         }
     }
 
@@ -1837,6 +1844,7 @@ MESHBLE_API void meshble_cleanup(void) {
     g_passkey_callback = NULL;
     atomic_store(&g_initialized, false);
     log_msg("[meshble] Cleanup done");
+    g_log_callback = NULL;
 }
 
 MESHBLE_API int meshble_get_adapter_state(void) {

@@ -50,8 +50,9 @@ public final class LinuxGtkTrayService implements AppTrayService {
 
         CountDownLatch started = new CountDownLatch(1);
         AtomicBoolean installed = new AtomicBoolean(false);
+        AtomicBoolean cancelled = new AtomicBoolean(false);
 
-        Thread thread = new Thread(() -> runGtk(onActivate, onExit, started, installed), "meshapp-gtk-tray");
+        Thread thread = new Thread(() -> runGtk(onActivate, onExit, started, installed, cancelled), "meshapp-gtk-tray");
         thread.setDaemon(true);
         gtkThread = thread;
         thread.start();
@@ -59,10 +60,12 @@ public final class LinuxGtkTrayService implements AppTrayService {
         try {
             if (!started.await(5, TimeUnit.SECONDS)) {
                 log.warn("GTK tray initialization timed out, falling back to AWT");
+                cancelled.set(true);
                 return fallbackToAwt(onActivate, onExit);
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+            cancelled.set(true);
             return fallbackToAwt(onActivate, onExit);
         }
 
@@ -103,7 +106,8 @@ public final class LinuxGtkTrayService implements AppTrayService {
     private void runGtk(Runnable onActivate,
                         Runnable onExit,
                         CountDownLatch started,
-                        AtomicBoolean installed) {
+                        AtomicBoolean installed,
+                        AtomicBoolean cancelled) {
         try {
             gtk = loadGtk();
             gObject = Native.load("gobject-2.0", GObjectLibrary.class);
@@ -149,16 +153,11 @@ public final class LinuxGtkTrayService implements AppTrayService {
             exitItemActivateCallback = (widget, userData) -> dispatch("tray-exit", onExit);
             disposeCallback = userData -> {
                 try {
-                    if (statusIcon != null) {
-                        gtk.gtk_status_icon_set_visible(statusIcon, false);
-                        gObject.g_object_unref(statusIcon);
-                        statusIcon = null;
+                    disposeGtkResources();
+                    GtkLibrary currentGtk = gtk;
+                    if (currentGtk != null) {
+                        currentGtk.gtk_main_quit();
                     }
-                    if (menu != null) {
-                        gObject.g_object_unref(menu);
-                        menu = null;
-                    }
-                    gtk.gtk_main_quit();
                 } catch (Throwable t) {
                     log.debug("Failed to dispose GTK tray", t);
                 }
@@ -170,6 +169,11 @@ public final class LinuxGtkTrayService implements AppTrayService {
             gObject.g_signal_connect_data(openItem, "activate", openItemActivateCallback, null, null, 0);
             gObject.g_signal_connect_data(exitItem, "activate", exitItemActivateCallback, null, null, 0);
 
+            if (cancelled.get() || usingFallback) {
+                disposeGtkResources();
+                return;
+            }
+
             installed.set(true);
         } catch (Throwable t) {
             log.warn("Failed to initialize GTK tray, will fall back to AWT", t);
@@ -177,7 +181,10 @@ public final class LinuxGtkTrayService implements AppTrayService {
             started.countDown();
         }
 
-        if (!installed.get()) {
+        if (!installed.get() || cancelled.get() || usingFallback) {
+            disposeGtkResources();
+            clearGtkReferences();
+            gtkThread = null;
             return;
         }
 
@@ -186,6 +193,8 @@ public final class LinuxGtkTrayService implements AppTrayService {
         } catch (Throwable t) {
             log.warn("GTK tray loop exited with error", t);
         } finally {
+            disposeGtkResources();
+            clearGtkReferences();
             gtkThread = null;
         }
     }
@@ -206,6 +215,51 @@ public final class LinuxGtkTrayService implements AppTrayService {
         }, "meshapp-" + actionName);
         thread.setDaemon(true);
         thread.start();
+    }
+
+    private void disposeGtkResources() {
+        GtkLibrary currentGtk = gtk;
+        GObjectLibrary currentGObject = gObject;
+
+        Pointer currentStatusIcon = statusIcon;
+        statusIcon = null;
+        if (currentStatusIcon != null) {
+            try {
+                if (currentGtk != null) {
+                    currentGtk.gtk_status_icon_set_visible(currentStatusIcon, false);
+                }
+            } catch (Throwable t) {
+                log.debug("Failed to hide GTK status icon", t);
+            }
+            try {
+                if (currentGObject != null) {
+                    currentGObject.g_object_unref(currentStatusIcon);
+                }
+            } catch (Throwable t) {
+                log.debug("Failed to unref GTK status icon", t);
+            }
+        }
+
+        Pointer currentMenu = menu;
+        menu = null;
+        if (currentMenu != null && currentGObject != null) {
+            try {
+                currentGObject.g_object_unref(currentMenu);
+            } catch (Throwable t) {
+                log.debug("Failed to unref GTK menu", t);
+            }
+        }
+    }
+
+    private void clearGtkReferences() {
+        statusActivateCallback = null;
+        statusPopupMenuCallback = null;
+        openItemActivateCallback = null;
+        exitItemActivateCallback = null;
+        disposeCallback = null;
+        gtk = null;
+        gObject = null;
+        gLib = null;
     }
 
     private GtkLibrary loadGtk() {

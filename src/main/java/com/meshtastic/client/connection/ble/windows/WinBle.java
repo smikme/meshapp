@@ -5,9 +5,12 @@ import com.meshtastic.client.connection.ble.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.sun.jna.Native;
+import com.sun.jna.NativeLibrary;
 import com.meshtastic.client.modal.Toast;
 import javafx.application.Platform;
 
+import java.io.File;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -311,9 +314,29 @@ public class WinBle implements BlePlatform {
 
     @Override
     public void dispose() {
+        connected = false;
+        scanConsumer = null;
+        fromRadioListener = null;
+        stateListener = null;
+        passkeyRequestHandler = null;
         stopPolling();
         pollScheduler.shutdownNow();
-        lib.meshble_cleanup();
+        try {
+            if (!pollScheduler.awaitTermination(2, TimeUnit.SECONDS)) {
+                log.debug("WinBle polling task did not stop before native cleanup");
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        try {
+            lib.meshble_cleanup();
+        } finally {
+            unloadNativeLibrary();
+            scanCallback = null;
+            dataCallback = null;
+            stateCallback = null;
+            passkeyCallback = null;
+        }
         log.info("WinBle disposed");
     }
 
@@ -369,6 +392,28 @@ public class WinBle implements BlePlatform {
      * Паттерн из MacOsBle: ускоряет получение ответа на отправленный запрос.
      */
     private void scheduleDrainAfterWrite() {
-        pollScheduler.schedule(this::pollFromRadio, POLL_INTERVAL_MS, TimeUnit.MILLISECONDS);
+        if (pollScheduler.isShutdown()) {
+            return;
+        }
+        try {
+            pollScheduler.schedule(this::pollFromRadio, POLL_INTERVAL_MS, TimeUnit.MILLISECONDS);
+        } catch (RuntimeException e) {
+            if (!pollScheduler.isShutdown()) {
+                throw e;
+            }
+        }
+    }
+
+    private void unloadNativeLibrary() {
+        try {
+            NativeLibrary nativeLibrary = Native.getNativeLibrary(lib);
+            File file = nativeLibrary.getFile();
+            nativeLibrary.close();
+            if (file != null && file.exists() && !file.delete()) {
+                file.deleteOnExit();
+            }
+        } catch (Throwable t) {
+            log.debug("Failed to unload WinBle native library", t);
+        }
     }
 }

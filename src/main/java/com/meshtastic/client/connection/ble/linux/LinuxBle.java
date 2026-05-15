@@ -3,9 +3,12 @@ package com.meshtastic.client.connection.ble.linux;
 import com.meshtastic.client.connection.ConnectionException;
 import com.meshtastic.client.connection.ble.*;
 import com.meshtastic.client.platform.OsDetect;
+import com.sun.jna.Native;
+import com.sun.jna.NativeLibrary;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.File;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -308,9 +311,31 @@ public class LinuxBle implements BlePlatform {
 
     @Override
     public void dispose() {
+        connected = false;
+        connectedAddress = null;
+        scanConsumer = null;
+        fromRadioListener = null;
+        stateListener = null;
+        passkeyRequestHandler = null;
         stopPolling();
         pollScheduler.shutdownNow();
-        lib.meshble_cleanup();
+        try {
+            if (!pollScheduler.awaitTermination(2, TimeUnit.SECONDS)) {
+                log.debug("LinuxBle polling task did not stop before native cleanup");
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        try {
+            lib.meshble_cleanup();
+        } finally {
+            unloadNativeLibrary();
+            logCallback = null;
+            scanCallback = null;
+            dataCallback = null;
+            stateCallback = null;
+            passkeyCallback = null;
+        }
         log.info("LinuxBle disposed");
     }
 
@@ -367,9 +392,19 @@ public class LinuxBle implements BlePlatform {
      * На BlueZ fromNum notifications могут не прийти, хотя WriteValue уже завершился успешно.
      */
     private void scheduleDrainAfterWrite() {
+        if (pollScheduler.isShutdown()) {
+            return;
+        }
         for (int i = 1; i <= POST_WRITE_DRAIN_ATTEMPTS; i++) {
             long delayMs = (long) i * POST_WRITE_DRAIN_INTERVAL_MS;
-            pollScheduler.schedule(this::pollFromRadio, delayMs, TimeUnit.MILLISECONDS);
+            try {
+                pollScheduler.schedule(this::pollFromRadio, delayMs, TimeUnit.MILLISECONDS);
+            } catch (RuntimeException e) {
+                if (!pollScheduler.isShutdown()) {
+                    throw e;
+                }
+                return;
+            }
         }
     }
 
@@ -377,5 +412,18 @@ public class LinuxBle implements BlePlatform {
         String target = (address == null || address.isEmpty()) ? "" : " (" + address + ")";
         return "BLE: сопряжение не аутентифицировано" + target
                 + ". Удалите устройство в Bluetooth и выполните pairing заново с PIN-кодом на экране устройства.";
+    }
+
+    private void unloadNativeLibrary() {
+        try {
+            NativeLibrary nativeLibrary = Native.getNativeLibrary(lib);
+            File file = nativeLibrary.getFile();
+            nativeLibrary.close();
+            if (file != null && file.exists() && !file.delete()) {
+                file.deleteOnExit();
+            }
+        } catch (Throwable t) {
+            log.debug("Failed to unload LinuxBle native library", t);
+        }
     }
 }
