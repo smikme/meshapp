@@ -14,6 +14,7 @@ import java.util.concurrent.PriorityBlockingQueue;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -40,8 +41,8 @@ public class BleConnection implements MeshtasticConnection {
 
     private static final Logger log = LoggerFactory.getLogger(BleConnection.class);
     private static final int WRITE_QUEUE_INITIAL_CAPACITY = 256;
-    private static final int LOW_PRIORITY_SEND_QUEUE_CAPACITY = 8;
-    private static final int LOW_PRIORITY_MAX_PAYLOAD_BYTES = 256;
+    private static final int WRITE_QUEUE_SIZE = 16_384;
+    private static final long WRITE_QUEUE_LOG_INTERVAL_SECONDS = 5L;
     private static final long WRITE_WARN_THRESHOLD_MS = 2_000;
     private static final long WRITE_ERROR_THRESHOLD_MS = 10_000;
 
@@ -54,6 +55,7 @@ public class BleConnection implements MeshtasticConnection {
     private final AtomicLong connectionGeneration = new AtomicLong();
     private final AtomicReference<BleWriteDiagnostics> inFlightWrite = new AtomicReference<>();
     private final AtomicBoolean platformDisposed = new AtomicBoolean(false);
+    private final Semaphore writeSlots = new Semaphore(WRITE_QUEUE_SIZE);
 
     private volatile Consumer<byte[]> dataListener;
     private volatile ConnectionListener connectionListener;
@@ -61,6 +63,7 @@ public class BleConnection implements MeshtasticConnection {
     private volatile BleProtocolProfile resolvedProfile;
     private volatile ThreadPoolExecutor writeExecutor;
     private volatile ScheduledExecutorService writeWatchdog;
+    private volatile ScheduledFuture<?> writeQueueLogFuture;
 
     public BleConnection(String address, BlePlatform platform) {
         this(address, platform, BleProtocolProfile.MESHTASTIC);
@@ -256,14 +259,8 @@ public class BleConnection implements MeshtasticConnection {
         long generation = connectionGeneration.get();
         String callerThread = Thread.currentThread().getName();
         int queueDepth = executor.getQueue().size();
-        if (!expectResponseAfterWrite && payload.length > LOW_PRIORITY_MAX_PAYLOAD_BYTES) {
-            log.warn("Dropping oversized low-priority BLE write #{} ({} bytes, limit={}, queueDepth={})",
-                    opId, payload.length, LOW_PRIORITY_MAX_PAYLOAD_BYTES, queueDepth);
-            return;
-        }
-        if (!expectResponseAfterWrite && queueDepth >= LOW_PRIORITY_SEND_QUEUE_CAPACITY) {
-            log.warn("Dropping low-priority BLE write #{} ({} bytes, queueDepth={}, limit={})",
-                    opId, payload.length, queueDepth, LOW_PRIORITY_SEND_QUEUE_CAPACITY);
+
+        if (!acquireWriteSlot(opId, payload.length, expectResponseAfterWrite)) {
             return;
         }
 
@@ -274,6 +271,7 @@ public class BleConnection implements MeshtasticConnection {
             executor.execute(new BleWriteTask(
                     opId, payload, expectResponseAfterWrite, callerThread, queuedAtNanos, generation));
         } catch (RejectedExecutionException e) {
+            writeSlots.release();
             log.warn("BLE send queue rejected write #{} ({} bytes, queueDepth={})",
                     opId, payload.length, queueDepth, e);
         }
@@ -312,6 +310,7 @@ public class BleConnection implements MeshtasticConnection {
                     return t;
                 });
             }
+            startWriteQueueLoggingLocked();
         }
     }
 
@@ -379,11 +378,67 @@ public class BleConnection implements MeshtasticConnection {
         if (executorToStop != null) {
             List<Runnable> dropped = executorToStop.shutdownNow();
             if (!dropped.isEmpty()) {
+                writeSlots.release(dropped.size());
                 log.info("Dropped {} queued BLE writes during {}", dropped.size(), reason);
             }
         }
         if (watchdogToStop != null) {
+            stopWriteQueueLogging();
             watchdogToStop.shutdownNow();
+        }
+    }
+
+    private boolean acquireWriteSlot(long opId, int payloadSize, boolean expectResponseAfterWrite) {
+        while (isConnected()) {
+            try {
+                writeSlots.acquire();
+                return true;
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                log.warn("Interrupted while waiting for BLE write queue space for {}", address);
+                return false;
+            }
+        }
+        log.warn("BLE write #{} not queued because transport disconnected while waiting for queue space ({} bytes, expectResponseAfterWrite={})",
+                opId, payloadSize, expectResponseAfterWrite);
+        return false;
+    }
+
+    private void startWriteQueueLoggingLocked() {
+        ScheduledFuture<?> current = writeQueueLogFuture;
+        if (current != null && !current.isDone()) {
+            return;
+        }
+        ScheduledExecutorService scheduler = writeWatchdog;
+        if (scheduler == null || scheduler.isShutdown()) {
+            return;
+        }
+        writeQueueLogFuture = scheduler.scheduleWithFixedDelay(
+                this::logWriteQueueDepthSafely,
+                WRITE_QUEUE_LOG_INTERVAL_SECONDS,
+                WRITE_QUEUE_LOG_INTERVAL_SECONDS,
+                TimeUnit.SECONDS
+        );
+    }
+
+    private void stopWriteQueueLogging() {
+        ScheduledFuture<?> current = writeQueueLogFuture;
+        writeQueueLogFuture = null;
+        if (current != null) {
+            current.cancel(false);
+        }
+    }
+
+    private void logWriteQueueDepthSafely() {
+        try {
+            ThreadPoolExecutor executor = writeExecutor;
+            if (executor == null || executor.isShutdown()) {
+                return;
+            }
+            log.debug("BLE write queue for {}: currentSize={}, maxSize={}",
+                    address, executor.getQueue().size(), WRITE_QUEUE_SIZE);
+        } catch (Throwable t) {
+            log.warn("Failed to log BLE write queue depth for {}", address, t);
         }
     }
 
@@ -541,7 +596,11 @@ public class BleConnection implements MeshtasticConnection {
 
         @Override
         public void run() {
-            performWrite(opId, payload, expectResponseAfterWrite, callerThread, queuedAtNanos, generation);
+            try {
+                performWrite(opId, payload, expectResponseAfterWrite, callerThread, queuedAtNanos, generation);
+            } finally {
+                writeSlots.release();
+            }
         }
 
         @Override
