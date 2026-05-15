@@ -1047,6 +1047,14 @@ static void do_disconnect(void) {
     atomic_store(&g_use_dbus_write, false);
     atomic_store(&g_use_dbus_read, false);
 
+    if (g_pending_passkey_msg) {
+        sd_bus_reply_method_errorf(g_pending_passkey_msg,
+                                   "org.bluez.Error.Rejected",
+                                   "Disconnected");
+        sd_bus_message_unref(g_pending_passkey_msg);
+        g_pending_passkey_msg = NULL;
+    }
+
     if (g_from_radio_fd >= 0) { close(g_from_radio_fd); g_from_radio_fd = -1; }
     if (g_to_radio_fd >= 0) { close(g_to_radio_fd); g_to_radio_fd = -1; }
 
@@ -1138,6 +1146,8 @@ static void do_start_scan(void* arg) {
     if (r < 0) {
         log_msg("[meshble] StartDiscovery failed: %s", error.message);
         sd_bus_error_free(&error);
+        if (g_iface_added_slot) { sd_bus_slot_unref(g_iface_added_slot); g_iface_added_slot = NULL; }
+        g_device_callback = NULL;
         ctx->result = -1;
         return;
     }
@@ -1593,6 +1603,9 @@ static int agent_request_passkey(sd_bus_message* msg, void* userdata, sd_bus_err
 
     /* Save the D-Bus message — we'll reply asynchronously */
     if (g_pending_passkey_msg) {
+        sd_bus_reply_method_errorf(g_pending_passkey_msg,
+                                   "org.bluez.Error.Rejected",
+                                   "Superseded by a newer passkey request");
         sd_bus_message_unref(g_pending_passkey_msg);
     }
     g_pending_passkey_msg = sd_bus_message_ref(msg);
@@ -1707,6 +1720,7 @@ static int register_agent(sd_bus* bus) {
                         fallback_error.message ? fallback_error.message : "?",
                         fallback_error.name ? fallback_error.name : "?");
                 sd_bus_error_free(&fallback_error);
+                if (g_agent_slot) { sd_bus_slot_unref(g_agent_slot); g_agent_slot = NULL; }
                 return r;
             }
         }
@@ -1721,6 +1735,7 @@ static int register_agent(sd_bus* bus) {
                     error.message ? error.message : "?",
                     error.name ? error.name : "?");
             sd_bus_error_free(&error);
+            if (g_agent_slot) { sd_bus_slot_unref(g_agent_slot); g_agent_slot = NULL; }
             return r;
         }
     }
@@ -1797,6 +1812,7 @@ MESHBLE_API int meshble_init(void) {
     register_agent(g_bus);
 
     if (pipe(g_wake_pipe) < 0) {
+        unregister_agent(g_bus);
         sd_bus_unref(g_bus); g_bus = NULL;
         atomic_store(&g_initialized, false);
         return -1;
@@ -1807,7 +1823,18 @@ MESHBLE_API int meshble_init(void) {
     tq_init(&g_tasks);
     atomic_store(&g_profile, PROFILE_MESHTASTIC);
     atomic_store(&g_worker_running, true);
-    pthread_create(&g_worker_thread, NULL, worker_loop, NULL);
+    int thread_result = pthread_create(&g_worker_thread, NULL, worker_loop, NULL);
+    if (thread_result != 0) {
+        log_msg("[meshble] Failed to start worker thread: %s", strerror(thread_result));
+        atomic_store(&g_worker_running, false);
+        tq_destroy(&g_tasks);
+        if (g_wake_pipe[0] >= 0) { close(g_wake_pipe[0]); g_wake_pipe[0] = -1; }
+        if (g_wake_pipe[1] >= 0) { close(g_wake_pipe[1]); g_wake_pipe[1] = -1; }
+        unregister_agent(g_bus);
+        sd_bus_unref(g_bus); g_bus = NULL;
+        atomic_store(&g_initialized, false);
+        return -1;
+    }
 
     log_msg("[meshble] Initialized (sd-bus worker thread)");
     return 0;
@@ -1989,8 +2016,7 @@ static void do_respond_passkey(void* arg) {
 }
 
 MESHBLE_API void meshble_respond_passkey(uint32_t passkey) {
-    static uint32_t pk;
-    pk = passkey;
+    uint32_t pk = passkey;
     run_on_worker(do_respond_passkey, &pk);
 }
 
