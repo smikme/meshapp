@@ -121,7 +121,7 @@ public class NativeMacOsWindowControl {
      */
     public void makeVisibleInAppSwitcher() {
         if (nsWindow == 0) { return; }
-        try {
+        try (ObjCRuntime.AutoreleasePool ignored = ObjCRuntime.openAutoreleasePool()) {
             long currentMask = msgSend(nsWindow, "styleMask");
             long titled = 1L;                // NSWindowStyleMaskTitled
             long resizable = 1L << 3;        // NSWindowStyleMaskResizable
@@ -168,7 +168,8 @@ public class NativeMacOsWindowControl {
      */
     public boolean applyVisualEffect(boolean darkMode) {
         if (nsWindow == 0) { return false; }
-        try {
+        long vev = 0;
+        try (ObjCRuntime.AutoreleasePool ignored = ObjCRuntime.openAutoreleasePool()) {
             // Получить contentView окна
             long contentView = msgSend(nsWindow, "contentView");
             if (contentView == 0) { return false; }
@@ -186,7 +187,7 @@ public class NativeMacOsWindowControl {
 
             // Создать NSVisualEffectView
             long vevClass = cls("NSVisualEffectView");
-            long vev = msgSend(vevClass, "alloc");
+            vev = msgSend(vevClass, "alloc");
             vev = msgSend(vev, "init");
 
             // material = NSVisualEffectMaterialHUDWindow (13) — выраженный frosted glass
@@ -228,6 +229,8 @@ public class NativeMacOsWindowControl {
         } catch (Throwable t) {
             log.error("Не удалось применить NSVisualEffectView", t);
             return false;
+        } finally {
+            ObjCRuntime.release(vev);
         }
     }
 
@@ -255,7 +258,7 @@ public class NativeMacOsWindowControl {
      */
     public void updateVisualEffectAppearance(boolean dark) {
         if (nsWindow == 0) { return; }
-        try {
+        try (ObjCRuntime.AutoreleasePool ignored = ObjCRuntime.openAutoreleasePool()) {
             long contentView = msgSend(nsWindow, "contentView");
             if (contentView == 0) { return; }
 
@@ -282,7 +285,7 @@ public class NativeMacOsWindowControl {
     /** Переключить NSAppearance на окне (DarkAqua / Aqua) */
     public void setDarkMode(boolean dark) {
         if (nsWindow == 0) { return; }
-        try {
+        try (ObjCRuntime.AutoreleasePool ignored = ObjCRuntime.openAutoreleasePool()) {
             setAppearanceOnView(nsWindow, dark);
         } catch (Throwable t) {
             log.error("Не удалось установить appearance", t);
@@ -370,8 +373,9 @@ public class NativeMacOsWindowControl {
             return 0;
         }
 
-        try {
-            long observer = ObjCRuntime.allocInitClass(miniaturizeObserverClass);
+        long observer = 0;
+        try (ObjCRuntime.AutoreleasePool ignored = ObjCRuntime.openAutoreleasePool()) {
+            observer = ObjCRuntime.allocInitClass(miniaturizeObserverClass);
             if (observer == 0) {
                 return 0;
             }
@@ -391,6 +395,20 @@ public class NativeMacOsWindowControl {
             return observer;
         } catch (Throwable t) {
             log.error("Не удалось установить observer минимизации NSWindow", t);
+            MINIATURIZE_HANDLERS.remove(observer);
+            if (observer != 0) {
+                try {
+                    long center = msgSend(cls("NSNotificationCenter"), "defaultCenter");
+                    OBJC_MSG_SEND.invokeLong(new Object[]{
+                            center,
+                            sel("removeObserver:"),
+                            observer
+                    });
+                } catch (Throwable ignored) {
+                    // best-effort cleanup after partial observer registration
+                }
+                ObjCRuntime.release(observer);
+            }
             return 0;
         }
     }
@@ -400,8 +418,8 @@ public class NativeMacOsWindowControl {
             return;
         }
 
-        MINIATURIZE_HANDLERS.remove(observer);
         try {
+            MINIATURIZE_HANDLERS.remove(observer);
             long center = msgSend(cls("NSNotificationCenter"), "defaultCenter");
             OBJC_MSG_SEND.invokeLong(new Object[]{
                     center,
@@ -410,6 +428,8 @@ public class NativeMacOsWindowControl {
             });
         } catch (Throwable t) {
             log.warn("Не удалось удалить observer минимизации NSWindow", t);
+        } finally {
+            ObjCRuntime.release(observer);
         }
     }
 
@@ -509,9 +529,8 @@ public class NativeMacOsWindowControl {
 
     private static long createNSString(String javaString) {
         long nsStringClass = cls("NSString");
-        long alloc = msgSend(nsStringClass, "alloc");
         return OBJC_MSG_SEND.invokeLong(new Object[]{
-                alloc, sel("initWithUTF8String:"), javaString
+                nsStringClass, sel("stringWithUTF8String:"), javaString == null ? "" : javaString
         });
     }
 

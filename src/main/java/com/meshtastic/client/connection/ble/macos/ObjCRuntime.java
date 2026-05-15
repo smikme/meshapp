@@ -39,6 +39,8 @@ public final class ObjCRuntime {
     private static final Function SET_IVAR = OBJC.getFunction("object_setInstanceVariable");
     private static final Function GET_PROTOCOL = OBJC.getFunction("objc_getProtocol");
     private static final Function ADD_PROTOCOL = OBJC.getFunction("class_addProtocol");
+    private static final Function AUTORELEASE_POOL_PUSH = OBJC.getFunction("objc_autoreleasePoolPush");
+    private static final Function AUTORELEASE_POOL_POP = OBJC.getFunction("objc_autoreleasePoolPop");
 
     // libdispatch
     private static final Function DISPATCH_QUEUE_CREATE = DISPATCH.getFunction("dispatch_queue_create");
@@ -103,8 +105,21 @@ public final class ObjCRuntime {
     /** [NSString stringWithUTF8String:javaString] */
     public static long nsString(String javaString) {
         long nsStringClass = cls("NSString");
-        long alloc = msgSend(nsStringClass, "alloc");
-        return MSG_SEND.invokeLong(new Object[]{alloc, sel("initWithUTF8String:"), javaString});
+        return MSG_SEND.invokeLong(new Object[]{
+                nsStringClass, sel("stringWithUTF8String:"), javaString == null ? "" : javaString
+        });
+    }
+
+    /** Releases an Objective-C object owned by Java via alloc/init, retain or copy. */
+    public static void release(long object) {
+        if (object != 0) {
+            msgSend(object, "release");
+        }
+    }
+
+    /** Creates an autorelease pool for Java threads that call Objective-C APIs directly. */
+    public static AutoreleasePool openAutoreleasePool() {
+        return new AutoreleasePool(AUTORELEASE_POOL_PUSH.invokePointer(new Object[]{}));
     }
 
     /**
@@ -258,4 +273,21 @@ public final class ObjCRuntime {
     }
 
     private ObjCRuntime() {}
+
+    public static final class AutoreleasePool implements AutoCloseable {
+        private Pointer token;
+
+        private AutoreleasePool(Pointer token) {
+            this.token = token;
+        }
+
+        @Override
+        public void close() {
+            Pointer current = token;
+            token = null;
+            if (current != null) {
+                AUTORELEASE_POOL_POP.invokeVoid(new Object[]{current});
+            }
+        }
+    }
 }

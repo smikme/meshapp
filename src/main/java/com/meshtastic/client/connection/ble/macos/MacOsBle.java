@@ -156,15 +156,17 @@ public class MacOsBle implements BlePlatform {
 
     @Override
     public void startScan(Consumer<BleDevice> onDeviceFound) {
-        this.scanCallback = onDeviceFound;
-        log.info("Waiting for BLE adapter PoweredOn...");
-        waitForPoweredOn();
-        log.info("BLE adapter state: {}", adapterState);
+        try (ObjCRuntime.AutoreleasePool ignored = openAutoreleasePool()) {
+            this.scanCallback = onDeviceFound;
+            log.info("Waiting for BLE adapter PoweredOn...");
+            waitForPoweredOn();
+            log.info("BLE adapter state: {}", adapterState);
 
-        long serviceArray = serviceUuidArray(profile);
+            long serviceArray = serviceUuidArray(profile);
 
-        msgSend(centralManager, "scanForPeripheralsWithServices:options:", serviceArray, 0L);
-        log.info("BLE scan started (filter: {} service UUID)", profile.displayName());
+            msgSend(centralManager, "scanForPeripheralsWithServices:options:", serviceArray, 0L);
+            log.info("BLE scan started (filter: {} service UUID)", profile.displayName());
+        }
     }
 
     @Override
@@ -189,24 +191,31 @@ public class MacOsBle implements BlePlatform {
             throw new ConnectionException("BLE adapter is not ready: " + adapterState);
         }
 
+        ObjCRuntime.AutoreleasePool autoreleasePool = openAutoreleasePool();
+        try {
         Long peripheralPtr = discoveredPeripherals.get(address);
         if (peripheralPtr == null) {
             // Reconnect: retrieve peripheral by UUID from CoreBluetooth system cache
             log.info("[BLE] Device not in scan cache, trying retrievePeripheralsWithIdentifiers...");
             long nsuuidCls = cls("NSUUID");
-            long nsuuid = msgSend(msgSend(nsuuidCls, "alloc"), "initWithUUIDString:", nsString(address));
-            long identifiers = nsArrayWith(nsuuid);
-            long peripherals = msgSend(centralManager, "retrievePeripheralsWithIdentifiers:", identifiers);
-            long count = msgSend(peripherals, "count");
-            if (count > 0) {
-                long p = msgSend(peripherals, "objectAtIndex:", 0L);
-                cacheDiscoveredPeripheral(address, p);
-                peripheralPtr = p;
-                log.info("[BLE] Retrieved peripheral from system cache");
-            } else {
-                log.error("[BLE] Device not found in system cache either (address={})", address);
-                throw new ConnectionException(
-                        "BLE device not found: " + address + ". Run scan first.");
+            long nsuuid = 0;
+            try {
+                nsuuid = msgSend(msgSend(nsuuidCls, "alloc"), "initWithUUIDString:", nsString(address));
+                long identifiers = nsArrayWith(nsuuid);
+                long peripherals = msgSend(centralManager, "retrievePeripheralsWithIdentifiers:", identifiers);
+                long count = msgSend(peripherals, "count");
+                if (count > 0) {
+                    long p = msgSend(peripherals, "objectAtIndex:", 0L);
+                    cacheDiscoveredPeripheral(address, p);
+                    peripheralPtr = p;
+                    log.info("[BLE] Retrieved peripheral from system cache");
+                } else {
+                    log.error("[BLE] Device not found in system cache either (address={})", address);
+                    throw new ConnectionException(
+                            "BLE device not found: " + address + ". Run scan first.");
+                }
+            } finally {
+                release(nsuuid);
             }
         }
         long peripheral = peripheralPtr;
@@ -335,6 +344,9 @@ public class MacOsBle implements BlePlatform {
         } finally {
             connectInProgress = false;
         }
+        } finally {
+            autoreleasePool.close();
+        }
     }
 
     @Override
@@ -349,6 +361,11 @@ public class MacOsBle implements BlePlatform {
             if (peripheral != 0) {
                 if (notificationCharacteristic != 0) {
                     setNotify(peripheral, false, notificationCharacteristic);
+                }
+                try {
+                    msgSend(peripheral, "setDelegate:", 0L);
+                } catch (RuntimeException e) {
+                    log.debug("[BLE] Failed to clear peripheral delegate during disconnect", e);
                 }
                 msgSend(centralManager, "cancelPeripheralConnection:", peripheral);
                 // Once a session is torn down, the cached CBPeripheral can become stale after a
@@ -376,6 +393,7 @@ public class MacOsBle implements BlePlatform {
 
     @Override
     public boolean writeToRadio(byte[] protobufPayload) {
+        try (ObjCRuntime.AutoreleasePool ignored = openAutoreleasePool()) {
         synchronized (writeResponseLock) {
             CountDownLatch latch = new CountDownLatch(1);
             synchronized (connectionIoLock) {
@@ -432,9 +450,18 @@ public class MacOsBle implements BlePlatform {
 
         if (profile.hasNotifyTriggerCharacteristic()) {
             // Kickstart drain after write — не ждём poll cycle
-            pollScheduler.schedule(this::triggerDrain, 200, TimeUnit.MILLISECONDS);
+            if (!pollScheduler.isShutdown()) {
+                try {
+                    pollScheduler.schedule(this::triggerDrain, 200, TimeUnit.MILLISECONDS);
+                } catch (RuntimeException e) {
+                    if (!pollScheduler.isShutdown()) {
+                        throw e;
+                    }
+                }
+            }
         }
         return true;
+        }
     }
 
     @Override
@@ -466,11 +493,56 @@ public class MacOsBle implements BlePlatform {
     public void dispose() {
         disconnect();
         stopScan();
-        pollScheduler.shutdown();
+        pollScheduler.shutdownNow();
+        try {
+            if (!pollScheduler.awaitTermination(2, TimeUnit.SECONDS)) {
+                log.debug("MacOsBle polling task did not stop before native cleanup");
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
         DELEGATE_MAP.remove(delegateInstance);
         DELEGATE_MAP.remove(peripheralDelegateInstance);
         clearCachedPeripherals();
+        releaseCoreBluetoothObjects();
         log.info("MacOsBle disposed");
+    }
+
+    private void releaseCoreBluetoothObjects() {
+        synchronized (connectionIoLock) {
+            long manager = centralManager;
+            long centralDelegate = delegateInstance;
+            long peripheralDelegate = peripheralDelegateInstance;
+            long queue = dispatchQueue;
+
+            centralManager = 0;
+            delegateInstance = 0;
+            peripheralDelegateInstance = 0;
+            dispatchQueue = 0;
+
+            if (manager != 0) {
+                try {
+                    msgSend(manager, "setDelegate:", 0L);
+                } catch (RuntimeException e) {
+                    log.debug("[BLE] Failed to clear central manager delegate", e);
+                }
+                releaseObject("CBCentralManager", manager);
+            }
+            releaseObject("central delegate", centralDelegate);
+            releaseObject("peripheral delegate", peripheralDelegate);
+            releaseObject("dispatch queue", queue);
+        }
+    }
+
+    private void releaseObject(String name, long object) {
+        if (object == 0) {
+            return;
+        }
+        try {
+            release(object);
+        } catch (RuntimeException e) {
+            log.debug("[BLE] Failed to release {}", name, e);
+        }
     }
 
     // ====== Helpers ======
