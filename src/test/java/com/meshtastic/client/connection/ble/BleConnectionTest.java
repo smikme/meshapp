@@ -224,11 +224,11 @@ class BleConnectionTest {
     }
 
     @Test
-    void lowPriorityBleBacklogIsCappedWhileResponseWritesStillPass() throws Exception {
+    void lowPriorityBleBacklogIsLosslessWhileResponseWritesStillPass() throws Exception {
         FakePlatform platform = new FakePlatform();
         CountDownLatch firstWriteStarted = new CountDownLatch(1);
         CountDownLatch allowFirstWriteFinish = new CountDownLatch(1);
-        CountDownLatch writesFinished = new CountDownLatch(10);
+        CountDownLatch writesFinished = new CountDownLatch(26);
         AtomicInteger writeCalls = new AtomicInteger();
         CopyOnWriteArrayList<Byte> payloads = new CopyOnWriteArrayList<>();
         platform.connectAction = p -> p.connected = true;
@@ -261,19 +261,21 @@ class BleConnectionTest {
         allowFirstWriteFinish.countDown();
 
         assertTrue(writesFinished.await(1, TimeUnit.SECONDS));
-        assertEquals(10, writeCalls.get());
+        assertEquals(26, writeCalls.get());
         assertEquals(List.of((byte) 0x11, (byte) 0x7F), payloads.subList(0, 2));
     }
 
     @Test
-    void oversizedLowPriorityBleWriteIsDroppedWhileResponseWriteStillPasses() throws Exception {
+    void oversizedLowPriorityBleWriteIsQueuedLosslessly() throws Exception {
         FakePlatform platform = new FakePlatform();
-        CountDownLatch written = new CountDownLatch(1);
+        CountDownLatch written = new CountDownLatch(2);
         AtomicInteger writeCalls = new AtomicInteger();
+        CopyOnWriteArrayList<Byte> payloads = new CopyOnWriteArrayList<>();
         platform.connectAction = p -> p.connected = true;
         platform.writeAction = (p, payload) -> {
             writeCalls.incrementAndGet();
             p.lastPayload = payload;
+            payloads.add(payload[0]);
             written.countDown();
             return true;
         };
@@ -285,9 +287,10 @@ class BleConnectionTest {
         connection.sendBytes(frame((byte) 0x55, 257), true);
 
         assertTrue(written.await(1, TimeUnit.SECONDS));
-        assertEquals(1, writeCalls.get());
+        assertEquals(2, writeCalls.get());
         assertEquals(257, platform.lastPayload.length);
-        assertEquals(0x55, platform.lastPayload[0]);
+        assertTrue(payloads.contains((byte) 0x44));
+        assertTrue(payloads.contains((byte) 0x55));
     }
 
     @Test
