@@ -451,6 +451,8 @@ class MessageDbServiceTest {
 
         MeshMessage mqtt = message("duplicate", 992, 20);
         mqtt.setViaMqtt(true);
+        mqtt.setHopStart(7);
+        mqtt.setHopLimit(6);
         mqtt.setRxRssi(-70);
         service.save(mqtt, "channel", "0", "!owner");
 
@@ -459,6 +461,30 @@ class MessageDbServiceTest {
         assertFalse(loaded.isViaMqtt());
         assertEquals(4, loaded.getHopStart());
         assertEquals(2, loaded.getHopLimit());
+        assertEquals(0, loaded.getRxRssi());
+    }
+
+    @Test
+    void saveDuplicateDoesNotFillMissingLoraHopDataFromLaterMqttCopy() {
+        MeshMessage lora = message("first", 993, 10);
+        lora.setViaMqtt(false);
+        service.save(lora, "channel", "0", "!owner");
+
+        MeshMessage mqtt = message("duplicate", 993, 20);
+        mqtt.setViaMqtt(true);
+        mqtt.setHopStart(7);
+        mqtt.setHopLimit(3);
+        mqtt.setRxRssi(-70);
+        mqtt.setRxSnr(5.5f);
+        service.save(mqtt, "channel", "0", "!owner");
+
+        MeshMessage loaded = service.findByPacketId(993, "channel", "0", "!owner");
+        assertNotNull(loaded);
+        assertFalse(loaded.isViaMqtt());
+        assertEquals(0, loaded.getHopStart());
+        assertEquals(0, loaded.getHopLimit());
+        assertEquals(0, loaded.getRxRssi());
+        assertEquals(0.0f, loaded.getRxSnr());
     }
 
     @Test

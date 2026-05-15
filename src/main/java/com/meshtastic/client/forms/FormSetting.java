@@ -661,6 +661,14 @@ public class FormSetting extends Form {
                 == ModuleConfigProtos.ModuleConfig.PayloadVariantCase.MQTT;
     }
 
+    static boolean requiresConfigSaveReconnect(boolean ownerModified,
+                                               List<ConfigProtos.Config> configs,
+                                               List<ModuleConfigProtos.ModuleConfig> moduleConfigs) {
+        return ownerModified
+                || (configs != null && !configs.isEmpty())
+                || (moduleConfigs != null && !moduleConfigs.isEmpty());
+    }
+
     // ==================== Настройки приложения ====================
 
     private VBox createAppSettingsPanel() {
@@ -2819,6 +2827,17 @@ public class FormSetting extends Form {
         ConnectionType activeTransport = activeEntry != null
                 ? activeEntry.getEffectiveType()
                 : ConnectionType.TCP;
+        boolean hasPacketConfigChanges = !channels.isEmpty() || !configs.isEmpty() || !moduleConfigs.isEmpty();
+        boolean requiresReconnect = requiresConfigSaveReconnect(ownerModified, configs, moduleConfigs);
+        long reconnectHandoffGeneration = requiresReconnect && activeEntry != null
+                ? ConnectionManager.getInstance().getConnectionGeneration(activeEntry.getId())
+                : -1;
+        if (requiresReconnect && activeEntry != null) {
+            ConnectionManager.getInstance().expectDeviceReboot(activeEntry.getId());
+            if (ownerModified) {
+                markConfigSaveNavigationBlockAwaitingReconnect(activeEntry);
+            }
+        }
 
         // Виртуальные секции — отправить напрямую
         if (ownerModified && newLongName != null && newShortName != null) {
@@ -2870,17 +2889,10 @@ public class FormSetting extends Form {
         // Protobuf-секции обычно идут через begin/commit edit с задержками между сообщениями.
         // Исключение ниже — одиночный BLE-save MQTT, где некоторые устройства reboot/disconnect
         // уже на set_module_config и не дают commit дойти до firmware.
-        if (!channels.isEmpty() || !configs.isEmpty() || !moduleConfigs.isEmpty()) {
+        if (hasPacketConfigChanges) {
             List<Runnable> tasks = new ArrayList<>();
             AtomicBoolean saveFailed = new AtomicBoolean(false);
             AtomicBoolean saveCompletionAnnounced = new AtomicBoolean(false);
-            boolean requiresReconnect = !configs.isEmpty() || !moduleConfigs.isEmpty();
-            long reconnectHandoffGeneration = requiresReconnect && activeEntry != null
-                    ? ConnectionManager.getInstance().getConnectionGeneration(activeEntry.getId())
-                    : -1;
-            if (requiresReconnect && activeEntry != null) {
-                ConnectionManager.getInstance().expectDeviceReboot(activeEntry.getId());
-            }
             boolean useImplicitBleModuleSave = shouldUseImplicitBleModuleSave(
                     activeTransport, ownerModified, positionModified, configs, moduleConfigs)
                     && channels.isEmpty();
@@ -3075,6 +3087,51 @@ public class FormSetting extends Form {
             }, "config-save-sender");
             saveThread.setDaemon(true);
             saveThread.start();
+
+        } else if (requiresReconnect && activeEntry != null) {
+            long rebootHandoffDelay = getConfigSaveRebootHandoffDelayMs(activeTransport);
+            Platform.runLater(() -> {
+                resetModifiedFlags(fullConfigRoot != null ? fullConfigRoot : configTree.getRoot());
+                originalChannels = getWorkingChannelsSnapshot();
+                saveConfigBtn.setDisable(false);
+                String reconnectMessage = activeTransport == ConnectionType.BLE
+                        ? "Отправлено секций: " + totalChanges + ". Ожидание переподключения по BLE..."
+                        : "Отправлено секций: " + totalChanges + ". Устройство перезагрузится. Переподключение...";
+                configStatusLabel.setText(reconnectMessage);
+            });
+
+            Thread reconnectThread = new Thread(() -> {
+                try {
+                    Thread.sleep(rebootHandoffDelay);
+                    log.info("Config save: handoff to reboot reconnect flow after owner info update (transport={})",
+                            activeTransport);
+                    boolean handoffStarted = ConnectionManager.getInstance().disconnectForDeviceReboot(
+                            activeEntry.getId(), reconnectHandoffGeneration);
+                    if (!handoffStarted) {
+                        return;
+                    }
+                    Platform.runLater(() -> {
+                        if (state == actionState) {
+                            state = null;
+                        }
+                        if (handler == actionHandler) {
+                            handler = null;
+                        }
+                        reloadConfigTree();
+                    });
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    log.warn("Config save owner reconnect handoff interrupted");
+                    ConnectionManager.getInstance().clearExpectedDeviceReboot(activeEntry.getId());
+                    finishConfigSaveNavigationBlock();
+                } catch (Exception e) {
+                    log.error("Config save: owner reconnect handoff failed", e);
+                    ConnectionManager.getInstance().clearExpectedDeviceReboot(activeEntry.getId());
+                    finishConfigSaveNavigationBlock();
+                }
+            }, "config-save-owner-reconnect");
+            reconnectThread.setDaemon(true);
+            reconnectThread.start();
 
         } else {
             // Только виртуальные секции — завершить сразу (устройство не перезагружается)

@@ -3,6 +3,7 @@ package com.meshtastic.client.service;
 import org.junit.jupiter.api.Test;
 import org.meshtastic.proto.MeshProtos;
 import org.meshtastic.proto.ModuleConfigProtos;
+import org.meshtastic.proto.MQTTProtos;
 
 import com.google.protobuf.ByteString;
 import com.meshtastic.client.model.DeviceState;
@@ -132,5 +133,74 @@ class MqttProxyServiceTest {
         suppressor.remember("msh/test", new byte[] {0x01});
 
         assertFalse(suppressor.consume("msh/test", new byte[] {0x01}));
+    }
+
+    @Test
+    void addressedToLocalNodeRecognizesServiceEnvelopeTarget() {
+        DeviceState state = new DeviceState();
+        state.setMyNodeNum(0x12345678);
+        byte[] payload = MQTTProtos.ServiceEnvelope.newBuilder()
+                .setPacket(MeshProtos.MeshPacket.newBuilder()
+                        .setTo(0x12345678)
+                        .build())
+                .build()
+                .toByteArray();
+
+        assertTrue(MqttProxyService.isAddressedToLocalNode(payload, state));
+    }
+
+    @Test
+    void addressedToLocalNodeRejectsOtherTargetsAndNonEnvelopePayloads() {
+        DeviceState state = new DeviceState();
+        state.setMyNodeNum(0x12345678);
+        byte[] otherTarget = MQTTProtos.ServiceEnvelope.newBuilder()
+                .setPacket(MeshProtos.MeshPacket.newBuilder()
+                        .setTo(0x87654321)
+                        .build())
+                .build()
+                .toByteArray();
+
+        assertFalse(MqttProxyService.isAddressedToLocalNode(otherTarget, state));
+        assertFalse(MqttProxyService.isAddressedToLocalNode("not protobuf".getBytes(StandardCharsets.UTF_8), state));
+    }
+
+    @Test
+    void fromLocalNodeRecognizesLocalTopicSourceOnly() {
+        DeviceState state = new DeviceState();
+        state.setMyNodeNum(0x04c5b420);
+        byte[] payload = MQTTProtos.ServiceEnvelope.newBuilder()
+                .setPacket(MeshProtos.MeshPacket.newBuilder()
+                        .setFrom(0x04c5b420)
+                        .setTo(0x12345678)
+                        .build())
+                .build()
+                .toByteArray();
+
+        assertTrue(MqttProxyService.isFromLocalNode("msh/RU/MSK/2/e/PKI/!04c5b420", new byte[] {0x01}, state));
+        assertFalse(MqttProxyService.isFromLocalNode("msh/RU/MSK/2/e/PKI/!12345678", payload, state));
+    }
+
+    @Test
+    void fromLocalNodeRejectsRemoteTopicAndInvalidPayload() {
+        DeviceState state = new DeviceState();
+        state.setMyNodeNum(0x04c5b420);
+        byte[] payload = MQTTProtos.ServiceEnvelope.newBuilder()
+                .setPacket(MeshProtos.MeshPacket.newBuilder()
+                        .setFrom(0x12345678)
+                        .setTo(0x04c5b420)
+                        .build())
+                .build()
+                .toByteArray();
+
+        assertFalse(MqttProxyService.isFromLocalNode("msh/RU/MSK/2/e/PKI/!12345678", payload, state));
+        assertFalse(MqttProxyService.isFromLocalNode("msh/RU/MSK/2/e/PKI/!12345678",
+                "not protobuf".getBytes(StandardCharsets.UTF_8), state));
+    }
+
+    @Test
+    void backgroundYieldRemainingMillisKeepsBackgroundDownlinkQuietAfterLocalUplink() {
+        assertEquals(500, MqttProxyService.backgroundYieldRemainingMillis(1_000, 2_500));
+        assertEquals(0, MqttProxyService.backgroundYieldRemainingMillis(1_000, 3_000));
+        assertEquals(0, MqttProxyService.backgroundYieldRemainingMillis(0, 1_000));
     }
 }

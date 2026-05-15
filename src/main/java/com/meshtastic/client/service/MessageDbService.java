@@ -357,23 +357,23 @@ public final class MessageDbService {
                     END,
                     hop_start = CASE
                         WHEN ? = FALSE AND ? <> 0 THEN ?
-                        WHEN ? = TRUE AND hop_start = 0 AND ? <> 0 THEN ?
+                        WHEN ? = TRUE AND via_mqtt = TRUE AND hop_start = 0 AND ? <> 0 THEN ?
                         ELSE hop_start
                     END,
                     hop_limit = CASE
                         WHEN ? = FALSE AND ? <> 0 THEN ?
-                        WHEN ? = TRUE AND hop_limit = 0 AND ? <> 0 THEN ?
+                        WHEN ? = TRUE AND via_mqtt = TRUE AND hop_limit = 0 AND ? <> 0 THEN ?
                         ELSE hop_limit
                     END,
                     sender_name = COALESCE(?, sender_name),
                     rx_rssi = CASE
                         WHEN ? = FALSE AND ? <> 0 THEN ?
-                        WHEN ? = TRUE AND rx_rssi = 0 AND ? <> 0 THEN ?
+                        WHEN ? = TRUE AND via_mqtt = TRUE AND rx_rssi = 0 AND ? <> 0 THEN ?
                         ELSE rx_rssi
                     END,
                     rx_snr = CASE
                         WHEN ? = FALSE AND ? <> 0 THEN ?
-                        WHEN ? = TRUE AND rx_snr = 0 AND ? <> 0 THEN ?
+                        WHEN ? = TRUE AND via_mqtt = TRUE AND rx_snr = 0 AND ? <> 0 THEN ?
                         ELSE rx_snr
                     END,
                     via_mqtt = CASE WHEN ? THEN via_mqtt ELSE FALSE END

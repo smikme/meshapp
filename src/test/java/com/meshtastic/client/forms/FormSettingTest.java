@@ -110,6 +110,21 @@ class FormSettingTest {
     }
 
     @Test
+    void ownerInfoSaveRequiresReconnect() {
+        ConfigProtos.Config deviceConfig = ConfigProtos.Config.newBuilder()
+                .setDevice(ConfigProtos.Config.DeviceConfig.newBuilder().build())
+                .build();
+        ModuleConfigProtos.ModuleConfig serialConfig = ModuleConfigProtos.ModuleConfig.newBuilder()
+                .setSerial(ModuleConfigProtos.ModuleConfig.SerialConfig.newBuilder().setEnabled(true).build())
+                .build();
+
+        assertTrue(FormSetting.requiresConfigSaveReconnect(true, List.of(), List.of()));
+        assertTrue(FormSetting.requiresConfigSaveReconnect(false, List.of(deviceConfig), List.of()));
+        assertTrue(FormSetting.requiresConfigSaveReconnect(false, List.of(), List.of(serialConfig)));
+        assertFalse(FormSetting.requiresConfigSaveReconnect(false, List.of(), List.of()));
+    }
+
+    @Test
     void shouldSanitizeCacheDisplayTextWithoutRemovingValidEmoji() {
         assertEquals("Blue Goose 🪿86b8", FormSetting.sanitizeCacheDisplayText("Blue Goose 🪿86b8"));
         assertEquals("i͞oan͢n", FormSetting.sanitizeCacheDisplayText("i͞oan͢n"));

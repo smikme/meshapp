@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -73,6 +74,31 @@ class MessageStoreTest {
         assertEquals(2, stored.getHopLimit());
         assertEquals(-91, stored.getRxRssi());
         assertEquals(7.5f, stored.getRxSnr());
+    }
+
+    @Test
+    void addMessageDuplicateDoesNotFillMissingLoraHopDataFromLaterMqttCopy() {
+        MessageStore store = new MessageStore();
+
+        MeshMessage lora = createMessage("First", 0, 101);
+        lora.setViaMqtt(false);
+        store.addMessage(lora);
+
+        MeshMessage mqtt = createMessage("First", 0, 101);
+        mqtt.setViaMqtt(true);
+        mqtt.setHopStart(6);
+        mqtt.setHopLimit(2);
+        mqtt.setRxRssi(-80);
+        mqtt.setRxSnr(3.5f);
+        store.addMessage(mqtt);
+
+        MeshMessage stored = store.getMessages(0).getFirst();
+        assertEquals(1, store.getMessages(0).size());
+        assertFalse(stored.isViaMqtt());
+        assertEquals(0, stored.getHopStart());
+        assertEquals(0, stored.getHopLimit());
+        assertEquals(0, stored.getRxRssi());
+        assertEquals(0.0f, stored.getRxSnr());
     }
 
     @Test
@@ -153,9 +179,34 @@ class MessageStoreTest {
 
         MeshMessage stored = store.getDirectMessages("!peer1").getFirst();
         assertEquals(1, store.getDirectMessages("!peer1").size());
-        assertTrue(!stored.isViaMqtt());
+        assertFalse(stored.isViaMqtt());
         assertEquals(4, stored.getHopStart());
         assertEquals(1, stored.getHopLimit());
+    }
+
+    @Test
+    void addDirectMessageDuplicateDoesNotFillMissingLoraHopDataFromLaterMqttCopy() {
+        MessageStore store = new MessageStore();
+
+        MeshMessage lora = createMessage("First", 0, 202);
+        lora.setViaMqtt(false);
+        store.addDirectMessage(lora, "!peer1");
+
+        MeshMessage mqtt = createMessage("First", 0, 202);
+        mqtt.setViaMqtt(true);
+        mqtt.setHopStart(6);
+        mqtt.setHopLimit(2);
+        mqtt.setRxRssi(-80);
+        mqtt.setRxSnr(3.5f);
+        store.addDirectMessage(mqtt, "!peer1");
+
+        MeshMessage stored = store.getDirectMessages("!peer1").getFirst();
+        assertEquals(1, store.getDirectMessages("!peer1").size());
+        assertFalse(stored.isViaMqtt());
+        assertEquals(0, stored.getHopStart());
+        assertEquals(0, stored.getHopLimit());
+        assertEquals(0, stored.getRxRssi());
+        assertEquals(0.0f, stored.getRxSnr());
     }
 
     @Test
