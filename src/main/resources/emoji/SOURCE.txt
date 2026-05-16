@@ -1,0 +1,9 @@
+Twemoji PNG assets
+
+Source: https://github.com/twitter/twemoji
+Path: assets/72x72
+Commit: a6f943b958d94b2b82f886aa540b915d9a694a75
+
+License files copied with the assets:
+- LICENSE
+- LICENSE-GRAPHICS
