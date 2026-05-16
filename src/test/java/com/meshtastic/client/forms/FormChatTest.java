@@ -259,6 +259,15 @@ class FormChatTest {
     }
 
     @Test
+    void liveTailMetricUsesBottomSlopWithoutForcingLayout() {
+        assertTrue(FormChatMessages.isScrolledToBottomFromMetrics(1000, 400, 1.0));
+        assertTrue(FormChatMessages.isScrolledToBottomFromMetrics(1000, 400, 0.97));
+        assertFalse(FormChatMessages.isScrolledToBottomFromMetrics(1000, 400, 0.95));
+        assertTrue(FormChatMessages.isScrolledToBottomFromMetrics(0, 0, 0));
+        assertTrue(FormChatMessages.isScrolledToBottomFromMetrics(300, 400, 0));
+    }
+
+    @Test
     void shouldDetectDatabaseRewindWhenLatestDbMessageHasSmallerIdThanLoadedViewport() {
         MeshMessage loaded = incoming("old");
         loaded.setDbId(120);
