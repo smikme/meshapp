@@ -1,6 +1,5 @@
 package com.meshtastic.client.service;
 
-import com.google.protobuf.InvalidProtocolBufferException;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.protocol.FromRadioListener;
 import com.meshtastic.client.protocol.ProtocolHandler;
@@ -16,7 +15,6 @@ import org.eclipse.paho.client.mqttv3.MqttMessage;
 import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence;
 import org.meshtastic.proto.MeshProtos;
 import org.meshtastic.proto.ModuleConfigProtos;
-import org.meshtastic.proto.MQTTProtos;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -26,13 +24,9 @@ import java.util.Arrays;
 import java.util.Deque;
 import java.util.List;
 import java.util.Locale;
-import java.util.concurrent.Executors;
-import java.util.concurrent.PriorityBlockingQueue;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledFuture;
-import java.util.concurrent.Semaphore;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Desktop-side MQTT bridge for nodes that proxy MQTT through the connected client.
@@ -52,15 +46,10 @@ public final class MqttProxyService implements FromRadioListener, AutoCloseable 
     static final int DEFAULT_TCP_PORT = 1883;
     static final int DEFAULT_TLS_PORT = 8883;
     static final long LOCAL_ECHO_TTL_MS = 10_000;
-    private static final long DOWNLINK_DIRECT_SEND_MIN_INTERVAL_MS = 75L;
-    private static final long DOWNLINK_BACKGROUND_SEND_MIN_INTERVAL_MS = 250L;
-    private static final long DOWNLINK_BACKGROUND_YIELD_AFTER_LOCAL_UPLINK_MS = 2_000L;
+    private static final long DOWNLINK_SEND_MIN_INTERVAL_MS = 75L;
     private static final int MQTT_QOS = 0;
     private static final int DISCONNECTED_BUFFER_SIZE = 256;
-    private static final int DOWNLINK_QUEUE_SIZE = 16_384;
-    private static final int DOWNLINK_PRIORITY_DIRECT_TO_LOCAL = 0;
-    private static final int DOWNLINK_PRIORITY_DEFAULT = 1;
-    private static final long DOWNLINK_QUEUE_LOG_INTERVAL_SECONDS = 5L;
+    private static final int DOWNLINK_QUEUE_SIZE = 1_024;
 
     private final String connectionId;
     private final String connectionName;
@@ -68,19 +57,13 @@ public final class MqttProxyService implements FromRadioListener, AutoCloseable 
     private final DeviceState deviceState;
     private final Object lifecycleLock = new Object();
     private final LocalEchoSuppressor localEchoSuppressor = new LocalEchoSuppressor(LOCAL_ECHO_TTL_MS);
-    private final PriorityBlockingQueue<DownlinkMessage> downlinkQueue = new PriorityBlockingQueue<>();
-    private final Semaphore downlinkSlots = new Semaphore(DOWNLINK_QUEUE_SIZE);
-    private final AtomicLong downlinkSequence = new AtomicLong();
-    private final Thread downlinkThread;
-    private final ScheduledExecutorService downlinkQueueLogScheduler;
+    private final ThreadPoolExecutor downlinkExecutor;
 
     private volatile boolean closed;
     private volatile boolean listenerRegistered;
     private volatile MqttAsyncClient client;
     private volatile ProxyConfig activeConfig;
     private volatile long lastDownlinkForwardAtMillis;
-    private volatile long lastLocalMqttUplinkAtMillis;
-    private volatile ScheduledFuture<?> downlinkQueueLogFuture;
 
     public MqttProxyService(String connectionId,
                             String connectionName,
@@ -90,17 +73,30 @@ public final class MqttProxyService implements FromRadioListener, AutoCloseable 
         this.connectionName = connectionName;
         this.protocolHandler = protocolHandler;
         this.deviceState = deviceState;
-        this.downlinkThread = new Thread(
-                this::downlinkLoop,
-                "mqtt-proxy-downlink-" + sanitizeThreadSuffix(connectionId)
+        this.downlinkExecutor = new ThreadPoolExecutor(
+                1,
+                1,
+                0L,
+                TimeUnit.MILLISECONDS,
+                new LinkedBlockingQueue<>(DOWNLINK_QUEUE_SIZE),
+                r -> {
+                    Thread t = new Thread(r, "mqtt-proxy-downlink-" + sanitizeThreadSuffix(connectionId));
+                    t.setDaemon(true);
+                    return t;
+                },
+                (task, executor) -> {
+                    if (!executor.isShutdown()) {
+                        log.warn("MQTT downlink queue saturated for '{}'; waiting for radio write backlog to drain",
+                                connectionName);
+                        try {
+                            executor.getQueue().put(task);
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                            log.warn("Interrupted while waiting to enqueue MQTT downlink for '{}'", connectionName);
+                        }
+                    }
+                }
         );
-        this.downlinkThread.setDaemon(true);
-        this.downlinkThread.start();
-        this.downlinkQueueLogScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
-            Thread t = new Thread(r, "mqtt-proxy-queue-log-" + sanitizeThreadSuffix(connectionId));
-            t.setDaemon(true);
-            return t;
-        });
     }
 
     /**
@@ -132,7 +128,6 @@ public final class MqttProxyService implements FromRadioListener, AutoCloseable 
 
                 this.client = mqttClient;
                 this.activeConfig = config;
-                startDownlinkQueueLogging();
 
                 if (!listenerRegistered) {
                     protocolHandler.addListener(this);
@@ -177,7 +172,6 @@ public final class MqttProxyService implements FromRadioListener, AutoCloseable 
         }
 
         byte[] payload = extractPayload(proxyMessage);
-        lastLocalMqttUplinkAtMillis = System.currentTimeMillis();
         // The broker can echo QoS 0 publishes back to this subscribed client before publish() returns.
         RecentPublication publication = localEchoSuppressor.remember(proxyMessage.getTopic(), payload);
         try {
@@ -200,10 +194,7 @@ public final class MqttProxyService implements FromRadioListener, AutoCloseable 
             closed = true;
         }
         stopClient(true);
-        downlinkThread.interrupt();
-        downlinkQueueLogScheduler.shutdownNow();
-        downlinkQueue.clear();
-        downlinkSlots.release(DOWNLINK_QUEUE_SIZE);
+        downlinkExecutor.shutdownNow();
     }
 
     static ProxyConfig loadProxyConfig(DeviceState state) {
@@ -350,7 +341,6 @@ public final class MqttProxyService implements FromRadioListener, AutoCloseable 
             client = null;
             activeConfig = null;
             localEchoSuppressor.clear();
-            stopDownlinkQueueLogging();
             if (removeListener && listenerRegistered) {
                 protocolHandler.removeListener(this);
                 listenerRegistered = false;
@@ -393,183 +383,35 @@ public final class MqttProxyService implements FromRadioListener, AutoCloseable 
                     connectionName, topic, payload.length, retained);
             return;
         }
-        if (isFromLocalNode(topic, payload, deviceState)) {
-            log.debug("Suppressed local MQTT publication for '{}' topic='{}' bytes={} retained={}",
-                    connectionName, topic, payload.length, retained);
-            return;
-        }
 
-        boolean addressedToLocalNode = isAddressedToLocalNode(payload, deviceState);
-        DownlinkMessage downlinkMessage = new DownlinkMessage(
-                addressedToLocalNode ? DOWNLINK_PRIORITY_DIRECT_TO_LOCAL : DOWNLINK_PRIORITY_DEFAULT,
-                downlinkSequence.getAndIncrement(),
-                topic,
-                payload,
-                retained,
-                addressedToLocalNode
-        );
-        int queueDepth = downlinkQueue.size();
-        log.trace("Received MQTT downlink for '{}': topic='{}' bytes={} retained={} directToLocal={} queueDepth={}/{}",
-                connectionName, topic, payload.length, retained, addressedToLocalNode, queueDepth, DOWNLINK_QUEUE_SIZE);
-        enqueueDownlink(downlinkMessage);
+        int queueDepth = downlinkExecutor.getQueue().size();
+        log.trace("Received MQTT downlink for '{}': topic='{}' bytes={} retained={} queueDepth={}/{}",
+                connectionName, topic, payload.length, retained, queueDepth, DOWNLINK_QUEUE_SIZE);
+        byte[] downlinkPayload = payload;
+        downlinkExecutor.execute(() -> forwardBrokerMessageToRadio(topic, downlinkPayload, retained));
     }
 
-    private void downlinkLoop() {
-        log.debug("MQTT proxy downlink thread started for '{}'", connectionName);
-        while (!Thread.currentThread().isInterrupted()) {
-            try {
-                DownlinkMessage message = downlinkQueue.take();
-                if (shouldYieldBackgroundDownlink(message)) {
-                    downlinkQueue.offer(message);
-                    sleepBeforeRetryingBackgroundDownlink();
-                    continue;
-                }
-                try {
-                    forwardBrokerMessageToRadio(message);
-                } finally {
-                    downlinkSlots.release();
-                }
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                break;
-            } catch (Exception e) {
-                log.error("Error processing MQTT downlink for '{}'", connectionName, e);
-            }
-        }
-        log.debug("MQTT proxy downlink thread exiting for '{}'", connectionName);
-    }
-
-    private void enqueueDownlink(DownlinkMessage message) {
-        boolean acquired = false;
-        while (!closed) {
-            try {
-                downlinkSlots.acquire();
-                acquired = true;
-                break;
-            } catch (InterruptedException e) {
-                if (closed) {
-                    Thread.currentThread().interrupt();
-                    return;
-                }
-                log.warn("Interrupted while waiting for MQTT downlink queue space for '{}'; retrying",
-                        connectionName);
-            }
-        }
-        if (!acquired) {
-            return;
-        }
-        if (closed) {
-            downlinkSlots.release();
-            return;
-        }
-        downlinkQueue.offer(message);
-    }
-
-    private void startDownlinkQueueLogging() {
-        ScheduledFuture<?> current = downlinkQueueLogFuture;
-        if (current != null && !current.isDone()) {
-            return;
-        }
-        downlinkQueueLogFuture = downlinkQueueLogScheduler.scheduleWithFixedDelay(
-                this::logDownlinkQueueDepthSafely,
-                DOWNLINK_QUEUE_LOG_INTERVAL_SECONDS,
-                DOWNLINK_QUEUE_LOG_INTERVAL_SECONDS,
-                TimeUnit.SECONDS
-        );
-    }
-
-    private void stopDownlinkQueueLogging() {
-        ScheduledFuture<?> current = downlinkQueueLogFuture;
-        downlinkQueueLogFuture = null;
-        if (current != null) {
-            current.cancel(false);
-        }
-    }
-
-    private void logDownlinkQueueDepthSafely() {
-        try {
-            if (closed || client == null || activeConfig == null) {
-                return;
-            }
-            log.debug("MQTT downlink queue for '{}': currentSize={}, maxSize={}",
-                    connectionName, downlinkQueue.size(), DOWNLINK_QUEUE_SIZE);
-        } catch (Throwable t) {
-            log.warn("Failed to log MQTT downlink queue depth for '{}'", connectionName, t);
-        }
-    }
-
-    private void forwardBrokerMessageToRadio(DownlinkMessage message) {
+    private void forwardBrokerMessageToRadio(String topic, byte[] payload, boolean retained) {
         if (closed) {
             return;
         }
-        if (!awaitDownlinkSendWindow(message.addressedToLocalNode())) {
+        if (!awaitDownlinkSendWindow()) {
             return;
         }
         try {
-            MessageService.sendMqttClientProxyMessage(
-                    protocolHandler,
-                    message.topic(),
-                    message.payload(),
-                    message.retained()
-            );
+            MessageService.sendMqttClientProxyMessage(protocolHandler, topic, payload, retained);
         } catch (RuntimeException e) {
-            log.warn("Failed to forward MQTT downlink for '{}' topic='{}'", connectionName, message.topic(), e);
+            log.warn("Failed to forward MQTT downlink for '{}' topic='{}'", connectionName, topic, e);
             return;
         }
-        log.trace("Forwarded MQTT downlink for '{}': topic='{}' bytes={} retained={} directToLocal={}",
-                connectionName, message.topic(), message.payload().length,
-                message.retained(), message.addressedToLocalNode());
+        log.trace("Forwarded MQTT downlink for '{}': topic='{}' bytes={} retained={}",
+                connectionName, topic, payload.length, retained);
     }
 
-    static boolean isAddressedToLocalNode(byte[] payload, DeviceState state) {
-        if (payload == null || payload.length == 0 || state == null || state.getMyNodeNum() == 0) {
-            return false;
-        }
-        try {
-            MQTTProtos.ServiceEnvelope envelope = MQTTProtos.ServiceEnvelope.parseFrom(payload);
-            return envelope.hasPacket() && envelope.getPacket().getTo() == state.getMyNodeNum();
-        } catch (InvalidProtocolBufferException e) {
-            return false;
-        }
-    }
-
-    static boolean isFromLocalNode(String topic, byte[] payload, DeviceState state) {
-        String localNodeId = resolveLocalNodeId(state);
-        if (localNodeId == null) {
-            return false;
-        }
-        return topic != null && topic.endsWith("/" + localNodeId);
-    }
-
-    private boolean shouldYieldBackgroundDownlink(DownlinkMessage message) {
-        return message != null
-                && !message.addressedToLocalNode()
-                && backgroundYieldRemainingMillis(lastLocalMqttUplinkAtMillis, System.currentTimeMillis()) > 0;
-    }
-
-    static long backgroundYieldRemainingMillis(long lastLocalUplinkAtMillis, long nowMillis) {
-        if (lastLocalUplinkAtMillis <= 0) {
-            return 0;
-        }
-        long quietUntil = lastLocalUplinkAtMillis + DOWNLINK_BACKGROUND_YIELD_AFTER_LOCAL_UPLINK_MS;
-        return Math.max(0, quietUntil - nowMillis);
-    }
-
-    private void sleepBeforeRetryingBackgroundDownlink() throws InterruptedException {
-        long waitMs = backgroundYieldRemainingMillis(lastLocalMqttUplinkAtMillis, System.currentTimeMillis());
-        if (waitMs <= 0) {
-            return;
-        }
-        Thread.sleep(Math.min(waitMs, DOWNLINK_DIRECT_SEND_MIN_INTERVAL_MS));
-    }
-
-    private boolean awaitDownlinkSendWindow(boolean addressedToLocalNode) {
-        long minIntervalMs = addressedToLocalNode
-                ? DOWNLINK_DIRECT_SEND_MIN_INTERVAL_MS
-                : DOWNLINK_BACKGROUND_SEND_MIN_INTERVAL_MS;
+    private boolean awaitDownlinkSendWindow() {
         long lastForwardAt = lastDownlinkForwardAtMillis;
         long now = System.currentTimeMillis();
-        long waitMs = minIntervalMs - (now - lastForwardAt);
+        long waitMs = DOWNLINK_SEND_MIN_INTERVAL_MS - (now - lastForwardAt);
         if (waitMs > 0) {
             try {
                 Thread.sleep(waitMs);
@@ -621,23 +463,6 @@ public final class MqttProxyService implements FromRadioListener, AutoCloseable 
     private record RecentPublication(String topic,
                                      byte[] payload,
                                      long expiresAtMillis) {}
-
-    private record DownlinkMessage(int priority,
-                                   long sequence,
-                                   String topic,
-                                   byte[] payload,
-                                   boolean retained,
-                                   boolean addressedToLocalNode) implements Comparable<DownlinkMessage> {
-
-        @Override
-        public int compareTo(DownlinkMessage other) {
-            int priorityCompare = Integer.compare(priority, other.priority);
-            if (priorityCompare != 0) {
-                return priorityCompare;
-            }
-            return Long.compare(sequence, other.sequence);
-        }
-    }
 
     static final class LocalEchoSuppressor {
         private final long ttlMillis;
