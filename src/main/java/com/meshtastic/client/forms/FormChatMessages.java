@@ -266,11 +266,10 @@ abstract class FormChatMessages extends FormChatUi {
         appendNewerMessages(newMessages);
         trimLoadedWindowFromTopIfNeeded();
         allNewerHistoryLoaded = true;
-        if (formVisible) {
-            requestMessageViewportLayout();
-        }
-
         if (!wasAtLiveTail) {
+            if (formVisible) {
+                requestMessageViewportLayoutLater();
+            }
             restoreOrRefreshTailIndicator(preservedScrollState);
             return;
         }
@@ -574,13 +573,23 @@ abstract class FormChatMessages extends FormChatUi {
      * не вызывать applyCss и layout синхронно на каждом переключении чата.
      */
     protected void requestMessageViewportLayout() {
+        requestMessageViewportLayout(true);
+    }
+
+    protected void requestMessageViewportLayoutLater() {
+        requestMessageViewportLayout(false);
+    }
+
+    private void requestMessageViewportLayout(boolean immediate) {
         viewportLayoutDirty.set(true);
         if (!viewportLayoutQueued.compareAndSet(false, true)) {
             return;
         }
-        // Первый синхронный проход нужен при резком переключении короткий личный чат -> длинный канал:
-        // без него restoreSavedScrollPosition() может попасть в старую геометрию области просмотра.
-        relayoutMessageViewport();
+        if (immediate) {
+            // Первый синхронный проход нужен при резком переключении короткий личный чат -> длинный канал:
+            // без него restoreSavedScrollPosition() может попасть в старую геометрию области просмотра.
+            relayoutMessageViewport();
+        }
         Platform.runLater(this::flushQueuedViewportLayout);
     }
 
@@ -656,19 +665,23 @@ abstract class FormChatMessages extends FormChatUi {
             return true;
         }
 
-        messageScrollPane.applyCss();
-        messageScrollPane.layout();
-        messageContainer.applyCss();
-        messageContainer.layout();
+        return isScrolledToBottomFromMetrics(
+                messageContainer.getLayoutBounds().getHeight(),
+                messageScrollPane.getViewportBounds().getHeight(),
+                messageScrollPane.getVvalue());
+    }
 
-        double contentHeight = messageContainer.getLayoutBounds().getHeight();
-        double viewportHeight = messageScrollPane.getViewportBounds().getHeight();
+    static boolean isScrolledToBottomFromMetrics(double contentHeight, double viewportHeight, double vvalue) {
+        if (contentHeight <= 0 || viewportHeight <= 0) {
+            return true;
+        }
+
         double maxOffset = Math.max(0, contentHeight - viewportHeight);
         if (maxOffset <= 0) {
             return true;
         }
 
-        double currentOffset = Math.max(0, Math.min(maxOffset, messageScrollPane.getVvalue() * maxOffset));
+        double currentOffset = Math.max(0, Math.min(maxOffset, vvalue * maxOffset));
         return maxOffset - currentOffset <= BOTTOM_READ_SLOP_PX;
     }
 
