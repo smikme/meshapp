@@ -10,7 +10,9 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertAll;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
@@ -28,10 +30,21 @@ class EmojiImageCacheTest {
             assertAll(
                     () -> assertNotNull(EmojiImageCache.createImageView("❤️‍🔥", 24)),
                     () -> assertNotNull(EmojiImageCache.createImageView("❤️‍🩹", 24)),
-                    () -> assertNotNull(EmojiImageCache.createImageView("🐻‍❄️", 24))
+                    () -> assertNotNull(EmojiImageCache.createImageView("🐻‍❄️", 24)),
+                    () -> assertNotNull(EmojiImageCache.createImageView("🇺🇸", 24)),
+                    () -> assertNotNull(EmojiImageCache.createImageView("👩🏽‍💻", 24))
             );
             return null;
         });
+    }
+
+    @Test
+    void distinguishesTextAndEmojiPresentationForAmbiguousSymbols() {
+        assertAll(
+                () -> assertFalse(EmojiImageCache.isKnownEmoji("©")),
+                () -> assertTrue(EmojiImageCache.isKnownEmoji("©️")),
+                () -> assertTrue(EmojiImageCache.isKnownEmoji("⚪"))
+        );
     }
 
     private static <T> T onFxThread(FxSupplier<T> supplier) {

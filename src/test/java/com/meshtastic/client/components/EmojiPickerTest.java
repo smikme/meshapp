@@ -35,7 +35,7 @@ class EmojiPickerTest {
             Field searchFieldRef = EmojiPicker.class.getDeclaredField("searchField");
             searchFieldRef.setAccessible(true);
             TextField searchField = (TextField) searchFieldRef.get(picker);
-            assertEquals("🔍 Поиск emoji...", searchField.getPromptText());
+            assertEquals("Поиск emoji...", searchField.getPromptText());
             return null;
         });
     }
@@ -77,10 +77,10 @@ class EmojiPickerTest {
             EmojiPicker picker = new EmojiPicker(emoji -> {});
             Method createEmojiGraphic = EmojiPicker.class.getDeclaredMethod("createEmojiGraphic", String.class, double.class);
             createEmojiGraphic.setAccessible(true);
-            Node fallback = (Node) createEmojiGraphic.invoke(picker, "⚠️", 24d);
+            Node fallback = (Node) createEmojiGraphic.invoke(picker, "🪿", 24d);
 
             assertTrue(fallback instanceof Label);
-            assertEquals("⚠️", ((Label) fallback).getText());
+            assertEquals("🪿", ((Label) fallback).getText());
             return null;
         });
     }

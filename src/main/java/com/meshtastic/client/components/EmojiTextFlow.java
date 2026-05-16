@@ -3,10 +3,12 @@ package com.meshtastic.client.components;
 import com.meshtastic.client.utils.UnicodeTextUtils;
 import javafx.scene.image.ImageView;
 import javafx.scene.layout.Region;
+import javafx.scene.paint.Paint;
 import javafx.scene.text.Text;
 import javafx.scene.text.TextFlow;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.WeakHashMap;
 import java.util.concurrent.ConcurrentHashMap;
@@ -23,7 +25,10 @@ public class EmojiTextFlow extends TextFlow {
 
     private String rawText;
     private double emojiSize = 18;
-    private String textStyleClass;
+    private final List<String> textStyleClasses = new ArrayList<>();
+    private final List<String> appliedTextStyleClasses = new ArrayList<>();
+    private javafx.scene.text.Font textFont;
+    private Paint textFill;
 
     // Кеш для сегментов текста (уменьшает CPU при повторном рендере)
     private static final ConcurrentHashMap<String, List<Segment>> SEGMENT_CACHE = new ConcurrentHashMap<>();
@@ -71,9 +76,37 @@ public class EmojiTextFlow extends TextFlow {
     }
 
     public void setTextStyleClass(String styleClass) {
-        if (this.textStyleClass == null || !this.textStyleClass.equals(styleClass)) {
-            this.textStyleClass = styleClass;
+        setTextStyleClasses(styleClass == null || styleClass.isBlank() ? List.of() : List.of(styleClass));
+    }
+
+    public void setTextStyleClasses(Collection<String> styleClasses) {
+        List<String> next = styleClasses == null
+                ? List.of()
+                : styleClasses.stream()
+                .filter(s -> s != null && !s.isBlank())
+                .distinct()
+                .toList();
+        if (!textStyleClasses.equals(next)) {
+            textStyleClasses.clear();
+            textStyleClasses.addAll(next);
+            applyTextStylesToExistingNodes();
         }
+    }
+
+    public void setTextFont(javafx.scene.text.Font font) {
+        if (font == textFont || (font != null && font.equals(textFont))) {
+            return;
+        }
+        textFont = font;
+        applyTextStylesToExistingNodes();
+    }
+
+    public void setTextFill(Paint fill) {
+        if (fill == textFill || (fill != null && fill.equals(textFill))) {
+            return;
+        }
+        textFill = fill;
+        applyTextStylesToExistingNodes();
     }
 
     private void rebuild() {
@@ -149,6 +182,7 @@ public class EmojiTextFlow extends TextFlow {
                     String currentEmoji = findEmojiInImageView(iv);
                     if (currentEmoji == null || !currentEmoji.equals(seg.text)) {
                         iv.setImage(EmojiImageCache.getImage(seg.text));
+                        iv.setUserData(seg.text);
                     }
                 }
             } else {
@@ -177,24 +211,43 @@ public class EmojiTextFlow extends TextFlow {
      * Найти эмодзи из ImageView (для сравнения).
      */
     private String findEmojiInImageView(ImageView iv) {
-        // Простая проверка - по URL изображения
-        if (iv.getImage() != null) {
-            String url = iv.getImage().getUrl();
-            if (url != null && url.contains("/emoji/")) {
-                String filename = url.substring(url.lastIndexOf('/') + 1);
-                // Преобразовать 1f600.png в 😀
-                return filename.replace(".png", "").replace("-", " ").trim();
-            }
+        Object userData = iv.getUserData();
+        if (userData instanceof String emoji) {
+            return emoji;
         }
         return null;
     }
 
     private void addTextNode(String text) {
         Text t = new Text(UnicodeTextUtils.sanitizeForJavaFxDisplay(text));
-        if (textStyleClass != null) {
-            t.getStyleClass().add(textStyleClass);
-        }
+        applyTextStyles(t);
         getChildren().add(t);
+    }
+
+    private void applyTextStylesToExistingNodes() {
+        List<String> previousStyleClasses = List.copyOf(appliedTextStyleClasses);
+        for (javafx.scene.Node child : getChildren()) {
+            if (child instanceof Text text) {
+                applyTextStyles(text, previousStyleClasses);
+            }
+        }
+        appliedTextStyleClasses.clear();
+        appliedTextStyleClasses.addAll(textStyleClasses);
+    }
+
+    private void applyTextStyles(Text text) {
+        applyTextStyles(text, appliedTextStyleClasses);
+    }
+
+    private void applyTextStyles(Text text, List<String> previousStyleClasses) {
+        text.getStyleClass().removeAll(previousStyleClasses);
+        text.getStyleClass().addAll(textStyleClasses);
+        if (textFont != null) {
+            text.setFont(textFont);
+        }
+        if (textFill != null) {
+            text.setFill(textFill);
+        }
     }
 
     /**
@@ -235,7 +288,7 @@ public class EmojiTextFlow extends TextFlow {
      * Пробует от длинных подстрок к коротким (до 8 кодпоинтов для ZWJ-последовательностей).
      */
     private static String tryMatchEmoji(String text, int startIndex) {
-        int maxCps = 8;
+        int maxCps = EmojiImageCache.getMaxEmojiCodePointCount();
 
         // Собираем кодпоинты и позиции
         int[] endPositions = new int[maxCps + 1];

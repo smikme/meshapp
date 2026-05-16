@@ -35,6 +35,8 @@ public class DrawerPane extends StackPane {
     public static final double TOOLBAR_WIDTH = 56;
     private static final String WINDOWS_HIT_TEST_BACKGROUND = "-fx-background-color: rgba(0,0,0,0.004);";
     private static final String ORIGINAL_TOOLTIP_KEY = "drawer.originalTooltip";
+    private static final String NOTIFICATION_ON_ICON = "/drawer/icon/bell.svg";
+    private static final String NOTIFICATION_OFF_ICON = "/drawer/icon/bell-off.svg";
     private static final String NAVIGATION_BLOCKED_TOOLTIP =
             "Дождитесь завершения сохранения конфигурации и переподключения";
 
@@ -174,21 +176,22 @@ public class DrawerPane extends StackPane {
     }
 
     private void updateThemeIcon(Button btn, boolean isDark) {
-        // ☀ для тёмной темы (переключить на светлую), ☾ для светлой (переключить на тёмную)
-        btn.setText(isDark ? "\u2600" : "\u263E");
-    }
-
-    private Button createNotificationButton() {
-        SVGPath svgIcon = SvgIconLoader.load("/drawer/icon/bell.svg", 22);
-        Button btn = new Button();
-        btn.getStyleClass().add("drawer-toolbar-button");
+        String iconPath = isDark ? "/icons/light.svg" : "/icons/dark.svg";
+        SVGPath svgIcon = SvgIconLoader.load(iconPath, 22);
         if (svgIcon != null) {
+            btn.setText(null);
             btn.setGraphic(svgIcon);
             btn.setContentDisplay(ContentDisplay.GRAPHIC_ONLY);
         } else {
-            btn.setText("\uD83D\uDD14");
+            btn.setGraphic(null);
+            btn.setText(isDark ? "L" : "D");
+            btn.setContentDisplay(ContentDisplay.TEXT_ONLY);
         }
-        btn.setTooltip(new Tooltip("Уведомления"));
+    }
+
+    private Button createNotificationButton() {
+        Button btn = new Button();
+        btn.getStyleClass().add("drawer-toolbar-button");
         updateNotifIcon(btn, AppPreferences.isNotificationsEnabled());
         btn.setOnAction(e -> {
             boolean newState = !AppPreferences.isNotificationsEnabled();
@@ -199,7 +202,19 @@ public class DrawerPane extends StackPane {
     }
 
     private void updateNotifIcon(Button btn, boolean enabled) {
-        btn.setOpacity(enabled ? 1.0 : 0.4);
+        String iconPath = enabled ? NOTIFICATION_ON_ICON : NOTIFICATION_OFF_ICON;
+        SVGPath svgIcon = SvgIconLoader.load(iconPath, 22);
+        if (svgIcon != null) {
+            btn.setText(null);
+            btn.setGraphic(svgIcon);
+            btn.setContentDisplay(ContentDisplay.GRAPHIC_ONLY);
+        } else {
+            btn.setGraphic(null);
+            btn.setText(enabled ? "N" : "N/");
+            btn.setContentDisplay(ContentDisplay.TEXT_ONLY);
+        }
+        btn.setTooltip(new Tooltip(enabled ? "Оповещения включены" : "Оповещения выключены"));
+        btn.setOpacity(1.0);
     }
 
     public void setSelectedItemClass(Class<?> cls) {

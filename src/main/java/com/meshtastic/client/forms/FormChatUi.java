@@ -93,7 +93,7 @@ abstract class FormChatUi extends FormChatBase {
 
     private TextField createSearchField() {
         TextField searchField = new TextField();
-        searchField.setPromptText("🔍 Поиск чатов");
+        searchField.setPromptText("Поиск чатов");
         searchField.getStyleClass().add("chat-search-field");
         return searchField;
     }

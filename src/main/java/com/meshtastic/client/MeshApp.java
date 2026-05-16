@@ -2,6 +2,7 @@ package com.meshtastic.client;
 
 import com.meshtastic.client.components.CrashReportFlow;
 import com.meshtastic.client.components.EmojiImageCache;
+import com.meshtastic.client.components.EmojiRenderingSupport;
 import com.meshtastic.client.logging.JfrDiagnosticSupport;
 import com.meshtastic.client.logging.SessionCrashLogManager;
 import com.meshtastic.client.modal.ModalPane;
@@ -146,6 +147,7 @@ public class MeshApp extends Application {
         ThemeManager.applyTheme(scene, isDark);
 
         FormManager.install(rootPane);
+        EmojiRenderingSupport.install(scene);
 
         stage.setTitle("MeshApp");
         // На macOS иконка берётся из .app bundle (MeshApp.icns в Contents/Resources).
