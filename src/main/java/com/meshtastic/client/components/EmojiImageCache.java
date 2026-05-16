@@ -29,6 +29,8 @@ import java.util.concurrent.Future;
  */
 public final class EmojiImageCache {
 
+    private static final double TEXT_BASELINE_RATIO = 0.80;
+
     private static final Map<String, Image> CACHE = new ConcurrentHashMap<>();
     private static final Map<String, Boolean> KNOWN_EMOJI_CACHE = new ConcurrentHashMap<>();
     private static final Set<String> RESOURCE_NAMES = loadResourceNames();
@@ -124,7 +126,7 @@ public final class EmojiImageCache {
         if (img == null) {
             return null;
         }
-        ImageView iv = new ImageView(img);
+        ImageView iv = new InlineEmojiImageView(img);
         iv.setUserData(emoji);
         iv.setFitWidth(size);
         iv.setFitHeight(size);
@@ -401,5 +403,17 @@ public final class EmojiImageCache {
             }
         }
         return emoji.toString();
+    }
+
+    private static final class InlineEmojiImageView extends ImageView {
+        private InlineEmojiImageView(Image image) {
+            super(image);
+        }
+
+        @Override
+        public double getBaselineOffset() {
+            double height = getFitHeight() > 0 ? getFitHeight() : getLayoutBounds().getHeight();
+            return height * TEXT_BASELINE_RATIO;
+        }
     }
 }

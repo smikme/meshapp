@@ -7,10 +7,13 @@ import javafx.scene.Parent;
 import javafx.scene.Scene;
 import javafx.scene.control.ContentDisplay;
 import javafx.scene.control.Labeled;
+import javafx.scene.image.ImageView;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Pane;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
+
+import java.util.List;
 
 /**
  * Глобальный JavaFX-hook для локального рендеринга Twemoji в стандартных {@link Labeled} controls.
@@ -115,28 +118,46 @@ public final class EmojiRenderingSupport {
         if (!state.overridden) {
             state.originalGraphic = labeled.getGraphic();
             state.originalContentDisplay = labeled.getContentDisplay();
-            state.flow = createFlow(labeled, text);
-            if (state.originalGraphic != null) {
-                labeled.setGraphic(null);
-            }
-            state.wrapper = createWrapper(state.originalGraphic, state.flow, state.originalContentDisplay,
-                    labeled.getGraphicTextGap());
-            labeled.setGraphic(state.wrapper);
-            labeled.setContentDisplay(ContentDisplay.GRAPHIC_ONLY);
             state.overridden = true;
-            return;
+        } else {
+            detachOriginalGraphic(state);
         }
 
-        state.flow.setText(text);
-        applyFlowStyle(labeled, state.flow);
+        Node emojiContent = createEmojiContent(labeled, text, state);
+        state.wrapper = createWrapper(state.originalGraphic, emojiContent, state.originalContentDisplay,
+                labeled.getGraphicTextGap());
+        if (state.originalGraphic != null) {
+            labeled.setGraphic(null);
+        }
+        labeled.setGraphic(state.wrapper);
+        labeled.setContentDisplay(ContentDisplay.GRAPHIC_ONLY);
     }
 
-    private static EmojiTextFlow createFlow(Labeled labeled, String text) {
+    private static Node createEmojiContent(Labeled labeled, String text, LabeledState state) {
+        state.flow = null;
+
+        String emoji = singleLocalEmoji(text);
+        if (emoji != null) {
+            ImageView imageView = EmojiImageCache.createImageView(emoji, emojiSize(labeled));
+            if (imageView != null) {
+                return imageView;
+            }
+        }
+
         EmojiTextFlow flow = new EmojiTextFlow(text, emojiSize(labeled));
         flow.setMouseTransparent(true);
         flow.setMinHeight(Region.USE_PREF_SIZE);
         applyFlowStyle(labeled, flow);
+        state.flow = flow;
         return flow;
+    }
+
+    private static String singleLocalEmoji(String text) {
+        List<EmojiTextFlow.Segment> segments = EmojiTextFlow.parseSegments(text);
+        if (segments.size() == 1 && segments.getFirst().isEmoji()) {
+            return segments.getFirst().text();
+        }
+        return null;
     }
 
     private static void applyFlowStyle(Labeled labeled, EmojiTextFlow flow) {
@@ -152,11 +173,11 @@ public final class EmojiRenderingSupport {
     }
 
     private static Node createWrapper(Node originalGraphic,
-                                      EmojiTextFlow flow,
+                                      Node emojiContent,
                                       ContentDisplay originalContentDisplay,
                                       double gap) {
         if (originalGraphic == null) {
-            return flow;
+            return emojiContent;
         }
 
         ContentDisplay display = originalContentDisplay == null ? ContentDisplay.LEFT : originalContentDisplay;
@@ -164,32 +185,30 @@ public final class EmojiRenderingSupport {
             VBox box = new VBox(Math.max(0, gap));
             box.setAlignment(Pos.CENTER);
             box.setMouseTransparent(true);
-            addWrappedChildren(box, originalGraphic, flow, display == ContentDisplay.BOTTOM);
+            addWrappedChildren(box, originalGraphic, emojiContent, display == ContentDisplay.BOTTOM);
             return box;
         }
 
         HBox box = new HBox(Math.max(0, gap));
         box.setAlignment(Pos.CENTER);
         box.setMouseTransparent(true);
-        addWrappedChildren(box, originalGraphic, flow, display == ContentDisplay.RIGHT);
+        addWrappedChildren(box, originalGraphic, emojiContent, display == ContentDisplay.RIGHT);
         return box;
     }
 
     private static void addWrappedChildren(Pane wrapper,
                                            Node originalGraphic,
-                                           EmojiTextFlow flow,
+                                           Node emojiContent,
                                            boolean textFirst) {
         if (textFirst) {
-            wrapper.getChildren().addAll(flow, originalGraphic);
+            wrapper.getChildren().addAll(emojiContent, originalGraphic);
         } else {
-            wrapper.getChildren().addAll(originalGraphic, flow);
+            wrapper.getChildren().addAll(originalGraphic, emojiContent);
         }
     }
 
     private static void restoreOriginalGraphic(Labeled labeled, LabeledState state) {
-        if (state.wrapper instanceof Pane pane && state.originalGraphic != null) {
-            pane.getChildren().remove(state.originalGraphic);
-        }
+        detachOriginalGraphic(state);
         labeled.setGraphic(state.originalGraphic);
         labeled.setContentDisplay(state.originalContentDisplay == null
                 ? ContentDisplay.LEFT
@@ -200,6 +219,12 @@ public final class EmojiRenderingSupport {
         state.originalGraphic = null;
         state.originalContentDisplay = null;
         state.overridden = false;
+    }
+
+    private static void detachOriginalGraphic(LabeledState state) {
+        if (state.wrapper instanceof Pane pane && state.originalGraphic != null) {
+            pane.getChildren().remove(state.originalGraphic);
+        }
     }
 
     private static final class LabeledState {
