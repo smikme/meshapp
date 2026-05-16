@@ -31,7 +31,7 @@ public final class DatabaseMigrator {
     private static final Logger log = LoggerFactory.getLogger(DatabaseMigrator.class);
 
     /** Текущая версия схемы. Увеличивается при каждом изменении схемы. */
-    static final int CURRENT_VERSION = 12;
+    static final int CURRENT_VERSION = 13;
     private static final Pattern CONNECTION_NODE_ID_PATTERN =
             Pattern.compile("\"nodeId\"\\s*:\\s*\"(![0-9a-fA-F]{8})\"");
     private static final List<String> APPLICATION_TABLES = List.of(
@@ -40,7 +40,9 @@ public final class DatabaseMigrator {
             "NODES",
             "TELEMETRY_HISTORY",
             "MESSAGE_REACTIONS",
-            "LORA_PACKET_LOGS"
+            "LORA_PACKET_LOGS",
+            "LUA_SCRIPTS",
+            "LUA_SCRIPT_KV"
     );
 
     private DatabaseMigrator() {}
@@ -96,6 +98,7 @@ public final class DatabaseMigrator {
             if (version < 10) { migrateToV10(connection); version = 10; }
             if (version < 11) { migrateToV11(connection); version = 11; }
             if (version < 12) { migrateToV12(connection); version = 12; }
+            if (version < 13) { migrateToV13(connection); version = 13; }
 
             setVersion(connection, CURRENT_VERSION);
             log.info("Database migration complete, schema version = {}", CURRENT_VERSION);
@@ -365,6 +368,46 @@ public final class DatabaseMigrator {
         }
         MessageFullTextIndex.ensureExists(connection);
         log.info("Migration v12: created message fulltext index");
+    }
+
+    /** v13: Lua scripts and per-script key-value storage. */
+    private static void migrateToV13(Connection connection) throws SQLException {
+        try (Statement stmt = connection.createStatement()) {
+            stmt.execute("""
+                    CREATE TABLE IF NOT EXISTS lua_scripts (
+                        id          BIGINT AUTO_INCREMENT PRIMARY KEY,
+                        name        VARCHAR(120) NOT NULL,
+                        code        CLOB NOT NULL,
+                        enabled     BOOLEAN NOT NULL DEFAULT TRUE,
+                        created_at  BIGINT NOT NULL,
+                        updated_at  BIGINT NOT NULL,
+                        last_run_at BIGINT DEFAULT 0,
+                        last_status VARCHAR(20),
+                        last_error  CLOB
+                    )
+                    """);
+            stmt.execute("""
+                    CREATE UNIQUE INDEX IF NOT EXISTS idx_lua_scripts_name
+                    ON lua_scripts (name)
+                    """);
+            stmt.execute("""
+                    CREATE TABLE IF NOT EXISTS lua_script_kv (
+                        script_id  BIGINT NOT NULL,
+                        key_name   VARCHAR(200) NOT NULL,
+                        value_text CLOB,
+                        updated_at BIGINT NOT NULL,
+                        PRIMARY KEY (script_id, key_name),
+                        CONSTRAINT fk_lua_script_kv_script
+                            FOREIGN KEY (script_id) REFERENCES lua_scripts(id)
+                            ON DELETE CASCADE
+                    )
+                    """);
+            stmt.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_lua_script_kv_script
+                    ON lua_script_kv (script_id)
+                    """);
+        }
+        log.info("Migration v13: created Lua script and KV tables");
     }
 
     /** v2: колонка favorite для избранных нод. */

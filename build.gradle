@@ -77,6 +77,8 @@ dependencies {
 	implementation 'com.fazecast:jSerialComm:2.11.0'
 	implementation 'com.google.code.gson:gson:2.11.0'
 	implementation 'com.h2database:h2:2.3.232'
+	implementation 'org.luaj:luaj-jse:3.0.1'
+	implementation 'org.fxmisc.richtext:richtextfx:0.11.7'
 	implementation('io.github.mkpaz:atlantafx-base:2.1.0') {
 		// AtlantaFX публикует собственный org.openjfx version, который иначе
 		// может поднять проект на другую JavaFX-линейку через conflict resolution.

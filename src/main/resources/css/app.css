@@ -2445,3 +2445,175 @@
 .light-theme .ignored-btn-active:hover .svg-icon {
     -fx-fill: #C62828;
 }
+
+/* ============================================================
+   Lua IDE
+   ============================================================ */
+
+.lua-dev-root {
+    -fx-background-color: -color-bg-default;
+}
+
+.lua-script-list .list-cell {
+    -fx-padding: 8 10;
+}
+
+.lua-script-list .list-cell:filled {
+    -fx-font-size: 0.9231em;
+}
+
+.lua-code-area {
+    -fx-background-color: -color-bg-subtle;
+    -fx-font-family: "Menlo", "Consolas", "DejaVu Sans Mono", monospace;
+    -fx-font-size: 13px;
+}
+
+.lua-code-area .paragraph-box {
+    -fx-background-color: -color-bg-subtle;
+}
+
+.lua-code-area .text {
+    -fx-fill: -color-fg-default;
+}
+
+.lua-code-area .caret {
+    -fx-stroke: -color-fg-default;
+}
+
+.lua-code-area .lineno {
+    -fx-background-color: rgba(255, 255, 255, 0.04);
+    -fx-text-fill: -color-fg-muted;
+    -fx-padding: 0 8 0 8;
+}
+
+.lua-gutter-line {
+    -fx-alignment: top-right;
+    -fx-background-color: rgba(255, 255, 255, 0.04);
+}
+
+.lua-gutter-line-current {
+    -fx-background-color: rgba(88, 166, 255, 0.18);
+}
+
+.lua-breakpoint-marker {
+    -fx-min-width: 14;
+    -fx-pref-width: 14;
+    -fx-max-width: 14;
+    -fx-alignment: center;
+    -fx-text-fill: transparent;
+    -fx-font-size: 11px;
+    -fx-cursor: hand;
+}
+
+.lua-breakpoint-marker:hover {
+    -fx-text-fill: rgba(255, 107, 107, 0.48);
+}
+
+.lua-breakpoint-marker-active {
+    -fx-text-fill: #ff6b6b;
+}
+
+.light-theme .lua-code-area .lineno {
+    -fx-background-color: rgba(0, 0, 0, 0.04);
+}
+
+.light-theme .lua-gutter-line {
+    -fx-background-color: rgba(0, 0, 0, 0.04);
+}
+
+.light-theme .lua-gutter-line-current {
+    -fx-background-color: rgba(9, 105, 218, 0.12);
+}
+
+.light-theme .lua-breakpoint-marker-active {
+    -fx-text-fill: #cf222e;
+}
+
+.lua-keyword {
+    -fx-fill: #ff7b72;
+    -fx-font-weight: bold;
+}
+
+.lua-builtin {
+    -fx-fill: #d2a8ff;
+}
+
+.lua-api {
+    -fx-fill: #7ee787;
+    -fx-font-weight: bold;
+}
+
+.lua-string {
+    -fx-fill: #a5d6ff;
+}
+
+.lua-number {
+    -fx-fill: #ffa657;
+}
+
+.lua-comment {
+    -fx-fill: #8b949e;
+}
+
+.light-theme .lua-keyword {
+    -fx-fill: #cf222e;
+}
+
+.light-theme .lua-builtin {
+    -fx-fill: #8250df;
+}
+
+.light-theme .lua-api {
+    -fx-fill: #116329;
+}
+
+.light-theme .lua-string {
+    -fx-fill: #0550ae;
+}
+
+.light-theme .lua-number {
+    -fx-fill: #953800;
+}
+
+.light-theme .lua-comment {
+    -fx-fill: #6e7781;
+}
+
+.lua-console,
+.lua-api-reference {
+    -fx-font-family: "Menlo", "Consolas", "DejaVu Sans Mono", monospace;
+    -fx-font-size: 12px;
+}
+
+.lua-completion-popup {
+    -fx-background-color: -color-bg-subtle;
+    -fx-background-radius: 6;
+    -fx-border-color: -color-border-default;
+    -fx-border-radius: 6;
+    -fx-border-width: 1;
+    -fx-padding: 4;
+    -fx-effect: dropshadow(gaussian, rgba(0, 0, 0, 0.32), 14, 0, 0, 5);
+}
+
+.lua-completion-row {
+    -fx-padding: 4 8;
+    -fx-background-radius: 4;
+    -fx-font-family: "Menlo", "Consolas", "DejaVu Sans Mono", monospace;
+    -fx-font-size: 13px;
+}
+
+.lua-completion-row .text {
+    -fx-fill: -color-fg-default;
+    -fx-font-family: "Menlo", "Consolas", "DejaVu Sans Mono", monospace;
+    -fx-font-size: 13px;
+}
+
+.lua-completion-row:hover,
+.lua-completion-row-selected {
+    -fx-background-color: rgba(255, 255, 255, 0.10);
+}
+
+.light-theme .lua-completion-row:hover,
+.light-theme .lua-completion-row-selected {
+    -fx-background-color: rgba(0, 0, 0, 0.08);
+}
