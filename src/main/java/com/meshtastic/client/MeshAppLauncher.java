@@ -1,6 +1,7 @@
 package com.meshtastic.client;
 
 import com.meshtastic.client.logging.JfrDiagnosticSupport;
+import com.meshtastic.client.logging.JavaFxCssWarningGuard;
 import com.meshtastic.client.logging.SessionCrashLogManager;
 import com.meshtastic.client.utils.AppPreferences;
 
@@ -20,6 +21,7 @@ public final class MeshAppLauncher {
             return;
         }
         SessionCrashLogManager.prepareForLaunch();
+        JavaFxCssWarningGuard.install();
         JfrDiagnosticSupport.start();
         if (System.getProperty("prism.order") == null && AppPreferences.isSoftwareRendering()) {
             System.setProperty("prism.order", "sw");

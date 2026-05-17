@@ -53,6 +53,7 @@ public class ConfigExchangeService implements FromRadioListener {
      *  и первый want_config_id был отправлен до завершения загрузки ESP32. */
     private static final int RETRY_INTERVAL_MS = 3000;
     private static final int MAX_RETRIES = 5;
+    private static final int AUTO_TIME_SYNC_ACK_TIMEOUT_MS = 10_000;
 
     private final ProtocolHandler protocolHandler;
     private final DeviceState deviceState;
@@ -463,6 +464,33 @@ public class ConfigExchangeService implements FromRadioListener {
 
         if (future != null) {
             future.complete(deviceState);
+        }
+
+        autoSyncTimeAfterConfigComplete();
+    }
+
+    private void autoSyncTimeAfterConfigComplete() {
+        if (aborted.get() || deviceState.getMyNodeNum() == 0) {
+            return;
+        }
+        long epochSeconds = System.currentTimeMillis() / 1000L;
+        try {
+            MessageService.sendPhoneTimePosition(protocolHandler, deviceState, epochSeconds);
+            MessageService.setTimeOnly(protocolHandler, deviceState, epochSeconds)
+                    .completeOnTimeout(MeshProtos.Routing.Error.TIMEOUT,
+                            AUTO_TIME_SYNC_ACK_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+                    .whenComplete((routingError, throwable) -> {
+                        if (throwable != null) {
+                            log.debug("Automatic node time sync failed", throwable);
+                        } else if (routingError == MeshProtos.Routing.Error.NONE) {
+                            log.debug("Automatic node time sync ACK received");
+                        } else {
+                            log.debug("Automatic node time sync completed with {}", routingError);
+                        }
+                    });
+            log.debug("Automatic node time sync sent: epochSeconds={}", epochSeconds);
+        } catch (Exception e) {
+            log.debug("Automatic node time sync send failed", e);
         }
     }
 

@@ -63,7 +63,7 @@ public class EmojiPicker {
 
         // Поиск
         searchField = new TextField();
-        searchField.setPromptText("🔍 Поиск emoji...");
+        searchField.setPromptText("Поиск emoji...");
         searchField.getStyleClass().add("emoji-picker-search");
         searchField.textProperty().addListener((obs, old, val) -> onSearchChanged(val));
         searchField.setOnKeyPressed(e -> {

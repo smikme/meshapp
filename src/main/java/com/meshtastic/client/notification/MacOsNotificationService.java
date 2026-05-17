@@ -74,55 +74,66 @@ public class MacOsNotificationService implements NotificationService {
     }
 
     private void showViaNative(String title, String message) {
-        // content = [[UNMutableNotificationContent alloc] init]
-        long content = ObjCRuntime.allocInit("UNMutableNotificationContent");
-        if (content == 0) {
-            showViaOsascript(title, message);
-            return;
+        long pool = ObjCRuntime.createAutoreleasePool();
+        long content = 0;
+        long titleString = 0;
+        long bodyString = 0;
+        try {
+            // content = [[UNMutableNotificationContent alloc] init]
+            content = ObjCRuntime.allocInit("UNMutableNotificationContent");
+            if (content == 0) {
+                showViaOsascript(title, message);
+                return;
+            }
+
+            // content.title = title
+            titleString = ObjCRuntime.nsString(title != null ? title : "MeshApp");
+            ObjCRuntime.msgSend(content, "setTitle:", titleString);
+
+            // content.body = message
+            bodyString = ObjCRuntime.nsString(message != null ? message : "");
+            ObjCRuntime.msgSend(content, "setBody:", bodyString);
+
+            // content.sound = [UNNotificationSound defaultSound]
+            long defaultSound = ObjCRuntime.msgSend(
+                    ObjCRuntime.cls("UNNotificationSound"), "defaultSound");
+            if (defaultSound != 0) {
+                ObjCRuntime.msgSend(content, "setSound:", defaultSound);
+            }
+
+            // identifier = [[NSUUID UUID] UUIDString]
+            long uuid = ObjCRuntime.msgSend(ObjCRuntime.cls("NSUUID"), "UUID");
+            long identifier = ObjCRuntime.msgSend(uuid, "UUIDString");
+            if (identifier == 0) {
+                showViaOsascript(title, message);
+                return;
+            }
+
+            // request = [UNNotificationRequest requestWithIdentifier:id content:content trigger:nil]
+            long request = ObjCRuntime.msgSend(
+                    ObjCRuntime.cls("UNNotificationRequest"),
+                    "requestWithIdentifier:content:trigger:",
+                    identifier, content, 0L);
+            if (request == 0) {
+                showViaOsascript(title, message);
+                return;
+            }
+
+            // [[UNUserNotificationCenter currentNotificationCenter]
+            //     addNotificationRequest:request withCompletionHandler:nil]
+            long center = ObjCRuntime.msgSend(
+                    ObjCRuntime.cls("UNUserNotificationCenter"), "currentNotificationCenter");
+            if (center == 0) {
+                showViaOsascript(title, message);
+                return;
+            }
+            ObjCRuntime.msgSend(center, "addNotificationRequest:withCompletionHandler:", request, 0L);
+        } finally {
+            ObjCRuntime.release(bodyString);
+            ObjCRuntime.release(titleString);
+            ObjCRuntime.release(content);
+            ObjCRuntime.drainAutoreleasePool(pool);
         }
-
-        // content.title = title
-        ObjCRuntime.msgSend(content, "setTitle:",
-                ObjCRuntime.nsString(title != null ? title : "MeshApp"));
-
-        // content.body = message
-        ObjCRuntime.msgSend(content, "setBody:",
-                ObjCRuntime.nsString(message != null ? message : ""));
-
-        // content.sound = [UNNotificationSound defaultSound]
-        long defaultSound = ObjCRuntime.msgSend(
-                ObjCRuntime.cls("UNNotificationSound"), "defaultSound");
-        if (defaultSound != 0) {
-            ObjCRuntime.msgSend(content, "setSound:", defaultSound);
-        }
-
-        // identifier = [[NSUUID UUID] UUIDString]
-        long uuid = ObjCRuntime.msgSend(ObjCRuntime.cls("NSUUID"), "UUID");
-        long identifier = ObjCRuntime.msgSend(uuid, "UUIDString");
-        if (identifier == 0) {
-            showViaOsascript(title, message);
-            return;
-        }
-
-        // request = [UNNotificationRequest requestWithIdentifier:id content:content trigger:nil]
-        long request = ObjCRuntime.msgSend(
-                ObjCRuntime.cls("UNNotificationRequest"),
-                "requestWithIdentifier:content:trigger:",
-                identifier, content, 0L);
-        if (request == 0) {
-            showViaOsascript(title, message);
-            return;
-        }
-
-        // [[UNUserNotificationCenter currentNotificationCenter]
-        //     addNotificationRequest:request withCompletionHandler:nil]
-        long center = ObjCRuntime.msgSend(
-                ObjCRuntime.cls("UNUserNotificationCenter"), "currentNotificationCenter");
-        if (center == 0) {
-            showViaOsascript(title, message);
-            return;
-        }
-        ObjCRuntime.msgSend(center, "addNotificationRequest:withCompletionHandler:", request, 0L);
     }
 
     private void showViaOsascript(String title, String message) {

@@ -11,6 +11,7 @@ import org.slf4j.LoggerFactory;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 
 /**
  * Сервис автоматического обнаружения BLE-устройств Meshtastic и MeshCore (singleton).
@@ -35,6 +36,8 @@ public final class BleDeviceDiscoveryService {
     private volatile BleProtocolProfile scanProfile = BleProtocolProfile.MESHTASTIC;
     private volatile String lastErrorMessage;
     private BlePlatform platform;
+    private Supplier<BlePlatform> platformFactory = BlePlatformFactory::create;
+    private Boolean parallelConnectionSupportOverride;
 
     private BleDeviceDiscoveryService() {}
 
@@ -57,10 +60,17 @@ public final class BleDeviceDiscoveryService {
             return;
         }
 
-        // Один platform (CBCentralManager) на всё приложение — не пересоздаём
+        if (!supportsParallelConnections() && ConnectionManager.getInstance().hasActiveBleTransport()) {
+            lastErrorMessage = "BLE сканирование недоступно, пока активно BLE-подключение";
+            log.warn(lastErrorMessage);
+            return;
+        }
+
+        // Один platform для discovery на всё приложение — transport-подключения
+        // создаются отдельно через createConnectionPlatform().
         if (platform == null) {
             try {
-                platform = BlePlatformFactory.create();
+                platform = platformFactory.get();
             } catch (RuntimeException e) {
                 lastErrorMessage = e.getMessage();
                 log.warn("BLE not available: {}", e.getMessage());
@@ -130,6 +140,18 @@ public final class BleDeviceDiscoveryService {
     }
 
     /**
+     * Освобождает discovery backend и его native worker resources.
+     */
+    public void dispose() {
+        stopScanning();
+        BlePlatform current = platform;
+        platform = null;
+        if (current != null) {
+            current.dispose();
+        }
+    }
+
+    /**
      * Возвращает последнюю ошибку запуска BLE discovery, если сканирование не стартовало.
      */
     public String getLastErrorMessage() {
@@ -167,13 +189,14 @@ public final class BleDeviceDiscoveryService {
     }
 
     /**
-     * Возвращает {@link BlePlatform} для использования в {@link com.meshtastic.client.connection.ble.BleConnection}.
-     * Если платформа ещё не создана, создаёт новую.
+     * Возвращает discovery {@link BlePlatform}. Transport-подключения должны
+     * использовать {@link #createConnectionPlatform()}, чтобы не делить callbacks
+     * и GATT-состояние со сканированием.
      */
     public BlePlatform getPlatform() {
         if (platform == null) {
             try {
-                platform = BlePlatformFactory.create();
+                platform = platformFactory.get();
                 lastErrorMessage = null;
             } catch (RuntimeException e) {
                 lastErrorMessage = e.getMessage();
@@ -181,6 +204,44 @@ public final class BleDeviceDiscoveryService {
             }
         }
         return platform;
+    }
+
+    /**
+     * Создаёт backend для BLE transport-сессии.
+     * <p>
+     * Каждый вызов возвращает независимый backend: macOS создаёт отдельный
+     * CoreBluetooth stack, Linux/Windows загружают отдельную временную копию
+     * native library с собственным singleton state внутри этой SO/DLL.
+     */
+    public BlePlatform createConnectionPlatform() {
+        if (supportsParallelConnections()) {
+            return platformFactory.get();
+        }
+        stopScanning();
+        return getPlatform();
+    }
+
+    /**
+     * Нужно ли transport-у освобождать platform при disconnect.
+     */
+    public boolean shouldDisposeConnectionPlatform() {
+        return supportsParallelConnections();
+    }
+
+    public boolean supportsParallelConnections() {
+        return parallelConnectionSupportOverride != null
+                ? parallelConnectionSupportOverride
+                : BlePlatformFactory.supportsParallelConnections();
+    }
+
+    void setPlatformFactoryForTests(Supplier<BlePlatform> platformFactory) {
+        this.platformFactory = platformFactory == null ? BlePlatformFactory::create : platformFactory;
+        this.platform = null;
+        this.lastErrorMessage = null;
+    }
+
+    void setParallelConnectionSupportForTests(Boolean supported) {
+        this.parallelConnectionSupportOverride = supported;
     }
 
     private void fireChanged() {

@@ -9,4 +9,12 @@ if command -v update-desktop-database >/dev/null 2>&1; then
     update-desktop-database -q /usr/share/applications || true
 fi
 
+if [ "$1" = "remove" ] || [ "$1" = "purge" ]; then
+    rm -f /etc/udev/rules.d/78-mm-meshapp-serial.rules
+    if command -v udevadm >/dev/null 2>&1; then
+        udevadm control --reload-rules || true
+        udevadm trigger --subsystem-match=tty || true
+    fi
+fi
+
 exit 0

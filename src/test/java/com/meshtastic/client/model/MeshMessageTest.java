@@ -71,6 +71,15 @@ class MeshMessageTest {
     }
 
     @Test
+    void isDirectMessageDependsOnBroadcastDestination() {
+        MeshMessage channel = new MeshMessage("!00000001", "!ffffffff", 0, "Channel", 1_700_000_000L, true);
+        MeshMessage direct = new MeshMessage("!00000001", "!00000002", 0, "DM", 1_700_000_000L, true);
+
+        assertFalse(channel.isDirectMessage());
+        assertTrue(direct.isDirectMessage());
+    }
+
+    @Test
     void getStatusDefaultsToNull() {
         MeshMessage msg = createMessage();
         

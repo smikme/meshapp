@@ -162,8 +162,11 @@ public class MacOsBle implements BlePlatform {
         log.info("BLE adapter state: {}", adapterState);
 
         long serviceArray = serviceUuidArray(profile);
-
-        msgSend(centralManager, "scanForPeripheralsWithServices:options:", serviceArray, 0L);
+        try {
+            msgSend(centralManager, "scanForPeripheralsWithServices:options:", serviceArray, 0L);
+        } finally {
+            release(serviceArray);
+        }
         log.info("BLE scan started (filter: {} service UUID)", profile.displayName());
     }
 
@@ -193,20 +196,32 @@ public class MacOsBle implements BlePlatform {
         if (peripheralPtr == null) {
             // Reconnect: retrieve peripheral by UUID from CoreBluetooth system cache
             log.info("[BLE] Device not in scan cache, trying retrievePeripheralsWithIdentifiers...");
-            long nsuuidCls = cls("NSUUID");
-            long nsuuid = msgSend(msgSend(nsuuidCls, "alloc"), "initWithUUIDString:", nsString(address));
-            long identifiers = nsArrayWith(nsuuid);
-            long peripherals = msgSend(centralManager, "retrievePeripheralsWithIdentifiers:", identifiers);
-            long count = msgSend(peripherals, "count");
-            if (count > 0) {
-                long p = msgSend(peripherals, "objectAtIndex:", 0L);
-                cacheDiscoveredPeripheral(address, p);
-                peripheralPtr = p;
-                log.info("[BLE] Retrieved peripheral from system cache");
-            } else {
-                log.error("[BLE] Device not found in system cache either (address={})", address);
-                throw new ConnectionException(
-                        "BLE device not found: " + address + ". Run scan first.");
+            long nsuuidString = 0;
+            long nsuuid = 0;
+            long identifiers = 0;
+            long pool = createAutoreleasePool();
+            try {
+                long nsuuidCls = cls("NSUUID");
+                nsuuidString = nsString(address);
+                nsuuid = msgSend(msgSend(nsuuidCls, "alloc"), "initWithUUIDString:", nsuuidString);
+                identifiers = ownedArrayWithObjects(nsuuid);
+                long peripherals = msgSend(centralManager, "retrievePeripheralsWithIdentifiers:", identifiers);
+                long count = msgSend(peripherals, "count");
+                if (count > 0) {
+                    long p = msgSend(peripherals, "objectAtIndex:", 0L);
+                    cacheDiscoveredPeripheral(address, p);
+                    peripheralPtr = p;
+                    log.info("[BLE] Retrieved peripheral from system cache");
+                } else {
+                    log.error("[BLE] Device not found in system cache either (address={})", address);
+                    throw new ConnectionException(
+                            "BLE device not found: " + address + ". Run scan first.");
+                }
+            } finally {
+                release(identifiers);
+                release(nsuuid);
+                release(nsuuidString);
+                drainAutoreleasePool(pool);
             }
         }
         long peripheral = peripheralPtr;
@@ -239,7 +254,11 @@ public class MacOsBle implements BlePlatform {
             // Обнаруживаем сервисы
             log.info("[BLE] Step 3: discoverServices...");
             long serviceArray = serviceUuidArray(profile);
-            msgSend(peripheral, "discoverServices:", serviceArray);
+            try {
+                msgSend(peripheral, "discoverServices:", serviceArray);
+            } finally {
+                release(serviceArray);
+            }
 
             if (!serviceDiscoveryLatch.await(
                     BleConstants.SERVICE_DISCOVERY_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
@@ -265,11 +284,12 @@ public class MacOsBle implements BlePlatform {
             long service = msgSend(services, "objectAtIndex:", 0L);
 
             log.info("[BLE] Step 4: discoverCharacteristics...");
-            long inboundUuid = cbUuid(profile.inboundCharacteristicUuid());
-            long outboundUuid = cbUuid(profile.outboundCharacteristicUuid());
-            long charUuids = characteristicUuidArray(profile, inboundUuid, outboundUuid);
-
-            msgSend(peripheral, "discoverCharacteristics:forService:", charUuids, service);
+            long charUuids = characteristicUuidArray(profile);
+            try {
+                msgSend(peripheral, "discoverCharacteristics:forService:", charUuids, service);
+            } finally {
+                release(charUuids);
+            }
 
             if (!characteristicDiscoveryLatch.await(
                     BleConstants.SERVICE_DISCOVERY_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
@@ -350,6 +370,7 @@ public class MacOsBle implements BlePlatform {
                 if (notificationCharacteristic != 0) {
                     setNotify(peripheral, false, notificationCharacteristic);
                 }
+                msgSend(peripheral, "setDelegate:", 0L);
                 msgSend(centralManager, "cancelPeripheralConnection:", peripheral);
                 // Once a session is torn down, the cached CBPeripheral can become stale after a
                 // device reboot. Force the next connect() to reacquire a fresh object.
@@ -395,7 +416,11 @@ public class MacOsBle implements BlePlatform {
                 writeErrorMessage = null;
                 writeLatch = latch;
                 long nsData = nsData(protobufPayload);
-                writeValueForCharacteristic(peripheral, nsData, characteristic, CB_WRITE_WITH_RESPONSE);
+                try {
+                    writeValueForCharacteristic(peripheral, nsData, characteristic, CB_WRITE_WITH_RESPONSE);
+                } finally {
+                    release(nsData);
+                }
             }
 
             try {
@@ -470,10 +495,38 @@ public class MacOsBle implements BlePlatform {
         DELEGATE_MAP.remove(delegateInstance);
         DELEGATE_MAP.remove(peripheralDelegateInstance);
         clearCachedPeripherals();
+        releaseNativeObjects();
         log.info("MacOsBle disposed");
     }
 
     // ====== Helpers ======
+
+    private void releaseNativeObjects() {
+        long manager = centralManager;
+        if (manager != 0) {
+            msgSend(manager, "setDelegate:", 0L);
+            release(manager);
+            centralManager = 0;
+        }
+
+        long centralDelegate = delegateInstance;
+        if (centralDelegate != 0) {
+            release(centralDelegate);
+            delegateInstance = 0;
+        }
+
+        long peripheralDelegate = peripheralDelegateInstance;
+        if (peripheralDelegate != 0) {
+            release(peripheralDelegate);
+            peripheralDelegateInstance = 0;
+        }
+
+        long queue = dispatchQueue;
+        if (queue != 0) {
+            releaseDispatchQueue(queue);
+            dispatchQueue = 0;
+        }
+    }
 
     private void waitForPoweredOn() {
         if (adapterState == AdapterState.POWERED_ON) { return; }
@@ -765,27 +818,54 @@ public class MacOsBle implements BlePlatform {
         return mem;
     }
 
-    private static long serviceUuidArray(BleProtocolProfile profile) {
-        long[] uuids = new long[]{cbUuid(profile.primaryServiceUuid())};
-        long charUuids = cls("NSArray");
-        return ObjCRuntime.msgSendPtrLong(charUuids, "arrayWithObjects:count:",
-                buildPointerArray(uuids), uuids.length);
+    private static long ownedArrayWithObjects(long... objects) {
+        long nsArrayClass = cls("NSArray");
+        long alloc = msgSend(nsArrayClass, "alloc");
+        return ObjCRuntime.msgSendPtrLong(alloc, "initWithObjects:count:",
+                buildPointerArray(objects), objects.length);
     }
 
-    private static long characteristicUuidArray(BleProtocolProfile profile, long inboundUuid, long outboundUuid) {
-        long[] uuids;
-        if (profile.hasNotifyTriggerCharacteristic()) {
-            uuids = new long[]{
-                    inboundUuid,
-                    outboundUuid,
-                    cbUuid(profile.notifyTriggerCharacteristicUuid())
-            };
-        } else {
-            uuids = new long[]{inboundUuid, outboundUuid};
+    private static long ownedCbUuid(String uuidString) {
+        long pool = createAutoreleasePool();
+        try {
+            long uuid = cbUuid(uuidString);
+            retain(uuid);
+            return uuid;
+        } finally {
+            drainAutoreleasePool(pool);
         }
-        long charUuids = cls("NSArray");
-        return ObjCRuntime.msgSendPtrLong(charUuids, "arrayWithObjects:count:",
-                buildPointerArray(uuids), uuids.length);
+    }
+
+    private static long ownedUuidArray(String... uuidStrings) {
+        long[] uuids = new long[uuidStrings.length];
+        try {
+            for (int i = 0; i < uuidStrings.length; i++) {
+                uuids[i] = ownedCbUuid(uuidStrings[i]);
+            }
+            return ownedArrayWithObjects(uuids);
+        } finally {
+            for (long uuid : uuids) {
+                release(uuid);
+            }
+        }
+    }
+
+    private static long serviceUuidArray(BleProtocolProfile profile) {
+        return ownedUuidArray(profile.primaryServiceUuid());
+    }
+
+    private static long characteristicUuidArray(BleProtocolProfile profile) {
+        if (profile.hasNotifyTriggerCharacteristic()) {
+            return ownedUuidArray(
+                    profile.inboundCharacteristicUuid(),
+                    profile.outboundCharacteristicUuid(),
+                    profile.notifyTriggerCharacteristicUuid()
+            );
+        }
+        return ownedUuidArray(
+                profile.inboundCharacteristicUuid(),
+                profile.outboundCharacteristicUuid()
+        );
     }
 
     /** Запускает drain если ещё не активен (вызывается poll-таймером и fromNum). */

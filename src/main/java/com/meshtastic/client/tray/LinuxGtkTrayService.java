@@ -126,6 +126,7 @@ public final class LinuxGtkTrayService implements AppTrayService {
             gtk.gtk_status_icon_set_visible(statusIcon, true);
 
             Pointer gtkMenu = gtk.gtk_menu_new();
+            menu = gtkMenu;
             Pointer openItem = gtk.gtk_menu_item_new_with_label("Открыть");
             Pointer separator = gtk.gtk_separator_menu_item_new();
             Pointer exitItem = gtk.gtk_menu_item_new_with_label("Выход");
@@ -133,7 +134,6 @@ public final class LinuxGtkTrayService implements AppTrayService {
             gtk.gtk_menu_shell_append(gtkMenu, separator);
             gtk.gtk_menu_shell_append(gtkMenu, exitItem);
             gtk.gtk_widget_show_all(gtkMenu);
-            menu = gtkMenu;
 
             statusActivateCallback = (widget, userData) -> dispatch("tray-activate", onActivate);
             statusPopupMenuCallback = (widget, button, activateTime, userData) -> {
@@ -155,7 +155,7 @@ public final class LinuxGtkTrayService implements AppTrayService {
                         statusIcon = null;
                     }
                     if (menu != null) {
-                        gObject.g_object_unref(menu);
+                        gtk.gtk_widget_destroy(menu);
                         menu = null;
                     }
                     gtk.gtk_main_quit();
@@ -178,6 +178,7 @@ public final class LinuxGtkTrayService implements AppTrayService {
         }
 
         if (!installed.get()) {
+            cleanupGtkObjects();
             return;
         }
 
@@ -187,6 +188,22 @@ public final class LinuxGtkTrayService implements AppTrayService {
             log.warn("GTK tray loop exited with error", t);
         } finally {
             gtkThread = null;
+        }
+    }
+
+    private void cleanupGtkObjects() {
+        try {
+            if (menu != null && gtk != null) {
+                gtk.gtk_widget_destroy(menu);
+                menu = null;
+            }
+            if (statusIcon != null && gtk != null && gObject != null) {
+                gtk.gtk_status_icon_set_visible(statusIcon, false);
+                gObject.g_object_unref(statusIcon);
+                statusIcon = null;
+            }
+        } catch (Throwable t) {
+            log.debug("Failed to cleanup GTK tray objects", t);
         }
     }
 
@@ -230,6 +247,7 @@ public final class LinuxGtkTrayService implements AppTrayService {
         Pointer gtk_separator_menu_item_new();
         void gtk_menu_shell_append(Pointer menuShell, Pointer child);
         void gtk_widget_show_all(Pointer widget);
+        void gtk_widget_destroy(Pointer widget);
         void gtk_menu_popup_at_pointer(Pointer menu, Pointer triggerEvent);
         void gtk_main();
         void gtk_main_quit();

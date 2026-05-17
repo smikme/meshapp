@@ -23,7 +23,9 @@ import com.meshtastic.client.themes.ThemeManager;
 import com.meshtastic.client.utils.AppPreferences;
 import com.meshtastic.client.utils.SvgIconLoader;
 
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
@@ -32,10 +34,16 @@ public class DrawerPane extends StackPane {
 
     public static final double TOOLBAR_WIDTH = 56;
     private static final String WINDOWS_HIT_TEST_BACKGROUND = "-fx-background-color: rgba(0,0,0,0.004);";
+    private static final String ORIGINAL_TOOLTIP_KEY = "drawer.originalTooltip";
+    private static final String NOTIFICATION_ON_ICON = "/drawer/icon/bell.svg";
+    private static final String NOTIFICATION_OFF_ICON = "/drawer/icon/bell-off.svg";
+    private static final String NAVIGATION_BLOCKED_TOOLTIP =
+            "Дождитесь завершения сохранения конфигурации и переподключения";
 
     private final ToolBar toolBar;
     private final Button themeButton;
     private final Button notifButton;
+    private final Set<Class<?>> navigationBlockedItemClasses = new HashSet<>();
     private Class<?> selectedItemClass;
     private Circle chatBadgeDot;
 
@@ -127,9 +135,11 @@ public class DrawerPane extends StackPane {
         }
         btn.getStyleClass().add("drawer-toolbar-button");
         btn.setTooltip(new Tooltip(item.name()));
+        btn.getProperties().put(ORIGINAL_TOOLTIP_KEY, item.name());
         if (item.formClass() != null) {
             btn.setUserData(item.formClass());
         }
+        updateNavigationBlockState(btn);
         btn.setOnAction(e -> {
             if (item.action() != null) {
                 item.action().run();
@@ -166,21 +176,22 @@ public class DrawerPane extends StackPane {
     }
 
     private void updateThemeIcon(Button btn, boolean isDark) {
-        // ☀ для тёмной темы (переключить на светлую), ☾ для светлой (переключить на тёмную)
-        btn.setText(isDark ? "\u2600" : "\u263E");
-    }
-
-    private Button createNotificationButton() {
-        SVGPath svgIcon = SvgIconLoader.load("/drawer/icon/bell.svg", 22);
-        Button btn = new Button();
-        btn.getStyleClass().add("drawer-toolbar-button");
+        String iconPath = isDark ? "/icons/light.svg" : "/icons/dark.svg";
+        SVGPath svgIcon = SvgIconLoader.load(iconPath, 22);
         if (svgIcon != null) {
+            btn.setText(null);
             btn.setGraphic(svgIcon);
             btn.setContentDisplay(ContentDisplay.GRAPHIC_ONLY);
         } else {
-            btn.setText("\uD83D\uDD14");
+            btn.setGraphic(null);
+            btn.setText(isDark ? "L" : "D");
+            btn.setContentDisplay(ContentDisplay.TEXT_ONLY);
         }
-        btn.setTooltip(new Tooltip("Уведомления"));
+    }
+
+    private Button createNotificationButton() {
+        Button btn = new Button();
+        btn.getStyleClass().add("drawer-toolbar-button");
         updateNotifIcon(btn, AppPreferences.isNotificationsEnabled());
         btn.setOnAction(e -> {
             boolean newState = !AppPreferences.isNotificationsEnabled();
@@ -191,7 +202,19 @@ public class DrawerPane extends StackPane {
     }
 
     private void updateNotifIcon(Button btn, boolean enabled) {
-        btn.setOpacity(enabled ? 1.0 : 0.4);
+        String iconPath = enabled ? NOTIFICATION_ON_ICON : NOTIFICATION_OFF_ICON;
+        SVGPath svgIcon = SvgIconLoader.load(iconPath, 22);
+        if (svgIcon != null) {
+            btn.setText(null);
+            btn.setGraphic(svgIcon);
+            btn.setContentDisplay(ContentDisplay.GRAPHIC_ONLY);
+        } else {
+            btn.setGraphic(null);
+            btn.setText(enabled ? "N" : "N/");
+            btn.setContentDisplay(ContentDisplay.TEXT_ONLY);
+        }
+        btn.setTooltip(new Tooltip(enabled ? "Оповещения включены" : "Оповещения выключены"));
+        btn.setOpacity(1.0);
     }
 
     public void setSelectedItemClass(Class<?> cls) {
@@ -216,6 +239,35 @@ public class DrawerPane extends StackPane {
                 }
             }
         }
+    }
+
+    public void setNavigationBlockedItemClasses(Set<Class<?>> formClasses) {
+        navigationBlockedItemClasses.clear();
+        if (formClasses != null) {
+            navigationBlockedItemClasses.addAll(formClasses);
+        }
+        updateNavigationBlockState();
+    }
+
+    private void updateNavigationBlockState() {
+        for (Node node : toolBar.getItems()) {
+            if (node instanceof Button btn) {
+                updateNavigationBlockState(btn);
+            }
+        }
+    }
+
+    private void updateNavigationBlockState(Button btn) {
+        Object userData = btn.getUserData();
+        boolean blocked = userData instanceof Class<?> formClass
+                && navigationBlockedItemClasses.contains(formClass);
+        btn.setDisable(blocked);
+
+        Object originalTooltip = btn.getProperties().get(ORIGINAL_TOOLTIP_KEY);
+        String tooltipText = blocked
+                ? NAVIGATION_BLOCKED_TOOLTIP
+                : originalTooltip instanceof String text ? text : null;
+        btn.setTooltip(tooltipText != null ? new Tooltip(tooltipText) : null);
     }
 
     public void setChatUnreadDot(boolean visible) {

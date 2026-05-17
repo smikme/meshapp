@@ -52,6 +52,14 @@ static void meshapp_tray_invoke_java_click(void) {
 
 static MeshAppTrayTarget *gTrayTarget = nil;
 
+static void meshapp_tray_release_java_refs(JNIEnv *env) {
+    if (env != NULL && gBridgeClass != NULL) {
+        (*env)->DeleteGlobalRef(env, gBridgeClass);
+        gBridgeClass = NULL;
+    }
+    gHandleClickMethod = NULL;
+}
+
 static void meshapp_tray_run_on_main(dispatch_block_t block) {
     if ([NSThread isMainThread]) {
         block();
@@ -107,6 +115,15 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *reserved) {
     return JNI_VERSION_1_8;
 }
 
+JNIEXPORT void JNICALL JNI_OnUnload(JavaVM *vm, void *reserved) {
+    (void)reserved;
+    JNIEnv *env = NULL;
+    if ((*vm)->GetEnv(vm, (void **)&env, JNI_VERSION_1_8) == JNI_OK) {
+        meshapp_tray_release_java_refs(env);
+    }
+    gJvm = NULL;
+}
+
 JNIEXPORT jboolean JNICALL Java_com_meshtastic_client_tray_MacOsTrayBridge_install0(
         JNIEnv *env,
         jclass clazz,
@@ -123,6 +140,7 @@ JNIEXPORT jboolean JNICALL Java_com_meshtastic_client_tray_MacOsTrayBridge_insta
     if (gHandleClickMethod == NULL) {
         gHandleClickMethod = (*env)->GetStaticMethodID(env, clazz, "handleClickFromNative", "()V");
         if (gHandleClickMethod == NULL) {
+            meshapp_tray_release_java_refs(env);
             return JNI_FALSE;
         }
     }

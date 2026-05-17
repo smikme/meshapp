@@ -148,12 +148,32 @@ class MessageServiceTest {
         MessageService.setTimeOnly(handler, state, 1_775_000_123L);
 
         MeshProtos.ToRadio sent = parseLastToRadio(connection);
+        assertEquals(0, sent.getPacket().getFrom());
+        assertEquals(0x04c5b420, sent.getPacket().getTo());
         assertFalse(sent.getPacket().getDecoded().getWantResponse());
         AdminProtos.AdminMessage admin =
                 AdminProtos.AdminMessage.parseFrom(sent.getPacket().getDecoded().getPayload());
         assertTrue(admin.hasSetTimeOnly());
         assertEquals(1_775_000_123L, Integer.toUnsignedLong(admin.getSetTimeOnly()));
         assertFalse(admin.getSessionPasskey().isEmpty());
+    }
+
+    @Test
+    void sendPhoneTimePositionUsesLocalPositionAppPacket() throws Exception {
+        RecordingConnection connection = new RecordingConnection();
+        ProtocolHandler handler = track(new ProtocolHandler(connection));
+        DeviceState state = new DeviceState();
+        state.setMyNodeNum(0x04c5b420);
+
+        MessageService.sendPhoneTimePosition(handler, state, 1_775_000_123L);
+
+        MeshProtos.ToRadio sent = parseLastToRadio(connection);
+        MeshProtos.MeshPacket packet = sent.getPacket();
+        assertEquals(0, packet.getFrom());
+        assertEquals(0x04c5b420, packet.getTo());
+        assertEquals(Portnums.PortNum.POSITION_APP, packet.getDecoded().getPortnum());
+        MeshProtos.Position position = MeshProtos.Position.parseFrom(packet.getDecoded().getPayload());
+        assertEquals(1_775_000_123L, Integer.toUnsignedLong(position.getTime()));
     }
 
     @Test

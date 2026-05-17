@@ -5,6 +5,7 @@ import com.google.gson.GsonBuilder;
 import com.google.gson.reflect.TypeToken;
 import com.meshtastic.client.connection.*;
 import com.meshtastic.client.model.ConnectionEntry;
+import com.meshtastic.client.model.ConnectionType;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.ProtocolType;
 import com.meshtastic.client.protocol.ProtocolRegistry;
@@ -58,7 +59,9 @@ public final class ConnectionManager {
     private final Map<String, ProtocolHandler> protocolHandlers = new ConcurrentHashMap<>();
     private final Map<String, MessageListenerService> messageListenerServices = new ConcurrentHashMap<>();
     private final Map<String, CompletableFuture<DeviceState>> configFutures = new ConcurrentHashMap<>();
+    private final Map<String, Long> connectionGenerations = new ConcurrentHashMap<>();
     private final Set<String> userDisconnectedIds = ConcurrentHashMap.newKeySet();
+    private final Set<String> expectedDeviceRebootIds = ConcurrentHashMap.newKeySet();
     private final Map<String, String> userDisconnectReasons = new ConcurrentHashMap<>();
     private final List<Runnable> listeners = new CopyOnWriteArrayList<>();
     private final Gson gson = new GsonBuilder().setPrettyPrinting().create();
@@ -181,7 +184,9 @@ public final class ConnectionManager {
      */
     public void removeEntry(String id) {
         ReconnectService.getInstance().cancelReconnect(id);
+        clearExpectedDeviceReboot(id);
         disconnect(id, "entry removal");
+        connectionGenerations.remove(id);
         entries.removeIf(e -> e.getId().equals(id));
         save();
         fireChanged();
@@ -205,6 +210,7 @@ public final class ConnectionManager {
         synchronized (connectionLock) {
             userDisconnectedIds.remove(id);
             userDisconnectReasons.remove(id);
+            expectedDeviceRebootIds.remove(id);
             entry = findEntry(id);
             if (entry == null) {
                 throw new ConnectionException("Connection entry not found: " + id);
@@ -212,6 +218,7 @@ public final class ConnectionManager {
             if (activeConnections.containsKey(id) || pendingConnections.containsKey(id)) {
                 return;
             }
+            ensureBleConcurrencyAllowedLocked(id, entry);
             ensureNoDuplicateNodeConnectionLocked(id, entry);
             validateProtocolTransportCombination(entry, entry.getEffectiveProtocol());
             try {
@@ -235,24 +242,35 @@ public final class ConnectionManager {
             public void onDisconnected() {
                 boolean userInitiated = userDisconnectedIds.contains(id);
                 String disconnectReason = userDisconnectReasons.get(id);
+                boolean connectionWasCurrent = cleanupConnection(id, conn);
+                if (!connectionWasCurrent) {
+                    log.debug("Ignoring stale disconnect callback for '{}'", entry.getName());
+                    clearUserDisconnectStateIfIdle(id);
+                    return;
+                }
+                boolean expectedDeviceReboot = expectedDeviceRebootIds.remove(id);
                 if (userInitiated) {
                     if (disconnectReason != null && !disconnectReason.isBlank()) {
                         log.info("Connection '{}' disconnected by user ({})", entry.getName(), disconnectReason);
                     } else {
                         log.info("Connection '{}' disconnected by user", entry.getName());
                     }
+                } else if (expectedDeviceReboot) {
+                    log.info("Connection '{}' disconnected during expected device reboot", entry.getName());
                 } else {
                     log.warn("Connection '{}' disconnected unexpectedly", entry.getName());
                 }
                 entry.setConnected(false);
-                cleanupConnection(id, conn);
-                if (!userInitiated) {
-                    selectConnectionIfNeeded();
-                }
+                selectConnectionIfNeeded();
                 fireChanged();
                 if (!userInitiated) {
-                    log.info("Scheduling auto-reconnect for '{}' after disconnect", entry.getName());
-                    ReconnectService.getInstance().startReconnect(id);
+                    log.info("Scheduling auto-reconnect for '{}' after disconnect{}", entry.getName(),
+                            expectedDeviceReboot ? " (device reboot)" : "");
+                    if (expectedDeviceReboot) {
+                        ReconnectService.getInstance().startReconnectAfterDeviceReboot(id);
+                    } else {
+                        ReconnectService.getInstance().startReconnect(id);
+                    }
                 }
                 clearUserDisconnectStateIfIdle(id);
             }
@@ -261,10 +279,20 @@ public final class ConnectionManager {
             public void onConnectionError(String message, Throwable cause) {
                 boolean userInitiated = userDisconnectedIds.contains(id);
                 String disconnectReason = userDisconnectReasons.get(id);
+                boolean connectionWasCurrent = cleanupConnection(id, conn);
+                if (!connectionWasCurrent) {
+                    log.debug("Ignoring stale connection error callback for '{}': {}", entry.getName(), message);
+                    clearUserDisconnectStateIfIdle(id);
+                    return;
+                }
+                boolean expectedDeviceReboot = expectedDeviceRebootIds.remove(id);
                 if (cause != null) {
                     if (userInitiated && disconnectReason != null && !disconnectReason.isBlank()) {
                         log.warn("Connection '{}' error during requested disconnect ({}): {}",
                                 entry.getName(), disconnectReason, message, cause);
+                    } else if (expectedDeviceReboot) {
+                        log.info("Connection '{}' error during expected device reboot: {}",
+                                entry.getName(), message);
                     } else {
                         log.warn("Connection '{}' error: {}", entry.getName(), message, cause);
                     }
@@ -272,19 +300,24 @@ public final class ConnectionManager {
                     if (userInitiated && disconnectReason != null && !disconnectReason.isBlank()) {
                         log.warn("Connection '{}' error during requested disconnect ({}): {}",
                                 entry.getName(), disconnectReason, message);
+                    } else if (expectedDeviceReboot) {
+                        log.info("Connection '{}' error during expected device reboot: {}",
+                                entry.getName(), message);
                     } else {
                         log.warn("Connection '{}' error: {}", entry.getName(), message);
                     }
                 }
                 entry.setConnected(false);
-                cleanupConnection(id, conn);
-                if (!userInitiated) {
-                    selectConnectionIfNeeded();
-                }
+                selectConnectionIfNeeded();
                 fireChanged();
                 if (!userInitiated) {
-                    log.info("Scheduling auto-reconnect for '{}' after connection error", entry.getName());
-                    ReconnectService.getInstance().startReconnect(id);
+                    log.info("Scheduling auto-reconnect for '{}' after connection error{}", entry.getName(),
+                            expectedDeviceReboot ? " (device reboot)" : "");
+                    if (expectedDeviceReboot) {
+                        ReconnectService.getInstance().startReconnectAfterDeviceReboot(id);
+                    } else {
+                        ReconnectService.getInstance().startReconnect(id);
+                    }
                 }
                 clearUserDisconnectStateIfIdle(id);
             }
@@ -349,6 +382,7 @@ public final class ConnectionManager {
                 future = protocolRuntime.start();
                 protocolReadyFutures.put(id, future);
                 cacheMeshtasticRuntime(id, protocolRuntime);
+                connectionGenerations.merge(id, 1L, Long::sum);
 
                 entry.setConnected(true);
                 if (selectedConnectionId == null || !isSelectableConnectionIdLocked(selectedConnectionId)) {
@@ -407,6 +441,7 @@ public final class ConnectionManager {
         synchronized (connectionLock) {
             userDisconnectedIds.add(id);
             userDisconnectReasons.put(id, reason);
+            expectedDeviceRebootIds.remove(id);
             ReconnectService.getInstance().cancelReconnect(id);
             entry = findEntry(id);
             connectionName = entry != null ? entry.getName() : id;
@@ -440,19 +475,66 @@ public final class ConnectionManager {
      *
      * @param id идентификатор профиля подключения
      */
-    public void disconnectForDeviceReboot(String id) {
+    public boolean disconnectForDeviceReboot(String id) {
+        return disconnectForDeviceReboot(id, -1);
+    }
+
+    /**
+     * Разрывает соединение для reboot только если это всё ещё та же transport-сессия,
+     * которую видел вызывающий код. Это защищает от позднего save-handoff, который
+     * иначе мог бы отключить уже свежее соединение после самостоятельного reconnect.
+     */
+    public boolean disconnectForDeviceReboot(String id, long expectedConnectionGeneration) {
+        return disconnectForDeviceReboot(id, expectedConnectionGeneration, null);
+    }
+
+    /**
+     * Разрывает соединение для reboot только если сигнал пришёл от текущего runtime-а.
+     * Это защищает свежее переподключение от поздних {@code FromRadio.REBOOTED}
+     * из уже закрытой протокольной сессии.
+     */
+    public boolean disconnectForDeviceRebootFromRuntime(String id, ProtocolRuntime<?> expectedRuntime) {
+        if (expectedRuntime == null) {
+            return false;
+        }
+        return disconnectForDeviceReboot(id, -1, expectedRuntime);
+    }
+
+    private boolean disconnectForDeviceReboot(String id,
+                                              long expectedConnectionGeneration,
+                                              ProtocolRuntime<?> expectedRuntime) {
         ConnectionEntry entry;
         TransportConnection conn;
         ProtocolRuntime<?> protocolRuntime;
+        boolean pendingConnection;
+        long currentGeneration;
         synchronized (connectionLock) {
             userDisconnectedIds.remove(id);
             userDisconnectReasons.remove(id);
             entry = findEntry(id);
             if (entry == null) {
-                return;
+                return false;
+            }
+            currentGeneration = connectionGenerations.getOrDefault(id, 0L);
+            if (expectedConnectionGeneration >= 0 && currentGeneration != expectedConnectionGeneration) {
+                expectedDeviceRebootIds.remove(id);
+                log.info("Skipping stale reboot reconnect handoff for '{}' (expected generation {}, current {})",
+                        entry.getName(), expectedConnectionGeneration, currentGeneration);
+                return false;
             }
             conn = activeConnections.get(id);
             protocolRuntime = protocolRuntimes.get(id);
+            if (expectedRuntime != null && protocolRuntime != expectedRuntime) {
+                log.info("Skipping stale protocol reboot signal for '{}': runtime is no longer current",
+                        entry.getName());
+                return false;
+            }
+            pendingConnection = pendingConnections.containsKey(id);
+            if (conn != null) {
+                expectedDeviceRebootIds.add(id);
+            } else {
+                expectedDeviceRebootIds.remove(id);
+            }
         }
 
         if (protocolRuntime instanceof MeshtasticProtocolRuntime meshtasticRuntime) {
@@ -464,15 +546,42 @@ public final class ConnectionManager {
             // Не вызываем cleanupConnection() здесь: нам нужно, чтобы normal
             // onDisconnected()/onConnectionError() path запустил auto-reconnect.
             conn.disconnect();
-            return;
+            return true;
         }
 
-        if (!entry.isReconnecting() && !pendingConnections.containsKey(id)) {
+        if (!pendingConnection) {
             entry.setConnected(false);
             selectConnectionIfNeeded();
             fireChanged();
-            ReconnectService.getInstance().startReconnect(id);
+            ReconnectService.getInstance().startReconnectAfterDeviceReboot(id);
+            return true;
         }
+        return false;
+    }
+
+    /**
+     * Помечает ближайший разрыв соединения как ожидаемый reboot устройства.
+     * Это нужно, когда прошивка может закрыть transport сама ещё до того, как
+     * UI успеет вызвать {@link #disconnectForDeviceReboot(String)}.
+     */
+    public void expectDeviceReboot(String id) {
+        if (id == null || id.isBlank()) {
+            return;
+        }
+        expectedDeviceRebootIds.add(id);
+    }
+
+    public void clearExpectedDeviceReboot(String id) {
+        if (id != null) {
+            expectedDeviceRebootIds.remove(id);
+        }
+    }
+
+    public long getConnectionGeneration(String id) {
+        if (id == null) {
+            return 0L;
+        }
+        return connectionGenerations.getOrDefault(id, 0L);
     }
 
     /**
@@ -492,6 +601,15 @@ public final class ConnectionManager {
      */
     public boolean isConnectionActiveOrPending(String id) {
         return activeConnections.containsKey(id) || pendingConnections.containsKey(id);
+    }
+
+    /**
+     * Проверяет, есть ли открытое или открывающееся BLE transport-подключение.
+     */
+    public boolean hasActiveBleTransport() {
+        synchronized (connectionLock) {
+            return findActiveBleTransportLocked(null) != null;
+        }
     }
 
     /**
@@ -771,17 +889,19 @@ public final class ConnectionManager {
 
     /**
      * Удаляет transport из runtime-карт после disconnect/error callback-а.
+     *
+     * @return {@code true}, если callback относится к текущему active/pending transport-у
      */
-    private void cleanupConnection(String id, TransportConnection expectedConnection) {
+    private boolean cleanupConnection(String id, TransportConnection expectedConnection) {
         synchronized (connectionLock) {
             boolean removedActive = activeConnections.remove(id, expectedConnection);
             boolean removedPending = pendingConnections.remove(id, expectedConnection);
             if (removedActive) {
                 cleanupRuntimeState(id);
             } else if (!removedPending) {
-                return;
+                return false;
             }
-            selectConnectionIfNeededLocked();
+            return true;
         }
     }
 
@@ -805,6 +925,37 @@ public final class ConnectionManager {
         throw new ConnectionException("Нода " + entry.getNodeId()
                 + " уже подключена через \"" + duplicateEntry.getName()
                 + "\" (" + duplicateEntry.getEffectiveType() + ")");
+    }
+
+    private void ensureBleConcurrencyAllowedLocked(String id, ConnectionEntry entry) throws ConnectionException {
+        if (entry == null || entry.getEffectiveType() != ConnectionType.BLE) {
+            return;
+        }
+        BleDeviceDiscoveryService discovery = BleDeviceDiscoveryService.getInstance();
+        if (discovery.supportsParallelConnections()) {
+            return;
+        }
+        ConnectionEntry activeBle = findActiveBleTransportLocked(id);
+        if (activeBle == null) {
+            return;
+        }
+        throw new ConnectionException("Параллельные BLE-подключения на этой платформе пока не поддерживаются. "
+                + "Отключите \"" + activeBle.getName() + "\" перед подключением \"" + entry.getName() + "\".");
+    }
+
+    private ConnectionEntry findActiveBleTransportLocked(String excludeId) {
+        for (ConnectionEntry candidate : entries) {
+            if (candidate == null || candidate.getEffectiveType() != ConnectionType.BLE) {
+                continue;
+            }
+            if (excludeId != null && excludeId.equals(candidate.getId())) {
+                continue;
+            }
+            if (activeConnections.containsKey(candidate.getId()) || pendingConnections.containsKey(candidate.getId())) {
+                return candidate;
+            }
+        }
+        return null;
     }
 
     private ConnectionEntry findDuplicateNodeConnection(String id, String nodeId) {
@@ -906,8 +1057,11 @@ public final class ConnectionManager {
      * Создаёт transport по профилю подключения, не запуская протокольную логику.
      */
     private TransportConnection createConnection(ConnectionEntry entry) {
-        return TransportConnectionFactory.create(entry,
-                () -> BleDeviceDiscoveryService.getInstance().getPlatform());
+        BleDeviceDiscoveryService discovery = BleDeviceDiscoveryService.getInstance();
+        return TransportConnectionFactory.create(
+                entry,
+                discovery::createConnectionPlatform,
+                discovery.shouldDisposeConnectionPlatform());
     }
 
     /**

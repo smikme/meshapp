@@ -4,6 +4,9 @@ import com.sun.jna.Callback;
 import com.sun.jna.Library;
 import com.sun.jna.Native;
 import com.sun.jna.Pointer;
+import com.meshtastic.client.utils.NativeResourceLoader;
+
+import java.nio.file.Path;
 
 /**
  * JNA-маппинг нативной библиотеки meshapp-ble.dll (WinRT BLE).
@@ -20,9 +23,12 @@ import com.sun.jna.Pointer;
  */
 public interface WinBleLibrary extends Library {
 
-    WinBleLibrary INSTANCE = loadLibrary();
+    static WinBleLibrary loadIsolated() {
+        Path libraryPath = NativeResourceLoader.extractLibraryResource("meshapp-ble");
+        return Native.load(libraryPath.toAbsolutePath().toString(), WinBleLibrary.class);
+    }
 
-    private static WinBleLibrary loadLibrary() {
+    static WinBleLibrary loadShared() {
         return Native.load("meshapp-ble", WinBleLibrary.class);
     }
 

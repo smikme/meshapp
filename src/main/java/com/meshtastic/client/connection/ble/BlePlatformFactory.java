@@ -49,5 +49,18 @@ public final class BlePlatformFactory {
         return OsDetect.isMacOs() || OsDetect.isWindows() || OsDetect.isLinux();
     }
 
+    /**
+     * Возвращает {@code true}, если backend может безопасно держать несколько
+     * независимых BLE-сессий в одном процессе.
+     * <p>
+     * На macOS backend хранит состояние в отдельных {@link MacOsBle} экземплярах.
+     * На Linux/Windows каждый {@link LinuxBle}/{@link WinBle} загружает свою
+     * временную копию native library, поэтому singleton {@code meshble_*} state
+     * изолирован внутри конкретного экземпляра SO/DLL.
+     */
+    public static boolean supportsParallelConnections() {
+        return isSupported();
+    }
+
     private BlePlatformFactory() {}
 }

@@ -20,15 +20,18 @@ import java.util.List;
  */
 public class MeshMessage {
 
+    private static final String BROADCAST_NODE_ID = "!ffffffff";
+
     /**
      * Статус доставки сообщения.
      * <ul>
      *   <li>{@code SENDING} — отправлено на радио, ожидает ACK</li>
-     *   <li>{@code DELIVERED} — получено подтверждение (ACK) от получателя</li>
-     *   <li>{@code FAILED} — получен NAK или таймаут доставки</li>
+     *   <li>{@code DELIVERED} — сообщение отправлено, но DM-получатель не подтвердил получение</li>
+     *   <li>{@code CONFIRMED} — получено подтверждение (ACK) от DM-получателя</li>
+     *   <li>{@code FAILED} — получен NAK или таймаут канального ACK</li>
      * </ul>
      */
-    public enum DeliveryStatus { SENDING, DELIVERED, FAILED }
+    public enum DeliveryStatus { SENDING, DELIVERED, CONFIRMED, FAILED }
 
     private final String fromNodeId;
     private final String toNodeId;
@@ -77,6 +80,10 @@ public class MeshMessage {
     public String getText() { return text; }
     public long getTimestamp() { return timestamp; }
     public boolean isOutgoing() { return outgoing; }
+
+    public boolean isDirectMessage() {
+        return toNodeId != null && !BROADCAST_NODE_ID.equalsIgnoreCase(toNodeId);
+    }
 
     public DeliveryStatus getStatus() { return status; }
     public void setStatus(DeliveryStatus status) { this.status = status; }

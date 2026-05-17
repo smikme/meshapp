@@ -20,7 +20,8 @@ import java.util.function.Consumer;
  * <p>
  * Паттерн аналогичен {@link com.meshtastic.client.connection.ble.windows.WinBle}:
  * <ul>
- *   <li>Static JNA callbacks для защиты от GC</li>
+ *   <li>Изолированная копия native SO на экземпляр для параллельных BLE-сессий</li>
+ *   <li>Instance JNA callbacks для защиты от GC без перетирания соседних подключений</li>
  *   <li>Polling fallback (200ms) для вычитки fromRadio</li>
  *   <li>Drain chain после каждой записи</li>
  * </ul>
@@ -38,21 +39,23 @@ public class LinuxBle implements BlePlatform {
     private static final int POST_WRITE_DRAIN_ATTEMPTS = 10;
     private static final int POST_WRITE_DRAIN_INTERVAL_MS = 300;
     private static final int READ_BUFFER_SIZE = 512;
+    private static final int AUTHENTICATION_REQUIRED_ERROR = -4;
 
     private final LinuxBleLibrary lib;
 
-    // Static JNA callbacks — prevent GC (same pattern as WinBle/MacOsBle)
-    private static LinuxBleLibrary.LogCallback logCallback;
-    private static LinuxBleLibrary.DeviceCallback scanCallback;
-    private static LinuxBleLibrary.DataCallback dataCallback;
-    private static LinuxBleLibrary.StateCallback stateCallback;
-    private static LinuxBleLibrary.PasskeyRequestCallback passkeyCallback;
+    // Instance callbacks must stay strongly reachable while this isolated SO copy is loaded.
+    private LinuxBleLibrary.LogCallback logCallback;
+    private LinuxBleLibrary.DeviceCallback scanCallback;
+    private LinuxBleLibrary.DataCallback dataCallback;
+    private LinuxBleLibrary.StateCallback stateCallback;
+    private LinuxBleLibrary.PasskeyRequestCallback passkeyCallback;
 
     private volatile Consumer<BleDevice> scanConsumer;
     private volatile Consumer<byte[]> fromRadioListener;
     private volatile Consumer<BleState> stateListener;
     private volatile Consumer<String> passkeyRequestHandler;
     private volatile boolean connected;
+    private volatile String connectedAddress;
     private volatile BleProtocolProfile profile = BleProtocolProfile.MESHTASTIC;
 
     // Polling (fromRadio data also comes via fd notifications in native code,
@@ -68,23 +71,18 @@ public class LinuxBle implements BlePlatform {
 
     public LinuxBle() {
         try {
-            lib = LinuxBleLibrary.INSTANCE;
-        } catch (UnsatisfiedLinkError e) {
+            lib = LinuxBleLibrary.loadIsolated();
+        } catch (RuntimeException | UnsatisfiedLinkError e) {
             log.error("Не удалось загрузить libmeshapp-ble.so: {}", e.getMessage());
             throw new UnsupportedOperationException(
                     "libmeshapp-ble.so не найден. BLE на Linux недоступен.", e);
         }
 
-        int result = lib.meshble_init();
-        if (result != 0) {
-            throw new UnsupportedOperationException(bluezInitFailureMessage(result));
-        }
-
-        // Forward native log_msg() to SLF4J (static callback = GC protection)
+        // Forward native log_msg() to SLF4J before init so agent registration is visible.
         logCallback = msg -> log.debug("[native] {}", msg);
         lib.meshble_set_log_callback(logCallback);
 
-        // Passkey request callback (static, prevent GC)
+        // Passkey request callback; must exist before the BlueZ agent can receive requests.
         passkeyCallback = address -> {
             Consumer<String> handler = passkeyRequestHandler;
             if (handler != null && address != null) {
@@ -92,6 +90,11 @@ public class LinuxBle implements BlePlatform {
             }
         };
         lib.meshble_set_passkey_request_callback(passkeyCallback);
+
+        int result = lib.meshble_init();
+        if (result != 0) {
+            throw new UnsupportedOperationException(bluezInitFailureMessage(result));
+        }
 
         log.info("BlueZ BLE инициализирован (нативная библиотека)");
     }
@@ -165,11 +168,13 @@ public class LinuxBle implements BlePlatform {
                 }
                 case 1 -> { // disconnected
                     connected = false;
+                    connectedAddress = null;
                     stopPolling();
                     if (sl != null) { sl.accept(new BleState.Disconnected()); }
                 }
                 case 2 -> { // error
                     connected = false;
+                    connectedAddress = null;
                     stopPolling();
                     String msg = errorMsg != null ? errorMsg : "BLE error";
                     if (sl != null) { sl.accept(new BleState.Error(msg, null)); }
@@ -185,6 +190,7 @@ public class LinuxBle implements BlePlatform {
         switch (result) {
             case 0 -> {
                 connected = true;
+                connectedAddress = address;
                 log.info("BLE подключено: {}", address);
                 if (lib.meshble_notifications_active() == 0) {
                     log.info("Запуск polling fromRadio ({}ms)", POLL_INTERVAL_MS);
@@ -196,8 +202,7 @@ public class LinuxBle implements BlePlatform {
             case -1 -> throw new ConnectionException("BLE таймаут или разрыв подключения: " + address);
             case -2 -> throw new ConnectionException("BLE устройство не найдено: " + address);
             case -3 -> throw new ConnectionException("GATT ошибка при подключении к: " + address);
-            case -4 -> throw new ConnectionException(
-                    "Доступ запрещён. Выполните сопряжение: bluetoothctl pair " + address);
+            case AUTHENTICATION_REQUIRED_ERROR -> throw new ConnectionException(authenticationRequiredMessage(address));
             case -5 -> throw new ConnectionException("BLE подключение отменено: " + address);
             default -> throw new ConnectionException("BLE ошибка подключения (code=" + result + "): " + address);
         }
@@ -206,6 +211,7 @@ public class LinuxBle implements BlePlatform {
     @Override
     public void disconnect() {
         connected = false;
+        connectedAddress = null;
         stopPolling();
         lib.meshble_disconnect();
         log.info("BLE отключено");
@@ -226,6 +232,19 @@ public class LinuxBle implements BlePlatform {
         }
         int result = lib.meshble_write_to_radio(protobufPayload, protobufPayload.length);
         if (result != 0) {
+            if (result == AUTHENTICATION_REQUIRED_ERROR) {
+                String message = authenticationRequiredMessage(connectedAddress);
+                connected = false;
+                connectedAddress = null;
+                stopPolling();
+                lib.meshble_disconnect();
+                log.error("writeToRadio: {}", message);
+                Consumer<BleState> sl = stateListener;
+                if (sl != null) {
+                    sl.accept(new BleState.Error(message, null));
+                }
+                return false;
+            }
             log.error("writeToRadio failed: error={}", result);
             return false;
         } else {
@@ -352,5 +371,11 @@ public class LinuxBle implements BlePlatform {
             long delayMs = (long) i * POST_WRITE_DRAIN_INTERVAL_MS;
             pollScheduler.schedule(this::pollFromRadio, delayMs, TimeUnit.MILLISECONDS);
         }
+    }
+
+    private static String authenticationRequiredMessage(String address) {
+        String target = (address == null || address.isEmpty()) ? "" : " (" + address + ")";
+        return "BLE: сопряжение не аутентифицировано" + target
+                + ". Удалите устройство в Bluetooth и выполните pairing заново с PIN-кодом на экране устройства.";
     }
 }

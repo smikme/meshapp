@@ -22,7 +22,8 @@ import java.util.function.Consumer;
  * <p>
  * Паттерн аналогичен {@link com.meshtastic.client.connection.ble.macos.MacOsBle}:
  * <ul>
- *   <li>Static JNA callbacks для защиты от GC</li>
+ *   <li>Изолированная копия native DLL на экземпляр для параллельных BLE-сессий</li>
+ *   <li>Instance JNA callbacks для защиты от GC без перетирания соседних подключений</li>
  *   <li>Polling fallback (200ms) при недоступности notifications</li>
  *   <li>Drain chain после каждой записи</li>
  * </ul>
@@ -42,11 +43,11 @@ public class WinBle implements BlePlatform {
 
     private final WinBleLibrary lib;
 
-    // Static JNA callbacks — prevent GC (same pattern as MacOsBle)
-    private static WinBleLibrary.DeviceCallback scanCallback;
-    private static WinBleLibrary.DataCallback dataCallback;
-    private static WinBleLibrary.StateCallback stateCallback;
-    private static WinBleLibrary.PasskeyRequestCallback passkeyCallback;
+    // Instance callbacks must stay strongly reachable while this isolated DLL copy is loaded.
+    private WinBleLibrary.DeviceCallback scanCallback;
+    private WinBleLibrary.DataCallback dataCallback;
+    private WinBleLibrary.StateCallback stateCallback;
+    private WinBleLibrary.PasskeyRequestCallback passkeyCallback;
 
     private volatile Consumer<BleDevice> scanConsumer;
     private volatile Consumer<byte[]> fromRadioListener;
@@ -68,8 +69,8 @@ public class WinBle implements BlePlatform {
 
     public WinBle() {
         try {
-            lib = WinBleLibrary.INSTANCE;
-        } catch (UnsatisfiedLinkError e) {
+            lib = WinBleLibrary.loadIsolated();
+        } catch (RuntimeException | UnsatisfiedLinkError e) {
             log.error("Не удалось загрузить meshapp-ble.dll: {}", e.getMessage());
             throw new UnsupportedOperationException(
                     "meshapp-ble.dll не найден. BLE на Windows недоступен.", e);

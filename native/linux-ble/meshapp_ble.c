@@ -50,6 +50,7 @@
 #define MAX_DRAIN          100
 #define POLL_TIMEOUT_MS    100
 #define PAIR_TIMEOUT_MS    60000
+#define WRITE_VALUE_TIMEOUT_MS 60000
 
 /* ==================== Logging ==================== */
 
@@ -196,6 +197,8 @@ static const char* active_notify_trigger_uuid(void) {
     return active_profile() == PROFILE_MESHCORE ? NULL : FROM_NUM_UUID;
 }
 
+static void process_tasks(void);
+
 /* ==================== Wake + Dispatch ==================== */
 
 static void wake_worker(void) {
@@ -270,6 +273,28 @@ static int map_bluez_connect_error(const char* name, const char* message) {
         return -1;
     }
     return -3;
+}
+
+static int map_bluez_write_error(const char* name, const char* message) {
+    if (contains_text(name, "Authentication") || contains_text(name, "NotAuthorized") ||
+        contains_text(name, "NotPermitted") || contains_text(name, "AccessDenied") ||
+        contains_text(name, "Rejected") || contains_text(name, "Canceled") ||
+        contains_text(name, "Cancelled") || contains_text(name, "NotPaired") ||
+        contains_text(message, "Insufficient Authentication") ||
+        contains_text(message, "ATT error: 0x05") ||
+        contains_text(message, "Authentication") ||
+        contains_text(message, "authentication") ||
+        contains_text(message, "Not paired") ||
+        contains_text(message, "not paired") ||
+        contains_text(message, "encrypt") ||
+        contains_text(message, "bond")) {
+        return -4;
+    }
+    if (contains_text(name, "Timeout") || contains_text(name, "NoReply") ||
+        contains_text(message, "timed out") || contains_text(message, "timeout")) {
+        return -1;
+    }
+    return -1;
 }
 
 /* ==================== BlueZ D-Bus Helpers (worker thread only) ==================== */
@@ -491,6 +516,43 @@ static int start_notify(sd_bus* bus, const char* char_path) {
 
 /* ==================== WriteValue / ReadValue (D-Bus fallback) ==================== */
 
+typedef struct {
+    int done;
+    int result;
+    int length;
+    char error_name[128];
+    char error_msg[256];
+} write_reply_ctx_t;
+
+static int on_write_value_reply(sd_bus_message* msg, void* userdata, sd_bus_error* ret_error) {
+    (void)ret_error;
+    write_reply_ctx_t* ctx = (write_reply_ctx_t*)userdata;
+    if (!ctx) return 0;
+
+    if (!msg) {
+        ctx->result = -1;
+        ctx->done = 1;
+        return 1;
+    }
+
+    if (sd_bus_message_is_method_error(msg, NULL) > 0) {
+        const sd_bus_error* error = sd_bus_message_get_error(msg);
+        const char* name = (error && error->name) ? error->name : "unknown";
+        const char* message = (error && error->message) ? error->message : "";
+        snprintf(ctx->error_name, sizeof(ctx->error_name), "%s", name);
+        snprintf(ctx->error_msg, sizeof(ctx->error_msg), "%s", message);
+        ctx->result = map_bluez_write_error(ctx->error_name, ctx->error_msg);
+        log_msg("[meshble] WriteValue failed: %s (%s)",
+                ctx->error_msg[0] ? ctx->error_msg : "?", ctx->error_name);
+    } else {
+        ctx->result = 0;
+        log_msg("[meshble] WriteValue OK (%d bytes)", ctx->length);
+    }
+
+    ctx->done = 1;
+    return 1;
+}
+
 /** Single WriteValue attempt via D-Bus */
 static int dbus_write_value_once(sd_bus* bus, const char* char_path,
                                   const unsigned char* data, int length,
@@ -506,29 +568,65 @@ static int dbus_write_value_once(sd_bus* bus, const char* char_path,
 
     /* Options dict: {"type": "request"} for write-with-response */
     r = sd_bus_message_open_container(m, 'a', "{sv}");
-    if (r >= 0) {
-        sd_bus_message_open_container(m, 'e', "sv");
-        sd_bus_message_append(m, "s", "type");
-        sd_bus_message_open_container(m, 'v', "s");
-        sd_bus_message_append(m, "s", "request");
-        sd_bus_message_close_container(m);
-        sd_bus_message_close_container(m);
-        sd_bus_message_close_container(m);
+    if (r < 0) { sd_bus_message_unref(m); return r; }
+    sd_bus_message_open_container(m, 'e', "sv");
+    sd_bus_message_append(m, "s", "type");
+    sd_bus_message_open_container(m, 'v', "s");
+    sd_bus_message_append(m, "s", "request");
+    sd_bus_message_close_container(m);
+    sd_bus_message_close_container(m);
+    sd_bus_message_close_container(m);
+
+    write_reply_ctx_t write_reply = { .done = 0, .result = -1, .length = length };
+    sd_bus_slot* write_slot = NULL;
+    r = sd_bus_call_async(bus, &write_slot, m,
+                          on_write_value_reply, &write_reply,
+                          (uint64_t)WRITE_VALUE_TIMEOUT_MS * 1000);
+    sd_bus_message_unref(m);
+    if (r < 0) {
+        log_msg("[meshble] WriteValue async call failed: %s", strerror(-r));
+        return -1;
     }
 
-    sd_bus_error error = SD_BUS_ERROR_NULL;
-    r = sd_bus_call(bus, m, 5000000, &error, NULL);
-    if (r < 0) {
-        if (error.name && strstr(error.name, "InProgress")) {
-            *out_in_progress = 1;
+    int64_t deadline = now_ms() + WRITE_VALUE_TIMEOUT_MS;
+    while (now_ms() < deadline) {
+        for (;;) {
+            r = sd_bus_process(bus, NULL);
+            if (r <= 0) break;
         }
-        log_msg("[meshble] WriteValue failed: %s (%s)", error.message, error.name);
-    } else {
-        log_msg("[meshble] WriteValue OK (%d bytes)", length);
+        process_tasks();
+
+        if (write_reply.done) {
+            if (write_slot) sd_bus_slot_unref(write_slot);
+            if (contains_text(write_reply.error_name, "InProgress")) {
+                *out_in_progress = 1;
+            }
+            return write_reply.result;
+        }
+
+        if (!atomic_load(&g_worker_running) || !atomic_load(&g_connected)) {
+            log_msg("[meshble] WriteValue cancelled");
+            if (write_slot) sd_bus_slot_unref(write_slot);
+            return -1;
+        }
+
+        int64_t remaining = deadline - now_ms();
+        int timeout = remaining > POLL_TIMEOUT_MS ? POLL_TIMEOUT_MS : (int)remaining;
+        if (timeout < 1) timeout = 1;
+
+        int fd = sd_bus_get_fd(bus);
+        if (fd >= 0) {
+            struct pollfd pfd = { .fd = fd, .events = sd_bus_get_events(bus) };
+            poll(&pfd, 1, timeout);
+        } else {
+            struct timespec ts = { .tv_sec = 0, .tv_nsec = (long)timeout * 1000000 };
+            nanosleep(&ts, NULL);
+        }
     }
-    sd_bus_error_free(&error);
-    sd_bus_message_unref(m);
-    return r < 0 ? -1 : 0;
+
+    if (write_slot) sd_bus_slot_unref(write_slot);
+    log_msg("[meshble] WriteValue timed out waiting for BlueZ reply");
+    return -1;
 }
 
 /** Write data via D-Bus WriteValue with retry on InProgress (Bleak-style) */
@@ -538,7 +636,7 @@ static int dbus_write_value(sd_bus* bus, const char* char_path,
         int in_progress = 0;
         int r = dbus_write_value_once(bus, char_path, data, length, &in_progress);
         if (r >= 0) return 0;
-        if (!in_progress) return -1; /* real error, not InProgress */
+        if (!in_progress) return r; /* real error, not InProgress */
         /* InProgress — retry after 50ms (like Bleak does with 10ms) */
         struct timespec ts = { .tv_sec = 0, .tv_nsec = 50000000 };
         nanosleep(&ts, NULL);
@@ -949,6 +1047,14 @@ static void do_disconnect(void) {
     atomic_store(&g_use_dbus_write, false);
     atomic_store(&g_use_dbus_read, false);
 
+    if (g_pending_passkey_msg) {
+        sd_bus_reply_method_errorf(g_pending_passkey_msg,
+                                   "org.bluez.Error.Rejected",
+                                   "Disconnected");
+        sd_bus_message_unref(g_pending_passkey_msg);
+        g_pending_passkey_msg = NULL;
+    }
+
     if (g_from_radio_fd >= 0) { close(g_from_radio_fd); g_from_radio_fd = -1; }
     if (g_to_radio_fd >= 0) { close(g_to_radio_fd); g_to_radio_fd = -1; }
 
@@ -1040,6 +1146,8 @@ static void do_start_scan(void* arg) {
     if (r < 0) {
         log_msg("[meshble] StartDiscovery failed: %s", error.message);
         sd_bus_error_free(&error);
+        if (g_iface_added_slot) { sd_bus_slot_unref(g_iface_added_slot); g_iface_added_slot = NULL; }
+        g_device_callback = NULL;
         ctx->result = -1;
         return;
     }
@@ -1450,7 +1558,7 @@ static void do_connect(void* arg) {
     ctx->result = 0;
 }
 
-/* ==================== BlueZ Pairing Agent (KeyboardOnly) ==================== */
+/* ==================== BlueZ Pairing Agent ==================== */
 
 #define AGENT_PATH "/meshapp/agent"
 #define AGENT_MGR_IFACE "org.bluez.AgentManager1"
@@ -1495,6 +1603,9 @@ static int agent_request_passkey(sd_bus_message* msg, void* userdata, sd_bus_err
 
     /* Save the D-Bus message — we'll reply asynchronously */
     if (g_pending_passkey_msg) {
+        sd_bus_reply_method_errorf(g_pending_passkey_msg,
+                                   "org.bluez.Error.Rejected",
+                                   "Superseded by a newer passkey request");
         sd_bus_message_unref(g_pending_passkey_msg);
     }
     g_pending_passkey_msg = sd_bus_message_ref(msg);
@@ -1507,7 +1618,47 @@ static int agent_request_passkey(sd_bus_message* msg, void* userdata, sd_bus_err
     return 1; /* positive = we'll reply later (async) */
 }
 
-static int agent_auto_accept(sd_bus_message* msg, void* userdata, sd_bus_error* err) {
+static int agent_request_pincode(sd_bus_message* msg, void* userdata, sd_bus_error* err) {
+    (void)userdata; (void)err;
+    const char* device_path = NULL;
+    sd_bus_message_read(msg, "o", &device_path);
+    log_msg("[meshble] Agent: RequestPinCode for %s rejected (legacy PIN not supported)",
+            device_path ? device_path : "?");
+    return sd_bus_reply_method_errorf(msg, "org.bluez.Error.Rejected", "Legacy PIN code pairing is not supported");
+}
+
+static int agent_display_pincode(sd_bus_message* msg, void* userdata, sd_bus_error* err) {
+    (void)userdata; (void)err;
+    const char* device_path = NULL;
+    const char* pincode = NULL;
+    sd_bus_message_read(msg, "os", &device_path, &pincode);
+    (void)pincode;
+    log_msg("[meshble] Agent: DisplayPinCode for %s", device_path ? device_path : "?");
+    return sd_bus_reply_method_return(msg, "");
+}
+
+static int agent_display_passkey(sd_bus_message* msg, void* userdata, sd_bus_error* err) {
+    (void)userdata; (void)err;
+    const char* device_path = NULL;
+    uint32_t passkey = 0;
+    uint16_t entered = 0;
+    sd_bus_message_read(msg, "ouq", &device_path, &passkey, &entered);
+    log_msg("[meshble] Agent: DisplayPasskey for %s passkey=%06u entered=%u",
+            device_path ? device_path : "?", passkey, entered);
+    return sd_bus_reply_method_return(msg, "");
+}
+
+static int agent_request_confirmation(sd_bus_message* msg, void* userdata, sd_bus_error* err) {
+    (void)userdata; (void)err;
+    const char* device_path = NULL;
+    uint32_t passkey = 0;
+    sd_bus_message_read(msg, "ou", &device_path, &passkey);
+    log_msg("[meshble] Agent: RequestConfirmation for %s passkey=%06u (auto-accepted)",
+            device_path ? device_path : "?", passkey);
+    return sd_bus_reply_method_return(msg, "");
+}
+
+static int agent_auto_authorize(sd_bus_message* msg, void* userdata, sd_bus_error* err) {
     (void)userdata; (void)err;
     return sd_bus_reply_method_return(msg, "");
 }
@@ -1525,13 +1676,13 @@ static int agent_cancel(sd_bus_message* msg, void* userdata, sd_bus_error* err) 
 static const sd_bus_vtable agent_vtable[] = {
     SD_BUS_VTABLE_START(0),
     SD_BUS_METHOD("Release", "", "", agent_release, SD_BUS_VTABLE_UNPRIVILEGED),
-    SD_BUS_METHOD("RequestPinCode", "o", "s", agent_auto_accept, SD_BUS_VTABLE_UNPRIVILEGED),
+    SD_BUS_METHOD("RequestPinCode", "o", "s", agent_request_pincode, SD_BUS_VTABLE_UNPRIVILEGED),
     SD_BUS_METHOD("RequestPasskey", "o", "u", agent_request_passkey, SD_BUS_VTABLE_UNPRIVILEGED),
-    SD_BUS_METHOD("DisplayPinCode", "os", "", agent_auto_accept, SD_BUS_VTABLE_UNPRIVILEGED),
-    SD_BUS_METHOD("DisplayPasskey", "ouu", "", agent_auto_accept, SD_BUS_VTABLE_UNPRIVILEGED),
-    SD_BUS_METHOD("RequestConfirmation", "ou", "", agent_auto_accept, SD_BUS_VTABLE_UNPRIVILEGED),
-    SD_BUS_METHOD("RequestAuthorization", "o", "", agent_auto_accept, SD_BUS_VTABLE_UNPRIVILEGED),
-    SD_BUS_METHOD("AuthorizeService", "os", "", agent_auto_accept, SD_BUS_VTABLE_UNPRIVILEGED),
+    SD_BUS_METHOD("DisplayPinCode", "os", "", agent_display_pincode, SD_BUS_VTABLE_UNPRIVILEGED),
+    SD_BUS_METHOD("DisplayPasskey", "ouq", "", agent_display_passkey, SD_BUS_VTABLE_UNPRIVILEGED),
+    SD_BUS_METHOD("RequestConfirmation", "ou", "", agent_request_confirmation, SD_BUS_VTABLE_UNPRIVILEGED),
+    SD_BUS_METHOD("RequestAuthorization", "o", "", agent_auto_authorize, SD_BUS_VTABLE_UNPRIVILEGED),
+    SD_BUS_METHOD("AuthorizeService", "os", "", agent_auto_authorize, SD_BUS_VTABLE_UNPRIVILEGED),
     SD_BUS_METHOD("Cancel", "", "", agent_cancel, SD_BUS_VTABLE_UNPRIVILEGED),
     SD_BUS_VTABLE_END,
 };
@@ -1544,26 +1695,64 @@ static int register_agent(sd_bus* bus) {
         return r;
     }
 
+    const char* capability = "KeyboardDisplay";
     sd_bus_error error = SD_BUS_ERROR_NULL;
     r = sd_bus_call_method(bus, BLUEZ_BUS, "/org/bluez",
                             AGENT_MGR_IFACE, "RegisterAgent",
-                            &error, NULL, "os", AGENT_PATH, "KeyboardOnly");
+                            &error, NULL, "os", AGENT_PATH, capability);
+    if (r < 0 && !(error.name && strstr(error.name, "AlreadyExists"))) {
+        log_msg("[meshble] RegisterAgent(%s) failed: %s (%s); trying KeyboardOnly",
+                capability,
+                error.message ? error.message : "?",
+                error.name ? error.name : "?");
+        sd_bus_error_free(&error);
+        capability = "KeyboardOnly";
+        sd_bus_error fallback_error = SD_BUS_ERROR_NULL;
+        r = sd_bus_call_method(bus, BLUEZ_BUS, "/org/bluez",
+                                AGENT_MGR_IFACE, "RegisterAgent",
+                                &fallback_error, NULL, "os", AGENT_PATH, capability);
+        if (r < 0) {
+            if (fallback_error.name && strstr(fallback_error.name, "AlreadyExists")) {
+                log_msg("[meshble] Agent already registered");
+                r = 0;
+            } else {
+                log_msg("[meshble] RegisterAgent failed: %s (%s)",
+                        fallback_error.message ? fallback_error.message : "?",
+                        fallback_error.name ? fallback_error.name : "?");
+                sd_bus_error_free(&fallback_error);
+                if (g_agent_slot) { sd_bus_slot_unref(g_agent_slot); g_agent_slot = NULL; }
+                return r;
+            }
+        }
+        sd_bus_error_free(&fallback_error);
+    }
     if (r < 0) {
         if (error.name && strstr(error.name, "AlreadyExists")) {
             log_msg("[meshble] Agent already registered");
+            r = 0;
         } else {
-            log_msg("[meshble] RegisterAgent failed: %s (%s)", error.message, error.name);
+            log_msg("[meshble] RegisterAgent failed: %s (%s)",
+                    error.message ? error.message : "?",
+                    error.name ? error.name : "?");
             sd_bus_error_free(&error);
+            if (g_agent_slot) { sd_bus_slot_unref(g_agent_slot); g_agent_slot = NULL; }
             return r;
         }
     }
     sd_bus_error_free(&error);
 
-    sd_bus_call_method(bus, BLUEZ_BUS, "/org/bluez",
-                        AGENT_MGR_IFACE, "RequestDefaultAgent",
-                        NULL, NULL, "o", AGENT_PATH);
+    sd_bus_error default_error = SD_BUS_ERROR_NULL;
+    r = sd_bus_call_method(bus, BLUEZ_BUS, "/org/bluez",
+                           AGENT_MGR_IFACE, "RequestDefaultAgent",
+                           &default_error, NULL, "o", AGENT_PATH);
+    if (r < 0) {
+        log_msg("[meshble] RequestDefaultAgent failed: %s (%s)",
+                default_error.message ? default_error.message : "?",
+                default_error.name ? default_error.name : "?");
+    }
+    sd_bus_error_free(&default_error);
 
-    log_msg("[meshble] Agent registered (KeyboardOnly)");
+    log_msg("[meshble] Agent registered (%s)", capability);
     return 0;
 }
 
@@ -1623,6 +1812,7 @@ MESHBLE_API int meshble_init(void) {
     register_agent(g_bus);
 
     if (pipe(g_wake_pipe) < 0) {
+        unregister_agent(g_bus);
         sd_bus_unref(g_bus); g_bus = NULL;
         atomic_store(&g_initialized, false);
         return -1;
@@ -1633,7 +1823,18 @@ MESHBLE_API int meshble_init(void) {
     tq_init(&g_tasks);
     atomic_store(&g_profile, PROFILE_MESHTASTIC);
     atomic_store(&g_worker_running, true);
-    pthread_create(&g_worker_thread, NULL, worker_loop, NULL);
+    int thread_result = pthread_create(&g_worker_thread, NULL, worker_loop, NULL);
+    if (thread_result != 0) {
+        log_msg("[meshble] Failed to start worker thread: %s", strerror(thread_result));
+        atomic_store(&g_worker_running, false);
+        tq_destroy(&g_tasks);
+        if (g_wake_pipe[0] >= 0) { close(g_wake_pipe[0]); g_wake_pipe[0] = -1; }
+        if (g_wake_pipe[1] >= 0) { close(g_wake_pipe[1]); g_wake_pipe[1] = -1; }
+        unregister_agent(g_bus);
+        sd_bus_unref(g_bus); g_bus = NULL;
+        atomic_store(&g_initialized, false);
+        return -1;
+    }
 
     log_msg("[meshble] Initialized (sd-bus worker thread)");
     return 0;
@@ -1815,8 +2016,7 @@ static void do_respond_passkey(void* arg) {
 }
 
 MESHBLE_API void meshble_respond_passkey(uint32_t passkey) {
-    static uint32_t pk;
-    pk = passkey;
+    uint32_t pk = passkey;
     run_on_worker(do_respond_passkey, &pk);
 }
 

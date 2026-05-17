@@ -4,10 +4,12 @@ import com.meshtastic.client.model.ConnectionEntry;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.model.ProtocolType;
+import com.meshtastic.client.protocol.FromRadioListener;
 import com.meshtastic.client.protocol.ProtocolHandler;
 import com.meshtastic.client.protocol.ProtocolRuntime;
 import com.meshtastic.client.protocol.ProtocolRuntimeContext;
 import com.meshtastic.client.service.ConfigExchangeService;
+import com.meshtastic.client.service.ConnectionManager;
 import com.meshtastic.client.service.MessageListenerService;
 import com.meshtastic.client.service.MessageService;
 import com.meshtastic.client.service.MqttProxyService;
@@ -39,6 +41,13 @@ public final class MeshtasticProtocolRuntime implements ProtocolRuntime<DeviceSt
     private final MessageListenerService messageListenerService;
     private final MqttProxyService mqttProxyService;
     private final AtomicBoolean closed = new AtomicBoolean(false);
+    private final AtomicBoolean reconnectHandoffRequested = new AtomicBoolean(false);
+    private final FromRadioListener rebootListener = new FromRadioListener() {
+        @Override
+        public void onRebooted() {
+            handleRadioRebooted();
+        }
+    };
 
     private ConfigExchangeService configExchangeService;
     private CompletableFuture<DeviceState> readyFuture;
@@ -110,6 +119,7 @@ public final class MeshtasticProtocolRuntime implements ProtocolRuntime<DeviceSt
      * управления обычному auto-reconnect flow.
      */
     public void prepareForReconnectHandoff() {
+        reconnectHandoffRequested.set(true);
         mqttProxyService.close();
     }
 
@@ -143,6 +153,7 @@ public final class MeshtasticProtocolRuntime implements ProtocolRuntime<DeviceSt
             protocolHandler.startHeartbeat();
         }
 
+        protocolHandler.addListener(rebootListener);
         protocolHandler.addListener(messageListenerService);
         configExchangeService = new ConfigExchangeService(protocolHandler, deviceState);
         readyFuture = configExchangeService.startConfigExchange();
@@ -184,6 +195,7 @@ public final class MeshtasticProtocolRuntime implements ProtocolRuntime<DeviceSt
         deviceState.shutdown();
         messageListenerService.getNotificationManager().dispose();
         mqttProxyService.close();
+        protocolHandler.removeListener(rebootListener);
         if (configExchangeService != null) {
             configExchangeService.abort("connection cleanup");
         }
@@ -240,6 +252,21 @@ public final class MeshtasticProtocolRuntime implements ProtocolRuntime<DeviceSt
                                 entry.getName(), routingError);
                     }
                 });
+    }
+
+    private void handleRadioRebooted() {
+        if (closed.get() || !reconnectHandoffRequested.compareAndSet(false, true)) {
+            return;
+        }
+
+        log.info("Connection '{}' radio reported reboot; switching to reconnect flow",
+                context.connectionEntry().getName());
+        boolean handoffStarted = ConnectionManager.getInstance()
+                .disconnectForDeviceRebootFromRuntime(context.connectionId(), this);
+        if (!handoffStarted) {
+            log.debug("Connection '{}' reboot handoff skipped because runtime is no longer current",
+                    context.connectionEntry().getName());
+        }
     }
 
     /**

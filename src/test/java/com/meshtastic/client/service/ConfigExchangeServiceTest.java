@@ -11,10 +11,12 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.meshtastic.proto.AdminProtos;
 import org.meshtastic.proto.ChannelProtos;
 import org.meshtastic.proto.ConfigProtos;
 import org.meshtastic.proto.MeshProtos;
 import org.meshtastic.proto.ModuleConfigProtos;
+import org.meshtastic.proto.Portnums;
 import org.meshtastic.proto.TelemetryProtos;
 
 import java.nio.file.Path;
@@ -350,6 +352,44 @@ class ConfigExchangeServiceTest {
     }
 
     @Test
+    void onConfigCompleteAutomaticallySyncsNodeTime() throws Exception {
+        FakeConnection connection = new FakeConnection();
+        ProtocolHandler handler = track(new ProtocolHandler(connection));
+        DeviceState state = new DeviceState();
+        ConfigExchangeService service = track(new ConfigExchangeService(handler, state));
+
+        CompletableFuture<DeviceState> future = service.startConfigExchange();
+        int wantConfigId = connection.awaitLastWantConfigId();
+
+        service.onMyNodeInfo(MeshProtos.MyNodeInfo.newBuilder().setMyNodeNum(0x12345678).build());
+        long beforeSeconds = System.currentTimeMillis() / 1000L;
+        service.onConfigComplete(wantConfigId);
+        long afterSeconds = System.currentTimeMillis() / 1000L;
+
+        assertTrue(future.isDone());
+        MeshProtos.MeshPacket positionSyncPacket = connection.awaitPacket(Portnums.PortNum.POSITION_APP);
+        assertEquals(0, positionSyncPacket.getFrom());
+        assertEquals(0x12345678, positionSyncPacket.getTo());
+        MeshProtos.Position position =
+                MeshProtos.Position.parseFrom(positionSyncPacket.getDecoded().getPayload());
+        long sentPositionTime = Integer.toUnsignedLong(position.getTime());
+        assertTrue(sentPositionTime >= beforeSeconds && sentPositionTime <= afterSeconds);
+
+        MeshProtos.MeshPacket timeSyncPacket = connection.awaitPacket(Portnums.PortNum.ADMIN_APP);
+        assertEquals(0, timeSyncPacket.getFrom());
+        assertEquals(0x12345678, timeSyncPacket.getTo());
+        assertFalse(timeSyncPacket.getDecoded().getWantResponse());
+
+        AdminProtos.AdminMessage admin =
+                AdminProtos.AdminMessage.parseFrom(timeSyncPacket.getDecoded().getPayload());
+        assertTrue(admin.hasSetTimeOnly());
+        long sentTime = Integer.toUnsignedLong(admin.getSetTimeOnly());
+        assertTrue(sentTime >= beforeSeconds && sentTime <= afterSeconds);
+
+        assertTrue(state.completePendingPacketAck(timeSyncPacket.getId(), MeshProtos.Routing.Error.NONE));
+    }
+
+    @Test
     void onConfigCompleteIgnoresUnexpectedConfigId() throws Exception {
         FakeConnection connection = new FakeConnection();
         ProtocolHandler handler = track(new ProtocolHandler(connection));
@@ -409,6 +449,7 @@ class ConfigExchangeServiceTest {
         private ConnectionListener connectionListener;
         private volatile Integer lastWantConfigId;
         private final List<Integer> sentWantConfigIds = new ArrayList<>();
+        private final List<MeshProtos.MeshPacket> sentPackets = new ArrayList<>();
 
         @Override
         public void connect() throws ConnectionException {
@@ -433,6 +474,10 @@ class ConfigExchangeServiceTest {
                     lastWantConfigId = toRadio.getWantConfigId();
                     synchronized (sentWantConfigIds) {
                         sentWantConfigIds.add(lastWantConfigId);
+                    }
+                } else if (toRadio.hasPacket()) {
+                    synchronized (sentPackets) {
+                        sentPackets.add(toRadio.getPacket());
                     }
                 }
             } catch (Exception e) {
@@ -477,6 +522,28 @@ class ConfigExchangeServiceTest {
         List<Integer> snapshotWantConfigIds() {
             synchronized (sentWantConfigIds) {
                 return new ArrayList<>(sentWantConfigIds);
+            }
+        }
+
+        MeshProtos.MeshPacket awaitPacket(Portnums.PortNum portNum) throws InterruptedException {
+            long deadlineNanos = System.nanoTime() + TimeUnit.SECONDS.toNanos(1);
+            MeshProtos.MeshPacket packet = findPacket(portNum);
+            while (packet == null && System.nanoTime() < deadlineNanos) {
+                Thread.sleep(10);
+                packet = findPacket(portNum);
+            }
+            if (packet == null) {
+                throw new AssertionError("Timed out waiting for packet " + portNum);
+            }
+            return packet;
+        }
+
+        private MeshProtos.MeshPacket findPacket(Portnums.PortNum portNum) {
+            synchronized (sentPackets) {
+                return sentPackets.stream()
+                        .filter(packet -> packet.hasDecoded() && packet.getDecoded().getPortnum() == portNum)
+                        .reduce((first, second) -> second)
+                        .orElse(null);
             }
         }
     }

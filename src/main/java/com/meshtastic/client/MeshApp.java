@@ -2,6 +2,7 @@ package com.meshtastic.client;
 
 import com.meshtastic.client.components.CrashReportFlow;
 import com.meshtastic.client.components.EmojiImageCache;
+import com.meshtastic.client.components.EmojiRenderingSupport;
 import com.meshtastic.client.logging.JfrDiagnosticSupport;
 import com.meshtastic.client.logging.SessionCrashLogManager;
 import com.meshtastic.client.modal.ModalPane;
@@ -11,6 +12,7 @@ import com.meshtastic.client.service.DatabaseProvider;
 import com.meshtastic.client.service.MessageDbService;
 import com.meshtastic.client.service.NodeCacheService;
 import com.meshtastic.client.service.ConnectionManager;
+import com.meshtastic.client.service.BleDeviceDiscoveryService;
 import com.meshtastic.client.service.PacketMonitorService;
 import com.meshtastic.client.service.UpdateCheckService;
 import com.meshtastic.client.system.FormManager;
@@ -145,6 +147,7 @@ public class MeshApp extends Application {
         ThemeManager.applyTheme(scene, isDark);
 
         FormManager.install(rootPane);
+        EmojiRenderingSupport.install(scene);
 
         stage.setTitle("MeshApp");
         // На macOS иконка берётся из .app bundle (MeshApp.icns в Contents/Resources).
@@ -311,6 +314,7 @@ public class MeshApp extends Application {
         stopUiWatchdog();
         AppTrayManager.getInstance().dispose();
         ConnectionManager.getInstance().shutdownAll();
+        BleDeviceDiscoveryService.getInstance().dispose();
         SessionCrashLogManager.markNormalShutdown();
         JfrDiagnosticSupport.stop();
         releaseSingleInstanceGuard();

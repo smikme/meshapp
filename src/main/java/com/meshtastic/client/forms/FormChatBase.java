@@ -230,6 +230,9 @@ abstract class FormChatBase extends Form {
     protected abstract int getUnreadCount(ChatItem item);
     protected abstract void refreshUnreadTailIndicator();
     protected abstract void loadInitialMessages(boolean restoreSavedState);
+    protected abstract void ensureMessageLoaded(long dbId);
+    protected abstract void scrollToMessage(long dbId, double anchorOffset);
+    protected abstract void requestMessageViewportLayout();
     protected abstract void restorePendingCountdowns();
     protected abstract void updateInputEnabled();
     protected abstract void refreshLoadedMessageRows();

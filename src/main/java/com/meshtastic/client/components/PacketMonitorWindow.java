@@ -347,6 +347,7 @@ public final class PacketMonitorWindow {
 
         Scene scene = new Scene(root, DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT);
         ThemeManager.applyTheme(scene, AppPreferences.isDarkMode());
+        EmojiRenderingSupport.install(scene);
 
         stage = new Stage();
         stage.initStyle(StageStyle.DECORATED);

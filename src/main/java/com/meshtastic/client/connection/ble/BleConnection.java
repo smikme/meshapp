@@ -48,10 +48,12 @@ public class BleConnection implements MeshtasticConnection {
     private final String address;
     private final BlePlatform platform;
     private final BleProtocolProfile requestedProfile;
+    private final boolean disposePlatformOnDisconnect;
     private final Object sendInfrastructureLock = new Object();
     private final AtomicLong writeSequence = new AtomicLong();
     private final AtomicLong connectionGeneration = new AtomicLong();
     private final AtomicReference<BleWriteDiagnostics> inFlightWrite = new AtomicReference<>();
+    private final AtomicBoolean platformDisposed = new AtomicBoolean(false);
 
     private volatile Consumer<byte[]> dataListener;
     private volatile ConnectionListener connectionListener;
@@ -65,10 +67,18 @@ public class BleConnection implements MeshtasticConnection {
     }
 
     public BleConnection(String address, BlePlatform platform, BleProtocolProfile profile) {
+        this(address, platform, profile, false);
+    }
+
+    public BleConnection(String address,
+                         BlePlatform platform,
+                         BleProtocolProfile profile,
+                         boolean disposePlatformOnDisconnect) {
         this.address = address;
         this.platform = platform;
         this.requestedProfile = normalizeProfile(profile);
         this.resolvedProfile = this.requestedProfile;
+        this.disposePlatformOnDisconnect = disposePlatformOnDisconnect;
     }
 
     /**
@@ -112,6 +122,8 @@ public class BleConnection implements MeshtasticConnection {
                 }
                 case BleState.Disconnected ignored -> {
                     connected = false;
+                    shutdownSendInfrastructure("BLE disconnected");
+                    disposeOwnedPlatformAsync();
                     if (suppressTerminalStateEvents.get()) {
                         return;
                     }
@@ -121,6 +133,8 @@ public class BleConnection implements MeshtasticConnection {
                 }
                 case BleState.Error e -> {
                     connected = false;
+                    shutdownSendInfrastructure("BLE error");
+                    disposeOwnedPlatformAsync();
                     log.error("BLE error: {}", e.message(), e.cause());
                     if (suppressTerminalStateEvents.get()) {
                         return;
@@ -135,10 +149,32 @@ public class BleConnection implements MeshtasticConnection {
         // Pairing UI поднимается в общий BLE-контракт: Linux/Windows могут запросить passkey
         // из native backend, а macOS просто никогда не вызовет этот handler.
         platform.setPasskeyRequestHandler(deviceAddress ->
-                Platform.runLater(() ->
+                Platform.runLater(() -> {
+                    try {
                         PasskeyDialog.show(deviceAddress,
-                                platform::respondPasskey,
-                                platform::cancelPasskey)));
+                                passkey -> {
+                                    try {
+                                        platform.respondPasskey(passkey);
+                                    } catch (RuntimeException e) {
+                                        log.error("Failed to send BLE passkey response", e);
+                                    }
+                                },
+                                () -> {
+                                    try {
+                                        platform.cancelPasskey();
+                                    } catch (RuntimeException e) {
+                                        log.error("Failed to cancel BLE passkey request", e);
+                                    }
+                                });
+                    } catch (RuntimeException e) {
+                        log.error("Failed to show BLE passkey dialog", e);
+                        try {
+                            platform.cancelPasskey();
+                        } catch (RuntimeException cancelError) {
+                            log.error("Failed to cancel BLE passkey request after dialog error", cancelError);
+                        }
+                    }
+                }));
 
         BleProtocolProfile connectedProfile = connectWithProfileSelection(suppressTerminalStateEvents);
         resolvedProfile = connectedProfile;
@@ -160,7 +196,11 @@ public class BleConnection implements MeshtasticConnection {
         shutdownSendInfrastructure("disconnect");
         platform.setFromRadioListener(null);
         platform.setStateListener(null);
-        platform.disconnect();
+        try {
+            platform.disconnect();
+        } finally {
+            disposeOwnedPlatform();
+        }
         log.info("Disconnected from BLE device: {}", address);
 
         ConnectionListener listener = connectionListener;
@@ -344,6 +384,34 @@ public class BleConnection implements MeshtasticConnection {
         }
         if (watchdogToStop != null) {
             watchdogToStop.shutdownNow();
+        }
+    }
+
+    private void disposeOwnedPlatformAsync() {
+        if (!disposePlatformOnDisconnect || !platformDisposed.compareAndSet(false, true)) {
+            return;
+        }
+        platform.setFromRadioListener(null);
+        platform.setStateListener(null);
+        Thread cleanupThread = new Thread(() -> {
+            try {
+                platform.dispose();
+            } catch (RuntimeException e) {
+                log.warn("Failed to dispose BLE platform for {}", address, e);
+            }
+        }, "ble-dispose-" + threadSuffix());
+        cleanupThread.setDaemon(true);
+        cleanupThread.start();
+    }
+
+    private void disposeOwnedPlatform() {
+        if (!disposePlatformOnDisconnect || !platformDisposed.compareAndSet(false, true)) {
+            return;
+        }
+        try {
+            platform.dispose();
+        } catch (RuntimeException e) {
+            log.warn("Failed to dispose BLE platform for {}", address, e);
         }
     }
 

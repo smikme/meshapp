@@ -13,6 +13,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.*;
 
 /**
@@ -30,11 +31,13 @@ public final class ReconnectService {
     private static final Logger log = LoggerFactory.getLogger(ReconnectService.class);
 
     private static final long INITIAL_DELAY_SECONDS = 2;
+    private static final long DEVICE_REBOOT_INITIAL_DELAY_SECONDS = 6;
     /**
      * BLE-устройствам после reboot обычно нужно больше времени, чем TCP/Serial,
      * чтобы снова начать рекламироваться и принять GATT connect.
      */
     private static final long BLE_INITIAL_DELAY_SECONDS = 5;
+    private static final long BLE_DEVICE_REBOOT_INITIAL_DELAY_SECONDS = 10;
     private static final long MAX_DELAY_SECONDS = 30;
     /**
      * Перед BLE reconnect даём короткое scan window, чтобы прогреть discovery cache
@@ -48,6 +51,7 @@ public final class ReconnectService {
     private final ScheduledExecutorService scheduler;
     private final Map<String, ScheduledFuture<?>> pendingReconnects = new ConcurrentHashMap<>();
     private final Map<String, Integer> attemptCounts = new ConcurrentHashMap<>();
+    private final Set<String> deviceRebootReconnects = ConcurrentHashMap.newKeySet();
 
     private ReconnectService() {
         ThreadFactory tf = r -> {
@@ -69,8 +73,34 @@ public final class ReconnectService {
      * Запускает цикл переподключения для указанного соединения.
      * Идемпотентен — повторный вызов для того же id игнорируется.
      */
-    public void startReconnect(String id) {
-        if (pendingReconnects.containsKey(id)) {
+    public synchronized void startReconnect(String id) {
+        startReconnect(id, false);
+    }
+
+    /**
+     * Запускает reconnect после ожидаемого reboot устройства.
+     * Использует более длинную первую паузу, чтобы не делать раннюю неудачную попытку,
+     * пока радио ещё перезагружается или BLE ещё не рекламируется.
+     */
+    public synchronized void startReconnectAfterDeviceReboot(String id) {
+        startReconnect(id, true);
+    }
+
+    private void startReconnect(String id, boolean afterDeviceReboot) {
+        ScheduledFuture<?> pending = pendingReconnects.get(id);
+        if (pending != null) {
+            if (afterDeviceReboot && !deviceRebootReconnects.contains(id) && !pending.isDone()) {
+                deviceRebootReconnects.add(id);
+                if (pending.cancel(false) && pendingReconnects.remove(id, pending)) {
+                    attemptCounts.put(id, 0);
+                    ConnectionEntry entry = ConnectionManager.getInstance().findEntry(id);
+                    log.info("Rescheduling auto-reconnect for '{}' after device reboot",
+                            entry != null ? entry.getName() : id);
+                    scheduleNextAttempt(id);
+                }
+            } else if (afterDeviceReboot) {
+                deviceRebootReconnects.add(id);
+            }
             return;
         }
 
@@ -79,7 +109,13 @@ public final class ReconnectService {
             return;
         }
 
-        log.info("Starting auto-reconnect for '{}'", entry.getName());
+        if (afterDeviceReboot) {
+            deviceRebootReconnects.add(id);
+        } else {
+            deviceRebootReconnects.remove(id);
+        }
+        log.info("Starting auto-reconnect for '{}'{}",
+                entry.getName(), afterDeviceReboot ? " after device reboot" : "");
         entry.setReconnecting(true);
         attemptCounts.put(id, 0);
         ConnectionManager manager = ConnectionManager.getInstance();
@@ -99,6 +135,7 @@ public final class ReconnectService {
             future.cancel(false);
         }
         attemptCounts.remove(id);
+        deviceRebootReconnects.remove(id);
 
         ConnectionEntry entry = ConnectionManager.getInstance().findEntry(id);
         if (entry != null && entry.isReconnecting()) {
@@ -111,7 +148,8 @@ public final class ReconnectService {
         int attempt = attemptCounts.getOrDefault(id, 0);
 
         ConnectionEntry entry = ConnectionManager.getInstance().findEntry(id);
-        long initialDelaySeconds = initialDelaySeconds(entry);
+        boolean afterDeviceReboot = deviceRebootReconnects.contains(id);
+        long initialDelaySeconds = initialDelaySeconds(entry, afterDeviceReboot);
         long delaySec = Math.min(initialDelaySeconds * (1L << attempt), MAX_DELAY_SECONDS);
         String name = entry != null ? entry.getName() : id;
 
@@ -152,6 +190,7 @@ public final class ReconnectService {
             // Успех — очищаем состояние reconnect
             pendingReconnects.remove(id);
             attemptCounts.remove(id);
+            deviceRebootReconnects.remove(id);
             entry.setReconnecting(false);
 
             Platform.runLater(() ->
@@ -172,10 +211,14 @@ public final class ReconnectService {
      * появиться в advertising state только через несколько секунд.
      */
     private static long initialDelaySeconds(ConnectionEntry entry) {
+        return initialDelaySeconds(entry, false);
+    }
+
+    private static long initialDelaySeconds(ConnectionEntry entry, boolean afterDeviceReboot) {
         if (entry != null && entry.getEffectiveType() == ConnectionType.BLE) {
-            return BLE_INITIAL_DELAY_SECONDS;
+            return afterDeviceReboot ? BLE_DEVICE_REBOOT_INITIAL_DELAY_SECONDS : BLE_INITIAL_DELAY_SECONDS;
         }
-        return INITIAL_DELAY_SECONDS;
+        return afterDeviceReboot ? DEVICE_REBOOT_INITIAL_DELAY_SECONDS : INITIAL_DELAY_SECONDS;
     }
 
     /**

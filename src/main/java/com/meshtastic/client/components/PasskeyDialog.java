@@ -35,6 +35,7 @@ public final class PasskeyDialog {
                             Runnable onCancel) {
         ModalPane modalPane = ModalPane.getInstance();
         if (modalPane == null) {
+            onCancel.run();
             return;
         }
 

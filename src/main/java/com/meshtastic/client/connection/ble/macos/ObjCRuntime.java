@@ -42,6 +42,7 @@ public final class ObjCRuntime {
 
     // libdispatch
     private static final Function DISPATCH_QUEUE_CREATE = DISPATCH.getFunction("dispatch_queue_create");
+    private static final Function DISPATCH_RELEASE = DISPATCH.getFunction("dispatch_release");
     // ====== Класс и селектор ======
 
     /** objc_getClass(name) → Class pointer */
@@ -79,6 +80,20 @@ public final class ObjCRuntime {
     /** objc_msgSend(receiver, sel, bool) */
     public static void msgSendBool(long receiver, String selector, boolean arg) {
         MSG_SEND.invokeLong(new Object[]{receiver, sel(selector), arg ? 1L : 0L});
+    }
+
+    /** [obj retain] for Objective-C objects handed to Java as raw pointers. */
+    public static void retain(long obj) {
+        if (obj != 0) {
+            MSG_SEND.invokeLong(new Object[]{obj, sel("retain")});
+        }
+    }
+
+    /** [obj release] for Objective-C objects owned by Java-side bridge code. */
+    public static void release(long obj) {
+        if (obj != 0) {
+            MSG_SEND.invokeLong(new Object[]{obj, sel("release")});
+        }
     }
 
     /** objc_msgSend(receiver, sel, Pointer) → id */
@@ -123,8 +138,24 @@ public final class ObjCRuntime {
     /** [CBUUID UUIDWithString:uuidStr] */
     public static long cbUuid(String uuidStr) {
         long nsStr = nsString(uuidStr);
-        long cbUuidClass = cls("CBUUID");
-        return msgSend(cbUuidClass, "UUIDWithString:", nsStr);
+        try {
+            long cbUuidClass = cls("CBUUID");
+            return msgSend(cbUuidClass, "UUIDWithString:", nsStr);
+        } finally {
+            release(nsStr);
+        }
+    }
+
+    /** [[NSAutoreleasePool alloc] init] for JNA calls made outside Cocoa-managed threads. */
+    public static long createAutoreleasePool() {
+        return allocInit("NSAutoreleasePool");
+    }
+
+    /** [pool drain] for pools created by {@link #createAutoreleasePool()}. */
+    public static void drainAutoreleasePool(long pool) {
+        if (pool != 0) {
+            msgSend(pool, "drain");
+        }
     }
 
     /**
@@ -140,15 +171,16 @@ public final class ObjCRuntime {
     // ====== NSData ↔ byte[] ======
 
     /**
-     * Создаёт NSData из byte[].
-     * [NSData dataWithBytes:bytes length:len]
+     * Создаёт owned NSData из byte[].
+     * [[NSData alloc] initWithBytes:bytes length:len]
      */
     public static long nsData(byte[] bytes) {
         Memory mem = new Memory(bytes.length);
         mem.write(0, bytes, 0, bytes.length);
         long nsDataClass = cls("NSData");
+        long alloc = msgSend(nsDataClass, "alloc");
         return MSG_SEND.invokeLong(new Object[]{
-                nsDataClass, sel("dataWithBytes:length:"), mem, (long) bytes.length
+                alloc, sel("initWithBytes:length:"), mem, (long) bytes.length
         });
     }
 
@@ -175,6 +207,13 @@ public final class ObjCRuntime {
      */
     public static long createDispatchQueue(String label) {
         return DISPATCH_QUEUE_CREATE.invokeLong(new Object[]{label, Pointer.NULL});
+    }
+
+    /** Release a queue created by {@link #createDispatchQueue(String)}. */
+    public static void releaseDispatchQueue(long queue) {
+        if (queue != 0) {
+            DISPATCH_RELEASE.invokeVoid(new Object[]{new Pointer(queue)});
+        }
     }
 
     // ====== Создание делегат-классов ======

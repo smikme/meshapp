@@ -300,6 +300,19 @@ cd meshapp
 6. Нажмите **Подключить** — для Meshtastic будет запущен config exchange; для MeshCore KISS будет выполнен SetHardware handshake; для MeshCore Companion будет выполнен `APP_START` handshake.
 7. Для Meshtastic переключитесь в **Чат**, **Узлы** или **Настройки**. Для MeshCore Companion доступны **Чат**, **Узлы**, **DM**, **Статистика**, **Настройки** и **LoRa Monitor**; для MeshCore KISS отображается modem metadata.
 
+### Linux: доступ к USB Serial
+
+Если USB-порт виден в списке, но подключение падает с `Permission denied`, у текущего пользователя нет прав на `/dev/ttyUSB*` или `/dev/ttyACM*`. Проверьте группу device node и добавьте пользователя в неё:
+
+```bash
+ls -l /dev/ttyUSB0
+sudo usermod -aG dialout "$USER"
+```
+
+На некоторых дистрибутивах группа называется `uucp` или `lock`; используйте группу из вывода `ls -l`. После изменения групп нужно выйти из системы и войти снова. `.deb`-пакет MeshApp также устанавливает udev-правила для типичных USB-UART Meshtastic-плат, чтобы активный локальный пользователь получил `uaccess` ACL, а ModemManager не занимал порт.
+
+Если ошибка выглядит как `Device or resource busy`, порт уже открыт другим процессом. Чаще всего это другой serial monitor/CLI или ModemManager.
+
 ---
 
 ## Технологии

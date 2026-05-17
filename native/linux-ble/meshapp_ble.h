@@ -92,7 +92,7 @@ MESHBLE_API int meshble_is_connected(void);
  * Write protobuf payload to the toRadio GATT characteristic.
  * @param data    raw protobuf bytes (no serial framing)
  * @param length  number of bytes
- * @return 0 on success, negative on error
+ * @return 0 on success, -4 when the BLE bond is not authenticated/MITM, otherwise negative on error
  */
 MESHBLE_API int meshble_write_to_radio(const unsigned char* data, int length);
 

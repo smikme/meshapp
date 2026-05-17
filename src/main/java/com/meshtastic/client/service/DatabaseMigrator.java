@@ -31,7 +31,7 @@ public final class DatabaseMigrator {
     private static final Logger log = LoggerFactory.getLogger(DatabaseMigrator.class);
 
     /** Текущая версия схемы. Увеличивается при каждом изменении схемы. */
-    static final int CURRENT_VERSION = 11;
+    static final int CURRENT_VERSION = 12;
     private static final Pattern CONNECTION_NODE_ID_PATTERN =
             Pattern.compile("\"nodeId\"\\s*:\\s*\"(![0-9a-fA-F]{8})\"");
     private static final List<String> APPLICATION_TABLES = List.of(
@@ -95,6 +95,7 @@ public final class DatabaseMigrator {
             if (version < 9) { migrateToV9(connection); version = 9; }
             if (version < 10) { migrateToV10(connection); version = 10; }
             if (version < 11) { migrateToV11(connection); version = 11; }
+            if (version < 12) { migrateToV12(connection); version = 12; }
 
             setVersion(connection, CURRENT_VERSION);
             log.info("Database migration complete, schema version = {}", CURRENT_VERSION);
@@ -349,6 +350,21 @@ public final class DatabaseMigrator {
                     """);
         }
         log.info("Migration v11: added scoped message packet lookup index");
+    }
+
+    /** v12: полнотекстовый индекс H2 для поиска по тексту сообщений. */
+    private static void migrateToV12(Connection connection) throws SQLException {
+        if (!tableExists(connection, "MESSAGES")) {
+            log.info("Migration v12: skipped message fulltext index because messages table is absent");
+            return;
+        }
+        if (!columnExists(connection, "MESSAGES", "ID")
+                || !columnExists(connection, "MESSAGES", "TEXT")) {
+            log.info("Migration v12: skipped message fulltext index because messages table is missing required columns");
+            return;
+        }
+        MessageFullTextIndex.ensureExists(connection);
+        log.info("Migration v12: created message fulltext index");
     }
 
     /** v2: колонка favorite для избранных нод. */

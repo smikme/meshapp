@@ -74,5 +74,6 @@ public class FormChat extends FormChatData {
     @Override
     public void formRefresh() {
         reloadChatList();
+        reopenVisibleSelectedChatIfNeeded();
     }
 }

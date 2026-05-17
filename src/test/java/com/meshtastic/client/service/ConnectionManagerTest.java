@@ -33,8 +33,13 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayDeque;
+import java.util.Map;
+import java.util.Queue;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
@@ -126,7 +131,7 @@ class ConnectionManagerTest {
     @Test
     void connectUsesExplicitMeshCoreCompanionBleRuntime() throws Exception {
         MeshCoreCompanionPlatform platform = new MeshCoreCompanionPlatform();
-        installBlePlatform(platform);
+        installBlePlatformFactory(() -> platform, true);
 
         ConnectionManager manager = ConnectionManager.getInstance();
         ConnectionEntry entry = new ConnectionEntry("meshcore-companion", "AA:BB:CC:DD:EE:FF", "MeshCore Companion");
@@ -151,6 +156,66 @@ class ConnectionManagerTest {
         assertTrue(platform.appStartReceived.await(1, TimeUnit.SECONDS));
 
         manager.disconnect(entry.getId());
+    }
+
+    @Test
+    void connectUsesSeparateBlePlatformForParallelBleConnections() throws Exception {
+        MeshCoreCompanionPlatform firstPlatform =
+                new MeshCoreCompanionPlatform("meshcore-one", (byte) 0xA0);
+        MeshCoreCompanionPlatform secondPlatform =
+                new MeshCoreCompanionPlatform("meshcore-two", (byte) 0xC0);
+        Queue<BlePlatform> platforms = new ArrayDeque<>();
+        platforms.add(firstPlatform);
+        platforms.add(secondPlatform);
+        installBlePlatformFactory(platforms::remove, true);
+
+        ConnectionManager manager = ConnectionManager.getInstance();
+        ConnectionEntry first = new ConnectionEntry("ble-one", "AA:BB:CC:DD:EE:01", "BLE One");
+        first.setProtocol(ProtocolType.MESHCORE_COMPANION);
+        ConnectionEntry second = new ConnectionEntry("ble-two", "AA:BB:CC:DD:EE:02", "BLE Two");
+        second.setProtocol(ProtocolType.MESHCORE_COMPANION);
+        manager.addEntry(first);
+        manager.addEntry(second);
+
+        manager.connect(first.getId());
+        manager.getProtocolReadyFuture(first.getId()).get(5, TimeUnit.SECONDS);
+        manager.connect(second.getId());
+        manager.getProtocolReadyFuture(second.getId()).get(5, TimeUnit.SECONDS);
+
+        assertTrue(first.isConnected());
+        assertTrue(second.isConnected());
+        assertEquals(2, manager.getActiveConnectionEntries().size());
+        assertTrue(firstPlatform.appStartReceived.await(1, TimeUnit.SECONDS));
+        assertTrue(secondPlatform.appStartReceived.await(1, TimeUnit.SECONDS));
+
+        manager.disconnect(second.getId());
+        manager.disconnect(first.getId());
+    }
+
+    @Test
+    void connectRejectsParallelBleWhenPlatformBackendIsSingleton() throws Exception {
+        MeshCoreCompanionPlatform platform = new MeshCoreCompanionPlatform();
+        installBlePlatformFactory(() -> platform, false);
+
+        ConnectionManager manager = ConnectionManager.getInstance();
+        ConnectionEntry first = new ConnectionEntry("ble-one", "AA:BB:CC:DD:EE:01", "BLE One");
+        first.setProtocol(ProtocolType.MESHCORE_COMPANION);
+        ConnectionEntry second = new ConnectionEntry("ble-two", "AA:BB:CC:DD:EE:02", "BLE Two");
+        second.setProtocol(ProtocolType.MESHCORE_COMPANION);
+        manager.addEntry(first);
+        manager.addEntry(second);
+
+        manager.connect(first.getId());
+        manager.getProtocolReadyFuture(first.getId()).get(5, TimeUnit.SECONDS);
+
+        ConnectionException error = assertThrows(ConnectionException.class,
+                () -> manager.connect(second.getId()));
+
+        assertTrue(error.getMessage().contains("Параллельные BLE-подключения"));
+        assertTrue(first.isConnected());
+        assertFalse(second.isConnected());
+
+        manager.disconnect(first.getId());
     }
 
     @Test
@@ -353,13 +418,177 @@ class ConnectionManagerTest {
             assertFalse(entry.isConnected());
             assertTrue(entry.isReconnecting());
             assertFalse(manager.hasActiveConnection());
+            assertTrue(deviceRebootReconnectIds().contains(entry.getId()));
+            assertFalse(expectedDeviceRebootIds(manager).contains(entry.getId()));
         }
+    }
+
+    @Test
+    void fromRadioRebootMarkerStartsRebootAwareReconnect() throws Exception {
+        try (TcpMeshtasticStubServer server = new TcpMeshtasticStubServer(0xCAFEBABE)) {
+            ConnectionManager manager = ConnectionManager.getInstance();
+            ConnectionEntry entry = new ConnectionEntry("stub", "127.0.0.1", server.port());
+            manager.addEntry(entry);
+
+            manager.connect(entry.getId());
+            manager.getConfigFuture(entry.getId()).get(5, TimeUnit.SECONDS);
+            assertTrue(entry.isConnected());
+            assertTrue(manager.hasActiveConnection());
+
+            server.sendRebooted();
+
+            assertTrue(waitUntil(entry::isReconnecting, 2_000));
+            assertFalse(entry.isConnected());
+            assertFalse(manager.hasActiveConnection());
+            assertTrue(deviceRebootReconnectIds().contains(entry.getId()));
+            assertFalse(expectedDeviceRebootIds(manager).contains(entry.getId()));
+
+            ReconnectService.getInstance().cancelReconnect(entry.getId());
+        }
+    }
+
+    @Test
+    void expectedDeviceRebootDisconnectUsesRebootAwareReconnect() throws Exception {
+        ControlledBlePlatform platform = new ControlledBlePlatform();
+        installBlePlatformFactory(() -> platform, true);
+
+        ConnectionManager manager = ConnectionManager.getInstance();
+        ConnectionEntry entry = new ConnectionEntry("ble", "AA:BB:CC:DD:EE:FF", "Test BLE");
+        manager.addEntry(entry);
+
+        manager.connect(entry.getId());
+        assertTrue(entry.isConnected());
+
+        manager.expectDeviceReboot(entry.getId());
+        platform.emitDisconnected();
+
+        assertTrue(waitUntil(entry::isReconnecting, 1_000));
+        assertFalse(entry.isConnected());
+        assertFalse(manager.hasActiveConnection());
+        assertTrue(deviceRebootReconnectIds().contains(entry.getId()));
+        assertFalse(expectedDeviceRebootIds(manager).contains(entry.getId()));
+    }
+
+    @Test
+    void lateDeviceRebootHandoffDoesNotLeaveExpectedRebootFlag() throws Exception {
+        ControlledBlePlatform platform = new ControlledBlePlatform();
+        installBlePlatformFactory(() -> platform, true);
+
+        ConnectionManager manager = ConnectionManager.getInstance();
+        ConnectionEntry entry = new ConnectionEntry("ble", "AA:BB:CC:DD:EE:FF", "Test BLE");
+        manager.addEntry(entry);
+
+        manager.connect(entry.getId());
+        assertTrue(entry.isConnected());
+
+        manager.expectDeviceReboot(entry.getId());
+        platform.emitDisconnected();
+        assertTrue(waitUntil(entry::isReconnecting, 1_000));
+
+        manager.disconnectForDeviceReboot(entry.getId());
+
+        assertTrue(entry.isReconnecting());
+        assertTrue(deviceRebootReconnectIds().contains(entry.getId()));
+        assertFalse(expectedDeviceRebootIds(manager).contains(entry.getId()));
+    }
+
+    @Test
+    void staleDeviceRebootHandoffDoesNotDisconnectFreshReconnect() throws Exception {
+        ControlledBlePlatform firstPlatform = new ControlledBlePlatform();
+        ControlledBlePlatform secondPlatform = new ControlledBlePlatform();
+        Queue<BlePlatform> platforms = new ArrayDeque<>();
+        platforms.add(firstPlatform);
+        platforms.add(secondPlatform);
+        installBlePlatformFactory(platforms::remove, true);
+
+        ConnectionManager manager = ConnectionManager.getInstance();
+        ConnectionEntry entry = new ConnectionEntry("ble", "AA:BB:CC:DD:EE:FF", "Test BLE");
+        manager.addEntry(entry);
+
+        manager.connect(entry.getId());
+        assertTrue(entry.isConnected());
+        long oldGeneration = manager.getConnectionGeneration(entry.getId());
+
+        manager.expectDeviceReboot(entry.getId());
+        firstPlatform.emitDisconnected();
+        assertTrue(waitUntil(entry::isReconnecting, 1_000));
+
+        manager.connect(entry.getId());
+        assertTrue(entry.isConnected());
+        assertFalse(entry.isReconnecting());
+        assertTrue(manager.getConnectionGeneration(entry.getId()) > oldGeneration);
+
+        manager.disconnectForDeviceReboot(entry.getId(), oldGeneration);
+
+        assertTrue(entry.isConnected());
+        assertFalse(entry.isReconnecting());
+        assertTrue(manager.hasActiveConnection());
+
+        manager.disconnect(entry.getId());
+    }
+
+    @Test
+    void rebootAwareReconnectReschedulesExistingShortReconnect() {
+        ConnectionManager manager = ConnectionManager.getInstance();
+        ConnectionEntry entry = new ConnectionEntry("stub", "127.0.0.1", 4403);
+        manager.addEntry(entry);
+
+        ReconnectService service = ReconnectService.getInstance();
+        service.startReconnect(entry.getId());
+        ScheduledFuture<?> normalFuture = pendingReconnects().get(entry.getId());
+        assertNotNull(normalFuture);
+        long normalDelayMs = normalFuture.getDelay(TimeUnit.MILLISECONDS);
+
+        service.startReconnectAfterDeviceReboot(entry.getId());
+
+        ScheduledFuture<?> rebootFuture = pendingReconnects().get(entry.getId());
+        assertNotNull(rebootFuture);
+        assertTrue(rebootFuture != normalFuture);
+        assertTrue(deviceRebootReconnectIds().contains(entry.getId()));
+        assertTrue(rebootFuture.getDelay(TimeUnit.MILLISECONDS) > normalDelayMs + 2_000);
+
+        service.cancelReconnect(entry.getId());
+    }
+
+    @Test
+    void staleDisconnectCallbackDoesNotStartReconnectAfterNewConnectionIsActive() throws Exception {
+        ControlledBlePlatform firstPlatform = new ControlledBlePlatform();
+        ControlledBlePlatform secondPlatform = new ControlledBlePlatform();
+        Queue<BlePlatform> platforms = new ArrayDeque<>();
+        platforms.add(firstPlatform);
+        platforms.add(secondPlatform);
+        installBlePlatformFactory(platforms::remove, true);
+
+        ConnectionManager manager = ConnectionManager.getInstance();
+        ConnectionEntry entry = new ConnectionEntry("ble", "AA:BB:CC:DD:EE:FF", "Test BLE");
+        manager.addEntry(entry);
+
+        manager.connect(entry.getId());
+        assertTrue(entry.isConnected());
+
+        firstPlatform.emitDisconnected();
+        assertTrue(waitUntil(entry::isReconnecting, 1_000));
+        assertFalse(entry.isConnected());
+        assertFalse(manager.hasActiveConnection());
+
+        manager.connect(entry.getId());
+        assertTrue(entry.isConnected());
+        assertFalse(entry.isReconnecting());
+        assertTrue(manager.hasActiveConnection());
+
+        firstPlatform.emitDisconnected();
+
+        assertTrue(entry.isConnected());
+        assertFalse(entry.isReconnecting());
+        assertTrue(manager.hasActiveConnection());
+
+        manager.disconnect(entry.getId());
     }
 
     @Test
     void removeEntryDoesNotBlockWhileBleConnectIsPending() throws Exception {
         BlockingBlePlatform platform = new BlockingBlePlatform();
-        installBlePlatform(platform);
+        installBlePlatformFactory(() -> platform, true);
 
         ConnectionManager manager = ConnectionManager.getInstance();
         ConnectionEntry entry = new ConnectionEntry("ble", "AA:BB:CC:DD:EE:FF", "Test BLE");
@@ -392,11 +621,11 @@ class ConnectionManagerTest {
                 "late BLE connect should be disconnected after removal");
     }
 
-    private static void installBlePlatform(BlePlatform platform) throws Exception {
+    private static void installBlePlatformFactory(java.util.function.Supplier<BlePlatform> platformFactory,
+                                                  boolean supportsParallelConnections) {
         BleDeviceDiscoveryService discovery = BleDeviceDiscoveryService.getInstance();
-        Field platformField = BleDeviceDiscoveryService.class.getDeclaredField("platform");
-        platformField.setAccessible(true);
-        platformField.set(discovery, platform);
+        discovery.setPlatformFactoryForTests(platformFactory);
+        discovery.setParallelConnectionSupportForTests(supportsParallelConnections);
     }
 
     private static boolean waitUntil(CheckedBooleanSupplier condition, long timeoutMs) throws Exception {
@@ -413,6 +642,98 @@ class ConnectionManagerTest {
     @FunctionalInterface
     private interface CheckedBooleanSupplier {
         boolean getAsBoolean() throws Exception;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Set<String> deviceRebootReconnectIds() {
+        return (Set<String>) readField(ReconnectService.getInstance(), "deviceRebootReconnects");
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Set<String> expectedDeviceRebootIds(ConnectionManager manager) {
+        return (Set<String>) readField(manager, "expectedDeviceRebootIds");
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, ScheduledFuture<?>> pendingReconnects() {
+        return (Map<String, ScheduledFuture<?>>) readField(ReconnectService.getInstance(), "pendingReconnects");
+    }
+
+    private static Object readField(Object target, String fieldName) {
+        try {
+            Field field = target.getClass().getDeclaredField(fieldName);
+            field.setAccessible(true);
+            return field.get(target);
+        } catch (ReflectiveOperationException e) {
+            throw new AssertionError("Failed to read field " + fieldName, e);
+        }
+    }
+
+    private static final class ControlledBlePlatform implements BlePlatform {
+        private volatile Consumer<BleState> stateListener;
+        private volatile boolean connected;
+
+        @Override
+        public void startScan(Consumer<BleDevice> onDeviceFound) {
+        }
+
+        @Override
+        public void stopScan() {
+        }
+
+        @Override
+        public void connect(String address) {
+            connected = true;
+            Consumer<BleState> listener = stateListener;
+            if (listener != null) {
+                listener.accept(new BleState.Connected());
+            }
+        }
+
+        @Override
+        public void disconnect() {
+            connected = false;
+            Consumer<BleState> listener = stateListener;
+            if (listener != null) {
+                listener.accept(new BleState.Disconnected());
+            }
+        }
+
+        @Override
+        public boolean isConnected() {
+            return connected;
+        }
+
+        @Override
+        public boolean writeToRadio(byte[] protobufPayload) {
+            return connected;
+        }
+
+        @Override
+        public void setFromRadioListener(Consumer<byte[]> listener) {
+        }
+
+        @Override
+        public void setStateListener(Consumer<BleState> listener) {
+            this.stateListener = listener;
+        }
+
+        @Override
+        public AdapterState getAdapterState() {
+            return AdapterState.POWERED_ON;
+        }
+
+        @Override
+        public void dispose() {
+        }
+
+        private void emitDisconnected() {
+            connected = false;
+            Consumer<BleState> listener = stateListener;
+            if (listener != null) {
+                listener.accept(new BleState.Disconnected());
+            }
+        }
     }
 
     private static final class BlockingBlePlatform implements BlePlatform {
@@ -493,10 +814,21 @@ class ConnectionManagerTest {
 
     private static final class MeshCoreCompanionPlatform implements BlePlatform {
         private final CountDownLatch appStartReceived = new CountDownLatch(1);
+        private final String deviceName;
+        private final byte publicKeyBase;
         private volatile Consumer<byte[]> fromRadioListener;
         private volatile Consumer<BleState> stateListener;
         private volatile BleProtocolProfile profile = BleProtocolProfile.MESHTASTIC;
         private volatile boolean connected;
+
+        private MeshCoreCompanionPlatform() {
+            this("meshcore-companion-test", (byte) 0xA0);
+        }
+
+        private MeshCoreCompanionPlatform(String deviceName, byte publicKeyBase) {
+            this.deviceName = deviceName;
+            this.publicKeyBase = publicKeyBase;
+        }
 
         @Override
         public void startScan(Consumer<BleDevice> onDeviceFound) {
@@ -535,7 +867,7 @@ class ConnectionManagerTest {
                 appStartReceived.countDown();
                 Consumer<byte[]> listener = fromRadioListener;
                 if (listener != null) {
-                    listener.accept(meshCoreSelfInfo("meshcore-companion-test"));
+                    listener.accept(meshCoreSelfInfo(deviceName, publicKeyBase));
                 }
             }
             return connected;
@@ -576,6 +908,10 @@ class ConnectionManagerTest {
     }
 
     private static byte[] meshCoreSelfInfo(String name) {
+        return meshCoreSelfInfo(name, (byte) 0xA0);
+    }
+
+    private static byte[] meshCoreSelfInfo(String name, byte publicKeyBase) {
         byte[] nameBytes = name.getBytes(StandardCharsets.UTF_8);
         byte[] packet = new byte[58 + nameBytes.length];
         packet[0] = (byte) MeshCoreCompanionFrames.PACKET_SELF_INFO;
@@ -583,7 +919,7 @@ class ConnectionManagerTest {
         packet[2] = 10;
         packet[3] = 20;
         for (int i = 0; i < 32; i++) {
-            packet[4 + i] = (byte) (0xA0 + i);
+            packet[4 + i] = (byte) (publicKeyBase + i);
         }
         System.arraycopy(nameBytes, 0, packet, 58, nameBytes.length);
         return packet;
@@ -595,6 +931,7 @@ class ConnectionManagerTest {
         private final CountDownLatch wantConfigLatch = new CountDownLatch(1);
         private final Thread acceptThread;
         private volatile Socket clientSocket;
+        private volatile OutputStream clientOutput;
         private volatile boolean running = true;
 
         private TcpMeshtasticStubServer(int myNodeNum) throws IOException {
@@ -618,6 +955,7 @@ class ConnectionManagerTest {
                 clientSocket = socket;
                 InputStream in = socket.getInputStream();
                 OutputStream out = socket.getOutputStream();
+                clientOutput = out;
                 FrameParser parser = new FrameParser();
                 byte[] buffer = new byte[256];
 
@@ -652,6 +990,18 @@ class ConnectionManagerTest {
         private void send(OutputStream out, MessageLite message) throws IOException {
             out.write(PacketFramer.frame(message));
             out.flush();
+        }
+
+        void sendRebooted() throws Exception {
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(1);
+            while (clientOutput == null && System.nanoTime() < deadline) {
+                Thread.sleep(10);
+            }
+            OutputStream out = clientOutput;
+            assertNotNull(out);
+            send(out, MeshProtos.FromRadio.newBuilder()
+                    .setRebooted(true)
+                    .build());
         }
 
         @Override

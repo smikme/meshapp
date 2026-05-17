@@ -11,7 +11,6 @@ import com.meshtastic.client.modal.Toast;
 import com.meshtastic.client.model.ChatItem;
 import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.model.NodeData;
-import com.meshtastic.client.platform.OsDetect;
 import com.meshtastic.client.service.MessageService;
 import com.meshtastic.client.themes.TypographyManager;
 import com.meshtastic.client.utils.AppPreferences;
@@ -23,7 +22,6 @@ import javafx.collections.transformation.FilteredList;
 import javafx.collections.transformation.SortedList;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
-import javafx.scene.Node;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListView;
@@ -32,6 +30,7 @@ import javafx.scene.control.Separator;
 import javafx.scene.control.SplitPane;
 import javafx.scene.control.TextField;
 import javafx.scene.control.Tooltip;
+import javafx.scene.input.KeyEvent;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
@@ -44,6 +43,7 @@ import javafx.scene.text.FontWeight;
 import java.util.Comparator;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.Optional;
 
 /**
  * Создаёт и хранит JavaFX-структуру формы чата.
@@ -55,6 +55,9 @@ import java.util.Objects;
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 abstract class FormChatUi extends FormChatBase {
+
+    private Region headerSpacer;
+    private FormChatMessageSearchController messageSearchController;
 
     /**
      * Создаёт раздельную компоновку и переиспользуемые контролы активного чата.
@@ -77,7 +80,7 @@ abstract class FormChatUi extends FormChatBase {
     private VBox buildLeftPane() {
         VBox leftPane = new VBox();
         leftPane.getStyleClass().add("chat-list-pane");
-        applyWindowsHitTestBackground(leftPane);
+        FormChatUiSupport.applyWindowsHitTestBackground(leftPane);
 
         TextField searchField = createSearchField();
         newChatBtn = createNewChatButton();
@@ -90,7 +93,7 @@ abstract class FormChatUi extends FormChatBase {
 
     private TextField createSearchField() {
         TextField searchField = new TextField();
-        searchField.setPromptText("🔍 Поиск чатов");
+        searchField.setPromptText("Поиск чатов");
         searchField.getStyleClass().add("chat-search-field");
         return searchField;
     }
@@ -118,7 +121,10 @@ abstract class FormChatUi extends FormChatBase {
     }
 
     private boolean chatMatchesSearch(ChatItem chat, String rawQuery) {
-        String query = rawQuery == null ? "" : rawQuery.trim().toLowerCase(Locale.ROOT);
+        String query = Optional.ofNullable(rawQuery)
+                .map(String::trim)
+                .map(value -> value.toLowerCase(Locale.ROOT))
+                .orElse("");
         return query.isEmpty()
                 || containsIgnoreCase(chat.getDisplayName(), query)
                 || containsIgnoreCase(chat.getLastMessageText(), query);
@@ -131,7 +137,7 @@ abstract class FormChatUi extends FormChatBase {
 
         ListView<ChatItem> listView = new ListView<>(sortedChats);
         listView.getStyleClass().add("chat-list-view");
-        applyWindowsHitTestBackground(listView);
+        FormChatUiSupport.applyWindowsHitTestBackground(listView);
         listView.setCellFactory(view -> new ChatListCell(
                 this::deleteChat,
                 this::showChannelProperties,
@@ -153,21 +159,21 @@ abstract class FormChatUi extends FormChatBase {
             return;
         }
         saveCurrentChatScrollState();
-        if (newItem == null) {
-            closeChat();
-            return;
-        }
+        Optional.ofNullable(newItem).ifPresentOrElse(this::selectChat, this::closeChat);
+    }
 
-        selectedChat = newItem;
+    private void selectChat(ChatItem chat) {
+        selectedChat = chat;
         rememberSelectedChatForBoundConnection();
-        openingChatUnreadCount = newItem.getUnreadCount();
-        openChat(newItem);
+        openingChatUnreadCount = chat.getUnreadCount();
+        openChat(chat);
     }
 
     private VBox buildDetailPane() {
         VBox pane = new VBox();
         pane.getStyleClass().add("chat-detail-pane");
         pane.setMinWidth(300);
+        pane.addEventFilter(KeyEvent.KEY_PRESSED, this::handleDetailPaneKeyPressed);
         pane.getChildren().add(placeholderBox);
         return pane;
     }
@@ -180,12 +186,6 @@ abstract class FormChatUi extends FormChatBase {
         splitPane.getDividers().get(0).positionProperty().addListener((obs, oldVal, newVal) ->
                 AppPreferences.setChatDividerPos(newVal.doubleValue()));
         return splitPane;
-    }
-
-    private void applyWindowsHitTestBackground(javafx.scene.Node node) {
-        if (OsDetect.isWindows() && !AppPreferences.isDisableEffectsEffective()) {
-            node.setStyle(WINDOWS_HIT_TEST_BACKGROUND);
-        }
     }
 
     /**
@@ -233,13 +233,35 @@ abstract class FormChatUi extends FormChatBase {
         headerNameLabel = new Label();
         headerNameLabel.getStyleClass().add("chat-header-name");
 
-        chatHeader = new HBox(10, headerAvatarPane, headerNameLabel);
+        headerSpacer = new Region();
+        messageSearchController = createMessageSearchController();
+
+        chatHeader = new HBox(10,
+                headerAvatarPane,
+                headerNameLabel,
+                headerSpacer,
+                messageSearchController.searchButton(),
+                messageSearchController.controls());
         chatHeader.setAlignment(Pos.CENTER_LEFT);
         chatHeader.setPadding(new Insets(10, 15, 10, 15));
         chatHeader.getStyleClass().add("chat-header");
+        HBox.setHgrow(headerSpacer, Priority.ALWAYS);
+        HBox.setHgrow(messageSearchController.controls(), Priority.ALWAYS);
 
         headerSep = new Separator();
         headerSep.getStyleClass().add("chat-header-separator");
+    }
+
+    /**
+     * Создаёт компонент поиска сообщений и связывает его с минимальным набором
+     * действий формы: текущий чат, загруженные строки и прокрутка остаются во
+     * внешнем слое, а вся логика поиска живёт внутри компонента.
+     */
+    private FormChatMessageSearchController createMessageSearchController() {
+        return new FormChatMessageSearchController(
+                new FormChatMessageSearchHost(this),
+                headerNameLabel,
+                headerSpacer);
     }
 
     private VBox createMessageContainer() {
@@ -265,8 +287,12 @@ abstract class FormChatUi extends FormChatBase {
                     @Override public void startReply(MeshMessage msg) { FormChatUi.this.startReply(msg); }
                     @Override public void requestTraceroute(MeshMessage msg) { FormChatUi.this.requestTraceroute(msg); }
                     @Override public void requestNodeInfo(MeshMessage msg) { FormChatUi.this.requestNodeInfo(msg); }
-                    @Override public void sendReaction(MeshMessage msg, String emoji) { FormChatUi.this.sendReaction(msg, emoji); }
-                    @Override public void confirmDeleteMessage(MeshMessage msg, HBox row) { FormChatUi.this.confirmDeleteMessage(msg, row); }
+                    @Override public void sendReaction(MeshMessage msg, String emoji) {
+                        FormChatUi.this.sendReaction(msg, emoji);
+                    }
+                    @Override public void confirmDeleteMessage(MeshMessage msg, HBox row) {
+                        FormChatUi.this.confirmDeleteMessage(msg, row);
+                    }
                     @Override public boolean retryMessage(MeshMessage msg) { return FormChatUi.this.retryMessage(msg); }
                 },
                 pendingStatusLabels);
@@ -356,9 +382,11 @@ abstract class FormChatUi extends FormChatBase {
     }
 
     private void markSelectedChatReadWhenViewingTail() {
-        if (formVisible && selectedChat != null && isAtLiveTail() && getUnreadCount(selectedChat) > 0) {
-            markAsRead(selectedChat);
-        }
+        Optional.ofNullable(selectedChat)
+                .filter(chat -> formVisible)
+                .filter(chat -> isAtLiveTail())
+                .filter(chat -> getUnreadCount(chat) > 0)
+                .ifPresent(this::markAsRead);
     }
 
     private void saveScrollStateAfterUserScroll() {
@@ -380,6 +408,31 @@ abstract class FormChatUi extends FormChatBase {
         });
     }
 
+    private void handleDetailPaneKeyPressed(KeyEvent event) {
+        Optional.ofNullable(messageSearchController)
+                .ifPresent(controller -> controller.handleDetailPaneKeyPressed(event));
+    }
+
+    protected void closeMessageSearch(boolean focusInput) {
+        Optional.ofNullable(messageSearchController)
+                .ifPresent(controller -> controller.close(focusInput));
+    }
+
+    protected void refreshMessageSearchResults(boolean jumpToLatest) {
+        Optional.ofNullable(messageSearchController)
+                .ifPresent(controller -> controller.refreshResults(jumpToLatest));
+    }
+
+    protected void refreshMessageSearchHighlight() {
+        Optional.ofNullable(messageSearchController)
+                .ifPresent(FormChatMessageSearchController::refreshHighlight);
+    }
+
+    protected void applyMessageSearchHighlight(HBox row, long dbId) {
+        Optional.ofNullable(messageSearchController)
+                .ifPresent(controller -> controller.applyHighlight(row, dbId));
+    }
+
     private ChatInputBar createChatInputBar() {
         return new ChatInputBar(
                 this::sendChatMessage,
@@ -389,8 +442,10 @@ abstract class FormChatUi extends FormChatBase {
     }
 
     private void sendChatMessage(ChatInputBar.SendRequest request) {
-        if (selectedChat == null || state == null
-                || (protocolHandler == null && meshCoreCompanionRuntime == null)) {
+        if (Optional.ofNullable(selectedChat).isEmpty()
+                || Optional.ofNullable(state).isEmpty()
+                || (Optional.ofNullable(protocolHandler).isEmpty()
+                        && Optional.ofNullable(meshCoreCompanionRuntime).isEmpty())) {
             return;
         }
 
@@ -404,52 +459,54 @@ abstract class FormChatUi extends FormChatBase {
     }
 
     private boolean sendChannelMessage(ChatInputBar.SendRequest request) {
-        if (meshCoreCompanionRuntime != null) {
-            return meshCoreCompanionRuntime.sendChannelMessage(
-                    selectedChat.getChannelIndex(),
-                    request.text(),
-                    request.replyId()) != null;
-        }
-        MessageService.sendChannelMessage(
-                protocolHandler,
-                state,
-                selectedChat.getChannelIndex(),
-                request.text(),
-                request.replyId());
-        return true;
+        return Optional.ofNullable(meshCoreCompanionRuntime)
+                .map(runtime -> Optional.ofNullable(runtime.sendChannelMessage(
+                        selectedChat.getChannelIndex(),
+                        request.text(),
+                        request.replyId())).isPresent())
+                .orElseGet(() -> {
+                    MessageService.sendChannelMessage(
+                            protocolHandler,
+                            state,
+                            selectedChat.getChannelIndex(),
+                            request.text(),
+                            request.replyId());
+                    return true;
+                });
     }
 
     private boolean sendDirectMessage(ChatInputBar.SendRequest request) {
         NodeData peerNode = NodeUtils.resolveNode(state, selectedChat.getPeerNodeId());
-        if (peerNode != null && peerNode.isUnmessagable()) {
+        if (Optional.ofNullable(peerNode).filter(NodeData::isUnmessagable).isPresent()) {
             Toast.show(Toast.Type.WARNING, "Нода объявила, что не принимает личные сообщения");
             return false;
         }
 
-        if (meshCoreCompanionRuntime != null) {
-            MeshMessage sent = meshCoreCompanionRuntime.sendDirectMessage(
-                    selectedChat.getPeerNodeId(),
-                    request.text(),
-                    request.replyId());
-            if (sent != null) {
-                return true;
-            }
-            Toast.show(Toast.Type.ERROR, "Не удалось определить MeshCore contact для DM");
-            return false;
-        }
-
-        MeshMessage sent = MessageService.sendDirectMessage(
-                protocolHandler,
-                state,
-                selectedChat.getPeerNodeId(),
-                request.text(),
-                request.replyId());
-        if (sent != null) {
-            return true;
-        }
-
-        Toast.show(Toast.Type.ERROR, "Не удалось определить ноду для DM");
-        return false;
+        return Optional.ofNullable(meshCoreCompanionRuntime)
+                .map(runtime -> {
+                    MeshMessage sent = runtime.sendDirectMessage(
+                            selectedChat.getPeerNodeId(),
+                            request.text(),
+                            request.replyId());
+                    if (Optional.ofNullable(sent).isPresent()) {
+                        return true;
+                    }
+                    Toast.show(Toast.Type.ERROR, "Не удалось определить MeshCore contact для DM");
+                    return false;
+                })
+                .orElseGet(() -> {
+                    MeshMessage sent = MessageService.sendDirectMessage(
+                            protocolHandler,
+                            state,
+                            selectedChat.getPeerNodeId(),
+                            request.text(),
+                            request.replyId());
+                    if (Optional.ofNullable(sent).isPresent()) {
+                        return true;
+                    }
+                    Toast.show(Toast.Type.ERROR, "Не удалось определить ноду для DM");
+                    return false;
+                });
     }
 
     // ==================== Правая панель: открытие/закрытие чата ====================
@@ -496,6 +553,7 @@ abstract class FormChatUi extends FormChatBase {
     protected void openChat(ChatItem chat) {
         suspendScrollStateSync();
         try {
+            closeMessageSearch(false);
             bubbleFactory.hideOpenReactionPopup();
             scrollOperationGeneration++;
             this.selectedChat = chat;
@@ -533,24 +591,21 @@ abstract class FormChatUi extends FormChatBase {
 
     protected void handleChatFontSizeChanged() {
         applyChatTypography();
-        if (chatListView != null) {
-            chatListView.refresh();
-        }
-        if (selectedChat != null) {
-            refreshLoadedMessageRows();
-        }
+        Optional.ofNullable(chatListView).ifPresent(ListView::refresh);
+        Optional.ofNullable(selectedChat).ifPresent(chat -> refreshLoadedMessageRows());
     }
 
     protected void applyChatTypography() {
         setStyle("-fx-font-size: " + TypographyManager.getChatFontSize() + "px;");
-        if (getScene() != null) {
+        Optional.ofNullable(getScene()).ifPresent(scene -> {
             applyCss();
             requestLayout();
-        }
+        });
     }
 
     protected void closeChat() {
         saveCurrentChatScrollState();
+        closeMessageSearch(false);
         clearSelectedChatForBoundConnection();
         bubbleFactory.hideOpenReactionPopup();
         scrollOperationGeneration++;
@@ -560,24 +615,38 @@ abstract class FormChatUi extends FormChatBase {
         detailPane.getChildren().add(placeholderBox);
     }
 
+    protected boolean isChatDetailOpenFor(ChatItem chat) {
+        return chat != null
+                && selectedChat != null
+                && chatItemMatches(selectedChat, chat)
+                && detailPane != null
+                && detailPane.getChildren().contains(messageArea);
+    }
+
     // ==================== Сообщения: загрузка из БД с пагинацией ====================
 
     /** Определить тип и ключ чата для запросов к MessageDbService */
     protected String currentChatType() {
-        ChatDbKey key = currentChatDbKey();
-        return key == null ? null : key.dbType();
+        return Optional.ofNullable(currentChatDbKey())
+                .map(ChatDbKey::dbType)
+                .orElse(null);
     }
 
     protected String currentChatKey() {
-        ChatDbKey key = currentChatDbKey();
-        return key == null ? null : key.dbKey();
+        return Optional.ofNullable(currentChatDbKey())
+                .map(ChatDbKey::dbKey)
+                .orElse(null);
     }
 
     protected ChatDbKey currentChatDbKey() {
-        return selectedChat == null ? null : ChatDbKey.from(selectedChat);
+        return Optional.ofNullable(selectedChat)
+                .map(ChatDbKey::from)
+                .orElse(null);
     }
 
     protected String currentOwnerNodeId() {
-        return state != null && state.getOwnerNodeId() != null ? state.getOwnerNodeId() : "";
+        return Optional.ofNullable(state)
+                .map(deviceState -> deviceState.getOwnerNodeId())
+                .orElse("");
     }
 }

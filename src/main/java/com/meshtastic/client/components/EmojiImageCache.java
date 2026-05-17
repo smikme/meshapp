@@ -3,10 +3,16 @@ package com.meshtastic.client.components;
 import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
 
+import java.io.BufferedReader;
 import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -23,7 +29,13 @@ import java.util.concurrent.Future;
  */
 public final class EmojiImageCache {
 
+    private static final double TEXT_BASELINE_RATIO = 0.80;
+
     private static final Map<String, Image> CACHE = new ConcurrentHashMap<>();
+    private static final Map<String, Boolean> KNOWN_EMOJI_CACHE = new ConcurrentHashMap<>();
+    private static final Set<String> RESOURCE_NAMES = loadResourceNames();
+    private static final Set<String> AVAILABLE_EMOJIS = loadAvailableEmojis();
+    private static final int MAX_EMOJI_CODEPOINTS = computeMaxEmojiCodePointCount();
 
     /** Маркер «изображение не найдено» чтобы не пытаться загружать повторно. */
     private static final Image NOT_FOUND = new Image(
@@ -46,7 +58,20 @@ public final class EmojiImageCache {
 
     /** Проверить, является ли строка известным эмодзи с изображением. */
     public static boolean isKnownEmoji(String s) {
-        return EmojiData.getAllEmojis().contains(s);
+        if (s == null || s.isEmpty()) {
+            return false;
+        }
+        return KNOWN_EMOJI_CACHE.computeIfAbsent(s, EmojiImageCache::hasResourceForEmoji);
+    }
+
+    /** Все emoji, для которых в ресурсах есть локальный Twemoji PNG. */
+    public static Set<String> getAvailableEmojis() {
+        return AVAILABLE_EMOJIS;
+    }
+
+    /** Максимальная длина emoji-последовательности в кодпоинтах среди локальных ресурсов. */
+    public static int getMaxEmojiCodePointCount() {
+        return MAX_EMOJI_CODEPOINTS;
     }
 
     /**
@@ -101,7 +126,8 @@ public final class EmojiImageCache {
         if (img == null) {
             return null;
         }
-        ImageView iv = new ImageView(img);
+        ImageView iv = new InlineEmojiImageView(img);
+        iv.setUserData(emoji);
         iv.setFitWidth(size);
         iv.setFitHeight(size);
         iv.setPreserveRatio(true);
@@ -123,12 +149,7 @@ public final class EmojiImageCache {
         preloadFuture = preloadExecutor.submit(() -> {
             for (String emoji : emojisToPreload) {
                 if (Thread.interrupted()) break;
-                
-                // Загружаем в основной кеш (priority cache будет заполнен при первом get)
-                Image img = CACHE.get(emoji);
-                if (img == null || img == NOT_FOUND) {
-                    loadImage(emoji);
-                }
+                getImage(emoji);
             }
         });
     }
@@ -238,6 +259,10 @@ public final class EmojiImageCache {
     }
 
     private static String emojiToFilename(String emoji, boolean preserveVariationSelectors) {
+        return emojiToResourceName(emoji, preserveVariationSelectors) + ".png";
+    }
+
+    private static String emojiToResourceName(String emoji, boolean preserveVariationSelectors) {
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < emoji.length(); ) {
             int cp = emoji.codePointAt(i);
@@ -251,25 +276,144 @@ public final class EmojiImageCache {
             }
             i += Character.charCount(cp);
         }
-        return sb + ".png";
+        return sb.toString();
     }
 
-    private static List<String> emojiToCandidateFilenames(String emoji) {
-        String exact = emojiToFilename(emoji, true);
-        String normalized = emojiToFilename(emoji, false);
+    private static List<String> emojiToCandidateResourceNames(String emoji) {
+        String exact = emojiToResourceName(emoji, true);
+        String normalized = emojiToResourceName(emoji, false);
         if (exact.equals(normalized)) {
             return List.of(exact);
         }
         return List.of(exact, normalized);
     }
 
+    private static List<String> emojiToCandidateFilenames(String emoji) {
+        return emojiToCandidateResourceNames(emoji).stream()
+                .map(name -> name + ".png")
+                .toList();
+    }
+
+    private static boolean hasResourceForEmoji(String emoji) {
+        if (!hasEmojiPresentationHint(emoji)) {
+            return false;
+        }
+        for (String resourceName : emojiToCandidateResourceNames(emoji)) {
+            if (RESOURCE_NAMES.contains(resourceName)) {
+                return true;
+            }
+        }
+
+        if (!RESOURCE_NAMES.isEmpty()) {
+            return false;
+        }
+
+        for (String filename : emojiToCandidateFilenames(emoji)) {
+            try (InputStream is = EmojiImageCache.class.getResourceAsStream("/emoji/" + filename)) {
+                if (is != null) {
+                    return true;
+                }
+            } catch (Exception ignored) {
+                return false;
+            }
+        }
+        return false;
+    }
+
+    private static boolean hasEmojiPresentationHint(String emoji) {
+        for (int i = 0; i < emoji.length(); ) {
+            int cp = emoji.codePointAt(i);
+            if (cp == 0xFE0F || cp == 0x20E3 || cp == 0x200D || cp >= 0x1F000) {
+                return true;
+            }
+            i += Character.charCount(cp);
+        }
+        int first = emoji.codePointAt(0);
+        return first >= 0x2600;
+    }
+
     private static Image loadImage(String emoji) {
         for (String filename : emojiToCandidateFilenames(emoji)) {
+            String resourceName = filename.substring(0, filename.length() - ".png".length());
+            if (!RESOURCE_NAMES.isEmpty() && !RESOURCE_NAMES.contains(resourceName)) {
+                continue;
+            }
             InputStream is = EmojiImageCache.class.getResourceAsStream("/emoji/" + filename);
             if (is != null) {
                 return new Image(is);
             }
         }
         return NOT_FOUND;
+    }
+
+    private static Set<String> loadResourceNames() {
+        try (InputStream is = EmojiImageCache.class.getResourceAsStream("/emoji/index.txt")) {
+            if (is == null) {
+                return Set.of();
+            }
+            Set<String> names = new LinkedHashSet<>();
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    String name = line.trim();
+                    if (!name.isEmpty()) {
+                        names.add(name);
+                    }
+                }
+            }
+            return Collections.unmodifiableSet(names);
+        } catch (Exception ignored) {
+            return Set.of();
+        }
+    }
+
+    private static Set<String> loadAvailableEmojis() {
+        if (RESOURCE_NAMES.isEmpty()) {
+            return Set.of();
+        }
+        Set<String> emojis = new LinkedHashSet<>();
+        for (String resourceName : RESOURCE_NAMES) {
+            String emoji = resourceNameToEmoji(resourceName);
+            if (!emoji.isEmpty()) {
+                emojis.add(emoji);
+            }
+        }
+        return Collections.unmodifiableSet(emojis);
+    }
+
+    private static int computeMaxEmojiCodePointCount() {
+        int max = 1;
+        for (String resourceName : RESOURCE_NAMES) {
+            int count = resourceName.isEmpty() ? 0 : resourceName.split("-").length;
+            max = Math.max(max, count);
+        }
+        return Math.max(max, 10);
+    }
+
+    private static String resourceNameToEmoji(String resourceName) {
+        StringBuilder emoji = new StringBuilder();
+        for (String part : resourceName.split("-")) {
+            if (part.isEmpty()) {
+                continue;
+            }
+            try {
+                emoji.appendCodePoint(Integer.parseInt(part, 16));
+            } catch (NumberFormatException ignored) {
+                return "";
+            }
+        }
+        return emoji.toString();
+    }
+
+    private static final class InlineEmojiImageView extends ImageView {
+        private InlineEmojiImageView(Image image) {
+            super(image);
+        }
+
+        @Override
+        public double getBaselineOffset() {
+            double height = getFitHeight() > 0 ? getFitHeight() : getLayoutBounds().getHeight();
+            return height * TEXT_BASELINE_RATIO;
+        }
     }
 }

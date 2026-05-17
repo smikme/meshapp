@@ -31,6 +31,21 @@ public final class TransportConnectionFactory {
      * @return transport-объект, готовый к вызову {@link TransportConnection#connect()}
      */
     public static TransportConnection create(ConnectionEntry entry, Supplier<BlePlatform> blePlatformSupplier) {
+        return create(entry, blePlatformSupplier, false);
+    }
+
+    /**
+     * Создаёт transport-реализацию для указанного профиля подключения.
+     *
+     * @param entry профиль подключения из {@code connections.json}
+     * @param blePlatformSupplier поставщик платформенного BLE backend-а; вызывается
+     *                            только для BLE-подключений
+     * @param disposeBlePlatformOnDisconnect освобождать ли BLE backend вместе с transport-ом
+     * @return transport-объект, готовый к вызову {@link TransportConnection#connect()}
+     */
+    public static TransportConnection create(ConnectionEntry entry,
+                                             Supplier<BlePlatform> blePlatformSupplier,
+                                             boolean disposeBlePlatformOnDisconnect) {
         FrameFormat frameFormat = FrameFormat.forProtocol(entry.getEffectiveProtocol());
         return switch (entry.getEffectiveType()) {
             case TCP -> new TcpConnection(entry.getHost(), entry.getPort(), frameFormat);
@@ -42,7 +57,8 @@ public final class TransportConnectionFactory {
             case BLE -> new BleConnection(
                     entry.getBleAddress(),
                     blePlatformSupplier.get(),
-                    BleProtocolProfile.forProtocol(entry.getEffectiveProtocol())
+                    BleProtocolProfile.forProtocol(entry.getEffectiveProtocol()),
+                    disposeBlePlatformOnDisconnect
             );
         };
     }

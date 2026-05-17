@@ -121,6 +121,7 @@ public class NativeMacOsWindowControl {
      */
     public void makeVisibleInAppSwitcher() {
         if (nsWindow == 0) { return; }
+        long pool = ObjCRuntime.createAutoreleasePool();
         try {
             long currentMask = msgSend(nsWindow, "styleMask");
             long titled = 1L;                // NSWindowStyleMaskTitled
@@ -140,7 +141,11 @@ public class NativeMacOsWindowControl {
 
             // Установить title для NSWindow (AltTab и другие app-switcher'ы используют его)
             long nsTitle = createNSString("MeshApp");
-            msgSendId(nsWindow, "setTitle:", nsTitle);
+            try {
+                msgSendId(nsWindow, "setTitle:", nsTitle);
+            } finally {
+                ObjCRuntime.release(nsTitle);
+            }
 
             // Отключить нативное перемещение — drag реализован в RootPane
             msgSendBool(nsWindow, "setMovable:", false);
@@ -155,6 +160,8 @@ public class NativeMacOsWindowControl {
                     currentMask, newMask, behavior, behavior | managed | participates);
         } catch (Throwable t) {
             log.error("Не удалось настроить styleMask для App Switcher", t);
+        } finally {
+            ObjCRuntime.drainAutoreleasePool(pool);
         }
     }
 
@@ -168,6 +175,8 @@ public class NativeMacOsWindowControl {
      */
     public boolean applyVisualEffect(boolean darkMode) {
         if (nsWindow == 0) { return false; }
+        long pool = ObjCRuntime.createAutoreleasePool();
+        long vev = 0;
         try {
             // Получить contentView окна
             long contentView = msgSend(nsWindow, "contentView");
@@ -186,7 +195,7 @@ public class NativeMacOsWindowControl {
 
             // Создать NSVisualEffectView
             long vevClass = cls("NSVisualEffectView");
-            long vev = msgSend(vevClass, "alloc");
+            vev = msgSend(vevClass, "alloc");
             vev = msgSend(vev, "init");
 
             // material = NSVisualEffectMaterialHUDWindow (13) — выраженный frosted glass
@@ -228,6 +237,9 @@ public class NativeMacOsWindowControl {
         } catch (Throwable t) {
             log.error("Не удалось применить NSVisualEffectView", t);
             return false;
+        } finally {
+            ObjCRuntime.release(vev);
+            ObjCRuntime.drainAutoreleasePool(pool);
         }
     }
 
@@ -370,8 +382,10 @@ public class NativeMacOsWindowControl {
             return 0;
         }
 
+        long observer = 0;
+        boolean installed = false;
         try {
-            long observer = ObjCRuntime.allocInitClass(miniaturizeObserverClass);
+            observer = ObjCRuntime.allocInitClass(miniaturizeObserverClass);
             if (observer == 0) {
                 return 0;
             }
@@ -380,18 +394,28 @@ public class NativeMacOsWindowControl {
 
             long center = msgSend(cls("NSNotificationCenter"), "defaultCenter");
             long name = createNSString(MINIATURIZE_NOTIFICATION_NAME);
-            OBJC_MSG_SEND.invokeLong(new Object[]{
-                    center,
-                    sel("addObserver:selector:name:object:"),
-                    observer,
-                    sel("windowDidMiniaturize:"),
-                    name,
-                    nsWindow
-            });
-            return observer;
+            try {
+                OBJC_MSG_SEND.invokeLong(new Object[]{
+                        center,
+                        sel("addObserver:selector:name:object:"),
+                        observer,
+                        sel("windowDidMiniaturize:"),
+                        name,
+                        nsWindow
+                });
+                installed = true;
+                return observer;
+            } finally {
+                ObjCRuntime.release(name);
+            }
         } catch (Throwable t) {
             log.error("Не удалось установить observer минимизации NSWindow", t);
             return 0;
+        } finally {
+            if (!installed && observer != 0) {
+                MINIATURIZE_HANDLERS.remove(observer);
+                ObjCRuntime.release(observer);
+            }
         }
     }
 
@@ -410,6 +434,8 @@ public class NativeMacOsWindowControl {
             });
         } catch (Throwable t) {
             log.warn("Не удалось удалить observer минимизации NSWindow", t);
+        } finally {
+            ObjCRuntime.release(observer);
         }
     }
 
@@ -426,17 +452,22 @@ public class NativeMacOsWindowControl {
 
             long subviews = msgSend(themeFrame, "subviews");
             long count = msgSend(subviews, "count");
+            long targetClassName = createNSString("NSTitlebarContainerView");
 
-            for (long i = 0; i < count; i++) {
-                long subview = msgSendId(subviews, "objectAtIndex:", i);
-                long className = msgSend(subview, "className");
-                long nsString = createNSString("NSTitlebarContainerView");
-                long isEqual = OBJC_MSG_SEND.invokeLong(new Object[]{className, sel("isEqualToString:"), nsString});
-                if (isEqual != 0) {
-                    msgSendBool(subview, "setHidden:", true);
-                    log.info("NSTitlebarContainerView скрыт");
-                    break;
+            try {
+                for (long i = 0; i < count; i++) {
+                    long subview = msgSendId(subviews, "objectAtIndex:", i);
+                    long className = msgSend(subview, "className");
+                    long isEqual = OBJC_MSG_SEND.invokeLong(new Object[]{
+                            className, sel("isEqualToString:"), targetClassName});
+                    if (isEqual != 0) {
+                        msgSendBool(subview, "setHidden:", true);
+                        log.info("NSTitlebarContainerView скрыт");
+                        break;
+                    }
                 }
+            } finally {
+                ObjCRuntime.release(targetClassName);
             }
         } catch (Throwable t) {
             log.warn("Не удалось скрыть NSTitlebarContainerView", t);
@@ -444,11 +475,17 @@ public class NativeMacOsWindowControl {
     }
 
     private void setAppearanceOnView(long view, boolean dark) {
+        long pool = ObjCRuntime.createAutoreleasePool();
         String name = dark ? "NSAppearanceNameDarkAqua" : "NSAppearanceNameAqua";
         long nsString = createNSString(name);
-        long nsAppearanceClass = cls("NSAppearance");
-        long appearance = msgSendId(nsAppearanceClass, "appearanceNamed:", nsString);
-        msgSendId(view, "setAppearance:", appearance);
+        try {
+            long nsAppearanceClass = cls("NSAppearance");
+            long appearance = msgSendId(nsAppearanceClass, "appearanceNamed:", nsString);
+            msgSendId(view, "setAppearance:", appearance);
+        } finally {
+            ObjCRuntime.release(nsString);
+            ObjCRuntime.drainAutoreleasePool(pool);
+        }
     }
 
     // ====== Low-level helpers — фиксированные сигнатуры для arm64 ABI ======
@@ -492,11 +529,18 @@ public class NativeMacOsWindowControl {
      * CALayer cornerRadius принимает NSNumber и конвертирует в CGFloat.
      */
     private static void setDoubleProperty(long receiver, String key, double value) {
+        long pool = ObjCRuntime.createAutoreleasePool();
+        long nsKey = 0;
         long nsNumberClass = cls("NSNumber");
-        // numberWithInteger: принимает long — надёжно на arm64
-        long nsNumber = msgSendId(nsNumberClass, "numberWithInteger:", (long) value);
-        long nsKey = createNSString(key);
-        OBJC_MSG_SEND.invokeLong(new Object[]{receiver, sel("setValue:forKey:"), nsNumber, nsKey});
+        try {
+            // numberWithInteger: принимает long — надёжно на arm64
+            long nsNumber = msgSendId(nsNumberClass, "numberWithInteger:", (long) value);
+            nsKey = createNSString(key);
+            OBJC_MSG_SEND.invokeLong(new Object[]{receiver, sel("setValue:forKey:"), nsNumber, nsKey});
+        } finally {
+            ObjCRuntime.release(nsKey);
+            ObjCRuntime.drainAutoreleasePool(pool);
+        }
     }
 
     /** [contentView addSubview:vev positioned:NSWindowBelow(-1) relativeTo:nil(0)] */

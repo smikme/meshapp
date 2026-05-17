@@ -4,6 +4,9 @@ import com.sun.jna.Callback;
 import com.sun.jna.Library;
 import com.sun.jna.Native;
 import com.sun.jna.Pointer;
+import com.meshtastic.client.utils.NativeResourceLoader;
+
+import java.nio.file.Path;
 
 /**
  * JNA-маппинг нативной библиотеки libmeshapp-ble.so (BlueZ BLE через sd-bus).
@@ -20,9 +23,12 @@ import com.sun.jna.Pointer;
  */
 public interface LinuxBleLibrary extends Library {
 
-    LinuxBleLibrary INSTANCE = loadLibrary();
+    static LinuxBleLibrary loadIsolated() {
+        Path libraryPath = NativeResourceLoader.extractLibraryResource("meshapp-ble");
+        return Native.load(libraryPath.toAbsolutePath().toString(), LinuxBleLibrary.class);
+    }
 
-    private static LinuxBleLibrary loadLibrary() {
+    static LinuxBleLibrary loadShared() {
         return Native.load("meshapp-ble", LinuxBleLibrary.class);
     }
 
@@ -75,7 +81,7 @@ public interface LinuxBleLibrary extends Library {
 
     /**
      * Запись protobuf в toRadio GATT characteristic.
-     * @return 0 при успехе, отрицательное при ошибке
+     * @return 0 при успехе, -4 если BLE bond не прошёл authentication/MITM, иначе отрицательное при ошибке
      */
     int meshble_write_to_radio(byte[] data, int length);
 

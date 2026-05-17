@@ -480,6 +480,7 @@ public class EmojiData {
         for (Category cat : CATEGORIES) {
             set.addAll(cat.emojis());
         }
+        set.addAll(EmojiImageCache.getAvailableEmojis());
         ALL_EMOJIS = Collections.unmodifiableSet(set);
     }
 

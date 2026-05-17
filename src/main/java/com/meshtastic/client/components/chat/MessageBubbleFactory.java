@@ -91,6 +91,8 @@ public class MessageBubbleFactory {
     private static final String REACTION_UNAVAILABLE_TOOLTIP = "Реакция недоступна: у сообщения нет packet id";
     private static final String RETRY_TOOLTIP = "Повторить отправку";
     private static final String RETRY_ICON_PATH = "/icons/refresh.svg";
+    private static final String OK_STATUS_ICON_PATH = "/icons/status-ok-flat.svg";
+    private static final int OK_STATUS_ICON_SIZE = 18;
     private static final Insets MQTT_BADGE_MARGIN = new Insets(3, 4, 0, 0);
     private static final List<List<String>> REACTION_EMOJI_ROWS = List.of(
             List.of("⭐", "✅", "👍", "👋", "💯", "🔥", "🤝", "😁", "😂", "🤣", "😀"),
@@ -189,6 +191,16 @@ public class MessageBubbleFactory {
      */
     public static void updateStatusLabel(Label label,
                                          MeshMessage.DeliveryStatus status) {
+        updateStatusLabel(label, status, false);
+    }
+
+    private static void updateStatusLabel(Label label, MeshMessage msg) {
+        updateStatusLabel(label, msg.getStatus(), msg.isDirectMessage());
+    }
+
+    private static void updateStatusLabel(Label label,
+                                          MeshMessage.DeliveryStatus status,
+                                          boolean directMessage) {
         if (status == null) {
             return;
         }
@@ -197,14 +209,33 @@ public class MessageBubbleFactory {
         label.setGraphic(null);
         label.setContentDisplay(ContentDisplay.TEXT_ONLY);
         label.getStyleClass().remove("chat-bubble-status-failed");
+        label.getStyleClass().remove("chat-bubble-status-ok");
         switch (status) {
             case SENDING -> label.setText("⏳");
             case DELIVERED -> label.setText("✓");
+            case CONFIRMED -> {
+                if (directMessage) {
+                    label.setGraphic(createOkStatusIcon());
+                    label.setContentDisplay(ContentDisplay.GRAPHIC_ONLY);
+                    label.getStyleClass().add("chat-bubble-status-ok");
+                } else {
+                    label.setText("✓");
+                }
+            }
             case FAILED -> label.setText("✗");
         }
         if (status == MeshMessage.DeliveryStatus.FAILED) {
             label.getStyleClass().add("chat-bubble-status-failed");
         }
+    }
+
+    private static Node createOkStatusIcon() {
+        SVGPath icon = SvgIconLoader.load(OK_STATUS_ICON_PATH, OK_STATUS_ICON_SIZE);
+        if (icon != null) {
+            icon.getStyleClass().add("chat-bubble-status-ok-icon");
+            return icon;
+        }
+        return createEmojiNode("\uD83C\uDD97", OK_STATUS_ICON_SIZE);
     }
 
     /**
@@ -217,7 +248,7 @@ public class MessageBubbleFactory {
         if (label == null || msg == null || msg.getStatus() == null) {
             return;
         }
-        updateStatusLabel(label, msg.getStatus());
+        updateStatusLabel(label, msg);
         configureStatusLabelInteraction(label, msg);
         if (msg.getStatus() == MeshMessage.DeliveryStatus.SENDING && msg.getPacketId() != ZERO_VALUE) {
             pendingStatusLabels.put(msg.getPacketId(), label);
@@ -1120,8 +1151,6 @@ public class MessageBubbleFactory {
     }
 
     private void configureStatusLabelInteraction(Label statusLabel, MeshMessage msg) {
-        statusLabel.setGraphic(null);
-        statusLabel.setContentDisplay(ContentDisplay.TEXT_ONLY);
         statusLabel.setGraphicTextGap(ZERO_VALUE);
 
         if (msg.getStatus() != MeshMessage.DeliveryStatus.FAILED || !msg.isOutgoing()) {

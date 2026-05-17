@@ -97,6 +97,148 @@ class MessageDbServiceTest {
     }
 
     @Test
+    void messageSearchMatchesTextCaseInsensitivelyAndKeepsChatScope() {
+        MeshMessage first = message("Alpha payload", 41, 10);
+        MeshMessage second = message("beta alpha", 42, 20);
+        MeshMessage otherChat = message("alpha from another channel", 43, 30);
+        MeshMessage otherOwner = message("alpha from another owner", 44, 40);
+
+        service.save(first, "channel", "0", "!owner");
+        service.save(second, "channel", "0", "!owner");
+        service.save(otherChat, "channel", "1", "!owner");
+        service.save(otherOwner, "channel", "0", "!other");
+
+        MessageDbService.MessageSearchCount count =
+                service.countMessageSearchMatchesLimited("channel", "0", "ALPHA", "!owner");
+        assertEquals(2, count.count());
+        assertFalse(count.limited());
+        assertEquals(second.getDbId(), service.findLatestMessageSearchMatch("channel", "0", "ALPHA", "!owner"));
+        assertEquals(first.getDbId(),
+                service.findPreviousMessageSearchMatch("channel", "0", "ALPHA", "!owner", second.getDbId()));
+        assertEquals(second.getDbId(),
+                service.findNextMessageSearchMatch("channel", "0", "ALPHA", "!owner", first.getDbId()));
+        assertEquals(0,
+                service.findNextMessageSearchMatch("channel", "0", "ALPHA", "!owner", second.getDbId()));
+    }
+
+    @Test
+    void messageSearchUsesFullTextWordsAndDoesNotMatchPartialTerms() {
+        MeshMessage alpha = message("alpha payload", 45, 10);
+        MeshMessage alphabet = message("alphabet soup", 46, 20);
+
+        service.save(alpha, "channel", "0", "!owner");
+        service.save(alphabet, "channel", "0", "!owner");
+
+        assertEquals(alpha.getDbId(), service.findLatestMessageSearchMatch("channel", "0", "alpha", "!owner"));
+        assertEquals(1, service.countMessageSearchMatchesLimited("channel", "0", "alpha", "!owner").count());
+        assertEquals(0, service.findLatestMessageSearchMatch("channel", "0", "alp", "!owner"));
+        assertEquals(0, service.countMessageSearchMatchesLimited("channel", "0", "alp", "!owner").count());
+    }
+
+    @Test
+    void messageSearchMatchesRussianWordFormsByStemPrefix() {
+        MeshMessage plural = message("ремонт дверей", 54, 10);
+        MeshMessage adjective = message("дверной замок", 55, 20);
+        MeshMessage unrelated = message("доверие к связи", 56, 30);
+
+        service.save(plural, "channel", "0", "!owner");
+        service.save(adjective, "channel", "0", "!owner");
+        service.save(unrelated, "channel", "0", "!owner");
+
+        MessageDbService.MessageSearchCount count =
+                service.countMessageSearchMatchesLimited("channel", "0", "дверь", "!owner");
+        assertEquals(2, count.count());
+        assertFalse(count.limited());
+        assertEquals(adjective.getDbId(),
+                service.findLatestMessageSearchMatch("channel", "0", "дверь", "!owner"));
+        assertEquals(plural.getDbId(),
+                service.findPreviousMessageSearchMatch("channel", "0", "дверь", "!owner", adjective.getDbId()));
+        assertTrue(service.messageMatchesSearch("channel", "0", "дверь", "!owner", adjective.getDbId()));
+        assertFalse(service.messageMatchesSearch("channel", "0", "дверь", "!owner", unrelated.getDbId()));
+    }
+
+    @Test
+    void messageSearchRequiresAllFullTextTermsInsideChatScope() {
+        MeshMessage alphaPayload = message("alpha payload", 47, 10);
+        MeshMessage alphaOnly = message("alpha", 48, 20);
+        MeshMessage payloadOtherChat = message("payload", 49, 30);
+
+        service.save(alphaPayload, "channel", "0", "!owner");
+        service.save(alphaOnly, "channel", "0", "!owner");
+        service.save(payloadOtherChat, "channel", "1", "!owner");
+
+        assertTrue(service.messageMatchesSearch(
+                "channel",
+                "0",
+                "alpha payload",
+                "!owner",
+                alphaPayload.getDbId()));
+        assertFalse(service.messageMatchesSearch(
+                "channel",
+                "0",
+                "alpha payload",
+                "!owner",
+                alphaOnly.getDbId()));
+    }
+
+    @Test
+    void messageSearchUsesRealtimeFullTextIndexUpdates() {
+        assertEquals(0, service.findLatestMessageSearchMatch("channel", "0", "later", "!owner"));
+
+        MeshMessage insertedAfterIndexCreation = message("later indexed message", 50, 10);
+        service.save(insertedAfterIndexCreation, "channel", "0", "!owner");
+
+        assertEquals(insertedAfterIndexCreation.getDbId(),
+                service.findLatestMessageSearchMatch("channel", "0", "later", "!owner"));
+    }
+
+    @Test
+    void messageSearchCanBeFilteredBySenderNode() {
+        MeshMessage fromFirstNode = messageFrom("!00000001", "alpha from first node", 52, 10);
+        MeshMessage fromSecondNode = messageFrom("!00000002", "alpha from second node", 53, 20);
+
+        service.save(fromFirstNode, "channel", "0", "!owner");
+        service.save(fromSecondNode, "channel", "0", "!owner");
+
+        MessageDbService.MessageSearchCount firstNodeCount =
+                service.countMessageSearchMatchesLimited("channel", "0", "alpha", "!owner", "!00000001");
+        assertEquals(1, firstNodeCount.count());
+        assertFalse(firstNodeCount.limited());
+        assertEquals(fromFirstNode.getDbId(),
+                service.findLatestMessageSearchMatch("channel", "0", "alpha", "!owner", "!00000001"));
+        assertEquals(fromSecondNode.getDbId(),
+                service.findLatestMessageSearchMatch("channel", "0", "alpha", "!owner", "!00000002"));
+        assertEquals(0,
+                service.findLatestMessageSearchMatch("channel", "0", "alpha", "!owner", "!00000003"));
+        assertTrue(service.messageMatchesSearch(
+                "channel",
+                "0",
+                "alpha",
+                "!owner",
+                "!00000001",
+                fromFirstNode.getDbId()));
+        assertFalse(service.messageMatchesSearch(
+                "channel",
+                "0",
+                "alpha",
+                "!owner",
+                "!00000002",
+                fromFirstNode.getDbId()));
+    }
+
+    @Test
+    void fullTextIndexInitializationIsIdempotentAcrossServiceRestarts() {
+        MeshMessage persisted = message("restart searchable", 51, 10);
+        service.save(persisted, "channel", "0", "!owner");
+
+        TestEnvironmentSupport.resetSingletons();
+        service = MessageDbService.getInstance();
+
+        assertEquals(persisted.getDbId(),
+                service.findLatestMessageSearchMatch("channel", "0", "restart", "!owner"));
+    }
+
+    @Test
     void unreadEligibleCountIncludesIncomingSystemMessagesButExcludesOutgoing() {
         MeshMessage incoming = message("incoming", 10, 10);
         MeshMessage outgoing = new MeshMessage("!00000001", "!ffffffff", 0, "outgoing", 20, true);
@@ -309,6 +451,8 @@ class MessageDbServiceTest {
 
         MeshMessage mqtt = message("duplicate", 992, 20);
         mqtt.setViaMqtt(true);
+        mqtt.setHopStart(7);
+        mqtt.setHopLimit(6);
         mqtt.setRxRssi(-70);
         service.save(mqtt, "channel", "0", "!owner");
 
@@ -317,6 +461,30 @@ class MessageDbServiceTest {
         assertFalse(loaded.isViaMqtt());
         assertEquals(4, loaded.getHopStart());
         assertEquals(2, loaded.getHopLimit());
+        assertEquals(0, loaded.getRxRssi());
+    }
+
+    @Test
+    void saveDuplicateDoesNotFillMissingLoraHopDataFromLaterMqttCopy() {
+        MeshMessage lora = message("first", 993, 10);
+        lora.setViaMqtt(false);
+        service.save(lora, "channel", "0", "!owner");
+
+        MeshMessage mqtt = message("duplicate", 993, 20);
+        mqtt.setViaMqtt(true);
+        mqtt.setHopStart(7);
+        mqtt.setHopLimit(3);
+        mqtt.setRxRssi(-70);
+        mqtt.setRxSnr(5.5f);
+        service.save(mqtt, "channel", "0", "!owner");
+
+        MeshMessage loaded = service.findByPacketId(993, "channel", "0", "!owner");
+        assertNotNull(loaded);
+        assertFalse(loaded.isViaMqtt());
+        assertEquals(0, loaded.getHopStart());
+        assertEquals(0, loaded.getHopLimit());
+        assertEquals(0, loaded.getRxRssi());
+        assertEquals(0.0f, loaded.getRxSnr());
     }
 
     @Test
@@ -395,7 +563,12 @@ class MessageDbServiceTest {
     }
 
     private static MeshMessage message(String text, int packetId, long timestamp) {
-        MeshMessage message = new MeshMessage("!00000001", "!ffffffff", 0, text, timestamp, false);
+        MeshMessage message = messageFrom("!00000001", text, packetId, timestamp);
+        return message;
+    }
+
+    private static MeshMessage messageFrom(String fromNodeId, String text, int packetId, long timestamp) {
+        MeshMessage message = new MeshMessage(fromNodeId, "!ffffffff", 0, text, timestamp, false);
         message.setPacketId(packetId);
         return message;
     }
