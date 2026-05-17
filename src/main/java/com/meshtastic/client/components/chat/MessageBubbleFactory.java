@@ -625,9 +625,27 @@ public class MessageBubbleFactory {
     private boolean isReplyToOutgoingMessage(MeshMessage msg) {
         return Optional.of(msg.getReplyId())
                 .filter(replyId -> replyId != ZERO_VALUE)
-                .map(replyId -> MessageDbService.getInstance().findByPacketId(replyId))
+                .map(replyId -> findReplyTargetInCurrentScope(replyId, msg))
                 .map(MeshMessage::isOutgoing)
                 .orElse(false);
+    }
+
+    private MeshMessage findReplyTargetInCurrentScope(int replyId, MeshMessage msg) {
+        if (state == null || msg == null) {
+            return null;
+        }
+        String ownerNodeId = state.getOwnerNodeId();
+        if (ownerNodeId == null || ownerNodeId.isBlank()) {
+            return null;
+        }
+
+        String chatType = msg.isDirectMessage() ? "dm" : "channel";
+        String chatKey = msg.isDirectMessage() ? msg.getFromNodeId() : String.valueOf(msg.getChannelIndex());
+        if (chatKey == null || chatKey.isBlank()) {
+            return null;
+        }
+
+        return MessageDbService.getInstance().findByPacketId(replyId, chatType, chatKey, ownerNodeId);
     }
 
     /**

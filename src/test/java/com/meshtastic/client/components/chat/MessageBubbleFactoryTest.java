@@ -1,7 +1,9 @@
 package com.meshtastic.client.components.chat;
 
 import com.meshtastic.client.TestEnvironmentSupport;
+import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.MeshMessage;
+import com.meshtastic.client.service.MessageDbService;
 import javafx.application.Platform;
 import javafx.beans.property.SimpleDoubleProperty;
 import javafx.scene.Node;
@@ -14,7 +16,9 @@ import javafx.scene.layout.VBox;
 import javafx.scene.shape.SVGPath;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
+import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
@@ -122,6 +126,50 @@ class MessageBubbleFactoryTest {
             assertTrue(status.getStyleClass().contains("chat-bubble-status-ok"));
             return null;
         });
+    }
+
+    @Test
+    void replyHighlightIsScopedToCurrentOwnerAndChat(@TempDir Path tempHome) {
+        TestEnvironmentSupport.setUserHome(tempHome);
+        TestEnvironmentSupport.resetSingletons();
+
+        DeviceState ownerAState = new DeviceState();
+        DeviceState ownerBState = new DeviceState();
+        try {
+            ownerAState.setMyNodeNum(0x11111111);
+            ownerBState.setMyNodeNum(0x22222222);
+
+            MeshMessage ownerAOriginal = new MeshMessage("!11111111", "!ffffffff", 0, "owner a", 10, true);
+            ownerAOriginal.setPacketId(9001);
+            MessageDbService.getInstance().save(ownerAOriginal, "channel", "0", "!11111111");
+
+            MeshMessage incomingReply = new MeshMessage("!33333333", "!ffffffff", 0, "reply", 20, false);
+            incomingReply.setReplyId(9001);
+
+            onFxThread(() -> {
+                HBox ownerARow = factoryFor(ownerAState).build(incomingReply);
+                HBox ownerBRow = factoryFor(ownerBState).build(incomingReply);
+
+                VBox ownerAContent = findNodeWithStyle(ownerARow, "chat-bubble-incoming", VBox.class).orElseThrow();
+                VBox ownerBContent = findNodeWithStyle(ownerBRow, "chat-bubble-incoming", VBox.class).orElseThrow();
+
+                assertTrue(ownerAContent.getStyleClass().contains("chat-bubble-mentioned"));
+                assertFalse(ownerBContent.getStyleClass().contains("chat-bubble-mentioned"));
+                return null;
+            });
+        } finally {
+            ownerAState.shutdown();
+            ownerBState.shutdown();
+            TestEnvironmentSupport.resetSingletons();
+        }
+    }
+
+    private static MessageBubbleFactory factoryFor(DeviceState state) {
+        return new MessageBubbleFactory(
+                state,
+                new SimpleDoubleProperty(600),
+                new NoOpBubbleActions(),
+                new HashMap<>());
     }
 
     private static <T extends Node> Optional<T> findNodeWithStyle(Node node, String styleClass, Class<T> type) {
