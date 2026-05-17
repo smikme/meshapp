@@ -55,7 +55,7 @@ public class MyDrawerBuilder {
                         MenuManager.MenuItem.Type.ITEM, FormLogs.class))
                 .add(new MenuManager.MenuItem("LoRa пакеты", null, "/drawer/icon/packet-monitor.svg",
                         MenuManager.MenuItem.Type.ITEM, null))
-                .add(new MenuManager.MenuItem("Lua IDE", null, "/drawer/icon/lua.svg",
+                .add(new MenuManager.MenuItem("MeshApp IDE", null, "/drawer/icon/lua.svg",
                         MenuManager.MenuItem.Type.ITEM, null))
                 .add(new MenuManager.MenuItem("Настройки", null, "/drawer/icon/setting.svg",
                         MenuManager.MenuItem.Type.ITEM, FormSetting.class))
@@ -63,7 +63,7 @@ public class MyDrawerBuilder {
                         MenuManager.MenuItem.Type.ITEM, null));
 
         menuManager.registerAction("LoRa пакеты", PacketMonitorWindow::showWindow);
-        menuManager.registerAction("Lua IDE", LuaDevWindow::showWindow);
+        menuManager.registerAction("MeshApp IDE", LuaDevWindow::showWindow);
         menuManager.registerAction("Помощь", FormManager::showAbout);
     }
 }

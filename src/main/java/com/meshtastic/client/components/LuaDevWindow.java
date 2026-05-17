@@ -3,6 +3,8 @@ package com.meshtastic.client.components;
 import com.meshtastic.client.MeshApp;
 import com.meshtastic.client.lua.LuaDebugSnapshot;
 import com.meshtastic.client.lua.LuaDebugVariable;
+import com.meshtastic.client.lua.LuaCompletionEngine;
+import com.meshtastic.client.lua.LuaEditorIndentation;
 import com.meshtastic.client.lua.LuaScript;
 import com.meshtastic.client.lua.LuaScriptEvent;
 import com.meshtastic.client.lua.LuaScriptRuntimeService;
@@ -17,12 +19,14 @@ import javafx.collections.ObservableList;
 import javafx.geometry.Bounds;
 import javafx.geometry.Insets;
 import javafx.geometry.Orientation;
+import javafx.geometry.Point2D;
 import javafx.geometry.Pos;
 import javafx.scene.Node;
 import javafx.scene.Scene;
 import javafx.scene.control.Button;
 import javafx.scene.control.CheckBox;
 import javafx.scene.control.ContentDisplay;
+import javafx.scene.control.IndexRange;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
 import javafx.scene.control.ListView;
@@ -39,11 +43,11 @@ import javafx.scene.input.KeyEvent;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
+import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 import javafx.scene.shape.SVGPath;
 import javafx.scene.text.Text;
 import javafx.scene.text.TextFlow;
-import javafx.stage.Popup;
 import javafx.stage.Stage;
 import javafx.stage.StageStyle;
 import org.fxmisc.flowless.VirtualizedScrollPane;
@@ -60,7 +64,6 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -73,6 +76,7 @@ public final class LuaDevWindow {
 
     private static final double DEFAULT_WINDOW_WIDTH = 1280;
     private static final double DEFAULT_WINDOW_HEIGHT = 860;
+    private static final double COMPLETION_MIN_WIDTH = 260.0;
     private static final int MAX_COMPLETIONS = 9;
     private static final DateTimeFormatter TIME_FORMAT =
             DateTimeFormatter.ofPattern("HH:mm:ss").withZone(ZoneId.systemDefault());
@@ -83,16 +87,6 @@ public final class LuaDevWindow {
                     + "|(?<API>\\bmesh(?:\\.[A-Za-z_][A-Za-z0-9_]*)*)"
                     + "|(?<KEYWORD>\\b(?:and|break|do|else|elseif|end|false|for|function|if|in|local|nil|not|or|repeat|return|then|true|until|while)\\b)"
                     + "|(?<BUILTIN>\\b(?:assert|error|ipairs|next|pairs|pcall|select|tonumber|tostring|type|xpcall|string|table|math|coroutine)\\b)"
-    );
-
-    private static final List<String> COMPLETIONS = List.of(
-            "function", "local", "return", "if", "then", "else", "elseif", "end",
-            "for", "in", "pairs", "ipairs", "while", "do", "repeat", "until",
-            "true", "false", "nil",
-            "on_message(msg)", "mesh.log(", "mesh.now()", "mesh.owner()",
-            "mesh.chat.send_channel(", "mesh.chat.send_dm(", "mesh.chat.recent(",
-            "mesh.chat.nodes()", "mesh.chat.channels()",
-            "mesh.kv.get(", "mesh.kv.set(", "mesh.kv.delete(", "mesh.kv.list()", "mesh.kv.clear()"
     );
 
     private static final String API_REFERENCE = """
@@ -125,11 +119,11 @@ public final class LuaDevWindow {
 
     private final LuaScriptService scriptService = LuaScriptService.getInstance();
     private final LuaScriptRuntimeService runtimeService = LuaScriptRuntimeService.getInstance();
+    private final LuaCompletionEngine completionEngine = new LuaCompletionEngine();
     private final ObservableList<LuaScript> scripts = FXCollections.observableArrayList();
     private final ObservableList<KvRow> kvRows = FXCollections.observableArrayList();
     private final ObservableList<DebugVarRow> debugRows = FXCollections.observableArrayList();
     private final Map<Long, Set<Integer>> breakpointsByScript = new HashMap<>();
-    private final Popup completionPopup = new Popup();
     private final VBox completionBox = new VBox();
 
     private Stage stage;
@@ -137,6 +131,7 @@ public final class LuaDevWindow {
     private TextField nameField;
     private CheckBox enabledCheck;
     private CodeArea codeArea;
+    private StackPane editorStack;
     private TextArea consoleArea;
     private TableView<KvRow> kvTable;
     private TableView<DebugVarRow> debugTable;
@@ -150,14 +145,15 @@ public final class LuaDevWindow {
     private LuaScript currentScript;
     private boolean dirty;
     private boolean loadingScript;
-    private List<String> visibleCompletions = List.of();
-    private String visibleCompletionPrefix = "";
+    private List<LuaCompletionEngine.CompletionItem> visibleCompletions = List.of();
+    private int completionReplaceStart;
+    private int completionReplaceEnd;
     private int selectedCompletionIndex;
     private Set<Integer> currentBreakpoints = new TreeSet<>();
     private int currentDebugLine = -1;
 
     private LuaDevWindow() {
-        configureCompletionPopup();
+        configureCompletionOverlay();
         createStage();
         reloadScripts(0);
     }
@@ -197,7 +193,7 @@ public final class LuaDevWindow {
 
         stage = new Stage();
         stage.initStyle(StageStyle.DECORATED);
-        stage.setTitle("Lua среда разработки");
+        stage.setTitle("MeshApp IDE");
         stage.setResizable(true);
         if (MeshApp.getPrimaryStage() != null && !MeshApp.getPrimaryStage().getIcons().isEmpty()) {
             stage.getIcons().setAll(MeshApp.getPrimaryStage().getIcons());
@@ -205,24 +201,23 @@ public final class LuaDevWindow {
         stage.setScene(scene);
     }
 
-    private void configureCompletionPopup() {
+    private void configureCompletionOverlay() {
         completionBox.getStyleClass().add("lua-completion-popup");
+        completionBox.setManaged(false);
+        completionBox.setVisible(false);
         String appCss = LuaDevWindow.class.getResource("/css/app.css") != null
                 ? LuaDevWindow.class.getResource("/css/app.css").toExternalForm()
                 : null;
         if (appCss != null) {
             completionBox.getStylesheets().add(appCss);
         }
-        completionPopup.setAutoHide(true);
-        completionPopup.setHideOnEscape(true);
-        completionPopup.getContent().add(completionBox);
     }
 
     private HBox createHeader() {
         HBox header = new HBox(12);
         header.setAlignment(Pos.CENTER_LEFT);
 
-        Label title = new Label("Lua среда разработки");
+        Label title = new Label("MeshApp IDE");
         title.getStyleClass().add("form-title");
 
         statusLabel = new Label("Готово");
@@ -341,8 +336,13 @@ public final class LuaDevWindow {
         consoleArea.setWrapText(false);
         consoleArea.setPrefRowCount(9);
 
-        VBox editorBox = new VBox(8, metaRow, new VirtualizedScrollPane<>(codeArea));
-        VBox.setVgrow(editorBox.getChildren().get(1), Priority.ALWAYS);
+        VirtualizedScrollPane<CodeArea> codeScrollPane = new VirtualizedScrollPane<>(codeArea);
+        editorStack = new StackPane(codeScrollPane, completionBox);
+        editorStack.setPickOnBounds(false);
+        StackPane.setAlignment(completionBox, Pos.TOP_LEFT);
+
+        VBox editorBox = new VBox(8, metaRow, editorStack);
+        VBox.setVgrow(editorStack, Priority.ALWAYS);
 
         VBox consoleBox = new VBox(6, sectionTitle("Консоль"), consoleArea);
         VBox.setVgrow(consoleArea, Priority.ALWAYS);
@@ -487,7 +487,7 @@ public final class LuaDevWindow {
     }
 
     private void handleEditorKeyPressed(KeyEvent event) {
-        if (completionPopup.isShowing()) {
+        if (isCompletionShowing()) {
             if (event.getCode() == KeyCode.DOWN) {
                 selectCompletionOffset(1);
                 event.consume();
@@ -498,13 +498,13 @@ public final class LuaDevWindow {
                 event.consume();
                 return;
             }
-            if (event.getCode() == KeyCode.ENTER || event.getCode() == KeyCode.TAB) {
+            if (event.getCode() == KeyCode.ENTER || (event.getCode() == KeyCode.TAB && !event.isShiftDown())) {
                 applySelectedCompletion();
                 event.consume();
                 return;
             }
             if (event.getCode() == KeyCode.ESCAPE) {
-                completionPopup.hide();
+                hideCompletion();
                 event.consume();
                 return;
             }
@@ -524,49 +524,177 @@ public final class LuaDevWindow {
             event.consume();
             return;
         }
-        if (event.getCode() == KeyCode.ESCAPE) {
-            completionPopup.hide();
+        if (event.getCode() == KeyCode.TAB) {
+            applyTabIndent(event.isShiftDown());
+            event.consume();
+            return;
         }
+        if (event.getCode() == KeyCode.ENTER) {
+            applyIndentedNewLine();
+            event.consume();
+            return;
+        }
+        if (event.getCode() == KeyCode.ESCAPE) {
+            hideCompletion();
+        }
+    }
+
+    private void applyIndentedNewLine() {
+        IndexRange selection = codeArea.getSelection();
+        applyEditorTextEdit(LuaEditorIndentation.newLineEdit(
+                codeArea.getText(),
+                selection.getStart(),
+                selection.getEnd()
+        ));
+        hideCompletion();
+    }
+
+    private void applyTabIndent(boolean unindent) {
+        IndexRange selection = codeArea.getSelection();
+        applyEditorTextEdit(LuaEditorIndentation.tabEdit(
+                codeArea.getText(),
+                selection.getStart(),
+                selection.getEnd(),
+                unindent
+        ));
+        hideCompletion();
+    }
+
+    private void applyEditorTextEdit(LuaEditorIndentation.TextEdit edit) {
+        codeArea.replaceText(edit.start(), edit.end(), edit.replacement());
+        codeArea.selectRange(edit.selectionStart(), edit.selectionEnd());
     }
 
     private void showCompletion(boolean forced) {
         if (loadingScript || codeArea == null) {
             return;
         }
-        String prefix = completionPrefix();
-        if (!forced && prefix.length() < 2 && !prefix.contains(".")) {
-            completionPopup.hide();
-            return;
-        }
-        String query = prefix.toLowerCase(Locale.ROOT);
-        List<String> candidates = COMPLETIONS.stream()
-                .filter(candidate -> candidate.toLowerCase(Locale.ROOT).startsWith(query)
-                        || candidate.toLowerCase(Locale.ROOT).contains("." + query))
-                .limit(MAX_COMPLETIONS)
-                .toList();
-        if (candidates.isEmpty()) {
-            completionPopup.hide();
+        LuaCompletionEngine.CompletionResult result =
+                completionEngine.complete(codeArea.getText(), codeArea.getCaretPosition(), forced);
+        if (result.isEmpty()) {
+            hideCompletion();
             return;
         }
 
-        visibleCompletions = candidates;
-        visibleCompletionPrefix = prefix;
+        visibleCompletions = result.items().stream()
+                .limit(MAX_COMPLETIONS)
+                .toList();
+        completionReplaceStart = result.replaceStart();
+        completionReplaceEnd = result.replaceEnd();
         selectedCompletionIndex = 0;
         rebuildCompletionRows();
         updateCompletionPopupTheme();
 
-        Optional<Bounds> caretBounds = codeArea.getCaretBounds();
-        if (caretBounds.isPresent()) {
-            Bounds screenBounds = caretBounds.get();
-            double x = screenBounds.getMaxX();
-            double y = screenBounds.getMaxY() + 3;
-            if (completionPopup.isShowing()) {
-                completionPopup.setX(x);
-                completionPopup.setY(y);
+        positionCompletionOverlayAtCaret();
+        Platform.runLater(this::positionCompletionOverlayAtCaret);
+    }
+
+    private void positionCompletionOverlayAtCaret() {
+        if (codeArea == null || editorStack == null || visibleCompletions.isEmpty()) {
+            return;
+        }
+        Optional<Point2D> anchor = completionAnchorPoint();
+        if (anchor.isEmpty()) {
+            hideCompletion();
+            return;
+        }
+
+        applyCompletionBoxSize();
+        completionBox.relocate(
+                Math.max(0, Math.min(anchor.get().getX(), editorStack.getWidth() - completionBox.prefWidth(-1))),
+                Math.max(0, anchor.get().getY() + 1)
+        );
+        completionBox.toFront();
+        completionBox.setVisible(true);
+    }
+
+    private void applyCompletionBoxSize() {
+        completionBox.setVisible(true);
+        completionBox.applyCss();
+        double width = Math.max(COMPLETION_MIN_WIDTH, completionBox.prefWidth(-1));
+        double height = completionBox.getInsets().getTop() + completionBox.getInsets().getBottom();
+        for (Node child : completionBox.getChildren()) {
+            if (child instanceof Region region) {
+                height += region.prefHeight(width);
             } else {
-                completionPopup.show(codeArea, x, y);
+                height += child.getLayoutBounds().getHeight();
             }
         }
+        completionBox.setMinSize(width, height);
+        completionBox.setPrefSize(width, height);
+        completionBox.setMaxSize(width, height);
+        completionBox.resize(width, height);
+    }
+
+    private Optional<Point2D> completionAnchorPoint() {
+        Optional<Point2D> caretAnchor = codeArea.getCaretBounds()
+                .filter(bounds -> !bounds.isEmpty())
+                .map(bounds -> editorStack.screenToLocal(bounds.getMinX(), bounds.getMaxY()))
+                .map(this::snapPoint);
+        if (caretAnchor.isPresent()) {
+            return caretAnchor;
+        }
+
+        Optional<Point2D> characterAnchor = completionCharacterAnchorPoint();
+        if (characterAnchor.isPresent()) {
+            return characterAnchor;
+        }
+
+        return completionEstimatedAnchorPoint();
+    }
+
+    private Optional<Point2D> completionCharacterAnchorPoint() {
+        int caretPosition = codeArea.getCaretPosition();
+        int from = Math.max(0, caretPosition - 1);
+        int to = Math.max(from, caretPosition);
+        if (from == to) {
+            return Optional.empty();
+        }
+        try {
+            Optional<Bounds> bounds = codeArea.getCharacterBoundsOnScreen(from, to);
+            if (bounds.isPresent()) {
+                Bounds caretBounds = bounds.get();
+                Point2D local = editorStack.screenToLocal(caretBounds.getMaxX(), caretBounds.getMaxY());
+                return Optional.of(snapPoint(local));
+            }
+        } catch (IllegalArgumentException ignored) {
+            // Fall through to estimated bounds.
+        }
+        return Optional.empty();
+    }
+
+    private Optional<Point2D> completionEstimatedAnchorPoint() {
+        int currentParagraph = codeArea.getCurrentParagraph();
+        Optional<Bounds> paragraphBounds = codeArea.getParagraphBoundsOnScreen(currentParagraph);
+        if (paragraphBounds.isEmpty()) {
+            return Optional.empty();
+        }
+        Bounds bounds = paragraphBounds.get();
+        int lineCount = Math.max(1, codeArea.getParagraphLinesCount(currentParagraph));
+        int lineIndex = Math.max(0, codeArea.lineIndex(currentParagraph, codeArea.getCaretColumn()));
+        double lineHeight = bounds.getHeight() / lineCount;
+        double x = bounds.getMinX() + approximateCaretColumnOffset();
+        double y = bounds.getMinY() + ((lineIndex + 1) * lineHeight);
+        return Optional.of(snapPoint(editorStack.screenToLocal(x, y)));
+    }
+
+    private double approximateCaretColumnOffset() {
+        String paragraph = codeArea.getText(codeArea.getCurrentParagraph());
+        int column = Math.max(0, Math.min(codeArea.getCaretColumn(), paragraph.length()));
+        double charWidth = 9.6;
+        return paragraph.substring(0, column).length() * charWidth;
+    }
+
+    private Point2D snapPoint(Point2D point) {
+        return new Point2D(Math.floor(point.getX()), Math.floor(point.getY()));
+    }
+
+    private boolean isCompletionShowing() {
+        return completionBox.isVisible();
+    }
+
+    private void hideCompletion() {
+        completionBox.setVisible(false);
     }
 
     private void rebuildCompletionRows() {
@@ -576,17 +704,18 @@ public final class LuaDevWindow {
         updateSelectedCompletionRow();
     }
 
-    private TextFlow createCompletionRow(String candidate, int index) {
+    private TextFlow createCompletionRow(LuaCompletionEngine.CompletionItem candidate, int index) {
         TextFlow row = new TextFlow();
         row.getStyleClass().add("lua-completion-row");
-        row.setMinWidth(260);
+        row.setMinWidth(COMPLETION_MIN_WIDTH);
+        row.setPrefWidth(COMPLETION_MIN_WIDTH);
         row.setUserData(index);
-        addHighlightedCompletionText(row, candidate);
+        addHighlightedCompletionText(row, candidate.displayText());
         row.setOnMouseEntered(event -> {
             selectedCompletionIndex = index;
             updateSelectedCompletionRow();
         });
-        row.setOnMousePressed(event -> applyCompletion(visibleCompletionPrefix, candidate));
+        row.setOnMousePressed(event -> applyCompletion(candidate));
         return row;
     }
 
@@ -639,7 +768,7 @@ public final class LuaDevWindow {
                 || selectedCompletionIndex >= visibleCompletions.size()) {
             return;
         }
-        applyCompletion(visibleCompletionPrefix, visibleCompletions.get(selectedCompletionIndex));
+        applyCompletion(visibleCompletions.get(selectedCompletionIndex));
     }
 
     private void updateCompletionPopupTheme() {
@@ -649,27 +778,12 @@ public final class LuaDevWindow {
         }
     }
 
-    private String completionPrefix() {
-        int caret = codeArea.getCaretPosition();
-        String text = codeArea.getText();
-        int start = caret;
-        while (start > 0) {
-            char ch = text.charAt(start - 1);
-            if (Character.isLetterOrDigit(ch) || ch == '_' || ch == '.') {
-                start--;
-            } else {
-                break;
-            }
-        }
-        return text.substring(start, caret);
-    }
-
-    private void applyCompletion(String prefix, String candidate) {
-        int caret = codeArea.getCaretPosition();
-        int start = Math.max(0, caret - prefix.length());
-        codeArea.replaceText(start, caret, candidate);
+    private void applyCompletion(LuaCompletionEngine.CompletionItem candidate) {
+        int start = Math.max(0, Math.min(completionReplaceStart, codeArea.getLength()));
+        int end = Math.max(start, Math.min(completionReplaceEnd, codeArea.getLength()));
+        codeArea.replaceText(start, end, candidate.insertText());
         codeArea.requestFocus();
-        completionPopup.hide();
+        hideCompletion();
     }
 
     private void createScript() {
@@ -686,7 +800,7 @@ public final class LuaDevWindow {
     private void loadScript(LuaScript script) {
         loadingScript = true;
         currentScript = script;
-        completionPopup.hide();
+        hideCompletion();
         currentBreakpoints = new TreeSet<>(breakpointsByScript.computeIfAbsent(script.getId(), ignored -> new TreeSet<>()));
         clearDebugState();
         nameField.setText(script.getName());
