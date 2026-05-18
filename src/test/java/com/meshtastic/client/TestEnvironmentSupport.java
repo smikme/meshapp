@@ -85,6 +85,16 @@ public final class TestEnvironmentSupport {
         try {
             // Тесты поднимают реальные singleton-сервисы с H2/threads, поэтому
             // каждый кейс должен стартовать с полностью чистого runtime-состояния.
+            Class<?> luaRuntimeService = Class.forName("com.meshtastic.client.lua.LuaScriptRuntimeService");
+            Object luaRuntimeInstance = readStaticField(luaRuntimeService, "instance");
+            if (luaRuntimeInstance != null) {
+                luaRuntimeService.getMethod("stopAll").invoke(luaRuntimeInstance);
+            }
+            writeStaticField(luaRuntimeService, "instance", null);
+
+            Class<?> luaScriptService = Class.forName("com.meshtastic.client.lua.LuaScriptService");
+            writeStaticField(luaScriptService, "instance", null);
+
             Class<?> messageDbService = Class.forName("com.meshtastic.client.service.MessageDbService");
             Object messageDbInstance = readStaticField(messageDbService, "instance");
             if (messageDbInstance != null) {

@@ -5,6 +5,7 @@ import com.meshtastic.client.components.EmojiImageCache;
 import com.meshtastic.client.components.EmojiRenderingSupport;
 import com.meshtastic.client.logging.JfrDiagnosticSupport;
 import com.meshtastic.client.logging.SessionCrashLogManager;
+import com.meshtastic.client.lua.LuaScriptRuntimeService;
 import com.meshtastic.client.modal.ModalPane;
 import com.meshtastic.client.platform.NativeWindowHelper;
 import com.meshtastic.client.platform.OsDetect;
@@ -313,6 +314,7 @@ public class MeshApp extends Application {
         savePrimaryWindowStateIfPossible();
         stopUiWatchdog();
         AppTrayManager.getInstance().dispose();
+        LuaScriptRuntimeService.getInstance().stopAll();
         ConnectionManager.getInstance().shutdownAll();
         BleDeviceDiscoveryService.getInstance().dispose();
         SessionCrashLogManager.markNormalShutdown();
