@@ -319,8 +319,140 @@ class DatabaseMigratorTest {
         }
     }
 
+    @Test
+    void migrateLegacyNumericAppDatabaseWithoutSchemaVersionConvertsNodeColumns() throws Exception {
+        try (Connection connection = openConnection("legacy-numeric-app-preserve")) {
+            createLegacyNumericAppTables(connection);
+
+            DatabaseMigrator.migrate(connection);
+
+            assertLegacyNumericSchemaWasConverted(connection);
+        }
+    }
+
+    @Test
+    void migrateLegacyNumericVersionOneConvertsNodeColumns() throws Exception {
+        try (Connection connection = openConnection("legacy-numeric-v1")) {
+            createSchemaVersion(connection, 1);
+            createLegacyNumericAppTables(connection);
+
+            DatabaseMigrator.migrate(connection);
+
+            assertLegacyNumericSchemaWasConverted(connection);
+        }
+    }
+
     private Connection openConnection(String name) throws SQLException {
         return DriverManager.getConnection("jdbc:h2:" + tempDir.resolve(name) + ";AUTO_SERVER=FALSE;TRACE_LEVEL_FILE=0");
+    }
+
+    private static void createLegacyNumericAppTables(Connection connection) throws SQLException {
+        try (Statement stmt = connection.createStatement()) {
+            stmt.execute("""
+                    CREATE TABLE messages (
+                        id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                        chat_type VARCHAR(10) NOT NULL,
+                        chat_key INT NOT NULL,
+                        from_num INT NOT NULL,
+                        to_num INT NOT NULL,
+                        channel_idx INT NOT NULL,
+                        text CLOB,
+                        timestamp BIGINT NOT NULL,
+                        outgoing BOOLEAN NOT NULL,
+                        packet_id INT DEFAULT 0,
+                        status VARCHAR(20),
+                        error_reason VARCHAR(100),
+                        reply_id INT DEFAULT 0,
+                        reply_text CLOB,
+                        hop_start INT DEFAULT 0,
+                        hop_limit INT DEFAULT 0,
+                        sender_name VARCHAR(100),
+                        system_msg BOOLEAN DEFAULT FALSE
+                    )
+                    """);
+            stmt.execute("CREATE INDEX idx_msg_chat ON messages (chat_type, chat_key, id)");
+            stmt.execute("CREATE INDEX idx_msg_packet ON messages (packet_id)");
+            stmt.execute("""
+                    INSERT INTO messages (chat_type, chat_key, from_num, to_num, channel_idx, text, timestamp, outgoing)
+                    VALUES ('channel', 0, 48956964, -1, 0, 'legacy channel', 1, FALSE)
+                    """);
+            stmt.execute("""
+                    INSERT INTO messages (chat_type, chat_key, from_num, to_num, channel_idx, text, timestamp, outgoing)
+                    VALUES ('dm', -160835988, 48956964, -160835988, 0, 'legacy dm', 2, FALSE)
+                    """);
+
+            stmt.execute("""
+                    CREATE TABLE chat_read_counts (
+                        chat_type VARCHAR(10) NOT NULL,
+                        chat_key INT NOT NULL,
+                        read_count INT NOT NULL DEFAULT 0,
+                        PRIMARY KEY (chat_type, chat_key)
+                    )
+                    """);
+            stmt.execute("INSERT INTO chat_read_counts (chat_type, chat_key, read_count) VALUES ('channel', 0, 3)");
+            stmt.execute("INSERT INTO chat_read_counts (chat_type, chat_key, read_count) VALUES ('dm', -160835988, 2)");
+
+            stmt.execute("""
+                    CREATE TABLE telemetry_history (
+                        id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                        ts BIGINT NOT NULL,
+                        node_num INT NOT NULL,
+                        battery_level INT,
+                        voltage REAL,
+                        channel_utilization REAL,
+                        air_util_tx REAL,
+                        temperature REAL,
+                        relative_humidity REAL,
+                        barometric_pressure REAL
+                    )
+                    """);
+            stmt.execute("CREATE INDEX idx_telemetry_node_ts ON telemetry_history (node_num, ts)");
+            stmt.execute("INSERT INTO telemetry_history (ts, node_num, battery_level) VALUES (100, 48956964, 95)");
+
+            stmt.execute("""
+                    CREATE TABLE nodes (
+                        node_num INT PRIMARY KEY,
+                        long_name VARCHAR(100),
+                        short_name VARCHAR(10),
+                        node_id VARCHAR(20),
+                        role VARCHAR(30),
+                        hw_model VARCHAR(50),
+                        latitude DOUBLE,
+                        longitude DOUBLE,
+                        altitude INT,
+                        snr REAL,
+                        last_heard INT,
+                        battery_level INT,
+                        voltage REAL,
+                        hops_away INT
+                    )
+                    """);
+            stmt.execute("""
+                    INSERT INTO nodes (node_num, long_name, short_name, node_id)
+                    VALUES (48956964, 'LYBER_0624', 'DIM4', '!02eb0624')
+                    """);
+        }
+    }
+
+    private static void assertLegacyNumericSchemaWasConverted(Connection connection) throws SQLException {
+        assertEquals(DatabaseMigrator.CURRENT_VERSION, schemaVersion(connection));
+        assertTrue(columnExists(connection, "MESSAGES", "FROM_NODE_ID"));
+        assertTrue(columnExists(connection, "MESSAGES", "TO_NODE_ID"));
+        assertTrue(columnExists(connection, "MESSAGES", "OWNER_NODE_ID"));
+        assertTrue(columnExists(connection, "MESSAGES", "RX_RSSI"));
+        assertTrue(columnExists(connection, "MESSAGES", "RX_SNR"));
+        assertTrue(columnExists(connection, "TELEMETRY_HISTORY", "NODE_ID"));
+        assertTrue(columnExists(connection, "TELEMETRY_HISTORY", "OWNER_NODE_ID"));
+        assertTrue(columnExists(connection, "CHAT_READ_COUNTS", "OWNER_NODE_ID"));
+
+        assertEquals(2, countRows(connection, "messages"));
+        assertEquals(1, countRows(connection, "telemetry_history"));
+        assertEquals("!02eb0624", stringValue(connection, "SELECT from_node_id FROM messages WHERE text = 'legacy channel'"));
+        assertEquals("!ffffffff", stringValue(connection, "SELECT to_node_id FROM messages WHERE text = 'legacy channel'"));
+        assertEquals("0", stringValue(connection, "SELECT chat_key FROM messages WHERE text = 'legacy channel'"));
+        assertEquals("!f669d66c", stringValue(connection, "SELECT chat_key FROM messages WHERE text = 'legacy dm'"));
+        assertEquals("!02eb0624", stringValue(connection, "SELECT node_id FROM telemetry_history WHERE ts = 100"));
+        assertEquals("!f669d66c", stringValue(connection, "SELECT chat_key FROM chat_read_counts WHERE chat_type = 'dm'"));
     }
 
     private static void createSchemaVersion(Connection connection, int version) throws SQLException {
@@ -428,6 +560,14 @@ class DatabaseMigratorTest {
     private static String firstMessageText(Connection connection) throws SQLException {
         try (Statement stmt = connection.createStatement();
              ResultSet rs = stmt.executeQuery("SELECT text FROM messages ORDER BY id LIMIT 1")) {
+            rs.next();
+            return rs.getString(1);
+        }
+    }
+
+    private static String stringValue(Connection connection, String sql) throws SQLException {
+        try (Statement stmt = connection.createStatement();
+             ResultSet rs = stmt.executeQuery(sql)) {
             rs.next();
             return rs.getString(1);
         }

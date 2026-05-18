@@ -87,7 +87,7 @@ public final class DatabaseMigrator {
             log.info("Database schema version {} → migrating to {}", version, CURRENT_VERSION);
 
             // Последовательные миграции: v0→v1, v1→v2, ...
-            if (version < 2) { migrateToV2(connection); version = 2; }
+            if (version < 2) { normalizeLegacyV1Schema(connection); migrateToV2(connection); version = 2; }
             if (version < 3) { migrateToV3(connection); version = 3; }
             if (version < 4) { migrateToV4(connection); version = 4; }
             if (version < 5) { migrateToV5(connection); version = 5; }
@@ -153,6 +153,252 @@ public final class DatabaseMigrator {
             ps.setInt(1, version);
             ps.executeUpdate();
         }
+    }
+
+    /**
+     * Older builds created the app tables before schema_version existed, and used
+     * numeric node columns (from_num/to_num/node_num). When preserving such a DB,
+     * we label it as v1, so v1 must be tolerant of both the old numeric layout and
+     * the newer string-node layout.
+     */
+    private static void normalizeLegacyV1Schema(Connection connection) throws SQLException {
+        normalizeLegacyMessages(connection);
+        normalizeLegacyChatReadCounts(connection);
+        normalizeLegacyNodes(connection);
+        normalizeLegacyTelemetry(connection);
+    }
+
+    private static void normalizeLegacyMessages(Connection connection) throws SQLException {
+        if (!tableExists(connection, "MESSAGES")) {
+            return;
+        }
+
+        try (Statement stmt = connection.createStatement()) {
+            addColumnIfMissing(stmt, connection, "MESSAGES", "PACKET_ID", "packet_id INT DEFAULT 0");
+            addColumnIfMissing(stmt, connection, "MESSAGES", "STATUS", "status VARCHAR(20)");
+            addColumnIfMissing(stmt, connection, "MESSAGES", "ERROR_REASON", "error_reason VARCHAR(100)");
+            addColumnIfMissing(stmt, connection, "MESSAGES", "REPLY_ID", "reply_id INT DEFAULT 0");
+            addColumnIfMissing(stmt, connection, "MESSAGES", "REPLY_TEXT", "reply_text CLOB");
+            addColumnIfMissing(stmt, connection, "MESSAGES", "HOP_START", "hop_start INT DEFAULT 0");
+            addColumnIfMissing(stmt, connection, "MESSAGES", "HOP_LIMIT", "hop_limit INT DEFAULT 0");
+            addColumnIfMissing(stmt, connection, "MESSAGES", "SENDER_NAME", "sender_name VARCHAR(100)");
+            addColumnIfMissing(stmt, connection, "MESSAGES", "SYSTEM_MSG", "system_msg BOOLEAN DEFAULT FALSE");
+            addColumnIfMissing(stmt, connection, "MESSAGES", "RX_RSSI", "rx_rssi INT DEFAULT 0");
+            addColumnIfMissing(stmt, connection, "MESSAGES", "RX_SNR", "rx_snr REAL DEFAULT 0");
+
+            if (!columnExists(connection, "MESSAGES", "FROM_NODE_ID")) {
+                stmt.execute("ALTER TABLE messages ADD COLUMN from_node_id VARCHAR(20) NOT NULL DEFAULT ''");
+            }
+            if (!columnExists(connection, "MESSAGES", "TO_NODE_ID")) {
+                stmt.execute("ALTER TABLE messages ADD COLUMN to_node_id VARCHAR(20) NOT NULL DEFAULT ''");
+            }
+        }
+
+        if (columnExists(connection, "MESSAGES", "FROM_NUM") || columnExists(connection, "MESSAGES", "TO_NUM")) {
+            backfillMessageNodeIds(connection);
+        }
+
+        if (!isCharacterColumn(connection, "MESSAGES", "CHAT_KEY")) {
+            normalizeMessageChatKeys(connection);
+        }
+    }
+
+    private static void normalizeLegacyChatReadCounts(Connection connection) throws SQLException {
+        if (!tableExists(connection, "CHAT_READ_COUNTS")
+                || !columnExists(connection, "CHAT_READ_COUNTS", "CHAT_KEY")
+                || isCharacterColumn(connection, "CHAT_READ_COUNTS", "CHAT_KEY")) {
+            return;
+        }
+
+        List<String[]> updates = new ArrayList<>();
+        try (Statement stmt = connection.createStatement();
+             ResultSet rs = stmt.executeQuery("SELECT chat_type, chat_key FROM chat_read_counts")) {
+            while (rs.next()) {
+                String chatType = rs.getString("chat_type");
+                int oldKey = rs.getInt("chat_key");
+                updates.add(new String[]{
+                        chatType,
+                        String.valueOf(oldKey),
+                        normalizeChatKey(chatType, oldKey)
+                });
+            }
+        }
+
+        try (Statement stmt = connection.createStatement()) {
+            dropPrimaryKeyIfPresent(stmt, "chat_read_counts");
+            stmt.execute("ALTER TABLE chat_read_counts ALTER COLUMN chat_key SET DATA TYPE VARCHAR(20)");
+        }
+
+        try (PreparedStatement ps = connection.prepareStatement("""
+                UPDATE chat_read_counts
+                SET chat_key = ?
+                WHERE chat_type = ? AND chat_key = ?
+                """)) {
+            for (String[] update : updates) {
+                ps.setString(1, update[2]);
+                ps.setString(2, update[0]);
+                ps.setString(3, update[1]);
+                ps.addBatch();
+            }
+            ps.executeBatch();
+        }
+    }
+
+    private static void normalizeLegacyNodes(Connection connection) throws SQLException {
+        if (!tableExists(connection, "NODES")) {
+            return;
+        }
+        try (Statement stmt = connection.createStatement()) {
+            if (!columnExists(connection, "NODES", "NODE_ID")) {
+                stmt.execute("ALTER TABLE nodes ADD COLUMN node_id VARCHAR(20)");
+            }
+            addColumnIfMissing(stmt, connection, "NODES", "NODE_NUM", "node_num INT");
+        }
+        if (columnExists(connection, "NODES", "NODE_NUM")) {
+            try (Statement stmt = connection.createStatement();
+                 ResultSet rs = stmt.executeQuery("""
+                         SELECT node_num
+                         FROM nodes
+                         WHERE (node_id IS NULL OR node_id = '') AND node_num IS NOT NULL
+                         """);
+                 PreparedStatement ps = connection.prepareStatement("""
+                         UPDATE nodes
+                         SET node_id = ?
+                         WHERE node_num = ? AND (node_id IS NULL OR node_id = '')
+                         """)) {
+                while (rs.next()) {
+                    int nodeNum = rs.getInt("node_num");
+                    ps.setString(1, nodeIdFromInt(nodeNum));
+                    ps.setInt(2, nodeNum);
+                    ps.addBatch();
+                }
+                ps.executeBatch();
+            }
+        }
+    }
+
+    private static void normalizeLegacyTelemetry(Connection connection) throws SQLException {
+        if (!tableExists(connection, "TELEMETRY_HISTORY")) {
+            return;
+        }
+        try (Statement stmt = connection.createStatement()) {
+            if (!columnExists(connection, "TELEMETRY_HISTORY", "NODE_ID")) {
+                stmt.execute("ALTER TABLE telemetry_history ADD COLUMN node_id VARCHAR(20) NOT NULL DEFAULT ''");
+            }
+        }
+        if (columnExists(connection, "TELEMETRY_HISTORY", "NODE_NUM")) {
+            try (Statement stmt = connection.createStatement();
+                 ResultSet rs = stmt.executeQuery("""
+                         SELECT id, node_num
+                         FROM telemetry_history
+                         WHERE (node_id IS NULL OR node_id = '')
+                         """);
+                 PreparedStatement ps = connection.prepareStatement("""
+                         UPDATE telemetry_history
+                         SET node_id = ?
+                         WHERE id = ?
+                         """)) {
+                while (rs.next()) {
+                    ps.setString(1, nodeIdFromInt(rs.getInt("node_num")));
+                    ps.setLong(2, rs.getLong("id"));
+                    ps.addBatch();
+                }
+                ps.executeBatch();
+            }
+        }
+    }
+
+    private static void backfillMessageNodeIds(Connection connection) throws SQLException {
+        boolean hasFromNum = columnExists(connection, "MESSAGES", "FROM_NUM");
+        boolean hasToNum = columnExists(connection, "MESSAGES", "TO_NUM");
+        try (Statement stmt = connection.createStatement();
+             ResultSet rs = stmt.executeQuery("""
+                     SELECT id%s%s
+                     FROM messages
+                     WHERE from_node_id = '' OR to_node_id = ''
+                     """.formatted(hasFromNum ? ", from_num" : "", hasToNum ? ", to_num" : ""));
+             PreparedStatement ps = connection.prepareStatement("""
+                     UPDATE messages
+                     SET from_node_id = CASE WHEN from_node_id = '' THEN ? ELSE from_node_id END,
+                         to_node_id = CASE WHEN to_node_id = '' THEN ? ELSE to_node_id END
+                     WHERE id = ?
+                     """)) {
+            while (rs.next()) {
+                String fromNodeId = hasFromNum ? nodeIdFromInt(rs.getInt("from_num")) : "";
+                String toNodeId = hasToNum ? nodeIdFromInt(rs.getInt("to_num")) : "";
+                ps.setString(1, fromNodeId);
+                ps.setString(2, toNodeId);
+                ps.setLong(3, rs.getLong("id"));
+                ps.addBatch();
+            }
+            ps.executeBatch();
+        }
+    }
+
+    private static void normalizeMessageChatKeys(Connection connection) throws SQLException {
+        List<String[]> updates = new ArrayList<>();
+        try (Statement stmt = connection.createStatement();
+             ResultSet rs = stmt.executeQuery("SELECT id, chat_type, chat_key FROM messages")) {
+            while (rs.next()) {
+                updates.add(new String[]{
+                        String.valueOf(rs.getLong("id")),
+                        String.valueOf(rs.getInt("chat_key")),
+                        normalizeChatKey(rs.getString("chat_type"), rs.getInt("chat_key"))
+                });
+            }
+        }
+
+        try (Statement stmt = connection.createStatement()) {
+            stmt.execute("DROP INDEX IF EXISTS idx_msg_chat");
+            stmt.execute("ALTER TABLE messages ALTER COLUMN chat_key SET DATA TYPE VARCHAR(20)");
+        }
+
+        try (PreparedStatement ps = connection.prepareStatement("""
+                UPDATE messages
+                SET chat_key = ?
+                WHERE id = ?
+                """)) {
+            for (String[] update : updates) {
+                ps.setString(1, update[2]);
+                ps.setLong(2, Long.parseLong(update[0]));
+                ps.addBatch();
+            }
+            ps.executeBatch();
+        }
+    }
+
+    private static void addColumnIfMissing(Statement stmt,
+                                           Connection connection,
+                                           String tableName,
+                                           String columnName,
+                                           String columnDefinition) throws SQLException {
+        if (!columnExists(connection, tableName, columnName)) {
+            stmt.execute("ALTER TABLE " + tableName.toLowerCase(Locale.ROOT) + " ADD COLUMN " + columnDefinition);
+        }
+    }
+
+    private static boolean isCharacterColumn(Connection connection, String tableName, String columnName) throws SQLException {
+        try (ResultSet rs = connection.getMetaData()
+                .getColumns(null, null, tableName, columnName)) {
+            if (!rs.next()) {
+                return false;
+            }
+            int type = rs.getInt("DATA_TYPE");
+            return type == Types.CHAR
+                    || type == Types.VARCHAR
+                    || type == Types.LONGVARCHAR
+                    || type == Types.NCHAR
+                    || type == Types.NVARCHAR
+                    || type == Types.LONGNVARCHAR;
+        }
+    }
+
+    private static String normalizeChatKey(String chatType, int oldKey) {
+        return "dm".equals(chatType) ? nodeIdFromInt(oldKey) : String.valueOf(oldKey);
+    }
+
+    private static String nodeIdFromInt(int nodeNum) {
+        return String.format(Locale.ROOT, "!%08x", nodeNum);
     }
 
     /** v3: колонка owner_node_id для изоляции данных между устройствами. */
@@ -445,7 +691,11 @@ public final class DatabaseMigrator {
             stmt.execute("ALTER TABLE " + tableName + " DROP PRIMARY KEY");
         } catch (SQLException e) {
             String state = e.getSQLState();
-            if (!"90057".equals(state) && !"90083".equals(state)) {
+            int errorCode = e.getErrorCode();
+            if (errorCode != 42112
+                    && !"42112".equals(state)
+                    && !"90057".equals(state)
+                    && !"90083".equals(state)) {
                 throw e;
             }
         }
