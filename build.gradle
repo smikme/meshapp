@@ -11,6 +11,9 @@ plugins {
 
 def javaVersion = 25
 def javaFxVersion = '25.0.3'
+def meshAppIdeEnabled = providers.gradleProperty('meshAppIdeEnabled')
+		.map { it.toString().trim().equalsIgnoreCase('true') }
+		.orElse(false)
 
 application {
 	mainClass = 'com.meshtastic.client.MeshAppLauncher'
@@ -125,7 +128,9 @@ tasks.register('generateVersionProperties') {
 			versionCode = 'git rev-list --count HEAD'.execute().text.trim() ?: '0'
 		} catch (ignored) {}
 		new File(dir, 'version.properties').text =
-			"version=${project.version}\nversionCode=${versionCode}\n"
+			"version=${project.version}\n" +
+			"versionCode=${versionCode}\n" +
+			"meshAppIdeEnabled=${meshAppIdeEnabled.get()}\n"
 	}
 }
 
