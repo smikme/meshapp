@@ -234,13 +234,13 @@ class SerialConnectionTest {
     }
 
     @Test
-    void shouldAssertDtrForWindowsCp210Bridge() {
-        assertTrue(SerialConnection.shouldAssertDtr(
+    void shouldNotAssertDtrForUsbSerialBridges() {
+        assertFalse(SerialConnection.shouldAssertDtr(
                 "COM3",
                 "Silicon Labs CP210x USB to UART Bridge (COM3)",
                 true
         ));
-        assertTrue(SerialConnection.shouldAssertDtr(
+        assertFalse(SerialConnection.shouldAssertDtr(
                 "COM4",
                 "USB-Enhanced-SERIAL CH9102 (COM4)",
                 true

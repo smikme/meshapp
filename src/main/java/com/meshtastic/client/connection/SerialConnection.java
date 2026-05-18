@@ -550,13 +550,11 @@ public class SerialConnection implements MeshtasticConnection, FrameFormatAwareC
             return true;
         }
 
-        String lower = (portName + " " + desc).toLowerCase(java.util.Locale.ROOT);
-        // Windows + CP210x/CH9102: некоторые драйверы держат RX "тихим", пока DTR не asserted.
-        // Это выглядит как "порт открыт, запись идёт, но ответов нет вообще".
-        // Для CH340/FTDI сохраняем старое поведение, чтобы не провоцировать лишний reset ESP32.
-        return isWindows && (lower.contains("cp210")
-                || lower.contains("silicon labs")
-                || lower.contains("ch9102"));
+        // USB-UART bridges commonly wire DTR into the ESP32 auto-reset circuit.
+        // Keep DTR low for bridges on every platform, including Windows CP210x/CH9102.
+        // If asserted here, affected devices reboot on every open and the app loops
+        // through FromRadio.REBOOTED -> reconnect before config exchange can finish.
+        return false;
     }
 
     private void closePort() {
