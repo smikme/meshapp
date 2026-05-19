@@ -138,12 +138,7 @@ public final class TestEnvironmentSupport {
             Class<?> bleDiscoveryService = Class.forName("com.meshtastic.client.service.BleDeviceDiscoveryService");
             Object bleDiscoveryInstance = readStaticField(bleDiscoveryService, "instance");
             if (bleDiscoveryInstance != null) {
-                Object platform = readField(bleDiscoveryInstance, "platform");
-                if (platform != null) {
-                    Method disposeMethod = platform.getClass().getDeclaredMethod("dispose");
-                    disposeMethod.setAccessible(true);
-                    disposeMethod.invoke(platform);
-                }
+                bleDiscoveryService.getMethod("dispose").invoke(bleDiscoveryInstance);
             }
             writeStaticField(bleDiscoveryService, "instance", null);
         } catch (ReflectiveOperationException e) {

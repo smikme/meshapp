@@ -533,9 +533,17 @@ public class SimpleConnectionForm extends VBox {
         }
 
         int count = devices.size();
-        lblBleStatus.setText(count == 0
-                ? "Устройства не найдены. Убедитесь, что Bluetooth включён."
-                : "Найдено устройств: " + count);
+        BleDeviceDiscoveryService discovery = BleDeviceDiscoveryService.getInstance();
+        String errorMessage = discovery.getLastErrorMessage();
+        if (!discovery.isScanning() && errorMessage != null && !errorMessage.isBlank()) {
+            lblBleStatus.setText(errorMessage);
+        } else if (count == 0) {
+            lblBleStatus.setText(discovery.isScanning()
+                    ? "Сканирование..."
+                    : "Устройства не найдены. Убедитесь, что Bluetooth включён.");
+        } else {
+            lblBleStatus.setText("Найдено устройств: " + count);
+        }
     }
 
     /**
