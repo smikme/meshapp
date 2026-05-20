@@ -236,6 +236,7 @@ abstract class FormChatBase extends Form {
     protected abstract void restorePendingCountdowns();
     protected abstract void updateInputEnabled();
     protected abstract void refreshLoadedMessageRows();
+    protected abstract void refreshLoadedMessageRows(boolean force);
     protected abstract void startReply(MeshMessage msg);
     protected abstract void requestTraceroute(MeshMessage msg);
     protected abstract void requestNodeInfo(MeshMessage msg);

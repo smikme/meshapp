@@ -592,7 +592,7 @@ abstract class FormChatUi extends FormChatBase {
     protected void handleChatFontSizeChanged() {
         applyChatTypography();
         Optional.ofNullable(chatListView).ifPresent(ListView::refresh);
-        Optional.ofNullable(selectedChat).ifPresent(chat -> refreshLoadedMessageRows());
+        Optional.ofNullable(selectedChat).ifPresent(chat -> refreshLoadedMessageRows(true));
     }
 
     protected void applyChatTypography() {

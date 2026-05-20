@@ -8,10 +8,11 @@ import javafx.scene.text.Text;
 import javafx.scene.text.TextFlow;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Collection;
+import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.WeakHashMap;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.Map;
 
 /**
  * TextFlow с поддержкой отображения эмодзи как изображений.
@@ -31,10 +32,14 @@ public class EmojiTextFlow extends TextFlow {
     private Paint textFill;
 
     // Кеш для сегментов текста (уменьшает CPU при повторном рендере)
-    private static final ConcurrentHashMap<String, List<Segment>> SEGMENT_CACHE = new ConcurrentHashMap<>();
-    
-    // Сброс кеша при изменении размера эмодзи (используем WeakHashMap для предотвращения утечек)
-    private static final WeakHashMap<Double, Integer> CACHE_HITS = new WeakHashMap<>();
+    private static final int SEGMENT_CACHE_MAX_ENTRIES = 512;
+    private static final Map<String, List<Segment>> SEGMENT_CACHE = Collections.synchronizedMap(
+            new LinkedHashMap<>(SEGMENT_CACHE_MAX_ENTRIES, 0.75f, true) {
+                @Override
+                protected boolean removeEldestEntry(Map.Entry<String, List<Segment>> eldest) {
+                    return size() > SEGMENT_CACHE_MAX_ENTRIES;
+                }
+            });
 
     public EmojiTextFlow() {
         setMinHeight(Region.USE_PREF_SIZE);
@@ -140,19 +145,41 @@ public class EmojiTextFlow extends TextFlow {
      */
     private List<Segment> getSegmentsForText(String text) {
         if (text == null || text.isEmpty()) {
-            return new ArrayList<>();
+            return List.of();
         }
-        
-        List<Segment> segments = SEGMENT_CACHE.get(text);
-        if (segments == null) {
-            segments = parseSegments(text);
-            SEGMENT_CACHE.put(text, new ArrayList<>(segments));
-        } else {
-            // Увеличить счетчик попаданий
-            CACHE_HITS.computeIfAbsent(emojiSize, k -> 0);
+
+        synchronized (SEGMENT_CACHE) {
+            List<Segment> segments = SEGMENT_CACHE.get(text);
+            if (segments != null) {
+                return segments;
+            }
         }
-        
-        return segments;
+
+        List<Segment> parsed = List.copyOf(parseSegments(text));
+        synchronized (SEGMENT_CACHE) {
+            List<Segment> existing = SEGMENT_CACHE.get(text);
+            if (existing != null) {
+                return existing;
+            }
+            SEGMENT_CACHE.put(text, parsed);
+            return parsed;
+        }
+    }
+
+    static void clearSegmentCacheForTests() {
+        synchronized (SEGMENT_CACHE) {
+            SEGMENT_CACHE.clear();
+        }
+    }
+
+    static int segmentCacheSizeForTests() {
+        synchronized (SEGMENT_CACHE) {
+            return SEGMENT_CACHE.size();
+        }
+    }
+
+    static int segmentCacheLimitForTests() {
+        return SEGMENT_CACHE_MAX_ENTRIES;
     }
 
     /**

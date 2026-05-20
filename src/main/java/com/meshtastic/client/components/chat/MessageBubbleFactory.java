@@ -44,7 +44,9 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
 import java.util.stream.Stream;
 
 /**
@@ -936,9 +938,11 @@ public class MessageBubbleFactory {
 
     private Button createEnabledReactionButton(MeshMessage msg) {
         Button reactionButton = createReactionButton();
-        Popup reactionPopup = buildReactionPopup(msg);
+        AtomicReference<Popup> reactionPopup = new AtomicReference<>();
         reactionButton.setOnAction(e -> {
-            toggleReactionPopup(reactionButton, reactionPopup);
+            Popup popup = reactionPopup.updateAndGet(existing ->
+                    existing != null ? existing : buildReactionPopup(msg));
+            toggleReactionPopup(reactionButton, popup);
             e.consume();
         });
         return reactionButton;
@@ -1215,15 +1219,14 @@ public class MessageBubbleFactory {
      * @param row строка чата
      */
     private void attachIncomingContextMenu(VBox content, MeshMessage msg, HBox row) {
-        ContextMenu menu = new ContextMenu(
+        installContextMenu(content, () -> new ContextMenu(
                 createMenuItem("Копировать", () -> copyText(msg.getText())),
                 createMenuItem("Ответить", () -> actions.startReply(msg)),
                 createMenuItem("Trace", () -> actions.requestTraceroute(msg)),
                 createMenuItem("Инфо", () -> actions.requestNodeInfo(msg)),
                 new SeparatorMenuItem(),
                 createMenuItem("Удалить", () -> actions.confirmDeleteMessage(msg, row))
-        );
-        installContextMenu(content, menu);
+        ));
     }
 
     /**
@@ -1234,12 +1237,11 @@ public class MessageBubbleFactory {
      * @param row строка чата
      */
     private void attachCopyDeleteMenu(VBox content, MeshMessage msg, HBox row) {
-        ContextMenu menu = new ContextMenu(
+        installContextMenu(content, () -> new ContextMenu(
                 createMenuItem("Копировать", () -> copyText(msg.getText())),
                 new SeparatorMenuItem(),
                 createMenuItem("Удалить", () -> actions.confirmDeleteMessage(msg, row))
-        );
-        installContextMenu(content, menu);
+        ));
     }
 
     /**
@@ -1256,13 +1258,16 @@ public class MessageBubbleFactory {
     }
 
     /**
-     * Привязывает готовое контекстное меню к bubble-контенту.
+     * Привязывает лениво создаваемое контекстное меню к bubble-контенту.
      *
      * @param content bubble-контент
-     * @param menu меню действий
+     * @param menuSupplier фабрика меню действий
      */
-    private static void installContextMenu(VBox content, ContextMenu menu) {
+    private static void installContextMenu(VBox content, Supplier<ContextMenu> menuSupplier) {
+        AtomicReference<ContextMenu> menuRef = new AtomicReference<>();
         content.setOnContextMenuRequested(ev -> {
+            ContextMenu menu = menuRef.updateAndGet(existing ->
+                    existing != null ? existing : menuSupplier.get());
             menu.show(content, ev.getScreenX(), ev.getScreenY());
             ev.consume();
         });

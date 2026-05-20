@@ -9,6 +9,7 @@ import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -30,9 +31,16 @@ import java.util.concurrent.Future;
 public final class EmojiImageCache {
 
     private static final double TEXT_BASELINE_RATIO = 0.80;
+    private static final int KNOWN_EMOJI_CACHE_MAX_ENTRIES = 2048;
 
     private static final Map<String, Image> CACHE = new ConcurrentHashMap<>();
-    private static final Map<String, Boolean> KNOWN_EMOJI_CACHE = new ConcurrentHashMap<>();
+    private static final Map<String, Boolean> KNOWN_EMOJI_CACHE = Collections.synchronizedMap(
+            new LinkedHashMap<>(KNOWN_EMOJI_CACHE_MAX_ENTRIES, 0.75f, true) {
+                @Override
+                protected boolean removeEldestEntry(Map.Entry<String, Boolean> eldest) {
+                    return size() > KNOWN_EMOJI_CACHE_MAX_ENTRIES;
+                }
+            });
     private static final Set<String> RESOURCE_NAMES = loadResourceNames();
     private static final Set<String> AVAILABLE_EMOJIS = loadAvailableEmojis();
     private static final int MAX_EMOJI_CODEPOINTS = computeMaxEmojiCodePointCount();
@@ -61,7 +69,28 @@ public final class EmojiImageCache {
         if (s == null || s.isEmpty()) {
             return false;
         }
-        return KNOWN_EMOJI_CACHE.computeIfAbsent(s, EmojiImageCache::hasResourceForEmoji);
+        if (!hasEmojiPresentationHint(s)) {
+            return false;
+        }
+        synchronized (KNOWN_EMOJI_CACHE) {
+            return KNOWN_EMOJI_CACHE.computeIfAbsent(s, EmojiImageCache::hasResourceForEmoji);
+        }
+    }
+
+    static void clearKnownEmojiCacheForTests() {
+        synchronized (KNOWN_EMOJI_CACHE) {
+            KNOWN_EMOJI_CACHE.clear();
+        }
+    }
+
+    static int knownEmojiCacheSizeForTests() {
+        synchronized (KNOWN_EMOJI_CACHE) {
+            return KNOWN_EMOJI_CACHE.size();
+        }
+    }
+
+    static int knownEmojiCacheLimitForTests() {
+        return KNOWN_EMOJI_CACHE_MAX_ENTRIES;
     }
 
     /** Все emoji, для которых в ресурсах есть локальный Twemoji PNG. */

@@ -3,6 +3,7 @@ package com.meshtastic.client.forms;
 import com.meshtastic.client.components.chat.ChatDbKey;
 import com.meshtastic.client.model.ChatItem;
 import com.meshtastic.client.model.MeshMessage;
+import com.meshtastic.client.model.MessageReaction;
 import com.meshtastic.client.service.MessageDbService;
 import com.meshtastic.client.utils.AppPreferences;
 
@@ -11,9 +12,11 @@ import javafx.scene.control.Label;
 import javafx.scene.layout.HBox;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 import org.meshtastic.proto.MeshProtos;
 
@@ -187,7 +190,7 @@ abstract class FormChatMessages extends FormChatUi {
         // Обновить статусы доставки для отправленных сообщений (ACK/NAK)
         MessageDbService db = MessageDbService.getInstance();
         refreshPendingDeliveryStatuses(db, chatType, chatKey, ownerNodeId);
-        syncLoadedMqttMetadata(db, chatType, chatKey, ownerNodeId);
+        boolean metadataChanged = syncLoadedMqttMetadata(db, chatType, chatKey, ownerNodeId);
 
         List<MeshMessage> newMsgs = db.loadAfter(chatType, chatKey, latestKnownDbId, currentOwnerNodeId());
         if (reloadAfterDatabaseResetIfNeeded(db, chatType, chatKey, newMsgs)) {
@@ -195,7 +198,7 @@ abstract class FormChatMessages extends FormChatUi {
         }
         if (newMsgs.isEmpty()) {
             if (formVisible) {
-                refreshLoadedMessageRows();
+                refreshLoadedMessageRows(metadataChanged);
             }
             return;
         }
@@ -203,7 +206,7 @@ abstract class FormChatMessages extends FormChatUi {
         handleNewMessages(newMsgs, preservedScrollState, wasAtLiveTail);
         refreshMessageSearchResults(false);
         if (formVisible) {
-            refreshLoadedMessageRows();
+            refreshLoadedMessageRows(metadataChanged);
         }
     }
 
@@ -342,22 +345,24 @@ abstract class FormChatMessages extends FormChatUi {
         });
     }
 
-    protected void syncLoadedMqttMetadata(MessageDbService db,
+    protected boolean syncLoadedMqttMetadata(MessageDbService db,
                                         String chatType,
                                         String chatKey,
                                         String ownerNodeId) {
         if (db == null || chatType == null || chatKey == null || ownerNodeId == null) {
-            return;
+            return false;
         }
+        boolean changed = false;
         for (MeshMessage loaded : loadedMessages) {
             if (loaded.getPacketId() == 0 || !loaded.isViaMqtt()) {
                 continue;
             }
             MeshMessage updated = db.findByPacketId(loaded.getPacketId(), chatType, chatKey, ownerNodeId);
             if (updated != null) {
-                syncLoadedMessageMetadata(updated);
+                changed |= copyLoadedMessageMetadata(loaded, updated);
             }
         }
+        return changed;
     }
 
     protected MeshMessage syncLoadedMessageMetadata(MeshMessage updated) {
@@ -522,34 +527,62 @@ abstract class FormChatMessages extends FormChatUi {
         newestLoadedDbId = loadedMessages.getLast().getDbId();
     }
 
-    protected void attachReactions(List<MeshMessage> messages) {
+    protected Set<Long> attachReactions(List<MeshMessage> messages) {
         if (messages == null || messages.isEmpty() || selectedChat == null) {
-            return;
+            return Set.of();
         }
         MessageDbService db = MessageDbService.getInstance();
         String chatType = currentChatType();
         String chatKey = currentChatKey();
         String ownerNodeId = currentOwnerNodeId();
+        Map<Long, String> replyTextBefore = messages.stream()
+                .collect(java.util.stream.Collectors.toMap(
+                        MeshMessage::getDbId,
+                        msg -> normalizedReplyText(msg.getReplyText()),
+                        (first, ignored) -> first));
         db.hydrateReplyTexts(messages, chatType, chatKey, ownerNodeId);
 
-        Map<Integer, List<com.meshtastic.client.model.MessageReaction>> reactionsByTarget =
+        Map<Integer, List<MessageReaction>> reactionsByTarget =
                 db.loadReactionsByTargetPacketIds(
                         chatType,
                         chatKey,
                         ownerNodeId,
                         messages.stream().map(MeshMessage::getPacketId).toList());
+        Set<Long> changedDbIds = new HashSet<>();
         for (MeshMessage message : messages) {
-            message.setReactions(reactionsByTarget.get(message.getPacketId()));
+            if (!Objects.equals(
+                    replyTextBefore.getOrDefault(message.getDbId(), ""),
+                    normalizedReplyText(message.getReplyText()))) {
+                changedDbIds.add(message.getDbId());
+            }
+            List<MessageReaction> nextReactions = reactionsByTarget.get(message.getPacketId());
+            if (!sameReactions(message.getReactions(), nextReactions)) {
+                changedDbIds.add(message.getDbId());
+            }
+            message.setReactions(nextReactions);
         }
+        return changedDbIds;
+    }
+
+    private static String normalizedReplyText(String value) {
+        return value == null ? "" : value;
     }
 
     protected void refreshLoadedMessageRows() {
+        refreshLoadedMessageRows(false);
+    }
+
+    protected void refreshLoadedMessageRows(boolean force) {
         if (loadedMessages.isEmpty() || selectedChat == null) {
             return;
         }
 
-        attachReactions(loadedMessages);
+        Set<Long> changedDbIds = attachReactions(loadedMessages);
+        boolean rebuiltAny = false;
         for (MeshMessage message : loadedMessages) {
+            if (!force && !changedDbIds.contains(message.getDbId())) {
+                continue;
+            }
             HBox oldRow = loadedMessageRows.get(message.getDbId());
             if (oldRow == null) {
                 continue;
@@ -562,8 +595,38 @@ abstract class FormChatMessages extends FormChatUi {
             applyMessageSearchHighlight(newRow, message.getDbId());
             messageContainer.getChildren().set(index, newRow);
             loadedMessageRows.put(message.getDbId(), newRow);
+            rebuiltAny = true;
         }
-        requestMessageViewportLayout();
+        if (rebuiltAny || force) {
+            requestMessageViewportLayout();
+        }
+    }
+
+    private static boolean sameReactions(List<MessageReaction> current, List<MessageReaction> next) {
+        List<MessageReaction> left = current == null ? List.of() : current;
+        List<MessageReaction> right = next == null ? List.of() : next;
+        if (left.size() != right.size()) {
+            return false;
+        }
+        for (int i = 0; i < left.size(); i++) {
+            if (!sameReaction(left.get(i), right.get(i))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean sameReaction(MessageReaction left, MessageReaction right) {
+        return left.getDbId() == right.getDbId()
+                && left.getPacketId() == right.getPacketId()
+                && left.getTargetPacketId() == right.getTargetPacketId()
+                && left.isOutgoing() == right.isOutgoing()
+                && left.getTimestamp() == right.getTimestamp()
+                && Objects.equals(left.getFromNodeId(), right.getFromNodeId())
+                && Objects.equals(left.getEmoji(), right.getEmoji())
+                && left.getStatus() == right.getStatus()
+                && Objects.equals(left.getErrorReason(), right.getErrorReason())
+                && Objects.equals(left.getSenderName(), right.getSenderName());
     }
 
     /**
