@@ -26,8 +26,14 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.function.Supplier;
 import java.util.stream.Stream;
 
 /**
@@ -52,6 +58,7 @@ public final class SessionCrashLogManager {
     static final String NORMAL_EXIT_MARKER_NAME = "meshapp-session.clean-exit";
     static final String THREAD_DUMPS_FILE_NAME = "thread-dumps.txt";
     static final String FATAL_MARKER_FILE_NAME = "fatal-marker.json";
+    static final String SESSION_STATE_FILE_NAME = "session-state.json";
     static final String JFR_DUMP_FILE_NAME = "last.jfr";
 
     private static final Object LOCK = new Object();
@@ -73,8 +80,12 @@ public final class SessionCrashLogManager {
     private static final int MAX_PENDING_BUNDLES = 3;
     private static final long MAX_PENDING_BYTES = 64L * 1024 * 1024;
     private static final Duration MAX_PENDING_AGE = Duration.ofDays(14);
+    private static final Duration HEARTBEAT_INTERVAL = Duration.ofSeconds(30);
 
     private static volatile boolean shutdownHookInstalled;
+    private static volatile ScheduledExecutorService heartbeatExecutor;
+    private static volatile Supplier<BootIdentity> bootIdentitySupplier = SessionCrashLogManager::detectBootIdentity;
+    private static volatile BootIdentity cachedBootIdentity;
 
     private static Path appDir = resolveAppDir();
     private static Path logsDir = appDir.resolve(LOG_DIR_NAME);
@@ -84,11 +95,14 @@ public final class SessionCrashLogManager {
     private static Path activeLogPath = activeBundleDir.resolve(ACTIVE_LOG_NAME);
     private static Path threadDumpsPath = activeBundleDir.resolve(THREAD_DUMPS_FILE_NAME);
     private static Path fatalMarkerPath = activeBundleDir.resolve(FATAL_MARKER_FILE_NAME);
+    private static Path sessionStatePath = activeBundleDir.resolve(SESSION_STATE_FILE_NAME);
     private static Path normalExitMarkerPath = logsDir.resolve(NORMAL_EXIT_MARKER_NAME);
     private static Path legacyActiveLogPath = logsDir.resolve(ACTIVE_LOG_NAME);
 
     private static BufferedWriter writer;
     private static boolean prepared;
+    private static String sessionId;
+    private static Instant sessionStartedAt;
 
     private SessionCrashLogManager() {}
 
@@ -96,6 +110,7 @@ public final class SessionCrashLogManager {
         synchronized (LOCK) {
             refreshPaths();
             installShutdownHookIfNeeded();
+            stopHeartbeatLocked();
             closeWriterQuietly();
             ensureDirectories();
 
@@ -105,7 +120,11 @@ public final class SessionCrashLogManager {
                 deleteQuietly(normalExitMarkerPath);
             } else {
                 if (bundleHasPayload(activeBundleDir)) {
-                    rotateActiveBundleToPending();
+                    if (shouldSuppressPreviousBundleReport(activeBundleDir)) {
+                        deleteRecursivelyQuietly(activeBundleDir);
+                    } else {
+                        rotateActiveBundleToPending();
+                    }
                 }
                 if (Files.exists(legacyActiveLogPath)) {
                     rotateLegacyActiveLogToPending();
@@ -114,7 +133,9 @@ public final class SessionCrashLogManager {
 
             prunePendingBundles();
             prepareFreshActiveBundle();
+            initializeSessionState();
             prepared = true;
+            startHeartbeatLocked();
         }
     }
 
@@ -158,6 +179,7 @@ public final class SessionCrashLogManager {
             } catch (IOException e) {
                 System.err.println("[MeshApp] Failed to mark normal shutdown: " + e.getMessage());
             }
+            stopHeartbeatLocked();
         }
     }
 
@@ -267,9 +289,21 @@ public final class SessionCrashLogManager {
 
     static void resetForTests() {
         synchronized (LOCK) {
+            stopHeartbeatLocked();
             closeWriterQuietly();
             refreshPaths();
             prepared = false;
+            sessionId = null;
+            sessionStartedAt = null;
+            cachedBootIdentity = null;
+            bootIdentitySupplier = SessionCrashLogManager::detectBootIdentity;
+        }
+    }
+
+    static void setBootIdentityForTests(String bootId) {
+        synchronized (LOCK) {
+            cachedBootIdentity = null;
+            bootIdentitySupplier = () -> new BootIdentity("test", bootId == null ? "" : bootId.trim());
         }
     }
 
@@ -309,6 +343,7 @@ public final class SessionCrashLogManager {
         activeLogPath = activeBundleDir.resolve(ACTIVE_LOG_NAME);
         threadDumpsPath = activeBundleDir.resolve(THREAD_DUMPS_FILE_NAME);
         fatalMarkerPath = activeBundleDir.resolve(FATAL_MARKER_FILE_NAME);
+        sessionStatePath = activeBundleDir.resolve(SESSION_STATE_FILE_NAME);
         normalExitMarkerPath = logsDir.resolve(NORMAL_EXIT_MARKER_NAME);
         legacyActiveLogPath = logsDir.resolve(ACTIVE_LOG_NAME);
     }
@@ -332,6 +367,213 @@ public final class SessionCrashLogManager {
             Files.createDirectories(activeBundleDir);
         } catch (IOException e) {
             throw new IllegalStateException("Failed to create active diagnostics bundle", e);
+        }
+    }
+
+    private static void initializeSessionState() {
+        sessionId = UUID.randomUUID().toString();
+        sessionStartedAt = Instant.now();
+        writeSessionStateLocked();
+    }
+
+    private static void startHeartbeatLocked() {
+        if (heartbeatExecutor != null && !heartbeatExecutor.isShutdown()) {
+            return;
+        }
+        heartbeatExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "meshapp-session-heartbeat");
+            t.setDaemon(true);
+            return t;
+        });
+        heartbeatExecutor.scheduleWithFixedDelay(
+                SessionCrashLogManager::writeSessionStateSafely,
+                HEARTBEAT_INTERVAL.toSeconds(),
+                HEARTBEAT_INTERVAL.toSeconds(),
+                TimeUnit.SECONDS);
+    }
+
+    private static void stopHeartbeatLocked() {
+        ScheduledExecutorService executor = heartbeatExecutor;
+        heartbeatExecutor = null;
+        if (executor != null) {
+            executor.shutdownNow();
+        }
+    }
+
+    private static void writeSessionStateSafely() {
+        synchronized (LOCK) {
+            if (!prepared || sessionId == null) {
+                return;
+            }
+            refreshPaths();
+            ensureDirectories();
+            writeSessionStateLocked();
+        }
+    }
+
+    private static void writeSessionStateLocked() {
+        BootIdentity boot = currentBootIdentity();
+        Map<String, Object> state = new LinkedHashMap<>();
+        state.put("type", "session-state");
+        state.put("sessionId", sessionId != null ? sessionId : "");
+        state.put("pid", ProcessHandle.current().pid());
+        state.put("startedAt", sessionStartedAt != null ? JSON_TIME_FORMAT.format(sessionStartedAt) : "");
+        state.put("lastHeartbeatAt", nowString());
+        state.put("bootId", boot.value());
+        state.put("bootIdSource", boot.source());
+        writeJsonQuietly(sessionStatePath, state);
+    }
+
+    private static boolean shouldSuppressPreviousBundleReport(Path bundleDir) {
+        if (hasFatalCrashEvidence(bundleDir)) {
+            return false;
+        }
+        return previousSessionWasInterruptedByReboot(bundleDir);
+    }
+
+    private static boolean hasFatalCrashEvidence(Path bundleDir) {
+        if (hasJvmCrashLog(bundleDir)) {
+            return true;
+        }
+        Path marker = bundleDir.resolve(FATAL_MARKER_FILE_NAME);
+        if (!Files.isRegularFile(marker)) {
+            return false;
+        }
+        Map<?, ?> json = readJsonMapQuietly(marker);
+        Object type = json.get("type");
+        return !"ui-stall".equals(type);
+    }
+
+    private static boolean hasJvmCrashLog(Path bundleDir) {
+        if (!Files.isDirectory(bundleDir)) {
+            return false;
+        }
+        try (Stream<Path> files = Files.list(bundleDir)) {
+            return files
+                    .filter(Files::isRegularFile)
+                    .map(path -> path.getFileName().toString())
+                    .anyMatch(name -> name.startsWith("hs_err_pid") && name.endsWith(".log"));
+        } catch (IOException e) {
+            return false;
+        }
+    }
+
+    private static boolean previousSessionWasInterruptedByReboot(Path bundleDir) {
+        Path statePath = bundleDir.resolve(SESSION_STATE_FILE_NAME);
+        if (!Files.isRegularFile(statePath)) {
+            return false;
+        }
+        Map<?, ?> state = readJsonMapQuietly(statePath);
+        String previousBootId = stringValue(state.get("bootId"));
+        String currentBootId = currentBootIdentity().value();
+        return !previousBootId.isBlank()
+                && !currentBootId.isBlank()
+                && !previousBootId.equals(currentBootId);
+    }
+
+    private static Map<?, ?> readJsonMapQuietly(Path path) {
+        try {
+            Object parsed = GSON.fromJson(Files.readString(path, StandardCharsets.UTF_8), Map.class);
+            return parsed instanceof Map<?, ?> map ? map : Map.of();
+        } catch (Exception e) {
+            return Map.of();
+        }
+    }
+
+    private static String stringValue(Object value) {
+        return value instanceof String s ? s.trim() : "";
+    }
+
+    private static BootIdentity currentBootIdentity() {
+        BootIdentity cached = cachedBootIdentity;
+        if (cached != null) {
+            return cached;
+        }
+        BootIdentity detected = bootIdentitySupplier.get();
+        cachedBootIdentity = detected != null ? detected : BootIdentity.UNKNOWN;
+        return cachedBootIdentity;
+    }
+
+    private static BootIdentity detectBootIdentity() {
+        String osName = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
+        if (osName.contains("linux")) {
+            return detectLinuxBootIdentity();
+        }
+        if (osName.contains("mac") || osName.contains("darwin")) {
+            return detectMacBootIdentity();
+        }
+        if (osName.contains("win")) {
+            return detectWindowsBootIdentity();
+        }
+        return BootIdentity.UNKNOWN;
+    }
+
+    private static BootIdentity detectLinuxBootIdentity() {
+        try {
+            Path bootIdPath = Path.of("/proc/sys/kernel/random/boot_id");
+            if (Files.isRegularFile(bootIdPath)) {
+                String bootId = Files.readString(bootIdPath, StandardCharsets.UTF_8).trim();
+                if (!bootId.isBlank()) {
+                    return new BootIdentity("linux-proc-boot-id", bootId);
+                }
+            }
+        } catch (Exception ignored) {
+            // Fall through to unknown.
+        }
+        return BootIdentity.UNKNOWN;
+    }
+
+    private static BootIdentity detectMacBootIdentity() {
+        return runCommand(List.of("/usr/sbin/sysctl", "-n", "kern.boottime"))
+                .filter(value -> !value.isBlank())
+                .map(value -> new BootIdentity("macos-kern-boottime", value))
+                .orElse(BootIdentity.UNKNOWN);
+    }
+
+    private static BootIdentity detectWindowsBootIdentity() {
+        Optional<String> powershellBootTime = runCommand(List.of(
+                "powershell.exe",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "(Get-CimInstance Win32_OperatingSystem).LastBootUpTime.ToUniversalTime().ToString('o')"));
+        if (powershellBootTime.isPresent() && !powershellBootTime.get().isBlank()) {
+            return new BootIdentity("windows-cim-last-boot-time", powershellBootTime.get());
+        }
+
+        return runCommand(List.of("wmic", "os", "get", "lastbootuptime", "/value"))
+                .flatMap(SessionCrashLogManager::parseWmicBootTime)
+                .map(value -> new BootIdentity("windows-wmic-last-boot-time", value))
+                .orElse(BootIdentity.UNKNOWN);
+    }
+
+    private static Optional<String> parseWmicBootTime(String output) {
+        for (String line : output.split("\\R")) {
+            String trimmed = line.trim();
+            if (trimmed.startsWith("LastBootUpTime=")) {
+                String value = trimmed.substring("LastBootUpTime=".length()).trim();
+                return value.isBlank() ? Optional.empty() : Optional.of(value);
+            }
+        }
+        return Optional.empty();
+    }
+
+    private static Optional<String> runCommand(List<String> command) {
+        try {
+            Process process = new ProcessBuilder(command)
+                    .redirectErrorStream(true)
+                    .start();
+            boolean completed = process.waitFor(1500, TimeUnit.MILLISECONDS);
+            if (!completed) {
+                process.destroyForcibly();
+                return Optional.empty();
+            }
+            String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8).trim();
+            return process.exitValue() == 0 && !output.isBlank()
+                    ? Optional.of(output)
+                    : Optional.empty();
+        } catch (Exception e) {
+            return Optional.empty();
         }
     }
 
@@ -689,5 +931,9 @@ public final class SessionCrashLogManager {
 
     private static String nowString() {
         return JSON_TIME_FORMAT.format(Instant.now());
+    }
+
+    private record BootIdentity(String source, String value) {
+        static final BootIdentity UNKNOWN = new BootIdentity("unknown", "");
     }
 }
