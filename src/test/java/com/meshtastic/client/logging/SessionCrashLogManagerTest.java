@@ -1,5 +1,9 @@
 package com.meshtastic.client.logging;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.LoggerContext;
+import ch.qos.logback.classic.spi.LoggingEvent;
 import com.meshtastic.client.TestEnvironmentSupport;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -59,6 +63,58 @@ class SessionCrashLogManagerTest {
                 assertEquals("unexpected shutdown", Files.readString(pending.getFirst()));
             }
         }
+    }
+
+    @Test
+    void prepareForLaunchDropsInterruptedSessionAfterSystemReboot() throws Exception {
+        Path activeBundle = SessionCrashLogManager.getActiveBundleDir();
+        Files.createDirectories(activeBundle);
+        Files.writeString(activeBundle.resolve(SessionCrashLogManager.ACTIVE_LOG_NAME), "session before reboot");
+        Files.writeString(activeBundle.resolve(SessionCrashLogManager.SESSION_STATE_FILE_NAME),
+                "{\"bootId\":\"boot-before\"}");
+        SessionCrashLogManager.setBootIdentityForTests("boot-after");
+
+        SessionCrashLogManager.prepareForLaunch();
+
+        assertTrue(SessionCrashLogManager.peekPendingCrashLog().isEmpty());
+        assertFalse(Files.exists(activeBundle.resolve(SessionCrashLogManager.ACTIVE_LOG_NAME)));
+    }
+
+    @Test
+    void prepareForLaunchKeepsFatalCrashReportEvenAfterSystemReboot() throws Exception {
+        Path activeBundle = SessionCrashLogManager.getActiveBundleDir();
+        Files.createDirectories(activeBundle);
+        Files.writeString(activeBundle.resolve(SessionCrashLogManager.ACTIVE_LOG_NAME), "fatal session");
+        Files.writeString(activeBundle.resolve(SessionCrashLogManager.SESSION_STATE_FILE_NAME),
+                "{\"bootId\":\"boot-before\"}");
+        Files.writeString(activeBundle.resolve(SessionCrashLogManager.FATAL_MARKER_FILE_NAME),
+                "{\"type\":\"uncaught-exception\",\"exceptionClass\":\"java.lang.OutOfMemoryError\"}");
+        SessionCrashLogManager.setBootIdentityForTests("boot-after");
+
+        SessionCrashLogManager.prepareForLaunch();
+
+        assertTrue(SessionCrashLogManager.peekPendingCrashLog().isPresent());
+    }
+
+    @Test
+    void appendKeepsFormattedMessageOnSingleLogLine() throws Exception {
+        SessionCrashLogManager.prepareForLaunch();
+        LoggerContext context = new LoggerContext();
+        Logger logger = context.getLogger("test");
+        LoggingEvent event = new LoggingEvent(
+                SessionCrashLogManagerTest.class.getName(),
+                logger,
+                Level.DEBUG,
+                "native error: line one\r\nline two\r\n",
+                null,
+                null
+        );
+
+        SessionCrashLogManager.append(event);
+
+        List<String> lines = Files.readAllLines(SessionCrashLogManager.getActiveLogPath());
+        assertEquals(1, lines.size());
+        assertTrue(lines.getFirst().endsWith("native error: line one\\nline two"));
     }
 
     @Test
