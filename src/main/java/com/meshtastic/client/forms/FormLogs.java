@@ -34,6 +34,7 @@ import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
 import javafx.scene.shape.SVGPath;
+import javafx.scene.text.Text;
 import javafx.stage.FileChooser;
 import javafx.stage.Window;
 import org.slf4j.Logger;
@@ -180,6 +181,27 @@ public class FormLogs extends Form {
         TableColumn<LogEntry, String> colMessage = new TableColumn<>("Сообщение");
         colMessage.setCellValueFactory(new PropertyValueFactory<>("message"));
         colMessage.setSortable(false);
+        colMessage.setCellFactory(col -> new TableCell<>() {
+            private final Text messageText = new Text();
+
+            {
+                messageText.fontProperty().bind(fontProperty());
+                messageText.fillProperty().bind(textFillProperty());
+                setContentDisplay(ContentDisplay.GRAPHIC_ONLY);
+            }
+
+            @Override
+            protected void updateItem(String message, boolean empty) {
+                super.updateItem(message, empty);
+                if (empty || message == null) {
+                    messageText.setText(null);
+                    setGraphic(null);
+                } else {
+                    messageText.setText(message);
+                    setGraphic(messageText);
+                }
+            }
+        });
 
         logTable.getColumns().addAll(colTime, colLevel, colMessage);
         logTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
