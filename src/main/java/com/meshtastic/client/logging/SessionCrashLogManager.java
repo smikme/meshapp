@@ -483,7 +483,7 @@ public final class SessionCrashLogManager {
                 .append(' ')
                 .append(event.getLoggerName())
                 .append(" - ")
-                .append(event.getFormattedMessage());
+                .append(sanitizeEventMessage(event.getFormattedMessage()));
 
         IThrowableProxy throwable = event.getThrowableProxy();
         if (throwable != null) {
@@ -492,6 +492,16 @@ public final class SessionCrashLogManager {
         }
 
         return sb.toString();
+    }
+
+    private static String sanitizeEventMessage(String message) {
+        if (message == null) {
+            return "";
+        }
+        return message.stripTrailing()
+                .replace("\r\n", "\\n")
+                .replace('\r', '\n')
+                .replace("\n", "\\n");
     }
 
     private static void writeThreadDump(Path targetPath, String reason) {
