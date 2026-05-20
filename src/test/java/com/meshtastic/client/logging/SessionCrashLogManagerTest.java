@@ -1,5 +1,9 @@
 package com.meshtastic.client.logging;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.LoggerContext;
+import ch.qos.logback.classic.spi.LoggingEvent;
 import com.meshtastic.client.TestEnvironmentSupport;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -90,6 +94,27 @@ class SessionCrashLogManagerTest {
         SessionCrashLogManager.prepareForLaunch();
 
         assertTrue(SessionCrashLogManager.peekPendingCrashLog().isPresent());
+    }
+
+    @Test
+    void appendKeepsFormattedMessageOnSingleLogLine() throws Exception {
+        SessionCrashLogManager.prepareForLaunch();
+        LoggerContext context = new LoggerContext();
+        Logger logger = context.getLogger("test");
+        LoggingEvent event = new LoggingEvent(
+                SessionCrashLogManagerTest.class.getName(),
+                logger,
+                Level.DEBUG,
+                "native error: line one\r\nline two\r\n",
+                null,
+                null
+        );
+
+        SessionCrashLogManager.append(event);
+
+        List<String> lines = Files.readAllLines(SessionCrashLogManager.getActiveLogPath());
+        assertEquals(1, lines.size());
+        assertTrue(lines.getFirst().endsWith("native error: line one\\nline two"));
     }
 
     @Test
