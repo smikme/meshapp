@@ -1,5 +1,10 @@
 package com.meshtastic.client.components;
 
+import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonParser;
+import com.google.gson.JsonSyntaxException;
 import com.meshtastic.client.MeshApp;
 import com.meshtastic.client.lua.LuaDebugSnapshot;
 import com.meshtastic.client.lua.LuaDebugVariable;
@@ -9,6 +14,9 @@ import com.meshtastic.client.lua.LuaScript;
 import com.meshtastic.client.lua.LuaScriptEvent;
 import com.meshtastic.client.lua.LuaScriptRuntimeService;
 import com.meshtastic.client.lua.LuaScriptService;
+import com.meshtastic.client.platform.NativeMacOsWindowControl;
+import com.meshtastic.client.platform.NativeWindowHelper;
+import com.meshtastic.client.platform.OsDetect;
 import com.meshtastic.client.themes.ThemeManager;
 import com.meshtastic.client.utils.AppPreferences;
 import com.meshtastic.client.utils.SvgIconLoader;
@@ -23,21 +31,26 @@ import javafx.geometry.Point2D;
 import javafx.geometry.Pos;
 import javafx.scene.Node;
 import javafx.scene.Scene;
+import javafx.scene.control.Alert;
+import javafx.scene.control.ButtonBar;
 import javafx.scene.control.Button;
-import javafx.scene.control.CheckBox;
+import javafx.scene.control.ButtonType;
 import javafx.scene.control.ContentDisplay;
+import javafx.scene.control.ContextMenu;
 import javafx.scene.control.IndexRange;
 import javafx.scene.control.Label;
-import javafx.scene.control.ListCell;
-import javafx.scene.control.ListView;
+import javafx.scene.control.MenuItem;
+import javafx.scene.control.OverrunStyle;
 import javafx.scene.control.Separator;
 import javafx.scene.control.SplitPane;
+import javafx.scene.control.TableCell;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableView;
 import javafx.scene.control.TextArea;
-import javafx.scene.control.TextField;
 import javafx.scene.control.ToolBar;
 import javafx.scene.control.Tooltip;
+import javafx.scene.input.Clipboard;
+import javafx.scene.input.ClipboardContent;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyEvent;
 import javafx.scene.layout.HBox;
@@ -45,6 +58,7 @@ import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
+import javafx.scene.paint.Color;
 import javafx.scene.shape.SVGPath;
 import javafx.scene.text.Text;
 import javafx.scene.text.TextFlow;
@@ -72,12 +86,22 @@ import java.util.function.IntFunction;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+/**
+ * Отдельное окно MeshApp IDE для редактирования, запуска и отладки Lua-скриптов.
+ * <p>
+ * Окно содержит редактор с подсветкой, автодополнением, нумерацией строк,
+ * breakpoint-маркерами, консолью, таблицей переменных отладки и просмотром
+ * изолированного KV-хранилища выбранного скрипта.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
+ */
 public final class LuaDevWindow {
 
     private static final double DEFAULT_WINDOW_WIDTH = 1280;
     private static final double DEFAULT_WINDOW_HEIGHT = 860;
     private static final double COMPLETION_MIN_WIDTH = 260.0;
     private static final int MAX_COMPLETIONS = 9;
+    private static final Gson PRETTY_GSON = new GsonBuilder().setPrettyPrinting().create();
     private static final DateTimeFormatter TIME_FORMAT =
             DateTimeFormatter.ofPattern("HH:mm:ss").withZone(ZoneId.systemDefault());
     private static final Pattern LUA_HIGHLIGHT_PATTERN = Pattern.compile(
@@ -88,53 +112,32 @@ public final class LuaDevWindow {
                     + "|(?<KEYWORD>\\b(?:and|break|do|else|elseif|end|false|for|function|if|in|local|nil|not|or|repeat|return|then|true|until|while)\\b)"
                     + "|(?<BUILTIN>\\b(?:assert|error|ipairs|next|pairs|pcall|select|tonumber|tostring|type|xpcall|string|table|math|coroutine)\\b)"
     );
-
-    private static final String API_REFERENCE = """
-            Разрешенный Lua API
-
-            print(...) / mesh.log(text)
-            mesh.now() -> epoch seconds
-            mesh.owner() -> { node_id, node_num, connection_id }
-
-            mesh.chat.send_channel(channel, text) -> message
-            mesh.chat.send_dm(node_id, text) -> message
-            mesh.chat.recent(chat_type, chat_key, limit) -> { messages }
-            mesh.chat.nodes() -> { nodes }
-            mesh.chat.channels() -> { channels }
-
-            mesh.kv.get(key) -> string | nil
-            mesh.kv.set(key, value) -> true
-            mesh.kv.delete(key) -> boolean
-            mesh.kv.list() -> table
-            mesh.kv.clear() -> true
-
-            Если объявить function on_message(msg), скрипт останется запущенным
-            и будет получать новые сообщения выбранного подключения.
-
-            В песочнице нет io, os, debug, package, require, luajava,
-            dofile/loadfile и collectgarbage.
-            """;
+    private static final Pattern JSON_HIGHLIGHT_PATTERN = Pattern.compile(
+            "(?<KEY>\"(?:\\\\.|[^\"\\\\])*\")(?=\\s*:)"
+                    + "|(?<STRING>\"(?:\\\\.|[^\"\\\\])*\")"
+                    + "|(?<NUMBER>-?\\b\\d+(?:\\.\\d+)?(?:[eE][+-]?\\d+)?\\b)"
+                    + "|(?<BOOLEAN>\\b(?:true|false)\\b)"
+                    + "|(?<NULL>\\bnull\\b)"
+    );
 
     private static LuaDevWindow instance;
 
     private final LuaScriptService scriptService = LuaScriptService.getInstance();
     private final LuaScriptRuntimeService runtimeService = LuaScriptRuntimeService.getInstance();
     private final LuaCompletionEngine completionEngine = new LuaCompletionEngine();
-    private final ObservableList<LuaScript> scripts = FXCollections.observableArrayList();
     private final ObservableList<KvRow> kvRows = FXCollections.observableArrayList();
     private final ObservableList<DebugVarRow> debugRows = FXCollections.observableArrayList();
-    private final Map<Long, Set<Integer>> breakpointsByScript = new HashMap<>();
+    private static final Map<Long, Set<Integer>> BREAKPOINTS_BY_SCRIPT = new HashMap<>();
+
     private final VBox completionBox = new VBox();
 
     private Stage stage;
-    private ListView<LuaScript> scriptListView;
-    private TextField nameField;
-    private CheckBox enabledCheck;
     private CodeArea codeArea;
     private StackPane editorStack;
     private TextArea consoleArea;
     private TableView<KvRow> kvTable;
     private TableView<DebugVarRow> debugTable;
+    private Label scriptNameLabel;
     private Label statusLabel;
     private Button runButton;
     private Button debugButton;
@@ -145,6 +148,11 @@ public final class LuaDevWindow {
     private LuaScript currentScript;
     private boolean dirty;
     private boolean loadingScript;
+    private double dragOffsetX;
+    private double dragOffsetY;
+    private boolean draggingWindow;
+    private boolean nativeEffectsApplied;
+    private boolean closingWindow;
     private List<LuaCompletionEngine.CompletionItem> visibleCompletions = List.of();
     private int completionReplaceStart;
     private int completionReplaceEnd;
@@ -155,50 +163,219 @@ public final class LuaDevWindow {
     private LuaDevWindow() {
         configureCompletionOverlay();
         createStage();
-        reloadScripts(0);
     }
 
     public static void showWindow() {
+        showWindow(0);
+    }
+
+    public static void showWindow(long scriptId) {
         if (Platform.isFxApplicationThread()) {
-            showWindowInternal();
+            showWindowInternal(scriptId);
         } else {
-            Platform.runLater(LuaDevWindow::showWindowInternal);
+            Platform.runLater(() -> showWindowInternal(scriptId));
         }
     }
 
-    private static void showWindowInternal() {
+    private static void showWindowInternal(long scriptId) {
         if (instance == null) {
             instance = new LuaDevWindow();
         }
         instance.showStage();
+        instance.openScript(scriptId);
     }
 
     private void showStage() {
-        if (!stage.isShowing()) {
+        boolean wasShowing = stage.isShowing();
+        if (!wasShowing) {
             stage.show();
+        }
+        if (!wasShowing && useCustomFrame() && !nativeEffectsApplied) {
+            NativeWindowHelper.applyNativeEffects(stage, AppPreferences.isDarkMode());
+            nativeEffectsApplied = true;
+            stage.setTitle("MeshApp IDE");
         }
         stage.toFront();
         stage.requestFocus();
     }
 
     private void createStage() {
-        VBox root = new VBox(10);
-        root.getStyleClass().add("lua-dev-root");
-        root.setPadding(new Insets(12));
-        root.getChildren().addAll(createHeader(), createContent());
-
-        Scene scene = new Scene(root, DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT);
-        ThemeManager.applyTheme(scene, AppPreferences.isDarkMode());
-        EmojiRenderingSupport.install(scene);
-
         stage = new Stage();
-        stage.initStyle(StageStyle.DECORATED);
+        if (useCustomFrame()) {
+            NativeWindowHelper.prepareStage(stage);
+        } else {
+            stage.initStyle(StageStyle.DECORATED);
+        }
         stage.setTitle("MeshApp IDE");
         stage.setResizable(true);
         if (MeshApp.getPrimaryStage() != null && !MeshApp.getPrimaryStage().getIcons().isEmpty()) {
             stage.getIcons().setAll(MeshApp.getPrimaryStage().getIcons());
         }
+        stage.setOnCloseRequest(event -> {
+            event.consume();
+            closeWindow();
+        });
+
+        VBox root = new VBox();
+        root.getStyleClass().add("lua-dev-root");
+
+        HBox body = new HBox();
+        body.getStyleClass().add("lua-dev-body");
+        VBox.setVgrow(body, Priority.ALWAYS);
+
+        VBox content = new VBox(10);
+        content.getStyleClass().add("lua-dev-content");
+        content.setPadding(new Insets(12));
+        HBox.setHgrow(content, Priority.ALWAYS);
+        content.getChildren().addAll(createContent(), createStatusBar());
+
+        body.getChildren().addAll(createSideMenu(), content);
+        if (useCustomFrame()) {
+            root.getChildren().add(createWindowTitleBar());
+        }
+        root.getChildren().add(body);
+
+        Scene scene = new Scene(root, DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT);
+        if (useCustomFrame() && OsDetect.supportsSeamlessFrame()) {
+            scene.setFill(Color.TRANSPARENT);
+            root.pseudoClassStateChanged(NativeWindowHelper.SEAMLESS_FRAME, true);
+            root.pseudoClassStateChanged(NativeWindowHelper.SEPARATE_FRAME, false);
+        }
+        ThemeManager.applyTheme(scene, AppPreferences.isDarkMode());
+        EmojiRenderingSupport.install(scene);
         stage.setScene(scene);
+    }
+
+    private boolean useCustomFrame() {
+        return OsDetect.isMacOs() && !AppPreferences.isDisableEffectsEffective();
+    }
+
+    private HBox createWindowTitleBar() {
+        HBox bar = new HBox();
+        bar.getStyleClass().add("custom-title-bar");
+        bar.setAlignment(Pos.CENTER_LEFT);
+        bar.setPadding(new Insets(8, 12, 8, 12));
+        bar.setPickOnBounds(true);
+
+        Button closeButton = createWindowButton("window-btn-close");
+        closeButton.setOnAction(event -> closeWindow());
+
+        Button minimizeButton = createWindowButton("window-btn-minimize");
+        minimizeButton.setOnAction(event -> stage.setIconified(true));
+
+        Button maximizeButton = createWindowButton("window-btn-maximize");
+        maximizeButton.setOnAction(event -> toggleWindowMaximized());
+
+        HBox buttons = new HBox(8, closeButton, minimizeButton, maximizeButton);
+        buttons.setAlignment(Pos.CENTER_LEFT);
+
+        Region leftSpacer = new Region();
+        HBox.setHgrow(leftSpacer, Priority.ALWAYS);
+        leftSpacer.setMouseTransparent(true);
+
+        Label title = new Label("MeshApp IDE");
+        title.getStyleClass().add("title-bar-label");
+        title.setMinWidth(0);
+        title.setMaxWidth(520);
+        title.setTextOverrun(OverrunStyle.ELLIPSIS);
+        title.setMouseTransparent(true);
+
+        Region rightSpacer = new Region();
+        HBox.setHgrow(rightSpacer, Priority.ALWAYS);
+        rightSpacer.setMouseTransparent(true);
+
+        bar.getChildren().addAll(buttons, leftSpacer, title, rightSpacer);
+        bar.setOnMouseClicked(event -> {
+            if (event.getClickCount() == 2 && !(event.getTarget() instanceof Button)) {
+                toggleWindowMaximized();
+            }
+        });
+        bar.setOnMousePressed(event -> {
+            if (event.getTarget() instanceof Button) {
+                return;
+            }
+            dragOffsetX = event.getScreenX() - stage.getX();
+            dragOffsetY = event.getScreenY() - stage.getY();
+            draggingWindow = true;
+        });
+        bar.setOnMouseDragged(event -> {
+            if (!draggingWindow) {
+                return;
+            }
+            stage.setX(event.getScreenX() - dragOffsetX);
+            stage.setY(event.getScreenY() - dragOffsetY);
+        });
+        bar.setOnMouseReleased(event -> draggingWindow = false);
+        return bar;
+    }
+
+    private Button createWindowButton(String styleClass) {
+        Button button = new Button();
+        button.getStyleClass().addAll("window-control-btn", styleClass);
+        button.setMinSize(13, 13);
+        button.setMaxSize(13, 13);
+        button.setPrefSize(13, 13);
+        return button;
+    }
+
+    private void toggleWindowMaximized() {
+        stage.setMaximized(!stage.isMaximized());
+    }
+
+    private void closeWindow() {
+        if (closingWindow) {
+            return;
+        }
+        if (dirty && currentScript != null) {
+            CloseChoice choice = promptSaveBeforeClose();
+            if (choice == CloseChoice.CANCEL) {
+                return;
+            }
+            if (choice == CloseChoice.SAVE && !saveCurrentScriptSafely()) {
+                return;
+            }
+            if (choice == CloseChoice.DISCARD) {
+                dirty = false;
+            }
+        }
+        closingWindow = true;
+        try {
+            hideCompletion();
+            if (stage != null) {
+                ThemeManager.unregisterScene(stage.getScene());
+                stage.hide();
+            }
+        } finally {
+            nativeEffectsApplied = false;
+            instance = null;
+        }
+    }
+
+    private CloseChoice promptSaveBeforeClose() {
+        ButtonType saveButton = new ButtonType("Сохранить", ButtonBar.ButtonData.YES);
+        ButtonType discardButton = new ButtonType("Не сохранять", ButtonBar.ButtonData.NO);
+        ButtonType cancelButton = new ButtonType("Отмена", ButtonBar.ButtonData.CANCEL_CLOSE);
+
+        Alert alert = new Alert(Alert.AlertType.CONFIRMATION);
+        alert.setTitle("Несохраненные изменения");
+        alert.setHeaderText("Сохранить изменения в скрипте?");
+        String scriptName = currentScript.getName() == null || currentScript.getName().isBlank()
+                ? "скрипт"
+                : currentScript.getName();
+        alert.setContentText("В скрипте \"" + scriptName + "\" есть несохраненные изменения.");
+        alert.getButtonTypes().setAll(saveButton, discardButton, cancelButton);
+        if (stage != null) {
+            alert.initOwner(stage);
+        }
+
+        Optional<ButtonType> result = alert.showAndWait();
+        if (result.isEmpty() || result.get() == cancelButton) {
+            return CloseChoice.CANCEL;
+        }
+        if (result.get() == saveButton) {
+            return CloseChoice.SAVE;
+        }
+        return CloseChoice.DISCARD;
     }
 
     private void configureCompletionOverlay() {
@@ -213,111 +390,62 @@ public final class LuaDevWindow {
         }
     }
 
-    private HBox createHeader() {
-        HBox header = new HBox(12);
-        header.setAlignment(Pos.CENTER_LEFT);
-
-        Label title = new Label("MeshApp IDE");
-        title.getStyleClass().add("form-title");
-
+    private HBox createStatusBar() {
+        HBox statusBar = new HBox(8);
+        statusBar.getStyleClass().add("lua-dev-status-bar");
+        statusBar.setAlignment(Pos.CENTER_LEFT);
+        scriptNameLabel = new Label("Скрипт не выбран");
+        scriptNameLabel.getStyleClass().add("lua-dev-script-name");
         statusLabel = new Label("Готово");
         statusLabel.getStyleClass().add("config-status-label");
-
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
+        statusBar.getChildren().addAll(scriptNameLabel, spacer, statusLabel);
+        return statusBar;
+    }
 
+    private VBox createSideMenu() {
         ToolBar toolbar = new ToolBar();
-        toolbar.getStyleClass().add("logs-toolbar");
+        toolbar.setOrientation(Orientation.VERTICAL);
+        toolbar.getStyleClass().add("drawer-toolbar");
 
-        Button newButton = createToolbarButton("Новый", "Создать скрипт", "/icons/java.svg", this::createScript);
-        Button saveButton = createToolbarButton("Сохранить", "Сохранить код в БД", "/icons/save-text.svg", this::saveCurrentScriptSafely);
-        Button deleteButton = createToolbarButton("Удалить", "Удалить скрипт и его KV-хранилище", "/icons/clear.svg", this::deleteCurrentScript);
-        Button checkButton = createToolbarButton("Проверить", "Проверить синтаксис Lua", "/icons/eye.svg", this::checkCurrentScript);
-        runButton = createToolbarButton("Запустить", "Запустить скрипт", "/icons/play.svg", this::runCurrentScript);
-        debugButton = createToolbarButton("Отладка", "Запустить с остановкой на первой строке и breakpoints", "/icons/eye.svg", this::debugCurrentScript);
-        continueButton = createToolbarButton("Продолжить", "Продолжить выполнение после паузы", "/icons/play.svg", this::continueDebuggee);
-        stepButton = createToolbarButton("Шаг", "Выполнить одну строку", "/icons/refresh.svg", this::stepDebuggee);
-        stopButton = createToolbarButton("Остановить", "Остановить скрипт", "/icons/pause.svg", this::stopCurrentScript);
-        Button clearConsoleButton = createToolbarButton("Очистить", "Очистить консоль", "/icons/clear.svg", () -> consoleArea.clear());
+        Button saveButton = createSideMenuButton("Сохранить код в БД", "/icons/ide-file-code.svg", this::saveCurrentScriptSafely);
+        Button checkButton = createSideMenuButton("Проверить синтаксис Lua", "/icons/ide-code-check.svg", this::checkCurrentScript);
+        runButton = createSideMenuButton("Запустить скрипт", "/icons/ide-terminal-run.svg", this::runCurrentScript);
+        debugButton = createSideMenuButton("Отладка", "/icons/ide-bug.svg", this::debugCurrentScript);
+        continueButton = createSideMenuButton("Продолжить выполнение", "/icons/ide-debug-continue.svg", this::continueDebuggee);
+        stepButton = createSideMenuButton("Шаг отладки", "/icons/ide-debug-step-over.svg", this::stepDebuggee);
+        stopButton = createSideMenuButton("Остановить скрипт", "/icons/ide-stop.svg", this::stopCurrentScript);
+        Button clearConsoleButton = createSideMenuButton("Очистить консоль", "/icons/ide-console-clear.svg", () -> consoleArea.clear());
 
         toolbar.getItems().addAll(
-                newButton,
                 saveButton,
-                deleteButton,
-                new Separator(Orientation.VERTICAL),
                 checkButton,
                 runButton,
                 debugButton,
                 continueButton,
                 stepButton,
                 stopButton,
-                new Separator(Orientation.VERTICAL),
+                new Separator(Orientation.HORIZONTAL),
                 clearConsoleButton
         );
 
-        header.getChildren().addAll(title, statusLabel, spacer, toolbar);
-        return header;
+        VBox menu = new VBox(toolbar);
+        menu.getStyleClass().add("lua-dev-side-menu");
+        menu.setAlignment(Pos.TOP_CENTER);
+        VBox.setVgrow(toolbar, Priority.ALWAYS);
+        return menu;
     }
 
     private SplitPane createContent() {
-        SplitPane splitPane = new SplitPane(createScriptListPane(), createEditorPane(), createInfoPane());
-        splitPane.setDividerPositions(0.20, 0.78);
+        SplitPane splitPane = new SplitPane(createEditorPane(), createInfoPane());
+        splitPane.getStyleClass().add("lua-dev-split-pane");
+        splitPane.setDividerPositions(0.76);
         VBox.setVgrow(splitPane, Priority.ALWAYS);
         return splitPane;
     }
 
-    private VBox createScriptListPane() {
-        Label label = new Label("Скрипты");
-        label.getStyleClass().add("packet-monitor-section-title");
-
-        scriptListView = new ListView<>(scripts);
-        scriptListView.getStyleClass().add("lua-script-list");
-        scriptListView.setCellFactory(view -> new ListCell<>() {
-            @Override
-            protected void updateItem(LuaScript item, boolean empty) {
-                super.updateItem(item, empty);
-                if (empty || item == null) {
-                    setText(null);
-                    setTooltip(null);
-                    return;
-                }
-                String status = runtimeService.isRunning(item.getId())
-                        ? "RUNNING"
-                        : Optional.ofNullable(item.getLastStatus()).orElse("NEW");
-                setText(item.getName() + "\n" + status);
-                setTooltip(new Tooltip(item.getName()));
-            }
-        });
-        scriptListView.getSelectionModel().selectedItemProperty().addListener((obs, oldScript, newScript) -> {
-            if (newScript == null || newScript == currentScript) {
-                return;
-            }
-            if (dirty && currentScript != null) {
-                saveCurrentScriptSafely();
-            }
-            loadScript(newScript);
-        });
-
-        VBox pane = new VBox(8, label, scriptListView);
-        pane.getStyleClass().add("packet-monitor-section");
-        pane.setMinWidth(220);
-        pane.setPrefWidth(260);
-        VBox.setVgrow(scriptListView, Priority.ALWAYS);
-        return pane;
-    }
-
     private VBox createEditorPane() {
-        nameField = new TextField();
-        nameField.setPromptText("Название скрипта");
-        nameField.textProperty().addListener((obs, oldValue, newValue) -> markDirty());
-
-        enabledCheck = new CheckBox("Включен");
-        enabledCheck.selectedProperty().addListener((obs, oldValue, newValue) -> markDirty());
-
-        HBox metaRow = new HBox(10, new Label("Имя"), nameField, enabledCheck);
-        metaRow.setAlignment(Pos.CENTER_LEFT);
-        HBox.setHgrow(nameField, Priority.ALWAYS);
-
         codeArea = new CodeArea();
         codeArea.getStyleClass().add("lua-code-area");
         installEditorGutter();
@@ -341,68 +469,59 @@ public final class LuaDevWindow {
         editorStack.setPickOnBounds(false);
         StackPane.setAlignment(completionBox, Pos.TOP_LEFT);
 
-        VBox editorBox = new VBox(8, metaRow, editorStack);
+        VBox editorBox = createPanel(null, editorStack);
         VBox.setVgrow(editorStack, Priority.ALWAYS);
 
-        VBox consoleBox = new VBox(6, sectionTitle("Консоль"), consoleArea);
+        VBox consoleBox = createPanel("Консоль", consoleArea);
         VBox.setVgrow(consoleArea, Priority.ALWAYS);
 
-        SplitPane editorSplit = new SplitPane(editorBox, consoleBox);
+        StackPane editorSlot = createSplitSlot(editorBox, "lua-dev-code-slot");
+        StackPane consoleSlot = createSplitSlot(consoleBox, "lua-dev-console-slot");
+
+        SplitPane editorSplit = new SplitPane(editorSlot, consoleSlot);
+        editorSplit.getStyleClass().add("lua-dev-split-pane");
         editorSplit.setOrientation(Orientation.VERTICAL);
         editorSplit.setDividerPositions(0.72);
         VBox.setVgrow(editorSplit, Priority.ALWAYS);
 
-        VBox pane = new VBox(8, editorSplit);
-        pane.getStyleClass().add("packet-monitor-section");
-        VBox.setVgrow(editorSplit, Priority.ALWAYS);
-        return pane;
+        return new VBox(editorSplit);
     }
 
-    private VBox createInfoPane() {
-        TextArea apiArea = new TextArea(API_REFERENCE);
-        apiArea.getStyleClass().add("lua-api-reference");
-        apiArea.setEditable(false);
-        apiArea.setWrapText(true);
-
+    private SplitPane createInfoPane() {
         kvTable = new TableView<>(kvRows);
+        kvTable.getStyleClass().add("lua-dev-table");
+        kvTable.setPlaceholder(new Region());
         kvTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
         TableColumn<KvRow, String> keyColumn = new TableColumn<>("Ключ");
         keyColumn.setCellValueFactory(data -> new ReadOnlyStringWrapper(data.getValue().key()));
         keyColumn.setPrefWidth(110);
         TableColumn<KvRow, String> valueColumn = new TableColumn<>("Значение");
         valueColumn.setCellValueFactory(data -> new ReadOnlyStringWrapper(data.getValue().value()));
+        valueColumn.setCellFactory(column -> createValueCell());
         kvTable.getColumns().add(keyColumn);
         kvTable.getColumns().add(valueColumn);
 
-        VBox apiBox = new VBox(6, sectionTitle("API"), apiArea);
-        VBox kvBox = new VBox(6, sectionTitle("KV выбранного скрипта"), kvTable);
-        VBox.setVgrow(apiArea, Priority.ALWAYS);
+        VBox kvBox = createPanel("KV выбранного скрипта", kvTable);
         VBox.setVgrow(kvTable, Priority.ALWAYS);
 
         debugTable = createDebugTable();
-        VBox debugBox = new VBox(6, sectionTitle("Переменные"), debugTable);
+        VBox debugBox = createPanel("Переменные", debugTable);
         VBox.setVgrow(debugTable, Priority.ALWAYS);
 
-        SplitPane bottomSplit = new SplitPane(debugBox, kvBox);
-        bottomSplit.setOrientation(Orientation.VERTICAL);
-        bottomSplit.setDividerPositions(0.55);
-        VBox.setVgrow(bottomSplit, Priority.ALWAYS);
-
-        SplitPane split = new SplitPane(apiBox, bottomSplit);
+        SplitPane split = new SplitPane(debugBox, kvBox);
+        split.getStyleClass().add("lua-dev-split-pane");
         split.setOrientation(Orientation.VERTICAL);
-        split.setDividerPositions(0.42);
+        split.setDividerPositions(0.62);
         VBox.setVgrow(split, Priority.ALWAYS);
-
-        VBox pane = new VBox(split);
-        pane.getStyleClass().add("packet-monitor-section");
-        pane.setMinWidth(260);
-        pane.setPrefWidth(300);
-        VBox.setVgrow(split, Priority.ALWAYS);
-        return pane;
+        split.setMinWidth(260);
+        split.setPrefWidth(300);
+        return split;
     }
 
     private TableView<DebugVarRow> createDebugTable() {
         TableView<DebugVarRow> table = new TableView<>(debugRows);
+        table.getStyleClass().add("lua-dev-table");
+        table.setPlaceholder(new Region());
         table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
         TableColumn<DebugVarRow, String> scopeColumn = new TableColumn<>("Scope");
         scopeColumn.setCellValueFactory(data -> new ReadOnlyStringWrapper(data.getValue().scope()));
@@ -412,10 +531,179 @@ public final class LuaDevWindow {
         nameColumn.setPrefWidth(92);
         TableColumn<DebugVarRow, String> valueColumn = new TableColumn<>("Значение");
         valueColumn.setCellValueFactory(data -> new ReadOnlyStringWrapper(data.getValue().value()));
+        valueColumn.setCellFactory(column -> createValueCell());
         table.getColumns().add(scopeColumn);
         table.getColumns().add(nameColumn);
         table.getColumns().add(valueColumn);
         return table;
+    }
+
+    private <S> TableCell<S, String> createValueCell() {
+        return new TableCell<>() {
+            private final Label valueLabel = new Label();
+            private final Region spacer = new Region();
+            private final Button detailsButton = new Button("...");
+            private final HBox content = new HBox(6, valueLabel, spacer, detailsButton);
+
+            {
+                getStyleClass().add("lua-value-cell");
+                valueLabel.getStyleClass().add("lua-value-cell-text");
+                valueLabel.setTextOverrun(OverrunStyle.ELLIPSIS);
+                valueLabel.setMaxWidth(Double.MAX_VALUE);
+                HBox.setHgrow(valueLabel, Priority.ALWAYS);
+                HBox.setHgrow(spacer, Priority.ALWAYS);
+
+                detailsButton.getStyleClass().add("lua-value-details-button");
+                detailsButton.setFocusTraversable(false);
+                detailsButton.setVisible(false);
+                detailsButton.setManaged(false);
+                detailsButton.setOnAction(event -> showValueToolWindow(getItem()));
+
+                content.setAlignment(Pos.CENTER_LEFT);
+                hoverProperty().addListener((obs, wasHover, isHover) -> updateButtonVisibility());
+            }
+
+            @Override
+            protected void updateItem(String item, boolean empty) {
+                super.updateItem(item, empty);
+                if (empty || item == null) {
+                    valueLabel.setText(null);
+                    setGraphic(null);
+                    setText(null);
+                    detailsButton.setVisible(false);
+                    detailsButton.setManaged(false);
+                    return;
+                }
+                valueLabel.setText(item);
+                setText(null);
+                setGraphic(content);
+                updateButtonVisibility();
+            }
+
+            private void updateButtonVisibility() {
+                boolean show = isHover() && !isEmpty() && getItem() != null && !getItem().isBlank();
+                detailsButton.setVisible(show);
+                detailsButton.setManaged(show);
+            }
+        };
+    }
+
+    private void showValueToolWindow(String value) {
+        if (value == null || value.isBlank()) {
+            return;
+        }
+        CodeArea jsonView = createJsonCodeArea(formatJsonValue(value));
+        VirtualizedScrollPane<CodeArea> scrollPane = new VirtualizedScrollPane<>(jsonView);
+        scrollPane.getStyleClass().add("lua-json-scroll");
+
+        VBox root = new VBox(scrollPane);
+        root.getStyleClass().add("lua-json-window-root");
+        VBox.setVgrow(scrollPane, Priority.ALWAYS);
+
+        Scene scene = new Scene(root, 640, 420);
+        ThemeManager.applyTheme(scene, AppPreferences.isDarkMode());
+        EmojiRenderingSupport.install(scene);
+
+        Stage valueStage = new Stage();
+        valueStage.initStyle(StageStyle.UTILITY);
+        valueStage.setResizable(true);
+        if (stage != null && stage.isShowing()) {
+            valueStage.initOwner(stage);
+        }
+        valueStage.setTitle("Значение");
+        valueStage.setScene(scene);
+        valueStage.setOnHidden(event -> ThemeManager.unregisterScene(scene));
+        valueStage.show();
+        if (OsDetect.isMacOs()) {
+            new NativeMacOsWindowControl(valueStage).hideMiniaturizeAndZoomButtons();
+        }
+        valueStage.toFront();
+        Platform.runLater(jsonView::requestFocus);
+    }
+
+    private String formatJsonValue(String value) {
+        try {
+            JsonElement parsed = JsonParser.parseString(value);
+            return PRETTY_GSON.toJson(parsed);
+        } catch (JsonSyntaxException | IllegalStateException e) {
+            return value;
+        }
+    }
+
+    private CodeArea createJsonCodeArea(String text) {
+        CodeArea jsonArea = new CodeArea();
+        jsonArea.getStyleClass().add("lua-json-code-area");
+        jsonArea.setEditable(false);
+        jsonArea.replaceText(text);
+        jsonArea.setStyleSpans(0, computeJsonHighlighting(text));
+        jsonArea.moveTo(0);
+        installJsonCopyActions(jsonArea);
+        return jsonArea;
+    }
+
+    private void installJsonCopyActions(CodeArea jsonArea) {
+        MenuItem copyItem = new MenuItem("Копировать");
+        copyItem.setOnAction(event -> copySelectedJsonText(jsonArea));
+        MenuItem selectAllItem = new MenuItem("Выделить все");
+        selectAllItem.setOnAction(event -> {
+            jsonArea.requestFocus();
+            jsonArea.selectAll();
+        });
+        ContextMenu contextMenu = new ContextMenu(copyItem, selectAllItem);
+
+        jsonArea.addEventFilter(KeyEvent.KEY_PRESSED, event -> {
+            if (event.isShortcutDown() && event.getCode() == KeyCode.A) {
+                jsonArea.selectAll();
+                event.consume();
+                return;
+            }
+            if (event.isShortcutDown() && event.getCode() == KeyCode.C
+                    && jsonArea.getSelection().getLength() > 0) {
+                copySelectedJsonText(jsonArea);
+                event.consume();
+            }
+        });
+        jsonArea.setOnContextMenuRequested(event -> {
+            copyItem.setDisable(jsonArea.getSelection().getLength() == 0);
+            contextMenu.show(jsonArea, event.getScreenX(), event.getScreenY());
+            event.consume();
+        });
+        jsonArea.focusedProperty().addListener((obs, wasFocused, isFocused) -> {
+            if (!isFocused) {
+                contextMenu.hide();
+            }
+        });
+    }
+
+    private void copySelectedJsonText(CodeArea jsonArea) {
+        IndexRange selection = jsonArea.getSelection();
+        if (selection.getLength() == 0) {
+            return;
+        }
+        ClipboardContent content = new ClipboardContent();
+        content.putString(jsonArea.getText().substring(selection.getStart(), selection.getEnd()));
+        Clipboard.getSystemClipboard().setContent(content);
+    }
+
+    private static StyleSpans<Collection<String>> computeJsonHighlighting(String text) {
+        Matcher matcher = JSON_HIGHLIGHT_PATTERN.matcher(text);
+        int lastEnd = 0;
+        StyleSpansBuilder<Collection<String>> spansBuilder = new StyleSpansBuilder<>();
+        while (matcher.find()) {
+            String styleClass =
+                    matcher.group("KEY") != null ? "json-key" :
+                    matcher.group("STRING") != null ? "json-string" :
+                    matcher.group("NUMBER") != null ? "json-number" :
+                    matcher.group("BOOLEAN") != null ? "json-boolean" :
+                    matcher.group("NULL") != null ? "json-null" :
+                    null;
+            spansBuilder.add(Collections.emptyList(), matcher.start() - lastEnd);
+            spansBuilder.add(styleClass == null ? Collections.emptyList() : Collections.singleton(styleClass),
+                    matcher.end() - matcher.start());
+            lastEnd = matcher.end();
+        }
+        spansBuilder.add(Collections.emptyList(), text.length() - lastEnd);
+        return spansBuilder.create();
     }
 
     private void installEditorGutter() {
@@ -453,7 +741,7 @@ public final class LuaDevWindow {
             currentBreakpoints.add(line);
         }
         if (currentScript != null) {
-            breakpointsByScript.put(currentScript.getId(), new TreeSet<>(currentBreakpoints));
+            BREAKPOINTS_BY_SCRIPT.put(currentScript.getId(), new TreeSet<>(currentBreakpoints));
         }
         recreateLineGraphics();
     }
@@ -473,14 +761,33 @@ public final class LuaDevWindow {
         return label;
     }
 
-    private Button createToolbarButton(String text, String tooltip, String iconPath, Runnable action) {
-        Button button = new Button(text);
-        button.getStyleClass().addAll("config-toolbar-button", "packet-monitor-toolbar-button");
+    private VBox createPanel(String title, Node content) {
+        VBox panel = new VBox(6);
+        panel.getStyleClass().add("lua-dev-panel");
+        if (title != null && !title.isBlank()) {
+            panel.getChildren().add(sectionTitle(title));
+        }
+        panel.getChildren().add(content);
+        VBox.setVgrow(content, Priority.ALWAYS);
+        return panel;
+    }
+
+    private StackPane createSplitSlot(Node content, String styleClass) {
+        StackPane slot = new StackPane(content);
+        slot.getStyleClass().add(styleClass);
+        return slot;
+    }
+
+    private Button createSideMenuButton(String tooltip, String iconPath, Runnable action) {
+        Button button = new Button();
+        button.getStyleClass().add("drawer-toolbar-button");
         button.setTooltip(new Tooltip(tooltip));
-        button.setContentDisplay(ContentDisplay.LEFT);
-        SVGPath icon = SvgIconLoader.load(iconPath, 16);
+        SVGPath icon = SvgIconLoader.load(iconPath, 22);
         if (icon != null) {
             button.setGraphic(icon);
+            button.setContentDisplay(ContentDisplay.GRAPHIC_ONLY);
+        } else {
+            button.setText("?");
         }
         button.setOnAction(event -> action.run());
         return button;
@@ -786,14 +1093,18 @@ public final class LuaDevWindow {
         hideCompletion();
     }
 
-    private void createScript() {
-        try {
-            LuaScript script = scriptService.createScript();
-            reloadScripts(script.getId());
-            appendConsole("Создан скрипт " + script.getName());
-        } catch (Exception e) {
-            setStatus("Не удалось создать скрипт");
-            appendConsole("ERROR " + e.getMessage());
+    private void openScript(long scriptId) {
+        if (dirty && currentScript != null) {
+            saveCurrentScriptSafely();
+        }
+        LuaScript script = scriptId > 0
+                ? scriptService.findScript(scriptId).orElse(null)
+                : scriptService.listScripts().stream().findFirst().orElse(null);
+        if (script == null) {
+            script = scriptService.createScript();
+        }
+        if (currentScript == null || currentScript.getId() != script.getId()) {
+            loadScript(script);
         }
     }
 
@@ -801,10 +1112,9 @@ public final class LuaDevWindow {
         loadingScript = true;
         currentScript = script;
         hideCompletion();
-        currentBreakpoints = new TreeSet<>(breakpointsByScript.computeIfAbsent(script.getId(), ignored -> new TreeSet<>()));
+        currentBreakpoints = new TreeSet<>(BREAKPOINTS_BY_SCRIPT.computeIfAbsent(script.getId(), ignored -> new TreeSet<>()));
         clearDebugState();
-        nameField.setText(script.getName());
-        enabledCheck.setSelected(script.isEnabled());
+        updateScriptNameLabel();
         codeArea.replaceText(script.getCode() != null ? script.getCode() : "");
         codeArea.setStyleSpans(0, computeHighlighting(codeArea.getText()));
         dirty = false;
@@ -815,38 +1125,29 @@ public final class LuaDevWindow {
         setStatus(runtimeService.isRunning(script.getId()) ? "Скрипт запущен" : "Готово");
     }
 
-    private void saveCurrentScriptSafely() {
+    private boolean saveCurrentScriptSafely() {
         if (currentScript == null) {
-            return;
+            return false;
         }
         try {
             LuaScript saved = scriptService.saveScript(
                     currentScript.getId(),
-                    nameField.getText(),
+                    currentScript.getName(),
                     codeArea.getText(),
-                    enabledCheck.isSelected());
+                    currentScript.isEnabled());
             currentScript = saved;
+            updateScriptNameLabel();
             dirty = false;
-            reloadScripts(saved.getId());
+            refreshKvRows();
+            updateButtons();
             setStatus("Сохранено в БД");
             appendConsole("Сохранено: " + saved.getName());
+            return true;
         } catch (Exception e) {
             setStatus("Ошибка сохранения");
             appendConsole("ERROR " + e.getMessage());
+            return false;
         }
-    }
-
-    private void deleteCurrentScript() {
-        if (currentScript == null) {
-            return;
-        }
-        long deletedId = currentScript.getId();
-        runtimeService.stopScript(deletedId, this::handleRuntimeEvent);
-        scriptService.deleteScript(deletedId);
-        currentScript = null;
-        dirty = false;
-        reloadScripts(0);
-        appendConsole("Скрипт удален");
     }
 
     private void checkCurrentScript() {
@@ -854,7 +1155,7 @@ public final class LuaDevWindow {
             return;
         }
         saveCurrentScriptSafely();
-        String error = runtimeService.checkSyntax(codeArea.getText(), nameField.getText());
+        String error = runtimeService.checkSyntax(codeArea.getText(), currentScript.getName());
         if (error == null) {
             setStatus("Синтаксис OK");
             appendConsole("Синтаксис OK");
@@ -911,7 +1212,7 @@ public final class LuaDevWindow {
         runtimeService.stopScript(currentScript.getId(), this::handleRuntimeEvent);
         clearDebugState();
         updateButtons();
-        reloadScripts(currentScript.getId());
+        scriptService.findScript(currentScript.getId()).ifPresent(script -> currentScript = script);
     }
 
     private void handleRuntimeEvent(LuaScriptEvent event) {
@@ -944,32 +1245,7 @@ public final class LuaDevWindow {
             }
             updateButtons();
             refreshKvRows();
-            if (scriptListView != null) {
-                scriptListView.refresh();
-            }
         });
-    }
-
-    private void reloadScripts(long selectId) {
-        List<LuaScript> loaded = scriptService.listScripts();
-        if (loaded.isEmpty()) {
-            loaded = List.of(scriptService.createScript());
-        }
-        scripts.setAll(loaded);
-        long targetId = selectId > 0
-                ? selectId
-                : (currentScript != null ? currentScript.getId() : loaded.getFirst().getId());
-        scripts.stream()
-                .filter(script -> script.getId() == targetId)
-                .findFirst()
-                .or(() -> scripts.stream().findFirst())
-                .ifPresent(script -> {
-                    scriptListView.getSelectionModel().select(script);
-                    if (currentScript == null || currentScript.getId() != script.getId()) {
-                        loadScript(script);
-                    }
-                });
-        scriptListView.refresh();
     }
 
     private void refreshKvRows() {
@@ -1019,6 +1295,14 @@ public final class LuaDevWindow {
         stopButton.setDisable(!hasScript || !running);
     }
 
+    private void updateScriptNameLabel() {
+        if (scriptNameLabel == null) {
+            return;
+        }
+        String name = currentScript != null ? currentScript.getName() : null;
+        scriptNameLabel.setText(name == null || name.isBlank() ? "Скрипт не выбран" : name);
+    }
+
     private void setStatus(String text) {
         statusLabel.setText(text);
     }
@@ -1051,6 +1335,12 @@ public final class LuaDevWindow {
     }
 
     private record KvRow(String key, String value) {}
+
+    private enum CloseChoice {
+        SAVE,
+        DISCARD,
+        CANCEL
+    }
 
     private record DebugVarRow(String scope, String name, String value) {
         static DebugVarRow from(LuaDebugVariable variable) {

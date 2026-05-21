@@ -1,20 +1,16 @@
 package com.meshtastic.client.lua;
 
+import com.meshtastic.client.lua.api.LuaSandboxApi;
+import com.meshtastic.client.lua.api.LuaSandboxContext;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.MeshMessage;
-import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.service.MessageDbService;
-import com.meshtastic.client.service.MessageService;
 import org.luaj.vm2.Globals;
 import org.luaj.vm2.LuaError;
-import org.luaj.vm2.LuaTable;
 import org.luaj.vm2.LuaValue;
 import org.luaj.vm2.Varargs;
 import org.luaj.vm2.lib.DebugLib;
-import org.luaj.vm2.lib.OneArgFunction;
 import org.luaj.vm2.lib.TwoArgFunction;
-import org.luaj.vm2.lib.VarArgFunction;
-import org.luaj.vm2.lib.ZeroArgFunction;
 import org.meshtastic.proto.ChannelProtos;
 
 import java.util.ArrayList;
@@ -30,6 +26,16 @@ import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
+/**
+ * Изолированная сессия выполнения одного Lua-скрипта MeshApp.
+ * <p>
+ * Отвечает за запуск кода в песочнице LuaJ, доставку новых сообщений
+ * в {@code on_message(msg)}, отладочные хуки и лимиты выполнения.
+ * Разрешенные расширения {@code mesh.*} устанавливаются через отдельный
+ * namespace {@link LuaSandboxApi}.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
+ */
 final class LuaRuntimeSession {
 
     private static final long RUN_TIMEOUT_MS = 3_000;
@@ -62,6 +68,7 @@ final class LuaRuntimeSession {
     private final Runnable deviceMessageListener = this::onDeviceMessagesChanged;
 
     private SandboxDebugLib debugLib;
+    private LuaSandboxApi sandboxApi;
     private Globals globals;
     private Future<?> activeFuture;
     private volatile boolean listenerRegistered;
@@ -144,7 +151,16 @@ final class LuaRuntimeSession {
             debugLib = new SandboxDebugLib(script.getId(), this::handleDebugLine);
             globals = LuaScriptRuntimeService.createSandboxGlobals(debugLib);
             debugLib.arm(globals, debugMode);
-            installApi(globals);
+            sandboxApi = new LuaSandboxApi(new LuaSandboxContext(
+                    script.getId(),
+                    target.connectionId(),
+                    target.state(),
+                    target.handler(),
+                    target.meshCoreRuntime(),
+                    target.ownerNodeId(),
+                    scriptService,
+                    this::emitOutput));
+            sandboxApi.install(globals);
 
             debugLib.begin(RUN_TIMEOUT_MS);
             globals.load(script.getCode() != null ? script.getCode() : "", script.getName()).call();
@@ -212,7 +228,7 @@ final class LuaRuntimeSession {
                         lastSeenDbIds.put(scope.key(), message.getDbId());
                     }
                     debugLib.begin(CALLBACK_TIMEOUT_MS);
-                    onMessage.call(messageToTable(message, scope.chatType(), scope.chatKey()));
+                    onMessage.call(sandboxApi.mapper().messageToTable(message, scope.chatType(), scope.chatKey()));
                 }
             }
         } catch (Throwable error) {
@@ -455,233 +471,6 @@ final class LuaRuntimeSession {
         return result;
     }
 
-    private void installApi(Globals targetGlobals) {
-        targetGlobals.set("print", new VarArgFunction() {
-            @Override
-            public Varargs invoke(Varargs args) {
-                emitOutput(joinArgs(args));
-                return LuaValue.NONE;
-            }
-        });
-
-        LuaTable mesh = new LuaTable();
-        mesh.set("log", new OneArgFunction() {
-            @Override
-            public LuaValue call(LuaValue arg) {
-                emitOutput(arg.tojstring());
-                return LuaValue.NIL;
-            }
-        });
-        mesh.set("now", new ZeroArgFunction() {
-            @Override
-            public LuaValue call() {
-                return LuaValue.valueOf(System.currentTimeMillis() / 1000.0);
-            }
-        });
-        mesh.set("owner", new ZeroArgFunction() {
-            @Override
-            public LuaValue call() {
-                return ownerTable();
-            }
-        });
-        mesh.set("chat", chatApi());
-        mesh.set("kv", kvApi());
-        targetGlobals.set("mesh", mesh);
-    }
-
-    private LuaTable chatApi() {
-        LuaTable chat = new LuaTable();
-        chat.set("send_channel", new TwoArgFunction() {
-            @Override
-            public LuaValue call(LuaValue channelArg, LuaValue textArg) {
-                requireChatTransport();
-                int channel = channelArg.checkint();
-                String text = textArg.checkjstring();
-                MeshMessage sent = target.meshCoreRuntime() != null
-                        ? target.meshCoreRuntime().sendChannelMessage(channel, text, 0)
-                        : MessageService.sendChannelMessage(target.handler(), target.state(), channel, text, 0);
-                return sent != null ? messageToTable(sent, "channel", String.valueOf(channel)) : LuaValue.NIL;
-            }
-        });
-        chat.set("send_dm", new TwoArgFunction() {
-            @Override
-            public LuaValue call(LuaValue peerArg, LuaValue textArg) {
-                requireChatTransport();
-                String peerNodeId = peerArg.checkjstring();
-                String text = textArg.checkjstring();
-                MeshMessage sent = target.meshCoreRuntime() != null
-                        ? target.meshCoreRuntime().sendDirectMessage(peerNodeId, text, 0)
-                        : MessageService.sendDirectMessage(target.handler(), target.state(), peerNodeId, text, 0);
-                return sent != null ? messageToTable(sent, "dm", peerNodeId) : LuaValue.NIL;
-            }
-        });
-        chat.set("recent", new VarArgFunction() {
-            @Override
-            public Varargs invoke(Varargs args) {
-                String chatType = args.checkjstring(1);
-                String chatKey = args.checkjstring(2);
-                int limit = Math.max(1, Math.min(200, args.optint(3, 20)));
-                LuaTable table = new LuaTable();
-                List<MeshMessage> messages = messageDbService.loadLast(
-                        chatType,
-                        chatKey,
-                        limit,
-                        target.ownerNodeIdOrEmpty());
-                for (int i = 0; i < messages.size(); i++) {
-                    table.set(i + 1, messageToTable(messages.get(i), chatType, chatKey));
-                }
-                return table;
-            }
-        });
-        chat.set("nodes", new ZeroArgFunction() {
-            @Override
-            public LuaValue call() {
-                LuaTable table = new LuaTable();
-                if (target.state() == null) {
-                    return table;
-                }
-                List<NodeData> nodes = new ArrayList<>(target.state().getNodeDb().values());
-                nodes.sort(java.util.Comparator.comparing(NodeData::getNodeId, java.util.Comparator.nullsLast(String::compareTo)));
-                for (int i = 0; i < nodes.size(); i++) {
-                    table.set(i + 1, nodeToTable(nodes.get(i)));
-                }
-                return table;
-            }
-        });
-        chat.set("channels", new ZeroArgFunction() {
-            @Override
-            public LuaValue call() {
-                LuaTable table = new LuaTable();
-                if (target.state() == null) {
-                    return table;
-                }
-                List<ChannelProtos.Channel> channels = target.state().getChannels();
-                for (int i = 0; i < channels.size(); i++) {
-                    table.set(i + 1, channelToTable(channels.get(i)));
-                }
-                return table;
-            }
-        });
-        return chat;
-    }
-
-    private LuaTable kvApi() {
-        LuaTable kv = new LuaTable();
-        kv.set("get", new OneArgFunction() {
-            @Override
-            public LuaValue call(LuaValue keyArg) {
-                String value = scriptService.getKv(script.getId(), keyArg.checkjstring());
-                return value != null ? LuaValue.valueOf(value) : LuaValue.NIL;
-            }
-        });
-        kv.set("set", new TwoArgFunction() {
-            @Override
-            public LuaValue call(LuaValue keyArg, LuaValue valueArg) {
-                scriptService.setKv(script.getId(), keyArg.checkjstring(), valueArg.isnil() ? null : valueArg.tojstring());
-                return LuaValue.TRUE;
-            }
-        });
-        kv.set("delete", new OneArgFunction() {
-            @Override
-            public LuaValue call(LuaValue keyArg) {
-                return LuaValue.valueOf(scriptService.deleteKv(script.getId(), keyArg.checkjstring()));
-            }
-        });
-        kv.set("list", new ZeroArgFunction() {
-            @Override
-            public LuaValue call() {
-                LuaTable table = new LuaTable();
-                for (Map.Entry<String, String> entry : scriptService.listKv(script.getId()).entrySet()) {
-                    table.set(entry.getKey(), entry.getValue() != null ? LuaValue.valueOf(entry.getValue()) : LuaValue.NIL);
-                }
-                return table;
-            }
-        });
-        kv.set("clear", new ZeroArgFunction() {
-            @Override
-            public LuaValue call() {
-                scriptService.clearKv(script.getId());
-                return LuaValue.TRUE;
-            }
-        });
-        return kv;
-    }
-
-    private LuaTable ownerTable() {
-        LuaTable table = new LuaTable();
-        table.set("node_id", stringOrNil(target.ownerNodeId()));
-        if (target.state() != null) {
-            table.set("node_num", LuaValue.valueOf(target.state().getMyNodeNum()));
-        }
-        table.set("connection_id", stringOrNil(target.connectionId()));
-        return table;
-    }
-
-    private LuaTable messageToTable(MeshMessage message, String chatType, String chatKey) {
-        LuaTable table = new LuaTable();
-        table.set("db_id", LuaValue.valueOf(message.getDbId()));
-        table.set("packet_id", LuaValue.valueOf(message.getPacketId()));
-        table.set("chat_type", stringOrNil(chatType));
-        table.set("chat_key", stringOrNil(chatKey));
-        table.set("from", stringOrNil(message.getFromNodeId()));
-        table.set("to", stringOrNil(message.getToNodeId()));
-        table.set("channel", LuaValue.valueOf(message.getChannelIndex()));
-        table.set("text", stringOrNil(message.getText()));
-        table.set("timestamp", LuaValue.valueOf(message.getTimestamp()));
-        table.set("outgoing", LuaValue.valueOf(message.isOutgoing()));
-        table.set("status", stringOrNil(message.getStatus() != null ? message.getStatus().name() : null));
-        table.set("sender_name", stringOrNil(message.getSenderName()));
-        table.set("rx_rssi", LuaValue.valueOf(message.getRxRssi()));
-        table.set("rx_snr", LuaValue.valueOf(message.getRxSnr()));
-        return table;
-    }
-
-    private LuaTable nodeToTable(NodeData node) {
-        LuaTable table = new LuaTable();
-        table.set("node_num", LuaValue.valueOf(node.getNodeNum()));
-        table.set("node_id", stringOrNil(node.getNodeId()));
-        table.set("long_name", stringOrNil(node.getLongName()));
-        table.set("short_name", stringOrNil(node.getShortName()));
-        table.set("last_heard", LuaValue.valueOf(node.getLastHeard()));
-        table.set("battery", LuaValue.valueOf(node.getBatteryLevel()));
-        table.set("hops_away", node.hasHopsAway() ? LuaValue.valueOf(node.getHopsAway()) : LuaValue.NIL);
-        table.set("role", stringOrNil(node.getRole()));
-        table.set("hw_model", stringOrNil(node.getHwModel()));
-        table.set("unmessagable", LuaValue.valueOf(node.isUnmessagable()));
-        return table;
-    }
-
-    private LuaTable channelToTable(ChannelProtos.Channel channel) {
-        LuaTable table = new LuaTable();
-        table.set("index", LuaValue.valueOf(channel.getIndex()));
-        table.set("role", stringOrNil(channel.getRole().name()));
-        if (channel.hasSettings()) {
-            table.set("name", stringOrNil(channel.getSettings().getName()));
-        }
-        return table;
-    }
-
-    private void requireChatTransport() {
-        if (!target.hasChatTransport()) {
-            throw new LuaError("No active chat connection");
-        }
-    }
-
-    private LuaValue stringOrNil(String value) {
-        return value == null ? LuaValue.NIL : LuaValue.valueOf(value);
-    }
-
-    private String joinArgs(Varargs args) {
-        StringBuilder sb = new StringBuilder();
-        for (int i = 1; i <= args.narg(); i++) {
-            if (i > 1) {
-                sb.append('\t');
-            }
-            sb.append(args.arg(i).tojstring());
-        }
-        return sb.toString();
-    }
-
     private void emitOutput(String message) {
         if (message == null) {
             message = "";
@@ -726,6 +515,12 @@ final class LuaRuntimeSession {
         }
     }
 
+    /**
+     * Область чата, которую Lua-скрипт должен просматривать для новых сообщений.
+     *
+     * @param chatType тип чата ({@code channel} или {@code dm})
+     * @param chatKey  ключ чата
+     */
     private record ChatScope(String chatType, String chatKey) {
         String key() {
             return chatType + ":" + chatKey;

@@ -28,6 +28,15 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 
+/**
+ * Управляет жизненным циклом Lua-скриптов MeshApp.
+ * <p>
+ * Сервис создает песочницы выполнения, выбирает активное подключение приложения,
+ * запускает обычный режим и режим отладки, останавливает активные сессии и
+ * предоставляет состояние выполнения для UI MeshApp IDE.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
+ */
 public final class LuaScriptRuntimeService {
 
     private static LuaScriptRuntimeService instance;
@@ -48,7 +57,7 @@ public final class LuaScriptRuntimeService {
             return;
         }
         stopScript(script.getId(), sink);
-        RuntimeTarget target = resolveSelectedTarget();
+        RuntimeTarget target = resolveTarget(script);
         LuaRuntimeSession session = new LuaRuntimeSession(
                 script,
                 target,
@@ -71,7 +80,7 @@ public final class LuaScriptRuntimeService {
             return;
         }
         stopScript(script.getId(), sink);
-        RuntimeTarget target = resolveSelectedTarget();
+        RuntimeTarget target = resolveTarget(script);
         Set<Integer> breakpointSet = breakpoints != null ? Set.copyOf(breakpoints) : Set.of();
         LuaRuntimeSession session = new LuaRuntimeSession(
                 script,
@@ -148,8 +157,27 @@ public final class LuaScriptRuntimeService {
         ConnectionManager manager = ConnectionManager.getInstance();
         ConnectionEntry entry = manager.getSelectedConnectionEntry();
         if (entry == null || !entry.isConnected()) {
-            return RuntimeTarget.empty();
+            return RuntimeTarget.empty("");
         }
+        return resolveTarget(manager, entry);
+    }
+
+    private static RuntimeTarget resolveTarget(LuaScript script) {
+        String nodeId = normalizeNodeId(script != null ? script.getNodeId() : null);
+        if (nodeId.isBlank()) {
+            return resolveSelectedTarget();
+        }
+        ConnectionManager manager = ConnectionManager.getInstance();
+        for (ConnectionEntry entry : manager.getActiveConnectionEntries()) {
+            String ownerNodeId = normalizeNodeId(manager.getOwnerNodeId(entry.getId()));
+            if (nodeId.equals(ownerNodeId)) {
+                return resolveTarget(manager, entry);
+            }
+        }
+        return RuntimeTarget.empty(nodeId);
+    }
+
+    private static RuntimeTarget resolveTarget(ConnectionManager manager, ConnectionEntry entry) {
         DeviceState state = manager.getDeviceState(entry.getId());
         ProtocolHandler handler = manager.getProtocolHandler(entry.getId());
         ProtocolRuntime<?> runtime = manager.getProtocolRuntime(entry.getId());
@@ -162,6 +190,10 @@ public final class LuaScriptRuntimeService {
             ownerNodeId = state.getOwnerNodeId();
         }
         return new RuntimeTarget(entry.getId(), state, handler, meshCoreRuntime, ownerNodeId);
+    }
+
+    private static String normalizeNodeId(String nodeId) {
+        return nodeId == null ? "" : nodeId.trim().toLowerCase();
     }
 
     static Globals createSandboxGlobals(DebugLib debugLib) {
@@ -206,8 +238,8 @@ public final class LuaScriptRuntimeService {
                          ProtocolHandler handler,
                          MeshCoreCompanionProtocolRuntime meshCoreRuntime,
                          String ownerNodeId) {
-        static RuntimeTarget empty() {
-            return new RuntimeTarget(null, null, null, null, "");
+        static RuntimeTarget empty(String ownerNodeId) {
+            return new RuntimeTarget(null, null, null, null, ownerNodeId != null ? ownerNodeId : "");
         }
 
         boolean hasChatTransport() {

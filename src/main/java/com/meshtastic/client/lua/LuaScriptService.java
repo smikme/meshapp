@@ -15,6 +15,14 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.TreeMap;
 
+/**
+ * Сервис хранения Lua-скриптов MeshApp и их изолированных KV-хранилищ.
+ * <p>
+ * Инкапсулирует таблицы БД приложения для исходного кода, статусов запуска,
+ * ошибок выполнения и key-value данных, принадлежащих конкретному скрипту.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
+ */
 public final class LuaScriptService {
 
     private static final Logger log = LoggerFactory.getLogger(LuaScriptService.class);
@@ -56,6 +64,9 @@ public final class LuaScriptService {
                         name        VARCHAR(120) NOT NULL,
                         code        CLOB NOT NULL,
                         enabled     BOOLEAN NOT NULL DEFAULT TRUE,
+                        node_id     VARCHAR(60) NOT NULL DEFAULT '',
+                        bot_type    VARCHAR(30) NOT NULL DEFAULT 'AIR_BOT',
+                        automation_name VARCHAR(80) NOT NULL DEFAULT '',
                         created_at  BIGINT NOT NULL,
                         updated_at  BIGINT NOT NULL,
                         last_run_at BIGINT DEFAULT 0,
@@ -67,6 +78,9 @@ public final class LuaScriptService {
                     CREATE UNIQUE INDEX IF NOT EXISTS idx_lua_scripts_name
                     ON lua_scripts (name)
                     """);
+            stmt.execute("ALTER TABLE lua_scripts ADD COLUMN IF NOT EXISTS node_id VARCHAR(60) NOT NULL DEFAULT ''");
+            stmt.execute("ALTER TABLE lua_scripts ADD COLUMN IF NOT EXISTS bot_type VARCHAR(30) NOT NULL DEFAULT 'AIR_BOT'");
+            stmt.execute("ALTER TABLE lua_scripts ADD COLUMN IF NOT EXISTS automation_name VARCHAR(80) NOT NULL DEFAULT ''");
             stmt.execute("""
                     CREATE TABLE IF NOT EXISTS lua_script_kv (
                         script_id  BIGINT NOT NULL,
@@ -133,14 +147,18 @@ public final class LuaScriptService {
         }
         long now = nowSeconds();
         try (PreparedStatement ps = dbConnection.prepareStatement("""
-                INSERT INTO lua_scripts (name, code, enabled, created_at, updated_at, last_status)
-                VALUES (?, ?, TRUE, ?, ?, ?)
+                INSERT INTO lua_scripts (name, code, enabled, node_id, bot_type, automation_name,
+                                         created_at, updated_at, last_status)
+                VALUES (?, ?, TRUE, ?, ?, ?, ?, ?, ?)
                 """, Statement.RETURN_GENERATED_KEYS)) {
             ps.setString(1, normalizeName(name));
             ps.setString(2, code != null ? code : "");
-            ps.setLong(3, now);
-            ps.setLong(4, now);
-            ps.setString(5, "NEW");
+            ps.setString(3, "");
+            ps.setString(4, LuaScript.BotType.AIR_BOT.getStorageValue());
+            ps.setString(5, "");
+            ps.setLong(6, now);
+            ps.setLong(7, now);
+            ps.setString(8, "NEW");
             ps.executeUpdate();
             try (ResultSet keys = ps.getGeneratedKeys()) {
                 if (keys.next()) {
@@ -154,20 +172,44 @@ public final class LuaScriptService {
     }
 
     public synchronized LuaScript saveScript(long scriptId, String name, String code, boolean enabled) {
+        LuaScript existing = findScript(scriptId).orElse(null);
+        String nodeId = existing != null ? existing.getNodeId() : "";
+        LuaScript.BotType botType = existing != null ? existing.getBotType() : LuaScript.BotType.AIR_BOT;
+        String automationName = existing != null ? existing.getAutomationName() : "";
+        return saveScript(scriptId, name, code, enabled, nodeId, botType, automationName);
+    }
+
+    public synchronized LuaScript saveScript(long scriptId,
+                                             String name,
+                                             String code,
+                                             boolean enabled,
+                                             String nodeId,
+                                             LuaScript.BotType botType,
+                                             String automationName) {
         if (dbConnection == null || scriptId <= 0) {
             throw new IllegalStateException("Database connection is not available");
         }
+        LuaScript.BotType normalizedType = botType != null ? botType : LuaScript.BotType.AIR_BOT;
         long now = nowSeconds();
         try (PreparedStatement ps = dbConnection.prepareStatement("""
                 UPDATE lua_scripts
-                SET name = ?, code = ?, enabled = ?, updated_at = ?
+                SET name = ?,
+                    code = ?,
+                    enabled = ?,
+                    node_id = ?,
+                    bot_type = ?,
+                    automation_name = ?,
+                    updated_at = ?
                 WHERE id = ?
                 """)) {
             ps.setString(1, normalizeName(name));
             ps.setString(2, code != null ? code : "");
             ps.setBoolean(3, enabled);
-            ps.setLong(4, now);
-            ps.setLong(5, scriptId);
+            ps.setString(4, normalizeNodeId(nodeId));
+            ps.setString(5, normalizedType.getStorageValue());
+            ps.setString(6, normalizeAutomationName(normalizedType, automationName));
+            ps.setLong(7, now);
+            ps.setLong(8, scriptId);
             if (ps.executeUpdate() == 0) {
                 throw new IllegalStateException("Lua script not found: " + scriptId);
             }
@@ -175,6 +217,17 @@ public final class LuaScriptService {
         } catch (SQLException e) {
             throw new IllegalStateException("Failed to save Lua script", e);
         }
+    }
+
+    public synchronized LuaScript saveScriptSettings(long scriptId,
+                                                     String name,
+                                                     boolean autostart,
+                                                     String nodeId,
+                                                     LuaScript.BotType botType,
+                                                     String automationName) {
+        LuaScript existing = findScript(scriptId)
+                .orElseThrow(() -> new IllegalStateException("Lua script not found: " + scriptId));
+        return saveScript(scriptId, name, existing.getCode(), autostart, nodeId, botType, automationName);
     }
 
     public synchronized void deleteScript(long scriptId) {
@@ -305,6 +358,9 @@ public final class LuaScriptService {
                 rs.getString("name"),
                 rs.getString("code"),
                 rs.getBoolean("enabled"),
+                rs.getString("node_id"),
+                LuaScript.BotType.fromStorage(rs.getString("bot_type")),
+                rs.getString("automation_name"),
                 rs.getLong("created_at"),
                 rs.getLong("updated_at"),
                 rs.getLong("last_run_at"),
@@ -328,6 +384,25 @@ public final class LuaScriptService {
             throw new IllegalArgumentException("Script name is required");
         }
         return value.length() > 120 ? value.substring(0, 120) : value;
+    }
+
+    private static String normalizeNodeId(String nodeId) {
+        String value = nodeId == null ? "" : nodeId.trim();
+        return value.length() > 60 ? value.substring(0, 60) : value;
+    }
+
+    private static String normalizeAutomationName(LuaScript.BotType botType, String automationName) {
+        String value = automationName == null ? "" : automationName.trim();
+        if (botType != LuaScript.BotType.AUTOMATION_BOT) {
+            return "";
+        }
+        if (value.isEmpty()) {
+            throw new IllegalArgumentException("Automation bot name is required");
+        }
+        if (!value.matches("@[\\p{L}\\p{N}_]+")) {
+            throw new IllegalArgumentException("Automation bot name must match @имя_бота");
+        }
+        return value.length() > 80 ? value.substring(0, 80) : value;
     }
 
     private static String normalizeKey(String key) {

@@ -59,6 +59,32 @@ public class NativeMacOsWindowControl {
     }
 
     /**
+     * Для вспомогательных tool windows: оставить нативную close-кнопку,
+     * но скрыть minimize/zoom, сохранив resizable style mask.
+     */
+    public void hideMiniaturizeAndZoomButtons() {
+        if (nsWindow == 0) { return; }
+        try {
+            hideStandardWindowButton(1L); // NSWindowMiniaturizeButton
+            hideStandardWindowButton(2L); // NSWindowZoomButton
+        } catch (Throwable t) {
+            log.warn("Не удалось скрыть кнопки tool window", t);
+        }
+    }
+
+    private void hideStandardWindowButton(long buttonType) {
+        long button = OBJC_MSG_SEND.invokeLong(new Object[]{
+                nsWindow,
+                sel("standardWindowButton:"),
+                buttonType
+        });
+        if (button != 0) {
+            msgSendBool(button, "setHidden:", true);
+            msgSendBool(button, "setEnabled:", false);
+        }
+    }
+
+    /**
      * Рефлексия: Window → TkStage → PlatformWindow → getNativeHandle() → NSWindow pointer
      */
     private static long extractNsWindow(Window window) {

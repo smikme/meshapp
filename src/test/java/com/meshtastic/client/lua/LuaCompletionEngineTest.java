@@ -24,6 +24,43 @@ class LuaCompletionEngineTest {
     }
 
     @Test
+    void completesMessageChannelMetadataFields() {
+        LuaCompletionEngine.CompletionResult result = complete("""
+                function on_message(msg)
+                    msg.channel_|
+                end
+                """);
+
+        assertItemsContain(result, "channel_name");
+        assertItemsContain(result, "channel_role");
+    }
+
+    @Test
+    void completesMessageReplyFields() {
+        LuaCompletionEngine.CompletionResult result = complete("""
+                function on_message(msg)
+                    msg.reply_|
+                end
+                """);
+
+        assertItemsContain(result, "reply_id");
+        assertItemsContain(result, "reply_text");
+    }
+
+    @Test
+    void completesMessageHopFields() {
+        LuaCompletionEngine.CompletionResult result = complete("""
+                function on_message(msg)
+                    msg.hop|
+                end
+                """);
+
+        assertItemsContain(result, "hop_start");
+        assertItemsContain(result, "hop_limit");
+        assertItemsContain(result, "hops");
+    }
+
+    @Test
     void infersOwnerReturnTypeFromAssignment() {
         LuaCompletionEngine.CompletionResult result = complete("""
                 local owner = mesh.owner()
@@ -94,8 +131,36 @@ class LuaCompletionEngineTest {
                 chat.send_|
                 """);
 
-        assertItemsContain(result, "send_channel(channel, text)");
-        assertItemsContain(result, "send_dm(node_id, text)");
+        assertItemsContain(result, "send_channel(channel, text, reply_id)");
+        assertItemsContain(result, "send_dm(node_id, text, reply_id)");
+    }
+
+    @Test
+    void completesReplyApiOnMeshChat() {
+        LuaCompletionEngine.CompletionResult result = complete("""
+                local chat = mesh.chat
+                chat.|
+                """);
+
+        assertItemsContain(result, "reply(msg, text)");
+    }
+
+    @Test
+    void completesCurlApiAndResponseFields() {
+        LuaCompletionEngine.CompletionResult curlResult = complete("""
+                local curl = mesh.curl
+                curl.|
+                """);
+
+        assertItemsContain(curlResult, "get(url, options)");
+        assertItemsContain(curlResult, "request(options)");
+
+        LuaCompletionEngine.CompletionResult responseResult = complete("""
+                local response = mesh.curl.get("https://example.com")
+                response.st|
+                """);
+
+        assertItemsContain(responseResult, "status");
     }
 
     @Test
@@ -118,7 +183,7 @@ class LuaCompletionEngineTest {
         LuaCompletionEngine.CompletionResult result = engine.complete(code, code.length(), true);
 
         assertEquals("send_", code.substring(result.replaceStart(), result.replaceEnd()));
-        assertItemsContain(result, "send_channel(channel, text)");
+        assertItemsContain(result, "send_channel(channel, text, reply_id)");
     }
 
     private LuaCompletionEngine.CompletionResult complete(String markedCode) {

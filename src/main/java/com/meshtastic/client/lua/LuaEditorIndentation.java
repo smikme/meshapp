@@ -2,6 +2,15 @@ package com.meshtastic.client.lua;
 
 import java.util.regex.Pattern;
 
+/**
+ * Правила редактирования отступов Lua-кода в MeshApp IDE.
+ * <p>
+ * Реализует поведение клавиш Enter, Tab и Shift+Tab как в редакторах кода:
+ * четыре пробела на уровень, сохранение текущего отступа и увеличение отступа
+ * после открывающих Lua-блоков.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
+ */
 public final class LuaEditorIndentation {
 
     public static final String INDENT = "    ";

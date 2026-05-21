@@ -12,6 +12,15 @@ import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+/**
+ * Контекстный движок автодополнения Lua-кода для MeshApp IDE.
+ * <p>
+ * Движок знает разрешенный sandbox API {@code mesh.*}, стандартные Lua-библиотеки,
+ * поля прикладных объектов сообщений/нод/каналов и выполняет легкий статический
+ * анализ переменных, функций, таблиц и alias-выражений прямо по тексту редактора.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
+ */
 public final class LuaCompletionEngine {
 
     private static final int MAX_COMPLETIONS = 24;
@@ -44,10 +53,12 @@ public final class LuaCompletionEngine {
         mesh.member("owner()", "owner()", "function", "owner");
         mesh.member("chat", "chat.", "object", "mesh.chat");
         mesh.member("kv", "kv.", "object", "mesh.kv");
+        mesh.member("curl", "curl.", "object", "mesh.curl");
 
         TypeDef chat = new TypeDef();
-        chat.member("send_channel(channel, text)", "send_channel(", "function", "message");
-        chat.member("send_dm(node_id, text)", "send_dm(", "function", "message");
+        chat.member("send_channel(channel, text, reply_id)", "send_channel(", "function", "message");
+        chat.member("send_dm(node_id, text, reply_id)", "send_dm(", "function", "message");
+        chat.member("reply(msg, text)", "reply(", "function", "message");
         chat.member("recent(chat_type, chat_key, limit)", "recent(", "function", "list:message");
         chat.member("nodes()", "nodes()", "function", "list:node");
         chat.member("channels()", "channels()", "function", "list:channel");
@@ -59,9 +70,19 @@ public final class LuaCompletionEngine {
         kv.member("list()", "list()", "function", "table");
         kv.member("clear()", "clear()", "function", "boolean");
 
+        TypeDef curl = new TypeDef();
+        curl.member("get(url, options)", "get(", "function", "curl.response");
+        curl.member("request(options)", "request(", "function", "curl.response");
+
+        TypeDef curlResponse = new TypeDef();
+        for (String field : List.of("ok", "status", "url", "body", "headers", "error", "truncated")) {
+            curlResponse.member(field, field, "field", null);
+        }
+
         TypeDef message = new TypeDef();
         for (String field : List.of("db_id", "packet_id", "chat_type", "chat_key", "from", "to", "channel",
-                "text", "timestamp", "outgoing", "status", "sender_name", "rx_rssi", "rx_snr")) {
+                "channel_name", "channel_role", "text", "reply_id", "reply_text", "timestamp", "outgoing",
+                "status", "sender_name", "hop_start", "hop_limit", "hops", "rx_rssi", "rx_snr")) {
             message.member(field, field, "field", null);
         }
 
@@ -118,6 +139,8 @@ public final class LuaCompletionEngine {
         defs.put("mesh", mesh);
         defs.put("mesh.chat", chat);
         defs.put("mesh.kv", kv);
+        defs.put("mesh.curl", curl);
+        defs.put("curl.response", curlResponse);
         defs.put("message", message);
         defs.put("owner", owner);
         defs.put("node", node);
@@ -426,11 +449,17 @@ public final class LuaCompletionEngine {
         if (value.startsWith("mesh.kv.list")) {
             return Optional.of("table");
         }
+        if (value.startsWith("mesh.curl.get") || value.startsWith("mesh.curl.request")) {
+            return Optional.of("curl.response");
+        }
         if (value.startsWith("mesh.chat")) {
             return Optional.of("mesh.chat");
         }
         if (value.startsWith("mesh.kv")) {
             return Optional.of("mesh.kv");
+        }
+        if (value.startsWith("mesh.curl")) {
+            return Optional.of("mesh.curl");
         }
         if (value.startsWith("mesh")) {
             return Optional.of("mesh");

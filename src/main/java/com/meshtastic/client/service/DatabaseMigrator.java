@@ -31,7 +31,7 @@ public final class DatabaseMigrator {
     private static final Logger log = LoggerFactory.getLogger(DatabaseMigrator.class);
 
     /** Текущая версия схемы. Увеличивается при каждом изменении схемы. */
-    static final int CURRENT_VERSION = 13;
+    static final int CURRENT_VERSION = 14;
     private static final Pattern CONNECTION_NODE_ID_PATTERN =
             Pattern.compile("\"nodeId\"\\s*:\\s*\"(![0-9a-fA-F]{8})\"");
     private static final List<String> APPLICATION_TABLES = List.of(
@@ -99,6 +99,7 @@ public final class DatabaseMigrator {
             if (version < 11) { migrateToV11(connection); version = 11; }
             if (version < 12) { migrateToV12(connection); version = 12; }
             if (version < 13) { migrateToV13(connection); version = 13; }
+            if (version < 14) { migrateToV14(connection); version = 14; }
 
             setVersion(connection, CURRENT_VERSION);
             log.info("Database migration complete, schema version = {}", CURRENT_VERSION);
@@ -625,6 +626,9 @@ public final class DatabaseMigrator {
                         name        VARCHAR(120) NOT NULL,
                         code        CLOB NOT NULL,
                         enabled     BOOLEAN NOT NULL DEFAULT TRUE,
+                        node_id     VARCHAR(60) NOT NULL DEFAULT '',
+                        bot_type    VARCHAR(30) NOT NULL DEFAULT 'AIR_BOT',
+                        automation_name VARCHAR(80) NOT NULL DEFAULT '',
                         created_at  BIGINT NOT NULL,
                         updated_at  BIGINT NOT NULL,
                         last_run_at BIGINT DEFAULT 0,
@@ -654,6 +658,20 @@ public final class DatabaseMigrator {
                     """);
         }
         log.info("Migration v13: created Lua script and KV tables");
+    }
+
+    /** v14: параметры запуска и тип Lua-бота для MeshApp IDE. */
+    private static void migrateToV14(Connection connection) throws SQLException {
+        if (!tableExists(connection, "LUA_SCRIPTS")) {
+            log.info("Migration v14: skipped Lua script metadata because lua_scripts table is absent");
+            return;
+        }
+        try (Statement stmt = connection.createStatement()) {
+            stmt.execute("ALTER TABLE lua_scripts ADD COLUMN IF NOT EXISTS node_id VARCHAR(60) NOT NULL DEFAULT ''");
+            stmt.execute("ALTER TABLE lua_scripts ADD COLUMN IF NOT EXISTS bot_type VARCHAR(30) NOT NULL DEFAULT 'AIR_BOT'");
+            stmt.execute("ALTER TABLE lua_scripts ADD COLUMN IF NOT EXISTS automation_name VARCHAR(80) NOT NULL DEFAULT ''");
+        }
+        log.info("Migration v14: added Lua script node binding and bot metadata");
     }
 
     /** v2: колонка favorite для избранных нод. */

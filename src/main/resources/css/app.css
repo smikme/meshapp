@@ -2454,6 +2454,208 @@
     -fx-background-color: -color-bg-default;
 }
 
+.lua-dev-root:seamless-frame {
+    -fx-background-color: transparent;
+}
+
+.lua-dev-body {
+    -fx-background-color: transparent;
+}
+
+.lua-dev-side-menu {
+    -fx-background-color: rgba(255, 255, 255, 0.06);
+    -fx-border-color: rgba(255, 255, 255, 0.10);
+    -fx-border-width: 0 1 0 0;
+    -fx-min-width: 56;
+    -fx-pref-width: 56;
+    -fx-max-width: 56;
+    -fx-padding: 4 0 8 0;
+}
+
+.lua-dev-root:seamless-frame .lua-dev-side-menu {
+    -fx-background-color: transparent;
+    -fx-border-color: transparent;
+}
+
+.lua-dev-root.light-theme .lua-dev-side-menu {
+    -fx-background-color: rgba(0, 0, 0, 0.045);
+    -fx-border-color: rgba(0, 0, 0, 0.10);
+}
+
+.lua-dev-root.light-theme:seamless-frame .lua-dev-side-menu {
+    -fx-background-color: transparent;
+    -fx-border-color: transparent;
+}
+
+.lua-dev-root:seamless-frame .lua-dev-content {
+    -fx-background-color: -color-bg-default;
+    -fx-background-radius: 10 0 0 0;
+}
+
+.lua-dev-content,
+.lua-dev-status-bar {
+    -fx-background-color: transparent;
+}
+
+.lua-dev-split-pane {
+    -fx-background-color: transparent;
+    -fx-background-insets: 0;
+    -fx-padding: 0;
+}
+
+.lua-dev-split-pane:horizontal > .split-pane-divider {
+    -fx-background-color: -color-bg-default;
+    -fx-padding: 0 5 0 5;
+}
+
+.lua-dev-split-pane:vertical > .split-pane-divider {
+    -fx-background-color: -color-bg-default;
+    -fx-padding: 5 0 5 0;
+}
+
+.lua-dev-panel {
+    -fx-background-color: -color-bg-subtle;
+    -fx-background-radius: 8;
+    -fx-border-color: -color-border-default;
+    -fx-border-radius: 8;
+    -fx-padding: 10;
+}
+
+.lua-dev-code-slot {
+    -fx-background-color: transparent;
+    -fx-padding: 0 0 6 0;
+}
+
+.lua-dev-console-slot {
+    -fx-background-color: transparent;
+    -fx-padding: 6 0 0 0;
+}
+
+.lua-dev-table .column-header-background {
+    -fx-min-height: 20;
+    -fx-pref-height: 20;
+    -fx-max-height: 20;
+}
+
+.lua-dev-table .column-header,
+.lua-dev-table .filler {
+    -fx-size: 20;
+    -fx-min-height: 20;
+    -fx-pref-height: 20;
+    -fx-max-height: 20;
+    -fx-padding: 0;
+}
+
+.lua-dev-table .column-header .label {
+    -fx-padding: 1 8 1 8;
+    -fx-alignment: center-left;
+}
+
+.lua-value-cell {
+    -fx-padding: 0 4 0 6;
+}
+
+.lua-value-cell-text {
+    -fx-text-fill: -color-fg-default;
+}
+
+.lua-value-details-button {
+    -fx-min-width: 22;
+    -fx-pref-width: 22;
+    -fx-max-width: 22;
+    -fx-min-height: 22;
+    -fx-pref-height: 22;
+    -fx-max-height: 22;
+    -fx-padding: 0;
+    -fx-background-radius: 3;
+    -fx-border-radius: 3;
+    -fx-font-size: 11px;
+    -fx-font-weight: bold;
+    -fx-cursor: hand;
+}
+
+.lua-json-window-root,
+.lua-json-scroll,
+.lua-json-scroll > .viewport,
+.lua-json-code-area,
+.lua-json-code-area .paragraph-box {
+    -fx-background-color: -color-bg-default;
+}
+
+.lua-json-code-area {
+    -fx-font-family: "Menlo", "Consolas", "DejaVu Sans Mono", monospace;
+    -fx-font-size: 12px;
+    -fx-padding: 12;
+}
+
+.lua-json-code-area .text {
+    -fx-fill: -color-fg-default;
+}
+
+.lua-json-code-area .caret {
+    -fx-stroke: -color-fg-default;
+}
+
+.json-key {
+    -fx-fill: #79c0ff;
+}
+
+.json-string {
+    -fx-fill: #a5d6ff;
+}
+
+.json-number {
+    -fx-fill: #f2cc60;
+}
+
+.json-boolean {
+    -fx-fill: #ff7b72;
+    -fx-font-weight: bold;
+}
+
+.json-null {
+    -fx-fill: #8b949e;
+    -fx-font-style: italic;
+}
+
+.light-theme .json-key {
+    -fx-fill: #0550ae;
+}
+
+.light-theme .json-string {
+    -fx-fill: #116329;
+}
+
+.light-theme .json-number {
+    -fx-fill: #953800;
+}
+
+.light-theme .json-boolean {
+    -fx-fill: #cf222e;
+}
+
+.light-theme .json-null {
+    -fx-fill: #6e7781;
+}
+
+.lua-dev-status-bar {
+    -fx-min-height: 24;
+    -fx-pref-height: 24;
+    -fx-max-height: 24;
+    -fx-padding: 3 8 0 8;
+    -fx-border-color: rgba(255, 255, 255, 0.10);
+    -fx-border-width: 1 0 0 0;
+}
+
+.lua-dev-script-name {
+    -fx-font-weight: bold;
+    -fx-text-fill: -color-fg-default;
+}
+
+.lua-dev-root.light-theme .lua-dev-status-bar {
+    -fx-border-color: rgba(0, 0, 0, 0.10);
+}
+
 .lua-script-list .list-cell {
     -fx-padding: 8 10;
 }
@@ -2579,8 +2781,7 @@
     -fx-fill: #6e7781;
 }
 
-.lua-console,
-.lua-api-reference {
+.lua-console {
     -fx-font-family: "Menlo", "Consolas", "DejaVu Sans Mono", monospace;
     -fx-font-size: 12px;
 }

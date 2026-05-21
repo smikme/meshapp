@@ -63,6 +63,32 @@ class LuaScriptRuntimeServiceTest {
     }
 
     @Test
+    void scriptSettingsArePersisted() {
+        LuaScript script = scriptService.createScript("settings", "mesh.log('ok')");
+
+        LuaScript saved = scriptService.saveScriptSettings(
+                script.getId(),
+                "settings-renamed",
+                false,
+                "!abcdef12",
+                LuaScript.BotType.AUTOMATION_BOT,
+                "@bot_1");
+
+        assertEquals("settings-renamed", saved.getName());
+        assertFalse(saved.isAutostart());
+        assertEquals("!abcdef12", saved.getNodeId());
+        assertEquals(LuaScript.BotType.AUTOMATION_BOT, saved.getBotType());
+        assertEquals("@bot_1", saved.getAutomationName());
+
+        LuaScript reloaded = scriptService.findScript(script.getId()).orElseThrow();
+        assertEquals("settings-renamed", reloaded.getName());
+        assertFalse(reloaded.isAutostart());
+        assertEquals("!abcdef12", reloaded.getNodeId());
+        assertEquals(LuaScript.BotType.AUTOMATION_BOT, reloaded.getBotType());
+        assertEquals("@bot_1", reloaded.getAutomationName());
+    }
+
+    @Test
     void sandboxDoesNotExposeUnsafeLibraries() {
         LuaScript script = scriptService.createScript("sandbox", String.join("\n",
                 "mesh.kv.set('debug', tostring(debug))",

@@ -1,7 +1,18 @@
 package com.meshtastic.client.lua;
 
+/**
+ * Событие жизненного цикла или вывода Lua-скрипта.
+ * <p>
+ * Используется рантаймом для передачи в UI статусов запуска, остановки,
+ * ошибок, вывода {@code print}/ {@code mesh.log} и событий отладки.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
+ */
 public record LuaScriptEvent(Type type, long scriptId, String message, Throwable error) {
 
+    /**
+     * Тип события Lua-рантайма.
+     */
     public enum Type {
         INFO,
         OUTPUT,

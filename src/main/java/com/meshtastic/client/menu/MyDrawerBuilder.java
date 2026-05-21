@@ -2,12 +2,12 @@ package com.meshtastic.client.menu;
 
 import com.meshtastic.client.BuildFeatures;
 import com.meshtastic.client.components.PacketMonitorWindow;
-import com.meshtastic.client.components.LuaDevWindow;
 import com.meshtastic.client.forms.FormChat;
 import com.meshtastic.client.forms.FormConnections;
 import com.meshtastic.client.forms.FormDashboard;
 import com.meshtastic.client.forms.FormLogs;
 import com.meshtastic.client.forms.FormMap;
+import com.meshtastic.client.forms.FormMeshAppIde;
 import com.meshtastic.client.forms.FormNodes;
 import com.meshtastic.client.forms.FormSetting;
 import com.meshtastic.client.system.DrawerManager;
@@ -59,7 +59,7 @@ public class MyDrawerBuilder {
 
         if (BuildFeatures.isMeshAppIdeEnabled()) {
             menuManager.add(new MenuManager.MenuItem("MeshApp IDE", null, "/drawer/icon/lua.svg",
-                    MenuManager.MenuItem.Type.ITEM, null));
+                    MenuManager.MenuItem.Type.ITEM, FormMeshAppIde.class));
         }
 
         menuManager.add(new MenuManager.MenuItem("Настройки", null, "/drawer/icon/setting.svg",
@@ -68,9 +68,6 @@ public class MyDrawerBuilder {
                         MenuManager.MenuItem.Type.ITEM, null));
 
         menuManager.registerAction("LoRa пакеты", PacketMonitorWindow::showWindow);
-        if (BuildFeatures.isMeshAppIdeEnabled()) {
-            menuManager.registerAction("MeshApp IDE", LuaDevWindow::showWindow);
-        }
         menuManager.registerAction("Помощь", FormManager::showAbout);
     }
 }
