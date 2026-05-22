@@ -264,18 +264,18 @@ class SerialConnectionTest {
     }
 
     @Test
-    void shouldNotAssertRtsForUsbSerialBridges() {
-        assertFalse(SerialConnection.shouldAssertRts(
+    void shouldAssertRtsForUsbSerialBridges() {
+        assertTrue(SerialConnection.shouldAssertRts(
                 "COM3",
                 "Silicon Labs CP210x USB to UART Bridge (COM3)",
                 true
         ));
-        assertFalse(SerialConnection.shouldAssertRts(
+        assertTrue(SerialConnection.shouldAssertRts(
                 "/dev/cu.SLAB_USBtoUART",
                 "CP2102 USB to UART Bridge Controller",
                 false
         ));
-        assertFalse(SerialConnection.shouldAssertRts(
+        assertTrue(SerialConnection.shouldAssertRts(
                 "cu.usbserial-1234",
                 "USB Serial",
                 false

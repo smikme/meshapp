@@ -13,8 +13,8 @@ import org.slf4j.LoggerFactory;
  * для параллельного чтения и записи, и настраивает DCB с
  * modem-line policy selected by {@link SerialModemLinePolicy}.
  * <p>
- * DTR/RTS are kept disabled for USB-UART bridges so ESP32 auto-reset circuits
- * are not triggered on every open/reconnect.
+ * DTR is kept disabled for USB-UART bridges so ESP32 auto-reset circuits are not
+ * triggered on every open/reconnect; RTS follows the selected adapter policy.
  * {@code fAbortOnError = 0} → I/O не блокируется при ошибках драйвера.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
@@ -191,7 +191,7 @@ class WinSerialPort implements NativeSerialPort {
         // что блокирует ВСЁ I/O после любой ошибки на порту.
         //
         // DTR: ENABLE for native USB CDC, DISABLE for USB-UART bridges.
-        // RTS: do not force-enable for bridges; some ESP32 boards wire it into auto-reset.
+        // RTS: controlled by adapter policy; common CP210x bridges need it asserted.
         int flags = FBINARY_BIT;
         if (modemLinePolicy.assertDtr()) flags |= DTR_CONTROL_ENABLE;
         if (modemLinePolicy.assertRts()) flags |= RTS_CONTROL_ENABLE;
