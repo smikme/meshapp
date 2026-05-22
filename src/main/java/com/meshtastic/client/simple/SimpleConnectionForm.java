@@ -6,6 +6,7 @@ import com.meshtastic.client.connection.ble.BleProtocolProfile;
 import com.meshtastic.client.model.ConnectionEntry;
 import com.meshtastic.client.model.ConnectionType;
 import com.meshtastic.client.model.ProtocolType;
+import com.meshtastic.client.model.SerialModemLineMode;
 import com.meshtastic.client.service.BleDeviceDiscoveryService;
 import com.meshtastic.client.service.SerialPortDiscoveryService;
 import com.meshtastic.client.service.SerialPortDiscoveryService.DiscoveredPort;
@@ -45,6 +46,7 @@ public class SimpleConnectionForm extends VBox {
     private final ComboBox<String> cmbPort;
     private final Label lblSerialStatus;
     private final TextField txtBaudRate;
+    private final ComboBox<String> cmbSerialModemLines;
 
     // BLE fields
     private final VBox bleFields;
@@ -138,11 +140,23 @@ public class SimpleConnectionForm extends VBox {
 
         txtBaudRate = new TextField("115200");
 
+        cmbSerialModemLines = new ComboBox<>();
+        cmbSerialModemLines.getItems().addAll(
+                labelForSerialModemLineMode(SerialModemLineMode.AUTO),
+                labelForSerialModemLineMode(SerialModemLineMode.DTR_OFF_RTS_OFF),
+                labelForSerialModemLineMode(SerialModemLineMode.DTR_OFF_RTS_ON),
+                labelForSerialModemLineMode(SerialModemLineMode.DTR_ON_RTS_OFF),
+                labelForSerialModemLineMode(SerialModemLineMode.DTR_ON_RTS_ON)
+        );
+        cmbSerialModemLines.setValue(labelForSerialModemLineMode(SerialModemLineMode.AUTO));
+        cmbSerialModemLines.setMaxWidth(Double.MAX_VALUE);
+
         serialFields = new VBox(8);
         serialFields.getChildren().addAll(
                 new Label("Порт устройства"), portRow,
                 lblSerialStatus,
-                new Label("Скорость (бод)"), txtBaudRate
+                new Label("Скорость (бод)"), txtBaudRate,
+                new Label("Линии DTR/RTS"), cmbSerialModemLines
         );
         serialFields.setVisible(false);
         serialFields.setManaged(false);
@@ -255,6 +269,7 @@ public class SimpleConnectionForm extends VBox {
             }
             ConnectionEntry entry = new ConnectionEntry(name, portName, baudRate, ConnectionType.SERIAL);
             entry.setProtocol(selectedProtocolType());
+            entry.setSerialModemLineMode(selectedSerialModemLineMode());
             return withEditingMetadata(entry);
         } else {
             String host = txtHost.getText().trim();
@@ -340,6 +355,8 @@ public class SimpleConnectionForm extends VBox {
                     cmbPort.setValue(savedPortName);
                 }
                 txtBaudRate.setText(String.valueOf(entry.getBaudRate() > 0 ? entry.getBaudRate() : 115200));
+                cmbSerialModemLines.setValue(labelForSerialModemLineMode(
+                        entry.getEffectiveSerialModemLineMode()));
             }
             case BLE -> {
                 savedBleDeviceLabel = savedBleDeviceLabel(entry);
@@ -666,6 +683,20 @@ public class SimpleConnectionForm extends VBox {
         };
     }
 
+    private SerialModemLineMode selectedSerialModemLineMode() {
+        String value = cmbSerialModemLines == null ? null : cmbSerialModemLines.getValue();
+        if (value == null || value.isBlank()) {
+            return SerialModemLineMode.AUTO;
+        }
+        return switch (value) {
+            case "DTR off, RTS off" -> SerialModemLineMode.DTR_OFF_RTS_OFF;
+            case "DTR off, RTS on" -> SerialModemLineMode.DTR_OFF_RTS_ON;
+            case "DTR on, RTS off" -> SerialModemLineMode.DTR_ON_RTS_OFF;
+            case "DTR on, RTS on" -> SerialModemLineMode.DTR_ON_RTS_ON;
+            default -> SerialModemLineMode.AUTO;
+        };
+    }
+
     private static String labelForProtocol(ProtocolType protocolType) {
         if (protocolType == null) {
             return "Meshtastic";
@@ -674,6 +705,19 @@ public class SimpleConnectionForm extends VBox {
             case MESHTASTIC -> "Meshtastic";
             case MESHCORE_KISS -> "MeshCore KISS";
             case MESHCORE_COMPANION -> "MeshCore Companion";
+        };
+    }
+
+    private static String labelForSerialModemLineMode(SerialModemLineMode mode) {
+        if (mode == null) {
+            return "Auto";
+        }
+        return switch (mode) {
+            case AUTO -> "Auto";
+            case DTR_OFF_RTS_OFF -> "DTR off, RTS off";
+            case DTR_OFF_RTS_ON -> "DTR off, RTS on";
+            case DTR_ON_RTS_OFF -> "DTR on, RTS off";
+            case DTR_ON_RTS_ON -> "DTR on, RTS on";
         };
     }
 }

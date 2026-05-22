@@ -29,6 +29,7 @@ public class ConnectionEntry {
     private int port;
     private String portName;
     private int baudRate;
+    private SerialModemLineMode serialModemLineMode;
     private String bleAddress;
     private String bleDeviceName;
     private String nodeId;
@@ -85,6 +86,14 @@ public class ConnectionEntry {
      */
     public ProtocolType getEffectiveProtocol() {
         return protocol != null ? protocol : ProtocolType.MESHTASTIC;
+    }
+
+    /**
+     * Возвращает режим DTR/RTS для serial-подключения.
+     * Для legacy-записей без поля возвращает {@link SerialModemLineMode#AUTO}.
+     */
+    public SerialModemLineMode getEffectiveSerialModemLineMode() {
+        return serialModemLineMode != null ? serialModemLineMode : SerialModemLineMode.AUTO;
     }
 
     public String getId() {
@@ -162,6 +171,14 @@ public class ConnectionEntry {
 
     public void setBaudRate(int baudRate) {
         this.baudRate = baudRate;
+    }
+
+    public SerialModemLineMode getSerialModemLineMode() {
+        return serialModemLineMode;
+    }
+
+    public void setSerialModemLineMode(SerialModemLineMode serialModemLineMode) {
+        this.serialModemLineMode = serialModemLineMode;
     }
 
     public String getBleAddress() {

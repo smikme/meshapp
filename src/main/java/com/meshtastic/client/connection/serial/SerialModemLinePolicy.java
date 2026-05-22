@@ -21,4 +21,8 @@ public record SerialModemLinePolicy(boolean assertDtr, boolean assertRts, String
     public static SerialModemLinePolicy generic() {
         return new SerialModemLinePolicy(true, false, "generic serial");
     }
+
+    public static SerialModemLinePolicy manual(boolean assertDtr, boolean assertRts) {
+        return new SerialModemLinePolicy(assertDtr, assertRts, "manual override");
+    }
 }

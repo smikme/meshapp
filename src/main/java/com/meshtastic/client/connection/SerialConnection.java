@@ -4,6 +4,7 @@ import com.fazecast.jSerialComm.SerialPort;
 import com.meshtastic.client.connection.serial.NativeSerialPort;
 import com.meshtastic.client.connection.serial.NativeSerialPortFactory;
 import com.meshtastic.client.connection.serial.SerialModemLinePolicy;
+import com.meshtastic.client.model.SerialModemLineMode;
 import com.meshtastic.client.platform.OsDetect;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -52,6 +53,7 @@ public class SerialConnection implements MeshtasticConnection, FrameFormatAwareC
     private final long writeResponseTimeoutMs;
     private final long readCallStallTimeoutMs;
     private final long readWatchdogPeriodMs;
+    private final SerialModemLineMode serialModemLineMode;
 
     private volatile NativeSerialPort nativePort;
     private volatile Consumer<byte[]> dataListener;
@@ -72,14 +74,23 @@ public class SerialConnection implements MeshtasticConnection, FrameFormatAwareC
     private final AtomicBoolean terminalSignalSent = new AtomicBoolean();
 
     public SerialConnection(String portName, int baudRate) {
+        this(portName, baudRate, SerialModemLineMode.AUTO);
+    }
+
+    public SerialConnection(String portName, int baudRate, SerialModemLineMode serialModemLineMode) {
         this(portName, baudRate, NativeSerialPortFactory::create, System::currentTimeMillis,
                 DEFAULT_READ_TIMEOUT_MS, DEFAULT_PORT_INIT_DELAY_MS, DEFAULT_WRITE_RESPONSE_TIMEOUT_MS,
                 DEFAULT_READ_CALL_STALL_TIMEOUT_MS, DEFAULT_READ_WATCHDOG_PERIOD_MS,
-                DEFAULT_PARTIAL_FRAME_SILENCE_TIMEOUT_MS);
+                DEFAULT_PARTIAL_FRAME_SILENCE_TIMEOUT_MS, serialModemLineMode);
     }
 
     public SerialConnection(String portName, int baudRate, FrameFormat frameFormat) {
-        this(portName, baudRate);
+        this(portName, baudRate, frameFormat, SerialModemLineMode.AUTO);
+    }
+
+    public SerialConnection(String portName, int baudRate, FrameFormat frameFormat,
+                            SerialModemLineMode serialModemLineMode) {
+        this(portName, baudRate, serialModemLineMode);
         setFrameFormat(frameFormat);
     }
 
@@ -95,7 +106,7 @@ public class SerialConnection implements MeshtasticConnection, FrameFormatAwareC
                      long writeResponseTimeoutMs) {
         this(portName, baudRate, portFactory, currentTimeMillis, readTimeoutMs, portInitDelayMs,
                 writeResponseTimeoutMs, DEFAULT_READ_CALL_STALL_TIMEOUT_MS, DEFAULT_READ_WATCHDOG_PERIOD_MS,
-                DEFAULT_PARTIAL_FRAME_SILENCE_TIMEOUT_MS);
+                DEFAULT_PARTIAL_FRAME_SILENCE_TIMEOUT_MS, SerialModemLineMode.AUTO);
     }
 
     SerialConnection(String portName, int baudRate,
@@ -108,7 +119,7 @@ public class SerialConnection implements MeshtasticConnection, FrameFormatAwareC
                      long readWatchdogPeriodMs) {
         this(portName, baudRate, portFactory, currentTimeMillis, readTimeoutMs, portInitDelayMs,
                 writeResponseTimeoutMs, readCallStallTimeoutMs, readWatchdogPeriodMs,
-                DEFAULT_PARTIAL_FRAME_SILENCE_TIMEOUT_MS);
+                DEFAULT_PARTIAL_FRAME_SILENCE_TIMEOUT_MS, SerialModemLineMode.AUTO);
     }
 
     SerialConnection(String portName, int baudRate,
@@ -120,6 +131,21 @@ public class SerialConnection implements MeshtasticConnection, FrameFormatAwareC
                      long readCallStallTimeoutMs,
                      long readWatchdogPeriodMs,
                      int partialFrameSilenceTimeoutMs) {
+        this(portName, baudRate, portFactory, currentTimeMillis, readTimeoutMs, portInitDelayMs,
+                writeResponseTimeoutMs, readCallStallTimeoutMs, readWatchdogPeriodMs,
+                partialFrameSilenceTimeoutMs, SerialModemLineMode.AUTO);
+    }
+
+    SerialConnection(String portName, int baudRate,
+                     Supplier<NativeSerialPort> portFactory,
+                     LongSupplier currentTimeMillis,
+                     int readTimeoutMs,
+                     int portInitDelayMs,
+                     long writeResponseTimeoutMs,
+                     long readCallStallTimeoutMs,
+                     long readWatchdogPeriodMs,
+                     int partialFrameSilenceTimeoutMs,
+                     SerialModemLineMode serialModemLineMode) {
         this.portName = portName;
         this.baudRate = baudRate;
         this.portFactory = portFactory;
@@ -130,6 +156,7 @@ public class SerialConnection implements MeshtasticConnection, FrameFormatAwareC
         this.writeResponseTimeoutMs = writeResponseTimeoutMs;
         this.readCallStallTimeoutMs = readCallStallTimeoutMs;
         this.readWatchdogPeriodMs = readWatchdogPeriodMs;
+        this.serialModemLineMode = normalizeSerialModemLineMode(serialModemLineMode);
         this.frameFormat = FrameFormat.MESHTASTIC;
         this.frameParser = FrameParsers.create(this.frameFormat);
     }
@@ -140,7 +167,8 @@ public class SerialConnection implements MeshtasticConnection, FrameFormatAwareC
             String desc = getDescriptivePortName(portName);
             log.info("Opening serial port: {} ({})", portName, desc);
 
-            SerialModemLinePolicy modemLinePolicy = modemLinePolicy(portName, desc, OsDetect.isWindows());
+            SerialModemLinePolicy modemLinePolicy = modemLinePolicy(
+                    portName, desc, OsDetect.isWindows(), serialModemLineMode);
             log.info("Serial modem line policy for {}: DTR={}, RTS={} ({})",
                     portName,
                     modemLinePolicy.assertDtr() ? "on" : "off",
@@ -267,6 +295,10 @@ public class SerialConnection implements MeshtasticConnection, FrameFormatAwareC
     @Override
     public FrameFormat getFrameFormat() {
         return frameFormat;
+    }
+
+    SerialModemLineMode getSerialModemLineMode() {
+        return serialModemLineMode;
     }
 
     /**
@@ -571,6 +603,15 @@ public class SerialConnection implements MeshtasticConnection, FrameFormatAwareC
     }
 
     static SerialModemLinePolicy modemLinePolicy(String portName, String desc, boolean isWindows) {
+        return modemLinePolicy(portName, desc, isWindows, SerialModemLineMode.AUTO);
+    }
+
+    static SerialModemLinePolicy modemLinePolicy(String portName, String desc, boolean isWindows,
+                                                 SerialModemLineMode serialModemLineMode) {
+        SerialModemLineMode mode = normalizeSerialModemLineMode(serialModemLineMode);
+        if (!mode.isAuto()) {
+            return SerialModemLinePolicy.manual(mode.assertDtr(), mode.assertRts());
+        }
         if (isUsbSerialBridge(portName, desc)) {
             return SerialModemLinePolicy.usbSerialBridge();
         }
@@ -586,6 +627,10 @@ public class SerialConnection implements MeshtasticConnection, FrameFormatAwareC
 
     static boolean shouldAssertRts(String portName, String desc, boolean isWindows) {
         return modemLinePolicy(portName, desc, isWindows).assertRts();
+    }
+
+    private static SerialModemLineMode normalizeSerialModemLineMode(SerialModemLineMode mode) {
+        return mode != null ? mode : SerialModemLineMode.AUTO;
     }
 
     private void closePort() {

@@ -22,6 +22,8 @@ class ConnectionEntryProtocolTest {
         assertEquals(ProtocolType.MESHTASTIC, tcp.getEffectiveProtocol());
         assertEquals(ProtocolType.MESHTASTIC, serial.getEffectiveProtocol());
         assertEquals(ProtocolType.MESHTASTIC, ble.getEffectiveProtocol());
+        assertNull(serial.getSerialModemLineMode());
+        assertEquals(SerialModemLineMode.AUTO, serial.getEffectiveSerialModemLineMode());
     }
 
     @Test

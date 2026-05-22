@@ -9,6 +9,7 @@ import com.meshtastic.client.model.ConnectionType;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.model.ProtocolType;
+import com.meshtastic.client.model.SerialModemLineMode;
 import com.meshtastic.client.service.ConnectionManager;
 import com.meshtastic.client.service.SerialPortDiscoveryService;
 import com.meshtastic.client.simple.SimpleConnectionForm;
@@ -143,7 +144,8 @@ public class FormConnections extends Form {
             String devName = entry.getBleDeviceName() != null ? entry.getBleDeviceName() : "";
             addressText = "BLE: " + devName + " (" + entry.getBleAddress() + ")";
         } else if (entry.getEffectiveType() == ConnectionType.SERIAL) {
-            addressText = "Serial: " + entry.getPortName() + " (" + entry.getBaudRate() + " бод)";
+            addressText = "Serial: " + entry.getPortName() + " (" + entry.getBaudRate() + " бод"
+                    + ", " + formatSerialModemLineMode(entry.getEffectiveSerialModemLineMode()) + ")";
         } else {
             addressText = "TCP: " + entry.getHost() + ":" + entry.getPort();
         }
@@ -282,6 +284,19 @@ public class FormConnections extends Form {
             case MESHTASTIC -> "Meshtastic";
             case MESHCORE_KISS -> "MeshCore KISS";
             case MESHCORE_COMPANION -> "MeshCore Companion";
+        };
+    }
+
+    private static String formatSerialModemLineMode(SerialModemLineMode mode) {
+        if (mode == null) {
+            return "Auto";
+        }
+        return switch (mode) {
+            case AUTO -> "Auto";
+            case DTR_OFF_RTS_OFF -> "DTR off, RTS off";
+            case DTR_OFF_RTS_ON -> "DTR off, RTS on";
+            case DTR_ON_RTS_OFF -> "DTR on, RTS off";
+            case DTR_ON_RTS_ON -> "DTR on, RTS on";
         };
     }
 }
