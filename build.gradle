@@ -14,6 +14,59 @@ def javaFxVersion = '25.0.3'
 def meshAppIdeEnabled = providers.gradleProperty('meshAppIdeEnabled')
 		.map { it.toString().trim().equalsIgnoreCase('true') }
 		.orElse(false)
+def jmxDebugEnabled = providers.gradleProperty('jmxDebugEnabled')
+		.orElse(providers.environmentVariable('MESHAPP_JMX_DEBUG'))
+		.map { it.toString().trim().equalsIgnoreCase('true') }
+		.orElse(false)
+def visualVmProfilerEnabled = providers.gradleProperty('visualVmProfilerEnabled')
+		.orElse(providers.environmentVariable('MESHAPP_VISUALVM_PROFILER'))
+		.map { it.toString().trim().equalsIgnoreCase('true') }
+		.orElse(false)
+def visualVmSoftwareRenderingEnabled = providers.gradleProperty('visualVmSoftwareRenderingEnabled')
+		.orElse(providers.environmentVariable('MESHAPP_VISUALVM_SW_RENDERING'))
+		.map { it.toString().trim().equalsIgnoreCase('true') }
+		.orElse(false)
+def jmxDebugPort = providers.gradleProperty('jmxDebugPort')
+		.orElse(providers.environmentVariable('MESHAPP_JMX_PORT'))
+		.map { it.toString().trim() }
+		.orElse('9010')
+
+def jmxDebugJvmArgs = {
+	def port = jmxDebugPort.get()
+	if (!(port ==~ /\d{1,5}/)) {
+		throw new GradleException("jmxDebugPort must be a TCP port number, got '${port}'")
+	}
+	def portNumber = Integer.parseInt(port)
+	if (portNumber < 1 || portNumber > 65535) {
+		throw new GradleException("jmxDebugPort must be between 1 and 65535, got '${port}'")
+	}
+	return [
+		'-Dcom.sun.management.jmxremote',
+		'-Dcom.sun.management.jmxremote.authenticate=false',
+		'-Dcom.sun.management.jmxremote.ssl=false',
+		'-Dcom.sun.management.jmxremote.local.only=true',
+		'-Dcom.sun.management.jmxremote.host=127.0.0.1',
+		"-Dcom.sun.management.jmxremote.port=${port}",
+		"-Dcom.sun.management.jmxremote.rmi.port=${port}",
+		'-Djava.rmi.server.hostname=127.0.0.1'
+	]
+}
+
+def visualVmProfilerJvmArgs = {
+	return [
+		'-Xshare:off',
+		'-XX:+IgnoreUnrecognizedVMOptions',
+		'-XX:-UseJVMCICompiler'
+	]
+}
+
+def visualVmSoftwareRenderingJvmArgs = {
+	return [
+		'-Djavafx.animation.fullspeed=true',
+		'-Dprism.vsync=false',
+		'-Dprism.order=sw'
+	]
+}
 
 application {
 	mainClass = 'com.meshtastic.client.MeshAppLauncher'
@@ -33,6 +86,18 @@ application {
 	}
 	if (org.gradle.internal.os.OperatingSystem.current().isMacOsX()) {
 		jvmArgs += ['--add-opens', 'javafx.graphics/com.sun.glass.ui.mac=ALL-UNNAMED']
+	}
+	if (jmxDebugEnabled.get() || visualVmProfilerEnabled.get()) {
+		jvmArgs += jmxDebugJvmArgs()
+		logger.lifecycle("JMX debug enabled at 127.0.0.1:${jmxDebugPort.get()}")
+	}
+	if (visualVmProfilerEnabled.get()) {
+		jvmArgs += visualVmProfilerJvmArgs()
+		logger.lifecycle('VisualVM profiler mode enabled (-Xshare:off, JVMCI compiler disabled)')
+	}
+	if (visualVmSoftwareRenderingEnabled.get()) {
+		jvmArgs += visualVmSoftwareRenderingJvmArgs()
+		logger.lifecycle('VisualVM experimental software rendering enabled')
 	}
 	applicationDefaultJvmArgs = jvmArgs
 }

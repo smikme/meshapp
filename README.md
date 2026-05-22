@@ -280,6 +280,18 @@ cd meshapp
 # Запустить приложение
 ./gradlew run
 
+# Запустить с локальным JMX для VisualVM/JConsole/JMC
+./gradlew run -PjmxDebugEnabled=true
+
+# Запустить режим для VisualVM memory profiler
+./gradlew run -PvisualVmProfilerEnabled=true
+
+# Собрать .app/.dmg с режимом для VisualVM memory profiler
+./gradlew jpackage -PvisualVmProfilerEnabled=true
+
+# JMX на другом локальном порту
+./gradlew run -PjmxDebugEnabled=true -PjmxDebugPort=9011
+
 # Собрать нативный инсталлятор (.dmg / .msi / .deb)
 ./gradlew jpackage
 
@@ -289,6 +301,36 @@ cd meshapp
 # Linux: собрать Flatpak bundle
 ./gradlew flatpak
 ```
+
+При включённом JMX приложение слушает только `127.0.0.1`; адрес подключения:
+`service:jmx:rmi:///jndi/rmi://127.0.0.1:9010/jmxrmi`. Для другого порта замените
+`9010` на значение `jmxDebugPort`. То же самое можно включить через переменные
+окружения `MESHAPP_JMX_DEBUG=true` и `MESHAPP_JMX_PORT=9011`.
+
+Для анализа памяти в VisualVM используйте `Sampler > Memory` через локальное JMX
+подключение. `Profiler > Memory` — инструментирующий profiler; на
+Java 25/GraalVM/JavaFX/macOS его нативный агент может падать вместе с целевой JVM.
+
+Если всё-таки нужно проверить `Profiler > Memory`, запускайте приложение через
+`-PvisualVmProfilerEnabled=true`. Этот режим также включает локальный JMX, но
+дополнительно отключает class data sharing (`-Xshare:off`) и Graal/JVMCI JIT
+компилятор на время профилирования. Для другого порта используйте
+`-PvisualVmProfilerEnabled=true -PjmxDebugPort=9011`. Через окружение режим
+включается переменной `MESHAPP_VISUALVM_PROFILER=true`.
+
+Если профилируется собранный macOS `.app`, его нужно пересобрать с
+`-PvisualVmProfilerEnabled=true`: уже существующий `.app` не получает новые JVM
+options автоматически.
+
+Флаги software rendering для обхода macOS `CVDisplayLink` не включаются по
+умолчанию, потому что они могут сделать интерфейс непригодным для работы. Для
+разового эксперимента их можно добавить отдельно:
+`-PvisualVmSoftwareRenderingEnabled=true`.
+
+Если VisualVM при запуске `Profiler > Memory` показывает
+`Provided Memory settings are invalid`, откройте настройки memory profiler и
+замените placeholder в поле `Profile classes` на валидный фильтр, например
+`com.meshtastic.client.**` для кода приложения или `**` для всех классов.
 
 ### Подключение к устройству
 

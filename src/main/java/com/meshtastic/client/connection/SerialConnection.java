@@ -3,6 +3,7 @@ package com.meshtastic.client.connection;
 import com.fazecast.jSerialComm.SerialPort;
 import com.meshtastic.client.connection.serial.NativeSerialPort;
 import com.meshtastic.client.connection.serial.NativeSerialPortFactory;
+import com.meshtastic.client.connection.serial.SerialModemLinePolicy;
 import com.meshtastic.client.platform.OsDetect;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -139,16 +140,23 @@ public class SerialConnection implements MeshtasticConnection, FrameFormatAwareC
             String desc = getDescriptivePortName(portName);
             log.info("Opening serial port: {} ({})", portName, desc);
 
-            boolean assertDtr = shouldAssertDtr(portName, desc, OsDetect.isWindows());
+            SerialModemLinePolicy modemLinePolicy = modemLinePolicy(portName, desc, OsDetect.isWindows());
+            log.info("Serial modem line policy for {}: DTR={}, RTS={} ({})",
+                    portName,
+                    modemLinePolicy.assertDtr() ? "on" : "off",
+                    modemLinePolicy.assertRts() ? "on" : "off",
+                    modemLinePolicy.reason());
 
             NativeSerialPort port = portFactory.get();
-            port.open(portName, baudRate, assertDtr);
+            port.open(portName, baudRate, modemLinePolicy);
             this.nativePort = port;
 
             Thread.sleep(portInitDelayMs);
             port.drainInput();
-            log.info("Connected to serial port {} at {} baud (native JNA, DTR={})",
-                    portName, baudRate, assertDtr ? "on" : "off");
+            log.info("Connected to serial port {} at {} baud (native JNA, DTR={}, RTS={})",
+                    portName, baudRate,
+                    modemLinePolicy.assertDtr() ? "on" : "off",
+                    modemLinePolicy.assertRts() ? "on" : "off");
 
             running = true;
             long now = currentTimeMillis.getAsLong();
@@ -520,9 +528,10 @@ public class SerialConnection implements MeshtasticConnection, FrameFormatAwareC
      * jSerialComm используется ТОЛЬКО для обнаружения портов, не для I/O.
      */
     private static String getDescriptivePortName(String systemName) {
+        String normalizedSystemName = normalizeSystemPortName(systemName);
         try {
             for (SerialPort port : SerialPort.getCommPorts()) {
-                if (port.getSystemPortName().equals(systemName)) {
+                if (normalizeSystemPortName(port.getSystemPortName()).equals(normalizedSystemName)) {
                     return port.getDescriptivePortName();
                 }
             }
@@ -530,6 +539,13 @@ public class SerialConnection implements MeshtasticConnection, FrameFormatAwareC
             log.debug("Failed to get descriptive name for {}", systemName, e);
         }
         return systemName;
+    }
+
+    private static String normalizeSystemPortName(String systemName) {
+        if (systemName == null) {
+            return "";
+        }
+        return systemName.startsWith("/dev/") ? systemName.substring("/dev/".length()) : systemName;
     }
 
     /**
@@ -541,20 +557,35 @@ public class SerialConnection implements MeshtasticConnection, FrameFormatAwareC
         String lower = (portName + " " + desc).toLowerCase(java.util.Locale.ROOT);
         return lower.contains("usbserial") || lower.contains("ttyusb")
                 || lower.contains("ch340") || lower.contains("ch341") || lower.contains("ch9102")
-                || lower.contains("cp210") || lower.contains("ftdi");
+                || lower.contains("cp210") || lower.contains("slab") || lower.contains("silicon labs")
+                || lower.contains("usb to uart") || lower.contains("usbtouart")
+                || lower.contains("ftdi");
+    }
+
+    private static boolean isNativeUsbCdc(String portName, String desc) {
+        String lower = (portName + " " + desc).toLowerCase(java.util.Locale.ROOT);
+        return lower.contains("usbmodem") || lower.contains("ttyacm")
+                || lower.contains("usb cdc") || lower.contains("cdc acm")
+                || lower.contains("esp32-s2") || lower.contains("esp32-s3")
+                || lower.contains("nrf52");
+    }
+
+    static SerialModemLinePolicy modemLinePolicy(String portName, String desc, boolean isWindows) {
+        if (isUsbSerialBridge(portName, desc)) {
+            return SerialModemLinePolicy.usbSerialBridge();
+        }
+        if (isNativeUsbCdc(portName, desc)) {
+            return SerialModemLinePolicy.nativeUsbCdc();
+        }
+        return SerialModemLinePolicy.generic();
     }
 
     static boolean shouldAssertDtr(String portName, String desc, boolean isWindows) {
-        boolean isUsbBridge = isUsbSerialBridge(portName, desc);
-        if (!isUsbBridge) {
-            return true;
-        }
+        return modemLinePolicy(portName, desc, isWindows).assertDtr();
+    }
 
-        // USB-UART bridges commonly wire DTR into the ESP32 auto-reset circuit.
-        // Keep DTR low for bridges on every platform, including Windows CP210x/CH9102.
-        // If asserted here, affected devices reboot on every open and the app loops
-        // through FromRadio.REBOOTED -> reconnect before config exchange can finish.
-        return false;
+    static boolean shouldAssertRts(String portName, String desc, boolean isWindows) {
+        return modemLinePolicy(portName, desc, isWindows).assertRts();
     }
 
     private void closePort() {

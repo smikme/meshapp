@@ -11,10 +11,10 @@ import org.slf4j.LoggerFactory;
  * <p>
  * Открывает COM-порт через {@code CreateFileW} с {@code FILE_FLAG_OVERLAPPED}
  * для параллельного чтения и записи, и настраивает DCB с
- * {@code fDtrControl = DTR_CONTROL_DISABLE}, {@code fRtsControl = RTS_CONTROL_ENABLE}.
+ * modem-line policy selected by {@link SerialModemLinePolicy}.
  * <p>
- * DTR не активируется → ESP32 на CH340/CP210x не сбрасывается.
- * RTS активируется (LOW) → Q1 OFF → EN не удерживается в LOW.
+ * DTR/RTS are kept disabled for USB-UART bridges so ESP32 auto-reset circuits
+ * are not triggered on every open/reconnect.
  * {@code fAbortOnError = 0} → I/O не блокируется при ошибках драйвера.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
@@ -122,13 +122,13 @@ class WinSerialPort implements NativeSerialPort {
     private Pointer readEvent;
     private Pointer writeEvent;
 
-    private boolean assertDtr;
+    private SerialModemLinePolicy modemLinePolicy;
     private volatile int lastLoggedCommErrorMask;
     private volatile long lastLoggedCommErrorAtMillis;
 
     @Override
-    public void open(String portName, int baudRate, boolean assertDtr) throws ConnectionException {
-        this.assertDtr = assertDtr;
+    public void open(String portName, int baudRate, SerialModemLinePolicy modemLinePolicy) throws ConnectionException {
+        this.modemLinePolicy = modemLinePolicy;
         String path = portName.startsWith("\\\\.\\") ? portName : "\\\\.\\" + portName;
 
         // FILE_FLAG_OVERLAPPED — критично для параллельного read/write.
@@ -157,8 +157,11 @@ class WinSerialPort implements NativeSerialPort {
         }
 
         open = true;
-        log.debug("WinSerialPort opened {} at {} baud (DTR={}, RTS=enabled, overlapped)",
-                portName, baudRate, assertDtr ? "enabled" : "disabled");
+        log.debug("WinSerialPort opened {} at {} baud (DTR={}, RTS={}, policy={}, overlapped)",
+                portName, baudRate,
+                modemLinePolicy.assertDtr() ? "enabled" : "disabled",
+                modemLinePolicy.assertRts() ? "enabled" : "disabled",
+                modemLinePolicy.reason());
     }
 
     private Pointer createEvent() throws ConnectionException {
@@ -187,10 +190,11 @@ class WinSerialPort implements NativeSerialPort {
         // Критично: драйвер CH340 может оставить fAbortOnError=1 по умолчанию,
         // что блокирует ВСЁ I/O после любой ошибки на порту.
         //
-        // RTS=ENABLE: всегда (на CH340 держит Q1 OFF → EN HIGH)
-        // DTR: ENABLE для native USB CDC (сигнал "хост подключён"), DISABLE для мостов (сброс ESP32)
-        int flags = FBINARY_BIT | RTS_CONTROL_ENABLE;
-        if (assertDtr) flags |= DTR_CONTROL_ENABLE;
+        // DTR: ENABLE for native USB CDC, DISABLE for USB-UART bridges.
+        // RTS: do not force-enable for bridges; some ESP32 boards wire it into auto-reset.
+        int flags = FBINARY_BIT;
+        if (modemLinePolicy.assertDtr()) flags |= DTR_CONTROL_ENABLE;
+        if (modemLinePolicy.assertRts()) flags |= RTS_CONTROL_ENABLE;
         dcb.setInt(DCB_OFF_FLAGS, flags);
 
         dcb.setShort(DCB_OFF_XONLIM, (short) 2048);

@@ -11,17 +11,24 @@ import com.meshtastic.client.modal.Toast;
 import com.meshtastic.client.model.ConnectionEntry;
 import com.meshtastic.client.service.ConnectionManager;
 import com.meshtastic.client.system.Form;
+import com.meshtastic.client.utils.SvgIconLoader;
 import com.meshtastic.client.utils.SystemForm;
 import javafx.application.Platform;
 import javafx.geometry.Insets;
+import javafx.geometry.Orientation;
 import javafx.geometry.Pos;
 import javafx.scene.control.Button;
+import javafx.scene.control.ContentDisplay;
 import javafx.scene.control.Label;
 import javafx.scene.control.ScrollPane;
+import javafx.scene.control.Separator;
+import javafx.scene.control.ToolBar;
+import javafx.scene.control.Tooltip;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
+import javafx.scene.shape.SVGPath;
 
 import java.time.Instant;
 import java.time.ZoneId;
@@ -67,13 +74,28 @@ public class FormMeshAppIde extends Form {
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
 
-        Button refreshButton = new Button("Обновить");
-        refreshButton.setOnAction(event -> rebuildCards());
+        ToolBar actionToolbar = new ToolBar();
+        actionToolbar.getStyleClass().add("ide-toolbar");
 
-        Button createButton = new Button("Новый скрипт");
-        createButton.setOnAction(event -> createScript());
+        Button refreshButton = createToolbarButton(
+                "Обновить",
+                "Перестроить список скриптов",
+                "/icons/refresh.svg",
+                this::rebuildCards);
 
-        titleRow.getChildren().addAll(title, spacer, refreshButton, createButton);
+        Button createButton = createToolbarButton(
+                "Новый скрипт",
+                "Создать новый Lua-скрипт",
+                "/icons/ide-file-code.svg",
+                this::createScript);
+
+        actionToolbar.getItems().addAll(
+                refreshButton,
+                new Separator(Orientation.VERTICAL),
+                createButton
+        );
+
+        titleRow.getChildren().addAll(title, spacer, actionToolbar);
 
         emptyLabel = new Label("Скриптов пока нет");
         emptyLabel.setStyle("-fx-opacity: 0.65;");
@@ -140,28 +162,9 @@ public class FormMeshAppIde extends Form {
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
 
-        Button runButton = new Button(running ? "Остановить" : "Запустить");
-        runButton.setOnAction(event -> {
-            if (running) {
-                stopScript(script);
-            } else {
-                runScript(script);
-            }
-        });
+        ToolBar actionToolbar = createScriptActionToolbar(script, running);
 
-        Button enabledButton = new Button(script.isAutostart() ? "Автозапуск выкл" : "Автозапуск вкл");
-        enabledButton.setOnAction(event -> toggleAutostart(script));
-
-        Button ideButton = new Button("IDE");
-        ideButton.setOnAction(event -> LuaDevWindow.showWindow(script.getId()));
-
-        Button editButton = new Button("Редактировать");
-        editButton.setOnAction(event -> showSettingsDialog(script));
-
-        Button deleteButton = new Button("Удалить");
-        deleteButton.setOnAction(event -> deleteScript(script));
-
-        topRow.getChildren().addAll(indicator, name, status, spacer, runButton, enabledButton, ideButton, editButton, deleteButton);
+        topRow.getChildren().addAll(indicator, name, status, spacer, actionToolbar);
 
         Label params = new Label(scriptSummary(script));
         params.setWrapText(true);
@@ -175,6 +178,87 @@ public class FormMeshAppIde extends Form {
             card.getChildren().add(error);
         }
         return card;
+    }
+
+    private ToolBar createScriptActionToolbar(LuaScript script, boolean running) {
+        ToolBar actionToolbar = new ToolBar();
+        actionToolbar.getStyleClass().add("ide-toolbar");
+
+        Button runButton = createToolbarButton(
+                running ? "Остановить" : "Запустить",
+                running ? "Остановить выполнение скрипта" : "Запустить скрипт",
+                running ? "/icons/ide-stop.svg" : "/icons/ide-terminal-run.svg",
+                () -> {
+                    if (running) {
+                        stopScript(script);
+                    } else {
+                        runScript(script);
+                    }
+                });
+
+        Button autostartButton = createToolbarButton(
+                script.isAutostart() ? "Отключить автозапуск" : "Включить автозапуск",
+                script.isAutostart()
+                        ? "Не запускать скрипт автоматически"
+                        : "Запускать скрипт автоматически",
+                "/icons/autoplay.svg",
+                () -> toggleAutostart(script));
+
+        Button ideButton = createToolbarButton(
+                "Открыть IDE",
+                "Открыть редактор и отладчик скрипта",
+                "/icons/ide-file-code.svg",
+                () -> LuaDevWindow.showWindow(script.getId()));
+
+        Button editButton = createToolbarButton(
+                "Настройки",
+                "Изменить параметры скрипта",
+                "/drawer/icon/setting.svg",
+                () -> showSettingsDialog(script));
+
+        Button deleteButton = createToolbarButton(
+                "Удалить",
+                "Удалить скрипт",
+                "/drawer/icon/delete-node.svg",
+                () -> deleteScript(script));
+
+        actionToolbar.getItems().addAll(
+                runButton,
+                autostartButton,
+                new Separator(Orientation.VERTICAL),
+                ideButton,
+                editButton,
+                new Separator(Orientation.VERTICAL),
+                deleteButton
+        );
+        return actionToolbar;
+    }
+
+    private Button createToolbarButton(String title, String description, String iconPath, Runnable action) {
+        Button button = new Button();
+        button.getStyleClass().add("ide-toolbar-button");
+        button.setMinSize(34, 34);
+        button.setPrefSize(34, 34);
+        button.setMaxSize(34, 34);
+        button.setFocusTraversable(false);
+        button.setAccessibleText(title);
+        setToolbarButtonGraphic(button, iconPath, title);
+        button.setTooltip(new Tooltip(title + "\n" + description));
+        button.setOnAction(event -> action.run());
+        return button;
+    }
+
+    private void setToolbarButtonGraphic(Button button, String iconPath, String fallbackText) {
+        SVGPath icon = SvgIconLoader.load(iconPath, 18);
+        if (icon != null) {
+            button.setGraphic(icon);
+            button.setText(null);
+            button.setContentDisplay(ContentDisplay.GRAPHIC_ONLY);
+        } else {
+            button.setGraphic(null);
+            button.setText(fallbackText);
+            button.setContentDisplay(ContentDisplay.TEXT_ONLY);
+        }
     }
 
     private void createScript() {

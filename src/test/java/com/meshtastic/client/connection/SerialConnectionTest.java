@@ -1,6 +1,7 @@
 package com.meshtastic.client.connection;
 
 import com.meshtastic.client.connection.serial.NativeSerialPort;
+import com.meshtastic.client.connection.serial.SerialModemLinePolicy;
 import com.meshtastic.client.protocol.meshcore.MeshCoreCompanionFrames;
 import org.junit.jupiter.api.Test;
 
@@ -255,6 +256,44 @@ class SerialConnectionTest {
                 "CP2102 USB to UART Bridge Controller",
                 false
         ));
+        assertFalse(SerialConnection.shouldAssertDtr(
+                "/dev/cu.SLAB_USBtoUART",
+                "/dev/cu.SLAB_USBtoUART",
+                false
+        ));
+    }
+
+    @Test
+    void shouldNotAssertRtsForUsbSerialBridges() {
+        assertFalse(SerialConnection.shouldAssertRts(
+                "COM3",
+                "Silicon Labs CP210x USB to UART Bridge (COM3)",
+                true
+        ));
+        assertFalse(SerialConnection.shouldAssertRts(
+                "/dev/cu.SLAB_USBtoUART",
+                "CP2102 USB to UART Bridge Controller",
+                false
+        ));
+        assertFalse(SerialConnection.shouldAssertRts(
+                "cu.usbserial-1234",
+                "USB Serial",
+                false
+        ));
+    }
+
+    @Test
+    void nativeUsbCdcAssertsDtrButNotRts() {
+        assertTrue(SerialConnection.shouldAssertDtr(
+                "cu.usbmodem1234",
+                "ESP32-S3 USB CDC",
+                false
+        ));
+        assertFalse(SerialConnection.shouldAssertRts(
+                "cu.usbmodem1234",
+                "ESP32-S3 USB CDC",
+                false
+        ));
     }
 
     private static final class TestConnectionListener implements ConnectionListener {
@@ -308,7 +347,7 @@ class SerialConnectionTest {
         private volatile boolean open;
 
         @Override
-        public void open(String portName, int baudRate, boolean assertDtr) {
+        public void open(String portName, int baudRate, SerialModemLinePolicy modemLinePolicy) {
             open = true;
         }
 
@@ -371,7 +410,7 @@ class SerialConnectionTest {
         private volatile boolean open;
 
         @Override
-        public void open(String portName, int baudRate, boolean assertDtr) {
+        public void open(String portName, int baudRate, SerialModemLinePolicy modemLinePolicy) {
             open = true;
         }
 

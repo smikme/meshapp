@@ -98,6 +98,7 @@ class PosixSerialPort implements NativeSerialPort {
 
     // ioctl: modem control
     private static final long TIOCMBIS_LINUX = 0x5416L;
+    private static final long TIOCMBIC_LINUX = 0x5417L;
     private static final long TIOCMGET_LINUX = 0x5415L;
     private static final int TIOCM_DTR = 0x0002;
     private static final int TIOCM_RTS = 0x0004;
@@ -157,7 +158,7 @@ class PosixSerialPort implements NativeSerialPort {
     private volatile boolean open;
 
     @Override
-    public void open(String portName, int baudRate, boolean assertDtr) throws ConnectionException {
+    public void open(String portName, int baudRate, SerialModemLinePolicy modemLinePolicy) throws ConnectionException {
         // Дополняем путь /dev/ если нужно
         String path = portName.startsWith("/dev/") ? portName : "/dev/" + portName;
         boolean isMac = OsDetect.isMacOs();
@@ -183,9 +184,9 @@ class PosixSerialPort implements NativeSerialPort {
         this.fd = result;
 
         try {
-            configureTermios(baudRate, isMac);
+            configureTermios(baudRate, isMac, modemLinePolicy);
             CLib.INSTANCE.fcntl(fd, F_SETFL, 0);
-            configureModemLines(isMac, assertDtr);
+            configureModemLines(isMac, modemLinePolicy);
         } catch (Exception e) {
             CLib.INSTANCE.close(fd);
             fd = -1;
@@ -193,8 +194,11 @@ class PosixSerialPort implements NativeSerialPort {
         }
 
         open = true;
-        log.debug("PosixSerialPort opened {} at {} baud (DTR={}, RTS=asserted)",
-                portName, baudRate, assertDtr ? "on" : "off");
+        log.debug("PosixSerialPort opened {} at {} baud (DTR={}, RTS={}, policy={})",
+                portName, baudRate,
+                modemLinePolicy.assertDtr() ? "on" : "off",
+                modemLinePolicy.assertRts() ? "on" : "off",
+                modemLinePolicy.reason());
     }
 
     /**
@@ -202,12 +206,12 @@ class PosixSerialPort implements NativeSerialPort {
      * Linux использует прямой вызов libc. macOS идёт через отдельный shim с фиксированной ABI,
      * чтобы не вызывать variadic {@code ioctl()} из JNA на Apple Silicon.
      */
-    private void configureModemLines(boolean isMac, boolean assertDtr) throws ConnectionException {
+    private void configureModemLines(boolean isMac, SerialModemLinePolicy modemLinePolicy) throws ConnectionException {
         if (isMac) {
-            configureMacModemLines(assertDtr);
+            configureMacModemLines(modemLinePolicy);
             return;
         }
-        configureLinuxModemLines(assertDtr);
+        configureLinuxModemLines(modemLinePolicy);
     }
 
     /**
@@ -215,24 +219,36 @@ class PosixSerialPort implements NativeSerialPort {
      * Это сохраняет полный контроль над DTR/RTS, но избегает прямого JNA-вызова variadic
      * {@code ioctl()}, который на arm64 может аварийно завершить JVM.
      */
-    private void configureMacModemLines(boolean assertDtr) throws ConnectionException {
+    private void configureMacModemLines(SerialModemLinePolicy modemLinePolicy) throws ConnectionException {
         MacOsSerialLibrary.Api serialLib = MacOsSerialLibrary.instance();
 
-        if (!assertDtr) {
-            int clearResult = serialLib.meshserial_clear_modem_bits(fd, TIOCM_DTR);
+        int clearBits = 0;
+        if (!modemLinePolicy.assertDtr()) {
+            clearBits |= TIOCM_DTR;
+        }
+        if (!modemLinePolicy.assertRts()) {
+            clearBits |= TIOCM_RTS;
+        }
+        if (clearBits != 0) {
+            int clearResult = serialLib.meshserial_clear_modem_bits(fd, clearBits);
             if (clearResult != 0) {
-                throw modemLineError("TIOCMBIC(DTR)", clearResult);
+                throw modemLineError("TIOCMBIC", clearResult);
             }
         }
 
-        int setBits = TIOCM_RTS;
-        if (assertDtr) {
+        int setBits = 0;
+        if (modemLinePolicy.assertDtr()) {
             setBits |= TIOCM_DTR;
         }
+        if (modemLinePolicy.assertRts()) {
+            setBits |= TIOCM_RTS;
+        }
 
-        int setResult = serialLib.meshserial_set_modem_bits(fd, setBits);
-        if (setResult != 0) {
-            throw modemLineError("TIOCMBIS", setResult);
+        if (setBits != 0) {
+            int setResult = serialLib.meshserial_set_modem_bits(fd, setBits);
+            if (setResult != 0) {
+                throw modemLineError("TIOCMBIS", setResult);
+            }
         }
 
         IntByReference actualBits = new IntByReference();
@@ -244,19 +260,38 @@ class PosixSerialPort implements NativeSerialPort {
         }
     }
 
-    private void configureLinuxModemLines(boolean assertDtr) {
-        // RTS всегда активируем (на CH340 держит Q1 OFF → EN HIGH).
-        // DTR активируем только для native USB CDC (сигнал "хост подключён").
-        int modemFlags = TIOCM_RTS;
-        if (assertDtr) {
-            modemFlags |= TIOCM_DTR;
+    private void configureLinuxModemLines(SerialModemLinePolicy modemLinePolicy) {
+        int clearFlags = 0;
+        if (!modemLinePolicy.assertDtr()) {
+            clearFlags |= TIOCM_DTR;
+        }
+        if (!modemLinePolicy.assertRts()) {
+            clearFlags |= TIOCM_RTS;
+        }
+        if (clearFlags != 0) {
+            Memory clearBits = new Memory(4);
+            clearBits.setInt(0, clearFlags);
+            int r = CLib.INSTANCE.ioctl(fd, TIOCMBIC_LINUX, clearBits);
+            if (r != 0) {
+                log.warn("ioctl TIOCMBIC failed: errno={}", errno());
+            }
         }
 
-        Memory modemBits = new Memory(4);
-        modemBits.setInt(0, modemFlags);
-        int r = CLib.INSTANCE.ioctl(fd, TIOCMBIS_LINUX, modemBits);
-        if (r != 0) {
-            log.warn("ioctl TIOCMBIS failed: errno={}", errno());
+        int setFlags = 0;
+        if (modemLinePolicy.assertDtr()) {
+            setFlags |= TIOCM_DTR;
+        }
+        if (modemLinePolicy.assertRts()) {
+            setFlags |= TIOCM_RTS;
+        }
+
+        if (setFlags != 0) {
+            Memory setBits = new Memory(4);
+            setBits.setInt(0, setFlags);
+            int r = CLib.INSTANCE.ioctl(fd, TIOCMBIS_LINUX, setBits);
+            if (r != 0) {
+                log.warn("ioctl TIOCMBIS failed: errno={}", errno());
+            }
         }
 
         Memory actualBits = new Memory(4);
@@ -287,7 +322,7 @@ class PosixSerialPort implements NativeSerialPort {
         return CLib.INSTANCE.strerror(err) + " (" + err + ")";
     }
 
-    private void configureTermios(int baudRate, boolean isMac) throws ConnectionException {
+    private void configureTermios(int baudRate, boolean isMac, SerialModemLinePolicy modemLinePolicy) throws ConnectionException {
         int termiosSize = isMac ? TERMIOS_SIZE_MAC : TERMIOS_SIZE_LINUX;
         Memory termios = new Memory(termiosSize);
         termios.clear();
@@ -299,7 +334,7 @@ class PosixSerialPort implements NativeSerialPort {
         if (isMac) {
             configureMac(termios);
         } else {
-            configureLinux(termios);
+            configureLinux(termios, modemLinePolicy);
         }
 
         // Установить скорость через cfsetispeed/cfsetospeed
@@ -340,7 +375,7 @@ class PosixSerialPort implements NativeSerialPort {
         t.setByte(OFF_CC_MAC + VTIME_MAC, (byte) 0);
     }
 
-    private void configureLinux(Memory t) {
+    private void configureLinux(Memory t, SerialModemLinePolicy modemLinePolicy) {
         // c_iflag: raw input (как jSerialComm)
         int iflag = t.getInt(OFF_IFLAG_LINUX);
         iflag &= ~((int) IXON_LINUX | (int) IXOFF_LINUX | (int) BRKINT_LINUX
@@ -353,10 +388,14 @@ class PosixSerialPort implements NativeSerialPort {
         oflag &= ~(int) OPOST_LINUX;
         t.setInt(OFF_OFLAG_LINUX, oflag);
 
-        // c_cflag: 8N1, CLOCAL, CREAD, HUPCL (как jSerialComm)
+        // c_cflag: 8N1, CLOCAL, CREAD. For bridge/native-USB reconnect stability,
+        // avoid HUPCL unless both lines are intentionally asserted.
         int cflag = t.getInt(OFF_CFLAG_LINUX);
-        cflag &= ~((int) CSIZE_LINUX | (int) PARENB_LINUX | (int) CSTOPB_LINUX);
-        cflag |= (int) CS8_LINUX | (int) CLOCAL_LINUX | (int) CREAD_LINUX | (int) HUPCL_LINUX;
+        cflag &= ~((int) CSIZE_LINUX | (int) PARENB_LINUX | (int) CSTOPB_LINUX | (int) HUPCL_LINUX);
+        cflag |= (int) CS8_LINUX | (int) CLOCAL_LINUX | (int) CREAD_LINUX;
+        if (modemLinePolicy.assertDtr() && modemLinePolicy.assertRts()) {
+            cflag |= (int) HUPCL_LINUX;
+        }
         t.setInt(OFF_CFLAG_LINUX, cflag);
 
         // c_lflag
