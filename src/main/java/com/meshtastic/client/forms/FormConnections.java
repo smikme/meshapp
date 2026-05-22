@@ -14,17 +14,24 @@ import com.meshtastic.client.service.ConnectionManager;
 import com.meshtastic.client.service.SerialPortDiscoveryService;
 import com.meshtastic.client.simple.SimpleConnectionForm;
 import com.meshtastic.client.system.Form;
+import com.meshtastic.client.utils.SvgIconLoader;
 import com.meshtastic.client.utils.SystemForm;
 import javafx.application.Platform;
 import javafx.geometry.Insets;
+import javafx.geometry.Orientation;
 import javafx.geometry.Pos;
 import javafx.scene.control.Button;
+import javafx.scene.control.ContentDisplay;
 import javafx.scene.control.Label;
 import javafx.scene.control.ScrollPane;
+import javafx.scene.control.Separator;
+import javafx.scene.control.ToolBar;
+import javafx.scene.control.Tooltip;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
+import javafx.scene.shape.SVGPath;
 
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
@@ -55,10 +62,15 @@ public class FormConnections extends Form {
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
 
-        Button btnAdd = new Button("Добавить");
-        btnAdd.setOnAction(e -> showAddDialog());
+        ToolBar actionToolbar = new ToolBar();
+        actionToolbar.getStyleClass().add("connection-toolbar");
+        actionToolbar.getItems().add(createToolbarButton(
+                "Добавить",
+                "Создать новое подключение",
+                "/icons/add.svg",
+                this::showAddDialog));
 
-        titleRow.getChildren().addAll(title, spacer, btnAdd);
+        titleRow.getChildren().addAll(title, spacer, actionToolbar);
 
         cardsBox = new VBox(10);
 
@@ -121,23 +133,9 @@ public class FormConnections extends Form {
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
 
-        Button btnConnect = new Button(connected || reconnecting ? "Отключить" : "Подключить");
-        btnConnect.setOnAction(e -> {
-            if (entry.isConnected() || entry.isReconnecting()) {
-                doDisconnect(entry);
-            } else {
-                doConnect(entry);
-            }
-        });
+        ToolBar actionToolbar = createConnectionActionToolbar(entry, connected, reconnecting);
 
-        Button btnEdit = new Button("Изменить");
-        btnEdit.setDisable(connected || reconnecting);
-        btnEdit.setOnAction(e -> showEditDialog(entry));
-
-        Button btnDelete = new Button("Удалить");
-        btnDelete.setOnAction(e -> doDelete(entry));
-
-        topRow.getChildren().addAll(indicator, lblName, lblStatus, spacer, btnConnect, btnEdit, btnDelete);
+        topRow.getChildren().addAll(indicator, lblName, lblStatus, spacer, actionToolbar);
 
         String addressText;
         if (entry.getEffectiveType() == ConnectionType.BLE) {
@@ -157,6 +155,71 @@ public class FormConnections extends Form {
 
         card.getChildren().addAll(topRow, lblAddress);
         return card;
+    }
+
+    private ToolBar createConnectionActionToolbar(ConnectionEntry entry, boolean connected, boolean reconnecting) {
+        ToolBar actionToolbar = new ToolBar();
+        actionToolbar.getStyleClass().add("connection-toolbar");
+
+        Button connectButton = createToolbarButton(
+                connected || reconnecting ? "Отключить" : "Подключить",
+                connected || reconnecting ? "Отключить текущее соединение" : "Подключиться к устройству",
+                connected || reconnecting ? "/icons/disconnect.svg" : "/icons/connect.svg",
+                () -> {
+                    if (entry.isConnected() || entry.isReconnecting()) {
+                        doDisconnect(entry);
+                    } else {
+                        doConnect(entry);
+                    }
+                });
+
+        Button editButton = createToolbarButton(
+                "Изменить",
+                "Изменить параметры подключения",
+                "/drawer/icon/setting.svg",
+                () -> showEditDialog(entry));
+        editButton.setDisable(connected || reconnecting);
+
+        Button deleteButton = createToolbarButton(
+                "Удалить",
+                "Удалить подключение",
+                "/drawer/icon/delete-node.svg",
+                () -> doDelete(entry));
+
+        actionToolbar.getItems().addAll(
+                connectButton,
+                new Separator(Orientation.VERTICAL),
+                editButton,
+                deleteButton
+        );
+        return actionToolbar;
+    }
+
+    private Button createToolbarButton(String title, String description, String iconPath, Runnable action) {
+        Button button = new Button();
+        button.getStyleClass().add("connection-toolbar-button");
+        button.setMinSize(34, 34);
+        button.setPrefSize(34, 34);
+        button.setMaxSize(34, 34);
+        button.setFocusTraversable(false);
+        button.setAccessibleText(title);
+        setToolbarButtonGraphic(button, iconPath, title);
+        button.setTooltip(new Tooltip(title + "\n" + description));
+        button.setOnAction(event -> action.run());
+        return button;
+    }
+
+    private void setToolbarButtonGraphic(Button button, String iconPath, String fallbackText) {
+        SVGPath icon = SvgIconLoader.load(iconPath, 18);
+        if (icon != null) {
+            button.setGraphic(icon);
+            button.setText(null);
+            button.setContentDisplay(ContentDisplay.GRAPHIC_ONLY);
+        } else {
+            button.setGraphic(null);
+            button.setText(fallbackText);
+            button.setContentDisplay(ContentDisplay.TEXT_ONLY);
+        }
     }
 
     private void doConnect(ConnectionEntry entry) {

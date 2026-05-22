@@ -86,7 +86,7 @@ public class FormMeshAppIde extends Form {
         Button createButton = createToolbarButton(
                 "Новый скрипт",
                 "Создать новый Lua-скрипт",
-                "/icons/ide-file-code.svg",
+                "/icons/add.svg",
                 this::createScript);
 
         actionToolbar.getItems().addAll(
