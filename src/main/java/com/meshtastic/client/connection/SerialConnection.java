@@ -77,6 +77,13 @@ public class SerialConnection implements MeshtasticConnection, FrameFormatAwareC
         this(portName, baudRate, SerialModemLineMode.AUTO);
     }
 
+    /**
+     * Создаёт serial-подключение с явным режимом управления DTR/RTS.
+     *
+     * @param portName системное имя порта
+     * @param baudRate скорость порта
+     * @param serialModemLineMode режим modem lines или {@link SerialModemLineMode#AUTO}
+     */
     public SerialConnection(String portName, int baudRate, SerialModemLineMode serialModemLineMode) {
         this(portName, baudRate, NativeSerialPortFactory::create, System::currentTimeMillis,
                 DEFAULT_READ_TIMEOUT_MS, DEFAULT_PORT_INIT_DELAY_MS, DEFAULT_WRITE_RESPONSE_TIMEOUT_MS,
@@ -88,6 +95,14 @@ public class SerialConnection implements MeshtasticConnection, FrameFormatAwareC
         this(portName, baudRate, frameFormat, SerialModemLineMode.AUTO);
     }
 
+    /**
+     * Создаёт serial-подключение с заданным frame format и режимом DTR/RTS.
+     *
+     * @param portName системное имя порта
+     * @param baudRate скорость порта
+     * @param frameFormat формат фрейминга для stream-протокола
+     * @param serialModemLineMode режим modem lines или {@link SerialModemLineMode#AUTO}
+     */
     public SerialConnection(String portName, int baudRate, FrameFormat frameFormat,
                             SerialModemLineMode serialModemLineMode) {
         this(portName, baudRate, serialModemLineMode);

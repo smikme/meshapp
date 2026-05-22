@@ -177,6 +177,11 @@ public class ConnectionEntry {
         return serialModemLineMode;
     }
 
+    /**
+     * Задаёт режим DTR/RTS для serial-подключения.
+     *
+     * @param serialModemLineMode сохранённый режим или {@code null} для legacy-compatible {@code AUTO}
+     */
     public void setSerialModemLineMode(SerialModemLineMode serialModemLineMode) {
         this.serialModemLineMode = serialModemLineMode;
     }
