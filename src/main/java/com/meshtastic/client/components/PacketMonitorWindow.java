@@ -35,6 +35,7 @@ import javafx.scene.control.ProgressBar;
 import javafx.scene.control.Separator;
 import javafx.scene.control.SplitPane;
 import javafx.scene.control.ScrollBar;
+import javafx.scene.control.TableCell;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableRow;
 import javafx.scene.control.TableView;
@@ -659,6 +660,7 @@ public final class PacketMonitorWindow {
 
         TableColumn<PacketLogEntry, String> colPayload = new TableColumn<>("Payload");
         colPayload.setCellValueFactory(new PropertyValueFactory<>("payloadText"));
+        colPayload.setCellFactory(column -> new PayloadTableCell());
         colPayload.setMinWidth(PACKET_TABLE_PAYLOAD_RUNTIME_MIN_WIDTH);
         colPayload.setPrefWidth(PACKET_TABLE_PAYLOAD_MIN_WIDTH);
         colPayload.setMaxWidth(Double.MAX_VALUE);
@@ -719,6 +721,57 @@ public final class PacketMonitorWindow {
         });
         VBox.setVgrow(table, Priority.ALWAYS);
         return table;
+    }
+
+    private static final class PayloadTableCell extends TableCell<PacketLogEntry, String> {
+        private static final double CELL_EMOJI_SIZE = 18;
+
+        private final EmojiTextFlow flow = new EmojiTextFlow("", CELL_EMOJI_SIZE);
+
+        private PayloadTableCell() {
+            flow.getStyleClass().add("packet-monitor-payload-flow");
+            flow.setMouseTransparent(true);
+            setContentDisplay(ContentDisplay.GRAPHIC_ONLY);
+        }
+
+        @Override
+        protected void updateItem(String item, boolean empty) {
+            super.updateItem(item, empty);
+            setText(null);
+            if (empty || item == null || item.isBlank()) {
+                setGraphic(null);
+                flow.setText("");
+                return;
+            }
+            flow.setText(item);
+            flow.setEmojiSize(CELL_EMOJI_SIZE);
+            flow.setTextFont(getFont());
+            flow.setTextStyleClasses(payloadTextStyleClasses());
+            setGraphic(flow);
+        }
+
+        @Override
+        public void updateSelected(boolean selected) {
+            super.updateSelected(selected);
+            if (getGraphic() == flow) {
+                flow.setTextStyleClasses(payloadTextStyleClasses());
+            }
+        }
+
+        private List<String> payloadTextStyleClasses() {
+            List<String> classes = new ArrayList<>();
+            classes.add("packet-monitor-payload-text");
+            PacketLogEntry entry = getTableRow() != null ? getTableRow().getItem() : null;
+            if (entry == null) {
+                return classes;
+            }
+            switch (entry.getDirection()) {
+                case INCOMING -> classes.add("packet-monitor-payload-incoming");
+                case OUTGOING -> classes.add("packet-monitor-payload-outgoing");
+                case INTERNAL -> classes.add("packet-monitor-payload-internal");
+            }
+            return classes;
+        }
     }
 
     private Button createPacketActionButton(String title, String tooltipText, String iconPath, Runnable action) {

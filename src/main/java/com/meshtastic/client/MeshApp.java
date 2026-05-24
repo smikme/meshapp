@@ -17,6 +17,8 @@ import com.meshtastic.client.service.BleDeviceDiscoveryService;
 import com.meshtastic.client.service.PacketMonitorService;
 import com.meshtastic.client.service.UpdateCheckService;
 import com.meshtastic.client.system.FormManager;
+import com.meshtastic.client.system.AppUi;
+import com.meshtastic.client.system.JavaFxAppUiBridge;
 import com.meshtastic.client.system.RootPane;
 import com.meshtastic.client.system.SingleInstanceGuard;
 import com.meshtastic.client.themes.ThemeManager;
@@ -113,6 +115,7 @@ public class MeshApp extends Application {
     @Override
     public void start(Stage stage) {
         primaryStage = stage;
+        AppUi.install(new JavaFxAppUiBridge());
 
         Font.loadFont(getClass().getResourceAsStream("/fonts/Roboto-Regular.ttf"), 13);
         Font.loadFont(getClass().getResourceAsStream("/fonts/Roboto-Bold.ttf"), 13);

@@ -12,6 +12,7 @@ import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.MessageReaction;
 import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.model.NodeData;
+import com.meshtastic.client.model.TelemetryEntry;
 import com.meshtastic.client.protocol.ProtocolHandler;
 import com.meshtastic.client.utils.AppPreferences;
 import org.junit.jupiter.api.AfterEach;
@@ -405,6 +406,45 @@ class MessageListenerServiceTest {
         assertEquals(77, node.getBatteryLevel());
         assertEquals(3.92f, node.getVoltage());
         assertEquals(1, NodeCacheService.getInstance().countTelemetryEntries("!12345678"));
+    }
+
+    @Test
+    void onMeshPacketSeparatesExternalPowerFlagFromBatteryPercent() {
+        TelemetryProtos.Telemetry telemetry = TelemetryProtos.Telemetry.newBuilder()
+                .setDeviceMetrics(TelemetryProtos.DeviceMetrics.newBuilder()
+                        .setBatteryLevel(101)
+                        .setVoltage(4.0f)
+                        .build())
+                .build();
+        MeshProtos.MeshPacket packet = MeshProtos.MeshPacket.newBuilder()
+                .setFrom(0xCAFEBABE)
+                .setTo(0xFFFFFFFF)
+                .setId(7013)
+                .setRxTime(1_700_000_333)
+                .setDecoded(MeshProtos.Data.newBuilder()
+                        .setPortnum(Portnums.PortNum.TELEMETRY_APP)
+                        .setPayload(telemetry.toByteString())
+                        .build())
+                .build();
+
+        service.onMeshPacket(packet);
+
+        NodeData node = state.getOrCreateNode(0xCAFEBABE);
+        assertEquals(0, node.getBatteryLevel());
+        assertTrue(node.isExternallyPowered());
+        assertEquals(4.0f, node.getVoltage());
+
+        TelemetryEntry runtimeEntry = state.getTelemetryHistory().getFirst();
+        assertEquals(0, runtimeEntry.getBatteryLevel());
+        assertTrue(runtimeEntry.isExternallyPowered());
+        assertEquals(4.0f, runtimeEntry.getVoltage());
+
+        List<TelemetryEntry> persistedEntries = NodeCacheService.getInstance().loadTelemetrySince(0, "!12345678");
+        assertEquals(1, persistedEntries.size());
+        TelemetryEntry persisted = persistedEntries.getFirst();
+        assertEquals(0, persisted.getBatteryLevel());
+        assertTrue(persisted.isExternallyPowered());
+        assertEquals(4.0f, persisted.getVoltage());
     }
 
     @Test

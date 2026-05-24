@@ -1,11 +1,17 @@
 package com.meshtastic.client.components;
 
 import com.meshtastic.client.TestEnvironmentSupport;
+import com.meshtastic.client.forms.FormDashboard;
+import com.meshtastic.client.model.DeviceState;
+import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.model.TelemetryEntry;
 import javafx.application.Platform;
 import javafx.scene.chart.AreaChart;
 import javafx.scene.chart.NumberAxis;
 import javafx.scene.chart.XYChart;
+import javafx.scene.control.TableColumn;
+import javafx.scene.control.TableView;
+import org.meshtastic.proto.MeshProtos;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
@@ -43,7 +49,7 @@ class TelemetryChartPanelTest {
         AreaChart<Number, Number> hopsChart = chartField(panel, "hopsChart");
 
         assertEquals("Базовые метрики", basicChart.getTitle());
-        assertEquals(List.of("Battery %", "Voltage В", "ChUtil %", "AirUtil %"), seriesNames(basicChart));
+        assertEquals(List.of("Voltage В", "Battery %", "ChUtil %", "AirUtil %"), seriesNames(basicChart));
 
         assertEquals("Статистика эфира", rxChart.getTitle());
         assertEquals(List.of("Good RX %", "Bad RX %", "Dupe RX %"), seriesNames(rxChart));
@@ -71,7 +77,7 @@ class TelemetryChartPanelTest {
         AreaChart<Number, Number> basicChart = chartField(panel, "chart");
 
         assertEquals("Базовые метрики", basicChart.getTitle());
-        assertEquals(List.of("Battery %", "Voltage В", "ChUtil %", "AirUtil %"), seriesNames(basicChart));
+        assertEquals(List.of("Voltage В", "Battery %", "ChUtil %", "AirUtil %"), seriesNames(basicChart));
         assertFalse(((NumberAxis) basicChart.getXAxis()).isAutoRanging());
     }
 
@@ -79,7 +85,7 @@ class TelemetryChartPanelTest {
     void storesActualVoltageForDisplayInsteadOfScaledPercent() {
         TelemetryChartPanel panel = onFxThread(() -> new TelemetryChartPanel(true));
         TelemetryEntry entry = new TelemetryEntry(1_700_000_000L, "!test");
-        entry.setVoltage(4.2f);
+        entry.setVoltage(4.0f);
 
         onFxThread(() -> {
             invokeUpdateChart(panel, List.of(entry), List.of());
@@ -93,10 +99,115 @@ class TelemetryChartPanelTest {
                 .orElseThrow();
         XYChart.Data<Number, Number> point = voltageSeries.getData().getFirst();
 
-        assertEquals(100.0, point.getYValue().doubleValue(), 0.0001);
+        assertEquals(83.0, point.getYValue().doubleValue(), 0.0001);
         Number actualVoltage = assertInstanceOf(Number.class, point.getExtraValue());
-        assertEquals(4.2, actualVoltage.doubleValue(), 0.0001);
-        assertTrue(TelemetryChartPanel.formatSeriesValue(voltageSeries.getName(), point).matches("4[,.]20V"));
+        assertEquals(4.0, actualVoltage.doubleValue(), 0.0001);
+        assertTrue(TelemetryChartPanel.formatSeriesValue(voltageSeries.getName(), point).matches("4[,.]00V"));
+
+        assertSeriesValues(basicChart, "Battery %", 83.0);
+    }
+
+    @Test
+    void plotsMeshtasticBatteryPercentWhenDeviceMetricsProvideLevel() {
+        TelemetryChartPanel panel = onFxThread(() -> new TelemetryChartPanel(true));
+        TelemetryEntry entry = new TelemetryEntry(1_700_000_000L, "!test");
+        entry.setBatteryLevel(77);
+
+        onFxThread(() -> {
+            invokeUpdateChart(panel, List.of(entry), List.of());
+            return null;
+        });
+
+        AreaChart<Number, Number> basicChart = chartField(panel, "chart");
+        assertSeriesValues(basicChart, "Battery %", 77.0);
+    }
+
+    @Test
+    void plotsPoweredFlagBatteryFromVoltageEstimateWithoutUsingFlagAsPercent() {
+        TelemetryChartPanel panel = onFxThread(() -> new TelemetryChartPanel(true));
+        TelemetryEntry entry = new TelemetryEntry(1_700_000_000L, "!test");
+        entry.setExternallyPowered(true);
+        entry.setVoltage(4.0f);
+
+        onFxThread(() -> {
+            invokeUpdateChart(panel, List.of(entry), List.of());
+            return null;
+        });
+
+        AreaChart<Number, Number> basicChart = chartField(panel, "chart");
+        assertSeriesValues(basicChart, "Battery %", 83.0);
+    }
+
+    @Test
+    void usesDeviceStateOwnerIdForTelemetryHistoryQueries() {
+        TelemetryChartPanel panel = onFxThread(() -> new TelemetryChartPanel(true));
+        DeviceState state = new DeviceState();
+        state.setMyNodeNum(0x1234ABCD);
+        state.setOwnerInfo(MeshProtos.User.newBuilder()
+                .setId("!1234abcd")
+                .build());
+
+        assertEquals("!1234abcd", invokeOwnerNodeId(panel, state));
+    }
+
+    @Test
+    void telemetryLogRowShowsDerivedBatteryPercentAndOwnerNameForMeshtasticVoltageOnlyEntry() {
+        DeviceState state = new DeviceState();
+        state.setOwnerInfo(MeshProtos.User.newBuilder()
+                .setId("!1234abcd")
+                .setLongName("Meshtastic Radio")
+                .build());
+        TelemetryEntry entry = new TelemetryEntry(1_700_000_000L, "!1234abcd");
+        entry.setVoltage(4.0f);
+
+        FormDashboard.TelemetryLogRow row = new FormDashboard.TelemetryLogRow(entry, state);
+
+        assertEquals("83%", row.getBattery());
+        assertEquals("Meshtastic Radio (!1234abcd)", row.getNode());
+    }
+
+    @Test
+    void telemetryLogRowDoesNotMixPoweredFlagIntoBatteryPercent() {
+        TelemetryEntry entry = new TelemetryEntry(1_700_000_000L, "!1234abcd");
+        entry.setExternallyPowered(true);
+        entry.setVoltage(4.0f);
+
+        FormDashboard.TelemetryLogRow row = new FormDashboard.TelemetryLogRow(entry, null);
+
+        assertEquals("83%", row.getBattery());
+    }
+
+    @Test
+    void telemetryLogRowUsesShortNameWhenLongNameIsMissing() {
+        DeviceState state = new DeviceState();
+        NodeData node = state.getOrCreateNode(0x1234ABCD);
+        node.setShortName("MESH");
+        TelemetryEntry entry = new TelemetryEntry(1_700_000_000L, "!1234abcd");
+        entry.setBatteryLevel(77);
+
+        FormDashboard.TelemetryLogRow row = new FormDashboard.TelemetryLogRow(entry, state);
+
+        assertEquals("MESH (!1234abcd)", row.getNode());
+    }
+
+    @Test
+    void telemetryLogNodeColumnUsesExplicitValueFactoryAfterRowsAreRebuilt() {
+        FormDashboard dashboard = onFxThread(FormDashboard::new);
+        TableColumn<FormDashboard.TelemetryLogRow, String> nodeColumn = telemetryNodeColumn(dashboard);
+
+        DeviceState state = new DeviceState();
+        NodeData node = state.getOrCreateNode(0x1234ABCD);
+        node.setLongName("Meshtastic Radio");
+
+        TelemetryEntry firstEntry = new TelemetryEntry(1_700_000_000L, "!1234abcd");
+        TelemetryEntry secondEntry = new TelemetryEntry(1_700_000_060L, "!1234abcd");
+        FormDashboard.TelemetryLogRow firstRow = new FormDashboard.TelemetryLogRow(firstEntry, state);
+        FormDashboard.TelemetryLogRow secondRow = new FormDashboard.TelemetryLogRow(secondEntry, state);
+
+        assertEquals("Meshtastic Radio (!1234abcd)",
+                nodeColumn.getCellObservableValue(firstRow).getValue());
+        assertEquals("Meshtastic Radio (!1234abcd)",
+                nodeColumn.getCellObservableValue(secondRow).getValue());
     }
 
     @Test
@@ -211,6 +322,16 @@ class TelemetryChartPanelTest {
         }
     }
 
+    private static String invokeOwnerNodeId(TelemetryChartPanel panel, DeviceState state) {
+        try {
+            Method method = TelemetryChartPanel.class.getDeclaredMethod("ownerNodeId", DeviceState.class);
+            method.setAccessible(true);
+            return (String) method.invoke(panel, state);
+        } catch (ReflectiveOperationException e) {
+            throw new AssertionError("Failed to invoke ownerNodeId", e);
+        }
+    }
+
     @SuppressWarnings("unchecked")
     private static AreaChart<Number, Number> chartField(TelemetryChartPanel panel, String fieldName) {
         try {
@@ -219,6 +340,23 @@ class TelemetryChartPanelTest {
             return (AreaChart<Number, Number>) field.get(panel);
         } catch (ReflectiveOperationException e) {
             throw new AssertionError("Failed to read chart field " + fieldName, e);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static TableColumn<FormDashboard.TelemetryLogRow, String> telemetryNodeColumn(FormDashboard dashboard) {
+        try {
+            Field field = FormDashboard.class.getDeclaredField("logTable");
+            field.setAccessible(true);
+            TableView<FormDashboard.TelemetryLogRow> table =
+                    (TableView<FormDashboard.TelemetryLogRow>) field.get(dashboard);
+            return table.getColumns().stream()
+                    .filter(column -> "Нода".equals(column.getText()))
+                    .findFirst()
+                    .map(column -> (TableColumn<FormDashboard.TelemetryLogRow, String>) column)
+                    .orElseThrow();
+        } catch (ReflectiveOperationException e) {
+            throw new AssertionError("Failed to read telemetry log table", e);
         }
     }
 

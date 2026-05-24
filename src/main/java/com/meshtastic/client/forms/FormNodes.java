@@ -12,6 +12,7 @@ import com.meshtastic.client.service.IgnoredNodeService;
 import com.meshtastic.client.service.NodeCacheService;
 import com.meshtastic.client.system.Form;
 import com.meshtastic.client.utils.AppPreferences;
+import com.meshtastic.client.utils.BatteryLevelEstimator;
 import com.meshtastic.client.utils.NodeUtils;
 import com.meshtastic.client.utils.SvgIconLoader;
 import com.meshtastic.client.utils.SystemForm;
@@ -692,12 +693,11 @@ public class FormNodes extends Form {
                     if (!sb.isEmpty()) { sb.append(" · "); }
                     sb.append(node.getHopsAway()).append(" хоп");
                 }
-                if (node.getBatteryLevel() > 0 && node.getBatteryLevel() <= 100) {
+                if (BatteryLevelEstimator.hasBatteryPercent(node.getBatteryLevel(), node.getVoltage())) {
                     if (!sb.isEmpty()) { sb.append(" · "); }
-                    sb.append("Бат: ").append(node.getBatteryLevel()).append("%");
-                } else if (node.getBatteryLevel() == 101) {
-                    if (!sb.isEmpty()) { sb.append(" · "); }
-                    sb.append("Бат: USB");
+                    sb.append("Бат: ")
+                            .append(BatteryLevelEstimator.effectivePercent(node.getBatteryLevel(), node.getVoltage()))
+                            .append("%");
                 }
                 if (node.getVoltage() > 0) {
                     if (!sb.isEmpty()) { sb.append(" · "); }

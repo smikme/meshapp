@@ -247,8 +247,9 @@ public final class NodeUtils {
 
         int level = node.getBatteryLevel();
         String battery = null;
-        if (level > 0 && level <= 100) { battery = level + "%"; }
-        else if (level == 101) { battery = "Внешнее питание"; }
+        if (BatteryLevelEstimator.hasBatteryPercent(level, node.getVoltage())) {
+            battery = BatteryLevelEstimator.effectivePercent(level, node.getVoltage()) + "%";
+        }
         rows.add(new String[]{"\uD83D\uDD0B", "Батарея", battery});
 
         rows.add(new String[]{"\u26A1", "Напряжение", node.getVoltage() > 0 ? String.format("%.2f В", node.getVoltage()) : null});
