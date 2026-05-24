@@ -31,7 +31,7 @@ public final class DatabaseMigrator {
     private static final Logger log = LoggerFactory.getLogger(DatabaseMigrator.class);
 
     /** Текущая версия схемы. Увеличивается при каждом изменении схемы. */
-    static final int CURRENT_VERSION = 14;
+    static final int CURRENT_VERSION = 15;
     private static final Pattern CONNECTION_NODE_ID_PATTERN =
             Pattern.compile("\"nodeId\"\\s*:\\s*\"(![0-9a-fA-F]{8})\"");
     private static final List<String> APPLICATION_TABLES = List.of(
@@ -100,6 +100,7 @@ public final class DatabaseMigrator {
             if (version < 12) { migrateToV12(connection); version = 12; }
             if (version < 13) { migrateToV13(connection); version = 13; }
             if (version < 14) { migrateToV14(connection); version = 14; }
+            if (version < 15) { migrateToV15(connection); version = 15; }
 
             setVersion(connection, CURRENT_VERSION);
             log.info("Database migration complete, schema version = {}", CURRENT_VERSION);
@@ -672,6 +673,19 @@ public final class DatabaseMigrator {
             stmt.execute("ALTER TABLE lua_scripts ADD COLUMN IF NOT EXISTS automation_name VARCHAR(80) NOT NULL DEFAULT ''");
         }
         log.info("Migration v14: added Lua script node binding and bot metadata");
+    }
+
+    /** v15: separate Meshtastic external-power flag from battery percentage. */
+    private static void migrateToV15(Connection connection) throws SQLException {
+        try (Statement stmt = connection.createStatement()) {
+            if (tableExists(connection, "NODES")) {
+                stmt.execute("ALTER TABLE nodes ADD COLUMN IF NOT EXISTS externally_powered BOOLEAN DEFAULT FALSE");
+            }
+            if (tableExists(connection, "TELEMETRY_HISTORY")) {
+                stmt.execute("ALTER TABLE telemetry_history ADD COLUMN IF NOT EXISTS externally_powered BOOLEAN DEFAULT FALSE");
+            }
+        }
+        log.info("Migration v15: added external power flags for nodes and telemetry");
     }
 
     /** v2: колонка favorite для избранных нод. */

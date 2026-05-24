@@ -6,9 +6,12 @@ import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.model.TelemetryEntry;
 import com.meshtastic.client.service.ConnectionManager;
+import com.meshtastic.client.service.NodeCacheService;
 import com.meshtastic.client.system.Form;
+import com.meshtastic.client.utils.BatteryLevelEstimator;
 import com.meshtastic.client.utils.SystemForm;
 import javafx.application.Platform;
+import javafx.beans.property.ReadOnlyStringWrapper;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import javafx.geometry.Insets;
@@ -18,6 +21,7 @@ import javafx.scene.control.Label;
 import javafx.scene.control.ScrollBar;
 import javafx.scene.control.Tab;
 import javafx.scene.control.TabPane;
+import javafx.scene.control.TableCell;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableView;
 import javafx.scene.control.cell.PropertyValueFactory;
@@ -224,7 +228,15 @@ public class FormDashboard extends Form {
         colHops.setPrefWidth(60);
 
         TableColumn<TelemetryLogRow, String> colNode = new TableColumn<>("Нода");
-        colNode.setCellValueFactory(new PropertyValueFactory<>("node"));
+        colNode.setCellValueFactory(cellData -> new ReadOnlyStringWrapper(
+                cellData.getValue() != null ? cellData.getValue().getNode() : "?"));
+        colNode.setCellFactory(column -> new TableCell<>() {
+            @Override
+            protected void updateItem(String item, boolean empty) {
+                super.updateItem(item, empty);
+                setText(empty || item == null || item.isBlank() ? null : item);
+            }
+        });
         colNode.setPrefWidth(120);
 
         table.getColumns().addAll(colTime, colBattery, colVoltage, colChUtil, colAirUtil, colGoodRx, colBadRx, colDupeRx, colTx, colTxDropped, colTxRelay, colTxCanceled, colSnr, colRssi, colHops, colNode);
@@ -305,10 +317,8 @@ public class FormDashboard extends Form {
                     : "—";
 
             int bl = e.getBatteryLevel();
-            if (bl > 100) {
-                this.battery = "PWD";
-            } else if (bl > 0) {
-                this.battery = bl + "%";
+            if (BatteryLevelEstimator.hasBatteryPercent(bl, e.getVoltage())) {
+                this.battery = BatteryLevelEstimator.effectivePercent(bl, e.getVoltage()) + "%";
             } else {
                 this.battery = "—";
             }
@@ -340,15 +350,57 @@ public class FormDashboard extends Form {
             this.rssi = (e.getRxRssi() != 0) ? String.valueOf(e.getRxRssi()) : "—";
             this.hops = e.hasValidHopData() ? String.valueOf(e.getHopsTraveled()) : "—";
 
-            // Имя ноды
-            String nodeName = e.getNodeId() != null ? e.getNodeId() : "?";
+            this.node = formatTelemetryNode(e, state);
+        }
+
+        private static String formatTelemetryNode(TelemetryEntry e, DeviceState state) {
+            String nodeId = normalizeNodeId(e != null ? e.getNodeId() : null);
+            String name = resolveNodeName(nodeId, state);
+            if (name != null && nodeId != null) {
+                return name + " (" + nodeId + ")";
+            }
+            if (name != null) {
+                return name;
+            }
+            return nodeId != null ? nodeId : "?";
+        }
+
+        private static String resolveNodeName(String nodeId, DeviceState state) {
             if (state != null) {
-                NodeData nd = state.getNodeByNodeId(e.getNodeId());
-                if (nd != null && nd.getLongName() != null && !nd.getLongName().isEmpty()) {
-                    nodeName = nd.getLongName();
+                NodeData node = state.getNodeByNodeId(nodeId);
+                String name = displayName(node);
+                if (name != null) {
+                    return name;
+                }
+                if (nodeId != null && nodeId.equals(state.getOwnerNodeId())
+                        && state.getOwnerInfo() != null
+                        && !state.getOwnerInfo().getLongName().isBlank()) {
+                    return state.getOwnerInfo().getLongName();
                 }
             }
-            this.node = nodeName;
+
+            NodeData cached = NodeCacheService.getInstance().get(nodeId);
+            String cachedName = displayName(cached);
+            if (cachedName != null) {
+                return cachedName;
+            }
+            return null;
+        }
+
+        private static String normalizeNodeId(String nodeId) {
+            return nodeId == null || nodeId.isBlank() ? null : nodeId.trim();
+        }
+
+        private static String displayName(NodeData node) {
+            if (node == null) {
+                return null;
+            }
+            if (node.getLongName() != null && !node.getLongName().isEmpty()) {
+                return node.getLongName();
+            }
+            return node.getShortName() != null && !node.getShortName().isEmpty()
+                    ? node.getShortName()
+                    : null;
         }
 
         public String getTime()    { return time; }

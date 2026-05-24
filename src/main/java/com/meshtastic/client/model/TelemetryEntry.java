@@ -26,6 +26,7 @@ public class TelemetryEntry {
 
     // DeviceMetrics
     private int batteryLevel;
+    private boolean externallyPowered;
     private float voltage;
     private float channelUtilization;
     private float airUtilTx;
@@ -64,6 +65,9 @@ public class TelemetryEntry {
 
     public int getBatteryLevel() { return batteryLevel; }
     public void setBatteryLevel(int batteryLevel) { this.batteryLevel = batteryLevel; }
+
+    public boolean isExternallyPowered() { return externallyPowered; }
+    public void setExternallyPowered(boolean externallyPowered) { this.externallyPowered = externallyPowered; }
 
     public float getVoltage() { return voltage; }
     public void setVoltage(float voltage) { this.voltage = voltage; }

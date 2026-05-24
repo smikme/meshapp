@@ -1,6 +1,7 @@
 package com.meshtastic.client.components;
 
 import com.meshtastic.client.model.TelemetryEntry;
+import com.meshtastic.client.utils.BatteryLevelEstimator;
 import javafx.scene.chart.XYChart;
 
 import java.util.IntSummaryStatistics;
@@ -59,11 +60,8 @@ final class TelemetryChartDataBuilder {
 
     private static final int MAX_CHART_POINTS = 60;
     private static final long EMPTY_PERIOD_FALLBACK = 24L * 3600;
-    private static final float VOLTAGE_MIN = 3.0f;
-    private static final float VOLTAGE_MAX = 4.2f;
-
     private static final Predicate<TelemetryEntry> HAS_BATTERY =
-            entry -> entry.getBatteryLevel() > 0 && entry.getBatteryLevel() <= 100;
+            entry -> BatteryLevelEstimator.hasBatteryPercent(entry.getBatteryLevel(), entry.getVoltage());
     private static final Predicate<TelemetryEntry> HAS_VOLTAGE = entry -> entry.getVoltage() > 0;
     private static final Predicate<TelemetryEntry> HAS_RX_COUNTERS = entry -> entry.getNumPacketsRx() > 0;
     private static final Predicate<TelemetryEntry> HAS_TX_COUNTERS = entry -> entry.getNumPacketsTx() > 0;
@@ -138,10 +136,11 @@ final class TelemetryChartDataBuilder {
         if (isBucketed(entries)) {
             List<Bucket<TelemetryEntry>> buckets = bucketize(entries, TelemetryEntry::getTimestamp, MAX_CHART_POINTS);
             return new ChartPayload(TITLE_BASIC, List.of(
-                    series(SERIES_BATTERY, averageData(buckets, HAS_BATTERY, entry -> entry.getBatteryLevel(),
-                            TelemetryChartDataBuilder::dataPoint)),
                     series(SERIES_VOLTAGE, averageData(buckets, HAS_VOLTAGE, entry -> entry.getVoltage(),
                             TelemetryChartDataBuilder::createVoltageData)),
+                    series(SERIES_BATTERY, averageData(buckets, HAS_BATTERY,
+                            entry -> BatteryLevelEstimator.effectivePercent(entry.getBatteryLevel(), entry.getVoltage()),
+                            TelemetryChartDataBuilder::dataPoint)),
                     series(SERIES_CH_UTIL, averageData(buckets, entry -> true, entry -> entry.getChannelUtilization(),
                             TelemetryChartDataBuilder::dataPoint)),
                     series(SERIES_AIR_UTIL, averageData(buckets, entry -> true, entry -> entry.getAirUtilTx(),
@@ -150,10 +149,11 @@ final class TelemetryChartDataBuilder {
         }
 
         return new ChartPayload(TITLE_BASIC, List.of(
-                series(SERIES_BATTERY, pointData(entries, HAS_BATTERY, TelemetryEntry::getTimestamp,
-                        entry -> entry.getBatteryLevel(), TelemetryChartDataBuilder::dataPoint)),
                 series(SERIES_VOLTAGE, pointData(entries, HAS_VOLTAGE, TelemetryEntry::getTimestamp,
                         entry -> entry.getVoltage(), TelemetryChartDataBuilder::createVoltageData)),
+                series(SERIES_BATTERY, pointData(entries, HAS_BATTERY, TelemetryEntry::getTimestamp,
+                        entry -> BatteryLevelEstimator.effectivePercent(entry.getBatteryLevel(), entry.getVoltage()),
+                        TelemetryChartDataBuilder::dataPoint)),
                 series(SERIES_CH_UTIL, pointData(entries, entry -> true, TelemetryEntry::getTimestamp,
                         entry -> entry.getChannelUtilization(), TelemetryChartDataBuilder::dataPoint)),
                 series(SERIES_AIR_UTIL, pointData(entries, entry -> true, TelemetryEntry::getTimestamp,
@@ -394,12 +394,7 @@ final class TelemetryChartDataBuilder {
     }
 
     private static XYChart.Data<Number, Number> createVoltageData(long timestamp, double voltage) {
-        return new XYChart.Data<>(timestamp, voltageToPercent((float) voltage), voltage);
-    }
-
-    private static double voltageToPercent(float voltage) {
-        double pct = (voltage - VOLTAGE_MIN) / (VOLTAGE_MAX - VOLTAGE_MIN) * 100.0;
-        return Math.max(0, Math.min(100, pct));
+        return new XYChart.Data<>(timestamp, BatteryLevelEstimator.fromVoltage((float) voltage), voltage);
     }
 
     private static RxMetric createRxMetric(TelemetryEntry previous, TelemetryEntry current) {

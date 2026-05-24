@@ -137,6 +137,8 @@ class DatabaseMigratorTest {
             assertTrue(columnExists(connection, "CHAT_READ_COUNTS", "OWNER_NODE_ID"));
             assertTrue(columnExists(connection, "TELEMETRY_HISTORY", "OWNER_NODE_ID"));
             assertTrue(columnExists(connection, "NODES", "IGNORED"));
+            assertTrue(columnExists(connection, "NODES", "EXTERNALLY_POWERED"));
+            assertTrue(columnExists(connection, "TELEMETRY_HISTORY", "EXTERNALLY_POWERED"));
             assertTrue(indexExists(connection, "IDX_MSG_CHAT_PACKET"));
 
             assertEquals(1, countRows(connection, "messages"));
@@ -443,7 +445,9 @@ class DatabaseMigratorTest {
         assertTrue(columnExists(connection, "MESSAGES", "RX_SNR"));
         assertTrue(columnExists(connection, "TELEMETRY_HISTORY", "NODE_ID"));
         assertTrue(columnExists(connection, "TELEMETRY_HISTORY", "OWNER_NODE_ID"));
+        assertTrue(columnExists(connection, "TELEMETRY_HISTORY", "EXTERNALLY_POWERED"));
         assertTrue(columnExists(connection, "CHAT_READ_COUNTS", "OWNER_NODE_ID"));
+        assertTrue(columnExists(connection, "NODES", "EXTERNALLY_POWERED"));
 
         assertEquals(2, countRows(connection, "messages"));
         assertEquals(1, countRows(connection, "telemetry_history"));

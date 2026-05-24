@@ -218,6 +218,10 @@ public class TelemetryChartPanel extends VBox {
     }
 
     private String ownerNodeId(DeviceState state) {
+        String ownerNodeId = state.getOwnerNodeId();
+        if (ownerNodeId != null && !ownerNodeId.isBlank()) {
+            return ownerNodeId;
+        }
         return state.getMyNodeNum() == 0 ? "" : String.format("!%08x", state.getMyNodeNum());
     }
 

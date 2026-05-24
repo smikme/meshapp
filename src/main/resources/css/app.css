@@ -630,6 +630,30 @@
     -fx-text-fill: -color-fg-muted;
 }
 
+.packet-monitor-payload-flow {
+    -fx-padding: 0;
+}
+
+.packet-monitor-payload-text {
+    -fx-fill: -color-fg-default;
+}
+
+.packet-monitor-payload-incoming {
+    -fx-fill: -color-accent-emphasis;
+}
+
+.packet-monitor-payload-outgoing {
+    -fx-fill: -color-success-emphasis;
+}
+
+.packet-monitor-payload-internal {
+    -fx-fill: -color-fg-muted;
+}
+
+.table-row-cell:selected .packet-monitor-payload-text {
+    -fx-fill: -color-fg-default;
+}
+
 .packet-monitor-side-toolbar {
     -fx-orientation: vertical;
     -fx-background-color: transparent;

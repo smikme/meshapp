@@ -2,11 +2,9 @@ package com.meshtastic.client.connection.ble.windows;
 
 import com.meshtastic.client.connection.ConnectionException;
 import com.meshtastic.client.connection.ble.*;
+import com.meshtastic.client.system.AppUi;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import com.meshtastic.client.modal.Toast;
-import javafx.application.Platform;
 
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -224,8 +222,8 @@ public class WinBle implements BlePlatform {
                 stopPolling();
                 lib.meshble_disconnect();
                 log.error("writeToRadio: AccessDenied — BLE pairing is required or incomplete");
-                Platform.runLater(() -> Toast.show(Toast.Type.ERROR,
-                        "BLE: сопряжение не завершено. Подключитесь заново и подтвердите pairing"));
+                AppUi.showStatus(AppUi.StatusType.ERROR,
+                        "BLE: сопряжение не завершено. Подключитесь заново и подтвердите pairing");
                 Consumer<BleState> sl = stateListener;
                 if (sl != null) {
                     sl.accept(new BleState.Error(

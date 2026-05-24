@@ -2,13 +2,11 @@ package com.meshtastic.client.service;
 
 import com.meshtastic.client.connection.ConnectionException;
 import com.meshtastic.client.connection.ble.BleDevice;
-import com.meshtastic.client.menu.MyDrawerBuilder;
-import com.meshtastic.client.modal.Toast;
 import com.meshtastic.client.model.ConnectionEntry;
 import com.meshtastic.client.model.ConnectionType;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.NodeData;
-import javafx.application.Platform;
+import com.meshtastic.client.system.AppUi;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -153,9 +151,8 @@ public final class ReconnectService {
         long delaySec = Math.min(initialDelaySeconds * (1L << attempt), MAX_DELAY_SECONDS);
         String name = entry != null ? entry.getName() : id;
 
-        Platform.runLater(() ->
-                Toast.show(Toast.Type.WARNING,
-                        "Соединение потеряно: " + name + ". Переподключение через " + delaySec + "с..."));
+        AppUi.showStatus(AppUi.StatusType.WARNING,
+                "Соединение потеряно: " + name + ". Переподключение через " + delaySec + "с...");
 
         ScheduledFuture<?> future = scheduler.schedule(
                 () -> attemptReconnect(id), delaySec, TimeUnit.SECONDS);
@@ -193,8 +190,7 @@ public final class ReconnectService {
             deviceRebootReconnects.remove(id);
             entry.setReconnecting(false);
 
-            Platform.runLater(() ->
-                    Toast.show(Toast.Type.SUCCESS, "Переподключено: " + entry.getName()));
+            AppUi.showStatus(AppUi.StatusType.SUCCESS, "Переподключено: " + entry.getName());
 
             handlePostReconnectConfigExchange(id, entry);
 
@@ -281,8 +277,7 @@ public final class ReconnectService {
                     String shortName = myNode.getShortName() != null ? myNode.getShortName() : "?";
                     String longName = myNode.getLongName() != null ? myNode.getLongName() : "?";
                     String nodeId = myNode.getNodeId() != null ? myNode.getNodeId() : "?";
-                    Platform.runLater(() ->
-                            MyDrawerBuilder.updateHeader(shortName, longName, nodeId));
+                    AppUi.updateHeader(shortName, longName, nodeId);
                 }
             }
         });

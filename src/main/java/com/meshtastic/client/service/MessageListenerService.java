@@ -13,8 +13,7 @@ import com.meshtastic.client.model.TelemetryEntry;
 import com.meshtastic.client.notification.NotificationManager;
 import com.meshtastic.client.protocol.FromRadioListener;
 import com.meshtastic.client.protocol.ProtocolHandler;
-import com.meshtastic.client.system.DrawerManager;
-import javafx.application.Platform;
+import com.meshtastic.client.system.AppUi;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -74,12 +73,12 @@ public class MessageListenerService implements FromRadioListener {
 
     @Override
     public void onMyNodeInfo(MeshProtos.MyNodeInfo myInfo) {
-        Platform.runLater(this::flushDeferredMeshPacketsIfOwnerKnown);
+        AppUi.runLater(this::flushDeferredMeshPacketsIfOwnerKnown);
     }
 
     @Override
     public void onConfigComplete(int configCompleteId) {
-        Platform.runLater(this::flushDeferredMeshPacketsIfOwnerKnown);
+        AppUi.runLater(this::flushDeferredMeshPacketsIfOwnerKnown);
     }
 
     @Override
@@ -234,7 +233,7 @@ public class MessageListenerService implements FromRadioListener {
         }
 
         // Показать красную точку на иконке "Чаты"
-        Platform.runLater(() -> DrawerManager.setChatUnreadDot(true));
+        AppUi.setChatUnreadDot(true);
     }
 
     private void hydrateReplyText(MeshMessage msg, String ownerNodeId, String chatType, String chatKey) {
@@ -577,13 +576,12 @@ public class MessageListenerService implements FromRadioListener {
 
             if (telemetry.hasDeviceMetrics()) {
                 org.meshtastic.proto.TelemetryProtos.DeviceMetrics dm = telemetry.getDeviceMetrics();
-                node.setBatteryLevel(dm.getBatteryLevel());
+                applyBatteryLevel(dm.getBatteryLevel(), node, entry);
                 node.setVoltage(dm.getVoltage());
                 node.setChannelUtilization(dm.getChannelUtilization());
                 node.setAirUtilTx(dm.getAirUtilTx());
                 node.setUptimeSeconds(dm.getUptimeSeconds());
 
-                entry.setBatteryLevel(dm.getBatteryLevel());
                 entry.setVoltage(dm.getVoltage());
                 entry.setChannelUtilization(dm.getChannelUtilization());
                 entry.setAirUtilTx(dm.getAirUtilTx());
@@ -645,6 +643,17 @@ public class MessageListenerService implements FromRadioListener {
             NodeCacheService.getInstance().persistTelemetry(entry, ownerNodeId);
         } catch (InvalidProtocolBufferException e) {
             log.warn("Failed to parse Telemetry from TELEMETRY_APP packet from !{}", Integer.toHexString(fromNum), e);
+        }
+    }
+
+    private static void applyBatteryLevel(int rawBatteryLevel, NodeData node, TelemetryEntry entry) {
+        if (rawBatteryLevel > 100) {
+            node.setExternallyPowered(true);
+            entry.setExternallyPowered(true);
+        } else if (rawBatteryLevel > 0) {
+            node.setBatteryLevel(rawBatteryLevel);
+            node.setExternallyPowered(false);
+            entry.setBatteryLevel(rawBatteryLevel);
         }
     }
 
