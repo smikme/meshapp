@@ -765,10 +765,7 @@ public class FormSetting extends Form {
         Label valueLabel = new Label(formatFontSizeLabel(initialValue));
         valueLabel.getStyleClass().add("section-title");
 
-        Region spacer = new Region();
-        HBox.setHgrow(spacer, Priority.ALWAYS);
-
-        HBox header = new HBox(12, titleLabel, spacer, valueLabel);
+        HBox header = new HBox(12, titleLabel, valueLabel);
         header.setAlignment(Pos.CENTER_LEFT);
 
         Slider slider = new Slider(min, max, initialValue);
