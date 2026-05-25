@@ -19,7 +19,6 @@ import com.googlecode.lanterna.terminal.ansi.UnixTerminal;
 import com.meshtastic.client.connection.ConnectionException;
 import com.meshtastic.client.logging.UiLogAppender;
 import com.meshtastic.client.model.ConnectionEntry;
-import com.meshtastic.client.model.ConnectionType;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.LogEntry;
 import com.meshtastic.client.model.MeshMessage;

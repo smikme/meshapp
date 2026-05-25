@@ -69,7 +69,6 @@ public class FormNodes extends Form {
 
     private DeviceState state;
     private ProtocolHandler protocolHandler;
-    private String connectionId;
 
     private final IntConsumer nodeUpdateListener = num -> Platform.runLater(() -> {
         if (state == null) { return; }
@@ -781,13 +780,11 @@ public class FormNodes extends Form {
         var mgr = ConnectionManager.getInstance();
         DeviceState newState = null;
         ProtocolHandler newHandler = null;
-        String newConnId = null;
 
         ConnectionEntry entry = mgr.getSelectedConnectionEntry();
         if (entry != null && entry.isConnected()) {
             newState = mgr.getDeviceState(entry.getId());
             newHandler = mgr.getProtocolHandler(entry.getId());
-            newConnId = entry.getId();
         }
 
         if (newState == this.state) {
@@ -801,7 +798,6 @@ public class FormNodes extends Form {
 
         this.state = newState;
         this.protocolHandler = newHandler;
-        this.connectionId = newConnId;
 
         if (this.state != null) {
             this.state.addNodeUpdateListener(nodeUpdateListener);

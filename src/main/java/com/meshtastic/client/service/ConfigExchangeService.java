@@ -357,7 +357,6 @@ public class ConfigExchangeService implements FromRadioListener {
                 + ", address='" + mqtt.getAddress() + "'"
                 + ", tls=" + mqtt.getTlsEnabled()
                 + ", encryption=" + mqtt.getEncryptionEnabled()
-                + ", json=" + mqtt.getJsonEnabled()
                 + ", mapReporting=" + mqtt.getMapReportingEnabled()
                 + ", usernameSet=" + !mqtt.getUsername().isBlank()
                 + ", passwordSet=" + !mqtt.getPassword().isBlank();

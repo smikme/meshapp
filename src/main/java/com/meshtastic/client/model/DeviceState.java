@@ -10,7 +10,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
@@ -44,8 +43,6 @@ public class DeviceState {
     private static final long ACK_TIMEOUT_MS = 240_000;
     /** Интервал проверки просроченных pending ACK */
     private static final long ACK_SWEEP_INTERVAL_MS = 10_000;
-    /** Максимум сообщений в памяти на канал/DM (история загружается из БД) */
-    private static final int MAX_MESSAGES_IN_MEMORY = 100;
 
     // ═══════════════════════════════════════════════════════════
     //  Компоненты состояния (новая архитектура)
@@ -301,7 +298,6 @@ public class DeviceState {
 
     /** Удалить ноду из nodeDb и directMessages. */
     public void removeNode(int nodeNum) {
-        NodeData node = getNodeByNodeId(String.format("!%08x", nodeNum));
         nodeDatabase.removeNode(nodeNum);
     }
 

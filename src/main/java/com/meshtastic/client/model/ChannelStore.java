@@ -1,8 +1,6 @@
 package com.meshtastic.client.model;
 
 import org.meshtastic.proto.ChannelProtos;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -28,8 +26,6 @@ import java.util.Collections;
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class ChannelStore {
-
-    private static final Logger log = LoggerFactory.getLogger(ChannelStore.class);
 
     /** Список каналов ( synchronizedList для потокобезопасности) */
     private final List<ChannelProtos.Channel> channels = Collections.synchronizedList(new ArrayList<>());

@@ -7,7 +7,6 @@ import com.meshtastic.client.connection.FrameParser;
 import com.meshtastic.client.connection.KissFrameParser;
 import com.meshtastic.client.connection.ble.BleDevice;
 import com.meshtastic.client.connection.ble.BlePlatform;
-import com.meshtastic.client.connection.ble.BlePlatform.AdapterState;
 import com.meshtastic.client.connection.ble.BleProtocolProfile;
 import com.meshtastic.client.connection.ble.BleState;
 import com.meshtastic.client.model.ConnectionEntry;
@@ -719,8 +718,8 @@ class ConnectionManagerTest {
         }
 
         @Override
-        public AdapterState getAdapterState() {
-            return AdapterState.POWERED_ON;
+        public BlePlatform.AdapterState getAdapterState() {
+            return BlePlatform.AdapterState.POWERED_ON;
         }
 
         @Override
@@ -803,8 +802,8 @@ class ConnectionManagerTest {
         }
 
         @Override
-        public AdapterState getAdapterState() {
-            return AdapterState.POWERED_ON;
+        public BlePlatform.AdapterState getAdapterState() {
+            return BlePlatform.AdapterState.POWERED_ON;
         }
 
         @Override
@@ -898,8 +897,8 @@ class ConnectionManagerTest {
         }
 
         @Override
-        public AdapterState getAdapterState() {
-            return AdapterState.POWERED_ON;
+        public BlePlatform.AdapterState getAdapterState() {
+            return BlePlatform.AdapterState.POWERED_ON;
         }
 
         @Override

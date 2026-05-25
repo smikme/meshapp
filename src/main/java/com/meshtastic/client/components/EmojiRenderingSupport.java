@@ -134,8 +134,6 @@ public final class EmojiRenderingSupport {
     }
 
     private static Node createEmojiContent(Labeled labeled, String text, LabeledState state) {
-        state.flow = null;
-
         String emoji = singleLocalEmoji(text);
         if (emoji != null) {
             ImageView imageView = EmojiImageCache.createImageView(emoji, emojiSize(labeled));
@@ -148,7 +146,6 @@ public final class EmojiRenderingSupport {
         flow.setMouseTransparent(true);
         flow.setMinHeight(Region.USE_PREF_SIZE);
         applyFlowStyle(labeled, flow);
-        state.flow = flow;
         return flow;
     }
 
@@ -214,7 +211,6 @@ public final class EmojiRenderingSupport {
                 ? ContentDisplay.LEFT
                 : state.originalContentDisplay);
 
-        state.flow = null;
         state.wrapper = null;
         state.originalGraphic = null;
         state.originalContentDisplay = null;
@@ -230,7 +226,6 @@ public final class EmojiRenderingSupport {
     private static final class LabeledState {
         private Node originalGraphic;
         private ContentDisplay originalContentDisplay;
-        private EmojiTextFlow flow;
         private Node wrapper;
         private boolean overridden;
         private boolean updating;

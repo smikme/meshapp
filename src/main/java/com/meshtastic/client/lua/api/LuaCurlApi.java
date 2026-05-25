@@ -140,11 +140,10 @@ public final class LuaCurlApi {
             int status = response.statusCode();
             if (isRedirect(status)) {
                 String location = response.headers().firstValue("location").orElse(null);
-                try (InputStream ignored = response.body()) {
-                    if (location != null && redirect < MAX_REDIRECTS) {
-                        current = redirectRequest(current, status, location);
-                        continue;
-                    }
+                if (location != null && redirect < MAX_REDIRECTS) {
+                    response.body().close();
+                    current = redirectRequest(current, status, location);
+                    continue;
                 }
             }
 

@@ -40,7 +40,6 @@ import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
 import javafx.scene.control.MenuButton;
 import javafx.scene.control.CheckMenuItem;
-import javafx.scene.control.ScrollPane;
 import javafx.scene.control.Separator;
 import javafx.scene.control.Slider;
 import javafx.scene.control.Tab;
@@ -1082,7 +1081,7 @@ public class FormSetting extends Form {
                     setStyle("");
                 } else {
                     setText(item);
-                    TreeItem<ConfigTreeItem> treeItem = getTreeTableRow().getTreeItem();
+                    TreeItem<ConfigTreeItem> treeItem = getTableRow().getTreeItem();
                     if (treeItem != null && treeItem.getValue() != null && treeItem.getValue().isCategory()) {
                         setStyle("-fx-font-weight: bold;");
                     } else {
@@ -3273,7 +3272,6 @@ public class FormSetting extends Form {
                 checkBox.selectedProperty().addListener((obs, oldVal, newVal) -> item.setValue(newVal));
                 setGraphic(checkBox);
             } else if (type == EnumValueDescriptor.class && item.getEnumValues() != null) {
-                @SuppressWarnings("unchecked")
                 ComboBox<EnumValueDescriptor> comboBox = new ComboBox<>();
                 for (Object ev : item.getEnumValues()) {
                     if (ev instanceof EnumValueDescriptor evd) {

@@ -206,10 +206,6 @@ public final class ReconnectService {
      * BLE получает больший grace period, потому что после reboot устройство может
      * появиться в advertising state только через несколько секунд.
      */
-    private static long initialDelaySeconds(ConnectionEntry entry) {
-        return initialDelaySeconds(entry, false);
-    }
-
     private static long initialDelaySeconds(ConnectionEntry entry, boolean afterDeviceReboot) {
         if (entry != null && entry.getEffectiveType() == ConnectionType.BLE) {
             return afterDeviceReboot ? BLE_DEVICE_REBOOT_INITIAL_DELAY_SECONDS : BLE_INITIAL_DELAY_SECONDS;

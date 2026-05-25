@@ -42,7 +42,6 @@ public class ModalPane extends StackPane {
     private static ModalPane instance;
     private Node currentContent;
     private Runnable onHidden;
-    private boolean dismissOnBackdrop = true;
     private boolean dismissOnEscape = true;
 
     /** Scene-level фильтр: закрытие по клику вне контента */
@@ -101,7 +100,6 @@ public class ModalPane extends StackPane {
     public void show(Node content, boolean dismissOnBackdrop, boolean dismissOnEscape) {
         currentContent = content;
         onHidden = null;
-        this.dismissOnBackdrop = dismissOnBackdrop;
         this.dismissOnEscape = dismissOnEscape;
         getChildren().setAll(content);
         setVisible(true);
@@ -154,7 +152,6 @@ public class ModalPane extends StackPane {
             setVisible(false);
             getChildren().clear();
             currentContent = null;
-            dismissOnBackdrop = true;
             dismissOnEscape = true;
             Runnable hiddenCallback = onHidden;
             onHidden = null;

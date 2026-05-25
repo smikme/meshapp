@@ -30,7 +30,6 @@ public final class MeshCoreKissProtocolRuntime implements ProtocolRuntime<MeshCo
     private static final Logger log = LoggerFactory.getLogger(MeshCoreKissProtocolRuntime.class);
     private static final long READY_TIMEOUT_MS = 3_000L;
 
-    private final ProtocolRuntimeContext context;
     private final TransportConnection transport;
     private final MeshCoreKissState state = new MeshCoreKissState();
     private final CompletableFuture<MeshCoreKissState> readyFuture = new CompletableFuture<>();
@@ -39,7 +38,6 @@ public final class MeshCoreKissProtocolRuntime implements ProtocolRuntime<MeshCo
     private volatile boolean closed;
 
     MeshCoreKissProtocolRuntime(ProtocolRuntimeContext context) {
-        this.context = context;
         this.transport = context.transportConnection();
         this.scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "meshcore-kiss-runtime-" + context.connectionId());

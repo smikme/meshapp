@@ -109,7 +109,7 @@ public class BleConnection implements MeshtasticConnection {
 
         platform.setStateListener(state -> {
             switch (state) {
-                case BleState.Connected ignored -> {
+                case BleState.Connected _ -> {
                     connected = true;
                     if (suppressTerminalStateEvents.get()) {
                         return;
@@ -119,7 +119,7 @@ public class BleConnection implements MeshtasticConnection {
                         if (listener != null) { listener.onConnected(); }
                     }
                 }
-                case BleState.Disconnected ignored -> {
+                case BleState.Disconnected _ -> {
                     connected = false;
                     shutdownSendInfrastructure("BLE disconnected");
                     disposeOwnedPlatformAsync();

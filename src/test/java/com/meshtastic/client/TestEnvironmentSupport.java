@@ -2,7 +2,6 @@ package com.meshtastic.client;
 
 import javafx.application.Platform;
 
-import java.lang.reflect.Method;
 import java.lang.reflect.Field;
 import java.nio.file.Path;
 import java.util.Locale;

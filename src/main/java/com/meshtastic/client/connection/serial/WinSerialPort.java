@@ -36,7 +36,6 @@ class WinSerialPort implements NativeSerialPort {
     private static final int WAIT_OBJECT_0 = 0x00000000;
     private static final int WAIT_TIMEOUT = 0x00000102;
     private static final int WAIT_FAILED = 0xFFFFFFFF;
-    private static final int INFINITE = 0xFFFFFFFF;
 
     // OVERLAPPED structure: 5 fields (Internal, InternalHigh, Offset, OffsetHigh, hEvent)
     // На 64-bit Windows: ULONG_PTR (8) + ULONG_PTR (8) + DWORD (4) + DWORD (4) + HANDLE (8) = 32 bytes

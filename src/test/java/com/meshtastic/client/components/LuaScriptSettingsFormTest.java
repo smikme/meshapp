@@ -171,7 +171,6 @@ class LuaScriptSettingsFormTest {
                 "", 0L, 0L, 0L, "NEW", null);
     }
 
-    @SuppressWarnings("unchecked")
     private static ComboBox<?> nodeCombo(LuaScriptSettingsForm form) {
         try {
             Field field = LuaScriptSettingsForm.class.getDeclaredField("nodeCombo");

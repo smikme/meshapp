@@ -333,7 +333,7 @@ class MessageStoreTest {
         MeshMessage msg = createMessage("pending", 0, 400);
         store.registerPendingAck(400, msg);
         
-        MeshMessage result = store.resolvePendingAck(400);
+        store.resolvePendingAck(400);
         assertNull(store.resolvePendingAck(400));
     }
 

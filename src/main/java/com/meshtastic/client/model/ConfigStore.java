@@ -2,8 +2,6 @@ package com.meshtastic.client.model;
 
 import org.meshtastic.proto.ConfigProtos;
 import org.meshtastic.proto.ModuleConfigProtos;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -25,8 +23,6 @@ import java.util.List;
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class ConfigStore {
-
-    private static final Logger log = LoggerFactory.getLogger(ConfigStore.class);
 
     /** Основные конфиги устройства */
     private final List<ConfigProtos.Config> configs = Collections.synchronizedList(new ArrayList<>());

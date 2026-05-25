@@ -4,7 +4,6 @@ import com.meshtastic.client.connection.ble.BleDevice;
 import com.meshtastic.client.connection.ble.BlePlatform;
 import com.meshtastic.client.connection.ble.BlePlatformFactory;
 import com.meshtastic.client.connection.ble.BleProtocolProfile;
-import com.meshtastic.client.model.ProtocolType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

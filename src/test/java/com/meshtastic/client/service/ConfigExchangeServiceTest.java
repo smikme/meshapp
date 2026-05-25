@@ -479,8 +479,6 @@ class ConfigExchangeServiceTest {
 
     private static final class FakeConnection implements MeshtasticConnection {
         // Нам нужен только факт отправки want_config_id; входящие события вызываем напрямую у сервиса.
-        private Consumer<byte[]> dataListener;
-        private ConnectionListener connectionListener;
         private volatile Integer lastWantConfigId;
         private final List<Integer> sentWantConfigIds = new ArrayList<>();
         private final List<MeshProtos.MeshPacket> sentPackets = new ArrayList<>();
@@ -521,12 +519,10 @@ class ConfigExchangeServiceTest {
 
         @Override
         public void setDataListener(Consumer<byte[]> listener) {
-            this.dataListener = listener;
         }
 
         @Override
         public void setConnectionListener(ConnectionListener listener) {
-            this.connectionListener = listener;
         }
 
         int awaitLastWantConfigId() throws InterruptedException {

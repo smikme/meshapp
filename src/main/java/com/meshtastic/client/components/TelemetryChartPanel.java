@@ -193,7 +193,7 @@ public class TelemetryChartPanel extends VBox {
     private void refresh() {
         switch (bindingState) {
             case Bound bound -> refresh(bound);
-            case Unbound ignored -> {
+            case Unbound _ -> {
                 filteredEntries = List.of();
                 updateChart(List.of(), List.of());
             }
@@ -228,7 +228,7 @@ public class TelemetryChartPanel extends VBox {
     private Optional<Bound> currentBinding() {
         return switch (bindingState) {
             case Bound bound -> Optional.of(bound);
-            case Unbound ignored -> Optional.empty();
+            case Unbound _ -> Optional.empty();
         };
     }
 

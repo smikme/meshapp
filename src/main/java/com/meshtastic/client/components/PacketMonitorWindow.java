@@ -675,7 +675,7 @@ public final class PacketMonitorWindow {
         trackPacketTableColumnWidth(colTo, AppPreferences.KEY_PACKET_MONITOR_COLUMN_TO_WIDTH);
         trackPacketTableColumnWidth(colPayload, AppPreferences.KEY_PACKET_MONITOR_COLUMN_PAYLOAD_WIDTH);
 
-        table.getColumns().addAll(colTime, colType, colTransport, colFrom, colTo, colPayload);
+        table.getColumns().addAll(List.of(colTime, colType, colTransport, colFrom, colTo, colPayload));
         table.setRowFactory(tv -> new TableRow<>() {
             private final Tooltip rowTooltip = new Tooltip();
 
@@ -1644,11 +1644,6 @@ public final class PacketMonitorWindow {
     private boolean isTableInPagingUpZone() {
         return packetTableVerticalScrollBar == null
                 || packetTableVerticalScrollBar.getValue() <= TABLE_SCROLL_PAGE_UP_THRESHOLD;
-    }
-
-    private boolean isTableNearBottom() {
-        return packetTableVerticalScrollBar != null
-                && packetTableVerticalScrollBar.getValue() >= 1.0 - TABLE_SCROLL_EDGE_THRESHOLD;
     }
 
     private boolean isTableInPagingDownZone() {

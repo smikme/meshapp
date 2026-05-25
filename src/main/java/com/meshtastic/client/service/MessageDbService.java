@@ -909,10 +909,6 @@ public final class MessageDbService {
         }
     }
 
-    private boolean messageExistsInChat(String chatType, String chatKey, String ownerNodeId, long dbId) {
-        return messageExistsInChat(chatType, chatKey, ownerNodeId, null, dbId);
-    }
-
     private boolean messageExistsInChat(String chatType,
                                         String chatKey,
                                         String ownerNodeId,

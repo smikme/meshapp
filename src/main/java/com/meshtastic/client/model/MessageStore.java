@@ -6,7 +6,6 @@ import org.slf4j.LoggerFactory;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.function.Consumer;
 
 /**
  * Управление сообщениями Meshtastic-чата.
@@ -243,7 +242,6 @@ public class MessageStore {
         while (iterator.hasNext()) {
             var entry = iterator.next();
             iterator.remove();
-            int packetId = entry.getKey();
             MeshMessage msg = entry.getValue().message();
             msg.setStatus(MeshMessage.DeliveryStatus.FAILED);
             msg.setErrorReason(reason);

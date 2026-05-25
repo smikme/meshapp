@@ -89,10 +89,6 @@ class PosixSerialPort implements NativeSerialPort {
     private static final long OPOST_MAC = 0x00000001L;
     private static final long OPOST_LINUX = 0x00000001L;
 
-    // Baud rate constants
-    private static final long B115200_MAC = 115200L;
-    private static final long B115200_LINUX = 0x1002L;
-
     // poll
     private static final short POLLIN = 0x0001;
 
@@ -115,8 +111,6 @@ class PosixSerialPort implements NativeSerialPort {
     private static final int OFF_CFLAG_MAC = 16;
     private static final int OFF_LFLAG_MAC = 24;
     private static final int OFF_CC_MAC = 32;     // c_cc[20]
-    private static final int OFF_ISPEED_MAC = 56;
-    private static final int OFF_OSPEED_MAC = 64;
     private static final int VMIN_MAC = 16;        // c_cc index
     private static final int VTIME_MAC = 17;
 
