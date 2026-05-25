@@ -141,24 +141,52 @@ public final class LuaScriptService {
         return createScript(nextDefaultName(), DEFAULT_SCRIPT_CODE);
     }
 
+    public synchronized LuaScript createDraftScript() {
+        long now = nowSeconds();
+        return new LuaScript(
+                0L,
+                nextDefaultName(),
+                DEFAULT_SCRIPT_CODE,
+                true,
+                "",
+                LuaScript.BotType.AIR_BOT,
+                "",
+                now,
+                now,
+                0L,
+                "NEW",
+                null);
+    }
+
     public synchronized LuaScript createScript(String name, String code) {
+        return createScript(name, code, true, "", LuaScript.BotType.AIR_BOT, "");
+    }
+
+    public synchronized LuaScript createScript(String name,
+                                               String code,
+                                               boolean enabled,
+                                               String nodeId,
+                                               LuaScript.BotType botType,
+                                               String automationName) {
         if (dbConnection == null) {
             throw new IllegalStateException("Database connection is not available");
         }
+        LuaScript.BotType normalizedType = botType != null ? botType : LuaScript.BotType.AIR_BOT;
         long now = nowSeconds();
         try (PreparedStatement ps = dbConnection.prepareStatement("""
                 INSERT INTO lua_scripts (name, code, enabled, node_id, bot_type, automation_name,
                                          created_at, updated_at, last_status)
-                VALUES (?, ?, TRUE, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, Statement.RETURN_GENERATED_KEYS)) {
             ps.setString(1, normalizeName(name));
             ps.setString(2, code != null ? code : "");
-            ps.setString(3, "");
-            ps.setString(4, LuaScript.BotType.AIR_BOT.getStorageValue());
-            ps.setString(5, "");
-            ps.setLong(6, now);
+            ps.setBoolean(3, enabled);
+            ps.setString(4, normalizeNodeId(nodeId));
+            ps.setString(5, normalizedType.getStorageValue());
+            ps.setString(6, normalizeAutomationName(normalizedType, automationName));
             ps.setLong(7, now);
-            ps.setString(8, "NEW");
+            ps.setLong(8, now);
+            ps.setString(9, "NEW");
             ps.executeUpdate();
             try (ResultSet keys = ps.getGeneratedKeys()) {
                 if (keys.next()) {

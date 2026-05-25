@@ -175,6 +175,29 @@ protobuf {
 	}
 }
 
+def generatedResourcesDir = layout.buildDirectory.dir('generated/resources')
+def buildshipGeneratedClasspathDirs = [
+		layout.buildDirectory.dir('generated/source/proto/main/java'),
+		layout.buildDirectory.dir('generated/source/proto/test/java'),
+		generatedResourcesDir
+]
+
+// Buildship/JDTLS validates generated classpath entries before Gradle generation tasks run.
+// Keep those directories present even after a fresh checkout or IDE import.
+buildshipGeneratedClasspathDirs.each { it.get().asFile.mkdirs() }
+
+def prepareBuildshipGeneratedDirs = tasks.register('prepareBuildshipGeneratedDirs') {
+	doLast {
+		buildshipGeneratedClasspathDirs.each { it.get().asFile.mkdirs() }
+	}
+}
+
+['clean', 'generateProto', 'generateTestProto'].each { taskName ->
+	tasks.named(taskName) {
+		finalizedBy(prepareBuildshipGeneratedDirs)
+	}
+}
+
 jar {
 	manifest {
 		attributes(
@@ -189,8 +212,9 @@ jar {
 
 // Генерация version.properties при каждой сборке
 tasks.register('generateVersionProperties') {
-	def outputDir = layout.buildDirectory.dir('generated/resources')
+	def outputDir = generatedResourcesDir
 	outputs.dir(outputDir)
+	finalizedBy(prepareBuildshipGeneratedDirs)
 	// Всегда пересоздавать — версия может измениться (dirty/commit)
 	outputs.upToDateWhen { false }
 	doLast {
@@ -207,7 +231,7 @@ tasks.register('generateVersionProperties') {
 	}
 }
 
-sourceSets.main.resources.srcDir(layout.buildDirectory.dir('generated/resources'))
+sourceSets.main.resources.srcDir(generatedResourcesDir)
 tasks.named('processResources') { dependsOn 'generateVersionProperties' }
 
 def macOsJnaResourcePrefix = {

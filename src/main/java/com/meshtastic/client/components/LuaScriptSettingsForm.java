@@ -13,6 +13,7 @@ import javafx.scene.control.Button;
 import javafx.scene.control.CheckBox;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
+import javafx.scene.control.ListCell;
 import javafx.scene.control.Separator;
 import javafx.scene.control.TextField;
 import javafx.scene.layout.HBox;
@@ -34,6 +35,9 @@ import java.util.function.Consumer;
  */
 public final class LuaScriptSettingsForm extends VBox {
 
+    private static final double NODE_COMBO_HEIGHT = 34.0;
+    private static final int NODE_COMBO_VISIBLE_ROWS = 6;
+
     private final LuaScript script;
     private final TextField nameField = new TextField();
     private final CheckBox autostartCheck = new CheckBox("Автозапуск");
@@ -42,17 +46,31 @@ public final class LuaScriptSettingsForm extends VBox {
     private final Label automationNameLabel = new Label("Имя автоматизации");
     private final TextField automationNameField = new TextField();
     private final Label statusLabel = new Label();
+    private final ConnectionManager connectionManager = ConnectionManager.getInstance();
+    private final Runnable connectionListener = () -> Platform.runLater(this::refreshNodeChoices);
 
     private Consumer<Draft> onSave;
+    private boolean disposed;
+    private boolean updatingNodeChoices;
+    private boolean userSelectedNode;
 
     public LuaScriptSettingsForm(LuaScript script) {
         this.script = script;
         configureLayout();
+        connectionManager.addListener(connectionListener);
         populateFields();
     }
 
     public void setOnSave(Consumer<Draft> onSave) {
         this.onSave = onSave;
+    }
+
+    public void dispose() {
+        if (disposed) {
+            return;
+        }
+        disposed = true;
+        connectionManager.removeListener(connectionListener);
     }
 
     private void configureLayout() {
@@ -63,14 +81,36 @@ public final class LuaScriptSettingsForm extends VBox {
         setMaxHeight(Double.MAX_VALUE);
         getStyleClass().add("modal-side-panel");
 
-        Label title = new Label("Редактировать скрипт");
+        Label title = new Label(isNewScript() ? "Новый скрипт" : "Редактировать скрипт");
         title.getStyleClass().add("dialog-title");
 
         nameField.setPromptText("Имя скрипта");
         nameField.setMaxWidth(Double.MAX_VALUE);
 
         nodeCombo.setMaxWidth(Double.MAX_VALUE);
+        nodeCombo.setMinHeight(NODE_COMBO_HEIGHT);
+        nodeCombo.setPrefHeight(NODE_COMBO_HEIGHT);
+        nodeCombo.setMaxHeight(NODE_COMBO_HEIGHT);
+        nodeCombo.setVisibleRowCount(NODE_COMBO_VISIBLE_ROWS);
         nodeCombo.setPromptText("Выберите ноду");
+        nodeCombo.setConverter(new StringConverter<>() {
+            @Override
+            public String toString(NodeChoice choice) {
+                return choice != null ? choice.displayText() : "";
+            }
+
+            @Override
+            public NodeChoice fromString(String value) {
+                return null;
+            }
+        });
+        nodeCombo.setCellFactory(listView -> new NodeChoiceCell());
+        nodeCombo.setButtonCell(new NodeChoiceCell());
+        nodeCombo.valueProperty().addListener((obs, oldChoice, newChoice) -> {
+            if (!updatingNodeChoices) {
+                userSelectedNode = true;
+            }
+        });
 
         botTypeCombo.getItems().setAll(LuaScript.BotType.values());
         botTypeCombo.setMaxWidth(Double.MAX_VALUE);
@@ -125,16 +165,7 @@ public final class LuaScriptSettingsForm extends VBox {
         nameField.setText(script.getName() != null ? script.getName() : "");
         autostartCheck.setSelected(script.isAutostart());
 
-        List<NodeChoice> choices = loadNodeChoices(script);
-        nodeCombo.getItems().setAll(choices);
-        choices.stream()
-                .filter(choice -> sameNode(choice.nodeId(), script.getNodeId()))
-                .findFirst()
-                .ifPresentOrElse(nodeCombo.getSelectionModel()::select, () -> {
-                    if (!choices.isEmpty()) {
-                        nodeCombo.getSelectionModel().selectFirst();
-                    }
-                });
+        refreshNodeChoices();
 
         botTypeCombo.getSelectionModel().select(script.getBotType());
         automationNameField.setText(script.getAutomationName() != null ? script.getAutomationName() : "");
@@ -159,6 +190,70 @@ public final class LuaScriptSettingsForm extends VBox {
         if (onSave != null) {
             onSave.accept(draft);
         }
+    }
+
+    private void refreshNodeChoices() {
+        if (disposed) {
+            return;
+        }
+        String preferredNodeId = preferredNodeId(selectedNodeId());
+        List<NodeChoice> choices = loadNodeChoices(preferredNodeId);
+
+        updatingNodeChoices = true;
+        try {
+            nodeCombo.getItems().setAll(choices);
+            selectNodeChoice(choices, preferredNodeId);
+        } finally {
+            updatingNodeChoices = false;
+        }
+    }
+
+    private String preferredNodeId(String selectedNodeId) {
+        if (userSelectedNode) {
+            String selected = normalizeNodeId(selectedNodeId);
+            if (!selected.isBlank()) {
+                return selected;
+            }
+        }
+        String savedNodeId = normalizeNodeId(script.getNodeId());
+        if (!savedNodeId.isBlank()) {
+            return savedNodeId;
+        }
+        String activeNodeId = activeConnectionNodeId();
+        if (!activeNodeId.isBlank()) {
+            return activeNodeId;
+        }
+        return normalizeNodeId(selectedNodeId);
+    }
+
+    private void selectNodeChoice(List<NodeChoice> choices, String nodeId) {
+        String normalizedNodeId = normalizeNodeId(nodeId);
+        if (!normalizedNodeId.isBlank()) {
+            choices.stream()
+                    .filter(choice -> sameNode(choice.nodeId(), normalizedNodeId))
+                    .findFirst()
+                    .ifPresentOrElse(nodeCombo.getSelectionModel()::select, () -> selectFallbackNode(choices));
+            return;
+        }
+        selectFallbackNode(choices);
+    }
+
+    private void selectFallbackNode(List<NodeChoice> choices) {
+        if (!choices.isEmpty()) {
+            nodeCombo.getSelectionModel().selectFirst();
+        } else {
+            nodeCombo.getSelectionModel().clearSelection();
+        }
+    }
+
+    private String selectedNodeId() {
+        NodeChoice selected = nodeCombo.getValue();
+        return selected != null ? selected.nodeId() : "";
+    }
+
+    private String activeConnectionNodeId() {
+        ConnectionEntry entry = connectionManager.getSelectedConnectionEntry();
+        return entry != null ? resolveConnectionNodeId(entry) : "";
     }
 
     private Draft buildDraft() {
@@ -189,26 +284,44 @@ public final class LuaScriptSettingsForm extends VBox {
         return new Draft(name, autostartCheck.isSelected(), nodeChoice.nodeId(), botType, automationName);
     }
 
-    private static List<NodeChoice> loadNodeChoices(LuaScript script) {
-        ConnectionManager manager = ConnectionManager.getInstance();
+    private List<NodeChoice> loadNodeChoices(String preferredNodeId) {
         Map<String, NodeChoice> choices = new LinkedHashMap<>();
-        for (ConnectionEntry entry : manager.getEntries()) {
-            String nodeId = normalizeNodeId(firstNonBlank(manager.getOwnerNodeId(entry.getId()), entry.getNodeId()));
-            if (nodeId.isBlank()) {
-                continue;
-            }
-            choices.putIfAbsent(nodeId, new NodeChoice(nodeId, resolveNodeName(manager, entry, nodeId), entry.isConnected()));
+
+        ConnectionEntry selectedEntry = connectionManager.getSelectedConnectionEntry();
+        addNodeChoice(choices, selectedEntry);
+        for (ConnectionEntry entry : connectionManager.getEntries()) {
+            addNodeChoice(choices, entry);
         }
 
         String savedNodeId = normalizeNodeId(script.getNodeId());
         if (!savedNodeId.isBlank()) {
-            choices.putIfAbsent(savedNodeId, new NodeChoice(savedNodeId, "Сохраненная нода", false));
+            choices.putIfAbsent(savedNodeId, new NodeChoice(savedNodeId, "Сохраненная нода (" + savedNodeId + ")", false));
+        }
+
+        String preferred = normalizeNodeId(preferredNodeId);
+        if (!preferred.isBlank()) {
+            choices.putIfAbsent(preferred, new NodeChoice(preferred, "Нода (" + preferred + ")", false));
         }
         return List.copyOf(choices.values());
     }
 
-    private static String resolveNodeName(ConnectionManager manager, ConnectionEntry entry, String nodeId) {
-        DeviceState state = manager.getDeviceState(entry.getId());
+    private void addNodeChoice(Map<String, NodeChoice> choices, ConnectionEntry entry) {
+        if (entry == null) {
+            return;
+        }
+        String nodeId = resolveConnectionNodeId(entry);
+        if (nodeId.isBlank()) {
+            return;
+        }
+        choices.putIfAbsent(nodeId, new NodeChoice(nodeId, resolveNodeName(entry, nodeId), entry.isConnected()));
+    }
+
+    private String resolveConnectionNodeId(ConnectionEntry entry) {
+        return normalizeNodeId(firstNonBlank(connectionManager.getOwnerNodeId(entry.getId()), entry.getNodeId()));
+    }
+
+    private String resolveNodeName(ConnectionEntry entry, String nodeId) {
+        DeviceState state = connectionManager.getDeviceState(entry.getId());
         NodeData node = state != null ? state.getNodeDb().get(state.getMyNodeNum()) : null;
         String nodeName = node != null ? firstNonBlank(node.getLongName(), node.getShortName()) : "";
         if (nodeName.isBlank()) {
@@ -222,6 +335,10 @@ public final class LuaScriptSettingsForm extends VBox {
         if (modalPane != null) {
             modalPane.hide();
         }
+    }
+
+    private boolean isNewScript() {
+        return script.getId() <= 0;
     }
 
     private static boolean sameNode(String left, String right) {
@@ -247,9 +364,27 @@ public final class LuaScriptSettingsForm extends VBox {
                         String automationName) {}
 
     private record NodeChoice(String nodeId, String displayName, boolean connected) {
+        private String displayText() {
+            return displayName + (connected ? " · подключена" : "");
+        }
+
         @Override
         public String toString() {
-            return displayName + (connected ? " · подключена" : "");
+            return displayText();
+        }
+    }
+
+    private static final class NodeChoiceCell extends ListCell<NodeChoice> {
+        private NodeChoiceCell() {
+            setMinHeight(NODE_COMBO_HEIGHT);
+            setPrefHeight(NODE_COMBO_HEIGHT);
+            setMaxHeight(NODE_COMBO_HEIGHT);
+        }
+
+        @Override
+        protected void updateItem(NodeChoice item, boolean empty) {
+            super.updateItem(item, empty);
+            setText(empty || item == null ? null : item.displayText());
         }
     }
 }

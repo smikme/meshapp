@@ -262,13 +262,30 @@ public class FormMeshAppIde extends Form {
     }
 
     private void createScript() {
-        try {
-            LuaScript script = scriptService.createScript();
-            rebuildCards();
-            Toast.show(Toast.Type.SUCCESS, "Создан скрипт: " + script.getName());
-        } catch (Exception e) {
-            Toast.show(Toast.Type.ERROR, "Не удалось создать скрипт: " + e.getMessage());
+        ModalPane modalPane = ModalPane.getInstance();
+        if (modalPane == null) {
+            return;
         }
+        LuaScript draftScript = scriptService.createDraftScript();
+        LuaScriptSettingsForm form = new LuaScriptSettingsForm(draftScript);
+        form.setOnSave(draft -> {
+            try {
+                LuaScript created = scriptService.createScript(
+                        draft.name(),
+                        draftScript.getCode(),
+                        draft.autostart(),
+                        draft.nodeId(),
+                        draft.botType(),
+                        draft.automationName());
+                modalPane.hide();
+                rebuildCards();
+                Toast.show(Toast.Type.SUCCESS, "Создан скрипт: " + created.getName());
+            } catch (Exception e) {
+                Toast.show(Toast.Type.ERROR, "Не удалось создать скрипт: " + e.getMessage());
+            }
+        });
+        modalPane.show(form);
+        modalPane.setOnHidden(form::dispose);
     }
 
     private void toggleAutostart(LuaScript script) {
@@ -303,6 +320,7 @@ public class FormMeshAppIde extends Form {
             }
         });
         modalPane.show(form);
+        modalPane.setOnHidden(form::dispose);
     }
 
     private void runScript(LuaScript script) {
