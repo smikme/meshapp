@@ -28,8 +28,9 @@ import java.util.function.Consumer;
 /**
  * Боковая форма редактирования параметров Lua-скрипта MeshApp IDE.
  * <p>
- * Форма изменяет только метаданные сценария: имя, автозапуск, привязку к ноде,
- * тип бота и имя автоматизации. Исходный код остается в отдельном IDE-окне.
+ * Форма изменяет только метаданные сценария: имя, автозапуск, тип бота,
+ * имя автоматизации и, для эфирных ботов, привязку к ноде. Исходный код
+ * остается в отдельном IDE-окне.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -41,6 +42,7 @@ public final class LuaScriptSettingsForm extends VBox {
     private final LuaScript script;
     private final TextField nameField = new TextField();
     private final CheckBox autostartCheck = new CheckBox("Автозапуск");
+    private final Label nodeLabel = new Label("Нода исполнения");
     private final ComboBox<NodeChoice> nodeCombo = new ComboBox<>();
     private final ComboBox<LuaScript.BotType> botTypeCombo = new ComboBox<>();
     private final Label automationNameLabel = new Label("Имя автоматизации");
@@ -150,7 +152,7 @@ public final class LuaScriptSettingsForm extends VBox {
                 new Label("Имя скрипта"),
                 nameField,
                 autostartCheck,
-                new Label("Нода исполнения"),
+                nodeLabel,
                 nodeCombo,
                 new Label("Тип"),
                 botTypeCombo,
@@ -179,6 +181,10 @@ public final class LuaScriptSettingsForm extends VBox {
         automationNameLabel.setManaged(automation);
         automationNameField.setVisible(automation);
         automationNameField.setManaged(automation);
+        nodeLabel.setVisible(!automation);
+        nodeLabel.setManaged(!automation);
+        nodeCombo.setVisible(!automation);
+        nodeCombo.setManaged(!automation);
     }
 
     private void save() {
@@ -263,15 +269,18 @@ public final class LuaScriptSettingsForm extends VBox {
             return null;
         }
 
-        NodeChoice nodeChoice = nodeCombo.getValue();
-        if (nodeChoice == null || isBlank(nodeChoice.nodeId())) {
-            statusLabel.setText("Выберите ноду исполнения");
-            return null;
-        }
-
         LuaScript.BotType botType = botTypeCombo.getValue() != null
                 ? botTypeCombo.getValue()
                 : LuaScript.BotType.AIR_BOT;
+        NodeChoice nodeChoice = nodeCombo.getValue();
+        String nodeId = "";
+        if (botType != LuaScript.BotType.AUTOMATION_BOT) {
+            if (nodeChoice == null || isBlank(nodeChoice.nodeId())) {
+                statusLabel.setText("Выберите ноду исполнения");
+                return null;
+            }
+            nodeId = nodeChoice.nodeId();
+        }
         String automationName = automationNameField.getText() != null
                 ? automationNameField.getText().trim()
                 : "";
@@ -281,7 +290,7 @@ public final class LuaScriptSettingsForm extends VBox {
             return null;
         }
 
-        return new Draft(name, autostartCheck.isSelected(), nodeChoice.nodeId(), botType, automationName);
+        return new Draft(name, autostartCheck.isSelected(), nodeId, botType, automationName);
     }
 
     private List<NodeChoice> loadNodeChoices(String preferredNodeId) {

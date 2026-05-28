@@ -124,6 +124,24 @@ class LuaScriptRuntimeServiceTest {
     }
 
     @Test
+    void autostartScriptsForNodeIgnoresAutomationBots() {
+        LuaScript automation = scriptService.createScript(
+                "automation-autostart",
+                "mesh.kv.set('started_node', mesh.owner().node_id)",
+                true,
+                "!ABCDEF12",
+                LuaScript.BotType.AUTOMATION_BOT,
+                "@bot_1");
+
+        runtimeService.autostartScriptsForNode("!abcdef12", events::add);
+
+        assertEquals("", automation.getNodeId());
+        assertNull(scriptService.getKv(automation.getId(), "started_node"));
+        assertFalse(events.stream().anyMatch(event ->
+                event.type() == LuaScriptEvent.Type.STARTED && event.scriptId() == automation.getId()));
+    }
+
+    @Test
     void scriptSettingsArePersisted() {
         LuaScript script = scriptService.createScript("settings", "mesh.log('ok')");
 
@@ -137,14 +155,14 @@ class LuaScriptRuntimeServiceTest {
 
         assertEquals("settings-renamed", saved.getName());
         assertFalse(saved.isAutostart());
-        assertEquals("!abcdef12", saved.getNodeId());
+        assertEquals("", saved.getNodeId());
         assertEquals(LuaScript.BotType.AUTOMATION_BOT, saved.getBotType());
         assertEquals("@bot_1", saved.getAutomationName());
 
         LuaScript reloaded = scriptService.findScript(script.getId()).orElseThrow();
         assertEquals("settings-renamed", reloaded.getName());
         assertFalse(reloaded.isAutostart());
-        assertEquals("!abcdef12", reloaded.getNodeId());
+        assertEquals("", reloaded.getNodeId());
         assertEquals(LuaScript.BotType.AUTOMATION_BOT, reloaded.getBotType());
         assertEquals("@bot_1", reloaded.getAutomationName());
     }
@@ -168,7 +186,7 @@ class LuaScriptRuntimeServiceTest {
         assertEquals(draft.getName(), created.getName());
         assertEquals(draft.getCode(), created.getCode());
         assertFalse(created.isAutostart());
-        assertEquals("!abcdef12", created.getNodeId());
+        assertEquals("", created.getNodeId());
         assertEquals(LuaScript.BotType.AUTOMATION_BOT, created.getBotType());
         assertEquals("@bot_1", created.getAutomationName());
     }

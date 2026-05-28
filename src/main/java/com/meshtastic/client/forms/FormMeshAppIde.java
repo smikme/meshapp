@@ -409,6 +409,9 @@ public class FormMeshAppIde extends Form {
     }
 
     private String nodeSummary(LuaScript script) {
+        if (script.getBotType() == LuaScript.BotType.AUTOMATION_BOT) {
+            return "соединение: текущее при вызове";
+        }
         String nodeId = script.getNodeId();
         if (nodeId == null || nodeId.isBlank()) {
             return "нода: не выбрана";

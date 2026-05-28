@@ -181,7 +181,7 @@ public final class LuaScriptService {
             ps.setString(1, normalizeName(name));
             ps.setString(2, code != null ? code : "");
             ps.setBoolean(3, enabled);
-            ps.setString(4, normalizeNodeId(nodeId));
+            ps.setString(4, normalizeNodeId(normalizedType, nodeId));
             ps.setString(5, normalizedType.getStorageValue());
             ps.setString(6, normalizeAutomationName(normalizedType, automationName));
             ps.setLong(7, now);
@@ -233,7 +233,7 @@ public final class LuaScriptService {
             ps.setString(1, normalizeName(name));
             ps.setString(2, code != null ? code : "");
             ps.setBoolean(3, enabled);
-            ps.setString(4, normalizeNodeId(nodeId));
+            ps.setString(4, normalizeNodeId(normalizedType, nodeId));
             ps.setString(5, normalizedType.getStorageValue());
             ps.setString(6, normalizeAutomationName(normalizedType, automationName));
             ps.setLong(7, now);
@@ -417,6 +417,13 @@ public final class LuaScriptService {
     private static String normalizeNodeId(String nodeId) {
         String value = nodeId == null ? "" : nodeId.trim();
         return value.length() > 60 ? value.substring(0, 60) : value;
+    }
+
+    private static String normalizeNodeId(LuaScript.BotType botType, String nodeId) {
+        if (botType == LuaScript.BotType.AUTOMATION_BOT) {
+            return "";
+        }
+        return normalizeNodeId(nodeId);
     }
 
     private static String normalizeAutomationName(LuaScript.BotType botType, String automationName) {

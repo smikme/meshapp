@@ -80,7 +80,8 @@ public final class LuaScriptRuntimeService {
     }
 
     /**
-     * Запускает все Lua-скрипты с включенным автозапуском, привязанные к указанной ноде.
+     * Запускает все эфирные Lua-скрипты с включенным автозапуском,
+     * привязанные к указанной ноде.
      * <p>
      * Метод вызывается после готовности протокольного runtime-а подключения, чтобы
      * скрипт получал уже заполненное состояние ноды и корректный transport target.
@@ -95,6 +96,7 @@ public final class LuaScriptRuntimeService {
         }
         List<LuaScript> scripts = LuaScriptService.getInstance().listScripts().stream()
                 .filter(LuaScript::isAutostart)
+                .filter(script -> script.getBotType() != LuaScript.BotType.AUTOMATION_BOT)
                 .filter(script -> normalizedNodeId.equals(normalizeNodeId(script.getNodeId())))
                 .toList();
         for (LuaScript script : scripts) {

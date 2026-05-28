@@ -159,6 +159,26 @@ class LuaScriptSettingsFormTest {
         }
     }
 
+    @Test
+    void automationBotDoesNotRequireNodeChoice() {
+        onFxThread(() -> {
+            LuaScriptSettingsForm form = new LuaScriptSettingsForm(
+                    script("!04c5b420", LuaScript.BotType.AUTOMATION_BOT, "@auto"));
+            try {
+                ComboBox<?> combo = nodeCombo(form);
+                assertFalse(combo.isVisible());
+                assertFalse(combo.isManaged());
+
+                Object draft = buildDraft(form);
+                assertNotNull(draft);
+                assertEquals("", draftNodeId(draft));
+            } finally {
+                form.dispose();
+            }
+            return null;
+        });
+    }
+
     private static ConnectionEntry serialEntry(String name, String portName, String nodeId, boolean connected) {
         ConnectionEntry entry = new ConnectionEntry(name, portName, 115200, ConnectionType.SERIAL);
         entry.setNodeId(nodeId);
@@ -167,8 +187,12 @@ class LuaScriptSettingsFormTest {
     }
 
     private static LuaScript script(String nodeId) {
-        return new LuaScript(1L, "Script", "", true, nodeId, LuaScript.BotType.AIR_BOT,
-                "", 0L, 0L, 0L, "NEW", null);
+        return script(nodeId, LuaScript.BotType.AIR_BOT, "");
+    }
+
+    private static LuaScript script(String nodeId, LuaScript.BotType botType, String automationName) {
+        return new LuaScript(1L, "Script", "", true, nodeId, botType,
+                automationName, 0L, 0L, 0L, "NEW", null);
     }
 
     private static ComboBox<?> nodeCombo(LuaScriptSettingsForm form) {
@@ -190,6 +214,26 @@ class LuaScriptSettingsFormTest {
             return (String) method.invoke(value);
         } catch (ReflectiveOperationException e) {
             throw new AssertionError("Failed to read selected node id", e);
+        }
+    }
+
+    private static Object buildDraft(LuaScriptSettingsForm form) {
+        try {
+            Method method = LuaScriptSettingsForm.class.getDeclaredMethod("buildDraft");
+            method.setAccessible(true);
+            return method.invoke(form);
+        } catch (ReflectiveOperationException e) {
+            throw new AssertionError("Failed to build draft", e);
+        }
+    }
+
+    private static String draftNodeId(Object draft) {
+        try {
+            Method method = draft.getClass().getDeclaredMethod("nodeId");
+            method.setAccessible(true);
+            return (String) method.invoke(draft);
+        } catch (ReflectiveOperationException e) {
+            throw new AssertionError("Failed to read draft node id", e);
         }
     }
 
