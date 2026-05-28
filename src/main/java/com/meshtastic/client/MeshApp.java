@@ -3,27 +3,38 @@ package com.meshtastic.client;
 import com.meshtastic.client.components.CrashReportFlow;
 import com.meshtastic.client.components.EmojiImageCache;
 import com.meshtastic.client.components.EmojiRenderingSupport;
+import com.meshtastic.client.components.LuaDevWindow;
 import com.meshtastic.client.logging.JfrDiagnosticSupport;
 import com.meshtastic.client.logging.SessionCrashLogManager;
 import com.meshtastic.client.lua.LuaScriptRuntimeService;
 import com.meshtastic.client.modal.ModalPane;
 import com.meshtastic.client.platform.NativeWindowHelper;
 import com.meshtastic.client.platform.OsDetect;
+import com.meshtastic.client.service.BleDeviceDiscoveryService;
+import com.meshtastic.client.service.ConnectionManager;
 import com.meshtastic.client.service.DatabaseProvider;
 import com.meshtastic.client.service.MessageDbService;
 import com.meshtastic.client.service.NodeCacheService;
-import com.meshtastic.client.service.ConnectionManager;
-import com.meshtastic.client.service.BleDeviceDiscoveryService;
 import com.meshtastic.client.service.PacketMonitorService;
 import com.meshtastic.client.service.UpdateCheckService;
-import com.meshtastic.client.system.FormManager;
 import com.meshtastic.client.system.AppUi;
+import com.meshtastic.client.system.FormManager;
 import com.meshtastic.client.system.JavaFxAppUiBridge;
 import com.meshtastic.client.system.RootPane;
 import com.meshtastic.client.system.SingleInstanceGuard;
 import com.meshtastic.client.themes.ThemeManager;
 import com.meshtastic.client.tray.AppTrayManager;
 import com.meshtastic.client.utils.AppPreferences;
+import java.io.IOException;
+import java.nio.file.Path;
+import java.time.Duration;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.collections.ObservableList;
@@ -33,20 +44,8 @@ import javafx.scene.paint.Color;
 import javafx.scene.text.Font;
 import javafx.stage.Screen;
 import javafx.stage.Stage;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import java.io.IOException;
-import java.time.Duration;
-import java.nio.file.Path;
-import java.util.Objects;
-import java.util.Optional;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
 
 /**
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
@@ -60,12 +59,16 @@ public class MeshApp extends Application {
 
     private static String resolveVersion() {
         // 1. version.properties (генерируется Gradle при каждой сборке)
-        try (var is = MeshApp.class.getResourceAsStream("/version.properties")) {
+        try (
+            var is = MeshApp.class.getResourceAsStream("/version.properties")
+        ) {
             if (is != null) {
                 var props = new java.util.Properties();
                 props.load(is);
                 String v = props.getProperty("version");
-                if (v != null && !v.isBlank()) { return v; }
+                if (v != null && !v.isBlank()) {
+                    return v;
+                }
             }
         } catch (Exception ignored) {}
         // 2. MANIFEST.MF (при запуске из jar)
@@ -74,7 +77,9 @@ public class MeshApp extends Application {
     }
 
     private static int resolveVersionCode() {
-        try (var is = MeshApp.class.getResourceAsStream("/version.properties")) {
+        try (
+            var is = MeshApp.class.getResourceAsStream("/version.properties")
+        ) {
             if (is != null) {
                 var props = new java.util.Properties();
                 props.load(is);
@@ -89,25 +94,33 @@ public class MeshApp extends Application {
 
     private static void logStartupContext() {
         log.info(
-                "Starting MeshApp version {} (build {}) on {} {} ({})",
-                APPLICATION_VERSION,
-                VERSION_CODE,
-                System.getProperty("os.name", "unknown").trim(),
-                System.getProperty("os.version", "unknown").trim(),
-                System.getProperty("os.arch", "unknown").trim()
+            "Starting MeshApp version {} (build {}) on {} {} ({})",
+            APPLICATION_VERSION,
+            VERSION_CODE,
+            System.getProperty("os.name", "unknown").trim(),
+            System.getProperty("os.version", "unknown").trim(),
+            System.getProperty("os.arch", "unknown").trim()
         );
     }
 
     private static Stage primaryStage;
     private static final Object SINGLE_INSTANCE_LOCK = new Object();
-    private static final long UI_THREAD_STALL_THRESHOLD_NANOS = TimeUnit.SECONDS.toNanos(15);
-    private static final long UI_THREAD_STALL_CAPTURE_COOLDOWN_NANOS = TimeUnit.MINUTES.toNanos(1);
+    private static final long UI_THREAD_STALL_THRESHOLD_NANOS =
+        TimeUnit.SECONDS.toNanos(15);
+    private static final long UI_THREAD_STALL_CAPTURE_COOLDOWN_NANOS =
+        TimeUnit.MINUTES.toNanos(1);
 
     private static SingleInstanceGuard singleInstanceGuard;
 
-    private final AtomicBoolean deferredStartupTasksStarted = new AtomicBoolean(false);
-    private final AtomicLong lastUiHeartbeatNanos = new AtomicLong(System.nanoTime());
-    private final AtomicBoolean uiFreezeCaptureInProgress = new AtomicBoolean(false);
+    private final AtomicBoolean deferredStartupTasksStarted = new AtomicBoolean(
+        false
+    );
+    private final AtomicLong lastUiHeartbeatNanos = new AtomicLong(
+        System.nanoTime()
+    );
+    private final AtomicBoolean uiFreezeCaptureInProgress = new AtomicBoolean(
+        false
+    );
 
     private ScheduledExecutorService uiWatchdog;
     private volatile long lastUiFreezeCaptureNanos;
@@ -117,30 +130,41 @@ public class MeshApp extends Application {
         primaryStage = stage;
         AppUi.install(new JavaFxAppUiBridge());
 
-        Font.loadFont(getClass().getResourceAsStream("/fonts/Roboto-Regular.ttf"), 13);
-        Font.loadFont(getClass().getResourceAsStream("/fonts/Roboto-Bold.ttf"), 13);
+        Font.loadFont(
+            getClass().getResourceAsStream("/fonts/Roboto-Regular.ttf"),
+            13
+        );
+        Font.loadFont(
+            getClass().getResourceAsStream("/fonts/Roboto-Bold.ttf"),
+            13
+        );
 
         AppPreferences.init();
-        
+
         // Предзагрузить часто используемые эмодзи для ускорения отображения
         EmojiImageCache.preloadCommonEmojis();
-        
+
         // Инициализировать MessageDbService и выполнить миграцию JSON → H2 при первом запуске
         MessageDbService.getInstance().migrateFromJsonHistory();
         MessageDbService.getInstance().markStaleSendingAsFailed();
-        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-            MessageDbService.closeIfInitialized();
-            NodeCacheService.closeIfInitialized();
-            PacketMonitorService.closeIfInitialized();
-            DatabaseProvider.close();
-        }));
+        Runtime.getRuntime().addShutdownHook(
+            new Thread(() -> {
+                MessageDbService.closeIfInitialized();
+                NodeCacheService.closeIfInitialized();
+                PacketMonitorService.closeIfInitialized();
+                DatabaseProvider.close();
+            })
+        );
 
         // Seamless frame: StageStyle.UNIFIED ДО создания сцены
         NativeWindowHelper.prepareStage(stage);
 
         RootPane rootPane = new RootPane();
         Scene scene = new Scene(rootPane, 1010, 750);
-        if (!AppPreferences.isDisableEffectsEffective() && OsDetect.supportsSeamlessFrame()) {
+        if (
+            !AppPreferences.isDisableEffectsEffective() &&
+            OsDetect.supportsSeamlessFrame()
+        ) {
             // Для transparent stage fill должен быть прозрачным ещё до первого show(),
             // иначе первый кадр успевает отрисоваться как opaque и backdrop "просыпается"
             // только после следующего крупного repaint (например, смены темы).
@@ -157,13 +181,35 @@ public class MeshApp extends Application {
         // На macOS иконка берётся из .app bundle (MeshApp.icns в Contents/Resources).
         // На Windows/Linux — через stage.getIcons().
         if (!OsDetect.isMacOs()) {
-            stage.getIcons().addAll(
-                    new Image(Objects.requireNonNull(getClass().getResourceAsStream("/logo/icon_256.png"))),
-                    new Image(Objects.requireNonNull(getClass().getResourceAsStream("/logo/icon_128.png"))),
-                    new Image(Objects.requireNonNull(getClass().getResourceAsStream("/logo/icon_64.png"))),
-                    new Image(Objects.requireNonNull(getClass().getResourceAsStream("/logo/icon_32.png"))),
-                    new Image(Objects.requireNonNull(getClass().getResourceAsStream("/logo/icon_16.png")))
-            );
+            stage
+                .getIcons()
+                .addAll(
+                    new Image(
+                        Objects.requireNonNull(
+                            getClass().getResourceAsStream("/logo/icon_256.png")
+                        )
+                    ),
+                    new Image(
+                        Objects.requireNonNull(
+                            getClass().getResourceAsStream("/logo/icon_128.png")
+                        )
+                    ),
+                    new Image(
+                        Objects.requireNonNull(
+                            getClass().getResourceAsStream("/logo/icon_64.png")
+                        )
+                    ),
+                    new Image(
+                        Objects.requireNonNull(
+                            getClass().getResourceAsStream("/logo/icon_32.png")
+                        )
+                    ),
+                    new Image(
+                        Objects.requireNonNull(
+                            getClass().getResourceAsStream("/logo/icon_16.png")
+                        )
+                    )
+                );
         }
 
         stage.setScene(scene);
@@ -201,7 +247,9 @@ public class MeshApp extends Application {
     }
 
     private void restoreWindowBounds(Stage stage) {
-        if (!AppPreferences.hasWindowBounds()) { return; }
+        if (!AppPreferences.hasWindowBounds()) {
+            return;
+        }
 
         double x = AppPreferences.getWindowX();
         double y = AppPreferences.getWindowY();
@@ -209,8 +257,15 @@ public class MeshApp extends Application {
         double h = AppPreferences.getWindowHeight();
 
         // Проверить, что окно попадает хотя бы частично на один из доступных экранов
-        ObservableList<Screen> screens = Screen.getScreensForRectangle(x, y, w, h);
-        if (screens.isEmpty()) { return; }
+        ObservableList<Screen> screens = Screen.getScreensForRectangle(
+            x,
+            y,
+            w,
+            h
+        );
+        if (screens.isEmpty()) {
+            return;
+        }
 
         stage.setX(x);
         stage.setY(y);
@@ -268,34 +323,64 @@ public class MeshApp extends Application {
             return;
         }
 
-        AtomicBoolean nativeMaximizeNormalizationInProgress = new AtomicBoolean(false);
+        AtomicBoolean nativeMaximizeNormalizationInProgress = new AtomicBoolean(
+            false
+        );
 
-        stage.maximizedProperty().addListener((obs, wasMaximized, isMaximized) -> {
-            if (!isMaximized) {
-                return;
-            }
-            Platform.runLater(() -> normalizeNativeMaximize(stage, rootPane, nativeMaximizeNormalizationInProgress));
-        });
-
-        stage.iconifiedProperty().addListener((obs, wasIconified, isIconified) -> {
-            if (isIconified) {
-                return;
-            }
-            Platform.runLater(() -> {
-                normalizeNativeMaximize(stage, rootPane, nativeMaximizeNormalizationInProgress);
-                if (OsDetect.isWindows() && stage.isShowing()) {
-                    NativeWindowHelper.applyNativeEffects(stage, AppPreferences.isDarkMode());
+        stage
+            .maximizedProperty()
+            .addListener((obs, wasMaximized, isMaximized) -> {
+                if (!isMaximized) {
+                    return;
                 }
+                Platform.runLater(() ->
+                    normalizeNativeMaximize(
+                        stage,
+                        rootPane,
+                        nativeMaximizeNormalizationInProgress
+                    )
+                );
             });
-        });
+
+        stage
+            .iconifiedProperty()
+            .addListener((obs, wasIconified, isIconified) -> {
+                if (isIconified) {
+                    return;
+                }
+                Platform.runLater(() -> {
+                    normalizeNativeMaximize(
+                        stage,
+                        rootPane,
+                        nativeMaximizeNormalizationInProgress
+                    );
+                    if (OsDetect.isWindows() && stage.isShowing()) {
+                        NativeWindowHelper.applyNativeEffects(
+                            stage,
+                            AppPreferences.isDarkMode()
+                        );
+                    }
+                });
+            });
     }
 
-    private void normalizeNativeMaximize(Stage stage, RootPane rootPane, AtomicBoolean normalizationInProgress) {
-        if (normalizationInProgress.get() || !stage.isShowing() || stage.isIconified() || !stage.isMaximized()) {
+    private void normalizeNativeMaximize(
+        Stage stage,
+        RootPane rootPane,
+        AtomicBoolean normalizationInProgress
+    ) {
+        if (
+            normalizationInProgress.get() ||
+            !stage.isShowing() ||
+            stage.isIconified() ||
+            !stage.isMaximized()
+        ) {
             return;
         }
 
-        log.warn("Detected native maximize on a custom-framed window; translating to custom maximize");
+        log.warn(
+            "Detected native maximize on a custom-framed window; translating to custom maximize"
+        );
         normalizationInProgress.set(true);
         stage.setMaximized(false);
         Platform.runLater(() -> {
@@ -314,6 +399,7 @@ public class MeshApp extends Application {
 
     @Override
     public void stop() {
+        LuaDevWindow.saveWindowStateIfOpen();
         savePrimaryWindowStateIfPossible();
         stopUiWatchdog();
         AppTrayManager.getInstance().dispose();
@@ -335,12 +421,19 @@ public class MeshApp extends Application {
         if (!acquireSingleInstanceGuard()) {
             return;
         }
-        if (System.getProperty("prism.order") == null && AppPreferences.isSoftwareRendering()) {
+        if (
+            System.getProperty("prism.order") == null &&
+            AppPreferences.isSoftwareRendering()
+        ) {
             System.setProperty("prism.order", "sw");
         }
         Thread.setDefaultUncaughtExceptionHandler((thread, throwable) -> {
             SessionCrashLogManager.captureUncaughtException(thread, throwable);
-            log.error("Uncaught exception in thread '{}'", thread.getName(), throwable);
+            log.error(
+                "Uncaught exception in thread '{}'",
+                thread.getName(),
+                throwable
+            );
         });
         logStartupContext();
         launch(args);
@@ -359,7 +452,8 @@ public class MeshApp extends Application {
                 return true;
             }
             try {
-                Optional<SingleInstanceGuard> guard = SingleInstanceGuard.acquire(resolveAppDirectory());
+                Optional<SingleInstanceGuard> guard =
+                    SingleInstanceGuard.acquire(resolveAppDirectory());
                 if (guard.isEmpty()) {
                     return false;
                 }
@@ -368,7 +462,10 @@ public class MeshApp extends Application {
             } catch (IOException e) {
                 // Не блокируем запуск из-за проблем с ~/.meshapp: это лучше, чем
                 // оставить пользователя без возможности открыть приложение.
-                log.warn("Failed to initialize single-instance guard; continuing without duplicate launch protection", e);
+                log.warn(
+                    "Failed to initialize single-instance guard; continuing without duplicate launch protection",
+                    e
+                );
                 return true;
             }
         }
@@ -380,7 +477,9 @@ public class MeshApp extends Application {
             guard = singleInstanceGuard;
         }
         if (guard != null) {
-            guard.setActivationHandler(() -> AppTrayManager.getInstance().restoreWindow());
+            guard.setActivationHandler(() ->
+                AppTrayManager.getInstance().restoreWindow()
+            );
         }
     }
 
@@ -404,13 +503,18 @@ public class MeshApp extends Application {
     }
 
     private void handlePendingCrashLog(Stage stage) {
-        Optional<Path> pendingCrashLog = SessionCrashLogManager.peekPendingCrashLog();
+        Optional<Path> pendingCrashLog =
+            SessionCrashLogManager.peekPendingCrashLog();
         if (pendingCrashLog.isEmpty()) {
             runDeferredStartupTasks();
             return;
         }
 
-        CrashReportFlow.showPendingCrashPrompt(stage, pendingCrashLog.get(), this::runDeferredStartupTasks);
+        CrashReportFlow.showPendingCrashPrompt(
+            stage,
+            pendingCrashLog.get(),
+            this::runDeferredStartupTasks
+        );
     }
 
     private void runDeferredStartupTasks() {
@@ -430,14 +534,26 @@ public class MeshApp extends Application {
             t.setDaemon(true);
             return t;
         });
-        uiWatchdog.scheduleAtFixedRate(() -> {
-            try {
-                Platform.runLater(() -> lastUiHeartbeatNanos.set(System.nanoTime()));
-            } catch (IllegalStateException ignored) {
-                // JavaFX toolkit is already shutting down.
-            }
-        }, 0, 1, TimeUnit.SECONDS);
-        uiWatchdog.scheduleAtFixedRate(this::checkUiThreadHealth, 5, 5, TimeUnit.SECONDS);
+        uiWatchdog.scheduleAtFixedRate(
+            () -> {
+                try {
+                    Platform.runLater(() ->
+                        lastUiHeartbeatNanos.set(System.nanoTime())
+                    );
+                } catch (IllegalStateException ignored) {
+                    // JavaFX toolkit is already shutting down.
+                }
+            },
+            0,
+            1,
+            TimeUnit.SECONDS
+        );
+        uiWatchdog.scheduleAtFixedRate(
+            this::checkUiThreadHealth,
+            5,
+            5,
+            TimeUnit.SECONDS
+        );
     }
 
     private void stopUiWatchdog() {
@@ -455,7 +571,10 @@ public class MeshApp extends Application {
         }
 
         long now = System.nanoTime();
-        if (now - lastUiFreezeCaptureNanos < UI_THREAD_STALL_CAPTURE_COOLDOWN_NANOS) {
+        if (
+            now - lastUiFreezeCaptureNanos <
+            UI_THREAD_STALL_CAPTURE_COOLDOWN_NANOS
+        ) {
             return;
         }
         if (!uiFreezeCaptureInProgress.compareAndSet(false, true)) {
@@ -464,7 +583,9 @@ public class MeshApp extends Application {
 
         lastUiFreezeCaptureNanos = now;
         try {
-            SessionCrashLogManager.captureUiFreezeDiagnostic(Duration.ofNanos(stallNanos));
+            SessionCrashLogManager.captureUiFreezeDiagnostic(
+                Duration.ofNanos(stallNanos)
+            );
         } catch (Exception e) {
             log.warn("Failed to capture JavaFX thread stall diagnostics", e);
         } finally {

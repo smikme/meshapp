@@ -29,6 +29,7 @@ import javafx.geometry.Insets;
 import javafx.geometry.Orientation;
 import javafx.geometry.Point2D;
 import javafx.geometry.Pos;
+import javafx.geometry.Rectangle2D;
 import javafx.scene.Node;
 import javafx.scene.Scene;
 import javafx.scene.control.Alert;
@@ -41,6 +42,7 @@ import javafx.scene.control.IndexRange;
 import javafx.scene.control.Label;
 import javafx.scene.control.MenuItem;
 import javafx.scene.control.OverrunStyle;
+import javafx.scene.control.ScrollPane;
 import javafx.scene.control.Separator;
 import javafx.scene.control.SplitPane;
 import javafx.scene.control.TableCell;
@@ -64,6 +66,7 @@ import javafx.scene.text.Text;
 import javafx.scene.text.TextFlow;
 import javafx.stage.Stage;
 import javafx.stage.StageStyle;
+import javafx.stage.Screen;
 import org.fxmisc.flowless.VirtualizedScrollPane;
 import org.fxmisc.richtext.CodeArea;
 import org.fxmisc.richtext.LineNumberFactory;
@@ -82,6 +85,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.function.DoubleConsumer;
 import java.util.function.IntFunction;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -99,7 +103,13 @@ public final class LuaDevWindow {
 
     private static final double DEFAULT_WINDOW_WIDTH = 1280;
     private static final double DEFAULT_WINDOW_HEIGHT = 860;
+    private static final double MIN_WINDOW_WIDTH = 900;
+    private static final double MIN_WINDOW_HEIGHT = 620;
+    private static final double WINDOW_VISIBLE_MARGIN_X = 96;
+    private static final double WINDOW_VISIBLE_MARGIN_Y = 72;
     private static final double COMPLETION_MIN_WIDTH = 260.0;
+    private static final double COMPLETION_MIN_VISIBLE_HEIGHT = 36.0;
+    private static final double COMPLETION_VERTICAL_GAP = 2.0;
     private static final int MAX_COMPLETIONS = 9;
     private static final Gson PRETTY_GSON = new GsonBuilder().setPrettyPrinting().create();
     private static final DateTimeFormatter TIME_FORMAT =
@@ -130,8 +140,13 @@ public final class LuaDevWindow {
     private static final Map<Long, Set<Integer>> BREAKPOINTS_BY_SCRIPT = new HashMap<>();
 
     private final VBox completionBox = new VBox();
+    private final VBox completionRows = new VBox();
+    private final ScrollPane completionScrollPane = new ScrollPane(completionRows);
 
     private Stage stage;
+    private SplitPane mainSplit;
+    private SplitPane editorSplit;
+    private SplitPane infoSplit;
     private CodeArea codeArea;
     private StackPane editorStack;
     private TextArea consoleArea;
@@ -153,6 +168,13 @@ public final class LuaDevWindow {
     private boolean draggingWindow;
     private boolean nativeEffectsApplied;
     private boolean closingWindow;
+    private boolean restoreMaximizedOnShow;
+    private boolean restoringDividerPositions;
+    private boolean dividerPositionTrackingEnabled;
+    private double normalWindowX = Double.NaN;
+    private double normalWindowY = Double.NaN;
+    private double normalWindowWidth = DEFAULT_WINDOW_WIDTH;
+    private double normalWindowHeight = DEFAULT_WINDOW_HEIGHT;
     private List<LuaCompletionEngine.CompletionItem> visibleCompletions = List.of();
     private int completionReplaceStart;
     private int completionReplaceEnd;
@@ -177,6 +199,17 @@ public final class LuaDevWindow {
         }
     }
 
+    /**
+     * Сохраняет геометрию и компоновку IDE, если окно было создано в текущей сессии.
+     */
+    public static void saveWindowStateIfOpen() {
+        if (Platform.isFxApplicationThread()) {
+            saveWindowStateIfOpenInternal();
+        } else {
+            Platform.runLater(LuaDevWindow::saveWindowStateIfOpenInternal);
+        }
+    }
+
     private static void showWindowInternal(long scriptId) {
         if (instance == null) {
             instance = new LuaDevWindow();
@@ -185,10 +218,24 @@ public final class LuaDevWindow {
         instance.openScript(scriptId);
     }
 
+    private static void saveWindowStateIfOpenInternal() {
+        if (instance != null && instance.stage != null) {
+            instance.saveWindowState();
+        }
+    }
+
     private void showStage() {
         boolean wasShowing = stage.isShowing();
         if (!wasShowing) {
             stage.show();
+            restoreDividerPositionsAfterFirstLayout();
+            if (restoreMaximizedOnShow) {
+                Platform.runLater(() -> {
+                    stage.setMaximized(true);
+                    restoreDividerPositionsAfterFirstLayout();
+                });
+                restoreMaximizedOnShow = false;
+            }
         }
         if (!wasShowing && useCustomFrame() && !nativeEffectsApplied) {
             NativeWindowHelper.applyNativeEffects(stage, AppPreferences.isDarkMode());
@@ -244,6 +291,9 @@ public final class LuaDevWindow {
         ThemeManager.applyTheme(scene, AppPreferences.isDarkMode());
         EmojiRenderingSupport.install(scene);
         stage.setScene(scene);
+        restoreWindowState();
+        trackWindowBounds();
+        stage.setOnHiding(event -> saveWindowState());
     }
 
     private boolean useCustomFrame() {
@@ -322,6 +372,201 @@ public final class LuaDevWindow {
         stage.setMaximized(!stage.isMaximized());
     }
 
+    private void restoreWindowState() {
+        if (!AppPreferences.hasLuaDevWindowBounds()) {
+            normalWindowWidth = DEFAULT_WINDOW_WIDTH;
+            normalWindowHeight = DEFAULT_WINDOW_HEIGHT;
+            return;
+        }
+
+        WindowBounds bounds = resolveVisibleWindowBounds(
+                AppPreferences.getLuaDevWindowX(),
+                AppPreferences.getLuaDevWindowY(),
+                AppPreferences.getLuaDevWindowWidth(),
+                AppPreferences.getLuaDevWindowHeight());
+        applyWindowBounds(bounds);
+        restoreMaximizedOnShow = AppPreferences.isLuaDevWindowMaximized();
+    }
+
+    private void trackWindowBounds() {
+        rememberNormalWindowBounds();
+        stage.xProperty().addListener((obs, oldValue, newValue) -> rememberNormalWindowBounds());
+        stage.yProperty().addListener((obs, oldValue, newValue) -> rememberNormalWindowBounds());
+        stage.widthProperty().addListener((obs, oldValue, newValue) -> rememberNormalWindowBounds());
+        stage.heightProperty().addListener((obs, oldValue, newValue) -> rememberNormalWindowBounds());
+        stage.maximizedProperty().addListener((obs, oldValue, maximized) -> {
+            if (!maximized) {
+                Platform.runLater(this::rememberNormalWindowBounds);
+            }
+        });
+    }
+
+    private void rememberNormalWindowBounds() {
+        if (stage == null || stage.isMaximized() || stage.isIconified()) {
+            return;
+        }
+        double width = stage.getWidth();
+        double height = stage.getHeight();
+        if (!hasUsableWindowSize(width, height)) {
+            return;
+        }
+        normalWindowX = stage.getX();
+        normalWindowY = stage.getY();
+        normalWindowWidth = width;
+        normalWindowHeight = height;
+    }
+
+    private void saveWindowState() {
+        if (stage == null) {
+            return;
+        }
+        rememberNormalWindowBounds();
+        boolean maximized = stage.isMaximized();
+        WindowBounds visibleBounds = resolveVisibleWindowBounds(
+                Double.isNaN(normalWindowX) ? stage.getX() : normalWindowX,
+                Double.isNaN(normalWindowY) ? stage.getY() : normalWindowY,
+                hasUsableWindowSize(normalWindowWidth, normalWindowHeight) ? normalWindowWidth : stage.getWidth(),
+                hasUsableWindowSize(normalWindowWidth, normalWindowHeight) ? normalWindowHeight : stage.getHeight());
+        saveDividerPositions();
+        AppPreferences.saveLuaDevWindowBounds(
+                visibleBounds.x(),
+                visibleBounds.y(),
+                visibleBounds.width(),
+                visibleBounds.height(),
+                maximized);
+    }
+
+    private void saveDividerPositions() {
+        AppPreferences.saveLuaDevDividerPositions(
+                dividerPosition(mainSplit, AppPreferences.getLuaDevMainDividerPos()),
+                dividerPosition(editorSplit, AppPreferences.getLuaDevEditorDividerPos()),
+                dividerPosition(infoSplit, AppPreferences.getLuaDevInfoDividerPos())
+        );
+    }
+
+    private void restoreDividerPositionsAfterFirstLayout() {
+        dividerPositionTrackingEnabled = false;
+        Platform.runLater(() -> Platform.runLater(this::restoreDividerPositions));
+    }
+
+    private void restoreDividerPositions() {
+        restoringDividerPositions = true;
+        try {
+            applyDividerPosition(mainSplit, AppPreferences.getLuaDevMainDividerPos());
+            applyDividerPosition(editorSplit, AppPreferences.getLuaDevEditorDividerPos());
+            applyDividerPosition(infoSplit, AppPreferences.getLuaDevInfoDividerPos());
+        } finally {
+            restoringDividerPositions = false;
+            dividerPositionTrackingEnabled = true;
+        }
+    }
+
+    private void configurePersistentDivider(SplitPane splitPane, double position, DoubleConsumer saveAction) {
+        applyDividerPosition(splitPane, position);
+        splitPane.getDividers().getFirst().positionProperty().addListener((obs, oldValue, newValue) -> {
+            if (!dividerPositionTrackingEnabled || restoringDividerPositions || stage == null || !stage.isShowing()) {
+                return;
+            }
+            saveAction.accept(normalizeDividerPosition(newValue.doubleValue(), oldValue.doubleValue()));
+        });
+    }
+
+    private static void applyDividerPosition(SplitPane splitPane, double position) {
+        if (splitPane != null && !splitPane.getDividers().isEmpty()) {
+            splitPane.setDividerPositions(normalizeDividerPosition(position, 0.5));
+        }
+    }
+
+    private static double dividerPosition(SplitPane splitPane, double fallback) {
+        if (splitPane == null || splitPane.getDividers().isEmpty()) {
+            return normalizeDividerPosition(fallback, 0.5);
+        }
+        return normalizeDividerPosition(splitPane.getDividers().getFirst().getPosition(), fallback);
+    }
+
+    private static double normalizeDividerPosition(double position, double fallback) {
+        if (!Double.isFinite(position)) {
+            return Double.isFinite(fallback) ? clamp(fallback, 0.0, 1.0) : 0.5;
+        }
+        return clamp(position, 0.0, 1.0);
+    }
+
+    private void applyWindowBounds(WindowBounds bounds) {
+        if (bounds == null) {
+            return;
+        }
+        stage.setX(bounds.x());
+        stage.setY(bounds.y());
+        stage.setWidth(bounds.width());
+        stage.setHeight(bounds.height());
+        normalWindowX = bounds.x();
+        normalWindowY = bounds.y();
+        normalWindowWidth = bounds.width();
+        normalWindowHeight = bounds.height();
+    }
+
+    private static WindowBounds resolveVisibleWindowBounds(double x, double y, double width, double height) {
+        List<Rectangle2D> visibleAreas = Screen.getScreens().stream()
+                .map(Screen::getVisualBounds)
+                .toList();
+        Rectangle2D fallbackArea = visibleAreas.isEmpty()
+                ? new Rectangle2D(0, 0, DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT)
+                : visibleAreas.getFirst();
+        Rectangle2D targetArea = visibleAreas.stream()
+                .filter(area -> isWindowVisibleOnArea(x, y, width, height, area))
+                .findFirst()
+                .orElse(fallbackArea);
+
+        double safeWidth = clamp(
+                Double.isFinite(width) && width > 0 ? width : DEFAULT_WINDOW_WIDTH,
+                Math.min(MIN_WINDOW_WIDTH, targetArea.getWidth()),
+                targetArea.getWidth());
+        double safeHeight = clamp(
+                Double.isFinite(height) && height > 0 ? height : DEFAULT_WINDOW_HEIGHT,
+                Math.min(MIN_WINDOW_HEIGHT, targetArea.getHeight()),
+                targetArea.getHeight());
+
+        boolean invalidPosition = !Double.isFinite(x)
+                || !Double.isFinite(y)
+                || !isWindowVisibleOnArea(x, y, safeWidth, safeHeight, targetArea);
+        double safeX = invalidPosition
+                ? targetArea.getMinX() + Math.max(0, (targetArea.getWidth() - safeWidth) / 2.0)
+                : clamp(x, targetArea.getMinX(), targetArea.getMaxX() - safeWidth);
+        double safeY = invalidPosition
+                ? targetArea.getMinY() + Math.max(0, (targetArea.getHeight() - safeHeight) / 2.0)
+                : clamp(y, targetArea.getMinY(), targetArea.getMaxY() - safeHeight);
+        return new WindowBounds(safeX, safeY, safeWidth, safeHeight);
+    }
+
+    private static boolean isWindowVisibleOnArea(double x, double y, double width, double height, Rectangle2D area) {
+        if (area == null || !Double.isFinite(x) || !Double.isFinite(y)) {
+            return false;
+        }
+        double safeWidth = Double.isFinite(width) && width > 0 ? width : DEFAULT_WINDOW_WIDTH;
+        double safeHeight = Double.isFinite(height) && height > 0 ? height : DEFAULT_WINDOW_HEIGHT;
+        return x + Math.min(WINDOW_VISIBLE_MARGIN_X, safeWidth) >= area.getMinX()
+                && x <= area.getMaxX() - Math.min(WINDOW_VISIBLE_MARGIN_X, safeWidth)
+                && y + Math.min(WINDOW_VISIBLE_MARGIN_Y, safeHeight) >= area.getMinY()
+                && y <= area.getMaxY() - Math.min(WINDOW_VISIBLE_MARGIN_Y, safeHeight);
+    }
+
+    private static boolean hasUsableWindowSize(double width, double height) {
+        return Double.isFinite(width) && Double.isFinite(height)
+                && width >= MIN_WINDOW_WIDTH
+                && height >= MIN_WINDOW_HEIGHT;
+    }
+
+    private static double clamp(double value, double min, double max) {
+        if (max < min) {
+            return min;
+        }
+        return Math.max(min, Math.min(max, value));
+    }
+
+    private record WindowBounds(double x, double y, double width, double height) {}
+
+    private record CompletionPopupSize(double width, double height, double preferredHeight) {}
+
     private void closeWindow() {
         if (closingWindow) {
             return;
@@ -382,6 +627,12 @@ public final class LuaDevWindow {
         completionBox.getStyleClass().add("lua-completion-popup");
         completionBox.setManaged(false);
         completionBox.setVisible(false);
+        completionScrollPane.getStyleClass().add("lua-completion-scroll-pane");
+        completionScrollPane.setFitToWidth(true);
+        completionScrollPane.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
+        completionScrollPane.setVbarPolicy(ScrollPane.ScrollBarPolicy.AS_NEEDED);
+        completionScrollPane.setPannable(true);
+        completionBox.getChildren().setAll(completionScrollPane);
         String appCss = LuaDevWindow.class.getResource("/css/app.css") != null
                 ? LuaDevWindow.class.getResource("/css/app.css").toExternalForm()
                 : null;
@@ -438,11 +689,12 @@ public final class LuaDevWindow {
     }
 
     private SplitPane createContent() {
-        SplitPane splitPane = new SplitPane(createEditorPane(), createInfoPane());
-        splitPane.getStyleClass().add("lua-dev-split-pane");
-        splitPane.setDividerPositions(0.76);
-        VBox.setVgrow(splitPane, Priority.ALWAYS);
-        return splitPane;
+        mainSplit = new SplitPane(createEditorPane(), createInfoPane());
+        mainSplit.getStyleClass().add("lua-dev-split-pane");
+        configurePersistentDivider(mainSplit, AppPreferences.getLuaDevMainDividerPos(),
+                AppPreferences::setLuaDevMainDividerPos);
+        VBox.setVgrow(mainSplit, Priority.ALWAYS);
+        return mainSplit;
     }
 
     private VBox createEditorPane() {
@@ -478,10 +730,11 @@ public final class LuaDevWindow {
         StackPane editorSlot = createSplitSlot(editorBox, "lua-dev-code-slot");
         StackPane consoleSlot = createSplitSlot(consoleBox, "lua-dev-console-slot");
 
-        SplitPane editorSplit = new SplitPane(editorSlot, consoleSlot);
+        editorSplit = new SplitPane(editorSlot, consoleSlot);
         editorSplit.getStyleClass().add("lua-dev-split-pane");
         editorSplit.setOrientation(Orientation.VERTICAL);
-        editorSplit.setDividerPositions(0.72);
+        configurePersistentDivider(editorSplit, AppPreferences.getLuaDevEditorDividerPos(),
+                AppPreferences::setLuaDevEditorDividerPos);
         VBox.setVgrow(editorSplit, Priority.ALWAYS);
 
         return new VBox(editorSplit);
@@ -508,14 +761,15 @@ public final class LuaDevWindow {
         VBox debugBox = createPanel("Переменные", debugTable);
         VBox.setVgrow(debugTable, Priority.ALWAYS);
 
-        SplitPane split = new SplitPane(debugBox, kvBox);
-        split.getStyleClass().add("lua-dev-split-pane");
-        split.setOrientation(Orientation.VERTICAL);
-        split.setDividerPositions(0.62);
-        VBox.setVgrow(split, Priority.ALWAYS);
-        split.setMinWidth(260);
-        split.setPrefWidth(300);
-        return split;
+        infoSplit = new SplitPane(debugBox, kvBox);
+        infoSplit.getStyleClass().add("lua-dev-split-pane");
+        infoSplit.setOrientation(Orientation.VERTICAL);
+        configurePersistentDivider(infoSplit, AppPreferences.getLuaDevInfoDividerPos(),
+                AppPreferences::setLuaDevInfoDividerPos);
+        VBox.setVgrow(infoSplit, Priority.ALWAYS);
+        infoSplit.setMinWidth(260);
+        infoSplit.setPrefWidth(300);
+        return infoSplit;
     }
 
     private TableView<DebugVarRow> createDebugTable() {
@@ -906,31 +1160,61 @@ public final class LuaDevWindow {
             return;
         }
 
-        applyCompletionBoxSize();
+        CompletionPopupSize popupSize = applyCompletionBoxSize(Double.MAX_VALUE);
+        double availableBelow = Math.max(0, editorStack.getHeight() - anchor.get().getY() - COMPLETION_VERTICAL_GAP);
+        double availableAbove = Math.max(0, anchor.get().getY() - COMPLETION_VERTICAL_GAP);
+        boolean openAbove = popupSize.preferredHeight() > availableBelow && availableAbove > availableBelow;
+        double availableHeight = openAbove ? availableAbove : availableBelow;
+        popupSize = applyCompletionBoxSize(Math.max(COMPLETION_MIN_VISIBLE_HEIGHT, availableHeight));
+        double x = clamp(anchor.get().getX(), 0, Math.max(0, editorStack.getWidth() - popupSize.width()));
+        double y = openAbove
+                ? anchor.get().getY() - popupSize.height() - COMPLETION_VERTICAL_GAP
+                : anchor.get().getY() + COMPLETION_VERTICAL_GAP;
+        y = clamp(y, 0, Math.max(0, editorStack.getHeight() - popupSize.height()));
         completionBox.relocate(
-                Math.max(0, Math.min(anchor.get().getX(), editorStack.getWidth() - completionBox.prefWidth(-1))),
-                Math.max(0, anchor.get().getY() + 1)
+                x,
+                y
         );
         completionBox.toFront();
         completionBox.setVisible(true);
     }
 
-    private void applyCompletionBoxSize() {
+    private CompletionPopupSize applyCompletionBoxSize(double maxHeight) {
         completionBox.setVisible(true);
+        completionRows.applyCss();
+        completionScrollPane.applyCss();
         completionBox.applyCss();
-        double width = Math.max(COMPLETION_MIN_WIDTH, completionBox.prefWidth(-1));
-        double height = completionBox.getInsets().getTop() + completionBox.getInsets().getBottom();
-        for (Node child : completionBox.getChildren()) {
+        double rowWidth = COMPLETION_MIN_WIDTH;
+        double contentHeight = 0;
+        for (Node child : completionRows.getChildren()) {
             if (child instanceof Region region) {
-                height += region.prefHeight(width);
+                rowWidth = Math.max(rowWidth, region.prefWidth(-1));
+                contentHeight += region.prefHeight(rowWidth);
             } else {
-                height += child.getLayoutBounds().getHeight();
+                Bounds bounds = child.getLayoutBounds();
+                rowWidth = Math.max(rowWidth, bounds.getWidth());
+                contentHeight += bounds.getHeight();
             }
         }
+        double verticalInsets = completionBox.getInsets().getTop() + completionBox.getInsets().getBottom();
+        double horizontalInsets = completionBox.getInsets().getLeft() + completionBox.getInsets().getRight();
+        double preferredHeight = verticalInsets + contentHeight;
+        double height = Math.min(preferredHeight, Math.max(COMPLETION_MIN_VISIBLE_HEIGHT, maxHeight));
+        double viewportHeight = Math.max(0, height - verticalInsets);
+        completionRows.setMinWidth(rowWidth);
+        completionRows.setPrefWidth(rowWidth);
+        completionScrollPane.setMinWidth(rowWidth);
+        completionScrollPane.setPrefWidth(rowWidth);
+        completionScrollPane.setMaxWidth(rowWidth);
+        completionScrollPane.setMinHeight(viewportHeight);
+        completionScrollPane.setPrefHeight(viewportHeight);
+        completionScrollPane.setMaxHeight(viewportHeight);
+        double width = rowWidth + horizontalInsets;
         completionBox.setMinSize(width, height);
         completionBox.setPrefSize(width, height);
         completionBox.setMaxSize(width, height);
         completionBox.resize(width, height);
+        return new CompletionPopupSize(width, height, preferredHeight);
     }
 
     private Optional<Point2D> completionAnchorPoint() {
@@ -1001,13 +1285,18 @@ public final class LuaDevWindow {
     }
 
     private void hideCompletion() {
+        visibleCompletions = List.of();
+        selectedCompletionIndex = 0;
+        completionRows.getChildren().clear();
+        completionScrollPane.setVvalue(0);
         completionBox.setVisible(false);
     }
 
     private void rebuildCompletionRows() {
-        completionBox.getChildren().setAll(java.util.stream.IntStream.range(0, visibleCompletions.size())
+        completionRows.getChildren().setAll(java.util.stream.IntStream.range(0, visibleCompletions.size())
                 .mapToObj(index -> createCompletionRow(visibleCompletions.get(index), index))
                 .toList());
+        completionScrollPane.setVvalue(0);
         updateSelectedCompletionRow();
     }
 
@@ -1018,12 +1307,17 @@ public final class LuaDevWindow {
         row.setPrefWidth(COMPLETION_MIN_WIDTH);
         row.setUserData(index);
         addHighlightedCompletionText(row, candidate.displayText());
-        row.setOnMouseEntered(event -> {
-            selectedCompletionIndex = index;
-            updateSelectedCompletionRow();
-        });
+        row.setOnMouseEntered(event -> selectCompletionIndex(index));
+        row.setOnMouseMoved(event -> selectCompletionIndex(index));
         row.setOnMousePressed(event -> applyCompletion(candidate));
         return row;
+    }
+
+    private void selectCompletionIndex(int index) {
+        if (selectedCompletionIndex != index) {
+            selectedCompletionIndex = index;
+            updateSelectedCompletionRow();
+        }
     }
 
     private void addHighlightedCompletionText(TextFlow row, String candidate) {
@@ -1062,12 +1356,43 @@ public final class LuaDevWindow {
     }
 
     private void updateSelectedCompletionRow() {
-        for (javafx.scene.Node node : completionBox.getChildren()) {
+        for (javafx.scene.Node node : completionRows.getChildren()) {
             node.getStyleClass().remove("lua-completion-row-selected");
             if (node.getUserData() instanceof Integer index && index == selectedCompletionIndex) {
                 node.getStyleClass().add("lua-completion-row-selected");
             }
         }
+        scrollSelectedCompletionIntoView();
+    }
+
+    private void scrollSelectedCompletionIntoView() {
+        Node selectedNode = completionRows.getChildren().stream()
+                .filter(node -> node.getUserData() instanceof Integer index && index == selectedCompletionIndex)
+                .findFirst()
+                .orElse(null);
+        if (selectedNode == null) {
+            return;
+        }
+        completionRows.layout();
+        completionScrollPane.layout();
+        double viewportHeight = completionScrollPane.getViewportBounds().getHeight();
+        double contentHeight = completionRows.getBoundsInLocal().getHeight();
+        double scrollableHeight = contentHeight - viewportHeight;
+        if (scrollableHeight <= 0) {
+            return;
+        }
+        Bounds selectedBounds = selectedNode.getBoundsInParent();
+        double currentTop = completionScrollPane.getVvalue() * scrollableHeight;
+        double currentBottom = currentTop + viewportHeight;
+        double targetTop = selectedBounds.getMinY();
+        double targetBottom = selectedBounds.getMaxY();
+        double newTop = currentTop;
+        if (targetTop < currentTop) {
+            newTop = targetTop;
+        } else if (targetBottom > currentBottom) {
+            newTop = targetBottom - viewportHeight;
+        }
+        completionScrollPane.setVvalue(clamp(newTop / scrollableHeight, 0, 1));
     }
 
     private void applySelectedCompletion() {

@@ -2842,6 +2842,16 @@
     -fx-effect: dropshadow(gaussian, rgba(0, 0, 0, 0.32), 14, 0, 0, 5);
 }
 
+.lua-completion-scroll-pane,
+.lua-completion-scroll-pane > .viewport {
+    -fx-background-color: transparent;
+    -fx-background: transparent;
+}
+
+.lua-completion-scroll-pane {
+    -fx-padding: 0;
+}
+
 .lua-completion-row {
     -fx-padding: 4 8;
     -fx-background-radius: 4;
@@ -2855,12 +2865,10 @@
     -fx-font-size: 13px;
 }
 
-.lua-completion-row:hover,
 .lua-completion-row-selected {
     -fx-background-color: rgba(255, 255, 255, 0.10);
 }
 
-.light-theme .lua-completion-row:hover,
 .light-theme .lua-completion-row-selected {
     -fx-background-color: rgba(0, 0, 0, 0.08);
 }

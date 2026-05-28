@@ -5,7 +5,7 @@ plugins {
 	id 'java'
 	id 'application'
 	id 'org.graalvm.buildtools.native' version '0.10.6'
-	id 'com.google.protobuf' version '0.9.4'
+	id 'com.google.protobuf' version '0.10.0'
 	id 'org.openjfx.javafxplugin' version '0.1.0'
 }
 
@@ -122,6 +122,7 @@ version = {
 		return 'dev'
 	}
 }()
+def applicationVersion = version.toString()
 
 java {
 	toolchain {
@@ -179,11 +180,15 @@ def generatedResourcesDir = layout.buildDirectory.dir('generated/resources')
 def buildshipGeneratedClasspathDirs = [
 		layout.buildDirectory.dir('generated/source/proto/main/java'),
 		layout.buildDirectory.dir('generated/source/proto/test/java'),
+		layout.buildDirectory.dir('generated/sources/proto/main/java'),
+		layout.buildDirectory.dir('generated/sources/proto/test/java'),
+		layout.buildDirectory.dir('generated/proto-resources/main'),
+		layout.buildDirectory.dir('generated/proto-resources/test'),
 		generatedResourcesDir
 ]
 
 // Buildship/JDTLS validates generated classpath entries before Gradle generation tasks run.
-// Keep those directories present even after a fresh checkout or IDE import.
+// Keep those directories present even after a fresh checkout, IDE import, or clean.
 buildshipGeneratedClasspathDirs.each { it.get().asFile.mkdirs() }
 
 def prepareBuildshipGeneratedDirs = tasks.register('prepareBuildshipGeneratedDirs') {
@@ -192,8 +197,15 @@ def prepareBuildshipGeneratedDirs = tasks.register('prepareBuildshipGeneratedDir
 	}
 }
 
-['clean', 'generateProto', 'generateTestProto'].each { taskName ->
-	tasks.named(taskName) {
+[
+		'clean',
+		'generateProto',
+		'generateTestProto',
+		'processProtoResources',
+		'processTestProtoResources',
+		'generateVersionProperties'
+].each { taskName ->
+	tasks.matching { it.name == taskName }.configureEach {
 		finalizedBy(prepareBuildshipGeneratedDirs)
 	}
 }
@@ -214,7 +226,6 @@ jar {
 tasks.register('generateVersionProperties') {
 	def outputDir = generatedResourcesDir
 	outputs.dir(outputDir)
-	finalizedBy(prepareBuildshipGeneratedDirs)
 	// Всегда пересоздавать — версия может измениться (dirty/commit)
 	outputs.upToDateWhen { false }
 	doLast {
@@ -225,7 +236,7 @@ tasks.register('generateVersionProperties') {
 			versionCode = 'git rev-list --count HEAD'.execute().text.trim() ?: '0'
 		} catch (ignored) {}
 		new File(dir, 'version.properties').text =
-			"version=${project.version}\n" +
+			"version=${applicationVersion}\n" +
 			"versionCode=${versionCode}\n" +
 			"meshAppIdeEnabled=${meshAppIdeEnabled.get()}\n"
 	}
@@ -433,6 +444,7 @@ tasks.withType(JavaCompile).configureEach {
 
 tasks.named('test') {
 	useJUnitPlatform()
+	jvmArgs '--enable-native-access=ALL-UNNAMED', '--sun-misc-unsafe-memory-access=allow'
 	if (org.gradle.internal.os.OperatingSystem.current().isLinux()
 			&& !System.getenv('DISPLAY')?.trim()
 			&& !System.getenv('WAYLAND_DISPLAY')?.trim()) {

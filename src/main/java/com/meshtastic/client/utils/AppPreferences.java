@@ -44,6 +44,11 @@ public class AppPreferences {
     public static final String KEY_PACKET_MONITOR_COLUMN_FROM_WIDTH = "packetMonitorColumnFromWidth";
     public static final String KEY_PACKET_MONITOR_COLUMN_TO_WIDTH = "packetMonitorColumnToWidth";
     public static final String KEY_PACKET_MONITOR_COLUMN_PAYLOAD_WIDTH = "packetMonitorColumnPayloadWidth";
+    public static final String KEY_LUA_DEV_WINDOW_X = "luaDevWindowX";
+    public static final String KEY_LUA_DEV_WINDOW_Y = "luaDevWindowY";
+    public static final String KEY_LUA_DEV_WINDOW_WIDTH = "luaDevWindowWidth";
+    public static final String KEY_LUA_DEV_WINDOW_HEIGHT = "luaDevWindowHeight";
+    public static final String KEY_LUA_DEV_WINDOW_MAXIMIZED = "luaDevWindowMaximized";
     public static final String KEY_MAP_CENTER_LATITUDE = "mapCenterLatitude";
     public static final String KEY_MAP_CENTER_LONGITUDE = "mapCenterLongitude";
     public static final String KEY_MAP_ZOOM = "mapZoom";
@@ -247,6 +252,33 @@ public class AppPreferences {
         flushState();
     }
 
+    /**
+     * @return {@code true}, если для окна MeshApp IDE уже сохранены координаты и размер
+     */
+    public static boolean hasLuaDevWindowBounds() {
+        return !Double.isNaN(state().getDouble(KEY_LUA_DEV_WINDOW_WIDTH, Double.NaN));
+    }
+
+    public static double getLuaDevWindowX() { return state().getDouble(KEY_LUA_DEV_WINDOW_X, Double.NaN); }
+    public static double getLuaDevWindowY() { return state().getDouble(KEY_LUA_DEV_WINDOW_Y, Double.NaN); }
+    public static double getLuaDevWindowWidth() { return state().getDouble(KEY_LUA_DEV_WINDOW_WIDTH, Double.NaN); }
+    public static double getLuaDevWindowHeight() { return state().getDouble(KEY_LUA_DEV_WINDOW_HEIGHT, Double.NaN); }
+    public static boolean isLuaDevWindowMaximized() {
+        return state().getBoolean(KEY_LUA_DEV_WINDOW_MAXIMIZED, false);
+    }
+
+    /**
+     * Сохраняет положение, размер и состояние максимизации окна MeshApp IDE.
+     */
+    public static void saveLuaDevWindowBounds(double x, double y, double w, double h, boolean maximized) {
+        state().putDouble(KEY_LUA_DEV_WINDOW_X, x);
+        state().putDouble(KEY_LUA_DEV_WINDOW_Y, y);
+        state().putDouble(KEY_LUA_DEV_WINDOW_WIDTH, w);
+        state().putDouble(KEY_LUA_DEV_WINDOW_HEIGHT, h);
+        state().putBoolean(KEY_LUA_DEV_WINDOW_MAXIMIZED, maximized);
+        flushState();
+    }
+
     // ==================== Map ====================
 
     /**
@@ -383,6 +415,9 @@ public class AppPreferences {
     public static final String KEY_CHAT_DIVIDER = "chatDividerPos";
     public static final String KEY_NODES_DIVIDER = "nodesDividerPos";
     public static final String KEY_PACKET_MONITOR_DIVIDER = "packetMonitorDividerPos";
+    public static final String KEY_LUA_DEV_MAIN_DIVIDER = "luaDevMainDividerPos";
+    public static final String KEY_LUA_DEV_EDITOR_DIVIDER = "luaDevEditorDividerPos";
+    public static final String KEY_LUA_DEV_INFO_DIVIDER = "luaDevInfoDividerPos";
     private static final String NODE_CHAT_SCROLL = "chatScroll";
     private static final String NODE_CHAT_NOTIFICATIONS = "chatNotifications";
 
@@ -403,6 +438,47 @@ public class AppPreferences {
      * @param pos позиция разделителя в диапазоне {@code 0..1}
      */
     public static void setPacketMonitorDividerPos(double pos) { state().putDouble(KEY_PACKET_MONITOR_DIVIDER, pos); }
+
+    public static double getLuaDevMainDividerPos() {
+        return state().getDouble(KEY_LUA_DEV_MAIN_DIVIDER, 0.76);
+    }
+
+    public static void setLuaDevMainDividerPos(double pos) {
+        state().putDouble(KEY_LUA_DEV_MAIN_DIVIDER, normalizeDividerPosition(pos, 0.76));
+    }
+
+    public static double getLuaDevEditorDividerPos() {
+        return state().getDouble(KEY_LUA_DEV_EDITOR_DIVIDER, 0.72);
+    }
+
+    public static void setLuaDevEditorDividerPos(double pos) {
+        state().putDouble(KEY_LUA_DEV_EDITOR_DIVIDER, normalizeDividerPosition(pos, 0.72));
+    }
+
+    public static double getLuaDevInfoDividerPos() {
+        return state().getDouble(KEY_LUA_DEV_INFO_DIVIDER, 0.62);
+    }
+
+    public static void setLuaDevInfoDividerPos(double pos) {
+        state().putDouble(KEY_LUA_DEV_INFO_DIVIDER, normalizeDividerPosition(pos, 0.62));
+    }
+
+    /**
+     * Сохраняет компоновку SplitPane в окне MeshApp IDE и сразу сбрасывает её в backing store.
+     */
+    public static void saveLuaDevDividerPositions(double mainPos, double editorPos, double infoPos) {
+        setLuaDevMainDividerPos(mainPos);
+        setLuaDevEditorDividerPos(editorPos);
+        setLuaDevInfoDividerPos(infoPos);
+        flushState();
+    }
+
+    private static double normalizeDividerPosition(double pos, double fallback) {
+        if (!Double.isFinite(pos)) {
+            return fallback;
+        }
+        return Math.max(0.0, Math.min(1.0, pos));
+    }
 
     /**
      * Возвращает сохранённую ширину колонки таблицы LoRa-мониторинга.
