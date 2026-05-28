@@ -9,6 +9,8 @@ import com.meshtastic.client.connection.ble.BleDevice;
 import com.meshtastic.client.connection.ble.BlePlatform;
 import com.meshtastic.client.connection.ble.BleProtocolProfile;
 import com.meshtastic.client.connection.ble.BleState;
+import com.meshtastic.client.lua.LuaScript;
+import com.meshtastic.client.lua.LuaScriptService;
 import com.meshtastic.client.model.ConnectionEntry;
 import com.meshtastic.client.model.ConnectionType;
 import com.meshtastic.client.model.DeviceState;
@@ -98,6 +100,51 @@ class ConnectionManagerTest {
             assertNull(manager.getProtocolHandler(entry.getId()));
             assertNull(manager.getMessageListenerService(entry.getId()));
             assertNull(manager.getConfigFuture(entry.getId()));
+        }
+    }
+
+    @Test
+    void connectAutostartsMatchingLuaScriptsAfterConfigExchange() throws Exception {
+        try (TcpMeshtasticStubServer server = new TcpMeshtasticStubServer(0x1234ABCD)) {
+            ConnectionManager manager = ConnectionManager.getInstance();
+            LuaScriptService scriptService = LuaScriptService.getInstance();
+            LuaScript matching = scriptService.createScript(
+                    "matching-autostart",
+                    "mesh.kv.set('ready_node', mesh.owner().node_id)",
+                    true,
+                    "!1234ABCD",
+                    LuaScript.BotType.AIR_BOT,
+                    "");
+            LuaScript otherNode = scriptService.createScript(
+                    "other-node-autostart",
+                    "mesh.kv.set('ready_node', 'wrong-node')",
+                    true,
+                    "!00000000",
+                    LuaScript.BotType.AIR_BOT,
+                    "");
+            LuaScript disabled = scriptService.createScript(
+                    "disabled-autostart",
+                    "mesh.kv.set('ready_node', 'disabled')",
+                    false,
+                    "!1234ABCD",
+                    LuaScript.BotType.AIR_BOT,
+                    "");
+            ConnectionEntry entry = new ConnectionEntry("stub", "127.0.0.1", server.port());
+            manager.addEntry(entry);
+
+            manager.connect(entry.getId());
+
+            CompletableFuture<DeviceState> future = manager.getConfigFuture(entry.getId());
+            assertNotNull(future);
+            DeviceState state = future.get(5, TimeUnit.SECONDS);
+
+            assertEquals(0x1234ABCD, state.getMyNodeNum());
+            assertTrue(waitUntil(() -> "!1234abcd".equals(scriptService.getKv(matching.getId(), "ready_node")),
+                    4_000));
+            assertNull(scriptService.getKv(otherNode.getId(), "ready_node"));
+            assertNull(scriptService.getKv(disabled.getId(), "ready_node"));
+
+            manager.disconnect(entry.getId());
         }
     }
 

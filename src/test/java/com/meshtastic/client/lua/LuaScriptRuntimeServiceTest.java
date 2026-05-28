@@ -7,7 +7,9 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
@@ -60,6 +62,65 @@ class LuaScriptRuntimeServiceTest {
 
         assertNull(scriptService.getKv(first.getId(), "shared"));
         assertEquals("two", scriptService.getKv(second.getId(), "shared"));
+    }
+
+    @Test
+    void kvStorageListsUpdatesAndDeletesEntriesForEditor() {
+        LuaScript script = scriptService.createScript("kv-editor", "");
+
+        scriptService.setKv(script.getId(), "beta", "two");
+        scriptService.setKv(script.getId(), "alpha", "one");
+
+        Map<String, String> initialKv = scriptService.listKv(script.getId());
+        assertEquals(List.of("alpha", "beta"), new ArrayList<>(initialKv.keySet()));
+        assertEquals("one", initialKv.get("alpha"));
+        assertEquals("two", initialKv.get("beta"));
+
+        scriptService.setKv(script.getId(), "alpha", "updated");
+        assertEquals("updated", scriptService.getKv(script.getId(), "alpha"));
+
+        assertTrue(scriptService.deleteKv(script.getId(), "alpha"));
+        assertFalse(scriptService.deleteKv(script.getId(), "missing"));
+        assertEquals(Map.of("beta", "two"), scriptService.listKv(script.getId()));
+    }
+
+    @Test
+    void autostartScriptsForNodeRunsOnlyMatchingEnabledScripts() {
+        LuaScript matching = scriptService.createScript(
+                "matching-autostart",
+                "mesh.kv.set('started_node', mesh.owner().node_id)",
+                true,
+                "!ABCDEF12",
+                LuaScript.BotType.AIR_BOT,
+                "");
+        LuaScript otherNode = scriptService.createScript(
+                "other-node-autostart",
+                "mesh.kv.set('started_node', 'wrong-node')",
+                true,
+                "!00000000",
+                LuaScript.BotType.AIR_BOT,
+                "");
+        LuaScript disabled = scriptService.createScript(
+                "disabled-autostart",
+                "mesh.kv.set('started_node', 'disabled')",
+                false,
+                "!ABCDEF12",
+                LuaScript.BotType.AIR_BOT,
+                "");
+
+        runtimeService.autostartScriptsForNode(" !abcdef12 ", events::add);
+
+        awaitCondition(() -> "!abcdef12".equals(scriptService.getKv(matching.getId(), "started_node")),
+                "Matching autostart script did not run");
+
+        assertNull(scriptService.getKv(otherNode.getId(), "started_node"));
+        assertNull(scriptService.getKv(disabled.getId(), "started_node"));
+        assertTrue(events.stream().anyMatch(event ->
+                event.type() == LuaScriptEvent.Type.STARTED && event.scriptId() == matching.getId()));
+        assertFalse(events.stream().anyMatch(event ->
+                event.type() == LuaScriptEvent.Type.STARTED && event.scriptId() == otherNode.getId()));
+        assertFalse(events.stream().anyMatch(event ->
+                event.type() == LuaScriptEvent.Type.STARTED && event.scriptId() == disabled.getId()));
     }
 
     @Test

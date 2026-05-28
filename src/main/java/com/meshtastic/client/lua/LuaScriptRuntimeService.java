@@ -6,6 +6,8 @@ import com.meshtastic.client.protocol.ProtocolHandler;
 import com.meshtastic.client.protocol.ProtocolRuntime;
 import com.meshtastic.client.protocol.meshcore.MeshCoreCompanionProtocolRuntime;
 import com.meshtastic.client.service.ConnectionManager;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.luaj.vm2.Globals;
 import org.luaj.vm2.LuaValue;
 import org.luaj.vm2.compiler.LuaC;
@@ -38,6 +40,8 @@ import java.util.function.Consumer;
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public final class LuaScriptRuntimeService {
+
+    private static final Logger log = LoggerFactory.getLogger(LuaScriptRuntimeService.class);
 
     private static LuaScriptRuntimeService instance;
 
@@ -73,6 +77,30 @@ public final class LuaScriptRuntimeService {
         );
         sessions.put(script.getId(), session);
         session.start();
+    }
+
+    /**
+     * Запускает все Lua-скрипты с включенным автозапуском, привязанные к указанной ноде.
+     * <p>
+     * Метод вызывается после готовности протокольного runtime-а подключения, чтобы
+     * скрипт получал уже заполненное состояние ноды и корректный transport target.
+     *
+     * @param nodeId идентификатор локальной ноды активного подключения
+     * @param sink получатель событий запуска; может быть {@code null}
+     */
+    public void autostartScriptsForNode(String nodeId, Consumer<LuaScriptEvent> sink) {
+        String normalizedNodeId = normalizeNodeId(nodeId);
+        if (normalizedNodeId.isBlank()) {
+            return;
+        }
+        List<LuaScript> scripts = LuaScriptService.getInstance().listScripts().stream()
+                .filter(LuaScript::isAutostart)
+                .filter(script -> normalizedNodeId.equals(normalizeNodeId(script.getNodeId())))
+                .toList();
+        for (LuaScript script : scripts) {
+            log.info("Autostarting Lua script '{}' for node {}", script.getName(), normalizedNodeId);
+            runScript(script, sink);
+        }
     }
 
     public void debugScript(LuaScript script, Set<Integer> breakpoints, Consumer<LuaScriptEvent> sink) {

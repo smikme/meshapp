@@ -2567,6 +2567,21 @@
     -fx-padding: 10;
 }
 
+.lua-kv-search-field {
+    -fx-min-width: 260;
+    -fx-pref-width: 320;
+    -fx-max-width: 360;
+}
+
+.lua-kv-value-area {
+    -fx-font-family: "Menlo", "Consolas", "DejaVu Sans Mono", monospace;
+    -fx-font-size: 12px;
+}
+
+.lua-kv-value-area .content {
+    -fx-background-color: -color-bg-default;
+}
+
 .lua-dev-code-slot {
     -fx-background-color: transparent;
     -fx-padding: 0 0 6 0;

@@ -154,6 +154,7 @@ public final class LuaDevWindow {
     private TableView<DebugVarRow> debugTable;
     private Label scriptNameLabel;
     private Label statusLabel;
+    private Button kvButton;
     private Button runButton;
     private Button debugButton;
     private Button continueButton;
@@ -661,6 +662,7 @@ public final class LuaDevWindow {
         toolbar.getStyleClass().add("drawer-toolbar");
 
         Button saveButton = createSideMenuButton("Сохранить код в БД", "/icons/ide-file-code.svg", this::saveCurrentScriptSafely);
+        kvButton = createSideMenuButton("KV редактор", "/icons/database.svg", this::openCurrentScriptKvEditor);
         Button checkButton = createSideMenuButton("Проверить синтаксис Lua", "/icons/ide-code-check.svg", this::checkCurrentScript);
         runButton = createSideMenuButton("Запустить скрипт", "/icons/ide-terminal-run.svg", this::runCurrentScript);
         debugButton = createSideMenuButton("Отладка", "/icons/ide-bug.svg", this::debugCurrentScript);
@@ -671,6 +673,7 @@ public final class LuaDevWindow {
 
         toolbar.getItems().addAll(
                 saveButton,
+                kvButton,
                 checkButton,
                 runButton,
                 debugButton,
@@ -1490,6 +1493,13 @@ public final class LuaDevWindow {
         }
     }
 
+    private void openCurrentScriptKvEditor() {
+        if (currentScript == null) {
+            return;
+        }
+        LuaKvEditorWindow.showWindow(currentScript);
+    }
+
     private void runCurrentScript() {
         if (currentScript == null) {
             return;
@@ -1613,6 +1623,7 @@ public final class LuaDevWindow {
         boolean hasScript = currentScript != null;
         boolean running = hasScript && runtimeService.isRunning(currentScript.getId());
         boolean paused = hasScript && runtimeService.isPaused(currentScript.getId());
+        kvButton.setDisable(!hasScript);
         runButton.setDisable(!hasScript || running);
         debugButton.setDisable(!hasScript || running);
         continueButton.setDisable(!paused);

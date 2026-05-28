@@ -1,6 +1,7 @@
 package com.meshtastic.client.forms;
 
 import com.meshtastic.client.components.LuaDevWindow;
+import com.meshtastic.client.components.LuaKvEditorWindow;
 import com.meshtastic.client.components.LuaScriptSettingsForm;
 import com.meshtastic.client.lua.LuaScript;
 import com.meshtastic.client.lua.LuaScriptEvent;
@@ -210,6 +211,12 @@ public class FormMeshAppIde extends Form {
                 "/icons/ide-file-code.svg",
                 () -> LuaDevWindow.showWindow(script.getId()));
 
+        Button kvButton = createToolbarButton(
+                "KV",
+                "Открыть KV-редактор скрипта",
+                "/icons/database.svg",
+                () -> LuaKvEditorWindow.showWindow(script));
+
         Button editButton = createToolbarButton(
                 "Настройки",
                 "Изменить параметры скрипта",
@@ -227,6 +234,7 @@ public class FormMeshAppIde extends Form {
                 autostartButton,
                 new Separator(Orientation.VERTICAL),
                 ideButton,
+                kvButton,
                 editButton,
                 new Separator(Orientation.VERTICAL),
                 deleteButton

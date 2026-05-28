@@ -8,6 +8,7 @@ import com.meshtastic.client.model.ConnectionEntry;
 import com.meshtastic.client.model.ConnectionType;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.ProtocolType;
+import com.meshtastic.client.lua.LuaScriptRuntimeService;
 import com.meshtastic.client.protocol.ProtocolRegistry;
 import com.meshtastic.client.protocol.ProtocolRuntime;
 import com.meshtastic.client.protocol.ProtocolRuntimeContext;
@@ -417,7 +418,18 @@ public final class ConnectionManager {
                     return;
                 }
             }
+            String readyNodeId = nodeId != null && !nodeId.isBlank() && !"?".equals(nodeId)
+                    ? nodeId
+                    : entry.getNodeId();
             activeRuntime.onReady();
+            if (activeConnections.get(id) != conn || !entry.isConnected()) {
+                log.debug("Skipping Lua autostart for '{}' because transport is no longer active",
+                        entry.getName());
+                return;
+            }
+            LuaScriptRuntimeService.getInstance().autostartScriptsForNode(
+                    readyNodeId,
+                    event -> fireChanged());
             fireChanged();
         });
         fireChanged();
