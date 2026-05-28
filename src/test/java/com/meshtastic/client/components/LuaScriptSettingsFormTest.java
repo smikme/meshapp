@@ -8,6 +8,8 @@ import com.meshtastic.client.service.ConnectionManager;
 import javafx.application.Platform;
 import javafx.scene.Scene;
 import javafx.scene.control.ComboBox;
+import javafx.scene.control.Label;
+import javafx.scene.control.TextField;
 import javafx.scene.layout.StackPane;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
@@ -25,6 +27,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -179,6 +182,99 @@ class LuaScriptSettingsFormTest {
         });
     }
 
+    @Test
+    void showsGuidAsReadOnlyProperty() {
+        String guid = "123e4567-e89b-12d3-a456-426614174000";
+
+        onFxThread(() -> {
+            LuaScriptSettingsForm form = new LuaScriptSettingsForm(script(guid, "", LuaScript.BotType.AIR_BOT, ""));
+            try {
+                TextField field = guidField(form);
+
+                assertTrue(field.isVisible());
+                assertTrue(field.isManaged());
+                assertFalse(field.isEditable());
+                assertEquals(guid, field.getText());
+            } finally {
+                form.dispose();
+            }
+            return null;
+        });
+    }
+
+    @Test
+    void buildsDraftWithEmojiIcon() {
+        onFxThread(() -> {
+            LuaScriptSettingsForm form = new LuaScriptSettingsForm(
+                    script("123e4567-e89b-12d3-a456-426614174000", "🚀", "",
+                            LuaScript.BotType.AUTOMATION_BOT, "@auto"));
+            try {
+                TextField field = iconField(form);
+                assertEquals("🚀", field.getText());
+
+                field.setText("🛰️");
+                Object draft = buildDraft(form);
+
+                assertNotNull(draft);
+                assertEquals("🛰️", draftIcon(draft));
+            } finally {
+                form.dispose();
+            }
+            return null;
+        });
+    }
+
+    @Test
+    void iconFieldRejectsPlainText() {
+        onFxThread(() -> {
+            LuaScriptSettingsForm form = new LuaScriptSettingsForm(
+                    script("123e4567-e89b-12d3-a456-426614174000", "🚀", "",
+                            LuaScript.BotType.AUTOMATION_BOT, "@auto"));
+            try {
+                TextField field = iconField(form);
+
+                field.selectAll();
+                field.replaceSelection("bot");
+                assertEquals("🚀", field.getText());
+                assertEquals("Иконка должна быть одним emoji-символом", statusLabel(form).getText());
+
+                field.selectAll();
+                field.replaceSelection("🛰️");
+                assertEquals("🛰️", field.getText());
+                assertEquals("", statusLabel(form).getText());
+
+                field.selectAll();
+                field.replaceSelection("🤖🚀");
+                assertEquals("🛰️", field.getText());
+            } finally {
+                form.dispose();
+            }
+            return null;
+        });
+    }
+
+    @Test
+    void buildDraftRejectsPlainTextIcon() {
+        onFxThread(() -> {
+            LuaScriptSettingsForm form = new LuaScriptSettingsForm(
+                    script("123e4567-e89b-12d3-a456-426614174000", "🚀", "",
+                            LuaScript.BotType.AUTOMATION_BOT, "@auto"));
+            try {
+                TextField field = iconField(form);
+                field.setTextFormatter(null);
+                field.setText("bot");
+
+                Object draft = buildDraft(form);
+
+                assertNull(draft);
+                assertEquals("Иконка должна быть одним emoji-символом", statusLabel(form).getText());
+            } finally {
+                form.dispose();
+            }
+            return null;
+        });
+    }
+
     private static ConnectionEntry serialEntry(String name, String portName, String nodeId, boolean connected) {
         ConnectionEntry entry = new ConnectionEntry(name, portName, 115200, ConnectionType.SERIAL);
         entry.setNodeId(nodeId);
@@ -195,6 +291,16 @@ class LuaScriptSettingsFormTest {
                 automationName, 0L, 0L, 0L, "NEW", null);
     }
 
+    private static LuaScript script(String guid, String nodeId, LuaScript.BotType botType, String automationName) {
+        return script(guid, LuaScript.DEFAULT_ICON, nodeId, botType, automationName);
+    }
+
+    private static LuaScript script(String guid, String icon, String nodeId,
+                                    LuaScript.BotType botType, String automationName) {
+        return new LuaScript(1L, guid, icon, "Script", "", true, nodeId, botType,
+                automationName, 0L, 0L, 0L, "NEW", null);
+    }
+
     private static ComboBox<?> nodeCombo(LuaScriptSettingsForm form) {
         try {
             Field field = LuaScriptSettingsForm.class.getDeclaredField("nodeCombo");
@@ -202,6 +308,36 @@ class LuaScriptSettingsFormTest {
             return (ComboBox<?>) field.get(form);
         } catch (ReflectiveOperationException e) {
             throw new AssertionError("Failed to read node combo", e);
+        }
+    }
+
+    private static TextField guidField(LuaScriptSettingsForm form) {
+        try {
+            Field field = LuaScriptSettingsForm.class.getDeclaredField("guidField");
+            field.setAccessible(true);
+            return (TextField) field.get(form);
+        } catch (ReflectiveOperationException e) {
+            throw new AssertionError("Failed to read GUID field", e);
+        }
+    }
+
+    private static TextField iconField(LuaScriptSettingsForm form) {
+        try {
+            Field field = LuaScriptSettingsForm.class.getDeclaredField("iconField");
+            field.setAccessible(true);
+            return (TextField) field.get(form);
+        } catch (ReflectiveOperationException e) {
+            throw new AssertionError("Failed to read icon field", e);
+        }
+    }
+
+    private static Label statusLabel(LuaScriptSettingsForm form) {
+        try {
+            Field field = LuaScriptSettingsForm.class.getDeclaredField("statusLabel");
+            field.setAccessible(true);
+            return (Label) field.get(form);
+        } catch (ReflectiveOperationException e) {
+            throw new AssertionError("Failed to read status label", e);
         }
     }
 
@@ -234,6 +370,16 @@ class LuaScriptSettingsFormTest {
             return (String) method.invoke(draft);
         } catch (ReflectiveOperationException e) {
             throw new AssertionError("Failed to read draft node id", e);
+        }
+    }
+
+    private static String draftIcon(Object draft) {
+        try {
+            Method method = draft.getClass().getDeclaredMethod("icon");
+            method.setAccessible(true);
+            return (String) method.invoke(draft);
+        } catch (ReflectiveOperationException e) {
+            throw new AssertionError("Failed to read draft icon", e);
         }
     }
 

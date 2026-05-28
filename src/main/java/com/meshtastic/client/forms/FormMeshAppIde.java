@@ -30,7 +30,11 @@ import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
 import javafx.scene.shape.SVGPath;
+import javafx.stage.FileChooser;
+import javafx.stage.Window;
 
+import java.io.File;
+import java.io.IOException;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
@@ -84,6 +88,12 @@ public class FormMeshAppIde extends Form {
                 "/icons/refresh.svg",
                 this::rebuildCards);
 
+        Button importButton = createToolbarButton(
+                "Импорт",
+                "Загрузить Lua-скрипт из JSON-файла",
+                "/icons/load-config.svg",
+                this::importScript);
+
         Button createButton = createToolbarButton(
                 "Новый скрипт",
                 "Создать новый Lua-скрипт",
@@ -93,6 +103,7 @@ public class FormMeshAppIde extends Form {
         actionToolbar.getItems().addAll(
                 refreshButton,
                 new Separator(Orientation.VERTICAL),
+                importButton,
                 createButton
         );
 
@@ -154,6 +165,9 @@ public class FormMeshAppIde extends Form {
         Label indicator = new Label("\u25CF");
         indicator.setStyle("-fx-text-fill: " + indicatorColor(script, running) + "; -fx-font-weight: bold;");
 
+        Label icon = new Label(script.getIcon());
+        icon.setStyle("-fx-font-size: 18px;");
+
         Label name = new Label(script.getName());
         name.getStyleClass().add("connection-card-name");
 
@@ -165,7 +179,7 @@ public class FormMeshAppIde extends Form {
 
         ToolBar actionToolbar = createScriptActionToolbar(script, running);
 
-        topRow.getChildren().addAll(indicator, name, status, spacer, actionToolbar);
+        topRow.getChildren().addAll(indicator, icon, name, status, spacer, actionToolbar);
 
         Label params = new Label(scriptSummary(script));
         params.setWrapText(true);
@@ -217,6 +231,12 @@ public class FormMeshAppIde extends Form {
                 "/icons/database.svg",
                 () -> LuaKvEditorWindow.showWindow(script));
 
+        Button exportButton = createToolbarButton(
+                "Экспорт",
+                "Сохранить скрипт и его свойства в JSON-файл",
+                "/icons/save-json.svg",
+                () -> exportScript(script));
+
         Button editButton = createToolbarButton(
                 "Настройки",
                 "Изменить параметры скрипта",
@@ -235,6 +255,7 @@ public class FormMeshAppIde extends Form {
                 new Separator(Orientation.VERTICAL),
                 ideButton,
                 kvButton,
+                exportButton,
                 editButton,
                 new Separator(Orientation.VERTICAL),
                 deleteButton
@@ -282,6 +303,7 @@ public class FormMeshAppIde extends Form {
                         draft.name(),
                         draftScript.getCode(),
                         draft.autostart(),
+                        draft.icon(),
                         draft.nodeId(),
                         draft.botType(),
                         draft.automationName());
@@ -294,6 +316,41 @@ public class FormMeshAppIde extends Form {
         });
         modalPane.show(form);
         modalPane.setOnHidden(form::dispose);
+    }
+
+    private void importScript() {
+        FileChooser chooser = createScriptJsonChooser("Импорт скрипта", false, null);
+        File source = chooser.showOpenDialog(currentWindow());
+        if (source == null) {
+            return;
+        }
+        try {
+            LuaScriptService.ScriptImportResult result = scriptService.importScript(source.toPath());
+            rebuildCards();
+            Toast.show(
+                    Toast.Type.SUCCESS,
+                    (result.updated() ? "Обновлен скрипт: " : "Импортирован скрипт: ")
+                            + result.script().getName());
+        } catch (Exception e) {
+            Toast.show(Toast.Type.ERROR, "Ошибка импорта: " + userMessage(e));
+        }
+    }
+
+    private void exportScript(LuaScript script) {
+        FileChooser chooser = createScriptJsonChooser("Экспорт скрипта", true, script);
+        File target = chooser.showSaveDialog(currentWindow());
+        if (target == null) {
+            return;
+        }
+        File outputFile = ensureJsonExtension(target);
+        try {
+            scriptService.exportScript(script.getId(), outputFile.toPath());
+            Toast.show(Toast.Type.SUCCESS, "Экспортирован скрипт: " + outputFile.getName());
+        } catch (IOException e) {
+            Toast.show(Toast.Type.ERROR, "Ошибка экспорта: " + userMessage(e));
+        } catch (Exception e) {
+            Toast.show(Toast.Type.ERROR, "Ошибка экспорта: " + userMessage(e));
+        }
     }
 
     private void toggleAutostart(LuaScript script) {
@@ -317,6 +374,7 @@ public class FormMeshAppIde extends Form {
                         script.getId(),
                         draft.name(),
                         draft.autostart(),
+                        draft.icon(),
                         draft.nodeId(),
                         draft.botType(),
                         draft.automationName());
@@ -443,6 +501,48 @@ public class FormMeshAppIde extends Form {
             return 0;
         }
         return code.split("\\R", -1).length;
+    }
+
+    private FileChooser createScriptJsonChooser(String title, boolean saveMode, LuaScript script) {
+        FileChooser chooser = new FileChooser();
+        chooser.setTitle(title);
+        chooser.getExtensionFilters().add(
+                new FileChooser.ExtensionFilter("MeshApp Lua Script (*.json)", "*.json"));
+        if (saveMode && script != null) {
+            chooser.setInitialFileName(suggestedExportFileName(script));
+        }
+        return chooser;
+    }
+
+    private String suggestedExportFileName(LuaScript script) {
+        String name = script.getName() != null ? script.getName().trim() : "";
+        if (name.isBlank()) {
+            name = "lua-script";
+        }
+        String safeName = name.replaceAll("[^\\p{L}\\p{N}._-]+", "-")
+                .replaceAll("^-+|-+$", "");
+        if (safeName.isBlank()) {
+            safeName = "lua-script";
+        }
+        return safeName + ".meshapp-script.json";
+    }
+
+    private File ensureJsonExtension(File file) {
+        String name = file.getName();
+        if (name.toLowerCase(Locale.ROOT).endsWith(".json")) {
+            return file;
+        }
+        File parent = file.getParentFile();
+        return new File(parent != null ? parent : new File("."), name + ".json");
+    }
+
+    private Window currentWindow() {
+        return getScene() != null ? getScene().getWindow() : null;
+    }
+
+    private String userMessage(Exception e) {
+        String message = e.getMessage();
+        return message == null || message.isBlank() ? "операция не выполнена" : message;
     }
 
     private String truncate(String value, int maxLength) {

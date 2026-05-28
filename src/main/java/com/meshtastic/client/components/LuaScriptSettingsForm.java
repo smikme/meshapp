@@ -16,6 +16,7 @@ import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
 import javafx.scene.control.Separator;
 import javafx.scene.control.TextField;
+import javafx.scene.control.TextFormatter;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
 import javafx.util.StringConverter;
@@ -38,9 +39,13 @@ public final class LuaScriptSettingsForm extends VBox {
 
     private static final double NODE_COMBO_HEIGHT = 34.0;
     private static final int NODE_COMBO_VISIBLE_ROWS = 6;
+    private static final String ICON_VALIDATION_MESSAGE = "Иконка должна быть одним emoji-символом";
 
     private final LuaScript script;
+    private final TextField iconField = new TextField();
     private final TextField nameField = new TextField();
+    private final Label guidLabel = new Label("GUID");
+    private final TextField guidField = new TextField();
     private final CheckBox autostartCheck = new CheckBox("Автозапуск");
     private final Label nodeLabel = new Label("Нода исполнения");
     private final ComboBox<NodeChoice> nodeCombo = new ComboBox<>();
@@ -86,8 +91,16 @@ public final class LuaScriptSettingsForm extends VBox {
         Label title = new Label(isNewScript() ? "Новый скрипт" : "Редактировать скрипт");
         title.getStyleClass().add("dialog-title");
 
+        iconField.setPromptText(LuaScript.DEFAULT_ICON);
+        iconField.setMaxWidth(Double.MAX_VALUE);
+        iconField.setTextFormatter(new TextFormatter<>(this::filterIconChange));
+
         nameField.setPromptText("Имя скрипта");
         nameField.setMaxWidth(Double.MAX_VALUE);
+
+        guidField.setEditable(false);
+        guidField.setFocusTraversable(true);
+        guidField.setMaxWidth(Double.MAX_VALUE);
 
         nodeCombo.setMaxWidth(Double.MAX_VALUE);
         nodeCombo.setMinHeight(NODE_COMBO_HEIGHT);
@@ -149,8 +162,12 @@ public final class LuaScriptSettingsForm extends VBox {
         getChildren().addAll(
                 title,
                 new Separator(),
+                new Label("Иконка"),
+                iconField,
                 new Label("Имя скрипта"),
                 nameField,
+                guidLabel,
+                guidField,
                 autostartCheck,
                 nodeLabel,
                 nodeCombo,
@@ -164,7 +181,15 @@ public final class LuaScriptSettingsForm extends VBox {
     }
 
     private void populateFields() {
+        iconField.setText(script.getIcon());
         nameField.setText(script.getName() != null ? script.getName() : "");
+        String guid = script.getGuid();
+        boolean hasGuid = guid != null && !guid.isBlank();
+        guidField.setText(hasGuid ? guid : "");
+        guidLabel.setVisible(hasGuid);
+        guidLabel.setManaged(hasGuid);
+        guidField.setVisible(hasGuid);
+        guidField.setManaged(hasGuid);
         autostartCheck.setSelected(script.isAutostart());
 
         refreshNodeChoices();
@@ -268,6 +293,13 @@ public final class LuaScriptSettingsForm extends VBox {
             statusLabel.setText("Введите имя скрипта");
             return null;
         }
+        String icon;
+        try {
+            icon = LuaScript.requireValidIcon(iconField.getText());
+        } catch (IllegalArgumentException e) {
+            statusLabel.setText(ICON_VALIDATION_MESSAGE);
+            return null;
+        }
 
         LuaScript.BotType botType = botTypeCombo.getValue() != null
                 ? botTypeCombo.getValue()
@@ -290,7 +322,19 @@ public final class LuaScriptSettingsForm extends VBox {
             return null;
         }
 
-        return new Draft(name, autostartCheck.isSelected(), nodeId, botType, automationName);
+        return new Draft(name, autostartCheck.isSelected(), icon, nodeId, botType, automationName);
+    }
+
+    private TextFormatter.Change filterIconChange(TextFormatter.Change change) {
+        String nextText = change.getControlNewText();
+        if (nextText == null || nextText.isEmpty() || LuaScript.isEmojiIcon(nextText)) {
+            if (ICON_VALIDATION_MESSAGE.equals(statusLabel.getText())) {
+                statusLabel.setText("");
+            }
+            return change;
+        }
+        statusLabel.setText(ICON_VALIDATION_MESSAGE);
+        return null;
     }
 
     private List<NodeChoice> loadNodeChoices(String preferredNodeId) {
@@ -368,6 +412,7 @@ public final class LuaScriptSettingsForm extends VBox {
 
     public record Draft(String name,
                         boolean autostart,
+                        String icon,
                         String nodeId,
                         LuaScript.BotType botType,
                         String automationName) {}

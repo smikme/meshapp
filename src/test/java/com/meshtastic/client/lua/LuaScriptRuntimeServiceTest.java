@@ -11,13 +11,17 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
@@ -82,6 +86,62 @@ class LuaScriptRuntimeServiceTest {
         assertTrue(scriptService.deleteKv(script.getId(), "alpha"));
         assertFalse(scriptService.deleteKv(script.getId(), "missing"));
         assertEquals(Map.of("beta", "two"), scriptService.listKv(script.getId()));
+    }
+
+    @Test
+    void createdScriptsReceiveStableUniqueGuids() {
+        LuaScript first = scriptService.createScript("guid-one", "");
+        LuaScript second = scriptService.createScript("guid-two", "");
+
+        assertValidGuid(first.getGuid());
+        assertValidGuid(second.getGuid());
+        assertNotEquals(first.getGuid(), second.getGuid());
+        assertEquals(LuaScript.DEFAULT_ICON, first.getIcon());
+
+        LuaScript saved = scriptService.saveScript(first.getId(), "guid-one-renamed", "mesh.log('ok')", true);
+        assertEquals(first.getGuid(), saved.getGuid());
+        assertEquals(first.getIcon(), saved.getIcon());
+        assertEquals(first.getGuid(), scriptService.findScript(first.getId()).orElseThrow().getGuid());
+    }
+
+    @Test
+    void scriptIconIsPersistedWithSettings() {
+        LuaScript script = scriptService.createScript("icon", "");
+
+        LuaScript saved = scriptService.saveScriptSettings(
+                script.getId(),
+                "icon",
+                true,
+                "🛰️",
+                "!abcdef12",
+                LuaScript.BotType.AIR_BOT,
+                "");
+
+        assertEquals("🛰️", saved.getIcon());
+        assertEquals("🛰️", scriptService.findScript(script.getId()).orElseThrow().getIcon());
+    }
+
+    @Test
+    void scriptIconRejectsPlainText() {
+        LuaScript script = scriptService.createScript("plain-text-icon", "");
+
+        assertThrows(IllegalArgumentException.class, () -> scriptService.saveScriptSettings(
+                script.getId(),
+                "plain-text-icon",
+                true,
+                "bot",
+                "!abcdef12",
+                LuaScript.BotType.AIR_BOT,
+                ""));
+
+        assertThrows(IllegalArgumentException.class, () -> scriptService.createScript(
+                "bad-icon",
+                "",
+                true,
+                "script",
+                "!abcdef12",
+                LuaScript.BotType.AIR_BOT,
+                ""));
     }
 
     @Test
@@ -203,7 +263,7 @@ class LuaScriptRuntimeServiceTest {
 
         runtimeService.runScript(script, events::add);
 
-        awaitCondition(() -> "nil".equals(scriptService.getKv(script.getId(), "debug")),
+        awaitCondition(() -> "nil".equals(scriptService.getKv(script.getId(), "luajava")),
                 "Lua sandbox script did not finish");
 
         assertEquals("nil", scriptService.getKv(script.getId(), "debug"));
@@ -285,5 +345,10 @@ class LuaScriptRuntimeServiceTest {
             }
         }
         fail(timeoutMessage);
+    }
+
+    private static void assertValidGuid(String guid) {
+        assertNotNull(guid);
+        assertEquals(guid, UUID.fromString(guid).toString());
     }
 }

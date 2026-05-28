@@ -7,8 +7,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.*;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
+import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -31,7 +34,7 @@ public final class DatabaseMigrator {
     private static final Logger log = LoggerFactory.getLogger(DatabaseMigrator.class);
 
     /** Текущая версия схемы. Увеличивается при каждом изменении схемы. */
-    static final int CURRENT_VERSION = 15;
+    static final int CURRENT_VERSION = 17;
     private static final Pattern CONNECTION_NODE_ID_PATTERN =
             Pattern.compile("\"nodeId\"\\s*:\\s*\"(![0-9a-fA-F]{8})\"");
     private static final List<String> APPLICATION_TABLES = List.of(
@@ -101,6 +104,8 @@ public final class DatabaseMigrator {
             if (version < 13) { migrateToV13(connection); version = 13; }
             if (version < 14) { migrateToV14(connection); version = 14; }
             if (version < 15) { migrateToV15(connection); version = 15; }
+            if (version < 16) { migrateToV16(connection); version = 16; }
+            if (version < 17) { migrateToV17(connection); version = 17; }
 
             setVersion(connection, CURRENT_VERSION);
             log.info("Database migration complete, schema version = {}", CURRENT_VERSION);
@@ -624,6 +629,8 @@ public final class DatabaseMigrator {
             stmt.execute("""
                     CREATE TABLE IF NOT EXISTS lua_scripts (
                         id          BIGINT AUTO_INCREMENT PRIMARY KEY,
+                        guid        VARCHAR(36) NOT NULL DEFAULT '',
+                        icon        VARCHAR(32) NOT NULL DEFAULT '🤖',
                         name        VARCHAR(120) NOT NULL,
                         code        CLOB NOT NULL,
                         enabled     BOOLEAN NOT NULL DEFAULT TRUE,
@@ -640,6 +647,14 @@ public final class DatabaseMigrator {
             stmt.execute("""
                     CREATE UNIQUE INDEX IF NOT EXISTS idx_lua_scripts_name
                     ON lua_scripts (name)
+                    """);
+            stmt.execute("ALTER TABLE lua_scripts ADD COLUMN IF NOT EXISTS guid VARCHAR(36) NOT NULL DEFAULT ''");
+            stmt.execute("ALTER TABLE lua_scripts ADD COLUMN IF NOT EXISTS icon VARCHAR(32) NOT NULL DEFAULT '🤖'");
+            backfillLuaScriptGuids(connection);
+            backfillLuaScriptIcons(connection);
+            stmt.execute("""
+                    CREATE UNIQUE INDEX IF NOT EXISTS idx_lua_scripts_guid
+                    ON lua_scripts (guid)
                     """);
             stmt.execute("""
                     CREATE TABLE IF NOT EXISTS lua_script_kv (
@@ -688,6 +703,36 @@ public final class DatabaseMigrator {
         log.info("Migration v15: added external power flags for nodes and telemetry");
     }
 
+    /** v16: стабильный GUID для каждого Lua-скрипта. */
+    private static void migrateToV16(Connection connection) throws SQLException {
+        if (!tableExists(connection, "LUA_SCRIPTS")) {
+            log.info("Migration v16: skipped Lua script GUID because lua_scripts table is absent");
+            return;
+        }
+        try (Statement stmt = connection.createStatement()) {
+            stmt.execute("ALTER TABLE lua_scripts ADD COLUMN IF NOT EXISTS guid VARCHAR(36) NOT NULL DEFAULT ''");
+            backfillLuaScriptGuids(connection);
+            stmt.execute("""
+                    CREATE UNIQUE INDEX IF NOT EXISTS idx_lua_scripts_guid
+                    ON lua_scripts (guid)
+                    """);
+        }
+        log.info("Migration v16: added Lua script GUID identifiers");
+    }
+
+    /** v17: emoji-иконка для каждого Lua-скрипта. */
+    private static void migrateToV17(Connection connection) throws SQLException {
+        if (!tableExists(connection, "LUA_SCRIPTS")) {
+            log.info("Migration v17: skipped Lua script icon because lua_scripts table is absent");
+            return;
+        }
+        try (Statement stmt = connection.createStatement()) {
+            stmt.execute("ALTER TABLE lua_scripts ADD COLUMN IF NOT EXISTS icon VARCHAR(32) NOT NULL DEFAULT '🤖'");
+            backfillLuaScriptIcons(connection);
+        }
+        log.info("Migration v17: added Lua script emoji icons");
+    }
+
     /** v2: колонка favorite для избранных нод. */
     private static void migrateToV2(Connection connection) throws SQLException {
         if (!tableExists(connection, "NODES")) {
@@ -717,6 +762,78 @@ public final class DatabaseMigrator {
             }
         }
     }
+
+    private static void backfillLuaScriptGuids(Connection connection) throws SQLException {
+        if (!tableExists(connection, "LUA_SCRIPTS") || !columnExists(connection, "LUA_SCRIPTS", "GUID")) {
+            return;
+        }
+        List<GuidUpdate> updates = new ArrayList<>();
+        Set<String> usedGuids = new HashSet<>();
+        try (Statement stmt = connection.createStatement();
+             ResultSet rs = stmt.executeQuery("SELECT id, guid FROM lua_scripts ORDER BY id")) {
+            while (rs.next()) {
+                long id = rs.getLong("id");
+                String rawGuid = rs.getString("guid");
+                String normalizedGuid = normalizeGuid(rawGuid);
+                if (normalizedGuid.isBlank() || !usedGuids.add(normalizedGuid)) {
+                    updates.add(new GuidUpdate(id, newGuid(usedGuids)));
+                } else if (!normalizedGuid.equals(rawGuid)) {
+                    updates.add(new GuidUpdate(id, normalizedGuid));
+                }
+            }
+        }
+        if (updates.isEmpty()) {
+            return;
+        }
+        try (PreparedStatement ps = connection.prepareStatement("""
+                UPDATE lua_scripts SET guid = ? WHERE id = ?
+                """)) {
+            for (GuidUpdate update : updates) {
+                ps.setString(1, update.guid());
+                ps.setLong(2, update.scriptId());
+                ps.addBatch();
+            }
+            ps.executeBatch();
+        }
+        log.info("Migration: populated Lua script GUID for {} rows", updates.size());
+    }
+
+    private static void backfillLuaScriptIcons(Connection connection) throws SQLException {
+        if (!tableExists(connection, "LUA_SCRIPTS") || !columnExists(connection, "LUA_SCRIPTS", "ICON")) {
+            return;
+        }
+        try (PreparedStatement ps = connection.prepareStatement("""
+                UPDATE lua_scripts SET icon = ?
+                WHERE icon IS NULL OR TRIM(icon) = ''
+                """)) {
+            ps.setString(1, "🤖");
+            int updated = ps.executeUpdate();
+            if (updated > 0) {
+                log.info("Migration: populated Lua script icon for {} rows", updated);
+            }
+        }
+    }
+
+    private static String normalizeGuid(String guid) {
+        if (guid == null || guid.isBlank()) {
+            return "";
+        }
+        try {
+            return UUID.fromString(guid.trim()).toString();
+        } catch (IllegalArgumentException e) {
+            return "";
+        }
+    }
+
+    private static String newGuid(Set<String> usedGuids) {
+        String guid;
+        do {
+            guid = UUID.randomUUID().toString();
+        } while (!usedGuids.add(guid));
+        return guid;
+    }
+
+    private record GuidUpdate(long scriptId, String guid) {}
 
     private static void dropPrimaryKeyIfPresent(Statement stmt, String tableName) throws SQLException {
         try {
