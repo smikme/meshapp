@@ -10,6 +10,8 @@ import java.util.Locale;
 
 /**
  * Minimal command-line parser for terminal mode.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 final class TerminalOptions {
 
@@ -92,7 +94,7 @@ final class TerminalOptions {
                   --name NAME              Temporary profile name
                   --help                   Show this help
 
-                In the TUI press / for commands, ? for help, q to quit.
+                In the TUI press Tab to switch panels, PgUp/PgDn for chat history, ? for help.
                 """;
     }
 

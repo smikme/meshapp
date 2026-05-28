@@ -458,6 +458,42 @@ public final class MessageDbService {
     }
 
     /**
+     * Область чата, к которой относится сохранённая реакция.
+     *
+     * @param ownerNodeId владелец локальной истории
+     * @param chatType тип чата
+     * @param chatKey ключ чата
+     * @param targetPacketId packet id сообщения, на которое поставлена реакция
+     */
+    public record ReactionScope(String ownerNodeId, String chatType, String chatKey, int targetPacketId) {}
+
+    public synchronized ReactionScope findReactionScopeByPacketId(int packetId) {
+        if (dbConnection == null || packetId == 0) {
+            return null;
+        }
+        try (PreparedStatement ps = dbConnection.prepareStatement("""
+                SELECT owner_node_id, chat_type, chat_key, target_packet_id
+                FROM message_reactions
+                WHERE packet_id = ?
+                LIMIT 1
+                """)) {
+            ps.setInt(1, packetId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    return new ReactionScope(
+                            rs.getString("owner_node_id"),
+                            rs.getString("chat_type"),
+                            rs.getString("chat_key"),
+                            rs.getInt("target_packet_id"));
+                }
+            }
+        } catch (SQLException e) {
+            log.error("Failed to find reaction scope for packetId {}", packetId, e);
+        }
+        return null;
+    }
+
+    /**
      * Обновляет статус доставки сообщения по packetId.
      */
     public synchronized void updateStatus(int packetId, MeshMessage.DeliveryStatus status, String errorReason) {

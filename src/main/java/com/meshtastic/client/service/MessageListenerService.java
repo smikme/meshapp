@@ -6,6 +6,7 @@ import org.meshtastic.proto.MeshProtos;
 import org.meshtastic.proto.Portnums;
 import com.google.protobuf.InvalidProtocolBufferException;
 import com.meshtastic.client.model.DeviceState;
+import com.meshtastic.client.model.MessageChangeEvent;
 import com.meshtastic.client.model.MessageReaction;
 import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.model.NodeData;
@@ -380,6 +381,11 @@ public class MessageListenerService implements FromRadioListener {
             MessageDbService.getInstance().saveReaction(reaction, "dm", fromNodeId, ownerNodeId);
         }
 
+        deviceState.fireMessageChange(MessageChangeEvent.reactionChanged(
+                channelMessage ? "channel" : "dm",
+                channelMessage ? String.valueOf(packet.getChannel()) : fromNodeId,
+                ownerNodeId,
+                data.getReplyId()));
         deviceState.fireMessageListeners();
     }
 
@@ -407,8 +413,9 @@ public class MessageListenerService implements FromRadioListener {
             String reactionError = routing.getErrorReason() == MeshProtos.Routing.Error.NONE
                     ? null
                     : routing.getErrorReason().name();
-            boolean updatedReaction = MessageDbService.getInstance()
-                    .updateReactionStatus(requestId, reactionStatus, reactionError);
+            MessageDbService db = MessageDbService.getInstance();
+            MessageDbService.ReactionScope reactionScope = db.findReactionScopeByPacketId(requestId);
+            boolean updatedReaction = db.updateReactionStatus(requestId, reactionStatus, reactionError);
 
             if (pending == null && !completedPacketAck && !updatedReaction) {
                 log.debug("No pending message or packet ACK waiter found for requestId={}", requestId);
@@ -417,6 +424,7 @@ public class MessageListenerService implements FromRadioListener {
 
             if (pending == null) {
                 if (updatedReaction) {
+                    fireReactionChanged(reactionScope);
                     deviceState.fireMessageListeners();
                     log.debug("Routing ACK received for reaction packet {}", requestId);
                 } else {
@@ -438,6 +446,7 @@ public class MessageListenerService implements FromRadioListener {
             pending.setStatus(MeshMessage.DeliveryStatus.FAILED);
             pending.setErrorReason(routing.getErrorReason().name());
             MessageDbService.getInstance().updateStatus(requestId, pending.getStatus(), pending.getErrorReason());
+            fireMessageStatusChanged(pending);
             deviceState.fireMessageListeners();
             log.warn("NAK received for packet {}: {}", requestId, routing.getErrorReason());
             return;
@@ -448,6 +457,7 @@ public class MessageListenerService implements FromRadioListener {
             pending.setStatus(MeshMessage.DeliveryStatus.CONFIRMED);
             pending.setErrorReason(null);
             MessageDbService.getInstance().updateStatus(requestId, pending.getStatus(), null);
+            fireMessageStatusChanged(pending);
             deviceState.fireMessageListeners();
             log.debug("Recipient ACK received for DM packet {}", requestId);
             return;
@@ -456,6 +466,7 @@ public class MessageListenerService implements FromRadioListener {
         pending.setStatus(MeshMessage.DeliveryStatus.DELIVERED);
         pending.setErrorReason(null);
         MessageDbService.getInstance().updateStatus(requestId, pending.getStatus(), null);
+        fireMessageStatusChanged(pending);
         deviceState.fireMessageListeners();
         if (pending.isDirectMessage()) {
             log.debug("Non-recipient ACK received for DM packet {} from !{}; waiting for ACK from {}",
@@ -475,6 +486,43 @@ public class MessageListenerService implements FromRadioListener {
         } catch (NumberFormatException e) {
             return false;
         }
+    }
+
+    private void fireMessageStatusChanged(MeshMessage message) {
+        if (message == null) {
+            return;
+        }
+        deviceState.fireMessageChange(MessageChangeEvent.statusChanged(
+                chatType(message),
+                chatKey(message),
+                currentOwnerNodeId(),
+                message));
+    }
+
+    private void fireReactionChanged(MessageDbService.ReactionScope reactionScope) {
+        if (reactionScope == null) {
+            return;
+        }
+        deviceState.fireMessageChange(MessageChangeEvent.reactionChanged(
+                reactionScope.chatType(),
+                reactionScope.chatKey(),
+                reactionScope.ownerNodeId(),
+                reactionScope.targetPacketId()));
+    }
+
+    private static String chatType(MeshMessage message) {
+        return message.isDirectMessage() ? "dm" : "channel";
+    }
+
+    private static String chatKey(MeshMessage message) {
+        if (!message.isDirectMessage()) {
+            return String.valueOf(message.getChannelIndex());
+        }
+        return message.isOutgoing() ? message.getToNodeId() : message.getFromNodeId();
+    }
+
+    private String currentOwnerNodeId() {
+        return String.format("!%08x", deviceState.getMyNodeNum());
     }
 
     private void handleNodeInfoResponse(MeshProtos.MeshPacket packet, MeshProtos.Data data) {

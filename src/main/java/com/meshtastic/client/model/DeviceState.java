@@ -19,6 +19,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 
 import com.meshtastic.client.service.MessageDbService;
 
@@ -194,6 +195,12 @@ public class DeviceState {
 
     public void addMessageListener(Runnable listener) { messageStore.addMessageListener(listener); }
     public void removeMessageListener(Runnable listener) { messageStore.removeMessageListener(listener); }
+    public void addMessageChangeListener(Consumer<MessageChangeEvent> listener) {
+        messageStore.addMessageChangeListener(listener);
+    }
+    public void removeMessageChangeListener(Consumer<MessageChangeEvent> listener) {
+        messageStore.removeMessageChangeListener(listener);
+    }
 
     public void addNodeUpdateListener(java.util.function.IntConsumer listener) { nodeDatabase.addNodeUpdateListener(listener); }
     public void removeNodeUpdateListener(java.util.function.IntConsumer listener) { nodeDatabase.removeNodeUpdateListener(listener); }
@@ -250,6 +257,10 @@ public class DeviceState {
         messageStore.fireMessageListeners();
     }
 
+    public void fireMessageChange(MessageChangeEvent event) {
+        messageStore.fireMessageChange(event);
+    }
+
     /**
      * Добавляет канальное сообщение с дедупликацией по {@code packetId}.
      * Сохраняет сообщение в БД сразу после добавления.
@@ -261,6 +272,11 @@ public class DeviceState {
         if (ownerNodeId != null && msg.getPacketId() > 0) {
             messageDbService.save(msg, "channel", String.valueOf(msg.getChannelIndex()), ownerNodeId);
         }
+        messageStore.fireMessageChange(MessageChangeEvent.newMessage(
+                "channel",
+                String.valueOf(msg.getChannelIndex()),
+                ownerNodeId,
+                msg));
     }
 
     public List<MeshMessage> getMessages(int channelIndex) {
@@ -278,6 +294,7 @@ public class DeviceState {
         if (ownerNodeId != null && msg.getPacketId() > 0) {
             messageDbService.save(msg, "dm", peerNodeId, ownerNodeId);
         }
+        messageStore.fireMessageChange(MessageChangeEvent.newMessage("dm", peerNodeId, ownerNodeId, msg));
     }
 
     public void ensureDirectMessageThread(String peerNodeId) {
@@ -360,6 +377,7 @@ public class DeviceState {
         messageStore.failAllPendingAcksWithDbUpdate(reason, (packetId, msg) -> {
             if (msg != null) {
                 messageDbService.updateStatus(packetId, msg.getStatus(), msg.getErrorReason());
+                fireMessageChange(statusChangedEvent(msg));
             }
         });
     }
@@ -509,6 +527,7 @@ public class DeviceState {
                     if (packetId > 0) {
                         messageDbService.updateStatus(packetId, msg.getStatus(), msg.getErrorReason());
                     }
+                    fireMessageChange(statusChangedEvent(msg));
                     
                     anyExpired = true;
                 }
@@ -517,6 +536,16 @@ public class DeviceState {
         if (anyExpired) {
             fireMessageListeners();
         }
+    }
+
+    private MessageChangeEvent statusChangedEvent(MeshMessage message) {
+        return MessageChangeEvent.statusChanged(
+                message.isDirectMessage() ? "dm" : "channel",
+                message.isDirectMessage()
+                        ? message.isOutgoing() ? message.getToNodeId() : message.getFromNodeId()
+                        : String.valueOf(message.getChannelIndex()),
+                getOwnerNodeId(),
+                message);
     }
 
     // ═══════════════════════════════════════════════════════════

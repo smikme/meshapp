@@ -651,11 +651,13 @@ public final class PacketMonitorWindow {
         TableColumn<PacketLogEntry, String> colFrom = new TableColumn<>("От");
         colFrom.setCellValueFactory(cellData -> new ReadOnlyStringWrapper(
                 formatPacketFromNode(cellData.getValue())));
+        colFrom.setCellFactory(column -> new EndpointTableCell());
         configureCompactColumn(colFrom, PACKET_TABLE_NODE_COLUMN_WIDTH);
 
         TableColumn<PacketLogEntry, String> colTo = new TableColumn<>("Кому");
         colTo.setCellValueFactory(cellData -> new ReadOnlyStringWrapper(
                 formatPacketToNode(cellData.getValue())));
+        colTo.setCellFactory(column -> new EndpointTableCell());
         configureCompactColumn(colTo, PACKET_TABLE_NODE_COLUMN_WIDTH);
 
         TableColumn<PacketLogEntry, String> colPayload = new TableColumn<>("Payload");
@@ -721,6 +723,41 @@ public final class PacketMonitorWindow {
         });
         VBox.setVgrow(table, Priority.ALWAYS);
         return table;
+    }
+
+    private static final class EndpointTableCell extends TableCell<PacketLogEntry, String> {
+        private static final double CELL_EMOJI_SIZE = 18;
+
+        private final EmojiTextFlow flow = new EmojiTextFlow("", CELL_EMOJI_SIZE);
+
+        private EndpointTableCell() {
+            flow.setMouseTransparent(true);
+            flow.setMinHeight(Region.USE_PREF_SIZE);
+            setContentDisplay(ContentDisplay.GRAPHIC_ONLY);
+
+            fontProperty().addListener((obs, oldFont, newFont) -> applyTextStyle());
+            textFillProperty().addListener((obs, oldFill, newFill) -> applyTextStyle());
+        }
+
+        @Override
+        protected void updateItem(String item, boolean empty) {
+            super.updateItem(item, empty);
+            setText(null);
+            if (empty || item == null || item.isBlank()) {
+                setGraphic(null);
+                flow.setText("");
+                return;
+            }
+            flow.setText(item);
+            flow.setEmojiSize(CELL_EMOJI_SIZE);
+            applyTextStyle();
+            setGraphic(flow);
+        }
+
+        private void applyTextStyle() {
+            flow.setTextFont(getFont());
+            flow.setTextFill(getTextFill());
+        }
     }
 
     private static final class PayloadTableCell extends TableCell<PacketLogEntry, String> {

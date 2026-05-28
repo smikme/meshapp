@@ -6,6 +6,7 @@ import org.slf4j.LoggerFactory;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.function.Consumer;
 
 /**
  * Управление сообщениями Meshtastic-чата.
@@ -44,6 +45,8 @@ public class MessageStore {
 
     /** Слушатели обновлений сообщений */
     private final CopyOnWriteArrayList<Runnable> messageListeners = new CopyOnWriteArrayList<>();
+    /** Детальные слушатели изменений сообщений для точечного UI-обновления. */
+    private final CopyOnWriteArrayList<Consumer<MessageChangeEvent>> messageChangeListeners = new CopyOnWriteArrayList<>();
 
     /**
      * Добавляет канальное сообщение с дедупликацией по идентичности пакета
@@ -200,12 +203,43 @@ public class MessageStore {
     }
 
     /**
+     * Добавляет listener детальных изменений сообщений.
+     *
+     * @param listener consumer события
+     */
+    public void addMessageChangeListener(Consumer<MessageChangeEvent> listener) {
+        messageChangeListeners.add(listener);
+    }
+
+    /**
+     * Удаляет listener детальных изменений сообщений.
+     *
+     * @param listener ранее добавленный consumer
+     */
+    public void removeMessageChangeListener(Consumer<MessageChangeEvent> listener) {
+        messageChangeListeners.remove(listener);
+    }
+
+    /**
      * Оповещает всех listener'ов об изменениях в сообщениях.
      */
     public void fireMessageListeners() {
         for (Runnable r : messageListeners) {
             try { r.run(); }
             catch (Exception e) { log.error("Exception in message listener", e); }
+        }
+    }
+
+    /**
+     * Оповещает детальные listener'ы о конкретном изменении сообщения.
+     *
+     * @param event событие изменения
+     */
+    public void fireMessageChange(MessageChangeEvent event) {
+        MessageChangeEvent safeEvent = event != null ? event : MessageChangeEvent.unknown();
+        for (Consumer<MessageChangeEvent> listener : messageChangeListeners) {
+            try { listener.accept(safeEvent); }
+            catch (Exception e) { log.error("Exception in message change listener", e); }
         }
     }
 

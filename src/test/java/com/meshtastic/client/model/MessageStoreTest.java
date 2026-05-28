@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -443,5 +444,34 @@ class MessageStoreTest {
         store.addMessage(msg);
         
         assertTrue(notified[0]);
+    }
+
+    @Test
+    void fireMessageChangeNotifiesDetailedListeners() {
+        MessageStore store = new MessageStore();
+        MessageChangeEvent[] captured = {null};
+        MeshMessage msg = createMessage("detail", 0, 77);
+        MessageChangeEvent event = MessageChangeEvent.newMessage("channel", "0", "!00000001", msg);
+
+        store.addMessageChangeListener(change -> captured[0] = change);
+        store.fireMessageChange(event);
+
+        assertEquals(MessageChangeEvent.Kind.NEW_MESSAGE, captured[0].kind());
+        assertEquals("channel", captured[0].chatType());
+        assertEquals("0", captured[0].chatKey());
+        assertEquals(msg, captured[0].message());
+    }
+
+    @Test
+    void removeMessageChangeListenerStopsDetailedNotifications() {
+        MessageStore store = new MessageStore();
+        boolean[] notified = {false};
+        Consumer<MessageChangeEvent> listener = ignored -> notified[0] = true;
+
+        store.addMessageChangeListener(listener);
+        store.removeMessageChangeListener(listener);
+        store.fireMessageChange(MessageChangeEvent.unknown());
+
+        assertFalse(notified[0]);
     }
 }

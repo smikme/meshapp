@@ -3,6 +3,7 @@ package com.meshtastic.client.protocol.meshcore;
 import com.meshtastic.client.connection.FrameFormat;
 import com.meshtastic.client.connection.FrameFormatAwareConnection;
 import com.meshtastic.client.connection.TransportConnection;
+import com.meshtastic.client.model.MessageChangeEvent;
 import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.model.ProtocolType;
 import com.meshtastic.client.protocol.ProtocolRuntime;
@@ -526,6 +527,11 @@ public final class MeshCoreCompanionProtocolRuntime implements ProtocolRuntime<M
         message.setStatus(MeshMessage.DeliveryStatus.DELIVERED);
         message.setErrorReason(null);
         MessageDbService.getInstance().updateStatus(message.getPacketId(), message.getStatus(), null);
+        state.getDeviceState().fireMessageChange(MessageChangeEvent.statusChanged(
+                message.isDirectMessage() ? "dm" : "channel",
+                message.isDirectMessage() ? message.getToNodeId() : String.valueOf(message.getChannelIndex()),
+                state.getOwnerId(),
+                message));
         state.getDeviceState().fireMessageListeners();
     }
 

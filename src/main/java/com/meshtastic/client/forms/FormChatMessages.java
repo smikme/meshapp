@@ -1,7 +1,9 @@
 package com.meshtastic.client.forms;
 
+import com.meshtastic.client.components.chat.MessageBubbleFactory;
 import com.meshtastic.client.components.chat.ChatDbKey;
 import com.meshtastic.client.model.ChatItem;
+import com.meshtastic.client.model.MessageChangeEvent;
 import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.model.MessageReaction;
 import com.meshtastic.client.service.MessageDbService;
@@ -19,6 +21,8 @@ import java.util.Objects;
 import java.util.Set;
 
 import org.meshtastic.proto.MeshProtos;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Управляет окном загруженных сообщений выбранного чата.
@@ -31,6 +35,7 @@ import org.meshtastic.proto.MeshProtos;
  */
 abstract class FormChatMessages extends FormChatUi {
 
+    private static final Logger log = LoggerFactory.getLogger(FormChatMessages.class);
     private static final int VIEWPORT_ANCHOR_RESTORE_PULSES = 6;
 
     /**
@@ -190,7 +195,7 @@ abstract class FormChatMessages extends FormChatUi {
         // Обновить статусы доставки для отправленных сообщений (ACK/NAK)
         MessageDbService db = MessageDbService.getInstance();
         refreshPendingDeliveryStatuses(db, chatType, chatKey, ownerNodeId);
-        boolean metadataChanged = syncLoadedMqttMetadata(db, chatType, chatKey, ownerNodeId);
+        Set<Long> metadataChangedDbIds = syncLoadedMqttMetadata(db, chatType, chatKey, ownerNodeId);
 
         List<MeshMessage> newMsgs = db.loadAfter(chatType, chatKey, latestKnownDbId, currentOwnerNodeId());
         if (reloadAfterDatabaseResetIfNeeded(db, chatType, chatKey, newMsgs)) {
@@ -198,7 +203,7 @@ abstract class FormChatMessages extends FormChatUi {
         }
         if (newMsgs.isEmpty()) {
             if (formVisible) {
-                refreshLoadedMessageRows(metadataChanged);
+                refreshLoadedMessageRows(metadataChangedDbIds);
             }
             return;
         }
@@ -206,8 +211,170 @@ abstract class FormChatMessages extends FormChatUi {
         handleNewMessages(newMsgs, preservedScrollState, wasAtLiveTail);
         refreshMessageSearchResults(false);
         if (formVisible) {
-            refreshLoadedMessageRows(metadataChanged);
+            refreshLoadedMessageRows(metadataChangedDbIds);
         }
+    }
+
+    protected void processMessageChangeEvents(List<MessageChangeEvent> events) {
+        if (selectedChat == null || events == null || events.isEmpty()) {
+            return;
+        }
+
+        long startedNanos = System.nanoTime();
+        boolean fallbackRefresh = false;
+        for (MessageChangeEvent event : events) {
+            if (event == null || event.kind() == MessageChangeEvent.Kind.UNKNOWN) {
+                fallbackRefresh = true;
+                continue;
+            }
+            if (!isMessageChangeForCurrentChat(event)) {
+                continue;
+            }
+            fallbackRefresh |= !applyMessageChangeEvent(event);
+        }
+
+        if (fallbackRefresh) {
+            refreshCurrentChat();
+        }
+        if (log.isDebugEnabled()) {
+            log.debug("Applied {} chat message change events in {} ms (fallback={})",
+                    events.size(), elapsedMillis(startedNanos), fallbackRefresh);
+        }
+    }
+
+    private boolean isMessageChangeForCurrentChat(MessageChangeEvent event) {
+        return event.hasChatScope()
+                && Objects.equals(event.ownerNodeId(), currentOwnerNodeId())
+                && Objects.equals(event.chatType(), currentChatType())
+                && Objects.equals(event.chatKey(), currentChatKey());
+    }
+
+    private boolean applyMessageChangeEvent(MessageChangeEvent event) {
+        return switch (event.kind()) {
+            case NEW_MESSAGE -> {
+                refreshCurrentChat();
+                refreshMessageMetadata(event);
+                yield true;
+            }
+            case REACTION_CHANGED -> refreshMessageReactions(event.targetPacketId());
+            case STATUS_CHANGED -> refreshMessageStatus(event);
+            case METADATA_CHANGED -> refreshMessageMetadata(event);
+            case DELETE -> {
+                refreshCurrentChat();
+                yield true;
+            }
+            case UNKNOWN -> false;
+        };
+    }
+
+    private boolean refreshMessageReactions(int targetPacketId) {
+        if (targetPacketId == 0) {
+            return false;
+        }
+        MeshMessage message = findLoadedMessageByPacketId(targetPacketId);
+        if (message == null) {
+            return true;
+        }
+
+        attachReactions(List.of(message));
+        MessageBubbleFactory.RenderedMessageRow rendered = loadedRenderedMessageRows.get(message.getDbId());
+        if (rendered == null) {
+            return true;
+        }
+        bubbleFactory.refreshRenderedReactions(rendered, message);
+        requestMessageViewportLayoutLater();
+        return true;
+    }
+
+    private boolean refreshMessageStatus(MessageChangeEvent event) {
+        MeshMessage message = findLoadedMessage(event);
+        if (message == null) {
+            return true;
+        }
+
+        MeshMessage updated = event.message();
+        if (updated == null && event.packetId() != 0) {
+            updated = MessageDbService.getInstance()
+                    .findByPacketId(event.packetId(), currentChatType(), currentChatKey(), currentOwnerNodeId());
+        }
+        if (updated != null) {
+            copyLoadedMessageMetadata(message, updated);
+        }
+
+        MessageBubbleFactory.RenderedMessageRow rendered = loadedRenderedMessageRows.get(message.getDbId());
+        if (rendered != null) {
+            bubbleFactory.refreshRenderedStatus(rendered, message);
+            bubbleFactory.refreshRenderedMetadata(rendered, message);
+            requestMessageViewportLayoutLater();
+        }
+        return true;
+    }
+
+    private boolean refreshMessageMetadata(MessageChangeEvent event) {
+        MeshMessage message = findLoadedMessage(event);
+        if (message == null) {
+            return true;
+        }
+
+        MeshMessage updated = event.message();
+        if (updated == null && event.packetId() != 0) {
+            updated = MessageDbService.getInstance()
+                    .findByPacketId(event.packetId(), currentChatType(), currentChatKey(), currentOwnerNodeId());
+        }
+        if (updated != null) {
+            copyLoadedMessageMetadata(message, updated);
+        }
+
+        MessageBubbleFactory.RenderedMessageRow rendered = loadedRenderedMessageRows.get(message.getDbId());
+        if (rendered != null) {
+            bubbleFactory.refreshRenderedMetadata(rendered, message);
+            requestMessageViewportLayoutLater();
+        }
+        return true;
+    }
+
+    private MeshMessage findLoadedMessage(MessageChangeEvent event) {
+        if (event.dbId() > 0) {
+            MeshMessage byDbId = findLoadedMessageByDbId(event.dbId());
+            if (byDbId != null) {
+                return byDbId;
+            }
+        }
+        if (event.packetId() != 0) {
+            MeshMessage byPacketId = findLoadedMessageByPacketId(event.packetId());
+            if (byPacketId != null) {
+                return byPacketId;
+            }
+        }
+        MeshMessage eventMessage = event.message();
+        if (eventMessage == null) {
+            return null;
+        }
+        if (eventMessage.getDbId() > 0) {
+            MeshMessage byDbId = findLoadedMessageByDbId(eventMessage.getDbId());
+            if (byDbId != null) {
+                return byDbId;
+            }
+        }
+        return eventMessage.getPacketId() != 0 ? findLoadedMessageByPacketId(eventMessage.getPacketId()) : null;
+    }
+
+    private MeshMessage findLoadedMessageByDbId(long dbId) {
+        for (MeshMessage message : loadedMessages) {
+            if (message.getDbId() == dbId) {
+                return message;
+            }
+        }
+        return null;
+    }
+
+    private MeshMessage findLoadedMessageByPacketId(int packetId) {
+        for (MeshMessage message : loadedMessages) {
+            if (message.getPacketId() == packetId) {
+                return message;
+            }
+        }
+        return null;
     }
 
     private void refreshPendingDeliveryStatuses(MessageDbService db,
@@ -345,24 +512,26 @@ abstract class FormChatMessages extends FormChatUi {
         });
     }
 
-    protected boolean syncLoadedMqttMetadata(MessageDbService db,
+    protected Set<Long> syncLoadedMqttMetadata(MessageDbService db,
                                         String chatType,
                                         String chatKey,
                                         String ownerNodeId) {
         if (db == null || chatType == null || chatKey == null || ownerNodeId == null) {
-            return false;
+            return Set.of();
         }
-        boolean changed = false;
+        Set<Long> changedDbIds = new HashSet<>();
         for (MeshMessage loaded : loadedMessages) {
             if (loaded.getPacketId() == 0 || !loaded.isViaMqtt()) {
                 continue;
             }
             MeshMessage updated = db.findByPacketId(loaded.getPacketId(), chatType, chatKey, ownerNodeId);
             if (updated != null) {
-                changed |= copyLoadedMessageMetadata(loaded, updated);
+                if (copyLoadedMessageMetadata(loaded, updated)) {
+                    changedDbIds.add(loaded.getDbId());
+                }
             }
         }
-        return changed;
+        return changedDbIds;
     }
 
     protected MeshMessage syncLoadedMessageMetadata(MeshMessage updated) {
@@ -444,6 +613,7 @@ abstract class FormChatMessages extends FormChatUi {
     protected void clearLoadedMessageState() {
         loadedMessages.clear();
         loadedMessageRows.clear();
+        loadedRenderedMessageRows.clear();
         loadedChatScrollCacheKey = null;
         oldestLoadedDbId = Long.MAX_VALUE;
         newestLoadedDbId = 0;
@@ -456,18 +626,20 @@ abstract class FormChatMessages extends FormChatUi {
 
     protected void appendLoadedMessageRow(MeshMessage msg) {
         loadedMessages.add(msg);
-        HBox row = bubbleFactory.build(msg);
-        applyMessageSearchHighlight(row, msg.getDbId());
-        loadedMessageRows.put(msg.getDbId(), row);
-        messageContainer.getChildren().add(row);
+        MessageBubbleFactory.RenderedMessageRow rendered = bubbleFactory.buildRendered(msg);
+        applyMessageSearchHighlight(rendered.row(), msg.getDbId());
+        loadedRenderedMessageRows.put(msg.getDbId(), rendered);
+        loadedMessageRows.put(msg.getDbId(), rendered.row());
+        messageContainer.getChildren().add(rendered.row());
     }
 
     protected void prependLoadedMessageRow(MeshMessage msg) {
         loadedMessages.add(0, msg);
-        HBox row = bubbleFactory.build(msg);
-        applyMessageSearchHighlight(row, msg.getDbId());
-        loadedMessageRows.put(msg.getDbId(), row);
-        messageContainer.getChildren().addFirst(row);
+        MessageBubbleFactory.RenderedMessageRow rendered = bubbleFactory.buildRendered(msg);
+        applyMessageSearchHighlight(rendered.row(), msg.getDbId());
+        loadedRenderedMessageRows.put(msg.getDbId(), rendered);
+        loadedMessageRows.put(msg.getDbId(), rendered.row());
+        messageContainer.getChildren().addFirst(rendered.row());
     }
 
     protected void prependOlderMessages(List<MeshMessage> older) {
@@ -503,6 +675,7 @@ abstract class FormChatMessages extends FormChatUi {
         for (int i = 0; i < excess; i++) {
             MeshMessage removed = trimFromTop ? loadedMessages.removeFirst() : loadedMessages.removeLast();
             HBox row = loadedMessageRows.remove(removed.getDbId());
+            loadedRenderedMessageRows.remove(removed.getDbId());
             if (row != null) {
                 messageContainer.getChildren().remove(row);
             }
@@ -577,29 +750,66 @@ abstract class FormChatMessages extends FormChatUi {
             return;
         }
 
-        Set<Long> changedDbIds = attachReactions(loadedMessages);
-        boolean rebuiltAny = false;
-        for (MeshMessage message : loadedMessages) {
-            if (!force && !changedDbIds.contains(message.getDbId())) {
-                continue;
-            }
-            HBox oldRow = loadedMessageRows.get(message.getDbId());
-            if (oldRow == null) {
-                continue;
-            }
-            int index = messageContainer.getChildren().indexOf(oldRow);
-            if (index < 0) {
-                continue;
-            }
-            HBox newRow = bubbleFactory.build(message);
-            applyMessageSearchHighlight(newRow, message.getDbId());
-            messageContainer.getChildren().set(index, newRow);
-            loadedMessageRows.put(message.getDbId(), newRow);
-            rebuiltAny = true;
+        if (force) {
+            rebuildLoadedMessageRows();
+            return;
         }
-        if (rebuiltAny || force) {
+
+        Set<Long> changedDbIds = attachReactions(loadedMessages);
+        refreshLoadedMessageRows(changedDbIds);
+    }
+
+    private void refreshLoadedMessageRows(Set<Long> changedDbIds) {
+        if (changedDbIds == null || changedDbIds.isEmpty()) {
+            return;
+        }
+
+        long startedNanos = System.nanoTime();
+        int refreshedRows = 0;
+        boolean refreshedAny = false;
+        for (MeshMessage message : loadedMessages) {
+            if (!changedDbIds.contains(message.getDbId())) {
+                continue;
+            }
+            if (refreshRenderedMessageRow(message)) {
+                refreshedAny = true;
+                refreshedRows++;
+            }
+        }
+        if (refreshedAny) {
             requestMessageViewportLayout();
         }
+        if (log.isDebugEnabled()) {
+            log.debug("Patched {} loaded chat rows in {} ms", refreshedRows, elapsedMillis(startedNanos));
+        }
+    }
+
+    private void rebuildLoadedMessageRows() {
+        loadedMessageRows.clear();
+        loadedRenderedMessageRows.clear();
+        messageContainer.getChildren().clear();
+        for (MeshMessage message : loadedMessages) {
+            MessageBubbleFactory.RenderedMessageRow rendered = bubbleFactory.buildRendered(message);
+            applyMessageSearchHighlight(rendered.row(), message.getDbId());
+            loadedRenderedMessageRows.put(message.getDbId(), rendered);
+            loadedMessageRows.put(message.getDbId(), rendered.row());
+            messageContainer.getChildren().add(rendered.row());
+        }
+        requestMessageViewportLayout();
+    }
+
+    private boolean refreshRenderedMessageRow(MeshMessage message) {
+        MessageBubbleFactory.RenderedMessageRow rendered = loadedRenderedMessageRows.get(message.getDbId());
+        if (rendered == null) {
+            return false;
+        }
+        bubbleFactory.refreshRenderedMetadata(rendered, message);
+        bubbleFactory.refreshRenderedReactions(rendered, message);
+        return true;
+    }
+
+    private static long elapsedMillis(long startedNanos) {
+        return (System.nanoTime() - startedNanos) / 1_000_000L;
     }
 
     private static boolean sameReactions(List<MessageReaction> current, List<MessageReaction> next) {
@@ -632,11 +842,10 @@ abstract class FormChatMessages extends FormChatUi {
     /**
      * После переключения из личного чата в канал ScrollPane иногда остаётся в геометрии
      * предыдущего короткого чата до следующего изменения размера или pulse. Принудительно
-     * инвалидируем область просмотра, но объединяем пачку вызовов в один проход, чтобы
-     * не вызывать applyCss и layout синхронно на каждом переключении чата.
+     * инвалидируем область просмотра, но объединяем пачку вызовов в один проход.
      */
     protected void requestMessageViewportLayout() {
-        requestMessageViewportLayout(true);
+        requestMessageViewportLayout(false);
     }
 
     protected void requestMessageViewportLayoutLater() {
@@ -649,8 +858,6 @@ abstract class FormChatMessages extends FormChatUi {
             return;
         }
         if (immediate) {
-            // Первый синхронный проход нужен при резком переключении короткий личный чат -> длинный канал:
-            // без него restoreSavedScrollPosition() может попасть в старую геометрию области просмотра.
             relayoutMessageViewport();
         }
         Platform.runLater(this::flushQueuedViewportLayout);
@@ -681,15 +888,6 @@ abstract class FormChatMessages extends FormChatUi {
         if (messageScrollPane.getScene() == null) {
             return;
         }
-
-        detailPane.applyCss();
-        detailPane.layout();
-        messageArea.applyCss();
-        messageArea.layout();
-        messageScrollPane.applyCss();
-        messageScrollPane.layout();
-        messageContainer.applyCss();
-        messageContainer.layout();
     }
 
     protected void suspendScrollStateSync() {

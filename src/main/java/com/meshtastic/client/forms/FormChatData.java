@@ -126,7 +126,7 @@ abstract class FormChatData extends FormChatRequests {
 
     private void unbindPreviousState() {
         if (state != null) {
-            state.removeMessageListener(messageListener);
+            state.removeMessageChangeListener(messageChangeListener);
         }
     }
 
@@ -157,7 +157,7 @@ abstract class FormChatData extends FormChatRequests {
         }
 
         if (state != null) {
-            state.addMessageListener(messageListener);
+            state.addMessageChangeListener(messageChangeListener);
         }
     }
 
@@ -410,6 +410,7 @@ abstract class FormChatData extends FormChatRequests {
         MessageDbService.getInstance().deleteMessage(msg.getDbId());
         loadedMessages.removeIf(loaded -> loaded.getDbId() == msg.getDbId());
         loadedMessageRows.remove(msg.getDbId());
+        loadedRenderedMessageRows.remove(msg.getDbId());
         recalcLoadedBounds();
         messageContainer.getChildren().remove(bubbleRow);
         refreshMessageSearchResults(false);
