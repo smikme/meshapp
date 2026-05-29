@@ -67,6 +67,8 @@ class LuaScriptImportExportTest {
         assertTrue(json.contains("\"mesh.log('hello')\""));
         assertTrue(json.contains("\"mesh.log('second line')\""));
         assertFalse(json.contains("\"code\":"));
+        assertFalse(json.contains("\"autostart\":"));
+        assertFalse(json.contains("\"nodeId\":"));
 
         scriptService.deleteScript(script.getId());
         LuaScriptService.ScriptImportResult result = scriptService.importScript(exportFile);
@@ -80,7 +82,7 @@ class LuaScriptImportExportTest {
         assertEquals(1L, imported.getVersion());
         assertEquals(description, imported.getDescription());
         assertFalse(imported.isAutostart());
-        assertEquals("!abcdef12", imported.getNodeId());
+        assertEquals("", imported.getNodeId());
         assertEquals(LuaScript.BotType.AIR_BOT, imported.getBotType());
     }
 
@@ -127,8 +129,8 @@ class LuaScriptImportExportTest {
         assertEquals("🛰️", updated.getIcon());
         assertEquals(2L, updated.getVersion());
         assertEquals("Updated description\nwith multiple lines", updated.getDescription());
-        assertFalse(updated.isAutostart());
-        assertEquals("!00000001", updated.getNodeId());
+        assertTrue(updated.isAutostart());
+        assertEquals("!abcdef12", updated.getNodeId());
         assertEquals(1, scriptService.listScripts().size());
     }
 
@@ -154,5 +156,7 @@ class LuaScriptImportExportTest {
 
         assertFalse(result.updated());
         assertEquals("mesh.log('legacy')\nmesh.log('code')", result.script().getCode());
+        assertFalse(result.script().isAutostart());
+        assertEquals("", result.script().getNodeId());
     }
 }

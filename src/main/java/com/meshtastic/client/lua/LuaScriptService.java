@@ -356,21 +356,20 @@ public final class LuaScriptService {
         long scriptVersion = LuaScript.normalizeVersion(exportFile.scriptVersion());
         String description = normalizeDescription(exportFile.description());
         LuaScript.BotType botType = LuaScript.BotType.fromStorage(exportFile.botType());
-        String nodeId = normalizeNodeId(botType, exportFile.nodeId());
         String automationName = normalizeAutomationName(botType, exportFile.automationName());
         String code = exportFile.codeText();
-        boolean autostart = Boolean.TRUE.equals(exportFile.autostart());
 
         if (!guid.isBlank()) {
             Optional<LuaScript> existing = findScriptByGuid(guid);
             if (existing.isPresent()) {
+                LuaScript existingScript = existing.get();
                 LuaScript saved = saveScript(
-                        existing.get().getId(),
+                        existingScript.getId(),
                         name,
                         code,
-                        autostart,
+                        existingScript.isAutostart(),
                         icon,
-                        nodeId,
+                        existingScript.getNodeId(),
                         botType,
                         automationName,
                         description);
@@ -382,9 +381,9 @@ public final class LuaScriptService {
                 guid,
                 name,
                 code,
-                autostart,
+                false,
                 icon,
-                nodeId,
+                "",
                 botType,
                 automationName,
                 scriptVersion,
@@ -858,8 +857,6 @@ public final class LuaScriptService {
                                       String description,
                                       String code,
                                       List<String> codeLines,
-                                      Boolean autostart,
-                                      String nodeId,
                                       String botType,
                                       String automationName) {
         private String codeText() {
@@ -880,8 +877,6 @@ public final class LuaScriptService {
                     script.getDescription(),
                     null,
                     splitCodeLines(script.getCode()),
-                    script.isAutostart(),
-                    script.getNodeId(),
                     script.getBotType().getStorageValue(),
                     script.getAutomationName());
         }
