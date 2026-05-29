@@ -38,6 +38,13 @@ class LuaScriptImportExportTest {
     @Test
     void exportAndImportCreatesScriptWithOriginalGuidAndProperties() throws Exception {
         String code = "mesh.log('hello')\nmesh.log('second line')";
+        String description = """
+                Назначение:
+                Проверяет перенос описания между установками.
+
+                Детали:
+                Описание может занимать несколько строк и оставаться частью JSON-экспорта.
+                """;
         LuaScript script = scriptService.createScript(
                 "portable",
                 code,
@@ -45,14 +52,17 @@ class LuaScriptImportExportTest {
                 "🚀",
                 "!abcdef12",
                 LuaScript.BotType.AIR_BOT,
-                "");
+                "",
+                description);
         Path exportFile = tempHome.resolve("portable.json");
 
         scriptService.exportScript(script.getId(), exportFile);
 
         String json = Files.readString(exportFile);
         assertTrue(json.contains("\"format\": \"meshapp-lua-script\""));
+        assertTrue(json.contains("\"scriptVersion\": 1"));
         assertTrue(json.contains("\"guid\": \"" + script.getGuid() + "\""));
+        assertTrue(json.contains("\"description\":"));
         assertTrue(json.contains("\"codeLines\": ["));
         assertTrue(json.contains("\"mesh.log('hello')\""));
         assertTrue(json.contains("\"mesh.log('second line')\""));
@@ -67,6 +77,8 @@ class LuaScriptImportExportTest {
         assertEquals("portable", imported.getName());
         assertEquals(code, imported.getCode());
         assertEquals("🚀", imported.getIcon());
+        assertEquals(1L, imported.getVersion());
+        assertEquals(description, imported.getDescription());
         assertFalse(imported.isAutostart());
         assertEquals("!abcdef12", imported.getNodeId());
         assertEquals(LuaScript.BotType.AIR_BOT, imported.getBotType());
@@ -89,9 +101,11 @@ class LuaScriptImportExportTest {
                 {
                   "format": "meshapp-lua-script",
                   "version": 1,
+                  "scriptVersion": 7,
                   "guid": "%s",
                   "icon": "🛰️",
                   "name": "same-guid-updated",
+                  "description": "Updated description\\nwith multiple lines",
                   "codeLines": [
                     "mesh.log('new')"
                   ],
@@ -111,6 +125,8 @@ class LuaScriptImportExportTest {
         assertEquals("same-guid-updated", updated.getName());
         assertEquals("mesh.log('new')", updated.getCode());
         assertEquals("🛰️", updated.getIcon());
+        assertEquals(2L, updated.getVersion());
+        assertEquals("Updated description\nwith multiple lines", updated.getDescription());
         assertFalse(updated.isAutostart());
         assertEquals("!00000001", updated.getNodeId());
         assertEquals(1, scriptService.listScripts().size());

@@ -15,6 +15,7 @@ import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
 import javafx.scene.control.Separator;
+import javafx.scene.control.TextArea;
 import javafx.scene.control.TextField;
 import javafx.scene.control.TextFormatter;
 import javafx.scene.layout.HBox;
@@ -46,6 +47,8 @@ public final class LuaScriptSettingsForm extends VBox {
     private final TextField nameField = new TextField();
     private final Label guidLabel = new Label("GUID");
     private final TextField guidField = new TextField();
+    private final TextField versionField = new TextField();
+    private final TextArea descriptionArea = new TextArea();
     private final CheckBox autostartCheck = new CheckBox("Автозапуск");
     private final Label nodeLabel = new Label("Нода исполнения");
     private final ComboBox<NodeChoice> nodeCombo = new ComboBox<>();
@@ -101,6 +104,16 @@ public final class LuaScriptSettingsForm extends VBox {
         guidField.setEditable(false);
         guidField.setFocusTraversable(true);
         guidField.setMaxWidth(Double.MAX_VALUE);
+
+        versionField.setEditable(false);
+        versionField.setFocusTraversable(true);
+        versionField.setMaxWidth(Double.MAX_VALUE);
+
+        descriptionArea.setPromptText("Подробное многострочное описание скрипта");
+        descriptionArea.setWrapText(true);
+        descriptionArea.setPrefRowCount(7);
+        descriptionArea.setMinHeight(120);
+        descriptionArea.setMaxWidth(Double.MAX_VALUE);
 
         nodeCombo.setMaxWidth(Double.MAX_VALUE);
         nodeCombo.setMinHeight(NODE_COMBO_HEIGHT);
@@ -168,6 +181,10 @@ public final class LuaScriptSettingsForm extends VBox {
                 nameField,
                 guidLabel,
                 guidField,
+                new Label("Версия"),
+                versionField,
+                new Label("Описание"),
+                descriptionArea,
                 autostartCheck,
                 nodeLabel,
                 nodeCombo,
@@ -190,6 +207,8 @@ public final class LuaScriptSettingsForm extends VBox {
         guidLabel.setManaged(hasGuid);
         guidField.setVisible(hasGuid);
         guidField.setManaged(hasGuid);
+        versionField.setText(String.valueOf(script.getVersion()));
+        descriptionArea.setText(script.getDescription());
         autostartCheck.setSelected(script.isAutostart());
 
         refreshNodeChoices();
@@ -322,7 +341,8 @@ public final class LuaScriptSettingsForm extends VBox {
             return null;
         }
 
-        return new Draft(name, autostartCheck.isSelected(), icon, nodeId, botType, automationName);
+        String description = descriptionArea.getText() != null ? descriptionArea.getText() : "";
+        return new Draft(name, autostartCheck.isSelected(), icon, nodeId, botType, automationName, description);
     }
 
     private TextFormatter.Change filterIconChange(TextFormatter.Change change) {
@@ -415,7 +435,8 @@ public final class LuaScriptSettingsForm extends VBox {
                         String icon,
                         String nodeId,
                         LuaScript.BotType botType,
-                        String automationName) {}
+                        String automationName,
+                        String description) {}
 
     private record NodeChoice(String nodeId, String displayName, boolean connected) {
         private String displayText() {

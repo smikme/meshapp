@@ -204,20 +204,30 @@ class LuaScriptRuntimeServiceTest {
     @Test
     void scriptSettingsArePersisted() {
         LuaScript script = scriptService.createScript("settings", "mesh.log('ok')");
+        String description = """
+                Назначение:
+                Проверяет сохранение длинного описания.
+
+                Параметры:
+                Несколько строк должны храниться без потери переносов.
+                """;
 
         LuaScript saved = scriptService.saveScriptSettings(
                 script.getId(),
                 "settings-renamed",
                 false,
+                LuaScript.DEFAULT_ICON,
                 "!abcdef12",
                 LuaScript.BotType.AUTOMATION_BOT,
-                "@bot_1");
+                "@bot_1",
+                description);
 
         assertEquals("settings-renamed", saved.getName());
         assertFalse(saved.isAutostart());
         assertEquals("", saved.getNodeId());
         assertEquals(LuaScript.BotType.AUTOMATION_BOT, saved.getBotType());
         assertEquals("@bot_1", saved.getAutomationName());
+        assertEquals(description, saved.getDescription());
 
         LuaScript reloaded = scriptService.findScript(script.getId()).orElseThrow();
         assertEquals("settings-renamed", reloaded.getName());
@@ -225,6 +235,45 @@ class LuaScriptRuntimeServiceTest {
         assertEquals("", reloaded.getNodeId());
         assertEquals(LuaScript.BotType.AUTOMATION_BOT, reloaded.getBotType());
         assertEquals("@bot_1", reloaded.getAutomationName());
+        assertEquals(description, reloaded.getDescription());
+    }
+
+    @Test
+    void scriptVersionIncrementsOnlyForPersistedScriptModifications() {
+        LuaScript script = scriptService.createScript("versioned", "mesh.log('one')");
+
+        assertEquals(1L, script.getVersion());
+
+        LuaScript unchanged = scriptService.saveScript(
+                script.getId(),
+                "versioned",
+                "mesh.log('one')",
+                true);
+        assertEquals(1L, unchanged.getVersion());
+
+        LuaScript codeChanged = scriptService.saveScript(
+                script.getId(),
+                "versioned",
+                "mesh.log('two')",
+                true);
+        assertEquals(2L, codeChanged.getVersion());
+
+        LuaScript settingsChanged = scriptService.saveScriptSettings(
+                script.getId(),
+                "versioned",
+                false,
+                LuaScript.DEFAULT_ICON,
+                "!abcdef12",
+                LuaScript.BotType.AIR_BOT,
+                "",
+                "Line one\nLine two");
+        assertEquals(3L, settingsChanged.getVersion());
+
+        scriptService.updateRunState(script.getId(), "DONE", null);
+        scriptService.setKv(script.getId(), "runtime", "value");
+
+        LuaScript afterRuntimeChanges = scriptService.findScript(script.getId()).orElseThrow();
+        assertEquals(3L, afterRuntimeChanges.getVersion());
     }
 
     @Test

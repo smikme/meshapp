@@ -9,6 +9,7 @@ import javafx.application.Platform;
 import javafx.scene.Scene;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
+import javafx.scene.control.TextArea;
 import javafx.scene.control.TextField;
 import javafx.scene.layout.StackPane;
 import org.junit.jupiter.api.AfterEach;
@@ -203,6 +204,33 @@ class LuaScriptSettingsFormTest {
     }
 
     @Test
+    void showsVersionAndBuildsDraftWithMultilineDescription() {
+        String description = "Назначение:\nДлинное описание\n\nДетали:\nНесколько строк";
+
+        onFxThread(() -> {
+            LuaScriptSettingsForm form = new LuaScriptSettingsForm(
+                    script("123e4567-e89b-12d3-a456-426614174000", "🚀", "",
+                            LuaScript.BotType.AUTOMATION_BOT, "@auto", 4L, description));
+            try {
+                assertEquals("4", versionField(form).getText());
+
+                TextArea area = descriptionArea(form);
+                assertEquals(description, area.getText());
+                area.setText(description + "\nФинальная строка");
+
+                Object draft = buildDraft(form);
+
+                assertNotNull(draft);
+                assertEquals(description + "\nФинальная строка", draftDescription(draft));
+            } finally {
+                form.dispose();
+            }
+            return null;
+        });
+    }
+
+
+    @Test
     void buildsDraftWithEmojiIcon() {
         onFxThread(() -> {
             LuaScriptSettingsForm form = new LuaScriptSettingsForm(
@@ -297,7 +325,13 @@ class LuaScriptSettingsFormTest {
 
     private static LuaScript script(String guid, String icon, String nodeId,
                                     LuaScript.BotType botType, String automationName) {
-        return new LuaScript(1L, guid, icon, "Script", "", true, nodeId, botType,
+        return script(guid, icon, nodeId, botType, automationName, LuaScript.DEFAULT_VERSION, "");
+    }
+
+    private static LuaScript script(String guid, String icon, String nodeId,
+                                    LuaScript.BotType botType, String automationName,
+                                    long version, String description) {
+        return new LuaScript(1L, guid, icon, "Script", "", version, description, true, nodeId, botType,
                 automationName, 0L, 0L, 0L, "NEW", null);
     }
 
@@ -318,6 +352,26 @@ class LuaScriptSettingsFormTest {
             return (TextField) field.get(form);
         } catch (ReflectiveOperationException e) {
             throw new AssertionError("Failed to read GUID field", e);
+        }
+    }
+
+    private static TextField versionField(LuaScriptSettingsForm form) {
+        try {
+            Field field = LuaScriptSettingsForm.class.getDeclaredField("versionField");
+            field.setAccessible(true);
+            return (TextField) field.get(form);
+        } catch (ReflectiveOperationException e) {
+            throw new AssertionError("Failed to read version field", e);
+        }
+    }
+
+    private static TextArea descriptionArea(LuaScriptSettingsForm form) {
+        try {
+            Field field = LuaScriptSettingsForm.class.getDeclaredField("descriptionArea");
+            field.setAccessible(true);
+            return (TextArea) field.get(form);
+        } catch (ReflectiveOperationException e) {
+            throw new AssertionError("Failed to read description area", e);
         }
     }
 
@@ -380,6 +434,16 @@ class LuaScriptSettingsFormTest {
             return (String) method.invoke(draft);
         } catch (ReflectiveOperationException e) {
             throw new AssertionError("Failed to read draft icon", e);
+        }
+    }
+
+    private static String draftDescription(Object draft) {
+        try {
+            Method method = draft.getClass().getDeclaredMethod("description");
+            method.setAccessible(true);
+            return (String) method.invoke(draft);
+        } catch (ReflectiveOperationException e) {
+            throw new AssertionError("Failed to read draft description", e);
         }
     }
 

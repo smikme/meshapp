@@ -1636,7 +1636,9 @@ public final class LuaDevWindow {
             return;
         }
         String name = currentScript != null ? currentScript.getName() : null;
-        scriptNameLabel.setText(name == null || name.isBlank() ? "Скрипт не выбран" : name);
+        scriptNameLabel.setText(name == null || name.isBlank()
+                ? "Скрипт не выбран"
+                : name + " · v" + currentScript.getVersion());
     }
 
     private void setStatus(String text) {

@@ -12,6 +12,7 @@ package com.meshtastic.client.lua;
 public class LuaScript {
 
     public static final String DEFAULT_ICON = "🤖";
+    public static final long DEFAULT_VERSION = 1L;
     private static final int MAX_ICON_LENGTH = 32;
     private static final int ZERO_WIDTH_JOINER = 0x200D;
     private static final int VARIATION_SELECTOR_TEXT = 0xFE0E;
@@ -61,6 +62,17 @@ public class LuaScript {
             throw new IllegalArgumentException("Script icon must be a single emoji");
         }
         return value;
+    }
+
+    public static long normalizeVersion(long version) {
+        return version > 0 ? version : DEFAULT_VERSION;
+    }
+
+    public static String normalizeDescription(String description) {
+        if (description == null) {
+            return "";
+        }
+        return description.replace("\r\n", "\n").replace('\r', '\n');
     }
 
     private static boolean isEmojiZwjSequence(int[] codePoints) {
@@ -178,6 +190,8 @@ public class LuaScript {
     private String icon;
     private String name;
     private String code;
+    private long version;
+    private String description;
     private boolean enabled;
     private String nodeId;
     private BotType botType;
@@ -193,6 +207,8 @@ public class LuaScript {
                      String icon,
                      String name,
                      String code,
+                     long version,
+                     String description,
                      boolean enabled,
                      String nodeId,
                      BotType botType,
@@ -207,6 +223,8 @@ public class LuaScript {
         this.icon = normalizeIcon(icon);
         this.name = name;
         this.code = code;
+        this.version = normalizeVersion(version);
+        this.description = normalizeDescription(description);
         this.enabled = enabled;
         this.nodeId = nodeId;
         this.botType = botType != null ? botType : BotType.AIR_BOT;
@@ -216,6 +234,24 @@ public class LuaScript {
         this.lastRunAt = lastRunAt;
         this.lastStatus = lastStatus;
         this.lastError = lastError;
+    }
+
+    public LuaScript(long id,
+                     String guid,
+                     String icon,
+                     String name,
+                     String code,
+                     boolean enabled,
+                     String nodeId,
+                     BotType botType,
+                     String automationName,
+                     long createdAt,
+                     long updatedAt,
+                     long lastRunAt,
+                     String lastStatus,
+                     String lastError) {
+        this(id, guid, icon, name, code, DEFAULT_VERSION, "", enabled, nodeId, botType, automationName,
+                createdAt, updatedAt, lastRunAt, lastStatus, lastError);
     }
 
     public LuaScript(long id,
@@ -275,6 +311,12 @@ public class LuaScript {
 
     public String getCode() { return code; }
     public void setCode(String code) { this.code = code; }
+
+    public long getVersion() { return normalizeVersion(version); }
+    public void setVersion(long version) { this.version = normalizeVersion(version); }
+
+    public String getDescription() { return normalizeDescription(description); }
+    public void setDescription(String description) { this.description = normalizeDescription(description); }
 
     public boolean isEnabled() { return enabled; }
     public void setEnabled(boolean enabled) { this.enabled = enabled; }

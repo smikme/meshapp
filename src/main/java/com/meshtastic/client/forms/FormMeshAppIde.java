@@ -186,6 +186,12 @@ public class FormMeshAppIde extends Form {
         params.setStyle("-fx-opacity: 0.68;");
 
         card.getChildren().addAll(topRow, params);
+        if (script.getDescription() != null && !script.getDescription().isBlank()) {
+            Label description = new Label(truncate(script.getDescription(), 360));
+            description.setWrapText(true);
+            description.setStyle("-fx-opacity: 0.78;");
+            card.getChildren().add(description);
+        }
         if (script.getLastError() != null && !script.getLastError().isBlank()) {
             Label error = new Label("Ошибка: " + truncate(script.getLastError(), 240));
             error.setWrapText(true);
@@ -306,7 +312,8 @@ public class FormMeshAppIde extends Form {
                         draft.icon(),
                         draft.nodeId(),
                         draft.botType(),
-                        draft.automationName());
+                        draft.automationName(),
+                        draft.description());
                 modalPane.hide();
                 rebuildCards();
                 Toast.show(Toast.Type.SUCCESS, "Создан скрипт: " + created.getName());
@@ -377,7 +384,8 @@ public class FormMeshAppIde extends Form {
                         draft.icon(),
                         draft.nodeId(),
                         draft.botType(),
-                        draft.automationName());
+                        draft.automationName(),
+                        draft.description());
                 modalPane.hide();
                 rebuildCards();
                 Toast.show(Toast.Type.SUCCESS, "Сохранено: " + saved.getName());
@@ -427,6 +435,7 @@ public class FormMeshAppIde extends Form {
 
     private String scriptSummary(LuaScript script) {
         return "ID: " + script.getId()
+                + " · v" + script.getVersion()
                 + " · " + (script.isAutostart() ? "автозапуск" : "без автозапуска")
                 + " · " + script.getBotType().getDisplayName()
                 + automationSummary(script)
