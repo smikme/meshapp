@@ -34,7 +34,8 @@ public final class DatabaseMigrator {
     private static final Logger log = LoggerFactory.getLogger(DatabaseMigrator.class);
 
     /** Текущая версия схемы. Увеличивается при каждом изменении схемы. */
-    static final int CURRENT_VERSION = 17;
+    static final int CURRENT_VERSION = 18;
+    private static final String LEGACY_TRACEROUTE_PREFIX = "\uD83D\uDD0D Traceroute → ";
     private static final Pattern CONNECTION_NODE_ID_PATTERN =
             Pattern.compile("\"nodeId\"\\s*:\\s*\"(![0-9a-fA-F]{8})\"");
     private static final List<String> APPLICATION_TABLES = List.of(
@@ -43,6 +44,7 @@ public final class DatabaseMigrator {
             "NODES",
             "TELEMETRY_HISTORY",
             "MESSAGE_REACTIONS",
+            "TRACEROUTE_RESULTS",
             "LORA_PACKET_LOGS",
             "LUA_SCRIPTS",
             "LUA_SCRIPT_KV"
@@ -106,6 +108,7 @@ public final class DatabaseMigrator {
             if (version < 15) { migrateToV15(connection); version = 15; }
             if (version < 16) { migrateToV16(connection); version = 16; }
             if (version < 17) { migrateToV17(connection); version = 17; }
+            if (version < 18) { migrateToV18(connection); version = 18; }
 
             setVersion(connection, CURRENT_VERSION);
             log.info("Database migration complete, schema version = {}", CURRENT_VERSION);
@@ -731,6 +734,88 @@ public final class DatabaseMigrator {
             backfillLuaScriptIcons(connection);
         }
         log.info("Migration v17: added Lua script emoji icons");
+    }
+
+    /** v18: отдельное хранилище результатов traceroute. */
+    private static void migrateToV18(Connection connection) throws SQLException {
+        createTracerouteResultsTable(connection);
+        backfillLegacyTracerouteMessages(connection);
+        log.info("Migration v18: created traceroute_results table");
+    }
+
+    private static void createTracerouteResultsTable(Connection connection) throws SQLException {
+        try (Statement stmt = connection.createStatement()) {
+            stmt.execute("""
+                    CREATE TABLE IF NOT EXISTS traceroute_results (
+                        id                     BIGINT AUTO_INCREMENT PRIMARY KEY,
+                        owner_node_id          VARCHAR(20) NOT NULL DEFAULT '',
+                        chat_type              VARCHAR(10) NOT NULL DEFAULT '',
+                        chat_key               VARCHAR(20) NOT NULL DEFAULT '',
+                        source                 VARCHAR(80) NOT NULL DEFAULT '',
+                        request_id             VARCHAR(120) NOT NULL DEFAULT '',
+                        script_id              BIGINT DEFAULT 0,
+                        target_node_num        BIGINT DEFAULT 0,
+                        target_node_id         VARCHAR(20),
+                        target_name            VARCHAR(120),
+                        response_from_node_num BIGINT DEFAULT 0,
+                        response_from_node_id  VARCHAR(20),
+                        route_data             BLOB,
+                        formatted_text         CLOB,
+                        timestamp              BIGINT NOT NULL
+                    )
+                    """);
+            stmt.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_traceroute_owner_time
+                    ON traceroute_results (owner_node_id, timestamp DESC, id DESC)
+                    """);
+            stmt.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_traceroute_request
+                    ON traceroute_results (owner_node_id, request_id)
+                    """);
+        }
+    }
+
+    private static void backfillLegacyTracerouteMessages(Connection connection) throws SQLException {
+        if (!tableExists(connection, "MESSAGES")
+                || !columnExists(connection, "MESSAGES", "ID")
+                || !columnExists(connection, "MESSAGES", "OWNER_NODE_ID")
+                || !columnExists(connection, "MESSAGES", "CHAT_TYPE")
+                || !columnExists(connection, "MESSAGES", "CHAT_KEY")
+                || !columnExists(connection, "MESSAGES", "TEXT")
+                || !columnExists(connection, "MESSAGES", "TIMESTAMP")
+                || !columnExists(connection, "MESSAGES", "SYSTEM_MSG")) {
+            log.info("Migration v18: skipped legacy traceroute backfill because messages table is incomplete");
+            return;
+        }
+        try (PreparedStatement ps = connection.prepareStatement("""
+                INSERT INTO traceroute_results (
+                    owner_node_id, chat_type, chat_key, source, request_id, script_id,
+                    target_name, route_data, formatted_text, timestamp
+                )
+                SELECT m.owner_node_id, m.chat_type, m.chat_key,
+                       'legacy.messages',
+                       CONCAT('legacy:', m.id),
+                       0,
+                       '',
+                       NULL,
+                       m.text,
+                       m.timestamp
+                FROM messages m
+                WHERE m.system_msg = TRUE
+                  AND CAST(m.text AS VARCHAR) LIKE ?
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM traceroute_results tr
+                      WHERE tr.owner_node_id = m.owner_node_id
+                        AND tr.request_id = CONCAT('legacy:', m.id)
+                  )
+                """)) {
+            ps.setString(1, LEGACY_TRACEROUTE_PREFIX + "%");
+            int inserted = ps.executeUpdate();
+            if (inserted > 0) {
+                log.info("Migration v18: backfilled {} legacy traceroute messages", inserted);
+            }
+        }
     }
 
     /** v2: колонка favorite для избранных нод. */

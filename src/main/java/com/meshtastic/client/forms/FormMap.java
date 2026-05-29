@@ -9,7 +9,6 @@ import com.meshtastic.client.components.map.TileMapView;
 import com.meshtastic.client.modal.Toast;
 import com.meshtastic.client.model.ConnectionEntry;
 import com.meshtastic.client.model.DeviceState;
-import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.service.ConnectionManager;
 import com.meshtastic.client.service.FavoriteNodeService;
@@ -44,6 +43,7 @@ import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
 import javafx.scene.shape.SVGPath;
 import javafx.stage.DirectoryChooser;
+import org.meshtastic.proto.MeshProtos;
 
 import java.nio.file.InvalidPathException;
 import java.nio.file.Files;
@@ -54,6 +54,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.function.IntConsumer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -64,7 +65,7 @@ import java.util.regex.Pattern;
  * <p>
  * Форма связывает UI приложения с низкоуровневым компонентом {@link TileMapView}:
  * собирает ноды из текущего {@link DeviceState} и кэша, применяет фильтры,
- * парсит сохранённые traceroute-сообщения и передаёт готовые маркеры/сегменты
+ * парсит сохранённые результаты traceroute и передаёт готовые маркеры/сегменты
  * в карту.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
@@ -498,15 +499,15 @@ public class FormMap extends Form {
     }
 
     /**
-     * Перечитывает последние системные traceroute-сообщения и строит меню выбора.
+     * Перечитывает последние сохранённые результаты traceroute и строит меню выбора.
      * Можно выбрать несколько трейсов, выбранные элементы остаются отмеченными.
      */
     private void refreshTracesMenu() {
         recentTraces = MessageDbService.getInstance()
-                .loadRecentSystemMessagesByPrefix(TracerouteView.TRACEROUTE_PREFIX, RECENT_TRACE_LIMIT, currentOwnerNodeId())
+                .loadRecentTracerouteResults(RECENT_TRACE_LIMIT, currentOwnerNodeId())
                 .stream()
-                .map(this::parseTraceMessage)
-                .filter(trace -> trace != null)
+                .map(this::parseTraceRecord)
+                .flatMap(Optional::stream)
                 .toList();
 
         tracesMenu.getItems().clear();
@@ -729,18 +730,56 @@ public class FormMap extends Form {
     }
 
     /**
-     * Парсит сохранённое системное traceroute-сообщение в структуру для карты.
-     * Поддерживает прямой маршрут и, если он есть в тексте, явный обратный маршрут.
+     * Парсит сохранённую запись traceroute в структуру для карты.
+     * Новые записи читаются из protobuf RouteDiscovery, legacy-записи — из старого текстового формата.
      *
-     * @return разобранный трейс или {@code null}, если сообщение не является traceroute
+     * @return разобранный трейс или пустое значение, если запись повреждена
      */
-    private ParsedTrace parseTraceMessage(MeshMessage message) {
-        if (message == null || message.getText() == null
-                || !message.getText().startsWith(TracerouteView.TRACEROUTE_PREFIX)) {
+    private Optional<ParsedTrace> parseTraceRecord(MessageDbService.TracerouteResultRecord record) {
+        if (record == null) {
+            return Optional.empty();
+        }
+        byte[] routeData = record.routeData();
+        if (routeData != null && routeData.length > 0) {
+            try {
+                return Optional.of(parseTraceRoute(record, MeshProtos.RouteDiscovery.parseFrom(routeData)));
+            } catch (Exception ignored) {
+                // Старые или повреждённые записи пробуем восстановить из formatted_text ниже.
+            }
+        }
+        return Optional.ofNullable(parseTraceText(
+                record.id(),
+                record.timestamp(),
+                record.formattedText(),
+                record.targetName()));
+    }
+
+    private ParsedTrace parseTraceRoute(MessageDbService.TracerouteResultRecord record,
+                                        MeshProtos.RouteDiscovery route) {
+        String targetName = firstNonBlank(record.targetName(), record.targetNodeId(), "нода");
+        List<TracePath> paths = new ArrayList<>();
+        paths.add(new TracePath(
+                false,
+                routeNodeNames("Я", route.getRouteList(), targetName),
+                snrValues(route.getSnrTowardsList())));
+        if (route.getRouteBackCount() > 0 || route.getSnrBackCount() > 0) {
+            paths.add(new TracePath(
+                    true,
+                    routeNodeNames(targetName, route.getRouteBackList(), "Я"),
+                    snrValues(route.getSnrBackList())));
+        }
+        return new ParsedTrace(record.id(), targetName, record.timestamp(), List.copyOf(paths));
+    }
+
+    /**
+     * Парсит legacy-текст traceroute из старых системных сообщений.
+     */
+    private ParsedTrace parseTraceText(long id, long timestamp, String text, String targetFallback) {
+        if (text == null || !text.startsWith(TracerouteView.TRACEROUTE_PREFIX)) {
             return null;
         }
 
-        String[] lines = message.getText().split("\\R");
+        String[] lines = text.split("\\R");
         if (lines.length < 2) {
             return null;
         }
@@ -748,7 +787,7 @@ public class FormMap extends Form {
         String header = lines[0];
         String targetName = header.substring(TracerouteView.TRACEROUTE_PREFIX.length()).trim();
         if (targetName.isBlank()) {
-            targetName = "нода";
+            targetName = firstNonBlank(targetFallback, "нода");
         }
 
         List<TracePath> paths = new ArrayList<>();
@@ -775,11 +814,54 @@ public class FormMap extends Form {
         }
 
         return new ParsedTrace(
-                message.getDbId(),
+                id,
                 targetName,
-                message.getTimestamp(),
+                timestamp,
                 List.copyOf(paths)
         );
+    }
+
+    private List<String> routeNodeNames(String firstName, List<Integer> intermediateNodeNums, String lastName) {
+        List<String> names = new ArrayList<>();
+        names.add(firstName);
+        for (Integer nodeNum : intermediateNodeNums) {
+            if (nodeNum != null) {
+                names.add(traceNodeName(nodeNum));
+            }
+        }
+        names.add(lastName);
+        return List.copyOf(names);
+    }
+
+    private List<Double> snrValues(List<Integer> rawValues) {
+        List<Double> values = new ArrayList<>();
+        for (Integer rawValue : rawValues) {
+            if (rawValue != null) {
+                values.add(rawValue / 4.0);
+            }
+        }
+        return List.copyOf(values);
+    }
+
+    private String traceNodeName(int nodeNum) {
+        NodeData node = state != null ? state.getNodeDb().get(nodeNum) : null;
+        if (node == null) {
+            node = NodeCacheService.getInstance().get(nodeIdFromNum(nodeNum));
+        }
+        return node != null ? nodeTitle(node) : nodeIdFromNum(nodeNum);
+    }
+
+    private static String nodeIdFromNum(int nodeNum) {
+        return String.format(Locale.ROOT, "!%08x", nodeNum);
+    }
+
+    private static String firstNonBlank(String... values) {
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                return value;
+            }
+        }
+        return "";
     }
 
     /**
@@ -1626,11 +1708,11 @@ public class FormMap extends Form {
     }
 
     /**
-     * Сохранённый трейс, извлечённый из системного сообщения.
+     * Сохранённый трейс, извлечённый из отдельной таблицы результатов.
      *
-     * @param dbId       id сообщения в БД
+     * @param dbId       id записи traceroute_results
      * @param targetName имя целевой ноды
-     * @param timestamp  время сообщения
+     * @param timestamp  время результата
      * @param paths      прямой и, при наличии, обратный путь
      */
     private record ParsedTrace(long dbId, String targetName, long timestamp, List<TracePath> paths) {

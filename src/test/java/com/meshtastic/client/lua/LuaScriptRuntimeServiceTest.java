@@ -367,7 +367,7 @@ class LuaScriptRuntimeServiceTest {
     }
 
     @Test
-    void tracerouteRequestDeliversResultToAutomationCallback() {
+    void tracerouteRequestDeliversResultToAutomationCallback() throws Exception {
         LuaScript automation = scriptService.createScript(
                 "automation-traceroute",
                 """
@@ -445,6 +445,24 @@ class LuaScriptRuntimeServiceTest {
             assertEquals("channel:0", scriptService.getKv(automation.getId(), "trace_chat"));
             assertEquals("!f0000003", scriptService.getKv(automation.getId(), "route_first_id"));
             assertEquals("3.0", scriptService.getKv(automation.getId(), "snr_first"));
+            List<MessageDbService.TracerouteResultRecord> savedTraces = MessageDbService.getInstance()
+                    .loadRecentTracerouteResults(10, "!12345678");
+            assertEquals(1, savedTraces.size());
+            MessageDbService.TracerouteResultRecord savedTrace = savedTraces.get(0);
+            assertEquals("channel", savedTrace.chatType());
+            assertEquals("0", savedTrace.chatKey());
+            assertEquals("mesh.traceroute.request", savedTrace.source());
+            assertEquals(automation.getId(), savedTrace.scriptId());
+            assertEquals(48879L, savedTrace.targetNodeNum());
+            assertEquals("!0000beef", savedTrace.targetNodeId());
+            assertEquals("Alpha", savedTrace.targetName());
+            assertEquals(Integer.toUnsignedLong((int) 0xF0000002L), savedTrace.responseFromNodeNum());
+            assertEquals("!f0000002", savedTrace.responseFromNodeId());
+            assertNotNull(savedTrace.routeData());
+            MeshProtos.RouteDiscovery savedRoute = MeshProtos.RouteDiscovery.parseFrom(savedTrace.routeData());
+            assertEquals(1, savedRoute.getRouteCount());
+            assertEquals((int) 0xF0000003L, savedRoute.getRoute(0));
+            assertEquals(12, savedRoute.getSnrTowards(0));
             assertFalse(events.stream().anyMatch(event -> event.type() == LuaScriptEvent.Type.ERROR));
         } finally {
             session.stop();

@@ -22,6 +22,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
@@ -337,6 +338,7 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
         if (!running.get() || globals == null) {
             return;
         }
+        persistTracerouteResult(request, responseFromNodeNum, status, route);
         LuaValue callback = globals.get("on_traceroute");
         try {
             if (callback.isfunction()) {
@@ -350,6 +352,41 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
             fail(callbackError);
             finishWithoutInterruptingExecutor();
         }
+    }
+
+    private void persistTracerouteResult(LuaTracerouteRequest request,
+                                         int responseFromNodeNum,
+                                         String status,
+                                         MeshProtos.RouteDiscovery route) {
+        if (!"ok".equals(status) || route == null) {
+            return;
+        }
+        messageDbService.saveTracerouteResult(
+                target.ownerNodeIdOrEmpty(),
+                request.chatType(),
+                request.chatKey(),
+                request.source(),
+                request.requestId(),
+                request.scriptId(),
+                Integer.toUnsignedLong(request.targetNodeNum()),
+                request.targetNodeId() != null ? request.targetNodeId() : nodeIdFromNum(request.targetNodeNum()),
+                tracerouteTargetName(request),
+                responseFromNodeNum != 0 ? Integer.toUnsignedLong(responseFromNodeNum) : 0,
+                responseFromNodeNum != 0 ? nodeIdFromNum(responseFromNodeNum) : null,
+                route.toByteArray(),
+                null,
+                System.currentTimeMillis() / 1000
+        );
+    }
+
+    private static String tracerouteTargetName(LuaTracerouteRequest request) {
+        if (request.targetName() != null && !request.targetName().isBlank()) {
+            return request.targetName();
+        }
+        if (request.targetNodeId() != null && !request.targetNodeId().isBlank()) {
+            return request.targetNodeId();
+        }
+        return nodeIdFromNum(request.targetNodeNum());
     }
 
     private void completeNodeInfoImmediate(LuaNodeInfoRequest request) {
@@ -468,13 +505,13 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
         table.set("target_node_num", LuaValueMapper.uint32ToLuaValue(request.targetNodeNum()));
         table.set("target_node_id", LuaValue.valueOf(request.targetNodeId() != null
                 ? request.targetNodeId()
-                : String.format("!%08x", request.targetNodeNum())));
+                : nodeIdFromNum(request.targetNodeNum())));
         table.set("target_name", LuaValue.valueOf(request.targetName() != null ? request.targetName() : ""));
         table.set("response_from_node_num", responseFromNodeNum != 0
                 ? LuaValueMapper.uint32ToLuaValue(responseFromNodeNum)
                 : LuaValue.NIL);
         table.set("response_from_node_id", responseFromNodeNum != 0
-                ? LuaValue.valueOf(String.format("!%08x", responseFromNodeNum))
+                ? LuaValue.valueOf(nodeIdFromNum(responseFromNodeNum))
                 : LuaValue.NIL);
         table.set("chat_type", LuaValue.valueOf(request.chatType() != null ? request.chatType() : ""));
         table.set("chat_key", LuaValue.valueOf(request.chatKey() != null ? request.chatKey() : ""));
@@ -499,7 +536,7 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
         table.set("target_node_num", LuaValueMapper.uint32ToLuaValue(request.targetNodeNum()));
         table.set("target_node_id", LuaValue.valueOf(request.targetNodeId() != null
                 ? request.targetNodeId()
-                : String.format("!%08x", request.targetNodeNum())));
+                : nodeIdFromNum(request.targetNodeNum())));
         table.set("target_name", LuaValue.valueOf(request.targetName() != null ? request.targetName() : ""));
         table.set("chat_type", LuaValue.valueOf(request.chatType() != null ? request.chatType() : ""));
         table.set("chat_key", LuaValue.valueOf(request.chatKey() != null ? request.chatKey() : ""));
@@ -532,10 +569,14 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
         LuaTable table = new LuaTable();
         if (values != null) {
             for (int i = 0; i < values.size(); i++) {
-                table.set(i + 1, LuaValue.valueOf(String.format("!%08x", values.get(i))));
+                table.set(i + 1, LuaValue.valueOf(nodeIdFromNum(values.get(i))));
             }
         }
         return table;
+    }
+
+    private static String nodeIdFromNum(int nodeNum) {
+        return String.format(Locale.ROOT, "!%08x", nodeNum);
     }
 
     private LuaTable snrListToTable(List<Integer> values) {

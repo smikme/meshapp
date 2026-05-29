@@ -158,6 +158,36 @@ public final class MessageDbService {
                         PRIMARY KEY (owner_node_id, chat_type, chat_key)
                     )
                     """);
+
+                stmt.execute("""
+                    CREATE TABLE IF NOT EXISTS traceroute_results (
+                        id                     BIGINT AUTO_INCREMENT PRIMARY KEY,
+                        owner_node_id          VARCHAR(20) NOT NULL DEFAULT '',
+                        chat_type              VARCHAR(10) NOT NULL DEFAULT '',
+                        chat_key               VARCHAR(20) NOT NULL DEFAULT '',
+                        source                 VARCHAR(80) NOT NULL DEFAULT '',
+                        request_id             VARCHAR(120) NOT NULL DEFAULT '',
+                        script_id              BIGINT DEFAULT 0,
+                        target_node_num        BIGINT DEFAULT 0,
+                        target_node_id         VARCHAR(20),
+                        target_name            VARCHAR(120),
+                        response_from_node_num BIGINT DEFAULT 0,
+                        response_from_node_id  VARCHAR(20),
+                        route_data             BLOB,
+                        formatted_text         CLOB,
+                        timestamp              BIGINT NOT NULL
+                    )
+                    """);
+
+                stmt.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_traceroute_owner_time
+                    ON traceroute_results (owner_node_id, timestamp DESC, id DESC)
+                    """);
+
+                stmt.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_traceroute_request
+                    ON traceroute_results (owner_node_id, request_id)
+                    """);
             }
             ensureMessageFullTextIndex();
 
@@ -454,6 +484,67 @@ public final class MessageDbService {
         } catch (SQLException e) {
             log.error("Failed to save reaction to DB", e);
             return false;
+        }
+    }
+
+    /**
+     * Сохраняет успешный результат traceroute в отдельной таблице.
+     * <p>
+     * В отличие от старого механизма системных сообщений, эта запись не попадает
+     * в историю чата и не участвует в полнотекстовом поиске сообщений.
+     *
+     * @return id записи в {@code traceroute_results}; {@code 0}, если сохранить не удалось
+     */
+    public synchronized long saveTracerouteResult(String ownerNodeId,
+                                                  String chatType,
+                                                  String chatKey,
+                                                  String source,
+                                                  String requestId,
+                                                  long scriptId,
+                                                  long targetNodeNum,
+                                                  String targetNodeId,
+                                                  String targetName,
+                                                  long responseFromNodeNum,
+                                                  String responseFromNodeId,
+                                                  byte[] routeData,
+                                                  String formattedText,
+                                                  long timestamp) {
+        if (dbConnection == null) {
+            return 0;
+        }
+        String normalizedOwnerNodeId = ownerNodeId != null ? ownerNodeId : "";
+        String normalizedRequestId = requestId != null ? requestId : "";
+        try (PreparedStatement ps = dbConnection.prepareStatement("""
+                INSERT INTO traceroute_results (
+                    owner_node_id, chat_type, chat_key, source, request_id, script_id,
+                    target_node_num, target_node_id, target_name,
+                    response_from_node_num, response_from_node_id,
+                    route_data, formatted_text, timestamp
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, Statement.RETURN_GENERATED_KEYS)) {
+            ps.setString(1, normalizedOwnerNodeId);
+            ps.setString(2, chatType != null ? chatType : "");
+            ps.setString(3, chatKey != null ? chatKey : "");
+            ps.setString(4, source != null ? source : "");
+            ps.setString(5, normalizedRequestId);
+            ps.setLong(6, scriptId);
+            ps.setLong(7, targetNodeNum);
+            ps.setString(8, targetNodeId);
+            ps.setString(9, targetName);
+            ps.setLong(10, responseFromNodeNum);
+            ps.setString(11, responseFromNodeId);
+            ps.setBytes(12, routeData);
+            ps.setString(13, formattedText);
+            ps.setLong(14, timestamp > 0 ? timestamp : System.currentTimeMillis() / 1000);
+            ps.executeUpdate();
+            try (ResultSet keys = ps.getGeneratedKeys()) {
+                return keys.next() ? keys.getLong(1) : 0;
+            }
+        } catch (SQLException e) {
+            log.error("Failed to save traceroute result (requestId={}, target={})",
+                    normalizedRequestId, targetNodeId, e);
+            return 0;
         }
     }
 
@@ -771,6 +862,38 @@ public final class MessageDbService {
             }
         } catch (SQLException e) {
             log.error("Failed to load recent system messages by prefix (limit={})", limit, e);
+        }
+        return result;
+    }
+
+    /**
+     * Загружает последние сохранённые traceroute-результаты.
+     *
+     * @param limit       максимальное количество записей
+     * @param ownerNodeId nodeId устройства-владельца
+     * @return список результатов (новые → старые)
+     */
+    public List<TracerouteResultRecord> loadRecentTracerouteResults(int limit, String ownerNodeId) {
+        List<TracerouteResultRecord> result = new ArrayList<>();
+        if (dbConnection == null || limit <= 0) {
+            return result;
+        }
+        try (PreparedStatement ps = dbConnection.prepareStatement("""
+                SELECT *
+                FROM traceroute_results
+                WHERE owner_node_id = ?
+                ORDER BY timestamp DESC, id DESC
+                LIMIT ?
+                """)) {
+            ps.setString(1, ownerNodeId != null ? ownerNodeId : "");
+            ps.setInt(2, limit);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    result.add(readTracerouteResult(rs));
+                }
+            }
+        } catch (SQLException e) {
+            log.error("Failed to load recent traceroute results (limit={})", limit, e);
         }
         return result;
     }
@@ -1466,6 +1589,25 @@ public final class MessageDbService {
     public record MessageSearchCount(int count, boolean limited) {}
 
     /**
+     * Сохранённый результат traceroute.
+     */
+    public record TracerouteResultRecord(long id,
+                                         String ownerNodeId,
+                                         String chatType,
+                                         String chatKey,
+                                         String source,
+                                         String requestId,
+                                         long scriptId,
+                                         long targetNodeNum,
+                                         String targetNodeId,
+                                         String targetName,
+                                         long responseFromNodeNum,
+                                         String responseFromNodeId,
+                                         byte[] routeData,
+                                         String formattedText,
+                                         long timestamp) {}
+
+    /**
      * Находит сообщение по packetId (для reply_text).
      */
     public MeshMessage findByPacketId(int packetId) {
@@ -2122,6 +2264,26 @@ public final class MessageDbService {
         msg.setRxSnr(rs.getFloat("rx_snr"));
         msg.setViaMqtt(rs.getBoolean("via_mqtt"));
         return msg;
+    }
+
+    private static TracerouteResultRecord readTracerouteResult(ResultSet rs) throws SQLException {
+        return new TracerouteResultRecord(
+                rs.getLong("id"),
+                rs.getString("owner_node_id"),
+                rs.getString("chat_type"),
+                rs.getString("chat_key"),
+                rs.getString("source"),
+                rs.getString("request_id"),
+                rs.getLong("script_id"),
+                rs.getLong("target_node_num"),
+                rs.getString("target_node_id"),
+                rs.getString("target_name"),
+                rs.getLong("response_from_node_num"),
+                rs.getString("response_from_node_id"),
+                rs.getBytes("route_data"),
+                rs.getString("formatted_text"),
+                rs.getLong("timestamp")
+        );
     }
 
     /**

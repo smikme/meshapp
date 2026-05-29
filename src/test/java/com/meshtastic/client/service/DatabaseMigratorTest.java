@@ -343,6 +343,61 @@ class DatabaseMigratorTest {
     }
 
     @Test
+    void migrateFromV17CreatesTracerouteResultsAndBackfillsLegacyMessages() throws Exception {
+        try (Connection connection = openConnection("upgrade-v17-traceroute-results")) {
+            createSchemaVersion(connection, 17);
+
+            try (Statement stmt = connection.createStatement()) {
+                stmt.execute("""
+                        CREATE TABLE messages (
+                            id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                            owner_node_id VARCHAR(20) NOT NULL DEFAULT '',
+                            chat_type VARCHAR(10) NOT NULL,
+                            chat_key VARCHAR(20) NOT NULL,
+                            text CLOB,
+                            timestamp BIGINT NOT NULL,
+                            system_msg BOOLEAN DEFAULT FALSE
+                        )
+                        """);
+            }
+            try (PreparedStatement ps = connection.prepareStatement("""
+                    INSERT INTO messages (owner_node_id, chat_type, chat_key, text, timestamp, system_msg)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """)) {
+                ps.setString(1, "!12345678");
+                ps.setString(2, "channel");
+                ps.setString(3, "0");
+                ps.setString(4, "\uD83D\uDD0D Traceroute → Alpha\nЯ → Alpha");
+                ps.setLong(5, 100);
+                ps.setBoolean(6, true);
+                ps.executeUpdate();
+
+                ps.setString(1, "!12345678");
+                ps.setString(2, "channel");
+                ps.setString(3, "0");
+                ps.setString(4, "ordinary system message");
+                ps.setLong(5, 101);
+                ps.setBoolean(6, true);
+                ps.executeUpdate();
+            }
+
+            DatabaseMigrator.migrate(connection);
+
+            assertEquals(DatabaseMigrator.CURRENT_VERSION, schemaVersion(connection));
+            assertTrue(tableExists(connection, "TRACEROUTE_RESULTS"));
+            assertTrue(columnExists(connection, "TRACEROUTE_RESULTS", "ROUTE_DATA"));
+            assertTrue(indexExists(connection, "IDX_TRACEROUTE_OWNER_TIME"));
+            assertTrue(indexExists(connection, "IDX_TRACEROUTE_REQUEST"));
+            assertEquals(1, countRows(connection, "traceroute_results"));
+            assertEquals("legacy.messages", stringValue(connection, "SELECT source FROM traceroute_results"));
+            assertEquals("legacy:1", stringValue(connection, "SELECT request_id FROM traceroute_results"));
+            assertEquals("!12345678", stringValue(connection, "SELECT owner_node_id FROM traceroute_results"));
+            assertEquals("\uD83D\uDD0D Traceroute → Alpha\nЯ → Alpha",
+                    stringValue(connection, "SELECT formatted_text FROM traceroute_results"));
+        }
+    }
+
+    @Test
     void migrateLegacyAppDatabaseWithoutSchemaVersionPreservesMessages() throws Exception {
         try (Connection connection = openConnection("legacy-app-preserve")) {
             try (Statement stmt = connection.createStatement()) {

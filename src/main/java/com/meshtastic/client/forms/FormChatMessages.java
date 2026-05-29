@@ -19,6 +19,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.UUID;
 
 import org.meshtastic.proto.MeshProtos;
 import org.slf4j.Logger;
@@ -1362,16 +1363,33 @@ abstract class FormChatMessages extends FormChatUi {
     }
 
     /**
-     * Добавить результат трассировки: отдельный визуальный узел в интерфейсе и текстовую запасную запись в БД.
+     * Добавить результат трассировки: отдельная запись в traceroute_results и временный визуальный узел в текущем UI.
      */
     protected void addTracerouteResult(String chatType, String chatKey,
                                      String targetName, MeshProtos.RouteDiscovery route) {
         String text = tracerouteView.formatText(targetName, route);
-        MeshMessage sysMsg = new MeshMessage("!00000000", "!00000000", 0, text, System.currentTimeMillis() / 1000, false);
+        long timestamp = System.currentTimeMillis() / 1000;
+        MessageDbService.getInstance().saveTracerouteResult(
+                currentOwnerNodeId(),
+                chatType,
+                chatKey,
+                "java.traceroute",
+                "java:" + timestamp + ":" + UUID.randomUUID(),
+                0,
+                0,
+                null,
+                targetName,
+                0,
+                null,
+                route != null ? route.toByteArray() : null,
+                text,
+                timestamp);
+        if (!isCurrentChat(chatType, chatKey)) {
+            return;
+        }
+        MeshMessage sysMsg = new MeshMessage("!00000000", "!00000000", 0, text, timestamp, false);
         sysMsg.setSystemMessage(true);
-        MessageDbService.getInstance().save(sysMsg, chatType, chatKey, currentOwnerNodeId());
-
-        publishSavedSystemMessage(chatType, chatKey, sysMsg);
+        appendSystemMessageToCurrentChat(sysMsg);
     }
 
     private void publishSavedSystemMessage(String chatType, String chatKey, MeshMessage systemMessage) {
