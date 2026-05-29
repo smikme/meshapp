@@ -5,6 +5,8 @@ package com.meshtastic.client.lua;
  *
  * @param scriptId id Lua-скрипта
  * @param requestId id запроса внутри сессии
+ * @param source Lua API, который создал запрос
+ * @param name имя запроса, заданное скриптом
  * @param prompt текст заголовка/подсказки
  * @param query начальная строка поиска
  * @param chatType тип чата, связанного с запросом
@@ -14,6 +16,8 @@ package com.meshtastic.client.lua;
  */
 public record LuaUiNodePickRequest(long scriptId,
                                    String requestId,
+                                   String source,
+                                   String name,
                                    String prompt,
                                    String query,
                                    String chatType,

@@ -288,8 +288,6 @@ abstract class FormChatUi extends FormChatBase {
                 messageContainer.widthProperty(),
                 new MessageBubbleFactory.BubbleActions() {
                     @Override public void startReply(MeshMessage msg) { FormChatUi.this.startReply(msg); }
-                    @Override public void requestTraceroute(MeshMessage msg) { FormChatUi.this.requestTraceroute(msg); }
-                    @Override public void requestNodeInfo(MeshMessage msg) { FormChatUi.this.requestNodeInfo(msg); }
                     @Override public void sendReaction(MeshMessage msg, String emoji) {
                         FormChatUi.this.sendReaction(msg, emoji);
                     }

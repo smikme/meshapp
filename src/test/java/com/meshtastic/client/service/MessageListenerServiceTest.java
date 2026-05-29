@@ -689,9 +689,13 @@ class MessageListenerServiceTest {
     }
 
     @Test
-    void onMeshPacketIgnoresEmptyTraceroutePayloadWithoutRequestId() {
+    void onMeshPacketFiresTracerouteListenerForEmptyPayloadWithoutRequestIdAddressedToLocalNode() {
         List<MeshProtos.RouteDiscovery> routes = new ArrayList<>();
-        state.addTracerouteListener((nodeNum, route) -> routes.add(route));
+        List<Integer> fromNodes = new ArrayList<>();
+        state.addTracerouteListener((nodeNum, route) -> {
+            fromNodes.add(nodeNum);
+            routes.add(route);
+        });
 
         MeshProtos.MeshPacket packet = MeshProtos.MeshPacket.newBuilder()
                 .setFrom(0x11111111)
@@ -705,7 +709,9 @@ class MessageListenerServiceTest {
 
         service.onMeshPacket(packet);
 
-        assertTrue(routes.isEmpty());
+        assertEquals(List.of(0x11111111), fromNodes);
+        assertEquals(1, routes.size());
+        assertEquals(0, routes.getFirst().getRouteCount());
     }
 
     @Test

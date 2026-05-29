@@ -1350,6 +1350,18 @@ abstract class FormChatMessages extends FormChatUi {
     }
 
     /**
+     * Показать временное системное сообщение только в текущем UI, без записи в историю.
+     */
+    protected void showTransientSystemMessageTo(String chatType, String chatKey, String text) {
+        if (!isCurrentChat(chatType, chatKey)) {
+            return;
+        }
+        MeshMessage sysMsg = new MeshMessage("!00000000", "!00000000", 0, text, System.currentTimeMillis() / 1000, false);
+        sysMsg.setSystemMessage(true);
+        appendSystemMessageToCurrentChat(sysMsg);
+    }
+
+    /**
      * Добавить результат трассировки: отдельный визуальный узел в интерфейсе и текстовую запасную запись в БД.
      */
     protected void addTracerouteResult(String chatType, String chatKey,

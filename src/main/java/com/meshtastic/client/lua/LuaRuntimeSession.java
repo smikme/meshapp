@@ -2,16 +2,21 @@ package com.meshtastic.client.lua;
 
 import com.meshtastic.client.lua.api.LuaSandboxApi;
 import com.meshtastic.client.lua.api.LuaSandboxContext;
+import com.meshtastic.client.lua.api.LuaValueMapper;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.MeshMessage;
+import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.service.MessageDbService;
+import com.meshtastic.client.service.MessageService;
 import org.luaj.vm2.Globals;
 import org.luaj.vm2.LuaError;
+import org.luaj.vm2.LuaTable;
 import org.luaj.vm2.LuaValue;
 import org.luaj.vm2.Varargs;
 import org.luaj.vm2.lib.DebugLib;
 import org.luaj.vm2.lib.TwoArgFunction;
 import org.meshtastic.proto.ChannelProtos;
+import org.meshtastic.proto.MeshProtos;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -23,9 +28,14 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
+import java.util.function.IntConsumer;
 
 /**
  * Изолированная сессия выполнения одного Lua-скрипта MeshApp.
@@ -37,7 +47,7 @@ import java.util.function.Consumer;
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
-final class LuaRuntimeSession implements LuaUiBridge {
+final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNodeInfoBridge {
 
     private static final long RUN_TIMEOUT_MS = 3_000;
     private static final long CALLBACK_TIMEOUT_MS = 1_500;
@@ -66,10 +76,15 @@ final class LuaRuntimeSession implements LuaUiBridge {
     private final boolean debugMode;
     private final Object debugLock = new Object();
     private final ExecutorService executor;
+    private final ScheduledExecutorService scheduler;
     private final AtomicBoolean running = new AtomicBoolean(false);
     private final Map<String, Long> lastSeenDbIds = new java.util.concurrent.ConcurrentHashMap<>();
     private final Set<String> pendingUiRequests = java.util.concurrent.ConcurrentHashMap.newKeySet();
+    private final Map<String, PendingTraceroute> pendingTraceroutes = new java.util.concurrent.ConcurrentHashMap<>();
+    private final Map<String, PendingNodeInfo> pendingNodeInfos = new java.util.concurrent.ConcurrentHashMap<>();
     private final AtomicLong uiRequestCounter = new AtomicLong();
+    private final AtomicLong tracerouteRequestCounter = new AtomicLong();
+    private final AtomicLong nodeInfoRequestCounter = new AtomicLong();
     private final Runnable deviceMessageListener = this::onDeviceMessagesChanged;
 
     private SandboxDebugLib debugLib;
@@ -106,6 +121,11 @@ final class LuaRuntimeSession implements LuaUiBridge {
         this.onClosed = onClosed;
         this.executor = Executors.newSingleThreadExecutor(r -> {
             Thread thread = new Thread(r, "lua-script-" + script.getId());
+            thread.setDaemon(true);
+            return thread;
+        });
+        this.scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread thread = new Thread(r, "lua-script-timer-" + script.getId());
             thread.setDaemon(true);
             return thread;
         });
@@ -170,19 +190,228 @@ final class LuaRuntimeSession implements LuaUiBridge {
         uiNodePickSink.accept(request);
     }
 
+    @Override
+    public void showBotNotice(LuaUiBotNotice notice) {
+        if (notice == null || uiNodePickSink == null) {
+            throw new LuaError("No active UI context");
+        }
+        emit(LuaScriptEvent.uiBotNotice(script.getId(), notice));
+    }
+
+    @Override
+    public boolean isTracerouteAvailable() {
+        return target.state() != null && target.handler() != null;
+    }
+
+    @Override
+    public String nextTracerouteRequestId() {
+        return script.getId() + ":traceroute:" + tracerouteRequestCounter.incrementAndGet();
+    }
+
+    @Override
+    public void requestTraceroute(LuaTracerouteRequest request) {
+        if (request == null || target.state() == null || target.handler() == null) {
+            throw new LuaError("Traceroute is not available");
+        }
+        if (request.targetNodeNum() == 0) {
+            throw new LuaError("target node_num is required");
+        }
+
+        PendingTraceroute pending = new PendingTraceroute(request);
+        pending.listener = (fromNodeNum, route) -> {
+            if (matchesTracerouteResponse(request, fromNodeNum)) {
+                completeTraceroute(request.requestId(), fromNodeNum, "ok", route, null);
+            }
+        };
+        pendingTraceroutes.put(request.requestId(), pending);
+        target.state().addTracerouteListener(pending.listener);
+        pending.timeoutFuture = scheduler.schedule(
+                () -> completeTraceroute(request.requestId(), 0, "timeout", null, null),
+                Math.max(1, request.timeoutSeconds()),
+                TimeUnit.SECONDS);
+        scriptService.updateRunState(script.getId(), "RUNNING", null);
+        try {
+            MessageService.requestTraceroute(target.handler(), target.state(), request.targetNodeNum());
+        } catch (Throwable error) {
+            completeTraceroute(request.requestId(), 0, "error", null,
+                    error.getMessage() != null ? error.getMessage() : error.getClass().getSimpleName());
+        }
+    }
+
+    @Override
+    public boolean isNodeInfoAvailable() {
+        return target.state() != null && (target.handler() != null || target.meshCoreRuntime() != null);
+    }
+
+    @Override
+    public String nextNodeInfoRequestId() {
+        return script.getId() + ":nodeinfo:" + nodeInfoRequestCounter.incrementAndGet();
+    }
+
+    @Override
+    public void requestNodeInfo(LuaNodeInfoRequest request) {
+        if (request == null || target.state() == null) {
+            throw new LuaError("NodeInfo is not available");
+        }
+        if (request.targetNodeNum() == 0) {
+            throw new LuaError("target node_num is required");
+        }
+        if (target.handler() == null) {
+            completeNodeInfoImmediate(request);
+            return;
+        }
+
+        PendingNodeInfo pending = new PendingNodeInfo(request);
+        pending.listener = nodeNum -> {
+            if (nodeNum == request.targetNodeNum()) {
+                completeNodeInfo(request.requestId(), "ok", target.state().getNodeDb().get(nodeNum), null);
+            }
+        };
+        pendingNodeInfos.put(request.requestId(), pending);
+        target.state().addNodeUpdateListener(pending.listener);
+        pending.timeoutFuture = scheduler.schedule(
+                () -> completeNodeInfo(request.requestId(), "timeout", cachedNode(request.targetNodeNum()), null),
+                Math.max(1, request.timeoutSeconds()),
+                TimeUnit.SECONDS);
+        scriptService.updateRunState(script.getId(), "RUNNING", null);
+        try {
+            MessageService.requestNodeInfo(target.handler(), target.state(), request.targetNodeNum());
+        } catch (Throwable error) {
+            completeNodeInfo(request.requestId(), "error", cachedNode(request.targetNodeNum()),
+                    error.getMessage() != null ? error.getMessage() : error.getClass().getSimpleName());
+        }
+    }
+
     void stop() {
         if (!running.getAndSet(false)) {
             return;
         }
         resumeDebuggee(DebugCommand.CONTINUE);
         unregisterListener();
+        cleanupTraceroutes();
+        cleanupNodeInfos();
         Future<?> future = activeFuture;
         if (future != null) {
             future.cancel(true);
         }
         executor.shutdownNow();
+        scheduler.shutdownNow();
         scriptService.updateRunState(script.getId(), "STOPPED", null);
         emit(LuaScriptEvent.stopped(script.getId(), "Скрипт остановлен"));
+    }
+
+    private boolean matchesTracerouteResponse(LuaTracerouteRequest request, int fromNodeNum) {
+        if (fromNodeNum == request.targetNodeNum()) {
+            return true;
+        }
+        return pendingTraceroutes.size() == 1;
+    }
+
+    private void completeTraceroute(String requestId,
+                                    int responseFromNodeNum,
+                                    String status,
+                                    MeshProtos.RouteDiscovery route,
+                                    String error) {
+        PendingTraceroute pending = pendingTraceroutes.remove(requestId);
+        if (pending == null || !pending.completed.compareAndSet(false, true)) {
+            return;
+        }
+        if (target.state() != null && pending.listener != null) {
+            target.state().removeTracerouteListener(pending.listener);
+        }
+        if (pending.timeoutFuture != null) {
+            pending.timeoutFuture.cancel(false);
+        }
+        try {
+            executor.execute(() -> callTraceroute(pending.request, responseFromNodeNum, status, route, error));
+        } catch (RejectedExecutionException ignored) {
+            // Session is stopping.
+        }
+    }
+
+    private void callTraceroute(LuaTracerouteRequest request,
+                                int responseFromNodeNum,
+                                String status,
+                                MeshProtos.RouteDiscovery route,
+                                String error) {
+        if (!running.get() || globals == null) {
+            return;
+        }
+        LuaValue callback = globals.get("on_traceroute");
+        try {
+            if (callback.isfunction()) {
+                debugLib.begin(CALLBACK_TIMEOUT_MS);
+                callback.call(tracerouteEventToTable(request, responseFromNodeNum, status, route, error));
+            } else {
+                emit(LuaScriptEvent.warning(script.getId(), "Traceroute result received, but on_traceroute(event) is missing"));
+            }
+            finishIfIdle();
+        } catch (Throwable callbackError) {
+            fail(callbackError);
+            finishWithoutInterruptingExecutor();
+        }
+    }
+
+    private void completeNodeInfoImmediate(LuaNodeInfoRequest request) {
+        NodeData node = target.state() != null ? target.state().getNodeDb().get(request.targetNodeNum()) : null;
+        String status = node != null ? "ok" : "error";
+        String error = node != null ? null : "NodeInfo is not available for selected node";
+        PendingNodeInfo pending = new PendingNodeInfo(request);
+        pendingNodeInfos.put(request.requestId(), pending);
+        scriptService.updateRunState(script.getId(), "RUNNING", null);
+        try {
+            executor.execute(() -> {
+                PendingNodeInfo removed = pendingNodeInfos.remove(request.requestId());
+                if (removed == null || !removed.completed.compareAndSet(false, true)) {
+                    return;
+                }
+                callNodeInfo(request, status, node, error);
+            });
+        } catch (RejectedExecutionException ignored) {
+            pendingNodeInfos.remove(request.requestId());
+            // Session is stopping.
+        }
+    }
+
+    private void completeNodeInfo(String requestId, String status, NodeData node, String error) {
+        PendingNodeInfo pending = pendingNodeInfos.remove(requestId);
+        if (pending == null || !pending.completed.compareAndSet(false, true)) {
+            return;
+        }
+        if (target.state() != null && pending.listener != null) {
+            target.state().removeNodeUpdateListener(pending.listener);
+        }
+        if (pending.timeoutFuture != null) {
+            pending.timeoutFuture.cancel(false);
+        }
+        try {
+            executor.execute(() -> callNodeInfo(pending.request, status, node, error));
+        } catch (RejectedExecutionException ignored) {
+            // Session is stopping.
+        }
+    }
+
+    private NodeData cachedNode(int nodeNum) {
+        return target.state() != null ? target.state().getNodeDb().get(nodeNum) : null;
+    }
+
+    private void callNodeInfo(LuaNodeInfoRequest request, String status, NodeData node, String error) {
+        if (!running.get() || globals == null) {
+            return;
+        }
+        LuaValue callback = globals.get("on_node_info");
+        try {
+            if (callback.isfunction()) {
+                debugLib.begin(CALLBACK_TIMEOUT_MS);
+                callback.call(nodeInfoEventToTable(request, status, node, error));
+            } else {
+                emit(LuaScriptEvent.warning(script.getId(), "NodeInfo result received, but on_node_info(event) is missing"));
+            }
+            finishIfIdle();
+        } catch (Throwable callbackError) {
+            fail(callbackError);
+            finishWithoutInterruptingExecutor();
+        }
     }
 
     private void callNodeSelected(LuaUiNodeSelection selection) {
@@ -198,10 +427,7 @@ final class LuaRuntimeSession implements LuaUiBridge {
             } else {
                 emit(LuaScriptEvent.warning(script.getId(), "Node selection received, but on_node_selected(event) is missing"));
             }
-            if (!listenerRegistered && pendingUiRequests.isEmpty()) {
-                scriptService.updateRunState(script.getId(), "FINISHED", null);
-                finishWithoutInterruptingExecutor();
-            }
+            finishIfIdle();
         } catch (Throwable error) {
             fail(error);
             finishWithoutInterruptingExecutor();
@@ -209,7 +435,10 @@ final class LuaRuntimeSession implements LuaUiBridge {
     }
 
     private LuaValue nodeSelectionToTable(LuaUiNodeSelection selection) {
-        org.luaj.vm2.LuaTable table = new org.luaj.vm2.LuaTable();
+        LuaTable table = new LuaTable();
+        table.set("type", LuaValue.valueOf("ui_result"));
+        table.set("source", LuaValue.valueOf(selection.source() != null ? selection.source() : "mesh.ui.pick_node"));
+        table.set("name", LuaValue.valueOf(selection.name() != null ? selection.name() : ""));
         table.set("request_id", LuaValue.valueOf(selection.requestId()));
         table.set("status", LuaValue.valueOf(selection.selected() ? "selected" : "cancelled"));
         table.set("selected", LuaValue.valueOf(selection.selected()));
@@ -220,6 +449,114 @@ final class LuaRuntimeSession implements LuaUiBridge {
                 ? sandboxApi.mapper().nodeToTable(selection.node())
                 : LuaValue.NIL);
         return table;
+    }
+
+    private LuaValue tracerouteEventToTable(LuaTracerouteRequest request,
+                                            int responseFromNodeNum,
+                                            String status,
+                                            MeshProtos.RouteDiscovery route,
+                                            String error) {
+        LuaTable table = new LuaTable();
+        table.set("type", LuaValue.valueOf("traceroute_result"));
+        table.set("source", LuaValue.valueOf(request.source() != null ? request.source() : "mesh.traceroute.request"));
+        table.set("name", LuaValue.valueOf(request.name() != null ? request.name() : ""));
+        table.set("request_id", LuaValue.valueOf(request.requestId()));
+        table.set("status", LuaValue.valueOf(status != null ? status : ""));
+        table.set("ok", LuaValue.valueOf("ok".equals(status)));
+        table.set("timeout", LuaValue.valueOf("timeout".equals(status)));
+        table.set("error", error != null ? LuaValue.valueOf(error) : LuaValue.NIL);
+        table.set("target_node_num", LuaValueMapper.uint32ToLuaValue(request.targetNodeNum()));
+        table.set("target_node_id", LuaValue.valueOf(request.targetNodeId() != null
+                ? request.targetNodeId()
+                : String.format("!%08x", request.targetNodeNum())));
+        table.set("target_name", LuaValue.valueOf(request.targetName() != null ? request.targetName() : ""));
+        table.set("response_from_node_num", responseFromNodeNum != 0
+                ? LuaValueMapper.uint32ToLuaValue(responseFromNodeNum)
+                : LuaValue.NIL);
+        table.set("response_from_node_id", responseFromNodeNum != 0
+                ? LuaValue.valueOf(String.format("!%08x", responseFromNodeNum))
+                : LuaValue.NIL);
+        table.set("chat_type", LuaValue.valueOf(request.chatType() != null ? request.chatType() : ""));
+        table.set("chat_key", LuaValue.valueOf(request.chatKey() != null ? request.chatKey() : ""));
+        table.set("route", route != null ? routeToTable(route) : LuaValue.NIL);
+        return table;
+    }
+
+    private LuaValue nodeInfoEventToTable(LuaNodeInfoRequest request,
+                                          String status,
+                                          NodeData node,
+                                          String error) {
+        LuaTable table = new LuaTable();
+        table.set("type", LuaValue.valueOf("nodeinfo_result"));
+        table.set("source", LuaValue.valueOf(request.source() != null ? request.source() : "mesh.nodeinfo.request"));
+        table.set("name", LuaValue.valueOf(request.name() != null ? request.name() : ""));
+        table.set("request_id", LuaValue.valueOf(request.requestId()));
+        table.set("status", LuaValue.valueOf(status != null ? status : ""));
+        table.set("ok", LuaValue.valueOf("ok".equals(status)));
+        table.set("timeout", LuaValue.valueOf("timeout".equals(status)));
+        table.set("cached", LuaValue.valueOf(node != null && !"ok".equals(status)));
+        table.set("error", error != null ? LuaValue.valueOf(error) : LuaValue.NIL);
+        table.set("target_node_num", LuaValueMapper.uint32ToLuaValue(request.targetNodeNum()));
+        table.set("target_node_id", LuaValue.valueOf(request.targetNodeId() != null
+                ? request.targetNodeId()
+                : String.format("!%08x", request.targetNodeNum())));
+        table.set("target_name", LuaValue.valueOf(request.targetName() != null ? request.targetName() : ""));
+        table.set("chat_type", LuaValue.valueOf(request.chatType() != null ? request.chatType() : ""));
+        table.set("chat_key", LuaValue.valueOf(request.chatKey() != null ? request.chatKey() : ""));
+        table.set("node", node != null ? sandboxApi.mapper().nodeToTable(node) : LuaValue.NIL);
+        return table;
+    }
+
+    private LuaValue routeToTable(MeshProtos.RouteDiscovery route) {
+        LuaTable table = new LuaTable();
+        table.set("route", intListToTable(route.getRouteList()));
+        table.set("route_back", intListToTable(route.getRouteBackList()));
+        table.set("route_ids", nodeIdListToTable(route.getRouteList()));
+        table.set("route_back_ids", nodeIdListToTable(route.getRouteBackList()));
+        table.set("snr_towards", snrListToTable(route.getSnrTowardsList()));
+        table.set("snr_back", snrListToTable(route.getSnrBackList()));
+        return table;
+    }
+
+    private LuaTable intListToTable(List<Integer> values) {
+        LuaTable table = new LuaTable();
+        if (values != null) {
+            for (int i = 0; i < values.size(); i++) {
+                table.set(i + 1, LuaValueMapper.uint32ToLuaValue(values.get(i)));
+            }
+        }
+        return table;
+    }
+
+    private LuaTable nodeIdListToTable(List<Integer> values) {
+        LuaTable table = new LuaTable();
+        if (values != null) {
+            for (int i = 0; i < values.size(); i++) {
+                table.set(i + 1, LuaValue.valueOf(String.format("!%08x", values.get(i))));
+            }
+        }
+        return table;
+    }
+
+    private LuaTable snrListToTable(List<Integer> values) {
+        LuaTable table = new LuaTable();
+        if (values != null) {
+            for (int i = 0; i < values.size(); i++) {
+                table.set(i + 1, LuaValue.valueOf(values.get(i) / 4.0));
+            }
+        }
+        return table;
+    }
+
+    private boolean hasPendingAsyncWork() {
+        return !pendingUiRequests.isEmpty() || !pendingTraceroutes.isEmpty() || !pendingNodeInfos.isEmpty();
+    }
+
+    private void finishIfIdle() {
+        if (!listenerRegistered && !hasPendingAsyncWork()) {
+            scriptService.updateRunState(script.getId(), "FINISHED", null);
+            finishWithoutInterruptingExecutor();
+        }
     }
 
     private void runInitialChunk() {
@@ -238,6 +575,8 @@ final class LuaRuntimeSession implements LuaUiBridge {
                     scriptService,
                     this::emitOutput,
                     command,
+                    this,
+                    this,
                     this));
             sandboxApi.install(globals);
 
@@ -255,14 +594,14 @@ final class LuaRuntimeSession implements LuaUiBridge {
                 if (command == null) {
                     emit(LuaScriptEvent.info(script.getId(), "Выполнено: on_message не объявлен, скрипт завершен"));
                 }
-                if (pendingUiRequests.isEmpty()) {
+                if (!hasPendingAsyncWork()) {
                     scriptService.updateRunState(script.getId(), "FINISHED", null);
                 }
             }
         } catch (Throwable error) {
             fail(error);
         } finally {
-            if (!keepListening && pendingUiRequests.isEmpty()) {
+            if (!keepListening && !hasPendingAsyncWork()) {
                 finishWithoutInterruptingExecutor();
             }
         }
@@ -594,8 +933,11 @@ final class LuaRuntimeSession implements LuaUiBridge {
 
     private void finishWithoutInterruptingExecutor() {
         unregisterListener();
+        cleanupTraceroutes();
+        cleanupNodeInfos();
         running.set(false);
         executor.shutdown();
+        scheduler.shutdownNow();
         onClosed.run();
     }
 
@@ -604,6 +946,30 @@ final class LuaRuntimeSession implements LuaUiBridge {
             target.state().removeMessageListener(deviceMessageListener);
         }
         listenerRegistered = false;
+    }
+
+    private void cleanupTraceroutes() {
+        pendingTraceroutes.forEach((ignored, pending) -> {
+            if (target.state() != null && pending.listener != null) {
+                target.state().removeTracerouteListener(pending.listener);
+            }
+            if (pending.timeoutFuture != null) {
+                pending.timeoutFuture.cancel(false);
+            }
+        });
+        pendingTraceroutes.clear();
+    }
+
+    private void cleanupNodeInfos() {
+        pendingNodeInfos.forEach((ignored, pending) -> {
+            if (target.state() != null && pending.listener != null) {
+                target.state().removeNodeUpdateListener(pending.listener);
+            }
+            if (pending.timeoutFuture != null) {
+                pending.timeoutFuture.cancel(false);
+            }
+        });
+        pendingNodeInfos.clear();
     }
 
     private void emit(LuaScriptEvent event) {
@@ -628,6 +994,28 @@ final class LuaRuntimeSession implements LuaUiBridge {
         NONE,
         CONTINUE,
         STEP
+    }
+
+    private static final class PendingTraceroute {
+        private final LuaTracerouteRequest request;
+        private final AtomicBoolean completed = new AtomicBoolean(false);
+        private volatile BiConsumer<Integer, MeshProtos.RouteDiscovery> listener;
+        private volatile ScheduledFuture<?> timeoutFuture;
+
+        private PendingTraceroute(LuaTracerouteRequest request) {
+            this.request = request;
+        }
+    }
+
+    private static final class PendingNodeInfo {
+        private final LuaNodeInfoRequest request;
+        private final AtomicBoolean completed = new AtomicBoolean(false);
+        private volatile IntConsumer listener;
+        private volatile ScheduledFuture<?> timeoutFuture;
+
+        private PendingNodeInfo(LuaNodeInfoRequest request) {
+            this.request = request;
+        }
     }
 
     private static final class SandboxDebugLib extends DebugLib {

@@ -8,7 +8,11 @@ package com.meshtastic.client.lua;
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
-public record LuaScriptEvent(Type type, long scriptId, String message, Throwable error) {
+public record LuaScriptEvent(Type type, long scriptId, String message, Throwable error, Object payload) {
+
+    public LuaScriptEvent(Type type, long scriptId, String message, Throwable error) {
+        this(type, scriptId, message, error, null);
+    }
 
     /**
      * Тип события Lua-рантайма.
@@ -20,6 +24,7 @@ public record LuaScriptEvent(Type type, long scriptId, String message, Throwable
         ERROR,
         STARTED,
         STOPPED,
+        UI_BOT_NOTICE,
         DEBUG_PAUSED,
         DEBUG_RESUMED
     }
@@ -46,6 +51,15 @@ public record LuaScriptEvent(Type type, long scriptId, String message, Throwable
 
     public static LuaScriptEvent stopped(long scriptId, String message) {
         return new LuaScriptEvent(Type.STOPPED, scriptId, message, null);
+    }
+
+    public static LuaScriptEvent uiBotNotice(long scriptId, LuaUiBotNotice notice) {
+        return new LuaScriptEvent(
+                Type.UI_BOT_NOTICE,
+                scriptId,
+                notice != null ? notice.text() : "",
+                null,
+                notice);
     }
 
     public static LuaScriptEvent debugPaused(long scriptId, String message) {

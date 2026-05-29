@@ -112,12 +112,6 @@ public class MessageBubbleFactory {
         /** Начать ответ на сообщение. */
         void startReply(MeshMessage msg);
 
-        /** Запросить traceroute до ноды-отправителя. */
-        void requestTraceroute(MeshMessage msg);
-
-        /** Запросить информацию о ноде-отправителе. */
-        void requestNodeInfo(MeshMessage msg);
-
         /** Отправить emoji-реакцию на сообщение. */
         void sendReaction(MeshMessage msg, String emoji);
 
@@ -1422,7 +1416,7 @@ public class MessageBubbleFactory {
     }
 
     /**
-     * Навешивает контекстное меню входящего сообщения с reply/trace/info действиями.
+     * Навешивает контекстное меню входящего сообщения с reply/delete действиями.
      *
      * @param content bubble-контент
      * @param msg сообщение
@@ -1432,8 +1426,6 @@ public class MessageBubbleFactory {
         installContextMenu(content, () -> new ContextMenu(
                 createMenuItem("Копировать", () -> copyText(msg.getText())),
                 createMenuItem("Ответить", () -> actions.startReply(msg)),
-                createMenuItem("Trace", () -> actions.requestTraceroute(msg)),
-                createMenuItem("Инфо", () -> actions.requestNodeInfo(msg)),
                 new SeparatorMenuItem(),
                 createMenuItem("Удалить", () -> actions.confirmDeleteMessage(msg, row))
         ));

@@ -227,8 +227,6 @@ class MessageBubbleFactoryTest {
 
     private static final class NoOpBubbleActions implements MessageBubbleFactory.BubbleActions {
         @Override public void startReply(MeshMessage msg) {}
-        @Override public void requestTraceroute(MeshMessage msg) {}
-        @Override public void requestNodeInfo(MeshMessage msg) {}
         @Override public void sendReaction(MeshMessage msg, String emoji) {}
         @Override public void confirmDeleteMessage(MeshMessage msg, HBox bubbleRow) {}
         @Override public boolean retryMessage(MeshMessage msg) { return false; }

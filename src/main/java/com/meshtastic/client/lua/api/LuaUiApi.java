@@ -41,6 +41,8 @@ public final class LuaUiApi {
                 bridge.requestNodePick(new LuaUiNodePickRequest(
                         context.scriptId(),
                         requestId,
+                        "mesh.ui.pick_node",
+                        options.name(),
                         options.prompt(),
                         options.query(),
                         options.chatType(),
@@ -53,13 +55,14 @@ public final class LuaUiApi {
 
     private PickNodeOptions readPickNodeOptions(LuaValue value) {
         if (value == null || value.isnil()) {
-            return new PickNodeOptions("", "", "", "");
+            return new PickNodeOptions("", "", "", "", "");
         }
         if (value.isstring()) {
-            return new PickNodeOptions("", value.checkjstring(), "", "");
+            return new PickNodeOptions("", "", value.checkjstring(), "", "");
         }
         LuaTable table = value.checktable();
         return new PickNodeOptions(
+                optionalString(table, "name"),
                 optionalString(table, "prompt"),
                 optionalString(table, "query"),
                 optionalString(table, "chat_type"),
@@ -71,5 +74,5 @@ public final class LuaUiApi {
         return value.isnil() ? "" : value.checkjstring();
     }
 
-    private record PickNodeOptions(String prompt, String query, String chatType, String chatKey) {}
+    private record PickNodeOptions(String name, String prompt, String query, String chatType, String chatKey) {}
 }

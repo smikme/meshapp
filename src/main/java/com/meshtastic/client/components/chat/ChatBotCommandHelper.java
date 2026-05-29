@@ -20,20 +20,13 @@ import java.util.regex.Pattern;
  */
 public final class ChatBotCommandHelper {
 
-    public static final String TRACEBOT_HANDLE = "@tracebot";
-    public static final String INFOBOT_HANDLE = "@infobot";
     private static final Pattern TOKEN_PATTERN = Pattern.compile("\\S+");
     private static final Pattern NODE_ID_PATTERN = Pattern.compile("!([0-9a-fA-F]{1,8})");
-    private static final List<BotDefinition> BOTS = List.of(
-            new BotDefinition(TRACEBOT_HANDLE, "Traceroute до ноды", BotAction.TRACEROUTE),
-            new BotDefinition(INFOBOT_HANDLE, "Информация о ноде", BotAction.NODE_INFO)
-    );
+    private static final List<BotDefinition> BOTS = List.of();
 
     private ChatBotCommandHelper() {}
 
     public enum BotAction {
-        TRACEROUTE,
-        NODE_INFO,
         AUTOMATION
     }
 
@@ -320,7 +313,7 @@ public final class ChatBotCommandHelper {
                 if (bot == null || isBlank(bot.handle())) {
                     continue;
                 }
-                bots.putIfAbsent(bot.handle().trim().toLowerCase(Locale.ROOT), bot);
+                bots.put(bot.handle().trim().toLowerCase(Locale.ROOT), bot);
             }
         }
         return new ArrayList<>(bots.values());

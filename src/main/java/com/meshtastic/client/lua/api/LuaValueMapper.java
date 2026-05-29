@@ -67,16 +67,31 @@ public final class LuaValueMapper {
      */
     public LuaTable nodeToTable(NodeData node) {
         LuaTable table = new LuaTable();
-        table.set("node_num", LuaValue.valueOf(node.getNodeNum()));
+        table.set("node_num", uint32ToLuaValue(node.getNodeNum()));
         table.set("node_id", stringOrNil(node.getNodeId()));
         table.set("long_name", stringOrNil(node.getLongName()));
         table.set("short_name", stringOrNil(node.getShortName()));
         table.set("last_heard", LuaValue.valueOf(node.getLastHeard()));
         table.set("battery", LuaValue.valueOf(node.getBatteryLevel()));
+        table.set("externally_powered", LuaValue.valueOf(node.isExternallyPowered()));
+        table.set("voltage", LuaValue.valueOf(node.getVoltage()));
+        table.set("snr", LuaValue.valueOf(node.getSnr()));
+        table.set("latitude", LuaValue.valueOf(node.getLatitude()));
+        table.set("longitude", LuaValue.valueOf(node.getLongitude()));
+        table.set("altitude", LuaValue.valueOf(node.getAltitude()));
         table.set("hops_away", node.hasHopsAway() ? LuaValue.valueOf(node.getHopsAway()) : LuaValue.NIL);
+        table.set("channel", LuaValue.valueOf(node.getChannel()));
         table.set("role", stringOrNil(node.getRole()));
         table.set("hw_model", stringOrNil(node.getHwModel()));
+        table.set("public_key", stringOrNil(hex(node.getPublicKey())));
+        table.set("uptime_seconds", LuaValue.valueOf((double) node.getUptimeSeconds()));
+        table.set("channel_utilization", LuaValue.valueOf(node.getChannelUtilization()));
+        table.set("air_util_tx", LuaValue.valueOf(node.getAirUtilTx()));
+        table.set("temperature", LuaValue.valueOf(node.getTemperature()));
+        table.set("relative_humidity", LuaValue.valueOf(node.getRelativeHumidity()));
+        table.set("barometric_pressure", LuaValue.valueOf(node.getBarometricPressure()));
         table.set("unmessagable", LuaValue.valueOf(node.isUnmessagable()));
+        table.set("licensed", node.getLicensed() != null ? LuaValue.valueOf(node.isLicensed()) : LuaValue.NIL);
         return table;
     }
 
@@ -110,6 +125,33 @@ public final class LuaValueMapper {
     }
 
     /**
+     * Безопасно читает uint32-поле из Lua-таблицы в Java int с сохранением битов.
+     * <p>
+     * Meshtastic хранит node_num как unsigned 32-bit, а protobuf/Java держит его
+     * в signed {@code int}. Lua API показывает такие значения как положительные
+     * числа 0..4294967295, но обратно в Java их нужно свернуть в те же 32 бита.
+     *
+     * @param table        Lua-таблица
+     * @param key          имя поля
+     * @param defaultValue значение по умолчанию
+     * @return signed int с исходными uint32-битами
+     */
+    public static int tableUInt32(LuaTable table, String key, int defaultValue) {
+        LuaValue value = table.get(key);
+        if (value.isnil()) {
+            return defaultValue;
+        }
+        if (value.isnumber()) {
+            double number = value.checkdouble();
+            if (number < 0) {
+                number += 4_294_967_296.0;
+            }
+            return (int) ((long) number & 0xffff_ffffL);
+        }
+        return value.checkint();
+    }
+
+    /**
      * Безопасно читает строковое поле из Lua-таблицы.
      *
      * @param table Lua-таблица
@@ -125,11 +167,26 @@ public final class LuaValueMapper {
         return value == null ? LuaValue.NIL : LuaValue.valueOf(value);
     }
 
+    public static LuaValue uint32ToLuaValue(int value) {
+        return LuaValue.valueOf((double) Integer.toUnsignedLong(value));
+    }
+
     private ChannelProtos.Channel findMessageChannel(int channelIndex) {
         return state != null ? state.getChannelStore().getChannelByIndex(channelIndex) : null;
     }
 
     private String channelName(ChannelProtos.Channel channel) {
         return channel != null && channel.hasSettings() ? channel.getSettings().getName() : null;
+    }
+
+    private static String hex(byte[] bytes) {
+        if (bytes == null || bytes.length == 0) {
+            return null;
+        }
+        StringBuilder sb = new StringBuilder(bytes.length * 2);
+        for (byte value : bytes) {
+            sb.append(String.format("%02x", value));
+        }
+        return sb.toString();
     }
 }

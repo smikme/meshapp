@@ -25,4 +25,11 @@ public interface LuaUiBridge {
      * @param request запрос из Lua
      */
     void requestNodePick(LuaUiNodePickRequest request);
+
+    /**
+     * Показывает временное сообщение встроенного бота без сохранения в БД.
+     *
+     * @param notice сообщение для UI
+     */
+    void showBotNotice(LuaUiBotNotice notice);
 }

@@ -83,6 +83,18 @@ public class MessageListenerService implements FromRadioListener {
     }
 
     @Override
+    public void onNodeInfo(MeshProtos.NodeInfo nodeInfo) {
+        if (nodeInfo == null || nodeInfo.getNum() == 0) {
+            return;
+        }
+        NodeData node = applyNodeInfo(nodeInfo);
+        int nodeNum = nodeInfo.getNum();
+        deviceState.fireNodeUpdateListeners(nodeNum);
+        NodeCacheService.getInstance().update(node);
+        log.info("Received NodeInfo from !{}: {}", Integer.toHexString(nodeNum), node.getLongName());
+    }
+
+    @Override
     public void onMeshPacket(MeshProtos.MeshPacket packet) {
         onMeshPacket(packet, System.currentTimeMillis() / 1000);
     }
@@ -546,6 +558,7 @@ public class MessageListenerService implements FromRadioListener {
             if (!user.getPublicKey().isEmpty()) {
                 node.setPublicKey(user.getPublicKey().toByteArray());
             }
+            node.setLicensed(user.getIsLicensed());
             if (user.hasIsUnmessagable()) {
                 node.setUnmessagable(user.getIsUnmessagable());
             }
@@ -557,6 +570,86 @@ public class MessageListenerService implements FromRadioListener {
                     user.hasIsUnmessagable() ? user.getIsUnmessagable() : null);
         } catch (InvalidProtocolBufferException e) {
             log.warn("Failed to parse User from NODEINFO_APP packet from !{}", Integer.toHexString(fromNum), e);
+        }
+    }
+
+    private NodeData applyNodeInfo(MeshProtos.NodeInfo nodeInfo) {
+        NodeData node = deviceState.getOrCreateNode(nodeInfo.getNum());
+
+        if (nodeInfo.hasUser()) {
+            applyUserInfo(node, nodeInfo.getUser());
+        }
+
+        if (nodeInfo.hasPosition()) {
+            MeshProtos.Position position = nodeInfo.getPosition();
+            if (position.getLatitudeI() != 0) {
+                node.setLatitude(position.getLatitudeI() * 1e-7);
+            }
+            if (position.getLongitudeI() != 0) {
+                node.setLongitude(position.getLongitudeI() * 1e-7);
+            }
+            if (position.getAltitude() != 0) {
+                node.setAltitude(position.getAltitude());
+            }
+        }
+
+        if (nodeInfo.getSnr() != 0) {
+            node.setSnr(nodeInfo.getSnr());
+        }
+        if (nodeInfo.getLastHeard() != 0) {
+            node.setLastHeard(nodeInfo.getLastHeard());
+        } else {
+            node.setLastHeard((int) (System.currentTimeMillis() / 1000));
+        }
+        if (nodeInfo.hasHopsAway()) {
+            node.setHopsAway((int) nodeInfo.getHopsAway());
+        }
+        if (nodeInfo.getChannel() != 0) {
+            node.setChannel((int) nodeInfo.getChannel());
+        }
+
+        if (nodeInfo.hasDeviceMetrics()) {
+            org.meshtastic.proto.TelemetryProtos.DeviceMetrics metrics = nodeInfo.getDeviceMetrics();
+            applyBatteryLevel(metrics.getBatteryLevel(), node, null);
+            if (metrics.getVoltage() != 0) {
+                node.setVoltage(metrics.getVoltage());
+            }
+            if (metrics.getChannelUtilization() != 0) {
+                node.setChannelUtilization(metrics.getChannelUtilization());
+            }
+            if (metrics.getAirUtilTx() != 0) {
+                node.setAirUtilTx(metrics.getAirUtilTx());
+            }
+            if (metrics.getUptimeSeconds() != 0) {
+                node.setUptimeSeconds(metrics.getUptimeSeconds());
+            }
+        }
+
+        return node;
+    }
+
+    private static void applyUserInfo(NodeData node, MeshProtos.User user) {
+        if (!user.getLongName().isEmpty()) {
+            node.setLongName(user.getLongName());
+        }
+        if (!user.getShortName().isEmpty()) {
+            node.setShortName(user.getShortName());
+        }
+        if (!user.getId().isEmpty()) {
+            node.setNodeId(user.getId());
+        }
+        if (user.getRole() != ConfigProtos.Config.DeviceConfig.Role.CLIENT || node.getRole() == null) {
+            node.setRole(user.getRole().name());
+        }
+        if (user.getHwModel() != MeshProtos.HardwareModel.UNSET || node.getHwModel() == null) {
+            node.setHwModel(user.getHwModel().name());
+        }
+        if (!user.getPublicKey().isEmpty()) {
+            node.setPublicKey(user.getPublicKey().toByteArray());
+        }
+        node.setLicensed(user.getIsLicensed());
+        if (user.hasIsUnmessagable()) {
+            node.setUnmessagable(user.getIsUnmessagable());
         }
     }
 
@@ -697,11 +790,11 @@ public class MessageListenerService implements FromRadioListener {
     private static void applyBatteryLevel(int rawBatteryLevel, NodeData node, TelemetryEntry entry) {
         if (rawBatteryLevel > 100) {
             node.setExternallyPowered(true);
-            entry.setExternallyPowered(true);
+            if (entry != null) { entry.setExternallyPowered(true); }
         } else if (rawBatteryLevel > 0) {
             node.setBatteryLevel(rawBatteryLevel);
             node.setExternallyPowered(false);
-            entry.setBatteryLevel(rawBatteryLevel);
+            if (entry != null) { entry.setBatteryLevel(rawBatteryLevel); }
         }
     }
 
@@ -780,14 +873,14 @@ public class MessageListenerService implements FromRadioListener {
         try {
             MeshProtos.RouteDiscovery route = MeshProtos.RouteDiscovery.parseFrom(data.getPayload());
             if (data.getRequestId() == 0) {
-                if (!hasRouteDiscoveryData(route)) {
-                    log.debug("Ignoring TRACEROUTE_APP packet without requestId or route data");
-                    return;
-                }
                 if (packet.getTo() != myNodeNum) {
                     log.debug("Ignoring TRACEROUTE_APP route data without requestId addressed to !{}",
                             Integer.toHexString(packet.getTo()));
                     return;
+                }
+                if (!hasRouteDiscoveryData(route)) {
+                    log.debug("Accepting empty TRACEROUTE_APP response from !{} addressed to local node",
+                            Integer.toHexString(packet.getFrom()));
                 }
             }
             deviceState.fireTracerouteListeners(packet.getFrom(), route);

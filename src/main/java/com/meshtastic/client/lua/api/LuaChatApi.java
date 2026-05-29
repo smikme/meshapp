@@ -3,6 +3,7 @@ package com.meshtastic.client.lua.api;
 import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.model.MessageChangeEvent;
 import com.meshtastic.client.model.NodeData;
+import com.meshtastic.client.lua.LuaUiBotNotice;
 import com.meshtastic.client.service.MessageDbService;
 import com.meshtastic.client.service.MessageService;
 import org.luaj.vm2.LuaError;
@@ -119,6 +120,28 @@ public final class LuaChatApi {
                 int replyId = LuaValueMapper.tableInt(message, "packet_id", 0);
                 String replyText = LuaValueMapper.tableString(message, "text");
                 return createBotMessage(chatType, chatKey, text, replyId, replyText);
+            }
+        });
+        chat.set("bot_notice", new VarArgFunction() {
+            @Override
+            public Varargs invoke(Varargs args) {
+                if (context.uiBridge() == null || !context.uiBridge().isAvailable()) {
+                    throw new LuaError("No active UI context");
+                }
+                String chatType = normalizeChatType(args.checkjstring(1));
+                String chatKey = args.checkjstring(2);
+                String text = normalizeBotText(args.checkjstring(3));
+                LuaTable options = args.arg(4).istable() ? args.arg(4).checktable() : null;
+                String name = options != null ? optionalString(options, "name") : "";
+                ChatScope scope = normalizeChatScope(chatType, chatKey);
+                context.uiBridge().showBotNotice(new LuaUiBotNotice(
+                        context.scriptId(),
+                        "mesh.chat.bot_notice",
+                        name,
+                        scope.chatType(),
+                        scope.chatKey(),
+                        text));
+                return LuaValue.TRUE;
             }
         });
         chat.set("recent", new VarArgFunction() {
@@ -249,6 +272,11 @@ public final class LuaChatApi {
             throw new LuaError("bot message text is too long");
         }
         return text;
+    }
+
+    private static String optionalString(LuaTable table, String key) {
+        LuaValue value = table.get(key);
+        return value.isnil() ? "" : value.checkjstring();
     }
 
     private void requireChatContext() {

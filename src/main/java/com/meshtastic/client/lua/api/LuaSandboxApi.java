@@ -12,7 +12,8 @@ import org.luaj.vm2.lib.ZeroArgFunction;
  * Корневой установщик разрешенного API Lua-песочницы MeshApp.
  * <p>
  * Создает namespace {@code mesh} и подключает отдельные модули расширений:
- * {@code mesh.chat}, {@code mesh.kv}, {@code mesh.curl}, {@code mesh.ui}, а также базовые
+ * {@code mesh.chat}, {@code mesh.kv}, {@code mesh.curl}, {@code mesh.ui},
+ * {@code mesh.traceroute}, {@code mesh.nodeinfo}, а также базовые
  * функции {@code mesh.log}, {@code mesh.now}, {@code mesh.owner}.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
@@ -65,6 +66,8 @@ public final class LuaSandboxApi {
         mesh.set("kv", new LuaKvApi(context).create());
         mesh.set("curl", new LuaCurlApi().create());
         mesh.set("ui", new LuaUiApi(context).create());
+        mesh.set("traceroute", new LuaTracerouteApi(context).create());
+        mesh.set("nodeinfo", new LuaNodeInfoApi(context).create());
         mesh.set("command", new ZeroArgFunction() {
             @Override
             public LuaValue call() {
@@ -87,7 +90,7 @@ public final class LuaSandboxApi {
         LuaTable table = new LuaTable();
         table.set("node_id", LuaValueMapper.stringOrNil(context.ownerNodeId()));
         if (context.state() != null) {
-            table.set("node_num", LuaValue.valueOf(context.state().getMyNodeNum()));
+            table.set("node_num", LuaValueMapper.uint32ToLuaValue(context.state().getMyNodeNum()));
         }
         table.set("connection_id", LuaValueMapper.stringOrNil(context.connectionId()));
         return table;
@@ -98,6 +101,10 @@ public final class LuaSandboxApi {
         if (context.command() == null) {
             return table;
         }
+        table.set("type", LuaValue.valueOf("chat_command"));
+        table.set("source", LuaValue.valueOf("chat"));
+        table.set("name", LuaValueMapper.stringOrNil(context.command().handle()));
+        table.set("request_id", LuaValue.valueOf(commandRequestId()));
         table.set("chat_type", LuaValueMapper.stringOrNil(context.command().chatType()));
         table.set("chat_key", LuaValueMapper.stringOrNil(context.command().chatKey()));
         table.set("handle", LuaValueMapper.stringOrNil(context.command().handle()));
@@ -110,6 +117,13 @@ public final class LuaSandboxApi {
         }
         table.set("argument_tokens", tokens);
         return table;
+    }
+
+    private String commandRequestId() {
+        String requestId = context.command() != null ? context.command().requestId() : null;
+        return requestId != null && !requestId.isBlank()
+                ? requestId
+                : context.scriptId() + ":command";
     }
 
     private String joinArgs(Varargs args) {

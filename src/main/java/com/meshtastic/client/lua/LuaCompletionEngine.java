@@ -23,7 +23,7 @@ import java.util.regex.Pattern;
  */
 public final class LuaCompletionEngine {
 
-    private static final int MAX_COMPLETIONS = 24;
+    private static final int MAX_COMPLETIONS = 32;
     private static final Pattern ON_MESSAGE_PATTERN =
             Pattern.compile("\\bfunction\\s+on_message\\s*\\(\\s*([A-Za-z_][A-Za-z0-9_]*)");
     private static final Pattern FUNCTION_PATTERN =
@@ -55,6 +55,8 @@ public final class LuaCompletionEngine {
         mesh.member("kv", "kv.", "object", "mesh.kv");
         mesh.member("curl", "curl.", "object", "mesh.curl");
         mesh.member("ui", "ui.", "object", "mesh.ui");
+        mesh.member("traceroute", "traceroute.", "object", "mesh.traceroute");
+        mesh.member("nodeinfo", "nodeinfo.", "object", "mesh.nodeinfo");
         mesh.member("command()", "command()", "function", "command");
 
         TypeDef chat = new TypeDef();
@@ -63,6 +65,7 @@ public final class LuaCompletionEngine {
         chat.member("reply(msg, text)", "reply(", "function", "message");
         chat.member("bot_message(chat_type, chat_key, text)", "bot_message(", "function", "message");
         chat.member("bot_reply(msg, text)", "bot_reply(", "function", "message");
+        chat.member("bot_notice(chat_type, chat_key, text, options)", "bot_notice(", "function", "boolean");
         chat.member("recent(chat_type, chat_key, limit)", "recent(", "function", "list:message");
         chat.member("nodes()", "nodes()", "function", "list:node");
         chat.member("channels()", "channels()", "function", "list:channel");
@@ -86,14 +89,43 @@ public final class LuaCompletionEngine {
         TypeDef ui = new TypeDef();
         ui.member("pick_node(options)", "pick_node(", "function", "string");
 
+        TypeDef traceroute = new TypeDef();
+        traceroute.member("request(target, options)", "request(", "function", "string");
+
+        TypeDef nodeinfo = new TypeDef();
+        nodeinfo.member("request(target, options)", "request(", "function", "string");
+
         TypeDef command = new TypeDef();
-        for (String field : List.of("chat_type", "chat_key", "handle", "text", "arguments", "argument_tokens")) {
+        for (String field : List.of("type", "source", "name", "request_id",
+                "chat_type", "chat_key", "handle", "text", "arguments", "argument_tokens")) {
             command.member(field, field, "field", null);
         }
 
         TypeDef nodeSelection = new TypeDef();
-        for (String field : List.of("request_id", "status", "selected", "cancelled", "chat_type", "chat_key", "node")) {
+        for (String field : List.of("type", "source", "name", "request_id",
+                "status", "selected", "cancelled", "chat_type", "chat_key")) {
             nodeSelection.member(field, field, "field", null);
+        }
+        nodeSelection.member("node", "node", "field", "node");
+
+        TypeDef tracerouteEvent = new TypeDef();
+        for (String field : List.of("type", "source", "name", "request_id", "status", "ok", "timeout",
+                "error", "target_node_num", "target_node_id", "target_name",
+                "response_from_node_num", "response_from_node_id", "chat_type", "chat_key")) {
+            tracerouteEvent.member(field, field, "field", null);
+        }
+        tracerouteEvent.member("route", "route", "field", "route.discovery");
+
+        TypeDef nodeInfoEvent = new TypeDef();
+        for (String field : List.of("type", "source", "name", "request_id", "status", "ok", "timeout",
+                "cached", "error", "target_node_num", "target_node_id", "target_name", "chat_type", "chat_key")) {
+            nodeInfoEvent.member(field, field, "field", null);
+        }
+        nodeInfoEvent.member("node", "node", "field", "node");
+
+        TypeDef routeDiscovery = new TypeDef();
+        for (String field : List.of("route", "route_back", "route_ids", "route_back_ids", "snr_towards", "snr_back")) {
+            routeDiscovery.member(field, field, "field", null);
         }
 
         TypeDef message = new TypeDef();
@@ -110,7 +142,10 @@ public final class LuaCompletionEngine {
 
         TypeDef node = new TypeDef();
         for (String field : List.of("node_num", "node_id", "long_name", "short_name", "last_heard",
-                "battery", "hops_away", "role", "hw_model", "unmessagable")) {
+                "battery", "externally_powered", "voltage", "snr", "latitude", "longitude", "altitude",
+                "hops_away", "channel", "role", "hw_model", "public_key", "uptime_seconds",
+                "channel_utilization", "air_util_tx", "temperature", "relative_humidity",
+                "barometric_pressure", "unmessagable", "licensed")) {
             node.member(field, field, "field", null);
         }
 
@@ -158,9 +193,14 @@ public final class LuaCompletionEngine {
         defs.put("mesh.kv", kv);
         defs.put("mesh.curl", curl);
         defs.put("mesh.ui", ui);
+        defs.put("mesh.traceroute", traceroute);
+        defs.put("mesh.nodeinfo", nodeinfo);
         defs.put("curl.response", curlResponse);
         defs.put("command", command);
         defs.put("node.selection", nodeSelection);
+        defs.put("traceroute.event", tracerouteEvent);
+        defs.put("nodeinfo.event", nodeInfoEvent);
+        defs.put("route.discovery", routeDiscovery);
         defs.put("message", message);
         defs.put("owner", owner);
         defs.put("node", node);
@@ -182,6 +222,8 @@ public final class LuaCompletionEngine {
                 new CompletionItem("on_message(msg)", "function on_message(msg)\n    \nend", "snippet"),
                 new CompletionItem("on_command(command)", "function on_command(command)\n    \nend", "snippet"),
                 new CompletionItem("on_node_selected(event)", "function on_node_selected(event)\n    \nend", "snippet"),
+                new CompletionItem("on_traceroute(event)", "function on_traceroute(event)\n    \nend", "snippet"),
+                new CompletionItem("on_node_info(event)", "function on_node_info(event)\n    \nend", "snippet"),
                 new CompletionItem("mesh", "mesh", "object"),
                 new CompletionItem("string", "string", "object"),
                 new CompletionItem("table", "table", "object"),
@@ -310,6 +352,16 @@ public final class LuaCompletionEngine {
                 List<String> params = splitNames(functionMatcher.group(2));
                 if (!params.isEmpty()) {
                     symbols.put(params.getFirst(), "node.selection");
+                }
+            } else if ("on_traceroute".equals(name)) {
+                List<String> params = splitNames(functionMatcher.group(2));
+                if (!params.isEmpty()) {
+                    symbols.put(params.getFirst(), "traceroute.event");
+                }
+            } else if ("on_node_info".equals(name)) {
+                List<String> params = splitNames(functionMatcher.group(2));
+                if (!params.isEmpty()) {
+                    symbols.put(params.getFirst(), "nodeinfo.event");
                 }
             }
         }
@@ -501,6 +553,12 @@ public final class LuaCompletionEngine {
         }
         if (value.startsWith("mesh.ui")) {
             return Optional.of("mesh.ui");
+        }
+        if (value.startsWith("mesh.traceroute")) {
+            return Optional.of("mesh.traceroute");
+        }
+        if (value.startsWith("mesh.nodeinfo")) {
+            return Optional.of("mesh.nodeinfo");
         }
         if (value.startsWith("mesh")) {
             return Optional.of("mesh");

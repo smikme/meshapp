@@ -264,8 +264,6 @@ abstract class FormChatBase extends Form {
     protected abstract void refreshLoadedMessageRows();
     protected abstract void refreshLoadedMessageRows(boolean force);
     protected abstract void startReply(MeshMessage msg);
-    protected abstract void requestTraceroute(MeshMessage msg);
-    protected abstract void requestNodeInfo(MeshMessage msg);
     protected abstract void sendReaction(MeshMessage msg, String emoji);
     protected abstract void confirmDeleteMessage(MeshMessage msg, HBox row);
     protected abstract boolean retryMessage(MeshMessage msg);

@@ -1561,6 +1561,7 @@ public final class LuaDevWindow {
                 case WARNING -> "WARN";
                 case OUTPUT -> "OUT";
                 case INFO -> "INFO";
+                case UI_BOT_NOTICE -> "UI";
             };
             appendConsole(prefix + " " + event.message());
             if (event.type() == LuaScriptEvent.Type.ERROR) {

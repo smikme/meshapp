@@ -81,6 +81,8 @@ class LuaCompletionEngineTest {
 
         assertItemsContain(result, "long_name");
         assertItemsContain(result, "short_name");
+        assertItemsContain(result, "voltage");
+        assertItemsContain(result, "public_key");
     }
 
     @Test
@@ -145,6 +147,7 @@ class LuaCompletionEngineTest {
         assertItemsContain(result, "reply(msg, text)");
         assertItemsContain(result, "bot_message(chat_type, chat_key, text)");
         assertItemsContain(result, "bot_reply(msg, text)");
+        assertItemsContain(result, "bot_notice(chat_type, chat_key, text, options)");
     }
 
     @Test
@@ -160,15 +163,81 @@ class LuaCompletionEngineTest {
                 end
                 """);
         assertItemsContain(commandResult, "chat_type");
+        assertItemsContain(commandResult, "request_id");
+        assertItemsContain(commandResult, "source");
         assertItemsContain(commandResult, "argument_tokens");
 
         LuaCompletionEngine.CompletionResult selectionResult = complete("""
                 function on_node_selected(event)
                     event.|
                 end
-                """);
+        """);
         assertItemsContain(selectionResult, "node");
+        assertItemsContain(selectionResult, "name");
         assertItemsContain(selectionResult, "selected");
+
+        LuaCompletionEngine.CompletionResult selectedNodeResult = complete("""
+                function on_node_selected(event)
+                    event.node.|
+                end
+                """);
+        assertItemsContain(selectedNodeResult, "node_id");
+        assertItemsContain(selectedNodeResult, "long_name");
+    }
+
+    @Test
+    void completesTracerouteApiAndCallbackEvent() {
+        LuaCompletionEngine.CompletionResult apiResult = complete("""
+                mesh.traceroute.|
+                """);
+        assertItemsContain(apiResult, "request(target, options)");
+
+        LuaCompletionEngine.CompletionResult eventResult = complete("""
+                function on_traceroute(event)
+                    event.|
+                end
+                """);
+        assertItemsContain(eventResult, "request_id");
+        assertItemsContain(eventResult, "target_node_num");
+        assertItemsContain(eventResult, "response_from_node_num");
+        assertItemsContain(eventResult, "route");
+
+        LuaCompletionEngine.CompletionResult routeResult = complete("""
+                function on_traceroute(event)
+                    event.route.|
+                end
+                """);
+        assertItemsContain(routeResult, "snr_towards");
+        assertItemsContain(routeResult, "route_ids");
+        assertItemsContain(routeResult, "route_back");
+    }
+
+    @Test
+    void completesNodeInfoApiAndCallbackEvent() {
+        LuaCompletionEngine.CompletionResult apiResult = complete("""
+                mesh.nodeinfo.|
+                """);
+        assertItemsContain(apiResult, "request(target, options)");
+
+        LuaCompletionEngine.CompletionResult eventResult = complete("""
+                function on_node_info(event)
+                    event.|
+                end
+                """);
+        assertItemsContain(eventResult, "request_id");
+        assertItemsContain(eventResult, "target_node_num");
+        assertItemsContain(eventResult, "cached");
+        assertItemsContain(eventResult, "node");
+
+        LuaCompletionEngine.CompletionResult nodeResult = complete("""
+                function on_node_info(event)
+                    event.node.|
+                end
+                """);
+        assertItemsContain(nodeResult, "node_id");
+        assertItemsContain(nodeResult, "voltage");
+        assertItemsContain(nodeResult, "public_key");
+        assertItemsContain(nodeResult, "uptime_seconds");
     }
 
     @Test
