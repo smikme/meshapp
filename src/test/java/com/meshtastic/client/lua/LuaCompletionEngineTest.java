@@ -136,13 +136,39 @@ class LuaCompletionEngineTest {
     }
 
     @Test
-    void completesReplyApiOnMeshChat() {
+    void completesLocalBotApiOnMeshChat() {
         LuaCompletionEngine.CompletionResult result = complete("""
                 local chat = mesh.chat
                 chat.|
                 """);
 
         assertItemsContain(result, "reply(msg, text)");
+        assertItemsContain(result, "bot_message(chat_type, chat_key, text)");
+        assertItemsContain(result, "bot_reply(msg, text)");
+    }
+
+    @Test
+    void completesUiPickNodeAndAutomationCallbacks() {
+        LuaCompletionEngine.CompletionResult uiResult = complete("""
+                mesh.ui.|
+                """);
+        assertItemsContain(uiResult, "pick_node(options)");
+
+        LuaCompletionEngine.CompletionResult commandResult = complete("""
+                function on_command(command)
+                    command.|
+                end
+                """);
+        assertItemsContain(commandResult, "chat_type");
+        assertItemsContain(commandResult, "argument_tokens");
+
+        LuaCompletionEngine.CompletionResult selectionResult = complete("""
+                function on_node_selected(event)
+                    event.|
+                end
+                """);
+        assertItemsContain(selectionResult, "node");
+        assertItemsContain(selectionResult, "selected");
     }
 
     @Test

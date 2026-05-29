@@ -51,6 +51,7 @@ public final class LuaValueMapper {
         table.set("hops", message.hasValidHopData() ? LuaValue.valueOf(message.getHopsTraveled()) : LuaValue.NIL);
         table.set("timestamp", LuaValue.valueOf(message.getTimestamp()));
         table.set("outgoing", LuaValue.valueOf(message.isOutgoing()));
+        table.set("system", LuaValue.valueOf(message.isSystemMessage()));
         table.set("status", stringOrNil(message.getStatus() != null ? message.getStatus().name() : null));
         table.set("sender_name", stringOrNil(message.getSenderName()));
         table.set("rx_rssi", LuaValue.valueOf(message.getRxRssi()));

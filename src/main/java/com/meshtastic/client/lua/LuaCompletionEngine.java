@@ -54,11 +54,15 @@ public final class LuaCompletionEngine {
         mesh.member("chat", "chat.", "object", "mesh.chat");
         mesh.member("kv", "kv.", "object", "mesh.kv");
         mesh.member("curl", "curl.", "object", "mesh.curl");
+        mesh.member("ui", "ui.", "object", "mesh.ui");
+        mesh.member("command()", "command()", "function", "command");
 
         TypeDef chat = new TypeDef();
         chat.member("send_channel(channel, text, reply_id)", "send_channel(", "function", "message");
         chat.member("send_dm(node_id, text, reply_id)", "send_dm(", "function", "message");
         chat.member("reply(msg, text)", "reply(", "function", "message");
+        chat.member("bot_message(chat_type, chat_key, text)", "bot_message(", "function", "message");
+        chat.member("bot_reply(msg, text)", "bot_reply(", "function", "message");
         chat.member("recent(chat_type, chat_key, limit)", "recent(", "function", "list:message");
         chat.member("nodes()", "nodes()", "function", "list:node");
         chat.member("channels()", "channels()", "function", "list:channel");
@@ -79,9 +83,22 @@ public final class LuaCompletionEngine {
             curlResponse.member(field, field, "field", null);
         }
 
+        TypeDef ui = new TypeDef();
+        ui.member("pick_node(options)", "pick_node(", "function", "string");
+
+        TypeDef command = new TypeDef();
+        for (String field : List.of("chat_type", "chat_key", "handle", "text", "arguments", "argument_tokens")) {
+            command.member(field, field, "field", null);
+        }
+
+        TypeDef nodeSelection = new TypeDef();
+        for (String field : List.of("request_id", "status", "selected", "cancelled", "chat_type", "chat_key", "node")) {
+            nodeSelection.member(field, field, "field", null);
+        }
+
         TypeDef message = new TypeDef();
         for (String field : List.of("db_id", "packet_id", "chat_type", "chat_key", "from", "to", "channel",
-                "channel_name", "channel_role", "text", "reply_id", "reply_text", "timestamp", "outgoing",
+                "channel_name", "channel_role", "text", "reply_id", "reply_text", "timestamp", "outgoing", "system",
                 "status", "sender_name", "hop_start", "hop_limit", "hops", "rx_rssi", "rx_snr")) {
             message.member(field, field, "field", null);
         }
@@ -140,7 +157,10 @@ public final class LuaCompletionEngine {
         defs.put("mesh.chat", chat);
         defs.put("mesh.kv", kv);
         defs.put("mesh.curl", curl);
+        defs.put("mesh.ui", ui);
         defs.put("curl.response", curlResponse);
+        defs.put("command", command);
+        defs.put("node.selection", nodeSelection);
         defs.put("message", message);
         defs.put("owner", owner);
         defs.put("node", node);
@@ -160,6 +180,8 @@ public final class LuaCompletionEngine {
                 new CompletionItem("while condition do", "while condition do\n    \nend", "snippet"),
                 new CompletionItem("repeat until condition", "repeat\n    \nuntil condition", "snippet"),
                 new CompletionItem("on_message(msg)", "function on_message(msg)\n    \nend", "snippet"),
+                new CompletionItem("on_command(command)", "function on_command(command)\n    \nend", "snippet"),
+                new CompletionItem("on_node_selected(event)", "function on_node_selected(event)\n    \nend", "snippet"),
                 new CompletionItem("mesh", "mesh", "object"),
                 new CompletionItem("string", "string", "object"),
                 new CompletionItem("table", "table", "object"),
@@ -278,6 +300,16 @@ public final class LuaCompletionEngine {
                 List<String> params = splitNames(functionMatcher.group(2));
                 if (!params.isEmpty()) {
                     symbols.put(params.getFirst(), "message");
+                }
+            } else if ("on_command".equals(name)) {
+                List<String> params = splitNames(functionMatcher.group(2));
+                if (!params.isEmpty()) {
+                    symbols.put(params.getFirst(), "command");
+                }
+            } else if ("on_node_selected".equals(name)) {
+                List<String> params = splitNames(functionMatcher.group(2));
+                if (!params.isEmpty()) {
+                    symbols.put(params.getFirst(), "node.selection");
                 }
             }
         }
@@ -440,11 +472,17 @@ public final class LuaCompletionEngine {
         if (value.startsWith("mesh.chat.channels")) {
             return Optional.of("list:channel");
         }
-        if (value.startsWith("mesh.chat.send_channel") || value.startsWith("mesh.chat.send_dm")) {
+        if (value.startsWith("mesh.chat.send_channel")
+                || value.startsWith("mesh.chat.send_dm")
+                || value.startsWith("mesh.chat.bot_message")
+                || value.startsWith("mesh.chat.bot_reply")) {
             return Optional.of("message");
         }
         if (value.startsWith("mesh.owner")) {
             return Optional.of("owner");
+        }
+        if (value.startsWith("mesh.command")) {
+            return Optional.of("command");
         }
         if (value.startsWith("mesh.kv.list")) {
             return Optional.of("table");
@@ -460,6 +498,9 @@ public final class LuaCompletionEngine {
         }
         if (value.startsWith("mesh.curl")) {
             return Optional.of("mesh.curl");
+        }
+        if (value.startsWith("mesh.ui")) {
+            return Optional.of("mesh.ui");
         }
         if (value.startsWith("mesh")) {
             return Optional.of("mesh");

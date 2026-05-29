@@ -127,7 +127,7 @@ class LuaScriptImportExportTest {
         assertEquals("same-guid-updated", updated.getName());
         assertEquals("mesh.log('new')", updated.getCode());
         assertEquals("🛰️", updated.getIcon());
-        assertEquals(2L, updated.getVersion());
+        assertEquals(7L, updated.getVersion());
         assertEquals("Updated description\nwith multiple lines", updated.getDescription());
         assertTrue(updated.isAutostart());
         assertEquals("!abcdef12", updated.getNodeId());

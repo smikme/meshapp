@@ -68,11 +68,41 @@ public final class LuaScriptRuntimeService {
                 LuaScriptService.getInstance(),
                 Set.of(),
                 false,
+                null,
                 event -> {
                     if (sink != null) {
                         sink.accept(event);
                     }
                 },
+                null,
+                () -> sessions.remove(script.getId())
+        );
+        sessions.put(script.getId(), session);
+        session.start();
+    }
+
+    public void runAutomationCommand(LuaScript script,
+                                     LuaAutomationCommand command,
+                                     Consumer<LuaScriptEvent> sink,
+                                     Consumer<LuaUiNodePickRequest> uiNodePickSink) {
+        if (script == null || command == null) {
+            return;
+        }
+        stopScript(script.getId(), sink);
+        RuntimeTarget target = resolveTarget(script);
+        LuaRuntimeSession session = new LuaRuntimeSession(
+                script,
+                target,
+                LuaScriptService.getInstance(),
+                Set.of(),
+                false,
+                command,
+                event -> {
+                    if (sink != null) {
+                        sink.accept(event);
+                    }
+                },
+                uiNodePickSink,
                 () -> sessions.remove(script.getId())
         );
         sessions.put(script.getId(), session);
@@ -118,15 +148,24 @@ public final class LuaScriptRuntimeService {
                 LuaScriptService.getInstance(),
                 breakpointSet,
                 breakpointSet.isEmpty(),
+                null,
                 event -> {
                     if (sink != null) {
                         sink.accept(event);
                     }
                 },
+                null,
                 () -> sessions.remove(script.getId())
         );
         sessions.put(script.getId(), session);
         session.start();
+    }
+
+    public void deliverNodeSelection(long scriptId, LuaUiNodeSelection selection) {
+        LuaRuntimeSession session = sessions.get(scriptId);
+        if (session != null) {
+            session.deliverNodeSelection(selection);
+        }
     }
 
     public void stopScript(long scriptId, Consumer<LuaScriptEvent> sink) {

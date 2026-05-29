@@ -3,6 +3,7 @@ package com.meshtastic.client.forms;
 import com.meshtastic.client.components.LuaDevWindow;
 import com.meshtastic.client.components.LuaKvEditorWindow;
 import com.meshtastic.client.components.LuaScriptSettingsForm;
+import com.meshtastic.client.components.LuaScriptStoreForm;
 import com.meshtastic.client.lua.LuaScript;
 import com.meshtastic.client.lua.LuaScriptEvent;
 import com.meshtastic.client.lua.LuaScriptRuntimeService;
@@ -94,6 +95,11 @@ public class FormMeshAppIde extends Form {
                 "/icons/load-config.svg",
                 this::importScript);
 
+        Button storeButton = createStoreToolbarButton(
+                "Магазин",
+                "Открыть магазин скриптов",
+                this::showScriptStore);
+
         Button createButton = createToolbarButton(
                 "Новый скрипт",
                 "Создать новый Lua-скрипт",
@@ -103,6 +109,7 @@ public class FormMeshAppIde extends Form {
         actionToolbar.getItems().addAll(
                 refreshButton,
                 new Separator(Orientation.VERTICAL),
+                storeButton,
                 importButton,
                 createButton
         );
@@ -240,7 +247,7 @@ public class FormMeshAppIde extends Form {
         Button exportButton = createToolbarButton(
                 "Экспорт",
                 "Сохранить скрипт и его свойства в JSON-файл",
-                "/icons/save-json.svg",
+                "/icons/export.svg",
                 () -> exportScript(script));
 
         Button editButton = createToolbarButton(
@@ -278,6 +285,21 @@ public class FormMeshAppIde extends Form {
         button.setFocusTraversable(false);
         button.setAccessibleText(title);
         setToolbarButtonGraphic(button, iconPath, title);
+        button.setTooltip(new Tooltip(title + "\n" + description));
+        button.setOnAction(event -> action.run());
+        return button;
+    }
+
+    private Button createStoreToolbarButton(String title, String description, Runnable action) {
+        Button button = new Button("🛍️");
+        button.getStyleClass().addAll("ide-toolbar-button", "script-store-toolbar-button");
+        button.setMinSize(34, 34);
+        button.setPrefSize(34, 34);
+        button.setMaxSize(34, 34);
+        button.setFocusTraversable(false);
+        button.setAccessibleText(title);
+        button.setContentDisplay(ContentDisplay.TEXT_ONLY);
+        button.setStyle("-fx-font-size: 17px;");
         button.setTooltip(new Tooltip(title + "\n" + description));
         button.setOnAction(event -> action.run());
         return button;
@@ -321,6 +343,16 @@ public class FormMeshAppIde extends Form {
                 Toast.show(Toast.Type.ERROR, "Не удалось создать скрипт: " + e.getMessage());
             }
         });
+        modalPane.show(form);
+        modalPane.setOnHidden(form::dispose);
+    }
+
+    private void showScriptStore() {
+        ModalPane modalPane = ModalPane.getInstance();
+        if (modalPane == null) {
+            return;
+        }
+        LuaScriptStoreForm form = new LuaScriptStoreForm(this::rebuildCards);
         modalPane.show(form);
         modalPane.setOnHidden(form::dispose);
     }

@@ -1,6 +1,8 @@
 package com.meshtastic.client.lua.api;
 
 import com.meshtastic.client.lua.LuaScriptService;
+import com.meshtastic.client.lua.LuaAutomationCommand;
+import com.meshtastic.client.lua.LuaUiBridge;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.protocol.ProtocolHandler;
 import com.meshtastic.client.protocol.meshcore.MeshCoreCompanionProtocolRuntime;
@@ -22,7 +24,9 @@ public record LuaSandboxContext(long scriptId,
                                 MeshCoreCompanionProtocolRuntime meshCoreRuntime,
                                 String ownerNodeId,
                                 LuaScriptService scriptService,
-                                Consumer<String> outputSink) {
+                                Consumer<String> outputSink,
+                                LuaAutomationCommand command,
+                                LuaUiBridge uiBridge) {
 
     /**
      * Проверяет, есть ли активный транспорт для отправки сообщений.

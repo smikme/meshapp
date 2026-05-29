@@ -51,6 +51,7 @@ public class ChatInputBar extends VBox {
 
     private final Consumer<SendRequest> onSend;
     private final Predicate<ChatBotCommandHelper.ParsedBotCommand> onBotCommand;
+    private final Function<String, List<ChatBotCommandHelper.BotDefinition>> botSuggestionProvider;
     private final Function<String, List<ChatBotCommandHelper.NodeSuggestion>> nodeSuggestionProvider;
     private final EmojiTextField messageInput;
     private final SendButtonWithRing sendRing;
@@ -71,9 +72,13 @@ public class ChatInputBar extends VBox {
      */
     public ChatInputBar(Consumer<SendRequest> onSend,
                         Predicate<ChatBotCommandHelper.ParsedBotCommand> onBotCommand,
+                        Function<String, List<ChatBotCommandHelper.BotDefinition>> botSuggestionProvider,
                         Function<String, List<ChatBotCommandHelper.NodeSuggestion>> nodeSuggestionProvider) {
         this.onSend = onSend;
         this.onBotCommand = onBotCommand;
+        this.botSuggestionProvider = botSuggestionProvider != null
+                ? botSuggestionProvider
+                : ChatBotCommandHelper::suggestBots;
         this.nodeSuggestionProvider = nodeSuggestionProvider;
         getStyleClass().add("chat-input-wrapper");
 
@@ -246,7 +251,9 @@ public class ChatInputBar extends VBox {
         }
         text = text.trim();
 
-        ChatBotCommandHelper.ParsedBotCommand botCommand = ChatBotCommandHelper.parseCommand(text);
+        ChatBotCommandHelper.ParsedBotCommand botCommand = ChatBotCommandHelper.parseCommand(
+                text,
+                botSuggestionProvider.apply(""));
         if (botCommand.isCommand()) {
             hideCommandSuggestions();
             if (onBotCommand != null && onBotCommand.test(botCommand)) {
@@ -328,7 +335,11 @@ public class ChatInputBar extends VBox {
     }
 
     private List<Button> buildBotSuggestionRows(ChatBotCommandHelper.SuggestionContext context) {
-        return ChatBotCommandHelper.suggestBots(context.query())
+        List<ChatBotCommandHelper.BotDefinition> suggestions = botSuggestionProvider.apply(context.query());
+        if (suggestions == null || suggestions.isEmpty()) {
+            return List.of();
+        }
+        return suggestions
                 .stream()
                 .limit(MAX_COMMAND_SUGGESTIONS)
                 .map(bot -> buildSuggestionButton(

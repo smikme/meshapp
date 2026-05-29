@@ -7,6 +7,8 @@ import com.meshtastic.client.components.chat.ChatListCell;
 import com.meshtastic.client.components.chat.ChatNameResolver;
 import com.meshtastic.client.components.chat.MessageBubbleFactory;
 import com.meshtastic.client.components.chat.TracerouteView;
+import com.meshtastic.client.lua.LuaScript;
+import com.meshtastic.client.lua.LuaScriptService;
 import com.meshtastic.client.modal.Toast;
 import com.meshtastic.client.model.ChatItem;
 import com.meshtastic.client.model.MeshMessage;
@@ -41,6 +43,7 @@ import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
 
 import java.util.Comparator;
+import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
@@ -437,8 +440,38 @@ abstract class FormChatUi extends FormChatBase {
         return new ChatInputBar(
                 this::sendChatMessage,
                 this::handleBotCommand,
+                this::suggestBotCommands,
                 query -> ChatBotCommandHelper.suggestNodes(listBotCommandNodes(), query, 8)
         );
+    }
+
+    private List<ChatBotCommandHelper.BotDefinition> suggestBotCommands(String query) {
+        return ChatBotCommandHelper.suggestBots(query, automationBotDefinitions());
+    }
+
+    private List<ChatBotCommandHelper.BotDefinition> automationBotDefinitions() {
+        return LuaScriptService.getInstance().listScripts().stream()
+                .filter(LuaScript::isEnabled)
+                .filter(script -> script.getBotType() == LuaScript.BotType.AUTOMATION_BOT)
+                .filter(script -> hasText(script.getAutomationName()))
+                .map(script -> new ChatBotCommandHelper.BotDefinition(
+                        script.getAutomationName().trim(),
+                        automationSuggestionDescription(script),
+                        ChatBotCommandHelper.BotAction.AUTOMATION,
+                        script.getId()))
+                .toList();
+    }
+
+    private static String automationSuggestionDescription(LuaScript script) {
+        String scriptName = hasText(script.getName()) ? script.getName().trim() : "Lua";
+        String description = script.getDescription();
+        return hasText(description)
+                ? "Автоматизация: " + scriptName + " - " + description.trim()
+                : "Автоматизация: " + scriptName;
+    }
+
+    private static boolean hasText(String value) {
+        return value != null && !value.isBlank();
     }
 
     private void sendChatMessage(ChatInputBar.SendRequest request) {

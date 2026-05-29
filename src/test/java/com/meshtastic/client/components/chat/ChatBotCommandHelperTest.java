@@ -28,6 +28,42 @@ class ChatBotCommandHelperTest {
     }
 
     @Test
+    void suggestsExternalAutomationBotsTogetherWithBuiltIns() {
+        List<ChatBotCommandHelper.BotDefinition> suggestions = ChatBotCommandHelper.suggestBots(
+                "@tr",
+                List.of(new ChatBotCommandHelper.BotDefinition("@traceauto", "Automation script", null)));
+
+        assertEquals(List.of("@tracebot", "@traceauto"),
+                suggestions.stream().map(ChatBotCommandHelper.BotDefinition::handle).toList());
+    }
+
+    @Test
+    void externalAutomationBotIsNotParsedAsBuiltInCommandYet() {
+        ChatBotCommandHelper.ParsedBotCommand command = ChatBotCommandHelper.parseCommand("@traceauto target");
+
+        assertFalse(command.isCommand());
+    }
+
+    @Test
+    void parsesExternalAutomationBotCommandWithArguments() {
+        ChatBotCommandHelper.ParsedBotCommand command = ChatBotCommandHelper.parseCommand(
+                "@traceauto Alpha Node",
+                List.of(new ChatBotCommandHelper.BotDefinition(
+                        "@traceauto",
+                        "Automation script",
+                        ChatBotCommandHelper.BotAction.AUTOMATION,
+                        42L)));
+
+        assertTrue(command.isCommand());
+        assertEquals(ChatBotCommandHelper.BotAction.AUTOMATION, command.action());
+        assertEquals(42L, command.scriptId());
+        assertEquals("Alpha", command.targetToken());
+        assertEquals("Alpha Node", command.arguments());
+        assertEquals(List.of("Alpha", "Node"), command.argumentTokens());
+        assertTrue(command.hasExtraTokens());
+    }
+
+    @Test
     void switchesToNodeSuggestionAfterBotSelection() {
         String input = "@tracebot ";
 

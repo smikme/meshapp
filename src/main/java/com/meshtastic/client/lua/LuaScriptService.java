@@ -336,10 +336,20 @@ public final class LuaScriptService {
         } catch (JsonParseException e) {
             throw new IllegalArgumentException("Некорректный JSON-файл скрипта", e);
         }
-        return importScript(exportFile);
+        return importScriptExport(exportFile);
     }
 
-    private ScriptImportResult importScript(LuaScriptExportFile exportFile) {
+    public synchronized ScriptImportResult importScriptJson(String json) {
+        LuaScriptExportFile exportFile;
+        try {
+            exportFile = SCRIPT_JSON.fromJson(json, LuaScriptExportFile.class);
+        } catch (JsonParseException e) {
+            throw new IllegalArgumentException("Некорректный JSON-файл скрипта", e);
+        }
+        return importScriptExport(exportFile);
+    }
+
+    public synchronized ScriptImportResult importScriptExport(LuaScriptExportFile exportFile) {
         if (exportFile == null) {
             throw new IllegalArgumentException("Файл скрипта пуст");
         }
@@ -363,7 +373,7 @@ public final class LuaScriptService {
             Optional<LuaScript> existing = findScriptByGuid(guid);
             if (existing.isPresent()) {
                 LuaScript existingScript = existing.get();
-                LuaScript saved = saveScript(
+                LuaScript saved = saveImportedScript(
                         existingScript.getId(),
                         name,
                         code,
@@ -372,6 +382,7 @@ public final class LuaScriptService {
                         existingScript.getNodeId(),
                         botType,
                         automationName,
+                        scriptVersion,
                         description);
                 return new ScriptImportResult(saved, true);
             }
@@ -436,6 +447,34 @@ public final class LuaScriptService {
                                              LuaScript.BotType botType,
                                              String automationName,
                                              String description) {
+        return saveScriptInternal(scriptId, name, code, enabled, icon, nodeId, botType, automationName,
+                description, null);
+    }
+
+    private synchronized LuaScript saveImportedScript(long scriptId,
+                                                      String name,
+                                                      String code,
+                                                      boolean enabled,
+                                                      String icon,
+                                                      String nodeId,
+                                                      LuaScript.BotType botType,
+                                                      String automationName,
+                                                      long version,
+                                                      String description) {
+        return saveScriptInternal(scriptId, name, code, enabled, icon, nodeId, botType, automationName,
+                description, LuaScript.normalizeVersion(version));
+    }
+
+    private LuaScript saveScriptInternal(long scriptId,
+                                         String name,
+                                         String code,
+                                         boolean enabled,
+                                         String icon,
+                                         String nodeId,
+                                         LuaScript.BotType botType,
+                                         String automationName,
+                                         String description,
+                                         Long explicitVersion) {
         if (dbConnection == null || scriptId <= 0) {
             throw new IllegalStateException("Database connection is not available");
         }
@@ -448,6 +487,7 @@ public final class LuaScriptService {
         String normalizedNodeId = normalizeNodeId(normalizedType, nodeId);
         String normalizedAutomationName = normalizeAutomationName(normalizedType, automationName);
         String normalizedDescription = normalizeDescription(description);
+        long nextVersion = explicitVersion != null ? explicitVersion : existing.getVersion() + 1;
         boolean modified = !Objects.equals(existing.getName(), normalizedName)
                 || !Objects.equals(existing.getCode(), normalizedCode)
                 || existing.isEnabled() != enabled
@@ -455,12 +495,12 @@ public final class LuaScriptService {
                 || !Objects.equals(existing.getNodeId(), normalizedNodeId)
                 || existing.getBotType() != normalizedType
                 || !Objects.equals(existing.getAutomationName(), normalizedAutomationName)
-                || !Objects.equals(existing.getDescription(), normalizedDescription);
+                || !Objects.equals(existing.getDescription(), normalizedDescription)
+                || (explicitVersion != null && existing.getVersion() != nextVersion);
         if (!modified) {
             return existing;
         }
         long now = nowSeconds();
-        long nextVersion = existing.getVersion() + 1;
         try (PreparedStatement ps = dbConnection.prepareStatement("""
                 UPDATE lua_scripts
                 SET name = ?,

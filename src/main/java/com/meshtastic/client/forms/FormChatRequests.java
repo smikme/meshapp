@@ -3,6 +3,13 @@ package com.meshtastic.client.forms;
 import com.meshtastic.client.components.EmojiTextFlow;
 import com.meshtastic.client.components.chat.ChatBotCommandHelper;
 import com.meshtastic.client.components.chat.NodeInfoFormatter;
+import com.meshtastic.client.lua.LuaAutomationCommand;
+import com.meshtastic.client.lua.LuaScript;
+import com.meshtastic.client.lua.LuaScriptEvent;
+import com.meshtastic.client.lua.LuaScriptRuntimeService;
+import com.meshtastic.client.lua.LuaScriptService;
+import com.meshtastic.client.lua.LuaUiNodePickRequest;
+import com.meshtastic.client.lua.LuaUiNodeSelection;
 import com.meshtastic.client.modal.Toast;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.MeshMessage;
@@ -16,7 +23,13 @@ import javafx.animation.KeyFrame;
 import javafx.animation.Timeline;
 import javafx.application.Platform;
 import javafx.scene.Cursor;
+import javafx.scene.Node;
+import javafx.scene.control.ButtonType;
+import javafx.scene.control.Dialog;
 import javafx.scene.control.Label;
+import javafx.scene.control.ListView;
+import javafx.scene.control.TextField;
+import javafx.scene.input.KeyCode;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
 import javafx.util.Duration;
@@ -27,6 +40,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.function.BiConsumer;
 import java.util.function.IntConsumer;
 
@@ -210,6 +224,9 @@ abstract class FormChatRequests extends FormChatMessages {
             Toast.show(Toast.Type.WARNING, "Нет подключения к радио");
             return false;
         }
+        if (command.action() == ChatBotCommandHelper.BotAction.AUTOMATION) {
+            return runLuaAutomationCommand(command);
+        }
         if (command.hasExtraTokens()) {
             Toast.show(Toast.Type.WARNING, "Команда бота принимает только одну ноду");
             return false;
@@ -218,6 +235,7 @@ abstract class FormChatRequests extends FormChatMessages {
             Toast.show(Toast.Type.WARNING, switch (command.action()) {
                 case TRACEROUTE -> "Используйте: @tracebot имя(!nodeid)";
                 case NODE_INFO -> "Используйте: @infobot имя(!nodeid)";
+                case AUTOMATION -> "Используйте: " + command.botHandle();
             });
             return false;
         }
@@ -251,8 +269,135 @@ abstract class FormChatRequests extends FormChatMessages {
                 requestNodeInfo(resolution.node());
                 yield true;
             }
+            case AUTOMATION -> false;
         };
     }
+
+    private boolean runLuaAutomationCommand(ChatBotCommandHelper.ParsedBotCommand command) {
+        Optional<LuaScript> script = LuaScriptService.getInstance().findScript(command.scriptId());
+        if (script.isEmpty()
+                || !script.get().isEnabled()
+                || script.get().getBotType() != LuaScript.BotType.AUTOMATION_BOT) {
+            Toast.show(Toast.Type.WARNING, "Автоматизация не найдена: " + command.botHandle());
+            return false;
+        }
+
+        String chatType = currentChatType();
+        String chatKey = currentChatKey();
+        if (chatType == null || chatKey == null) {
+            return false;
+        }
+
+        LuaAutomationCommand luaCommand = new LuaAutomationCommand(
+                chatType,
+                chatKey,
+                command.botHandle(),
+                command.botHandle() + (command.arguments().isBlank() ? "" : " " + command.arguments()),
+                command.arguments(),
+                command.argumentTokens());
+        LuaScriptRuntimeService.getInstance().runAutomationCommand(
+                script.get(),
+                luaCommand,
+                event -> handleLuaAutomationEvent(chatType, chatKey, event),
+                this::handleLuaNodePickRequest);
+        return true;
+    }
+
+    private void handleLuaAutomationEvent(String chatType, String chatKey, LuaScriptEvent event) {
+        if (event == null) {
+            return;
+        }
+        if (event.type() == LuaScriptEvent.Type.ERROR || event.type() == LuaScriptEvent.Type.WARNING) {
+            Platform.runLater(() -> addSystemMessageTo(chatType, chatKey, "Lua: " + event.message()));
+        }
+    }
+
+    private void handleLuaNodePickRequest(LuaUiNodePickRequest request) {
+        if (request == null) {
+            return;
+        }
+        Platform.runLater(() -> showLuaNodePicker(request));
+    }
+
+    private void showLuaNodePicker(LuaUiNodePickRequest request) {
+        List<NodeData> candidates = listBotCommandNodes();
+        Dialog<NodeData> dialog = new Dialog<>();
+        dialog.setTitle(request.prompt() != null && !request.prompt().isBlank()
+                ? request.prompt()
+                : "Выбор ноды");
+        dialog.getDialogPane().getButtonTypes().setAll(ButtonType.OK, ButtonType.CANCEL);
+
+        TextField searchField = new TextField(request.query() != null ? request.query() : "");
+        searchField.setPromptText("Имя или !nodeid");
+
+        ListView<NodePickRow> listView = new ListView<>();
+        listView.setPrefHeight(260);
+        listView.setCellFactory(ignored -> new javafx.scene.control.ListCell<>() {
+            @Override
+            protected void updateItem(NodePickRow row, boolean empty) {
+                super.updateItem(row, empty);
+                setText(empty || row == null ? null : row.label());
+            }
+        });
+
+        Runnable refresh = () -> {
+            List<NodePickRow> rows = ChatBotCommandHelper.suggestNodes(candidates, searchField.getText(), 8)
+                    .stream()
+                    .map(suggestion -> nodePickRow(suggestion, candidates))
+                    .flatMap(Optional::stream)
+                    .toList();
+            listView.getItems().setAll(rows);
+            if (!rows.isEmpty()) {
+                listView.getSelectionModel().select(0);
+            }
+        };
+        searchField.textProperty().addListener((obs, oldValue, newValue) -> refresh.run());
+        refresh.run();
+
+        Node okButton = dialog.getDialogPane().lookupButton(ButtonType.OK);
+        okButton.setDisable(listView.getSelectionModel().getSelectedItem() == null);
+        listView.getSelectionModel().selectedItemProperty().addListener((obs, oldValue, newValue) ->
+                okButton.setDisable(newValue == null));
+        listView.setOnMouseClicked(event -> {
+            if (event.getClickCount() == 2 && listView.getSelectionModel().getSelectedItem() != null) {
+                dialog.setResult(listView.getSelectionModel().getSelectedItem().node());
+                dialog.close();
+            }
+        });
+        listView.setOnKeyPressed(event -> {
+            if (event.getCode() == KeyCode.ENTER && listView.getSelectionModel().getSelectedItem() != null) {
+                dialog.setResult(listView.getSelectionModel().getSelectedItem().node());
+                dialog.close();
+            }
+        });
+
+        dialog.getDialogPane().setContent(new VBox(8, searchField, listView));
+        dialog.setResultConverter(button -> button == ButtonType.OK && listView.getSelectionModel().getSelectedItem() != null
+                ? listView.getSelectionModel().getSelectedItem().node()
+                : null);
+        dialog.setOnShown(event -> searchField.requestFocus());
+        dialog.setOnHidden(event -> LuaScriptRuntimeService.getInstance().deliverNodeSelection(
+                request.scriptId(),
+                dialog.getResult() != null
+                        ? LuaUiNodeSelection.selected(request, dialog.getResult())
+                        : LuaUiNodeSelection.cancelled(request)));
+        dialog.show();
+    }
+
+    private Optional<NodePickRow> nodePickRow(ChatBotCommandHelper.NodeSuggestion suggestion, List<NodeData> candidates) {
+        ChatBotCommandHelper.NodeResolution resolution =
+                ChatBotCommandHelper.resolveTarget(suggestion.insertText(), candidates);
+        if (resolution.status() != ChatBotCommandHelper.NodeResolutionStatus.FOUND || resolution.node() == null) {
+            return Optional.empty();
+        }
+        String label = suggestion.primaryText()
+                + (suggestion.secondaryText() != null && !suggestion.secondaryText().isBlank()
+                ? " - " + suggestion.secondaryText()
+                : "");
+        return Optional.of(new NodePickRow(resolution.node(), label));
+    }
+
+    private record NodePickRow(NodeData node, String label) {}
 
     protected List<NodeData> listBotCommandNodes() {
         LinkedHashMap<String, NodeData> nodes = new LinkedHashMap<>();

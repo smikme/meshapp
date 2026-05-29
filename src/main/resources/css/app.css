@@ -226,6 +226,22 @@
     -fx-fill: rgba(0, 0, 0, 0.88);
 }
 
+.script-store-toolbar-button {
+    -fx-background-color: rgba(245, 158, 11, 0.20);
+}
+
+.script-store-toolbar-button:hover {
+    -fx-background-color: rgba(245, 158, 11, 0.34);
+}
+
+.light-theme .script-store-toolbar-button {
+    -fx-background-color: rgba(245, 158, 11, 0.24);
+}
+
+.light-theme .script-store-toolbar-button:hover {
+    -fx-background-color: rgba(245, 158, 11, 0.38);
+}
+
 .packet-monitor-toolbar-button {
     -fx-min-width: -1;
     -fx-max-width: -1;

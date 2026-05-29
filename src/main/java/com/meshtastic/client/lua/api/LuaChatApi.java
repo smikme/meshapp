@@ -1,6 +1,7 @@
 package com.meshtastic.client.lua.api;
 
 import com.meshtastic.client.model.MeshMessage;
+import com.meshtastic.client.model.MessageChangeEvent;
 import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.service.MessageDbService;
 import com.meshtastic.client.service.MessageService;
@@ -15,6 +16,7 @@ import org.meshtastic.proto.ChannelProtos;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * Реализация {@code mesh.chat} для Lua-песочницы.
@@ -25,6 +27,10 @@ import java.util.List;
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public final class LuaChatApi {
+
+    private static final String SYSTEM_BOT_NODE_ID = "!00000000";
+    private static final String BROADCAST_NODE_ID = "!ffffffff";
+    private static final int MAX_BOT_MESSAGE_LENGTH = 4096;
 
     private final LuaSandboxContext context;
     private final LuaValueMapper mapper;
@@ -85,6 +91,34 @@ public final class LuaChatApi {
                 }
 
                 throw new LuaError("Cannot reply: unsupported msg.chat_type " + chatType);
+            }
+        });
+        chat.set("bot_message", new VarArgFunction() {
+            @Override
+            public Varargs invoke(Varargs args) {
+                String chatType = normalizeChatType(args.checkjstring(1));
+                String chatKey = args.checkjstring(2);
+                String text = args.checkjstring(3);
+                return createBotMessage(chatType, chatKey, text, 0, null);
+            }
+        });
+        chat.set("bot_reply", new VarArgFunction() {
+            @Override
+            public Varargs invoke(Varargs args) {
+                LuaTable message = args.checktable(1);
+                String text = args.checkjstring(2);
+                String chatType = normalizeChatType(LuaValueMapper.tableString(message, "chat_type"));
+                String chatKey;
+                if ("channel".equals(chatType)) {
+                    chatKey = String.valueOf(messageChannelIndex(message));
+                } else if ("dm".equals(chatType)) {
+                    chatKey = messageDirectPeer(message);
+                } else {
+                    throw new LuaError("Cannot bot_reply: unsupported msg.chat_type " + chatType);
+                }
+                int replyId = LuaValueMapper.tableInt(message, "packet_id", 0);
+                String replyText = LuaValueMapper.tableString(message, "text");
+                return createBotMessage(chatType, chatKey, text, replyId, replyText);
             }
         });
         chat.set("recent", new VarArgFunction() {
@@ -151,6 +185,87 @@ public final class LuaChatApi {
                 : MessageService.sendDirectMessage(context.handler(), context.state(), peerNodeId, text, replyId);
     }
 
+    private LuaTable createBotMessage(String chatType, String rawChatKey, String rawText, int replyId, String replyText) {
+        requireChatContext();
+        ChatScope scope = normalizeChatScope(chatType, rawChatKey);
+        String text = normalizeBotText(rawText);
+        String ownerNodeId = ownerNodeIdForMessages();
+        MeshMessage message = new MeshMessage(
+                SYSTEM_BOT_NODE_ID,
+                "dm".equals(scope.chatType()) ? scope.chatKey() : BROADCAST_NODE_ID,
+                scope.channelIndex(),
+                text,
+                System.currentTimeMillis() / 1000,
+                false);
+        message.setSystemMessage(true);
+        if (replyId > 0) {
+            message.setReplyId(replyId);
+            message.setReplyText(replyText);
+        }
+
+        messageDbService.save(message, scope.chatType(), scope.chatKey(), ownerNodeId);
+        context.state().fireMessageChange(MessageChangeEvent.newMessage(
+                scope.chatType(),
+                scope.chatKey(),
+                ownerNodeId,
+                message));
+        return mapper.messageToTable(message, scope.chatType(), scope.chatKey());
+    }
+
+    private ChatScope normalizeChatScope(String chatType, String rawChatKey) {
+        String chatKey = rawChatKey != null ? rawChatKey.trim() : "";
+        if (chatKey.isEmpty()) {
+            throw new LuaError("chat_key must not be empty");
+        }
+
+        if ("channel".equals(chatType)) {
+            int channel;
+            try {
+                channel = Integer.parseInt(chatKey);
+            } catch (NumberFormatException e) {
+                throw new LuaError("channel chat_key must be a channel index");
+            }
+            if (channel < 0) {
+                throw new LuaError("channel chat_key must be >= 0");
+            }
+            return new ChatScope("channel", String.valueOf(channel), channel);
+        }
+        if ("dm".equals(chatType)) {
+            return new ChatScope("dm", chatKey, 0);
+        }
+        throw new LuaError("Unsupported chat_type: " + chatType);
+    }
+
+    private String normalizeChatType(String chatType) {
+        return chatType != null ? chatType.trim().toLowerCase(Locale.ROOT) : "";
+    }
+
+    private String normalizeBotText(String rawText) {
+        String text = rawText != null ? rawText : "";
+        if (text.isBlank()) {
+            throw new LuaError("bot message text must not be empty");
+        }
+        if (text.length() > MAX_BOT_MESSAGE_LENGTH) {
+            throw new LuaError("bot message text is too long");
+        }
+        return text;
+    }
+
+    private void requireChatContext() {
+        if (context.state() == null || ownerNodeIdForMessages().isBlank()) {
+            throw new LuaError("No active chat context");
+        }
+    }
+
+    private String ownerNodeIdForMessages() {
+        if (context.ownerNodeId() != null && !context.ownerNodeId().isBlank()) {
+            return context.ownerNodeId();
+        }
+        return context.state() != null && context.state().getOwnerNodeId() != null
+                ? context.state().getOwnerNodeId()
+                : "";
+    }
+
     private int messageChannelIndex(LuaTable message) {
         LuaValue channel = message.get("channel");
         if (!channel.isnil()) {
@@ -173,7 +288,7 @@ public final class LuaChatApi {
             return chatKey;
         }
 
-        String owner = context.ownerNodeId();
+        String owner = ownerNodeIdForMessages();
         String from = LuaValueMapper.tableString(message, "from");
         String to = LuaValueMapper.tableString(message, "to");
         if (from != null && !from.isBlank() && !from.equalsIgnoreCase(owner)) {
@@ -190,4 +305,6 @@ public final class LuaChatApi {
             throw new LuaError("No active chat connection");
         }
     }
+
+    private record ChatScope(String chatType, String chatKey, int channelIndex) {}
 }

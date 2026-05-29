@@ -1,6 +1,7 @@
 package com.meshtastic.client.lua;
 
 import com.meshtastic.client.TestEnvironmentSupport;
+import com.meshtastic.client.model.NodeData;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -199,6 +200,97 @@ class LuaScriptRuntimeServiceTest {
         assertNull(scriptService.getKv(automation.getId(), "started_node"));
         assertFalse(events.stream().anyMatch(event ->
                 event.type() == LuaScriptEvent.Type.STARTED && event.scriptId() == automation.getId()));
+    }
+
+    @Test
+    void automationCommandDeliversCommandContextAndFinishes() {
+        LuaScript automation = scriptService.createScript(
+                "automation-command",
+                """
+                function on_command(command)
+                    mesh.kv.set('chat_type', command.chat_type)
+                    mesh.kv.set('chat_key', command.chat_key)
+                    mesh.kv.set('handle', command.handle)
+                    mesh.kv.set('arguments', command.arguments)
+                    mesh.kv.set('first_arg', command.argument_tokens[1] or '')
+                end
+                """,
+                true,
+                "",
+                LuaScript.BotType.AUTOMATION_BOT,
+                "@auto");
+
+        runtimeService.runAutomationCommand(
+                automation,
+                new LuaAutomationCommand("channel", "0", "@auto", "@auto Alpha", "Alpha", List.of("Alpha")),
+                events::add,
+                null);
+
+        awaitCondition(() -> !runtimeService.isRunning(automation.getId()), "Automation command did not finish");
+
+        assertEquals("channel", scriptService.getKv(automation.getId(), "chat_type"));
+        assertEquals("0", scriptService.getKv(automation.getId(), "chat_key"));
+        assertEquals("@auto", scriptService.getKv(automation.getId(), "handle"));
+        assertEquals("Alpha", scriptService.getKv(automation.getId(), "arguments"));
+        assertEquals("Alpha", scriptService.getKv(automation.getId(), "first_arg"));
+        assertFalse(events.stream().anyMatch(event -> event.type() == LuaScriptEvent.Type.ERROR));
+    }
+
+    @Test
+    void uiPickNodeReturnsSelectionToAutomationCallback() {
+        LuaScript automation = scriptService.createScript(
+                "automation-pick-node",
+                """
+                function on_command(command)
+                    local request_id = mesh.ui.pick_node({
+                        prompt = 'Pick',
+                        query = command.arguments,
+                        chat_type = command.chat_type,
+                        chat_key = command.chat_key
+                    })
+                    mesh.kv.set('request_id', request_id)
+                end
+
+                function on_node_selected(event)
+                    mesh.kv.set('selection_status', event.status)
+                    mesh.kv.set('selection_chat', event.chat_type .. ':' .. event.chat_key)
+                    if event.node ~= nil then
+                        mesh.kv.set('selection_node', event.node.node_id)
+                    end
+                end
+                """,
+                true,
+                "",
+                LuaScript.BotType.AUTOMATION_BOT,
+                "@pick");
+        List<LuaUiNodePickRequest> requests = new CopyOnWriteArrayList<>();
+
+        runtimeService.runAutomationCommand(
+                automation,
+                new LuaAutomationCommand("dm", "!abcdef01", "@pick", "@pick Alpha", "Alpha", List.of("Alpha")),
+                events::add,
+                requests::add);
+
+        awaitCondition(() -> !requests.isEmpty(), "Lua UI node pick request was not emitted");
+
+        LuaUiNodePickRequest request = requests.getFirst();
+        assertEquals(automation.getId(), request.scriptId());
+        assertEquals("Pick", request.prompt());
+        assertEquals("Alpha", request.query());
+        assertEquals("dm", request.chatType());
+        assertEquals("!abcdef01", request.chatKey());
+
+        NodeData node = new NodeData(0x0000BEEF);
+        node.setLongName("Alpha");
+        runtimeService.deliverNodeSelection(automation.getId(), LuaUiNodeSelection.selected(request, node));
+
+        awaitCondition(() -> "!0000beef".equals(scriptService.getKv(automation.getId(), "selection_node")),
+                "Lua node selection callback did not run");
+
+        assertEquals("selected", scriptService.getKv(automation.getId(), "selection_status"));
+        assertEquals("dm:!abcdef01", scriptService.getKv(automation.getId(), "selection_chat"));
+        assertFalse(runtimeService.isRunning(automation.getId()));
+        assertFalse(events.stream().anyMatch(event -> event.type() == LuaScriptEvent.Type.ERROR));
     }
 
     @Test

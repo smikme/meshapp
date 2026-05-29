@@ -24,6 +24,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
 /**
@@ -36,7 +37,7 @@ import java.util.function.Consumer;
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
-final class LuaRuntimeSession {
+final class LuaRuntimeSession implements LuaUiBridge {
 
     private static final long RUN_TIMEOUT_MS = 3_000;
     private static final long CALLBACK_TIMEOUT_MS = 1_500;
@@ -58,13 +59,17 @@ final class LuaRuntimeSession {
     private final LuaScriptService scriptService;
     private final MessageDbService messageDbService = MessageDbService.getInstance();
     private final Consumer<LuaScriptEvent> eventSink;
+    private final Consumer<LuaUiNodePickRequest> uiNodePickSink;
     private final Runnable onClosed;
     private final Set<Integer> breakpoints;
+    private final LuaAutomationCommand command;
     private final boolean debugMode;
     private final Object debugLock = new Object();
     private final ExecutorService executor;
     private final AtomicBoolean running = new AtomicBoolean(false);
     private final Map<String, Long> lastSeenDbIds = new java.util.concurrent.ConcurrentHashMap<>();
+    private final Set<String> pendingUiRequests = java.util.concurrent.ConcurrentHashMap.newKeySet();
+    private final AtomicLong uiRequestCounter = new AtomicLong();
     private final Runnable deviceMessageListener = this::onDeviceMessagesChanged;
 
     private SandboxDebugLib debugLib;
@@ -85,7 +90,9 @@ final class LuaRuntimeSession {
                       LuaScriptService scriptService,
                       Set<Integer> breakpoints,
                       boolean pauseOnStart,
+                      LuaAutomationCommand command,
                       Consumer<LuaScriptEvent> eventSink,
+                      Consumer<LuaUiNodePickRequest> uiNodePickSink,
                       Runnable onClosed) {
         this.script = script;
         this.target = target;
@@ -93,7 +100,9 @@ final class LuaRuntimeSession {
         this.breakpoints = breakpoints != null ? Set.copyOf(breakpoints) : Set.of();
         this.pauseOnNextLine = pauseOnStart;
         this.debugMode = pauseOnStart || !this.breakpoints.isEmpty();
+        this.command = command;
         this.eventSink = eventSink;
+        this.uiNodePickSink = uiNodePickSink;
         this.onClosed = onClosed;
         this.executor = Executors.newSingleThreadExecutor(r -> {
             Thread thread = new Thread(r, "lua-script-" + script.getId());
@@ -130,6 +139,37 @@ final class LuaRuntimeSession {
         resumeDebuggee(DebugCommand.STEP);
     }
 
+    void deliverNodeSelection(LuaUiNodeSelection selection) {
+        if (selection == null || !running.get()) {
+            return;
+        }
+        try {
+            executor.execute(() -> callNodeSelected(selection));
+        } catch (RejectedExecutionException ignored) {
+            // Session is stopping.
+        }
+    }
+
+    @Override
+    public boolean isAvailable() {
+        return uiNodePickSink != null;
+    }
+
+    @Override
+    public String nextRequestId() {
+        return script.getId() + ":" + uiRequestCounter.incrementAndGet();
+    }
+
+    @Override
+    public void requestNodePick(LuaUiNodePickRequest request) {
+        if (request == null || uiNodePickSink == null) {
+            throw new LuaError("No active UI context");
+        }
+        pendingUiRequests.add(request.requestId());
+        scriptService.updateRunState(script.getId(), "RUNNING", null);
+        uiNodePickSink.accept(request);
+    }
+
     void stop() {
         if (!running.getAndSet(false)) {
             return;
@@ -143,6 +183,43 @@ final class LuaRuntimeSession {
         executor.shutdownNow();
         scriptService.updateRunState(script.getId(), "STOPPED", null);
         emit(LuaScriptEvent.stopped(script.getId(), "Скрипт остановлен"));
+    }
+
+    private void callNodeSelected(LuaUiNodeSelection selection) {
+        if (!running.get() || globals == null) {
+            return;
+        }
+        LuaValue callback = globals.get("on_node_selected");
+        try {
+            pendingUiRequests.remove(selection.requestId());
+            if (callback.isfunction()) {
+                debugLib.begin(CALLBACK_TIMEOUT_MS);
+                callback.call(nodeSelectionToTable(selection));
+            } else {
+                emit(LuaScriptEvent.warning(script.getId(), "Node selection received, but on_node_selected(event) is missing"));
+            }
+            if (!listenerRegistered && pendingUiRequests.isEmpty()) {
+                scriptService.updateRunState(script.getId(), "FINISHED", null);
+                finishWithoutInterruptingExecutor();
+            }
+        } catch (Throwable error) {
+            fail(error);
+            finishWithoutInterruptingExecutor();
+        }
+    }
+
+    private LuaValue nodeSelectionToTable(LuaUiNodeSelection selection) {
+        org.luaj.vm2.LuaTable table = new org.luaj.vm2.LuaTable();
+        table.set("request_id", LuaValue.valueOf(selection.requestId()));
+        table.set("status", LuaValue.valueOf(selection.selected() ? "selected" : "cancelled"));
+        table.set("selected", LuaValue.valueOf(selection.selected()));
+        table.set("cancelled", LuaValue.valueOf(!selection.selected()));
+        table.set("chat_type", LuaValue.valueOf(selection.chatType() != null ? selection.chatType() : ""));
+        table.set("chat_key", LuaValue.valueOf(selection.chatKey() != null ? selection.chatKey() : ""));
+        table.set("node", selection.node() != null
+                ? sandboxApi.mapper().nodeToTable(selection.node())
+                : LuaValue.NIL);
+        return table;
     }
 
     private void runInitialChunk() {
@@ -159,26 +236,46 @@ final class LuaRuntimeSession {
                     target.meshCoreRuntime(),
                     target.ownerNodeId(),
                     scriptService,
-                    this::emitOutput));
+                    this::emitOutput,
+                    command,
+                    this));
             sandboxApi.install(globals);
 
             debugLib.begin(RUN_TIMEOUT_MS);
             globals.load(script.getCode() != null ? script.getCode() : "", script.getName()).call();
 
+            if (command != null) {
+                deliverAutomationCommand();
+            }
+
             LuaValue onMessage = globals.get("on_message");
             if (onMessage.isfunction()) {
                 keepListening = attachMessageListener();
             } else {
-                emit(LuaScriptEvent.info(script.getId(), "Выполнено: on_message не объявлен, скрипт завершен"));
-                scriptService.updateRunState(script.getId(), "FINISHED", null);
+                if (command == null) {
+                    emit(LuaScriptEvent.info(script.getId(), "Выполнено: on_message не объявлен, скрипт завершен"));
+                }
+                if (pendingUiRequests.isEmpty()) {
+                    scriptService.updateRunState(script.getId(), "FINISHED", null);
+                }
             }
         } catch (Throwable error) {
             fail(error);
         } finally {
-            if (!keepListening) {
+            if (!keepListening && pendingUiRequests.isEmpty()) {
                 finishWithoutInterruptingExecutor();
             }
         }
+    }
+
+    private void deliverAutomationCommand() {
+        LuaValue onCommand = globals.get("on_command");
+        if (!onCommand.isfunction()) {
+            emit(LuaScriptEvent.warning(script.getId(), "Automation script has no on_command(command) callback"));
+            return;
+        }
+        debugLib.begin(CALLBACK_TIMEOUT_MS);
+        onCommand.call(sandboxApi.commandToTable());
     }
 
     private boolean attachMessageListener() {

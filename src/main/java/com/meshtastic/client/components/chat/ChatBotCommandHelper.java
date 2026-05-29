@@ -33,7 +33,8 @@ public final class ChatBotCommandHelper {
 
     public enum BotAction {
         TRACEROUTE,
-        NODE_INFO
+        NODE_INFO,
+        AUTOMATION
     }
 
     public enum SuggestionMode {
@@ -48,7 +49,12 @@ public final class ChatBotCommandHelper {
         AMBIGUOUS
     }
 
-    public record BotDefinition(String handle, String description, BotAction action) {}
+    public record BotDefinition(String handle, String description, BotAction action, long scriptId) {
+
+        public BotDefinition(String handle, String description, BotAction action) {
+            this(handle, description, action, 0L);
+        }
+    }
 
     public record SuggestionContext(SuggestionMode mode,
                                     String query,
@@ -68,7 +74,17 @@ public final class ChatBotCommandHelper {
     public record ParsedBotCommand(BotAction action,
                                    String botHandle,
                                    String targetToken,
-                                   boolean hasExtraTokens) {
+                                   boolean hasExtraTokens,
+                                   String arguments,
+                                   List<String> argumentTokens,
+                                   long scriptId) {
+
+        public ParsedBotCommand(BotAction action,
+                                String botHandle,
+                                String targetToken,
+                                boolean hasExtraTokens) {
+            this(action, botHandle, targetToken, hasExtraTokens, "", List.of(), 0L);
+        }
 
         public static ParsedBotCommand none() {
             return new ParsedBotCommand(null, "", "", false);
@@ -105,12 +121,19 @@ public final class ChatBotCommandHelper {
     private record RankedNodeSuggestion(NodeSuggestion suggestion, int score, int lastHeard) {}
 
     public static List<BotDefinition> suggestBots(String rawQuery) {
+        return suggestBots(rawQuery, List.of());
+    }
+
+    public static List<BotDefinition> suggestBots(String rawQuery, Collection<BotDefinition> extraBots) {
         String query = normalizeBotQuery(rawQuery);
-        return BOTS.stream()
-                .filter(bot -> query.isEmpty()
-                        || bot.handle().substring(1).startsWith(query)
-                        || bot.handle().substring(1).contains(query))
+        return mergeBots(extraBots).stream()
+                .filter(bot -> botMatchesQuery(bot, query))
                 .toList();
+    }
+
+    private static boolean botMatchesQuery(BotDefinition bot, String query) {
+        String handle = normalizeBotQuery(bot.handle());
+        return query.isEmpty() || handle.startsWith(query) || handle.contains(query);
     }
 
     public static SuggestionContext detectSuggestionContext(String text, int caretPosition) {
@@ -152,6 +175,10 @@ public final class ChatBotCommandHelper {
     }
 
     public static ParsedBotCommand parseCommand(String text) {
+        return parseCommand(text, List.of());
+    }
+
+    public static ParsedBotCommand parseCommand(String text, Collection<BotDefinition> extraBots) {
         String safeText = text != null ? text.trim() : "";
         if (safeText.isEmpty()) {
             return ParsedBotCommand.none();
@@ -162,13 +189,22 @@ public final class ChatBotCommandHelper {
             return ParsedBotCommand.none();
         }
 
-        BotDefinition bot = findBot(tokens.getFirst().text());
+        BotDefinition bot = findBot(tokens.getFirst().text(), extraBots);
         if (bot == null) {
             return ParsedBotCommand.none();
         }
 
         String targetToken = tokens.size() >= 2 ? tokens.get(1).text() : "";
-        return new ParsedBotCommand(bot.action(), bot.handle(), targetToken, tokens.size() > 2);
+        String arguments = tokens.size() >= 2 ? safeText.substring(tokens.get(1).start()).trim() : "";
+        List<String> argumentTokens = tokens.stream().skip(1).map(Token::text).toList();
+        return new ParsedBotCommand(
+                bot.action(),
+                bot.handle(),
+                targetToken,
+                tokens.size() > 2,
+                arguments,
+                argumentTokens,
+                bot.scriptId());
     }
 
     public static List<NodeSuggestion> suggestNodes(Collection<NodeData> rawNodes, String rawQuery, int limit) {
@@ -262,14 +298,32 @@ public final class ChatBotCommandHelper {
     }
 
     private static BotDefinition findBot(String token) {
+        return findBot(token, List.of());
+    }
+
+    private static BotDefinition findBot(String token, Collection<BotDefinition> extraBots) {
         if (isBlank(token)) {
             return null;
         }
         String normalized = token.trim().toLowerCase(Locale.ROOT);
-        return BOTS.stream()
+        return mergeBots(extraBots).stream()
                 .filter(bot -> bot.handle().equals(normalized))
                 .findFirst()
                 .orElse(null);
+    }
+
+    private static List<BotDefinition> mergeBots(Collection<BotDefinition> extraBots) {
+        Map<String, BotDefinition> bots = new LinkedHashMap<>();
+        BOTS.forEach(bot -> bots.put(bot.handle().toLowerCase(Locale.ROOT), bot));
+        if (extraBots != null) {
+            for (BotDefinition bot : extraBots) {
+                if (bot == null || isBlank(bot.handle())) {
+                    continue;
+                }
+                bots.putIfAbsent(bot.handle().trim().toLowerCase(Locale.ROOT), bot);
+            }
+        }
+        return new ArrayList<>(bots.values());
     }
 
     private static List<NodeData> uniqueNodes(Collection<NodeData> rawNodes) {
