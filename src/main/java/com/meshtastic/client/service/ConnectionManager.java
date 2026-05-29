@@ -330,10 +330,10 @@ public final class ConnectionManager {
                 throw new ConnectionException("Подключение завершилось без активного транспорта: " + entry.getName());
             }
         } catch (ConnectionException e) {
-            abortPendingConnection(id, conn);
+            cleanupFailedConnect(id, conn);
             throw e;
         } catch (RuntimeException e) {
-            abortPendingConnection(id, conn);
+            cleanupFailedConnect(id, conn);
             throw e;
         }
 
@@ -872,6 +872,21 @@ public final class ConnectionManager {
             pendingConnections.remove(id, conn);
         }
         clearUserDisconnectStateIfIdle(id);
+    }
+
+    /**
+     * Закрывает transport, который не смог завершить connect().
+     * Это важно для BLE: ошибка pairing/connect может оставить native backend,
+     * BlueZ agent или worker thread живыми, если не выполнить обычный disconnect.
+     */
+    private void cleanupFailedConnect(String id, TransportConnection conn) {
+        abortPendingConnection(id, conn);
+        conn.setConnectionListener(null);
+        try {
+            conn.disconnect();
+        } catch (RuntimeException cleanupError) {
+            log.warn("Failed to cleanup transport after unsuccessful connect", cleanupError);
+        }
     }
 
     /**

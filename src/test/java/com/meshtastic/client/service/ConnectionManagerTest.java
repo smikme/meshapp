@@ -265,6 +265,28 @@ class ConnectionManagerTest {
     }
 
     @Test
+    void failedBleConnectDisconnectsAndDisposesTransport() {
+        FailingBlePlatform platform = new FailingBlePlatform();
+        installBlePlatformFactory(() -> platform, true);
+
+        ConnectionManager manager = ConnectionManager.getInstance();
+        ConnectionEntry entry = new ConnectionEntry("ble", "AA:BB:CC:DD:EE:FF", "Test BLE");
+        manager.addEntry(entry);
+
+        ConnectionException error = assertThrows(ConnectionException.class,
+                () -> manager.connect(entry.getId()));
+
+        assertEquals("Pairing failed", error.getMessage());
+        assertEquals(1, platform.connectCalls);
+        assertEquals(1, platform.disconnectCalls);
+        assertEquals(1, platform.disposeCalls);
+        assertFalse(entry.isConnected());
+        assertFalse(entry.isReconnecting());
+        assertFalse(manager.hasActiveConnection());
+        assertFalse(pendingReconnects().containsKey(entry.getId()));
+    }
+
+    @Test
     void connectUsesExplicitMeshCoreCompanionTcpRuntime() throws Exception {
         try (TcpMeshCoreCompanionStubServer server =
                      new TcpMeshCoreCompanionStubServer("meshcore-companion-tcp")) {
@@ -855,6 +877,69 @@ class ConnectionManagerTest {
 
         @Override
         public void dispose() {
+        }
+    }
+
+    private static final class FailingBlePlatform implements BlePlatform {
+        private volatile Consumer<BleState> stateListener;
+        private int connectCalls;
+        private int disconnectCalls;
+        private int disposeCalls;
+
+        @Override
+        public void startScan(Consumer<BleDevice> onDeviceFound) {
+        }
+
+        @Override
+        public void stopScan() {
+        }
+
+        @Override
+        public void connect(String address) throws ConnectionException {
+            connectCalls++;
+            throw new ConnectionException("Pairing failed");
+        }
+
+        @Override
+        public void disconnect() {
+            disconnectCalls++;
+            Consumer<BleState> listener = stateListener;
+            if (listener != null) {
+                listener.accept(new BleState.Disconnected());
+            }
+        }
+
+        @Override
+        public boolean isConnected() {
+            return false;
+        }
+
+        @Override
+        public boolean writeToRadio(byte[] protobufPayload) {
+            return false;
+        }
+
+        @Override
+        public void setFromRadioListener(Consumer<byte[]> listener) {
+        }
+
+        @Override
+        public void setStateListener(Consumer<BleState> listener) {
+            this.stateListener = listener;
+        }
+
+        @Override
+        public void setPasskeyRequestHandler(Consumer<String> handler) {
+        }
+
+        @Override
+        public BlePlatform.AdapterState getAdapterState() {
+            return BlePlatform.AdapterState.POWERED_ON;
+        }
+
+        @Override
+        public void dispose() {
+            disposeCalls++;
         }
     }
 
