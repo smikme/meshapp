@@ -50,6 +50,7 @@ public final class LuaCompletionEngine {
         TypeDef mesh = new TypeDef();
         mesh.member("log(text)", "log(", "function", null);
         mesh.member("now()", "now()", "function", "number");
+        mesh.member("sleep(seconds)", "sleep(", "function", "boolean");
         mesh.member("owner()", "owner()", "function", "owner");
         mesh.member("chat", "chat.", "object", "mesh.chat");
         mesh.member("kv", "kv.", "object", "mesh.kv");

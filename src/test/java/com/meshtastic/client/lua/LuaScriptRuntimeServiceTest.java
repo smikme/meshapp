@@ -258,6 +258,33 @@ class LuaScriptRuntimeServiceTest {
     }
 
     @Test
+    void sleepAllowsCallbacksToResumeAfterDelay() {
+        LuaScript automation = scriptService.createScript(
+                "automation-sleep",
+                """
+                function on_command(command)
+                    mesh.sleep(1.6)
+                    mesh.kv.set('slept', 'done')
+                end
+                """,
+                true,
+                "",
+                LuaScript.BotType.AUTOMATION_BOT,
+                "@sleep");
+
+        runtimeService.runAutomationCommand(
+                automation,
+                new LuaAutomationCommand("channel", "0", "@sleep", "@sleep", "", List.of(), "cmd-sleep"),
+                events::add,
+                null);
+
+        awaitCondition(() -> !runtimeService.isRunning(automation.getId()), "Sleep automation did not finish");
+
+        assertEquals("done", scriptService.getKv(automation.getId(), "slept"));
+        assertFalse(events.stream().anyMatch(event -> event.type() == LuaScriptEvent.Type.ERROR));
+    }
+
+    @Test
     void uiPickNodeReturnsSelectionToAutomationCallback() {
         LuaScript automation = scriptService.createScript(
                 "automation-pick-node",

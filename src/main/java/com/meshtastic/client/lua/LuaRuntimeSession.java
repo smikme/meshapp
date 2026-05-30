@@ -618,7 +618,8 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
                     command,
                     this,
                     this,
-                    this));
+                    this,
+                    this::deferExecutionDeadline));
             sandboxApi.install(globals);
 
             debugLib.begin(RUN_TIMEOUT_MS);
@@ -761,6 +762,12 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
         synchronized (debugLock) {
             debugCommand = command;
             debugLock.notifyAll();
+        }
+    }
+
+    private void deferExecutionDeadline() {
+        if (debugLib != null) {
+            debugLib.deferDeadline();
         }
     }
 

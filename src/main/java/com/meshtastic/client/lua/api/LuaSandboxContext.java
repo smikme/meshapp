@@ -30,7 +30,8 @@ public record LuaSandboxContext(long scriptId,
                                 LuaAutomationCommand command,
                                 LuaUiBridge uiBridge,
                                 LuaTracerouteBridge tracerouteBridge,
-                                LuaNodeInfoBridge nodeInfoBridge) {
+                                LuaNodeInfoBridge nodeInfoBridge,
+                                Runnable executionDeadlineDeferrer) {
 
     /**
      * Проверяет, есть ли активный транспорт для отправки сообщений.
@@ -58,6 +59,15 @@ public record LuaSandboxContext(long scriptId,
     public void emitOutput(String message) {
         if (outputSink != null) {
             outputSink.accept(message);
+        }
+    }
+
+    /**
+     * Продлевает лимит выполнения после разрешенного блокирующего вызова API.
+     */
+    public void deferExecutionDeadline() {
+        if (executionDeadlineDeferrer != null) {
+            executionDeadlineDeferrer.run();
         }
     }
 }

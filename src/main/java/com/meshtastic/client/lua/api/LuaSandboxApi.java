@@ -1,6 +1,7 @@
 package com.meshtastic.client.lua.api;
 
 import org.luaj.vm2.Globals;
+import org.luaj.vm2.LuaError;
 import org.luaj.vm2.LuaTable;
 import org.luaj.vm2.LuaValue;
 import org.luaj.vm2.Varargs;
@@ -14,11 +15,14 @@ import org.luaj.vm2.lib.ZeroArgFunction;
  * Создает namespace {@code mesh} и подключает отдельные модули расширений:
  * {@code mesh.chat}, {@code mesh.kv}, {@code mesh.curl}, {@code mesh.ui},
  * {@code mesh.traceroute}, {@code mesh.nodeinfo}, а также базовые
- * функции {@code mesh.log}, {@code mesh.now}, {@code mesh.owner}.
+ * функции {@code mesh.log}, {@code mesh.now}, {@code mesh.owner},
+ * {@code mesh.sleep}.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public final class LuaSandboxApi {
+
+    private static final double MAX_SLEEP_SECONDS = 10.0;
 
     private final LuaSandboxContext context;
     private final LuaValueMapper mapper;
@@ -54,6 +58,23 @@ public final class LuaSandboxApi {
             @Override
             public LuaValue call() {
                 return LuaValue.valueOf(System.currentTimeMillis() / 1000.0);
+            }
+        });
+        mesh.set("sleep", new OneArgFunction() {
+            @Override
+            public LuaValue call(LuaValue secondsArg) {
+                double seconds = secondsArg.checkdouble();
+                if (!Double.isFinite(seconds) || seconds < 0.0 || seconds > MAX_SLEEP_SECONDS) {
+                    throw new LuaError("mesh.sleep: seconds must be between 0 and " + MAX_SLEEP_SECONDS);
+                }
+                try {
+                    Thread.sleep(Math.round(seconds * 1000.0));
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new LuaError("Lua script stopped");
+                }
+                context.deferExecutionDeadline();
+                return LuaValue.TRUE;
             }
         });
         mesh.set("owner", new ZeroArgFunction() {
