@@ -468,8 +468,7 @@ public class FormMeshAppIde extends Form {
     }
 
     private String scriptSummary(LuaScript script) {
-        return "ID: " + script.getId()
-                + " · v" + script.getVersion()
+        return "v" + script.getVersion()
                 + authorSummary(script)
                 + " · " + (script.isAutostart() ? "автозапуск" : "без автозапуска")
                 + " · " + script.getBotType().getDisplayName()
