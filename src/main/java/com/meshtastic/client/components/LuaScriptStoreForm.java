@@ -216,7 +216,10 @@ public final class LuaScriptStoreForm extends VBox {
         Label type = new Label("Тип: " + scriptTypeText(storeScript.botType()));
         type.getStyleClass().add("muted-small-label");
 
-        VBox titleBox = new VBox(2, name, type, version);
+        Label author = new Label(authorText(storeScript.author()));
+        author.getStyleClass().add("muted-small-label");
+
+        VBox titleBox = new VBox(2, name, author, type, version);
         HBox.setHgrow(titleBox, Priority.ALWAYS);
 
         HBox actions = createActions(storeScript, installed, updateAvailable);
@@ -345,6 +348,11 @@ public final class LuaScriptStoreForm extends VBox {
 
     private static String scriptTypeText(LuaScript.BotType botType) {
         return botType == LuaScript.BotType.AUTOMATION_BOT ? "Автоматизация" : "Бот";
+    }
+
+    private static String authorText(String author) {
+        String value = author == null ? "" : author.trim();
+        return value.isBlank() ? "Автор: не указан" : "Автор: " + value;
     }
 
     private void notifyScriptsChanged() {

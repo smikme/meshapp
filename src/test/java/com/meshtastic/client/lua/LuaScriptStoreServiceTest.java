@@ -60,6 +60,7 @@ class LuaScriptStoreServiceTest {
                   "icon": "🤖",
                   "name": "Ping Bot",
                   "description": "Replies to ping",
+                  "author": "Packet Lab",
                   "codeLines": [
                     "mesh.log('ping')"
                   ],
@@ -76,6 +77,7 @@ class LuaScriptStoreServiceTest {
                   "icon": "⚙️",
                   "name": "Automation",
                   "description": "Runs an automation command",
+                  "author": "MeshApp Team",
                   "codeLines": [
                     "mesh.log('automation')"
                   ],
@@ -98,6 +100,7 @@ class LuaScriptStoreServiceTest {
         assertEquals("Automation", automation.name());
         assertEquals(2L, automation.version());
         assertEquals(LuaScript.BotType.AUTOMATION_BOT, automation.botType());
+        assertEquals("MeshApp Team", automation.author());
 
         LuaScriptStoreService.StoreScript script = scripts.get(1);
         assertEquals("96c3f915-87c6-435e-a6c5-c7ffe6f94d1b", script.guid());
@@ -106,6 +109,7 @@ class LuaScriptStoreServiceTest {
         assertEquals(5L, script.version());
         assertEquals(LuaScript.BotType.AIR_BOT, script.botType());
         assertEquals("Replies to ping", script.description());
+        assertEquals("Packet Lab", script.author());
         assertEquals("mesh.log('ping')", String.join("\n", script.exportFile().codeLines()));
     }
 

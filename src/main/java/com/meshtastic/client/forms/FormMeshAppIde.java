@@ -335,7 +335,8 @@ public class FormMeshAppIde extends Form {
                         draft.nodeId(),
                         draft.botType(),
                         draft.automationName(),
-                        draft.description());
+                        draft.description(),
+                        draft.author());
                 modalPane.hide();
                 rebuildCards();
                 Toast.show(Toast.Type.SUCCESS, "Создан скрипт: " + created.getName());
@@ -417,7 +418,8 @@ public class FormMeshAppIde extends Form {
                         draft.nodeId(),
                         draft.botType(),
                         draft.automationName(),
-                        draft.description());
+                        draft.description(),
+                        draft.author());
                 modalPane.hide();
                 rebuildCards();
                 Toast.show(Toast.Type.SUCCESS, "Сохранено: " + saved.getName());
@@ -468,6 +470,7 @@ public class FormMeshAppIde extends Form {
     private String scriptSummary(LuaScript script) {
         return "ID: " + script.getId()
                 + " · v" + script.getVersion()
+                + authorSummary(script)
                 + " · " + (script.isAutostart() ? "автозапуск" : "без автозапуска")
                 + " · " + script.getBotType().getDisplayName()
                 + automationSummary(script)
@@ -505,6 +508,11 @@ public class FormMeshAppIde extends Form {
         }
         String automationName = script.getAutomationName();
         return automationName == null || automationName.isBlank() ? " · автоматизация не задана" : " · " + automationName;
+    }
+
+    private String authorSummary(LuaScript script) {
+        String author = script.getAuthor();
+        return author == null || author.isBlank() ? "" : " · автор: " + author;
     }
 
     private String nodeSummary(LuaScript script) {

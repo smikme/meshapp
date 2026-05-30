@@ -78,6 +78,7 @@ public final class LuaScriptStoreService {
                 LuaScript.normalizeVersion(exportFile.scriptVersion()),
                 LuaScript.BotType.fromStorage(exportFile.botType()),
                 LuaScript.normalizeDescription(exportFile.description()),
+                LuaScript.normalizeAuthor(exportFile.author()),
                 entry.downloadUri().toString(),
                 exportFile));
     }
@@ -158,6 +159,7 @@ public final class LuaScriptStoreService {
                               long version,
                               LuaScript.BotType botType,
                               String description,
+                              String author,
                               String downloadUrl,
                               LuaScriptService.LuaScriptExportFile exportFile) {}
 }

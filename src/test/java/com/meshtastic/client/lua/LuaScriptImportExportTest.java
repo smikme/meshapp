@@ -45,6 +45,7 @@ class LuaScriptImportExportTest {
                 Детали:
                 Описание может занимать несколько строк и оставаться частью JSON-экспорта.
                 """;
+        String author = "MeshApp Team";
         LuaScript script = scriptService.createScript(
                 "portable",
                 code,
@@ -53,7 +54,8 @@ class LuaScriptImportExportTest {
                 "!abcdef12",
                 LuaScript.BotType.AIR_BOT,
                 "",
-                description);
+                description,
+                author);
         Path exportFile = tempHome.resolve("portable.json");
 
         scriptService.exportScript(script.getId(), exportFile);
@@ -63,6 +65,7 @@ class LuaScriptImportExportTest {
         assertTrue(json.contains("\"scriptVersion\": 1"));
         assertTrue(json.contains("\"guid\": \"" + script.getGuid() + "\""));
         assertTrue(json.contains("\"description\":"));
+        assertTrue(json.contains("\"author\": \"MeshApp Team\""));
         assertTrue(json.contains("\"codeLines\": ["));
         assertTrue(json.contains("\"mesh.log('hello')\""));
         assertTrue(json.contains("\"mesh.log('second line')\""));
@@ -81,6 +84,7 @@ class LuaScriptImportExportTest {
         assertEquals("🚀", imported.getIcon());
         assertEquals(1L, imported.getVersion());
         assertEquals(description, imported.getDescription());
+        assertEquals(author, imported.getAuthor());
         assertFalse(imported.isAutostart());
         assertEquals("", imported.getNodeId());
         assertEquals(LuaScript.BotType.AIR_BOT, imported.getBotType());
@@ -108,6 +112,7 @@ class LuaScriptImportExportTest {
                   "icon": "🛰️",
                   "name": "same-guid-updated",
                   "description": "Updated description\\nwith multiple lines",
+                  "author": "Store Author",
                   "codeLines": [
                     "mesh.log('new')"
                   ],
@@ -129,6 +134,7 @@ class LuaScriptImportExportTest {
         assertEquals("🛰️", updated.getIcon());
         assertEquals(7L, updated.getVersion());
         assertEquals("Updated description\nwith multiple lines", updated.getDescription());
+        assertEquals("Store Author", updated.getAuthor());
         assertTrue(updated.isAutostart());
         assertEquals("!abcdef12", updated.getNodeId());
         assertEquals(1, scriptService.listScripts().size());
@@ -156,6 +162,7 @@ class LuaScriptImportExportTest {
 
         assertFalse(result.updated());
         assertEquals("mesh.log('legacy')\nmesh.log('code')", result.script().getCode());
+        assertEquals("", result.script().getAuthor());
         assertFalse(result.script().isAutostart());
         assertEquals("", result.script().getNodeId());
     }

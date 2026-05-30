@@ -332,6 +332,7 @@ class DatabaseMigratorTest {
             assertEquals(DatabaseMigrator.CURRENT_VERSION, schemaVersion(connection));
             assertTrue(columnExists(connection, "LUA_SCRIPTS", "GUID"));
             assertTrue(columnExists(connection, "LUA_SCRIPTS", "ICON"));
+            assertTrue(columnExists(connection, "LUA_SCRIPTS", "AUTHOR"));
             assertTrue(indexExists(connection, "IDX_LUA_SCRIPTS_GUID"));
             String firstGuid = stringValue(connection, "SELECT guid FROM lua_scripts WHERE name = 'one'");
             String secondGuid = stringValue(connection, "SELECT guid FROM lua_scripts WHERE name = 'two'");
@@ -339,6 +340,7 @@ class DatabaseMigratorTest {
             assertValidGuid(secondGuid);
             assertNotEquals(firstGuid, secondGuid);
             assertEquals("🤖", stringValue(connection, "SELECT icon FROM lua_scripts WHERE name = 'one'"));
+            assertEquals("", stringValue(connection, "SELECT author FROM lua_scripts WHERE name = 'one'"));
         }
     }
 

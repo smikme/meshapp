@@ -75,6 +75,17 @@ public class LuaScript {
         return description.replace("\r\n", "\n").replace('\r', '\n');
     }
 
+    public static String normalizeAuthor(String author) {
+        if (author == null) {
+            return "";
+        }
+        String value = author.replace("\r\n", " ")
+                .replace('\r', ' ')
+                .replace('\n', ' ')
+                .trim();
+        return value.length() > 120 ? value.substring(0, 120) : value;
+    }
+
     private static boolean isEmojiZwjSequence(int[] codePoints) {
         boolean expectingEmoji = true;
         boolean sawEmoji = false;
@@ -192,6 +203,7 @@ public class LuaScript {
     private String code;
     private long version;
     private String description;
+    private String author;
     private boolean enabled;
     private String nodeId;
     private BotType botType;
@@ -209,6 +221,7 @@ public class LuaScript {
                      String code,
                      long version,
                      String description,
+                     String author,
                      boolean enabled,
                      String nodeId,
                      BotType botType,
@@ -225,6 +238,7 @@ public class LuaScript {
         this.code = code;
         this.version = normalizeVersion(version);
         this.description = normalizeDescription(description);
+        this.author = normalizeAuthor(author);
         this.enabled = enabled;
         this.nodeId = nodeId;
         this.botType = botType != null ? botType : BotType.AIR_BOT;
@@ -241,6 +255,8 @@ public class LuaScript {
                      String icon,
                      String name,
                      String code,
+                     long version,
+                     String description,
                      boolean enabled,
                      String nodeId,
                      BotType botType,
@@ -250,7 +266,25 @@ public class LuaScript {
                      long lastRunAt,
                      String lastStatus,
                      String lastError) {
-        this(id, guid, icon, name, code, DEFAULT_VERSION, "", enabled, nodeId, botType, automationName,
+        this(id, guid, icon, name, code, version, description, "", enabled, nodeId, botType, automationName,
+                createdAt, updatedAt, lastRunAt, lastStatus, lastError);
+    }
+
+    public LuaScript(long id,
+                     String guid,
+                     String icon,
+                     String name,
+                     String code,
+                     boolean enabled,
+                     String nodeId,
+                     BotType botType,
+                     String automationName,
+                     long createdAt,
+                     long updatedAt,
+                     long lastRunAt,
+                     String lastStatus,
+                     String lastError) {
+        this(id, guid, icon, name, code, DEFAULT_VERSION, "", "", enabled, nodeId, botType, automationName,
                 createdAt, updatedAt, lastRunAt, lastStatus, lastError);
     }
 
@@ -317,6 +351,9 @@ public class LuaScript {
 
     public String getDescription() { return normalizeDescription(description); }
     public void setDescription(String description) { this.description = normalizeDescription(description); }
+
+    public String getAuthor() { return normalizeAuthor(author); }
+    public void setAuthor(String author) { this.author = normalizeAuthor(author); }
 
     public boolean isEnabled() { return enabled; }
     public void setEnabled(boolean enabled) { this.enabled = enabled; }

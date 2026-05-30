@@ -45,6 +45,7 @@ public final class LuaScriptSettingsForm extends VBox {
     private final LuaScript script;
     private final TextField iconField = new TextField();
     private final TextField nameField = new TextField();
+    private final TextField authorField = new TextField();
     private final Label guidLabel = new Label("GUID");
     private final TextField guidField = new TextField();
     private final TextField versionField = new TextField();
@@ -100,6 +101,9 @@ public final class LuaScriptSettingsForm extends VBox {
 
         nameField.setPromptText("Имя скрипта");
         nameField.setMaxWidth(Double.MAX_VALUE);
+
+        authorField.setPromptText("Автор скрипта");
+        authorField.setMaxWidth(Double.MAX_VALUE);
 
         guidField.setEditable(false);
         guidField.setFocusTraversable(true);
@@ -179,6 +183,8 @@ public final class LuaScriptSettingsForm extends VBox {
                 iconField,
                 new Label("Имя скрипта"),
                 nameField,
+                new Label("Автор"),
+                authorField,
                 guidLabel,
                 guidField,
                 new Label("Версия"),
@@ -200,6 +206,7 @@ public final class LuaScriptSettingsForm extends VBox {
     private void populateFields() {
         iconField.setText(script.getIcon());
         nameField.setText(script.getName() != null ? script.getName() : "");
+        authorField.setText(script.getAuthor());
         String guid = script.getGuid();
         boolean hasGuid = guid != null && !guid.isBlank();
         guidField.setText(hasGuid ? guid : "");
@@ -342,7 +349,9 @@ public final class LuaScriptSettingsForm extends VBox {
         }
 
         String description = descriptionArea.getText() != null ? descriptionArea.getText() : "";
-        return new Draft(name, autostartCheck.isSelected(), icon, nodeId, botType, automationName, description);
+        String author = LuaScript.normalizeAuthor(authorField.getText());
+        return new Draft(name, autostartCheck.isSelected(), icon, nodeId, botType, automationName, description,
+                author);
     }
 
     private TextFormatter.Change filterIconChange(TextFormatter.Change change) {
@@ -436,7 +445,8 @@ public final class LuaScriptSettingsForm extends VBox {
                         String nodeId,
                         LuaScript.BotType botType,
                         String automationName,
-                        String description) {}
+                        String description,
+                        String author) {}
 
     private record NodeChoice(String nodeId, String displayName, boolean connected) {
         private String displayText() {

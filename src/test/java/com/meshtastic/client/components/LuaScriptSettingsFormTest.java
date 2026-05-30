@@ -204,15 +204,18 @@ class LuaScriptSettingsFormTest {
     }
 
     @Test
-    void showsVersionAndBuildsDraftWithMultilineDescription() {
+    void showsVersionAuthorAndBuildsDraftWithMultilineDescription() {
         String description = "Назначение:\nДлинное описание\n\nДетали:\nНесколько строк";
+        String author = "MeshApp Team";
 
         onFxThread(() -> {
             LuaScriptSettingsForm form = new LuaScriptSettingsForm(
                     script("123e4567-e89b-12d3-a456-426614174000", "🚀", "",
-                            LuaScript.BotType.AUTOMATION_BOT, "@auto", 4L, description));
+                            LuaScript.BotType.AUTOMATION_BOT, "@auto", 4L, description, author));
             try {
                 assertEquals("4", versionField(form).getText());
+                assertEquals(author, authorField(form).getText());
+                authorField(form).setText("  Store Author  ");
 
                 TextArea area = descriptionArea(form);
                 assertEquals(description, area.getText());
@@ -222,6 +225,7 @@ class LuaScriptSettingsFormTest {
 
                 assertNotNull(draft);
                 assertEquals(description + "\nФинальная строка", draftDescription(draft));
+                assertEquals("Store Author", draftAuthor(draft));
             } finally {
                 form.dispose();
             }
@@ -331,7 +335,13 @@ class LuaScriptSettingsFormTest {
     private static LuaScript script(String guid, String icon, String nodeId,
                                     LuaScript.BotType botType, String automationName,
                                     long version, String description) {
-        return new LuaScript(1L, guid, icon, "Script", "", version, description, true, nodeId, botType,
+        return script(guid, icon, nodeId, botType, automationName, version, description, "");
+    }
+
+    private static LuaScript script(String guid, String icon, String nodeId,
+                                    LuaScript.BotType botType, String automationName,
+                                    long version, String description, String author) {
+        return new LuaScript(1L, guid, icon, "Script", "", version, description, author, true, nodeId, botType,
                 automationName, 0L, 0L, 0L, "NEW", null);
     }
 
@@ -372,6 +382,16 @@ class LuaScriptSettingsFormTest {
             return (TextArea) field.get(form);
         } catch (ReflectiveOperationException e) {
             throw new AssertionError("Failed to read description area", e);
+        }
+    }
+
+    private static TextField authorField(LuaScriptSettingsForm form) {
+        try {
+            Field field = LuaScriptSettingsForm.class.getDeclaredField("authorField");
+            field.setAccessible(true);
+            return (TextField) field.get(form);
+        } catch (ReflectiveOperationException e) {
+            throw new AssertionError("Failed to read author field", e);
         }
     }
 
@@ -444,6 +464,16 @@ class LuaScriptSettingsFormTest {
             return (String) method.invoke(draft);
         } catch (ReflectiveOperationException e) {
             throw new AssertionError("Failed to read draft description", e);
+        }
+    }
+
+    private static String draftAuthor(Object draft) {
+        try {
+            Method method = draft.getClass().getDeclaredMethod("author");
+            method.setAccessible(true);
+            return (String) method.invoke(draft);
+        } catch (ReflectiveOperationException e) {
+            throw new AssertionError("Failed to read draft author", e);
         }
     }
 

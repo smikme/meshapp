@@ -34,7 +34,7 @@ public final class DatabaseMigrator {
     private static final Logger log = LoggerFactory.getLogger(DatabaseMigrator.class);
 
     /** Текущая версия схемы. Увеличивается при каждом изменении схемы. */
-    static final int CURRENT_VERSION = 18;
+    static final int CURRENT_VERSION = 19;
     private static final String LEGACY_TRACEROUTE_PREFIX = "\uD83D\uDD0D Traceroute → ";
     private static final Pattern CONNECTION_NODE_ID_PATTERN =
             Pattern.compile("\"nodeId\"\\s*:\\s*\"(![0-9a-fA-F]{8})\"");
@@ -109,6 +109,7 @@ public final class DatabaseMigrator {
             if (version < 16) { migrateToV16(connection); version = 16; }
             if (version < 17) { migrateToV17(connection); version = 17; }
             if (version < 18) { migrateToV18(connection); version = 18; }
+            if (version < 19) { migrateToV19(connection); version = 19; }
 
             setVersion(connection, CURRENT_VERSION);
             log.info("Database migration complete, schema version = {}", CURRENT_VERSION);
@@ -636,6 +637,7 @@ public final class DatabaseMigrator {
                         icon        VARCHAR(32) NOT NULL DEFAULT '🤖',
                         name        VARCHAR(120) NOT NULL,
                         code        CLOB NOT NULL,
+                        author      VARCHAR(120) NOT NULL DEFAULT '',
                         enabled     BOOLEAN NOT NULL DEFAULT TRUE,
                         node_id     VARCHAR(60) NOT NULL DEFAULT '',
                         bot_type    VARCHAR(30) NOT NULL DEFAULT 'AIR_BOT',
@@ -741,6 +743,19 @@ public final class DatabaseMigrator {
         createTracerouteResultsTable(connection);
         backfillLegacyTracerouteMessages(connection);
         log.info("Migration v18: created traceroute_results table");
+    }
+
+    /** v19: автор Lua-скрипта для локальных настроек и магазина. */
+    private static void migrateToV19(Connection connection) throws SQLException {
+        if (!tableExists(connection, "LUA_SCRIPTS")) {
+            log.info("Migration v19: skipped Lua script author because lua_scripts table is absent");
+            return;
+        }
+        try (Statement stmt = connection.createStatement()) {
+            stmt.execute("ALTER TABLE lua_scripts ADD COLUMN IF NOT EXISTS author VARCHAR(120) NOT NULL DEFAULT ''");
+        }
+        backfillLuaScriptAuthors(connection);
+        log.info("Migration v19: added Lua script authors");
     }
 
     private static void createTracerouteResultsTable(Connection connection) throws SQLException {
@@ -895,6 +910,21 @@ public final class DatabaseMigrator {
             int updated = ps.executeUpdate();
             if (updated > 0) {
                 log.info("Migration: populated Lua script icon for {} rows", updated);
+            }
+        }
+    }
+
+    private static void backfillLuaScriptAuthors(Connection connection) throws SQLException {
+        if (!tableExists(connection, "LUA_SCRIPTS") || !columnExists(connection, "LUA_SCRIPTS", "AUTHOR")) {
+            return;
+        }
+        try (PreparedStatement ps = connection.prepareStatement("""
+                UPDATE lua_scripts SET author = ''
+                WHERE author IS NULL
+                """)) {
+            int updated = ps.executeUpdate();
+            if (updated > 0) {
+                log.info("Migration: populated Lua script author for {} rows", updated);
             }
         }
     }
