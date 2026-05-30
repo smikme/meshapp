@@ -11,9 +11,6 @@ plugins {
 
 def javaVersion = 25
 def javaFxVersion = '25.0.3'
-def meshAppIdeEnabled = providers.gradleProperty('meshAppIdeEnabled')
-		.map { it.toString().trim().equalsIgnoreCase('true') }
-		.orElse(false)
 def jmxDebugEnabled = providers.gradleProperty('jmxDebugEnabled')
 		.orElse(providers.environmentVariable('MESHAPP_JMX_DEBUG'))
 		.map { it.toString().trim().equalsIgnoreCase('true') }
@@ -237,8 +234,7 @@ tasks.register('generateVersionProperties') {
 		} catch (ignored) {}
 		new File(dir, 'version.properties').text =
 			"version=${applicationVersion}\n" +
-			"versionCode=${versionCode}\n" +
-			"meshAppIdeEnabled=${meshAppIdeEnabled.get()}\n"
+			"versionCode=${versionCode}\n"
 	}
 }
 

@@ -97,6 +97,17 @@ public class NodeDetailContent extends HBox {
             formChat.openDirectChat(node.getNodeId(), node);
         });
 
+        // Кнопка «Traceroute» — live-трассировка маршрута до выбранной ноды
+        SVGPath tracerouteIcon = SvgIconLoader.load("/icons/map-traces.svg", 22);
+        Button tracerouteBtn = new Button();
+        tracerouteBtn.setGraphic(tracerouteIcon);
+        tracerouteBtn.setContentDisplay(ContentDisplay.GRAPHIC_ONLY);
+        tracerouteBtn.getStyleClass().add("drawer-toolbar-button");
+        tracerouteBtn.setTooltip(new Tooltip("Traceroute до ноды"));
+        tracerouteBtn.setDisable(handler == null || state == null || nodeNum == 0);
+        tracerouteBtn.setOnAction(e ->
+                NodeTracerouteWindow.showWindow(this.state, node, protocolHandler));
+
         // Кнопка «Обновить ноду» — запрос информации по радио + обмен User-данными
         SVGPath refreshIcon = SvgIconLoader.load("/drawer/icon/refresh-node.svg", 22);
         Button refreshBtn = new Button();
@@ -194,7 +205,7 @@ public class NodeDetailContent extends HBox {
             ignoredBtn.getTooltip().setText(nowIgn ? "Убрать из игнорируемых" : "Добавить в игнорируемые");
         });
 
-        actionToolbar.getItems().addAll(privateChatBtn, favoriteBtn, ignoredBtn, refreshBtn, deleteBtn);
+        actionToolbar.getItems().addAll(privateChatBtn, tracerouteBtn, favoriteBtn, ignoredBtn, refreshBtn, deleteBtn);
 
         VBox toolbarContainer = new VBox(actionToolbar);
         toolbarContainer.setAlignment(Pos.TOP_CENTER);
@@ -250,7 +261,22 @@ public class NodeDetailContent extends HBox {
             chartPanel.bind(state, node.getNodeId());
         }
 
-        VBox contentPane = new VBox(10, header, sep, table, chartPanel);
+        VBox infoPane = new VBox(10, table, chartPanel);
+        VBox.setVgrow(infoPane, Priority.ALWAYS);
+
+        NodeTracerouteHistoryPanel tracesPanel = new NodeTracerouteHistoryPanel(this.state, node, onBeforeNavigate);
+        Tab infoTab = new Tab("Информация", infoPane);
+        Tab tracesTab = new Tab("Трейсы", tracesPanel);
+        TabPane tabPane = new TabPane(infoTab, tracesTab);
+        tabPane.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
+        tabPane.getSelectionModel().selectedItemProperty().addListener((obs, oldTab, selectedTab) -> {
+            if (selectedTab == tracesTab) {
+                tracesPanel.refresh();
+            }
+        });
+        VBox.setVgrow(tabPane, Priority.ALWAYS);
+
+        VBox contentPane = new VBox(10, header, sep, tabPane);
         contentPane.setPadding(new Insets(4, 8, 8, 0));
         HBox.setHgrow(contentPane, Priority.ALWAYS);
 

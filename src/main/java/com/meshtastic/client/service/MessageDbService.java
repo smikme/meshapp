@@ -899,6 +899,136 @@ public final class MessageDbService {
     }
 
     /**
+     * Загружает сохранённые traceroute-результаты, относящиеся к конкретной ноде.
+     *
+     * @param ownerNodeId   nodeId устройства-владельца
+     * @param targetNodeNum числовой id целевой ноды как unsigned int
+     * @param targetNodeId  строковый nodeId целевой ноды
+     * @return список результатов (новые → старые)
+     */
+    public List<TracerouteResultRecord> loadTracerouteResultsForNode(String ownerNodeId,
+                                                                     long targetNodeNum,
+                                                                     String targetNodeId) {
+        return loadTracerouteResultsForNode(
+                ownerNodeId,
+                targetNodeNum,
+                targetNodeId,
+                0,
+                0,
+                Integer.MAX_VALUE,
+                0,
+                0);
+    }
+
+    /**
+     * Загружает страницу сохранённых traceroute-результатов для конкретной ноды.
+     *
+     * @param ownerNodeId            nodeId устройства-владельца
+     * @param targetNodeNum          числовой id целевой ноды как unsigned int
+     * @param targetNodeId           строковый nodeId целевой ноды
+     * @param startTimestampInclusive начало фильтра по времени; {@code <= 0} отключает нижнюю границу
+     * @param endTimestampExclusive   конец фильтра по времени; {@code <= 0} отключает верхнюю границу
+     * @param limit                  максимальное количество записей
+     * @param beforeTimestamp        timestamp последней загруженной записи; {@code <= 0} для первой страницы
+     * @param beforeId               id последней загруженной записи; используется вместе с {@code beforeTimestamp}
+     * @return страница результатов (новые → старые)
+     */
+    public List<TracerouteResultRecord> loadTracerouteResultsForNode(String ownerNodeId,
+                                                                     long targetNodeNum,
+                                                                     String targetNodeId,
+                                                                     long startTimestampInclusive,
+                                                                     long endTimestampExclusive,
+                                                                     int limit,
+                                                                     long beforeTimestamp,
+                                                                     long beforeId) {
+        List<TracerouteResultRecord> result = new ArrayList<>();
+        if (dbConnection == null
+                || limit <= 0
+                || (targetNodeNum <= 0 && (targetNodeId == null || targetNodeId.isBlank()))) {
+            return result;
+        }
+
+        String normalizedOwnerNodeId = ownerNodeId != null ? ownerNodeId : "";
+        String normalizedTargetNodeId = targetNodeId != null
+                ? targetNodeId.trim().toLowerCase(Locale.ROOT)
+                : "";
+        try (PreparedStatement ps = dbConnection.prepareStatement("""
+                SELECT *
+                FROM traceroute_results
+                WHERE owner_node_id = ?
+                  AND (
+                    (? > 0 AND (target_node_num = ? OR response_from_node_num = ?))
+                    OR (? <> '' AND (
+                        LOWER(target_node_id) = ?
+                        OR LOWER(response_from_node_id) = ?
+                        OR LOWER(chat_key) = ?
+                    ))
+                  )
+                  AND (? <= 0 OR timestamp >= ?)
+                  AND (? <= 0 OR timestamp < ?)
+                  AND (? <= 0 OR timestamp < ? OR (timestamp = ? AND id < ?))
+                ORDER BY timestamp DESC, id DESC
+                LIMIT ?
+                """)) {
+            ps.setString(1, normalizedOwnerNodeId);
+            ps.setLong(2, targetNodeNum);
+            ps.setLong(3, targetNodeNum);
+            ps.setLong(4, targetNodeNum);
+            ps.setString(5, normalizedTargetNodeId);
+            ps.setString(6, normalizedTargetNodeId);
+            ps.setString(7, normalizedTargetNodeId);
+            ps.setString(8, normalizedTargetNodeId);
+            ps.setLong(9, startTimestampInclusive);
+            ps.setLong(10, startTimestampInclusive);
+            ps.setLong(11, endTimestampExclusive);
+            ps.setLong(12, endTimestampExclusive);
+            ps.setLong(13, beforeTimestamp);
+            ps.setLong(14, beforeTimestamp);
+            ps.setLong(15, beforeTimestamp);
+            ps.setLong(16, beforeId);
+            ps.setInt(17, limit);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    result.add(readTracerouteResult(rs));
+                }
+            }
+        } catch (SQLException e) {
+            log.error("Failed to load traceroute results for node {}", targetNodeId, e);
+        }
+        return result;
+    }
+
+    /**
+     * Загружает один сохранённый traceroute-результат по id внутри owner scope.
+     *
+     * @param id          id записи в {@code traceroute_results}
+     * @param ownerNodeId nodeId устройства-владельца
+     * @return запись результата или пустое значение, если она не найдена
+     */
+    public Optional<TracerouteResultRecord> loadTracerouteResult(long id, String ownerNodeId) {
+        if (dbConnection == null || id <= 0) {
+            return Optional.empty();
+        }
+        try (PreparedStatement ps = dbConnection.prepareStatement("""
+                SELECT *
+                FROM traceroute_results
+                WHERE id = ? AND owner_node_id = ?
+                LIMIT 1
+                """)) {
+            ps.setLong(1, id);
+            ps.setString(2, ownerNodeId != null ? ownerNodeId : "");
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next()
+                        ? Optional.of(readTracerouteResult(rs))
+                        : Optional.empty();
+            }
+        } catch (SQLException e) {
+            log.error("Failed to load traceroute result {}", id, e);
+            return Optional.empty();
+        }
+    }
+
+    /**
      * Проверяет, совпадает ли конкретное сообщение с поисковым запросом.
      *
      * @param chatType    тип чата

@@ -1066,6 +1066,29 @@
     -fx-font-weight: bold;
 }
 
+.node-trace-history-list {
+    -fx-background-color: transparent;
+}
+
+.node-trace-record {
+    -fx-padding: 0 0 8 0;
+}
+
+.node-trace-created-label {
+    -fx-text-fill: -color-fg-muted;
+    -fx-font-size: 0.8462em;
+    -fx-font-weight: bold;
+}
+
+.node-trace-map-button {
+    -fx-min-width: 30;
+    -fx-pref-width: 30;
+    -fx-max-width: 30;
+    -fx-min-height: 30;
+    -fx-pref-height: 30;
+    -fx-max-height: 30;
+}
+
 .dashboard-log-count-label {
     -fx-opacity: 0.6;
     -fx-font-size: 0.9231em;

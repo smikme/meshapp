@@ -172,6 +172,37 @@ public class FormMap extends Form {
     }
 
     /**
+     * Показывает на карте один сохранённый traceroute-результат.
+     *
+     * <p>Метод используется внешними формами, которые уже знают id записи
+     * {@code traceroute_results}. Предыдущий выбор трейсов очищается, чтобы
+     * карта сфокусировалась только на указанном маршруте.
+     *
+     * @param tracerouteResultId id записи {@code traceroute_results}
+     */
+    public void showTracerouteResult(long tracerouteResultId) {
+        if (!Platform.isFxApplicationThread()) {
+            Platform.runLater(() -> showTracerouteResult(tracerouteResultId));
+            return;
+        }
+
+        MessageDbService.getInstance()
+                .loadTracerouteResult(tracerouteResultId, currentOwnerNodeId())
+                .flatMap(this::parseTraceRecord)
+                .ifPresentOrElse(
+                        trace -> {
+                            selectedTraces.clear();
+                            selectedTraces.put(trace.dbId(), trace);
+                            syncTracesButton();
+                            refreshSelectedTraceOverlay(true);
+                            if (tracesMenu.isShowing()) {
+                                refreshTracesMenu();
+                            }
+                        },
+                        () -> Toast.show(Toast.Type.WARNING, "Трейс не найден"));
+    }
+
+    /**
      * Собирает тулбар, карту и статусную строку, затем восстанавливает сохранённые
      * настройки карты: центр, масштаб, оффлайн-режим, ночной режим и каталог тайлов.
      */

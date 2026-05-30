@@ -7,6 +7,7 @@ import javafx.beans.property.SimpleDoubleProperty;
 import javafx.scene.Node;
 import javafx.scene.Parent;
 import javafx.scene.control.Label;
+import javafx.scene.layout.HBox;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.meshtastic.proto.MeshProtos;
@@ -49,11 +50,31 @@ class TracerouteViewTest {
         }));
     }
 
+    @Test
+    void buildFromProtoCanHideBotAvatarForStandaloneWindow() {
+        assertTrue(onFxThread(() -> {
+            TracerouteView view = createViewWithoutAvatar();
+            MeshMessage msg = new MeshMessage("!00000000", "!00000000", 0, "", 10, false);
+            HBox row = view.buildFromProto("Target", directRouteWithBackSnr(), msg);
+
+            return row.getChildren().size() == 1
+                    && row.getChildren().getFirst().getStyleClass().contains("chat-bubble-system");
+        }));
+    }
+
     private static TracerouteView createView() {
         return new TracerouteView(
                 new SimpleDoubleProperty(600),
                 nodeNum -> String.format("!%08x", nodeNum),
                 (msg, row) -> {});
+    }
+
+    private static TracerouteView createViewWithoutAvatar() {
+        return new TracerouteView(
+                new SimpleDoubleProperty(600),
+                nodeNum -> String.format("!%08x", nodeNum),
+                null,
+                false);
     }
 
     private static MeshProtos.RouteDiscovery directRouteWithBackSnr() {
