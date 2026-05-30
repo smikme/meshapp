@@ -150,7 +150,7 @@ dependencies {
 	implementation 'ch.qos.logback:logback-classic:1.5.32'
 	implementation 'com.fazecast:jSerialComm:2.11.0'
 	implementation 'com.google.code.gson:gson:2.11.0'
-	implementation 'com.h2database:h2:2.3.232'
+	implementation 'com.h2database:h2:2.4.240'
 	implementation 'org.luaj:luaj-jse:3.0.1'
 	implementation 'org.fxmisc.richtext:richtextfx:0.11.7'
 	implementation('io.github.mkpaz:atlantafx-base:2.1.0') {
