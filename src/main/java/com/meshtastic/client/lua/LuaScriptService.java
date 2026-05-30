@@ -544,9 +544,12 @@ public final class LuaScriptService {
         String normalizedAutomationName = normalizeAutomationName(normalizedType, automationName);
         String normalizedDescription = normalizeDescription(description);
         String normalizedAuthor = normalizeAuthor(author);
-        long nextVersion = explicitVersion != null ? explicitVersion : existing.getVersion() + 1;
+        boolean codeModified = !Objects.equals(existing.getCode(), normalizedCode);
+        long nextVersion = explicitVersion != null
+                ? explicitVersion
+                : codeModified ? existing.getVersion() + 1 : existing.getVersion();
         boolean modified = !Objects.equals(existing.getName(), normalizedName)
-                || !Objects.equals(existing.getCode(), normalizedCode)
+                || codeModified
                 || existing.isEnabled() != enabled
                 || !Objects.equals(existing.getIcon(), normalizedIcon)
                 || !Objects.equals(existing.getNodeId(), normalizedNodeId)

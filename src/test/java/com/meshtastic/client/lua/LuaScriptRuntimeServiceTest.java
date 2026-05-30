@@ -692,7 +692,7 @@ class LuaScriptRuntimeServiceTest {
     }
 
     @Test
-    void scriptVersionIncrementsOnlyForPersistedScriptModifications() {
+    void scriptVersionIncrementsOnlyForCodeChanges() {
         LuaScript script = scriptService.createScript("versioned", "mesh.log('one')");
 
         assertEquals(1L, script.getVersion());
@@ -720,13 +720,13 @@ class LuaScriptRuntimeServiceTest {
                 LuaScript.BotType.AIR_BOT,
                 "",
                 "Line one\nLine two");
-        assertEquals(3L, settingsChanged.getVersion());
+        assertEquals(2L, settingsChanged.getVersion());
 
         scriptService.updateRunState(script.getId(), "DONE", null);
         scriptService.setKv(script.getId(), "runtime", "value");
 
         LuaScript afterRuntimeChanges = scriptService.findScript(script.getId()).orElseThrow();
-        assertEquals(3L, afterRuntimeChanges.getVersion());
+        assertEquals(2L, afterRuntimeChanges.getVersion());
     }
 
     @Test
