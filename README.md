@@ -256,6 +256,16 @@ MeshCore Companion не использует KISS framing. Для BLE испол
 
 ---
 
+## Lua API для скриптов
+
+MeshApp поддерживает пользовательские Lua-скрипты и ботов в sandbox-среде LuaJ. Скриптам доступен namespace `mesh` для работы с чатами, локальным KV-хранилищем, ограниченными HTTP(S)-запросами, выбором нод, traceroute и NodeInfo. Небезопасные глобальные API вроде `io`, `os`, `debug`, `package`, `require`, `dofile`, `loadfile` и `luajava` отключены.
+
+Скрипты могут реагировать на новые сообщения через `on_message(msg)`, обрабатывать команды ботов через `on_command(command)` и получать результаты асинхронных операций через `on_node_selected(event)`, `on_traceroute(event)` и `on_node_info(event)`.
+
+Полная документация Lua API, поля объектов и рабочие примеры вынесены в [docs/lua-api.md](docs/lua-api.md).
+
+---
+
 ## Быстрый старт
 
 ### Требования
