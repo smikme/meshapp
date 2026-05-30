@@ -7,6 +7,7 @@ import com.meshtastic.client.connection.*;
 import com.meshtastic.client.model.ConnectionEntry;
 import com.meshtastic.client.model.ConnectionType;
 import com.meshtastic.client.model.DeviceState;
+import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.model.ProtocolType;
 import com.meshtastic.client.lua.LuaScriptRuntimeService;
 import com.meshtastic.client.protocol.ProtocolRegistry;
@@ -17,6 +18,7 @@ import com.meshtastic.client.protocol.meshcore.MeshCoreCompanionState;
 import com.meshtastic.client.protocol.meshcore.MeshCoreKissState;
 import com.meshtastic.client.protocol.meshtastic.MeshtasticProtocol;
 import com.meshtastic.client.protocol.meshtastic.MeshtasticProtocolRuntime;
+import com.meshtastic.client.system.AppUi;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -30,6 +32,7 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Менеджер транспортных подключений и протокольных runtime-адаптеров (singleton).
@@ -65,6 +68,7 @@ public final class ConnectionManager {
     private final Set<String> expectedDeviceRebootIds = ConcurrentHashMap.newKeySet();
     private final Map<String, String> userDisconnectReasons = new ConcurrentHashMap<>();
     private final List<Runnable> listeners = new CopyOnWriteArrayList<>();
+    private final AtomicBoolean startupAutoconnectStarted = new AtomicBoolean(false);
     private final Gson gson = new GsonBuilder().setPrettyPrinting().create();
     private final Path configPath;
     private volatile String selectedConnectionId;
@@ -433,6 +437,72 @@ public final class ConnectionManager {
             fireChanged();
         });
         fireChanged();
+    }
+
+    /**
+     * Запускает фоновые подключения для профилей с включённым автоподключением.
+     * Метод идемпотентен для текущего экземпляра менеджера и предназначен для вызова
+     * один раз во время старта приложения.
+     */
+    public void connectAutoconnectEntries() {
+        if (!startupAutoconnectStarted.compareAndSet(false, true)) {
+            return;
+        }
+        List<ConnectionEntry> targets = getEntries().stream()
+                .filter(ConnectionEntry::isAutoconnect)
+                .toList();
+        if (targets.isEmpty()) {
+            return;
+        }
+        for (ConnectionEntry entry : targets) {
+            Thread worker = new Thread(
+                    () -> connectAutoconnectEntry(entry.getId()),
+                    "autoconnect-" + entry.getId());
+            worker.setDaemon(true);
+            worker.start();
+        }
+    }
+
+    private void connectAutoconnectEntry(String id) {
+        ConnectionEntry entry = findEntry(id);
+        if (entry == null || !entry.isAutoconnect()) {
+            return;
+        }
+        try {
+            connect(id);
+            AppUi.showStatus(AppUi.StatusType.SUCCESS, "Автоподключено: " + entry.getName());
+            handlePostAutoconnectReady(id, entry);
+        } catch (ConnectionException e) {
+            log.warn("Autoconnect failed for '{}': {}", entry.getName(), e.getMessage());
+            AppUi.showStatus(AppUi.StatusType.ERROR,
+                    "Ошибка автоподключения \"" + entry.getName() + "\": " + e.getMessage());
+        } catch (RuntimeException e) {
+            log.warn("Autoconnect failed for '{}'", entry.getName(), e);
+            AppUi.showStatus(AppUi.StatusType.ERROR,
+                    "Ошибка автоподключения \"" + entry.getName() + "\": " + e.getMessage());
+        }
+    }
+
+    private void handlePostAutoconnectReady(String id, ConnectionEntry entry) {
+        CompletableFuture<DeviceState> future = getConfigFuture(id);
+        if (future == null) {
+            return;
+        }
+        future.whenComplete((state, ex) -> {
+            if (state == null || ex != null) {
+                return;
+            }
+            NodeData myNode = state.getNodeDb().get(state.getMyNodeNum());
+            if (myNode == null) {
+                return;
+            }
+            String shortName = myNode.getShortName() != null ? myNode.getShortName() : "?";
+            String longName = myNode.getLongName() != null ? myNode.getLongName() : "?";
+            String nodeId = myNode.getNodeId() != null ? myNode.getNodeId() : "?";
+            if (entry.isConnected() && Objects.equals(selectedConnectionId, id)) {
+                AppUi.updateHeader(shortName, longName, nodeId);
+            }
+        });
     }
 
     /**

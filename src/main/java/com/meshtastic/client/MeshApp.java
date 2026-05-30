@@ -244,6 +244,7 @@ public class MeshApp extends Application {
 
         startUiWatchdog();
         handlePendingCrashLog(stage);
+        ConnectionManager.getInstance().connectAutoconnectEntries();
     }
 
     private void restoreWindowBounds(Stage stage) {

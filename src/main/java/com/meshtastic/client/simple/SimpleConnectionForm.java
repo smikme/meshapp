@@ -14,6 +14,7 @@ import javafx.application.Platform;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.control.Button;
+import javafx.scene.control.CheckBox;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.Separator;
@@ -35,6 +36,7 @@ public class SimpleConnectionForm extends VBox {
     private final ComboBox<String> cmbType;
     private final ComboBox<String> cmbProtocol;
     private final TextField txtName;
+    private final CheckBox chkAutoconnect;
 
     // TCP fields
     private final VBox tcpFields;
@@ -104,6 +106,9 @@ public class SimpleConnectionForm extends VBox {
         // Название
         txtName = new TextField();
         txtName.setPromptText("Например: Дом, Офис");
+
+        chkAutoconnect = new CheckBox("Автоподключение");
+        chkAutoconnect.setTooltip(new Tooltip("Подключаться автоматически при запуске приложения"));
 
         // --- TCP fields ---
         txtHost = new TextField();
@@ -203,6 +208,7 @@ public class SimpleConnectionForm extends VBox {
                 new Label("Тип подключения"), cmbType,
                 new Label("Протокол"), cmbProtocol,
                 new Label("Название"), txtName,
+                chkAutoconnect,
                 tcpFields,
                 serialFields,
                 bleFields,
@@ -250,10 +256,12 @@ public class SimpleConnectionForm extends VBox {
                 }
                 ConnectionEntry entry = new ConnectionEntry(name, address, extractBleDeviceName(selectedDevice));
                 entry.setProtocol(selectedProtocolType());
+                entry.setAutoconnect(chkAutoconnect.isSelected());
                 return withEditingMetadata(entry);
             }
             ConnectionEntry entry = new ConnectionEntry(name, device.address(), device.displayName());
             entry.setProtocol(selectedProtocolForDevice(device));
+            entry.setAutoconnect(chkAutoconnect.isSelected());
             return withEditingMetadata(entry);
         } else if (isSerialMode()) {
             String selectedPort = cmbPort.getValue();
@@ -270,6 +278,7 @@ public class SimpleConnectionForm extends VBox {
             ConnectionEntry entry = new ConnectionEntry(name, portName, baudRate, ConnectionType.SERIAL);
             entry.setProtocol(selectedProtocolType());
             entry.setSerialModemLineMode(selectedSerialModemLineMode());
+            entry.setAutoconnect(chkAutoconnect.isSelected());
             return withEditingMetadata(entry);
         } else {
             String host = txtHost.getText().trim();
@@ -284,6 +293,7 @@ public class SimpleConnectionForm extends VBox {
             }
             ConnectionEntry entry = new ConnectionEntry(name, host, port);
             entry.setProtocol(selectedProtocolType());
+            entry.setAutoconnect(chkAutoconnect.isSelected());
             return withEditingMetadata(entry);
         }
     }
@@ -337,6 +347,7 @@ public class SimpleConnectionForm extends VBox {
         }
 
         txtName.setText(valueOrEmpty(entry.getName()));
+        chkAutoconnect.setSelected(entry.isAutoconnect());
         selectConnectionType(entry.getEffectiveType());
         updateProtocolOptions();
         String protocolLabel = labelForProtocol(entry.getEffectiveProtocol());

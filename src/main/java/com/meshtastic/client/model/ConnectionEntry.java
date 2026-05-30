@@ -14,6 +14,7 @@ import java.util.UUID;
  * Новые профили по умолчанию используют {@link ProtocolType#MESHTASTIC}.
  * Поле {@code protocol} может быть {@code null} для legacy-записей —
  * в этом случае {@link #getEffectiveProtocol()} возвращает {@link ProtocolType#MESHTASTIC}.
+ * Поле {@code autoconnect} сохраняется и по умолчанию равно {@code false}.
  * Поля {@code connected} и {@code reconnecting} помечены как {@code transient} —
  * не сохраняются, отражают текущее runtime-состояние.
  *
@@ -33,6 +34,7 @@ public class ConnectionEntry {
     private String bleAddress;
     private String bleDeviceName;
     private String nodeId;
+    private boolean autoconnect;
     private transient boolean connected;
     private transient boolean reconnecting;
 
@@ -208,6 +210,14 @@ public class ConnectionEntry {
 
     public void setNodeId(String nodeId) {
         this.nodeId = nodeId;
+    }
+
+    public boolean isAutoconnect() {
+        return autoconnect;
+    }
+
+    public void setAutoconnect(boolean autoconnect) {
+        this.autoconnect = autoconnect;
     }
 
     public boolean isConnected() {

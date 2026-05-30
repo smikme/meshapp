@@ -336,6 +336,43 @@ class ConnectionManagerTest {
     }
 
     @Test
+    void connectAutoconnectEntriesConnectsOnlyFlaggedProfiles() throws Exception {
+        try (TcpMeshtasticStubServer autoconnectServer = new TcpMeshtasticStubServer(0x1234ABCD);
+             TcpMeshtasticStubServer manualServer = new TcpMeshtasticStubServer(0x22222222)) {
+            ConnectionManager manager = ConnectionManager.getInstance();
+            ConnectionEntry autoconnect = new ConnectionEntry("auto", "127.0.0.1", autoconnectServer.port());
+            autoconnect.setAutoconnect(true);
+            ConnectionEntry manual = new ConnectionEntry("manual", "127.0.0.1", manualServer.port());
+            manager.addEntry(autoconnect);
+            manager.addEntry(manual);
+
+            manager.connectAutoconnectEntries();
+
+            assertTrue(waitUntil(autoconnect::isConnected, 2_000));
+            CompletableFuture<DeviceState> future = manager.getConfigFuture(autoconnect.getId());
+            assertNotNull(future);
+            assertEquals(0x1234ABCD, future.get(5, TimeUnit.SECONDS).getMyNodeNum());
+            assertFalse(manual.isConnected());
+            assertNull(manager.getConfigFuture(manual.getId()));
+
+            manager.disconnect(autoconnect.getId());
+        }
+    }
+
+    @Test
+    void autoconnectFlagIsStoredInConnectionsJson() {
+        ConnectionManager manager = ConnectionManager.getInstance();
+        ConnectionEntry entry = new ConnectionEntry("auto", "127.0.0.1", 4403);
+        entry.setAutoconnect(true);
+        manager.addEntry(entry);
+
+        TestEnvironmentSupport.resetSingletons();
+        ConnectionEntry loaded = ConnectionManager.getInstance().getEntries().getFirst();
+
+        assertTrue(loaded.isAutoconnect());
+    }
+
+    @Test
     void connectAllowsMultipleActiveConnectionsAndTracksSelectedConnection() throws Exception {
         try (TcpMeshtasticStubServer serverA = new TcpMeshtasticStubServer(0x11111111);
              TcpMeshtasticStubServer serverB = new TcpMeshtasticStubServer(0x22222222)) {
@@ -440,6 +477,7 @@ class ConnectionManagerTest {
         ConnectionEntry updated = new ConnectionEntry("office", "192.0.2.10", 4404);
         updated.setId(entry.getId());
         updated.setProtocol(ProtocolType.MESHCORE_KISS);
+        updated.setAutoconnect(true);
 
         manager.updateEntry(updated);
 
@@ -452,6 +490,7 @@ class ConnectionManagerTest {
         assertEquals(4404, stored.getPort());
         assertEquals("!12345678", stored.getNodeId());
         assertEquals(ProtocolType.MESHCORE_KISS, stored.getProtocol());
+        assertTrue(stored.isAutoconnect());
     }
 
     @Test

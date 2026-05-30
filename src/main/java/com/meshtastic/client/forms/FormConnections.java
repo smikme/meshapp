@@ -149,6 +149,7 @@ public class FormConnections extends Form {
         }
         ProtocolType protocolType = ConnectionManager.getInstance().getActiveProtocolType(entry.getId());
         addressText += " · Протокол: " + formatProtocol(protocolType);
+        addressText += " · Автоподключение: " + (entry.isAutoconnect() ? "вкл" : "выкл");
 
         Label lblAddress = new Label(addressText);
         lblAddress.setStyle("-fx-opacity: 0.6;");
