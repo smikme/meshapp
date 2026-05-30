@@ -11,6 +11,164 @@ MeshApp выполняет пользовательские Lua-скрипты �
 - вывод `print` / `mesh.log` — до 64 КБ на запуск
 - `mesh.sleep(seconds)` принимает задержку от `0` до `10` секунд и продлевает deadline текущего выполнения
 
+## Краткая справка по Lua
+
+Lua — небольшой динамический язык. В MeshApp код обычно состоит из функций-callback вроде `on_message(msg)` и вызовов API `mesh.*`.
+
+### Комментарии
+
+```lua
+-- Однострочный комментарий
+
+--[[
+Многострочный комментарий.
+Удобен для временного отключения блока кода.
+]]
+```
+
+### Переменные и типы
+
+Переменные не требуют объявления типа. Используйте `local`, чтобы переменная не стала глобальной и не жила между callback-вызовами дольше, чем нужно.
+
+```lua
+local text = "hello"
+local count = 3
+local enabled = true
+local missing = nil
+
+mesh.log(type(text))   -- string
+mesh.log(type(count))  -- number
+```
+
+Основные типы: `nil`, `boolean`, `number`, `string`, `table`, `function`. Значение `nil` означает отсутствие значения. В условиях ложными считаются только `false` и `nil`; числа `0` и пустая строка `""` считаются истинными.
+
+```lua
+if "" then
+    mesh.log("Пустая строка в Lua считается true")
+end
+```
+
+### Строки
+
+Строки можно писать в одинарных или двойных кавычках. Склейка строк выполняется оператором `..`.
+
+```lua
+local name = "Alpha"
+local message = 'node: ' .. name
+
+mesh.log(string.lower(message))
+mesh.log(string.format("battery %d%%", 87))
+```
+
+### Условия
+
+```lua
+if msg.outgoing then
+    return
+elseif msg.text == "ping" then
+    mesh.chat.bot_reply(msg, "pong")
+else
+    mesh.log("другое сообщение")
+end
+```
+
+Полезные операторы: `==`, `~=`, `<`, `<=`, `>`, `>=`, `and`, `or`, `not`.
+
+### Таблицы
+
+Таблица — главная структура данных Lua. Она работает и как массив, и как словарь. Индексы массивов начинаются с `1`.
+
+```lua
+local route = { "node-a", "node-b", "node-c" }
+mesh.log(route[1])       -- node-a
+mesh.log(#route)         -- 3
+
+local node = {
+    node_id = "!abcdef12",
+    long_name = "Alpha"
+}
+mesh.log(node.node_id)
+mesh.log(node["long_name"])
+```
+
+### Циклы
+
+Для массивов используйте `ipairs`, для словарей — `pairs`.
+
+```lua
+for i, node in ipairs(mesh.chat.nodes()) do
+    mesh.log(i .. ": " .. tostring(node.node_id))
+end
+
+local values = mesh.kv.list()
+for key, value in pairs(values) do
+    mesh.log(key .. " = " .. tostring(value))
+end
+
+for i = 1, 3 do
+    mesh.log("step " .. i)
+end
+```
+
+### Функции
+
+Функции объявляются через `function ... end`. `return` завершает функцию и возвращает значение.
+
+```lua
+local function normalize(text)
+    if not text then
+        return ""
+    end
+    return string.lower(text)
+end
+
+function on_message(msg)
+    local text = normalize(msg.text)
+    if text == "ping" then
+        mesh.chat.bot_reply(msg, "pong")
+    end
+end
+```
+
+### Проверка `nil`
+
+Поля событий могут отсутствовать. Перед обращением к вложенным полям проверяйте значение на `nil`.
+
+```lua
+function on_traceroute(event)
+    if event.route and event.route.route_ids then
+        mesh.log(table.concat(event.route.route_ids, " -> "))
+    else
+        mesh.log("маршрут не получен")
+    end
+end
+```
+
+### Обработка ошибок
+
+`pcall` запускает функцию защищённо: ошибка не прерывает весь скрипт, а возвращается вторым значением.
+
+```lua
+local ok, result = pcall(function()
+    return mesh.curl.get("https://example.com/api/status")
+end)
+
+if not ok then
+    mesh.log("ошибка: " .. tostring(result))
+elseif result.ok then
+    mesh.log(result.body)
+end
+```
+
+### Что важно помнить
+
+- В конце блоков всегда нужен `end`.
+- Не нужны точки с запятой.
+- Массивы начинаются с индекса `1`, не с `0`.
+- Неравенство записывается как `~=`, а не `!=`.
+- Для объединения строк используется `..`, а не `+`.
+- `require`, файловая система и системные API отключены sandbox-ограничениями MeshApp.
+
 ## Базовые функции
 
 | Функция | Назначение |
