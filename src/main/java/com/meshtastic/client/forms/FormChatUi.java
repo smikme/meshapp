@@ -25,8 +25,10 @@ import javafx.collections.transformation.SortedList;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.control.Button;
+import javafx.scene.control.ContextMenu;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListView;
+import javafx.scene.control.MenuItem;
 import javafx.scene.control.ScrollPane;
 import javafx.scene.control.Separator;
 import javafx.scene.control.SplitPane;
@@ -60,6 +62,8 @@ import java.util.Optional;
 abstract class FormChatUi extends FormChatBase {
 
     private Region headerSpacer;
+    private Button quickScriptButton;
+    private ContextMenu quickScriptMenu;
     private FormChatMessageSearchController messageSearchController;
 
     /**
@@ -237,12 +241,14 @@ abstract class FormChatUi extends FormChatBase {
         headerNameLabel.getStyleClass().add("chat-header-name");
 
         headerSpacer = new Region();
+        quickScriptButton = createQuickScriptButton();
         messageSearchController = createMessageSearchController();
 
         chatHeader = new HBox(10,
                 headerAvatarPane,
                 headerNameLabel,
                 headerSpacer,
+                quickScriptButton,
                 messageSearchController.searchButton(),
                 messageSearchController.controls());
         chatHeader.setAlignment(Pos.CENTER_LEFT);
@@ -265,6 +271,80 @@ abstract class FormChatUi extends FormChatBase {
                 new FormChatMessageSearchHost(this),
                 headerNameLabel,
                 headerSpacer);
+    }
+
+    private Button createQuickScriptButton() {
+        Button button = FormChatUiSupport.createHeaderIconButton(
+                "/icons/autoplay.svg",
+                "Быстрый запуск ботов",
+                "▶");
+        button.setOnAction(event -> toggleQuickScriptMenu(button));
+        return button;
+    }
+
+    private void toggleQuickScriptMenu(Button anchor) {
+        if (quickScriptMenu != null && quickScriptMenu.isShowing()) {
+            quickScriptMenu.hide();
+            return;
+        }
+        quickScriptMenu = buildQuickScriptMenu();
+        quickScriptMenu.setOnShowing(event -> anchor.getStyleClass().add("chat-header-icon-btn-active"));
+        quickScriptMenu.setOnHidden(event -> anchor.getStyleClass().remove("chat-header-icon-btn-active"));
+        quickScriptMenu.show(anchor, javafx.geometry.Side.BOTTOM, 0, 4);
+    }
+
+    private ContextMenu buildQuickScriptMenu() {
+        ContextMenu menu = new ContextMenu();
+        List<LuaScript> scripts = quickLaunchScripts();
+        if (scripts.isEmpty()) {
+            MenuItem emptyItem = new MenuItem("Нет доступных ботов");
+            emptyItem.setDisable(true);
+            menu.getItems().add(emptyItem);
+            return menu;
+        }
+
+        scripts.forEach(script -> menu.getItems().add(createQuickScriptMenuItem(script)));
+        return menu;
+    }
+
+    private List<LuaScript> quickLaunchScripts() {
+        return LuaScriptService.getInstance().listScripts().stream()
+                .filter(LuaScript::isEnabled)
+                .filter(script -> script.getBotType() == LuaScript.BotType.AUTOMATION_BOT)
+                .filter(script -> hasText(script.getAutomationName()))
+                .sorted(Comparator
+                        .comparing(FormChatUi::quickScriptDisplayName, String.CASE_INSENSITIVE_ORDER)
+                        .thenComparing(script -> script.getAutomationName().trim(), String.CASE_INSENSITIVE_ORDER))
+                .toList();
+    }
+
+    private MenuItem createQuickScriptMenuItem(LuaScript script) {
+        String name = quickScriptDisplayName(script);
+        String handle = script.getAutomationName().trim();
+        MenuItem item = new MenuItem(UnicodeTextUtils.sanitizeForJavaFxDisplay(
+                scriptIcon(script) + "  " + name + "  " + handle));
+        item.setOnAction(event -> launchQuickScript(script));
+        return item;
+    }
+
+    private void launchQuickScript(LuaScript script) {
+        ChatBotCommandHelper.ParsedBotCommand command = new ChatBotCommandHelper.ParsedBotCommand(
+                ChatBotCommandHelper.BotAction.AUTOMATION,
+                script.getAutomationName().trim(),
+                "",
+                false,
+                "",
+                List.of(),
+                script.getId());
+        handleBotCommand(command);
+    }
+
+    private static String quickScriptDisplayName(LuaScript script) {
+        return hasText(script.getName()) ? script.getName().trim() : script.getAutomationName().trim();
+    }
+
+    private static String scriptIcon(LuaScript script) {
+        return hasText(script.getIcon()) ? script.getIcon().trim() : LuaScript.DEFAULT_ICON;
     }
 
     private VBox createMessageContainer() {
