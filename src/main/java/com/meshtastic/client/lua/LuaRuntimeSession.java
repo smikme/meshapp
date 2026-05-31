@@ -1,5 +1,6 @@
 package com.meshtastic.client.lua;
 
+import com.meshtastic.client.forms.FormLuaCanvas;
 import com.meshtastic.client.lua.api.LuaSandboxApi;
 import com.meshtastic.client.lua.api.LuaSandboxContext;
 import com.meshtastic.client.lua.api.LuaValueMapper;
@@ -48,7 +49,7 @@ import java.util.function.IntConsumer;
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
-final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNodeInfoBridge {
+final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNodeInfoBridge, LuaCanvasBridge {
 
     private static final long RUN_TIMEOUT_MS = 3_000;
     private static final long CALLBACK_TIMEOUT_MS = 1_500;
@@ -83,6 +84,7 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
     private final Set<String> pendingUiRequests = java.util.concurrent.ConcurrentHashMap.newKeySet();
     private final Map<String, PendingTraceroute> pendingTraceroutes = new java.util.concurrent.ConcurrentHashMap<>();
     private final Map<String, PendingNodeInfo> pendingNodeInfos = new java.util.concurrent.ConcurrentHashMap<>();
+    private final AtomicBoolean canvasOpen = new AtomicBoolean(false);
     private final AtomicLong uiRequestCounter = new AtomicLong();
     private final AtomicLong tracerouteRequestCounter = new AtomicLong();
     private final AtomicLong nodeInfoRequestCounter = new AtomicLong();
@@ -283,6 +285,58 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
         }
     }
 
+    @Override
+    public void openCanvas(LuaCanvasOptions options) {
+        try {
+            FormLuaCanvas.showCanvas(script.getId(), script.getName(), options, this::handleCanvasEvent);
+            canvasOpen.set(true);
+            scriptService.updateRunState(script.getId(), "RUNNING", null);
+        } catch (RuntimeException error) {
+            throw new LuaError("mesh.canvas.open failed: " + error.getMessage());
+        }
+    }
+
+    @Override
+    public void closeCanvas() {
+        if (!canvasOpen.getAndSet(false)) {
+            return;
+        }
+        try {
+            FormLuaCanvas.closeCanvas(script.getId());
+        } catch (RuntimeException error) {
+            throw new LuaError("mesh.canvas.close failed: " + error.getMessage());
+        }
+    }
+
+    @Override
+    public void enqueueCanvasDraw(LuaCanvasDrawCommand command) {
+        if (!canvasOpen.get() || !FormLuaCanvas.enqueueDraw(script.getId(), command)) {
+            throw new LuaError("mesh.canvas: call mesh.canvas.open(...) before drawing");
+        }
+    }
+
+    @Override
+    public void setCanvasFrameRate(double fps) {
+        if (!canvasOpen.get() || !FormLuaCanvas.setFrameRate(script.getId(), fps)) {
+            throw new LuaError("mesh.canvas: call mesh.canvas.open(...) before set_fps");
+        }
+    }
+
+    @Override
+    public LuaCanvasMouseState canvasMouseState() {
+        return FormLuaCanvas.mouseState(script.getId());
+    }
+
+    @Override
+    public LuaCanvasKeyState canvasKeyState() {
+        return FormLuaCanvas.keyState(script.getId());
+    }
+
+    @Override
+    public LuaCanvasSize canvasSize() {
+        return FormLuaCanvas.size(script.getId());
+    }
+
     void stop() {
         if (!running.getAndSet(false)) {
             return;
@@ -291,6 +345,7 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
         unregisterListener();
         cleanupTraceroutes();
         cleanupNodeInfos();
+        cleanupCanvas();
         Future<?> future = activeFuture;
         if (future != null) {
             future.cancel(true);
@@ -471,6 +526,41 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
         }
     }
 
+    private void handleCanvasEvent(LuaCanvasEvent event) {
+        if (event == null) {
+            return;
+        }
+        if ("closed".equals(event.type())) {
+            canvasOpen.set(false);
+        }
+        if (!running.get()) {
+            return;
+        }
+        try {
+            executor.execute(() -> callCanvasEvent(event));
+        } catch (RejectedExecutionException ignored) {
+            // Session is stopping.
+        }
+    }
+
+    private void callCanvasEvent(LuaCanvasEvent event) {
+        if (!running.get() || globals == null) {
+            return;
+        }
+        String callbackName = "frame".equals(event.type()) ? "on_canvas_frame" : "on_canvas_event";
+        LuaValue callback = globals.get(callbackName);
+        try {
+            if (callback.isfunction()) {
+                debugLib.begin(CALLBACK_TIMEOUT_MS);
+                callback.call(canvasEventToTable(event));
+            }
+            finishIfIdle();
+        } catch (Throwable error) {
+            fail(error);
+            finishWithoutInterruptingExecutor();
+        }
+    }
+
     private LuaValue nodeSelectionToTable(LuaUiNodeSelection selection) {
         LuaTable table = new LuaTable();
         table.set("type", LuaValue.valueOf("ui_result"));
@@ -485,6 +575,35 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
         table.set("node", selection.node() != null
                 ? sandboxApi.mapper().nodeToTable(selection.node())
                 : LuaValue.NIL);
+        return table;
+    }
+
+    private LuaValue canvasEventToTable(LuaCanvasEvent event) {
+        LuaTable table = new LuaTable();
+        table.set("type", LuaValue.valueOf(event.type() != null ? event.type() : ""));
+        table.set("source", LuaValue.valueOf("mesh.canvas"));
+        table.set("x", LuaValue.valueOf(event.x()));
+        table.set("y", LuaValue.valueOf(event.y()));
+        table.set("screen_x", LuaValue.valueOf(event.screenX()));
+        table.set("screen_y", LuaValue.valueOf(event.screenY()));
+        table.set("button", LuaValue.valueOf(event.button() != null ? event.button() : ""));
+        table.set("click_count", LuaValue.valueOf(event.clickCount()));
+        table.set("primary", LuaValue.valueOf(event.primaryDown()));
+        table.set("middle", LuaValue.valueOf(event.middleDown()));
+        table.set("secondary", LuaValue.valueOf(event.secondaryDown()));
+        table.set("wheel_delta_x", LuaValue.valueOf(event.wheelDeltaX()));
+        table.set("wheel_delta_y", LuaValue.valueOf(event.wheelDeltaY()));
+        table.set("code", LuaValue.valueOf(event.code() != null ? event.code() : ""));
+        table.set("key", LuaValue.valueOf(event.key() != null ? event.key() : ""));
+        table.set("text", LuaValue.valueOf(event.text() != null ? event.text() : ""));
+        table.set("shift", LuaValue.valueOf(event.shiftDown()));
+        table.set("ctrl", LuaValue.valueOf(event.controlDown()));
+        table.set("alt", LuaValue.valueOf(event.altDown()));
+        table.set("meta", LuaValue.valueOf(event.metaDown()));
+        table.set("width", LuaValue.valueOf(event.width()));
+        table.set("height", LuaValue.valueOf(event.height()));
+        table.set("time", LuaValue.valueOf(event.timeSeconds()));
+        table.set("dt", LuaValue.valueOf(event.deltaSeconds()));
         return table;
     }
 
@@ -590,7 +709,10 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
     }
 
     private boolean hasPendingAsyncWork() {
-        return !pendingUiRequests.isEmpty() || !pendingTraceroutes.isEmpty() || !pendingNodeInfos.isEmpty();
+        return !pendingUiRequests.isEmpty()
+                || !pendingTraceroutes.isEmpty()
+                || !pendingNodeInfos.isEmpty()
+                || canvasOpen.get();
     }
 
     private void finishIfIdle() {
@@ -616,6 +738,7 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
                     scriptService,
                     this::emitOutput,
                     command,
+                    this,
                     this,
                     this,
                     this,
@@ -983,6 +1106,7 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
         unregisterListener();
         cleanupTraceroutes();
         cleanupNodeInfos();
+        cleanupCanvas();
         running.set(false);
         executor.shutdown();
         scheduler.shutdownNow();
@@ -1018,6 +1142,16 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
             }
         });
         pendingNodeInfos.clear();
+    }
+
+    private void cleanupCanvas() {
+        if (canvasOpen.getAndSet(false)) {
+            try {
+                FormLuaCanvas.closeCanvas(script.getId());
+            } catch (RuntimeException ignored) {
+                // JavaFX may already be shutting down.
+            }
+        }
     }
 
     private void emit(LuaScriptEvent event) {

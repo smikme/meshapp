@@ -189,6 +189,8 @@ end
 | `on_node_selected(event)` | После выбора или отмены выбора ноды через `mesh.ui.pick_node(...)` |
 | `on_traceroute(event)` | После результата `mesh.traceroute.request(...)` |
 | `on_node_info(event)` | После результата `mesh.nodeinfo.request(...)` |
+| `on_canvas_event(event)` | После события встроенной Canvas-формы: мышь, клавиатура, resize, open/close |
+| `on_canvas_frame(event)` | По таймеру Canvas-формы, если задан `fps` или вызван `mesh.canvas.set_fps(...)` |
 
 ## `mesh.chat`
 
@@ -241,6 +243,52 @@ HTTP(S)-запросы выполняются встроенным Java HTTP-к�
 
 Поля `on_node_selected(event)`: `type`, `source`, `name`, `request_id`, `status`, `selected`, `cancelled`, `chat_type`, `chat_key`, `node`.
 
+## `mesh.canvas`
+
+`mesh.canvas` открывает встроенную форму внутри основного окна приложения. Форма не добавляется в боковое меню и существует только пока её держит Lua-скрипт.
+
+| Функция | Возврат | Назначение |
+|---------|---------|------------|
+| `mesh.canvas.open(options)` | `true` | Показывает Canvas-форму |
+| `mesh.canvas.close()` | `true` | Закрывает Canvas-форму |
+| `mesh.canvas.set_fps(fps)` | `true` | Включает/меняет частоту `on_canvas_frame(event)`, `0` выключает |
+| `mesh.canvas.size()` | `{width, height}` | Возвращает текущий размер холста |
+| `mesh.canvas.mouse()` | `canvas.mouse` | Возвращает текущее состояние мыши |
+| `mesh.canvas.keys()` | `canvas.keys` | Возвращает текущее состояние клавиатуры |
+| `mesh.canvas.clear([color])` | `true` | Очищает холст или заливает цветом |
+| `mesh.canvas.set_fill(color)` | `true` | Устанавливает цвет заливки |
+| `mesh.canvas.set_stroke(color)` | `true` | Устанавливает цвет линии |
+| `mesh.canvas.set_line_width(width)` | `true` | Устанавливает толщину линии |
+| `mesh.canvas.set_font(size[, family[, weight]])` | `true` | Устанавливает шрифт текста |
+| `mesh.canvas.save()` / `mesh.canvas.restore()` | `true` | Сохраняет и восстанавливает состояние рисования |
+| `mesh.canvas.translate(x, y)` | `true` | Смещает систему координат |
+| `mesh.canvas.rotate(degrees)` | `true` | Поворачивает систему координат |
+| `mesh.canvas.scale(x[, y])` | `true` | Масштабирует систему координат |
+| `mesh.canvas.fill_rect(x, y, w, h[, color])` | `true` | Рисует залитый прямоугольник |
+| `mesh.canvas.stroke_rect(x, y, w, h[, color[, line_width]])` | `true` | Рисует контур прямоугольника |
+| `mesh.canvas.fill_round_rect(x, y, w, h, radius[, color])` | `true` | Рисует залитый скруглённый прямоугольник |
+| `mesh.canvas.stroke_round_rect(x, y, w, h, radius[, color[, line_width]])` | `true` | Рисует контур скруглённого прямоугольника |
+| `mesh.canvas.line(x1, y1, x2, y2[, color[, line_width]])` | `true` | Рисует линию |
+| `mesh.canvas.fill_circle(x, y, radius[, color])` | `true` | Рисует залитый круг |
+| `mesh.canvas.stroke_circle(x, y, radius[, color[, line_width]])` | `true` | Рисует контур круга |
+| `mesh.canvas.fill_ellipse(x, y, w, h[, color])` | `true` | Рисует залитый эллипс |
+| `mesh.canvas.stroke_ellipse(x, y, w, h[, color[, line_width]])` | `true` | Рисует контур эллипса |
+| `mesh.canvas.fill_polygon(points[, color])` | `true` | Рисует залитый многоугольник |
+| `mesh.canvas.stroke_polygon(points[, color[, line_width]])` | `true` | Рисует контур многоугольника |
+| `mesh.canvas.polyline(points[, color[, line_width]])` | `true` | Рисует ломаную линию |
+| `mesh.canvas.fill_text(text, x, y[, color])` | `true` | Рисует текст |
+| `mesh.canvas.stroke_text(text, x, y[, color[, line_width]])` | `true` | Рисует контур текста |
+
+Поля `options`: `title`, `width`, `height`, `background`, `resizable`, `fps`. По умолчанию форма растягивается в доступной области основного окна (`resizable = true`).
+
+Цвет можно передать строкой JavaFX/CSS (`"#ffcc00"`, `"rgba(255,0,0,0.5)"`, `"white"`) или таблицей `{r, g, b, a}`. Компоненты `r/g/b/a` принимаются в диапазоне `0..1` или `0..255`.
+
+`points` можно передать как плоский список `{x1, y1, x2, y2, ...}` или как список точек `{{x=10, y=10}, {x=40, y=20}}`.
+
+Поля `on_canvas_event(event)`: `type`, `source`, `x`, `y`, `screen_x`, `screen_y`, `button`, `click_count`, `primary`, `middle`, `secondary`, `wheel_delta_x`, `wheel_delta_y`, `code`, `key`, `text`, `shift`, `ctrl`, `alt`, `meta`, `width`, `height`, `time`, `dt`.
+
+Значения `event.type`: `opened`, `closed`, `resized`, `mouse_moved`, `mouse_pressed`, `mouse_released`, `mouse_clicked`, `mouse_dragged`, `mouse_entered`, `mouse_exited`, `scroll`, `key_pressed`, `key_released`, `key_typed`.
+
 ## `mesh.traceroute`
 
 | Функция | Возврат | Назначение |
@@ -274,6 +322,10 @@ HTTP(S)-запросы выполняются встроенным Java HTTP-к�
 `channel`: `index`, `role`, `name`.
 
 `command`: `type`, `source`, `name`, `request_id`, `chat_type`, `chat_key`, `handle`, `text`, `arguments`, `argument_tokens`.
+
+`canvas.mouse`: `x`, `y`, `screen_x`, `screen_y`, `over`, `pressed`, `primary`, `middle`, `secondary`, `button`, `click_count`, `wheel_delta_x`, `wheel_delta_y`, `last_type`, `time`.
+
+`canvas.keys`: `pressed`, `last_type`, `last_code`, `last_key`, `text`, `shift`, `ctrl`, `alt`, `meta`, `time`. Для быстрого опроса клавиши также доступны как булевы поля по имени кода, например `mesh.canvas.keys().Left`.
 
 ## Примеры
 
@@ -413,5 +465,53 @@ if response.ok then
     mesh.log(response.body)
 else
     mesh.log("HTTP error: " .. tostring(response.status) .. " " .. tostring(response.error))
+end
+```
+
+### Встроенное меню на Canvas
+
+```lua
+mesh.canvas.open({
+    title = "Demo menu",
+    background = "#111827",
+    fps = 30
+})
+
+local items = { "Start", "Settings", "Exit" }
+local selected = 1
+
+local function draw()
+    local size = mesh.canvas.size()
+    mesh.canvas.clear("#111827")
+    mesh.canvas.set_font(28, "Roboto", "BOLD")
+    mesh.canvas.fill_text("MeshApp Lua", 40, 60, "#e5e7eb")
+
+    mesh.canvas.set_font(20, "Roboto")
+    for i, label in ipairs(items) do
+        local y = 105 + i * 48
+        local bg = i == selected and "#2563eb" or "#1f2937"
+        mesh.canvas.fill_round_rect(40, y - 30, 240, 38, 8, bg)
+        mesh.canvas.fill_text(label, 62, y - 5, "#f9fafb")
+    end
+
+    mesh.canvas.fill_text("mouse: " .. math.floor(mesh.canvas.mouse().x), size.width - 180, 32, "#9ca3af")
+end
+
+function on_canvas_event(event)
+    if event.type == "mouse_clicked" then
+        for i = 1, #items do
+            local y = 105 + i * 48
+            if event.x >= 40 and event.x <= 280 and event.y >= y - 30 and event.y <= y + 8 then
+                selected = i
+            end
+        end
+    elseif event.type == "key_pressed" and event.code == "Esc" then
+        mesh.canvas.close()
+    end
+    draw()
+end
+
+function on_canvas_frame(event)
+    draw()
 end
 ```

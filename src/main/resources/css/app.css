@@ -1046,6 +1046,18 @@
     -fx-font-size: 1.0769em;
 }
 
+/* Lua Canvas */
+.lua-canvas-form {
+    -fx-background-color: -color-bg-default;
+}
+
+.lua-canvas-host {
+    -fx-background-color: #05070a;
+    -fx-background-radius: 8;
+    -fx-border-color: -color-border-default;
+    -fx-border-radius: 8;
+}
+
 .muted-note-label {
     -fx-opacity: 0.6;
     -fx-font-size: 0.8462em;

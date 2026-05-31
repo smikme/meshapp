@@ -56,6 +56,7 @@ public final class LuaCompletionEngine {
         mesh.member("kv", "kv.", "object", "mesh.kv");
         mesh.member("curl", "curl.", "object", "mesh.curl");
         mesh.member("ui", "ui.", "object", "mesh.ui");
+        mesh.member("canvas", "canvas.", "object", "mesh.canvas");
         mesh.member("traceroute", "traceroute.", "object", "mesh.traceroute");
         mesh.member("nodeinfo", "nodeinfo.", "object", "mesh.nodeinfo");
         mesh.member("command()", "command()", "function", "command");
@@ -90,6 +91,28 @@ public final class LuaCompletionEngine {
         TypeDef ui = new TypeDef();
         ui.member("pick_node(options)", "pick_node(", "function", "string");
 
+        TypeDef canvas = new TypeDef();
+        canvas.member("open(options)", "open(", "function", "boolean");
+        canvas.member("close()", "close()", "function", "boolean");
+        canvas.member("set_fps(fps)", "set_fps(", "function", "boolean");
+        canvas.member("size()", "size()", "function", "canvas.size");
+        canvas.member("mouse()", "mouse()", "function", "canvas.mouse");
+        canvas.member("keys()", "keys()", "function", "canvas.keys");
+        for (String member : List.of("clear(color)", "set_fill(color)", "set_stroke(color)",
+                "set_line_width(width)", "set_font(size, family, weight)", "save()", "restore()",
+                "translate(x, y)", "rotate(degrees)", "scale(x, y)",
+                "fill_rect(x, y, w, h, color)", "stroke_rect(x, y, w, h, color, line_width)",
+                "fill_round_rect(x, y, w, h, radius, color)",
+                "stroke_round_rect(x, y, w, h, radius, color, line_width)",
+                "line(x1, y1, x2, y2, color, line_width)",
+                "fill_circle(x, y, radius, color)", "stroke_circle(x, y, radius, color, line_width)",
+                "fill_ellipse(x, y, w, h, color)", "stroke_ellipse(x, y, w, h, color, line_width)",
+                "fill_polygon(points, color)", "stroke_polygon(points, color, line_width)",
+                "polyline(points, color, line_width)", "fill_text(text, x, y, color)",
+                "stroke_text(text, x, y, color, line_width)", "text(text, x, y, color)")) {
+            canvas.member(member, member.substring(0, member.indexOf('(') + 1), "function", "boolean");
+        }
+
         TypeDef traceroute = new TypeDef();
         traceroute.member("request(target, options)", "request(", "function", "string");
 
@@ -123,6 +146,30 @@ public final class LuaCompletionEngine {
             nodeInfoEvent.member(field, field, "field", null);
         }
         nodeInfoEvent.member("node", "node", "field", "node");
+
+        TypeDef canvasEvent = new TypeDef();
+        for (String field : List.of("type", "source", "x", "y", "screen_x", "screen_y", "button",
+                "click_count", "primary", "middle", "secondary", "wheel_delta_x", "wheel_delta_y",
+                "code", "key", "text", "shift", "ctrl", "alt", "meta", "width", "height", "time", "dt")) {
+            canvasEvent.member(field, field, "field", null);
+        }
+
+        TypeDef canvasMouse = new TypeDef();
+        for (String field : List.of("x", "y", "screen_x", "screen_y", "over", "pressed", "primary",
+                "middle", "secondary", "button", "click_count", "wheel_delta_x", "wheel_delta_y",
+                "last_type", "time")) {
+            canvasMouse.member(field, field, "field", null);
+        }
+
+        TypeDef canvasKeys = new TypeDef();
+        for (String field : List.of("pressed", "last_type", "last_code", "last_key", "text",
+                "shift", "ctrl", "alt", "meta", "time")) {
+            canvasKeys.member(field, field, "field", null);
+        }
+
+        TypeDef canvasSize = new TypeDef();
+        canvasSize.member("width", "width", "field", null);
+        canvasSize.member("height", "height", "field", null);
 
         TypeDef routeDiscovery = new TypeDef();
         for (String field : List.of("route", "route_back", "route_ids", "route_back_ids", "snr_towards", "snr_back")) {
@@ -194,6 +241,7 @@ public final class LuaCompletionEngine {
         defs.put("mesh.kv", kv);
         defs.put("mesh.curl", curl);
         defs.put("mesh.ui", ui);
+        defs.put("mesh.canvas", canvas);
         defs.put("mesh.traceroute", traceroute);
         defs.put("mesh.nodeinfo", nodeinfo);
         defs.put("curl.response", curlResponse);
@@ -201,6 +249,10 @@ public final class LuaCompletionEngine {
         defs.put("node.selection", nodeSelection);
         defs.put("traceroute.event", tracerouteEvent);
         defs.put("nodeinfo.event", nodeInfoEvent);
+        defs.put("canvas.event", canvasEvent);
+        defs.put("canvas.mouse", canvasMouse);
+        defs.put("canvas.keys", canvasKeys);
+        defs.put("canvas.size", canvasSize);
         defs.put("route.discovery", routeDiscovery);
         defs.put("message", message);
         defs.put("owner", owner);
@@ -225,6 +277,8 @@ public final class LuaCompletionEngine {
                 new CompletionItem("on_node_selected(event)", "function on_node_selected(event)\n    \nend", "snippet"),
                 new CompletionItem("on_traceroute(event)", "function on_traceroute(event)\n    \nend", "snippet"),
                 new CompletionItem("on_node_info(event)", "function on_node_info(event)\n    \nend", "snippet"),
+                new CompletionItem("on_canvas_event(event)", "function on_canvas_event(event)\n    \nend", "snippet"),
+                new CompletionItem("on_canvas_frame(event)", "function on_canvas_frame(event)\n    \nend", "snippet"),
                 new CompletionItem("mesh", "mesh", "object"),
                 new CompletionItem("string", "string", "object"),
                 new CompletionItem("table", "table", "object"),
@@ -363,6 +417,11 @@ public final class LuaCompletionEngine {
                 List<String> params = splitNames(functionMatcher.group(2));
                 if (!params.isEmpty()) {
                     symbols.put(params.getFirst(), "nodeinfo.event");
+                }
+            } else if ("on_canvas_event".equals(name) || "on_canvas_frame".equals(name)) {
+                List<String> params = splitNames(functionMatcher.group(2));
+                if (!params.isEmpty()) {
+                    symbols.put(params.getFirst(), "canvas.event");
                 }
             }
         }
@@ -543,6 +602,15 @@ public final class LuaCompletionEngine {
         if (value.startsWith("mesh.curl.get") || value.startsWith("mesh.curl.request")) {
             return Optional.of("curl.response");
         }
+        if (value.startsWith("mesh.canvas.size")) {
+            return Optional.of("canvas.size");
+        }
+        if (value.startsWith("mesh.canvas.mouse")) {
+            return Optional.of("canvas.mouse");
+        }
+        if (value.startsWith("mesh.canvas.keys")) {
+            return Optional.of("canvas.keys");
+        }
         if (value.startsWith("mesh.chat")) {
             return Optional.of("mesh.chat");
         }
@@ -554,6 +622,9 @@ public final class LuaCompletionEngine {
         }
         if (value.startsWith("mesh.ui")) {
             return Optional.of("mesh.ui");
+        }
+        if (value.startsWith("mesh.canvas")) {
+            return Optional.of("mesh.canvas");
         }
         if (value.startsWith("mesh.traceroute")) {
             return Optional.of("mesh.traceroute");

@@ -59,6 +59,7 @@ class LuaChatApiTest {
                         null,
                         null,
                         null,
+                        null,
                         null),
                 new LuaValueMapper(state))
                 .create();

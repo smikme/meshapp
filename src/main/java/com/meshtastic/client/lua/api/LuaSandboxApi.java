@@ -14,7 +14,7 @@ import org.luaj.vm2.lib.ZeroArgFunction;
  * <p>
  * Создает namespace {@code mesh} и подключает отдельные модули расширений:
  * {@code mesh.chat}, {@code mesh.kv}, {@code mesh.curl}, {@code mesh.ui},
- * {@code mesh.traceroute}, {@code mesh.nodeinfo}, а также базовые
+ * {@code mesh.canvas}, {@code mesh.traceroute}, {@code mesh.nodeinfo}, а также базовые
  * функции {@code mesh.log}, {@code mesh.now}, {@code mesh.owner},
  * {@code mesh.sleep}.
  *
@@ -87,6 +87,7 @@ public final class LuaSandboxApi {
         mesh.set("kv", new LuaKvApi(context).create());
         mesh.set("curl", new LuaCurlApi().create());
         mesh.set("ui", new LuaUiApi(context).create());
+        mesh.set("canvas", new LuaCanvasApi(context).create());
         mesh.set("traceroute", new LuaTracerouteApi(context).create());
         mesh.set("nodeinfo", new LuaNodeInfoApi(context).create());
         mesh.set("command", new ZeroArgFunction() {
