@@ -67,8 +67,8 @@ def visualVmSoftwareRenderingJvmArgs = {
 
 def baseRuntimeJvmArgs = {
 	return [
-		'-Xmx256m',
-		'-Xms256m',
+		'-Xmx512m',
+		'-Xms128m',
 		'-XX:+IgnoreUnrecognizedVMOptions',
 		'--sun-misc-unsafe-memory-access=allow',
 		'-XX:ErrorFile=%h/.meshapp/logs/diagnostics/active/hs_err_pid%p.log'
