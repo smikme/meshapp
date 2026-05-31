@@ -75,7 +75,7 @@ public final class LuaCanvasWindow {
     private final long scriptId;
     private final Consumer<LuaCanvasEvent> eventSink;
     private final Queue<LuaCanvasDrawCommand> drawQueue = new ConcurrentLinkedQueue<>();
-    private final AtomicBoolean drawFlushScheduled = new AtomicBoolean(false);
+    private final AtomicBoolean drawFlushRequestQueued = new AtomicBoolean(false);
     private final Set<String> pressedCodes = new HashSet<>();
 
     private Stage stage;
@@ -639,6 +639,7 @@ public final class LuaCanvasWindow {
             drawFlushDelay.stop();
             drawFlushDelay = null;
         }
+        drawFlushRequestQueued.set(false);
         drawQueue.clear();
         OPEN_WINDOWS.remove(scriptId, this);
         if (scene != null) {
@@ -649,12 +650,17 @@ public final class LuaCanvasWindow {
 
     private void enqueue(LuaCanvasDrawCommand command) {
         drawQueue.add(command);
-        if (drawFlushScheduled.compareAndSet(false, true)) {
+        requestDrawFlush();
+    }
+
+    private void requestDrawFlush() {
+        if (drawFlushRequestQueued.compareAndSet(false, true)) {
             Platform.runLater(this::scheduleDrawFlush);
         }
     }
 
     private void scheduleDrawFlush() {
+        drawFlushRequestQueued.set(false);
         if (drawFlushDelay == null) {
             drawFlushDelay = new PauseTransition(Duration.millis(DRAW_FLUSH_DELAY_MS));
             drawFlushDelay.setOnFinished(event -> flushDrawQueue());
@@ -663,7 +669,6 @@ public final class LuaCanvasWindow {
     }
 
     private void flushDrawQueue() {
-        drawFlushScheduled.set(false);
         if (canvas == null || !active) {
             drawQueue.clear();
             return;
@@ -673,8 +678,8 @@ public final class LuaCanvasWindow {
         while ((command = drawQueue.poll()) != null) {
             command.draw(gc);
         }
-        if (!drawQueue.isEmpty() && drawFlushScheduled.compareAndSet(false, true)) {
-            Platform.runLater(this::scheduleDrawFlush);
+        if (!drawQueue.isEmpty()) {
+            requestDrawFlush();
         }
     }
 
