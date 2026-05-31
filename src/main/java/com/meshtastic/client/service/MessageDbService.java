@@ -565,7 +565,7 @@ public final class MessageDbService {
         try (PreparedStatement ps = dbConnection.prepareStatement("""
                 SELECT owner_node_id, chat_type, chat_key, target_packet_id
                 FROM message_reactions
-                WHERE packet_id = ?
+                WHERE reaction_packet_id = ?
                 LIMIT 1
                 """)) {
             ps.setInt(1, packetId);
