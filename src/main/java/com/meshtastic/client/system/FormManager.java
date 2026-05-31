@@ -55,24 +55,6 @@ public class FormManager {
         showForm(form, true);
     }
 
-    /**
-     * Показывает временную форму, не запоминая ее как последнюю форму подключения.
-     *
-     * @param form форма для центральной области приложения
-     */
-    public static void showTransientForm(Form form) {
-        showForm(form, false);
-    }
-
-    /**
-     * Возвращает текущую форму центральной области приложения.
-     *
-     * @return активная форма или {@code null}, если навигация еще не инициализирована
-     */
-    public static Form getCurrentForm() {
-        return currentForm;
-    }
-
     private static void showForm(Form form, boolean rememberForConnection) {
         // Блокировать навигацию, пока открыто модальное окно
         ModalPane modal = ModalPane.getInstance();

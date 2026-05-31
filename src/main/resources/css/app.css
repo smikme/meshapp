@@ -1047,8 +1047,14 @@
 }
 
 /* Lua Canvas */
-.lua-canvas-form {
+.lua-canvas-root {
     -fx-background-color: -color-bg-default;
+}
+
+.lua-canvas-minimized-root {
+    -fx-background-color: rgba(0, 0, 0, 0.68);
+    -fx-border-color: rgba(255, 255, 255, 0.22);
+    -fx-border-width: 1;
 }
 
 .lua-canvas-host {
@@ -1056,6 +1062,60 @@
     -fx-background-radius: 8;
     -fx-border-color: -color-border-default;
     -fx-border-radius: 8;
+}
+
+.lua-canvas-minimized-badge {
+    -fx-background-color: transparent;
+    -fx-alignment: center;
+    -fx-cursor: move;
+}
+
+.lua-canvas-minimized-icon {
+    -fx-font-size: 2.1538em;
+    -fx-text-fill: white;
+}
+
+.lua-canvas-close-button {
+    -fx-background-color: rgba(0, 0, 0, 0.58);
+    -fx-background-radius: 14;
+    -fx-border-color: rgba(255, 255, 255, 0.18);
+    -fx-border-radius: 14;
+    -fx-border-width: 1;
+    -fx-alignment: center;
+    -fx-cursor: hand;
+}
+
+.lua-canvas-close-icon {
+    -fx-font-size: 1.0769em;
+    -fx-font-weight: bold;
+    -fx-text-fill: rgba(255, 255, 255, 0.9);
+}
+
+.lua-canvas-close-button:hover {
+    -fx-background-color: rgba(220, 38, 38, 0.88);
+    -fx-border-color: rgba(255, 255, 255, 0.28);
+}
+
+.lua-canvas-close-button:hover .lua-canvas-close-icon {
+    -fx-text-fill: white;
+}
+
+.light-theme .lua-canvas-close-button {
+    -fx-background-color: rgba(255, 255, 255, 0.82);
+    -fx-border-color: rgba(0, 0, 0, 0.16);
+}
+
+.light-theme .lua-canvas-close-icon {
+    -fx-text-fill: rgba(0, 0, 0, 0.78);
+}
+
+.light-theme .lua-canvas-close-button:hover {
+    -fx-background-color: rgba(220, 38, 38, 0.92);
+    -fx-border-color: rgba(0, 0, 0, 0.12);
+}
+
+.light-theme .lua-canvas-close-button:hover .lua-canvas-close-icon {
+    -fx-text-fill: white;
 }
 
 .muted-note-label {

@@ -1,6 +1,6 @@
 package com.meshtastic.client.lua;
 
-import com.meshtastic.client.forms.FormLuaCanvas;
+import com.meshtastic.client.components.LuaCanvasWindow;
 import com.meshtastic.client.lua.api.LuaSandboxApi;
 import com.meshtastic.client.lua.api.LuaSandboxContext;
 import com.meshtastic.client.lua.api.LuaValueMapper;
@@ -288,7 +288,7 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
     @Override
     public void openCanvas(LuaCanvasOptions options) {
         try {
-            FormLuaCanvas.showCanvas(script.getId(), script.getName(), options, this::handleCanvasEvent);
+            LuaCanvasWindow.showWindow(script.getId(), script.getName(), script.getIcon(), options, this::handleCanvasEvent);
             canvasOpen.set(true);
             scriptService.updateRunState(script.getId(), "RUNNING", null);
         } catch (RuntimeException error) {
@@ -302,7 +302,7 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
             return;
         }
         try {
-            FormLuaCanvas.closeCanvas(script.getId());
+            LuaCanvasWindow.closeWindow(script.getId());
         } catch (RuntimeException error) {
             throw new LuaError("mesh.canvas.close failed: " + error.getMessage());
         }
@@ -310,31 +310,31 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
 
     @Override
     public void enqueueCanvasDraw(LuaCanvasDrawCommand command) {
-        if (!canvasOpen.get() || !FormLuaCanvas.enqueueDraw(script.getId(), command)) {
+        if (!canvasOpen.get() || !LuaCanvasWindow.enqueueDraw(script.getId(), command)) {
             throw new LuaError("mesh.canvas: call mesh.canvas.open(...) before drawing");
         }
     }
 
     @Override
     public void setCanvasFrameRate(double fps) {
-        if (!canvasOpen.get() || !FormLuaCanvas.setFrameRate(script.getId(), fps)) {
+        if (!canvasOpen.get() || !LuaCanvasWindow.setFrameRate(script.getId(), fps)) {
             throw new LuaError("mesh.canvas: call mesh.canvas.open(...) before set_fps");
         }
     }
 
     @Override
     public LuaCanvasMouseState canvasMouseState() {
-        return FormLuaCanvas.mouseState(script.getId());
+        return LuaCanvasWindow.mouseState(script.getId());
     }
 
     @Override
     public LuaCanvasKeyState canvasKeyState() {
-        return FormLuaCanvas.keyState(script.getId());
+        return LuaCanvasWindow.keyState(script.getId());
     }
 
     @Override
     public LuaCanvasSize canvasSize() {
-        return FormLuaCanvas.size(script.getId());
+        return LuaCanvasWindow.size(script.getId());
     }
 
     void stop() {
@@ -1147,7 +1147,7 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
     private void cleanupCanvas() {
         if (canvasOpen.getAndSet(false)) {
             try {
-                FormLuaCanvas.closeCanvas(script.getId());
+                LuaCanvasWindow.closeWindow(script.getId());
             } catch (RuntimeException ignored) {
                 // JavaFX may already be shutting down.
             }

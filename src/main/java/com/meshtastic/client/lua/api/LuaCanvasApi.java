@@ -1,14 +1,19 @@
 package com.meshtastic.client.lua.api;
 
+import com.meshtastic.client.components.EmojiImageCache;
+import com.meshtastic.client.components.EmojiTextFlow;
 import com.meshtastic.client.lua.LuaCanvasBridge;
 import com.meshtastic.client.lua.LuaCanvasKeyState;
 import com.meshtastic.client.lua.LuaCanvasMouseState;
 import com.meshtastic.client.lua.LuaCanvasOptions;
 import com.meshtastic.client.lua.LuaCanvasSize;
+import com.meshtastic.client.utils.UnicodeTextUtils;
+import javafx.scene.image.Image;
 import javafx.scene.paint.Color;
 import javafx.scene.paint.Paint;
 import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
+import javafx.scene.text.Text;
 import org.luaj.vm2.LuaError;
 import org.luaj.vm2.LuaTable;
 import org.luaj.vm2.LuaValue;
@@ -17,6 +22,7 @@ import org.luaj.vm2.lib.OneArgFunction;
 import org.luaj.vm2.lib.VarArgFunction;
 import org.luaj.vm2.lib.ZeroArgFunction;
 
+import java.util.List;
 import java.util.Locale;
 
 /**
@@ -28,6 +34,8 @@ public final class LuaCanvasApi {
     private static final double DEFAULT_HEIGHT = 360;
     private static final double MAX_LINE_WIDTH = 128;
     private static final double MAX_FONT_SIZE = 256;
+    private static final double CANVAS_EMOJI_SIZE_RATIO = 1.2;
+    private static final double CANVAS_EMOJI_BASELINE_RATIO = 0.82;
 
     private final LuaSandboxContext context;
 
@@ -293,7 +301,7 @@ public final class LuaCanvasApi {
                 double x = finite(args.arg(2).checkdouble(), "x");
                 double y = finite(args.arg(3).checkdouble(), "y");
                 Color color = optionalColor(args.arg(4));
-                return enqueue(gc -> withFill(gc, color, () -> gc.fillText(text, x, y)));
+                return enqueue(gc -> withFill(gc, color, () -> fillText(gc, text, x, y)));
             }
         });
         canvas.set("stroke_text", new VarArgFunction() {
@@ -304,7 +312,7 @@ public final class LuaCanvasApi {
                 double y = finite(args.arg(3).checkdouble(), "y");
                 Color color = optionalColor(args.arg(4));
                 Double lineWidth = optionalLineWidth(args.arg(5));
-                return enqueue(gc -> withStroke(gc, color, lineWidth, () -> gc.strokeText(text, x, y)));
+                return enqueue(gc -> withStroke(gc, color, lineWidth, () -> strokeText(gc, text, x, y)));
             }
         });
         canvas.set("text", canvas.get("fill_text"));
@@ -461,6 +469,83 @@ public final class LuaCanvasApi {
         if (color != null) {
             gc.setStroke(oldStroke);
         }
+    }
+
+    private static void fillText(javafx.scene.canvas.GraphicsContext gc, String value, double x, double y) {
+        drawText(gc, value, x, y, false);
+    }
+
+    private static void strokeText(javafx.scene.canvas.GraphicsContext gc, String value, double x, double y) {
+        drawText(gc, value, x, y, true);
+    }
+
+    private static void drawText(javafx.scene.canvas.GraphicsContext gc,
+                                 String value,
+                                 double x,
+                                 double y,
+                                 boolean stroke) {
+        String text = UnicodeTextUtils.sanitizeForJavaFxDisplay(value);
+        if (text.isEmpty()) {
+            return;
+        }
+
+        List<EmojiTextFlow.Segment> segments = EmojiTextFlow.parseSegments(text);
+        if (!containsEmojiSegment(segments)) {
+            drawPlainText(gc, text, x, y, stroke);
+            return;
+        }
+
+        Font font = gc.getFont() != null ? gc.getFont() : Font.getDefault();
+        double emojiSize = Math.max(12, font.getSize() * CANVAS_EMOJI_SIZE_RATIO);
+        double cursorX = x;
+        for (EmojiTextFlow.Segment segment : segments) {
+            String segmentText = UnicodeTextUtils.sanitizeForJavaFxDisplay(segment.text());
+            if (segmentText.isEmpty()) {
+                continue;
+            }
+            if (segment.isEmoji()) {
+                Image image = EmojiImageCache.getImage(segmentText);
+                if (image != null) {
+                    gc.drawImage(
+                            image,
+                            cursorX,
+                            y - emojiSize * CANVAS_EMOJI_BASELINE_RATIO,
+                            emojiSize,
+                            emojiSize);
+                    cursorX += emojiSize;
+                    continue;
+                }
+            }
+            drawPlainText(gc, segmentText, cursorX, y, stroke);
+            cursorX += textWidth(segmentText, font);
+        }
+    }
+
+    private static boolean containsEmojiSegment(List<EmojiTextFlow.Segment> segments) {
+        for (EmojiTextFlow.Segment segment : segments) {
+            if (segment.isEmoji()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static void drawPlainText(javafx.scene.canvas.GraphicsContext gc,
+                                      String text,
+                                      double x,
+                                      double y,
+                                      boolean stroke) {
+        if (stroke) {
+            gc.strokeText(text, x, y);
+        } else {
+            gc.fillText(text, x, y);
+        }
+    }
+
+    private static double textWidth(String value, Font font) {
+        Text text = new Text(value);
+        text.setFont(font);
+        return text.getLayoutBounds().getWidth();
     }
 
     private static Color optionalColor(LuaValue value) {

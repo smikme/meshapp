@@ -189,8 +189,8 @@ end
 | `on_node_selected(event)` | После выбора или отмены выбора ноды через `mesh.ui.pick_node(...)` |
 | `on_traceroute(event)` | После результата `mesh.traceroute.request(...)` |
 | `on_node_info(event)` | После результата `mesh.nodeinfo.request(...)` |
-| `on_canvas_event(event)` | После события встроенной Canvas-формы: мышь, клавиатура, resize, open/close |
-| `on_canvas_frame(event)` | По таймеру Canvas-формы, если задан `fps` или вызван `mesh.canvas.set_fps(...)` |
+| `on_canvas_event(event)` | После события плавающего Canvas-окна: мышь, клавиатура, resize, open/close |
+| `on_canvas_frame(event)` | По таймеру Canvas-окна, если задан `fps` или вызван `mesh.canvas.set_fps(...)` |
 
 ## `mesh.chat`
 
@@ -245,12 +245,12 @@ HTTP(S)-запросы выполняются встроенным Java HTTP-к�
 
 ## `mesh.canvas`
 
-`mesh.canvas` открывает встроенную форму внутри основного окна приложения. Форма не добавляется в боковое меню и существует только пока её держит Lua-скрипт.
+`mesh.canvas` открывает плавающее изменяемое окно без системной рамки рядом с основным окном приложения. Окно не модальное, не добавляется в боковое меню и существует только пока его держит Lua-скрипт.
 
 | Функция | Возврат | Назначение |
 |---------|---------|------------|
-| `mesh.canvas.open(options)` | `true` | Показывает Canvas-форму |
-| `mesh.canvas.close()` | `true` | Закрывает Canvas-форму |
+| `mesh.canvas.open(options)` | `true` | Показывает Canvas-окно |
+| `mesh.canvas.close()` | `true` | Закрывает Canvas-окно |
 | `mesh.canvas.set_fps(fps)` | `true` | Включает/меняет частоту `on_canvas_frame(event)`, `0` выключает |
 | `mesh.canvas.size()` | `{width, height}` | Возвращает текущий размер холста |
 | `mesh.canvas.mouse()` | `canvas.mouse` | Возвращает текущее состояние мыши |
@@ -279,7 +279,7 @@ HTTP(S)-запросы выполняются встроенным Java HTTP-к�
 | `mesh.canvas.fill_text(text, x, y[, color])` | `true` | Рисует текст |
 | `mesh.canvas.stroke_text(text, x, y[, color[, line_width]])` | `true` | Рисует контур текста |
 
-Поля `options`: `title`, `width`, `height`, `background`, `resizable`, `fps`. По умолчанию форма растягивается в доступной области основного окна (`resizable = true`).
+Поля `options`: `title`, `width`, `height`, `background`, `resizable`, `fps`. По умолчанию Canvas масштабируется вместе с плавающим окном (`resizable = true`); размер меняется перетаскиванием краёв окна. Кнопка в правом верхнем углу закрывает окно после подтверждения. Двойной клик по верхней зоне переноса сворачивает окно в полупрозрачный квадрат с иконкой скрипта; двойной клик по квадрату восстанавливает прежний размер.
 
 Цвет можно передать строкой JavaFX/CSS (`"#ffcc00"`, `"rgba(255,0,0,0.5)"`, `"white"`) или таблицей `{r, g, b, a}`. Компоненты `r/g/b/a` принимаются в диапазоне `0..1` или `0..255`.
 
@@ -505,8 +505,6 @@ function on_canvas_event(event)
                 selected = i
             end
         end
-    elseif event.type == "key_pressed" and event.code == "Esc" then
-        mesh.canvas.close()
     end
     draw()
 end
