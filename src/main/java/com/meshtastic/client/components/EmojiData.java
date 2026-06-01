@@ -13,10 +13,14 @@ public class EmojiData {
     private EmojiData() {} // utility class
 
     /** Категория эмодзи */
-    public record Category(String id, String icon, String label, List<String> emojis) {}
+    public record Category(String id, String icon, List<String> emojis) {
+        public String labelKey() {
+            return "emoji.category." + id;
+        }
+    }
 
     private static final List<Category> CATEGORIES = List.of(
-        new Category("smileys", "\uD83D\uDE00", "Смайлики", List.of(
+        new Category("smileys", "\uD83D\uDE00", List.of(
             "😀","😃","😄","😁","😆","😅","🤣","😂","🙂","🙃",
             "😉","😊","😇","🥰","😍","🤩","😘","😗","😚","😙",
             "🥲","😋","😛","😜","🤪","😝","🤑","🤗","🤭","🤫",
@@ -29,7 +33,7 @@ public class EmojiData {
             "😤","😡","😠","🤬","😈","👿","💀","☠️","💩","🤡",
             "👹","👺","👻","👽","👾","🤖"
         )),
-        new Category("people", "\uD83D\uDC4B", "Люди", List.of(
+        new Category("people", "\uD83D\uDC4B", List.of(
             "👋","🤚","🖐️","✋","🖖","🫱","🫲","🫳","🫴","👌",
             "🤌","🤏","✌️","🤞","🫰","🤟","🤘","🤙","👈","👉",
             "👆","🖕","👇","☝️","🫵","👍","👎","✊","👊","🤛",
@@ -37,7 +41,7 @@ public class EmojiData {
             "🦵","🦶","👂","👃","🧠","🫁","🦷","🦴","👀","👁️",
             "👅","👄","💋","👶","👧","🧒","👦","👩","🧑","👨"
         )),
-        new Category("nature", "\uD83D\uDC3B", "Природа", List.of(
+        new Category("nature", "\uD83D\uDC3B", List.of(
             "🐶","🐱","🐭","🐹","🐰","🐇","🦊","🐻","🐼","🐻‍❄️","🐨",
             "🐯","🦁","🐮","🐷","🐸","🐵","🙈","🙉","🙊","🐔",
             "🐧","🐦","🐤","🦆","🦅","🦉","🦇","🐺","🐗","🐴",
@@ -48,7 +52,7 @@ public class EmojiData {
             "🌴","🌵","🍀","🍁","🍂","🍃","☀️","🌤️","⛅","🌧️",
             "⛈️","🌩️","❄️","💨","🌈","⭐","🌙","🔥"
         )),
-        new Category("food", "\uD83C\uDF54", "Еда", List.of(
+        new Category("food", "\uD83C\uDF54", List.of(
             "🍎","🍐","🍊","🍋","🍌","🍉","🍇","🍓","🫐","🍈",
             "🍒","🍑","🥭","🍍","🥥","🥝","🍅","🍆","🥑","🥦",
             "🥬","🥒","🌶️","🫑","🌽","🥕","🧄","🧅","🥔","🍠",
@@ -60,7 +64,7 @@ public class EmojiData {
             "🍩","🍪","☕","🍵","🧃","🥤","🍶","🍺","🍻","🥂",
             "🍷","🍸","🍹","🧉"
         )),
-        new Category("travel", "\u2708\uFE0F", "Путешествия", List.of(
+        new Category("travel", "\u2708\uFE0F", List.of(
             "🚗","🚕","🚌","🚎","🚐","🚑","🚒","🚓","🚔","🚍",
             "🚘","🚖","🛻","🚚","🚛","🚜","🏎️","🏍️","🛵","🚲",
             "🛴","🛹","🛼","🚁","✈️","🛩️","🛸","🚀","🛶","⛵",
@@ -69,7 +73,7 @@ public class EmojiData {
             "⛰️","🌋","🗻","🏕️","🏖️","🏜️","🏝️","🌅","🌄","🌠",
             "🎆","🎇","🏙️","🌃","🌉","🌁"
         )),
-        new Category("activities", "\u26BD", "Активности", List.of(
+        new Category("activities", "\u26BD", List.of(
             "⚽","🏀","🏈","⚾","🥎","🎾","🏐","🏉","🥏","🎱",
             "🏓","🏸","🏒","🥊","🥋","🥅","⛳","⛸️","🎣","🤿",
             "🎿","🛷","🎯","🪁","🎮","🕹️","🎰","🧩","🎲","♟️",
@@ -77,7 +81,7 @@ public class EmojiData {
             "🎺","🪗","🎸","🎻","🎪","🎗️","🏆","🥇","🥈","🥉",
             "🏅","🎖️","🎁","🎀","🎊","🎉","🎈"
         )),
-        new Category("objects", "\uD83D\uDCA1", "Объекты", List.of(
+        new Category("objects", "\uD83D\uDCA1", List.of(
             "📱","💻","⌨️","🖥️","🖨️","🖱️","💾","💿","📀","🎥",
             "📷","📸","📹","📼","🔍","🔎","💡","🔦","🏮","📔",
             "📕","📖","📗","📘","📙","📚","📓","📒","📰","📄",
@@ -89,7 +93,7 @@ public class EmojiData {
             "⚰️","🪦","🗿","🏧","🔑","🗝️","🛡️","⚔️","🔫","🪃",
             "🏹","⚒️"
         )),
-        new Category("symbols", "\u2764\uFE0F", "Символы", List.of(
+        new Category("symbols", "\u2764\uFE0F", List.of(
             "❤️","🧡","💛","💚","💙","💜","🖤","🤍","🤎","💔",
             "❤️‍🔥","❤️‍🩹","❣️","💕","💞","💓","💗","💖","💘","💝",
             "💟","☮️","✝️","☪️","🕉️","☸️","✡️","🔯","🕎","☯️",
@@ -490,7 +494,7 @@ public class EmojiData {
     public static Set<String> getAllEmojis() { return ALL_EMOJIS; }
 
     /**
-     * Поиск эмодзи по русским ключевым словам (substring match).
+     * Поиск эмодзи по русским ключевым словам и английским Unicode-именам (substring match).
      * Возвращает уникальные эмодзи в порядке категорий.
      */
     public static List<String> search(String query) {
@@ -502,18 +506,36 @@ public class EmojiData {
         for (Category cat : CATEGORIES) {
             for (String emoji : cat.emojis()) {
                 if (seen.contains(emoji)) { continue; }
-                List<String> kws = KEYWORDS.get(emoji);
-                if (kws != null) {
-                    for (String kw : kws) {
-                        if (kw.contains(q)) {
-                            results.add(emoji);
-                            seen.add(emoji);
-                            break;
-                        }
-                    }
+                if (matchesQuery(emoji, q)) {
+                    results.add(emoji);
+                    seen.add(emoji);
                 }
             }
         }
         return results;
+    }
+
+    private static boolean matchesQuery(String emoji, String query) {
+        if (emoji.contains(query)) {
+            return true;
+        }
+        List<String> keywords = KEYWORDS.get(emoji);
+        if (keywords != null) {
+            for (String keyword : keywords) {
+                if (keyword.contains(query)) {
+                    return true;
+                }
+            }
+        }
+        return englishUnicodeName(emoji).contains(query);
+    }
+
+    private static String englishUnicodeName(String emoji) {
+        StringBuilder names = new StringBuilder();
+        emoji.codePoints()
+                .mapToObj(Character::getName)
+                .filter(Objects::nonNull)
+                .forEach(name -> names.append(' ').append(name.toLowerCase(java.util.Locale.ROOT)));
+        return names.toString();
     }
 }

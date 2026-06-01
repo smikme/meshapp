@@ -1,5 +1,6 @@
 package com.meshtastic.client.components;
 
+import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.utils.UnicodeTextUtils;
 import javafx.geometry.Bounds;
 import javafx.geometry.Insets;
@@ -63,7 +64,7 @@ public class EmojiPicker {
 
         // Поиск
         searchField = new TextField();
-        searchField.setPromptText("Поиск emoji...");
+        searchField.setPromptText(I18n.t("emoji.search.placeholder"));
         searchField.getStyleClass().add("emoji-picker-search");
         searchField.textProperty().addListener((obs, old, val) -> onSearchChanged(val));
         searchField.setOnKeyPressed(e -> {
@@ -159,13 +160,13 @@ public class EmojiPicker {
         List<String> recent = EmojiRecentStore.getRecent();
         if (!recent.isEmpty()) {
             categoryBar.getChildren().add(
-                    createCategoryButton("recent", RECENT_CATEGORY_ICON, "Недавние"));
+                    createCategoryButton("recent", RECENT_CATEGORY_ICON, I18n.t("emoji.category.recent")));
         }
 
         // Кнопки остальных категорий
         for (EmojiData.Category cat : EmojiData.getCategories()) {
             categoryBar.getChildren().add(
-                    createCategoryButton(cat.id(), cat.icon(), cat.label()));
+                    createCategoryButton(cat.id(), cat.icon(), I18n.t(cat.labelKey())));
         }
     }
 
