@@ -8,7 +8,7 @@ import java.net.URI;
 import java.util.List;
 
 /**
- * Открывает внешние URL через нативные системные команды, не затрагивая AWT/Desktop.
+ * Opens external URLs through native system commands without touching AWT Desktop.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */

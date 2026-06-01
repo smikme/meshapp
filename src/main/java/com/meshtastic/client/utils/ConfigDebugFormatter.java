@@ -6,7 +6,7 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 /**
- * Вспомогательное форматирование для отладки проблем сохранения конфигурации.
+ * Formatting helpers for diagnosing configuration-save failures.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */

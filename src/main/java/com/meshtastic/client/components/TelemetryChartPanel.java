@@ -35,10 +35,11 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 /**
- * Переиспользуемый компонент: AreaChart телеметрии + панель фильтра по периоду.
+ * Reusable telemetry component containing an {@code AreaChart} and a period filter.
  * <p>
- * Используется в FormDashboard (телеметрия локальной ноды) и в FormNodes (телеметрия выбранной ноды).
- * Жизненный цикл: {@link #bind(DeviceState, String)} / {@link #unbind()}.
+ * Used by the dashboard for the local node and by node details for a selected
+ * node. The lifecycle is {@link #bind(DeviceState, String)} followed by
+ * {@link #unbind()}.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -78,10 +79,10 @@ public class TelemetryChartPanel extends VBox {
     private BindingState bindingState = Unbound.INSTANCE;
     private final Runnable telemetryListener = () -> Platform.runLater(this::refresh);
 
-    /** Callback, вызываемый после обновления данных (для синхронизации таблицы логов) */
+    /** Callback invoked after data refresh, used to synchronize the log table. */
     private Runnable onDataRefreshed = () -> {};
 
-    /** Последние отфильтрованные записи (для использования в таблице логов) */
+    /** Last filtered entries, reused by the log table. */
     private List<TelemetryEntry> filteredEntries = List.of();
 
     private record PeriodOption(String labelKey, long seconds) {}
@@ -128,17 +129,17 @@ public class TelemetryChartPanel extends VBox {
     }
 
     /**
-     * Устанавливает callback, вызываемый после каждого обновления данных графика.
-     * Используется FormDashboard для синхронизации таблицы логов.
+     * Sets the callback invoked after each chart data refresh.
+     * The dashboard uses it to synchronize its log table.
      */
     public void setOnDataRefreshed(Runnable callback) {
         onDataRefreshed = Objects.requireNonNullElse(callback, () -> {});
     }
 
     /**
-     * Привязать компонент к состоянию устройства и идентификатору ноды.
-     * Подписывается на обновления телеметрии и загружает данные.
-     * Если уже привязан к тому же state и nodeId — просто обновляет данные без переподписки.
+     * Binds the component to a device state and node id.
+     * It subscribes to telemetry updates and loads data. If the same state and
+     * node id are already bound, data is refreshed without resubscribing.
      */
     public void bind(DeviceState state, String nodeId) {
         Bound nextBinding = new Bound(
@@ -158,7 +159,7 @@ public class TelemetryChartPanel extends VBox {
     }
 
     /**
-     * Отвязать от текущего DeviceState и очистить график.
+     * Unbinds the current device state and clears the chart.
      */
     public void unbind() {
         currentBinding().ifPresent(bound -> bound.state().removeTelemetryListener(telemetryListener));
@@ -168,8 +169,7 @@ public class TelemetryChartPanel extends VBox {
     }
 
     /**
-     * Возвращает последние отфильтрованные записи телеметрии.
-     * Используется FormDashboard для таблицы логов.
+     * Returns the latest filtered telemetry entries for the dashboard log table.
      */
     public List<TelemetryEntry> getFilteredEntries() {
         return filteredEntries;
@@ -358,7 +358,7 @@ public class TelemetryChartPanel extends VBox {
     }
 
     /**
-     * Оборачивает AreaChart в StackPane и накладывает вертикальный курсор + label.
+     * Wraps the AreaChart in a StackPane and overlays the vertical cursor and label.
      */
     private StackPane wrapWithOverlay(AreaChart<Number, Number> areaChart) {
         Line crosshair = new Line();
@@ -383,8 +383,9 @@ public class TelemetryChartPanel extends VBox {
     }
 
     /**
-     * Устанавливает обработчики мыши на plot-area графика.
-     * Используем Platform.runLater чтобы chart.lookup() работал после добавления в Scene Graph.
+     * Installs mouse handlers on the chart plot area.
+     * {@link Platform#runLater(Runnable)} is used so {@code chart.lookup()} runs
+     * after the chart is attached to the scene graph.
      */
     private void installCrosshair(AreaChart<Number, Number> areaChart,
                                   Line crosshair,
@@ -489,7 +490,7 @@ public class TelemetryChartPanel extends VBox {
     }
 
     /**
-     * Находит ближайшую по оси X точку в серии.
+     * Finds the closest point in a series along the X axis.
      */
     private static Optional<XYChart.Data<Number, Number>> findNearest(XYChart.Series<Number, Number> series,
                                                                       long targetEpoch) {

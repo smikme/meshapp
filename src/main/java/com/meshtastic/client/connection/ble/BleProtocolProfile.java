@@ -5,10 +5,10 @@ import com.meshtastic.client.model.ProtocolType;
 import java.util.List;
 
 /**
- * BLE GATT profile, который описывает UUID и framing rules для protocol runtime-а.
+ * BLE GATT profile describing UUIDs and framing rules for a protocol runtime.
  * <p>
- * Это transport-level профиль BLE-подключения, а не отдельный communication protocol:
- * MeshCore Companion остаётся одним protocol type для BLE, TCP и Serial.
+ * This is a transport-level BLE profile, not a separate communication protocol:
+ * MeshCore Companion remains one protocol type across BLE, TCP, and Serial.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -62,25 +62,25 @@ public enum BleProtocolProfile {
     }
 
     /**
-     * Возвращает код profile-а для native BLE backend-ов.
+     * Returns the profile code used by native BLE backends.
      *
-     * @return {@code 0} для Meshtastic, {@code 1} для MeshCore Companion
+     * @return {@code 0} for Meshtastic, {@code 1} for MeshCore Companion
      */
     public int nativeCode() {
         return nativeCode;
     }
 
     /**
-     * Возвращает communication protocol, связанный с BLE profile-ом.
+     * Returns the communication protocol associated with this BLE profile.
      *
-     * @return protocol type, связанный с profile-ом
+     * @return associated protocol type
      */
     public ProtocolType protocolType() {
         return protocolType;
     }
 
     /**
-     * Возвращает человекочитаемое имя profile-а для логов и UI.
+     * Returns a human-readable profile name for logs and UI.
      *
      * @return display name
      */
@@ -89,82 +89,82 @@ public enum BleProtocolProfile {
     }
 
     /**
-     * Возвращает список BLE service UUID, по которым выполняется scan/connect.
+     * Returns BLE service UUIDs used for scanning and connecting.
      *
-     * @return immutable список UUID строк
+     * @return immutable list of UUID strings
      */
     public List<String> serviceUuids() {
         return serviceUuids;
     }
 
     /**
-     * Возвращает основной service UUID profile-а.
+     * Returns the primary service UUID for this profile.
      *
-     * @return первый service UUID или {@code null}, если profile не задаёт конкретный service
+     * @return first service UUID, or {@code null} when the profile has no fixed service
      */
     public String primaryServiceUuid() {
         return serviceUuids.isEmpty() ? null : serviceUuids.get(0);
     }
 
     /**
-     * Возвращает UUID characteristic, из которой приходят данные от устройства.
+     * Returns the characteristic UUID used for inbound data from the device.
      *
-     * @return inbound characteristic UUID или {@code null}
+     * @return inbound characteristic UUID, or {@code null}
      */
     public String inboundCharacteristicUuid() {
         return inboundCharacteristicUuid;
     }
 
     /**
-     * Возвращает UUID characteristic, в которую приложение пишет данные.
+     * Returns the characteristic UUID the application writes to.
      *
-     * @return outbound characteristic UUID или {@code null}
+     * @return outbound characteristic UUID, or {@code null}
      */
     public String outboundCharacteristicUuid() {
         return outboundCharacteristicUuid;
     }
 
     /**
-     * Возвращает UUID characteristic, запись в которую инициирует notify/read flow.
+     * Returns the characteristic UUID whose write starts the notify/read flow.
      *
-     * @return UUID trigger characteristic или {@code null}, если profile использует direct notifications
+     * @return trigger characteristic UUID, or {@code null} for direct notifications
      */
     public String notifyTriggerCharacteristicUuid() {
         return notifyTriggerCharacteristicUuid;
     }
 
     /**
-     * Проверяет, нужен ли profile-у отдельный trigger characteristic.
+     * Returns whether this profile needs a separate trigger characteristic.
      *
-     * @return {@code true}, если notify/read flow требует отдельной записи-trigger-а
+     * @return {@code true} when notify/read flow requires a trigger write
      */
     public boolean hasNotifyTriggerCharacteristic() {
         return notifyTriggerCharacteristicUuid != null && !notifyTriggerCharacteristicUuid.isBlank();
     }
 
     /**
-     * Проверяет, нужно ли оборачивать payload в Meshtastic serial frame перед BLE write.
+     * Returns whether payloads must be wrapped in a Meshtastic serial frame before BLE writes.
      *
-     * @return {@code true} для Meshtastic BLE profile-а
+     * @return {@code true} for the Meshtastic BLE profile
      */
     public boolean usesSerialFramePayload() {
         return serialFramePayload;
     }
 
     /**
-     * Проверяет, приходят ли входящие данные напрямую через notifications inbound characteristic.
+     * Returns whether inbound data arrives directly through notifications.
      *
-     * @return {@code true}, если отдельный notify trigger не используется
+     * @return {@code true} when no separate notify trigger is used
      */
     public boolean usesDirectInboundNotifications() {
         return !hasNotifyTriggerCharacteristic();
     }
 
     /**
-     * Подбирает BLE profile для выбранного communication protocol.
+     * Selects the BLE profile for a connection protocol type.
      *
-     * @param protocolType protocol type из профиля подключения
-     * @return BLE profile, который нужно использовать при connect-е
+     * @param protocolType protocol type from the connection profile
+     * @return BLE profile to use for the connection
      */
     public static BleProtocolProfile forProtocol(ProtocolType protocolType) {
         if (protocolType == null) {

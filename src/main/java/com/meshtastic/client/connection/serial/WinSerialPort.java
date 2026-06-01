@@ -7,15 +7,16 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Windows-реализация serial-порта через kernel32.dll (JNA).
+ * Windows serial-port implementation backed by kernel32.dll through JNA.
  * <p>
- * Открывает COM-порт через {@code CreateFileW} с {@code FILE_FLAG_OVERLAPPED}
- * для параллельного чтения и записи, и настраивает DCB с
+ * Opens the COM port with {@code CreateFileW} and {@code FILE_FLAG_OVERLAPPED}
+ * for parallel reads and writes, then configures the DCB according to the
  * modem-line policy selected by {@link SerialModemLinePolicy}.
  * <p>
  * DTR is kept disabled for USB-UART bridges so ESP32 auto-reset circuits are not
  * triggered on every open/reconnect; RTS follows the selected adapter policy.
- * {@code fAbortOnError = 0} → I/O не блокируется при ошибках драйвера.
+ * {@code fAbortOnError = 0} keeps I/O from getting stuck after driver-reported
+ * communication errors.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -38,8 +39,8 @@ class WinSerialPort implements NativeSerialPort {
     private static final int WAIT_FAILED = 0xFFFFFFFF;
 
     // OVERLAPPED structure: 5 fields (Internal, InternalHigh, Offset, OffsetHigh, hEvent)
-    // На 64-bit Windows: ULONG_PTR (8) + ULONG_PTR (8) + DWORD (4) + DWORD (4) + HANDLE (8) = 32 bytes
-    // На 32-bit: ULONG_PTR (4) + ULONG_PTR (4) + DWORD (4) + DWORD (4) + HANDLE (4) = 20 bytes
+    // 64-bit Windows: ULONG_PTR (8) + ULONG_PTR (8) + DWORD (4) + DWORD (4) + HANDLE (8) = 32 bytes.
+    // 32-bit Windows: ULONG_PTR (4) + ULONG_PTR (4) + DWORD (4) + DWORD (4) + HANDLE (4) = 20 bytes.
     private static final int OVERLAPPED_SIZE = Native.POINTER_SIZE == 8 ? 32 : 20;
     private static final int OVERLAPPED_EVENT_OFFSET = Native.POINTER_SIZE == 8 ? 24 : 16;
 
@@ -117,7 +118,7 @@ class WinSerialPort implements NativeSerialPort {
     private volatile Pointer handle;
     private volatile boolean open;
 
-    // Отдельные event-объекты для read и write — позволяют работать параллельно
+    // Separate read/write event objects allow both directions to operate in parallel.
     private Pointer readEvent;
     private Pointer writeEvent;
 
@@ -130,8 +131,8 @@ class WinSerialPort implements NativeSerialPort {
         this.modemLinePolicy = modemLinePolicy;
         String path = portName.startsWith("\\\\.\\") ? portName : "\\\\.\\" + portName;
 
-        // FILE_FLAG_OVERLAPPED — критично для параллельного read/write.
-        // Без этого ReadFile блокирует WriteFile на ~500мс (read timeout).
+        // FILE_FLAG_OVERLAPPED is required for parallel read/write.
+        // Without it, ReadFile blocks WriteFile for roughly one read timeout.
         Pointer h = K32.INSTANCE.CreateFileW(
                 new WString(path),
                 GENERIC_READ | GENERIC_WRITE,
@@ -185,9 +186,9 @@ class WinSerialPort implements NativeSerialPort {
         dcb.setByte(DCB_OFF_PARITY, (byte) 0);   // NOPARITY
         dcb.setByte(DCB_OFF_STOPBITS, (byte) 0);  // ONESTOPBIT
 
-        // fFlags: выставляем ВСЕ биты явно (не read-modify-write!).
-        // Критично: драйвер CH340 может оставить fAbortOnError=1 по умолчанию,
-        // что блокирует ВСЁ I/O после любой ошибки на порту.
+        // fFlags: set every bit explicitly; do not use read-modify-write here.
+        // CH340 drivers may leave fAbortOnError=1 by default, which blocks all
+        // I/O after any port error.
         //
         // DTR: ENABLE for native USB CDC, DISABLE for USB-UART bridges.
         // RTS: controlled by adapter policy; common CP210x bridges need it asserted.
@@ -209,12 +210,11 @@ class WinSerialPort implements NativeSerialPort {
     private void configureTimeouts() throws ConnectionException {
         Memory ct = new Memory(CT_SIZE);
         ct.clear();
-        // Для overlapped I/O все таймауты = 0:
-        // ReadFile/WriteFile возвращают IO_PENDING, реальный таймаут
-        // контролируется через WaitForSingleObject на event-объектах.
-        // Если задать MAXDWORD/MAXDWORD/N — драйвер завершает операцию
-        // с 0 байтами немедленно при пустом буфере, event сигнализируется
-        // сразу, и WaitForSingleObject никогда не ждёт реальных данных.
+        // For overlapped I/O, all COMMTIMEOUTS values must be zero:
+        // ReadFile/WriteFile return IO_PENDING and the real timeout is enforced
+        // by WaitForSingleObject on the event handles. With MAXDWORD/MAXDWORD/N,
+        // some drivers complete immediately with 0 bytes when the buffer is empty,
+        // signal the event at once, and WaitForSingleObject never waits for data.
         ct.setInt(0, 0);   // ReadIntervalTimeout = 0
         ct.setInt(4, 0);   // ReadTotalTimeoutMultiplier = 0
         ct.setInt(8, 0);   // ReadTotalTimeoutConstant = 0
@@ -231,8 +231,8 @@ class WinSerialPort implements NativeSerialPort {
         Pointer h = handle;
         if (h == null || !open) return -1;
 
-        // Первый байт ждём одним overlapped ReadFile с timeout.
-        // Это убирает постоянный polling через ClearCommError на пустом порту.
+        // Wait for the first byte with one timed overlapped ReadFile.
+        // This avoids constant ClearCommError polling on an idle port.
         int totalRead = readChunk(h, buf, 0, 1, timeoutMs);
         if (totalRead <= 0) {
             return totalRead;
@@ -267,14 +267,15 @@ class WinSerialPort implements NativeSerialPort {
     }
 
     /**
-     * Выполняет один overlapped read для указанного чанка.
-     * timeoutMs=0 используется только для уже накопившегося хвоста после первого байта.
+     * Performs one overlapped read for the requested chunk.
+     * timeoutMs=0 is used only for bytes already buffered after the first byte.
      */
     private int readChunk(Pointer h, byte[] buf, int offset, int len, int timeoutMs) {
-        // Нативный буфер (Memory) живёт до конца метода — ReadFile пишет в него
-        // асинхронно, и данные будут на месте когда GetOverlappedResult вернёт управление.
-        // Нельзя передавать byte[] в overlapped ReadFile — JNA освободит временный
-        // нативный буфер до завершения I/O, и данные пропадут (все нули).
+        // The native Memory buffer lives until the method returns. ReadFile writes
+        // into it asynchronously, and the data is still present when
+        // GetOverlappedResult completes. Passing byte[] to overlapped ReadFile is
+        // unsafe: JNA may release the temporary native buffer before I/O completes,
+        // leaving the caller with zeroed or missing data.
         Memory nativeBuf = new Memory(len);
 
         Memory ovl = new Memory(OVERLAPPED_SIZE);
@@ -312,8 +313,8 @@ class WinSerialPort implements NativeSerialPort {
     }
 
     /**
-     * Возвращает количество входящих байт, уже буферизованных драйвером.
-     * Нужен для быстрого дочитывания хвоста после первого успешного байта.
+     * Returns the number of incoming bytes already buffered by the driver.
+     * Used to quickly drain the tail after the first successful byte.
      */
     private int bytesAvailable(Pointer h) {
         Memory stat = new Memory(COMSTAT_SIZE);
@@ -337,12 +338,12 @@ class WinSerialPort implements NativeSerialPort {
     }
 
     /**
-     * Завершает timed-out overlapped read.
+     * Completes an overlapped read that timed out.
      * <p>
-     * На Windows отмена может вернуть уже полученные байты, если устройство успело
-     * дописать их между {@code WAIT_TIMEOUT} и фактической отменой операции.
-     * Их нельзя терять: выпадение даже нескольких байт рвёт Meshtastic frame и
-     * даёт protobuf parse errors / потерю ACK при рабочем канале записи.
+     * On Windows, cancellation can still return bytes that arrived between
+     * {@code WAIT_TIMEOUT} and the actual cancellation. Those bytes must not be
+     * dropped: losing even a few can break a Meshtastic frame and lead to
+     * protobuf parse errors or lost ACKs while writes still appear healthy.
      */
     private int finishTimedOutRead(Pointer h, Memory ovl, Memory nativeBuf,
                                    byte[] buf, int offset, IntByReference bytesRead) {
@@ -372,8 +373,8 @@ class WinSerialPort implements NativeSerialPort {
             throw new ConnectionException("Port is closed");
         }
 
-        // Нативный буфер для overlapped WriteFile — аналогично read(),
-        // byte[] нельзя передавать в асинхронную операцию.
+        // Native buffer for overlapped WriteFile, for the same lifetime reason
+        // as read(): byte[] must not be passed to asynchronous I/O.
         Memory nativeBuf = new Memory(len);
         nativeBuf.write(0, data, offset, len);
 

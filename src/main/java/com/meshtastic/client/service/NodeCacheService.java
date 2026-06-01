@@ -19,18 +19,18 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Локальный персистентный кэш нод.
+ * Local persistent node cache.
  * <p>
- * Хранит накопленную информацию о нодах между сессиями приложения
- * в H2 embedded БД {@code ~/.meshapp/nodedb}. Используется как fallback
- * когда в {@link com.meshtastic.client.model.DeviceState#getNodeDb()} нет данных.
+ * Stores accumulated node information between application sessions in the
+ * embedded H2 database {@code ~/.meshapp/nodedb}. Used as a fallback when
+ * {@link com.meshtastic.client.model.DeviceState#getNodeDb()} has no data.
  * <p>
- * Ключ — {@code node_id} (строка вида {@code !9e755af0}), стабильный
- * идентификатор ноды из {@code User.id} протокола Meshtastic.
+ * The key is {@code node_id}, a string such as {@code !9e755af0}, which is the
+ * stable node identifier from Meshtastic {@code User.id}.
  * <p>
- * Обновляется при получении данных через config exchange и live-пакеты
- * (NODEINFO_APP, POSITION_APP, TELEMETRY_APP). Запись в БД происходит
- * немедленно (MERGE INTO), без debounce.
+ * Updated from config exchange data and live packets (NODEINFO_APP,
+ * POSITION_APP, TELEMETRY_APP). Database writes happen immediately through
+ * MERGE INTO, without debounce.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -68,7 +68,7 @@ public final class NodeCacheService {
     }
 
     // ═══════════════════════════════════════════════════════════
-    //  Инициализация БД
+    // Database initialization.
     // ═══════════════════════════════════════════════════════════
 
     private void initDb() {
@@ -190,27 +190,27 @@ public final class NodeCacheService {
     }
 
     // ═══════════════════════════════════════════════════════════
-    //  Чтение
+    // Reads.
     // ═══════════════════════════════════════════════════════════
 
     /**
-     * Возвращает ноду из in-memory кэша или H2 по node_id.
-     * Ленивая загрузка из БД, если в памяти нет — результат кэшируется.
+     * Returns a node by node_id from the in-memory cache or H2.
+     * If the node is not in memory, it is loaded lazily from the database and cached.
      */
     public NodeData get(String nodeId) {
         return getCachedOrLoad(nodeId, false);
     }
 
     /**
-     * Convenience: поиск ноды по node_num (конвертируется в node_id).
-     * Используется в местах, где доступен только числовой идентификатор.
+     * Convenience lookup by node_num, converted to node_id.
+     * Used where only the numeric identifier is available.
      */
     public NodeData getByNum(int nodeNum) {
         return get(String.format("!%08x", nodeNum));
     }
 
     /**
-     * Загружает одну ноду из БД по node_id.
+     * Loads one node from the database by node_id.
      */
     private NodeData loadFromDb(String nodeId) {
         if (dbConnection == null || nodeId == null) { return null; }
@@ -227,26 +227,26 @@ public final class NodeCacheService {
     }
 
     /**
-     * Возвращает все ноды из кэша.
+     * Returns all nodes from the cache.
      */
     public Collection<NodeData> getAll() {
         return cache.values();
     }
 
     /**
-     * Возвращает количество нод в кэше.
+     * Returns the number of nodes in the cache.
      */
     public int size() {
         return cache.size();
     }
 
     /**
-     * Возвращает страницу нод из БД, отсортированных по {@code last_heard DESC}.
-     * Используется для пагинации на вкладке «Кэш».
+     * Returns one page of nodes from the database, sorted by {@code last_heard DESC}.
+     * Used for pagination on the Cache tab.
      *
-     * @param offset смещение (количество пропущенных строк)
-     * @param limit  максимальное количество строк на странице
-     * @return список нод для указанной страницы (может быть пустым)
+     * @param offset number of rows to skip
+     * @param limit  maximum number of rows on the page
+     * @return nodes for the requested page, possibly empty
      */
     public List<NodeData> loadPage(int offset, int limit) {
         List<NodeData> page = new ArrayList<>();
@@ -267,9 +267,9 @@ public final class NodeCacheService {
     }
 
     /**
-     * Возвращает общее количество нод в БД.
+     * Returns the total number of nodes in the database.
      *
-     * @return количество записей в таблице {@code nodes}
+     * @return number of rows in the {@code nodes} table
      */
     public int countNodesInDb() {
         if (dbConnection == null) { return 0; }
@@ -283,14 +283,15 @@ public final class NodeCacheService {
     }
 
     // ═══════════════════════════════════════════════════════════
-    //  Запись (merge)
+    // Writes (merge).
     // ═══════════════════════════════════════════════════════════
 
     /**
-     * Обновляет ноду в кэше и БД. Применяет merge — новые непустые поля
-     * перезаписывают старые, нулевые/пустые поля не затирают имеющиеся данные.
+     * Updates a node in the cache and database. Merge semantics apply: new
+     * non-empty fields overwrite old ones, while zero/empty fields do not erase
+     * existing data.
      *
-     * @param fresh свежие данные для merge (nodeId берётся из fresh)
+     * @param fresh fresh data to merge; nodeId is taken from {@code fresh}
      */
     public void update(NodeData fresh) {
         if (fresh == null) { return; }
@@ -312,10 +313,10 @@ public final class NodeCacheService {
     }
 
     /**
-     * Массовое обновление нод (после config exchange).
-     * Для каждой ноды выполняется merge с кэшем, затем batch-запись в БД.
+     * Bulk node update, usually after config exchange.
+     * Each node is merged with the cache, then written to the database in a batch.
      *
-     * @param nodes карта нод из {@code DeviceState.getNodeDb()}
+     * @param nodes node map from {@code DeviceState.getNodeDb()}
      */
     public void updateAll(Map<Integer, NodeData> nodes) {
         Set<String> persistIds = new HashSet<>();
@@ -343,12 +344,12 @@ public final class NodeCacheService {
     }
 
     /**
-     * Обогащает bare-ноду (без имени) данными из кэша/H2.
-     * Заполняет только identity-поля (longName, shortName, role, hwModel, publicKey),
-     * если они отсутствуют у ноды. Телеметрию и позицию не трогает —
-     * у ноды уже есть свежие данные от устройства.
+     * Enriches a bare node, such as one without a name, from cache/H2 data.
+     * Only missing identity fields are filled: longName, shortName, role, hwModel,
+     * and publicKey. Telemetry and position are left untouched because the node
+     * already has fresh data from the device.
      *
-     * @param node нода из DeviceState для обогащения
+     * @param node DeviceState node to enrich
      */
     public void enrichFromCache(NodeData node) {
         if (node == null) { return; }
@@ -388,7 +389,7 @@ public final class NodeCacheService {
     }
 
     /**
-     * Полностью очищает кэш: удаляет все записи из H2 и in-memory кэша.
+     * Fully clears the cache: removes all rows from H2 and the in-memory cache.
      */
     public synchronized void clearAll() {
         cache.clear();
@@ -402,7 +403,7 @@ public final class NodeCacheService {
         }
     }
 
-    /** Удалить конкретную ноду и её телеметрию из кэша и БД. */
+    /** Deletes a specific node and its telemetry from cache and database. */
     public synchronized void deleteNode(String nodeId) {
         if (nodeId == null) { return; }
         cache.remove(nodeId);
@@ -421,12 +422,12 @@ public final class NodeCacheService {
     }
 
     // ═══════════════════════════════════════════════════════════
-    //  Избранные ноды
+    // Favorite nodes.
     // ═══════════════════════════════════════════════════════════
 
     /**
-     * Устанавливает флаг избранного для ноды.
-     * Если нода отсутствует в БД, ничего не делает.
+     * Sets the favorite flag for a node.
+     * If the node is absent from the database, no row is created.
      */
     public synchronized void setFavorite(String nodeId, boolean favorite) {
         if (dbConnection == null || nodeId == null) { return; }
@@ -442,7 +443,7 @@ public final class NodeCacheService {
     }
 
     /**
-     * Проверяет, является ли нода избранной.
+     * Checks whether a node is marked as favorite.
      */
     public boolean isFavorite(String nodeId) {
         if (dbConnection == null || nodeId == null) { return false; }
@@ -459,7 +460,7 @@ public final class NodeCacheService {
     }
 
     /**
-     * Загружает все избранные ноды из БД.
+     * Loads all favorite nodes from the database.
      */
     public List<NodeData> loadFavoriteNodes() {
         List<NodeData> favorites = new ArrayList<>();
@@ -478,11 +479,11 @@ public final class NodeCacheService {
     }
 
     // ═══════════════════════════════════════════════════════════
-    //  Игнорируемые ноды
+    // Ignored nodes.
     // ═══════════════════════════════════════════════════════════
 
     /**
-     * Устанавливает флаг игнорирования для ноды.
+     * Sets the ignored flag for a node.
      */
     public synchronized void setIgnored(String nodeId, boolean ignored) {
         if (dbConnection == null || nodeId == null) { return; }
@@ -498,7 +499,7 @@ public final class NodeCacheService {
     }
 
     /**
-     * Проверяет, является ли нода игнорируемой.
+     * Checks whether a node is ignored.
      */
     public boolean isIgnored(String nodeId) {
         if (dbConnection == null || nodeId == null) { return false; }
@@ -515,7 +516,7 @@ public final class NodeCacheService {
     }
 
     /**
-     * Загружает все игнорируемые ноды из БД.
+     * Loads all ignored nodes from the database.
      */
     public List<NodeData> loadIgnoredNodes() {
         List<NodeData> ignored = new ArrayList<>();
@@ -534,8 +535,8 @@ public final class NodeCacheService {
     }
 
     /**
-     * Создаёт placeholder-строку для ноды, если флаг меняется раньше,
-     * чем нода была записана в кэш/H2 полноценным update().
+     * Creates a placeholder node row when a flag changes before the node has
+     * been written to cache/H2 by a full update().
      */
     private void ensureNodeRowExists(String nodeId) {
         if (mergeStmt == null || get(nodeId) != null) { return; }
@@ -558,11 +559,11 @@ public final class NodeCacheService {
     }
 
     // ═══════════════════════════════════════════════════════════
-    //  Телеметрия — персистентная история
+    // Telemetry: persistent history.
     // ═══════════════════════════════════════════════════════════
 
     /**
-     * Сохраняет одну запись телеметрии в H2.
+     * Saves one telemetry entry to H2.
      */
     public synchronized void persistTelemetry(TelemetryEntry entry, String ownerNodeId) {
         if (insertTelemetryStmt == null || entry == null) { return; }
@@ -596,16 +597,16 @@ public final class NodeCacheService {
     }
 
     /**
-     * Загружает последние {@code limit} записей телеметрии из H2,
-     * отсортированных по времени (старые → новые).
+     * Loads the last {@code limit} telemetry entries from H2, sorted by time
+     * from oldest to newest.
      *
-     * @param limit максимальное количество записей
-     * @return список записей (может быть пустым)
+     * @param limit maximum number of entries
+     * @return entries, possibly empty
      */
     public List<TelemetryEntry> loadTelemetryHistory(int limit, String ownerNodeId) {
         List<TelemetryEntry> result = new ArrayList<>();
         if (dbConnection == null) { return result; }
-        // Подзапрос берёт последние N записей (DESC), внешний сортирует ASC
+            // Inner query takes the latest N rows (DESC); the outer query sorts them ASC.
         String sql = "SELECT * FROM (SELECT * FROM telemetry_history WHERE owner_node_id = ? ORDER BY ts DESC LIMIT ?) ORDER BY ts ASC";
         try (PreparedStatement ps = dbConnection.prepareStatement(sql)) {
             ps.setString(1, ownerNodeId != null ? ownerNodeId : "");
@@ -622,11 +623,11 @@ public final class NodeCacheService {
     }
 
     /**
-     * Загружает записи телеметрии за указанный период (от {@code sinceEpoch} до текущего момента),
-     * отсортированные по времени (старые → новые).
+     * Loads telemetry entries for the given period, from {@code sinceEpoch} to now,
+     * sorted by time from oldest to newest.
      *
-     * @param sinceEpoch метка времени начала периода (epoch seconds), 0 = без ограничений
-     * @return список записей (может быть пустым)
+     * @param sinceEpoch period start timestamp in epoch seconds; 0 means no lower bound
+     * @return entries, possibly empty
      */
     public List<TelemetryEntry> loadTelemetrySince(long sinceEpoch, String ownerNodeId) {
         List<TelemetryEntry> result = new ArrayList<>();
@@ -649,13 +650,14 @@ public final class NodeCacheService {
     }
 
     /**
-     * Загружает записи телеметрии для конкретной ноды за указанный период.
-     * Фильтрация по nodeId, периоду, нулевым артефактам и будущим датам выполняется в SQL.
+     * Loads telemetry entries for a specific node over the given period.
+     * Filtering by nodeId, period, zero-value artifacts, and future timestamps is
+     * performed in SQL.
      *
-     * @param nodeId       идентификатор ноды (например {@code !9e755af0})
-     * @param sinceEpoch   метка времени начала периода (epoch seconds), 0 = без ограничений
-     * @param maxFutureTs  максимально допустимая метка времени (для фильтрации будущих дат)
-     * @return список записей, отсортированных по времени ASC (может быть пустым)
+     * @param nodeId       node identifier, for example {@code !9e755af0}
+     * @param sinceEpoch   period start timestamp in epoch seconds; 0 means no lower bound
+     * @param maxFutureTs  maximum accepted timestamp for filtering future dates
+     * @return entries sorted by time ascending, possibly empty
      */
     public List<TelemetryEntry> loadTelemetryForNode(String nodeId, long sinceEpoch, long maxFutureTs, String ownerNodeId) {
         List<TelemetryEntry> result = new ArrayList<>();
@@ -690,7 +692,7 @@ public final class NodeCacheService {
     }
 
     /**
-     * Загружает записи телеметрии по всем нодам, содержащие данные о качестве соединения (SNR/RSSI/hops).
+     * Loads telemetry entries for all nodes that contain link-quality data (SNR/RSSI/hops).
      */
     public List<TelemetryEntry> loadTelemetryQuality(long sinceEpoch, long maxFutureTs, String ownerNodeId) {
         List<TelemetryEntry> result = new ArrayList<>();
@@ -723,7 +725,7 @@ public final class NodeCacheService {
     }
 
     /**
-     * Возвращает общее количество записей телеметрии в БД.
+     * Returns the total number of telemetry entries in the database.
      */
     public int countTelemetryEntries(String ownerNodeId) {
         if (dbConnection == null) { return 0; }
@@ -764,10 +766,10 @@ public final class NodeCacheService {
     }
 
     /**
-     * Удаляет записи телеметрии старше указанного количества дней.
+     * Deletes telemetry entries older than the given number of days.
      *
-     * @param days количество дней (записи старше этого срока удаляются)
-     * @return количество удалённых записей
+     * @param days number of days; older entries are removed
+     * @return number of deleted rows
      */
     public int pruneTelemetryHistory(int days, String ownerNodeId) {
         if (dbConnection == null) { return 0; }
@@ -786,34 +788,34 @@ public final class NodeCacheService {
     }
 
     // ═══════════════════════════════════════════════════════════
-    //  Импорт из OneMesh
+    // Import from OneMesh.
     // ═══════════════════════════════════════════════════════════
 
-    /** URL для загрузки кэша нод из интернета. */
+    /** URL used to download the node cache from the internet. */
     private static final String ONEMESH_URL =
             "https://map.onemesh.ru/cache/nodes_optimized_v2.json";
 
     /**
-     * Загружает и импортирует ноды из OneMesh JSON-файла в H2 кэш.
+     * Downloads and imports nodes from the OneMesh JSON file into the H2 cache.
      * <p>
-     * Формат файла: массив массивов, каждый внутренний массив — нода.
-     * Маппинг позиций:
+     * File format: array of arrays, where each inner array is one node.
+     * Position mapping:
      * <ul>
-     *   <li>[1] — nodeNum (unsigned int как строка)</li>
-     *   <li>[2] — longName</li>
-     *   <li>[3] — shortName</li>
-     *   <li>[4] — hwModel (числовой код Meshtastic HardwareModel)</li>
-     *   <li>[5] — role (числовой код Meshtastic Config.DeviceConfig.Role)</li>
-     *   <li>[12] — latitude (raw int, * 1e-7 для градусов)</li>
-     *   <li>[13] — longitude (raw int, * 1e-7 для градусов)</li>
-     *   <li>[16] — altitude (метры)</li>
-     *   <li>[17] — lastHeard (ISO 8601 timestamp)</li>
-     *   <li>[18] — batteryLevel</li>
-     *   <li>[19] — voltage (строка)</li>
+     *   <li>[1] - nodeNum, unsigned int as string</li>
+     *   <li>[2] - longName</li>
+     *   <li>[3] - shortName</li>
+     *   <li>[4] - hwModel, numeric Meshtastic HardwareModel code</li>
+     *   <li>[5] - role, numeric Meshtastic Config.DeviceConfig.Role code</li>
+     *   <li>[12] - latitude, raw int multiplied by 1e-7 for degrees</li>
+     *   <li>[13] - longitude, raw int multiplied by 1e-7 for degrees</li>
+     *   <li>[16] - altitude in meters</li>
+     *   <li>[17] - lastHeard, ISO 8601 timestamp</li>
+     *   <li>[18] - batteryLevel</li>
+     *   <li>[19] - voltage as string</li>
      * </ul>
      *
-     * @return количество импортированных нод
-     * @throws Exception при ошибках загрузки или парсинга
+     * @return number of imported nodes
+     * @throws Exception on download or parsing errors
      */
     public int importFromOneMesh() throws Exception {
         log.info("Начало импорта нод из OneMesh: {}", ONEMESH_URL);
@@ -841,7 +843,7 @@ public final class NodeCacheService {
                     mergeStmt.addBatch();
                     imported++;
 
-                    // Промежуточный flush каждые 1000 записей
+                // Flush in batches every 1000 rows.
                     if (imported % 1000 == 0) {
                         mergeStmt.executeBatch();
                     }
@@ -864,16 +866,16 @@ public final class NodeCacheService {
     }
 
     /**
-     * Парсит одну строку (массив) из OneMesh JSON в {@link NodeData}.
+     * Parses one row array from OneMesh JSON into {@link NodeData}.
      *
-     * @param row JSON-массив одной ноды
-     * @return {@link NodeData} или {@code null} если строка невалидна
+     * @param row JSON array for one node
+     * @return {@link NodeData}, or {@code null} when the row is invalid
      */
     private static NodeData parseOneMeshRow(JsonArray row) {
         if (row.size() < 20) { return null; }
 
 
-        // [1] nodeNum — unsigned int как строка
+            // [1] nodeNum, unsigned int as string.
         long nodeNumLong = Long.parseUnsignedLong(row.get(1).getAsString());
         int nodeNum = (int) nodeNumLong;
         if (nodeNum == 0) { return null; }
@@ -890,14 +892,14 @@ public final class NodeCacheService {
             node.setShortName(row.get(3).getAsString());
         }
 
-        // [4] hwModel — числовой код → имя enum Protobuf
+            // [4] hwModel, numeric code to protobuf enum name.
         if (!row.get(4).isJsonNull()) {
             int hwCode = row.get(4).getAsInt();
             MeshProtos.HardwareModel hw = MeshProtos.HardwareModel.forNumber(hwCode);
             node.setHwModel(hw != null ? hw.name() : String.valueOf(hwCode));
         }
 
-        // [5] role — числовой код → имя enum Protobuf
+            // [5] role, numeric code to protobuf enum name.
         if (!row.get(5).isJsonNull()) {
             int roleCode = row.get(5).getAsInt();
             ConfigProtos.Config.DeviceConfig.Role role =
@@ -936,7 +938,7 @@ public final class NodeCacheService {
             applyBatteryLevel(row.get(18).getAsInt(), node);
         }
 
-        // [19] voltage (строка → float)
+            // [19] voltage, string to float.
         if (!row.get(19).isJsonNull()) {
             try {
                 node.setVoltage(Float.parseFloat(row.get(19).getAsString()));
@@ -947,12 +949,12 @@ public final class NodeCacheService {
     }
 
     // ═══════════════════════════════════════════════════════════
-    //  Merge-логика
+    // Merge logic.
     // ═══════════════════════════════════════════════════════════
 
     /**
-     * Переносит непустые поля из {@code src} в {@code dst}.
-     * Нулевые/пустые/дефолтные поля в src не затирают имеющиеся в dst.
+     * Copies non-empty fields from {@code src} to {@code dst}.
+     * Zero, empty, and default fields in src do not overwrite existing values in dst.
      */
     private static void merge(NodeData dst, NodeData src) {
         if (src.getLongName() != null && !src.getLongName().isEmpty()) {
@@ -1045,26 +1047,27 @@ public final class NodeCacheService {
     }
 
     // ═══════════════════════════════════════════════════════════
-    //  Персистентность (H2)
+    // Persistence (H2).
     // ═══════════════════════════════════════════════════════════
 
     /**
-     * No-op: данные читаются из БД по запросу через {@link #loadPage} и {@link #countNodesInDb}.
-     * In-memory кэш заполняется лениво при вызовах {@link #update}.
+     * No-op: data is read from the database on demand through {@link #loadPage}
+     * and {@link #countNodesInDb}. The in-memory cache is filled lazily by
+     * {@link #update}.
      */
     public void load() {
-        // No-op: данные читаются из H2 напрямую
+        // No-op: data is read directly from H2.
     }
 
     /**
-     * No-op: записи в H2 происходят немедленно. Метод сохранён для совместимости API.
+     * No-op: H2 writes happen immediately. Kept for API compatibility.
      */
     public void save() {
         // No-op: H2 writes are immediate
     }
 
     /**
-     * Корректно закрывает соединение с БД. Вызывается при завершении приложения.
+     * Closes the database connection cleanly. Called during application shutdown.
      */
     public void close() {
         cache.clear();
@@ -1099,7 +1102,7 @@ public final class NodeCacheService {
     }
 
     /**
-     * Сохраняет одну ноду в БД (MERGE INTO).
+     * Saves one node to the database using MERGE INTO.
      */
     private synchronized void persistNode(String nodeId) {
         NodeData node = cache.get(nodeId);
@@ -1113,7 +1116,7 @@ public final class NodeCacheService {
     }
 
     /**
-     * Сохраняет набор нод в БД в одной транзакции (batch MERGE).
+     * Saves a set of nodes to the database in one transaction using batch MERGE.
      */
     private synchronized void persistAll(Set<String> nodeIds) {
         if (mergeStmt == null) { return; }
@@ -1139,12 +1142,12 @@ public final class NodeCacheService {
     }
 
     // ═══════════════════════════════════════════════════════════
-    //  Утилиты JDBC
+    // JDBC utilities.
     // ═══════════════════════════════════════════════════════════
 
     /**
-     * Привязывает поля NodeData к параметрам PreparedStatement.
-     * Порядок: node_id, node_num, long_name, short_name, role, hw_model, ...
+     * Binds NodeData fields to PreparedStatement parameters.
+     * Order: node_id, node_num, long_name, short_name, role, hw_model, ...
      */
     private static void bindNode(PreparedStatement ps, NodeData n) throws SQLException {
         ps.setString(1, n.getNodeId());
@@ -1188,7 +1191,7 @@ public final class NodeCacheService {
     }
 
     /**
-     * Читает NodeData из текущей строки ResultSet.
+     * Reads NodeData from the current ResultSet row.
      */
     private static NodeData readNode(ResultSet rs) throws SQLException {
         NodeData node = new NodeData(rs.getInt("node_num"));

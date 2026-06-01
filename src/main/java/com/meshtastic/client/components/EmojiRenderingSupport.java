@@ -16,11 +16,12 @@ import javafx.scene.layout.VBox;
 import java.util.List;
 
 /**
- * Глобальный JavaFX-hook для локального рендеринга Twemoji в стандартных {@link Labeled} controls.
+ * Global JavaFX hook that renders Twemoji locally inside standard {@link Labeled} controls.
  *
- * <p>JavaFX {@code Label}/{@code Button}/{@code ToggleButton} рисуют emoji через системный
- * fallback-шрифт. На системах без emoji-шрифта это даёт квадраты, поэтому controls с emoji-текстом
- * получают graphic на базе {@link EmojiTextFlow}; исходное text-property при этом сохраняется.
+ * <p>JavaFX {@code Label}, {@code Button}, and {@code ToggleButton} render emoji
+ * through the system fallback font. On systems without an emoji font this yields
+ * placeholder boxes, so controls with emoji text receive an {@link EmojiTextFlow}
+ * graphic while keeping their original text property.
  */
 public final class EmojiRenderingSupport {
 

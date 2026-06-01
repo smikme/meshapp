@@ -1,14 +1,14 @@
 package com.meshtastic.client.components.map;
 
 /**
- * Маркер ноды, который отображается поверх тайловой карты.
+ * Node marker displayed over the tile map.
  *
- * @param id         стабильный идентификатор ноды, используется для связи UI с моделью
- * @param title      полное название для подсказки
- * @param shortTitle короткий текст внутри круглого маркера
- * @param latitude   широта в градусах WGS84
- * @param longitude  долгота в градусах WGS84
- * @param local      {@code true}, если маркер показывает собственную ноду пользователя
+ * @param id stable node identifier used to connect UI with the model
+ * @param title full title used by tooltips
+ * @param shortTitle short text shown inside the circular marker
+ * @param latitude WGS84 latitude in degrees
+ * @param longitude WGS84 longitude in degrees
+ * @param local {@code true} when the marker represents the user's own node
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */

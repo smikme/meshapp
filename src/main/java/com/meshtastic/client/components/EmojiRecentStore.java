@@ -7,8 +7,8 @@ import java.util.Arrays;
 import java.util.List;
 
 /**
- * Хранение недавно использованных эмодзи в AppPreferences.
- * Максимум 32 элемента. Самый новый — первый в списке.
+ * Stores recently used emoji in AppPreferences.
+ * Keeps up to 32 entries, newest first.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -21,14 +21,14 @@ public class EmojiRecentStore {
     private static final String SEPARATOR = "\\|";
     private static final String JOIN_SEPARATOR = "|";
 
-    /** Получить список недавних эмодзи (новые первыми) */
+    /** Returns recent emoji, newest first. */
     public static List<String> getRecent() {
         String raw = AppPreferences.getState().get(KEY_RECENT_EMOJI, "");
         if (raw.isEmpty()) { return new ArrayList<>(); }
         return new ArrayList<>(Arrays.asList(raw.split(SEPARATOR)));
     }
 
-    /** Добавить эмодзи в начало списка недавних, удалить дубликат если есть */
+    /** Adds an emoji to the front of the recent list, removing any duplicate. */
     public static void addRecent(String emoji) {
         List<String> list = getRecent();
         list.remove(emoji);

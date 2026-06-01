@@ -15,13 +15,13 @@ import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 /**
- * Сервис автоматического обнаружения BLE-устройств Meshtastic и MeshCore (singleton).
+ * Singleton service for automatic discovery of Meshtastic and MeshCore BLE devices.
  * <p>
- * Использует платформо-зависимый {@link BlePlatform} для BLE-сканирования
- * с фильтром по service UUID выбранного BLE-профиля. Оповещает подписчиков при
- * обнаружении новых устройств или изменении RSSI.
+ * Uses the platform-specific {@link BlePlatform} to scan BLE devices with a
+ * service UUID filter from the selected BLE profile. Subscribers are notified
+ * when new devices are found or RSSI changes.
  * <p>
- * Паттерн аналогичен {@link SerialPortDiscoveryService}.
+ * The pattern mirrors {@link SerialPortDiscoveryService}.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -61,8 +61,8 @@ public final class BleDeviceDiscoveryService {
     }
 
     /**
-     * Запускает BLE-сканирование. Обнаруженные устройства с выбранным service UUID
-     * добавляются в список и оповещают подписчиков.
+     * Starts BLE scanning. Devices that advertise the selected service UUID are
+     * added to the list and broadcast to subscribers.
      */
     public void startScanning() {
         if (scanning || disposed) { return; }
@@ -99,8 +99,8 @@ public final class BleDeviceDiscoveryService {
     private void startScanningOnWorker(long generation) {
         BlePlatform currentPlatform;
         try {
-            // Один platform для discovery на всё приложение — transport-подключения
-            // создаются отдельно через createConnectionPlatform().
+            // One platform instance is shared by discovery for the whole app.
+            // Transport connections are created separately via createConnectionPlatform().
             currentPlatform = getOrCreatePlatform();
         } catch (RuntimeException e) {
             handleScanStartFailure(generation, "BLE not available", e);
@@ -123,7 +123,7 @@ public final class BleDeviceDiscoveryService {
                         : device;
                 discoveredDevices.put(device.address(), profiledDevice);
 
-                // Оповещаем при новом устройстве или значительном изменении RSSI
+                // Notify on new devices or meaningful RSSI changes.
                 if (existing == null || Math.abs(existing.rssi() - profiledDevice.rssi()) > 5) {
                     fireChanged();
                 }
@@ -145,7 +145,7 @@ public final class BleDeviceDiscoveryService {
         log.info("BLE scanning started");
     }
 
-    /** Останавливает BLE-сканирование. */
+    /** Stops BLE scanning. */
     public void stopScanning() {
         stopScanning(false);
     }
@@ -184,7 +184,7 @@ public final class BleDeviceDiscoveryService {
         submitScanTask(stopTask);
     }
 
-    /** Выполняет немедленное сканирование (запускает, если не запущено). */
+    /** Performs an immediate scan, starting scanning if needed. */
     public List<BleDevice> scanNow() {
         if (!scanning) {
             startScanning();
@@ -192,25 +192,25 @@ public final class BleDeviceDiscoveryService {
         return getDiscoveredDevices();
     }
 
-    /** Возвращает текущий список обнаруженных устройств, отсортированный по RSSI. */
+    /** Returns the current discovered-device list, sorted by RSSI. */
     public List<BleDevice> getDiscoveredDevices() {
         List<BleDevice> devices = new ArrayList<>(discoveredDevices.values());
-        devices.sort((a, b) -> Integer.compare(b.rssi(), a.rssi())); // Сильный сигнал первым
+        devices.sort((a, b) -> Integer.compare(b.rssi(), a.rssi())); // Strongest signal first.
         return List.copyOf(devices);
     }
 
-    /** Проверяет, поддерживается ли BLE на текущей платформе. */
+    /** Checks whether BLE is supported on the current platform. */
     public boolean isSupported() {
         return BlePlatformFactory.isSupported();
     }
 
-    /** Проверяет, идёт ли сейчас сканирование. */
+    /** Checks whether scanning is currently active. */
     public boolean isScanning() {
         return scanning;
     }
 
     /**
-     * Освобождает discovery backend и его native worker resources.
+     * Releases the discovery backend and its native worker resources.
      */
     public void dispose() {
         scanGeneration.incrementAndGet();
@@ -238,17 +238,17 @@ public final class BleDeviceDiscoveryService {
     }
 
     /**
-     * Возвращает последнюю ошибку запуска BLE discovery, если сканирование не стартовало.
+     * Returns the latest BLE discovery startup error when scanning did not start.
      */
     public String getLastErrorMessage() {
         return lastErrorMessage;
     }
 
     /**
-     * Меняет BLE-профиль для следующего сканирования. Если сканирование уже идёт,
-     * оно перезапускается с новым фильтром UUID.
-     *
-     * @param profile BLE-профиль; null трактуется как Meshtastic
+     * Changes the BLE profile used by the next scan. If scanning is already
+     * active, it is restarted with the new UUID filter.
+ *
+     * @param profile BLE profile; null is treated as Meshtastic
      */
     public void setScanProfile(BleProtocolProfile profile) {
         BleProtocolProfile newProfile = profile == null ? BleProtocolProfile.MESHTASTIC : profile;
@@ -275,9 +275,9 @@ public final class BleDeviceDiscoveryService {
     }
 
     /**
-     * Возвращает discovery {@link BlePlatform}. Transport-подключения должны
-     * использовать {@link #createConnectionPlatform()}, чтобы не делить callbacks
-     * и GATT-состояние со сканированием.
+     * Returns the discovery {@link BlePlatform}. Transport connections should
+     * use {@link #createConnectionPlatform()} so callbacks and GATT state are not
+     * shared with scanning.
      */
     public BlePlatform getPlatform() {
         try {
@@ -291,11 +291,11 @@ public final class BleDeviceDiscoveryService {
     }
 
     /**
-     * Создаёт backend для BLE transport-сессии.
+     * Creates a backend for a BLE transport session.
      * <p>
-     * Каждый вызов возвращает независимый backend: macOS создаёт отдельный
-     * CoreBluetooth stack, Linux/Windows загружают отдельную временную копию
-     * native library с собственным singleton state внутри этой SO/DLL.
+     * Each call returns an independent backend: macOS creates a separate
+     * CoreBluetooth stack, while Linux/Windows load a separate temporary copy of
+     * the native library with its own singleton state inside that SO/DLL.
      */
     public BlePlatform createConnectionPlatform() {
         if (supportsParallelConnections()) {
@@ -306,7 +306,7 @@ public final class BleDeviceDiscoveryService {
     }
 
     /**
-     * Нужно ли transport-у освобождать platform при disconnect.
+     * Whether the transport should dispose the platform on disconnect.
      */
     public boolean shouldDisposeConnectionPlatform() {
         return supportsParallelConnections();

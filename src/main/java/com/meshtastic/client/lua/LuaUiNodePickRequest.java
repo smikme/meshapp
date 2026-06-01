@@ -1,16 +1,16 @@
 package com.meshtastic.client.lua;
 
 /**
- * Запрос Lua-скрипта на интерактивный выбор ноды в UI.
+ * Lua-script request for interactive node selection in the UI.
  *
- * @param scriptId id Lua-скрипта
- * @param requestId id запроса внутри сессии
- * @param source Lua API, который создал запрос
- * @param name имя запроса, заданное скриптом
- * @param prompt текст заголовка/подсказки
- * @param query начальная строка поиска
- * @param chatType тип чата, связанного с запросом
- * @param chatKey ключ чата, связанного с запросом
+ * @param scriptId Lua script id
+ * @param requestId request id inside the runtime session
+ * @param source Lua API that created the request
+ * @param name script-defined request name
+ * @param prompt title or hint text
+ * @param query initial search query
+ * @param chatType chat type associated with the request
+ * @param chatKey chat key associated with the request
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */

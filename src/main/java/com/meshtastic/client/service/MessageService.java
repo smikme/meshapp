@@ -25,15 +25,14 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * Сервис отправки сообщений и admin-команд на Meshtastic-устройство.
+ * Service for sending messages and admin commands to a Meshtastic device.
  * <p>
- * Статический утилитный класс (без состояния). Формирует protobuf-пакеты
- * {@code ToRadio} для различных типов операций:
+ * Stateless utility class that builds protobuf {@code ToRadio} packets for:
  * <ul>
- *   <li>Текстовые сообщения (канальные и личные)</li>
- *   <li>Запросы информации о нодах (NODEINFO_APP)</li>
- *   <li>Traceroute (TRACEROUTE_APP)</li>
- *   <li>Admin-операции: owner info, каналы, конфигурация</li>
+ *   <li>text messages, both channel and direct</li>
+ *   <li>node information requests (NODEINFO_APP)</li>
+ *   <li>traceroute requests (TRACEROUTE_APP)</li>
+ *   <li>admin operations: owner info, channels, and configuration</li>
  * </ul>
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
@@ -48,16 +47,16 @@ public final class MessageService {
     private MessageService() {}
 
     /**
-     * Отправляет текстовое сообщение в канал (broadcast, {@code to=0xFFFFFFFF}).
-     * Создаёт {@link MeshMessage}, сохраняет в БД, добавляет в {@link DeviceState}
-     * и регистрирует для отслеживания ACK.
+     * Sends a text message to a channel as broadcast, {@code to=0xFFFFFFFF}.
+     * Creates a {@link MeshMessage}, saves it to the database, adds it to
+     * {@link DeviceState}, and registers it for ACK tracking.
      *
-     * @param handler      протокол-обработчик для отправки
-     * @param state        состояние устройства
-     * @param channelIndex индекс канала (0 — Primary)
-     * @param text         текст сообщения
-     * @param replyId      packetId цитируемого сообщения (0 — без цитаты)
-     * @return созданное сообщение в статусе {@code SENDING}
+     * @param handler      protocol handler used for sending
+     * @param state        device state
+     * @param channelIndex channel index; 0 is Primary
+     * @param text         message text
+     * @param replyId      packetId of the quoted message; 0 means no quote
+     * @return created message in {@code SENDING} status
      */
     public static MeshMessage sendChannelMessage(ProtocolHandler handler, DeviceState state, int channelIndex, String text, int replyId) {
         int packetId = ThreadLocalRandom.current().nextInt(1, Integer.MAX_VALUE);
@@ -114,16 +113,16 @@ public final class MessageService {
     }
 
     /**
-     * Отправляет личное текстовое сообщение (DM) конкретной ноде.
-     * Создаёт {@link MeshMessage}, сохраняет в БД, добавляет в {@link DeviceState}
-     * и регистрирует для отслеживания ACK.
+     * Sends a direct text message to a specific node.
+     * Creates a {@link MeshMessage}, saves it to the database, adds it to
+     * {@link DeviceState}, and registers it for ACK tracking.
      *
-     * @param handler      протокол-обработчик для отправки
-     * @param state        состояние устройства
-     * @param peerNodeId   node_id получателя (например {@code "!9e755af0"})
-     * @param text         текст сообщения
-     * @param replyId      packetId цитируемого сообщения (0 — без цитаты)
-     * @return созданное сообщение в статусе {@code SENDING}
+     * @param handler      protocol handler used for sending
+     * @param state        device state
+     * @param peerNodeId   recipient node_id, for example {@code "!9e755af0"}
+     * @param text         message text
+     * @param replyId      packetId of the quoted message; 0 means no quote
+     * @return created message in {@code SENDING} status
      */
     public static MeshMessage sendDirectMessage(ProtocolHandler handler, DeviceState state, String peerNodeId, String text, int replyId) {
         int packetId = ThreadLocalRandom.current().nextInt(1, Integer.MAX_VALUE);
@@ -243,9 +242,9 @@ public final class MessageService {
     }
 
     /**
-     * Переотправляет ранее не доставленное исходящее сообщение без создания новой записи в истории.
+     * Resends a previously undelivered outgoing message without creating a new history row.
      *
-     * @return {@code true}, если новая попытка отправки инициирована
+     * @return {@code true} if a new send attempt was started
      */
     public static boolean retryMessage(ProtocolHandler handler, DeviceState state, MeshMessage message) {
         if (handler == null || state == null || message == null || !message.isOutgoing()) {
@@ -261,8 +260,8 @@ public final class MessageService {
     }
 
     /**
-     * Отправляет emoji-реакцию на канальное сообщение.
-     * Реакция хранится отдельно от обычных сообщений и не попадает в preview чатов.
+     * Sends an emoji reaction to a channel message.
+     * Reactions are stored separately from regular messages and do not affect chat previews.
      */
     public static boolean sendChannelReaction(ProtocolHandler handler,
                                               DeviceState state,
@@ -297,7 +296,7 @@ public final class MessageService {
     }
 
     /**
-     * Отправляет emoji-реакцию на личное сообщение.
+     * Sends an emoji reaction to a direct message.
      */
     public static boolean sendDirectReaction(ProtocolHandler handler,
                                              DeviceState state,
@@ -427,17 +426,16 @@ public final class MessageService {
     }
 
     /**
-     * Запрашивает информацию о ноде, отправляя NODEINFO_APP пакет с want_response=true.
-     * Удалённая нода ответит пакетом NODEINFO_APP с данными User.
+     * Requests node information by sending a NODEINFO_APP packet with want_response=true.
+     * The remote node responds with NODEINFO_APP containing User data.
      */
     public static void requestNodeInfo(ProtocolHandler handler, DeviceState state, int targetNodeNum) {
         sendNodeInfoPacket(handler, state, targetNodeNum, null, true);
     }
 
     /**
-     * Обменивается пользовательской информацией с выбранной нодой:
-     * сначала отправляет ей наши локальные User-данные, затем запрашивает
-     * актуальный NODEINFO_APP-ответ от неё.
+     * Exchanges user information with the selected node: first sends our local
+     * User data to it, then requests a fresh NODEINFO_APP response from it.
      */
     public static void exchangeNodeUserInfo(ProtocolHandler handler, DeviceState state, int targetNodeNum) {
         if (handler == null || state == null || targetNodeNum == 0) { return; }
@@ -456,8 +454,8 @@ public final class MessageService {
     }
 
     /**
-     * Запрашивает трассировку маршрута до ноды, отправляя TRACEROUTE_APP пакет с want_response=true.
-     * Ответ содержит RouteDiscovery с маршрутом и SNR на каждом хопе.
+     * Requests a traceroute to a node by sending TRACEROUTE_APP with want_response=true.
+     * The response contains RouteDiscovery with the route and per-hop SNR.
      */
     public static void requestTraceroute(ProtocolHandler handler, DeviceState state, int targetNodeNum) {
         MeshProtos.RouteDiscovery emptyRoute = MeshProtos.RouteDiscovery.newBuilder().build();
@@ -487,8 +485,8 @@ public final class MessageService {
     }
 
     /**
-     * Запрашивает owner info (User) и session_passkey у подключённого радио.
-     * Ответ придёт как AdminMessage.get_owner_response через ADMIN_APP.
+     * Requests owner info (User) and session_passkey from the connected radio.
+     * The response arrives as AdminMessage.get_owner_response through ADMIN_APP.
      */
     public static void requestOwnerInfo(ProtocolHandler handler, DeviceState state) {
         AdminProtos.AdminMessage adminMsg = AdminProtos.AdminMessage.newBuilder()
@@ -498,11 +496,11 @@ public final class MessageService {
     }
 
     /**
-     * Запрашивает только {@code session_passkey} у подключённого радио.
+     * Requests only {@code session_passkey} from the connected radio.
      * <p>
-     * Использует {@code get_config_request = SESSIONKEY_CONFIG}, потому что часть
-     * устройств/прошивок не отвечает на {@code get_owner_request}, но при этом
-     * корректно возвращает session key вместе с config-response.
+     * Uses {@code get_config_request = SESSIONKEY_CONFIG} because some
+     * devices/firmware do not answer {@code get_owner_request}, but still return
+     * the session key correctly with the config response.
      */
     public static void requestSessionPasskey(ProtocolHandler handler, DeviceState state) {
         AdminProtos.AdminMessage adminMsg = AdminProtos.AdminMessage.newBuilder()
@@ -512,8 +510,8 @@ public final class MessageService {
     }
 
     /**
-     * Запрашивает metadata устройства (включая версию прошивки) у подключённого радио.
-     * Ответ придёт как AdminMessage.get_device_metadata_response через ADMIN_APP.
+     * Requests device metadata, including firmware version, from the connected radio.
+     * The response arrives as AdminMessage.get_device_metadata_response through ADMIN_APP.
      */
     public static CompletableFuture<MeshProtos.Routing.Error> requestDeviceMetadata(ProtocolHandler handler,
                                                                                     DeviceState state) {
@@ -524,8 +522,8 @@ public final class MessageService {
     }
 
     /**
-     * Запрашивает RTTTL ringtone, используемый External Notification.
-     * Ответ придёт как AdminMessage.get_ringtone_response через ADMIN_APP.
+     * Requests the RTTTL ringtone used by External Notification.
+     * The response arrives as AdminMessage.get_ringtone_response through ADMIN_APP.
      */
     public static CompletableFuture<MeshProtos.Routing.Error> requestRingtone(ProtocolHandler handler,
                                                                               DeviceState state) {
@@ -536,8 +534,8 @@ public final class MessageService {
     }
 
     /**
-     * Проксирует MQTT payload с desktop/phone клиента на устройство.
-     * Payload всегда отправляется как bytes, чтобы не терять бинарные данные.
+     * Proxies an MQTT payload from the desktop/phone client to the device.
+     * Payload is always sent as bytes so binary data is not lost.
      */
     public static void sendMqttClientProxyMessage(ProtocolHandler handler,
                                                   String topic,
@@ -559,10 +557,10 @@ public final class MessageService {
     }
 
     /**
-     * Устанавливает только текущее Unix-время на ноде без изменения других полей Position.
+     * Sets only the current Unix time on the node without changing other Position fields.
      *
-     * @param epochSeconds текущее время в секундах Unix epoch
-     * @return future с routing ACK/NAK для отправленного admin-пакета
+     * @param epochSeconds current time in Unix epoch seconds
+     * @return future with routing ACK/NAK for the sent admin packet
      */
     public static CompletableFuture<MeshProtos.Routing.Error> setTimeOnly(ProtocolHandler handler,
                                                                           DeviceState state,
@@ -578,9 +576,9 @@ public final class MessageService {
     }
 
     /**
-     * Отправляет текущее Unix-время через {@code POSITION_APP}, как time-only
-     * пакет от локального PhoneAPI-клиента. Часть прошивок обрабатывает время
-     * от телефона именно этим путём, до появления {@code set_time_only}.
+     * Sends the current Unix time through {@code POSITION_APP} as a time-only
+     * packet from the local PhoneAPI client. Some firmware handles phone-provided
+     * time through this path before {@code set_time_only} is available.
      */
     public static void sendPhoneTimePosition(ProtocolHandler handler,
                                              DeviceState state,
@@ -608,8 +606,8 @@ public final class MessageService {
     }
 
     /**
-     * Устанавливает owner info (longName, shortName) на подключённом радио.
-     * Требует session_passkey, полученный из предварительного get_owner_request.
+     * Sets owner info (longName, shortName) on the connected radio.
+     * Requires session_passkey obtained by a prior get_owner_request.
      */
     public static void setOwnerInfo(ProtocolHandler handler, DeviceState state,
                                     String longName, String shortName, ByteString sessionPasskey) {
@@ -617,8 +615,8 @@ public final class MessageService {
     }
 
     /**
-     * Устанавливает owner info (longName, shortName, isLicensed) на подключённом радио.
-     * Требует session_passkey, полученный из предварительного get_owner_request.
+     * Sets owner info (longName, shortName, isLicensed) on the connected radio.
+     * Requires session_passkey obtained by a prior get_owner_request.
      */
     public static void setOwnerInfo(ProtocolHandler handler, DeviceState state,
                                     String longName, String shortName, boolean isLicensed,
@@ -650,8 +648,8 @@ public final class MessageService {
     }
 
     /**
-     * Создаёт/обновляет канал на подключённом радио через AdminMessage.set_channel.
-     * Требует session_passkey для защищённых устройств (может быть null для локальных).
+     * Creates or updates a channel on the connected radio through AdminMessage.set_channel.
+     * Requires session_passkey for protected devices; it may be null for local devices.
      */
     public static CompletableFuture<MeshProtos.Routing.Error> setChannel(ProtocolHandler handler, DeviceState state,
                                    ChannelProtos.Channel channel, ByteString sessionPasskey) {
@@ -668,10 +666,10 @@ public final class MessageService {
     // ==================== Config Admin Methods ====================
 
     /**
-     * Отправляет begin_edit_settings для начала транзакции изменения настроек.
-     * Предотвращает перезагрузку устройства между отдельными set_config/set_module_config.
+     * Sends begin_edit_settings to start a settings transaction.
+     * Prevents the device from rebooting between individual set_config/set_module_config calls.
      *
-     * @return future с routing ACK/NAK для отправленного admin-пакета
+     * @return future with routing ACK/NAK for the sent admin packet
      */
     public static CompletableFuture<MeshProtos.Routing.Error> beginEditSettings(ProtocolHandler handler, DeviceState state) {
         AdminProtos.AdminMessage.Builder adminBuilder = AdminProtos.AdminMessage.newBuilder()
@@ -685,10 +683,10 @@ public final class MessageService {
     }
 
     /**
-     * Отправляет commit_edit_settings для завершения транзакции настроек.
-     * Устройство применит все изменения и перезагрузится.
+     * Sends commit_edit_settings to finish the settings transaction.
+     * The device applies all changes and reboots.
      *
-     * @return future с routing ACK/NAK для отправленного admin-пакета
+     * @return future with routing ACK/NAK for the sent admin packet
      */
     public static CompletableFuture<MeshProtos.Routing.Error> commitEditSettings(ProtocolHandler handler, DeviceState state) {
         AdminProtos.AdminMessage.Builder adminBuilder = AdminProtos.AdminMessage.newBuilder()
@@ -702,9 +700,9 @@ public final class MessageService {
     }
 
     /**
-     * Отправляет set_config (одна секция Config) на устройство.
+     * Sends set_config, one Config section, to the device.
      *
-     * @return future с routing ACK/NAK для отправленного admin-пакета
+     * @return future with routing ACK/NAK for the sent admin packet
      */
     public static CompletableFuture<MeshProtos.Routing.Error> setConfig(ProtocolHandler handler, DeviceState state, ConfigProtos.Config config) {
         if (config.getPayloadVariantCase() == ConfigProtos.Config.PayloadVariantCase.LORA) {
@@ -721,9 +719,9 @@ public final class MessageService {
     }
 
     /**
-     * Отправляет set_module_config (одна секция ModuleConfig) на устройство.
+     * Sends set_module_config, one ModuleConfig section, to the device.
      *
-     * @return future с routing ACK/NAK для отправленного admin-пакета
+     * @return future with routing ACK/NAK for the sent admin packet
      */
     public static CompletableFuture<MeshProtos.Routing.Error> setModuleConfig(ProtocolHandler handler, DeviceState state,
                                         ModuleConfigProtos.ModuleConfig moduleConfig) {
@@ -738,9 +736,9 @@ public final class MessageService {
     }
 
     /**
-     * Отправляет set_ringtone_message на устройство.
+     * Sends set_ringtone_message to the device.
      *
-     * @return future с routing ACK/NAK для отправленного admin-пакета
+     * @return future with routing ACK/NAK for the sent admin packet
      */
     public static CompletableFuture<MeshProtos.Routing.Error> setRingtone(ProtocolHandler handler,
                                                                           DeviceState state,
@@ -756,10 +754,10 @@ public final class MessageService {
     }
 
     /**
-     * Отправляет команду перезапуска устройства через {@code reboot_seconds}.
+     * Sends a device reboot command through {@code reboot_seconds}.
      *
-     * @param delaySeconds задержка перед перезапуском в секундах
-     * @return future с routing ACK/NAK для отправленного admin-пакета
+     * @param delaySeconds delay before reboot, in seconds
+     * @return future with routing ACK/NAK for the sent admin packet
      */
     public static CompletableFuture<MeshProtos.Routing.Error> rebootDevice(ProtocolHandler handler,
                                                                            DeviceState state,
@@ -775,10 +773,10 @@ public final class MessageService {
     }
 
     /**
-     * Отправляет команду выключения устройства через {@code shutdown_seconds}.
+     * Sends a device shutdown command through {@code shutdown_seconds}.
      *
-     * @param delaySeconds задержка перед выключением в секундах
-     * @return future с routing ACK/NAK для отправленного admin-пакета
+     * @param delaySeconds delay before shutdown, in seconds
+     * @return future with routing ACK/NAK for the sent admin packet
      */
     public static CompletableFuture<MeshProtos.Routing.Error> shutdownDevice(ProtocolHandler handler,
                                                                              DeviceState state,
@@ -794,13 +792,13 @@ public final class MessageService {
     }
 
     /**
-     * Устанавливает фиксированную позицию на устройстве.
-     * Отправляет AdminMessage.set_fixed_position с координатами.
-     * Прошивка автоматически установит position.fixed_position = true.
+     * Sets a fixed position on the device.
+     * Sends AdminMessage.set_fixed_position with coordinates. Firmware sets
+     * position.fixed_position = true automatically.
      *
-     * @param latDegrees широта в градусах (-90..90)
-     * @param lonDegrees долгота в градусах (-180..180)
-     * @param altMeters  высота в метрах над уровнем моря
+     * @param latDegrees latitude in degrees (-90..90)
+     * @param lonDegrees longitude in degrees (-180..180)
+     * @param altMeters  altitude in meters above sea level
      */
     public static void setFixedPosition(ProtocolHandler handler, DeviceState state,
                                          double latDegrees, double lonDegrees, int altMeters) {
@@ -829,9 +827,9 @@ public final class MessageService {
     }
 
     /**
-     * Удаляет фиксированную позицию с устройства.
-     * Отправляет AdminMessage.remove_fixed_position = true.
-     * Прошивка автоматически установит position.fixed_position = false.
+     * Removes the fixed position from the device.
+     * Sends AdminMessage.remove_fixed_position = true. Firmware sets
+     * position.fixed_position = false automatically.
      */
     public static void removeFixedPosition(ProtocolHandler handler, DeviceState state) {
         AdminProtos.AdminMessage.Builder adminBuilder = AdminProtos.AdminMessage.newBuilder()
@@ -845,7 +843,7 @@ public final class MessageService {
     }
 
     /**
-     * Отправляет AdminMessage.set_favorite_node на устройство.
+     * Sends AdminMessage.set_favorite_node to the device.
      */
     public static void setFavoriteNode(ProtocolHandler handler, DeviceState state, int nodeNum) {
         AdminProtos.AdminMessage.Builder adminBuilder = AdminProtos.AdminMessage.newBuilder()
@@ -858,7 +856,7 @@ public final class MessageService {
     }
 
     /**
-     * Отправляет AdminMessage.remove_favorite_node на устройство.
+     * Sends AdminMessage.remove_favorite_node to the device.
      */
     public static void removeFavoriteNode(ProtocolHandler handler, DeviceState state, int nodeNum) {
         AdminProtos.AdminMessage.Builder adminBuilder = AdminProtos.AdminMessage.newBuilder()
@@ -871,7 +869,7 @@ public final class MessageService {
     }
 
     /**
-     * Отправляет AdminMessage.set_ignored_node на устройство.
+     * Sends AdminMessage.set_ignored_node to the device.
      */
     public static void setIgnoredNode(ProtocolHandler handler, DeviceState state, int nodeNum) {
         AdminProtos.AdminMessage.Builder adminBuilder = AdminProtos.AdminMessage.newBuilder()
@@ -884,7 +882,7 @@ public final class MessageService {
     }
 
     /**
-     * Отправляет AdminMessage.remove_ignored_node на устройство.
+     * Sends AdminMessage.remove_ignored_node to the device.
      */
     public static void removeIgnoredNode(ProtocolHandler handler, DeviceState state, int nodeNum) {
         AdminProtos.AdminMessage.Builder adminBuilder = AdminProtos.AdminMessage.newBuilder()
@@ -897,17 +895,17 @@ public final class MessageService {
     }
 
     /**
-     * Вспомогательный метод для отправки AdminMessage на локальное устройство.
+     * Helper for sending AdminMessage to the local device.
      *
-     * @return future с routing ACK/NAK для отправленного admin-пакета
+     * @return future with routing ACK/NAK for the sent admin packet
      */
     /**
-     * Отправляет mutating admin-команду на локальное устройство.
+     * Sends a mutating admin command to the local device.
      * <p>
-     * Для begin/set/commit и прочих write-операций нам нужен только routing ACK.
-     * Запрашивать ещё и ADMIN_APP response здесь вредно: часть прошивок рвёт BLE-сессию
-     * уже на шаге обработки set_module_config(MQTT), хотя service-response клиент всё
-     * равно не использует.
+     * For begin/set/commit and other write operations, only routing ACK is needed.
+     * Requesting an ADMIN_APP response here is harmful: some firmware drops the
+     * BLE session while processing set_module_config(MQTT), while the client does
+     * not use the service response anyway.
      */
     private static CompletableFuture<MeshProtos.Routing.Error> sendAdminMessage(ProtocolHandler handler,
                                                                                 DeviceState state,
@@ -916,12 +914,12 @@ public final class MessageService {
     }
 
     /**
-     * Отправляет AdminMessage на локальное устройство.
+     * Sends AdminMessage to the local device.
      *
-     * @param wantResponse {@code true} только для read/query-запросов, где клиент реально
-     *                     ждёт ADMIN_APP response; для mutating команд используем {@code false}
-     *                     и опираемся на routing ACK.
-     * @return future с routing ACK/NAK для отправленного admin-пакета
+     * @param wantResponse {@code true} only for read/query requests where the client
+     *                     actually waits for an ADMIN_APP response; mutating commands
+     *                     use {@code false} and rely on routing ACK
+     * @return future with routing ACK/NAK for the sent admin packet
      */
     private static CompletableFuture<MeshProtos.Routing.Error> sendAdminMessage(ProtocolHandler handler,
                                           DeviceState state,

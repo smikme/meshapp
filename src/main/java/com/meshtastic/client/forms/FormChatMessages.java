@@ -26,11 +26,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Управляет окном загруженных сообщений выбранного чата.
+ * Manages the loaded message window for the selected chat.
  *
- * <p>История в БД может быть длинной, поэтому слой держит ограниченное окно
- * сообщений, догружает реакции и цитаты, восстанавливает якоря прокрутки и
- * обновляет индикаторы непрочитанных при поступлении новых сообщений.
+ * <p>Message history can be long, so this layer keeps a bounded window, loads
+ * reactions and quoted messages, restores scroll anchors, and updates unread
+ * indicators as new messages arrive.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -40,8 +40,9 @@ abstract class FormChatMessages extends FormChatUi {
     private static final int VIEWPORT_ANCHOR_RESTORE_PULSES = 6;
 
     /**
-     * Загрузить последние PAGE_SIZE сообщений из БД.
-     * Если накопилось несколько непрочитанных, показать верхнюю границу непрочитанного окна.
+     * Loads the latest {@code PAGE_SIZE} messages from the database.
+     * When several unread messages are pending, the viewport starts at the top
+     * of the unread range instead of the absolute bottom.
      */
     protected void loadInitialMessages(boolean restoreSavedState) {
         if (selectedChat == null) { return; }
@@ -110,7 +111,7 @@ abstract class FormChatMessages extends FormChatUi {
     }
 
     /**
-     * Подгрузить PAGE_SIZE старых сообщений (скролл вверх). Сохранить позицию скролла.
+     * Loads the next page of older messages while preserving scroll position.
      */
     protected void loadOlderMessages() {
         if (allHistoryLoaded || loadingOlderMessages || selectedChat == null) { return; }
@@ -182,8 +183,8 @@ abstract class FormChatMessages extends FormChatUi {
     }
 
     /**
-     * Инкрементальное обновление: загрузить новые сообщения из БД (id > newestLoadedDbId).
-     * Вызывается при срабатывании messageListener.
+     * Incrementally loads messages newer than {@code newestLoadedDbId}.
+     * Triggered by the message listener.
      */
     protected void refreshCurrentChat() {
         if (selectedChat == null) { return; }
@@ -193,7 +194,7 @@ abstract class FormChatMessages extends FormChatUi {
         String chatKey = currentChatKey();
         String ownerNodeId = currentOwnerNodeId();
 
-        // Обновить статусы доставки для отправленных сообщений (ACK/NAK)
+        // Refresh delivery statuses for sent messages, including ACK and NAK.
         MessageDbService db = MessageDbService.getInstance();
         refreshPendingDeliveryStatuses(db, chatType, chatKey, ownerNodeId);
         Set<Long> metadataChangedDbIds = syncLoadedMqttMetadata(db, chatType, chatKey, ownerNodeId);
@@ -598,9 +599,9 @@ abstract class FormChatMessages extends FormChatUi {
     }
 
     /**
-     * Сразу отражает локально отправленное сообщение в открытом чате.
-     * Использует тот же путь через БД, что и обычный messageListener,
-     * чтобы не плодить отдельную логику рендера и не расходиться со статусами.
+     * Reflects a locally sent message in the open chat immediately.
+     * It still goes through the database-backed path used by the ordinary
+     * message listener, keeping rendering and delivery statuses consistent.
      */
     protected void refreshCurrentChatAfterLocalSend() {
         reloadChatList();
@@ -841,9 +842,9 @@ abstract class FormChatMessages extends FormChatUi {
     }
 
     /**
-     * После переключения из личного чата в канал ScrollPane иногда остаётся в геометрии
-     * предыдущего короткого чата до следующего изменения размера или pulse. Принудительно
-     * инвалидируем область просмотра, но объединяем пачку вызовов в один проход.
+     * After switching from a short direct chat to a channel, ScrollPane can keep
+     * the previous viewport geometry until the next resize or pulse. Force one
+     * viewport invalidation while coalescing repeated requests.
      */
     protected void requestMessageViewportLayout() {
         requestMessageViewportLayout(false);
@@ -1282,7 +1283,7 @@ abstract class FormChatMessages extends FormChatUi {
         }
     }
 
-    /** Прокрутка сообщений вниз с принудительной раскладкой */
+    /** Scrolls messages to the bottom after forcing layout. */
     protected void scrollToBottom() {
         long generation = scrollOperationGeneration;
         Platform.runLater(() -> {
@@ -1292,7 +1293,7 @@ abstract class FormChatMessages extends FormChatUi {
             messageScrollPane.applyCss();
             messageScrollPane.layout();
             messageScrollPane.setVvalue(1.0);
-            // Повторно после следующего pulse — ScrollPane может ещё не знать новый размер контента
+        // Repeat on the next pulse because ScrollPane may not yet know the new content size.
             Platform.runLater(() -> {
                 if (isCurrentScrollOperation(generation)) {
                     messageScrollPane.setVvalue(1.0);
@@ -1340,8 +1341,9 @@ abstract class FormChatMessages extends FormChatUi {
     }
 
     /**
-     * Добавить системное (бот) сообщение в указанный чат.
-     * Сохраняет в БД. Обновляет интерфейс и счётчик прочитанных, если чат сейчас открыт.
+     * Adds a system or bot message to the requested chat.
+     * The message is saved to the database and updates the open UI and read
+     * counter when that chat is currently selected.
      */
     protected void addSystemMessageTo(String chatType, String chatKey, String text) {
         MeshMessage sysMsg = new MeshMessage("!00000000", "!00000000", 0, text, System.currentTimeMillis() / 1000, false);
@@ -1351,7 +1353,7 @@ abstract class FormChatMessages extends FormChatUi {
     }
 
     /**
-     * Показать временное системное сообщение только в текущем UI, без записи в историю.
+     * Shows a temporary system message in the current UI without saving it to history.
      */
     protected void showTransientSystemMessageTo(String chatType, String chatKey, String text) {
         if (!isCurrentChat(chatType, chatKey)) {
@@ -1363,7 +1365,7 @@ abstract class FormChatMessages extends FormChatUi {
     }
 
     /**
-     * Добавить результат трассировки: отдельная запись в traceroute_results и временный визуальный узел в текущем UI.
+     * Adds a traceroute result to {@code traceroute_results} and shows a temporary node in the current UI.
      */
     protected void addTracerouteResult(String chatType, String chatKey,
                                      String targetName, MeshProtos.RouteDiscovery route) {

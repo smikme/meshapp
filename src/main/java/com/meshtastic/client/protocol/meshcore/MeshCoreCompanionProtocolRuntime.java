@@ -23,10 +23,10 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * Runtime для MeshCore Companion Protocol.
+ * Runtime for the MeshCore Companion Protocol.
  * <p>
- * Runtime работает поверх BLE RX/TX или raw TCP/Serial byte stream, отправляет
- * {@code APP_START}, запрашивает metadata устройства и сохраняет результат в
+ * Runs over BLE RX/TX or a raw TCP/Serial byte stream, sends {@code APP_START},
+ * requests device metadata, and stores the assembled state in
  * {@link MeshCoreCompanionState}.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
@@ -57,7 +57,7 @@ public final class MeshCoreCompanionProtocolRuntime implements ProtocolRuntime<M
     }
 
     /**
-     * Возвращает активный protocol type этого runtime-а.
+     * Returns the protocol type served by this runtime.
      *
      * @return {@link ProtocolType#MESHCORE_COMPANION}
      */
@@ -67,7 +67,7 @@ public final class MeshCoreCompanionProtocolRuntime implements ProtocolRuntime<M
     }
 
     /**
-     * Возвращает текущее состояние, собранное из Companion responses.
+     * Returns the current state assembled from Companion responses.
      *
      * @return mutable runtime state
      */
@@ -77,9 +77,9 @@ public final class MeshCoreCompanionProtocolRuntime implements ProtocolRuntime<M
     }
 
     /**
-     * Возвращает future готовности runtime-а.
-     *
-     * @return future, завершающийся после получения {@code SELF_INFO}
+     * Returns the runtime readiness future.
+ *
+     * @return future completed after {@code SELF_INFO} is received
      */
     @Override
     public CompletableFuture<MeshCoreCompanionState> getReadyFuture() {
@@ -87,9 +87,9 @@ public final class MeshCoreCompanionProtocolRuntime implements ProtocolRuntime<M
     }
 
     /**
-     * Запускает Companion handshake и подписывает runtime на входящие packets.
-     *
-     * @return future готовности подключения
+     * Starts the Companion handshake and subscribes the runtime to incoming packets.
+ *
+     * @return connection readiness future
      */
     @Override
     public CompletableFuture<MeshCoreCompanionState> start() {
@@ -108,9 +108,9 @@ public final class MeshCoreCompanionProtocolRuntime implements ProtocolRuntime<M
     }
 
     /**
-     * Возвращает owner id, если public key уже получен от устройства.
-     *
-     * @return короткий owner id вида {@code mc:<12 hex>} или {@code null}
+     * Returns the owner id once the device public key has been received.
+ *
+     * @return short owner id in the {@code mc:<12 hex>} form, or {@code null}
      */
     @Override
     public String getOwnerId() {
@@ -118,7 +118,7 @@ public final class MeshCoreCompanionProtocolRuntime implements ProtocolRuntime<M
     }
 
     /**
-     * Останавливает runtime, снимает listener и завершает pending future ошибкой.
+     * Stops the runtime, removes the listener, and fails the pending readiness future.
      */
     @Override
     public void close() {
@@ -131,14 +131,14 @@ public final class MeshCoreCompanionProtocolRuntime implements ProtocolRuntime<M
     }
 
     /**
-     * Отправляет стартовый {@code APP_START} packet.
+     * Sends the initial {@code APP_START} packet.
      */
     private void sendAppStart() {
         sendCommand(MeshCoreCompanionFrames.appStart("meshapp"), "APP_START");
     }
 
     /**
-     * Отправляет дополнительные metadata-запросы после успешного {@code SELF_INFO}.
+     * Sends follow-up metadata requests after a successful {@code SELF_INFO}.
      */
     private void sendPostReadyQueries() {
         scheduleCommand(0, MeshCoreCompanionFrames.deviceQuery(), "DEVICE_QUERY");
@@ -151,12 +151,12 @@ public final class MeshCoreCompanionProtocolRuntime implements ProtocolRuntime<M
     }
 
     /**
-     * Отправляет текстовое сообщение в MeshCore-канал.
-     *
-     * @param channelIndex индекс канала {@code 0..7}
-     * @param text текст сообщения
-     * @param replyId идентификатор сообщения-ответа; MeshCore Companion не переносит это поле
-     * @return локально созданное сообщение или {@code null}, если отправка невозможна
+     * Sends a text message to a MeshCore channel.
+ *
+     * @param channelIndex channel index in the {@code 0..7} range
+     * @param text         message text
+     * @param replyId      reply-message id; MeshCore Companion does not transmit this field
+     * @return locally created message, or {@code null} if it cannot be sent
      */
     public MeshMessage sendChannelMessage(int channelIndex, String text, int replyId) {
         if (closed || text == null || text.isBlank()) {
@@ -183,12 +183,12 @@ public final class MeshCoreCompanionProtocolRuntime implements ProtocolRuntime<M
     }
 
     /**
-     * Отправляет личное сообщение MeshCore contact-у.
-     *
-     * @param peerNodeId node id контакта вида {@code mc:<12 hex>}
-     * @param text текст сообщения
-     * @param replyId идентификатор сообщения-ответа; MeshCore Companion не переносит это поле
-     * @return локально созданное сообщение или {@code null}, если контакт не может быть адресован
+     * Sends a direct message to a MeshCore contact.
+ *
+     * @param peerNodeId contact node id in the {@code mc:<12 hex>} form
+     * @param text       message text
+     * @param replyId    reply-message id; MeshCore Companion does not transmit this field
+     * @return locally created message, or {@code null} if the contact cannot be addressed
      */
     public MeshMessage sendDirectMessage(String peerNodeId, String text, int replyId) {
         if (closed || text == null || text.isBlank()) {
@@ -219,10 +219,10 @@ public final class MeshCoreCompanionProtocolRuntime implements ProtocolRuntime<M
     }
 
     /**
-     * Повторно отправляет неуспешное MeshCore-сообщение.
-     *
-     * @param message исходное сообщение со статусом {@code FAILED}
-     * @return {@code true}, если повторная отправка поставлена в transport
+     * Resends a failed MeshCore message.
+ *
+     * @param message original message with {@code FAILED} status
+     * @return {@code true} if the retry was queued to the transport
      */
     public boolean retryMessage(MeshMessage message) {
         if (message == null || !message.isOutgoing()) {
@@ -246,7 +246,7 @@ public final class MeshCoreCompanionProtocolRuntime implements ProtocolRuntime<M
     }
 
     /**
-     * Обрабатывает входящий raw Companion packet.
+     * Handles an incoming raw Companion packet.
      */
     private void handlePacket(byte[] packet) {
         if (closed || packet == null || packet.length == 0) {
@@ -300,7 +300,7 @@ public final class MeshCoreCompanionProtocolRuntime implements ProtocolRuntime<M
     }
 
     /**
-     * Помечает runtime готовым после получения self-info.
+     * Marks the runtime ready after self-info has been received.
      */
     private void completeReady() {
         state.setReady(true);
@@ -308,7 +308,7 @@ public final class MeshCoreCompanionProtocolRuntime implements ProtocolRuntime<M
     }
 
     /**
-     * Разбирает {@code SELF_INFO}: power limits, public key и имя устройства.
+     * Parses {@code SELF_INFO}: power limits, public key, and device name.
      */
     private void parseSelfInfo(byte[] packet) {
         if (packet.length < 36) {
@@ -345,7 +345,7 @@ public final class MeshCoreCompanionProtocolRuntime implements ProtocolRuntime<M
     }
 
     /**
-     * Разбирает {@code DEVICE_INFO} и планирует запрос battery/storage metadata.
+     * Parses {@code DEVICE_INFO} and schedules battery/storage metadata retrieval.
      */
     private void parseDeviceInfo(byte[] packet) {
         if (packet.length < 2) {
@@ -365,7 +365,7 @@ public final class MeshCoreCompanionProtocolRuntime implements ProtocolRuntime<M
     }
 
     /**
-     * Разбирает battery voltage и optional storage counters.
+     * Parses battery voltage and optional storage counters.
      */
     private void parseBattery(byte[] packet) {
         if (packet.length < 3) {
@@ -380,7 +380,7 @@ public final class MeshCoreCompanionProtocolRuntime implements ProtocolRuntime<M
     }
 
     /**
-     * Сохраняет Companion error и завершает handshake ошибкой, если runtime ещё не готов.
+     * Stores a Companion error and fails the handshake if the runtime is not ready yet.
      */
     private void parseError(byte[] packet) {
         String message = packet.length >= 2
@@ -394,7 +394,7 @@ public final class MeshCoreCompanionProtocolRuntime implements ProtocolRuntime<M
     }
 
     /**
-     * Разбирает начало списка MeshCore contacts.
+     * Parses the beginning of the MeshCore contact list.
      */
     private void parseContactsStart(byte[] packet) {
         if (packet.length >= 5) {
@@ -403,7 +403,7 @@ public final class MeshCoreCompanionProtocolRuntime implements ProtocolRuntime<M
     }
 
     /**
-     * Разбирает один contact из sync-ответа MeshCore.
+     * Parses one contact from the MeshCore sync response.
      */
     private void parseContact(byte[] packet) {
         if (packet.length < 100) {
@@ -424,7 +424,7 @@ public final class MeshCoreCompanionProtocolRuntime implements ProtocolRuntime<M
     }
 
     /**
-     * Завершает sync списка контактов.
+     * Completes contact-list synchronization.
      */
     private void parseContactsEnd(byte[] packet) {
         if (packet.length >= 5) {
@@ -433,7 +433,7 @@ public final class MeshCoreCompanionProtocolRuntime implements ProtocolRuntime<M
     }
 
     /**
-     * Разбирает описание канала MeshCore.
+     * Parses a MeshCore channel descriptor.
      */
     private void parseChannelInfo(byte[] packet) {
         if (packet.length < 2) {
@@ -455,7 +455,7 @@ public final class MeshCoreCompanionProtocolRuntime implements ProtocolRuntime<M
     }
 
     /**
-     * Разбирает входящее личное сообщение MeshCore.
+     * Parses an incoming MeshCore direct message.
      */
     private void parseContactMessage(byte[] packet) {
         boolean v3 = (packet[0] & 0xFF) == MeshCoreCompanionFrames.PACKET_CONTACT_MSG_RECV_V3;
@@ -481,7 +481,7 @@ public final class MeshCoreCompanionProtocolRuntime implements ProtocolRuntime<M
     }
 
     /**
-     * Разбирает входящее сообщение MeshCore-канала.
+     * Parses an incoming MeshCore channel message.
      */
     private void parseChannelMessage(byte[] packet) {
         boolean v3 = (packet[0] & 0xFF) == MeshCoreCompanionFrames.PACKET_CHANNEL_MSG_RECV_V3;

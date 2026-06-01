@@ -59,7 +59,7 @@ public class DrawerPane extends StackPane {
         toolBar.setOrientation(Orientation.VERTICAL);
         toolBar.getStyleClass().add("drawer-toolbar");
 
-        // Кнопки уведомлений и темы — прижаты к низу
+        // Notification and theme buttons are pinned to the bottom.
         notifButton = createNotificationButton();
         themeButton = createThemeButton();
 
@@ -88,7 +88,7 @@ public class DrawerPane extends StackPane {
     }
 
     public void updateHeader(String shortName, String longName, String nodeId) {
-        // В режиме ToolBar header не отображается
+        // Toolbar mode does not show the header.
     }
 
     public void rebuildMenu(List<DrawerMenuItem> items) {
@@ -119,7 +119,7 @@ public class DrawerPane extends StackPane {
 
         Button btn;
         if (item.iconPath() != null) {
-            // SVG-иконка из ресурсов — цвет управляется через CSS
+            // SVG icon from resources; color is controlled through CSS.
             SVGPath svgIcon = SvgIconLoader.load(item.iconPath(), 22);
             if (svgIcon != null) {
                 btn = new Button();
@@ -129,7 +129,7 @@ public class DrawerPane extends StackPane {
                 btn = new Button("?");
             }
         } else {
-            // Текстовая иконка (для чатов/каналов)
+            // Text icon used for chats and channels.
             btn = new Button(item.iconText() != null ? item.iconText() : "?");
         }
         btn.getStyleClass().add("drawer-toolbar-button");
@@ -145,7 +145,7 @@ public class DrawerPane extends StackPane {
             }
         });
 
-        // Красная точка для кнопки "Чаты"
+        // Unread dot for the Chats button.
         if (item.formClass() == FormChat.class && btn.getGraphic() != null) {
             chatBadgeDot = new Circle(4);
             chatBadgeDot.getStyleClass().add("drawer-chat-badge-dot");

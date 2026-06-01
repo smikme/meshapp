@@ -3,63 +3,62 @@ package com.meshtastic.client.connection;
 import java.util.function.Consumer;
 
 /**
- * Низкоуровневое транспортное соединение, которое используется протокольными адаптерами.
+ * Low-level transport connection used by protocol adapters.
  * <p>
- * Реализации отвечают только за жизненный цикл byte stream: открыть соединение,
- * закрыть соединение, отправить подготовленные байты и передать входящие payload-ы
- * на уровень протокола. В этом интерфейсе не должно быть бизнес-логики конкретной
- * радиосети или сетевого протокола.
+ * Implementations own only the byte-stream lifecycle: open, close, write bytes
+ * prepared by the active protocol, and deliver inbound payloads upward. Business
+ * logic for a specific radio network or protocol does not belong here.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public interface TransportConnection {
 
     /**
-     * Открывает транспортное соединение.
+     * Opens the transport connection.
      *
-     * @throws ConnectionException если транспорт не удалось открыть
+     * @throws ConnectionException when the transport cannot be opened
      */
     void connect() throws ConnectionException;
 
-    /** Закрывает транспорт. Метод безопасен при повторном вызове. */
+    /** Closes the transport. The method is safe to call more than once. */
     void disconnect();
 
     /**
-     * @return {@code true}, если транспорт открыт и готов к записи
+     * @return {@code true} when the transport is open and writable
      */
     boolean isConnected();
 
     /**
-     * Отправляет через транспорт байтовый массив, уже подготовленный активным протоколом.
+     * Sends bytes already prepared by the active protocol through the transport.
      *
-     * @param data байты, подготовленные активным протокольным адаптером
+     * @param data bytes prepared by the active protocol adapter
      */
     void sendBytes(byte[] data);
 
     /**
-     * Отправляет байты и сообщает transport-ам с receive watchdog,
-     * должна ли эта запись ожидать входящую активность.
+     * Sends bytes and tells transports with receive watchdogs whether this write
+     * should expect inbound activity.
      *
-     * @param data байты, подготовленные активным протокольным адаптером
-     * @param expectResponseAfterWrite {@code true} для обычных запросов,
-     *                                 {@code false} для keepalive/heartbeat-записей
+     * @param data bytes prepared by the active protocol adapter
+     * @param expectResponseAfterWrite {@code true} for ordinary requests,
+     *                                 {@code false} for keepalive or heartbeat writes
      */
     default void sendBytes(byte[] data, boolean expectResponseAfterWrite) {
         sendBytes(data);
     }
 
     /**
-     * Регистрирует слушателя входящих protocol payload-ов, которые уже извлечены
-     * transport framing layer из конкретного TCP/Serial/BLE потока.
+     * Registers a listener for protocol payloads extracted by the transport
+     * framing layer from TCP, Serial, or BLE input.
      *
-     * @param listener callback для полученных payload-байтов, или {@code null}
+     * @param listener callback for received payload bytes, or {@code null}
      */
     void setDataListener(Consumer<byte[]> listener);
 
     /**
-     * Регистрирует слушателя событий жизненного цикла транспорта.
+     * Registers a listener for transport lifecycle events.
      *
-     * @param listener слушатель событий подключения/отключения/ошибки, или {@code null}
+     * @param listener connection, disconnection, and error listener, or {@code null}
      */
     void setConnectionListener(ConnectionListener listener);
 }

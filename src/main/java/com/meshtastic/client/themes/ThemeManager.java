@@ -30,7 +30,7 @@ public class ThemeManager {
             Collections.newSetFromMap(new WeakHashMap<>());
 
     public static void applyTheme(Scene scene, boolean isDark) {
-        // Устанавливаем тему AtlantaFX как UserAgentStylesheet
+        // Install the AtlantaFX theme as the user-agent stylesheet.
         if (isDark) {
             Application.setUserAgentStylesheet(new CupertinoDark().getUserAgentStylesheet());
         } else {

@@ -9,7 +9,7 @@ import java.nio.file.Path;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * JNI bridge к нативной macOS tray-библиотеке.
+ * JNI bridge to the native macOS tray library.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */

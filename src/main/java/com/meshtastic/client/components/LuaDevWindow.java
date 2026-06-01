@@ -92,11 +92,11 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Отдельное окно MeshApp IDE для редактирования, запуска и отладки Lua-скриптов.
+ * Standalone MeshApp IDE window for editing, running, and debugging Lua scripts.
  * <p>
- * Окно содержит редактор с подсветкой, автодополнением, нумерацией строк,
- * breakpoint-маркерами, консолью, таблицей переменных отладки и просмотром
- * изолированного KV-хранилища выбранного скрипта.
+ * The window includes a highlighted editor, autocomplete, line numbers,
+ * breakpoint markers, console, debug-variable table, and isolated KV storage
+ * view for the selected script.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -202,7 +202,7 @@ public final class LuaDevWindow {
     }
 
     /**
-     * Сохраняет геометрию и компоновку IDE, если окно было создано в текущей сессии.
+     * Saves IDE geometry and layout when the window exists in the current session.
      */
     public static void saveWindowStateIfOpen() {
         if (Platform.isFxApplicationThread()) {

@@ -25,13 +25,13 @@ import java.util.Objects;
 import java.util.Optional;
 
 /**
- * Управляет поиском сообщений внутри заголовка активного чата.
+ * Controls message search inside the active chat header.
  *
- * <p>Компонент держит только состояние поисковой панели: текст запроса,
- * фильтр по ноде, текущую подсветку, счётчик совпадений и popup выбора ноды.
- * Тяжёлые запросы к БД выполняются в {@link ChatMessageSearchService}, поэтому
- * JavaFX Application Thread отвечает только за обновление контролов и
- * прокрутку к найденному сообщению.
+ * <p>This component owns only search-panel state: the query text, node filter,
+ * current highlight, match counter, and node-selection popup. Expensive database
+ * work is delegated to {@link ChatMessageSearchService}, leaving the JavaFX
+ * Application Thread responsible only for control updates and scrolling to the
+ * selected result.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -69,49 +69,48 @@ final class FormChatMessageSearchController {
     private String textBeforeNodeLookup = "";
 
     /**
-     * Контракт с формой чата.
-     *
-     * <p>Поиск не знает о внутреннем устройстве {@link FormChatUi}: компонент
-     * запрашивает только текущий ключ чата, окно загруженных строк и действия
-     * прокрутки. Так форма остаётся владельцем данных, а поиск — владельцем
-     * своей панели управления.
+     * Contract provided by the chat form.
+ *
+     * <p>Search does not depend on {@link FormChatUi} internals. It asks only
+     * for the current chat key, the loaded-row window, and scrolling actions.
+     * The form remains the data owner; search owns only its controls.
      */
     interface Host {
 
-        /** Возвращает {@code true}, если сейчас открыт чат, в котором можно искать. */
+        /** Returns {@code true} when a searchable chat is currently open. */
         boolean hasSelectedChat();
 
-        /** Тип текущего чата для запросов к БД сообщений. */
+        /** Current chat type used for message-database queries. */
         String currentChatType();
 
-        /** Ключ текущего чата для запросов к БД сообщений. */
+        /** Current chat key used for message-database queries. */
         String currentChatKey();
 
-        /** NodeId владельца текущего подключения для изоляции истории сообщений. */
+        /** Owner node id for the current connection, used to isolate message history. */
         String currentOwnerNodeId();
 
-        /** Список нод, доступных для фильтра «искать сообщения от ноды». */
+        /** Nodes available to the "search messages from node" filter. */
         List<NodeData> listBotCommandNodes();
 
-        /** Загруженные строки сообщений, по которым применяется визуальная подсветка. */
+        /** Loaded message rows where visual highlights can be applied. */
         Map<Long, HBox> loadedMessageRows();
 
-        /** Догружает страницу истории так, чтобы строка с указанным id попала в окно. */
+        /** Loads enough history for the row with the given id to enter the window. */
         void ensureMessageLoaded(long dbId);
 
-        /** Планирует layout области сообщений перед точной прокруткой к найденной строке. */
+        /** Schedules message-area layout before exact scrolling to a found row. */
         void requestMessageViewportLayout();
 
-        /** Прокручивает область сообщений к указанному сообщению. */
+        /** Scrolls the message area to the given message. */
         void scrollToMessage(long dbId, double anchorOffset);
 
-        /** Возвращает фокус в строку ввода сообщения после закрытия поиска. */
+        /** Returns focus to the message input after search closes. */
         void focusChatInput();
     }
 
     /**
-     * Создаёт контроллер и сразу строит оба элемента заголовка: кнопку открытия
-     * поиска и панель с полем, счётчиком, навигацией и фильтром по ноде.
+     * Creates the controller and builds both header elements immediately: the
+     * search-open button and the panel with field, counter, navigation, and node filter.
      */
     FormChatMessageSearchController(Host host, Label headerNameLabel, Region headerSpacer) {
         this.host = Objects.requireNonNull(host, "host");
@@ -136,22 +135,22 @@ final class FormChatMessageSearchController {
     }
 
     /**
-     * Кнопка, показываемая в заголовке чата, когда поиск закрыт.
+     * Button shown in the chat header while search is closed.
      */
     Button searchButton() {
         return searchButton;
     }
 
     /**
-     * Панель поиска, показываемая вместо имени чата на время активного поиска.
+     * Search panel shown instead of the chat name while search is active.
      */
     HBox controls() {
         return controls;
     }
 
     /**
-     * Обрабатывает глобальные горячие клавиши правой панели: Ctrl/Cmd+F
-     * открывает поиск, Escape закрывает активный поиск.
+     * Handles right-pane shortcuts: Ctrl/Cmd+F opens search, Escape closes an
+     * active search.
      */
     void handleDetailPaneKeyPressed(KeyEvent event) {
         if (!host.hasSelectedChat()) {
@@ -169,11 +168,11 @@ final class FormChatMessageSearchController {
     }
 
     /**
-     * Открывает панель поиска для текущего чата.
+     * Opens the search panel for the current chat.
      *
-     * <p>Заголовок переходит в компактный режим: имя чата и spacer скрываются,
-     * а поисковое поле получает фокус. Последний запрос остаётся в поле, если
-     * пользователь временно ушёл из него, и выделяется для быстрой замены.
+     * <p>The header switches to a compact mode: chat name and spacer are hidden,
+     * and the search field receives focus. If the user briefly left search, the
+     * last query remains in the field and is selected for quick replacement.
      */
     void open() {
         if (!host.hasSelectedChat()) {
@@ -196,11 +195,11 @@ final class FormChatMessageSearchController {
     }
 
     /**
-     * Закрывает поиск и сбрасывает все поисковые состояния.
+     * Closes search and resets all search state.
      *
-     * <p>Активные фоновые задачи инвалидируются поколением, popup выбора ноды
-     * скрывается, подсветка на загруженных строках снимается. При закрытии по
-     * Escape или кнопке фокус возвращается в строку ввода сообщения.
+     * <p>Active background tasks are invalidated by generation, the node picker
+     * popup is hidden, and highlights are removed from loaded rows. When closed
+     * by Escape or by the button, focus returns to the message input.
      */
     void close(boolean focusInput) {
         active = false;
@@ -229,10 +228,10 @@ final class FormChatMessageSearchController {
     }
 
     /**
-     * Повторяет поиск после изменения окна сообщений или удаления строки.
+     * Re-runs search after the message window changes or a row is deleted.
      *
-     * <p>Если текст ещё ждёт debounce, метод не запускает лишний запрос:
-     * актуальный поиск стартует после паузы ввода или Enter.
+     * <p>If text is still waiting for debounce, this method does not start an
+     * extra query: the current search begins after the input pause or Enter.
      */
     void refreshResults(boolean jumpToLatest) {
         if (!active || !host.hasSelectedChat() || nodeLookupActive || textDirty) {
@@ -254,7 +253,7 @@ final class FormChatMessageSearchController {
     }
 
     /**
-     * Обновляет подсветку найденного сообщения на уже загруженных строках.
+     * Refreshes the found-message highlight on rows that are already loaded.
      */
     void refreshHighlight() {
         Optional.ofNullable(host.loadedMessageRows())
@@ -265,7 +264,7 @@ final class FormChatMessageSearchController {
     }
 
     /**
-     * Применяет CSS-класс найденного сообщения к одной строке.
+     * Applies the found-message CSS class to one row.
      */
     void applyHighlight(HBox row, long dbId) {
         Optional.ofNullable(row).ifPresent(messageRow -> {
@@ -277,8 +276,8 @@ final class FormChatMessageSearchController {
     }
 
     /**
-     * Освобождает фоновый executor поиска. Используется, если форма будет
-     * явно уничтожаться вместе с приложением.
+     * Releases the background search executor. Used when the form is explicitly
+     * destroyed with the application.
      */
     void dispose() {
         searchService.close();

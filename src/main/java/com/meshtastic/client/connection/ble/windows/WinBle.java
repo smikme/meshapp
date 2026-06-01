@@ -13,18 +13,15 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
 /**
- * Windows-реализация BLE через WinRT (нативная DLL meshapp-ble.dll + JNA).
+ * Windows BLE implementation backed by WinRT through {@code meshapp-ble.dll}
+ * and JNA.
  * <p>
- * Делегирует все BLE-операции в {@link WinBleLibrary}, которая загружает
- * {@code meshapp-ble.dll} — маленький C++/WinRT модуль с плоским C API.
- * <p>
- * Паттерн аналогичен {@link com.meshtastic.client.connection.ble.macos.MacOsBle}:
- * <ul>
- *   <li>Изолированная копия native DLL на экземпляр для параллельных BLE-сессий</li>
- *   <li>Instance JNA callbacks для защиты от GC без перетирания соседних подключений</li>
- *   <li>Polling fallback (200ms) при недоступности notifications</li>
- *   <li>Drain chain после каждой записи</li>
- * </ul>
+ * All BLE operations are delegated to {@link WinBleLibrary}, which loads a
+ * small C++/WinRT module with a flat C API. The structure mirrors the macOS BLE
+ * implementation: each instance gets an isolated native library copy, JNA
+ * callbacks are instance-owned to avoid GC and cross-connection clashes,
+ * polling is used as a fallback when notifications are unavailable, and a drain
+ * pass follows each write.
  *
  * @see WinBleLibrary
  * @see BlePlatform
@@ -79,8 +76,8 @@ public class WinBle implements BlePlatform {
             throw new RuntimeException("WinRT BLE инициализация не удалась: error=" + result);
         }
 
-        // Passkey callback поднимает BLE pairing в Java/UI слой, как на Linux:
-        // WinRT сам знает когда требуется PIN, а приложение отвечает через dialog.
+        // The passkey callback lifts BLE pairing into the Java/UI layer, as Linux does.
+        // WinRT knows when a PIN is required; the app answers through a dialog.
         passkeyCallback = address -> {
             Consumer<String> handler = passkeyRequestHandler;
             if (handler != null && address != null) {
@@ -215,9 +212,8 @@ public class WinBle implements BlePlatform {
         long durationMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt);
         if (result != 0) {
             if (result == -2) {
-                // AccessDenied означает, что текущая GATT-сессия не получила pairing/auth.
-                // Оставаться в connected=true нельзя: приложение иначе будет бесконечно
-                // пытаться писать в нерабочее соединение.
+                // AccessDenied means the current GATT session did not receive pairing/auth.
+                // Do not stay connected, or writes would keep targeting a broken session.
                 connected = false;
                 stopPolling();
                 lib.meshble_disconnect();
@@ -332,8 +328,8 @@ public class WinBle implements BlePlatform {
     }
 
     /**
-     * Polling: читаем fromRadio до получения пустого ответа.
-     * Guard drainInProgress предотвращает конкурентные чтения (как в MacOsBle).
+     * Polling path: read fromRadio until the response is empty.
+     * The drainInProgress guard prevents concurrent reads, as in MacOsBle.
      */
     private void pollFromRadio() {
         if (!connected || drainInProgress) { return; }
@@ -363,8 +359,8 @@ public class WinBle implements BlePlatform {
     }
 
     /**
-     * После каждого writeToRadio — дополнительный drain через 200ms.
-     * Паттерн из MacOsBle: ускоряет получение ответа на отправленный запрос.
+     * Runs an additional drain 200 ms after each writeToRadio call.
+     * This mirrors MacOsBle and speeds up responses to outgoing requests.
      */
     private void scheduleDrainAfterWrite() {
         pollScheduler.schedule(this::pollFromRadio, POLL_INTERVAL_MS, TimeUnit.MILLISECONDS);

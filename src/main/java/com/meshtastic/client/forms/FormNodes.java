@@ -75,7 +75,7 @@ public class FormNodes extends Form {
         if (state == null) { return; }
         NodeData node = state.getNodeDb().get(num);
 
-        // Нода удалена из nodeDb — убрать из списка и очистить детали
+            // The node was removed from nodeDb; remove it from the list and clear details.
         if (node == null) {
             nodeData.removeIf(n -> n.getNodeNum() == num);
             if (num == currentDetailNodeNum) {
@@ -92,8 +92,8 @@ public class FormNodes extends Form {
                 } finally {
                     suppressSelectionListener = false;
                 }
-                // Обновлять правую панель только для реально выбранной ноды.
-                // Иначе частые апдейты чужих нод дёргают detail-table во время layout/render.
+            // Update the right panel only for the actually selected node.
+            // Frequent updates for other nodes would otherwise disturb the detail table during layout/render.
                 if (num == currentDetailNodeNum) {
                     for (NodeData n : nodeListView.getItems()) {
                         if (n.getNodeNum() == num) {
@@ -154,7 +154,7 @@ public class FormNodes extends Form {
     private void initComponents() {
         getStyleClass().add("node-form");
 
-        // --- Левая панель: поиск + список ---
+        // --- Left Panel: Search and List ---
         VBox leftPane = new VBox();
         leftPane.getStyleClass().add("node-list-pane");
         if (OsDetect.isWindows() && !AppPreferences.isDisableEffectsEffective()) {
@@ -165,7 +165,7 @@ public class FormNodes extends Form {
         searchField.setPromptText(I18n.t("node.search.placeholder"));
         searchField.getStyleClass().add("node-search-field");
 
-        // Кнопка фильтра «Только избранные»
+        // Favorites-only filter button.
         SVGPath favFilterIcon = SvgIconLoader.load("/icons/favorite.svg", 16);
         favFilterBtn = new Button();
         favFilterBtn.setGraphic(favFilterIcon);
@@ -179,7 +179,7 @@ public class FormNodes extends Form {
             if (filterFavorites != null) { filterFavorites.setSelected(showFavoritesOnly); }
         });
 
-        // Кнопка сортировки и фильтров
+        // Sort and filter button.
         SVGPath sortIcon = SvgIconLoader.load("/icons/sort.svg", 16);
         Button sortBtn = new Button();
         sortBtn.setGraphic(sortIcon);
@@ -187,7 +187,7 @@ public class FormNodes extends Form {
         sortBtn.getStyleClass().add("chat-new-btn");
         sortBtn.setTooltip(new Tooltip(I18n.t("node.sortAndFilters")));
 
-        // --- Сортировки ---
+        // --- Sorting ---
         ToggleGroup sortGroup = new ToggleGroup();
         RadioMenuItem sortLastHeardNew = new RadioMenuItem(I18n.t("node.sort.lastHeardNew"));
         RadioMenuItem sortLastHeardOld = new RadioMenuItem(I18n.t("node.sort.lastHeardOld"));
@@ -202,7 +202,7 @@ public class FormNodes extends Form {
         sortHops.setToggleGroup(sortGroup);
         sortChannel.setToggleGroup(sortGroup);
 
-        // --- Фильтры ---
+        // --- Filters ---
         CheckMenuItem filterUnknown = new CheckMenuItem(I18n.t("node.filter.showUnknown"));
         CheckMenuItem filterDetails = new CheckMenuItem(I18n.t("node.filter.showDetails"));
         CheckMenuItem filterHideOffline = new CheckMenuItem(I18n.t("node.filter.hideOffline"));
@@ -215,7 +215,7 @@ public class FormNodes extends Form {
                 new SeparatorMenuItem(),
                 filterUnknown, filterDetails, filterHideOffline, filterFavorites, filterDirect, filterIgnored
         );
-        // Не закрывать меню при клике на чекбоксы — переоткрыть
+                // Keep the menu open when checkboxes are clicked by reopening it.
         for (MenuItem item : sortMenu.getItems()) {
             if (item instanceof CheckMenuItem) {
                 item.addEventHandler(javafx.event.ActionEvent.ACTION, ev -> {
@@ -235,11 +235,11 @@ public class FormNodes extends Form {
             }
         });
 
-        // Компараторы сортировки
+        // Sort comparators.
         Comparator<NodeData> defaultSort = Comparator.comparingInt(NodeData::getLastHeard).reversed()
                 .thenComparing(n -> n.getLongName() != null ? n.getLongName() : "");
 
-        // Map sort keys → RadioMenuItems и Comparators
+        // Map sort keys to RadioMenuItems and Comparators.
         Map<String, RadioMenuItem> sortKeyToItem = new LinkedHashMap<>();
         sortKeyToItem.put("LAST_HEARD_NEW", sortLastHeardNew);
         sortKeyToItem.put("LAST_HEARD_OLD", sortLastHeardOld);
@@ -266,7 +266,7 @@ public class FormNodes extends Form {
             AppPreferences.setNodesSort("CHANNEL");
         });
 
-        // Обработчики фильтров
+        // Filter handlers.
         filterUnknown.setOnAction(e -> {
             includeUnknownNames = filterUnknown.isSelected();
             AppPreferences.setNodesFilterUnknown(includeUnknownNames);
@@ -298,7 +298,7 @@ public class FormNodes extends Form {
             syncIgnoredState();
         });
 
-        // --- Восстановить настройки из Preferences ---
+        // --- Restore Settings from Preferences ---
         includeUnknownNames = AppPreferences.isNodesFilterUnknown();
         showDetails = AppPreferences.isNodesFilterDetails();
         hideOffline = AppPreferences.isNodesFilterHideOffline();
@@ -313,13 +313,13 @@ public class FormNodes extends Form {
         filterDirect.setSelected(showDirectOnly);
         filterIgnored.setSelected(showIgnoredOnly);
 
-        // Синхронизировать favFilterBtn
+        // Synchronize favFilterBtn.
         if (showFavoritesOnly) {
             favFilterBtn.getStyleClass().add("favorite-btn-active");
             favFilterBtn.getTooltip().setText(I18n.t("node.filter.showAll"));
         }
 
-        // Восстановить сортировку
+        // Restore sorting.
         String savedSort = AppPreferences.getNodesSort();
         RadioMenuItem savedSortItem = sortKeyToItem.getOrDefault(savedSort, sortLastHeardNew);
         savedSortItem.setSelected(true);
@@ -332,7 +332,7 @@ public class FormNodes extends Form {
         filteredNodes = new FilteredList<>(nodeData, n -> true);
         searchField.textProperty().addListener((obs, oldVal, newVal) -> updateFilterPredicate());
 
-        // Инициализировать компаратор по сохранённой сортировке
+        // Initialize comparator from the saved sort mode.
         Comparator<NodeData> initialComparator = resolveComparator(savedSort, defaultSort);
         sortedNodes = new SortedList<>(filteredNodes, initialComparator);
 
@@ -347,7 +347,7 @@ public class FormNodes extends Form {
                     if (!suppressSelectionListener) { showDetail(newNode); }
                 });
 
-        // Бейдж с количеством нод
+        // Node-count badge.
         countBadge = new Label("0");
         countBadge.getStyleClass().add("node-count-badge");
         countBadge.setMouseTransparent(true);
@@ -362,7 +362,7 @@ public class FormNodes extends Form {
 
         leftPane.getChildren().addAll(searchBox, listWrapper);
 
-        // --- Правая панель: детали ---
+        // --- Right Panel: Details ---
         detailPane = new VBox();
         detailPane.setPadding(Insets.EMPTY);
         detailPane.getStyleClass().add("node-detail-pane");
@@ -384,15 +384,15 @@ public class FormNodes extends Form {
 
         getChildren().add(splitPane);
 
-        // Растянуть SplitPane на всю форму
+        // Stretch the SplitPane to the whole form.
         splitPane.prefWidthProperty().bind(widthProperty());
         splitPane.prefHeightProperty().bind(heightProperty());
 
-        // Применить фильтры при старте
+        // Apply filters on startup.
         updateFilterPredicate();
     }
 
-    /** Возвращает компаратор по строковому ключу сортировки. */
+    /** Returns the comparator for a string sort key. */
     private Comparator<NodeData> resolveComparator(String sortKey, Comparator<NodeData> defaultSort) {
         return switch (sortKey) {
             case "LAST_HEARD_OLD" -> Comparator.comparingInt(NodeData::getLastHeard)
@@ -411,7 +411,7 @@ public class FormNodes extends Form {
                 .thenComparing(Comparator.comparingInt(NodeData::getLastHeard).reversed());
     }
 
-    /** Синхронизирует визуальное состояние кнопки favFilterBtn и применяет фильтр. */
+    /** Synchronizes favFilterBtn visual state and applies the filter. */
     private void syncFavoritesState() {
         if (showFavoritesOnly) {
             favFilterBtn.getStyleClass().add("favorite-btn-active");
@@ -425,7 +425,7 @@ public class FormNodes extends Form {
         updateFilterPredicate();
     }
 
-    /** Синхронизирует состояние фильтра игнорируемых и применяет фильтр. */
+    /** Synchronizes ignored-filter state and applies the filter. */
     private void syncIgnoredState() {
         if (showIgnoredOnly) {
             injectOfflineIgnored();
@@ -439,7 +439,7 @@ public class FormNodes extends Form {
 
     private static final double EARTH_RADIUS_KM = 6371.0;
 
-    /** Comparator по расстоянию от своей ноды. Ноды без GPS — в конец. */
+    /** Comparator by distance from the local node. Nodes without GPS are placed last. */
     private Comparator<NodeData> buildDistanceComparator() {
         double myLat = 0, myLon = 0;
         if (state != null) {
@@ -454,7 +454,7 @@ public class FormNodes extends Form {
         boolean hasMyPos = lat1 != 0 || lon1 != 0;
 
         if (!hasMyPos) {
-            // Нет своей позиции — fallback на lastHeard DESC
+        // No local position: fall back to lastHeard DESC.
             return Comparator.comparingInt(NodeData::getLastHeard).reversed()
                     .thenComparing(n -> n.getLongName() != null ? n.getLongName() : "");
         }
@@ -476,7 +476,7 @@ public class FormNodes extends Form {
 
     // ==================== Filter ====================
 
-    /** Подгрузить избранные ноды из БД, которых нет в текущем живом списке. */
+    /** Loads favorite nodes from the database when they are absent from the live list. */
     private void injectOfflineFavorites() {
         List<NodeData> dbFavorites = NodeCacheService.getInstance().loadFavoriteNodes();
         Set<Integer> existingNums = new HashSet<>();
@@ -488,7 +488,7 @@ public class FormNodes extends Form {
         }
     }
 
-    /** Подгрузить игнорируемые ноды из БД, которых нет в текущем живом списке. */
+    /** Loads ignored nodes from the database when they are absent from the live list. */
     private void injectOfflineIgnored() {
         List<NodeData> dbIgnored = NodeCacheService.getInstance().loadIgnoredNodes();
         Set<Integer> existingNums = new HashSet<>();
@@ -500,7 +500,7 @@ public class FormNodes extends Form {
         }
     }
 
-    /** Убрать ноды, которых нет в DeviceState (были подгружены из БД). */
+    /** Removes nodes absent from DeviceState, typically nodes loaded from the database. */
     private void removeOfflineNodes() {
         if (state == null) { return; }
         Set<Integer> liveNums = state.getNodeDb().keySet();
@@ -514,28 +514,27 @@ public class FormNodes extends Form {
         IgnoredNodeService ignService = IgnoredNodeService.getInstance();
         long now = System.currentTimeMillis() / 1000;
         filteredNodes.setPredicate(node -> {
-            // Текстовый поиск применяем первым, чтобы во время поиска
-            // можно было находить ноды даже без имени.
+        // Apply text search first so unnamed nodes can still be found during search.
             if (!matchesSearchQuery(node, query)) {
                 return false;
             }
-            // Фильтр неизвестных нод (без имени)
+        // Unknown-node filter for nodes without names.
             if (!includeUnknownNames && !node.hasName() && !hasQuery) {
                 return false;
             }
-            // Фильтр офлайн-нод (не слышны более 2 часов)
+        // Offline-node filter for nodes not heard for more than two hours.
             if (hideOffline && node.getLastHeard() > 0 && (now - node.getLastHeard()) > 7200) {
                 return false;
             }
-            // Фильтр только избранные
+        // Favorites-only filter.
             if (showFavoritesOnly && !favService.isFavorite(node.getNodeId())) {
                 return false;
             }
-            // Фильтр только прямые (0 хопов)
+        // Direct-only filter for 0-hop nodes.
             if (showDirectOnly && !node.isDirectNeighbor()) {
                 return false;
             }
-            // Фильтр только игнорируемые
+        // Ignored-only filter.
             if (showIgnoredOnly && !ignService.isIgnored(node.getNodeId())) {
                 return false;
             }
@@ -580,7 +579,7 @@ public class FormNodes extends Form {
             root.setPadding(new Insets(6, 10, 6, 10));
             root.getStyleClass().add("node-list-cell-root");
 
-            // Круглый аватар
+        // Circular avatar.
             avatarPane.setMinSize(40, 40);
             avatarPane.setMaxSize(40, 40);
             avatarPane.getStyleClass().add("node-avatar");
@@ -596,7 +595,7 @@ public class FormNodes extends Form {
             textBox.getChildren().addAll(nameLabel, subtitleLabel);
             HBox.setHgrow(textBox, Priority.ALWAYS);
 
-            // Звёздочка избранного
+        // Favorite star.
             SVGPath starIcon = SvgIconLoader.load("/icons/favorite.svg", 12);
             if (starIcon != null) {
                 starPane.getChildren().add(starIcon);
@@ -608,7 +607,7 @@ public class FormNodes extends Form {
 
             root.getChildren().addAll(avatarPane, textBox, starPane);
 
-            // Контекстное меню
+        // Context menu.
             MenuItem addFavItem = new MenuItem(I18n.t("node.menu.addFavorite"));
             MenuItem removeFavItem = new MenuItem(I18n.t("node.menu.removeFavorite"));
             MenuItem addIgnItem = new MenuItem(I18n.t("node.menu.addIgnored"));
@@ -663,7 +662,7 @@ public class FormNodes extends Form {
             displayName = UnicodeTextUtils.sanitizeForJavaFxDisplay(displayName);
             nameLabel.setText(displayName);
 
-            // Аватар: shortName целиком или первые 4 символа имени
+        // Avatar text: full shortName or the first four characters of the name.
             String avatarText;
             if (node.getShortName() != null && !node.getShortName().isEmpty()) {
                 avatarText = UnicodeTextUtils.sanitize(node.getShortName()).toUpperCase(Locale.ROOT);
@@ -678,14 +677,14 @@ public class FormNodes extends Form {
             String color = NodeUtils.roleColor(node.getRole());
             avatarPane.setStyle("-fx-background-color: " + color + "; -fx-background-radius: 20;");
 
-            // Подстрока
+            // Substring.
             String subtitle = formatLastHeardRelative(node.getLastHeard());
             if (node.hasHopsAway() && node.getHopsAway() > 0) {
                 subtitle += " · " + hopText(node.getHopsAway());
             }
             subtitleLabel.setText(subtitle);
 
-            // Расширенные детали
+        // Expanded details.
             if (showDetails) {
                 StringBuilder sb = new StringBuilder();
                 if (node.getSnr() != 0) {
@@ -723,7 +722,7 @@ public class FormNodes extends Form {
                 detailsLabel.setManaged(false);
             }
 
-            // Звёздочка избранного
+        // Favorite star.
             boolean isFav = FavoriteNodeService.getInstance().isFavorite(node.getNodeId());
             starPane.setVisible(isFav);
             starPane.setManaged(isFav);
@@ -747,18 +746,18 @@ public class FormNodes extends Form {
             return;
         }
 
-        // Обогатить bare-ноду данными из кэша перед показом
+            // Enrich a bare node with cached data before showing it.
         if (!node.hasName()) {
             NodeCacheService.getInstance().enrichFromCache(node);
         }
 
-        // Если та же нода — обновляем только данные таблицы, не пересоздаём UI
+                // Same node: update only table data without recreating the UI.
         if (node.getNodeNum() == currentDetailNodeNum && currentDetailContent != null) {
             currentDetailContent.updateTableData(node);
             return;
         }
 
-        // Отвязать предыдущий компонент
+            // Detach the previous component.
         if (currentDetailContent != null) {
             currentDetailContent.getChartPanel().unbind();
         }
@@ -771,7 +770,7 @@ public class FormNodes extends Form {
         detailPane.getChildren().add(currentDetailContent);
     }
 
-    /** Обновить детали если выбранная нода обновилась (не пересоздаёт UI, сохраняет фильтр графика) */
+    /** Updates details when the selected node changes, preserving UI and chart filter state. */
     private void refreshDetail() {
         NodeData selected = nodeListView.getSelectionModel().getSelectedItem();
         if (selected != null) {
@@ -812,11 +811,11 @@ public class FormNodes extends Form {
     }
 
     private void reloadList() {
-        // Запомнить выделенную ноду
+        // Remember the selected node.
         NodeData selected = nodeListView.getSelectionModel().getSelectedItem();
         int selectedNodeNum = selected != null ? selected.getNodeNum() : 0;
 
-        // Подавить listener чтобы setAll() → null selection не закрыл детали
+        // Suppress the listener so setAll() -> null selection does not close details.
         suppressSelectionListener = true;
         try {
             if (state != null) {
@@ -825,7 +824,7 @@ public class FormNodes extends Form {
                 nodeData.clear();
             }
 
-            // Восстановить выделение
+        // Restore selection.
             if (selectedNodeNum != 0) {
                 for (NodeData node : nodeListView.getItems()) {
                     if (node.getNodeNum() == selectedNodeNum) {
@@ -842,7 +841,7 @@ public class FormNodes extends Form {
     // ==================== Helpers ====================
 
     /**
-     * Относительное время: «в сети», «X минут назад», «X часов назад», «X дней назад».
+     * Formats relative time: online, minutes ago, hours ago, or days ago.
      */
     private static String formatLastHeardRelative(int epochSeconds) {
         if (epochSeconds <= 0) { return I18n.t("node.status.noData"); }

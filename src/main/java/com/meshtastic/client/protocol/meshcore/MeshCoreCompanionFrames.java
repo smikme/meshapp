@@ -4,10 +4,10 @@ import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 
 /**
- * Утилиты и константы MeshCore Companion Protocol packets.
+ * Utilities and constants for MeshCore Companion Protocol packets.
  * <p>
- * Эти packets используются одинаково поверх BLE RX/TX characteristics и raw
- * TCP/Serial byte stream endpoint-ов.
+ * These packets are used the same way over BLE RX/TX characteristics and raw
+ * TCP/Serial byte-stream endpoints.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -46,10 +46,10 @@ public final class MeshCoreCompanionFrames {
     }
 
     /**
-     * Создаёт {@code APP_START} command.
-     *
-     * @param appName имя приложения, которое будет записано в packet после служебного заголовка
-     * @return raw Companion packet для отправки в transport
+     * Creates an {@code APP_START} command.
+ *
+     * @param appName application name written after the packet service header
+     * @return raw Companion packet ready for transport
      */
     public static byte[] appStart(String appName) {
         byte[] nameBytes = appName == null || appName.isBlank()
@@ -62,7 +62,7 @@ public final class MeshCoreCompanionFrames {
     }
 
     /**
-     * Создаёт command запроса информации об устройстве.
+     * Creates a command that requests device information.
      *
      * @return raw Companion {@code DEVICE_QUERY} packet
      */
@@ -71,7 +71,7 @@ public final class MeshCoreCompanionFrames {
     }
 
     /**
-     * Создаёт command запроса батареи и storage metadata.
+     * Creates a command that requests battery and storage metadata.
      *
      * @return raw Companion {@code GET_BATTERY} packet
      */
@@ -80,7 +80,7 @@ public final class MeshCoreCompanionFrames {
     }
 
     /**
-     * Создаёт command запроса списка контактов.
+     * Creates a command that requests the contact list.
      *
      * @return raw Companion {@code GET_CONTACTS} packet
      */
@@ -89,9 +89,9 @@ public final class MeshCoreCompanionFrames {
     }
 
     /**
-     * Создаёт command запроса информации о MeshCore-канале.
-     *
-     * @param channelIndex индекс канала {@code 0..7}
+     * Creates a command that requests MeshCore channel information.
+ *
+     * @param channelIndex channel index in the {@code 0..7} range
      * @return raw Companion {@code GET_CHANNEL} packet
      */
     public static byte[] getChannel(int channelIndex) {
@@ -99,11 +99,11 @@ public final class MeshCoreCompanionFrames {
     }
 
     /**
-     * Создаёт command отправки текста в MeshCore-канал.
-     *
-     * @param channelIndex индекс канала {@code 0..7}
-     * @param timestampSeconds Unix timestamp отправителя в секундах
-     * @param text текст сообщения
+     * Creates a command that sends text to a MeshCore channel.
+ *
+     * @param channelIndex     channel index in the {@code 0..7} range
+     * @param timestampSeconds sender Unix timestamp in seconds
+     * @param text             message text
      * @return raw Companion {@code SEND_CHANNEL_TXT_MSG} packet
      */
     public static byte[] sendChannelText(int channelIndex, long timestampSeconds, String text) {
@@ -118,11 +118,11 @@ public final class MeshCoreCompanionFrames {
     }
 
     /**
-     * Создаёт command отправки DM по префиксу public key контакта.
-     *
-     * @param publicKeyPrefix первые 6 байт public key получателя
-     * @param timestampSeconds Unix timestamp отправителя в секундах
-     * @param text текст сообщения
+     * Creates a command that sends a direct message to a contact public-key prefix.
+ *
+     * @param publicKeyPrefix  first 6 bytes of the recipient public key
+     * @param timestampSeconds sender Unix timestamp in seconds
+     * @param text             message text
      * @return raw Companion {@code SEND_TXT_MSG} packet
      */
     public static byte[] sendDirectText(byte[] publicKeyPrefix, long timestampSeconds, String text) {
@@ -139,7 +139,7 @@ public final class MeshCoreCompanionFrames {
     }
 
     /**
-     * Создаёт command запроса следующего сообщения из очереди MeshCore.
+     * Creates a command that requests the next message from the MeshCore queue.
      *
      * @return raw Companion {@code GET_MESSAGE} packet
      */
@@ -148,10 +148,10 @@ public final class MeshCoreCompanionFrames {
     }
 
     /**
-     * Извлекает public key из {@code SELF_INFO} packet-а.
-     *
+     * Extracts the public key from a {@code SELF_INFO} packet.
+ *
      * @param selfInfoPacket raw {@code SELF_INFO} packet
-     * @return 32 байта public key или пустой массив, если packet некорректен
+     * @return 32 public-key bytes, or an empty array when the packet is invalid
      */
     public static byte[] publicKey(byte[] selfInfoPacket) {
         if (selfInfoPacket == null || selfInfoPacket.length < 36
@@ -162,11 +162,11 @@ public final class MeshCoreCompanionFrames {
     }
 
     /**
-     * Читает UTF-8 строку переменной длины из packet-а.
-     *
+     * Reads a variable-length UTF-8 string from a packet.
+ *
      * @param packet raw Companion packet
-     * @param offset смещение начала строки
-     * @return trimmed строка или {@code null}, если строка отсутствует
+     * @param offset start offset of the string
+     * @return trimmed string, or {@code null} when no string is present
      */
     public static String text(byte[] packet, int offset) {
         if (packet == null || offset >= packet.length) {
@@ -179,12 +179,12 @@ public final class MeshCoreCompanionFrames {
     }
 
     /**
-     * Читает UTF-8 строку фиксированной максимальной длины.
-     *
+     * Reads a UTF-8 string with a fixed maximum length.
+ *
      * @param packet raw Companion packet
-     * @param offset смещение начала строки
-     * @param length максимальная длина поля в байтах
-     * @return trimmed строка или {@code null}, если строка отсутствует
+     * @param offset start offset of the string
+     * @param length maximum field length in bytes
+     * @return trimmed string, or {@code null} when no string is present
      */
     public static String fixedText(byte[] packet, int offset, int length) {
         if (packet == null || offset >= packet.length || length <= 0) {
@@ -198,12 +198,12 @@ public final class MeshCoreCompanionFrames {
     }
 
     /**
-     * Читает UTF-8 строку фиксированной длины до первого {@code 0x00}.
-     *
+     * Reads a fixed-length UTF-8 string up to the first {@code 0x00}.
+ *
      * @param packet raw Companion packet
-     * @param offset смещение начала строки
-     * @param length максимальная длина поля в байтах
-     * @return trimmed строка или {@code null}, если строка отсутствует
+     * @param offset start offset of the string
+     * @param length maximum field length in bytes
+     * @return trimmed string, or {@code null} when no string is present
      */
     public static String nullTerminatedText(byte[] packet, int offset, int length) {
         if (packet == null || offset >= packet.length || length <= 0) {
@@ -219,11 +219,11 @@ public final class MeshCoreCompanionFrames {
     }
 
     /**
-     * Читает unsigned 16-bit little-endian значение.
-     *
+     * Reads an unsigned 16-bit little-endian value.
+ *
      * @param packet raw Companion packet
-     * @param offset смещение первого байта
-     * @return значение в диапазоне {@code 0..65535} или {@code 0}, если данных недостаточно
+     * @param offset first-byte offset
+     * @return value in the {@code 0..65535} range, or {@code 0} when data is insufficient
      */
     public static int unsignedShortLe(byte[] packet, int offset) {
         if (packet == null || packet.length < offset + 2) {
@@ -233,11 +233,11 @@ public final class MeshCoreCompanionFrames {
     }
 
     /**
-     * Читает unsigned 32-bit little-endian значение.
-     *
+     * Reads an unsigned 32-bit little-endian value.
+ *
      * @param packet raw Companion packet
-     * @param offset смещение первого байта
-     * @return значение в диапазоне unsigned int или {@code 0}, если данных недостаточно
+     * @param offset first-byte offset
+     * @return unsigned-int value, or {@code 0} when data is insufficient
      */
     public static long unsignedIntLe(byte[] packet, int offset) {
         if (packet == null || packet.length < offset + 4) {
@@ -251,11 +251,11 @@ public final class MeshCoreCompanionFrames {
     }
 
     /**
-     * Читает signed 32-bit little-endian значение.
-     *
+     * Reads a signed 32-bit little-endian value.
+ *
      * @param packet raw Companion packet
-     * @param offset смещение первого байта
-     * @return signed int или {@code 0}, если данных недостаточно
+     * @param offset first-byte offset
+     * @return signed int, or {@code 0} when data is insufficient
      */
     public static int signedIntLe(byte[] packet, int offset) {
         if (packet == null || packet.length < offset + 4) {
@@ -268,24 +268,24 @@ public final class MeshCoreCompanionFrames {
     }
 
     /**
-     * Кодирует байты в lowercase HEX.
-     *
-     * @param data исходные байты; {@code null} трактуется как пустой массив
-     * @return HEX-строка без разделителей
+     * Encodes bytes as lowercase HEX.
+ *
+     * @param data source bytes; {@code null} is treated as an empty array
+     * @return HEX string without separators
      */
     public static String hex(byte[] data) {
         return MeshCoreKissFrames.hex(data == null ? new byte[0] : data);
     }
 
     /**
-     * Возвращает короткий MeshCore node id по public key.
+     * Returns a short MeshCore node id for a public key.
      * <p>
-     * Полный public key остаётся в runtime state, а UI/БД получают стабильный
-     * короткий идентификатор {@code mc:<12 hex>}, совместимый с существующими
-     * ограничениями полей чата.
-     *
-     * @param publicKeyHex полный или частичный public key в HEX
-     * @return node id вида {@code mc:abcdef123456} или {@code null}
+     * The full public key remains in runtime state; the UI and database receive
+     * a stable short identifier, {@code mc:<12 hex>}, compatible with existing
+     * chat-field constraints.
+ *
+     * @param publicKeyHex full or partial public key in HEX
+     * @return node id in the {@code mc:abcdef123456} form, or {@code null}
      */
     public static String nodeIdFromPublicKeyHex(String publicKeyHex) {
         if (publicKeyHex == null) {
@@ -299,10 +299,10 @@ public final class MeshCoreCompanionFrames {
     }
 
     /**
-     * Возвращает первые 6 байт public key из MeshCore node id.
-     *
-     * @param nodeId node id вида {@code mc:<12 hex>}
-     * @return 6-байтовый public key prefix или пустой массив
+     * Returns the first 6 public-key bytes from a MeshCore node id.
+ *
+     * @param nodeId node id in the {@code mc:<12 hex>} form
+     * @return 6-byte public-key prefix, or an empty array
      */
     public static byte[] publicKeyPrefixFromNodeId(String nodeId) {
         if (nodeId == null || !nodeId.startsWith("mc:") || nodeId.length() < 15) {
@@ -312,10 +312,10 @@ public final class MeshCoreCompanionFrames {
     }
 
     /**
-     * Декодирует HEX-строку в байты.
-     *
-     * @param hex HEX-строка без разделителей
-     * @return массив байт; некорректный ввод даёт пустой массив
+     * Decodes a HEX string into bytes.
+ *
+     * @param hex HEX string without separators
+     * @return byte array; invalid input produces an empty array
      */
     public static byte[] hexToBytes(String hex) {
         if (hex == null) {
@@ -338,10 +338,10 @@ public final class MeshCoreCompanionFrames {
     }
 
     /**
-     * Проверяет, похож ли packet на распознанный ответ MeshCore Companion Protocol.
-     *
+     * Checks whether a packet looks like a recognized MeshCore Companion Protocol response.
+ *
      * @param packet raw Companion packet
-     * @return {@code true}, если первый byte соответствует известному packet type
+     * @return {@code true} when the first byte matches a known packet type
      */
     public static boolean isRecognizedResponsePacket(byte[] packet) {
         if (packet == null || packet.length == 0) {

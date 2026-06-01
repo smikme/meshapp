@@ -9,15 +9,12 @@ import java.time.format.DateTimeFormatter;
 import java.time.format.TextStyle;
 
 /**
- * Утилита форматирования времени для чата (русская локаль, Telegram-стиль).
+ * Chat time formatter using the application locale and Telegram-style rules.
  *
- * <p>Два режима:
- * <ul>
- *   <li>{@link #formatChatTime} — список чатов: сегодня HH:mm, вчера «вчера»,
- *       в течение недели — день недели, старше — дата.</li>
- *   <li>{@link #formatMessageTime} — пузыри сообщений: сегодня HH:mm,
- *       старые dd.MM HH:mm.</li>
- * </ul>
+ * <p>{@link #formatChatTime(long)} is used in the chat list: today shows time,
+ * yesterday shows the localized "yesterday" label, recent days show weekday,
+ * and older entries show a date. {@link #formatMessageTime(long)} is used in
+ * message bubbles.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -35,10 +32,10 @@ public final class ChatTimeFormatter {
     private ChatTimeFormatter() {}
 
     /**
-     * Форматирование времени для списка чатов (Telegram-стиль).
+     * Formats time for the chat list.
      *
-     * @param epochSeconds Unix timestamp в секундах
-     * @return отформатированная строка или пустая строка если epochSeconds {@code <= 0}
+     * @param epochSeconds Unix timestamp in seconds
+     * @return formatted string, or empty string when {@code epochSeconds <= 0}
      */
     public static String formatChatTime(long epochSeconds) {
         if (epochSeconds <= 0) {
@@ -67,10 +64,10 @@ public final class ChatTimeFormatter {
     }
 
     /**
-     * Форматирование времени для пузырей сообщений.
+     * Formats time for message bubbles.
      *
-     * @param epochSeconds Unix timestamp в секундах
-     * @return отформатированная строка или пустая строка если epochSeconds {@code <= 0}
+     * @param epochSeconds Unix timestamp in seconds
+     * @return formatted string, or empty string when {@code epochSeconds <= 0}
      */
     public static String formatMessageTime(long epochSeconds) {
         if (epochSeconds <= 0) {

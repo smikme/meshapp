@@ -15,8 +15,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * Linux tray через GTK status icon.
- * Если GTK недоступен, откатывается на AWT tray.
+ * Linux tray integration through a GTK status icon.
+ * Falls back to the AWT tray when GTK is unavailable.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */

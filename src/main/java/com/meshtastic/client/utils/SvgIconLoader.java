@@ -16,9 +16,10 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
- * Загрузчик SVG-иконок из ресурсов.
- * Парсит SVG файл, извлекает path data и viewBox, создаёт JavaFX SVGPath.
- * Цвет fill управляется через CSS (-fx-fill), что позволяет адаптировать иконки к теме.
+ * Loads SVG icons from resources.
+ * The loader parses SVG path data and viewBox values, then creates a JavaFX
+ * {@code SVGPath}. Fill color is controlled through CSS ({@code -fx-fill}) so
+ * icons can follow the active theme.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -30,17 +31,17 @@ public final class SvgIconLoader {
     private static final Pattern VIEWBOX_PATTERN = Pattern.compile("viewBox=\"([^\"]+)\"");
     private static final Pattern FILL_RULE_PATTERN = Pattern.compile("fill-rule=\"evenodd\"");
 
-    /** Кэш: путь к ресурсу → распарсенные данные SVG */
+    /** Cache from resource path to parsed SVG data. */
     private static final Map<String, SvgData> cache = new HashMap<>();
 
     private record SvgData(String pathData, double viewBoxSize, boolean evenOdd) {}
 
     /**
-     * Создать SVGPath из SVG-файла в ресурсах.
+     * Creates an {@code SVGPath} from an SVG resource.
      *
-     * @param resourcePath путь к SVG-файлу (напр. "/drawer/icon/chat.svg")
-     * @param size         размер иконки (ширина и высота в px)
-     * @return SVGPath с загруженным контуром, или null если не удалось загрузить
+     * @param resourcePath SVG resource path, for example {@code "/drawer/icon/chat.svg"}
+     * @param size icon size in pixels, used for both width and height
+     * @return loaded SVG path, or {@code null} when loading fails
      */
     public static SVGPath load(String resourcePath, double size) {
         SvgData data = parseSvg(resourcePath);
@@ -53,7 +54,7 @@ public final class SvgIconLoader {
         }
         svgPath.getStyleClass().add("svg-icon");
 
-        // Масштабирование: SVG viewBox → целевой размер
+        // Scale from SVG viewBox to the requested target size.
         double scale = size / data.viewBoxSize();
         svgPath.setScaleX(scale);
         svgPath.setScaleY(scale);
@@ -73,7 +74,7 @@ public final class SvgIconLoader {
             String svg = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8))
                     .lines().collect(Collectors.joining(" "));
 
-            // Извлечь path data
+        // Extract path data.
             Matcher pathMatcher = PATH_D_PATTERN.matcher(svg);
             if (!pathMatcher.find()) {
                 log.warn("Не найден <path d=\"...\"> в SVG: {}", resourcePath);
@@ -81,7 +82,7 @@ public final class SvgIconLoader {
             }
             String pathData = pathMatcher.group(1);
 
-            // Извлечь viewBox размер
+        // Extract viewBox size.
             double viewBoxSize = 48; // fallback
             Matcher vbMatcher = VIEWBOX_PATTERN.matcher(svg);
             if (vbMatcher.find()) {

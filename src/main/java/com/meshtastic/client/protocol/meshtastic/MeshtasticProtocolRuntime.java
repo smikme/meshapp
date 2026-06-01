@@ -22,12 +22,12 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * Runtime-сервисы одного Meshtastic-подключения.
+ * Runtime services for one Meshtastic connection.
  * <p>
- * Класс объединяет Meshtastic protocol handler, {@link DeviceState},
- * обработчик входящих сообщений, config exchange и MQTT proxy. Благодаря этому
- * {@code ConnectionManager} управляет только transport lifecycle, а вся
- * Meshtastic-специфичная функциональность остаётся в одном адаптере.
+ * Combines the Meshtastic protocol handler, {@link DeviceState}, incoming
+ * message processing, config exchange, and MQTT proxy. This lets
+ * {@code ConnectionManager} manage only the transport lifecycle while
+ * Meshtastic-specific behavior stays in one adapter.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -53,9 +53,9 @@ public final class MeshtasticProtocolRuntime implements ProtocolRuntime<DeviceSt
     private CompletableFuture<DeviceState> readyFuture;
 
     /**
-     * Создаёт runtime Meshtastic-протокола поверх переданного transport-а.
-     *
-     * @param context параметры подключения, transport и описание для логов
+     * Creates a Meshtastic protocol runtime over the supplied transport.
+ *
+     * @param context connection parameters, transport, and log description
      */
     public MeshtasticProtocolRuntime(ProtocolRuntimeContext context) {
         this.context = context;
@@ -70,7 +70,7 @@ public final class MeshtasticProtocolRuntime implements ProtocolRuntime<DeviceSt
     }
 
     /**
-     * @return тип протокола runtime-а
+     * @return runtime protocol type
      */
     @Override
     public ProtocolType getProtocolType() {
@@ -78,7 +78,7 @@ public final class MeshtasticProtocolRuntime implements ProtocolRuntime<DeviceSt
     }
 
     /**
-     * @return состояние Meshtastic-устройства, которое наполняется config exchange и входящими пакетами
+     * @return Meshtastic device state populated by config exchange and incoming packets
      */
     @Override
     public DeviceState getState() {
@@ -86,37 +86,38 @@ public final class MeshtasticProtocolRuntime implements ProtocolRuntime<DeviceSt
     }
 
     /**
-     * Совместимый accessor для существующего UI-кода.
-     *
-     * @return состояние Meshtastic-устройства
+     * Compatibility accessor for existing UI code.
+ *
+     * @return Meshtastic device state
      */
     public DeviceState getDeviceState() {
         return deviceState;
     }
 
     /**
-     * Совместимый accessor для форм и сервисов, которые пока отправляют Meshtastic-команды напрямую.
-     *
-     * @return dispatcher Meshtastic-протокола
+     * Compatibility accessor for forms and services that still send Meshtastic
+     * commands directly.
+ *
+     * @return Meshtastic protocol dispatcher
      */
     public ProtocolHandler getProtocolHandler() {
         return protocolHandler;
     }
 
     /**
-     * Совместимый accessor к сервису входящих сообщений.
-     *
-     * @return сервис обработки входящих mesh-пакетов
+     * Compatibility accessor for the incoming-message service.
+ *
+     * @return service that processes incoming mesh packets
      */
     public MessageListenerService getMessageListenerService() {
         return messageListenerService;
     }
 
     /**
-     * Подготавливает runtime к ожидаемому разрыву соединения при reboot/reconnect.
+     * Prepares the runtime for an expected disconnect during reboot/reconnect.
      * <p>
-     * Сейчас это нужно Meshtastic, чтобы остановить MQTT proxy до передачи
-     * управления обычному auto-reconnect flow.
+     * Meshtastic currently needs this to stop the MQTT proxy before handing
+     * control back to the normal auto-reconnect flow.
      */
     public void prepareForReconnectHandoff() {
         reconnectHandoffRequested.set(true);
@@ -124,9 +125,9 @@ public final class MeshtasticProtocolRuntime implements ProtocolRuntime<DeviceSt
     }
 
     /**
-     * Возвращает future завершения Meshtastic config exchange.
-     *
-     * @return future с заполненным {@link DeviceState}
+     * Returns the Meshtastic config-exchange completion future.
+ *
+     * @return future completed with the populated {@link DeviceState}
      */
     @Override
     public CompletableFuture<DeviceState> getReadyFuture() {
@@ -139,10 +140,10 @@ public final class MeshtasticProtocolRuntime implements ProtocolRuntime<DeviceSt
     }
 
     /**
-     * Запускает Meshtastic runtime: heartbeat при необходимости, listener входящих
-     * mesh-пакетов и config exchange.
-     *
-     * @return future, завершающийся после config exchange
+     * Starts the Meshtastic runtime: heartbeat when needed, incoming mesh-packet
+     * listener, and config exchange.
+ *
+     * @return future completed after config exchange
      */
     @Override
     public CompletableFuture<DeviceState> start() {
@@ -161,9 +162,9 @@ public final class MeshtasticProtocolRuntime implements ProtocolRuntime<DeviceSt
     }
 
     /**
-     * Возвращает nodeId локального Meshtastic-устройства.
-     *
-     * @return nodeId вида {@code !1234abcd} или {@code ?}, если устройство ещё не определено
+     * Returns the nodeId of the local Meshtastic device.
+ *
+     * @return nodeId in the {@code !1234abcd} form, or {@code ?} before the device is known
      */
     @Override
     public String getOwnerId() {
@@ -171,9 +172,8 @@ public final class MeshtasticProtocolRuntime implements ProtocolRuntime<DeviceSt
     }
 
     /**
-     * Выполняет post-connect действия после успешного config exchange:
-     * логирует сведения о ноде, запускает MQTT proxy при включенной настройке и
-     * запрашивает firmware metadata.
+     * Runs post-connect work after successful config exchange: logs node context,
+     * starts the MQTT proxy when enabled, and requests firmware metadata.
      */
     @Override
     public void onReady() {
@@ -183,7 +183,7 @@ public final class MeshtasticProtocolRuntime implements ProtocolRuntime<DeviceSt
     }
 
     /**
-     * Освобождает все Meshtastic-ресурсы и переводит pending операции в состояние disconnect.
+     * Releases all Meshtastic resources and marks pending operations as disconnected.
      */
     @Override
     public void close() {
@@ -206,7 +206,7 @@ public final class MeshtasticProtocolRuntime implements ProtocolRuntime<DeviceSt
     }
 
     /**
-     * Запрашивает firmware/device metadata и пишет результат в лог.
+     * Requests firmware/device metadata and writes the result to the log.
      */
     private void requestAndLogDeviceMetadata(ConnectionEntry entry,
                                              ProtocolHandler handler,
@@ -270,7 +270,7 @@ public final class MeshtasticProtocolRuntime implements ProtocolRuntime<DeviceSt
     }
 
     /**
-     * Определяет, является ли ошибка ожидаемым следствием очистки runtime-а при disconnect.
+     * Checks whether an error is an expected consequence of runtime cleanup during disconnect.
      */
     private static boolean isExpectedDisconnectAbort(Throwable throwable) {
         Throwable current = throwable;
@@ -286,7 +286,7 @@ public final class MeshtasticProtocolRuntime implements ProtocolRuntime<DeviceSt
     }
 
     /**
-     * Логирует базовый контекст локальной ноды после config exchange.
+     * Logs the local node's basic context after config exchange.
      */
     private void logNodeConnectionContext(ConnectionEntry entry, DeviceState state) {
         NodeData node = resolveLocalNode(state);
@@ -300,7 +300,7 @@ public final class MeshtasticProtocolRuntime implements ProtocolRuntime<DeviceSt
     }
 
     /**
-     * Находит в {@link DeviceState} данные локальной ноды.
+     * Finds local-node data in {@link DeviceState}.
      */
     private static NodeData resolveLocalNode(DeviceState state) {
         if (state == null || state.getMyNodeNum() == 0) {
@@ -310,7 +310,7 @@ public final class MeshtasticProtocolRuntime implements ProtocolRuntime<DeviceSt
     }
 
     /**
-     * Возвращает лучшее доступное имя локальной ноды для логов.
+     * Returns the best available local-node name for logs.
      */
     private static String resolveLocalNodeName(DeviceState state) {
         NodeData node = resolveLocalNode(state);
@@ -330,7 +330,7 @@ public final class MeshtasticProtocolRuntime implements ProtocolRuntime<DeviceSt
     }
 
     /**
-     * Возвращает Meshtastic nodeId локальной ноды или placeholder, если он ещё неизвестен.
+     * Returns the local Meshtastic nodeId, or a placeholder if it is still unknown.
      */
     private static String resolveLocalNodeId(DeviceState state) {
         NodeData node = resolveLocalNode(state);
@@ -342,7 +342,7 @@ public final class MeshtasticProtocolRuntime implements ProtocolRuntime<DeviceSt
     }
 
     /**
-     * Нормализует строковое значение для логов.
+     * Normalizes a string value for logs.
      */
     private static String safeText(String value) {
         return value == null || value.isBlank() ? "?" : value.trim();

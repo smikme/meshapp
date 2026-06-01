@@ -12,9 +12,9 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
- * Сервис управления избранными нодами.
- * Делегирует персистентность в {@link NodeCacheService} (H2, колонка {@code favorite}).
- * При изменении из UI отправляет AdminMessage на устройство для двусторонней синхронизации.
+ * Manages favorite nodes.
+ * Persistence is delegated to {@link NodeCacheService} in H2, and UI changes
+ * are mirrored to the device through AdminMessage for two-way synchronization.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -26,7 +26,7 @@ public final class FavoriteNodeService {
 
     private final List<Runnable> listeners = new CopyOnWriteArrayList<>();
 
-    /** Ноды, для которых пользователь снял избранное, но устройство ещё не подтвердило изменение. */
+    /** Nodes unfavorited locally but not yet confirmed by the device. */
     private final Set<String> pendingUnfavorites = ConcurrentHashMap.newKeySet();
 
     private FavoriteNodeService() {}
@@ -60,12 +60,11 @@ public final class FavoriteNodeService {
     }
 
     /**
-     * Обновляет H2 без уведомления listeners и без отправки на устройство.
-     * Используется при config exchange, когда данные уже пришли с устройства.
+     * Updates H2 without notifying listeners or sending a device command.
+     * Used during config exchange when the value already came from the device.
      * <p>
-     * Если для ноды есть pending unfavorite (пользователь снял избранное,
-     * но прошивка не сохранила изменение), пропускаем перезапись и повторно
-     * отправляем {@code remove_favorite_node} AdminMessage.
+     * If a node has a pending local unfavorite that firmware has not stored yet,
+     * the overwrite is skipped and {@code remove_favorite_node} is sent again.
      */
     public void setFavoriteQuiet(String nodeId, boolean favorite) {
         if (nodeId == null) { return; }
@@ -75,7 +74,7 @@ public final class FavoriteNodeService {
             return;
         }
         if (!favorite && pendingUnfavorites.contains(nodeId)) {
-            // Устройство подтвердило unfavorite — убираем из pending
+            // The device confirmed the unfavorite request; clear the pending marker.
             log.info("Device confirmed unfavorite for node {}, clearing pending state", nodeId);
             pendingUnfavorites.remove(nodeId);
         }
@@ -120,7 +119,7 @@ public final class FavoriteNodeService {
                 log.info("Sent favorite change to device: nodeId={}, favorite={}, via='{}'",
                         nodeId, favorite, entry.getName());
                 sent = true;
-                break; // отправляем только на первое активное соединение
+                break; // Send through the first active connection only.
             }
             if (!sent) {
                 log.warn("No active connection found to send favorite change for node {}", nodeId);

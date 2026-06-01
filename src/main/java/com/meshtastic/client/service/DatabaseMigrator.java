@@ -16,16 +16,19 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Централизованное версионирование и миграция схемы H2 БД.
+ * Centralized H2 database schema versioning and migration.
  * <p>
- * Хранит номер версии схемы в таблице {@code schema_version} (одна строка, одно число).
- * При запуске проверяет текущую версию и выполняет необходимые миграции последовательно.
+ * Stores the schema version in {@code schema_version}: one row, one number.
+ * At startup, the migrator reads the current version and applies required
+ * migrations in order.
  * <p>
- * Если таблица {@code schema_version} отсутствует — БД считается устаревшей.
- * Известные таблицы приложения мигрируются с сохранением данных, чужие legacy-объекты
- * удаляются ({@code DROP ALL OBJECTS}) и схема создаётся с нуля.
+ * If {@code schema_version} is missing, the database is treated as legacy.
+ * Known application tables are migrated while preserving data; unrelated legacy
+ * objects are removed with {@code DROP ALL OBJECTS}, and the schema is rebuilt
+ * from scratch.
  * <p>
- * Вызывается из {@link DatabaseProvider#getConnection()} при первом создании соединения.
+ * Invoked from {@link DatabaseProvider#getConnection()} when the first
+ * connection is created.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -33,7 +36,7 @@ public final class DatabaseMigrator {
 
     private static final Logger log = LoggerFactory.getLogger(DatabaseMigrator.class);
 
-    /** Текущая версия схемы. Увеличивается при каждом изменении схемы. */
+    /** Current schema version. Increment on every schema change. */
     static final int CURRENT_VERSION = 19;
     private static final String LEGACY_TRACEROUTE_PREFIX = "\uD83D\uDD0D Traceroute → ";
     private static final Pattern CONNECTION_NODE_ID_PATTERN =
@@ -53,9 +56,9 @@ public final class DatabaseMigrator {
     private DatabaseMigrator() {}
 
     /**
-     * Точка входа. Проверяет версию схемы и выполняет миграции при необходимости.
-     *
-     * @param connection активное соединение с H2 БД
+     * Entry point. Checks the schema version and runs migrations when needed.
+ *
+     * @param connection active H2 database connection
      */
     public static void migrate(Connection connection) {
         try {
@@ -91,7 +94,7 @@ public final class DatabaseMigrator {
 
             log.info("Database schema version {} → migrating to {}", version, CURRENT_VERSION);
 
-            // Последовательные миграции: v0→v1, v1→v2, ...
+            // Sequential migrations: v0 -> v1, v1 -> v2, and so on.
             if (version < 2) { normalizeLegacyV1Schema(connection); migrateToV2(connection); version = 2; }
             if (version < 3) { migrateToV3(connection); version = 3; }
             if (version < 4) { migrateToV4(connection); version = 4; }
@@ -118,9 +121,7 @@ public final class DatabaseMigrator {
         }
     }
 
-    // ═══════════════════════════════════════════════════════════
-    //  Утилиты
-    // ═══════════════════════════════════════════════════════════
+    // Utilities
 
     private static boolean schemaVersionTableExists(Connection connection) throws SQLException {
         try (ResultSet rs = connection.getMetaData()
@@ -412,7 +413,7 @@ public final class DatabaseMigrator {
         return String.format(Locale.ROOT, "!%08x", nodeNum);
     }
 
-    /** v3: колонка owner_node_id для изоляции данных между устройствами. */
+    /** v3: owner_node_id column for isolating data between devices. */
     private static void migrateToV3(Connection connection) throws SQLException {
         String ownerNodeId = inferOwnerNodeId();
         try (Statement stmt = connection.createStatement()) {
@@ -432,7 +433,7 @@ public final class DatabaseMigrator {
         log.info("Migration v3: added 'owner_node_id' column without deleting messages/read counts");
     }
 
-    /** v4: колонка owner_node_id для изоляции телеметрии между устройствами. */
+    /** v4: owner_node_id column for isolating telemetry between devices. */
     private static void migrateToV4(Connection connection) throws SQLException {
         if (!tableExists(connection, "TELEMETRY_HISTORY")) {
             log.info("Migration v4: skipped telemetry owner isolation because telemetry_history is absent");
@@ -448,7 +449,7 @@ public final class DatabaseMigrator {
         log.info("Migration v4: added 'owner_node_id' to telemetry_history without deleting telemetry data");
     }
 
-    /** v5: колонка ignored для игнорируемых нод. */
+    /** v5: ignored column for ignored nodes. */
     private static void migrateToV5(Connection connection) throws SQLException {
         if (!tableExists(connection, "NODES")) {
             log.info("Migration v5: skipped ignored column because nodes table is absent");
@@ -460,7 +461,7 @@ public final class DatabaseMigrator {
         log.info("Migration v5: added 'ignored' column to nodes");
     }
 
-    /** v6: отдельная таблица реакций на сообщения. */
+    /** v6: dedicated table for message reactions. */
     private static void migrateToV6(Connection connection) throws SQLException {
         try (Statement stmt = connection.createStatement()) {
             stmt.execute("""
@@ -493,14 +494,14 @@ public final class DatabaseMigrator {
     }
 
     /**
-     * v7: нормализация legacy-кэша hops_away.
+     * v7: normalizes the legacy hops_away cache.
      * <p>
-     * До v7 приложение сохраняло {@code hops_away = 0} и для прямых соседей,
-     * и для нод с неизвестным hop count, потому что presence optional-поля
-     * терялся при сериализации в {@link com.meshtastic.client.model.NodeData}.
-     * Старые записи невозможно восстановить точно, поэтому переводим все
-     * legacy-ноли в {@code NULL}. Актуальные direct-neighbor значения будут
-     * заново заполнены на следующем config exchange.
+     * Before v7, the app stored {@code hops_away = 0} both for direct neighbors
+     * and for nodes with unknown hop count, because optional-field presence was
+     * lost while serializing {@link com.meshtastic.client.model.NodeData}. Older
+     * rows cannot be reconstructed precisely, so all legacy zeroes are converted
+     * to {@code NULL}. Current direct-neighbor values are repopulated by the next
+     * config exchange.
      */
     private static void migrateToV7(Connection connection) throws SQLException {
         if (!tableExists(connection, "NODES") || !columnExists(connection, "NODES", "HOPS_AWAY")) {
@@ -513,7 +514,7 @@ public final class DatabaseMigrator {
         log.info("Migration v7: normalized legacy nodes.hops_away=0 values to NULL");
     }
 
-    /** v8: журнал LoRa-пакетов для подсистемы мониторинга. */
+    /** v8: LoRa packet journal for the monitor subsystem. */
     private static void migrateToV8(Connection connection) throws SQLException {
         try (Statement stmt = connection.createStatement()) {
             stmt.execute("""
@@ -541,7 +542,7 @@ public final class DatabaseMigrator {
         log.info("Migration v8: created 'lora_packet_logs' table and indexes");
     }
 
-    /** v9: transport_mechanism для точного различения радио/API/MQTT путей. */
+    /** v9: transport_mechanism for distinguishing radio/API/MQTT paths precisely. */
     private static void migrateToV9(Connection connection) throws SQLException {
         try (Statement stmt = connection.createStatement()) {
             stmt.execute("""
@@ -578,7 +579,7 @@ public final class DatabaseMigrator {
         log.info("Migration v9: added 'transport_mechanism' to lora_packet_logs");
     }
 
-    /** v10: флаг MQTT-доставки для сообщений чата. */
+    /** v10: MQTT delivery flag for chat messages. */
     private static void migrateToV10(Connection connection) throws SQLException {
         if (!tableExists(connection, "MESSAGES")) {
             log.info("Migration v10: skipped messages.via_mqtt because messages table is absent");
@@ -590,7 +591,7 @@ public final class DatabaseMigrator {
         log.info("Migration v10: added 'via_mqtt' to messages");
     }
 
-    /** v11: индекс для поиска сообщений по packet_id внутри owner/chat scope. */
+    /** v11: index for packet_id lookups inside an owner/chat scope. */
     private static void migrateToV11(Connection connection) throws SQLException {
         if (!tableExists(connection, "MESSAGES")) {
             log.info("Migration v11: skipped message packet lookup index because messages table is absent");
@@ -612,7 +613,7 @@ public final class DatabaseMigrator {
         log.info("Migration v11: added scoped message packet lookup index");
     }
 
-    /** v12: полнотекстовый индекс H2 для поиска по тексту сообщений. */
+    /** v12: H2 full-text index for message text search. */
     private static void migrateToV12(Connection connection) throws SQLException {
         if (!tableExists(connection, "MESSAGES")) {
             log.info("Migration v12: skipped message fulltext index because messages table is absent");
@@ -681,7 +682,7 @@ public final class DatabaseMigrator {
         log.info("Migration v13: created Lua script and KV tables");
     }
 
-    /** v14: параметры запуска и тип Lua-бота для MeshApp IDE. */
+    /** v14: launch parameters and Lua bot type for MeshApp IDE. */
     private static void migrateToV14(Connection connection) throws SQLException {
         if (!tableExists(connection, "LUA_SCRIPTS")) {
             log.info("Migration v14: skipped Lua script metadata because lua_scripts table is absent");
@@ -708,7 +709,7 @@ public final class DatabaseMigrator {
         log.info("Migration v15: added external power flags for nodes and telemetry");
     }
 
-    /** v16: стабильный GUID для каждого Lua-скрипта. */
+    /** v16: stable GUID for each Lua script. */
     private static void migrateToV16(Connection connection) throws SQLException {
         if (!tableExists(connection, "LUA_SCRIPTS")) {
             log.info("Migration v16: skipped Lua script GUID because lua_scripts table is absent");
@@ -725,7 +726,7 @@ public final class DatabaseMigrator {
         log.info("Migration v16: added Lua script GUID identifiers");
     }
 
-    /** v17: emoji-иконка для каждого Lua-скрипта. */
+    /** v17: emoji icon for each Lua script. */
     private static void migrateToV17(Connection connection) throws SQLException {
         if (!tableExists(connection, "LUA_SCRIPTS")) {
             log.info("Migration v17: skipped Lua script icon because lua_scripts table is absent");
@@ -738,14 +739,14 @@ public final class DatabaseMigrator {
         log.info("Migration v17: added Lua script emoji icons");
     }
 
-    /** v18: отдельное хранилище результатов traceroute. */
+    /** v18: dedicated storage for traceroute results. */
     private static void migrateToV18(Connection connection) throws SQLException {
         createTracerouteResultsTable(connection);
         backfillLegacyTracerouteMessages(connection);
         log.info("Migration v18: created traceroute_results table");
     }
 
-    /** v19: автор Lua-скрипта для локальных настроек и магазина. */
+    /** v19: Lua script author for local settings and the store. */
     private static void migrateToV19(Connection connection) throws SQLException {
         if (!tableExists(connection, "LUA_SCRIPTS")) {
             log.info("Migration v19: skipped Lua script author because lua_scripts table is absent");
@@ -833,7 +834,7 @@ public final class DatabaseMigrator {
         }
     }
 
-    /** v2: колонка favorite для избранных нод. */
+    /** v2: favorite column for favorite nodes. */
     private static void migrateToV2(Connection connection) throws SQLException {
         if (!tableExists(connection, "NODES")) {
             log.info("Migration v2: skipped favorite column because nodes table is absent");

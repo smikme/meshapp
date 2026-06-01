@@ -1,8 +1,8 @@
 package com.meshtastic.client.lua;
 
 /**
- * Событие Lua Canvas, доставляемое в {@code on_canvas_event(event)}
- * или {@code on_canvas_frame(event)}.
+ * Lua canvas event delivered to {@code on_canvas_event(event)} or
+ * {@code on_canvas_frame(event)}.
  */
 public record LuaCanvasEvent(String type,
                              double x,

@@ -1,21 +1,21 @@
 package com.meshtastic.client.model;
 
 /**
- * Детальное событие изменения чат-сообщений.
+ * Detailed chat-message change event.
  *
- * <p>Старый {@code Runnable}-listener сообщает только "что-то изменилось" и
- * вынуждает UI перечитывать и пересобирать видимое окно сообщений. Это событие
- * несёт enough scope, чтобы экран чата мог обновить одну строку или одну часть
- * строки без полной пересборки JavaFX-узлов.
+ * <p>The legacy {@code Runnable} listener can only say that something changed,
+ * which forces the UI to reload and rebuild the visible message window. This
+ * event carries enough scope for the chat screen to update a single row, or part
+ * of a row, without rebuilding its JavaFX nodes.
  *
- * @param kind тип изменения
- * @param chatType тип чата: {@code channel} или {@code dm}
- * @param chatKey ключ чата: индекс канала или nodeId собеседника
- * @param ownerNodeId nodeId локального владельца истории
- * @param packetId packet id сообщения или реакции
- * @param targetPacketId packet id сообщения, к которому относится реакция
- * @param dbId id сообщения в локальной БД, если известен
- * @param message сообщение, если оно уже есть в памяти
+ * @param kind change kind
+ * @param chatType chat type: {@code channel} or {@code dm}
+ * @param chatKey chat key: channel index or peer node id
+ * @param ownerNodeId node id of the local history owner
+ * @param packetId packet id of the message or reaction
+ * @param targetPacketId packet id of the message targeted by a reaction
+ * @param dbId local database id of the message, when known
+ * @param message message already held in memory, when available
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */

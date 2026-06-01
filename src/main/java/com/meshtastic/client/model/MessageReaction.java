@@ -3,8 +3,8 @@ package com.meshtastic.client.model;
 import com.meshtastic.client.utils.UnicodeTextUtils;
 
 /**
- * Реакция на сообщение, доставляемая отдельным TEXT_MESSAGE_APP пакетом
- * с {@code reply_id} и выставленным protobuf-полем {@code emoji}.
+ * Message reaction delivered as a separate {@code TEXT_MESSAGE_APP} packet with
+ * {@code reply_id} and the protobuf {@code emoji} field set.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */

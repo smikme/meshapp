@@ -10,12 +10,12 @@ import java.util.function.Supplier;
 import java.util.Optional;
 
 /**
- * Выполняет полнотекстовый поиск сообщений вне JavaFX Application Thread.
+ * Runs full-text message search away from the JavaFX Application Thread.
  *
- * <p>Сервис держит поколение запросов: результаты старых задач можно безопасно
- * отбросить, если пользователь уже изменил запрос, фильтр или выбранный чат.
- * Вся логика здесь синхронная с точки зрения БД и не зависит от JavaFX; слой UI
- * только передаёт callback-и для публикации результата обратно на FX-поток.
+ * <p>The service tracks a monotonically increasing request generation, allowing
+ * the UI to discard stale results when the query, sender filter, or selected
+ * chat has already changed. Database work stays synchronous and UI-agnostic;
+ * callers provide callbacks to publish results back to the FX layer.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -30,7 +30,7 @@ public final class ChatMessageSearchService implements AutoCloseable {
     private volatile Future<?> currentTask;
 
     /**
-     * Направление перехода между найденными сообщениями.
+     * Direction used when moving between search matches.
      */
     public enum Direction {
         PREVIOUS,
@@ -38,17 +38,17 @@ public final class ChatMessageSearchService implements AutoCloseable {
     }
 
     /**
-     * Снимок параметров первичного поиска сообщений.
+     * Immutable input for the initial message search.
      *
-     * @param generation поколение запроса, по которому UI отбрасывает старые ответы
-     * @param chatType тип чата в БД сообщений
-     * @param chatKey ключ чата в БД сообщений
-     * @param query поисковая строка
-     * @param ownerNodeId nodeId владельца текущего подключения
-     * @param fromNodeId необязательный фильтр по отправителю
-     * @param previousHighlightedDbId ранее подсвеченное сообщение для сохранения позиции
-     * @param previousResultIndex ранее известный индекс результата
-     * @param jumpToLatest нужно ли перейти к последнему совпадению
+     * @param generation request generation used to discard stale UI responses
+     * @param chatType message database chat type
+     * @param chatKey message database chat key
+     * @param query search text
+     * @param ownerNodeId node id of the active connection owner
+     * @param fromNodeId optional sender filter
+     * @param previousHighlightedDbId previously highlighted message, used to preserve position
+     * @param previousResultIndex previously known match index
+     * @param jumpToLatest whether the search should jump to the newest match
      */
     public record SearchRequest(
             long generation,
@@ -62,15 +62,15 @@ public final class ChatMessageSearchService implements AutoCloseable {
             boolean jumpToLatest) {}
 
     /**
-     * Результат первичного поиска.
+     * Result of the initial message search.
      *
-     * @param request исходный запрос
-     * @param highlightedDbId id сообщения, которое нужно подсветить
-     * @param resultCount количество найденных совпадений с учётом лимита подсчёта
-     * @param resultIndex индекс подсвеченного совпадения
-     * @param resultCountLimited был ли подсчёт остановлен на лимите
-     * @param hasPrevious есть ли совпадение старше текущего
-     * @param hasNext есть ли совпадение новее текущего
+     * @param request original request
+     * @param highlightedDbId database id of the message that should be highlighted
+     * @param resultCount number of matches, respecting the count limit
+     * @param resultIndex index of the highlighted match
+     * @param resultCountLimited whether counting stopped at the configured limit
+     * @param hasPrevious whether an older match exists
+     * @param hasNext whether a newer match exists
      */
     public record SearchResult(
             SearchRequest request,
@@ -82,19 +82,19 @@ public final class ChatMessageSearchService implements AutoCloseable {
             boolean hasNext) {}
 
     /**
-     * Снимок параметров навигации по уже найденному запросу.
+     * Immutable input for navigating within an existing search result set.
      *
-     * @param generation поколение запроса, по которому UI отбрасывает старые ответы
-     * @param chatType тип чата в БД сообщений
-     * @param chatKey ключ чата в БД сообщений
-     * @param query поисковая строка
-     * @param ownerNodeId nodeId владельца текущего подключения
-     * @param fromNodeId необязательный фильтр по отправителю
-     * @param currentHighlightedDbId текущее подсвеченное сообщение
-     * @param currentResultIndex текущий индекс совпадения
-     * @param resultCount известное количество совпадений
-     * @param resultCountLimited был ли подсчёт остановлен на лимите
-     * @param direction направление перехода
+     * @param generation request generation used to discard stale UI responses
+     * @param chatType message database chat type
+     * @param chatKey message database chat key
+     * @param query search text
+     * @param ownerNodeId node id of the active connection owner
+     * @param fromNodeId optional sender filter
+     * @param currentHighlightedDbId currently highlighted message
+     * @param currentResultIndex current match index
+     * @param resultCount known match count
+     * @param resultCountLimited whether counting stopped at the configured limit
+     * @param direction navigation direction
      */
     public record NavigationRequest(
             long generation,
@@ -110,13 +110,13 @@ public final class ChatMessageSearchService implements AutoCloseable {
             Direction direction) {}
 
     /**
-     * Результат перехода к соседнему совпадению.
+     * Result of moving to an adjacent search match.
      *
-     * @param request исходный запрос навигации
-     * @param highlightedDbId id нового подсвеченного сообщения
-     * @param resultIndex новый индекс совпадения
-     * @param hasPrevious есть ли совпадение старше текущего
-     * @param hasNext есть ли совпадение новее текущего
+     * @param request original navigation request
+     * @param highlightedDbId database id of the newly highlighted message
+     * @param resultIndex new match index
+     * @param hasPrevious whether an older match exists
+     * @param hasNext whether a newer match exists
      */
     public record NavigationResult(
             NavigationRequest request,
@@ -126,7 +126,7 @@ public final class ChatMessageSearchService implements AutoCloseable {
             boolean hasNext) {}
 
     /**
-     * Нормализованная область поиска, общая для первичного запроса и навигации.
+     * Normalized search scope shared by initial search and navigation.
      */
     private record SearchScope(
             String chatType,
@@ -136,7 +136,7 @@ public final class ChatMessageSearchService implements AutoCloseable {
             String fromNodeId) {}
 
     /**
-     * Позиция текущего совпадения и связанный с ней счётчик результатов.
+     * Current match position together with the associated match count.
      */
     private record SearchPosition(
             long highlightedDbId,
@@ -148,7 +148,7 @@ public final class ChatMessageSearchService implements AutoCloseable {
     }
 
     /**
-     * Наличие соседних совпадений относительно текущей позиции.
+     * Availability of neighboring matches around the current position.
      */
     private record NavigationAvailability(boolean hasPrevious, boolean hasNext) {
 
@@ -156,7 +156,7 @@ public final class ChatMessageSearchService implements AutoCloseable {
     }
 
     /**
-     * Начинает новую работу и отменяет ещё не завершившийся поисковый запрос.
+     * Starts a new generation and cancels any unfinished search task.
      */
     public long beginWork() {
         cancelCurrentTask();
@@ -164,7 +164,7 @@ public final class ChatMessageSearchService implements AutoCloseable {
     }
 
     /**
-     * Инвалидирует текущие ответы без обязательного запуска новой работы.
+     * Invalidates pending responses without necessarily starting new work.
      */
     public void invalidate() {
         cancelCurrentTask();
@@ -172,14 +172,14 @@ public final class ChatMessageSearchService implements AutoCloseable {
     }
 
     /**
-     * Проверяет, относится ли ответ к последнему известному поколению запроса.
+     * Returns whether a response still belongs to the latest request generation.
      */
     public boolean isCurrent(long candidateGeneration) {
         return candidateGeneration == generation.get();
     }
 
     /**
-     * Отправляет первичный поиск в однониточный executor.
+     * Submits the initial search to the single-thread executor.
      */
     public void submitSearch(SearchRequest request,
                              Consumer<SearchResult> onSuccess,
@@ -188,7 +188,7 @@ public final class ChatMessageSearchService implements AutoCloseable {
     }
 
     /**
-     * Отправляет переход к соседнему совпадению в однониточный executor.
+     * Submits adjacent-match navigation to the single-thread executor.
      */
     public void submitNavigation(NavigationRequest request,
                                  Consumer<NavigationResult> onSuccess,
@@ -365,7 +365,7 @@ public final class ChatMessageSearchService implements AutoCloseable {
     }
 
     /**
-     * Останавливает текущий поиск и завершает executor сервиса.
+     * Stops the active search and shuts down the service executor.
      */
     @Override
     public void close() {

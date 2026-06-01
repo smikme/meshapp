@@ -9,7 +9,7 @@ import org.luaj.vm2.Varargs;
 import org.luaj.vm2.lib.VarArgFunction;
 
 /**
- * NodeInfo API для Lua sandbox.
+ * Node-info API exposed to the Lua sandbox.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -25,9 +25,9 @@ public final class LuaNodeInfoApi {
     }
 
     /**
-     * Создает Lua-таблицу {@code mesh.nodeinfo}.
+     * Creates the Lua table for {@code mesh.nodeinfo}.
      *
-     * @return таблица nodeinfo API
+     * @return node-info API table
      */
     public LuaTable create() {
         LuaTable nodeinfo = new LuaTable();

@@ -27,19 +27,19 @@ import java.util.function.Function;
 import java.util.function.Predicate;
 
 /**
- * Панель ввода чата: кнопка эмодзи + текстовое поле + счётчик байт
- * + кнопка отправки + полоса ответа.
+ * Chat input panel: emoji button, text field, byte counter, send button, and reply bar.
  *
- * <p>Расширяет VBox (содержит replyBar + inputBar).
+ * <p>Extends VBox and contains replyBar plus inputBar.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class ChatInputBar extends VBox {
 
     /**
-     * Максимальный размер сериализованного Data protobuf (mesh.proto: DATA_PAYLOAD_LEN).
-     * Протокольный overhead внутри Data: portnum (2 байта) + payload tag+length (3 байта) = 5.
-     * При режиме ответа добавляется reply_id: tag (1 байт) + fixed32 (4 байта) = 5.
+     * Maximum serialized Data protobuf size from mesh.proto DATA_PAYLOAD_LEN.
+     * Protocol overhead inside Data is portnum (2 bytes) plus payload tag and
+     * length (3 bytes), for 5 bytes total. Reply mode adds reply_id: tag
+     * (1 byte) plus fixed32 (4 bytes), another 5 bytes.
      */
     private static final int DATA_PAYLOAD_LEN = 233;
     private static final int PROTO_OVERHEAD = 5;
@@ -47,10 +47,10 @@ public class ChatInputBar extends VBox {
     private static final int MAX_COMMAND_SUGGESTIONS = 8;
     private static final String SELECTED_SUGGESTION_STYLE_CLASS = "chat-command-suggestion-btn-selected";
 
-    /** Данные для колбэка отправки. */
+    /** Data passed to the send callback. */
     public record SendRequest(String text, int replyId) {}
 
-    /** Данные inline-запроса выбора ноды из Lua UI API. */
+    /** State for an inline node-pick request from the Lua UI API. */
     private record ActiveNodePick(Consumer<ChatBotCommandHelper.NodeSuggestion> onSelected,
                                   Runnable onCancelled) {}
 
@@ -74,7 +74,7 @@ public class ChatInputBar extends VBox {
     private ActiveNodePick activeNodePick;
 
     /**
-     * @param onSend колбэк отправки сообщения (текст + replyId)
+     * @param onSend message-send callback carrying text and replyId
      */
     public ChatInputBar(Consumer<SendRequest> onSend,
                         Predicate<ChatBotCommandHelper.ParsedBotCommand> onBotCommand,
@@ -88,11 +88,11 @@ public class ChatInputBar extends VBox {
         this.nodeSuggestionProvider = nodeSuggestionProvider;
         getStyleClass().add("chat-input-wrapper");
 
-        // Разделитель
+        // Divider
         inputSep = new Separator();
         inputSep.getStyleClass().add("chat-input-separator");
 
-        // Кнопка эмодзи (с изображением, размер как у кнопки отправки)
+        // Emoji button, using an image sized to match the send button.
         Button emojiBtn = new Button();
         ImageView emojiBtnIcon = EmojiImageCache.createImageView("\uD83D\uDE00", 22);
         if (emojiBtnIcon != null) {
@@ -110,13 +110,13 @@ public class ChatInputBar extends VBox {
         commandSuggestionRoot.setVisible(false);
         commandSuggestionRoot.setManaged(false);
 
-        // Поле ввода (кастомное с emoji-картинками)
+        // Custom input field with inline emoji images.
         messageInput = new EmojiTextField();
         messageInput.setPromptText(defaultPromptText());
         messageInput.setMaxBytesSupplier(this::getMaxTextBytes);
         HBox.setHgrow(messageInput, Priority.ALWAYS);
 
-        // Кнопка отправки с кольцевым индикатором заполненности
+        // Send button with a circular fill indicator.
         sendRing = new SendButtonWithRing(this::doSend);
 
         messageInput.focusedProperty().addListener((obs, wasFocused, isFocused) -> {
@@ -133,8 +133,9 @@ public class ChatInputBar extends VBox {
 
         messageInput.textProperty().addListener((obs, oldVal, newVal) -> {
             if (newVal != null && textByteLength(newVal) > getMaxTextBytes()) {
-                // Откатить к предыдущему тексту целиком, а не обрезать конец —
-                // иначе вставка в середину «работает» (удаляет последний символ)
+                // Revert to the previous text as a whole instead of trimming the
+                // end; otherwise inserting in the middle appears to work by
+                // deleting the final character.
                 messageInput.setText(oldVal != null ? oldVal : "");
                 return;
             }
@@ -164,7 +165,7 @@ public class ChatInputBar extends VBox {
         StackPane.setAlignment(inputBar, Pos.BOTTOM_LEFT);
         StackPane.setAlignment(commandSuggestionRoot, Pos.BOTTOM_LEFT);
 
-        // Панель ответа (скрыта по умолчанию)
+        // Reply bar, hidden by default.
         Label replyIcon = new Label("↩");
         replyIcon.getStyleClass().add("chat-reply-icon");
 
@@ -189,12 +190,12 @@ public class ChatInputBar extends VBox {
         getChildren().addAll(replyBar, inputStack);
     }
 
-    /** Получить разделитель для размещения над панелью ввода. */
+    /** Returns the separator placed above the input panel. */
     public Separator getInputSeparator() {
         return inputSep;
     }
 
-    /** Очистить поле ввода и сбросить режим ответа. */
+    /** Clears the input field and exits reply mode. */
     public void clear() {
         cancelActiveNodePick(true);
         hideCommandSuggestions();
@@ -202,7 +203,7 @@ public class ChatInputBar extends VBox {
         cancelReply();
     }
 
-    /** Включить/выключить панель ввода. */
+    /** Enables or disables the input panel. */
     public void setInputEnabled(boolean enabled) {
         messageInput.setFieldDisabled(!enabled);
         sendRing.setSendDisable(!enabled
@@ -214,8 +215,8 @@ public class ChatInputBar extends VBox {
     }
 
     /**
-     * Запустить старый inline-pickup ноды прямо в панели ввода чата.
-     * Используется Lua API {@code mesh.ui.pick_node()}.
+     * Starts the legacy inline node picker directly in the chat input panel.
+     * Used by the Lua API {@code mesh.ui.pick_node()}.
      */
     public void startNodePick(String query,
                               String prompt,
@@ -235,7 +236,7 @@ public class ChatInputBar extends VBox {
         Platform.runLater(this::refreshCommandSuggestions);
     }
 
-    /** Включить режим ответа на сообщение. */
+    /** Enters reply mode for a message. */
     public void startReply(MeshMessage msg, String senderName) {
         if (msg == null || msg.getPacketId() == 0) {
             return;
@@ -254,7 +255,7 @@ public class ChatInputBar extends VBox {
         messageInput.requestFocus();
     }
 
-    /** Отменить режим ответа. */
+    /** Cancels reply mode. */
     public void cancelReply() {
         replyToMessage = null;
         replyBar.setVisible(false);
@@ -263,14 +264,14 @@ public class ChatInputBar extends VBox {
         updateCharCount();
     }
 
-    /** Запросить фокус на текстовое поле. */
+    /** Requests focus for the text field. */
     public void focusInput() {
         Platform.runLater(() -> messageInput.requestFocus());
     }
 
-    // === Внутренние методы ===
+    // === Internal Methods ===
 
-    /** Максимальное количество байт текста с учётом protobuf overhead и режима ответа. */
+    /** Maximum text byte length after protobuf overhead and reply mode are accounted for. */
     private int getMaxTextBytes() {
         int overhead = PROTO_OVERHEAD;
         if (replyToMessage != null) {
@@ -332,7 +333,7 @@ public class ChatInputBar extends VBox {
         sendRing.update(byteLen, maxBytes);
     }
 
-    /** Длина строки в байтах UTF-8. */
+    /** Returns string length in UTF-8 bytes. */
     private static int textByteLength(String text) {
         return text.getBytes(StandardCharsets.UTF_8).length;
     }

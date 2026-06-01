@@ -36,7 +36,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 
 /**
- * Боковая форма магазина Lua-скриптов MeshApp.
+ * Side form for the MeshApp Lua script store.
  */
 public final class LuaScriptStoreForm extends VBox {
 

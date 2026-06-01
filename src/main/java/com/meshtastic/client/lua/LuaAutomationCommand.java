@@ -3,15 +3,15 @@ package com.meshtastic.client.lua;
 import java.util.List;
 
 /**
- * Контекст запуска Lua-автоматизации из чат-команды.
+ * Launch context for Lua automation started from a chat command.
  *
- * @param chatType тип чата, из которого вызвана команда
- * @param chatKey ключ чата, из которого вызвана команда
- * @param handle имя команды, например {@code @tracebot}
- * @param text полный текст пользовательской команды
- * @param arguments строка аргументов после имени команды
- * @param argumentTokens аргументы, разбитые так же, как chat command parser
- * @param requestId id вызова команды внутри UI/рантайма
+ * @param chatType chat type where the command was invoked
+ * @param chatKey chat key where the command was invoked
+ * @param handle command name, for example {@code @tracebot}
+ * @param text full user command text
+ * @param arguments raw argument string after the command name
+ * @param argumentTokens arguments split the same way as the chat command parser
+ * @param requestId command invocation id inside the UI/runtime
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */

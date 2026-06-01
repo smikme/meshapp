@@ -13,10 +13,10 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * Преобразует машинные protobuf-значения к более понятному для пользователя виду
- * и обратно. Используется для IPv4-адресов, которые в protobuf хранятся
- * как fixed32 little-endian числа, и для bitmask-полей, которые удобнее
- * редактировать как набор флагов, а не как сырое число.
+ * Converts raw protobuf values to user-friendly text and back.
+ * This covers IPv4 addresses stored in protobuf as little-endian fixed32 values
+ * and bitmask fields that are easier to edit as a set of flags than as a raw
+ * number.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -85,10 +85,10 @@ public final class ConfigValueFormatter {
     private ConfigValueFormatter() {}
 
     /**
-     * Набор флагов, из которых собирается целочисленное значение bitmask-поля.
-     *
-     * @param mask числовая маска флага
-     * @param label пользовательское имя флага
+     * One flag option used to compose an integer bitmask field value.
+ *
+     * @param mask     numeric flag mask
+     * @param labelKey user-facing label key
      */
     public record BitmaskOption(long mask, String labelKey) {
         public String label() {
@@ -104,10 +104,10 @@ public final class ConfigValueFormatter {
     }
 
     /**
-     * Форматирует значение поля дерева для отображения в UI.
-     *
-     * @param item узел дерева конфигурации
-     * @return строка для показа пользователю
+     * Formats a tree field value for display in the UI.
+ *
+     * @param item configuration tree node
+     * @return text shown to the user
      */
     public static String formatValue(ConfigTreeItem item) {
         if (item == null) {
@@ -117,12 +117,12 @@ public final class ConfigValueFormatter {
     }
 
     /**
-     * Форматирует исходное protobuf-значение по его descriptor.
-     * Для известных IPv4-полей возвращает dotted-decimal строку.
-     *
-     * @param fieldDescriptor protobuf-descriptor поля
-     * @param value исходное значение поля
-     * @return строка для отображения в редакторе
+     * Formats a raw protobuf value according to its descriptor.
+     * Known IPv4 fields are returned as dotted-decimal strings.
+ *
+     * @param fieldDescriptor protobuf field descriptor
+     * @param value           raw field value
+     * @return text displayed in the editor
      */
     public static String formatValue(FieldDescriptor fieldDescriptor, Object value) {
         if (value == null) {
@@ -145,11 +145,11 @@ public final class ConfigValueFormatter {
     }
 
     /**
-     * Разбирает текст, введённый пользователем в редакторе, в тип значения дерева.
-     *
-     * @param item узел дерева конфигурации
-     * @param text текст, введённый пользователем
-     * @return значение, готовое к сохранению в дереве
+     * Parses text entered by the user into the value type expected by the tree.
+ *
+     * @param item configuration tree node
+     * @param text text entered by the user
+     * @return value ready to be stored in the tree
      */
     public static Object parseTextValue(ConfigTreeItem item, String text) {
         if (item == null) {
@@ -159,13 +159,13 @@ public final class ConfigValueFormatter {
     }
 
     /**
-     * Разбирает пользовательский текст с учётом protobuf-descriptor и ожидаемого Java-типа.
-     * Для известных IPv4-полей поддерживает как dotted-decimal ввод, так и legacy uint32.
-     *
-     * @param fieldDescriptor protobuf-descriptor поля
-     * @param valueType ожидаемый Java-тип значения
-     * @param text текст, введённый пользователем
-     * @return разобранное значение поля
+     * Parses user text using the protobuf descriptor and expected Java type.
+     * Known IPv4 fields accept both dotted-decimal input and legacy uint32 input.
+ *
+     * @param fieldDescriptor protobuf field descriptor
+     * @param valueType       expected Java value type
+     * @param text            text entered by the user
+     * @return parsed field value
      */
     public static Object parseTextValue(FieldDescriptor fieldDescriptor, Class<?> valueType, String text) {
         if (valueType == null || valueType == String.class) {
@@ -198,20 +198,20 @@ public final class ConfigValueFormatter {
     }
 
     /**
-     * Проверяет, есть ли у поля набор выбираемых bitmask-флагов вместо ручного ввода числа.
-     *
-     * @param item узел дерева конфигурации
-     * @return {@code true}, если поле нужно редактировать через выбор флагов
+     * Checks whether the field should be edited as selectable bitmask flags.
+ *
+     * @param item configuration tree node
+     * @return {@code true} when the field should be edited through flag selection
      */
     public static boolean hasBitmaskOptions(ConfigTreeItem item) {
         return item != null && bitmaskFieldSpec(item.getFieldDescriptor()) != null;
     }
 
     /**
-     * Возвращает список битовых опций для поля.
-     *
-     * @param item узел дерева конфигурации
-     * @return список доступных флагов; пустой, если поле не является bitmask
+     * Returns the bit options available for a field.
+ *
+     * @param item configuration tree node
+     * @return available flags, or an empty list when the field is not a bitmask
      */
     public static List<BitmaskOption> bitmaskOptions(ConfigTreeItem item) {
         BitmaskFieldSpec spec = item != null ? bitmaskFieldSpec(item.getFieldDescriptor()) : null;
@@ -219,11 +219,11 @@ public final class ConfigValueFormatter {
     }
 
     /**
-     * Проверяет, включён ли конкретный флаг в текущем значении поля.
-     *
-     * @param item узел дерева конфигурации
-     * @param option опция bitmask
-     * @return {@code true}, если флаг выбран
+     * Checks whether a specific flag is enabled in the current field value.
+ *
+     * @param item   configuration tree node
+     * @param option bitmask option
+     * @return {@code true} when the flag is selected
      */
     public static boolean isBitmaskOptionSelected(ConfigTreeItem item, BitmaskOption option) {
         if (item == null || option == null || !(item.getValue() instanceof Number number)) {
@@ -234,11 +234,11 @@ public final class ConfigValueFormatter {
     }
 
     /**
-     * Собирает новое значение bitmask-поля из списка выбранных флагов.
-     *
-     * @param item узел дерева конфигурации
-     * @param selectedOptions выбранные пользователем флаги
-     * @return значение в типе, совместимом с полем дерева
+     * Builds a new bitmask field value from the selected flags.
+ *
+     * @param item            configuration tree node
+     * @param selectedOptions flags selected by the user
+     * @return value with a type compatible with the tree field
      */
     public static Object buildBitmaskValue(ConfigTreeItem item, List<BitmaskOption> selectedOptions) {
         long mask = 0L;
@@ -256,10 +256,10 @@ public final class ConfigValueFormatter {
     }
 
     /**
-     * Возвращает пример значения для placeholder у полей со специальным форматом ввода.
-     *
-     * @param item узел дерева конфигурации
-     * @return пример пользовательского ввода или {@code null}, если подсказка не нужна
+     * Returns an example placeholder for fields with special input formats.
+ *
+     * @param item configuration tree node
+     * @return user-input example, or {@code null} when no hint is needed
      */
     public static String promptText(ConfigTreeItem item) {
         if (item == null) {
@@ -279,10 +279,10 @@ public final class ConfigValueFormatter {
     }
 
     /**
-     * Возвращает подсказку валидации для полей со специальным форматом ввода.
-     *
-     * @param item узел дерева конфигурации
-     * @return текст подсказки или {@code null}, если подсказка не нужна
+     * Returns a validation hint for fields with special input formats.
+ *
+     * @param item configuration tree node
+     * @return hint text, or {@code null} when no hint is needed
      */
     public static String validationHint(ConfigTreeItem item) {
         if (item == null) {
@@ -302,10 +302,10 @@ public final class ConfigValueFormatter {
     }
 
     /**
-     * Проверяет, нужно ли отображать значение поля как IPv4-адрес.
-     *
-     * @param fieldDescriptor protobuf-descriptor поля
-     * @return {@code true}, если поле должно показываться в dotted-decimal виде
+     * Checks whether the field should be displayed as an IPv4 address.
+ *
+     * @param fieldDescriptor protobuf field descriptor
+     * @return {@code true} when the field should be shown as dotted-decimal text
      */
     static boolean isHumanReadableIpv4Field(FieldDescriptor fieldDescriptor) {
         return fieldDescriptor != null
@@ -314,10 +314,10 @@ public final class ConfigValueFormatter {
     }
 
     /**
-     * Проверяет, нужно ли отображать значение поля как node ID.
-     *
-     * @param fieldDescriptor protobuf-descriptor поля
-     * @return {@code true}, если поле должно показываться в формате {@code !XXXXXXXX}
+     * Checks whether the field should be displayed as a node ID.
+ *
+     * @param fieldDescriptor protobuf field descriptor
+     * @return {@code true} when the field should be shown as {@code !XXXXXXXX}
      */
     static boolean isHumanReadableNodeIdField(FieldDescriptor fieldDescriptor) {
         return fieldDescriptor != null
@@ -326,10 +326,10 @@ public final class ConfigValueFormatter {
     }
 
     /**
-     * Проверяет, нужно ли отображать значение поля в шестнадцатеричном виде.
-     *
-     * @param fieldDescriptor protobuf-descriptor поля
-     * @return {@code true}, если поле должно показываться в формате {@code 0x..}
+     * Checks whether the field should be displayed in hexadecimal form.
+ *
+     * @param fieldDescriptor protobuf field descriptor
+     * @return {@code true} when the field should be shown as {@code 0x..}
      */
     static boolean isHumanReadableHexField(FieldDescriptor fieldDescriptor) {
         return fieldDescriptor != null
@@ -342,10 +342,10 @@ public final class ConfigValueFormatter {
     }
 
     /**
-     * Преобразует little-endian fixed32 IPv4 в dotted-decimal строку.
-     *
-     * @param rawValue исходное protobuf-значение IPv4
-     * @return IPv4-адрес в формате {@code a.b.c.d}
+     * Converts a little-endian fixed32 IPv4 value to dotted-decimal text.
+ *
+     * @param rawValue raw protobuf IPv4 value
+     * @return IPv4 address in {@code a.b.c.d} form
      */
     static String formatIpv4(int rawValue) {
         long unsigned = Integer.toUnsignedLong(rawValue);
@@ -357,31 +357,31 @@ public final class ConfigValueFormatter {
     }
 
     /**
-     * Преобразует номер ноды в стандартный Meshtastic node ID.
-     *
-     * @param rawValue номер ноды
-     * @return node ID в формате {@code !XXXXXXXX}
+     * Converts a node number to the standard Meshtastic node ID.
+ *
+     * @param rawValue node number
+     * @return node ID in {@code !XXXXXXXX} form
      */
     static String formatNodeId(int rawValue) {
         return String.format("!%08x", rawValue);
     }
 
     /**
-     * Преобразует числовой адрес шины в hex-строку.
-     *
-     * @param rawValue числовой адрес
-     * @return адрес в формате {@code 0x40}
+     * Converts a numeric bus address to a hex string.
+ *
+     * @param rawValue numeric address
+     * @return address in {@code 0x40} form
      */
     static String formatHex(int rawValue) {
         return String.format("0x%02X", Integer.toUnsignedLong(rawValue));
     }
 
     /**
-     * Преобразует dotted-decimal IPv4 в protobuf fixed32 little-endian значение.
-     *
-     * @param text IPv4-адрес в пользовательском формате
-     * @return значение для protobuf fixed32 поля
-     * @throws IllegalArgumentException если адрес имеет неверный формат
+     * Converts dotted-decimal IPv4 text to a protobuf little-endian fixed32 value.
+ *
+     * @param text IPv4 address in user-facing format
+     * @return value for the protobuf fixed32 field
+     * @throws IllegalArgumentException when the address format is invalid
      */
     static int parseIpv4(String text) {
         if (text == null || text.isBlank()) {
@@ -421,11 +421,11 @@ public final class ConfigValueFormatter {
     }
 
     /**
-     * Разбирает пользовательский node ID или uint32-значение в номер ноды.
-     *
-     * @param text node ID в формате {@code !XXXXXXXX}, hex или uint32
-     * @return номер ноды как int
-     * @throws IllegalArgumentException если значение не удалось разобрать
+     * Parses a user-entered node ID or uint32 value into a node number.
+ *
+     * @param text node ID in {@code !XXXXXXXX} form, hex, or uint32
+     * @return node number as int
+     * @throws IllegalArgumentException when the value cannot be parsed
      */
     static int parseNodeId(String text) {
         if (text == null || text.isBlank()) {
@@ -451,11 +451,11 @@ public final class ConfigValueFormatter {
     }
 
     /**
-     * Разбирает hex-строку или десятичное значение в uint32-поле.
-     *
-     * @param text hex или decimal строка
-     * @return int-значение для protobuf uint32-поля
-     * @throws IllegalArgumentException если значение не удалось разобрать
+     * Parses a hex string or decimal value into a uint32 field.
+ *
+     * @param text hex or decimal string
+     * @return int value for the protobuf uint32 field
+     * @throws IllegalArgumentException when the value cannot be parsed
      */
     static int parseHexInt(String text) {
         if (text == null || text.isBlank()) {
@@ -474,12 +474,12 @@ public final class ConfigValueFormatter {
     }
 
     /**
-     * Поддерживает старый способ ввода IPv4 как uint32, чтобы импорт и ручное редактирование
-     * уже сохранённых значений оставались обратно совместимыми.
-     *
-     * @param text строковое представление uint32
-     * @return значение для protobuf fixed32 поля
-     * @throws IllegalArgumentException если число не удалось разобрать
+     * Supports the legacy IPv4-as-uint32 input form so imports and manual edits
+     * of already saved values remain backward compatible.
+ *
+     * @param text uint32 text representation
+     * @return value for the protobuf fixed32 field
+     * @throws IllegalArgumentException when the number cannot be parsed
      */
     private static int parseLegacyIpv4Number(String text) {
         try {

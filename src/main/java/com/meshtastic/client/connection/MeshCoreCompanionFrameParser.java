@@ -3,11 +3,13 @@ package com.meshtastic.client.connection;
 import java.io.ByteArrayOutputStream;
 
 /**
- * Эвристический parser для MeshCore Companion Protocol packets поверх byte-stream transport-ов.
+ * Heuristic parser for MeshCore Companion Protocol packets carried over
+ * byte-stream transports.
  * <p>
- * Companion Protocol естественно работает с packet boundaries BLE write/notification.
- * TCP и Serial таких границ не сохраняют, поэтому packets фиксированной длины возвращаются
- * сразу, а variable-size packets завершаются по inter-byte silence через {@link #flushPartialFrame()}.
+ * The Companion Protocol naturally has packet boundaries on BLE writes and
+ * notifications. TCP and Serial do not preserve those boundaries, so fixed-size
+ * packets are returned immediately, while variable-size packets are completed
+ * after inter-byte silence via {@link #flushPartialFrame()}.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -18,19 +20,19 @@ public final class MeshCoreCompanionFrameParser implements StreamFrameParser {
     private final ByteArrayOutputStream buffer = new ByteArrayOutputStream(128);
 
     /**
-     * Создаёт parser для обычного runtime-режима.
+     * Creates a parser for normal runtime mode.
      * <p>
-     * Variable-size packets будут возвращаться только после {@link #flushPartialFrame()},
-     * чтобы не обрезать полезную нагрузку раньше окончания stream-паузы.
+     * Variable-size packets are returned only after {@link #flushPartialFrame()}
+     * so payloads are not truncated before the stream pause ends.
      */
     public MeshCoreCompanionFrameParser() {
     }
 
     /**
-     * Добавляет байт в текущий Companion packet.
+     * Adds one byte to the current Companion packet.
      *
-     * @param b очередной байт packet-а
-     * @return готовый packet или {@code null}, если нужно дождаться дополнительных байтов/паузы
+     * @param b next packet byte
+     * @return completed packet, or {@code null} while more bytes or a pause are required
      */
     @Override
     public byte[] processByte(byte b) {
@@ -54,9 +56,9 @@ public final class MeshCoreCompanionFrameParser implements StreamFrameParser {
     }
 
     /**
-     * Проверяет, накоплен ли частичный Companion packet.
+     * Returns whether a partial Companion packet is buffered.
      *
-     * @return {@code true}, если buffer не пуст
+     * @return {@code true} when the buffer is not empty
      */
     @Override
     public boolean hasPartialFrame() {
@@ -64,9 +66,9 @@ public final class MeshCoreCompanionFrameParser implements StreamFrameParser {
     }
 
     /**
-     * Завершает variable-size packet после read timeout или inter-byte silence.
+     * Completes a variable-size packet after read timeout or inter-byte silence.
      *
-     * @return готовый packet или {@code null}, если накопленных данных недостаточно
+     * @return completed packet, or {@code null} when buffered data is insufficient
      */
     @Override
     public byte[] flushPartialFrame() {
@@ -81,7 +83,7 @@ public final class MeshCoreCompanionFrameParser implements StreamFrameParser {
     }
 
     /**
-     * Очищает накопленный packet.
+     * Clears the buffered packet.
      */
     @Override
     public void reset() {
@@ -89,9 +91,9 @@ public final class MeshCoreCompanionFrameParser implements StreamFrameParser {
     }
 
     /**
-     * Возвращает точную длину packet-а, если она известна по packet type и version.
+     * Returns the exact packet length when packet type and version define one.
      *
-     * @return ожидаемая длина или {@code -1} для variable-size packets
+     * @return expected length, or {@code -1} for variable-size packets
      */
     private int expectedLength() {
         if (buffer.size() == 0) {
@@ -111,9 +113,9 @@ public final class MeshCoreCompanionFrameParser implements StreamFrameParser {
     }
 
     /**
-     * Возвращает минимальную длину, достаточную для распознавания variable-size packet-а.
+     * Returns the minimum length needed to recognize a variable-size packet.
      *
-     * @return минимальная длина или {@code -1}, если тип packet-а неизвестен
+     * @return minimum length, or {@code -1} when the packet type is unknown
      */
     private int minimumLength() {
         if (buffer.size() == 0) {
@@ -136,7 +138,7 @@ public final class MeshCoreCompanionFrameParser implements StreamFrameParser {
     }
 
     /**
-     * Определяет длину {@code DEVICE_INFO} packet-а по версии firmware protocol.
+     * Determines {@code DEVICE_INFO} packet length from firmware protocol version.
      */
     private int deviceInfoLength(byte[] data) {
         if (data.length < 2) {
@@ -156,7 +158,7 @@ public final class MeshCoreCompanionFrameParser implements StreamFrameParser {
     }
 
     /**
-     * Забирает готовый packet из buffer-а и оставляет лишние байты для следующего packet-а.
+     * Takes a completed packet from the buffer and keeps extra bytes for the next packet.
      */
     private byte[] take(int length) {
         byte[] data = buffer.toByteArray();
@@ -170,7 +172,7 @@ public final class MeshCoreCompanionFrameParser implements StreamFrameParser {
     }
 
     /**
-     * Проверяет, может ли байт быть первым байтом известного Companion packet-а.
+     * Returns whether a byte can start a known Companion packet.
      */
     private static boolean isKnownPacketType(int value) {
         return switch (value) {

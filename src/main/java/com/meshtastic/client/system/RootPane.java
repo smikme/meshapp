@@ -32,15 +32,15 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Корневая панель окна приложения с кастомным title bar.
+ * Root pane for the application window with a custom title bar.
  * <p>
- * Реализует кастомную оконную рамку (traffic light кнопки, перетаскивание,
- * resize по краям) для работы с {@code StageStyle.TRANSPARENT}.
- * Содержит {@link DrawerPane} (боковое меню), {@link MainForm} (область контента),
- * {@link com.meshtastic.client.modal.ModalPane} и overlay для toast-уведомлений.
+ * Implements a custom window frame for {@code StageStyle.TRANSPARENT}: traffic
+ * light buttons, window dragging, and edge resizing. Contains {@link DrawerPane}
+ * for navigation, {@link MainForm} for content, {@link com.meshtastic.client.modal.ModalPane},
+ * and a toast overlay.
  * <p>
- * На macOS resize делегируется нативному {@code NSWindowStyleMaskResizable}.
- * На Windows/Linux используются кастомные обработчики мыши по краям/углам окна.
+ * On macOS, resizing is delegated to native {@code NSWindowStyleMaskResizable}.
+ * On Windows/Linux, custom mouse handlers handle edges and corners.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -51,9 +51,9 @@ public class RootPane extends BorderPane {
     private static final double RESIZE_MARGIN = 8;
     private static final double CORNER_MARGIN = 16;
     /**
-     * Для transparent/layered окна Windows нужен хотя бы минимальный alpha,
-     * иначе hit-test проваливается сквозь полностью прозрачные пиксели.
-     * Значение держим на грани видимости, чтобы не убивать backdrop.
+     * A transparent/layered Windows window needs a minimal alpha value; otherwise
+     * hit-testing passes through fully transparent pixels. Keep the value barely
+     * visible so it does not harm the backdrop.
      */
     private static final String WINDOWS_HIT_TEST_BACKGROUND = "-fx-background-color: rgba(0,0,0,0.004);";
 
@@ -75,14 +75,14 @@ public class RootPane extends BorderPane {
     private double dragOffsetY;
     private boolean dragging = false;
 
-    /** Кастомный maximize (Windows/Linux): stage.setMaximized() при TRANSPARENT перекрывает панель задач */
+    /** Custom maximize for Windows/Linux: stage.setMaximized() with TRANSPARENT overlaps the taskbar. */
     private boolean customMaximized = false;
     private double restoreX;
     private double restoreY;
     private double restoreW;
     private double restoreH;
 
-    /** Узел, на котором мы принудительно подменили курсор; null если не подменяли */
+    /** Node whose cursor was forcibly overridden; null when none was changed. */
     private Node cursorOverriddenNode;
     private Cursor cursorOverriddenOriginal;
     private Label titleLabel;
@@ -98,22 +98,22 @@ public class RootPane extends BorderPane {
         StackPane centerStack = new StackPane(mainForm, modalPane, toastOverlay);
 
         if (!AppPreferences.isDisableEffectsEffective()) {
-            // Кастомный title bar — на всю ширину окна, прозрачный (frosted glass просвечивает)
+        // Custom title bar spans the full window width and remains transparent so frosted glass shows through.
             HBox titleBar = createTitleBar();
             setTop(titleBar);
 
-            // Windows + StageStyle.TRANSPARENT: ОС пропускает mouse events сквозь
-            // полностью прозрачные пиксели (hit-test по альфа-каналу).
-            // Полностью прозрачные пиксели не участвуют в Windows hit-test,
-            // поэтому root получает почти невидимый alpha-слой для resize.
-            // На macOS это не нужно — NSVisualEffectView рисует backdrop под JavaFX.
+        // Windows + StageStyle.TRANSPARENT lets mouse events pass through fully
+        // transparent pixels because hit-testing uses alpha. Fully transparent
+        // pixels do not participate in Windows hit-testing, so root gets a nearly
+        // invisible alpha layer for resize. macOS does not need this because
+        // NSVisualEffectView draws the backdrop under JavaFX.
             if (OsDetect.isWindows()) {
                 setPickOnBounds(true);
                 setStyle(WINDOWS_HIT_TEST_BACKGROUND);
             }
 
-            // На macOS ресайз обрабатывает нативный NSWindowStyleMaskResizable,
-            // кастомные хэндлеры нужны только для Windows/Linux
+        // On macOS, resize is handled by native NSWindowStyleMaskResizable.
+        // Custom handlers are needed only for Windows/Linux.
             if (!OsDetect.isMacOs()) {
                 initResizeHandlers();
             }
@@ -131,23 +131,23 @@ public class RootPane extends BorderPane {
     }
 
     /**
-     * Кастомный title bar: traffic lights слева, заголовок по центру, drag по всей ширине.
+     * Custom title bar: traffic lights on the left, centered title, and full-width dragging.
      */
     private HBox createTitleBar() {
         HBox bar = new HBox();
         bar.setAlignment(Pos.CENTER_LEFT);
         bar.setPadding(new Insets(8, 12, 8, 12));
         bar.getStyleClass().add("custom-title-bar");
-        // Перехватывать клики по всей площади bar, включая прозрачные spacers —
-        // без этого на Windows клики проваливаются сквозь прозрачные Region
+        // Capture clicks across the whole bar, including transparent spacers;
+        // otherwise Windows lets clicks pass through transparent Region nodes.
         bar.setPickOnBounds(true);
         if (OsDetect.isWindows()) {
-            // Для transparent/layered окна Windows учитывает альфу именно в верхнем
-            // слое title bar, поэтому делаем hit-testable сам bar, а не только root.
+        // For a transparent/layered window, Windows evaluates alpha in the top
+        // titlebar layer, so make the bar itself hit-testable, not only root.
             bar.setStyle(WINDOWS_HIT_TEST_BACKGROUND);
         }
 
-        // Traffic light кнопки
+        // Traffic light buttons.
         Button closeBtn = createWindowButton("window-btn-close");
         closeBtn.setOnAction(e -> AppTrayManager.getInstance().exitApplication());
 
@@ -177,14 +177,14 @@ public class RootPane extends BorderPane {
 
         bar.getChildren().addAll(buttons, spacer, titleLabel, spacer2);
 
-        // Двойной клик по title bar — toggle maximize
+        // Double-click on title bar toggles maximize.
         bar.setOnMouseClicked(event -> {
             if (event.getClickCount() == 2 && !(event.getTarget() instanceof Button)) {
                 toggleMaximize();
             }
         });
 
-        // Перетаскивание окна за title bar (кроме зон resize по краям/углам)
+        // Drag the window by the title bar, except over edge/corner resize zones.
         bar.setOnMousePressed(event -> {
             if (event.getTarget() instanceof Button) { return; }
             if (isInResizeZone(event)) { return; }
@@ -199,12 +199,12 @@ public class RootPane extends BorderPane {
             if (!dragging) { return; }
             Stage stage = MeshApp.getPrimaryStage();
             if (stage != null) {
-                // При перетаскивании из maximized — сначала восстанавливаем размер
+                    // When dragging from maximized state, restore size first.
                 if (customMaximized) {
                     double relativeX = event.getScreenX() - stage.getX();
                     double proportion = relativeX / stage.getWidth();
                     restoreFromMaximize(stage);
-                    // Пересчитываем offset чтобы курсор оставался пропорционально
+                    // Recalculate offset so the cursor keeps the same relative position.
                     dragOffsetX = restoreW * proportion;
                     dragOffsetY = event.getScreenY() - stage.getY();
                 }
@@ -306,9 +306,9 @@ public class RootPane extends BorderPane {
             return;
         }
 
-        // В seamless-режиме не используем stage.setMaximized(): на macOS после
-        // восстановления maximized-состояния оно может потерять корректный
-        // restore-frame и увести transparent окно с экрана при unmaximize.
+        // In seamless mode, do not use stage.setMaximized(): on macOS, after
+        // restoring maximized state it can lose the correct restore frame and
+        // move a transparent window off-screen during unmaximize.
         if (customMaximized) {
             restoreFromMaximize(stage);
         } else {
@@ -349,8 +349,8 @@ public class RootPane extends BorderPane {
     // ==================== Resize ====================
 
     private void initResizeHandlers() {
-        // Используем EventFilter (фаза захвата) вместо setOnMouse* (фаза всплытия),
-        // чтобы resize работал поверх title bar и других дочерних элементов
+        // Use EventFilter, the capture phase, instead of setOnMouse*, the bubble
+        // phase, so resize works above the title bar and other child elements.
         addEventFilter(MouseEvent.MOUSE_MOVED, this::updateResizeCursor);
         addEventFilter(MouseEvent.MOUSE_PRESSED, this::onResizeStart);
         addEventFilter(MouseEvent.MOUSE_DRAGGED, this::onResizeDrag);
@@ -379,9 +379,9 @@ public class RootPane extends BorderPane {
                 case NW, SE -> Cursor.SE_RESIZE;
                 default -> Cursor.DEFAULT;
             };
-            // Восстановить предыдущий узел, если target сменился
+                // Restore the previous node if the target changed.
             restoreCursorOverride();
-            // Принудительно ставим resize-курсор на target-узел
+                // Force the resize cursor onto the target node.
             if (target != null) {
                 cursorOverriddenOriginal = target.getCursor();
                 cursorOverriddenNode = target;
@@ -389,7 +389,7 @@ public class RootPane extends BorderPane {
             }
             setCursor(cursor);
         } else {
-            // Вне зоны resize — восстанавливаем оригинальный курсор
+                // Outside resize zones, restore the original cursor.
             restoreCursorOverride();
             setCursor(Cursor.DEFAULT);
         }
@@ -449,15 +449,15 @@ public class RootPane extends BorderPane {
     }
 
     private ResizeDirection detectEdge(MouseEvent e) {
-        // Используем sceneX/sceneY — при EventFilter e.getX()/getY() относительны к target-узлу,
-        // а не к RootPane. sceneX/sceneY совпадают с локальными координатами RootPane,
-        // т.к. RootPane — корневой узел сцены.
+        // Use sceneX/sceneY: with EventFilter, e.getX()/getY() are relative to the
+        // target node, not RootPane. sceneX/sceneY match RootPane local coordinates
+        // because RootPane is the scene root.
         double x = e.getSceneX();
         double y = e.getSceneY();
         double w = getWidth();
         double h = getHeight();
 
-        // Углы — увеличенная зона захвата
+        // Corners use an enlarged grab zone.
         boolean cornerTop = y < CORNER_MARGIN;
         boolean cornerBottom = y > h - CORNER_MARGIN;
         boolean cornerLeft = x < CORNER_MARGIN;
@@ -468,7 +468,7 @@ public class RootPane extends BorderPane {
         if (cornerBottom && cornerLeft) { return ResizeDirection.SW; }
         if (cornerBottom && cornerRight) { return ResizeDirection.SE; }
 
-        // Стороны — стандартная зона
+        // Edges use the standard zone.
         boolean top = y < RESIZE_MARGIN;
         boolean bottom = y > h - RESIZE_MARGIN;
         boolean left = x < RESIZE_MARGIN;
@@ -481,18 +481,18 @@ public class RootPane extends BorderPane {
         return ResizeDirection.NONE;
     }
 
-    /** Проверяет, находится ли курсор в зоне resize (края/углы окна) */
+    /** Checks whether the cursor is in a resize zone: window edges or corners. */
     private boolean isInResizeZone(MouseEvent event) {
         double sceneX = event.getSceneX();
         double sceneY = event.getSceneY();
         double w = getWidth();
         double h = getHeight();
-        // Углы
+        // Corners.
         if ((sceneX < CORNER_MARGIN && sceneY < CORNER_MARGIN) ||
             (sceneX > w - CORNER_MARGIN && sceneY < CORNER_MARGIN) ||
             (sceneX < CORNER_MARGIN && sceneY > h - CORNER_MARGIN) ||
             (sceneX > w - CORNER_MARGIN && sceneY > h - CORNER_MARGIN)) { return true; }
-        // Края
+        // Edges.
         return sceneX < RESIZE_MARGIN || sceneX > w - RESIZE_MARGIN ||
                sceneY < RESIZE_MARGIN || sceneY > h - RESIZE_MARGIN;
     }

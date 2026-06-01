@@ -45,11 +45,10 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * Главная форма MeshApp IDE со списком пользовательских Lua-скриптов.
+ * Main MeshApp IDE form showing the user's Lua scripts.
  * <p>
- * Форма отображает параметры скриптов, их состояние выполнения и действия
- * управления. Отдельное окно редактора открывается только по явному действию
- * редактирования выбранного скрипта.
+ * Displays script settings, runtime state, and control actions. The editor
+ * window opens only when the user explicitly chooses to edit a selected script.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */

@@ -61,13 +61,13 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Форма «Карты»: отображает OSM-карту, ноды с координатами, фильтры,
- * поиск, измерение расстояний, выделение области, оффлайн-тайлы и трейсы.
+ * Maps form: displays an OSM map, positioned nodes, filters, search, distance
+ * measurement, area selection, offline tiles, and traces.
  * <p>
- * Форма связывает UI приложения с низкоуровневым компонентом {@link TileMapView}:
- * собирает ноды из текущего {@link DeviceState} и кэша, применяет фильтры,
- * парсит сохранённые результаты traceroute и передаёт готовые маркеры/сегменты
- * в карту.
+ * The form connects the application UI to the low-level {@link TileMapView}:
+ * it collects nodes from the current {@link DeviceState} and cache, applies
+ * filters, parses saved traceroute results, and passes ready marker/segment
+ * data to the map.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -132,14 +132,14 @@ public class FormMap extends Form {
     private final Runnable ignoredListener = () -> Platform.runLater(this::reloadMarkers);
 
     /**
-     * Создаёт форму и сразу собирает визуальные элементы панели карт.
+     * Creates the form and builds the map panel UI immediately.
      */
     public FormMap() {
         initComponents();
     }
 
     /**
-     * Подписывает форму на изменения подключения, избранных и игнорируемых нод.
+     * Subscribes the form to connection, favorite-node, and ignored-node changes.
      */
     @Override
     public void formInit() {
@@ -150,7 +150,7 @@ public class FormMap extends Form {
     }
 
     /**
-     * При открытии формы заново привязывает активное состояние устройства.
+     * Rebinds the active device state when the form is opened.
      */
     @Override
     public void formOpen() {
@@ -158,7 +158,7 @@ public class FormMap extends Form {
     }
 
     /**
-     * Сохраняет центр и масштаб карты при закрытии формы.
+     * Saves the map center and zoom level when the form is closed.
      */
     @Override
     public void formClose() {
@@ -166,7 +166,7 @@ public class FormMap extends Form {
     }
 
     /**
-     * Обновляет маркеры при ручном обновлении формы.
+     * Refreshes markers when the form is manually refreshed.
      */
     @Override
     public void formRefresh() {
@@ -174,13 +174,13 @@ public class FormMap extends Form {
     }
 
     /**
-     * Показывает на карте один сохранённый traceroute-результат.
+     * Shows one saved traceroute result on the map.
      *
-     * <p>Метод используется внешними формами, которые уже знают id записи
-     * {@code traceroute_results}. Предыдущий выбор трейсов очищается, чтобы
-     * карта сфокусировалась только на указанном маршруте.
+     * <p>This method is used by external forms that already know the
+     * {@code traceroute_results} row id. The previous trace selection is cleared
+     * so the map focuses only on the requested route.
      *
-     * @param tracerouteResultId id записи {@code traceroute_results}
+     * @param tracerouteResultId id of the {@code traceroute_results} row
      */
     public void showTracerouteResult(long tracerouteResultId) {
         if (!Platform.isFxApplicationThread()) {
@@ -205,8 +205,8 @@ public class FormMap extends Form {
     }
 
     /**
-     * Собирает тулбар, карту и статусную строку, затем восстанавливает сохранённые
-     * настройки карты: центр, масштаб, оффлайн-режим, ночной режим и каталог тайлов.
+     * Builds the toolbar, map, and status line, then restores saved map settings:
+     * center, zoom, offline mode, night mode, and tile directory.
      */
     private void initComponents() {
         getStyleClass().add("map-form");
@@ -370,7 +370,7 @@ public class FormMap extends Form {
     }
 
     /**
-     * Создаёт компактную текстовую кнопку в стиле панели карт.
+     * Creates a compact text button using the map panel style.
      */
     private Button iconButton(String text, String tooltip) {
         Button button = new Button(text);
@@ -381,7 +381,7 @@ public class FormMap extends Form {
     }
 
     /**
-     * Настраивает предиктивный поиск нод на карте и быстрый фильтр избранного.
+     * Configures predictive node search on the map and the quick favorites filter.
      */
     private void configureSearchControls() {
         searchField.setPromptText(I18n.t("map.search.placeholder"));
@@ -421,7 +421,7 @@ public class FormMap extends Form {
     }
 
     /**
-     * Настраивает кнопку меню последних трейсов.
+     * Configures the recent-traces menu button.
      */
     private void configureTraceButton() {
         configureIconButton(tracesButton, "/icons/map-traces.svg", I18n.t("map.traces.recent"));
@@ -438,7 +438,7 @@ public class FormMap extends Form {
     }
 
     /**
-     * Создаёт меню фильтров нод, синхронизированное с фильтрами формы «Ноды».
+     * Creates the node-filter menu, synchronized with the Nodes form filters.
      */
     private Button createFilterButton() {
         Button filterButton = new Button();
@@ -517,7 +517,7 @@ public class FormMap extends Form {
     }
 
     /**
-     * Синхронизирует визуальное состояние кнопки «Только избранные».
+     * Synchronizes the visual state of the Favorites Only button.
      */
     private void syncFavoriteFilterButton() {
         if (showFavoritesOnly) {
@@ -532,8 +532,8 @@ public class FormMap extends Form {
     }
 
     /**
-     * Перечитывает последние сохранённые результаты traceroute и строит меню выбора.
-     * Можно выбрать несколько трейсов, выбранные элементы остаются отмеченными.
+     * Reloads recent saved traceroute results and builds the selection menu.
+     * Multiple traces can be selected, and selected entries stay checked.
      */
     private void refreshTracesMenu() {
         recentTraces = MessageDbService.getInstance()
@@ -583,7 +583,7 @@ public class FormMap extends Form {
     }
 
     /**
-     * Обновляет подсказку и активный стиль кнопки трейсов по числу выбранных маршрутов.
+     * Updates the trace button tooltip and active style from the selected-route count.
      */
     private void syncTracesButton() {
         if (selectedTraces.isEmpty()) {
@@ -598,7 +598,7 @@ public class FormMap extends Form {
     }
 
     /**
-     * Формирует короткий заголовок трейса для меню: время, цель и число связей.
+     * Builds a compact trace menu title: time, target, and link count.
      */
     private String traceMenuTitle(ParsedTrace trace) {
         int linkCount = trace.paths().stream()
@@ -609,7 +609,7 @@ public class FormMap extends Form {
     }
 
     /**
-     * Обновляет список подсказок поиска по тем же правилам, что используются в чат-боте.
+     * Updates search suggestions using the same rules as the chat bot.
      */
     private void refreshSearchSuggestions() {
         String query = searchField.getText() == null ? "" : searchField.getText().trim();
@@ -662,7 +662,7 @@ public class FormMap extends Form {
     }
 
     /**
-     * Создаёт одну строку выпадающей подсказки поиска.
+     * Creates one row in the search suggestion popup.
      */
     private CustomMenuItem buildSearchSuggestionItem(ChatBotCommandHelper.NodeSuggestion suggestion, NodeData node) {
         Label primary = new Label(suggestion.primaryText());
@@ -685,7 +685,7 @@ public class FormMap extends Form {
     }
 
     /**
-     * Обрабатывает клавиатурную навигацию по результатам поиска.
+     * Handles keyboard navigation through search results.
      */
     private void handleSearchKeyPressed(KeyEvent event) {
         if (event.getCode() == KeyCode.ESCAPE) {
@@ -713,7 +713,7 @@ public class FormMap extends Form {
     }
 
     /**
-     * Гарантирует наличие открытого меню подсказок перед навигацией с клавиатуры.
+     * Ensures the suggestions popup is open before keyboard navigation.
      */
     private void ensureSearchSuggestions() {
         if (currentSearchMatches.isEmpty()) {
@@ -724,7 +724,7 @@ public class FormMap extends Form {
     }
 
     /**
-     * Сдвигает выделение в списке подсказок поиска с циклическим переходом через край.
+     * Moves the highlighted search suggestion, wrapping around the list edges.
      */
     private void moveSearchSelection(int delta) {
         if (currentSearchMatches.isEmpty()) {
@@ -739,7 +739,7 @@ public class FormMap extends Form {
     }
 
     /**
-     * Применяет CSS-класс выбранной строки к текущей подсказке поиска.
+     * Applies the selected-row CSS class to the current search suggestion.
      */
     private void updateSearchSuggestionSelection() {
         for (int i = 0; i < currentSearchSuggestionItems.size(); i++) {
@@ -752,7 +752,7 @@ public class FormMap extends Form {
     }
 
     /**
-     * Закрывает меню подсказок и сбрасывает временное состояние поиска.
+     * Closes the suggestions popup and resets transient search state.
      */
     private void hideSearchSuggestions() {
         currentSearchMatches = List.of();
@@ -763,10 +763,11 @@ public class FormMap extends Form {
     }
 
     /**
-     * Парсит сохранённую запись traceroute в структуру для карты.
-     * Новые записи читаются из protobuf RouteDiscovery, legacy-записи — из старого текстового формата.
+     * Parses a saved traceroute row into the map representation.
+     * New rows are read from protobuf RouteDiscovery; legacy rows fall back to
+     * the old text format.
      *
-     * @return разобранный трейс или пустое значение, если запись повреждена
+     * @return parsed trace, or empty when the row is corrupted
      */
     private Optional<ParsedTrace> parseTraceRecord(MessageDbService.TracerouteResultRecord record) {
         if (record == null) {
@@ -777,7 +778,7 @@ public class FormMap extends Form {
             try {
                 return Optional.of(parseTraceRoute(record, MeshProtos.RouteDiscovery.parseFrom(routeData)));
             } catch (Exception ignored) {
-                // Старые или повреждённые записи пробуем восстановить из formatted_text ниже.
+        // Try to recover old or corrupted rows from formatted_text below.
             }
         }
         return Optional.ofNullable(parseTraceText(
@@ -805,7 +806,7 @@ public class FormMap extends Form {
     }
 
     /**
-     * Парсит legacy-текст traceroute из старых системных сообщений.
+     * Parses legacy traceroute text from old system messages.
      */
     private ParsedTrace parseTraceText(long id, long timestamp, String text, String targetFallback) {
         if (text == null || !text.startsWith(TracerouteView.TRACEROUTE_PREFIX)) {
@@ -906,14 +907,14 @@ public class FormMap extends Form {
     }
 
     /**
-     * Удаляет необязательные подписи секций «Прямой:» и «Обратный:» из строки трейса.
+     * Removes optional Forward/Reverse section labels from a trace line.
      */
     private String stripTraceSectionLabel(String line) {
         return line == null ? "" : TRACE_SECTION_LABEL_PATTERN.matcher(line).replaceFirst("").trim();
     }
 
     /**
-     * Разбирает строку маршрута вида {@code A →1.2dB→ B → C} в имена хопов и SNR.
+     * Parses a route line such as {@code A ->1.2dB-> B -> C} into hop names and SNR values.
      */
     private ParsedTraceLine parseTraceLine(String line) {
         if (line == null || line.isBlank()) {
@@ -952,9 +953,9 @@ public class FormMap extends Form {
     }
 
     /**
-     * Пересобирает оверлей выбранных трейсов и при необходимости масштабирует карту к ним.
+     * Rebuilds the selected traces overlay and fits the map to it when requested.
      *
-     * @param fitAndReport {@code true}, чтобы приблизить карту и вывести статус пользователю
+     * @param fitAndReport {@code true} to fit the map and report status to the user
      */
     private void refreshSelectedTraceOverlay(boolean fitAndReport) {
         if (selectedTraces.isEmpty()) {
@@ -987,9 +988,9 @@ public class FormMap extends Form {
     }
 
     /**
-     * Строит все визуальные сегменты выбранных трейсов.
-     * Если явного обратного трейса нет, добавляет синтетическое обратное направление
-     * без SNR, чтобы на карте были видны обе стрелки.
+     * Builds all visual segments for selected traces.
+     * If no explicit reverse trace exists, a synthetic reverse direction without
+     * SNR is added so both arrows are visible on the map.
      */
     private TraceOverlayBuild buildTraceOverlay() {
         TraceNodeIndex index = buildTraceNodeIndex();
@@ -1019,8 +1020,8 @@ public class FormMap extends Form {
     }
 
     /**
-     * Считает количество хопов по исходным путям трейса.
-     * Пропущенные точки без координат и визуальная «склейка» линий на это число не влияют.
+     * Counts hops from the original trace paths.
+     * Skipped coordinate-less points and visual line stitching do not affect this count.
      */
     private int traceHopCount(ParsedTrace trace) {
         return trace.paths().stream()
@@ -1029,10 +1030,11 @@ public class FormMap extends Form {
     }
 
     /**
-     * Превращает путь трейса в сегменты между нодами с известными координатами.
-     * Ноды без координат пропускаются, но исходные индексы сохраняются для расчёта SNR.
+     * Converts a trace path into segments between nodes with known coordinates.
+     * Nodes without coordinates are skipped, while original indexes are preserved
+     * for SNR calculation.
      *
-     * @return количество точек маршрута, которые не удалось показать из-за отсутствия координат
+     * @return number of route points that could not be shown because coordinates were missing
      */
     private int appendTracePathSegments(TraceNodeIndex index,
                                         List<TileMapView.TraceSegment> segments,
@@ -1076,9 +1078,9 @@ public class FormMap extends Form {
     }
 
     /**
-     * Рассчитывает подпись SNR для визуального сегмента.
-     * Если сегмент получился после пропуска промежуточных точек без координат,
-     * SNR усредняется по исходным хопам между видимыми точками.
+     * Calculates the SNR label for a visual segment.
+     * If the segment spans skipped coordinate-less points, SNR is averaged over
+     * the original hops between the visible points.
      */
     private TraceSignal traceSignalBetween(List<Double> snrs,
                                            int fromIndex,
@@ -1099,8 +1101,8 @@ public class FormMap extends Form {
     }
 
     /**
-     * Создаёт синтетический обратный путь на основе прямого маршрута.
-     * SNR для такого пути неизвестен и помечается как {@link Double#NaN}.
+     * Creates a synthetic reverse path from the forward route.
+     * SNR for this path is unknown and is marked as {@link Double#NaN}.
      */
     private TracePath mirroredTracePath(TracePath path) {
         List<String> names = new ArrayList<>();
@@ -1115,8 +1117,8 @@ public class FormMap extends Form {
     }
 
     /**
-     * Собирает индекс нод для разрешения имён из трейсов.
-     * Используются текущий DeviceState, кэш нод и псевдоним «Я» для собственной ноды.
+     * Builds a node index for resolving names found in traces.
+     * Uses the current DeviceState, the node cache, and the self alias for the local node.
      */
     private TraceNodeIndex buildTraceNodeIndex() {
         Map<Integer, NodeData> nodesByNum = new LinkedHashMap<>();
@@ -1150,7 +1152,7 @@ public class FormMap extends Form {
     }
 
     /**
-     * Добавляет нормализованный поисковый токен ноды в индекс трейсов.
+     * Adds a normalized node search token to the trace index.
      */
     private void putTraceLookupToken(Map<String, NodeData> byToken, String token, NodeData node) {
         String normalized = normalizeTraceToken(token);
@@ -1160,7 +1162,7 @@ public class FormMap extends Form {
     }
 
     /**
-     * Находит ноду по имени из трейса: nodeId, longName, shortName, заголовок или подсказка чат-бота.
+     * Finds a node by a trace name: nodeId, longName, shortName, title, or chat-bot suggestion.
      */
     private NodeData resolveTraceNode(String name, TraceNodeIndex index) {
         String normalized = normalizeTraceToken(name);
@@ -1194,7 +1196,7 @@ public class FormMap extends Form {
     }
 
     /**
-     * Извлекает nodeId из произвольного текста и дополняет короткую hex-форму до восьми символов.
+     * Extracts a nodeId from arbitrary text and pads short hex forms to eight characters.
      */
     private String extractTraceNodeId(String text) {
         if (text == null) {
@@ -1209,7 +1211,7 @@ public class FormMap extends Form {
     }
 
     /**
-     * Нормализует строку для сравнения имён нод в трейсе.
+     * Normalizes a string for comparing node names in traces.
      */
     private String normalizeTraceToken(String token) {
         return token == null
@@ -1218,7 +1220,7 @@ public class FormMap extends Form {
     }
 
     /**
-     * Формирует подпись линии трейса с направлением, исходным числом хопов и SNR.
+     * Builds a trace-line label with direction, original hop count, and SNR.
      */
     private String formatTraceSignal(double snr, boolean reverse, int totalHops) {
         String direction = I18n.t(reverse ? "map.trace.direction.reverse" : "map.trace.direction.forward");
@@ -1233,7 +1235,7 @@ public class FormMap extends Form {
     }
 
     /**
-     * Возвращает ноды, доступные для поиска на карте: с координатами и проходящие фильтры.
+     * Returns nodes available for map search: nodes with coordinates that pass filters.
      */
     private List<NodeData> collectSearchNodes() {
         List<NodeData> nodes = new ArrayList<>();
@@ -1246,7 +1248,7 @@ public class FormMap extends Form {
     }
 
     /**
-     * Центрирует карту по текущему выбранному результату поиска.
+     * Centers the map on the currently selected search result.
      */
     private void centerOnSelectedSearchMatch() {
         ensureSearchSuggestions();
@@ -1265,7 +1267,7 @@ public class FormMap extends Form {
     }
 
     /**
-     * Центрирует карту по найденной ноде и оставляет результаты/маркеры на карте.
+     * Centers the map on the found node while keeping search results and markers visible.
      */
     private void centerOnSearchNode(NodeData node, String searchText) {
         if (!hasCoordinate(node)) {
@@ -1285,7 +1287,7 @@ public class FormMap extends Form {
     }
 
     /**
-     * Настраивает кнопку панели карт как иконку с подсказкой.
+     * Configures a map-panel button as an icon with a tooltip.
      */
     private void configureIconButton(Button button, String iconPath, String tooltip) {
         SVGPath icon = SvgIconLoader.load(iconPath, 18);
@@ -1300,7 +1302,7 @@ public class FormMap extends Form {
     }
 
     /**
-     * Настраивает компактную кнопку управления загрузкой рядом с progress bar.
+     * Configures a compact download-control button next to the progress bar.
      */
     private void configureDownloadControlButton(Button button, String iconPath, String tooltip, String fallbackText) {
         button.getStyleClass().add("map-progress-icon-button");
@@ -1310,7 +1312,7 @@ public class FormMap extends Form {
     }
 
     /**
-     * Обновляет иконку кнопки, оставляя текстовый fallback для отсутствующего SVG.
+     * Updates a button icon while keeping text fallback for a missing SVG.
      */
     private void setButtonIcon(Button button, String iconPath, String fallbackText, double size) {
         SVGPath icon = SvgIconLoader.load(iconPath, size);
@@ -1326,7 +1328,7 @@ public class FormMap extends Form {
     }
 
     /**
-     * Настраивает переключаемую кнопку панели карт как иконку с подсказкой.
+     * Configures a toggle map-panel button as an icon with a tooltip.
      */
     private void configureIconToggleButton(ToggleButton button, String iconPath, String tooltip) {
         SVGPath icon = SvgIconLoader.load(iconPath, 18);
@@ -1341,7 +1343,7 @@ public class FormMap extends Form {
     }
 
     /**
-     * Восстанавливает сохранённый каталог оффлайн-тайлов, если путь ещё существует.
+     * Restores the saved offline tile directory if the path still exists.
      */
     private void restoreTileDirectory(String tileDirectory) {
         try {
@@ -1355,7 +1357,7 @@ public class FormMap extends Form {
     }
 
     /**
-     * Привязывает форму к выбранному активному подключению и перевешивает listener обновления нод.
+     * Binds the form to the selected active connection and reattaches the node-update listener.
      */
     private void rebindState() {
         DeviceState oldState = state;
@@ -1385,8 +1387,9 @@ public class FormMap extends Form {
     }
 
     /**
-     * Пересобирает маркеры карты из текущего состояния и кэша.
-     * Собственная нода всегда остаётся на карте при наличии координат, даже если фильтры её скрыли бы.
+     * Rebuilds map markers from current state and cache.
+     * The local node remains on the map whenever it has coordinates, even if
+     * filters would otherwise hide it.
      */
     private void reloadMarkers() {
         List<MapMarker> markers = new ArrayList<>();
@@ -1427,7 +1430,7 @@ public class FormMap extends Form {
     }
 
     /**
-     * Открывает переиспользуемую панель информации о ноде по клику на маркер карты.
+     * Opens the reusable node-detail panel when a map marker is clicked.
      */
     private void showMarkerDetails(MapMarker marker) {
         if (marker == null || marker.id() == null || marker.id().isBlank()) {
@@ -1447,7 +1450,7 @@ public class FormMap extends Form {
     }
 
     /**
-     * Находит NodeData для маркера среди текущих маркеров, активного DeviceState и кэша.
+     * Finds NodeData for a marker among current markers, active DeviceState, and cache.
      */
     private NodeData resolveMarkerNode(String nodeId) {
         NodeData node = currentMarkerNodes.get(nodeId);
@@ -1465,8 +1468,8 @@ public class FormMap extends Form {
     }
 
     /**
-     * Собирает исходный набор нод для карты из текущего DeviceState и, при необходимости,
-     * из кэша избранных или игнорируемых нод.
+     * Builds the source node set for the map from the current DeviceState and,
+     * when needed, from favorite or ignored node caches.
      */
     private List<NodeData> collectMapNodes() {
         if (state == null && !showFavoritesOnly && !showIgnoredOnly) {
@@ -1491,15 +1494,14 @@ public class FormMap extends Form {
     }
 
     /**
-     * Проверяет, должна ли нода отображаться на карте с учётом текущих фильтров.
+     * Checks whether a node should be shown on the map under current filters.
      */
     private boolean passesFilters(NodeData node) {
         return isVisibleByMapFilters(node);
     }
 
     /**
-     * Реализация фильтров карты: неизвестные имена, оффлайн, избранные,
-     * прямые соседи и игнорируемые.
+     * Implements map filters: unknown names, offline nodes, favorites, direct neighbors, and ignored nodes.
      */
     private boolean isVisibleByMapFilters(NodeData node) {
         if (!includeUnknownNames && !node.hasName()) {
@@ -1519,7 +1521,7 @@ public class FormMap extends Form {
     }
 
     /**
-     * Центрирует карту по координатам собственной ноды.
+     * Centers the map on the local node coordinates.
      */
     private void centerOnMyNode() {
         if (state == null) {
@@ -1538,8 +1540,8 @@ public class FormMap extends Form {
     }
 
     /**
-     * Проверяет, что у ноды есть валидные координаты.
-     * Значение {@code 0,0} трактуется как отсутствие координат.
+     * Checks whether the node has valid coordinates.
+     * The {@code 0,0} value is treated as missing coordinates.
      */
     private boolean hasCoordinate(NodeData node) {
         return node != null
@@ -1551,7 +1553,7 @@ public class FormMap extends Form {
     }
 
     /**
-     * Возвращает лучшее доступное имя ноды для подсказок и подписей.
+     * Returns the best available node name for tooltips and labels.
      */
     private String nodeTitle(NodeData node) {
         if (node.getLongName() != null && !node.getLongName().isBlank()) {
@@ -1567,7 +1569,7 @@ public class FormMap extends Form {
     }
 
     /**
-     * Возвращает короткую подпись маркера, которая должна помещаться в круг.
+     * Returns a compact marker label that should fit inside the circle.
      */
     private String shortMarkerTitle(NodeData node) {
         if (node.getShortName() != null && !node.getShortName().isBlank()) {
@@ -1581,14 +1583,14 @@ public class FormMap extends Form {
     }
 
     /**
-     * Возвращает nodeId владельца текущего подключения для изоляции истории сообщений.
+     * Returns the owner nodeId of the current connection for message-history isolation.
      */
     private String currentOwnerNodeId() {
         return state != null && state.getOwnerNodeId() != null ? state.getOwnerNodeId() : "";
     }
 
     /**
-     * Открывает выбор внешнего каталога тайлов и применяет его к карте.
+     * Opens the external tile-directory picker and applies the selected directory to the map.
      */
     private void chooseTileDirectory() {
         DirectoryChooser chooser = new DirectoryChooser();
@@ -1611,7 +1613,7 @@ public class FormMap extends Form {
     }
 
     /**
-     * Обновляет статусную подпись текущего источника локальных тайлов.
+     * Updates the status label for the current local tile source.
      */
     private void updateTileDirectoryLabel() {
         Path root = mapView.getExternalTileRoot();
@@ -1623,7 +1625,7 @@ public class FormMap extends Form {
     }
 
     /**
-     * Запускает загрузку тайлов в локальный кэш и отображает прогресс.
+     * Starts downloading tiles into the local cache and displays progress.
      */
     private void downloadSelectedAreaTiles() {
         if (!mapView.hasSelectedArea()) {
@@ -1747,56 +1749,56 @@ public class FormMap extends Form {
     }
 
     /**
-     * Сохранённый трейс, извлечённый из отдельной таблицы результатов.
+     * Saved trace read from the dedicated results table.
      *
-     * @param dbId       id записи traceroute_results
-     * @param targetName имя целевой ноды
-     * @param timestamp  время результата
-     * @param paths      прямой и, при наличии, обратный путь
+     * @param dbId       id of the traceroute_results row
+     * @param targetName target node name
+     * @param timestamp  result timestamp
+     * @param paths      forward path and, when present, reverse path
      */
     private record ParsedTrace(long dbId, String targetName, long timestamp, List<TracePath> paths) {
     }
 
     /**
-     * Один путь трейса.
+     * One trace path.
      *
-     * @param reverse   {@code true}, если путь обратный
-     * @param names     имена нод в порядке прохождения маршрута
-     * @param snrValues SNR между соседними нодами; {@link Double#NaN}, если значения нет
+     * @param reverse   {@code true} for the reverse path
+     * @param names     node names in route order
+     * @param snrValues SNR between adjacent nodes; {@link Double#NaN} when absent
      */
     private record TracePath(boolean reverse, List<String> names, List<Double> snrValues) {
     }
 
     /**
-     * Нода трейса с известными координатами и её исходный индекс в маршруте.
+     * Trace node with known coordinates and its original route index.
      */
     private record TracePoint(NodeData node, int sourceIndex) {
     }
 
     /**
-     * Подготовленная подпись и числовой SNR для визуального сегмента трейса.
+     * Prepared label and numeric SNR for a visual trace segment.
      */
     private record TraceSignal(String text, double snr) {
     }
 
     /**
-     * Результат разбора одной текстовой строки traceroute.
+     * Parse result for one textual traceroute line.
      */
     private record ParsedTraceLine(List<String> names, List<Double> snrValues) {
     }
 
     /**
-     * Индекс для быстрого поиска нод по разным вариантам имени из трейса.
+     * Index for fast node lookup by different name variants found in traces.
      */
     private record TraceNodeIndex(List<NodeData> nodes, Map<String, NodeData> byToken, NodeData localNode) {
     }
 
     /**
-     * Результат построения оверлея трейсов для карты.
+     * Result of building the trace overlay for the map.
      *
-     * @param segments      готовые визуальные сегменты
-     * @param skippedPoints число точек без координат
-     * @param totalHops     исходное количество хопов без учёта визуальной склейки
+     * @param segments      prepared visual segments
+     * @param skippedPoints number of points without coordinates
+     * @param totalHops     original hop count, before visual stitching
      */
     private record TraceOverlayBuild(List<TileMapView.TraceSegment> segments, int skippedPoints, int totalHops) {
     }

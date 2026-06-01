@@ -80,7 +80,7 @@ public class FormLogs extends Form {
         VBox content = new VBox(10);
         content.setPadding(new Insets(10));
 
-        // Заголовок + панель действий
+        // Header and action bar.
         HBox titleRow = new HBox(10);
         titleRow.setAlignment(Pos.CENTER_LEFT);
 
@@ -140,7 +140,7 @@ public class FormLogs extends Form {
 
         titleRow.getChildren().addAll(title, spacer, actionToolbar);
 
-        // Таблица логов
+        // Log table.
         logTable = new TableView<>(logData);
         logTable.setFixedCellSize(26);
 
@@ -207,7 +207,7 @@ public class FormLogs extends Form {
         logTable.getColumns().addAll(colTime, colLevel, colMessage);
         logTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
 
-        // Раскраска строк по уровню
+        // Row coloring by level.
         logTable.setRowFactory(tv -> new TableRow<>() {
             @Override
             protected void updateItem(LogEntry item, boolean empty) {
@@ -230,12 +230,12 @@ public class FormLogs extends Form {
 
     @Override
     public void formInit() {
-        // Live-подписка включается только пока форма открыта.
+        // Live subscription is enabled only while the form is open.
     }
 
     @Override
     public void formOpen() {
-        // Обновить из буфера при каждом открытии
+        // Refresh from the buffer each time the form opens.
         reloadVisibleLogsFromBuffer();
         installLiveLogListener();
     }

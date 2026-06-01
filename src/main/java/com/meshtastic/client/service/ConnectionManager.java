@@ -36,15 +36,15 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * Менеджер транспортных подключений и протокольных runtime-адаптеров (singleton).
+ * Singleton manager for transport connections and protocol runtime adapters.
  * <p>
- * Управляет жизненным циклом соединений (TCP, Serial и BLE): хранит профили подключений
- * ({@link ConnectionEntry}) в JSON-файле {@code ~/.meshapp/connections.json},
- * создаёт/разрывает транспорт, выбирает коммуникационный протокол и поднимает
- * соответствующий runtime. Для существующего UI сохраняет доступ к Meshtastic
- * {@link DeviceState} и {@link ProtocolHandler}.
+ * Owns the lifecycle of TCP, Serial, and BLE connections: stores connection
+ * profiles ({@link ConnectionEntry}) in {@code ~/.meshapp/connections.json},
+ * creates and closes transports, selects the communication protocol, and starts
+ * the matching runtime. For the existing UI, it still exposes Meshtastic
+ * {@link DeviceState} and {@link ProtocolHandler}.
  * <p>
- * Каждое соединение идентифицируется по строковому {@code id} из {@link ConnectionEntry}.
+ * Each connection is identified by the string {@code id} from {@link ConnectionEntry}.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -81,10 +81,10 @@ public final class ConnectionManager {
     }
 
     /**
-     * Возвращает единственный экземпляр менеджера соединений.
-     * При первом вызове загружает профили из {@code ~/.meshapp/connections.json}.
+     * Returns the singleton connection manager.
+     * On first call, loads profiles from {@code ~/.meshapp/connections.json}.
      *
-     * @return экземпляр {@code ConnectionManager}
+     * @return {@code ConnectionManager} instance
      */
     public static synchronized ConnectionManager getInstance() {
         if (instance == null) {
@@ -94,10 +94,10 @@ public final class ConnectionManager {
     }
 
     /**
-     * Загружает сохранённые профили подключений из {@code ~/.meshapp/connections.json}.
+     * Loads saved connection profiles from {@code ~/.meshapp/connections.json}.
      * <p>
-     * Runtime-поля вроде {@code connected} и {@code reconnecting} в файл не входят
-     * и выставляются только во время работы приложения.
+     * Runtime fields such as {@code connected} and {@code reconnecting} are not
+     * stored in the file and are set only while the application is running.
      */
     public synchronized void load() {
         if (!Files.exists(configPath)) {
@@ -116,7 +116,7 @@ public final class ConnectionManager {
     }
 
     /**
-     * Сохраняет текущий список профилей подключений в {@code ~/.meshapp/connections.json}.
+     * Saves the current connection profile list to {@code ~/.meshapp/connections.json}.
      */
     public synchronized void save() {
         try {
@@ -130,9 +130,9 @@ public final class ConnectionManager {
     }
 
     /**
-     * Добавляет новый профиль подключения. Автоматически сохраняет в JSON и оповещает слушателей.
+     * Adds a new connection profile, saves it to JSON, and notifies listeners.
      *
-     * @param entry профиль подключения
+     * @param entry connection profile
      */
     public void addEntry(ConnectionEntry entry) {
         entries.add(entry);
@@ -141,11 +141,11 @@ public final class ConnectionManager {
     }
 
     /**
-     * Обновляет сохранённые параметры существующего профиля подключения.
-     * Активные и переподключающиеся профили не изменяются, чтобы не менять
-     * transport-параметры под уже открытым runtime.
+     * Updates saved parameters of an existing connection profile.
+     * Active and reconnecting profiles are left unchanged so transport parameters
+     * are not modified underneath an already open runtime.
      *
-     * @param updated профиль с тем же id и новыми параметрами
+     * @param updated profile with the same id and new parameters
      */
     public void updateEntry(ConnectionEntry updated) {
         if (updated == null || updated.getId() == null || updated.getId().isBlank()) {
@@ -182,10 +182,10 @@ public final class ConnectionManager {
     }
 
     /**
-     * Удаляет профиль подключения. Предварительно разрывает соединение,
-     * если оно активно. Сохраняет в JSON и оповещает слушателей.
+     * Deletes a connection profile. Disconnects it first if it is active, then
+     * saves JSON and notifies listeners.
      *
-     * @param id идентификатор профиля
+     * @param id profile id
      */
     public void removeEntry(String id) {
         ReconnectService.getInstance().cancelReconnect(id);
@@ -198,16 +198,15 @@ public final class ConnectionManager {
     }
 
     /**
-     * Устанавливает соединение по идентификатору профиля.
+     * Opens a connection by profile id.
      * <p>
-     * Метод последовательно создаёт transport (TCP, Serial или BLE), открывает его,
-     * выбирает протокольный адаптер из {@link ProtocolRegistry}, создаёт
-     * {@link ProtocolRuntime} и запускает начальную синхронизацию протокола.
-     * Если соединение с этим id уже активно или находится в процессе подключения,
-     * вызов игнорируется.
+     * The method creates a transport (TCP, Serial, or BLE), opens it, selects a
+     * protocol adapter from {@link ProtocolRegistry}, creates {@link ProtocolRuntime},
+     * and starts the initial protocol synchronization. If the same id is already
+     * active or currently connecting, the call is ignored.
      *
-     * @param id идентификатор профиля подключения
-     * @throws ConnectionException если профиль не найден или соединение не удалось
+     * @param id connection profile id
+     * @throws ConnectionException if the profile is missing or connection fails
      */
     public void connect(String id) throws ConnectionException {
         ConnectionEntry entry;
@@ -440,9 +439,9 @@ public final class ConnectionManager {
     }
 
     /**
-     * Запускает фоновые подключения для профилей с включённым автоподключением.
-     * Метод идемпотентен для текущего экземпляра менеджера и предназначен для вызова
-     * один раз во время старта приложения.
+     * Starts background connections for profiles with auto-connect enabled.
+     * Idempotent for the current manager instance and intended to be called once
+     * during application startup.
      */
     public void connectAutoconnectEntries() {
         if (!startupAutoconnectStarted.compareAndSet(false, true)) {
@@ -506,10 +505,10 @@ public final class ConnectionManager {
     }
 
     /**
-     * Разрывает соединение и очищает связанные ресурсы
-     * (DeviceState, ProtocolHandler, config future).
+     * Disconnects and clears associated resources such as DeviceState,
+     * ProtocolHandler, and config future.
      *
-     * @param id идентификатор профиля подключения
+     * @param id connection profile id
      */
     public void disconnect(String id) {
         disconnect(id, "manual disconnect");
@@ -548,32 +547,32 @@ public final class ConnectionManager {
     }
 
     /**
-     * Разрывает соединение как ожидаемую часть reboot/restart цикла устройства.
+     * Disconnects as an expected part of a device reboot/restart cycle.
      * <p>
-     * В отличие от {@link #disconnect(String)}, такой разрыв не считается
-     * пользовательским отключением: transport освобождается, но auto-reconnect
-     * остаётся разрешённым. Это нужно после сохранения конфигурации, когда
-     * радио само перезагружается и BLE/TCP/Serial-сессия становится stale.
+     * Unlike {@link #disconnect(String)}, this is not treated as a user disconnect:
+     * the transport is released, but auto-reconnect remains allowed. This is needed
+     * after saving configuration, when the radio reboots itself and the BLE/TCP/Serial
+     * session becomes stale.
      *
-     * @param id идентификатор профиля подключения
+     * @param id connection profile id
      */
     public boolean disconnectForDeviceReboot(String id) {
         return disconnectForDeviceReboot(id, -1);
     }
 
     /**
-     * Разрывает соединение для reboot только если это всё ещё та же transport-сессия,
-     * которую видел вызывающий код. Это защищает от позднего save-handoff, который
-     * иначе мог бы отключить уже свежее соединение после самостоятельного reconnect.
+     * Disconnects for reboot only if this is still the same transport session seen
+     * by the caller. This protects against a late save handoff that could otherwise
+     * disconnect a fresh connection after an independent reconnect.
      */
     public boolean disconnectForDeviceReboot(String id, long expectedConnectionGeneration) {
         return disconnectForDeviceReboot(id, expectedConnectionGeneration, null);
     }
 
     /**
-     * Разрывает соединение для reboot только если сигнал пришёл от текущего runtime-а.
-     * Это защищает свежее переподключение от поздних {@code FromRadio.REBOOTED}
-     * из уже закрытой протокольной сессии.
+     * Disconnects for reboot only if the signal came from the current runtime.
+     * This protects a fresh reconnection from late {@code FromRadio.REBOOTED}
+     * events emitted by an already closed protocol session.
      */
     public boolean disconnectForDeviceRebootFromRuntime(String id, ProtocolRuntime<?> expectedRuntime) {
         if (expectedRuntime == null) {
@@ -625,8 +624,8 @@ public final class ConnectionManager {
         }
 
         if (conn != null) {
-            // Не вызываем cleanupConnection() здесь: нам нужно, чтобы normal
-            // onDisconnected()/onConnectionError() path запустил auto-reconnect.
+		// Do not call cleanupConnection() here: the normal onDisconnected() /
+		// onConnectionError() path must trigger auto-reconnect.
             conn.disconnect();
             return true;
         }
@@ -642,9 +641,9 @@ public final class ConnectionManager {
     }
 
     /**
-     * Помечает ближайший разрыв соединения как ожидаемый reboot устройства.
-     * Это нужно, когда прошивка может закрыть transport сама ещё до того, как
-     * UI успеет вызвать {@link #disconnectForDeviceReboot(String)}.
+     * Marks the next connection drop as an expected device reboot.
+     * Needed when firmware can close the transport by itself before the UI calls
+     * {@link #disconnectForDeviceReboot(String)}.
      */
     public void expectDeviceReboot(String id) {
         if (id == null || id.isBlank()) {
@@ -667,26 +666,26 @@ public final class ConnectionManager {
     }
 
     /**
-     * Проверяет, есть ли активное или ещё подключающееся соединение.
+     * Checks whether any connection is active or still connecting.
      *
-     * @return {@code true}, если приложение уже занято одним transport-подключением
+     * @return {@code true} if the application is already busy with one transport connection
      */
     public boolean hasActiveConnection() {
         return !activeConnections.isEmpty() || !pendingConnections.isEmpty();
     }
 
     /**
-     * Проверяет, занято ли конкретное подключение активным или pending transport-ом.
+     * Checks whether a specific connection has an active or pending transport.
      *
-     * @param id идентификатор профиля
-     * @return {@code true}, если это подключение уже открыто или открывается
+     * @param id profile id
+     * @return {@code true} if this connection is already open or opening
      */
     public boolean isConnectionActiveOrPending(String id) {
         return activeConnections.containsKey(id) || pendingConnections.containsKey(id);
     }
 
     /**
-     * Проверяет, есть ли открытое или открывающееся BLE transport-подключение.
+     * Checks whether any BLE transport connection is open or opening.
      */
     public boolean hasActiveBleTransport() {
         synchronized (connectionLock) {
@@ -695,19 +694,18 @@ public final class ConnectionManager {
     }
 
     /**
-     * Возвращает копию списка сохранённых профилей подключений.
+     * Returns a copy of saved connection profiles.
      *
-     * @return список профилей, безопасный для чтения вызывающим кодом
+     * @return profile list safe for caller-side reads
      */
     public List<ConnectionEntry> getEntries() {
         return new ArrayList<>(entries);
     }
 
     /**
-     * Возвращает активные для UI подключения: подключённые, открывающиеся
-     * и находящиеся в auto-reconnect.
+     * Returns UI-active connections: connected, opening, and auto-reconnecting.
      *
-     * @return список активных профилей в порядке сохранённых подключений
+     * @return active profiles in saved-profile order
      */
     public List<ConnectionEntry> getActiveConnectionEntries() {
         List<ConnectionEntry> result = new ArrayList<>();
@@ -720,9 +718,9 @@ public final class ConnectionManager {
     }
 
     /**
-     * Возвращает выбранное в UI подключение или первый доступный активный профиль.
+     * Returns the UI-selected connection, or the first available active profile.
      *
-     * @return выбранный профиль подключения или {@code null}
+     * @return selected connection profile, or {@code null}
      */
     public ConnectionEntry getSelectedConnectionEntry() {
         synchronized (connectionLock) {
@@ -734,7 +732,7 @@ public final class ConnectionManager {
     }
 
     /**
-     * Возвращает id выбранного UI-подключения.
+     * Returns the selected UI connection id.
      */
     public String getSelectedConnectionId() {
         ConnectionEntry entry = getSelectedConnectionEntry();
@@ -742,9 +740,9 @@ public final class ConnectionManager {
     }
 
     /**
-     * Выбирает активное подключение для всех форм приложения.
+     * Selects the active connection for all application forms.
      *
-     * @param id идентификатор профиля подключения
+     * @param id connection profile id
      */
     public void setSelectedConnectionId(String id) {
         boolean changed;
@@ -763,14 +761,14 @@ public final class ConnectionManager {
     }
 
     /**
-     * Возвращает UI-совместимый {@link DeviceState} для активного подключения.
+     * Returns the UI-compatible {@link DeviceState} for an active connection.
      * <p>
-     * Для Meshtastic это нативное состояние protobuf runtime-а. Для MeshCore
-     * Companion Protocol возвращается bridge-состояние, которое заполняется
-     * контактами, каналами, сообщениями и телеметрией MeshCore.
+     * For Meshtastic this is the native protobuf runtime state. For MeshCore
+     * Companion Protocol this is a bridge state populated with MeshCore contacts,
+     * channels, messages, and telemetry.
      *
-     * @param id идентификатор профиля подключения
-     * @return состояние устройства для UI или {@code null}
+     * @param id connection profile id
+     * @return device state for the UI, or {@code null}
      */
     public DeviceState getDeviceState(String id) {
         MeshtasticProtocolRuntime runtime = getMeshtasticRuntime(id);
@@ -785,10 +783,10 @@ public final class ConnectionManager {
     }
 
     /**
-     * Возвращает Meshtastic protocol handler для активного подключения.
+     * Returns the Meshtastic protocol handler for an active connection.
      *
-     * @param id идентификатор профиля подключения
-     * @return handler Meshtastic-протокола или {@code null}
+     * @param id connection profile id
+     * @return Meshtastic protocol handler, or {@code null}
      */
     public ProtocolHandler getProtocolHandler(String id) {
         MeshtasticProtocolRuntime runtime = getMeshtasticRuntime(id);
@@ -796,10 +794,10 @@ public final class ConnectionManager {
     }
 
     /**
-     * Возвращает сервис обработки входящих Meshtastic-сообщений.
+     * Returns the service that processes incoming Meshtastic messages.
      *
-     * @param id идентификатор профиля подключения
-     * @return сервис входящих сообщений или {@code null}
+     * @param id connection profile id
+     * @return incoming message service, or {@code null}
      */
     public MessageListenerService getMessageListenerService(String id) {
         MeshtasticProtocolRuntime runtime = getMeshtasticRuntime(id);
@@ -807,10 +805,10 @@ public final class ConnectionManager {
     }
 
     /**
-     * Возвращает future завершения Meshtastic config exchange.
+     * Returns the future for Meshtastic config exchange completion.
      *
-     * @param id идентификатор профиля подключения
-     * @return future с заполненным {@link DeviceState} или {@code null}
+     * @param id connection profile id
+     * @return future with populated {@link DeviceState}, or {@code null}
      */
     public CompletableFuture<DeviceState> getConfigFuture(String id) {
         MeshtasticProtocolRuntime runtime = getMeshtasticRuntime(id);
@@ -818,12 +816,12 @@ public final class ConnectionManager {
     }
 
     /**
-     * Возвращает nodeId устройства для указанного подключения.
-     * Сначала пытается получить id из активного protocol runtime, затем из
-     * совместимого Meshtastic-кэша и только потом из сохранённого {@link ConnectionEntry}.
+     * Returns the device nodeId for the given connection.
+     * First tries the active protocol runtime, then the compatible Meshtastic
+     * cache, and finally the saved {@link ConnectionEntry}.
      *
-     * @param id идентификатор профиля подключения
-     * @return nodeId владельца или {@code null}, если он неизвестен
+     * @param id connection profile id
+     * @return owner nodeId, or {@code null} when unknown
      */
     public String getOwnerNodeId(String id) {
         ProtocolRuntime<?> runtime = protocolRuntimes.get(id);
@@ -842,30 +840,30 @@ public final class ConnectionManager {
     }
 
     /**
-     * Возвращает активный protocol runtime любого поддерживаемого типа.
+     * Returns the active protocol runtime of any supported type.
      *
-     * @param id идентификатор профиля подключения
-     * @return runtime активного протокола или {@code null}
+     * @param id connection profile id
+     * @return active protocol runtime, or {@code null}
      */
     public ProtocolRuntime<?> getProtocolRuntime(String id) {
         return protocolRuntimes.get(id);
     }
 
     /**
-     * Возвращает future готовности активного protocol runtime-а.
+     * Returns the readiness future for the active protocol runtime.
      *
-     * @param id идентификатор профиля подключения
-     * @return future готовности или {@code null}
+     * @param id connection profile id
+     * @return readiness future, or {@code null}
      */
     public CompletableFuture<?> getProtocolReadyFuture(String id) {
         return protocolReadyFutures.get(id);
     }
 
     /**
-     * Возвращает runtime-состояние MeshCore KISS, если подключение использует этот протокол.
+     * Returns MeshCore KISS runtime state when the connection uses that protocol.
      *
-     * @param id идентификатор профиля подключения
-     * @return состояние MeshCore KISS или {@code null}
+     * @param id connection profile id
+     * @return MeshCore KISS state, or {@code null}
      */
     public MeshCoreKissState getMeshCoreKissState(String id) {
         ProtocolRuntime<?> runtime = protocolRuntimes.get(id);
@@ -875,10 +873,10 @@ public final class ConnectionManager {
     }
 
     /**
-     * Возвращает runtime-состояние MeshCore Companion, если подключение использует Companion Protocol.
+     * Returns MeshCore Companion runtime state when the connection uses Companion Protocol.
      *
-     * @param id идентификатор профиля подключения
-     * @return состояние MeshCore Companion или {@code null}
+     * @param id connection profile id
+     * @return MeshCore Companion state, or {@code null}
      */
     public MeshCoreCompanionState getMeshCoreCompanionState(String id) {
         ProtocolRuntime<?> runtime = protocolRuntimes.get(id);
@@ -888,7 +886,7 @@ public final class ConnectionManager {
     }
 
     /**
-     * Возвращает фактически активный протокол или сохранённый выбор профиля.
+     * Returns the actually active protocol, or the protocol saved in the profile.
      */
     public ProtocolType getActiveProtocolType(String id) {
         ProtocolRuntime<?> runtime = protocolRuntimes.get(id);
@@ -900,26 +898,26 @@ public final class ConnectionManager {
     }
 
     /**
-     * Добавляет слушателя изменений списка профилей или runtime-состояния подключений.
+     * Adds a listener for profile-list or runtime-state changes.
      *
-     * @param listener callback, вызываемый после изменения состояния
+     * @param listener callback invoked after state changes
      */
     public void addListener(Runnable listener) {
         listeners.add(listener);
     }
 
     /**
-     * Удаляет ранее зарегистрированный слушатель изменений.
+     * Removes a previously registered change listener.
      *
-     * @param listener callback для удаления
+     * @param listener callback to remove
      */
     public void removeListener(Runnable listener) {
         listeners.remove(listener);
     }
 
     /**
-     * Отключает все активные соединения и освобождает ресурсы (tray icon, BLE polling и т.д.).
-     * Вызывается при завершении приложения.
+     * Disconnects all active connections and releases resources such as tray icon
+     * and BLE polling. Called during application shutdown.
      */
     public void shutdownAll() {
         Set<String> ids = new LinkedHashSet<>(activeConnections.keySet());
@@ -935,7 +933,7 @@ public final class ConnectionManager {
     }
 
     /**
-     * Убирает transport из pending-карты после ошибки или отмены подключения.
+     * Removes a transport from the pending map after connection failure or cancellation.
      */
     private void abortPendingConnection(String id, TransportConnection conn) {
         synchronized (connectionLock) {
@@ -945,9 +943,9 @@ public final class ConnectionManager {
     }
 
     /**
-     * Закрывает transport, который не смог завершить connect().
-     * Это важно для BLE: ошибка pairing/connect может оставить native backend,
-     * BlueZ agent или worker thread живыми, если не выполнить обычный disconnect.
+     * Closes a transport that failed to complete connect().
+     * This is important for BLE: pairing/connect failures can leave a native
+     * backend, BlueZ agent, or worker thread alive unless a normal disconnect runs.
      */
     private void cleanupFailedConnect(String id, TransportConnection conn) {
         abortPendingConnection(id, conn);
@@ -960,7 +958,7 @@ public final class ConnectionManager {
     }
 
     /**
-     * Закрывает transport, который успел подключиться уже после удаления/отмены профиля.
+     * Closes a transport that managed to connect after its profile was removed or cancelled.
      */
     private void disconnectStalePendingConnection(String id, ConnectionEntry entry, TransportConnection conn) {
         log.info("Connection '{}' completed after cancellation; disconnecting stale transport", entry.getName());
@@ -974,7 +972,7 @@ public final class ConnectionManager {
     }
 
     /**
-     * Очищает флаги пользовательского disconnect-а, когда для id больше нет runtime-а.
+     * Clears user-disconnect flags once an id no longer has a runtime.
      */
     private void clearUserDisconnectStateIfIdle(String id) {
         synchronized (connectionLock) {
@@ -985,9 +983,9 @@ public final class ConnectionManager {
     }
 
     /**
-     * Удаляет transport из runtime-карт после disconnect/error callback-а.
+     * Removes a transport from runtime maps after a disconnect/error callback.
      *
-     * @return {@code true}, если callback относится к текущему active/pending transport-у
+     * @return {@code true} if the callback belongs to the current active/pending transport
      */
     private boolean cleanupConnection(String id, TransportConnection expectedConnection) {
         synchronized (connectionLock) {
@@ -1131,7 +1129,7 @@ public final class ConnectionManager {
     }
 
     /**
-     * Освобождает протокольный runtime и совместимые Meshtastic-кэши.
+     * Releases the protocol runtime and compatible Meshtastic caches.
      */
     private void cleanupRuntimeState(String id) {
         ProtocolRuntime<?> runtime = protocolRuntimes.remove(id);
@@ -1146,14 +1144,14 @@ public final class ConnectionManager {
     }
 
     /**
-     * Делегирует форматирование параметров транспорта общей transport-фабрике.
+     * Delegates transport parameter formatting to the shared transport factory.
      */
     private static String formatConnectionParams(ConnectionEntry entry) {
         return TransportConnectionFactory.describe(entry);
     }
 
     /**
-     * Создаёт transport по профилю подключения, не запуская протокольную логику.
+     * Creates a transport from the connection profile without starting protocol logic.
      */
     private TransportConnection createConnection(ConnectionEntry entry) {
         BleDeviceDiscoveryService discovery = BleDeviceDiscoveryService.getInstance();
@@ -1164,7 +1162,7 @@ public final class ConnectionManager {
     }
 
     /**
-     * Создаёт protocol runtime поверх уже открытого transport-а.
+     * Creates a protocol runtime on top of an already open transport.
      */
     private ProtocolType resolveProtocolType(String id, ConnectionEntry entry, TransportConnection conn) throws ConnectionException {
         ProtocolType requestedProtocol = entry.getEffectiveProtocol();
@@ -1188,7 +1186,7 @@ public final class ConnectionManager {
     }
 
     /**
-     * Создаёт protocol runtime поверх уже открытого transport-а.
+     * Creates a protocol runtime on top of an already open transport.
      */
     private ProtocolRuntime<?> createProtocolRuntime(String id,
                                                      ConnectionEntry entry,
@@ -1210,7 +1208,7 @@ public final class ConnectionManager {
     }
 
     /**
-     * Возвращает Meshtastic runtime, если указанное подключение использует Meshtastic.
+     * Returns the Meshtastic runtime if the given connection uses Meshtastic.
      */
     private MeshtasticProtocolRuntime getMeshtasticRuntime(String id) {
         ProtocolRuntime<?> runtime = protocolRuntimes.get(id);
@@ -1218,10 +1216,10 @@ public final class ConnectionManager {
     }
 
     /**
-     * Заполняет старые Meshtastic-карты, которыми ещё пользуются формы и тесты.
+     * Populates the legacy Meshtastic maps still used by forms and tests.
      * <p>
-     * Эти карты являются compatibility layer на время постепенного перевода UI
-     * на протокольные runtime-абстракции.
+     * These maps are a compatibility layer while the UI is gradually moved to
+     * protocol runtime abstractions.
      */
     private void cacheMeshtasticRuntime(String id, ProtocolRuntime<?> runtime) {
         if (runtime instanceof MeshtasticProtocolRuntime meshtasticRuntime) {
@@ -1233,15 +1231,15 @@ public final class ConnectionManager {
     }
 
     /**
-     * Возвращает {@code true} только для transport-ов, которым действительно нужен heartbeat.
-     * В текущем протоколе heartbeat нужен для TCP и Serial, но не для BLE.
+     * Returns {@code true} only for transports that genuinely need heartbeat.
+     * In the current protocol, heartbeat is needed for TCP and Serial, but not BLE.
      */
     static boolean shouldStartHeartbeat(ConnectionEntry entry) {
         return MeshtasticProtocol.shouldStartHeartbeat(entry);
     }
 
     /**
-     * Ищет сохранённый профиль подключения по id.
+     * Finds a saved connection profile by id.
      */
     ConnectionEntry findEntry(String id) {
         for (ConnectionEntry e : entries) {
@@ -1253,7 +1251,7 @@ public final class ConnectionManager {
     }
 
     /**
-     * Оповещает UI и сервисы о том, что список подключений или их runtime-состояние изменились.
+     * Notifies UI and services that the connection list or runtime state has changed.
      */
     void fireChanged() {
         for (Runnable listener : listeners) {

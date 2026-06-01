@@ -5,7 +5,7 @@ import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 
 /**
- * Строка лога для отображения в TableView.
+ * Log row displayed in a {@code TableView}.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */

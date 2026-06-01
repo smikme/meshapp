@@ -22,8 +22,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Общие утилиты для работы с нодами — аватары, цвета, таблица деталей.
- * Используется из FormNodes, FormChat, NodeDetailPanel.
+ * Shared node presentation helpers: lookup, avatar styling, and the node
+ * details table used by the main node list and chat-related views.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -34,11 +34,12 @@ public final class NodeUtils {
     private NodeUtils() {}
 
     /**
-     * Разрешить ноду по номеру: DeviceState → обогащение из кэша если bare → fallback на кэш.
+     * Resolves a node by numeric id, preferring the current {@link DeviceState}
+     * and enriching sparse entries from the persistent cache.
      *
-     * @param state    состояние устройства (может быть {@code null})
-     * @param nodeNum  номер ноды
-     * @return NodeData с максимально полными данными, или {@code null} если нигде не найдена
+     * @param state current device state, or {@code null}
+     * @param nodeNum numeric node id
+     * @return the richest available {@link NodeData}, or {@code null} when no source has it
      */
     public static NodeData resolveNode(DeviceState state, int nodeNum) {
         NodeData node = state != null ? state.getNodeDb().get(nodeNum) : null;
@@ -60,11 +61,12 @@ public final class NodeUtils {
     }
 
     /**
-     * Разрешить ноду по nodeId: DeviceState → обогащение из кэша если bare → fallback на кэш.
+     * Resolves a node by Meshtastic node id, preferring the current
+     * {@link DeviceState} and falling back to the cache.
      *
-     * @param state   состояние устройства (может быть {@code null})
-     * @param nodeId  идентификатор ноды (например {@code "!9e755af0"})
-     * @return NodeData с максимально полными данными, или {@code null} если нигде не найдена
+     * @param state current device state, or {@code null}
+     * @param nodeId node id, for example {@code "!9e755af0"}
+     * @return the richest available {@link NodeData}, or {@code null} when no source has it
      */
     public static NodeData resolveNode(DeviceState state, String nodeId) {
         NodeData node = state != null ? state.getNodeByNodeId(nodeId) : null;
@@ -85,7 +87,7 @@ public final class NodeUtils {
         return node;
     }
 
-    /** Цвет аватара по роли ноды */
+    /** Returns the avatar color associated with a node role. */
     public static String roleColor(String role) {
         if (role == null) { return "#5B8DEF"; }
         return switch (role) {
@@ -105,9 +107,9 @@ public final class NodeUtils {
         };
     }
 
-    /** Размер шрифта аватара в зависимости от количества символов и размера круга */
+    /** Calculates avatar font size from text length and circle diameter. */
     public static double avatarFontSize(int charCount, int circleSize) {
-        double base = circleSize * 0.5; // 1 символ — 50% от размера круга
+        double base = circleSize * 0.5; // One character uses half of the circle diameter.
         if (charCount <= 1) { return base; }
         if (charCount == 2) { return base * 0.85; }
         if (charCount == 3) { return base * 0.7; }
@@ -115,9 +117,9 @@ public final class NodeUtils {
     }
 
     /**
-     * Стабильный размер шрифта для аватаров списка чатов и заголовка чата.
-     * Чуть крупнее общего правила, но без динамического перерасчёта по layout bounds,
-     * чтобы текст не "прыгал" при смене selection/focus состояния.
+     * Returns a stable avatar font size for chat lists and chat headers.
+     * It is slightly larger than the general rule and avoids layout-bound
+     * measurement so selection and focus changes do not make the text jump.
      */
     public static double chatAvatarFontSize(int charCount, int circleSize) {
         double base = circleSize * 0.5;
@@ -128,7 +130,7 @@ public final class NodeUtils {
     }
 
     /**
-     * Безопасный размер шрифта для чатовых аватаров без JavaFX text measurement.
+     * Calculates a safe chat avatar font size without JavaFX text measurement.
      */
     public static double chatAvatarFontSize(String text, int circleSize) {
         String sanitized = UnicodeTextUtils.sanitizeForJavaFxDisplay(text);
@@ -151,7 +153,7 @@ public final class NodeUtils {
     }
 
     /**
-     * Размер шрифта аватара по эвристике ширины glyph'ов, без JavaFX text measurement.
+     * Estimates avatar font size from glyph widths without JavaFX text measurement.
      */
     public static double avatarFontSize(String text, int circleSize) {
         String sanitized = UnicodeTextUtils.sanitize(text);
@@ -231,8 +233,8 @@ public final class NodeUtils {
     }
 
     /**
-     * Заполнить строки таблицы деталей ноды (13 ключ-значение).
-     * Формат: {@code String[]{emoji, label, value}} — emoji рендерится как PNG-картинка.
+     * Populates the node details table rows.
+     * Each row is {@code String[]{emoji, label, value}}; the emoji is rendered as a PNG image.
      */
     public static void fillDetailRows(ObservableList<String[]> rows, NodeData node) {
         rows.add(new String[]{"\uD83D\uDC64", I18n.t("node.detail.name"), node.getLongName()});
@@ -272,15 +274,15 @@ public final class NodeUtils {
     }
 
     /**
-     * Создать TableView для деталей ноды (2 колонки, без заголовков).
-     * Формат строк: {@code String[]{emoji, label, value}}.
+     * Creates the two-column, headerless node details table.
+     * Rows follow the {@code String[]{emoji, label, value}} shape.
      */
     public static TableView<String[]> createDetailTable(ObservableList<String[]> rows) {
         TableView<String[]> table = new TableView<>(rows);
         table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
         table.setSelectionModel(null);
 
-        // Колонка ключей: PNG-иконка + текст метки
+        // Key column: PNG icon plus label text.
         TableColumn<String[], String> keyCol = new TableColumn<>();
         keyCol.setCellValueFactory(cd -> new SimpleStringProperty(cd.getValue()[1]));
         keyCol.setPrefWidth(180);
@@ -308,14 +310,14 @@ public final class NodeUtils {
                     setGraphic(box);
                     setText(null);
                 } else {
-                    // Fallback: просто текст без иконки
+                    // Fallback to plain text when the icon cannot be rendered.
                     setText(label);
                     setGraphic(null);
                 }
             }
         });
 
-        // Колонка значений
+        // Value column.
         TableColumn<String[], String> valCol = new TableColumn<>();
         valCol.setCellValueFactory(cd -> {
             String v = cd.getValue()[2];
@@ -348,7 +350,7 @@ public final class NodeUtils {
         table.getColumns().add(keyCol);
         table.getColumns().add(valCol);
 
-        // Скрыть заголовки колонок, убрать рамку, высота по содержимому
+        // Hide headers, remove the frame, and size the table to its content.
         table.getStyleClass().addAll("no-header", "node-detail-table");
         int rowHeight = 28;
         table.setFixedCellSize(rowHeight);

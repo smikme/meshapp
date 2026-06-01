@@ -5,14 +5,14 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Координирует полный сброс локальной H2 БД приложения.
+ * Coordinates a full reset of the application's local H2 database.
  * <p>
- * Сценарий reset-а:
+ * Reset sequence:
  * <ol>
- *   <li>останавливаются активные подключения, чтобы прекратить фоновые записи в БД</li>
- *   <li>живые DB-сервисы освобождают PreparedStatement-ы и in-memory кэши</li>
- *   <li>выполняется {@code DROP ALL OBJECTS}</li>
- *   <li>сервисы заново инициализируют таблицы и JDBC-ресурсы</li>
+ *   <li>active connections are stopped so background database writes cease</li>
+ *   <li>live database services release prepared statements and in-memory caches</li>
+ *   <li>{@code DROP ALL OBJECTS} is executed</li>
+ *   <li>services recreate their tables and JDBC resources</li>
  * </ol>
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)

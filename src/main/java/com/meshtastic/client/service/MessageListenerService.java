@@ -23,21 +23,12 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Сервис обработки входящих mesh-пакетов ({@code MeshPacket}).
+ * Handles incoming mesh packets ({@code MeshPacket}).
  * <p>
- * Реализует {@link FromRadioListener#onMeshPacket} и распределяет пакеты
- * по типу portnum:
- * <ul>
- *   <li>{@code TEXT_MESSAGE_APP} — текстовые сообщения (канальные и DM)</li>
- *   <li>{@code ROUTING_APP} — ACK/NAK для отправленных сообщений</li>
- *   <li>{@code NODEINFO_APP} — обновление информации о ноде</li>
- *   <li>{@code POSITION_APP} — обновление координат ноды</li>
- *   <li>{@code TELEMETRY_APP} — метрики устройства и окружения</li>
- *   <li>{@code TRACEROUTE_APP} — ответ на traceroute</li>
- *   <li>{@code ADMIN_APP} — admin-ответы (owner info и др.)</li>
- * </ul>
- * Обновляет {@link com.meshtastic.client.model.DeviceState}, сохраняет сообщения
- * в БД через {@link MessageDbService}, синхронизирует кэш нод через {@link NodeCacheService}.
+ * The service implements {@link FromRadioListener#onMeshPacket}, routes packets
+ * by portnum, updates {@link com.meshtastic.client.model.DeviceState}, persists
+ * messages through {@link MessageDbService}, and keeps the node cache in sync
+ * through {@link NodeCacheService}.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -245,7 +236,7 @@ public class MessageListenerService implements FromRadioListener {
             }
         }
 
-        // Показать красную точку на иконке "Чаты"
+        // Show the unread dot on the Chats icon.
         AppUi.setChatUnreadDot(true);
     }
 
@@ -544,8 +535,7 @@ public class MessageListenerService implements FromRadioListener {
             NodeData node = deviceState.getOrCreateNode(fromNum);
             int rxTime = packet.getRxTime() > 0 ? packet.getRxTime() : (int)(System.currentTimeMillis() / 1000);
             node.setLastHeard(rxTime);
-            // Protobuf возвращает "" для незаполненных строковых полей —
-            // пустые значения не должны затирать существующие данные
+        // Protobuf returns "" for unset string fields; empty values must not erase existing data.
             if (!user.getLongName().isEmpty()) { node.setLongName(user.getLongName()); }
             if (!user.getShortName().isEmpty()) { node.setShortName(user.getShortName()); }
             if (!user.getId().isEmpty()) { node.setNodeId(user.getId()); }
@@ -685,7 +675,7 @@ public class MessageListenerService implements FromRadioListener {
             if (isMyNode && deviceState.hasPendingFixedPosition()) {
                 log.info("Ignoring position update for own node — pending fixed position active");
             } else {
-                // Нулевые координаты означают отсутствие данных — не затираем существующие
+            // Zero coordinates mean missing data, so keep the existing position.
                 if (position.getLatitudeI() != 0) { node.setLatitude(position.getLatitudeI() * 1e-7); }
                 if (position.getLongitudeI() != 0) { node.setLongitude(position.getLongitudeI() * 1e-7); }
                 if (position.getAltitude() != 0) { node.setAltitude(position.getAltitude()); }
@@ -864,7 +854,7 @@ public class MessageListenerService implements FromRadioListener {
     }
 
     private void handleTracerouteResponse(MeshProtos.MeshPacket packet, MeshProtos.Data data) {
-        // Игнорируем исходящий запрос (эхо от радио) — обрабатываем только ответ
+        // Ignore our outbound request echoed by the radio; only process the response.
         int myNodeNum = deviceState.getMyNodeNum();
         if (packet.getFrom() == myNodeNum) {
             log.debug("Ignoring outgoing TRACEROUTE_APP echo from self");

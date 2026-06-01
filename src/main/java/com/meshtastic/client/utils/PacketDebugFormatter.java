@@ -38,7 +38,7 @@ import java.util.Base64;
 import java.util.function.Function;
 
 /**
- * Форматирование и построение дерева для отладки LoRa-пакетов.
+ * Formatting and tree-building helpers for LoRa packet debugging.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -55,13 +55,13 @@ public final class PacketDebugFormatter {
     private PacketDebugFormatter() {}
 
     /**
-     * Человекочитаемое описание mesh-пакета для таблицы мониторинга.
-     *
-     * @param packetType       тип пакета или portnum
-     * @param fromNode         отправитель в UI-виде
-     * @param toNode           получатель в UI-виде
-     * @param payloadText      payload в текстовом представлении
-     * @param capturedAtMillis время захвата в миллисекундах Unix epoch
+     * Human-readable mesh-packet description for the monitor table.
+ *
+     * @param packetType       packet type or portnum
+     * @param fromNode         sender in UI display form
+     * @param toNode           recipient in UI display form
+     * @param payloadText      payload represented as text
+     * @param capturedAtMillis capture time in Unix epoch milliseconds
      */
     public record PacketDetails(String packetType,
                                 String fromNode,
@@ -70,23 +70,22 @@ public final class PacketDebugFormatter {
                                 long capturedAtMillis) {}
 
     /**
-     * Подготовленные подписи адресов верхнего уровня MeshPacket для UI.
-     * Контракт:
-     * - если имя ноды известно, оно добавляется перед стандартным {@code nodeId};
-     * - если имя неизвестно, возвращается только стандартный {@code nodeId};
-     * - для broadcast используется локализованная подпись c {@code !ffffffff}.
+     * Prepared top-level MeshPacket endpoint labels for the UI.
+     * When a node name is known, it is placed before the standard {@code nodeId};
+     * otherwise only the standard {@code nodeId} is returned. Broadcast packets
+     * use a localized label with {@code !ffffffff}.
      */
     public record PacketEndpoints(String fromNode, String toNode) {}
 
     /**
-     * Метаданные массового JSON-экспорта по текущим фильтрам окна мониторинга.
-     *
-     * @param exportedAtMillis время создания файла экспорта
-     * @param routeFilter      человекочитаемое значение фильтра маршрута
-     * @param packetTypeFilter человекочитаемое значение фильтра типа
-     * @param searchText       поисковая строка или {@code null}
-     * @param capturedAtFrom   нижняя граница времени в UI-представлении или {@code null}
-     * @param capturedAtTo     верхняя граница времени в UI-представлении или {@code null}
+     * Metadata for a bulk JSON export using the monitor window's current filters.
+ *
+     * @param exportedAtMillis export creation time
+     * @param routeFilter      human-readable route filter
+     * @param packetTypeFilter human-readable packet-type filter
+     * @param searchText       search text, or {@code null}
+     * @param capturedAtFrom   lower time bound in UI form, or {@code null}
+     * @param capturedAtTo     upper time bound in UI form, or {@code null}
      */
     public record PacketCollectionExportMetadata(long exportedAtMillis,
                                                  String routeFilter,
@@ -162,24 +161,24 @@ public final class PacketDebugFormatter {
     };
 
     /**
-     * Диапазон выделения в текстовом представлении предпросмотра.
-     *
-     * @param startChar индекс первого символа включительно
-     * @param endChar   индекс последнего символа исключительно
+     * Selection range in a textual preview.
+ *
+     * @param startChar inclusive first character index
+     * @param endChar   exclusive last character index
      */
     public record TextSelectionRange(int startChar, int endChar) {}
 
     /**
-     * Подготовленный HEX/ASCII предпросмотр пакета с отображением байтов в символьные позиции.
-     * Используется для независимой подсветки HEX и ASCII колонок при выборе узлов дерева.
-     *
-     * @param addressText         адресная колонка
-     * @param hexText             HEX-колонка
-     * @param asciiText           ASCII-колонка
-     * @param hexByteStartChars   индекс начала байта в HEX-представлении
-     * @param hexByteEndChars     индекс конца байта в HEX-представлении
-     * @param asciiByteStartChars индекс начала байта в ASCII-представлении
-     * @param asciiByteEndChars   индекс конца байта в ASCII-представлении
+     * Prepared HEX/ASCII packet preview with byte-to-character mappings.
+     * Used to highlight HEX and ASCII columns independently when tree nodes are selected.
+ *
+     * @param addressText         address column
+     * @param hexText             HEX column
+     * @param asciiText           ASCII column
+     * @param hexByteStartChars   start character index for each byte in the HEX view
+     * @param hexByteEndChars     end character index for each byte in the HEX view
+     * @param asciiByteStartChars start character index for each byte in the ASCII view
+     * @param asciiByteEndChars   end character index for each byte in the ASCII view
      */
     public record HexPreview(String addressText,
                              String hexText,
@@ -189,18 +188,18 @@ public final class PacketDebugFormatter {
                              int[] asciiByteStartChars,
                              int[] asciiByteEndChars) {
         /**
-         * @return {@code true}, если предпросмотр содержит хотя бы один байт пакета
+         * @return {@code true} when the preview contains at least one packet byte
          */
         public boolean hasBytes() {
             return hexByteStartChars != null && hexByteStartChars.length > 0;
         }
 
         /**
-         * Возвращает диапазон символов для выделения в HEX-колонке.
-         *
-         * @param startByte первый байт включительно
-         * @param endByte   последний байт исключительно
-         * @return диапазон символов или {@code null}, если диапазон некорректен
+         * Returns the character range to highlight in the HEX column.
+ *
+         * @param startByte inclusive first byte
+         * @param endByte   exclusive last byte
+         * @return character range, or {@code null} when the range is invalid
          */
         public TextSelectionRange selectionForHexBytes(int startByte, int endByte) {
             if (!hasBytes() || startByte < 0 || endByte <= startByte || endByte > hexByteStartChars.length) {
@@ -210,11 +209,11 @@ public final class PacketDebugFormatter {
         }
 
         /**
-         * Возвращает диапазон символов для выделения в ASCII-колонке.
-         *
-         * @param startByte первый байт включительно
-         * @param endByte   последний байт исключительно
-         * @return диапазон символов или {@code null}, если диапазон некорректен
+         * Returns the character range to highlight in the ASCII column.
+ *
+         * @param startByte inclusive first byte
+         * @param endByte   exclusive last byte
+         * @return character range, or {@code null} when the range is invalid
          */
         public TextSelectionRange selectionForAsciiBytes(int startByte, int endByte) {
             if (!hasBytes() || startByte < 0 || endByte <= startByte || endByte > asciiByteStartChars.length) {
@@ -256,11 +255,11 @@ public final class PacketDebugFormatter {
     }
 
     /**
-     * Формирует объединённое текстовое HEX-представление пакета в виде:
+     * Builds a combined textual HEX packet view in the form
      * {@code address  hex  |ascii|}.
-     *
-     * @param bytes сериализованный пакет
-     * @return строка HEX-предпросмотра или сообщение об отсутствии данных
+ *
+     * @param bytes serialized packet
+     * @return HEX preview text, or a no-data message
      */
     public static String formatHex(byte[] bytes) {
         HexPreview preview = formatHexPreview(bytes);
@@ -281,10 +280,10 @@ public final class PacketDebugFormatter {
     }
 
     /**
-     * Строит раздельный адресный, HEX и ASCII предпросмотр пакета.
-     *
-     * @param bytes сериализованный пакет
-     * @return объект предпросмотра с привязкой байтов к символьным диапазонам
+     * Builds separate address, HEX, and ASCII previews for a packet.
+ *
+     * @param bytes serialized packet
+     * @return preview object with byte-to-character range mappings
      */
     public static HexPreview formatHexPreview(byte[] bytes) {
         if (bytes == null || bytes.length == 0) {
@@ -335,25 +334,25 @@ public final class PacketDebugFormatter {
     }
 
     /**
-     * Экспортирует выбранный пакет в человекочитаемый текстовый формат для анализа и обмена.
-     * Включает метаданные пакета, HEX-представление и текущее дерево разбора.
-     *
-     * @param entry выбранная запись из журнала
-     * @return текст экспорта или пустая строка, если запись отсутствует
+     * Exports the selected packet as human-readable text for analysis and sharing.
+     * Includes packet metadata, a HEX view, and the current parse tree.
+ *
+     * @param entry selected journal entry
+     * @return export text, or an empty string when no entry is supplied
      */
     public static String exportPacketAsText(PacketLogEntry entry) {
         return exportPacketAsText(entry, null);
     }
 
     /**
-     * Экспортирует выбранный пакет в человекочитаемый текстовый формат для анализа и обмена.
-     * Поля {@code От} и {@code Кому} пересчитываются из {@link MeshProtos.MeshPacket},
-     * чтобы UI и экспорт использовали единый формат {@code Имя (!nodeId)} независимо
-     * от того, в каком виде адреса были сохранены в БД.
-     *
-     * @param entry       выбранная запись из журнала
-     * @param deviceState состояние устройства для разрешения имён нод; может быть {@code null}
-     * @return текст экспорта или пустая строка, если запись отсутствует
+     * Exports the selected packet as human-readable text for analysis and sharing.
+     * The From and To fields are recalculated from {@link MeshProtos.MeshPacket}
+     * so the UI and export use the same {@code Name (!nodeId)} form regardless
+     * of how addresses were originally stored in the database.
+ *
+     * @param entry       selected journal entry
+     * @param deviceState device state used to resolve node names; may be {@code null}
+     * @return export text, or an empty string when no entry is supplied
      */
     public static String exportPacketAsText(PacketLogEntry entry,
                                             com.meshtastic.client.model.DeviceState deviceState) {
@@ -380,13 +379,14 @@ public final class PacketDebugFormatter {
     }
 
     /**
-     * Возвращает подписи полей {@code from}/{@code to} для уже сохранённой записи пакета.
-     * Метод не зависит от строк, лежащих в БД: приоритетом всегда является разбор
-     * {@link MeshProtos.MeshPacket} из {@code packet_bytes}, а значения записи используются только как fallback.
-     *
-     * @param entry       запись журнала
-     * @param deviceState состояние устройства для разрешения имён нод; может быть {@code null}
-     * @return подписи отправителя и получателя, пригодные для таблицы и текстового экспорта
+     * Returns {@code from}/{@code to} labels for an already stored packet entry.
+     * The method does not trust database strings first: parsing
+     * {@link MeshProtos.MeshPacket} from {@code packet_bytes} has priority, and
+     * stored entry values are used only as fallbacks.
+ *
+     * @param entry       journal entry
+     * @param deviceState device state used to resolve node names; may be {@code null}
+     * @return sender and recipient labels suitable for the table and text export
      */
     public static PacketEndpoints resolvePacketEndpoints(PacketLogEntry entry,
                                                          com.meshtastic.client.model.DeviceState deviceState) {
@@ -402,11 +402,11 @@ public final class PacketDebugFormatter {
     }
 
     /**
-     * Разбирает верхнеуровневые поля {@code from}/{@code to} напрямую из байтов пакета.
-     *
-     * @param packetBytes сериализованный {@link MeshProtos.MeshPacket}
-     * @param deviceState состояние устройства для разрешения имён нод; может быть {@code null}
-     * @return подписи отправителя и получателя; при ошибке разбора оба значения {@code null}
+     * Parses top-level {@code from}/{@code to} fields directly from packet bytes.
+ *
+     * @param packetBytes serialized {@link MeshProtos.MeshPacket}
+     * @param deviceState device state used to resolve node names; may be {@code null}
+     * @return sender and recipient labels; both values are {@code null} if parsing fails
      */
     public static PacketEndpoints resolvePacketEndpoints(byte[] packetBytes,
                                                          com.meshtastic.client.model.DeviceState deviceState) {
@@ -425,12 +425,12 @@ public final class PacketDebugFormatter {
     }
 
     /**
-     * Экспортирует только содержимое {@link MeshProtos.MeshPacket} в protobuf-style JSON.
-     * Формат намеренно не содержит служебных полей desktop-клиента, чтобы результат можно было
-     * вставлять в оригинальное web-приложение Meshtastic.
-     *
-     * @param entry выбранная запись из журнала
-     * @return JSON пакета или пустая строка, если пакет отсутствует либо не разобран
+     * Exports only the {@link MeshProtos.MeshPacket} content as protobuf-style JSON.
+     * The format deliberately omits desktop-client fields so the result can be
+     * pasted into the original Meshtastic web application.
+ *
+     * @param entry selected journal entry
+     * @return packet JSON, or an empty string if the packet is missing or cannot be parsed
      */
     public static String exportPacketAsJson(PacketLogEntry entry) {
         if (entry == null) {
@@ -445,17 +445,15 @@ public final class PacketDebugFormatter {
     }
 
     /**
-     * Экспортирует набор пакетов в иерархический JSON-файл с учётом текущих фильтров UI.
-     * В отличие от {@link #exportPacketAsJson(PacketLogEntry)}, формат включает:
-     * - метаданные экспорта и выбранных фильтров;
-     * - desktop-метаданные каждой записи журнала;
-     * - protobuf-структуру пакета;
-     * - расшифрованный {@code decodedPayload}, когда его можно разобрать;
-     * - дерево иерархии пакета с byte-range.
-     *
-     * @param entries            записи, которые должны попасть в файл
-     * @param metadata           метаданные экспорта; может быть {@code null}
-     * @param deviceStateResolver resolver device-state для нормализации имён нод; может быть {@code null}
+     * Exports packets to a hierarchical JSON file using the current UI filters.
+     * Unlike {@link #exportPacketAsJson(PacketLogEntry)}, this format includes
+     * export/filter metadata, desktop metadata for each journal entry, the
+     * protobuf packet structure, decoded payloads when they can be parsed, and
+     * the packet hierarchy tree with byte ranges.
+ *
+     * @param entries             entries to include in the file
+     * @param metadata            export metadata; may be {@code null}
+     * @param deviceStateResolver device-state resolver used to normalize node names; may be {@code null}
      * @return pretty-printed JSON
      */
     public static String exportPacketsAsJson(List<PacketLogEntry> entries,
@@ -776,10 +774,10 @@ public final class PacketDebugFormatter {
     }
 
     /**
-     * Строит дерево разбора напрямую из сериализованных байтов пакета.
-     *
-     * @param packetBytes сериализованный {@link MeshProtos.MeshPacket}
-     * @return корневой узел дерева; при ошибке разбора содержит {@code parse_error}
+     * Builds a parse tree directly from serialized packet bytes.
+ *
+     * @param packetBytes serialized {@link MeshProtos.MeshPacket}
+     * @return tree root; contains {@code parse_error} when parsing fails
      */
     public static TreeItem<PacketTreeNode> buildPacketTree(byte[] packetBytes) {
         try {
@@ -794,11 +792,11 @@ public final class PacketDebugFormatter {
     }
 
     /**
-     * Строит дерево для raw-пакета, который не является {@link MeshProtos.MeshPacket}.
-     *
-     * @param rootLabel подпись корневого узла
-     * @param packetBytes исходные байты packet-а
-     * @return дерево с типом packet-а и byte-range для подсветки HEX/ASCII
+     * Builds a tree for a raw packet that is not a {@link MeshProtos.MeshPacket}.
+ *
+     * @param rootLabel   root node label
+     * @param packetBytes original packet bytes
+     * @return tree with packet type and byte ranges for HEX/ASCII highlighting
      */
     public static TreeItem<PacketTreeNode> buildRawPacketTree(String rootLabel, byte[] packetBytes) {
         byte[] bytes = packetBytes != null ? packetBytes : new byte[0];
@@ -823,22 +821,22 @@ public final class PacketDebugFormatter {
     }
 
     /**
-     * Строит дерево разбора из уже декодированного protobuf-пакета.
-     *
-     * @param packet protobuf-пакет
-     * @return корневой узел дерева
+     * Builds a parse tree from an already decoded protobuf packet.
+ *
+     * @param packet protobuf packet
+     * @return tree root
      */
     public static TreeItem<PacketTreeNode> buildPacketTree(MeshProtos.MeshPacket packet) {
         return buildPacketTree(packet, packet != null ? packet.toByteArray() : new byte[0]);
     }
 
     /**
-     * Строит дерево разбора из protobuf-пакета и исходных байтов, сохраняя диапазоны байтов
-     * для последующей подсветки в HEX/ASCII предпросмотре.
-     *
-     * @param packet      protobuf-пакет
-     * @param packetBytes сериализованные байты пакета
-     * @return корневой узел дерева
+     * Builds a parse tree from a protobuf packet and its original bytes, keeping
+     * byte ranges for later highlighting in the HEX/ASCII preview.
+ *
+     * @param packet      protobuf packet
+     * @param packetBytes serialized packet bytes
+     * @return tree root
      */
     public static TreeItem<PacketTreeNode> buildPacketTree(MeshProtos.MeshPacket packet, byte[] packetBytes) {
         TreeItem<PacketTreeNode> root = new TreeItem<>(new PacketTreeNode("MeshPacket", 0, packetBytes.length));
@@ -1436,14 +1434,16 @@ public final class PacketDebugFormatter {
     }
 
     /**
-     * Форматирует идентификатор узла для UI мониторинга пакетов.
-     * Контракт метода намеренно отличается от остального приложения: здесь {@code nodeId}
-     * показывается как protobuf {@code uint32}, то есть в unsigned decimal-виде.
-     *
-     * @param nodeNum     raw node number из protobuf-пакета
-     * @param deviceState состояние устройства для разрешения имени узла
-     * @return имя узла с {@code uint32}-идентификатором в скобках или только {@code uint32},
-     *         {@code "-"} для нулевого адреса и строка broadcast для {@code 0xFFFFFFFF}
+     * Formats a node identifier for the packet monitor UI.
+     * This method intentionally differs from the rest of the application:
+     * here {@code nodeId} is shown as a protobuf {@code uint32}, using unsigned
+     * decimal notation.
+ *
+     * @param nodeNum     raw node number from the protobuf packet
+     * @param deviceState device state used to resolve the node name
+     * @return node name with the {@code uint32} identifier in parentheses, only
+     *         {@code uint32} when the name is unknown, {@code "-"} for zero, or
+     *         the broadcast label for {@code 0xFFFFFFFF}
      */
     private static String formatNode(int nodeNum, com.meshtastic.client.model.DeviceState deviceState) {
         long unsignedNodeNum = Integer.toUnsignedLong(nodeNum);
@@ -1468,8 +1468,9 @@ public final class PacketDebugFormatter {
     }
 
     /**
-     * Форматирует идентификатор узла в стандартном Meshtastic-виде для таблицы и экспорта:
-     * {@code Имя (!nodeId)} или только {@code !nodeId}, если имя неизвестно.
+     * Formats a node identifier in the standard Meshtastic form used by the
+     * table and exports: {@code Name (!nodeId)}, or only {@code !nodeId} when
+     * the name is unknown.
      */
     private static String formatNodeDisplay(int nodeNum, com.meshtastic.client.model.DeviceState deviceState) {
         String nodeId = String.format("!%08x", nodeNum);

@@ -3,7 +3,7 @@ package com.meshtastic.client.lua;
 import java.util.Set;
 
 /**
- * Snapshot состояния клавиатуры для Lua Canvas.
+ * Snapshot of keyboard state for a Lua canvas.
  */
 public record LuaCanvasKeyState(Set<String> pressedCodes,
                                 String lastType,

@@ -27,7 +27,7 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * Чтение/запись snapshot-файлов конфигурации MeshApp (.mcf/.mtp).
+ * Reads and writes MeshApp configuration snapshot files ({@code .mcf}/{@code .mtp}).
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */

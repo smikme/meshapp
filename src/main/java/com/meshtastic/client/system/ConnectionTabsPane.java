@@ -27,17 +27,16 @@ import java.util.Objects;
 import java.util.Set;
 
 /**
- * Нижняя панель вкладок активных подключений.
+ * Bottom tab strip for active connections.
  * <p>
- * Отображается только когда одновременно активно больше одного подключения.
- * Каждая вкладка соответствует одному {@link ConnectionEntry}: показывает имя
- * локальной ноды, её nodeId, счётчик непрочитанных сообщений и кнопку закрытия.
- * Закрытие вкладки инициирует отключение соответствующего подключения, а выбор
- * вкладки переключает общий UI-контекст приложения на эту ноду.
+ * Visible only when more than one connection is active at the same time. Each
+ * tab represents one {@link ConnectionEntry}, showing the local node name, node
+ * id, unread count, and a close button. Closing a tab disconnects that
+ * connection; selecting one switches the shared UI context to that node.
  * <p>
- * Компонент намеренно обновляет существующие {@link Tab} и дочерние {@link Label}
- * точечно, чтобы входящие сообщения и изменение счётчиков не пересоздавали всю
- * панель вкладок и не вызывали визуального мерцания.
+ * Existing {@link Tab} instances and child {@link Label}s are updated in place
+ * so incoming messages and unread-count changes do not recreate the strip or
+ * cause visible flicker.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -57,8 +56,8 @@ public class ConnectionTabsPane extends TabPane {
                              Label unreadBadge) {}
 
     /**
-     * Создаёт панель вкладок подключений и подписывает её на изменения
-     * {@link ConnectionManager}.
+     * Creates the connection tab strip and subscribes it to {@link ConnectionManager}
+     * changes.
      */
     public ConnectionTabsPane() {
         getStyleClass().addAll("connection-tabs-pane", Styles.DENSE);

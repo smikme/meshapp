@@ -21,12 +21,12 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Диспетчер протокола Meshtastic. Принимает сырые protobuf-payload из
- * {@link TransportConnection}, парсит {@code FromRadio} и распределяет
- * по зарегистрированным {@link FromRadioListener}-ам.
+ * Meshtastic protocol dispatcher.
  * <p>
- * Также предоставляет метод отправки {@code ToRadio} на устройство
- * через фреймирование ({@link PacketFramer}) и транспорт.
+ * It receives raw protobuf payloads from {@link TransportConnection}, parses
+ * {@code FromRadio}, and distributes messages to registered
+ * {@link FromRadioListener}s. Outbound {@code ToRadio} messages are framed with
+ * {@link PacketFramer} before being written to the transport.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -35,9 +35,9 @@ public class ProtocolHandler {
     private static final Logger log = LoggerFactory.getLogger(ProtocolHandler.class);
     private static final byte[] SHUTDOWN_MARKER = new byte[0];
 
-    /** Интервал heartbeat (секунды). Прошивка Meshtastic закрывает TCP при idle (~5-7 сек). */
+    /** Heartbeat interval in seconds; Meshtastic firmware closes idle TCP connections after roughly 5-7 seconds. */
     private static final int HEARTBEAT_INTERVAL_SEC = 5;
-    /** Задержка перед первым heartbeat (секунды). 0 = отправить сразу после config exchange. */
+    /** Delay before the first heartbeat, in seconds. Zero sends immediately after config exchange. */
     private static final int HEARTBEAT_INITIAL_DELAY_SEC = 0;
     private static final int INCOMING_QUEUE_WARN_THRESHOLD = 256;
     private static final int INCOMING_QUEUE_WARN_STEP = 256;
@@ -49,10 +49,12 @@ public class ProtocolHandler {
     private final String connectionId;
     private final List<FromRadioListener> listeners = new CopyOnWriteArrayList<>();
 
-    /** Очередь входящих пакетов — разделяет reader-поток и обработку,
-     *  чтобы reader не блокировался на listeners и не терял данные из serial-буфера. */
+    /**
+     * Incoming packet queue separating the reader thread from listener dispatch
+     * so transport input is not blocked and serial-buffer data is not lost.
+     */
     private final BlockingQueue<byte[]> incomingQueue = new LinkedBlockingQueue<>();
-    /** Очередь исходящих пакетов с приоритетом обычных команд над MQTT downlink. */
+    /** Outgoing packet queue, prioritizing normal commands over MQTT downlink. */
     private final PriorityBlockingQueue<OutboundFrame> outgoingQueue = new PriorityBlockingQueue<>();
     private final Thread dispatcherThread;
     private final Thread senderThread;
@@ -86,40 +88,39 @@ public class ProtocolHandler {
     }
 
     /**
-     * Регистрирует слушателя входящих {@code FromRadio} сообщений.
+     * Registers a listener for incoming {@code FromRadio} messages.
      *
-     * @param listener слушатель для регистрации
+     * @param listener listener to register
      */
     public void addListener(FromRadioListener listener) {
         listeners.add(listener);
     }
 
     /**
-     * Удаляет ранее зарегистрированного слушателя.
+     * Removes a previously registered listener.
      *
-     * @param listener слушатель для удаления
+     * @param listener listener to remove
      */
     public void removeListener(FromRadioListener listener) {
         listeners.remove(listener);
     }
 
     /**
-     * Отправляет {@code ToRadio} сообщение на устройство.
-     * Сериализует protobuf, оборачивает в фрейм и передаёт через транспорт.
+     * Sends a {@code ToRadio} message to the device.
      *
-     * @param toRadio сообщение для отправки
+     * @param toRadio message to send
      */
     public void sendToRadio(MeshProtos.ToRadio toRadio) {
         sendToRadio(toRadio, true);
     }
 
     /**
-     * Отправляет {@code ToRadio} сообщение на устройство с возможностью не arm-ить
-     * transport-level receive watchdog для keepalive/heartbeat-пакетов.
+     * Sends a {@code ToRadio} message and optionally arms the transport-level
+     * receive watchdog. Keepalive packets do not expect a direct response.
      *
-     * @param toRadio сообщение для отправки
-     * @param expectResponseAfterWrite {@code true} для обычных запросов/пакетов,
-     *                                 {@code false} для keepalive
+     * @param toRadio message to send
+     * @param expectResponseAfterWrite {@code true} for ordinary requests and packets,
+     *                                 {@code false} for keepalive traffic
      */
     public void sendToRadio(MeshProtos.ToRadio toRadio, boolean expectResponseAfterWrite) {
         if (toRadio == null || shutdownRequested.get()) {
@@ -134,9 +135,8 @@ public class ProtocolHandler {
     }
 
     /**
-     * Запускает периодическую отправку heartbeat на устройство.
-     * Прошивка Meshtastic закрывает TCP-соединение при отсутствии активности.
-     * Вызывать после успешного config exchange.
+     * Starts periodic heartbeat delivery after a successful config exchange.
+     * Meshtastic firmware closes TCP connections when they stay idle.
      */
     public void startHeartbeat() {
         stopHeartbeat();
@@ -159,7 +159,7 @@ public class ProtocolHandler {
         log.info("Heartbeat started (initialDelay={}s, interval={}s)", HEARTBEAT_INITIAL_DELAY_SEC, HEARTBEAT_INTERVAL_SEC);
     }
 
-    /** Останавливает отправку heartbeat. */
+    /** Stops heartbeat delivery. */
     public void stopHeartbeat() {
         ScheduledFuture<?> f = heartbeatFuture;
         if (f != null) {
@@ -169,7 +169,7 @@ public class ProtocolHandler {
         }
     }
 
-    /** Останавливает heartbeat, dispatcher и освобождает scheduler. */
+    /** Stops heartbeat, dispatcher, sender, and scheduler resources. */
     public void shutdown() {
         stopHeartbeat();
         heartbeatScheduler.shutdownNow();

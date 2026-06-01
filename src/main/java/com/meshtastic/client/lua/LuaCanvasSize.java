@@ -1,10 +1,10 @@
 package com.meshtastic.client.lua;
 
 /**
- * Текущий размер Canvas-окна Lua.
+ * Current size of a Lua canvas window.
  *
- * @param width  ширина Canvas
- * @param height высота Canvas
+ * @param width  canvas width
+ * @param height canvas height
  */
 public record LuaCanvasSize(double width, double height) {
 

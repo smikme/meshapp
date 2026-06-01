@@ -7,8 +7,9 @@ import com.meshtastic.client.platform.OsDetect.PackageFormat;
 import java.util.Map;
 
 /**
- * Информация о новой версии приложения.
- * Десериализуется из JSON с сервера обновлений.
+ * Information about a newer application version.
+ * <p>
+ * Deserialized from update-server JSON.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -25,7 +26,7 @@ public class UpdateInfo {
     public Map<String, String> getDownloads() { return downloads; }
 
     /**
-     * URL для скачивания для текущей платформы, или null если недоступен.
+     * Download URL for the current platform, or {@code null} when unavailable.
      */
     public String getDownloadUrl() {
         return getDownloadUrl(OsDetect.current(), OsDetect.currentPackageFormat());

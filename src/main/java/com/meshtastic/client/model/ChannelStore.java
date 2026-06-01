@@ -10,45 +10,37 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.Collections;
 
 /**
- * Управление каналами Meshtastic-сети.
+ * Thread-safe store for Meshtastic channel configuration.
  * <p>
- * Хранит и управляет конфигурацией каналов.
- * Потокобезопасен через synchronized блоки.
- * <p>
- * Ответственность:
- * <ul>
- *   <li>Хранение и доступ к каналам по индексу</li>
- *   <li>Добавление/обновление каналов</li>
- *   <li>Поиск доступных слотов для SECONDARY каналов</li>
- *   <li>Проверка наличия активных каналов</li>
- * </ul>
+ * The store keeps channels addressable by index, updates or replaces known
+ * entries, finds free SECONDARY slots, and answers whether a channel is active.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class ChannelStore {
 
-    /** Список каналов ( synchronizedList для потокобезопасности) */
+    /** Channel list guarded by the synchronized list wrapper. */
     private final List<ChannelProtos.Channel> channels = Collections.synchronizedList(new ArrayList<>());
 
-    /** Флаг готовности каталога каналов */
+    /** Whether the channel catalog has been fully loaded. */
     private volatile boolean channelCatalogReady = false;
 
-    /** Счетчик версии каталога каналов (для кэширования UI) */
+    /** Channel catalog version used by UI caches. */
     private final AtomicLong channelCatalogEpoch = new AtomicLong(0);
 
     /**
-     * Возвращает все каналы.
+     * Returns the backing channel list.
      *
-     * @return список каналов
+     * @return channel list
      */
     public List<ChannelProtos.Channel> getChannels() {
         return channels;
     }
 
     /**
-     * Добавляет канал. Если канал с таким индексом уже существует - заменяет его.
+     * Adds a channel, replacing the existing channel with the same index.
      *
-     * @param channel канал для добавления
+     * @param channel channel to add
      */
     public void addChannel(ChannelProtos.Channel channel) {
         synchronized (channels) {
@@ -64,9 +56,9 @@ public class ChannelStore {
     }
 
     /**
-     * Обновляет канал по индексу и оповещает о изменениях.
+     * Updates a channel by index, adding it when no existing entry is present.
      *
-     * @param channel канал для обновления
+     * @param channel channel to update
      */
     public void updateChannel(ChannelProtos.Channel channel) {
         synchronized (channels) {
@@ -85,10 +77,10 @@ public class ChannelStore {
     }
 
     /**
-     * Возвращает канал по индексу или {@code null}, если не найден.
+     * Returns a channel by index.
      *
-     * @param channelIndex индекс канала
-     * @return ChannelProtos.Channel или {@code null}
+     * @param channelIndex channel index
+     * @return channel, or {@code null} when it is unknown
      */
     public ChannelProtos.Channel getChannelByIndex(int channelIndex) {
         synchronized (channels) {
@@ -102,10 +94,10 @@ public class ChannelStore {
     }
 
     /**
-     * Проверяет, существует ли активный канал с указанным индексом.
+     * Returns whether an enabled channel exists at the given index.
      *
-     * @param channelIndex индекс канала
-     * @return {@code true} если канал существует и не отключен
+     * @param channelIndex channel index
+     * @return {@code true} when the channel exists and is not disabled
      */
     public boolean hasEnabledChannel(int channelIndex) {
         synchronized (channels) {
@@ -120,10 +112,9 @@ public class ChannelStore {
     }
 
     /**
-     * Находит первый свободный слот для SECONDARY канала (индексы 1-7).
-     * Возвращает -1, если все слоты заняты.
+     * Finds the first available SECONDARY channel slot in the 1-7 range.
      *
-     * @return индекс свободного канала или -1
+     * @return available channel index, or {@code -1} when every slot is occupied
      */
     public int findFirstAvailableChannelSlot() {
         synchronized (channels) {
@@ -141,41 +132,41 @@ public class ChannelStore {
     }
 
     /**
-     * Возвращает флаг готовности каталога каналов.
+     * Returns whether the channel catalog is ready.
      *
-     * @return {@code true} если catalog ready
+     * @return {@code true} when the catalog is ready
      */
     public boolean isChannelCatalogReady() {
         return channelCatalogReady;
     }
 
     /**
-     * Устанавливает флаг готовности каталога каналов.
+     * Sets whether the channel catalog is ready.
      *
-     * @param channelCatalogReady новое значение
+     * @param channelCatalogReady new readiness value
      */
     public void setChannelCatalogReady(boolean channelCatalogReady) {
         this.channelCatalogReady = channelCatalogReady;
     }
 
     /**
-     * Возвращает версию каталога каналов (для кэширования UI).
+     * Returns the channel catalog version used by UI caches.
      *
-     * @return channelCatalogEpoch
+     * @return current channel catalog epoch
      */
     public long getChannelCatalogEpoch() {
         return channelCatalogEpoch.get();
     }
 
     /**
-     * Увеличивает epoch каталога каналов (для invalidation кэша UI).
+     * Increments the channel catalog epoch to invalidate UI caches.
      */
     public void incrementChannelCatalogEpoch() {
         channelCatalogEpoch.incrementAndGet();
     }
 
     /**
-     * Очищает все каналы и сбрасывает флаги.
+     * Clears all channels and resets catalog state.
      */
     public void clear() {
         channels.clear();

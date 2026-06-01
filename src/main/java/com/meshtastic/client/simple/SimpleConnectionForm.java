@@ -97,7 +97,7 @@ public class SimpleConnectionForm extends VBox {
                 : "connection.form.editTitle"));
         title.getStyleClass().add("dialog-title");
 
-        // Тип подключения
+        // Connection type.
         cmbType = new ComboBox<>();
         cmbType.getItems().addAll(BASE_CONNECTION_TYPES.stream()
                 .map(SimpleConnectionForm::labelForConnectionType)
@@ -109,7 +109,7 @@ public class SimpleConnectionForm extends VBox {
         cmbType.getSelectionModel().selectFirst();
         cmbType.setMaxWidth(Double.MAX_VALUE);
 
-        // Протокол
+        // Protocol.
         cmbProtocol = new ComboBox<>();
         cmbProtocol.setMaxWidth(Double.MAX_VALUE);
         cmbProtocol.setOnAction(e -> {
@@ -123,7 +123,7 @@ public class SimpleConnectionForm extends VBox {
             updateFieldVisibility();
         });
 
-        // Название
+        // Display name.
         txtName = new TextField();
         txtName.setPromptText(I18n.t("connection.form.namePrompt"));
 
@@ -320,7 +320,7 @@ public class SimpleConnectionForm extends VBox {
         refreshPorts();
     }
 
-    /** Отписка от discovery-сервисов. Вызывается при закрытии формы. */
+    /** Unsubscribes from discovery services when the form closes. */
     public void cleanup() {
         SerialPortDiscoveryService.getInstance().removeListener(discoveryListener);
         BleDeviceDiscoveryService.getInstance().removeListener(bleDiscoveryListener);
@@ -438,7 +438,7 @@ public class SimpleConnectionForm extends VBox {
             return;
         }
 
-        // Показать уже найденные устройства
+        // Show devices that were already discovered.
         List<BleDevice> devices = discovery.getDiscoveredDevices();
         if (!devices.isEmpty()) {
             populateBleDeviceCombo(devices);
@@ -475,7 +475,7 @@ public class SimpleConnectionForm extends VBox {
             cmbPort.getItems().add(savedPortName);
         }
 
-        // Восстановить предыдущий выбор
+        // Restore the previous selection.
         if (previousSelection != null) {
             String prevSysName = extractSystemPortName(previousSelection);
             for (String item : cmbPort.getItems()) {
@@ -486,7 +486,7 @@ public class SimpleConnectionForm extends VBox {
             }
         }
 
-        // Автовыбор первого вероятного Meshtastic порта
+        // Auto-select the first likely Meshtastic port.
         if (cmbPort.getValue() == null && !ports.isEmpty()) {
             for (int i = 0; i < ports.size(); i++) {
                 if (ports.get(i).likelyMeshtastic()) {
@@ -556,7 +556,7 @@ public class SimpleConnectionForm extends VBox {
             cmbBleDevice.getItems().add(label);
         }
 
-        // Восстановить предыдущий выбор
+        // Restore the previous selection.
         if (previousSelection != null) {
             for (String item : cmbBleDevice.getItems()) {
                 if (sameBleSelection(previousSelection, item)) {
@@ -566,7 +566,7 @@ public class SimpleConnectionForm extends VBox {
             }
         }
 
-        // Автовыбор первого устройства
+        // Auto-select the first device.
         if (cmbBleDevice.getValue() == null && !devices.isEmpty()) {
             cmbBleDevice.getSelectionModel().selectFirst();
         }
@@ -586,8 +586,8 @@ public class SimpleConnectionForm extends VBox {
     }
 
     /**
-     * Находит BleDevice по отображаемой строке в ComboBox.
-     * Формат: "DeviceName (-65 dBm)"
+     * Finds a {@link BleDevice} by the display string shown in the combo box.
+     * Format: {@code "DeviceName (-65 dBm)"}.
      */
     private BleDevice findBleDeviceByLabel(String label) {
         List<BleDevice> devices = BleDeviceDiscoveryService.getInstance().getDiscoveredDevices();
@@ -597,7 +597,7 @@ public class SimpleConnectionForm extends VBox {
                 return device;
             }
         }
-        // Fallback: по началу строки (RSSI мог измениться)
+        // Fallback to the label prefix because RSSI may have changed.
         for (BleDevice device : devices) {
             if (label.startsWith(device.displayName())) {
                 return device;
@@ -615,9 +615,9 @@ public class SimpleConnectionForm extends VBox {
     }
 
     /**
-     * Извлекает системное имя порта из форматированной строки.
-     * Формат: "CP210x USB to UART Bridge (cu.usbserial-1234) ✓"
-     * Результат: "cu.usbserial-1234"
+     * Extracts the system port name from a formatted display string.
+     * Format: {@code "CP210x USB to UART Bridge (cu.usbserial-1234) OK"}.
+     * Result: {@code "cu.usbserial-1234"}.
      */
     private String extractSystemPortName(String formatted) {
         int start = formatted.lastIndexOf('(');

@@ -3,12 +3,12 @@ package com.meshtastic.client.connection.ble;
 import com.meshtastic.client.model.ProtocolType;
 
 /**
- * Обнаруженное BLE-устройство.
+ * Discovered BLE device.
  *
- * @param address  адрес устройства (MAC на Linux/Windows, UUID на macOS)
- * @param name     рекламируемое имя (может быть {@code null})
- * @param rssi     уровень сигнала (dBm)
- * @param protocolType протокол, если он известен из режима сканирования
+ * @param address device address, MAC on Linux/Windows or UUID on macOS
+ * @param name advertised name, or {@code null}
+ * @param rssi signal level in dBm
+ * @param protocolType protocol when known from scan mode
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -19,7 +19,7 @@ public record BleDevice(String address, String name, int rssi, ProtocolType prot
     }
 
     /**
-     * Возвращает отображаемое имя: рекламируемое имя, если есть, иначе адрес.
+     * Returns the display name: advertised name when available, otherwise address.
      */
     public String displayName() {
         return name != null && !name.isBlank() ? name : address;

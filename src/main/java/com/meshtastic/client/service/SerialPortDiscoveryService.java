@@ -12,11 +12,11 @@ import java.util.concurrent.*;
 import java.util.function.Consumer;
 
 /**
- * Сервис автоматического обнаружения serial-портов (singleton).
+ * Singleton service for automatic serial-port discovery.
  * <p>
- * Периодически сканирует доступные serial-порты через jSerialComm
- * и определяет по эвристике, какие из них вероятнее всего являются Meshtastic-устройствами.
- * Оповещает подписчиков при изменении списка портов.
+ * The service periodically scans available serial ports through jSerialComm,
+ * estimates which ones are likely Meshtastic devices, and notifies subscribers
+ * when the list changes.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -26,7 +26,7 @@ public final class SerialPortDiscoveryService {
 
     private static final long SCAN_INTERVAL_MS = 3000;
 
-    /** Подстроки в descriptivePortName, характерные для Meshtastic USB-чипов. */
+    /** Substrings in descriptive port names that commonly identify Meshtastic USB adapters. */
     private static final List<String> MESHTASTIC_HINTS = List.of(
             "CP210", "CH340", "CH341", "CH9102",
             "ESP32", "nRF52", "Meshtastic",
@@ -42,13 +42,13 @@ public final class SerialPortDiscoveryService {
     private volatile boolean nativeDiscoveryUnavailable;
 
     /**
-     * Описание обнаруженного serial-порта.
+     * Description of a discovered serial port.
      *
-     * @param systemPortName      системное имя порта (e.g. "cu.usbserial-1234", "COM3")
-     * @param descriptivePortName описательное имя (e.g. "CP2104 USB to UART Bridge Controller")
-     * @param likelyMeshtastic    эвристическая оценка — вероятно Meshtastic-устройство
-     * @param accessible          есть ли у текущего пользователя read/write доступ к device node
-     * @param accessWarning       человекочитаемая подсказка по исправлению прав
+     * @param systemPortName system port name, for example {@code "cu.usbserial-1234"} or {@code "COM3"}
+     * @param descriptivePortName descriptive adapter name, for example {@code "CP2104 USB to UART Bridge Controller"}
+     * @param likelyMeshtastic heuristic estimate that the port is probably a Meshtastic device
+     * @param accessible whether the current user has read/write access to the device node
+     * @param accessWarning readable guidance for fixing access permissions
      */
     public record DiscoveredPort(
             String systemPortName,
@@ -81,8 +81,8 @@ public final class SerialPortDiscoveryService {
     }
 
     /**
-     * Запускает периодическое сканирование портов (интервал 3с).
-     * Идемпотентен — повторный вызов игнорируется.
+     * Starts periodic port scanning at a three-second interval.
+     * The method is idempotent; repeated calls are ignored.
      */
     public void startScanning() {
         if (scanning) {
@@ -93,18 +93,18 @@ public final class SerialPortDiscoveryService {
         log.info("Serial port scanning started");
     }
 
-    /** Останавливает периодическое сканирование. */
+    /** Stops periodic scanning. */
     public void stopScanning() {
         scanning = false;
     }
 
-    /** Выполняет немедленное сканирование и возвращает результат. */
+    /** Runs an immediate scan and returns its result. */
     public List<DiscoveredPort> scanNow() {
         scan();
         return getDiscoveredPorts();
     }
 
-    /** Возвращает последний известный список портов. */
+    /** Returns the last known port list. */
     public List<DiscoveredPort> getDiscoveredPorts() {
         return lastDiscoveredPorts;
     }
@@ -128,11 +128,11 @@ public final class SerialPortDiscoveryService {
             for (SerialPort port : ports) {
                 String sysName = port.getSystemPortName();
 
-                // macOS: пропускаем tty.* порты, используем только cu.*
+                // On macOS, skip tty.* ports and use only cu.* endpoints.
                 if (OsDetect.isMacOs() && sysName.startsWith("tty.")) {
                     continue;
                 }
-                // Пропускаем системные Bluetooth-порты (не SPP)
+            // Skip system Bluetooth ports that are not SPP endpoints.
                 if (sysName.contains("Bluetooth-Incoming") || sysName.contains("debug-console")) {
                     continue;
                 }
@@ -148,7 +148,7 @@ public final class SerialPortDiscoveryService {
                         access.warning()));
             }
 
-            // Сортировка: вероятные Meshtastic-устройства в начале
+        // Sort likely Meshtastic devices first.
             discovered.sort((a, b) -> Boolean.compare(b.likelyMeshtastic, a.likelyMeshtastic));
 
             publishIfChanged(discovered);

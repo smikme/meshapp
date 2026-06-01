@@ -25,12 +25,12 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * Межпроцессный guard, не позволяющий запустить второй экземпляр MeshApp.
+ * Inter-process guard that prevents MeshApp from running twice.
  * <p>
- * Используется реальная блокировка файла средствами ОС, а не stale pid-файл:
- * если процесс аварийно завершится, lock автоматически освобождается ядром и
- * следующий запуск сможет стартовать. Второй экземпляр отправляет первому
- * локальную команду активации окна и сразу завершается.
+ * The guard uses an operating-system file lock rather than a stale-prone PID
+ * file. If the process crashes, the kernel releases the lock and the next launch
+ * can proceed. A second instance sends a local activation command to the first
+ * instance and exits immediately.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -70,12 +70,12 @@ public final class SingleInstanceGuard implements AutoCloseable {
     }
 
     /**
-     * Пытается занять single-instance lock.
+     * Attempts to acquire the single-instance lock.
      *
-     * @param appDirectory директория служебных файлов MeshApp
-     * @return guard для первого экземпляра или {@link Optional#empty()}, если
-     *         активный экземпляр уже найден и ему отправлена команда активации
-     * @throws IOException если служебную директорию или lock невозможно открыть
+     * @param appDirectory directory that stores MeshApp service files
+     * @return guard for the first instance, or {@link Optional#empty()} if an
+     *         active instance was found and received an activation command
+     * @throws IOException if the service directory or lock file cannot be opened
      */
     public static Optional<SingleInstanceGuard> acquire(Path appDirectory) throws IOException {
         Files.createDirectories(appDirectory);
@@ -117,11 +117,12 @@ public final class SingleInstanceGuard implements AutoCloseable {
     }
 
     /**
-     * Устанавливает callback, который будет вызван при повторном запуске.
-     * Если второй экземпляр успел обратиться до создания окна, активация
-     * выполняется сразу после установки callback.
+     * Sets the callback invoked when another launch attempt is detected.
+     * <p>
+     * If a second instance connected before the window was created, activation
+     * is performed immediately after this callback is registered.
      *
-     * @param handler действие активации уже запущенного приложения
+     * @param handler action that activates the already running application
      */
     public void setActivationHandler(Runnable handler) {
         activationHandler = handler;

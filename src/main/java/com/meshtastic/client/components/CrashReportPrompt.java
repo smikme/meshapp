@@ -33,7 +33,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
 /**
- * Crash-report панели, встроенные в общую стилистику приложения через ModalPane.
+ * Crash-report panels integrated into the application style through ModalPane.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */

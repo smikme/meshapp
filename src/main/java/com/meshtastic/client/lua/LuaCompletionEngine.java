@@ -13,11 +13,12 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Контекстный движок автодополнения Lua-кода для MeshApp IDE.
+ * Context-aware Lua completion engine for MeshApp IDE.
  * <p>
- * Движок знает разрешенный sandbox API {@code mesh.*}, стандартные Lua-библиотеки,
- * поля прикладных объектов сообщений/нод/каналов и выполняет легкий статический
- * анализ переменных, функций, таблиц и alias-выражений прямо по тексту редактора.
+ * Knows the allowed {@code mesh.*} sandbox API, standard Lua libraries, fields
+ * of application message/node/channel objects, and performs lightweight static
+ * analysis of variables, functions, tables, and aliases directly from the editor
+ * text.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */

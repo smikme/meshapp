@@ -80,7 +80,7 @@ class ConnectionManagerTest {
             ConnectionEntry entry = new ConnectionEntry("stub", "127.0.0.1", server.port());
             manager.addEntry(entry);
 
-            // Идём через реальный TcpConnection и реальный ProtocolHandler/config exchange.
+        // Exercise the path through a real TcpConnection and real ProtocolHandler/config exchange.
             manager.connect(entry.getId());
 
             CompletableFuture<DeviceState> future = manager.getConfigFuture(entry.getId());
@@ -1146,7 +1146,7 @@ class ConnectionManagerTest {
                         }
                         MeshProtos.ToRadio toRadio = MeshProtos.ToRadio.parseFrom(payload);
                         if (toRadio.hasWantConfigId()) {
-                            // Минимальный happy-path для config exchange:
+        // Minimal config-exchange happy path:
                             // MyNodeInfo + matching config_complete_id.
                             wantConfigLatch.countDown();
                             send(out, MeshProtos.FromRadio.newBuilder()

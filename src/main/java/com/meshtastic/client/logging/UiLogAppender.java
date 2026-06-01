@@ -13,8 +13,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
 /**
- * Logback appender — складывает события в in-memory буфер для отображения в UI.
- * Регистрируется в logback.xml. Доступ к буферу через статические методы.
+ * Logback appender that stores events in an in-memory buffer for UI display.
+ * Registered from logback.xml; static methods expose the buffer.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -65,22 +65,22 @@ public class UiLogAppender extends UnsynchronizedAppenderBase<ILoggingEvent> {
         return message + System.lineSeparator() + stackTrace;
     }
 
-    /** Все накопленные записи */
+    /** Returns all accumulated records. */
     public static List<LogEntry> getBuffer() {
         return new ArrayList<>(buffer);
     }
 
-    /** Подписаться на новые события в реальном времени */
+    /** Subscribes to new events in real time. */
     public static void setLiveListener(Consumer<LogEntry> listener) {
         liveListener = listener;
     }
 
-    /** Снять подписку */
+    /** Removes a live-event subscription. */
     public static void clearLiveListener() {
         liveListener = null;
     }
 
-    /** Очистить буфер */
+    /** Clears the buffer. */
     public static void clearBuffer() {
         buffer.clear();
         size.set(0);

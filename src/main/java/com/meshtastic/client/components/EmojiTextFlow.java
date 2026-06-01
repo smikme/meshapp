@@ -15,10 +15,10 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * TextFlow с поддержкой отображения эмодзи как изображений.
+ * TextFlow that can render emoji as images.
  *
- * <p>Парсит текст, разбивает на сегменты (обычный текст и эмодзи),
- * рендерит обычный текст как {@link Text}, а эмодзи как {@link ImageView}.
+ * <p>Parses text into plain-text and emoji segments, renders plain text as
+ * {@link Text}, and renders emoji as {@link ImageView}.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -31,7 +31,7 @@ public class EmojiTextFlow extends TextFlow {
     private javafx.scene.text.Font textFont;
     private Paint textFill;
 
-    // Кеш для сегментов текста (уменьшает CPU при повторном рендере)
+    // Cache text segments to reduce CPU work during repeated rendering.
     private static final int SEGMENT_CACHE_MAX_ENTRIES = 512;
     private static final Map<String, List<Segment>> SEGMENT_CACHE = Collections.synchronizedMap(
             new LinkedHashMap<>(SEGMENT_CACHE_MAX_ENTRIES, 0.75f, true) {
@@ -60,7 +60,7 @@ public class EmojiTextFlow extends TextFlow {
         String sanitized = UnicodeTextUtils.sanitize(text);
         if ((sanitized == null && this.rawText == null)
                 || (sanitized != null && sanitized.equals(this.rawText))) {
-            return; // Тот же текст - ничего не делать
+            return; // Same text; nothing to do.
         }
         this.rawText = sanitized;
         rebuild();
@@ -72,7 +72,7 @@ public class EmojiTextFlow extends TextFlow {
 
     public void setEmojiSize(double size) {
         if (this.emojiSize == size) {
-            return; // Тот же размер - ничего не делать
+            return; // Same size; nothing to do.
         }
         this.emojiSize = size;
         if (rawText != null) {
@@ -115,10 +115,10 @@ public class EmojiTextFlow extends TextFlow {
     }
 
     private void rebuild() {
-        // Получаем сегменты из кеша или парсим новый текст
+        // Use cached segments or parse the new text.
         List<Segment> segments = getSegmentsForText(rawText);
         
-        // Оптимизация: если children пусты или размер совпадает, обновляем инлайн
+        // Optimization: if child count matches, update nodes in place.
         boolean shouldUpdateInline = getChildren().size() == segments.size();
         
         if (shouldUpdateInline) {
@@ -141,7 +141,7 @@ public class EmojiTextFlow extends TextFlow {
     }
 
     /**
-     * Получить сегменты из кеша или создать новые.
+     * Returns segments from the cache or creates them.
      */
     private List<Segment> getSegmentsForText(String text) {
         if (text == null || text.isEmpty()) {
@@ -183,7 +183,7 @@ public class EmojiTextFlow extends TextFlow {
     }
 
     /**
-     * Обновить children инлайн без полной перестройки.
+     * Updates children in place without a full rebuild.
      */
     private void updateChildrenInline(List<Segment> segments) {
         int i = 0;
@@ -201,11 +201,11 @@ public class EmojiTextFlow extends TextFlow {
                         getChildren().add(i, iv);
                     } else {
                         addTextNode(seg.text);
-                        i++; // Сдвигаемся после добавления
+                        i++; // Move past the inserted node.
                     }
                 } else {
                     ImageView iv = (ImageView) child;
-                    // Проверить, тот ли эмодзи
+                    // Check whether this ImageView already represents the same emoji.
                     String currentEmoji = findEmojiInImageView(iv);
                     if (currentEmoji == null || !currentEmoji.equals(seg.text)) {
                         iv.setImage(EmojiImageCache.getImage(seg.text));
@@ -228,14 +228,14 @@ public class EmojiTextFlow extends TextFlow {
             i++;
         }
         
-        // Удалить лишние children
+        // Remove extra children.
         while (getChildren().size() > segments.size()) {
             getChildren().remove(getChildren().size() - 1);
         }
     }
 
     /**
-     * Найти эмодзи из ImageView (для сравнения).
+     * Reads the emoji represented by an ImageView, for comparisons.
      */
     private String findEmojiInImageView(ImageView iv) {
         Object userData = iv.getUserData();
@@ -278,8 +278,8 @@ public class EmojiTextFlow extends TextFlow {
     }
 
     /**
-     * Разбить текст на сегменты: обычный текст и известные эмодзи.
-     * Использует жадный поиск — сначала пробует самую длинную последовательность.
+     * Splits text into plain-text and known-emoji segments.
+     * Uses greedy matching, trying the longest sequence first.
      */
     public static List<Segment> parseSegments(String text) {
         text = UnicodeTextUtils.sanitize(text);
@@ -311,13 +311,13 @@ public class EmojiTextFlow extends TextFlow {
     }
 
     /**
-     * Попытаться найти известный эмодзи начиная с позиции startIndex.
-     * Пробует от длинных подстрок к коротким (до 8 кодпоинтов для ZWJ-последовательностей).
+     * Attempts to match a known emoji starting at startIndex.
+     * Tries longer substrings first, up to the local maximum for ZWJ sequences.
      */
     private static String tryMatchEmoji(String text, int startIndex) {
         int maxCps = EmojiImageCache.getMaxEmojiCodePointCount();
 
-        // Собираем кодпоинты и позиции
+        // Collect code points and their end positions.
         int[] endPositions = new int[maxCps + 1];
         int cpCount = 0;
         int pos = startIndex;
@@ -328,7 +328,7 @@ public class EmojiTextFlow extends TextFlow {
             endPositions[cpCount] = pos;
         }
 
-        // Пробуем от самой длинной подстроки к самой короткой
+        // Try the longest substring first, then shorter ones.
         for (int len = cpCount; len >= 1; len--) {
             String candidate = text.substring(startIndex, endPositions[len]);
             if (EmojiImageCache.isKnownEmoji(candidate)) {
@@ -338,6 +338,6 @@ public class EmojiTextFlow extends TextFlow {
         return null;
     }
 
-    /** Сегмент текста: обычный текст или эмодзи. */
+    /** Text segment: either plain text or emoji. */
     public record Segment(String text, boolean isEmoji) {}
 }

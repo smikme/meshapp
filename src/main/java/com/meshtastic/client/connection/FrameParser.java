@@ -4,9 +4,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Конечный автомат для parsing-а Meshtastic serial/TCP frame-ов.
+ * State machine for parsing Meshtastic serial and TCP frames.
  * <p>
- * Формат frame-а: {@code [0x94][0xC3][len_msb][len_lsb][payload...]}.
+ * Frame format: {@code [0x94][0xC3][len_msb][len_lsb][payload...]}.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -28,13 +28,12 @@ public class FrameParser implements StreamFrameParser {
     private byte[] payloadBuffer;
 
     /**
-     * Обрабатывает один байт из входного потока.
-     * Продвигает конечный автомат по состояниям: WAIT_START1 → WAIT_START2 →
-     * READ_LEN_MSB → READ_LEN_LSB → READ_PAYLOAD.
-     * Пакеты с длиной {@code <= 0} или {@code > MAX_PACKET_SIZE} отбрасываются.
+     * Processes one byte from the incoming stream.
+     * Advances the state machine through start bytes, length bytes, and payload.
+     * Frames with length {@code <= 0} or greater than {@code MAX_PACKET_SIZE} are discarded.
      *
-     * @param b очередной байт
-     * @return полный protobuf-payload при завершении фрейма, или {@code null} если фрейм не собран
+     * @param b next byte
+     * @return complete protobuf payload when a frame is finished, otherwise {@code null}
      */
     @Override
     public byte[] processByte(byte b) {
@@ -93,8 +92,8 @@ public class FrameParser implements StreamFrameParser {
     }
 
     /**
-     * Возвращает {@code true}, если парсер находится внутри частично прочитанного фрейма
-     * и ожидает оставшиеся байты заголовка или payload.
+     * Returns {@code true} when the parser is inside a partial frame and waiting
+     * for the remaining header or payload bytes.
      */
     @Override
     public boolean hasPartialFrame() {
@@ -102,9 +101,9 @@ public class FrameParser implements StreamFrameParser {
     }
 
     /**
-     * Проверяет что первый байт payload — валидный protobuf field tag.
-     * Wire type (биты 0-2) должен быть 0-5, field number (биты 3+) должен быть > 0.
-     * Отсеивает ложные фреймы от debug-вывода устройства на том же UART.
+     * Checks that the first payload byte is a valid protobuf field tag.
+     * Wire type bits must be 0-5 and the field number must be positive. This
+     * filters false frames from device debug output on the same UART.
      */
     private static boolean isValidProtobufTag(byte firstByte) {
         int tag = firstByte & 0xFF;
@@ -114,8 +113,7 @@ public class FrameParser implements StreamFrameParser {
     }
 
     /**
-     * Сбрасывает парсер в начальное состояние.
-     * Используется при переподключении или обнаружении ошибки синхронизации.
+     * Resets the parser to its initial state after reconnect or sync errors.
      */
     @Override
     public void reset() {

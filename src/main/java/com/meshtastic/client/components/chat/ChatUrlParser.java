@@ -6,7 +6,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Разбивает текст чата на обычные фрагменты и http/https URL.
+ * Splits chat text into plain segments and HTTP/HTTPS URL segments.
  */
 final class ChatUrlParser {
 

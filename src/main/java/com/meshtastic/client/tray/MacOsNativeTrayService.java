@@ -4,7 +4,7 @@ import com.meshtastic.client.platform.NativeMacOsWindowControl;
 import javafx.stage.Stage;
 
 /**
- * macOS tray/status item через in-process native bridge.
+ * macOS tray/status item implemented through the in-process native bridge.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */

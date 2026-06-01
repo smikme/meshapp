@@ -37,12 +37,12 @@ import java.util.function.Supplier;
 import java.util.stream.Stream;
 
 /**
- * Управляет crash-bundle текущей сессии:
+ * Manages the current session crash bundle:
  * <ul>
- *     <li>ведёт ограниченный по размеру session.log;</li>
- *     <li>сохраняет thread dumps / fatal marker / JFR в активный каталог диагностики;</li>
- *     <li>при следующем запуске переносит нештатно завершившийся bundle в pending-каталог;</li>
- *     <li>чистит старые bundle по возрасту, количеству и суммарному объёму.</li>
+ *     <li>maintains a size-limited {@code session.log}</li>
+ *     <li>writes thread dumps, fatal markers, and JFR snapshots to the active diagnostics directory</li>
+ *     <li>moves an abnormally ended bundle to the pending directory on the next launch</li>
+ *     <li>removes old bundles by age, count, and total size</li>
  * </ul>
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)

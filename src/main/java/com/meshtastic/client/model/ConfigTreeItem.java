@@ -5,36 +5,36 @@ import com.google.protobuf.Descriptors;
 import java.util.List;
 
 /**
- * Модель данных для узла дерева конфигурации.
- * Представляет одно поле protobuf-конфига или категорию (секцию).
+ * Data model for a configuration tree node.
+ * Represents either one protobuf config field or a category section.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class ConfigTreeItem {
 
-    private final String name;              // Отображаемое имя ("Роль", "LoRa" и т.д.)
-    private final String fieldName;         // Protobuf field name (для сохранения)
-    private Object value;                   // Текущее значение
-    private Object originalValue;           // Исходное значение (для отслеживания изменений)
-    private final Class<?> valueType;       // Тип значения (Boolean, Integer, Long, Float, Double, String, Enum)
-    private final List<?> enumValues;       // Для enum — список допустимых значений (null для не-enum)
-    private final boolean editable;         // true для полей, false для категорий
-    private final boolean category;         // Корневая категория (device, position, mqtt...)
+    private final String name;              // Display name, such as Role or LoRa.
+    private final String fieldName;         // Protobuf field name used for saving.
+    private Object value;                   // Current value.
+    private Object originalValue;           // Original value used for change tracking.
+    private final Class<?> valueType;       // Value type: Boolean, Integer, Long, Float, Double, String, or Enum.
+    private final List<?> enumValues;       // Allowed enum values, or null for non-enum fields.
+    private final boolean editable;         // true for fields, false for categories.
+    private final boolean category;         // Root category such as device, position, or mqtt.
 
-    // Для обратной записи в protobuf:
-    private final Descriptors.FieldDescriptor fieldDescriptor;   // null для категорий
-    private String configType;              // "config" или "module_config"
-    private int configVariantNumber;        // Номер oneof варианта (1=device, 2=position, ...)
+    // Used when writing values back into protobuf.
+    private final Descriptors.FieldDescriptor fieldDescriptor;   // null for categories.
+    private String configType;              // "config" or "module_config".
+    private int configVariantNumber;        // oneof variant number, e.g. 1=device, 2=position.
 
     /**
-     * Конструктор для категории (секции).
+     * Constructor for a category section.
      */
     public ConfigTreeItem(String name, String configType, int configVariantNumber) {
         this(name, null, null, configType, configVariantNumber);
     }
 
     /**
-     * Конструктор для категории (секции/вложенной группы) с привязкой к protobuf-полю.
+     * Constructor for a category or nested group bound to a protobuf field.
      */
     public ConfigTreeItem(String name, String fieldName, Descriptors.FieldDescriptor fieldDescriptor,
                           String configType, int configVariantNumber) {
@@ -52,7 +52,7 @@ public class ConfigTreeItem {
     }
 
     /**
-     * Конструктор для редактируемого поля.
+     * Constructor for an editable field.
      */
     public ConfigTreeItem(String name, String fieldName, Object value, Class<?> valueType,
                            List<?> enumValues, Descriptors.FieldDescriptor fieldDescriptor,
@@ -93,7 +93,7 @@ public class ConfigTreeItem {
     public void setConfigVariantNumber(int configVariantNumber) { this.configVariantNumber = configVariantNumber; }
 
     /**
-     * Проверяет, было ли значение изменено пользователем.
+     * Checks whether the value was changed by the user.
      */
     public boolean isModified() {
         if (!editable) { return false; }

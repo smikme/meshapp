@@ -7,11 +7,12 @@ import java.sql.SQLException;
 import java.sql.Statement;
 
 /**
- * Обертка над штатным полнотекстовым индексом H2 для таблицы сообщений.
+ * Wrapper around H2's built-in full-text index for the message table.
  * <p>
- * Инкапсулирует создание схемы {@code FT}, регистрацию алиаса {@code FT_INIT},
- * создание индекса по {@code messages.text} и получение внутреннего id индекса.
- * Используется миграциями БД и {@link MessageDbService} как runtime-страховка.
+ * Encapsulates creation of the {@code FT} schema, registration of the
+ * {@code FT_INIT} alias, indexing of {@code messages.text}, and lookup of the
+ * internal index id. Database migrations use it directly, and
+ * {@link MessageDbService} uses it as a runtime guard.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -24,11 +25,11 @@ final class MessageFullTextIndex {
     private MessageFullTextIndex() {}
 
     /**
-     * Инициализирует H2 full-text подсистему и создает индекс сообщений,
-     * если он еще не зарегистрирован в {@code FT.INDEXES}.
+     * Initializes H2 full-text support and creates the message index if it is
+     * not already registered in {@code FT.INDEXES}.
      *
-     * @param connection активное соединение с H2 БД
-     * @throws SQLException если H2 не смог создать full-text объекты
+     * @param connection active H2 database connection
+     * @throws SQLException if H2 cannot create the required full-text objects
      */
     static void ensureExists(Connection connection) throws SQLException {
         try (Statement stmt = connection.createStatement()) {
@@ -44,11 +45,11 @@ final class MessageFullTextIndex {
     }
 
     /**
-     * Возвращает внутренний id full-text индекса для {@code PUBLIC.MESSAGES}.
+     * Returns the internal full-text index id for {@code PUBLIC.MESSAGES}.
      *
-     * @param connection активное соединение с H2 БД
-     * @return id индекса или {@code null}, если индекс еще не создан
-     * @throws SQLException если не удалось прочитать служебную таблицу {@code FT.INDEXES}
+     * @param connection active H2 database connection
+     * @return index id, or {@code null} when the index has not been created yet
+     * @throws SQLException if the {@code FT.INDEXES} metadata table cannot be read
      */
     static Integer indexId(Connection connection) throws SQLException {
         try (PreparedStatement ps = connection.prepareStatement("""
@@ -65,10 +66,10 @@ final class MessageFullTextIndex {
     }
 
     /**
-     * Создает H2 full-text индекс по колонке {@code messages.text}.
+     * Creates the H2 full-text index for {@code messages.text}.
      *
-     * @param connection активное соединение с H2 БД
-     * @throws SQLException если H2 отклонил создание индекса
+     * @param connection active H2 database connection
+     * @throws SQLException if H2 rejects index creation
      */
     private static void create(Connection connection) throws SQLException {
         try (PreparedStatement ps = connection.prepareStatement("CALL FT_CREATE_INDEX(?, ?, ?)")) {

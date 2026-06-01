@@ -1,14 +1,14 @@
 package com.meshtastic.client.lua;
 
 /**
- * Параметры Canvas-окна, создаваемого из Lua.
+ * Options for a canvas window created from Lua.
  *
- * @param title      заголовок окна
- * @param width      ширина Canvas
- * @param height     высота Canvas
- * @param background стартовый цвет фона или пустая строка
- * @param resizable  должен ли Canvas масштабироваться вместе с окном
- * @param fps        частота {@code on_canvas_frame}, 0 выключает таймер
+ * @param title      window title
+ * @param width      canvas width
+ * @param height     canvas height
+ * @param background initial background color, or an empty string
+ * @param resizable  whether the canvas should resize with the window
+ * @param fps        {@code on_canvas_frame} frequency; 0 disables the timer
  */
 public record LuaCanvasOptions(String title,
                                double width,

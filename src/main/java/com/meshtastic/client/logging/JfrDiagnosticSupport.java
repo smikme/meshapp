@@ -10,8 +10,10 @@ import java.time.Duration;
 import java.util.Locale;
 
 /**
- * Лёгкая JFR-диагностика: держит bounded recording в фоне и умеет по запросу
- * сбрасывать snapshot в указанный файл.
+ * Lightweight JFR diagnostics.
+ * <p>
+ * Keeps a bounded recording in the background and can dump a snapshot to a
+ * requested file.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -109,7 +111,7 @@ public final class JfrDiagnosticSupport {
             try {
                 recording.stop();
             } catch (Throwable ignored) {
-                // Ничего: закрываем recording в любом случае.
+            // Nothing to do here; the recording is closed below either way.
             }
             try {
                 recording.close();

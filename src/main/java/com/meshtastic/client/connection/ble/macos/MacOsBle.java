@@ -22,10 +22,11 @@ import java.util.function.Consumer;
 import static com.meshtastic.client.connection.ble.macos.ObjCRuntime.*;
 
 /**
- * macOS реализация BLE через CoreBluetooth (JNA + Objective-C runtime).
+ * macOS BLE implementation through CoreBluetooth, JNA, and the Objective-C runtime.
  * <p>
- * Delegate-классы Objective-C создаются ОДИН РАЗ (static) на весь JVM.
- * Экземпляр MacOsBle привязан к делегату через static map по pointer делегата.
+ * Objective-C delegate classes are created once per JVM as static classes.
+ * Each MacOsBle instance is associated with its delegate through a static map
+ * keyed by the delegate pointer.
  *
  * <h3>CBManagerState</h3>
  * 0=Unknown, 1=Resetting, 2=Unsupported, 3=Unauthorized, 4=PoweredOff, 5=PoweredOn
@@ -46,11 +47,11 @@ public class MacOsBle implements BlePlatform {
     private static final int WRITE_RESPONSE_TIMEOUT_MS = 10_000;
     private static final int FALLBACK_MAX_WRITE_WITH_RESPONSE_BYTES = 512;
 
-    // Статические Obj-C delegate классы (создаются один раз)
+    // Static Objective-C delegate classes, created once.
     private static long centralDelegateClass;
     private static long peripheralDelegateClass;
 
-    // JNA callbacks — static, чтобы не собрал GC (добавляются к static Obj-C классам)
+    // Static JNA callbacks so GC cannot collect methods added to static Objective-C classes.
     private static Callback cbDidUpdateState;
     private static Callback cbDidDiscover;
     private static Callback cbDidConnect;
@@ -62,7 +63,7 @@ public class MacOsBle implements BlePlatform {
     private static Callback cbDidWriteValue;
     private static Callback cbDidUpdateNotificationState;
 
-    /** Map: делегат pointer → MacOsBle instance (для dispatch из static callbacks). */
+    /** Map from delegate pointer to MacOsBle instance, used by static callbacks. */
     private static final Map<Long, MacOsBle> DELEGATE_MAP = new ConcurrentHashMap<>();
 
     static {
@@ -110,7 +111,7 @@ public class MacOsBle implements BlePlatform {
     private volatile String serviceDiscoveryErrorMessage;
     private volatile String characteristicDiscoveryErrorMessage;
 
-    // Polling: fromRadio не поддерживает notifications, поэтому опрашиваем периодически
+    // Polling: fromRadio does not support notifications, so it is read periodically.
     private final ScheduledExecutorService pollScheduler =
             Executors.newSingleThreadScheduledExecutor(r -> {
                 Thread t = new Thread(r, "ble-poll");
@@ -140,7 +141,7 @@ public class MacOsBle implements BlePlatform {
         delegateInstance = allocInitClass(centralDelegateClass);
         peripheralDelegateInstance = allocInitClass(peripheralDelegateClass);
 
-        // Привязываем оба делегата к этому экземпляру
+        // Bind both delegates to this instance.
         DELEGATE_MAP.put(delegateInstance, this);
         DELEGATE_MAP.put(peripheralDelegateInstance, this);
 
@@ -149,7 +150,7 @@ public class MacOsBle implements BlePlatform {
         centralManager = ObjCRuntime.msgSend(alloc,
                 "initWithDelegate:queue:", delegateInstance, dispatchQueue);
 
-        log.info("CBCentralManager создан");
+        log.info("CBCentralManager created");
     }
 
     // ====== Scanning ======
@@ -248,10 +249,10 @@ public class MacOsBle implements BlePlatform {
 
             connectedPeripheral = peripheral;
 
-            // Устанавливаем делегат для peripheral
+            // Install the delegate on the peripheral.
             msgSend(peripheral, "setDelegate:", peripheralDelegateInstance);
 
-            // Обнаруживаем сервисы
+            // Discover services.
             log.info("[BLE] Step 3: discoverServices...");
             long serviceArray = serviceUuidArray(profile);
             try {
@@ -274,7 +275,7 @@ public class MacOsBle implements BlePlatform {
             }
             log.info("[BLE] Step 3 done: services discovered");
 
-            // Обнаруживаем характеристики
+            // Discover characteristics.
             long services = msgSend(peripheral, "services");
             long serviceCount = msgSend(services, "count");
             if (serviceCount == 0) {
@@ -314,8 +315,8 @@ public class MacOsBle implements BlePlatform {
             }
 
             if (profile.hasNotifyTriggerCharacteristic()) {
-                // Meshtastic: fromRadio НЕ поддерживает notifications — используем polling.
-                // fromNum поддерживает — подписываемся как быстрый триггер drain.
+                // Meshtastic: fromRadio does not support notifications, so polling is used.
+                // fromNum does support them and acts as a fast drain trigger.
                 log.info("[BLE] Step 5: subscribe to fromNum notifications...");
                 notifyLatch = new CountDownLatch(1);
                 setNotify(peripheral, true, fromNumCharacteristic);
@@ -324,7 +325,7 @@ public class MacOsBle implements BlePlatform {
                 }
                 failIfConnectErrored();
 
-                // Drain stale fromRadio data
+                // Drain stale fromRadio data.
                 log.info("[BLE] Step 6: initial drain of fromRadio...");
                 drainInProgress.set(true);
                 drainLatch = new CountDownLatch(1);
@@ -333,7 +334,7 @@ public class MacOsBle implements BlePlatform {
                 failIfConnectErrored();
                 log.info("[BLE] Step 6 done: initial drain complete");
 
-                // Step 7: start periodic polling of fromRadio
+                // Step 7: start periodic polling of fromRadio.
                 startPolling();
                 failIfConnectErrored();
             } else {
@@ -456,7 +457,7 @@ public class MacOsBle implements BlePlatform {
         }
 
         if (profile.hasNotifyTriggerCharacteristic()) {
-            // Kickstart drain after write — не ждём poll cycle
+            // Kickstart drain after write; do not wait for the next poll cycle.
             pollScheduler.schedule(this::triggerDrain, 200, TimeUnit.MILLISECONDS);
         }
         return true;
@@ -543,11 +544,11 @@ public class MacOsBle implements BlePlatform {
             com.sun.jna.NativeLibrary.getInstance("objc").getFunction("objc_msgSend");
 
     /**
-     * Извлекает human-readable описание из NSError.
-     *
-     * @param error pointer на NSError или {@code 0}
-     * @param fallback запасное сообщение, если NSError пуст или недоступен
-     * @return локализованное описание ошибки либо {@code fallback}
+     * Extracts a human-readable description from NSError.
+ *
+     * @param error pointer to NSError, or {@code 0}
+     * @param fallback fallback message used when NSError is empty or unavailable
+     * @return localized error description, or {@code fallback}
      */
     private static String localizedError(long error, String fallback) {
         if (error == 0) { return fallback; }
@@ -560,10 +561,10 @@ public class MacOsBle implements BlePlatform {
     }
 
     /**
-     * Прерывает блокирующий connect-flow, если один из async CoreBluetooth callbacks
-     * уже сообщил об ошибке или разрыве соединения.
-     *
-     * @throws ConnectionException если в процессе подключения накопилась terminal error
+     * Interrupts the blocking connect flow if an async CoreBluetooth callback has
+     * already reported an error or disconnect.
+ *
+     * @throws ConnectionException when the connection process has accumulated a terminal error
      */
     private void failIfConnectErrored() throws ConnectionException {
         if (connectErrorMessage != null) {
@@ -868,7 +869,7 @@ public class MacOsBle implements BlePlatform {
         );
     }
 
-    /** Запускает drain если ещё не активен (вызывается poll-таймером и fromNum). */
+    /** Starts a drain if none is active; called by the poll timer and fromNum. */
     private void triggerDrain() {
         if (!drainInProgress.compareAndSet(false, true)) { return; }
         drainFromRadio();
@@ -924,7 +925,7 @@ public class MacOsBle implements BlePlatform {
         }
     }
 
-    /** Находит MacOsBle по pointer делегата. */
+    /** Resolves MacOsBle by delegate pointer. */
     private static MacOsBle resolve(long delegatePtr) {
         MacOsBle instance = DELEGATE_MAP.get(delegatePtr);
         if (instance == null) {
@@ -933,7 +934,7 @@ public class MacOsBle implements BlePlatform {
         return instance;
     }
 
-    // ====== Static delegate class creation (один раз на JVM) ======
+    // ====== Static delegate class creation, once per JVM ======
 
     private static synchronized void createDelegateClasses() {
         if (centralDelegateClass != 0) { return; }
@@ -1144,7 +1145,7 @@ public class MacOsBle implements BlePlatform {
                 return;
             }
 
-            // Сравнение по pointer характеристики — без ObjC-аллокаций на hot path
+            // Compare characteristic pointers directly, avoiding Objective-C allocations on the hot path.
             if (characteristic == me.fromNumCharacteristic) {
                 log.debug("[BLE] fromNum notification → triggering drain...");
                 me.triggerDrain();
@@ -1163,7 +1164,7 @@ public class MacOsBle implements BlePlatform {
                         }
                     }
                     if (me.profile.hasNotifyTriggerCharacteristic()) {
-                        // Продолжаем чтение — chain drain (без guard, мы уже в drain)
+                        // Continue reading by chaining the drain; no guard is needed because we are already draining.
                         me.drainFromRadio();
                     }
                 } else {

@@ -51,10 +51,10 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 /**
- * Плавающее Canvas-окно, управляемое Lua-скриптом.
+ * Floating Canvas window controlled by a Lua script.
  *
- * <p>Окно не модальное, не регистрируется в боковом меню и не переключает
- * основную форму приложения.
+ * <p>The window is non-modal, is not registered in the side menu, and does not
+ * switch the main application form.
  */
 public final class LuaCanvasWindow {
 

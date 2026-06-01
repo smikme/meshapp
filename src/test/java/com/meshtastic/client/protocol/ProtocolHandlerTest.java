@@ -128,7 +128,7 @@ class ProtocolHandlerTest {
         RecordingListener listener = new RecordingListener();
         handler.addListener(listener);
 
-        // Проверяем весь основной fan-out без привязки к UI/service-слою.
+        // Cover the main dispatch paths without involving UI or service-layer collaborators.
         MeshProtos.MyNodeInfo myInfo = MeshProtos.MyNodeInfo.newBuilder().setMyNodeNum(0x12345678).build();
         MeshProtos.NodeInfo nodeInfo = MeshProtos.NodeInfo.newBuilder().setNum(0xCAFEBABE).build();
         ConfigProtos.Config config = ConfigProtos.Config.newBuilder()
@@ -403,7 +403,7 @@ class ProtocolHandlerTest {
     }
 
     private static byte[] unframe(byte[] frame) {
-        // PacketFramer добавляет только 4-байтный заголовок Meshtastic.
+        // PacketFramer adds only the four-byte Meshtastic header.
         int payloadLength = ((frame[2] & 0xFF) << 8) | (frame[3] & 0xFF);
         byte[] payload = new byte[payloadLength];
         System.arraycopy(frame, 4, payload, 0, payloadLength);
@@ -422,7 +422,7 @@ class ProtocolHandlerTest {
     }
 
     private static final class FakeConnection implements MeshtasticConnection {
-        // Минимальный in-memory transport для deterministic тестов dispatcher/heartbeat.
+        // Minimal in-memory transport for deterministic dispatcher and heartbeat tests.
         private volatile Consumer<byte[]> dataListener;
         private volatile ConnectionListener connectionListener;
         private volatile byte[] lastSentBytes;
@@ -557,7 +557,7 @@ class ProtocolHandlerTest {
     }
 
     private static final class RecordingListener implements FromRadioListener {
-        // Храним только минимальные срезы данных, чтобы тестировать dispatch, а не protobuf-модели целиком.
+        // Keep only the fields needed to verify dispatch, not full protobuf objects.
         private final AtomicInteger eventsSeen = new AtomicInteger();
         private final AtomicInteger myNodeNum = new AtomicInteger();
         private final AtomicInteger nodeNum = new AtomicInteger();

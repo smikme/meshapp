@@ -47,12 +47,11 @@ import java.util.Locale;
 import java.util.Map;
 
 /**
- * Самостоятельное окно редактирования KV-хранилища Lua-скрипта.
+ * Standalone editor window for a Lua script's KV storage.
  * <p>
- * Окно открывается из списка скриптов MeshApp IDE и работает только с
- * key-value данными конкретного скрипта. Позволяет просматривать всю KV-базу,
- * фильтровать записи по ключу и значению, добавлять новые пары, изменять
- * существующие ключи/значения и удалять записи.
+ * Opened from the MeshApp IDE script list, the window is scoped to one script's
+ * key-value data. It supports browsing the full KV store, filtering by key or
+ * value, adding pairs, editing existing entries, and deleting entries.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -86,12 +85,12 @@ public final class LuaKvEditorWindow {
     }
 
     /**
-     * Открывает самостоятельное окно KV-редактора для указанного Lua-скрипта.
+     * Opens the standalone KV editor for a Lua script.
      * <p>
-     * Если окно для этого скрипта уже открыто, оно обновляет заголовок/данные
-     * и выводится на передний план вместо создания второго экземпляра.
+     * If that script already has an open editor, its title and data are refreshed
+     * and the existing window is brought forward.
      *
-     * @param script скрипт, KV-хранилище которого нужно открыть
+     * @param script script whose KV storage should be opened
      */
     public static void showWindow(LuaScript script) {
         if (script == null || script.getId() <= 0) {

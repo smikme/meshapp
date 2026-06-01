@@ -10,8 +10,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Оркестратор нативных оконных эффектов.
- * Единая точка входа для Mica (Windows) и vibrancy (macOS).
+ * Coordinates native window treatments across supported desktop platforms.
+ * This is the single entry point for Windows Mica, macOS vibrancy, and
+ * platform-specific title bar state.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -26,22 +27,23 @@ public final class NativeWindowHelper {
     private static boolean seamlessActive = false;
 
     /**
-     * Вызвать ДО stage.show(). Устанавливает StageStyle для кастомного title bar.
+     * Prepares the stage before {@link Stage#show()} by choosing the window
+     * style needed by the custom title bar.
      * <p>
-     * Windows и macOS: TRANSPARENT — кастомный title bar + нативный backdrop.
-     * Linux: UNDECORATED — убирает нативную рамку ОС, оставляя только кастомный title bar.
-     * Прочие ОС: по умолчанию (DECORATED).
+     * Windows and macOS use a transparent stage so the native backdrop can show
+     * through the custom frame. Linux uses an undecorated stage to remove the
+     * operating-system frame while keeping the custom title bar. Other platforms
+     * retain the default decorated style.
      */
     public static void prepareStage(Stage stage) {
-        // Windows 10: инициализировать undocumented uxtheme dark mode support
-        // Должен быть вызван один раз до создания окна
+        // Windows 10 needs the undocumented uxtheme dark-mode hook before the first window is created.
         if (OsDetect.isWindows()) {
             try { NativeWinWindowControl.initDarkModeSupport(); }
             catch (Throwable t) { log.warn("initDarkModeSupport failed", t); }
         }
 
         if (AppPreferences.isDisableEffectsEffective()) {
-            // Выключены эффекты оформления: стандартный DECORATED стиль ОС
+            // Native effects are disabled, so keep the standard decorated OS frame.
             return;
         }
         if (OsDetect.supportsSeamlessFrame()) {
@@ -52,7 +54,8 @@ public final class NativeWindowHelper {
     }
 
     /**
-     * Вызвать ПОСЛЕ stage.show(). Применяет нативные backdrop-эффекты и CSS pseudo-classes.
+     * Applies native backdrop effects and the matching CSS pseudo-classes after
+     * {@link Stage#show()} has created the underlying platform window.
      */
     public static void applyNativeEffects(Stage stage, boolean isDark) {
         if (stage.getScene() == null || stage.getScene().getRoot() == null) {
@@ -60,11 +63,11 @@ public final class NativeWindowHelper {
             return;
         }
 
-        // Выключены эффекты оформления — без backdrop эффектов
+        // With effects disabled, only keep the theme state in sync.
         if (AppPreferences.isDisableEffectsEffective()) {
             setSeamlessState(stage, false);
             setThemeState(stage, isDark);
-            // Windows: установить тёмный/светлый title bar в нативном режиме
+            // Windows still needs its native title bar tint updated in decorated mode.
             if (OsDetect.isWindows()) {
                 try {
                     var ctrl = new NativeWinWindowControl(stage);
@@ -85,9 +88,8 @@ public final class NativeWindowHelper {
                     var ctrl = new NativeWinWindowControl(stage);
                     seamless = ctrl.prepareMicaWindow(isDark);
                     if (seamless) {
-                        // Первый кадр у transparent stage иногда остаётся opaque
-                        // до следующего явного repaint. Принудительно обновляем
-                        // CSS и DWM после применения backdrop.
+                        // The first frame of a transparent stage can remain opaque until the next repaint.
+                        // Force both JavaFX CSS/layout and DWM to refresh after the backdrop is attached.
                         stage.getScene().setFill(Color.TRANSPARENT);
                         var root = stage.getScene().getRoot();
                         root.applyCss();
@@ -106,10 +108,10 @@ public final class NativeWindowHelper {
                     seamless = ctrl.applyVisualEffect(isDark);
                     ctrl.setDarkMode(isDark);
                     ctrl.makeVisibleInAppSwitcher();
-                    // Повторить с задержкой — JavaFX может перезаписывать свойства NSWindow
+                    // JavaFX can rewrite NSWindow attributes, so repeat this on the next pulse.
                     Platform.runLater(ctrl::makeVisibleInAppSwitcher);
                 }
-                default -> { /* Unknown OS / Linux: без нативных эффектов */ }
+                default -> { /* Unknown OS or Linux: no native effects are available. */ }
             }
         } catch (Throwable t) {
             log.warn("Не удалось применить нативные эффекты окна", t);
@@ -129,19 +131,19 @@ public final class NativeWindowHelper {
             });
         }
 
-        // Для seamless режима — прозрачный фон сцены, чтобы backdrop просвечивал
+        // Seamless mode needs a transparent scene so the native backdrop remains visible.
         if (seamless) {
             stage.getScene().setFill(Color.TRANSPARENT);
         }
     }
 
     /**
-     * Вызывается при смене темы (light ↔ dark). Обновляет нативные атрибуты.
+     * Refreshes native window attributes after the application theme changes.
      */
     public static void updateTheme(Stage stage, boolean isDark) {
         if (stage == null || !stage.isShowing()) { return; }
 
-        // Обновить CSS pseudo-class для light/dark
+        // Keep CSS theme pseudo-classes in sync with the native title bar.
         setThemeState(stage, isDark);
 
         try {

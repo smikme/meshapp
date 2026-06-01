@@ -6,11 +6,11 @@ import com.meshtastic.client.themes.TypographyManager;
 import com.meshtastic.client.utils.SystemForm;
 
 /**
- * Точка входа формы чата, зарегистрированная в боковом меню приложения.
+ * Chat form entry point registered in the application's side menu.
  *
- * <p>Класс намеренно содержит только жизненный цикл формы. Отрисовка,
- * пагинация сообщений, обработка запросов и привязка данных вынесены
- * в пакетные слои, от которых он наследуется.
+ * <p>This class intentionally keeps only the form lifecycle. Rendering, message
+ * pagination, request handling, and data binding live in the package-level
+ * layers it extends.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -26,7 +26,7 @@ public class FormChat extends FormChatData {
     public void formInit() {
         ConnectionManager.getInstance().addListener(connectionListener);
         TypographyManager.chatFontSizeProperty().addListener(chatFontSizeListener);
-        // Загрузить сохранённые счётчики прочитанных сообщений из БД
+        // Load persisted read counters from the database.
         lastReadCounts.putAll(MessageDbService.getInstance().loadAllReadCounts(currentOwnerNodeId()));
         rebindState();
     }

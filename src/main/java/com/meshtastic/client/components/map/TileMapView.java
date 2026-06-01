@@ -54,22 +54,21 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
 /**
- * JavaFX-компонент OSM-карты с поддержкой онлайн-тайлов, локального кэша,
- * внешнего каталога оффлайн-тайлов и пользовательских оверлеев.
+ * JavaFX OSM map component with online tiles, a local cache, an external
+ * offline tile directory, and custom overlays.
  * <p>
- * Компонент сам управляет загрузкой тайлов, масштабированием, сдвигом карты,
- * ночным режимом, маркерами нод, измерением расстояния, выделением области
- * и визуализацией трейсов.
+ * The component owns tile loading, zooming, panning, night mode, node markers,
+ * distance measurement, area selection, and trace visualization.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class TileMapView extends StackPane {
 
-    /** Размер одного OSM-тайла в пикселях. */
+    /** Size of one OSM tile, in pixels. */
     public static final int TILE_SIZE = 256;
-    /** Минимальный поддерживаемый масштаб карты. */
+    /** Minimum supported map zoom level. */
     public static final int MIN_ZOOM = 1;
-    /** Максимальный поддерживаемый масштаб карты. */
+    /** Maximum supported map zoom level. */
     public static final int MAX_ZOOM = 19;
 
     private static final double MAX_LATITUDE = 85.05112878;
@@ -151,8 +150,8 @@ public class TileMapView extends StackPane {
     private Consumer<MapMarker> markerClickListener = marker -> {};
 
     /**
-     * Создаёт карту и настраивает обработчики мыши для сдвига, масштабирования,
-     * измерений и выделения прямоугольной области.
+     * Creates the map and wires mouse handlers for panning, zooming,
+     * measurements, and rectangular area selection.
      */
     public TileMapView() {
         getStyleClass().add("tile-map-view");
@@ -266,10 +265,10 @@ public class TileMapView extends StackPane {
     }
 
     /**
-     * Устанавливает получатель краткого статуса карты: масштаб, количество тайлов,
-     * онлайн/оффлайн-режим и ночной режим.
+     * Sets the listener that receives the compact map status: zoom, tile count,
+     * online/offline mode, and night mode.
      *
-     * @param statusListener обработчик текста статуса
+     * @param statusListener receives status text
      */
     public void setStatusListener(Consumer<String> statusListener) {
         this.statusListener = statusListener != null ? statusListener : text -> {};
@@ -277,18 +276,18 @@ public class TileMapView extends StackPane {
     }
 
     /**
-     * Устанавливает получатель координат точки под указателем мыши.
+     * Sets the listener that receives the geographic point under the mouse pointer.
      *
-     * @param pointerListener обработчик географической точки
+     * @param pointerListener receives geographic points
      */
     public void setPointerListener(Consumer<GeoPoint> pointerListener) {
         this.pointerListener = pointerListener != null ? pointerListener : point -> {};
     }
 
     /**
-     * Устанавливает получатель текста состояния линейки.
+     * Sets the listener that receives the distance-measurement status text.
      *
-     * @param measureListener обработчик текста измерения
+     * @param measureListener receives measurement text
      */
     public void setMeasureListener(Consumer<String> measureListener) {
         this.measureListener = measureListener != null ? measureListener : text -> {};
@@ -296,9 +295,9 @@ public class TileMapView extends StackPane {
     }
 
     /**
-     * Устанавливает получатель текста состояния выделенной области.
+     * Sets the listener that receives the selected-area status text.
      *
-     * @param areaSelectionListener обработчик текста по области
+     * @param areaSelectionListener receives area-selection text
      */
     public void setAreaSelectionListener(Consumer<String> areaSelectionListener) {
         this.areaSelectionListener = areaSelectionListener != null ? areaSelectionListener : text -> {};
@@ -306,20 +305,20 @@ public class TileMapView extends StackPane {
     }
 
     /**
-     * Устанавливает обработчик клика по маркеру ноды.
+     * Sets the handler invoked when a node marker is clicked.
      *
-     * @param markerClickListener обработчик выбранного маркера
+     * @param markerClickListener receives the selected marker
      */
     public void setMarkerClickListener(Consumer<MapMarker> markerClickListener) {
         this.markerClickListener = markerClickListener != null ? markerClickListener : marker -> {};
     }
 
     /**
-     * Центрирует карту в указанной точке и применяет масштаб.
+     * Centers the map at the given point and applies the requested zoom level.
      *
-     * @param latitude  широта центра
-     * @param longitude долгота центра
-     * @param zoom      масштаб OSM
+     * @param latitude  center latitude
+     * @param longitude center longitude
+     * @param zoom      OSM zoom level
      */
     public void setView(double latitude, double longitude, int zoom) {
         this.centerLatitude = clampLatitude(latitude);
@@ -328,51 +327,51 @@ public class TileMapView extends StackPane {
         render();
     }
 
-    /** @return широта текущего центра карты */
+    /** @return latitude of the current map center */
     public double getCenterLatitude() {
         return centerLatitude;
     }
 
-    /** @return долгота текущего центра карты */
+    /** @return longitude of the current map center */
     public double getCenterLongitude() {
         return centerLongitude;
     }
 
-    /** @return текущий масштаб OSM */
+    /** @return current OSM zoom level */
     public int getZoom() {
         return zoom;
     }
 
-    /** Увеличивает масштаб относительно центра видимой области. */
+    /** Zooms in around the center of the visible area. */
     public void zoomIn() {
         zoomAround(getWidth() / 2.0, getHeight() / 2.0, zoom + 1);
     }
 
-    /** Уменьшает масштаб относительно центра видимой области. */
+    /** Zooms out around the center of the visible area. */
     public void zoomOut() {
         zoomAround(getWidth() / 2.0, getHeight() / 2.0, zoom - 1);
     }
 
     /**
-     * Включает или выключает режим использования только локальных тайлов.
+     * Enables or disables the mode that uses only local tiles.
      *
-     * @param offlineOnly {@code true}, чтобы не обращаться к OSM по сети
+     * @param offlineOnly {@code true} to avoid network requests to OSM
      */
     public void setOfflineOnly(boolean offlineOnly) {
         this.offlineOnly = offlineOnly;
         render();
     }
 
-    /** @return {@code true}, если карта использует только локальные тайлы */
+    /** @return {@code true} when the map is using local tiles only */
     public boolean isOfflineOnly() {
         return offlineOnly;
     }
 
     /**
-     * Включает ночный режим карты. Ночной режим преобразует только тайлы,
-     * не затрагивая маркеры, трейсы, линейку и выделенную область.
+     * Enables map night mode. Night mode transforms tiles only; markers,
+     * traces, the ruler, and the selected area are left unchanged.
      *
-     * @param nightMode {@code true}, чтобы отображать тайлы в ночной палитре
+     * @param nightMode {@code true} to render tiles with the night palette
      */
     public void setNightMode(boolean nightMode) {
         this.nightMode = nightMode;
@@ -386,15 +385,15 @@ public class TileMapView extends StackPane {
         render();
     }
 
-    /** @return {@code true}, если включён ночной режим тайлов */
+    /** @return {@code true} when tile night mode is enabled */
     public boolean isNightMode() {
         return nightMode;
     }
 
     /**
-     * Устанавливает внешний каталог оффлайн-тайлов формата {@code z/x/y.png|jpg|jpeg}.
+     * Sets the external offline tile directory in {@code z/x/y.png|jpg|jpeg} format.
      *
-     * @param externalTileRoot корневой каталог тайлов или {@code null}
+     * @param externalTileRoot tile root directory, or {@code null}
      */
     public void setExternalTileRoot(Path externalTileRoot) {
         this.externalTileRoot = externalTileRoot;
@@ -403,16 +402,16 @@ public class TileMapView extends StackPane {
         render();
     }
 
-    /** @return текущий внешний каталог тайлов или {@code null} */
+    /** @return current external tile directory, or {@code null} */
     public Path getExternalTileRoot() {
         return externalTileRoot;
     }
 
     /**
-     * Включает или выключает режим измерения расстояния.
-     * При включении режим выделения области отключается.
+     * Enables or disables distance-measurement mode.
+     * Enabling it turns off area-selection mode.
      *
-     * @param measuring {@code true}, чтобы клики по карте добавляли точки линейки
+     * @param measuring {@code true} to add ruler points with map clicks
      */
     public void setMeasuring(boolean measuring) {
         this.measuring = measuring;
@@ -425,12 +424,12 @@ public class TileMapView extends StackPane {
         updateAreaOverlay();
     }
 
-    /** @return {@code true}, если активна линейка */
+    /** @return {@code true} when the ruler is active */
     public boolean isMeasuring() {
         return measuring;
     }
 
-    /** Очищает все точки линейки и обновляет оверлей измерения. */
+    /** Clears all ruler points and refreshes the measurement overlay. */
     public void clearMeasure() {
         measurePoints.clear();
         updateMeasureOverlay();
@@ -438,10 +437,10 @@ public class TileMapView extends StackPane {
     }
 
     /**
-     * Включает или выключает режим выделения прямоугольной области.
-     * При включении линейка отключается.
+     * Enables or disables rectangular area-selection mode.
+     * Enabling it turns off the ruler.
      *
-     * @param areaSelectionMode {@code true}, чтобы протягивание мышью выделяло область
+     * @param areaSelectionMode {@code true} to select an area by dragging
      */
     public void setAreaSelectionMode(boolean areaSelectionMode) {
         this.areaSelectionMode = areaSelectionMode;
@@ -455,12 +454,12 @@ public class TileMapView extends StackPane {
         notifyAreaSelection();
     }
 
-    /** @return {@code true}, если активен режим выделения области */
+    /** @return {@code true} when area-selection mode is active */
     public boolean isAreaSelectionMode() {
         return areaSelectionMode;
     }
 
-    /** Очищает выбранную область и её визуальный оверлей. */
+    /** Clears the selected area and its visual overlay. */
     public void clearSelectedArea() {
         selectedArea = null;
         areaSelectionActive = false;
@@ -469,9 +468,9 @@ public class TileMapView extends StackPane {
     }
 
     /**
-     * Заменяет набор маркеров нод на карте.
+     * Replaces the set of node markers displayed on the map.
      *
-     * @param markers маркеры для отображения
+     * @param markers markers to display
      */
     public void setMarkers(List<MapMarker> markers) {
         this.markers = markers != null ? List.copyOf(markers) : List.of();
@@ -479,25 +478,25 @@ public class TileMapView extends StackPane {
     }
 
     /**
-     * Заменяет набор сегментов трейсов.
+     * Replaces the set of trace segments.
      *
-     * @param traceSegments сегменты соединений между нодами
+     * @param traceSegments connection segments between nodes
      */
     public void setTraceSegments(List<TraceSegment> traceSegments) {
         this.traceSegments = traceSegments != null ? List.copyOf(traceSegments) : List.of();
         updateTraceOverlay();
     }
 
-    /** Скрывает все трейсы с карты. */
+    /** Hides all traces from the map. */
     public void clearTraceSegments() {
         this.traceSegments = List.of();
         updateTraceOverlay();
     }
 
     /**
-     * Подбирает центр и масштаб так, чтобы выбранные трейсы поместились на карту.
+     * Chooses a center and zoom level that fit the selected traces on the map.
      *
-     * @return {@code true}, если есть координаты для масштабирования
+     * @return {@code true} if there are coordinates to fit
      */
     public boolean fitTraceSegments() {
         if (traceSegments.isEmpty()) {
@@ -551,9 +550,9 @@ public class TileMapView extends StackPane {
     }
 
     /**
-     * Подбирает центр и масштаб так, чтобы все маркеры нод поместились на карту.
+     * Chooses a center and zoom level that fit all node markers on the map.
      *
-     * @return {@code true}, если есть маркеры для масштабирования
+     * @return {@code true} if there are markers to fit
      */
     public boolean fitMarkers() {
         if (markers.isEmpty()) {
@@ -593,36 +592,36 @@ public class TileMapView extends StackPane {
         return true;
     }
 
-    /** @return количество тайлов, видимых в текущем viewport */
+    /** @return number of tiles visible in the current viewport */
     public int visibleTileCount() {
         return visibleTileKeys().size();
     }
 
     /**
-     * Возвращает количество тайлов, которые будут загружены для выбранной области.
+     * Returns the number of tiles that would be downloaded for the selected area.
      */
     public long downloadTileCount() {
         return downloadTilePlan().totalTiles();
     }
 
-    /** @return {@code true}, если пользователь явно выделил область для загрузки */
+    /** @return {@code true} if the user explicitly selected an area for download */
     public boolean hasSelectedArea() {
         return selectedArea != null;
     }
 
-    /** @return путь к встроенному локальному кэшу тайлов */
+    /** @return path to the built-in local tile cache */
     public Path cacheRoot() {
         return CACHE_ROOT;
     }
 
     /**
-     * Загружает тайлы во встроенный кэш.
+     * Downloads tiles into the built-in cache.
      * <p>
-     * Скачиваются только тайлы явно выделенной области на всех поддерживаемых масштабах.
-     * План загрузки хранится как набор диапазонов, чтобы большие области не создавали
-     * миллионы объектов ключей в памяти.
+     * Only tiles from the explicitly selected area are downloaded, across all
+     * supported zoom levels. The download plan is stored as tile ranges so large
+     * areas do not materialize millions of key objects in memory.
      *
-     * @param progressConsumer обработчик прогресса загрузки
+     * @param progressConsumer receives download progress updates
      */
     public DownloadHandle downloadSelectedAreaTiles(Consumer<DownloadProgress> progressConsumer) {
         TileDownloadPlan plan = downloadTilePlan();
@@ -719,10 +718,10 @@ public class TileMapView extends StackPane {
     }
 
     /**
-     * Форматирует расстояние в метрах или километрах для отображения в UI.
+     * Formats a distance in meters or kilometers for UI display.
      *
-     * @param meters расстояние в метрах
-     * @return строка вида {@code 250 м} или {@code 1.25 км}
+     * @param meters distance in meters
+     * @return a string such as {@code 250 m} or {@code 1.25 km}
      */
     public static String formatDistance(double meters) {
         if (meters < 1000.0) {
@@ -732,11 +731,11 @@ public class TileMapView extends StackPane {
     }
 
     /**
-     * Считает расстояние между двумя координатами по формуле гаверсинуса.
+     * Computes the distance between two coordinates with the haversine formula.
      *
-     * @param a первая точка
-     * @param b вторая точка
-     * @return расстояние в метрах
+     * @param a first point
+     * @param b second point
+     * @return distance in meters
      */
     public static double distanceMeters(GeoPoint a, GeoPoint b) {
         double radius = 6_371_000.0;
@@ -751,7 +750,7 @@ public class TileMapView extends StackPane {
     }
 
     /**
-     * Обрабатывает прокрутку мыши как масштабирование относительно положения курсора.
+     * Handles mouse-wheel scrolling as zooming around the cursor position.
      */
     private void handleScrollZoom(ScrollEvent event) {
         if (event.getDeltaY() == 0) {
@@ -763,8 +762,8 @@ public class TileMapView extends StackPane {
     }
 
     /**
-     * Меняет масштаб так, чтобы географическая точка под указанной экранной
-     * позицией осталась под курсором после изменения масштаба.
+     * Changes the zoom level while keeping the geographic point under the given
+     * screen position beneath the cursor.
      */
     private void zoomAround(double screenX, double screenY, int targetZoom) {
         int newZoom = clampZoom(targetZoom);
@@ -786,7 +785,7 @@ public class TileMapView extends StackPane {
     }
 
     /**
-     * Перерисовывает все слои карты: тайлы, маркеры, выделение, трейсы и линейку.
+     * Redraws all map layers: tiles, markers, selection, traces, and ruler.
      */
     private void render() {
         if (getWidth() <= 0 || getHeight() <= 0) {
@@ -823,8 +822,8 @@ public class TileMapView extends StackPane {
     }
 
     /**
-     * Создаёт визуальный узел для одного тайла. Если тайл отсутствует локально,
-     * показывает placeholder и запускает фоновую загрузку в онлайн-режиме.
+     * Creates the visual node for a single tile. If the tile is not available
+     * locally, a placeholder is shown and a background download starts in online mode.
      */
     private Node createTileNode(TileKey key) {
         StackPane tile = new StackPane();
@@ -858,9 +857,9 @@ public class TileMapView extends StackPane {
     }
 
     /**
-     * Загружает тайл из памяти, внешнего каталога или встроенного кэша.
+     * Loads a tile from memory, the external directory, or the built-in cache.
      *
-     * @return изображение тайла или {@code null}, если тайл не найден
+     * @return tile image, or {@code null} if the tile was not found
      */
     private Image loadLocalTileImage(TileKey key) {
         Image cached = memoryCache.get(key);
@@ -882,8 +881,8 @@ public class TileMapView extends StackPane {
     }
 
     /**
-     * Возвращает изображение тайла в текущем визуальном режиме.
-     * Для ночного режима используется отдельный кэш преобразованных изображений.
+     * Returns the tile image for the current visual mode.
+     * Night mode uses a separate cache for transformed images.
      */
     private Image displayTileImage(TileKey key, Image image) {
         if (!nightMode) {
@@ -901,8 +900,8 @@ public class TileMapView extends StackPane {
     }
 
     /**
-     * Создаёт ночную версию тайла попиксельным преобразованием палитры.
-     * Такой подход одинаково работает для онлайн, кэшированных и внешних оффлайн-тайлов.
+     * Creates a night-mode tile by transforming the palette pixel by pixel.
+     * This works the same way for online, cached, and external offline tiles.
      */
     private Image createNightTileImage(Image source) {
         PixelReader reader = source.getPixelReader();
@@ -923,8 +922,8 @@ public class TileMapView extends StackPane {
     }
 
     /**
-     * Преобразует цвет пикселя тайла в ночную сине-тёмную палитру,
-     * сохраняя детали дорог и подписей через инверсию яркости.
+     * Converts a tile pixel into the dark blue night palette, preserving road
+     * and label detail through brightness inversion.
      */
     private int nightTileArgb(int argb) {
         int alpha = (argb >>> 24) & 0xff;
@@ -943,14 +942,14 @@ public class TileMapView extends StackPane {
     }
 
     /**
-     * Переводит нормализованную компоненту цвета {@code 0..1} в байт {@code 0..255}.
+     * Converts a normalized color component {@code 0..1} into a {@code 0..255} byte value.
      */
     private int colorByte(double value) {
         return (int) Math.round(clamp(value, 0.0, 1.0) * 255.0);
     }
 
     /**
-     * Планирует фоновую загрузку тайла, если он ещё не загружается и отсутствует локально.
+     * Schedules a background tile download if it is not already loading and is absent locally.
      */
     private void downloadTileIfNeeded(TileKey key) {
         if (inFlightDownloads.contains(key) || hasLocalTile(key)) {
@@ -975,9 +974,9 @@ public class TileMapView extends StackPane {
     }
 
     /**
-     * Загружает один тайл с публичного OSM-сервера и атомарно сохраняет его в локальный кэш.
+     * Downloads one tile from the public OSM server and atomically stores it in the local cache.
      *
-     * @return {@code true}, если тайл доступен локально после выполнения метода
+     * @return {@code true} if the tile is available locally after the method completes
      */
     private boolean downloadTileFromNetwork(TileKey key) throws IOException, InterruptedException {
         Path target = cachePath(key);
@@ -1010,7 +1009,7 @@ public class TileMapView extends StackPane {
     }
 
     /**
-     * Формирует User-Agent для запросов к OSM с версией приложения.
+     * Builds the User-Agent used for OSM requests, including the application version.
      */
     private String userAgent() {
         String version = MeshApp.APPLICATION_VERSION != null ? MeshApp.APPLICATION_VERSION : "dev";
@@ -1018,14 +1017,14 @@ public class TileMapView extends StackPane {
     }
 
     /**
-     * Проверяет наличие тайла во внешнем каталоге или встроенном кэше.
+     * Checks whether a tile exists in the external directory or the built-in cache.
      */
     private boolean hasLocalTile(TileKey key) {
         return findLocalTile(key) != null;
     }
 
     /**
-     * Ищет тайл сначала во внешнем каталоге, затем во встроенном кэше.
+     * Looks for a tile first in the external directory, then in the built-in cache.
      */
     private Path findLocalTile(TileKey key) {
         Path external = findTileInRoot(externalTileRoot, key);
@@ -1036,7 +1035,7 @@ public class TileMapView extends StackPane {
     }
 
     /**
-     * Ищет файл тайла в каталоге формата {@code z/x/y.png|jpg|jpeg}.
+     * Finds a tile file in a directory laid out as {@code z/x/y.png|jpg|jpeg}.
      */
     private Path findTileInRoot(Path root, TileKey key) {
         if (root == null) {
@@ -1053,7 +1052,7 @@ public class TileMapView extends StackPane {
     }
 
     /**
-     * Возвращает путь, по которому тайл должен храниться во встроенном кэше.
+     * Returns the path where the tile should be stored in the built-in cache.
      */
     private Path cachePath(TileKey key) {
         return CACHE_ROOT
@@ -1063,7 +1062,7 @@ public class TileMapView extends StackPane {
     }
 
     /**
-     * Рассчитывает ключи тайлов, которые пересекают текущий viewport карты.
+     * Computes the tile keys intersecting the current map viewport.
      */
     private List<TileKey> visibleTileKeys() {
         if (getWidth() <= 0 || getHeight() <= 0) {
@@ -1094,7 +1093,7 @@ public class TileMapView extends StackPane {
     }
 
     /**
-     * Рассчитывает план загрузки тайлов без материализации каждого ключа.
+     * Builds a tile-download plan without materializing every key.
      */
     private TileDownloadPlan downloadTilePlan() {
         if (selectedArea == null) {
@@ -1104,7 +1103,7 @@ public class TileMapView extends StackPane {
     }
 
     /**
-     * Рассчитывает диапазоны тайлов, пересекающих географическую область.
+     * Computes tile ranges that intersect a geographic area.
      */
     private static TileDownloadPlan areaTilePlan(GeoBounds area, int minZoom, int maxZoom) {
         if (area == null) {
@@ -1139,14 +1138,14 @@ public class TileMapView extends StackPane {
     }
 
     /**
-     * Ограничивает индекс тайла валидным диапазоном для масштаба.
+     * Clamps a tile index to the valid range for the zoom level.
      */
     private static int clampTileIndex(int value, int tileCount) {
         return Math.max(0, Math.min(tileCount - 1, value));
     }
 
     /**
-     * Перерисовывает слой маркеров, оставляя только валидные и близкие к viewport ноды.
+     * Redraws the marker layer, keeping only valid nodes near the viewport.
      */
     private void updateMarkerOverlay() {
         markerLayer.getChildren().clear();
@@ -1171,7 +1170,7 @@ public class TileMapView extends StackPane {
     }
 
     /**
-     * Перерисовывает текущую выбранную область и активное прямоугольное выделение.
+     * Redraws the current selected area and the active rectangular selection.
      */
     private void updateAreaOverlay() {
         areaLayer.getChildren().clear();
@@ -1193,7 +1192,7 @@ public class TileMapView extends StackPane {
     }
 
     /**
-     * Перерисовывает сегменты трейсов, подписи SNR/хопов и стрелки направления.
+     * Redraws trace segments, SNR/hop labels, and direction arrows.
      */
     private void updateTraceOverlay() {
         traceLayer.getChildren().clear();
@@ -1253,8 +1252,8 @@ public class TileMapView extends StackPane {
     }
 
     /**
-     * Выбирает стабильную сторону смещения для линии трейса.
-     * Это позволяет прямому и обратному направлениям не накладываться друг на друга.
+     * Chooses a stable offset side for a trace line so forward and reverse
+     * directions do not overlap.
      */
     private boolean shouldFlipTraceNormal(TraceSegment segment) {
         int latCompare = Double.compare(segment.from().latitude(), segment.to().latitude());
@@ -1269,9 +1268,9 @@ public class TileMapView extends StackPane {
     }
 
     /**
-     * Добавляет стрелку направления на сегмент трейса.
+     * Adds a direction arrow to a trace segment.
      *
-     * @param position доля длины сегмента, где будет расположена стрелка
+     * @param position fraction of the segment length where the arrow is placed
      */
     private void addTraceArrow(double x1, double y1, double x2, double y2, double position, String color) {
         double x = x1 + (x2 - x1) * position;
@@ -1286,14 +1285,14 @@ public class TileMapView extends StackPane {
     }
 
     /**
-     * Возвращает цвет линии трейса для прямого или обратного направления.
+     * Returns the trace-line color for the forward or reverse direction.
      */
     private String traceColor(boolean reverse) {
         return reverse ? TRACE_REVERSE_COLOR : TRACE_FORWARD_COLOR;
     }
 
     /**
-     * Строит экранный прямоугольник для географических границ выбранной области.
+     * Builds a screen rectangle for the geographic bounds of the selected area.
      */
     private Rectangle rectangleForArea(GeoBounds area) {
         Point2D topLeft = geoToScreen(area.north(), area.west());
@@ -1302,7 +1301,7 @@ public class TileMapView extends StackPane {
     }
 
     /**
-     * Создаёт JavaFX-прямоугольник по двум экранным точкам независимо от направления drag.
+     * Creates a JavaFX rectangle from two screen points, regardless of drag direction.
      */
     private Rectangle rectangleForScreenBounds(double x1, double y1, double x2, double y2) {
         double x = Math.min(x1, x2);
@@ -1315,7 +1314,7 @@ public class TileMapView extends StackPane {
     }
 
     /**
-     * Завершает выделение области: сохраняет географические границы и масштабирует карту к ним.
+     * Completes area selection by storing geographic bounds and fitting the map to them.
      */
     private void finishAreaSelection() {
         double width = Math.abs(areaEndX - areaStartX);
@@ -1334,7 +1333,7 @@ public class TileMapView extends StackPane {
     }
 
     /**
-     * Подбирает центр и масштаб так, чтобы выбранная область поместилась в viewport.
+     * Chooses a center and zoom level that fit the selected area in the viewport.
      */
     private void fitArea(GeoBounds area) {
         if (getWidth() <= 0 || getHeight() <= 0) {
@@ -1374,7 +1373,7 @@ public class TileMapView extends StackPane {
     }
 
     /**
-     * Создаёт круглый маркер ноды с адаптивным размером текста и подсказкой координат.
+     * Creates a circular node marker with adaptive text sizing and a coordinate tooltip.
      */
     private StackPane createMarkerNode(MapMarker marker) {
         String markerText = sanitizeMarkerText(marker.shortTitle());
@@ -1411,8 +1410,8 @@ public class TileMapView extends StackPane {
     }
 
     /**
-     * Подготавливает короткий текст маркера: пустое значение заменяется точкой,
-     * длинное значение ограничивается четырьмя Unicode-символами.
+     * Prepares compact marker text: empty values become a dot, and long values are
+     * limited to four Unicode characters.
      */
     private String sanitizeMarkerText(String text) {
         if (text == null || text.isBlank()) {
@@ -1428,7 +1427,7 @@ public class TileMapView extends StackPane {
     }
 
     /**
-     * Подбирает максимальный размер шрифта, при котором текст помещается внутри маркера.
+     * Finds the largest font size that lets the text fit inside the marker.
      */
     private double fitMarkerFontSize(String text) {
         if (text == null || text.isBlank()) {
@@ -1446,7 +1445,7 @@ public class TileMapView extends StackPane {
     }
 
     /**
-     * Перерисовывает линию измерения, точки кликов и подписи расстояний между соседними точками.
+     * Redraws the measurement line, clicked points, and distance labels between adjacent points.
      */
     private void updateMeasureOverlay() {
         measureLayer.getChildren().clear();
@@ -1487,7 +1486,7 @@ public class TileMapView extends StackPane {
     }
 
     /**
-     * Отправляет наружу актуальный текст статуса карты.
+     * Publishes the current map status text.
      */
     private void notifyStatus() {
         int tileCount = visibleTileCount();
@@ -1500,7 +1499,7 @@ public class TileMapView extends StackPane {
     }
 
     /**
-     * Отправляет наружу актуальное состояние линейки и суммарную длину маршрута.
+     * Publishes the current ruler state and total route length.
      */
     private void notifyMeasure() {
         if (measurePoints.isEmpty()) {
@@ -1523,7 +1522,7 @@ public class TileMapView extends StackPane {
     }
 
     /**
-     * Отправляет наружу состояние выделения и размеры выбранной области.
+     * Publishes the selection state and selected-area size.
      */
     private void notifyAreaSelection() {
         if (areaSelectionActive) {
@@ -1551,7 +1550,7 @@ public class TileMapView extends StackPane {
     }
 
     /**
-     * Переводит экранные координаты внутри компонента в широту и долготу.
+     * Converts screen coordinates inside the component to latitude and longitude.
      */
     private GeoPoint screenToGeo(double screenX, double screenY) {
         double centerX = lonToPixelX(centerLongitude, zoom);
@@ -1562,7 +1561,7 @@ public class TileMapView extends StackPane {
     }
 
     /**
-     * Переводит географические координаты в экранную точку внутри компонента.
+     * Converts geographic coordinates to a screen point inside the component.
      */
     private Point2D geoToScreen(double latitude, double longitude) {
         double centerX = lonToPixelX(centerLongitude, zoom);
@@ -1573,7 +1572,7 @@ public class TileMapView extends StackPane {
     }
 
     /**
-     * Рассчитывает пиксельные границы всех маркеров для заданного масштаба.
+     * Computes the pixel bounds of all markers at the given zoom level.
      */
     private Bounds markerBounds(int candidateZoom) {
         List<GeoPoint> points = new ArrayList<>();
@@ -1584,7 +1583,7 @@ public class TileMapView extends StackPane {
     }
 
     /**
-     * Рассчитывает пиксельные границы произвольного набора географических точек.
+     * Computes the pixel bounds of an arbitrary set of geographic points.
      */
     private Bounds pointBounds(List<GeoPoint> points, int candidateZoom) {
         double minX = Double.POSITIVE_INFINITY;
@@ -1605,7 +1604,7 @@ public class TileMapView extends StackPane {
     }
 
     /**
-     * Нормализует центр карты в допустимые диапазоны широты и долготы.
+     * Normalizes the map center into the allowed latitude and longitude ranges.
      */
     private void normalizeCenter() {
         centerLatitude = clampLatitude(centerLatitude);
@@ -1613,8 +1612,7 @@ public class TileMapView extends StackPane {
     }
 
     /**
-     * Проверяет координаты на допустимый диапазон и отбрасывает значение {@code 0,0}
-     * как отсутствие координат у ноды.
+     * Validates coordinate ranges and treats {@code 0,0} as missing node coordinates.
      */
     private static boolean isValidCoordinate(double latitude, double longitude) {
         return (latitude != 0 || longitude != 0)
@@ -1625,7 +1623,7 @@ public class TileMapView extends StackPane {
     }
 
     /**
-     * Переводит долготу в глобальную пиксельную координату Web Mercator.
+     * Converts longitude to a global Web Mercator pixel X coordinate.
      */
     private static double lonToPixelX(double longitude, int zoom) {
         double worldSize = worldSize(zoom);
@@ -1633,7 +1631,7 @@ public class TileMapView extends StackPane {
     }
 
     /**
-     * Переводит широту в глобальную пиксельную координату Web Mercator.
+     * Converts latitude to a global Web Mercator pixel Y coordinate.
      */
     private static double latToPixelY(double latitude, int zoom) {
         double lat = Math.toRadians(clampLatitude(latitude));
@@ -1643,7 +1641,7 @@ public class TileMapView extends StackPane {
     }
 
     /**
-     * Переводит глобальную пиксельную X-координату Web Mercator в долготу.
+     * Converts a global Web Mercator pixel X coordinate to longitude.
      */
     private static double pixelXToLon(double pixelX, int zoom) {
         double worldSize = worldSize(zoom);
@@ -1655,7 +1653,7 @@ public class TileMapView extends StackPane {
     }
 
     /**
-     * Переводит глобальную пиксельную Y-координату Web Mercator в широту.
+     * Converts a global Web Mercator pixel Y coordinate to latitude.
      */
     private static double pixelYToLat(double pixelY, int zoom) {
         double worldSize = worldSize(zoom);
@@ -1665,14 +1663,14 @@ public class TileMapView extends StackPane {
     }
 
     /**
-     * Возвращает размер мира Web Mercator в пикселях на указанном масштабе.
+     * Returns the Web Mercator world size in pixels at the given zoom level.
      */
     private static double worldSize(int zoom) {
         return TILE_SIZE * (double) (1 << zoom);
     }
 
     /**
-     * Ограничивает широту диапазоном, поддерживаемым Web Mercator.
+     * Clamps latitude to the range supported by Web Mercator.
      */
     private static double clampLatitude(double latitude) {
         if (Double.isNaN(latitude)) {
@@ -1682,7 +1680,7 @@ public class TileMapView extends StackPane {
     }
 
     /**
-     * Нормализует долготу в диапазон {@code -180..180}.
+     * Normalizes longitude into the {@code -180..180} range.
      */
     private static double normalizeLongitude(double longitude) {
         if (Double.isNaN(longitude)) {
@@ -1693,25 +1691,25 @@ public class TileMapView extends StackPane {
     }
 
     /**
-     * Ограничивает масштаб поддерживаемым диапазоном OSM.
+     * Clamps zoom to the supported OSM range.
      */
     private static int clampZoom(int zoom) {
         return Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom));
     }
 
     /**
-     * Ограничивает число указанным диапазоном.
+     * Clamps a number to the given range.
      */
     private static double clamp(double value, double min, double max) {
         return Math.max(min, Math.min(max, value));
     }
 
     /**
-     * Форматирует координату для статусной строки карты.
+     * Formats coordinates for the map status line.
      *
-     * @param latitude  широта
-     * @param longitude долгота
-     * @return строка с шестью знаками после запятой
+     * @param latitude  latitude
+     * @param longitude longitude
+     * @return string with six fractional digits
      */
     public static String formatCoordinate(double latitude, double longitude) {
         return String.format(Locale.ROOT, "%.6f, %.6f", latitude, longitude);
@@ -1722,35 +1720,35 @@ public class TileMapView extends StackPane {
     }
 
     /**
-     * Географическая точка в градусах WGS84.
+     * Geographic point in WGS84 degrees.
      *
-     * @param latitude  широта
-     * @param longitude долгота
+     * @param latitude  latitude
+     * @param longitude longitude
      */
     public record GeoPoint(double latitude, double longitude) {
     }
 
     /**
-     * Прогресс загрузки тайлов выбранной области.
+     * Download progress for the selected area's tiles.
      *
-     * @param completed количество обработанных тайлов
-     * @param total     общее количество тайлов
-     * @param available количество тайлов, которые доступны локально после обработки
-     * @param message   пользовательский текст прогресса
-     * @param state     текущее состояние загрузки
+     * @param completed number of processed tiles
+     * @param total     total number of tiles
+     * @param available number of tiles available locally after processing
+     * @param message   user-facing progress message
+     * @param state     current download state
      */
     public record DownloadProgress(long completed, long total, long available, String message, DownloadState state) {
     }
 
     /**
-     * Состояние фоновой загрузки тайлов.
+     * State of the background tile download.
      */
     public enum DownloadState {
         RUNNING, CANCELLED, COMPLETED
     }
 
     /**
-     * Управляет активной фоновой загрузкой тайлов.
+     * Controls the active background tile download.
      */
     public static final class DownloadHandle {
         private final AtomicBoolean paused = new AtomicBoolean(false);
@@ -1806,17 +1804,17 @@ public class TileMapView extends StackPane {
     }
 
     /**
-     * Один визуальный сегмент трейса между двумя нодами с координатами.
+     * One visual trace segment between two nodes with coordinates.
      *
-     * @param from       начальная точка сегмента
-     * @param to         конечная точка сегмента
-     * @param fromTitle  имя начальной ноды
-     * @param toTitle    имя конечной ноды
-     * @param traceTitle название целевого трейса
-     * @param signalText подпись сигнала, направления и количества хопов
-     * @param snr        числовой SNR или {@link Double#NaN}, если данных нет
-     * @param reverse    {@code true} для обратного направления
-     * @param traceIndex индекс выбранного трейса для разведения линий
+     * @param from       segment start point
+     * @param to         segment end point
+     * @param fromTitle  start node name
+     * @param toTitle    end node name
+     * @param traceTitle target trace title
+     * @param signalText signal, direction, and hop-count label
+     * @param snr        numeric SNR, or {@link Double#NaN} when unavailable
+     * @param reverse    {@code true} for the reverse direction
+     * @param traceIndex selected trace index, used to spread lines apart
      */
     public record TraceSegment(
             GeoPoint from,
@@ -1832,11 +1830,11 @@ public class TileMapView extends StackPane {
     }
 
     /**
-     * Географические границы прямоугольной области.
+     * Geographic bounds of a rectangular area.
      */
     private record GeoBounds(double north, double south, double west, double east) {
         /**
-         * Создаёт границы из двух произвольных углов прямоугольника.
+         * Creates bounds from any two opposite corners of a rectangle.
          */
         static GeoBounds from(GeoPoint first, GeoPoint second) {
             double north = Math.max(first.latitude(), second.latitude());
@@ -1848,7 +1846,7 @@ public class TileMapView extends StackPane {
     }
 
     /**
-     * План оффлайн-загрузки, представленный диапазонами тайлов вместо полного списка ключей.
+     * Offline-download plan represented as tile ranges instead of a full key list.
      */
     private record TileDownloadPlan(List<TileRange> ranges, long totalTiles) {
         static TileDownloadPlan empty() {
@@ -1861,7 +1859,7 @@ public class TileMapView extends StackPane {
     }
 
     /**
-     * Прямоугольный диапазон тайлов одного масштаба.
+     * Rectangular tile range at a single zoom level.
      */
     private record TileRange(int zoom, int startX, int endX, int startY, int endY) {
         long count() {
@@ -1870,7 +1868,7 @@ public class TileMapView extends StackPane {
     }
 
     /**
-     * Ключ тайла OSM в схеме {@code z/x/y}.
+     * OSM tile key in the {@code z/x/y} scheme.
      */
     private record TileKey(int zoom, int x, int y) {
         private TileKey {
@@ -1881,25 +1879,25 @@ public class TileMapView extends StackPane {
     }
 
     /**
-     * Пиксельные границы набора точек на конкретном масштабе.
+     * Pixel bounds for a set of points at a specific zoom level.
      */
     private record Bounds(double minX, double minY, double maxX, double maxY) {
-        /** @return ширина границ в пикселях */
+        /** @return bounds width in pixels */
         double width() {
             return maxX - minX;
         }
 
-        /** @return высота границ в пикселях */
+        /** @return bounds height in pixels */
         double height() {
             return maxY - minY;
         }
 
-        /** @return X-координата центра границ */
+        /** @return X coordinate of the bounds center */
         double centerX() {
             return minX + width() / 2.0;
         }
 
-        /** @return Y-координата центра границ */
+        /** @return Y coordinate of the bounds center */
         double centerY() {
             return minY + height() / 2.0;
         }

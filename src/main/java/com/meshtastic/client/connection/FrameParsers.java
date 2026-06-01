@@ -1,7 +1,7 @@
 package com.meshtastic.client.connection;
 
 /**
- * Фабрика stream parser-ов для TCP/Serial transport-ов.
+ * Factory for stream parsers used by TCP and Serial transports.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -11,10 +11,10 @@ final class FrameParsers {
     }
 
     /**
-     * Создаёт parser для указанного формата фрейминга.
+     * Creates a parser for the requested framing format.
      *
-     * @param frameFormat формат, выбранный protocol runtime-ом
-     * @return новый parser с пустым внутренним состоянием
+     * @param frameFormat format selected by the protocol runtime
+     * @return fresh parser with empty internal state
      */
     static StreamFrameParser create(FrameFormat frameFormat) {
         return switch (frameFormat) {

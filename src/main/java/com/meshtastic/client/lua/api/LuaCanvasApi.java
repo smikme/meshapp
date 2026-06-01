@@ -26,7 +26,7 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * 2D Canvas API для Lua sandbox.
+ * 2D canvas API exposed to the Lua sandbox.
  */
 public final class LuaCanvasApi {
 
@@ -44,9 +44,9 @@ public final class LuaCanvasApi {
     }
 
     /**
-     * Создает Lua-таблицу {@code mesh.canvas}.
+     * Creates the Lua table for {@code mesh.canvas}.
      *
-     * @return таблица Canvas API
+     * @return canvas API table
      */
     public LuaTable create() {
         LuaTable canvas = new LuaTable();

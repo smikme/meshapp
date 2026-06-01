@@ -17,10 +17,11 @@ import java.util.function.Predicate;
 import java.util.stream.Stream;
 
 /**
- * Общие helper-методы для отображения имён нод и аватаров в чате.
+ * Shared helpers for displaying node names and avatars in chat.
  *
- * <p>Класс отделяет правила выбора отображаемого имени от JavaFX-рендеринга,
- * чтобы фабрика пузырей и другие чат-компоненты не дублировали одинаковые fallback-цепочки.
+ * <p>The class separates display-name selection rules from JavaFX rendering so
+ * the bubble factory and other chat components do not duplicate the same
+ * fallback chains.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -41,10 +42,10 @@ final class ChatNodeDisplayHelper {
     private ChatNodeDisplayHelper() {}
 
     /**
-     * Готовые данные для построения аватара сообщения.
-     *
-     * @param text отображаемый текст внутри аватара
-     * @param color css-цвет фона аватара
+     * Prepared data for building a message avatar.
+ *
+     * @param text  text shown inside the avatar
+     * @param color CSS background color for the avatar
      */
     record AvatarDescriptor(String text, String color) {
         AvatarDescriptor {
@@ -54,19 +55,19 @@ final class ChatNodeDisplayHelper {
     }
 
     /**
-     * Подготовленные данные отправителя для входящего сообщения.
-     *
-     * @param senderName имя над пузырём сообщения
-     * @param avatar     текст и цвет аватара
+     * Prepared sender data for an incoming message.
+ *
+     * @param senderName name shown above the message bubble
+     * @param avatar     avatar text and color
      */
     record IncomingMessagePresentation(String senderName, AvatarDescriptor avatar) {}
 
     /**
-     * Разрешает имя ноды по её номеру.
-     *
-     * @param state состояние устройства
-     * @param nodeNum номер ноды
-     * @return {@code longName}, если он известен, иначе {@code !hex}
+     * Resolves a node name from its node number.
+ *
+     * @param state   device state
+     * @param nodeNum node number
+     * @return {@code longName} when known, otherwise {@code !hex}
      */
     static String resolveNodeName(DeviceState state, int nodeNum) {
         NodeData node = NodeUtils.resolveNode(state, nodeNum);
@@ -77,11 +78,11 @@ final class ChatNodeDisplayHelper {
     }
 
     /**
-     * Разрешает имя отправителя для reply-preview в инпуте.
-     *
-     * @param state состояние устройства
-     * @param msg сообщение
-     * @return {@code "Вы"} для исходящих сообщений, иначе имя отправителя с fallback-цепочкой
+     * Resolves the sender name used in the input reply preview.
+ *
+     * @param state device state
+     * @param msg   message
+     * @return localized self label for outgoing messages, otherwise the sender name with fallbacks
      */
     static String resolveReplySenderName(DeviceState state, MeshMessage msg) {
         return Optional.ofNullable(msg)
@@ -90,11 +91,11 @@ final class ChatNodeDisplayHelper {
     }
 
     /**
-     * Разрешает все данные отправителя, нужные для рендера входящего пузыря.
-     *
-     * @param state состояние устройства
-     * @param msg входящее сообщение
-     * @return имя отправителя и descriptor аватара
+     * Resolves all sender data needed to render an incoming bubble.
+ *
+     * @param state device state
+     * @param msg   incoming message
+     * @return sender name and avatar descriptor
      */
     static IncomingMessagePresentation resolveIncomingMessagePresentation(DeviceState state,
                                                                           MeshMessage msg) {
@@ -113,10 +114,10 @@ final class ChatNodeDisplayHelper {
     }
 
     /**
-     * Разрешает данные аватара для исходящих сообщений.
-     *
-     * @param state состояние устройства
-     * @return descriptor аватара локального пользователя
+     * Resolves avatar data for outgoing messages.
+ *
+     * @param state device state
+     * @return local-user avatar descriptor
      */
     static AvatarDescriptor resolveOutgoingAvatar(DeviceState state) {
         NodeData myNode = state == null ? null : state.getNodeDb().get(state.getMyNodeNum());
@@ -127,11 +128,11 @@ final class ChatNodeDisplayHelper {
     }
 
     /**
-     * Разрешает имя автора реакции с fallback на short name и node id.
-     *
-     * @param state состояние устройства
-     * @param reaction реакция
-     * @return отображаемое имя автора реакции
+     * Resolves a reaction author's display name, falling back to short name and node id.
+ *
+     * @param state    device state
+     * @param reaction reaction
+     * @return displayed reaction author name
      */
     static String resolveReactionSenderDisplayName(DeviceState state, MessageReaction reaction) {
         return Optional.ofNullable(reaction)
@@ -148,14 +149,14 @@ final class ChatNodeDisplayHelper {
     }
 
     /**
-     * Ищет ноду для открытия деталей по клику на аватар.
-     *
-     * <p>Если нода ещё не была загружена в память, метод создаёт bare-node из {@code nodeId}
-     * и пытается обогатить её кэшем.
-     *
-     * @param state состояние устройства
-     * @param nodeId идентификатор ноды
-     * @return найденная или созданная нода, либо {@code null}, если разрешить её нельзя
+     * Finds the node used to open details after an avatar click.
+ *
+     * <p>If the node is not loaded in memory yet, the method creates a bare node
+     * from {@code nodeId} and tries to enrich it from the cache.
+ *
+     * @param state  device state
+     * @param nodeId node identifier
+     * @return found or created node, or {@code null} when it cannot be resolved
      */
     static NodeData resolveNodeForDetails(DeviceState state, String nodeId) {
         return Optional.ofNullable(state)
@@ -171,11 +172,11 @@ final class ChatNodeDisplayHelper {
     }
 
     /**
-     * Разрешает display name входящего сообщения без дублирования fallback-цепочки в UI.
-     *
-     * @param state состояние устройства
-     * @param msg входящее сообщение
-     * @return longName, сохранённое senderName или nodeId
+     * Resolves an incoming message display name without duplicating the fallback chain in the UI.
+ *
+     * @param state device state
+     * @param msg   incoming message
+     * @return longName, stored senderName, or nodeId
      */
     private static String resolveIncomingSenderName(DeviceState state, MeshMessage msg) {
         NodeData senderNode = resolveNode(state, msg.getFromNodeId());
@@ -183,12 +184,12 @@ final class ChatNodeDisplayHelper {
     }
 
     /**
-     * Выбирает первое доступное имя сообщения в порядке приоритета.
-     *
-     * @param senderNode найденная нода отправителя
-     * @param senderName имя, сохранённое вместе с сообщением
-     * @param nodeId идентификатор ноды
-     * @return строка для показа в UI
+     * Selects the first available message name in priority order.
+ *
+     * @param senderNode resolved sender node
+     * @param senderName name stored with the message
+     * @param nodeId     node identifier
+     * @return text shown in the UI
      */
     private static String resolveMessageDisplayName(NodeData senderNode,
                                                     String senderName,
@@ -201,11 +202,11 @@ final class ChatNodeDisplayHelper {
     }
 
     /**
-     * Формирует текст и цвет аватара входящего сообщения.
-     *
-     * @param senderNode найденная нода отправителя
-     * @param nodeId идентификатор ноды
-     * @return descriptor аватара с shortName или хвостом nodeId
+     * Builds avatar text and color for an incoming message.
+ *
+     * @param senderNode resolved sender node
+     * @param nodeId     node identifier
+     * @return avatar descriptor using shortName or the nodeId tail
      */
     private static AvatarDescriptor buildIncomingAvatarDescriptor(NodeData senderNode, String nodeId) {
         return new AvatarDescriptor(
@@ -219,11 +220,11 @@ final class ChatNodeDisplayHelper {
     }
 
     /**
-     * Ищет ноду по {@code nodeId} через общий resolver и сразу отсеивает пустые значения.
-     *
-     * @param state состояние устройства
-     * @param nodeId идентификатор ноды
-     * @return найденная нода или {@code null}
+     * Finds a node by {@code nodeId} through the shared resolver, ignoring blank values.
+ *
+     * @param state  device state
+     * @param nodeId node identifier
+     * @return resolved node, or {@code null}
      */
     private static NodeData resolveNode(DeviceState state, String nodeId) {
         return Optional.ofNullable(nodeId)
@@ -233,10 +234,10 @@ final class ChatNodeDisplayHelper {
     }
 
     /**
-     * Вычисляет стабильный цвет аватара по hash {@code nodeId}.
-     *
-     * @param nodeId идентификатор ноды
-     * @return hex-цвет из фиксированной палитры
+     * Calculates a stable avatar color from the {@code nodeId} hash.
+ *
+     * @param nodeId node identifier
+     * @return hex color from the fixed palette
      */
     private static String avatarColor(String nodeId) {
         return isBlank(nodeId)
@@ -245,10 +246,10 @@ final class ChatNodeDisplayHelper {
     }
 
     /**
-     * Берёт последние символы {@code nodeId}, чтобы получить компактный fallback для аватара.
-     *
-     * @param nodeId идентификатор ноды
-     * @return хвост nodeId длиной до {@value #MAX_AVATAR_TEXT_LENGTH} символов
+     * Uses the last characters of {@code nodeId} as a compact avatar fallback.
+ *
+     * @param nodeId node identifier
+     * @return nodeId tail up to {@value #MAX_AVATAR_TEXT_LENGTH} characters
      */
     private static String nodeIdTail(String nodeId) {
         return isBlank(nodeId)
@@ -257,10 +258,10 @@ final class ChatNodeDisplayHelper {
     }
 
     /**
-     * Нормализует текст аватара: uppercase и ограничение длины.
-     *
-     * @param value исходный текст
-     * @return безопасный текст для маленького круглого аватара
+     * Normalizes avatar text: uppercase with a length cap.
+ *
+     * @param value source text
+     * @return safe text for a small round avatar
      */
     private static String normalizeAvatarText(String value) {
         String normalized = UnicodeTextUtils.sanitize(firstNonBlank(value, UNKNOWN_AVATAR_TEXT))
@@ -269,10 +270,10 @@ final class ChatNodeDisplayHelper {
     }
 
     /**
-     * Возвращает первый непустой кандидат из списка fallback-значений.
-     *
-     * @param values кандидаты в порядке приоритета
-     * @return первое непустое значение или пустая строка
+     * Returns the first non-blank candidate from a fallback list.
+ *
+     * @param values candidates in priority order
+     * @return first non-blank value, or an empty string
      */
     private static String firstNonBlank(String... values) {
         return Stream.of(values)
@@ -285,21 +286,21 @@ final class ChatNodeDisplayHelper {
     }
 
     /**
-     * Проверяет, что строка отсутствует или состоит только из пробелов.
-     *
-     * @param value проверяемое значение
-     * @return {@code true}, если строка blank
+     * Checks whether a string is missing or contains only whitespace.
+ *
+     * @param value value to check
+     * @return {@code true} when the string is blank
      */
     private static boolean isBlank(String value) {
         return value == null || value.isBlank();
     }
 
     /**
-     * Пытается создать bare-node по hex-части nodeId для случаев, когда sender ещё не прогружен.
-     *
-     * @param state состояние устройства
-     * @param nodeId идентификатор ноды
-     * @return bare-node после обогащения кэшем или {@code null}, если nodeId некорректен
+     * Attempts to create a bare node from the hex part of nodeId when the sender is not loaded yet.
+ *
+     * @param state  device state
+     * @param nodeId node identifier
+     * @return cache-enriched bare node, or {@code null} when nodeId is invalid
      */
     private static NodeData createBareNodeCandidate(DeviceState state, String nodeId) {
         if (nodeId.length() < MIN_NODE_ID_LENGTH) {

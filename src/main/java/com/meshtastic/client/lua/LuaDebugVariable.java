@@ -1,11 +1,11 @@
 package com.meshtastic.client.lua;
 
 /**
- * Переменная, показанная в панели отладки MeshApp IDE.
+ * Variable shown in the MeshApp IDE debug panel.
  *
- * @param scope область видимости переменной
- * @param name  имя переменной
- * @param value строковое представление значения
+ * @param scope variable scope
+ * @param name  variable name
+ * @param value string representation of the value
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */

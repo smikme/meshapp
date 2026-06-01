@@ -30,9 +30,9 @@ import com.meshtastic.client.utils.ExternalUrlLauncher;
 import java.util.function.Consumer;
 
 /**
- * In-scene модальная панель — полупрозрачный оверлей с контентом справа.
- * Контент выезжает справа с анимацией slide + fade.
- * Используется для всех встроенных диалогов (confirm, info, error, about).
+ * In-scene modal panel: a translucent overlay with right-side content.
+ * Content enters from the right with slide and fade animation. Used by all
+ * built-in dialogs: confirm, info, error, and about.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -45,10 +45,10 @@ public class ModalPane extends StackPane {
     private Runnable onHidden;
     private boolean dismissOnEscape = true;
 
-    /** Scene-level фильтр: закрытие по клику вне контента */
+    /** Scene-level filter that closes the modal when the user clicks outside the content. */
     private final EventHandler<MouseEvent> sceneClickFilter = e -> {
         if (currentContent != null && isVisible()) {
-            // layoutBounds — только размеры самого Region, без overflow детей и эффектов
+            // layoutBounds covers only the Region itself, excluding child overflow and effects.
             Bounds contentBounds = currentContent.localToScene(currentContent.getLayoutBounds());
             if (contentBounds != null && !contentBounds.contains(e.getSceneX(), e.getSceneY())) {
                 hide();
@@ -57,7 +57,7 @@ public class ModalPane extends StackPane {
         }
     };
 
-    /** Scene-level фильтр: закрытие по ESC независимо от focus owner внутри модалки */
+    /** Scene-level filter that closes on ESC regardless of the focus owner inside the modal. */
     private final EventHandler<KeyEvent> sceneKeyFilter = e -> {
         if (dismissOnEscape && isVisible() && e.getCode() == KeyCode.ESCAPE) {
             hide();
@@ -82,21 +82,21 @@ public class ModalPane extends StackPane {
     }
 
     /**
-     * Установить callback, вызываемый при закрытии панели (для очистки ресурсов).
+     * Sets the callback invoked when the panel closes, usually for resource cleanup.
      */
     public void setOnHidden(Runnable callback) {
         this.onHidden = callback;
     }
 
     /**
-     * Показать контент — выезжает справа с fade-in.
+     * Shows content with right-to-left slide and fade-in.
      */
     public void show(Node content) {
         show(content, true, true);
     }
 
     /**
-     * Показать контент с явным управлением dismiss-поведением.
+     * Shows content with explicit dismiss behavior.
      */
     public void show(Node content, boolean dismissOnBackdrop, boolean dismissOnEscape) {
         currentContent = content;
@@ -105,7 +105,7 @@ public class ModalPane extends StackPane {
         getChildren().setAll(content);
         setVisible(true);
 
-        // Scene-level фильтр для закрытия по клику вне контента
+        // Scene-level filter for closing on backdrop click.
         if (dismissOnBackdrop && getScene() != null) {
             getScene().addEventFilter(MouseEvent.MOUSE_PRESSED, sceneClickFilter);
         }
@@ -113,13 +113,13 @@ public class ModalPane extends StackPane {
             getScene().addEventFilter(KeyEvent.KEY_PRESSED, sceneKeyFilter);
         }
 
-        // Фон: fade-in
+        // Backdrop fade-in.
         setOpacity(0);
         FadeTransition bgFade = new FadeTransition(ANIM_DURATION, this);
         bgFade.setFromValue(0);
         bgFade.setToValue(1);
 
-        // Контент: slide справа
+        // Content slides in from the right.
         content.setTranslateX(300);
         TranslateTransition slide = new TranslateTransition(ANIM_DURATION, content);
         slide.setFromX(300);
@@ -130,12 +130,12 @@ public class ModalPane extends StackPane {
     }
 
     /**
-     * Скрыть — контент уезжает вправо с fade-out.
+     * Hides the modal; content slides out to the right with fade-out.
      */
     public void hide() {
         if (currentContent == null) { return; }
 
-        // Снять scene-level фильтр
+        // Remove scene-level filters.
         if (getScene() != null) {
             getScene().removeEventFilter(MouseEvent.MOUSE_PRESSED, sceneClickFilter);
             getScene().removeEventFilter(KeyEvent.KEY_PRESSED, sceneKeyFilter);
@@ -163,10 +163,10 @@ public class ModalPane extends StackPane {
         anim.play();
     }
 
-    // ── Статические методы для диалогов ──────────────────────────
+    // Static dialog helpers
 
     /**
-     * Диалог подтверждения с кнопками Да / Нет.
+     * Confirmation dialog with Yes/No buttons.
      */
     public static void showConfirm(String title, String message, Consumer<Boolean> callback) {
         ModalPane pane = getInstance();
@@ -189,7 +189,7 @@ public class ModalPane extends StackPane {
     }
 
     /**
-     * Информационное сообщение с кнопкой ОК.
+     * Informational message with an OK button.
      */
     public static void showInfo(String title, String message) {
         ModalPane pane = getInstance();
@@ -203,7 +203,7 @@ public class ModalPane extends StackPane {
     }
 
     /**
-     * Сообщение об ошибке с кнопкой ОК.
+     * Error message with an OK button.
      */
     public static void showError(String title, String message) {
         ModalPane pane = getInstance();
@@ -219,7 +219,7 @@ public class ModalPane extends StackPane {
     }
 
     /**
-     * Окно «О программе».
+     * About window.
      */
     public static void showAbout() {
         ModalPane pane = getInstance();
@@ -241,7 +241,7 @@ public class ModalPane extends StackPane {
     }
 
     /**
-     * Диалог обновления — информация о новой версии с кнопкой скачивания.
+     * Update dialog with new-version information and a download button.
      */
     public static void showUpdateAvailable(UpdateInfo info) {
         ModalPane pane = getInstance();
@@ -296,7 +296,7 @@ public class ModalPane extends StackPane {
         pane.show(panel);
     }
 
-    // ── Построение панели ────────────────────────────────────────
+    // Panel construction
 
     private static VBox buildPanel(String title, String message, Button... buttons) {
         VBox panel = new VBox(8);

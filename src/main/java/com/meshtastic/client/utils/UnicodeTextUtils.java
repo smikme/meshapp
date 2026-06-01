@@ -1,10 +1,10 @@
 package com.meshtastic.client.utils;
 
 /**
- * Утилиты для безопасной работы с пользовательским Unicode-текстом в JavaFX.
+ * Utilities for handling user-supplied Unicode text safely in JavaFX.
  *
- * <p>Помогают не создавать строки с одиночными суррогатами и не резать текст
- * внутри суррогатных пар при обрезке, позиционировании каретки и измерении.
+ * <p>They keep callers from creating strings with lone surrogates or splitting
+ * surrogate pairs during truncation, caret movement, and measurement.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -53,11 +53,11 @@ public final class UnicodeTextUtils {
     }
 
     /**
-     * Санитизирует пользовательский текст перед передачей в JavaFX {@code Label}/{@code Text}.
+     * Sanitizes user text before it is passed to JavaFX {@code Label} or {@code Text}.
      *
-     * <p>JavaFX 25 корректно переживает supplementary emoji, variation selectors,
-     * ZWJ-последовательности и combining marks, поэтому метод больше не вырезает
-     * такие символы. Оставляем только общую защиту от одиночных суррогатов.
+     * <p>JavaFX 25 handles supplementary emoji, variation selectors, ZWJ
+     * sequences, and combining marks correctly, so this method no longer removes
+     * those characters. It keeps only the general guard against lone surrogates.
      */
     public static String sanitizeForJavaFxDisplay(String value) {
         String sanitized = sanitize(value);

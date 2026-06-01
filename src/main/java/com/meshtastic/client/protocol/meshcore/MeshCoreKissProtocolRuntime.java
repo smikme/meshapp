@@ -18,10 +18,11 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Runtime для MeshCore KISS modem devices.
+ * Protocol runtime for MeshCore KISS modem devices.
  * <p>
- * Runtime переключает byte-stream transport в KISS framing, отправляет базовые
- * {@code SetHardware} requests и собирает metadata устройства в {@link MeshCoreKissState}.
+ * The runtime switches a byte-stream transport into KISS framing, sends the
+ * initial {@code SetHardware} requests, and accumulates device metadata in
+ * {@link MeshCoreKissState}.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -47,7 +48,7 @@ public final class MeshCoreKissProtocolRuntime implements ProtocolRuntime<MeshCo
     }
 
     /**
-     * Возвращает активный protocol type этого runtime-а.
+     * Returns the protocol type handled by this runtime.
      *
      * @return {@link ProtocolType#MESHCORE_KISS}
      */
@@ -57,7 +58,7 @@ public final class MeshCoreKissProtocolRuntime implements ProtocolRuntime<MeshCo
     }
 
     /**
-     * Возвращает текущее состояние, собранное из MeshCore KISS responses.
+     * Returns the state assembled from MeshCore KISS responses.
      *
      * @return mutable runtime state
      */
@@ -67,9 +68,9 @@ public final class MeshCoreKissProtocolRuntime implements ProtocolRuntime<MeshCo
     }
 
     /**
-     * Возвращает future готовности runtime-а.
+     * Returns the runtime readiness future.
      *
-     * @return future, завершающийся после первого валидного KISS response-а
+     * @return future completed after the first valid KISS response
      */
     @Override
     public CompletableFuture<MeshCoreKissState> getReadyFuture() {
@@ -77,9 +78,9 @@ public final class MeshCoreKissProtocolRuntime implements ProtocolRuntime<MeshCo
     }
 
     /**
-     * Запускает KISS handshake и подписывает runtime на входящие frame-ы.
+     * Starts the KISS handshake and subscribes this runtime to incoming frames.
      *
-     * @return future готовности подключения
+     * @return connection readiness future
      */
     @Override
     public CompletableFuture<MeshCoreKissState> start() {
@@ -98,9 +99,9 @@ public final class MeshCoreKissProtocolRuntime implements ProtocolRuntime<MeshCo
     }
 
     /**
-     * Возвращает owner id, если identity уже получен от устройства.
+     * Returns the owner id once device identity has been received.
      *
-     * @return короткий owner id вида {@code mc:<12 hex>} или {@code null}
+     * @return short owner id in the {@code mc:<12 hex>} form, or {@code null}
      */
     @Override
     public String getOwnerId() {
@@ -108,7 +109,7 @@ public final class MeshCoreKissProtocolRuntime implements ProtocolRuntime<MeshCo
     }
 
     /**
-     * Останавливает runtime, снимает listener и завершает pending future ошибкой.
+     * Stops the runtime, unregisters the listener, and fails pending readiness.
      */
     @Override
     public void close() {
@@ -121,7 +122,7 @@ public final class MeshCoreKissProtocolRuntime implements ProtocolRuntime<MeshCo
     }
 
     /**
-     * Отправляет стартовый набор metadata-запросов MeshCore KISS.
+     * Sends the initial MeshCore KISS metadata requests.
      */
     private void sendInitialRequests() {
         sendSetHardware(MeshCoreKissFrames.REQ_GET_DEVICE_NAME);
@@ -135,14 +136,14 @@ public final class MeshCoreKissProtocolRuntime implements ProtocolRuntime<MeshCo
     }
 
     /**
-     * Отправляет один {@code SetHardware} request.
+     * Sends a single {@code SetHardware} request.
      */
     private void sendSetHardware(int subCommand) {
         transport.sendBytes(MeshCoreKissFrames.setHardwareRequest(subCommand), false);
     }
 
     /**
-     * Обрабатывает входящий unescaped KISS frame.
+     * Handles one incoming, unescaped KISS frame.
      */
     private void handleFrame(byte[] frame) {
         if (closed || frame == null || frame.length == 0) {
@@ -166,7 +167,7 @@ public final class MeshCoreKissProtocolRuntime implements ProtocolRuntime<MeshCo
     }
 
     /**
-     * Помечает runtime готовым после первого распознанного ответа.
+     * Marks the runtime ready after the first recognized response.
      */
     private void completeReady() {
         state.setReady(true);
@@ -174,7 +175,7 @@ public final class MeshCoreKissProtocolRuntime implements ProtocolRuntime<MeshCo
     }
 
     /**
-     * Применяет {@code SetHardware} response к runtime state.
+     * Applies a {@code SetHardware} response to the runtime state.
      */
     private void applySetHardwareResponse(int subCommand, byte[] payload) {
         switch (subCommand) {
@@ -231,7 +232,7 @@ public final class MeshCoreKissProtocolRuntime implements ProtocolRuntime<MeshCo
     }
 
     /**
-     * Разбирает параметры LoRa radio из little-endian payload-а.
+     * Parses LoRa radio parameters from the little-endian payload.
      */
     private void parseRadio(byte[] payload) {
         if (payload.length < 10) {
@@ -247,7 +248,7 @@ public final class MeshCoreKissProtocolRuntime implements ProtocolRuntime<MeshCo
     }
 
     /**
-     * Разбирает счётчики packet statistics из little-endian payload-а.
+     * Parses packet statistics counters from the little-endian payload.
      */
     private void parseStats(byte[] payload) {
         if (payload.length < 12) {
@@ -261,7 +262,7 @@ public final class MeshCoreKissProtocolRuntime implements ProtocolRuntime<MeshCo
     }
 
     /**
-     * Читает unsigned 16-bit little-endian значение из payload-а.
+     * Reads an unsigned 16-bit little-endian value from the payload.
      */
     private static int unsignedShortLe(byte[] payload, int offset) {
         return (payload[offset] & 0xFF) | ((payload[offset + 1] & 0xFF) << 8);

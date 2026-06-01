@@ -27,14 +27,11 @@ import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
 
 /**
- * Единый компонент детальной информации о ноде.
- * Содержит: вертикальный тулбар слева (действия) + контент справа (заголовок, таблица, график).
+ * Unified node details component with a vertical action toolbar on the left and
+ * content on the right: header, details table, telemetry chart, and traces.
  * <p>
- * Используется в двух контекстах:
- * <ul>
- *   <li>{@link NodeDetailPanel} — модальная панель (выезжает справа, с кнопкой «Назад»)</li>
- *   <li>{@code FormNodes} — встроенная панель в SplitPane (без кнопки «Назад»)</li>
- * </ul>
+ * The component is used both by {@link NodeDetailPanel} as a side modal and by
+ * {@code FormNodes} as an embedded split-pane detail view.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -42,17 +39,16 @@ public class NodeDetailContent extends HBox {
 
     private final TelemetryChartPanel chartPanel;
     private final ObservableList<String[]> tableData;
-    private final int nodeNum;     // для протокольных операций (requestNodeInfo, removeNode)
-    private final String nodeId;   // для идентификации (openDirectChat, deleteNode)
+    private final int nodeNum;     // Used by protocol operations such as requestNodeInfo and removeNode.
+    private final String nodeId;   // Used by identity-based actions such as openDirectChat and deleteNode.
     private final ProtocolHandler protocolHandler;
     private final DeviceState state;
 
     /**
-     * @param state             состояние устройства (для телеметрии), может быть {@code null}
-     * @param node              нода для отображения
-     * @param handler           протокол-обработчик для отправки радио-запросов, может быть {@code null}
-     * @param onBeforeNavigate  вызывается перед навигацией в приватный чат (напр. закрыть модалку),
-     *                          может быть {@code null}
+     * @param state current device state used for telemetry, or {@code null}
+     * @param node node to display
+     * @param handler protocol handler for radio requests, or {@code null}
+     * @param onBeforeNavigate callback invoked before navigating to a direct chat, or {@code null}
      */
     public NodeDetailContent(DeviceState state, NodeData node, ProtocolHandler handler, Runnable onBeforeNavigate) {
         this.nodeNum = node.getNodeNum();
@@ -64,7 +60,7 @@ public class NodeDetailContent extends HBox {
                 ? node.getLongName() : node.getNodeId() != null ? node.getNodeId() : "?";
         final String displayName = UnicodeTextUtils.sanitizeForJavaFxDisplay(rawDisplayName);
 
-        // === Вертикальный тулбар слева (56px, структура как DrawerPane) ===
+        // Left vertical toolbar, matching DrawerPane structure and width.
         StackPane toolbarPane = new StackPane();
         toolbarPane.setPrefWidth(56);
         toolbarPane.setMinWidth(56);
@@ -98,7 +94,7 @@ public class NodeDetailContent extends HBox {
             formChat.openDirectChat(node.getNodeId(), node);
         });
 
-        // Кнопка «Traceroute» — live-трассировка маршрута до выбранной ноды
+        // Live traceroute to the selected node.
         SVGPath tracerouteIcon = SvgIconLoader.load("/icons/map-traces.svg", 22);
         Button tracerouteBtn = new Button();
         tracerouteBtn.setGraphic(tracerouteIcon);
@@ -109,7 +105,7 @@ public class NodeDetailContent extends HBox {
         tracerouteBtn.setOnAction(e ->
                 NodeTracerouteWindow.showWindow(this.state, node, protocolHandler));
 
-        // Кнопка «Обновить ноду» — запрос информации по радио + обмен User-данными
+        // Refresh node information over radio and exchange User payloads.
         SVGPath refreshIcon = SvgIconLoader.load("/drawer/icon/refresh-node.svg", 22);
         Button refreshBtn = new Button();
         refreshBtn.setGraphic(refreshIcon);
@@ -131,7 +127,7 @@ public class NodeDetailContent extends HBox {
             }
         });
 
-        // Кнопка «Удалить ноду»
+        // Delete the node from the current state and cache.
         SVGPath deleteIcon = SvgIconLoader.load("/drawer/icon/delete-node.svg", 22);
         Button deleteBtn = new Button();
         deleteBtn.setGraphic(deleteIcon);
@@ -157,7 +153,7 @@ public class NodeDetailContent extends HBox {
             }
         });
 
-        // Кнопка «Избранное»
+        // Toggle favorite state.
         SVGPath favoriteIcon = SvgIconLoader.load("/icons/favorite.svg", 22);
         Button favoriteBtn = new Button();
         favoriteBtn.setGraphic(favoriteIcon);
@@ -181,7 +177,7 @@ public class NodeDetailContent extends HBox {
             favoriteBtn.getTooltip().setText(favoriteTooltip(nowFav));
         });
 
-        // Кнопка «Игнорировать»
+        // Toggle ignored state.
         SVGPath ignoredIcon = SvgIconLoader.load("/icons/eye-off.svg", 22);
         Button ignoredBtn = new Button();
         ignoredBtn.setGraphic(ignoredIcon);
@@ -213,7 +209,7 @@ public class NodeDetailContent extends HBox {
 
         toolbarPane.getChildren().add(toolbarContainer);
 
-        // === Заголовок: большой аватар + имя + nodeId ===
+        // Header: large avatar, display name, and node id.
         String avatarText;
         if (node.getShortName() != null && !node.getShortName().isEmpty()) {
             avatarText = UnicodeTextUtils.sanitize(node.getShortName()).toUpperCase(java.util.Locale.ROOT);
@@ -249,12 +245,12 @@ public class NodeDetailContent extends HBox {
 
         Separator sep = new Separator();
 
-        // === Таблица деталей ===
+        // Details table.
         tableData = FXCollections.observableArrayList();
         NodeUtils.fillDetailRows(tableData, node);
         TableView<String[]> table = NodeUtils.createDetailTable(tableData);
 
-        // === График телеметрии ===
+        // Telemetry chart.
         chartPanel = new TelemetryChartPanel(true);
         VBox.setVgrow(chartPanel, Priority.ALWAYS);
         if (state != null) {
@@ -283,12 +279,12 @@ public class NodeDetailContent extends HBox {
         getChildren().addAll(toolbarPane, contentPane);
     }
 
-    /** Конструктор без callback навигации (для inline-использования в FormNodes). */
+    /** Constructor without navigation callback, used by inline FormNodes content. */
     public NodeDetailContent(DeviceState state, NodeData node, ProtocolHandler handler) {
         this(state, node, handler, null);
     }
 
-    /** Обновить только данные таблицы (без пересоздания UI). */
+    /** Refreshes only table data without rebuilding the UI. */
     public void updateTableData(NodeData node) {
         ObservableList<String[]> refreshedRows = FXCollections.observableArrayList();
         NodeUtils.fillDetailRows(refreshedRows, node);

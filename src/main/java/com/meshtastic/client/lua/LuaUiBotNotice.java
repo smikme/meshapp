@@ -1,14 +1,14 @@
 package com.meshtastic.client.lua;
 
 /**
- * Временное UI-сообщение встроенного бота без записи в историю.
+ * Transient UI message from the built-in bot, not persisted to chat history.
  *
- * @param scriptId id Lua-скрипта
- * @param source источник события
- * @param name имя сценария/запроса
- * @param chatType тип чата
- * @param chatKey ключ чата
- * @param text текст сообщения
+ * @param scriptId Lua script id
+ * @param source event source
+ * @param name script or request name
+ * @param chatType chat type
+ * @param chatKey chat key
+ * @param text message text
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */

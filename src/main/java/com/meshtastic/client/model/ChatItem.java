@@ -7,7 +7,7 @@ import java.util.Locale;
 import java.util.List;
 
 /**
- * Элемент списка чатов — обёртка для канала или DM.
+ * Chat-list item representing either a channel or a direct message conversation.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -48,12 +48,12 @@ public final class ChatItem {
     }
 
     /**
-     * Создаёт ChatItem для канала с последним сообщением из in-memory списка.
+     * Creates a channel chat item using the last message from an in-memory list.
      *
-     * @param channel     канал (содержит имя и индекс)
-     * @param messages    список сообщений канала (последнее используется для preview)
-     * @param unreadCount количество непрочитанных сообщений
-     * @return элемент списка чатов
+     * @param channel channel containing name and index
+     * @param messages channel messages; the last one is used for preview
+     * @param unreadCount unread message count
+     * @return chat-list item
      */
     public static ChatItem fromChannel(ChannelProtos.Channel channel,
                                        List<MeshMessage> messages,
@@ -65,13 +65,13 @@ public final class ChatItem {
         }
         name = UnicodeTextUtils.sanitize(name);
 
-        // Аватар: # + первые 3 символа имени
+        // Avatar: hash plus the first three characters of the name.
         String abbr = UnicodeTextUtils.prefixByCodePoints(name, 3);
         String avatarText = "#" + abbr;
 
         String color = CHANNEL_COLORS[channel.getIndex() % CHANNEL_COLORS.length];
 
-        // Последнее сообщение
+        // Last message preview.
         String lastText = null;
         long lastTime = 0;
         if (!messages.isEmpty()) {
@@ -85,13 +85,13 @@ public final class ChatItem {
     }
 
     /**
-     * Создаёт ChatItem для DM с последним сообщением из in-memory списка.
+     * Creates a direct-message chat item using the last message from an in-memory list.
      *
-     * @param peerNodeId  node_id собеседника (например {@code "!9e755af0"})
-     * @param peerNode    данные ноды (для отображения имени), может быть {@code null}
-     * @param messages    список сообщений DM (последнее используется для preview)
-     * @param unreadCount количество непрочитанных сообщений
-     * @return элемент списка чатов
+     * @param peerNodeId peer node id, for example {@code "!9e755af0"}
+     * @param peerNode node data for display name resolution, or {@code null}
+     * @param messages direct-message history; the last one is used for preview
+     * @param unreadCount unread message count
+     * @return chat-list item
      */
     public static ChatItem fromDirectMessage(String peerNodeId, NodeData peerNode,
                                              List<MeshMessage> messages,
@@ -117,7 +117,7 @@ public final class ChatItem {
 
         String color = CHANNEL_COLORS[Math.abs(peerNodeId.hashCode()) % CHANNEL_COLORS.length];
 
-        // Последнее сообщение
+        // Last message preview.
         String lastText = null;
         long lastTime = 0;
         if (!messages.isEmpty()) {
@@ -133,7 +133,7 @@ public final class ChatItem {
     // === DB-backed factory methods ===
 
     /**
-     * Создаёт ChatItem для канала с последним сообщением из БД.
+     * Creates a channel chat item from the last database message.
      */
     public static ChatItem fromChannel(ChannelProtos.Channel channel,
                                        MeshMessage lastMessage,
@@ -161,7 +161,7 @@ public final class ChatItem {
     }
 
     /**
-     * Создаёт ChatItem для DM с последним сообщением из БД.
+     * Creates a direct-message chat item from the last database message.
      */
     public static ChatItem fromDirectMessage(String peerNodeId, NodeData peerNode,
                                              MeshMessage lastMessage,

@@ -29,13 +29,11 @@ import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 
 /**
- * Комбинированный picker даты и времени для фильтров.
- * Контракт:
- * - визуально ведёт себя как единый control на базе {@link DatePicker};
- * - popup содержит календарь и нижнюю панель выбора времени через слайдеры;
- * - шаг часов и минут всегда равен {@code 1};
- * - изменение значения коммитится только по кнопке {@code Применить};
- * - отсутствие времени трактуется как режим {@code Весь день}.
+ * Combined date and time picker used by filters.
+ * It behaves visually as a single {@link DatePicker}-based control. The popup
+ * contains a calendar and a bottom time-selection panel with sliders. Hours and
+ * minutes always move in steps of {@code 1}; value changes are committed only by
+ * the Apply action, and a missing time is treated as an all-day selection.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -68,8 +66,8 @@ public final class DateTimePicker extends HBox {
     private boolean adjusting;
 
     /**
-     * @param promptText     placeholder для даты
-     * @param onValueChanged callback после подтверждённого изменения значения
+     * @param promptText     date placeholder
+     * @param onValueChanged callback invoked after a committed value change
      */
     public DateTimePicker(String promptText, Runnable onValueChanged) {
         this.onValueChanged = onValueChanged;
@@ -134,35 +132,35 @@ public final class DateTimePicker extends HBox {
     }
 
     /**
-     * @return выбранная дата или {@code null}, если фильтр даты выключен
+     * @return selected date, or {@code null} when the date filter is disabled
      */
     public LocalDate getDate() {
         return dateValue;
     }
 
     /**
-     * @return выбранное время или {@code null}, если активен режим {@code Весь день}
+     * @return selected time, or {@code null} when all-day mode is active
      */
     public LocalTime getTime() {
         return timeValue;
     }
 
     /**
-     * @return read-only флаг видимости popup-календаря
+     * @return read-only visibility flag for the calendar popup
      */
     public ReadOnlyBooleanProperty popupShowingProperty() {
         return popupShowing.getReadOnlyProperty();
     }
 
     /**
-     * @return {@code true}, если popup-календарь сейчас открыт
+     * @return {@code true} while the calendar popup is open
      */
     public boolean isPopupShowing() {
         return popupShowing.get();
     }
 
     /**
-     * Полностью очищает выбранную дату и время.
+     * Clears the selected date and time completely.
      */
     public void clear() {
         dateValue = null;
@@ -172,11 +170,10 @@ public final class DateTimePicker extends HBox {
     }
 
     /**
-     * Создаёт внешнее поле date-picker, которое служит только триггером popup.
-     * Контракт:
-     * - ручной ввод отключён;
-     * - стандартный popup JavaFX подавляется, потому что используется кастомный popup;
-     * - отображаемое значение всегда синхронизируется только с подтверждённым состоянием control.
+     * Creates the visible date-picker field, used only as the popup trigger.
+     * Manual input is disabled. The standard JavaFX popup is suppressed because
+     * this control provides its own popup, and the displayed value is synchronized
+     * only from the committed control state.
      */
     private DatePicker createDisplayDatePicker(String promptText) {
         DatePicker datePicker = new DatePicker();
@@ -206,9 +203,9 @@ public final class DateTimePicker extends HBox {
     }
 
     /**
-     * Строит нижнюю часть popup с переключателем "Весь день", слайдерами и кнопками.
-     * Кнопка {@code Сбросить} очищает уже подтверждённое значение, а
-     * {@code Применить} переводит draft-состояние в committed-состояние control.
+     * Builds the popup footer with the all-day toggle, sliders, and actions.
+     * Reset clears the already committed value, while Apply promotes the draft
+     * state to the committed control state.
      */
     private VBox createPopupBottom() {
         HBox hourRow = createSliderRow(I18n.t("packetMonitor.date.hours"), hourSlider, hourValueLabel);
@@ -240,7 +237,7 @@ public final class DateTimePicker extends HBox {
     }
 
     /**
-     * Создаёт одну строку выбора времени: подпись, слайдер и текущее числовое значение.
+     * Creates one time-selection row: label, slider, and current numeric value.
      */
     private HBox createSliderRow(String title, Slider slider, Label valueLabel) {
         Label titleLabel = new Label(title);
@@ -254,9 +251,9 @@ public final class DateTimePicker extends HBox {
     }
 
     /**
-     * Создаёт слайдер времени с дискретным шагом {@code 1}.
-     * Контракт: control не использует крупные шаги, потому что пользователь должен
-     * иметь доступ к каждому часу и каждой минуте без пропусков.
+     * Creates a time slider with a discrete {@code 1} step.
+     * Larger steps are deliberately avoided so the user can reach every hour and
+     * minute without gaps.
      */
     private Slider createSlider(int max) {
         Slider slider = new Slider(0, max, 0);
@@ -273,7 +270,7 @@ public final class DateTimePicker extends HBox {
     }
 
     /**
-     * @return метка для отображения текущего положения соответствующего слайдера в формате {@code 00}
+     * @return label that shows the matching slider position in {@code 00} format
      */
     private Label createSliderValueLabel() {
         Label label = new Label("00");
@@ -282,9 +279,9 @@ public final class DateTimePicker extends HBox {
     }
 
     /**
-     * Подключает открытие popup к визуальным частям control.
-     * Контракт: mouse-событие поглощается, чтобы стандартный DatePicker не пытался
-     * открыть собственный popup поверх кастомного.
+     * Wires popup opening to the visible parts of the control.
+     * Mouse events are consumed so the standard DatePicker popup cannot open on
+     * top of the custom popup.
      */
     private void installOpenHandlers() {
         displayPicker.addEventFilter(MouseEvent.MOUSE_PRESSED, event -> {
@@ -298,7 +295,7 @@ public final class DateTimePicker extends HBox {
     }
 
     /**
-     * Переключает видимость кастомного popup-календаря.
+     * Toggles the custom calendar popup.
      */
     private void togglePopup() {
         if (popup.isShowing()) {
@@ -309,8 +306,8 @@ public final class DateTimePicker extends HBox {
     }
 
     /**
-     * Показывает popup под control и перед этим синхронизирует draft-состояние
-     * с уже подтверждённым значением.
+     * Shows the popup below the control after synchronizing draft state from the
+     * committed value.
      */
     private void showPopup() {
         if (getScene() == null) {
@@ -328,8 +325,8 @@ public final class DateTimePicker extends HBox {
     }
 
     /**
-     * Наследует тему и stylesheet'ы текущей сцены для popup-контента.
-     * Это гарантирует совпадение внешнего вида popup с основным окном.
+     * Inherits the current scene theme and stylesheets for popup content.
+     * This keeps the popup visually aligned with the main window.
      */
     private void syncPopupTheme() {
         if (getScene() == null) {
@@ -346,10 +343,9 @@ public final class DateTimePicker extends HBox {
     }
 
     /**
-     * Копирует подтверждённое значение control в draft-модель popup.
-     * Контракт:
-     * - изменение draft-полей не должно генерировать callback наружу;
-     * - при отсутствии времени popup стартует в режиме {@code Весь день}.
+     * Copies the committed control value into the popup draft model.
+     * Draft-field changes must not fire the external callback, and when no time
+     * is selected the popup starts in all-day mode.
      */
     private void syncDraftFromCommitted() {
         adjusting = true;
@@ -371,8 +367,8 @@ public final class DateTimePicker extends HBox {
     }
 
     /**
-     * Обновляет draft-time по положениям слайдеров.
-     * Игнорирует события, возникшие во время программной синхронизации draft-модели.
+     * Updates draft time from the slider positions.
+     * Events raised during programmatic draft synchronization are ignored.
      */
     private void updateDraftTimeFromSliders() {
         if (adjusting) {
@@ -383,7 +379,7 @@ public final class DateTimePicker extends HBox {
     }
 
     /**
-     * Синхронизирует текстовые значения справа от слайдеров с их текущими позициями.
+     * Synchronizes the value labels next to the sliders with current slider positions.
      */
     private void updateDraftTimeLabels() {
         hourValueLabel.setText(formatTimePart((int) Math.round(hourSlider.getValue())));
@@ -391,7 +387,7 @@ public final class DateTimePicker extends HBox {
     }
 
     /**
-     * Отключает или включает слайдеры в зависимости от режима {@code Весь день}.
+     * Enables or disables the sliders according to all-day mode.
      */
     private void updateDraftControlsState() {
         boolean disableTimeSelection = draftAllDay;
@@ -402,8 +398,8 @@ public final class DateTimePicker extends HBox {
     }
 
     /**
-     * Подтверждает текущее draft-состояние popup и закрывает его.
-     * Контракт: если дата снята или выбран режим {@code Весь день}, время в committed-модели становится {@code null}.
+     * Commits the current popup draft state and closes the popup.
+     * If the date is cleared or all-day mode is selected, committed time becomes {@code null}.
      */
     private void applyDraftAndHide() {
         dateValue = draftDate;
@@ -416,8 +412,8 @@ public final class DateTimePicker extends HBox {
     }
 
     /**
-     * Обновляет внешний вид control по committed-состоянию.
-     * Отображаемое время не использует draft-значения, пока пользователь не нажал {@code Применить}.
+     * Updates the control presentation from committed state.
+     * The displayed time does not use draft values until the user applies them.
      */
     private void updateCommittedDisplay() {
         displayPicker.setValue(dateValue);
@@ -437,7 +433,7 @@ public final class DateTimePicker extends HBox {
     }
 
     /**
-     * Вызывает внешний callback только после committed-изменений control.
+     * Invokes the external callback only after committed control changes.
      */
     private void notifyValueChanged() {
         if (onValueChanged != null) {
@@ -446,7 +442,7 @@ public final class DateTimePicker extends HBox {
     }
 
     /**
-     * Форматирует часы или минуты в двухсимвольный вид {@code 00}.
+     * Formats an hour or minute value as a two-character {@code 00} string.
      */
     private static String formatTimePart(int value) {
         return String.format("%02d", value);

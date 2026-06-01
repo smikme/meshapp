@@ -34,7 +34,7 @@ import javafx.scene.text.Text;
 import java.util.function.Consumer;
 
 /**
- * Ячейка списка чатов: аватар, имя, превью последнего сообщения, время, badge непрочитанных.
+ * Chat-list cell with avatar, name, last-message preview, time, and unread badge.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -63,9 +63,9 @@ public class ChatListCell extends ListCell<ChatItem> {
     private boolean previewUpdateQueued;
 
     /**
-     * @param onDeleteChat      колбэк удаления чата (вызывается из контекстного меню удаления/отключения)
-     * @param onShowProperties  колбэк свойств канала (вызывается из контекстного меню «Свойства»)
-     * @param onToggleMute      колбэк переключения оповещений для чата
+     * @param onDeleteChat callback used by the context menu to delete or disable a chat
+     * @param onShowProperties callback used by the context menu to open channel properties
+     * @param onToggleMute callback used to toggle chat notifications
      */
     public ChatListCell(Consumer<ChatItem> onDeleteChat,
                         Consumer<ChatItem> onShowProperties,
@@ -135,7 +135,7 @@ public class ChatListCell extends ListCell<ChatItem> {
 
         root.getChildren().addAll(avatarPane, textBox, metaBox);
 
-        // Контекстное меню (правый клик)
+        // Context menu opened by right click.
         MenuItem propertiesItem = new MenuItem(I18n.t("chat.menu.properties"));
         propertiesItem.setOnAction(ev -> {
             ChatItem chatItem = getItem();
@@ -155,7 +155,7 @@ public class ChatListCell extends ListCell<ChatItem> {
         MenuItem closeItem = new MenuItem(I18n.t("chat.menu.deleteLocal"));
         chatContextMenu = new ContextMenu(propertiesItem, notificationsItem, new SeparatorMenuItem(), closeItem);
 
-        // «Свойства» только для каналов
+        // Properties are available only for channels.
         chatContextMenu.setOnShowing(ev -> {
             ChatItem chatItem = getItem();
             if (chatItem == null || isEmpty()) {

@@ -6,15 +6,14 @@ import java.util.Collections;
 import java.util.List;
 
 /**
- * Сообщение Meshtastic-чата (канальное или личное).
+ * Meshtastic chat message, either channel-based or direct.
  * <p>
- * Содержит текст, адресацию (отправитель, получатель, канал),
- * статус доставки и метаданные маршрутизации (hop start/limit).
- * Исходящие сообщения создаются через {@link com.meshtastic.client.service.MessageService},
- * входящие — через {@link com.meshtastic.client.service.MessageListenerService}.
- * <p>
- * Поле {@code status} объявлено как {@code volatile} для безопасного
- * обновления из потока TCP-reader с последующим чтением из UI-потока.
+ * Holds text, addressing, delivery status, and routing metadata. Outgoing
+ * messages are created by {@link com.meshtastic.client.service.MessageService};
+ * incoming messages are created by
+ * {@link com.meshtastic.client.service.MessageListenerService}. The
+ * {@code status} field is volatile so transport-reader updates are visible to
+ * the UI thread.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -23,12 +22,12 @@ public class MeshMessage {
     private static final String BROADCAST_NODE_ID = "!ffffffff";
 
     /**
-     * Статус доставки сообщения.
+     * Delivery state of a message.
      * <ul>
-     *   <li>{@code SENDING} — отправлено на радио, ожидает ACK</li>
-     *   <li>{@code DELIVERED} — сообщение отправлено, но DM-получатель не подтвердил получение</li>
-     *   <li>{@code CONFIRMED} — получено подтверждение (ACK) от DM-получателя</li>
-     *   <li>{@code FAILED} — получен NAK или таймаут канального ACK</li>
+     *   <li>{@code SENDING}: sent to the radio and waiting for ACK</li>
+     *   <li>{@code DELIVERED}: sent, but a DM recipient has not confirmed delivery</li>
+     *   <li>{@code CONFIRMED}: ACK received from the DM recipient</li>
+     *   <li>{@code FAILED}: NAK received or channel ACK timed out</li>
      * </ul>
      */
     public enum DeliveryStatus { SENDING, DELIVERED, CONFIRMED, FAILED }
@@ -56,14 +55,14 @@ public class MeshMessage {
     private List<MessageReaction> reactions = Collections.emptyList();
 
     /**
-     * Создаёт сообщение с основными полями.
+     * Creates a message with its core fields.
      *
-     * @param fromNodeId   node_id отправителя (например {@code "!9e755af0"})
-     * @param toNodeId     node_id получателя ({@code "!ffffffff"} для broadcast)
-     * @param channelIndex индекс канала (0 для primary)
-     * @param text         текст сообщения (UTF-8)
-     * @param timestamp    время в секундах с начала эпохи (epoch seconds)
-     * @param outgoing     {@code true} если сообщение отправлено с этого устройства
+     * @param fromNodeId sender node id, for example {@code "!9e755af0"}
+     * @param toNodeId recipient node id, with {@code "!ffffffff"} meaning broadcast
+     * @param channelIndex channel index, where {@code 0} is primary
+     * @param text UTF-8 message text
+     * @param timestamp epoch time in seconds
+     * @param outgoing {@code true} when the message was sent from this device
      */
     public MeshMessage(String fromNodeId, String toNodeId, int channelIndex, String text, long timestamp, boolean outgoing) {
         this.fromNodeId = fromNodeId;
@@ -133,22 +132,21 @@ public class MeshMessage {
     public boolean hasReactions() { return !reactions.isEmpty(); }
 
     /**
-     * Проверяет, можно ли безопасно рассчитать количество пройденных хопов.
-     * {@code hopLimit} не должен превышать исходный {@code hopStart}; иначе
-     * пара полей считается некорректной и не используется в UI.
+     * Returns whether hop count can be calculated safely.
+     * {@code hopLimit} must not exceed the original {@code hopStart}; otherwise
+     * the pair is treated as invalid and ignored by the UI.
      *
-     * @return {@code true}, если hop-данные заданы и внутренне согласованы
+     * @return {@code true} when hop data is present and internally consistent
      */
     public boolean hasValidHopData() {
         return hopStart > 0 && hopLimit >= 0 && hopLimit <= hopStart;
     }
 
     /**
-     * Вычисляет количество хопов, которое прошло сообщение.
-     * Рассчитывается как {@code hopStart - hopLimit}. Если {@code hopStart}
-     * не задан (0) или данные некорректны, возвращает 0.
+     * Calculates how many hops the message has traversed.
+     * The value is {@code hopStart - hopLimit}; missing or invalid data returns 0.
      *
-     * @return количество хопов или 0 если данные недоступны
+     * @return hop count, or 0 when unavailable
      */
     public int getHopsTraveled() {
         return hasValidHopData() ? hopStart - hopLimit : 0;

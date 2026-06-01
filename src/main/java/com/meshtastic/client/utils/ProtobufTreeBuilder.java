@@ -22,8 +22,8 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
- * Утилита для построения дерева ConfigTreeItem из protobuf Config/ModuleConfig.
- * Использует protobuf reflection для автоматического обхода полей.
+ * Builds editable {@link ConfigTreeItem} trees from protobuf Config and
+ * ModuleConfig messages using protobuf reflection.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -64,7 +64,7 @@ public final class ProtobufTreeBuilder {
     private ProtobufTreeBuilder() {}
 
     /**
-     * Строит дерево из списка Config (устройство).
+     * Builds a device configuration tree from {@code Config} messages.
      */
     public static TreeItem<ConfigTreeItem> buildConfigTree(List<ConfigProtos.Config> configs) {
         ConfigTreeItem rootData = new ConfigTreeItem(I18n.t("settings.config.section.root.device"), "config", 0);
@@ -94,7 +94,7 @@ public final class ProtobufTreeBuilder {
     }
 
     /**
-     * Строит дерево из списка ModuleConfig (модули).
+     * Builds a module configuration tree from {@code ModuleConfig} messages.
      */
     public static TreeItem<ConfigTreeItem> buildModuleConfigTree(List<ModuleConfigProtos.ModuleConfig> moduleConfigs) {
         ConfigTreeItem rootData = new ConfigTreeItem(I18n.t("settings.config.section.root.module"), "module_config", 0);
@@ -124,7 +124,7 @@ public final class ProtobufTreeBuilder {
     }
 
     /**
-     * Рекурсивно добавляет поля protobuf Message в дерево.
+     * Recursively adds protobuf message fields to the configuration tree.
      */
     private static void addFieldsToTree(TreeItem<ConfigTreeItem> parent, Message message,
                                           String configType, int variantNumber) {
@@ -143,7 +143,7 @@ public final class ProtobufTreeBuilder {
             }
 
             if (fd.getType() == FieldDescriptor.Type.MESSAGE) {
-                // Вложенная группа — рекурсия
+                // Nested message group: descend into it.
                 Message subMsg = (Message) value;
                 ConfigTreeItem groupData = new ConfigTreeItem(
                         displayName, fieldName, fd, configType, variantNumber);
@@ -186,9 +186,9 @@ public final class ProtobufTreeBuilder {
     }
 
     /**
-     * Поддерживает repeated-группу в редактируемом состоянии:
-     * оставляет минимум видимых слотов и гарантирует хотя бы один свободный
-     * слот для добавления следующего значения без полной пересборки узлов.
+     * Keeps a repeated field group editable after a value changes.
+     * The group retains the minimum number of visible slots and always exposes
+     * one empty slot for adding the next value without rebuilding the whole tree.
      */
     public static void adjustRepeatedGroupAfterEdit(TreeItem<ConfigTreeItem> groupItem) {
         if (groupItem == null || groupItem.getValue() == null) {
@@ -313,7 +313,7 @@ public final class ProtobufTreeBuilder {
     }
 
     /**
-     * Находит активное поле oneof.
+     * Finds the active field of a named {@code oneof}.
      */
     private static FieldDescriptor getActiveOneofField(Message msg, String oneofName) {
         Descriptors.OneofDescriptor oneof = msg.getDescriptorForType().getOneofs().stream()
@@ -325,8 +325,8 @@ public final class ProtobufTreeBuilder {
     }
 
     /**
-     * Преобразует protobuf field name (snake_case) в человекочитаемое имя.
-     * Например: "node_info_broadcast_secs" -> "Node info broadcast secs"
+     * Converts a protobuf {@code snake_case} field name into a readable label.
+     * Example: {@code "node_info_broadcast_secs"} becomes {@code "Node info broadcast secs"}.
      */
     public static String humanize(String fieldName) {
         if (fieldName == null || fieldName.isEmpty()) { return fieldName; }
@@ -340,8 +340,8 @@ public final class ProtobufTreeBuilder {
     }
 
     /**
-     * Собирает protobuf Config из дерева для отправки на устройство.
-     * Берёт все дочерние поля секции и создаёт новый Config с обновлёнными значениями.
+     * Rebuilds a protobuf {@code Config} from the edited tree before sending it
+     * to the device.
      */
     public static ConfigProtos.Config rebuildConfig(TreeItem<ConfigTreeItem> sectionItem,
                                                       ConfigProtos.Config originalConfig) {
@@ -365,7 +365,7 @@ public final class ProtobufTreeBuilder {
     }
 
     /**
-     * Собирает protobuf ModuleConfig из дерева для отправки на устройство.
+     * Rebuilds a protobuf {@code ModuleConfig} from the edited tree before sending it.
      */
     public static ModuleConfigProtos.ModuleConfig rebuildModuleConfig(
             TreeItem<ConfigTreeItem> sectionItem,
@@ -384,7 +384,7 @@ public final class ProtobufTreeBuilder {
     }
 
     /**
-     * Рекурсивно применяет значения из дерева в protobuf Builder.
+     * Recursively applies tree values to a protobuf builder.
      */
     private static void applyTreeValues(TreeItem<ConfigTreeItem> treeItem, Message.Builder builder) {
         for (TreeItem<ConfigTreeItem> child : treeItem.getChildren()) {
@@ -418,7 +418,7 @@ public final class ProtobufTreeBuilder {
             if (item.getFieldDescriptor() == null || item.getValue() == null) { continue; }
 
             FieldDescriptor fd = item.getFieldDescriptor();
-            // Ищем соответствующий FieldDescriptor в текущем builder (может отличаться от оригинала)
+            // Resolve the field descriptor on the current builder; it may differ from the original one.
             FieldDescriptor builderFd = builder.getDescriptorForType().findFieldByName(fd.getName());
             if (builderFd == null) { continue; }
 
@@ -540,8 +540,8 @@ public final class ProtobufTreeBuilder {
     }
 
     /**
-     * Применяет значения protobuf Message к уже построенному дереву.
-     * Используется при импорте конфигурации из файла поверх текущего редактора.
+     * Applies protobuf message values to an existing tree.
+     * Used when importing a configuration file into the current editor state.
      */
     public static void applyMessageToTree(TreeItem<ConfigTreeItem> treeItem, Message message) {
         if (treeItem == null || message == null) {

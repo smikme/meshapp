@@ -13,18 +13,13 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
 /**
- * Linux-реализация BLE через BlueZ (нативная SO libmeshapp-ble.so + JNA).
+ * Linux BLE implementation backed by BlueZ through {@code libmeshapp-ble.so} and JNA.
  * <p>
- * Делегирует все BLE-операции в {@link LinuxBleLibrary}, которая загружает
- * {@code libmeshapp-ble.so} — C-модуль с sd-bus + AcquireNotify/AcquireWrite.
- * <p>
- * Паттерн аналогичен {@link com.meshtastic.client.connection.ble.windows.WinBle}:
- * <ul>
- *   <li>Изолированная копия native SO на экземпляр для параллельных BLE-сессий</li>
- *   <li>Instance JNA callbacks для защиты от GC без перетирания соседних подключений</li>
- *   <li>Polling fallback (200ms) для вычитки fromRadio</li>
- *   <li>Drain chain после каждой записи</li>
- * </ul>
+ * All BLE operations are delegated to {@link LinuxBleLibrary}, which loads a C
+ * module using sd-bus with AcquireNotify and AcquireWrite. The structure mirrors
+ * the Windows BLE implementation: each instance gets an isolated native library
+ * copy, callbacks are instance-owned to avoid GC and cross-connection clashes,
+ * polling is available as a fromRadio fallback, and a drain pass follows each write.
  *
  * @see LinuxBleLibrary
  * @see BlePlatform
@@ -331,8 +326,10 @@ public class LinuxBle implements BlePlatform {
     }
 
     /**
-     * Polling: читаем fromRadio до получения пустого ответа.
-     * Guard drainInProgress предотвращает конкурентные чтения (как в WinBle/MacOsBle).
+     * Polls {@code fromRadio} until BlueZ returns an empty response.
+     * <p>
+     * The {@code drainInProgress} guard prevents concurrent reads, matching the
+     * WinBle and MacOsBle behavior.
      */
     private void pollFromRadio() {
         if (!connected || drainInProgress) { return; }
@@ -363,8 +360,10 @@ public class LinuxBle implements BlePlatform {
     }
 
     /**
-     * После каждого writeToRadio — короткий drain burst.
-     * На BlueZ fromNum notifications могут не прийти, хотя WriteValue уже завершился успешно.
+     * Performs a short drain burst after each {@code writeToRadio}.
+     * <p>
+     * BlueZ can miss {@code fromNum} notifications even after {@code WriteValue}
+     * completes successfully.
      */
     private void scheduleDrainAfterWrite() {
         for (int i = 1; i <= POST_WRITE_DRAIN_ATTEMPTS; i++) {

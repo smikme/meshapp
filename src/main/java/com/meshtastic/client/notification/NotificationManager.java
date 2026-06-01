@@ -15,18 +15,13 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BiPredicate;
 
 /**
- * Оркестратор OS-уведомлений для входящих сообщений.
+ * Coordinates operating-system notifications for incoming messages.
  * <p>
- * Обязанности:
- * <ul>
- *   <li>Создаёт платформенный {@link NotificationService}</li>
- *   <li>Проверяет настройку уведомлений в {@link AppPreferences}</li>
- *   <li>Подавляет уведомления при активном чате + окне в фокусе</li>
- *   <li>Ограничивает частоту (rate-limit) между уведомлениями</li>
- *   <li>Обрезает текст для тела уведомления</li>
- * </ul>
- * Потокобезопасность: вызывается из потока чтения TCP/BLE (через MessageListenerService).
- * {@code Stage.isFocused()} обновляется через volatile-снимок из FX-потока.
+ * The manager creates the platform notification service, honors notification
+ * preferences, suppresses alerts for the active focused chat, rate-limits
+ * notifications, and trims message bodies. It may be called from transport
+ * reader threads through MessageListenerService; window focus is read from a
+ * volatile snapshot maintained on the FX thread.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -34,10 +29,10 @@ public class NotificationManager {
 
     private static final Logger log = LoggerFactory.getLogger(NotificationManager.class);
 
-    /** Минимальный интервал между уведомлениями (мс). */
+    /** Minimum interval between notifications, in milliseconds. */
     private static final long RATE_LIMIT_MS = 3_000;
 
-    /** Максимальная длина текста в уведомлении. */
+    /** Maximum notification body length. */
     private static final int MAX_BODY_LENGTH = 120;
 
     private final NotificationService service;
@@ -45,15 +40,15 @@ public class NotificationManager {
     private final AtomicLong lastNotificationTime = new AtomicLong(0);
 
     /**
-     * Volatile-снимок Stage.isFocused(), обновляемый слушателем на FX-потоке.
-     * Позволяет потоку чтения проверять фокус без блокировки.
+     * Volatile snapshot of Stage.isFocused(), updated by an FX-thread listener.
+     * Reader threads can check focus without blocking.
      */
     private volatile boolean windowFocused = true;
 
     /**
-     * Коллбэк для проверки, открыт ли конкретный чат в FormChat.
-     * Параметры: (chatType: "channel"|"dm", chatKey: channelIndex|peerNodeId).
-     * Устанавливается извне через {@link #setActiveChatChecker}.
+     * Callback that checks whether a specific chat is open in FormChat.
+     * Parameters are chatType ({@code "channel"} or {@code "dm"}) and chatKey
+     * (channel index or peer node id). Set externally through {@link #setActiveChatChecker}.
      */
     private volatile BiPredicate<String, String> activeChatChecker;
 
@@ -64,12 +59,12 @@ public class NotificationManager {
     }
 
     /**
-     * Вызывается из {@code MessageListenerService.handleTextMessage()} после сохранения в БД.
-     * Решает, показать ли OS-уведомление.
+     * Called after a text message has been saved to the database.
+     * Decides whether an OS notification should be shown.
      *
-     * @param msg      входящее сообщение
-     * @param chatType "channel" или "dm"
-     * @param chatKey  индекс канала (строкой) или nodeId собеседника
+     * @param msg incoming message
+     * @param chatType {@code "channel"} or {@code "dm"}
+     * @param chatKey channel index as a string, or peer node id
      */
     public void onIncomingMessage(MeshMessage msg, String chatType, String chatKey) {
         if (!AppPreferences.isNotificationsEnabled()) {
@@ -186,7 +181,7 @@ public class NotificationManager {
         AppUi.addPrimaryWindowFocusListener(focused -> windowFocused = focused);
     }
 
-    /** Заглушка для неподдерживаемых платформ. */
+    /** No-op fallback for unsupported platforms. */
     private static class NoOpNotificationService implements NotificationService {
         @Override
         public void showNotification(String title, String message) {}

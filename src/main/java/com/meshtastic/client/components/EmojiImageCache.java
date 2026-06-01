@@ -20,11 +20,11 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
 /**
- * Кеш изображений эмодзи: загружает PNG из ресурсов {@code /emoji/} и кеширует как {@link Image}.
+ * Emoji image cache that loads PNG files from {@code /emoji/} resources and stores them as {@link Image}.
  *
- * <p>Имена файлов соответствуют формату Twemoji: hex-кодпоинты через дефис.
- * Для совместимости с разными версиями ассетов loader умеет искать и точное имя,
- * и вариант без U+FE0F.
+ * <p>File names follow the Twemoji convention: lowercase hex code points joined
+ * with hyphens. To stay compatible with different asset revisions, the loader
+ * checks both the exact resource name and the variant with U+FE0F removed.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -45,17 +45,17 @@ public final class EmojiImageCache {
     private static final Set<String> AVAILABLE_EMOJIS = loadAvailableEmojis();
     private static final int MAX_EMOJI_CODEPOINTS = computeMaxEmojiCodePointCount();
 
-    /** Маркер «изображение не найдено» чтобы не пытаться загружать повторно. */
+    /** Sentinel for a missing image, used to avoid repeated load attempts. */
     private static final Image NOT_FOUND = new Image(
             new java.io.ByteArrayInputStream(new byte[0]));
 
-    /** Кеш для часто используемых эмодзи (обычные выражения) */
+    /** Cache for frequently used emoji, primarily common expressions. */
     private static final Map<String, Image> PRIORITY_CACHE = new ConcurrentHashMap<>();
 
-    /** Выделенный поток для предзагрузки эмодзи */
+    /** Dedicated preload task for emoji images. */
     private static volatile Future<?> preloadFuture;
 
-    /** Пул для фоновой предзагрузки */
+    /** Executor used for background preloading. */
     private static final ExecutorService preloadExecutor = Executors.newSingleThreadExecutor(r -> {
         Thread t = new Thread(r, "Emoji-Preloader");
         t.setPriority(Thread.MIN_PRIORITY);
@@ -64,7 +64,7 @@ public final class EmojiImageCache {
 
     private EmojiImageCache() {}
 
-    /** Проверить, является ли строка известным эмодзи с изображением. */
+    /** Checks whether the string is a known emoji with a local image. */
     public static boolean isKnownEmoji(String s) {
         if (s == null || s.isEmpty()) {
             return false;
@@ -93,39 +93,39 @@ public final class EmojiImageCache {
         return KNOWN_EMOJI_CACHE_MAX_ENTRIES;
     }
 
-    /** Все emoji, для которых в ресурсах есть локальный Twemoji PNG. */
+    /** All emoji that have a local Twemoji PNG resource. */
     public static Set<String> getAvailableEmojis() {
         return AVAILABLE_EMOJIS;
     }
 
-    /** Максимальная длина emoji-последовательности в кодпоинтах среди локальных ресурсов. */
+    /** Maximum local emoji-sequence length, measured in code points. */
     public static int getMaxEmojiCodePointCount() {
         return MAX_EMOJI_CODEPOINTS;
     }
 
     /**
-     * Получить кешированное изображение для эмодзи.
-     * Приоритизированные эмодзи загружаются первыми.
-     *
-     * @return {@link Image} или {@code null} если файл не найден
+     * Returns a cached image for the emoji.
+     * Priority emoji are promoted into the fast cache after loading.
+ *
+     * @return {@link Image}, or {@code null} when no resource exists
      */
     public static Image getImage(String emoji) {
-        // Сначала проверяем priority cache (чаще используемые)
+        // Check the priority cache first; these are the most common glyphs.
         Image img = PRIORITY_CACHE.get(emoji);
         if (img != null) {
             return img == NOT_FOUND ? null : img;
         }
         
-        // Затем основной кеш
+        // Then fall back to the main cache.
         img = CACHE.get(emoji);
         if (img != null) {
             return img == NOT_FOUND ? null : img;
         }
         
-        // Загрузка если не найдено
+        // Load on demand when no cache entry exists.
         img = CACHE.computeIfAbsent(emoji, EmojiImageCache::loadImage);
         
-        // Если это частый эмодзи, копируем в priority cache
+        // Promote frequently used emoji to the priority cache.
         if (isPriorityEmoji(emoji)) {
             PRIORITY_CACHE.put(emoji, img);
         }
@@ -134,21 +134,21 @@ public final class EmojiImageCache {
     }
 
     /**
-     * Проверить, является ли эмодзи приоритетным (часто используемым).
-     * Включает стандартные эмодзи из категории smileys и people.
+     * Checks whether the emoji belongs in the priority cache.
+     * The priority set covers common smileys and people expressions.
      */
     private static boolean isPriorityEmoji(String emoji) {
         if (emoji.length() == 0) return false;
         
-        // Смайлики (😀-🥲)
+        // Smileys (U+1F600 through U+1F64A).
         int cp = emoji.codePointAt(0);
         return (cp >= 0x1F600 && cp <= 0x1F64A);
     }
 
     /**
-     * Создать новый {@link ImageView} заданного размера.
-     *
-     * @return ImageView или {@code null} если изображение не найдено
+     * Creates a new {@link ImageView} with the requested size.
+ *
+     * @return ImageView, or {@code null} when the image is unavailable
      */
     public static ImageView createImageView(String emoji, double size) {
         Image img = getImage(emoji);
@@ -165,12 +165,12 @@ public final class EmojiImageCache {
     }
 
     /**
-     * Предзагрузить часто используемые эмодзи в фоновом потоке.
-     * Вызывается один раз при инициализации приложения.
+     * Preloads common emoji on a background thread.
+     * Called once during application initialization.
      */
     public static void preloadCommonEmojis() {
         if (preloadFuture != null && !preloadFuture.isDone()) {
-            return; // Уже запущена
+            return; // Already running.
         }
 
         List<String> emojisToPreload = getCommonEmojis();
@@ -184,13 +184,13 @@ public final class EmojiImageCache {
     }
 
     /**
-     * Получить список часто используемых эмодзи для предзагрузки.
+     * Builds the common emoji list used for preloading.
      */
     private static List<String> getCommonEmojis() {
         List<String> result = new ArrayList<>();
         
-        // Добавляем смайлики (наиболее популярные)
-        result.add("😀"); // улыбка
+        // Smileys, which are the most frequently used set.
+        result.add("😀"); // smile
         result.add("😃");
         result.add("😄");
         result.add("😁");
@@ -249,8 +249,8 @@ public final class EmojiImageCache {
         result.add("😵");
         result.add("🤯");
         
-        // Добавляем часто используемые выражения рук
-        result.add("👋"); // привет
+        // Common hand gestures.
+        result.add("👋"); // wave
         result.add("👍");
         result.add("👎");
         result.add("👏");
@@ -259,7 +259,7 @@ public final class EmojiImageCache {
         result.add("🙏");
         result.add("💪");
         
-        // Добавляем сердечки
+        // Hearts.
         result.add("❤️");
         result.add("🧡");
         result.add("💛");
@@ -268,7 +268,7 @@ public final class EmojiImageCache {
         result.add("💜");
         result.add("🖤");
         
-        // Добавляем другие популярные
+        // Other popular symbols.
         result.add("🔥");
         result.add("✨");
         result.add("⭐");
@@ -280,8 +280,9 @@ public final class EmojiImageCache {
     }
 
     /**
-     * Преобразовать строку эмодзи в имя файла ресурса.
-     * Кодпоинты через дефис, строчные hex, U+FE0F опционально пропускается.
+     * Converts an emoji string into a resource file name.
+     * Code points are lowercase hex values joined by hyphens; U+FE0F can be
+     * omitted when the caller asks for the normalized form.
      */
     static String emojiToFilename(String emoji) {
         return emojiToFilename(emoji, false);
@@ -295,8 +296,8 @@ public final class EmojiImageCache {
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < emoji.length(); ) {
             int cp = emoji.codePointAt(i);
-            // Часть ресурсов хранится без FE0F, часть — с ним внутри ZWJ-последовательностей.
-            // Поэтому в loadImage() пробуем обе формы имени файла.
+            // Some resources omit FE0F, while others keep it inside ZWJ sequences.
+            // loadImage() therefore tries both file-name forms.
             if (preserveVariationSelectors || cp != 0xFE0F) {
                 if (!sb.isEmpty()) {
                     sb.append('-');

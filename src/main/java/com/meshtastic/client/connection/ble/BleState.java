@@ -1,18 +1,18 @@
 package com.meshtastic.client.connection.ble;
 
 /**
- * Событие изменения состояния BLE-соединения.
+ * BLE connection state event.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public sealed interface BleState {
 
-    /** Соединение установлено, GATT-характеристики готовы. */
+    /** Connection is established and GATT characteristics are ready. */
     record Connected() implements BleState {}
 
-    /** Соединение разорвано. */
+    /** Connection has been closed. */
     record Disconnected() implements BleState {}
 
-    /** Ошибка соединения. */
+    /** Connection error. */
     record Error(String message, Throwable cause) implements BleState {}
 }

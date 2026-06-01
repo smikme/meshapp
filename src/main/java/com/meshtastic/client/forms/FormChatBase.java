@@ -42,11 +42,11 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.function.Consumer;
 
 /**
- * Общее состояние и контракты между слоями реализации формы чата.
+ * Shared state and contracts for the chat form implementation layers.
  *
- * <p>Публичная форма остаётся небольшой, а пакетные слои разделяют построение
- * интерфейса, окно загруженных сообщений, обработку запросов и привязку данных.
- * Состояние, общее для этих слоёв, хранится здесь.
+ * <p>The public form stays small while package-level layers split UI building,
+ * the loaded-message window, request handling, and data binding. State shared
+ * by those layers lives here.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -61,56 +61,56 @@ abstract class FormChatBase extends Form {
     protected static final int MAX_LOADED_MESSAGES = PAGE_SIZE * MAX_WINDOW_PAGES;
     protected static final String WINDOWS_HIT_TEST_BACKGROUND = "-fx-background-color: rgba(0,0,0,0.004);";
 
-    // === Левая панель: список чатов ===
+    // === Left pane: chat list ===
     protected ListView<ChatItem> chatListView;
     protected final ObservableList<ChatItem> chatItems = FXCollections.observableArrayList();
     protected FilteredList<ChatItem> filteredChats;
 
-    // === Правая панель ===
+    // === Right pane ===
     protected VBox detailPane;
     protected ChatItem selectedChat;
 
-    // Плейсхолдер
+    // Placeholder
     protected VBox placeholderBox;
 
-    // Заголовок чата
+    // Chat header
     protected HBox chatHeader;
     protected StackPane headerAvatarPane;
     protected Label headerAvatarLabel;
     protected Label headerNameLabel;
     protected Separator headerSep;
 
-    // Область сообщений
+    // Message area
     protected ScrollPane messageScrollPane;
     protected VBox messageContainer;
-    protected StackPane messageArea; // обёртка: scrollPane + кнопка «вниз»
+    protected StackPane messageArea; // Wrapper: scrollPane plus the jump-down button.
     protected Button scrollDownBtn;
     protected Label scrollDownBadge;
     protected int newMessageWhileScrolled = 0;
 
-    // Панель ввода
+    // Input bar
     protected ChatInputBar chatInputBar;
     protected Button newChatBtn;
     protected ContextMenu newChatMenu;
 
-    // === Компоненты ===
+    // === Components ===
     protected TracerouteView tracerouteView;
     protected MessageBubbleFactory bubbleFactory;
     protected ChatNameResolver nameResolver;
 
-    // === Данные ===
+    // === Data ===
     protected DeviceState state;
     protected ProtocolHandler protocolHandler;
     protected MeshCoreCompanionProtocolRuntime meshCoreCompanionRuntime;
-    /** Идентификатор подключения, к которому сейчас привязана форма чата. */
+    /** Connection id currently bound to the chat form. */
     protected String boundConnectionId;
 
-    // Трекинг непрочитанных: ключи вида "ch:INDEX" или "dm:NODEID" → кол-во прочитанных сообщений
+    // Unread tracking: keys such as "ch:INDEX" or "dm:NODEID" map to read-message counts.
     protected final Map<String, Integer> lastReadCounts = new HashMap<>();
-    /** Последний выбранный канал/DM для каждого подключения. */
+    /** Last selected channel or DM for each connection. */
     protected final Map<String, ChatSelection> selectedChatsByConnectionId = new HashMap<>();
 
-    // Пагинация сообщений из БД
+    // Database-backed message pagination.
     protected long oldestLoadedDbId = Long.MAX_VALUE;
     protected long newestLoadedDbId = 0;
     protected long latestKnownDbId = 0;
@@ -124,22 +124,22 @@ abstract class FormChatBase extends Form {
     protected String loadedChatScrollCacheKey;
     protected int openingChatUnreadCount = 0;
     protected final Map<String, ChatScrollState> savedChatScrollStates = new HashMap<>();
-    // Трекинг статусов исходящих сообщений для обновления при ACK/NAK
+    // Outgoing status tracking, used when ACK/NAK updates arrive.
     protected final Map<Integer, Label> pendingStatusLabels = new HashMap<>();
 
-    // Активные запросы с обратным отсчётом (трассировка/инфо), переживают переключение чатов
+    // Active countdown requests such as traceroute/info; they survive chat switches.
     protected final List<PendingCountdown> pendingCountdowns = new ArrayList<>();
 
-    /** Состояние активного запроса с обратным отсчётом */
+    /** State for an active countdown request. */
     protected static class PendingCountdown {
         final String chatType;
         final String chatKey;
         final String prefix;
         final int[] remaining;
         final boolean[] done = {false};
-        EmojiTextFlow countdownLabel;  // пересоздаётся при переключении чатов
-        HBox tempBubble;       // пересоздаётся при переключении чатов
-        Runnable cancelAction; // действие при отмене (останавливает таймер, убирает слушатель)
+        EmojiTextFlow countdownLabel;  // Recreated when switching chats.
+        HBox tempBubble;       // Recreated when switching chats.
+        Runnable cancelAction; // Cancels the timer and removes the listener.
 
         PendingCountdown(String chatType, String chatKey, String prefix, int totalSeconds) {
             this.chatType = chatType;
@@ -150,21 +150,21 @@ abstract class FormChatBase extends Form {
     }
 
     /**
-     * Сохраняемая точка привязки прокрутки для области сообщений.
-     *
-     * @param anchorDbId id сообщения в БД, используемый как якорь области просмотра
-     * @param anchorOffset смещение в пикселях от верхней границы строки-якоря
-     * @param atBottom была ли область просмотра в живом хвосте чата
+     * Persisted scroll anchor for the message area.
+ *
+     * @param anchorDbId   database id of the message used as the viewport anchor
+     * @param anchorOffset pixel offset from the top edge of the anchor row
+     * @param atBottom     whether the viewport was at the live tail of the chat
      */
     protected record ChatScrollState(long anchorDbId, double anchorOffset, boolean atBottom) {}
 
     /**
-     * Стабильный ключ выбранного чата, не зависящий от пересоздания {@link ChatItem}
-     * при обновлении списка чатов.
-     *
-     * @param type тип чата
-     * @param channelIndex индекс канала для {@link ChatItem.ChatType#CHANNEL}
-     * @param peerNodeId nodeId собеседника для {@link ChatItem.ChatType#DIRECT_MESSAGE}
+     * Stable key for the selected chat, independent of {@link ChatItem}
+     * recreation during chat-list refreshes.
+ *
+     * @param type         chat type
+     * @param channelIndex channel index for {@link ChatItem.ChatType#CHANNEL}
+     * @param peerNodeId   peer node id for {@link ChatItem.ChatType#DIRECT_MESSAGE}
      */
     protected record ChatSelection(ChatItem.ChatType type, int channelIndex, String peerNodeId) {
         static ChatSelection from(ChatItem item) {
@@ -189,10 +189,9 @@ abstract class FormChatBase extends Form {
             (obs, oldValue, newValue) -> Platform.runLater(this::handleChatFontSizeChanged);
 
     /**
-     * При бурном трафике отдельный Platform.runLater на каждое событие быстро
-     * раздувает FX-очередь. Держим не более одного запланированного прохода
-     * обновления, а параллельные события лишь помечают состояние как требующее
-     * повторного прохода.
+     * Under heavy traffic, scheduling one Platform.runLater call per event can
+     * flood the FX queue. We keep at most one refresh pass scheduled; concurrent
+     * events only mark the state as needing another pass.
      */
     protected void scheduleMessageRefresh() {
         messageRefreshDirty.set(true);
@@ -282,7 +281,7 @@ abstract class FormChatBase extends Form {
     }
 
     /**
-     * Запоминает текущий выбранный чат для подключения, к которому привязана форма.
+     * Remembers the currently selected chat for the connection bound to the form.
      */
     protected void rememberSelectedChatForBoundConnection() {
         if (boundConnectionId != null && selectedChat != null) {
@@ -291,7 +290,7 @@ abstract class FormChatBase extends Form {
     }
 
     /**
-     * Сбрасывает сохранённый выбранный чат для текущего подключения.
+     * Clears the saved selected chat for the current connection.
      */
     protected void clearSelectedChatForBoundConnection() {
         if (boundConnectionId != null) {
@@ -300,14 +299,14 @@ abstract class FormChatBase extends Form {
     }
 
     /**
-     * Возвращает сохранённый выбранный чат для текущего подключения.
+     * Returns the saved selected chat for the current connection.
      */
     protected ChatSelection selectedChatForBoundConnection() {
         return boundConnectionId != null ? selectedChatsByConnectionId.get(boundConnectionId) : null;
     }
 
     /**
-     * Проверяет, соответствует ли элемент списка сохранённому ключу чата.
+     * Checks whether a list item matches the saved chat key.
      */
     protected static boolean chatItemMatchesSelection(ChatItem item, ChatSelection selection) {
         if (item == null || selection == null || item.getType() != selection.type()) {

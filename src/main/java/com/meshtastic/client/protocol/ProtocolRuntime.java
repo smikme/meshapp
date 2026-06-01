@@ -5,65 +5,63 @@ import com.meshtastic.client.model.ProtocolType;
 import java.util.concurrent.CompletableFuture;
 
 /**
- * Runtime-экземпляр одного коммуникационного протокола поверх одного transport-соединения.
+ * Runtime instance for one communication protocol over one transport connection.
  * <p>
- * Runtime связывает transport с протокольными сервисами: слушателями входящих
- * сообщений, начальным handshake/config exchange, состоянием устройства и
- * post-connect действиями.
+ * A runtime connects the transport to protocol services: incoming-message
+ * listeners, initial handshake or config exchange, device state, and
+ * post-connect actions.
  *
- * @param <S> тип состояния, специфичный для протокола
+ * @param <S> protocol-specific state type
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public interface ProtocolRuntime<S> extends AutoCloseable {
 
     /**
-     * @return тип протокола этого runtime-а
+     * @return protocol type handled by this runtime
      */
     ProtocolType getProtocolType();
 
     /**
-     * @return текущее состояние протокола/устройства
+     * @return current protocol or device state
      */
     S getState();
 
     /**
-     * Возвращает future готовности runtime-а.
+     * Returns the runtime readiness future.
      * <p>
-     * Для Meshtastic это завершение config exchange; для других протоколов это
-     * может быть авторизация, handshake или иная начальная синхронизация.
+     * For Meshtastic this means config exchange completion; other protocols may
+     * define readiness as authorization, handshake, or another initial sync.
      *
-     * @return future, завершающийся после готовности протокола
+     * @return future completed when the protocol is ready
      */
     CompletableFuture<S> getReadyFuture();
 
     /**
-     * Запускает протокольные слушатели и начальный handshake/config exchange.
+     * Starts protocol listeners and the initial handshake or config exchange.
      *
-     * @return future готовности, совпадающий по смыслу с {@link #getReadyFuture()}
+     * @return readiness future with the same meaning as {@link #getReadyFuture()}
      */
     CompletableFuture<S> start();
 
     /**
-     * Стабильный идентификатор локального/владельческого устройства,
-     * если протокол уже смог его определить.
+     * Returns a stable id for the local or owner device once the protocol knows it.
      *
-     * @return идентификатор владельца или {@code null}, если он неизвестен
+     * @return owner id, or {@code null} when it is not known yet
      */
     default String getOwnerId() {
         return null;
     }
 
     /**
-     * Вызывается менеджером подключений после успешной готовности runtime-а,
-     * если transport всё ещё активен.
+     * Called by the connection manager after runtime readiness, while transport is still active.
      */
     default void onReady() {
     }
 
     /**
-     * Освобождает протокольные ресурсы: слушатели, scheduler-ы, pending ACK-и,
-     * вспомогательные сервисы и состояние.
+     * Releases protocol resources such as listeners, schedulers, pending ACKs,
+     * helper services, and state.
      */
     @Override
     void close();

@@ -14,8 +14,8 @@ import javafx.scene.layout.VBox;
 import java.util.function.IntConsumer;
 
 /**
- * Модальный диалог ввода PIN-кода (passkey) для BLE pairing.
- * Вызывается из нативного BlueZ agent callback при сопряжении с устройством.
+ * Modal passkey dialog used during BLE pairing.
+ * Invoked from the native BlueZ agent callback when a device requests pairing.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -24,11 +24,11 @@ public final class PasskeyDialog {
     private PasskeyDialog() {}
 
     /**
-     * Показать диалог ввода passkey.
+     * Shows the passkey entry dialog.
      *
-     * @param deviceAddress MAC-адрес устройства, запрашивающего pairing
-     * @param onPasskey     callback с введённым PIN (int)
-     * @param onCancel      callback при отмене
+     * @param deviceAddress MAC address of the device requesting pairing
+     * @param onPasskey callback receiving the entered PIN
+     * @param onCancel callback invoked when the dialog is cancelled
      */
     public static void show(String deviceAddress,
                             IntConsumer onPasskey,
@@ -59,7 +59,7 @@ public final class PasskeyDialog {
         pinField.setPromptText("123456");
         pinField.setMaxWidth(280);
 
-        // Только цифры, максимум 6
+        // Digits only, up to six characters.
         pinField.textProperty().addListener((obs, oldVal, newVal) -> {
             if (newVal != null) {
                 String filtered = newVal.replaceAll("[^0-9]", "");

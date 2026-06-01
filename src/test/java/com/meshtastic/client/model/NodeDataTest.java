@@ -233,13 +233,13 @@ class NodeDataTest {
         // 1700000000 = Wed Nov 15 2023 14:13:20 GMT+0000
         String formatted = NodeData.formatTime(1700000000);
         
-        // Проверяем формат dd.MM.yy HH:mm
+        // Verify the dd.MM.yy HH:mm format.
         assertTrue(formatted.matches("\\d{2}\\.\\d{2}\\.\\d{2} \\d{2}:\\d{2}"));
     }
 
     @Test
     void translateRoleReturnsUnknownForUnknown() {
-        // translateRole возвращает исходную строку если не найден перевод
+        // translateRole falls back to the original value when no localized label exists.
         assertEquals("unknown", NodeData.translateRole("unknown"));
     }
 

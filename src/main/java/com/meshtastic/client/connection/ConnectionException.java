@@ -1,8 +1,7 @@
 package com.meshtastic.client.connection;
 
 /**
- * Исключение, возникающее при невозможности установить соединение
- * с Meshtastic-устройством (таймаут, отказ, некорректный адрес).
+ * Exception thrown when a connection cannot be established.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */

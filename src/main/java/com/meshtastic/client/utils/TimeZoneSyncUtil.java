@@ -10,14 +10,15 @@ import java.time.temporal.ChronoUnit;
 import java.util.Optional;
 
 /**
- * Утилиты для синхронизации часового пояса Meshtastic-ноды с часовым поясом ПК.
+ * Utilities for synchronizing a Meshtastic node's time zone with the computer's
+ * current time zone.
  * <p>
- * Нода хранит timezone не как IANA ZoneId, а как POSIX {@code tzdef}. Для UI нам
- * нужно уметь:
+ * Nodes store time zones as POSIX {@code tzdef} strings rather than IANA
+ * {@code ZoneId} values. The UI needs helpers that can:
  * <ul>
- *   <li>получить текущее GMT-смещение системы</li>
- *   <li>сравнить его с текущим {@code tzdef} ноды</li>
- *   <li>сгенерировать безопасный fixed-offset {@code tzdef} для записи на ноду</li>
+ *   <li>read the current system GMT offset</li>
+ *   <li>compare it with the node's current {@code tzdef}</li>
+ *   <li>generate a safe fixed-offset {@code tzdef} to write back to the node</li>
  * </ul>
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
@@ -38,12 +39,13 @@ public final class TimeZoneSyncUtil {
     }
 
     /**
-     * Генерирует POSIX tzdef с фиксированным смещением от GMT.
+     * Builds a fixed-offset POSIX {@code tzdef} from a GMT offset.
      * <p>
-     * Используется как fallback-формат для синхронизации GMT с ПК. Например:
+     * Used as the fallback format for synchronizing GMT with the computer. For
+     * example:
      * <ul>
-     *   <li>{@code GMT-3} для UTC+03:00</li>
-     *   <li>{@code GMT5} для UTC-05:00</li>
+     *   <li>{@code GMT-3} for UTC+03:00</li>
+     *   <li>{@code GMT5} for UTC-05:00</li>
      * </ul>
      */
     public static String buildFixedGmtTzDef(ZoneOffset offset) {

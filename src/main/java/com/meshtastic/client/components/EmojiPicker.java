@@ -24,8 +24,8 @@ import java.util.List;
 import java.util.function.Consumer;
 
 /**
- * Всплывающий пикер эмодзи. Показывается как Popup привязанный к кнопке.
- * Содержит: поиск, категории, сетку эмодзи.
+ * Popup emoji picker anchored to a button.
+ * Contains search, category tabs, and an emoji grid.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -35,7 +35,7 @@ public class EmojiPicker {
     private static final double PICKER_HEIGHT = 400;
     private static final int GRID_COLUMNS = 8;
     private static final double CELL_SIZE = 36;
-    // Используем clock emoji с существующим PNG-ассетом, чтобы не уходить в fallback-квадрат.
+    // Use a clock emoji that has a local PNG asset, avoiding the fallback square.
     private static final String RECENT_CATEGORY_ICON = "\uD83D\uDD50";
 
     private final Popup popup;
@@ -52,7 +52,7 @@ public class EmojiPicker {
         this.onEmojiSelected = onEmojiSelected;
         this.popup = new Popup();
 
-        // Автоматическое скрытие при потере фокуса / клике вне
+        // Hide automatically when focus leaves the popup or the user clicks outside.
         popup.setAutoHide(true);
         popup.setHideOnEscape(true);
 
@@ -62,7 +62,7 @@ public class EmojiPicker {
         root.setPadding(new Insets(8));
         root.getStyleClass().add("emoji-picker");
 
-        // Поиск
+        // Search
         searchField = new TextField();
         searchField.setPromptText(I18n.t("emoji.search.placeholder"));
         searchField.getStyleClass().add("emoji-picker-search");
@@ -74,12 +74,12 @@ public class EmojiPicker {
             }
         });
 
-        // Панель категорий
+        // Category bar
         categoryBar = new HBox(2);
         categoryBar.setAlignment(Pos.CENTER);
         categoryBar.getStyleClass().add("emoji-picker-categories");
 
-        // Сетка эмодзи
+        // Emoji grid
         emojiGrid = new FlowPane(2, 2);
         emojiGrid.setPrefWrapLength((int) (GRID_COLUMNS * (CELL_SIZE + 2)));
         emojiGrid.getStyleClass().add("emoji-picker-grid");
@@ -95,7 +95,7 @@ public class EmojiPicker {
         popup.getContent().add(root);
     }
 
-    /** Показать/скрыть пикер относительно указанного узла (кнопки) */
+    /** Shows or hides the picker relative to the given anchor node. */
     public void toggle(Node anchor) {
         if (popup.isShowing()) {
             hide();
@@ -104,9 +104,9 @@ public class EmojiPicker {
         }
     }
 
-    /** Показать пикер над кнопкой (или под, если не влезает) */
+    /** Shows the picker above the button, or below it if there is no room. */
     public void show(Node anchor) {
-        // Синхронизировать тему: Popup не наследует styleClass с корня сцены
+        // Sync theme: Popup does not inherit style classes from the scene root.
         if (anchor.getScene() != null && anchor.getScene().getRoot() != null) {
             boolean isLight = anchor.getScene().getRoot().getStyleClass().contains("light-theme");
             if (isLight && !root.getStyleClass().contains("light-theme")) {
@@ -116,15 +116,15 @@ public class EmojiPicker {
             }
         }
 
-        // Перестроить категории (кнопка «Недавние» зависит от текущего состояния)
+        // Rebuild categories; the Recent button depends on current state.
         buildCategoryButtons();
 
-        // Позиция: над кнопкой, выровнено по левому краю
+        // Position above the button and left-aligned to it.
         Bounds bounds = anchor.localToScreen(anchor.getBoundsInLocal());
         if (bounds == null) { return; }
         double x = bounds.getMinX();
         double y = bounds.getMinY() - PICKER_HEIGHT - 4;
-        // Если не влезает сверху — показать снизу
+        // If there is no room above, show it below.
         if (y < 0) {
             y = bounds.getMaxY() + 4;
         }
@@ -135,7 +135,7 @@ public class EmojiPicker {
         showCategory(getDefaultCategory());
     }
 
-    /** Скрыть пикер */
+    /** Hides the picker. */
     public void hide() {
         popup.hide();
     }
@@ -144,26 +144,26 @@ public class EmojiPicker {
         return popup.isShowing();
     }
 
-    // ==================== Внутренняя логика ====================
+    // ==================== Internal Logic ====================
 
-    /** Определить стартовую категорию: "recent" если есть недавние, иначе "smileys" */
+    /** Chooses the initial category: "recent" when available, otherwise "smileys". */
     private String getDefaultCategory() {
         List<String> recent = EmojiRecentStore.getRecent();
         return recent.isEmpty() ? "smileys" : "recent";
     }
 
-    /** Построить кнопки категорий */
+    /** Builds the category buttons. */
     private void buildCategoryButtons() {
         categoryBar.getChildren().clear();
 
-        // Кнопка «Недавние» (если есть)
+        // Recent button, when there is recent history.
         List<String> recent = EmojiRecentStore.getRecent();
         if (!recent.isEmpty()) {
             categoryBar.getChildren().add(
                     createCategoryButton("recent", RECENT_CATEGORY_ICON, I18n.t("emoji.category.recent")));
         }
 
-        // Кнопки остальных категорий
+        // Buttons for all other categories.
         for (EmojiData.Category cat : EmojiData.getCategories()) {
             categoryBar.getChildren().add(
                     createCategoryButton(cat.id(), cat.icon(), I18n.t(cat.labelKey())));
@@ -183,7 +183,7 @@ public class EmojiPicker {
         return btn;
     }
 
-    /** Показать эмодзи указанной категории в сетке */
+    /** Shows the emoji for the selected category in the grid. */
     private void showCategory(String categoryId) {
         activeCategory = categoryId;
         emojiGrid.getChildren().clear();
@@ -207,7 +207,7 @@ public class EmojiPicker {
         updateCategoryHighlight();
     }
 
-    /** Реакция на ввод в поле поиска */
+    /** Handles search-field input. */
     private void onSearchChanged(String query) {
         if (query == null || query.trim().isEmpty()) {
             showCategory(activeCategory != null ? activeCategory : getDefaultCategory());
@@ -223,7 +223,7 @@ public class EmojiPicker {
         updateCategoryHighlight();
     }
 
-    /** Создать ячейку сетки для одного эмодзи */
+    /** Creates one grid cell for an emoji. */
     private StackPane createEmojiCell(String emoji) {
         StackPane cell = new StackPane();
         cell.getChildren().add(createEmojiGraphic(emoji, 24));
@@ -240,7 +240,7 @@ public class EmojiPicker {
         return cell;
     }
 
-    /** Подсветить активную категорию */
+    /** Highlights the active category. */
     private void updateCategoryHighlight() {
         for (Node node : categoryBar.getChildren()) {
             node.getStyleClass().remove("emoji-cat-btn-active");

@@ -14,7 +14,7 @@ import java.awt.TrayIcon;
 import java.io.IOException;
 
 /**
- * Tray icon для Windows/Linux через AWT {@link SystemTray}.
+ * Windows and Linux tray icon implemented through AWT {@link SystemTray}.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */

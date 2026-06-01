@@ -25,12 +25,12 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Pattern;
 
 /**
- * Сервис захвата и хранения LoRa mesh-пакетов для окна мониторинга.
- * Инкапсулирует приём сообщений из протокольного слоя, их сохранение в БД и
- * рассылку live-событий UI-слушателям.
+ * Captures and stores LoRa mesh packets for the packet monitor window.
+ * The service owns the handoff from protocol runtimes, durable storage in the
+ * local database, and live event delivery to UI listeners.
  *
- * Публичные методы допускают вызов из произвольных потоков. Операции, которые
- * работают с БД и общим состоянием сервиса, синхронизированы на экземпляре.
+ * Public methods may be called from arbitrary threads. Operations that touch
+ * the database or shared service state are synchronized on the service instance.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -49,9 +49,10 @@ public final class PacketMonitorService {
     private static final Logger log = LoggerFactory.getLogger(PacketMonitorService.class);
 
     /**
-     * Слушатель событий мониторинга.
-     * Контракт: callbacks должны быть быстрыми и не блокировать поток вызова.
-     * Переключение на JavaFX thread является обязанностью UI-слоя.
+     * Receives packet monitor events.
+     * Implementations should return quickly and must not block the calling
+     * thread. Moving work onto the JavaFX application thread is the UI layer's
+     * responsibility.
      */
     public interface Listener {
         default void onPacketLogged(PacketLogEntry entry) {}
@@ -65,17 +66,17 @@ public final class PacketMonitorService {
     }
 
     /**
-     * Серверный фильтр таблицы пакетов.
-     * Контракт: пустые строки нормализуются к {@code null}, чтобы SQL-слой не
-     * различал "пустой фильтр" и "фильтр не задан".
-     *
-     * @param direction            направление пакета или {@code null} для обоих направлений
-     * @param packetType           точный тип пакета или {@code null} для всех типов
-     * @param transportMechanism   точный transport_mechanism, {@link #TRANSPORT_MECHANISM_UNSPECIFIED}
-     *                             для строк без заполненного механизма или {@code null} для всех
-     * @param searchText           поисковая строка по UI-полям таблицы или {@code null}
-     * @param capturedAtFromMillis нижняя граница времени захвата в epoch millis включительно или {@code null}
-     * @param capturedAtToMillis   верхняя граница времени захвата в epoch millis включительно или {@code null}
+     * Server-side filter for the packet table.
+     * Blank strings are normalized to {@code null} so the SQL layer treats an
+     * empty filter and an omitted filter identically.
+ *
+     * @param direction            packet direction, or {@code null} for both directions
+     * @param packetType           exact packet type, or {@code null} for all types
+     * @param transportMechanism   exact transport_mechanism, {@link #TRANSPORT_MECHANISM_UNSPECIFIED}
+     *                             for rows without a stored mechanism, or {@code null} for all mechanisms
+     * @param searchText           free-text search across the table's UI fields, or {@code null}
+     * @param capturedAtFromMillis inclusive lower bound for capture time, in epoch millis, or {@code null}
+     * @param capturedAtToMillis   inclusive upper bound for capture time, in epoch millis, or {@code null}
      */
     public record PacketQuery(PacketLogEntry.Direction direction,
                               String packetType,
@@ -91,17 +92,17 @@ public final class PacketMonitorService {
         }
 
         /**
-         * @return нормализованный SQL-pattern для LIKE-поиска или {@code null}, если поиск выключен
+         * @return normalized SQL pattern for LIKE search, or {@code null} when search is disabled
          */
         public String searchPattern() {
             return searchText == null ? null : "%" + searchText.toLowerCase(Locale.ROOT) + "%";
         }
 
         /**
-         * Возвращает дополнительные SQL-patterns для поиска по адресам нод.
-         * Нужен для совместимости между UI-форматом {@code !1dc26363} и тем,
-         * как исторически были сохранены поля {@code from_node/to_node} в БД
-         * (имена с decimal-id или просто decimal-id).
+         * Builds additional SQL patterns for node-address searches.
+         * This preserves compatibility between the UI form {@code !1dc26363}
+         * and older {@code from_node}/{@code to_node} values stored as names
+         * with decimal IDs, or as decimal IDs alone.
          */
         public List<String> nodeAddressSearchPatterns() {
             return resolveNodeAddressSearchPatterns(searchText);
@@ -109,17 +110,17 @@ public final class PacketMonitorService {
     }
 
     /**
-     * Курсор пагинации относительно общего порядка {@code captured_at DESC, id DESC}.
-     * Контракт: курсор всегда описывает конкретную строку текущей страницы.
-     *
-     * @param capturedAt время захвата пакета
-     * @param id         идентификатор строки в БД
+     * Pagination cursor in the global {@code captured_at DESC, id DESC} order.
+     * A cursor always points to one concrete row from the current page.
+ *
+     * @param capturedAt packet capture time
+     * @param id         database row identifier
      */
     public record PageCursor(long capturedAt, long id) {
 
         /**
-         * @param entry запись текущей страницы
-         * @return курсор для этой записи или {@code null}, если запись отсутствует
+         * @param entry row from the current page
+         * @return cursor for that row, or {@code null} when no row is supplied
          */
         public static PageCursor fromEntry(PacketLogEntry entry) {
             if (entry == null) {
@@ -130,18 +131,17 @@ public final class PacketMonitorService {
     }
 
     /**
-     * Одна страница таблицы пакетов.
-     * Контракт:
-     * - {@link #entries()} уже отсортированы как UI-таблица: новые сверху;
-     * - флаги {@link #hasNewer()} и {@link #hasOlder()} описывают наличие
-     *   соседних страниц в той же выборке;
-     * - размер {@link #entries()} не превышает лимит, запрошенный у сервиса.
-     *
-     * @param entries            записи текущей страницы
-     * @param hasNewer           доступны ли более новые записи в той же выборке
-     * @param hasOlder           доступны ли более старые записи в той же выборке
-     * @param totalMatchingCount общее число строк, подходящих под фильтр
-     * @param totalStoredCount   общее число строк журнала безотносительно фильтра
+     * One page of packet-table data.
+     * The entries are already sorted as the UI displays them, newest first.
+     * {@link #hasNewer()} and {@link #hasOlder()} describe neighboring pages
+     * within the same filtered result set, and {@link #entries()} never exceeds
+     * the limit requested from the service.
+ *
+     * @param entries            rows on the current page
+     * @param hasNewer           whether newer rows are available in the same result set
+     * @param hasOlder           whether older rows are available in the same result set
+     * @param totalMatchingCount total number of rows that match the filter
+     * @param totalStoredCount   total number of stored rows, regardless of filters
      */
     public record PacketPage(List<PacketLogEntry> entries,
                              boolean hasNewer,
@@ -165,7 +165,7 @@ public final class PacketMonitorService {
     }
 
     /**
-     * @return singleton-экземпляр сервиса мониторинга
+     * @return singleton packet monitor service instance
      */
     public static synchronized PacketMonitorService getInstance() {
         if (instance == null) {
@@ -175,16 +175,16 @@ public final class PacketMonitorService {
     }
 
     /**
-     * @return уже инициализированный singleton или {@code null}, если сервис ещё не создавался
+     * @return initialized singleton, or {@code null} if the service has not been created yet
      */
     public static synchronized PacketMonitorService getIfInitialized() {
         return instance;
     }
 
     /**
-     * Закрывает singleton, если он был создан.
-     * После вызова следующий {@link #getInstance()} создаст новый сервис и заново
-     * инициализирует JDBC-ресурсы.
+     * Closes the singleton if it has been created.
+     * The next {@link #getInstance()} call will create a fresh service and
+     * initialize its JDBC resources again.
      */
     public static synchronized void closeIfInitialized() {
         if (instance != null) {
@@ -214,69 +214,68 @@ public final class PacketMonitorService {
     }
 
     /**
-     * Удаляет слушателя live-событий.
-     * Контракт: вызов допустим даже если слушатель не был зарегистрирован.
-     *
-     * @param listener слушатель, который больше не должен получать события
+     * Removes a live-event listener.
+     * The call is valid even when the listener was not registered.
+ *
+     * @param listener listener that should stop receiving events
      */
     public void removeListener(Listener listener) {
         listeners.remove(listener);
     }
 
     /**
-     * Регистрирует входящий пакет для конкретного подключения.
-     *
-     * @param connectionId идентификатор подключения в {@link ConnectionManager}
-     * @param packet       protobuf-пакет
+     * Records an incoming packet for a specific connection.
+ *
+     * @param connectionId connection identifier in {@link ConnectionManager}
+     * @param packet       protobuf packet
      */
     public void recordIncoming(String connectionId, MeshProtos.MeshPacket packet) {
         recordPacket(Direction.INCOMING, packet, resolveOwnerNodeId(connectionId), resolveDeviceState(connectionId));
     }
 
     /**
-     * Регистрирует исходящий пакет для конкретного подключения.
-     *
-     * @param connectionId идентификатор подключения в {@link ConnectionManager}
-     * @param packet       protobuf-пакет
+     * Records an outgoing packet for a specific connection.
+ *
+     * @param connectionId connection identifier in {@link ConnectionManager}
+     * @param packet       protobuf packet
      */
     public void recordOutgoing(String connectionId, MeshProtos.MeshPacket packet) {
         recordPacket(Direction.OUTGOING, packet, resolveOwnerNodeId(connectionId), resolveDeviceState(connectionId));
     }
 
     /**
-     * Регистрирует входящий raw-пакет протокола, который не является Meshtastic protobuf.
+     * Records an incoming raw protocol packet that is not a Meshtastic protobuf.
      * <p>
-     * Используется MeshCore Companion Protocol: монитор хранит байты, HEX/ASCII
-     * предпросмотр и человекочитаемый тип packet-а, не пытаясь конвертировать
-     * его в {@link MeshProtos.MeshPacket}.
-     *
-     * @param connectionId идентификатор подключения в {@link ConnectionManager}
-     * @param packetType тип raw packet-а для UI-фильтра
-     * @param payloadText краткое описание payload-а
-     * @param packetBytes исходные байты packet-а
+     * This is used by the MeshCore Companion Protocol. The monitor stores the
+     * raw bytes, a HEX/ASCII preview, and a human-readable packet type without
+     * attempting to convert the payload into a {@link MeshProtos.MeshPacket}.
+ *
+     * @param connectionId connection identifier in {@link ConnectionManager}
+     * @param packetType   raw packet type used by the UI filter
+     * @param payloadText  short payload description
+     * @param packetBytes  original packet bytes
      */
     public void recordRawIncoming(String connectionId, String packetType, String payloadText, byte[] packetBytes) {
         recordRawPacket(Direction.INCOMING, connectionId, packetType, payloadText, packetBytes);
     }
 
     /**
-     * Регистрирует исходящий raw-пакет протокола, который не является Meshtastic protobuf.
-     *
-     * @param connectionId идентификатор подключения в {@link ConnectionManager}
-     * @param packetType тип raw packet-а для UI-фильтра
-     * @param payloadText краткое описание payload-а
-     * @param packetBytes исходные байты packet-а
+     * Records an outgoing raw protocol packet that is not a Meshtastic protobuf.
+ *
+     * @param connectionId connection identifier in {@link ConnectionManager}
+     * @param packetType   raw packet type used by the UI filter
+     * @param payloadText  short payload description
+     * @param packetBytes  original packet bytes
      */
     public void recordRawOutgoing(String connectionId, String packetType, String payloadText, byte[] packetBytes) {
         recordRawPacket(Direction.OUTGOING, connectionId, packetType, payloadText, packetBytes);
     }
 
     /**
-     * Внутренняя точка записи пакета в журнал.
-     * Контракт:
-     * - если сбор выключен, пакет тихо игнорируется
-     * - уведомление слушателей происходит только после успешного insert в БД
-     * - порядок live-событий соответствует порядку успешных insert
+     * Internal journal entry point for protobuf packets.
+     * If capture is disabled, the packet is ignored silently. Listeners are
+     * notified only after a successful database insert, and live events follow
+     * the same order as successful inserts.
      */
     synchronized void recordPacket(Direction direction,
                                    MeshProtos.MeshPacket packet,
@@ -368,21 +367,20 @@ public final class PacketMonitorService {
     }
 
     /**
-     * Загружает все сохранённые пакеты в порядке "новые сверху".
-     * Контракт: UI может напрямую использовать результат как модель таблицы.
-     *
-     * @return список записей в порядке {@code captured_at DESC, id DESC}
+     * Loads all stored packets in newest-first order.
+     * The UI can use the returned list directly as a table model.
+ *
+     * @return entries ordered by {@code captured_at DESC, id DESC}
      */
     public synchronized List<PacketLogEntry> loadAll() {
         return loadAll(null);
     }
 
     /**
-     * Загружает все сохранённые пакеты, удовлетворяющие заданному фильтру,
-     * в порядке "новые сверху".
-     *
-     * @param query фильтр таблицы; {@code null} означает отсутствие дополнительных условий
-     * @return список записей в порядке {@code captured_at DESC, id DESC}
+     * Loads all stored packets that match the filter, in newest-first order.
+ *
+     * @param query table filter; {@code null} means no additional conditions
+     * @return entries ordered by {@code captured_at DESC, id DESC}
      */
     public synchronized List<PacketLogEntry> loadAll(PacketQuery query) {
         List<PacketLogEntry> entries = new ArrayList<>();
@@ -425,14 +423,15 @@ public final class PacketMonitorService {
     }
 
     /**
-     * Обходит все пакеты, удовлетворяющие фильтру, фиксированными блоками.
-     * Метод нужен для операций вроде экспорта, где нельзя загружать всю выборку в память.
-     *
-     * @param query     фильтр таблицы; {@code null} означает отсутствие дополнительных условий
-     * @param batchSize максимальный размер одного блока
-     * @param consumer  callback для обработки блока в порядке {@code captured_at DESC, id DESC}
-     * @return фактическое число обработанных записей
-     * @throws IOException если consumer завершился ошибкой либо не удалось прочитать данные из БД
+     * Streams all packets that match the filter in fixed-size batches.
+     * This is intended for operations such as export, where loading the entire
+     * result set into memory would be unnecessary or unsafe.
+ *
+     * @param query     table filter; {@code null} means no additional conditions
+     * @param batchSize maximum number of rows in one batch
+     * @param consumer  callback that receives batches in {@code captured_at DESC, id DESC} order
+     * @return actual number of processed entries
+     * @throws IOException if the consumer fails or database rows cannot be read
      */
     public long forEachMatchingBatch(PacketQuery query,
                                      int batchSize,
@@ -466,33 +465,33 @@ public final class PacketMonitorService {
     }
 
     /**
-     * @return общее число строк, подходящих под заданный фильтр
+     * @return total number of rows that match the supplied filter
      */
     public synchronized int countMatchingPackets(PacketQuery query) {
         return countMatching(query);
     }
 
     /**
-     * Загружает первую страницу таблицы в порядке "новые сверху".
-     * Используется при открытии окна, смене фильтров и синхронизации с live-данными.
-     *
-     * @param query фильтр таблицы
-     * @param limit максимум записей в памяти окна
-     * @return страница выборки и сопутствующие метаданные пагинации
+     * Loads the first table page in newest-first order.
+     * Used when the window opens, filters change, or live data is reconciled.
+ *
+     * @param query table filter
+     * @param limit maximum number of rows kept in the window
+     * @return result page with pagination metadata
      */
     public synchronized PacketPage loadLatestPage(PacketQuery query, int limit) {
         return loadPage(query, limit, null, PageRequestKind.LATEST);
     }
 
     /**
-     * Загружает фиксированный фрейм таблицы по смещению в общем порядке
+     * Loads a fixed table frame by offset in the global
      * {@code captured_at DESC, id DESC}.
-     * Используется UI-слоем для пошагового перехода между страницами одинакового размера.
-     *
-     * @param query  фильтр таблицы
-     * @param offset смещение от начала выборки; {@code 0} соответствует самой новой странице
-     * @param limit  размер одного фрейма
-     * @return страница и метаданные доступности соседних фреймов
+     * The UI uses this for step-by-step navigation between equal-sized pages.
+ *
+     * @param query  table filter
+     * @param offset offset from the start of the result set; {@code 0} is the newest page
+     * @param limit  frame size
+     * @return page and metadata describing the availability of neighboring frames
      */
     public synchronized PacketPage loadPageFrame(PacketQuery query, int offset, int limit) {
         int safeOffset = Math.max(0, offset);
@@ -534,36 +533,37 @@ public final class PacketMonitorService {
     }
 
     /**
-     * Загружает следующую страницу более старых пакетов относительно нижней записи текущей страницы.
-     *
-     * @param query           фильтр таблицы
-     * @param oldestExclusive курсор самой старой видимой записи; сама запись в новую страницу не попадает
-     * @param limit           максимум записей в памяти окна
-     * @return страница более старых записей
+     * Loads the next page of older packets relative to the bottom row of the current page.
+ *
+     * @param query           table filter
+     * @param oldestExclusive cursor for the oldest visible row; that row is excluded from the new page
+     * @param limit           maximum number of rows kept in the window
+     * @return page of older entries
      */
     public synchronized PacketPage loadOlderPage(PacketQuery query, PageCursor oldestExclusive, int limit) {
         return loadPage(query, limit, oldestExclusive, PageRequestKind.OLDER);
     }
 
     /**
-     * Загружает следующую страницу более новых пакетов относительно верхней записи текущей страницы.
-     *
-     * @param query           фильтр таблицы
-     * @param newestExclusive курсор самой новой видимой записи; сама запись в новую страницу не попадает
-     * @param limit           максимум записей в памяти окна
-     * @return страница более новых записей
+     * Loads the next page of newer packets relative to the top row of the current page.
+ *
+     * @param query           table filter
+     * @param newestExclusive cursor for the newest visible row; that row is excluded from the new page
+     * @param limit           maximum number of rows kept in the window
+     * @return page of newer entries
      */
     public synchronized PacketPage loadNewerPage(PacketQuery query, PageCursor newestExclusive, int limit) {
         return loadPage(query, limit, newestExclusive, PageRequestKind.NEWER);
     }
 
     /**
-     * Загружает доступные значения фильтра по типу пакета напрямую из БД.
-     * Контракт: фильтр по типу при формировании списка не используется, чтобы
-     * combo-box оставался источником выбора, а не зеркалом уже выбранного типа.
-     *
-     * @param query фильтр по направлению и поиску
-     * @return отсортированный список типов пакетов
+     * Loads available packet-type filter values directly from the database.
+     * The packet-type filter itself is intentionally ignored while building the
+     * list so the combo box remains a source of choices rather than a mirror of
+     * the currently selected type.
+ *
+     * @param query direction and search filter
+     * @return sorted packet type list
      */
     public synchronized List<String> loadPacketTypes(PacketQuery query) {
         List<String> packetTypes = new ArrayList<>();
@@ -606,7 +606,7 @@ public final class PacketMonitorService {
     }
 
     /**
-     * @return общее число сохранённых строк журнала без учёта UI-фильтров
+     * @return total number of stored log rows, ignoring UI filters
      */
     public synchronized int countAllPackets() {
         if (dbConnection == null) {
@@ -629,8 +629,8 @@ public final class PacketMonitorService {
     }
 
     /**
-     * Полностью очищает журнал пакетов и уведомляет слушателей.
-     * Контракт: после успешной очистки локальное состояние UI считается недействительным.
+     * Clears the packet journal completely and notifies listeners.
+     * After a successful clear, local UI state should be treated as stale.
      */
     public synchronized void clear() {
         if (dbConnection == null) {
@@ -645,8 +645,8 @@ public final class PacketMonitorService {
     }
 
     /**
-     * Освобождает JDBC-ресурсы сервиса.
-     * Используется при завершении приложения и при сбросе singleton в тестах.
+     * Releases the service's JDBC resources.
+     * Used during application shutdown and when tests reset the singleton.
      */
     public void close() {
         closeStatements();
@@ -892,8 +892,8 @@ public final class PacketMonitorService {
         }
 
         if (arrivedOverRadio(packet)) {
-            // Для mesh-монитора self-origin LoRa пакет должен считаться исходящим:
-            // desktop его получил как FromRadio, но сама нода отправила его в эфир.
+            // In the mesh monitor, a self-origin LoRa packet should be shown as outgoing:
+            // the desktop received it as FromRadio, but the node itself put it on the air.
             return Direction.OUTGOING;
         }
 

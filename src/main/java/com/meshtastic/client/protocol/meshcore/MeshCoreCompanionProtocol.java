@@ -5,14 +5,14 @@ import com.meshtastic.client.protocol.CommunicationProtocol;
 import com.meshtastic.client.protocol.ProtocolRuntimeContext;
 
 /**
- * Адаптер MeshCore Companion Protocol для общего protocol registry.
+ * MeshCore Companion Protocol adapter for the shared protocol registry.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public final class MeshCoreCompanionProtocol implements CommunicationProtocol<MeshCoreCompanionState> {
 
     /**
-     * Возвращает тип протокола, которым регистрируется этот адаптер.
+     * Returns the protocol type used to register this adapter.
      *
      * @return {@link ProtocolType#MESHCORE_COMPANION}
      */
@@ -22,10 +22,10 @@ public final class MeshCoreCompanionProtocol implements CommunicationProtocol<Me
     }
 
     /**
-     * Создаёт runtime MeshCore Companion поверх уже открытого transport-а.
+     * Creates a MeshCore Companion runtime over an already opened transport.
      *
-     * @param context контекст подключения и transport-а
-     * @return runtime, выполняющий Companion handshake и сбор metadata
+     * @param context connection and transport context
+     * @return runtime that performs Companion handshake and metadata collection
      */
     @Override
     public MeshCoreCompanionProtocolRuntime createRuntime(ProtocolRuntimeContext context) {

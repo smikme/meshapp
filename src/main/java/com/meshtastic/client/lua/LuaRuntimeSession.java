@@ -41,12 +41,12 @@ import java.util.function.Consumer;
 import java.util.function.IntConsumer;
 
 /**
- * Изолированная сессия выполнения одного Lua-скрипта MeshApp.
+ * Isolated execution session for a single MeshApp Lua script.
  * <p>
- * Отвечает за запуск кода в песочнице LuaJ, доставку новых сообщений
- * в {@code on_message(msg)}, отладочные хуки и лимиты выполнения.
- * Разрешенные расширения {@code mesh.*} устанавливаются через отдельный
- * namespace {@link LuaSandboxApi}.
+ * Runs code inside a LuaJ sandbox, delivers new messages to
+ * {@code on_message(msg)}, manages debug hooks, and enforces execution limits.
+ * Approved {@code mesh.*} extensions are installed through the separate
+ * {@link LuaSandboxApi} namespace.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -1166,10 +1166,10 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
     }
 
     /**
-     * Область чата, которую Lua-скрипт должен просматривать для новых сообщений.
+     * Chat scope a Lua script should watch for new messages.
      *
-     * @param chatType тип чата ({@code channel} или {@code dm})
-     * @param chatKey  ключ чата
+     * @param chatType chat type ({@code channel} or {@code dm})
+     * @param chatKey  chat key
      */
     private record ChatScope(String chatType, String chatKey) {
         String key() {

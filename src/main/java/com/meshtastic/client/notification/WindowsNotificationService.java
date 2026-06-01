@@ -3,7 +3,7 @@ package com.meshtastic.client.notification;
 import com.meshtastic.client.tray.AppTrayManager;
 
 /**
- * Windows-уведомления через уже созданный tray icon приложения.
+ * Windows notifications delivered through the application's existing tray icon.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */

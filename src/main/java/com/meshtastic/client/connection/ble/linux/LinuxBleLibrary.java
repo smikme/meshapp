@@ -9,13 +9,14 @@ import com.meshtastic.client.utils.NativeResourceLoader;
 import java.nio.file.Path;
 
 /**
- * JNA-маппинг нативной библиотеки libmeshapp-ble.so (BlueZ BLE через sd-bus).
+ * JNA mapping for the native libmeshapp-ble.so library, which implements BlueZ BLE through sd-bus.
  * <p>
- * SO предоставляет плоский C API для работы с Linux Bluetooth LE:
- * сканирование, подключение, GATT чтение/запись через fd (AcquireNotify/AcquireWrite).
+ * The shared object exposes a flat C API for Linux Bluetooth LE operations:
+ * scanning, connecting, and GATT read/write through file descriptors
+ * obtained with AcquireNotify/AcquireWrite.
  * <p>
- * Все callbacks вызываются из worker thread — вызывающий код
- * должен обеспечить thread-safety.
+ * All callbacks are invoked from a worker thread, so callers must provide their
+ * own thread-safety boundary.
  *
  * @see LinuxBle
  *
@@ -34,113 +35,113 @@ public interface LinuxBleLibrary extends Library {
 
     // ==================== Initialization ====================
 
-    /** Инициализация sd-bus и BlueZ. Вызывать один раз. */
+    /** Initializes sd-bus and BlueZ. Call once. */
     int meshble_init();
 
-    /** Освобождение всех ресурсов. */
+    /** Releases all native resources. */
     void meshble_cleanup();
 
     // ==================== Adapter State ====================
 
     /**
-     * Состояние BLE-адаптера.
+     * Returns the BLE adapter state.
      * @return 0=UNKNOWN, 1=POWERED_OFF, 2=POWERED_ON, 3=UNSUPPORTED, 4=UNAUTHORIZED
      */
     int meshble_get_adapter_state();
 
     // ==================== Scanning ====================
 
-    /** Настраивает BLE profile: 0=Meshtastic, 1=MeshCore Companion. */
+    /** Selects the BLE profile: 0=Meshtastic, 1=MeshCore Companion. */
     void meshble_set_profile(int profile);
 
     /**
-     * Запуск сканирования BLE с фильтром по service UUID выбранного profile.
-     * @return 0 при успехе, отрицательное при ошибке
+     * Starts BLE scanning with a service UUID filter for the selected profile.
+     * @return 0 on success, negative on error
      */
     int meshble_start_scan(DeviceCallback callback);
 
-    /** Остановка сканирования. */
+    /** Stops BLE scanning. */
     void meshble_stop_scan();
 
     // ==================== Connection ====================
 
     /**
-     * Подключение к BLE-устройству. Блокирует до обнаружения GATT, таймаута или конечной ошибки.
+     * Connects to a BLE device. Blocks until GATT discovery, timeout, or a terminal error.
      * @return 0=OK, -1=timeout/disconnect, -2=not found, -3=GATT error,
      *         -4=access denied, -5=cancelled
      */
     int meshble_connect(String address, int timeoutMs);
 
-    /** Отключение от BLE-устройства. */
+    /** Disconnects from the BLE device. */
     void meshble_disconnect();
 
-    /** @return 1 если подключено, 0 иначе */
+    /** @return 1 when connected, otherwise 0 */
     int meshble_is_connected();
 
     // ==================== Data Transfer ====================
 
     /**
-     * Запись protobuf в toRadio GATT characteristic.
-     * @return 0 при успехе, -4 если BLE bond не прошёл authentication/MITM, иначе отрицательное при ошибке
+     * Writes protobuf bytes to the toRadio GATT characteristic.
+     * @return 0 on success, -4 if BLE bonding failed authentication/MITM, otherwise negative on error
      */
     int meshble_write_to_radio(byte[] data, int length);
 
     /**
-     * Чтение fromRadio (для polling fallback).
-     * @param buffer   выходной буфер
-     * @param bufSize  размер буфера
-     * @param outLen   указатель на int — количество прочитанных байт
-     * @return 0 при успехе
+     * Reads fromRadio for the polling fallback.
+     * @param buffer  output buffer
+     * @param bufSize buffer size
+     * @param outLen  int pointer receiving the number of bytes read
+     * @return 0 on success
      */
     int meshble_read_from_radio(byte[] buffer, int bufSize, int[] outLen);
 
-    /** Установка слушателя входящих данных из fromRadio. */
+    /** Installs the listener for incoming fromRadio data. */
     void meshble_set_from_radio_listener(DataCallback callback);
 
     // ==================== Connection State ====================
 
-    /** Установка слушателя изменений состояния подключения. */
+    /** Installs the connection-state listener. */
     void meshble_set_state_listener(StateCallback callback);
 
     // ==================== Logging ====================
 
-    /** Установка callback для нативных лог-сообщений. */
+    /** Installs the callback for native log messages. */
     void meshble_set_log_callback(LogCallback callback);
 
     // ==================== Pairing ====================
 
-    /** Установка callback для запроса passkey при pairing. */
+    /** Installs the passkey-request callback used during pairing. */
     void meshble_set_passkey_request_callback(PasskeyRequestCallback callback);
 
-    /** Ответить на запрос passkey. */
+    /** Responds to a passkey request. */
     void meshble_respond_passkey(int passkey);
 
-    /** Отменить запрос passkey (пользователь отказался). */
+    /** Cancels a passkey request after user refusal. */
     void meshble_cancel_passkey();
 
     // ==================== Info ====================
 
-    /** @return 1 если notifications активны, 0 если polling */
+    /** @return 1 when notifications are active, 0 when polling is used */
     int meshble_notifications_active();
 
     // ==================== Callback Interfaces ====================
 
     /**
-     * Callback обнаружения BLE-устройства при сканировании.
+     * Callback invoked when a BLE device is discovered during scanning.
      */
     interface DeviceCallback extends Callback {
         void callback(String address, String name, int rssi);
     }
 
     /**
-     * Callback получения данных из fromRadio characteristic.
+     * Callback invoked when data arrives from the fromRadio characteristic.
      */
     interface DataCallback extends Callback {
         void callback(Pointer data, int length);
     }
 
     /**
-     * Callback изменения состояния BLE-подключения.
+     * Callback for BLE connection-state changes.
      * state: 0=connected, 1=disconnected, 2=error
      */
     interface StateCallback extends Callback {
@@ -148,14 +149,14 @@ public interface LinuxBleLibrary extends Library {
     }
 
     /**
-     * Callback для нативных лог-сообщений (перенаправление в SLF4J).
+     * Callback for native log messages, forwarded to SLF4J.
      */
     interface LogCallback extends Callback {
         void invoke(String message);
     }
 
     /**
-     * Callback запроса passkey при BLE pairing.
+     * Callback invoked when BLE pairing requires a passkey.
      */
     interface PasskeyRequestCallback extends Callback {
         void invoke(String deviceAddress);

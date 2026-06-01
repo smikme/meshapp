@@ -12,25 +12,25 @@ import javafx.scene.shape.ArcType;
 import javafx.scene.shape.StrokeLineCap;
 
 /**
- * Кнопка отправки сообщения с кольцевым индикатором заполненности.
+ * Send-message button with a circular fill indicator.
  *
- * <p>Кольцо вписано внутрь кнопки "➤" по её краю и показывает долю
- * использованных байт от максимума. При ≥ 90% заполнения кольцо становится красным.
- * Фоновый track всегда виден полупрозрачной окружностью.
- * Размер компонента фиксирован (36×36) и не меняется при вводе.
+ * <p>The ring sits inside the "➤" button along its edge and shows the share of
+ * used bytes. At 90% or more, the ring turns red. The background track remains
+ * visible as a translucent circle. Component size is fixed at 36x36 and does
+ * not change while typing.
  *
- * <p>Рисование выполняется на {@link Canvas} поверх кнопки — гарантированная
- * отрисовка независимо от z-order Button/Region.
+ * <p>Drawing is performed on a {@link Canvas} over the button, guaranteeing
+ * rendering independent of Button/Region z-order.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class SendButtonWithRing extends StackPane {
 
-    /** Размер кнопки — совпадает с .chat-send-btn в CSS. */
+    /** Button size, matching .chat-send-btn in CSS. */
     private static final double BUTTON_SIZE = 36;
-    /** Толщина штриха кольца. */
+    /** Ring stroke width. */
     private static final double RING_STROKE = 3;
-    /** Отступ кольца от края кнопки (центр штриха). */
+    /** Ring inset from the button edge, measured at stroke center. */
     private static final double RING_INSET = 2.5;
 
     private static final Color TRACK_COLOR_DARK = Color.web("#FFFFFF", 0.20);
@@ -47,29 +47,29 @@ public class SendButtonWithRing extends StackPane {
     private boolean nearLimit = false;
 
     public SendButtonWithRing(Runnable onSend) {
-        // Кнопка отправки
+        // Send button.
         sendButton = new Button("➤");
         sendButton.getStyleClass().add("chat-send-btn");
         sendButton.setTooltip(new Tooltip(I18n.t("chat.send")));
         sendButton.setOnAction(e -> onSend.run());
         sendButton.setDisable(true);
 
-        // Canvas поверх кнопки для рисования кольца
+        // Canvas above the button for drawing the ring.
         canvas = new Canvas(BUTTON_SIZE, BUTTON_SIZE);
         canvas.setMouseTransparent(true);
 
-        // Фиксированный размер — ровно как у кнопки, не меняется при вводе
+        // Fixed size, exactly matching the button and stable while typing.
         setMinSize(BUTTON_SIZE, BUTTON_SIZE);
         setPrefSize(BUTTON_SIZE, BUTTON_SIZE);
         setMaxSize(BUTTON_SIZE, BUTTON_SIZE);
 
-        // Кнопка внизу, canvas поверх
+        // Button below, canvas above.
         getChildren().addAll(sendButton, canvas);
 
-        // Начальная отрисовка (только track)
+        // Initial rendering with only the track.
         drawRing();
 
-        // Слушаем тему
+        // Track theme changes.
         sceneProperty().addListener((obs, oldScene, newScene) -> {
             if (newScene != null) {
                 newScene.getRoot().getStyleClass().addListener(
@@ -87,10 +87,10 @@ public class SendButtonWithRing extends StackPane {
     }
 
     /**
-     * Обновить кольцевой индикатор.
-     *
-     * @param currentBytes текущая длина текста в байтах UTF-8
-     * @param maxBytes     максимально допустимое количество байт
+     * Updates the circular indicator.
+ *
+     * @param currentBytes current text length in UTF-8 bytes
+     * @param maxBytes     maximum allowed byte count
      */
     public void update(int currentBytes, int maxBytes) {
         if (maxBytes <= 0) {
@@ -103,18 +103,18 @@ public class SendButtonWithRing extends StackPane {
         drawRing();
     }
 
-    /** Включить / отключить кнопку отправки. */
+    /** Enables or disables the send button. */
     public void setSendDisable(boolean disable) {
         sendButton.setDisable(disable);
     }
 
-    /** Доступ к внутренней кнопке. */
+    /** Returns the inner button. */
     public Button getSendButton() {
         return sendButton;
     }
 
     /**
-     * Перерисовать кольцо на Canvas: track (полная окружность) + прогресс (дуга).
+     * Repaints the ring on Canvas: track as a full circle plus progress as an arc.
      */
     private void drawRing() {
         GraphicsContext gc = canvas.getGraphicsContext2D();
@@ -127,15 +127,15 @@ public class SendButtonWithRing extends StackPane {
         gc.setLineWidth(RING_STROKE);
         gc.setLineCap(StrokeLineCap.ROUND);
 
-        // Track — полная окружность
+        // Track: full circle.
         gc.setStroke(lightTheme ? TRACK_COLOR_LIGHT : TRACK_COLOR_DARK);
         gc.strokeOval(x, y, diameter, diameter);
 
-        // Прогресс — дуга от 12 часов по часовой стрелке
+        // Progress: arc from 12 o'clock clockwise.
         if (currentRatio > 0) {
             double sweepDeg = currentRatio * 360.0;
             gc.setStroke(nearLimit ? LIMIT_COLOR : ARC_COLOR);
-            // strokeArc: startAngle=90 (12 часов), extent=negative (clockwise)
+            // strokeArc: startAngle=90 means 12 o'clock; negative extent draws clockwise.
             gc.strokeArc(x, y, diameter, diameter, 90, -sweepDeg, ArcType.OPEN);
         }
     }

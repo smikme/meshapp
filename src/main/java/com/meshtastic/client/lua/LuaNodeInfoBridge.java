@@ -1,28 +1,28 @@
 package com.meshtastic.client.lua;
 
 /**
- * Мост из Lua sandbox к запросам актуальной информации о ноде.
+ * Bridge from the Lua sandbox to live node-info requests.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public interface LuaNodeInfoBridge {
 
     /**
-     * @return {@code true}, если nodeinfo доступен для текущего runtime target.
+     * @return {@code true} when node info is available for the current runtime target
      */
     boolean isNodeInfoAvailable();
 
     /**
-     * Создает уникальный request id для nodeinfo.
+     * Creates a unique node-info request id.
      *
      * @return request id
      */
     String nextNodeInfoRequestId();
 
     /**
-     * Отправляет запрос nodeinfo и доставляет результат в {@code on_node_info(event)}.
+     * Sends a node-info request and delivers the result to {@code on_node_info(event)}.
      *
-     * @param request параметры запроса
+     * @param request request parameters
      */
     void requestNodeInfo(LuaNodeInfoRequest request);
 }

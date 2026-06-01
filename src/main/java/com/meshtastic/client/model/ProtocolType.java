@@ -1,21 +1,21 @@
 package com.meshtastic.client.model;
 
 /**
- * Коммуникационный протокол, который работает поверх выбранного транспорта.
+ * Communication protocol layered on top of the selected transport.
  * <p>
- * Значение сохраняется по имени в {@code ~/.meshapp/connections.json}. Новые
- * протокольные адаптеры добавляются сюда без изменения модели TCP/Serial/BLE
- * транспортов.
+ * Values are persisted by name in {@code ~/.meshapp/connections.json}. New
+ * protocol adapters can be added here without changing the TCP, serial, or BLE
+ * transport model.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public enum ProtocolType {
-    /** Протокол Meshtastic поверх TCP, Serial или BLE транспорта. */
+    /** Meshtastic protocol over TCP, serial, or BLE transport. */
     MESHTASTIC,
 
-    /** MeshCore KISS modem protocol поверх TCP или Serial byte stream. */
+    /** MeshCore KISS modem protocol over a TCP or serial byte stream. */
     MESHCORE_KISS,
 
-    /** MeshCore Companion Protocol поверх BLE RX/TX или raw TCP/Serial byte stream. */
+    /** MeshCore Companion Protocol over BLE RX/TX or a raw TCP/serial byte stream. */
     MESHCORE_COMPANION
 }

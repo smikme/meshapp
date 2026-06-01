@@ -8,9 +8,9 @@ import java.time.format.DateTimeFormatter;
 import java.util.Arrays;
 
 /**
- * Одна запись журнала LoRa-пакетов для окна мониторинга.
- * Экземпляр immutable по всем данным пакета, кроме {@link #id}, который
- * заполняется после сохранения записи в БД.
+ * One LoRa packet log entry shown in the packet monitor.
+ * The instance is immutable for packet data; only {@link #id} is filled after
+ * the entry is inserted into the database.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -21,7 +21,7 @@ public class PacketLogEntry {
     private static final int PAYLOAD_PREVIEW_LIMIT = 180;
 
     /**
-     * Направление пакета относительно локального mesh-узла и transport-канала клиента.
+     * Packet direction relative to the local mesh node and client transport.
      */
     public enum Direction {
         INCOMING,
@@ -41,17 +41,17 @@ public class PacketLogEntry {
     private final byte[] packetBytes;
 
     /**
-     * Создаёт журналируемую запись пакета.
+     * Creates a packet log entry.
      *
-     * @param ownerNodeId идентификатор локального owner-узла, к которому относится запись
-     * @param capturedAt  время захвата в миллисекундах Unix epoch
-     * @param direction   направление пакета
-     * @param packetType  тип пакета или portnum в UI-представлении
-     * @param transportMechanism transport_mechanism в UI-представлении
-     * @param fromNode    отправитель в UI-представлении
-     * @param toNode      получатель в UI-представлении
-     * @param payloadText payload в текстовом виде для таблицы
-     * @param packetBytes сериализованный MeshPacket; массив копируется
+     * @param ownerNodeId local owner node id this entry belongs to
+     * @param capturedAt capture time in Unix epoch milliseconds
+     * @param direction packet direction
+     * @param packetType packet type or portnum as presented in the UI
+     * @param transportMechanism transport mechanism as presented in the UI
+     * @param fromNode sender as presented in the UI
+     * @param toNode recipient as presented in the UI
+     * @param payloadText textual payload shown in the table
+     * @param packetBytes serialized MeshPacket; the array is copied
      */
     public PacketLogEntry(String ownerNodeId,
                           long capturedAt,
@@ -74,17 +74,17 @@ public class PacketLogEntry {
     }
 
     /**
-     * @return идентификатор строки в БД; присваивается после insert
+     * @return database row id assigned after insert
      */
     public long getId() {
         return id;
     }
 
     /**
-     * Устанавливает идентификатор, полученный от БД.
-     * Контракт: должен вызываться только сразу после успешного сохранения записи.
+     * Sets the id returned by the database.
+     * Contract: call only immediately after the entry is saved successfully.
      *
-     * @param id идентификатор строки в БД
+     * @param id database row id
      */
     public void setId(long id) {
         this.id = id;
@@ -149,10 +149,10 @@ public class PacketLogEntry {
     }
 
     /**
-     * Возвращает сокращённый payload для компактных мест UI.
-     * Контракт: не изменяет исходное значение {@link #payloadText}.
+     * Returns a shortened payload for compact UI locations.
+     * The original {@link #payloadText} value is not modified.
      *
-     * @return payload целиком или усечённый preview с многоточием
+     * @return full payload or truncated preview with an ellipsis
      */
     public String getPayloadPreview() {
         if (payloadText == null || payloadText.isBlank()) {
@@ -165,7 +165,7 @@ public class PacketLogEntry {
     }
 
     /**
-     * @return копия сериализованных байтов пакета; вызывающий код может безопасно изменять массив
+     * @return copy of serialized packet bytes, safe for callers to mutate
      */
     public byte[] getPacketBytes() {
         return Arrays.copyOf(packetBytes, packetBytes.length);

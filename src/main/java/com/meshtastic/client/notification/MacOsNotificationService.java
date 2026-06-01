@@ -6,12 +6,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * macOS-уведомления через {@code UNUserNotificationCenter} (JNA + ObjCRuntime).
+ * macOS notifications through {@code UNUserNotificationCenter} using JNA and ObjCRuntime.
  * <p>
- * Уведомления отправляются из процесса MeshApp — клик по уведомлению
- * активирует окно MeshApp, а не Script Editor.
- * <p>
- * При недоступности нативного API используется fallback через {@code osascript}.
+ * Notifications are sent from the MeshApp process, so clicking them activates
+ * MeshApp rather than Script Editor. If the native API is unavailable, the
+ * service falls back to {@code osascript}.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -24,10 +23,9 @@ public class MacOsNotificationService implements NotificationService {
     public MacOsNotificationService() {
         boolean ok = false;
         try {
-            // UNUserNotificationCenter требует .app bundle —
-            // без него currentNotificationCenter бросает ObjC NSException → abort() → JVM crash.
-            // Homebrew JDK имеет bundleIdentifier, но это не .app → тоже крашит.
-            // При jpackage bundlePath заканчивается на .app — нативные уведомления работают.
+        // UNUserNotificationCenter requires an .app bundle. Without it,
+        // currentNotificationCenter can raise an ObjC exception and crash the JVM.
+        // A Homebrew JDK has a bundleIdentifier but is not an .app; jpackage bundles are safe.
             long mainBundle = ObjCRuntime.msgSend(ObjCRuntime.cls("NSBundle"), "mainBundle");
             long bundlePath = ObjCRuntime.msgSend(mainBundle, "bundlePath");
             String path = ObjCRuntime.toJavaString(bundlePath);
@@ -43,7 +41,7 @@ public class MacOsNotificationService implements NotificationService {
                         && ObjCRuntime.cls("UNNotificationRequest") != 0;
 
                 if (ok) {
-                    // Запросить разрешение: alert (4) | sound (2) = 6
+            // Request alert and sound authorization: alert (4) | sound (2) = 6.
                     long center = ObjCRuntime.msgSend(
                             ObjCRuntime.cls("UNUserNotificationCenter"), "currentNotificationCenter");
                     if (center != 0) {

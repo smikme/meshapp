@@ -5,14 +5,14 @@ import com.meshtastic.client.protocol.CommunicationProtocol;
 import com.meshtastic.client.protocol.ProtocolRuntimeContext;
 
 /**
- * Адаптер MeshCore KISS modem protocol для общего protocol registry.
+ * MeshCore KISS modem protocol adapter for the shared protocol registry.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public final class MeshCoreKissProtocol implements CommunicationProtocol<MeshCoreKissState> {
 
     /**
-     * Возвращает тип протокола, которым регистрируется этот адаптер.
+     * Returns the protocol type used to register this adapter.
      *
      * @return {@link ProtocolType#MESHCORE_KISS}
      */
@@ -22,10 +22,10 @@ public final class MeshCoreKissProtocol implements CommunicationProtocol<MeshCor
     }
 
     /**
-     * Создаёт runtime MeshCore KISS поверх уже открытого transport-а.
+     * Creates a MeshCore KISS runtime over an already opened transport.
      *
-     * @param context контекст подключения и transport-а
-     * @return runtime, выполняющий KISS handshake и сбор metadata
+     * @param context connection and transport context
+     * @return runtime that performs KISS handshake and metadata collection
      */
     @Override
     public MeshCoreKissProtocolRuntime createRuntime(ProtocolRuntimeContext context) {

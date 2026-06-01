@@ -8,65 +8,58 @@ import java.util.Collections;
 import java.util.List;
 
 /**
- * Управление конфигурацией Meshtastic-устройства.
+ * Thread-safe store for Meshtastic device configuration.
  * <p>
- * Хранит основные конфиги и модульные конфиги устройства.
- * Потокобезопасен через synchronized блоки.
- * <p>
- * Ответственность:
- * <ul>
- *   <li>Хранение ConfigProtos.Config</li>
- *   <li>Хранение ModuleConfigProtos.ModuleConfig</li>
- *   <li>Добавление и получение конфигов</li>
- * </ul>
+ * Keeps both core device config sections and module config sections received
+ * from the radio.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class ConfigStore {
 
-    /** Основные конфиги устройства */
+    /** Core device configuration sections. */
     private final List<ConfigProtos.Config> configs = Collections.synchronizedList(new ArrayList<>());
 
-    /** Конфиги модулей устройства */
+    /** Module configuration sections. */
     private final List<ModuleConfigProtos.ModuleConfig> moduleConfigs = Collections.synchronizedList(new ArrayList<>());
 
     /**
-     * Возвращает основные конфиги устройства.
+     * Returns core device configuration sections.
      *
-     * @return список ConfigProtos.Config
+     * @return list of {@code ConfigProtos.Config}
      */
     public List<ConfigProtos.Config> getConfigs() {
         return configs;
     }
 
     /**
-     * Добавляет основной конфиг.
+     * Adds a core device configuration section.
      *
-     * @param config конфиг для добавления
+     * @param config config to add
      */
     public void addConfig(ConfigProtos.Config config) {
         configs.add(config);
     }
 
     /**
-     * Возвращает конфиги модулей устройства.
+     * Returns module configuration sections.
      *
-     * @return список ModuleConfigProtos.ModuleConfig
+     * @return list of {@code ModuleConfigProtos.ModuleConfig}
      */
     public List<ModuleConfigProtos.ModuleConfig> getModuleConfigs() {
         return moduleConfigs;
     }
 
     /**
-     * Добавляет конфиг модуля.
+     * Adds a module configuration section.
      *
-     * @param moduleConfig конфиг для добавления
+     * @param moduleConfig module config to add
      */
     public void addModuleConfig(ModuleConfigProtos.ModuleConfig moduleConfig) {
         moduleConfigs.add(moduleConfig);
     }
     /**
-     * Очищает все конфиги.
+     * Clears all stored configuration sections.
      */
     public void clear() {
         configs.clear();
