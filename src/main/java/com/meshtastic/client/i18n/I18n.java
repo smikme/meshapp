@@ -73,6 +73,19 @@ public final class I18n {
         return new MessageFormat(pattern, bundle.getLocale()).format(args);
     }
 
+    public static String pluralCategory(long value) {
+        long n = Math.abs(value);
+        if (!LANGUAGE_RU.equals(locale().getLanguage())) {
+            return n == 1 ? "one" : "many";
+        }
+        n %= 100;
+        long n1 = n % 10;
+        if (n > 10 && n < 20) { return "many"; }
+        if (n1 == 1) { return "one"; }
+        if (n1 >= 2 && n1 <= 4) { return "few"; }
+        return "many";
+    }
+
     public static void setLanguageTagForTests(String tag) {
         setCurrentLanguageTag(tag);
     }
