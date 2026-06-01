@@ -1,34 +1,36 @@
-# Lua API для скриптов MeshApp
+# MeshApp Script Lua API
 
-MeshApp выполняет пользовательские Lua-скрипты в sandbox-среде LuaJ. Скриптам доступен namespace `mesh`, базовые функции Lua, библиотеки `string`, `table`, `math`, `coroutine`, `bit32` и функции вроде `pairs`, `ipairs`, `pcall`, `tonumber`, `tostring`. Небезопасные глобальные API отключены: `io`, `os`, `debug`, `package`, `require`, `dofile`, `loadfile`, `luajava`, `collectgarbage`, `module`.
+**Language:** [Русский](lua-api.ru.md) | English
 
-Обычный скрипт запускается один раз и завершается, если не объявлен `on_message(msg)` или нет ожидающих асинхронных операций. Если объявлен `on_message(msg)`, скрипт остаётся активным и получает новые сообщения. Для командных ботов используется `on_command(command)`, а результаты UI/запросов приходят в отдельные callback-функции.
+MeshApp runs user Lua scripts in a LuaJ sandbox. Scripts can use the `mesh` namespace, core Lua functions, the `string`, `table`, `math`, `coroutine`, `bit32` libraries and functions such as `pairs`, `ipairs`, `pcall`, `tonumber` and `tostring`. Unsafe global APIs are disabled: `io`, `os`, `debug`, `package`, `require`, `dofile`, `loadfile`, `luajava`, `collectgarbage`, `module`.
 
-Ограничения выполнения:
+A regular script runs once and exits unless it declares `on_message(msg)` or has pending asynchronous operations. If `on_message(msg)` is declared, the script stays active and receives new messages. Command bots use `on_command(command)`, and UI/request results arrive in separate callback functions.
 
-- первичный запуск скрипта — до 3 секунд
-- callback — до 1.5 секунд
-- вывод `print` / `mesh.log` — до 64 КБ на запуск
-- `mesh.sleep(seconds)` принимает задержку от `0` до `10` секунд и продлевает deadline текущего выполнения
+Execution limits:
 
-## Краткая справка по Lua
+- initial script run: up to 3 seconds
+- callback: up to 1.5 seconds
+- `print` / `mesh.log` output: up to 64 KB per run
+- `mesh.sleep(seconds)` accepts a delay from `0` to `10` seconds and extends the current execution deadline
 
-Lua — небольшой динамический язык. В MeshApp код обычно состоит из функций-callback вроде `on_message(msg)` и вызовов API `mesh.*`.
+## Lua Quick Reference
 
-### Комментарии
+Lua is a small dynamic language. In MeshApp, code usually consists of callback functions such as `on_message(msg)` and `mesh.*` API calls.
+
+### Comments
 
 ```lua
--- Однострочный комментарий
+-- Single-line comment
 
 --[[
-Многострочный комментарий.
-Удобен для временного отключения блока кода.
+Multiline comment.
+Useful for temporarily disabling a code block.
 ]]
 ```
 
-### Переменные и типы
+### Variables and Types
 
-Переменные не требуют объявления типа. Используйте `local`, чтобы переменная не стала глобальной и не жила между callback-вызовами дольше, чем нужно.
+Variables do not require type declarations. Use `local` so a variable does not become global and does not live between callback calls longer than needed.
 
 ```lua
 local text = "hello"
@@ -40,17 +42,17 @@ mesh.log(type(text))   -- string
 mesh.log(type(count))  -- number
 ```
 
-Основные типы: `nil`, `boolean`, `number`, `string`, `table`, `function`. Значение `nil` означает отсутствие значения. В условиях ложными считаются только `false` и `nil`; числа `0` и пустая строка `""` считаются истинными.
+Main types: `nil`, `boolean`, `number`, `string`, `table`, `function`. `nil` means that the value is absent. In conditions, only `false` and `nil` are false; number `0` and an empty string `""` are true.
 
 ```lua
 if "" then
-    mesh.log("Пустая строка в Lua считается true")
+    mesh.log("An empty string is true in Lua")
 end
 ```
 
-### Строки
+### Strings
 
-Строки можно писать в одинарных или двойных кавычках. Склейка строк выполняется оператором `..`.
+Strings can use single or double quotes. Strings are concatenated with the `..` operator.
 
 ```lua
 local name = "Alpha"
@@ -60,7 +62,7 @@ mesh.log(string.lower(message))
 mesh.log(string.format("battery %d%%", 87))
 ```
 
-### Условия
+### Conditions
 
 ```lua
 if msg.outgoing then
@@ -68,15 +70,15 @@ if msg.outgoing then
 elseif msg.text == "ping" then
     mesh.chat.bot_reply(msg, "pong")
 else
-    mesh.log("другое сообщение")
+    mesh.log("another message")
 end
 ```
 
-Полезные операторы: `==`, `~=`, `<`, `<=`, `>`, `>=`, `and`, `or`, `not`.
+Useful operators: `==`, `~=`, `<`, `<=`, `>`, `>=`, `and`, `or`, `not`.
 
-### Таблицы
+### Tables
 
-Таблица — главная структура данных Lua. Она работает и как массив, и как словарь. Индексы массивов начинаются с `1`.
+A table is Lua's main data structure. It works as both an array and a dictionary. Array indexes start at `1`.
 
 ```lua
 local route = { "node-a", "node-b", "node-c" }
@@ -91,9 +93,9 @@ mesh.log(node.node_id)
 mesh.log(node["long_name"])
 ```
 
-### Циклы
+### Loops
 
-Для массивов используйте `ipairs`, для словарей — `pairs`.
+Use `ipairs` for arrays and `pairs` for dictionaries.
 
 ```lua
 for i, node in ipairs(mesh.chat.nodes()) do
@@ -110,9 +112,9 @@ for i = 1, 3 do
 end
 ```
 
-### Функции
+### Functions
 
-Функции объявляются через `function ... end`. `return` завершает функцию и возвращает значение.
+Functions are declared with `function ... end`. `return` exits the function and returns a value.
 
 ```lua
 local function normalize(text)
@@ -130,23 +132,23 @@ function on_message(msg)
 end
 ```
 
-### Проверка `nil`
+### Checking for `nil`
 
-Поля событий могут отсутствовать. Перед обращением к вложенным полям проверяйте значение на `nil`.
+Event fields may be absent. Check values for `nil` before accessing nested fields.
 
 ```lua
 function on_traceroute(event)
     if event.route and event.route.route_ids then
         mesh.log(table.concat(event.route.route_ids, " -> "))
     else
-        mesh.log("маршрут не получен")
+        mesh.log("route was not received")
     end
 end
 ```
 
-### Обработка ошибок
+### Error Handling
 
-`pcall` запускает функцию защищённо: ошибка не прерывает весь скрипт, а возвращается вторым значением.
+`pcall` runs a function in protected mode: an error does not stop the whole script and is returned as the second value.
 
 ```lua
 local ok, result = pcall(function()
@@ -154,166 +156,166 @@ local ok, result = pcall(function()
 end)
 
 if not ok then
-    mesh.log("ошибка: " .. tostring(result))
+    mesh.log("error: " .. tostring(result))
 elseif result.ok then
     mesh.log(result.body)
 end
 ```
 
-### Что важно помнить
+### Things to Remember
 
-- В конце блоков всегда нужен `end`.
-- Не нужны точки с запятой.
-- Массивы начинаются с индекса `1`, не с `0`.
-- Неравенство записывается как `~=`, а не `!=`.
-- Для объединения строк используется `..`, а не `+`.
-- `require`, файловая система и системные API отключены sandbox-ограничениями MeshApp.
+- Blocks always need a closing `end`.
+- Semicolons are not needed.
+- Arrays start at index `1`, not `0`.
+- Inequality is written as `~=`, not `!=`.
+- String concatenation uses `..`, not `+`.
+- `require`, the file system and system APIs are disabled by the MeshApp sandbox.
 
-## Базовые функции
+## Base Functions
 
-| Функция | Назначение |
-|---------|------------|
-| `print(...)` | Пишет строку в вывод скрипта; аргументы объединяются табуляцией |
-| `mesh.log(text)` | Пишет `text` в вывод скрипта |
-| `mesh.now()` | Возвращает Unix time в секундах |
-| `mesh.sleep(seconds)` | Блокирующая пауза от `0` до `10` секунд |
-| `mesh.owner()` | Возвращает таблицу `{ node_id, node_num, connection_id }` текущего узла |
-| `mesh.command()` | Возвращает текущую команду или пустую таблицу вне командного запуска |
+| Function | Purpose |
+|----------|---------|
+| `print(...)` | Writes a line to script output; arguments are joined with tabs |
+| `mesh.log(text)` | Writes `text` to script output |
+| `mesh.now()` | Returns Unix time in seconds |
+| `mesh.sleep(seconds)` | Blocking pause from `0` to `10` seconds |
+| `mesh.owner()` | Returns `{ node_id, node_num, connection_id }` for the current node |
+| `mesh.command()` | Returns the current command or an empty table outside command launch |
 
-## Callback-функции
+## Callbacks
 
-| Callback | Когда вызывается |
-|----------|------------------|
-| `on_message(msg)` | Для каждого нового входящего или исходящего сообщения, пока скрипт запущен |
-| `on_command(command)` | При запуске automation-бота из чата |
-| `on_node_selected(event)` | После выбора или отмены выбора ноды через `mesh.ui.pick_node(...)` |
-| `on_traceroute(event)` | После результата `mesh.traceroute.request(...)` |
-| `on_node_info(event)` | После результата `mesh.nodeinfo.request(...)` |
-| `on_canvas_event(event)` | После события плавающего Canvas-окна: мышь, клавиатура, resize, open/close |
-| `on_canvas_frame(event)` | По таймеру Canvas-окна, если задан `fps` или вызван `mesh.canvas.set_fps(...)` |
+| Callback | When it is called |
+|----------|-------------------|
+| `on_message(msg)` | For every new incoming or outgoing message while the script is running |
+| `on_command(command)` | When an automation bot is started from chat |
+| `on_node_selected(event)` | After selecting or cancelling node selection through `mesh.ui.pick_node(...)` |
+| `on_traceroute(event)` | After `mesh.traceroute.request(...)` produces a result |
+| `on_node_info(event)` | After `mesh.nodeinfo.request(...)` produces a result |
+| `on_canvas_event(event)` | After an event in a floating Canvas window: mouse, keyboard, resize, open/close |
+| `on_canvas_frame(event)` | On the Canvas window timer, if `fps` is set or `mesh.canvas.set_fps(...)` was called |
 
 ## `mesh.chat`
 
-`chat_type` принимает значения `channel` или `dm`. Для канала `chat_key` — строковый индекс канала, например `"0"`. Для личного диалога `chat_key` — node ID собеседника, например `"!abcdef12"`.
+`chat_type` accepts `channel` or `dm`. For a channel, `chat_key` is a string channel index, for example `"0"`. For a direct message, `chat_key` is the peer node ID, for example `"!abcdef12"`.
 
-| Функция | Возврат | Назначение |
-|---------|---------|------------|
-| `mesh.chat.send_channel(channel, text[, reply_id])` | `message` или `nil` | Отправляет сообщение в канал по радио |
-| `mesh.chat.send_dm(node_id, text[, reply_id])` | `message` или `nil` | Отправляет личное сообщение по радио |
-| `mesh.chat.reply(msg, text)` | `message` или `nil` | Отправляет ответ в тот же чат, где пришло `msg` |
-| `mesh.chat.bot_message(chat_type, chat_key, text)` | `message` | Добавляет локальное сообщение бота в историю, не отправляя его по радио |
-| `mesh.chat.bot_reply(msg, text)` | `message` | Добавляет локальный ответ бота к сообщению |
-| `mesh.chat.bot_notice(chat_type, chat_key, text[, options])` | `true` | Показывает временное UI-сообщение бота без записи в историю |
-| `mesh.chat.recent(chat_type, chat_key[, limit])` | список `message` | Возвращает последние сообщения, `limit` от 1 до 200, по умолчанию 20 |
-| `mesh.chat.nodes()` | список `node` | Возвращает известные ноды текущего подключения |
-| `mesh.chat.channels()` | список `channel` | Возвращает известные каналы текущего подключения |
+| Function | Return | Purpose |
+|----------|--------|---------|
+| `mesh.chat.send_channel(channel, text[, reply_id])` | `message` or `nil` | Sends a radio message to a channel |
+| `mesh.chat.send_dm(node_id, text[, reply_id])` | `message` or `nil` | Sends a radio direct message |
+| `mesh.chat.reply(msg, text)` | `message` or `nil` | Sends a reply to the same chat where `msg` arrived |
+| `mesh.chat.bot_message(chat_type, chat_key, text)` | `message` | Adds a local bot message to history without sending it over radio |
+| `mesh.chat.bot_reply(msg, text)` | `message` | Adds a local bot reply to a message |
+| `mesh.chat.bot_notice(chat_type, chat_key, text[, options])` | `true` | Shows a temporary bot UI message without writing it to history |
+| `mesh.chat.recent(chat_type, chat_key[, limit])` | list of `message` | Returns recent messages, `limit` from 1 to 200, default 20 |
+| `mesh.chat.nodes()` | list of `node` | Returns known nodes for the current connection |
+| `mesh.chat.channels()` | list of `channel` | Returns known channels for the current connection |
 
 ## `mesh.kv`
 
-KV-хранилище изолировано по скрипту и сохраняется в локальной БД приложения.
+KV storage is isolated per script and persisted in the local application database.
 
-| Функция | Возврат | Назначение |
-|---------|---------|------------|
-| `mesh.kv.get(key)` | строка или `nil` | Читает значение |
-| `mesh.kv.set(key, value)` | `true` | Сохраняет значение как строку; `nil` записывает пустое значение |
-| `mesh.kv.delete(key)` | boolean | Удаляет ключ |
-| `mesh.kv.list()` | table | Возвращает все ключи скрипта |
-| `mesh.kv.clear()` | `true` | Очищает KV-хранилище скрипта |
+| Function | Return | Purpose |
+|----------|--------|---------|
+| `mesh.kv.get(key)` | string or `nil` | Reads a value |
+| `mesh.kv.set(key, value)` | `true` | Stores a value as a string; `nil` stores an empty value |
+| `mesh.kv.delete(key)` | boolean | Deletes a key |
+| `mesh.kv.list()` | table | Returns all script keys |
+| `mesh.kv.clear()` | `true` | Clears the script KV storage |
 
 ## `mesh.curl`
 
-HTTP(S)-запросы выполняются встроенным Java HTTP-клиентом. Доступ к локальным, приватным, link-local и multicast-адресам запрещён. URL с credentials также запрещены.
+HTTP(S) requests are executed by the built-in Java HTTP client. Access to local, private, link-local and multicast addresses is blocked. URLs with credentials are also blocked.
 
-| Функция | Возврат | Назначение |
-|---------|---------|------------|
-| `mesh.curl.get(url[, options])` | `curl.response` | Выполняет GET-запрос |
-| `mesh.curl.request(options)` | `curl.response` | Выполняет запрос с параметрами |
+| Function | Return | Purpose |
+|----------|--------|---------|
+| `mesh.curl.get(url[, options])` | `curl.response` | Performs a GET request |
+| `mesh.curl.request(options)` | `curl.response` | Performs a request with parameters |
 
-Поля `options`: `url`, `method`, `body`, `headers`, `timeout_ms`, `max_bytes`. Разрешены методы `GET`, `HEAD`, `POST`, `PUT`, `PATCH`, `DELETE`. `timeout_ms` ограничен диапазоном 100..5000, `max_bytes` — до 1 МБ.
+`options` fields: `url`, `method`, `body`, `headers`, `timeout_ms`, `max_bytes`. Allowed methods: `GET`, `HEAD`, `POST`, `PUT`, `PATCH`, `DELETE`. `timeout_ms` is limited to 100..5000, `max_bytes` is limited to 1 MB.
 
-Поля ответа: `ok`, `status`, `url`, `body`, `headers`, `truncated`, `error`.
+Response fields: `ok`, `status`, `url`, `body`, `headers`, `truncated`, `error`.
 
 ## `mesh.ui`
 
-| Функция | Возврат | Назначение |
-|---------|---------|------------|
-| `mesh.ui.pick_node(options)` | `request_id` | Открывает выбор ноды и позже вызывает `on_node_selected(event)` |
+| Function | Return | Purpose |
+|----------|--------|---------|
+| `mesh.ui.pick_node(options)` | `request_id` | Opens node selection and later calls `on_node_selected(event)` |
 
-Поля `options`: `name`, `prompt`, `query`, `chat_type`, `chat_key`. Вместо таблицы можно передать строку, она будет использована как `query`.
+`options` fields: `name`, `prompt`, `query`, `chat_type`, `chat_key`. A string can be passed instead of a table; it will be used as `query`.
 
-Поля `on_node_selected(event)`: `type`, `source`, `name`, `request_id`, `status`, `selected`, `cancelled`, `chat_type`, `chat_key`, `node`.
+`on_node_selected(event)` fields: `type`, `source`, `name`, `request_id`, `status`, `selected`, `cancelled`, `chat_type`, `chat_key`, `node`.
 
 ## `mesh.canvas`
 
-`mesh.canvas` открывает плавающее изменяемое окно без системной рамки рядом с основным окном приложения. Окно не модальное, не добавляется в боковое меню и существует только пока его держит Lua-скрипт.
+`mesh.canvas` opens a floating resizable borderless window next to the main application window. The window is not modal, is not added to the side menu and exists only while the Lua script owns it.
 
-| Функция | Возврат | Назначение |
-|---------|---------|------------|
-| `mesh.canvas.open(options)` | `true` | Показывает Canvas-окно |
-| `mesh.canvas.close()` | `true` | Закрывает Canvas-окно |
-| `mesh.canvas.set_fps(fps)` | `true` | Включает/меняет частоту `on_canvas_frame(event)`, `0` выключает |
-| `mesh.canvas.size()` | `{width, height}` | Возвращает текущий размер холста |
-| `mesh.canvas.mouse()` | `canvas.mouse` | Возвращает текущее состояние мыши |
-| `mesh.canvas.keys()` | `canvas.keys` | Возвращает текущее состояние клавиатуры |
-| `mesh.canvas.clear([color])` | `true` | Очищает холст или заливает цветом |
-| `mesh.canvas.set_fill(color)` | `true` | Устанавливает цвет заливки |
-| `mesh.canvas.set_stroke(color)` | `true` | Устанавливает цвет линии |
-| `mesh.canvas.set_line_width(width)` | `true` | Устанавливает толщину линии |
-| `mesh.canvas.set_font(size[, family[, weight]])` | `true` | Устанавливает шрифт текста |
-| `mesh.canvas.save()` / `mesh.canvas.restore()` | `true` | Сохраняет и восстанавливает состояние рисования |
-| `mesh.canvas.translate(x, y)` | `true` | Смещает систему координат |
-| `mesh.canvas.rotate(degrees)` | `true` | Поворачивает систему координат |
-| `mesh.canvas.scale(x[, y])` | `true` | Масштабирует систему координат |
-| `mesh.canvas.fill_rect(x, y, w, h[, color])` | `true` | Рисует залитый прямоугольник |
-| `mesh.canvas.stroke_rect(x, y, w, h[, color[, line_width]])` | `true` | Рисует контур прямоугольника |
-| `mesh.canvas.fill_round_rect(x, y, w, h, radius[, color])` | `true` | Рисует залитый скруглённый прямоугольник |
-| `mesh.canvas.stroke_round_rect(x, y, w, h, radius[, color[, line_width]])` | `true` | Рисует контур скруглённого прямоугольника |
-| `mesh.canvas.line(x1, y1, x2, y2[, color[, line_width]])` | `true` | Рисует линию |
-| `mesh.canvas.fill_circle(x, y, radius[, color])` | `true` | Рисует залитый круг |
-| `mesh.canvas.stroke_circle(x, y, radius[, color[, line_width]])` | `true` | Рисует контур круга |
-| `mesh.canvas.fill_ellipse(x, y, w, h[, color])` | `true` | Рисует залитый эллипс |
-| `mesh.canvas.stroke_ellipse(x, y, w, h[, color[, line_width]])` | `true` | Рисует контур эллипса |
-| `mesh.canvas.fill_polygon(points[, color])` | `true` | Рисует залитый многоугольник |
-| `mesh.canvas.stroke_polygon(points[, color[, line_width]])` | `true` | Рисует контур многоугольника |
-| `mesh.canvas.polyline(points[, color[, line_width]])` | `true` | Рисует ломаную линию |
-| `mesh.canvas.fill_text(text, x, y[, color])` | `true` | Рисует текст |
-| `mesh.canvas.stroke_text(text, x, y[, color[, line_width]])` | `true` | Рисует контур текста |
+| Function | Return | Purpose |
+|----------|--------|---------|
+| `mesh.canvas.open(options)` | `true` | Shows the Canvas window |
+| `mesh.canvas.close()` | `true` | Closes the Canvas window |
+| `mesh.canvas.set_fps(fps)` | `true` | Enables/changes the `on_canvas_frame(event)` frequency; `0` disables it |
+| `mesh.canvas.size()` | `{width, height}` | Returns the current canvas size |
+| `mesh.canvas.mouse()` | `canvas.mouse` | Returns the current mouse state |
+| `mesh.canvas.keys()` | `canvas.keys` | Returns the current keyboard state |
+| `mesh.canvas.clear([color])` | `true` | Clears the canvas or fills it with a color |
+| `mesh.canvas.set_fill(color)` | `true` | Sets fill color |
+| `mesh.canvas.set_stroke(color)` | `true` | Sets stroke color |
+| `mesh.canvas.set_line_width(width)` | `true` | Sets line width |
+| `mesh.canvas.set_font(size[, family[, weight]])` | `true` | Sets text font |
+| `mesh.canvas.save()` / `mesh.canvas.restore()` | `true` | Saves and restores drawing state |
+| `mesh.canvas.translate(x, y)` | `true` | Translates the coordinate system |
+| `mesh.canvas.rotate(degrees)` | `true` | Rotates the coordinate system |
+| `mesh.canvas.scale(x[, y])` | `true` | Scales the coordinate system |
+| `mesh.canvas.fill_rect(x, y, w, h[, color])` | `true` | Draws a filled rectangle |
+| `mesh.canvas.stroke_rect(x, y, w, h[, color[, line_width]])` | `true` | Draws a rectangle outline |
+| `mesh.canvas.fill_round_rect(x, y, w, h, radius[, color])` | `true` | Draws a filled rounded rectangle |
+| `mesh.canvas.stroke_round_rect(x, y, w, h, radius[, color[, line_width]])` | `true` | Draws a rounded rectangle outline |
+| `mesh.canvas.line(x1, y1, x2, y2[, color[, line_width]])` | `true` | Draws a line |
+| `mesh.canvas.fill_circle(x, y, radius[, color])` | `true` | Draws a filled circle |
+| `mesh.canvas.stroke_circle(x, y, radius[, color[, line_width]])` | `true` | Draws a circle outline |
+| `mesh.canvas.fill_ellipse(x, y, w, h[, color])` | `true` | Draws a filled ellipse |
+| `mesh.canvas.stroke_ellipse(x, y, w, h[, color[, line_width]])` | `true` | Draws an ellipse outline |
+| `mesh.canvas.fill_polygon(points[, color])` | `true` | Draws a filled polygon |
+| `mesh.canvas.stroke_polygon(points[, color[, line_width]])` | `true` | Draws a polygon outline |
+| `mesh.canvas.polyline(points[, color[, line_width]])` | `true` | Draws a polyline |
+| `mesh.canvas.fill_text(text, x, y[, color])` | `true` | Draws text |
+| `mesh.canvas.stroke_text(text, x, y[, color[, line_width]])` | `true` | Draws text outline |
 
-Поля `options`: `title`, `width`, `height`, `background`, `resizable`, `fps`. По умолчанию Canvas масштабируется вместе с плавающим окном (`resizable = true`); размер меняется перетаскиванием краёв окна. Кнопка в правом верхнем углу закрывает окно после подтверждения. Двойной клик по верхней зоне переноса сворачивает окно в полупрозрачный квадрат с иконкой скрипта; двойной клик по квадрату восстанавливает прежний размер.
+`options` fields: `title`, `width`, `height`, `background`, `resizable`, `fps`. By default, Canvas scales with the floating window (`resizable = true`); resize it by dragging the window edges. The button in the top-right corner closes the window after confirmation. Double-clicking the top drag zone minimizes the window to a translucent square with the script icon; double-clicking the square restores the previous size.
 
-Цвет можно передать строкой JavaFX/CSS (`"#ffcc00"`, `"rgba(255,0,0,0.5)"`, `"white"`) или таблицей `{r, g, b, a}`. Компоненты `r/g/b/a` принимаются в диапазоне `0..1` или `0..255`.
+Color can be passed as a JavaFX/CSS string (`"#ffcc00"`, `"rgba(255,0,0,0.5)"`, `"white"`) or as a table `{r, g, b, a}`. `r/g/b/a` components are accepted in the `0..1` or `0..255` range.
 
-`points` можно передать как плоский список `{x1, y1, x2, y2, ...}` или как список точек `{{x=10, y=10}, {x=40, y=20}}`.
+`points` can be a flat list `{x1, y1, x2, y2, ...}` or a list of points `{{x=10, y=10}, {x=40, y=20}}`.
 
-Поля `on_canvas_event(event)`: `type`, `source`, `x`, `y`, `screen_x`, `screen_y`, `button`, `click_count`, `primary`, `middle`, `secondary`, `wheel_delta_x`, `wheel_delta_y`, `code`, `key`, `text`, `shift`, `ctrl`, `alt`, `meta`, `width`, `height`, `time`, `dt`.
+`on_canvas_event(event)` fields: `type`, `source`, `x`, `y`, `screen_x`, `screen_y`, `button`, `click_count`, `primary`, `middle`, `secondary`, `wheel_delta_x`, `wheel_delta_y`, `code`, `key`, `text`, `shift`, `ctrl`, `alt`, `meta`, `width`, `height`, `time`, `dt`.
 
-Значения `event.type`: `opened`, `closed`, `resized`, `mouse_moved`, `mouse_pressed`, `mouse_released`, `mouse_clicked`, `mouse_dragged`, `mouse_entered`, `mouse_exited`, `scroll`, `key_pressed`, `key_released`, `key_typed`.
+`event.type` values: `opened`, `closed`, `resized`, `mouse_moved`, `mouse_pressed`, `mouse_released`, `mouse_clicked`, `mouse_dragged`, `mouse_entered`, `mouse_exited`, `scroll`, `key_pressed`, `key_released`, `key_typed`.
 
 ## `mesh.traceroute`
 
-| Функция | Возврат | Назначение |
-|---------|---------|------------|
-| `mesh.traceroute.request(target[, options])` | `request_id` | Запускает traceroute до ноды и позже вызывает `on_traceroute(event)` |
+| Function | Return | Purpose |
+|----------|--------|---------|
+| `mesh.traceroute.request(target[, options])` | `request_id` | Starts traceroute to a node and later calls `on_traceroute(event)` |
 
-`target` может быть node ID строкой (`"!abcdef12"`), числовым `node_num` или таблицей ноды с полями `node_num`, `node_id`, `long_name`, `short_name`.
+`target` can be a node ID string (`"!abcdef12"`), numeric `node_num` or a node table with `node_num`, `node_id`, `long_name`, `short_name`.
 
-Поля `options`: `name`, `chat_type`, `chat_key`, `target_name`, `timeout_seconds`. Таймаут ограничен диапазоном 1..600 секунд, по умолчанию 360.
+`options` fields: `name`, `chat_type`, `chat_key`, `target_name`, `timeout_seconds`. Timeout is limited to 1..600 seconds, default 360.
 
-Поля `on_traceroute(event)`: `type`, `source`, `name`, `request_id`, `status`, `ok`, `timeout`, `error`, `target_node_num`, `target_node_id`, `target_name`, `response_from_node_num`, `response_from_node_id`, `chat_type`, `chat_key`, `route`.
+`on_traceroute(event)` fields: `type`, `source`, `name`, `request_id`, `status`, `ok`, `timeout`, `error`, `target_node_num`, `target_node_id`, `target_name`, `response_from_node_num`, `response_from_node_id`, `chat_type`, `chat_key`, `route`.
 
-Если `event.route` есть, в нём доступны поля `route`, `route_back`, `route_ids`, `route_back_ids`, `snr_towards`, `snr_back`.
+If `event.route` exists, it exposes `route`, `route_back`, `route_ids`, `route_back_ids`, `snr_towards`, `snr_back`.
 
 ## `mesh.nodeinfo`
 
-| Функция | Возврат | Назначение |
-|---------|---------|------------|
-| `mesh.nodeinfo.request(target[, options])` | `request_id` | Запрашивает NodeInfo и позже вызывает `on_node_info(event)` |
+| Function | Return | Purpose |
+|----------|--------|---------|
+| `mesh.nodeinfo.request(target[, options])` | `request_id` | Requests NodeInfo and later calls `on_node_info(event)` |
 
-`target` и `options` такие же, как у `mesh.traceroute.request(...)`, но таймаут по умолчанию 60 секунд.
+`target` and `options` are the same as for `mesh.traceroute.request(...)`, but default timeout is 60 seconds.
 
-Поля `on_node_info(event)`: `type`, `source`, `name`, `request_id`, `status`, `ok`, `timeout`, `cached`, `error`, `target_node_num`, `target_node_id`, `target_name`, `chat_type`, `chat_key`, `node`.
+`on_node_info(event)` fields: `type`, `source`, `name`, `request_id`, `status`, `ok`, `timeout`, `cached`, `error`, `target_node_num`, `target_node_id`, `target_name`, `chat_type`, `chat_key`, `node`.
 
-## Поля объектов
+## Object Fields
 
 `message`: `db_id`, `packet_id`, `chat_type`, `chat_key`, `from`, `to`, `channel`, `channel_name`, `channel_role`, `text`, `reply_id`, `reply_text`, `timestamp`, `outgoing`, `system`, `status`, `sender_name`, `hop_start`, `hop_limit`, `hops`, `rx_rssi`, `rx_snr`.
 
@@ -325,11 +327,11 @@ HTTP(S)-запросы выполняются встроенным Java HTTP-к�
 
 `canvas.mouse`: `x`, `y`, `screen_x`, `screen_y`, `over`, `pressed`, `primary`, `middle`, `secondary`, `button`, `click_count`, `wheel_delta_x`, `wheel_delta_y`, `last_type`, `time`.
 
-`canvas.keys`: `pressed`, `last_type`, `last_code`, `last_key`, `text`, `shift`, `ctrl`, `alt`, `meta`, `time`. Для быстрого опроса клавиши также доступны как булевы поля по имени кода, например `mesh.canvas.keys().Left`.
+`canvas.keys`: `pressed`, `last_type`, `last_code`, `last_key`, `text`, `shift`, `ctrl`, `alt`, `meta`, `time`. For quick polling, keys are also available as boolean fields by code name, for example `mesh.canvas.keys().Left`.
 
-## Примеры
+## Examples
 
-### Локальный ping/test-бот с задержкой
+### Local ping/test bot with delay
 
 ```lua
 math.randomseed(math.floor(mesh.now() * 1000))
@@ -340,14 +342,14 @@ function on_message(msg)
     end
 
     local text = string.lower(msg.text)
-    if text == "ping" or text == "test" or text == "пинг" then
+    if text == "ping" or text == "test" then
         mesh.sleep(math.random(1, 5))
         mesh.chat.bot_reply(msg, "pong")
     end
 end
 ```
 
-### Ответ в mesh-сеть
+### Reply to the mesh network
 
 ```lua
 function on_message(msg)
@@ -361,13 +363,13 @@ function on_message(msg)
 end
 ```
 
-### Automation-бот с выбором ноды и traceroute
+### Automation bot with node selection and traceroute
 
 ```lua
 function on_command(command)
     mesh.ui.pick_node({
         name = "trace_target",
-        prompt = "Выберите ноду для traceroute",
+        prompt = "Select a node for traceroute",
         query = command.arguments,
         chat_type = command.chat_type,
         chat_key = command.chat_key
@@ -376,11 +378,11 @@ end
 
 function on_node_selected(event)
     if event.cancelled then
-        mesh.chat.bot_message(event.chat_type, event.chat_key, "Traceroute отменён")
+        mesh.chat.bot_message(event.chat_type, event.chat_key, "Traceroute cancelled")
         return
     end
 
-    mesh.chat.bot_notice(event.chat_type, event.chat_key, "Запускаю traceroute...", {
+    mesh.chat.bot_notice(event.chat_type, event.chat_key, "Starting traceroute...", {
         name = "trace_progress"
     })
 
@@ -395,7 +397,7 @@ end
 function on_traceroute(event)
     if not event.ok then
         mesh.chat.bot_message(event.chat_type, event.chat_key,
-            "Traceroute не выполнен: " .. tostring(event.status))
+            "Traceroute failed: " .. tostring(event.status))
         return
     end
 
@@ -407,17 +409,17 @@ function on_traceroute(event)
         end
     end
 
-    mesh.chat.bot_message(event.chat_type, event.chat_key, "Маршрут: " .. hops)
+    mesh.chat.bot_message(event.chat_type, event.chat_key, "Route: " .. hops)
 end
 ```
 
-### Запрос NodeInfo по первому аргументу команды
+### Request NodeInfo by the first command argument
 
 ```lua
 function on_command(command)
     local target = command.argument_tokens[1]
     if not target then
-        mesh.chat.bot_message(command.chat_type, command.chat_key, "Укажите node ID")
+        mesh.chat.bot_message(command.chat_type, command.chat_key, "Specify node ID")
         return
     end
 
@@ -432,7 +434,7 @@ end
 function on_node_info(event)
     if not event.ok or not event.node then
         mesh.chat.bot_message(event.chat_type, event.chat_key,
-            "NodeInfo недоступен: " .. tostring(event.status))
+            "NodeInfo is unavailable: " .. tostring(event.status))
         return
     end
 
@@ -446,7 +448,7 @@ function on_node_info(event)
 end
 ```
 
-### KV-хранилище и внешний HTTP-запрос
+### KV storage and external HTTP request
 
 ```lua
 local runs = tonumber(mesh.kv.get("runs") or "0") + 1
@@ -468,7 +470,7 @@ else
 end
 ```
 
-### Встроенное меню на Canvas
+### Built-in Canvas menu
 
 ```lua
 mesh.canvas.open({

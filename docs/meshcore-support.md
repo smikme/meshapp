@@ -1,145 +1,147 @@
-# Поддержка MeshCore
+# MeshCore Support
 
-MeshApp поддерживает MeshCore-устройства через два разных протокольных режима:
+**Language:** [Русский](meshcore-support.ru.md) | English
 
-- **MeshCore KISS modem protocol** поверх TCP/Serial byte stream.
-- **MeshCore Companion Protocol** поверх BLE RX/TX GATT characteristics или raw TCP/Serial byte stream.
+MeshApp supports MeshCore devices through two different protocol modes:
 
-Это отдельные protocol runtime-ы рядом с Meshtastic, а не замена Meshtastic-логики. KISS и Companion несовместимы на уровне framing: BLE-подключение MeshCore не использует KISS frames, а TCP/Serial Companion endpoint должен отдавать raw Companion packets без KISS-обёртки.
+- **MeshCore KISS modem protocol** over a TCP/Serial byte stream.
+- **MeshCore Companion Protocol** over BLE RX/TX GATT characteristics or a raw TCP/Serial byte stream.
 
-## Что изменилось
+These are separate protocol runtimes next to Meshtastic, not a replacement for Meshtastic logic. KISS and Companion are incompatible at the framing level: MeshCore BLE connections do not use KISS frames, and a TCP/Serial Companion endpoint must provide raw Companion packets without a KISS wrapper.
 
-- Новые профили подключений по умолчанию используют `ProtocolType.MESHTASTIC`; legacy-профили без поля `protocol` трактуются как Meshtastic.
-- Добавлены `ProtocolType.MESHCORE_KISS`, `ProtocolType.MESHCORE_COMPANION`, `MeshCoreKissProtocolRuntime` и `MeshCoreCompanionProtocolRuntime`.
-- Добавлено KISS-фреймирование для TCP и Serial transport-ов.
-- Добавлен `FrameFormat.MESHCORE_COMPANION` и stream parser для MeshCore Companion packets на TCP/Serial.
-- Добавлен BLE profile для MeshCore Companion service/RX/TX UUID.
-- Протокол выбирается явно перед запуском runtime-а: `MeshCore KISS` или `MeshCore Companion` нужно выбрать в профиле подключения.
-- В карточке подключения отображается выбранный/активный протокол.
-- MeshCore Companion теперь заполняет общий UI state для экранов Chat, Nodes, Dashboard, Settings и LoRa Monitor.
-- Добавлена отправка канальных сообщений и DM через MeshCore Companion Protocol.
-- Добавлена синхронизация MeshCore contacts, channel info и входящих сообщений из очереди Companion Protocol.
-- Существующие Meshtastic-профили остаются совместимыми. Legacy-профили без поля `protocol` по-прежнему считаются `MESHTASTIC`.
+## What Changed
 
-## Поддерживаемые транспорты
+- New connection profiles use `ProtocolType.MESHTASTIC` by default; legacy profiles without a `protocol` field are treated as Meshtastic.
+- Added `ProtocolType.MESHCORE_KISS`, `ProtocolType.MESHCORE_COMPANION`, `MeshCoreKissProtocolRuntime` and `MeshCoreCompanionProtocolRuntime`.
+- Added KISS framing for TCP and Serial transports.
+- Added `FrameFormat.MESHCORE_COMPANION` and a stream parser for MeshCore Companion packets over TCP/Serial.
+- Added a BLE profile for MeshCore Companion service/RX/TX UUIDs.
+- Protocol is selected explicitly before runtime startup: choose `MeshCore KISS` or `MeshCore Companion` in the connection profile.
+- The connection card shows the selected/active protocol.
+- MeshCore Companion now fills the shared UI state for Chat, Nodes, Dashboard, Settings and LoRa Monitor screens.
+- Added channel-message and DM sending through MeshCore Companion Protocol.
+- Added synchronization of MeshCore contacts, channel info and incoming messages from the Companion Protocol queue.
+- Existing Meshtastic profiles remain compatible. Legacy profiles without a `protocol` field are still considered `MESHTASTIC`.
 
-| Transport | MeshCore режим | Примечание |
-|-----------|---------------|------------|
-| Serial / USB | KISS | Стандартные настройки MeshCore KISS serial: 115200 baud, 8N1, без flow control. |
-| TCP | KISS | Работает с endpoint-ами, которые отдают тот же KISS byte stream поверх TCP. |
-| Serial / USB | Companion Protocol | Работает с endpoint-ами, которые отдают raw Companion packets без KISS framing. |
-| TCP | Companion Protocol | Работает с bridge/server endpoint-ами, которые передают raw Companion packets через byte stream. |
-| BLE | Companion Protocol | Использует отдельный BLE service/RX/TX UUID, TX notifications и raw Companion packets. |
+## Supported Transports
 
-## Как выбирается протокол
+| Transport | MeshCore mode | Note |
+|-----------|---------------|------|
+| Serial / USB | KISS | Standard MeshCore KISS serial settings: 115200 baud, 8N1, no flow control. |
+| TCP | KISS | Works with endpoints that provide the same KISS byte stream over TCP. |
+| Serial / USB | Companion Protocol | Works with endpoints that provide raw Companion packets without KISS framing. |
+| TCP | Companion Protocol | Works with bridge/server endpoints that transmit raw Companion packets over a byte stream. |
+| BLE | Companion Protocol | Uses a separate BLE service/RX/TX UUID, TX notifications and raw Companion packets. |
 
-Для новых профилей `ConnectionEntry.protocol` по умолчанию равен `MESHTASTIC`.
+## Protocol Selection
 
-1. MeshApp открывает выбранный transport.
-2. TCP/Serial transport сразу получает `FrameFormat`, соответствующий сохранённому `ProtocolType`.
-3. BLE transport сразу выбирает GATT profile сохранённого `ProtocolType`.
-4. `ConnectionManager` запускает runtime из `ProtocolRegistry`: `MeshtasticProtocolRuntime`, `MeshCoreKissProtocolRuntime` или `MeshCoreCompanionProtocolRuntime`.
-5. Legacy-профили без поля `protocol` используют `MESHTASTIC`.
+For new profiles, `ConnectionEntry.protocol` defaults to `MESHTASTIC`.
 
-Для MeshCore нужно явно выбрать `MeshCore KISS` или `MeshCore Companion` в поле протокола при создании подключения.
+1. MeshApp opens the selected transport.
+2. TCP/Serial transport immediately receives the `FrameFormat` that corresponds to the saved `ProtocolType`.
+3. BLE transport immediately selects the saved `ProtocolType` GATT profile.
+4. `ConnectionManager` starts the runtime from `ProtocolRegistry`: `MeshtasticProtocolRuntime`, `MeshCoreKissProtocolRuntime` or `MeshCoreCompanionProtocolRuntime`.
+5. Legacy profiles without a `protocol` field use `MESHTASTIC`.
+
+For MeshCore, explicitly select `MeshCore KISS` or `MeshCore Companion` in the protocol field when creating a connection.
 
 ## MeshCore Companion
 
-MeshCore Companion Protocol использует не KISS framing, а собственный binary packet protocol. Согласно документации MeshCore, BLE companion devices рекламируют Nordic UART-like service:
+MeshCore Companion Protocol uses its own binary packet protocol, not KISS framing. According to the MeshCore documentation, BLE companion devices advertise a Nordic UART-like service:
 
 - Service UUID: `6E400001-B5A3-F393-E0A9-E50E24DCCA9E`
 - RX characteristic, App -> Firmware: `6E400002-B5A3-F393-E0A9-E50E24DCCA9E`
 - TX characteristic, Firmware -> App: `6E400003-B5A3-F393-E0A9-E50E24DCCA9E`
 
-Для BLE в MeshApp добавлен отдельный profile для этих UUID:
+MeshApp adds a separate BLE profile for these UUIDs:
 
-- scan ищет service UUID выбранного profile-а;
-- connect сразу использует выбранный profile;
-- для MeshCore Companion transport пишет raw Companion packets в RX characteristic;
-- входящие данные приходят из TX characteristic через notifications;
-- `MeshCoreCompanionProtocolRuntime` отправляет `APP_START`, разбирает `SELF_INFO`, `DEVICE_INFO`, `BATTERY`, contacts, channel info и queued messages.
+- scan searches for the selected profile service UUID;
+- connect immediately uses the selected profile;
+- MeshCore Companion transport writes raw Companion packets to the RX characteristic;
+- incoming data arrives from the TX characteristic through notifications;
+- `MeshCoreCompanionProtocolRuntime` sends `APP_START` and parses `SELF_INFO`, `DEVICE_INFO`, `BATTERY`, contacts, channel info and queued messages.
 
-Для TCP/Serial используется `FrameFormat.MESHCORE_COMPANION`: transport передаёт raw Companion packets в общий runtime. Так как официальный Companion transport является packet-boundary based BLE GATT, byte stream parser делает best-effort разбор: fixed-size responses отдаёт сразу, а variable-size responses завершает по inter-byte silence/read timeout.
+TCP/Serial uses `FrameFormat.MESHCORE_COMPANION`: transport forwards raw Companion packets to the shared runtime. Because the official Companion transport is packet-boundary based BLE GATT, the byte stream parser does best-effort parsing: fixed-size responses are emitted immediately, while variable-size responses are completed by inter-byte silence/read timeout.
 
-Companion runtime создаёт совместимый `DeviceState`, поэтому существующие экраны MeshApp могут показывать MeshCore contacts как nodes, MeshCore channels как chats, battery voltage как dashboard telemetry, а raw Companion packets как записи LoRa Monitor.
+The Companion runtime creates a compatible `DeviceState`, so existing MeshApp screens can show MeshCore contacts as nodes, MeshCore channels as chats, battery voltage as dashboard telemetry and raw Companion packets as LoRa Monitor entries.
 
-## Объём поддержки MeshCore KISS
+## MeshCore KISS Support Scope
 
-Текущий MeshCore runtime выполняет базовый KISS modem handshake и читает metadata устройства через MeshCore `SetHardware` extensions.
+The current MeshCore runtime performs the basic KISS modem handshake and reads device metadata through MeshCore `SetHardware` extensions.
 
-Сейчас собирается такое состояние:
+Current collected state:
 
-- имя устройства
-- identity public key, доступный для UI как короткий `mc:<12 hex>`
-- версия прошивки
+- device name
+- identity public key, exposed to the UI as short `mc:<12 hex>`
+- firmware version
 - radio parameters: frequency, bandwidth, spreading factor, coding rate
 - transmit power
-- напряжение батареи
+- battery voltage
 - packet statistics
-- последние RX metadata: RSSI и SNR
-- последний TX status
-- последний MeshCore error code
+- latest RX metadata: RSSI and SNR
+- latest TX status
+- latest MeshCore error code
 
-KISS runtime остаётся modem/metadata-интеграцией. Chat, DM, contacts и channel workflow реализованы через MeshCore Companion Protocol, потому что именно он предоставляет команды приложения для Companion-клиента.
+KISS runtime remains a modem/metadata integration. Chat, DM, contacts and channel workflows are implemented through MeshCore Companion Protocol because it provides application commands for the Companion client.
 
-## Объём поддержки MeshCore Companion
+## MeshCore Companion Support Scope
 
-Текущий MeshCore Companion runtime выполняет `APP_START` handshake и собирает:
+The current MeshCore Companion runtime performs the `APP_START` handshake and collects:
 
 - self-info packet;
-- public key, доступный в runtime полностью и в UI как короткий `mc:<12 hex>`;
-- имя устройства из self-info;
-- contacts list из `CONTACTS_START` / `CONTACT` / `CONTACTS_END`;
-- channel info из `CHANNEL_INFO`;
-- входящие channel messages и contact messages, включая V3 variants;
-- исходящие channel messages и DM;
+- public key, fully available in the runtime and exposed to the UI as short `mc:<12 hex>`;
+- device name from self-info;
+- contacts list from `CONTACTS_START` / `CONTACT` / `CONTACTS_END`;
+- channel info from `CHANNEL_INFO`;
+- incoming channel messages and contact messages, including V3 variants;
+- outgoing channel messages and DMs;
 - firmware protocol version;
-- max contacts / max channels, если устройство отдаёт device-info v3+;
-- BLE PIN, firmware build, model и firmware version из device-info v3+;
+- max contacts / max channels, if the device returns device-info v3+;
+- BLE PIN, firmware build, model and firmware version from device-info v3+;
 - battery voltage;
-- storage usage, если оно присутствует в battery response;
-- последний Companion error code.
+- storage usage, if present in the battery response;
+- latest Companion error code.
 
-Поддержка экранов:
+Screen support:
 
-- **Chat**: показывает MeshCore channels, сохраняет историю в общей H2-базе, отправляет channel messages и DM. Реакции, traceroute и Meshtastic bot-команды для MeshCore отключены или показывают локальную информацию.
-- **Nodes**: показывает contacts из MeshCore Companion как ноды с public key prefix, именем, ролью, координатами и временем последнего advert, если эти поля пришли от устройства.
-- **DM**: личные чаты создаются по MeshCore contact id `mc:<12 hex>` и отправляются через `SEND_TXT_MSG`.
-- **Dashboard**: показывает battery voltage как telemetry entry для локального MeshCore-устройства.
-- **Settings**: показывает read-only дерево MeshCore metadata, radio-параметры, storage и каналы. Запись Meshtastic Admin protobuf-конфига для MeshCore не выполняется.
-- **LoRa Monitor**: пишет входящие и исходящие raw MeshCore Companion packets с transport mechanism `MESHCORE_COMPANION`, отдельными типами packet-а и HEX/ASCII preview.
+- **Chat**: shows MeshCore channels, saves history in the shared H2 database, sends channel messages and DMs. Reactions, traceroute and Meshtastic bot commands are disabled for MeshCore or show local information.
+- **Nodes**: shows MeshCore Companion contacts as nodes with public-key prefix, name, role, coordinates and last advert time when these fields are received from the device.
+- **DM**: direct chats are created by MeshCore contact id `mc:<12 hex>` and sent through `SEND_TXT_MSG`.
+- **Dashboard**: shows battery voltage as a telemetry entry for the local MeshCore device.
+- **Settings**: shows a read-only tree of MeshCore metadata, radio parameters, storage and channels. Meshtastic Admin protobuf configuration is not written for MeshCore.
+- **LoRa Monitor**: records incoming and outgoing raw MeshCore Companion packets with transport mechanism `MESHCORE_COMPANION`, dedicated packet types and HEX/ASCII preview.
 
-## KISS-фреймирование
+## KISS Framing
 
-MeshCore KISS использует стандартное KISS TNC framing:
+MeshCore KISS uses standard KISS TNC framing:
 
-| Byte | Значение |
-|------|----------|
-| `0xC0` | `FEND`, разделитель frame-ов |
+| Byte | Value |
+|------|-------|
+| `0xC0` | `FEND`, frame delimiter |
 | `0xDB` | `FESC`, escape byte |
 | `0xDC` | escaped `FEND` |
 | `0xDD` | escaped `FESC` |
 
-MeshApp передаёт протокольному runtime-у уже unescaped frame body:
+MeshApp passes an already unescaped frame body to the protocol runtime:
 
 ```text
 [type byte][payload...]
 ```
 
-Для MeshCore metadata type byte использует KISS command `SetHardware` (`0x06`), а первый byte payload-а является MeshCore sub-command. Standard data frames (`0x00`) парсер принимает, но текущий MeshCore runtime только логирует их и пока не декодирует MeshCore packet payload в application models.
+For MeshCore metadata, the type byte uses KISS command `SetHardware` (`0x06`), and the first payload byte is the MeshCore sub-command. Standard data frames (`0x00`) are accepted by the parser, but the current MeshCore runtime only logs them and does not yet decode MeshCore packet payload into application models.
 
-## Поведение в интерфейсе
+## UI Behavior
 
-- Пользователь создаёт обычное TCP-, Serial- или BLE-подключение.
-- Protocol по умолчанию равен `Meshtastic`; для MeshCore пользователь явно выбирает `MeshCore KISS` или `MeshCore Companion`.
-- После нажатия **Подключить** MeshApp запускает runtime выбранного протокола.
-- В карточке подключения отображается `Meshtastic`, `MeshCore KISS` или `MeshCore Companion`.
-- Для MeshCore Companion открываются Chat, Nodes, Dashboard, Settings и LoRa Monitor. Функции, которые завязаны на Meshtastic Admin/Traceroute/Reaction protobuf, остаются недоступны и явно сообщают об этом в UI.
-- Для MeshCore KISS показывается подключение и metadata modem runtime-а; application screens используют Companion Protocol.
+- The user creates a normal TCP, Serial or BLE connection.
+- Protocol defaults to `Meshtastic`; for MeshCore, the user explicitly selects `MeshCore KISS` or `MeshCore Companion`.
+- After clicking **Connect**, MeshApp starts the selected protocol runtime.
+- The connection card shows `Meshtastic`, `MeshCore KISS` or `MeshCore Companion`.
+- For MeshCore Companion, Chat, Nodes, Dashboard, Settings and LoRa Monitor are available. Functions tied to Meshtastic Admin/Traceroute/Reaction protobuf remain unavailable and explicitly report this in the UI.
+- For MeshCore KISS, the connection and modem runtime metadata are shown; application screens use Companion Protocol.
 
-## Заметки для разработки
+## Development Notes
 
-Основные классы:
+Main classes:
 
 - `com.meshtastic.client.connection.KissFrameParser`
 - `com.meshtastic.client.connection.MeshCoreCompanionFrameParser`
@@ -157,19 +159,19 @@ MeshApp передаёт протокольному runtime-у уже unescaped 
 - `com.meshtastic.client.forms.FormSetting`
 - `com.meshtastic.client.service.PacketMonitorService`
 
-Тестами покрыты:
+Covered by tests:
 
-- KISS escaping и parsing
-- Companion packet parsing на byte stream transport-ах
-- регистрация протокола в registry
-- запуск MeshCore KISS runtime при явном выборе протокола
-- запуск MeshCore Companion runtime при явном выборе протокола
-- end-to-end TCP/BLE runtime selection через `ConnectionManager`
-- MeshCore Companion bridge в `DeviceState` для Chat/Nodes/Dashboard
-- отправка MeshCore channel messages и DM
-- raw MeshCore Companion entries в LoRa Monitor
+- KISS escaping and parsing
+- Companion packet parsing over byte stream transports
+- protocol registration in the registry
+- MeshCore KISS runtime startup after explicit protocol selection
+- MeshCore Companion runtime startup after explicit protocol selection
+- end-to-end TCP/BLE runtime selection through `ConnectionManager`
+- MeshCore Companion bridge into `DeviceState` for Chat/Nodes/Dashboard
+- MeshCore channel message and DM sending
+- raw MeshCore Companion entries in LoRa Monitor
 
-Ссылки на спецификации:
+Specification links:
 
 - MeshCore KISS modem protocol: <https://github.com/meshcore-dev/MeshCore/blob/main/docs/kiss_modem_protocol.md>
 - MeshCore Companion Protocol: <https://docs.meshcore.io/companion_protocol/>
