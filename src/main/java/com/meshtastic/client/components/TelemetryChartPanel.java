@@ -1,5 +1,6 @@
 package com.meshtastic.client.components;
 
+import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.TelemetryEntry;
 import com.meshtastic.client.service.NodeCacheService;
@@ -54,13 +55,13 @@ public class TelemetryChartPanel extends VBox {
     private static final long PERIOD_MAX = 0;
 
     private static final List<PeriodOption> PERIOD_OPTIONS = List.of(
-            new PeriodOption("1ч", PERIOD_1H),
-            new PeriodOption("6ч", PERIOD_6H),
-            new PeriodOption("12ч", PERIOD_12H),
-            new PeriodOption("24ч", PERIOD_24H),
-            new PeriodOption("48ч", PERIOD_48H),
-            new PeriodOption("1нед", PERIOD_1W),
-            new PeriodOption("Всё", PERIOD_MAX)
+            new PeriodOption("telemetry.period.1h", PERIOD_1H),
+            new PeriodOption("telemetry.period.6h", PERIOD_6H),
+            new PeriodOption("telemetry.period.12h", PERIOD_12H),
+            new PeriodOption("telemetry.period.24h", PERIOD_24H),
+            new PeriodOption("telemetry.period.48h", PERIOD_48H),
+            new PeriodOption("telemetry.period.1w", PERIOD_1W),
+            new PeriodOption("telemetry.period.all", PERIOD_MAX)
     );
 
     private final boolean basicOnly;
@@ -83,7 +84,7 @@ public class TelemetryChartPanel extends VBox {
     /** Последние отфильтрованные записи (для использования в таблице логов) */
     private List<TelemetryEntry> filteredEntries = List.of();
 
-    private record PeriodOption(String label, long seconds) {}
+    private record PeriodOption(String labelKey, long seconds) {}
 
     private record ChartBinding(TelemetryChartDataBuilder.ChartKind kind, AreaChart<Number, Number> chart) {}
 
@@ -293,11 +294,11 @@ public class TelemetryChartPanel extends VBox {
     }
 
     static String formatSeriesValue(String seriesName, XYChart.Data<Number, Number> point) {
-        if (TelemetryChartDataBuilder.SERIES_VOLTAGE.equals(seriesName)
-                && point.getExtraValue() instanceof Number voltage) {
-            return String.format("%.2fV", voltage.doubleValue());
+        if (point.getExtraValue() instanceof Number voltage) {
+            String formattedVoltage = String.format(I18n.locale(), "%.2f", voltage.doubleValue());
+            return I18n.t("telemetry.chart.value.voltage", formattedVoltage);
         }
-        return String.format("%.1f", point.getYValue().doubleValue());
+        return String.format(I18n.locale(), "%.1f", point.getYValue().doubleValue());
     }
 
     private void updateChart(List<TelemetryEntry> entries, List<TelemetryEntry> qualityEntries) {
@@ -344,7 +345,7 @@ public class TelemetryChartPanel extends VBox {
     }
 
     private ToggleButton periodButton(PeriodOption option) {
-        ToggleButton button = new ToggleButton(option.label());
+        ToggleButton button = new ToggleButton(I18n.t(option.labelKey()));
         button.setToggleGroup(periodGroup);
         button.setUserData(option.seconds());
         button.setPadding(new Insets(6, 16, 6, 16));

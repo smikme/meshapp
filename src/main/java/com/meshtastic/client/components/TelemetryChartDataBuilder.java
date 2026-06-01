@@ -1,5 +1,6 @@
 package com.meshtastic.client.components;
 
+import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.model.TelemetryEntry;
 import com.meshtastic.client.utils.BatteryLevelEstimator;
 import javafx.scene.chart.XYChart;
@@ -31,32 +32,32 @@ final class TelemetryChartDataBuilder {
         HOPS
     }
 
-    static final String TITLE_BASIC = "Базовые метрики";
-    static final String TITLE_RX = "Статистика эфира";
-    static final String TITLE_RATE = "Скорость приема";
-    static final String TITLE_TX = "Скорость передачи";
-    static final String TITLE_QUALITY = "Качество соединения";
-    static final String TITLE_HOPS = "Прыжки";
+    private static final String TITLE_BASIC_KEY = "telemetry.chart.title.basic";
+    private static final String TITLE_RX_KEY = "telemetry.chart.title.rx";
+    private static final String TITLE_RATE_KEY = "telemetry.chart.title.rate";
+    private static final String TITLE_TX_KEY = "telemetry.chart.title.tx";
+    private static final String TITLE_QUALITY_KEY = "telemetry.chart.title.quality";
+    private static final String TITLE_HOPS_KEY = "telemetry.chart.title.hops";
 
-    static final String SERIES_BATTERY = "Battery %";
-    static final String SERIES_VOLTAGE = "Voltage В";
-    static final String SERIES_CH_UTIL = "ChUtil %";
-    static final String SERIES_AIR_UTIL = "AirUtil %";
-    static final String SERIES_GOOD_RX = "Good RX %";
-    static final String SERIES_BAD_RX = "Bad RX %";
-    static final String SERIES_DUPE_RX = "Dupe RX %";
-    static final String SERIES_PACKETS_RECEIVED = "Packets Received";
-    static final String SERIES_BAD_PACKETS = "Bad Packets";
-    static final String SERIES_DUPLICATES = "Duplicates";
-    static final String SERIES_PACKETS_TRANSMITTED = "Packets Transmitted";
-    static final String SERIES_DROPPED = "Dropped";
-    static final String SERIES_RELAYED = "Relayed";
-    static final String SERIES_RELAY_CANCELED = "Relay Canceled";
-    static final String SERIES_SNR = "SNR (dB)";
-    static final String SERIES_RSSI = "RSSI (dBm)";
-    static final String SERIES_HOPS_MAX = "Макс";
-    static final String SERIES_HOPS_MIN = "Мин";
-    static final String SERIES_HOPS_AVG = "Среднее";
+    private static final String SERIES_BATTERY_KEY = "telemetry.chart.series.battery";
+    private static final String SERIES_VOLTAGE_KEY = "telemetry.chart.series.voltage";
+    private static final String SERIES_CH_UTIL_KEY = "telemetry.chart.series.chUtil";
+    private static final String SERIES_AIR_UTIL_KEY = "telemetry.chart.series.airUtil";
+    private static final String SERIES_GOOD_RX_KEY = "telemetry.chart.series.goodRx";
+    private static final String SERIES_BAD_RX_KEY = "telemetry.chart.series.badRx";
+    private static final String SERIES_DUPE_RX_KEY = "telemetry.chart.series.dupeRx";
+    private static final String SERIES_PACKETS_RECEIVED_KEY = "telemetry.chart.series.packetsReceived";
+    private static final String SERIES_BAD_PACKETS_KEY = "telemetry.chart.series.badPackets";
+    private static final String SERIES_DUPLICATES_KEY = "telemetry.chart.series.duplicates";
+    private static final String SERIES_PACKETS_TRANSMITTED_KEY = "telemetry.chart.series.packetsTransmitted";
+    private static final String SERIES_DROPPED_KEY = "telemetry.chart.series.dropped";
+    private static final String SERIES_RELAYED_KEY = "telemetry.chart.series.relayed";
+    private static final String SERIES_RELAY_CANCELED_KEY = "telemetry.chart.series.relayCanceled";
+    private static final String SERIES_SNR_KEY = "telemetry.chart.series.snr";
+    private static final String SERIES_RSSI_KEY = "telemetry.chart.series.rssi";
+    private static final String SERIES_HOPS_MAX_KEY = "telemetry.chart.series.hopsMax";
+    private static final String SERIES_HOPS_MIN_KEY = "telemetry.chart.series.hopsMin";
+    private static final String SERIES_HOPS_AVG_KEY = "telemetry.chart.series.hopsAvg";
 
     private static final int MAX_CHART_POINTS = 60;
     private static final long EMPTY_PERIOD_FALLBACK = 24L * 3600;
@@ -135,44 +136,44 @@ final class TelemetryChartDataBuilder {
     private static ChartPayload buildBasicChart(List<TelemetryEntry> entries) {
         if (isBucketed(entries)) {
             List<Bucket<TelemetryEntry>> buckets = bucketize(entries, TelemetryEntry::getTimestamp, MAX_CHART_POINTS);
-            return new ChartPayload(TITLE_BASIC, List.of(
-                    series(SERIES_VOLTAGE, averageData(buckets, HAS_VOLTAGE, entry -> entry.getVoltage(),
+            return new ChartPayload(t(TITLE_BASIC_KEY), List.of(
+                    series(t(SERIES_VOLTAGE_KEY), averageData(buckets, HAS_VOLTAGE, entry -> entry.getVoltage(),
                             TelemetryChartDataBuilder::createVoltageData)),
-                    series(SERIES_BATTERY, averageData(buckets, HAS_BATTERY,
+                    series(t(SERIES_BATTERY_KEY), averageData(buckets, HAS_BATTERY,
                             entry -> BatteryLevelEstimator.effectivePercent(entry.getBatteryLevel(), entry.getVoltage()),
                             TelemetryChartDataBuilder::dataPoint)),
-                    series(SERIES_CH_UTIL, averageData(buckets, entry -> true, entry -> entry.getChannelUtilization(),
+                    series(t(SERIES_CH_UTIL_KEY), averageData(buckets, entry -> true, entry -> entry.getChannelUtilization(),
                             TelemetryChartDataBuilder::dataPoint)),
-                    series(SERIES_AIR_UTIL, averageData(buckets, entry -> true, entry -> entry.getAirUtilTx(),
+                    series(t(SERIES_AIR_UTIL_KEY), averageData(buckets, entry -> true, entry -> entry.getAirUtilTx(),
                             TelemetryChartDataBuilder::dataPoint))
             ));
         }
 
-        return new ChartPayload(TITLE_BASIC, List.of(
-                series(SERIES_VOLTAGE, pointData(entries, HAS_VOLTAGE, TelemetryEntry::getTimestamp,
+        return new ChartPayload(t(TITLE_BASIC_KEY), List.of(
+                series(t(SERIES_VOLTAGE_KEY), pointData(entries, HAS_VOLTAGE, TelemetryEntry::getTimestamp,
                         entry -> entry.getVoltage(), TelemetryChartDataBuilder::createVoltageData)),
-                series(SERIES_BATTERY, pointData(entries, HAS_BATTERY, TelemetryEntry::getTimestamp,
+                series(t(SERIES_BATTERY_KEY), pointData(entries, HAS_BATTERY, TelemetryEntry::getTimestamp,
                         entry -> BatteryLevelEstimator.effectivePercent(entry.getBatteryLevel(), entry.getVoltage()),
                         TelemetryChartDataBuilder::dataPoint)),
-                series(SERIES_CH_UTIL, pointData(entries, entry -> true, TelemetryEntry::getTimestamp,
+                series(t(SERIES_CH_UTIL_KEY), pointData(entries, entry -> true, TelemetryEntry::getTimestamp,
                         entry -> entry.getChannelUtilization(), TelemetryChartDataBuilder::dataPoint)),
-                series(SERIES_AIR_UTIL, pointData(entries, entry -> true, TelemetryEntry::getTimestamp,
+                series(t(SERIES_AIR_UTIL_KEY), pointData(entries, entry -> true, TelemetryEntry::getTimestamp,
                         entry -> entry.getAirUtilTx(), TelemetryChartDataBuilder::dataPoint))
         ));
     }
 
     private static ChartPayload buildRxChart(List<RxMetric> metrics) {
-        return new ChartPayload(TITLE_RX, List.of(
-                series(SERIES_GOOD_RX, metrics.stream()
+        return new ChartPayload(t(TITLE_RX_KEY), List.of(
+                series(t(SERIES_GOOD_RX_KEY), metrics.stream()
                         .filter(metric -> metric.received() > 0)
                         .map(metric -> dataPoint(metric.timestamp(),
                                 (metric.received() - metric.bad() - metric.duplicate()) / metric.received() * 100.0))
                         .toList()),
-                series(SERIES_BAD_RX, metrics.stream()
+                series(t(SERIES_BAD_RX_KEY), metrics.stream()
                         .filter(metric -> metric.received() > 0)
                         .map(metric -> dataPoint(metric.timestamp(), metric.bad() / metric.received() * 100.0))
                         .toList()),
-                series(SERIES_DUPE_RX, metrics.stream()
+                series(t(SERIES_DUPE_RX_KEY), metrics.stream()
                         .filter(metric -> metric.received() > 0)
                         .map(metric -> dataPoint(metric.timestamp(), metric.duplicate() / metric.received() * 100.0))
                         .toList())
@@ -180,25 +181,25 @@ final class TelemetryChartDataBuilder {
     }
 
     private static ChartPayload buildRateChart(List<RxMetric> metrics) {
-        return new ChartPayload(TITLE_RATE, List.of(
-                series(SERIES_PACKETS_RECEIVED, pointData(metrics, metric -> true, RxMetric::timestamp,
+        return new ChartPayload(t(TITLE_RATE_KEY), List.of(
+                series(t(SERIES_PACKETS_RECEIVED_KEY), pointData(metrics, metric -> true, RxMetric::timestamp,
                         RxMetric::received, TelemetryChartDataBuilder::dataPoint)),
-                series(SERIES_BAD_PACKETS, pointData(metrics, metric -> true, RxMetric::timestamp,
+                series(t(SERIES_BAD_PACKETS_KEY), pointData(metrics, metric -> true, RxMetric::timestamp,
                         RxMetric::bad, TelemetryChartDataBuilder::dataPoint)),
-                series(SERIES_DUPLICATES, pointData(metrics, metric -> true, RxMetric::timestamp,
+                series(t(SERIES_DUPLICATES_KEY), pointData(metrics, metric -> true, RxMetric::timestamp,
                         RxMetric::duplicate, TelemetryChartDataBuilder::dataPoint))
         ));
     }
 
     private static ChartPayload buildTxChart(List<TxMetric> metrics) {
-        return new ChartPayload(TITLE_TX, List.of(
-                series(SERIES_PACKETS_TRANSMITTED, pointData(metrics, metric -> true, TxMetric::timestamp,
+        return new ChartPayload(t(TITLE_TX_KEY), List.of(
+                series(t(SERIES_PACKETS_TRANSMITTED_KEY), pointData(metrics, metric -> true, TxMetric::timestamp,
                         TxMetric::transmitted, TelemetryChartDataBuilder::dataPoint)),
-                series(SERIES_DROPPED, pointData(metrics, metric -> true, TxMetric::timestamp,
+                series(t(SERIES_DROPPED_KEY), pointData(metrics, metric -> true, TxMetric::timestamp,
                         TxMetric::dropped, TelemetryChartDataBuilder::dataPoint)),
-                series(SERIES_RELAYED, pointData(metrics, metric -> true, TxMetric::timestamp,
+                series(t(SERIES_RELAYED_KEY), pointData(metrics, metric -> true, TxMetric::timestamp,
                         TxMetric::relayed, TelemetryChartDataBuilder::dataPoint)),
-                series(SERIES_RELAY_CANCELED, pointData(metrics, metric -> true, TxMetric::timestamp,
+                series(t(SERIES_RELAY_CANCELED_KEY), pointData(metrics, metric -> true, TxMetric::timestamp,
                         TxMetric::canceled, TelemetryChartDataBuilder::dataPoint))
         ));
     }
@@ -210,22 +211,22 @@ final class TelemetryChartDataBuilder {
                 .toList();
         List<QualityMetric> metrics = aggregateIfNeeded(pointMetrics, qualityEntries, QualityMetric::timestamp,
                 TelemetryChartDataBuilder::averageQualityMetric);
-        return new ChartPayload(TITLE_QUALITY, List.of(
-                series(SERIES_SNR, pointData(metrics, metric -> true, QualityMetric::timestamp,
+        return new ChartPayload(t(TITLE_QUALITY_KEY), List.of(
+                series(t(SERIES_SNR_KEY), pointData(metrics, metric -> true, QualityMetric::timestamp,
                         QualityMetric::snr, TelemetryChartDataBuilder::dataPoint)),
-                series(SERIES_RSSI, pointData(metrics, metric -> true, QualityMetric::timestamp,
+                series(t(SERIES_RSSI_KEY), pointData(metrics, metric -> true, QualityMetric::timestamp,
                         QualityMetric::rssi, TelemetryChartDataBuilder::dataPoint))
         ));
     }
 
     private static ChartPayload buildHopsChart(List<TelemetryEntry> qualityEntries) {
         List<HopMetric> metrics = buildHopMetrics(qualityEntries);
-        return new ChartPayload(TITLE_HOPS, List.of(
-                series(SERIES_HOPS_MAX, pointData(metrics, metric -> true, HopMetric::timestamp,
+        return new ChartPayload(t(TITLE_HOPS_KEY), List.of(
+                series(t(SERIES_HOPS_MAX_KEY), pointData(metrics, metric -> true, HopMetric::timestamp,
                         HopMetric::max, TelemetryChartDataBuilder::dataPoint)),
-                series(SERIES_HOPS_MIN, pointData(metrics, metric -> true, HopMetric::timestamp,
+                series(t(SERIES_HOPS_MIN_KEY), pointData(metrics, metric -> true, HopMetric::timestamp,
                         HopMetric::min, TelemetryChartDataBuilder::dataPoint)),
-                series(SERIES_HOPS_AVG, pointData(metrics, metric -> true, HopMetric::timestamp,
+                series(t(SERIES_HOPS_AVG_KEY), pointData(metrics, metric -> true, HopMetric::timestamp,
                         HopMetric::average, TelemetryChartDataBuilder::dataPoint))
         ));
     }
@@ -453,5 +454,9 @@ final class TelemetryChartDataBuilder {
 
     private static boolean isBucketed(List<?> entries) {
         return entries.size() > MAX_CHART_POINTS;
+    }
+
+    private static String t(String key) {
+        return I18n.t(key);
     }
 }

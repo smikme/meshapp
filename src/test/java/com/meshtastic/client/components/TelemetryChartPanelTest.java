@@ -2,6 +2,7 @@ package com.meshtastic.client.components;
 
 import com.meshtastic.client.TestEnvironmentSupport;
 import com.meshtastic.client.forms.FormDashboard;
+import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.model.TelemetryEntry;
@@ -17,6 +18,7 @@ import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -25,7 +27,6 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
@@ -48,23 +49,42 @@ class TelemetryChartPanelTest {
         AreaChart<Number, Number> qualityChart = chartField(panel, "qualityChart");
         AreaChart<Number, Number> hopsChart = chartField(panel, "hopsChart");
 
-        assertEquals("Базовые метрики", basicChart.getTitle());
-        assertEquals(List.of("Voltage В", "Battery %", "ChUtil %", "AirUtil %"), seriesNames(basicChart));
+        assertEquals(t("telemetry.chart.title.basic"), basicChart.getTitle());
+        assertEquals(labels(
+                "telemetry.chart.series.voltage",
+                "telemetry.chart.series.battery",
+                "telemetry.chart.series.chUtil",
+                "telemetry.chart.series.airUtil"), seriesNames(basicChart));
 
-        assertEquals("Статистика эфира", rxChart.getTitle());
-        assertEquals(List.of("Good RX %", "Bad RX %", "Dupe RX %"), seriesNames(rxChart));
+        assertEquals(t("telemetry.chart.title.rx"), rxChart.getTitle());
+        assertEquals(labels(
+                "telemetry.chart.series.goodRx",
+                "telemetry.chart.series.badRx",
+                "telemetry.chart.series.dupeRx"), seriesNames(rxChart));
 
-        assertEquals("Скорость приема", rateChart.getTitle());
-        assertEquals(List.of("Packets Received", "Bad Packets", "Duplicates"), seriesNames(rateChart));
+        assertEquals(t("telemetry.chart.title.rate"), rateChart.getTitle());
+        assertEquals(labels(
+                "telemetry.chart.series.packetsReceived",
+                "telemetry.chart.series.badPackets",
+                "telemetry.chart.series.duplicates"), seriesNames(rateChart));
 
-        assertEquals("Скорость передачи", txChart.getTitle());
-        assertEquals(List.of("Packets Transmitted", "Dropped", "Relayed", "Relay Canceled"), seriesNames(txChart));
+        assertEquals(t("telemetry.chart.title.tx"), txChart.getTitle());
+        assertEquals(labels(
+                "telemetry.chart.series.packetsTransmitted",
+                "telemetry.chart.series.dropped",
+                "telemetry.chart.series.relayed",
+                "telemetry.chart.series.relayCanceled"), seriesNames(txChart));
 
-        assertEquals("Качество соединения", qualityChart.getTitle());
-        assertEquals(List.of("SNR (dB)", "RSSI (dBm)"), seriesNames(qualityChart));
+        assertEquals(t("telemetry.chart.title.quality"), qualityChart.getTitle());
+        assertEquals(labels(
+                "telemetry.chart.series.snr",
+                "telemetry.chart.series.rssi"), seriesNames(qualityChart));
 
-        assertEquals("Прыжки", hopsChart.getTitle());
-        assertEquals(List.of("Макс", "Мин", "Среднее"), seriesNames(hopsChart));
+        assertEquals(t("telemetry.chart.title.hops"), hopsChart.getTitle());
+        assertEquals(labels(
+                "telemetry.chart.series.hopsMax",
+                "telemetry.chart.series.hopsMin",
+                "telemetry.chart.series.hopsAvg"), seriesNames(hopsChart));
 
         assertFalse(((NumberAxis) basicChart.getXAxis()).isAutoRanging());
         assertFalse(((NumberAxis) rxChart.getXAxis()).isAutoRanging());
@@ -76,8 +96,12 @@ class TelemetryChartPanelTest {
         TelemetryChartPanel panel = onFxThread(() -> new TelemetryChartPanel(true));
         AreaChart<Number, Number> basicChart = chartField(panel, "chart");
 
-        assertEquals("Базовые метрики", basicChart.getTitle());
-        assertEquals(List.of("Voltage В", "Battery %", "ChUtil %", "AirUtil %"), seriesNames(basicChart));
+        assertEquals(t("telemetry.chart.title.basic"), basicChart.getTitle());
+        assertEquals(labels(
+                "telemetry.chart.series.voltage",
+                "telemetry.chart.series.battery",
+                "telemetry.chart.series.chUtil",
+                "telemetry.chart.series.airUtil"), seriesNames(basicChart));
         assertFalse(((NumberAxis) basicChart.getXAxis()).isAutoRanging());
     }
 
@@ -94,7 +118,7 @@ class TelemetryChartPanelTest {
 
         AreaChart<Number, Number> basicChart = chartField(panel, "chart");
         XYChart.Series<Number, Number> voltageSeries = basicChart.getData().stream()
-                .filter(series -> "Voltage В".equals(series.getName()))
+                .filter(series -> t("telemetry.chart.series.voltage").equals(series.getName()))
                 .findFirst()
                 .orElseThrow();
         XYChart.Data<Number, Number> point = voltageSeries.getData().getFirst();
@@ -102,9 +126,11 @@ class TelemetryChartPanelTest {
         assertEquals(83.0, point.getYValue().doubleValue(), 0.0001);
         Number actualVoltage = assertInstanceOf(Number.class, point.getExtraValue());
         assertEquals(4.0, actualVoltage.doubleValue(), 0.0001);
-        assertTrue(TelemetryChartPanel.formatSeriesValue(voltageSeries.getName(), point).matches("4[,.]00V"));
+        String expectedVoltage = I18n.t("telemetry.chart.value.voltage",
+                String.format(I18n.locale(), "%.2f", 4.0));
+        assertEquals(expectedVoltage, TelemetryChartPanel.formatSeriesValue(voltageSeries.getName(), point));
 
-        assertSeriesValues(basicChart, "Battery %", 83.0);
+        assertSeriesValues(basicChart, t("telemetry.chart.series.battery"), 83.0);
     }
 
     @Test
@@ -119,7 +145,7 @@ class TelemetryChartPanelTest {
         });
 
         AreaChart<Number, Number> basicChart = chartField(panel, "chart");
-        assertSeriesValues(basicChart, "Battery %", 77.0);
+        assertSeriesValues(basicChart, t("telemetry.chart.series.battery"), 77.0);
     }
 
     @Test
@@ -135,7 +161,7 @@ class TelemetryChartPanelTest {
         });
 
         AreaChart<Number, Number> basicChart = chartField(panel, "chart");
-        assertSeriesValues(basicChart, "Battery %", 83.0);
+        assertSeriesValues(basicChart, t("telemetry.chart.series.battery"), 83.0);
     }
 
     @Test
@@ -227,18 +253,18 @@ class TelemetryChartPanelTest {
         AreaChart<Number, Number> rateChart = chartField(panel, "rateChart");
         AreaChart<Number, Number> txChart = chartField(panel, "txChart");
 
-        assertSeriesValues(rateChart, "Packets Received", 15.0, 5.0);
-        assertSeriesValues(rateChart, "Bad Packets", 3.0, 1.0);
-        assertSeriesValues(rateChart, "Duplicates", 1.0, 0.0);
+        assertSeriesValues(rateChart, t("telemetry.chart.series.packetsReceived"), 15.0, 5.0);
+        assertSeriesValues(rateChart, t("telemetry.chart.series.badPackets"), 3.0, 1.0);
+        assertSeriesValues(rateChart, t("telemetry.chart.series.duplicates"), 1.0, 0.0);
 
-        assertSeriesValues(rxChart, "Good RX %", 73.33333333333333, 80.0);
-        assertSeriesValues(rxChart, "Bad RX %", 20.0, 20.0);
-        assertSeriesValues(rxChart, "Dupe RX %", 6.666666666666667, 0.0);
+        assertSeriesValues(rxChart, t("telemetry.chart.series.goodRx"), 73.33333333333333, 80.0);
+        assertSeriesValues(rxChart, t("telemetry.chart.series.badRx"), 20.0, 20.0);
+        assertSeriesValues(rxChart, t("telemetry.chart.series.dupeRx"), 6.666666666666667, 0.0);
 
-        assertSeriesValues(txChart, "Packets Transmitted", 12.0, 6.0);
-        assertSeriesValues(txChart, "Dropped", 3.0, 1.0);
-        assertSeriesValues(txChart, "Relayed", 4.0, 1.0);
-        assertSeriesValues(txChart, "Relay Canceled", 1.0, 0.0);
+        assertSeriesValues(txChart, t("telemetry.chart.series.packetsTransmitted"), 12.0, 6.0);
+        assertSeriesValues(txChart, t("telemetry.chart.series.dropped"), 3.0, 1.0);
+        assertSeriesValues(txChart, t("telemetry.chart.series.relayed"), 4.0, 1.0);
+        assertSeriesValues(txChart, t("telemetry.chart.series.relayCanceled"), 1.0, 0.0);
     }
 
     @Test
@@ -255,9 +281,9 @@ class TelemetryChartPanelTest {
         });
 
         AreaChart<Number, Number> hopsChart = chartField(panel, "hopsChart");
-        assertSeriesValues(hopsChart, "Макс", 2.0, 3.0);
-        assertSeriesValues(hopsChart, "Мин", 2.0, 3.0);
-        assertSeriesValues(hopsChart, "Среднее", 2.0, 3.0);
+        assertSeriesValues(hopsChart, t("telemetry.chart.series.hopsMax"), 2.0, 3.0);
+        assertSeriesValues(hopsChart, t("telemetry.chart.series.hopsMin"), 2.0, 3.0);
+        assertSeriesValues(hopsChart, t("telemetry.chart.series.hopsAvg"), 2.0, 3.0);
     }
 
     private static List<String> seriesNames(AreaChart<Number, Number> chart) {
@@ -351,7 +377,7 @@ class TelemetryChartPanelTest {
             TableView<FormDashboard.TelemetryLogRow> table =
                     (TableView<FormDashboard.TelemetryLogRow>) field.get(dashboard);
             return table.getColumns().stream()
-                    .filter(column -> "Нода".equals(column.getText()))
+                    .filter(column -> t("telemetry.column.node").equals(column.getText()))
                     .findFirst()
                     .map(column -> (TableColumn<FormDashboard.TelemetryLogRow, String>) column)
                     .orElseThrow();
@@ -391,6 +417,16 @@ class TelemetryChartPanelTest {
             Thread.currentThread().interrupt();
             throw new AssertionError("Interrupted while waiting for JavaFX task", e);
         }
+    }
+
+    private static String t(String key) {
+        return I18n.t(key);
+    }
+
+    private static List<String> labels(String... keys) {
+        return Arrays.stream(keys)
+                .map(I18n::t)
+                .toList();
     }
 
     @FunctionalInterface

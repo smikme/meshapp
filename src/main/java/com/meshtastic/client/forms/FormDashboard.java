@@ -1,6 +1,7 @@
 package com.meshtastic.client.forms;
 
 import com.meshtastic.client.components.TelemetryChartPanel;
+import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.model.ConnectionEntry;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.NodeData;
@@ -82,7 +83,7 @@ public class FormDashboard extends Form {
         VBox.setVgrow(chartPanel, Priority.ALWAYS);
 
         // --- Счётчик логов ---
-        logCountLabel = new Label("0 записей");
+        logCountLabel = new Label(formatLogCount(0, 0));
         logCountLabel.getStyleClass().add("dashboard-log-count-label");
         logCountLabel.setPadding(new Insets(4, 0, 4, 2));
 
@@ -95,9 +96,9 @@ public class FormDashboard extends Form {
         VBox.setVgrow(logTable, Priority.ALWAYS);
 
         // --- TabPane ---
-        Tab tabCharts = new Tab("Графики", chartTab);
+        Tab tabCharts = new Tab(I18n.t("telemetry.tab.charts"), chartTab);
         tabCharts.setClosable(false);
-        Tab tabData = new Tab("Данные", dataTab);
+        Tab tabData = new Tab(I18n.t("telemetry.tab.data"), dataTab);
         tabData.setClosable(false);
 
         TabPane tabPane = new TabPane(tabCharts, tabData);
@@ -144,7 +145,7 @@ public class FormDashboard extends Form {
         if (state == null || state.getMyNodeNum() == 0) {
             chartPanel.unbind();
             logData.clear();
-            logCountLabel.setText("0 записей");
+            logCountLabel.setText(formatLogCount(0, 0));
             return;
         }
 
@@ -165,69 +166,69 @@ public class FormDashboard extends Form {
     private TableView<TelemetryLogRow> createLogTable() {
         TableView<TelemetryLogRow> table = new TableView<>(logData);
         table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
-        table.setPlaceholder(new Label("Нет данных телеметрии"));
+        table.setPlaceholder(new Label(I18n.t("telemetry.table.empty")));
 
-        TableColumn<TelemetryLogRow, String> colTime = new TableColumn<>("Время");
+        TableColumn<TelemetryLogRow, String> colTime = new TableColumn<>(I18n.t("telemetry.column.time"));
         colTime.setCellValueFactory(new PropertyValueFactory<>("time"));
         colTime.setPrefWidth(150);
 
-        TableColumn<TelemetryLogRow, String> colBattery = new TableColumn<>("Батарея");
+        TableColumn<TelemetryLogRow, String> colBattery = new TableColumn<>(I18n.t("telemetry.column.battery"));
         colBattery.setCellValueFactory(new PropertyValueFactory<>("battery"));
         colBattery.setPrefWidth(100);
 
-        TableColumn<TelemetryLogRow, String> colVoltage = new TableColumn<>("Напряжение");
+        TableColumn<TelemetryLogRow, String> colVoltage = new TableColumn<>(I18n.t("telemetry.column.voltage"));
         colVoltage.setCellValueFactory(new PropertyValueFactory<>("voltage"));
         colVoltage.setPrefWidth(100);
 
-        TableColumn<TelemetryLogRow, String> colChUtil = new TableColumn<>("ChUtil");
+        TableColumn<TelemetryLogRow, String> colChUtil = new TableColumn<>(I18n.t("telemetry.column.chUtil"));
         colChUtil.setCellValueFactory(new PropertyValueFactory<>("chUtil"));
         colChUtil.setPrefWidth(90);
 
-        TableColumn<TelemetryLogRow, String> colAirUtil = new TableColumn<>("AirUtilTX");
+        TableColumn<TelemetryLogRow, String> colAirUtil = new TableColumn<>(I18n.t("telemetry.column.airUtilTx"));
         colAirUtil.setCellValueFactory(new PropertyValueFactory<>("airUtil"));
         colAirUtil.setPrefWidth(90);
 
-        TableColumn<TelemetryLogRow, String> colGoodRx = new TableColumn<>("Good RX");
+        TableColumn<TelemetryLogRow, String> colGoodRx = new TableColumn<>(I18n.t("telemetry.column.goodRx"));
         colGoodRx.setCellValueFactory(new PropertyValueFactory<>("goodRx"));
         colGoodRx.setPrefWidth(80);
 
-        TableColumn<TelemetryLogRow, String> colBadRx = new TableColumn<>("Bad RX");
+        TableColumn<TelemetryLogRow, String> colBadRx = new TableColumn<>(I18n.t("telemetry.column.badRx"));
         colBadRx.setCellValueFactory(new PropertyValueFactory<>("badRx"));
         colBadRx.setPrefWidth(80);
 
-        TableColumn<TelemetryLogRow, String> colDupeRx = new TableColumn<>("Dupe RX");
+        TableColumn<TelemetryLogRow, String> colDupeRx = new TableColumn<>(I18n.t("telemetry.column.dupeRx"));
         colDupeRx.setCellValueFactory(new PropertyValueFactory<>("dupeRx"));
         colDupeRx.setPrefWidth(80);
 
-        TableColumn<TelemetryLogRow, String> colTx = new TableColumn<>("TX");
+        TableColumn<TelemetryLogRow, String> colTx = new TableColumn<>(I18n.t("telemetry.column.tx"));
         colTx.setCellValueFactory(new PropertyValueFactory<>("tx"));
         colTx.setPrefWidth(60);
 
-        TableColumn<TelemetryLogRow, String> colTxDropped = new TableColumn<>("Dropped");
+        TableColumn<TelemetryLogRow, String> colTxDropped = new TableColumn<>(I18n.t("telemetry.column.dropped"));
         colTxDropped.setCellValueFactory(new PropertyValueFactory<>("txDropped"));
         colTxDropped.setPrefWidth(70);
 
-        TableColumn<TelemetryLogRow, String> colTxRelay = new TableColumn<>("Relayed");
+        TableColumn<TelemetryLogRow, String> colTxRelay = new TableColumn<>(I18n.t("telemetry.column.relayed"));
         colTxRelay.setCellValueFactory(new PropertyValueFactory<>("txRelay"));
         colTxRelay.setPrefWidth(70);
 
-        TableColumn<TelemetryLogRow, String> colTxCanceled = new TableColumn<>("Canceled");
+        TableColumn<TelemetryLogRow, String> colTxCanceled = new TableColumn<>(I18n.t("telemetry.column.canceled"));
         colTxCanceled.setCellValueFactory(new PropertyValueFactory<>("txCanceled"));
         colTxCanceled.setPrefWidth(70);
 
-        TableColumn<TelemetryLogRow, String> colSnr = new TableColumn<>("SNR");
+        TableColumn<TelemetryLogRow, String> colSnr = new TableColumn<>(I18n.t("telemetry.column.snr"));
         colSnr.setCellValueFactory(new PropertyValueFactory<>("snr"));
         colSnr.setPrefWidth(60);
 
-        TableColumn<TelemetryLogRow, String> colRssi = new TableColumn<>("RSSI");
+        TableColumn<TelemetryLogRow, String> colRssi = new TableColumn<>(I18n.t("telemetry.column.rssi"));
         colRssi.setCellValueFactory(new PropertyValueFactory<>("rssi"));
         colRssi.setPrefWidth(60);
 
-        TableColumn<TelemetryLogRow, String> colHops = new TableColumn<>("Hops");
+        TableColumn<TelemetryLogRow, String> colHops = new TableColumn<>(I18n.t("telemetry.column.hops"));
         colHops.setCellValueFactory(new PropertyValueFactory<>("hops"));
         colHops.setPrefWidth(60);
 
-        TableColumn<TelemetryLogRow, String> colNode = new TableColumn<>("Нода");
+        TableColumn<TelemetryLogRow, String> colNode = new TableColumn<>(I18n.t("telemetry.column.node"));
         colNode.setCellValueFactory(cellData -> new ReadOnlyStringWrapper(
                 cellData.getValue() != null ? cellData.getValue().getNode() : "?"));
         colNode.setCellFactory(column -> new TableCell<>() {
@@ -268,13 +269,17 @@ public class FormDashboard extends Form {
         allEntries = reversed;
         loadedCount = 0;
         logData.clear();
+        logCountLabel.setText(formatLogCount(0, allEntries.size()));
 
         loadNextPage();
     }
 
     /** Подгружает следующие PAGE_SIZE строк в таблицу */
     private void loadNextPage() {
-        if (loadedCount >= allEntries.size()) return;
+        if (loadedCount >= allEntries.size()) {
+            logCountLabel.setText(formatLogCount(loadedCount, allEntries.size()));
+            return;
+        }
 
         int end = Math.min(loadedCount + PAGE_SIZE, allEntries.size());
         for (int i = loadedCount; i < end; i++) {
@@ -282,7 +287,13 @@ public class FormDashboard extends Form {
         }
         loadedCount = end;
 
-        logCountLabel.setText(loadedCount + " / " + allEntries.size() + " записей");
+        logCountLabel.setText(formatLogCount(loadedCount, allEntries.size()));
+    }
+
+    private static String formatLogCount(int loaded, int total) {
+        return total == 0
+                ? I18n.t("telemetry.log.empty")
+                : I18n.t("telemetry.log.count", loaded, total);
     }
 
     // ==================== Модель строки таблицы ====================
