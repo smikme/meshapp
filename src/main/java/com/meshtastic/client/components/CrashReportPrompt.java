@@ -1,6 +1,7 @@
 package com.meshtastic.client.components;
 
 import com.sun.javafx.scene.SceneHelper;
+import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.modal.ModalPane;
 import com.meshtastic.client.platform.OsDetect;
 import com.meshtastic.client.tray.MacOsNativeTrayService;
@@ -74,7 +75,7 @@ public final class CrashReportPrompt {
         privacy.setWrapText(true);
         privacy.setStyle("-fx-opacity: 0.8;");
 
-        Button cancelButton = new Button("Отмена");
+        Button cancelButton = new Button(I18n.t("common.cancel"));
         Button sendButton = new Button(content.sendButtonText());
         sendButton.getStyleClass().add("accent");
 
@@ -135,20 +136,20 @@ public final class CrashReportPrompt {
             return ProgressDialog.noop();
         }
 
-        Label title = new Label("Отправка отчёта");
+        Label title = new Label(I18n.t("crashReport.progress.title"));
         title.getStyleClass().add("dialog-title");
 
         ProgressIndicator indicator = new ProgressIndicator();
         indicator.setMaxSize(56, 56);
 
-        Label message = new Label("Отправляем архив технического лога разработчикам.");
+        Label message = new Label(I18n.t("crashReport.progress.message"));
         message.setWrapText(true);
 
-        Label secondary = new Label("Можно дождаться завершения или отменить отправку.");
+        Label secondary = new Label(I18n.t("crashReport.progress.secondary"));
         secondary.setWrapText(true);
         secondary.setStyle("-fx-opacity: 0.8;");
 
-        Button cancelButton = new Button("Отмена");
+        Button cancelButton = new Button(I18n.t("common.cancel"));
 
         HBox progressRow = new HBox(14, indicator, new VBox(8, message, secondary));
         progressRow.setAlignment(Pos.CENTER_LEFT);
@@ -214,27 +215,27 @@ public final class CrashReportPrompt {
 
         public static Content startupCrash() {
             return new Content(
-                    "Отчёт о сбое",
-                    "Прошлый запуск приложения завершился ошибкой. Мы сохранили технический лог, чтобы можно было отправить его разработчикам.",
-                    "E-Mail для обратной связи (необязательно):",
-                    "you@example.com",
-                    "Комментарий к случившемуся:",
-                    "Опишите, что происходило перед сбоем",
-                    "Никакая конфиденциальная информация не передаётся: отправляется только технический лог приложения и ваш необязательный комментарий.",
-                    "Отправить лог"
+                    I18n.t("crashReport.startup.title"),
+                    I18n.t("crashReport.startup.lead"),
+                    I18n.t("crashReport.email.label"),
+                    I18n.t("crashReport.email.prompt"),
+                    I18n.t("crashReport.startup.comment.label"),
+                    I18n.t("crashReport.startup.comment.prompt"),
+                    I18n.t("crashReport.startup.privacy"),
+                    I18n.t("crashReport.startup.send")
             );
         }
 
         public static Content problemReport() {
             return new Content(
-                    "Сообщить о проблеме",
-                    "Опишите проблему, а мы приложим к отчёту технический лог текущей сессии приложения.",
-                    "E-Mail для обратной связи (необязательно):",
-                    "you@example.com",
-                    "Что произошло:",
-                    "Опишите шаги, ожидаемое и фактическое поведение",
-                    "Никакая конфиденциальная информация не передаётся: отправляется только технический лог текущей сессии и ваш необязательный комментарий.",
-                    "Отправить отчёт"
+                    I18n.t("crashReport.problem.title"),
+                    I18n.t("crashReport.problem.lead"),
+                    I18n.t("crashReport.email.label"),
+                    I18n.t("crashReport.email.prompt"),
+                    I18n.t("crashReport.problem.comment.label"),
+                    I18n.t("crashReport.problem.comment.prompt"),
+                    I18n.t("crashReport.problem.privacy"),
+                    I18n.t("crashReport.problem.send")
             );
         }
     }

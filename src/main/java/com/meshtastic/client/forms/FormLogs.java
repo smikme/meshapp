@@ -1,6 +1,7 @@
 package com.meshtastic.client.forms;
 
 import com.meshtastic.client.components.EmojiImageCache;
+import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.logging.UiLogAppender;
 import com.meshtastic.client.modal.ModalPane;
 import com.meshtastic.client.modal.Toast;
@@ -83,7 +84,7 @@ public class FormLogs extends Form {
         HBox titleRow = new HBox(10);
         titleRow.setAlignment(Pos.CENTER_LEFT);
 
-        Label title = new Label("Логирование");
+        Label title = new Label(I18n.t("logs.form.name"));
         title.getStyleClass().add("form-title");
 
         Region spacer = new Region();
@@ -93,8 +94,8 @@ public class FormLogs extends Form {
         actionToolbar.getStyleClass().add("logs-toolbar");
 
         btnPause = createToolbarButton(
-                "Пауза логов",
-                "Остановить обновление лога на экране",
+                I18n.t("logs.action.pause"),
+                I18n.t("logs.action.pause.tooltip"),
                 ICON_PAUSE,
                 this::toggleLogViewUpdates
         );
@@ -102,22 +103,22 @@ public class FormLogs extends Form {
         updatePauseButtonState();
 
         Button btnSave = createToolbarButton(
-                "Сохранить в файл",
-                "Экспортировать текущие логи в файл",
+                I18n.t("logs.action.save"),
+                I18n.t("logs.action.save.tooltip"),
                 "/icons/save-config.svg",
                 this::saveLogsToFile
         );
 
         Button btnCopy = createToolbarButton(
-                "Копировать",
-                "Скопировать текущие логи в буфер обмена",
+                I18n.t("logs.action.copy"),
+                I18n.t("logs.action.copy.tooltip"),
                 "/icons/copy.svg",
                 this::copyLogsToClipboard
         );
 
         Button btnClear = createToolbarButton(
-                "Очистить",
-                "Удалить логи из таблицы и внутреннего буфера",
+                I18n.t("logs.action.clear"),
+                I18n.t("logs.action.clear.tooltip"),
                 "/icons/clear.svg",
                 () -> {
                     UiLogAppender.clearBuffer();
@@ -143,13 +144,13 @@ public class FormLogs extends Form {
         logTable = new TableView<>(logData);
         logTable.setFixedCellSize(26);
 
-        TableColumn<LogEntry, String> colTime = new TableColumn<>("Дата");
+        TableColumn<LogEntry, String> colTime = new TableColumn<>(I18n.t("logs.column.date"));
         colTime.setCellValueFactory(new PropertyValueFactory<>("time"));
         colTime.setMinWidth(90);
         colTime.setMaxWidth(110);
         colTime.setSortable(false);
 
-        TableColumn<LogEntry, String> colLevel = new TableColumn<>("Тип");
+        TableColumn<LogEntry, String> colLevel = new TableColumn<>(I18n.t("logs.column.type"));
         colLevel.setCellValueFactory(new PropertyValueFactory<>("level"));
         colLevel.setMinWidth(30);
         colLevel.setMaxWidth(50);
@@ -178,7 +179,7 @@ public class FormLogs extends Form {
             }
         });
 
-        TableColumn<LogEntry, String> colMessage = new TableColumn<>("Сообщение");
+        TableColumn<LogEntry, String> colMessage = new TableColumn<>(I18n.t("logs.column.message"));
         colMessage.setCellValueFactory(new PropertyValueFactory<>("message"));
         colMessage.setSortable(false);
         colMessage.setCellFactory(col -> new TableCell<>() {
@@ -304,8 +305,8 @@ public class FormLogs extends Form {
         Toast.show(
                 Toast.Type.INFO,
                 logViewUpdatesPaused
-                        ? "Обновление лога на экране приостановлено"
-                        : "Обновление лога на экране возобновлено"
+                        ? I18n.t("logs.toast.paused")
+                        : I18n.t("logs.toast.resumed")
         );
     }
 
@@ -348,10 +349,10 @@ public class FormLogs extends Form {
 
     private void updatePauseButtonState() {
         if (btnPause != null) {
-            String title = logViewUpdatesPaused ? "Продолжить логи" : "Пауза логов";
+            String title = logViewUpdatesPaused ? I18n.t("logs.action.resume") : I18n.t("logs.action.pause");
             String description = logViewUpdatesPaused
-                    ? "Перестроить лог из памяти и снова обновлять экран"
-                    : "Остановить обновление лога на экране, не останавливая сбор записей";
+                    ? I18n.t("logs.action.resume.tooltip")
+                    : I18n.t("logs.action.pause.tooltip");
             setToolbarButtonGraphic(btnPause, logViewUpdatesPaused ? ICON_PLAY : ICON_PAUSE, title);
             btnPause.setAccessibleText(title);
             if (btnPauseTooltip != null) {
@@ -389,7 +390,7 @@ public class FormLogs extends Form {
 
     private void saveLogsToFile() {
         if (logData.isEmpty()) {
-            Toast.show(Toast.Type.WARNING, "Нет логов для сохранения");
+            Toast.show(Toast.Type.WARNING, I18n.t("logs.toast.noLogsToSave"));
             return;
         }
 
@@ -402,24 +403,24 @@ public class FormLogs extends Form {
 
             File outputFile = ensureLogExtension(selectedFile);
             Files.writeString(outputFile.toPath(), formatLogs(), StandardCharsets.UTF_8);
-            Toast.show(Toast.Type.SUCCESS, "Лог сохранён: " + outputFile.getName());
+            Toast.show(Toast.Type.SUCCESS, I18n.t("logs.toast.saved", outputFile.getName()));
         } catch (Exception e) {
             log.error("Log export failed", e);
             ModalPane.showError(
-                    "Ошибка сохранения лога",
-                    e.getMessage() != null ? e.getMessage() : "Не удалось сохранить файл"
+                    I18n.t("logs.save.error.title"),
+                    e.getMessage() != null ? e.getMessage() : I18n.t("logs.save.error.fallback")
             );
         }
     }
 
     private FileChooser createLogFileChooser() {
         FileChooser chooser = new FileChooser();
-        chooser.setTitle("Сохранить лог");
+        chooser.setTitle(I18n.t("logs.fileChooser.title"));
         chooser.getExtensionFilters().add(new FileChooser.ExtensionFilter(
-                "Log files (*.log)", "*.log"
+                I18n.t("logs.fileChooser.logFiles"), "*.log"
         ));
         chooser.getExtensionFilters().add(new FileChooser.ExtensionFilter(
-                "Text files (*.txt)", "*.txt"
+                I18n.t("logs.fileChooser.textFiles"), "*.txt"
         ));
         chooser.setInitialFileName("meshapp-log-" + EXPORT_FILE_TIME.format(LocalDateTime.now()) + ".log");
         return chooser;

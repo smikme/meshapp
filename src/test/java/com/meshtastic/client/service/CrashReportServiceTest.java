@@ -2,6 +2,7 @@ package com.meshtastic.client.service;
 
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.meshtastic.client.i18n.I18n;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -154,10 +155,10 @@ class CrashReportServiceTest {
         String title = payload.get("title").getAsString();
         String body = payload.get("body").getAsString();
 
-        assertTrue(title.contains("Problem report"));
-        assertTrue(body.contains("Автоматически созданный отчёт о проблеме MeshApp."));
+        assertTrue(title.contains(I18n.t("crashReport.issue.title.problem")));
+        assertTrue(body.contains(I18n.t("crashReport.issue.bodyLead.problem")));
         assertTrue(body.contains("Не открывается окно помощи"));
-        assertTrue(body.contains("текущей сессии"));
+        assertTrue(body.contains(I18n.t("crashReport.issue.attachment.problem")));
         String encodedEmail = Base64.getEncoder().encodeToString("support@example.com".getBytes(StandardCharsets.UTF_8));
         assertTrue(body.contains(encodedEmail));
         assertFalse(body.contains("support@example.com"));

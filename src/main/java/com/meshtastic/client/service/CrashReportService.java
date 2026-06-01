@@ -3,6 +3,7 @@ package com.meshtastic.client.service;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.meshtastic.client.i18n.I18n;
 
 import java.io.IOException;
 import java.net.URI;
@@ -204,22 +205,27 @@ public final class CrashReportService {
                                   CrashContext context,
                                   ReportType reportType) {
         String normalizedComment = comment == null || comment.isBlank()
-                ? "Комментарий не указан."
+                ? I18n.t("crashReport.issue.comment.empty")
                 : comment.trim();
         String normalizedContactEmail = normalizeOptionalText(contactEmail);
 
         List<String> lines = new ArrayList<>();
         lines.add(reportType.bodyLead());
         lines.add("");
-        lines.add("Версия приложения: " + context.applicationVersion());
-        lines.add("Код сборки: " + context.versionCode());
-        lines.add("ОС: " + context.osName() + " " + context.osVersion() + " (" + context.osArch() + ")");
-        lines.add("Время отправки: " + TITLE_TIME_FORMAT.format(Instant.now(clock)));
+        lines.add(I18n.t("crashReport.issue.label.applicationVersion", context.applicationVersion()));
+        lines.add(I18n.t("crashReport.issue.label.versionCode", context.versionCode()));
+        lines.add(I18n.t(
+                "crashReport.issue.label.os",
+                context.osName(),
+                context.osVersion(),
+                context.osArch()
+        ));
+        lines.add(I18n.t("crashReport.issue.label.submittedAt", TITLE_TIME_FORMAT.format(Instant.now(clock))));
         if (reportType.includesContactEmail() && !normalizedContactEmail.isBlank()) {
             lines.add(encodeContactEmail(normalizedContactEmail));
         }
         lines.add("");
-        lines.add("Комментарий пользователя:");
+        lines.add(I18n.t("crashReport.issue.label.userComment"));
         lines.add(normalizedComment);
         lines.add("");
         lines.add(reportType.attachmentNote());
@@ -285,40 +291,40 @@ public final class CrashReportService {
 
     private enum ReportType {
         CRASH(
-                "Crash report",
-                "Автоматически созданный отчёт о сбое MeshApp.",
-                "ZIP-архив session-лога приложен во вложениях issue.",
+                "crashReport.issue.title.crash",
+                "crashReport.issue.bodyLead.crash",
+                "crashReport.issue.attachment.crash",
                 true
         ),
         PROBLEM(
-                "Problem report",
-                "Автоматически созданный отчёт о проблеме MeshApp.",
-                "ZIP-архив session-лога текущей сессии приложен во вложениях issue.",
+                "crashReport.issue.title.problem",
+                "crashReport.issue.bodyLead.problem",
+                "crashReport.issue.attachment.problem",
                 true
         );
 
-        private final String titlePrefix;
-        private final String bodyLead;
-        private final String attachmentNote;
+        private final String titlePrefixKey;
+        private final String bodyLeadKey;
+        private final String attachmentNoteKey;
         private final boolean includesContactEmail;
 
-        ReportType(String titlePrefix, String bodyLead, String attachmentNote, boolean includesContactEmail) {
-            this.titlePrefix = titlePrefix;
-            this.bodyLead = bodyLead;
-            this.attachmentNote = attachmentNote;
+        ReportType(String titlePrefixKey, String bodyLeadKey, String attachmentNoteKey, boolean includesContactEmail) {
+            this.titlePrefixKey = titlePrefixKey;
+            this.bodyLeadKey = bodyLeadKey;
+            this.attachmentNoteKey = attachmentNoteKey;
             this.includesContactEmail = includesContactEmail;
         }
 
         private String titlePrefix() {
-            return titlePrefix;
+            return I18n.t(titlePrefixKey);
         }
 
         private String bodyLead() {
-            return bodyLead;
+            return I18n.t(bodyLeadKey);
         }
 
         private String attachmentNote() {
-            return attachmentNote;
+            return I18n.t(attachmentNoteKey);
         }
 
         private boolean includesContactEmail() {
