@@ -1,5 +1,7 @@
 package com.meshtastic.client.model;
 
+import com.meshtastic.client.i18n.I18n;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -8,6 +10,11 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 class PacketLogEntryTest {
+
+    @BeforeEach
+    void setLanguage() {
+        I18n.setLanguageTagForTests(I18n.LANGUAGE_RU);
+    }
 
     @Test
     void routeTextCombinesDirectionAndTransport() {

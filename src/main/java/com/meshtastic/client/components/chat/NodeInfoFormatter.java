@@ -1,5 +1,6 @@
 package com.meshtastic.client.components.chat;
 
+import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.model.NodeData;
 
 /**
@@ -19,7 +20,7 @@ public final class NodeInfoFormatter {
      */
     public static String format(NodeData node) {
         StringBuilder sb = new StringBuilder();
-        sb.append("\uD83D\uDCCB Информация о ноде\n");
+        sb.append(I18n.t("chat.nodeInfo.title")).append("\n");
         sb.append("━━━━━━━━━━━━━━━━━━━━\n");
 
         // Имя и ID
@@ -49,18 +50,22 @@ public final class NodeInfoFormatter {
             sb.append(battIcon).append(" ")
                     .append(node.getBatteryLevel()).append("%");
             if (node.getVoltage() > 0) {
-                sb.append(String.format(" (%.1fV)", node.getVoltage()));
+                sb.append(String.format(I18n.locale(),
+                        " (%.1f%s)", node.getVoltage(), I18n.t("node.unit.volt")));
             }
             sb.append("\n");
         }
 
         // Сигнал и хопы
         if (node.getSnr() != 0) {
-            sb.append(String.format("\uD83D\uDCE1 SNR: %.1f dB\n", node.getSnr()));
+            sb.append("\uD83D\uDCE1 ")
+                    .append(I18n.t("node.list.snr",
+                            String.format(I18n.locale(), "%.1f", node.getSnr()),
+                            I18n.t("node.unit.db")))
+                    .append("\n");
         }
         if (node.getHopsAway() > 0) {
-            sb.append("\uD83D\uDD17 Хопов: ")
-                    .append(node.getHopsAway()).append("\n");
+            sb.append(I18n.t("chat.nodeInfo.hops", node.getHopsAway())).append("\n");
         }
 
         // Координаты и высота
@@ -69,8 +74,7 @@ public final class NodeInfoFormatter {
                     node.getLatitude(), node.getLongitude()));
         }
         if (node.getAltitude() != 0) {
-            sb.append("\u26F0\uFE0F ").append(node.getAltitude())
-                    .append(" м\n");
+            sb.append(I18n.t("chat.nodeInfo.altitude", node.getAltitude())).append("\n");
         }
 
         // Публичный ключ
@@ -91,7 +95,7 @@ public final class NodeInfoFormatter {
         if (node.getUptimeSeconds() > 0) {
             long h = node.getUptimeSeconds() / 3600;
             long m = node.getUptimeSeconds() % 3600 / 60;
-            sb.append(String.format("⏱ %dч %dм\n", h, m));
+            sb.append(I18n.t("chat.nodeInfo.uptime", h, m)).append("\n");
         }
 
         sb.append("━━━━━━━━━━━━━━━━━━━━");

@@ -9,6 +9,7 @@ import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -38,6 +39,7 @@ class SingleInstanceGuardTest {
         Files.writeString(tempDir.resolve("meshapp.instance"), "port=1\ntoken=stale\n");
 
         try (SingleInstanceGuard guard = SingleInstanceGuard.acquire(tempDir).orElseThrow()) {
+            assertNotNull(guard);
             assertTrue(Files.isRegularFile(tempDir.resolve("meshapp.instance")));
         }
     }

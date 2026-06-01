@@ -1,5 +1,6 @@
 package com.meshtastic.client.service;
 
+import com.meshtastic.client.lua.LuaScriptRuntimeService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -25,6 +26,7 @@ public final class DatabaseResetService {
     public static synchronized void resetAllData() throws Exception {
         log.info("Starting full application database reset");
 
+        LuaScriptRuntimeService.getInstance().stopAll();
         ConnectionManager.getInstance().shutdownAll();
 
         MessageDbService messageDbService = MessageDbService.getIfInitialized();

@@ -153,6 +153,11 @@ message EnvironmentMetrics {
    * Soil temperature measured (*C)
    */
   optional float soil_temperature = 22;
+
+  /*
+   * One-wire temperature (*C)
+   */
+  repeated float one_wire_temperature = 23;
 }
 
 /*
@@ -653,7 +658,7 @@ enum TelemetrySensorType {
   BMP280 = 6;
 
   /*
-   * High accuracy temperature and humidity
+   * TODO - REMOVE High accuracy temperature and humidity
    */
   SHTC3 = 7;
 
@@ -678,7 +683,7 @@ enum TelemetrySensorType {
   QMC5883L = 11;
 
   /*
-   * High accuracy temperature and humidity
+   * TODO - REMOVE High accuracy temperature and humidity
    */
   SHT31 = 12;
 
@@ -703,7 +708,7 @@ enum TelemetrySensorType {
   RCWL9620 = 16;
 
   /*
-   * Sensirion High accuracy temperature and humidity
+   * TODO - REMOVE Sensirion High accuracy temperature and humidity
    */
   SHT4X = 17;
 
@@ -853,7 +858,7 @@ enum TelemetrySensorType {
   HDC1080 = 46;
 
   /*
-   * STH21 Temperature and R. Humidity sensor
+   * TODO - REMOVE STH21 Temperature and R. Humidity sensor
    */
   SHT21 = 47;
 
@@ -866,6 +871,26 @@ enum TelemetrySensorType {
    * SCD30 CO2, humidity, temperature sensor
    */
   SCD30 = 49;
+
+  /*
+   * SHT family of sensors for temperature and humidity
+   */
+  SHTXX = 50;
+
+  /*
+   * DS248X Bridge for one-wire temperature sensors
+   */
+  DS248X = 51;
+
+  /*
+   * MMC5983MA 3-Axis Digital Magnetic Sensor
+   */
+  MMC5983MA = 52;
+
+  /*
+   * ICM-42607-P 6‑Axis IMU
+   */
+  ICM42607P = 53;
 }
 
 /*

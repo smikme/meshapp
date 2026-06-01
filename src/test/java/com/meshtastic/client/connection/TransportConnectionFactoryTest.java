@@ -3,12 +3,12 @@ package com.meshtastic.client.connection;
 import com.meshtastic.client.connection.ble.BleConnection;
 import com.meshtastic.client.connection.ble.BleDevice;
 import com.meshtastic.client.connection.ble.BlePlatform;
-import com.meshtastic.client.connection.ble.BlePlatform.AdapterState;
 import com.meshtastic.client.connection.ble.BleProtocolProfile;
 import com.meshtastic.client.connection.ble.BleState;
 import com.meshtastic.client.model.ConnectionEntry;
 import com.meshtastic.client.model.ConnectionType;
 import com.meshtastic.client.model.ProtocolType;
+import com.meshtastic.client.model.SerialModemLineMode;
 import org.junit.jupiter.api.Test;
 
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -41,10 +41,22 @@ class TransportConnectionFactoryTest {
 
         TransportConnection connection = TransportConnectionFactory.create(entry, FakeBlePlatform::new);
 
-        assertInstanceOf(SerialConnection.class, connection);
+        SerialConnection serialConnection = assertInstanceOf(SerialConnection.class, connection);
         assertEquals(FrameFormat.MESHTASTIC, ((FrameFormatAwareConnection) connection).getFrameFormat());
+        assertEquals(SerialModemLineMode.AUTO, serialConnection.getSerialModemLineMode());
         assertEquals("type=SERIAL, port=/dev/ttyUSB0, baud=" + SerialConnection.DEFAULT_BAUD_RATE,
                 TransportConnectionFactory.describe(entry));
+    }
+
+    @Test
+    void createsSerialTransportWithSavedModemLineMode() {
+        ConnectionEntry entry = new ConnectionEntry("serial", "/dev/ttyUSB0", 115200, ConnectionType.SERIAL);
+        entry.setSerialModemLineMode(SerialModemLineMode.DTR_OFF_RTS_OFF);
+
+        TransportConnection connection = TransportConnectionFactory.create(entry, FakeBlePlatform::new);
+
+        SerialConnection serialConnection = assertInstanceOf(SerialConnection.class, connection);
+        assertEquals(SerialModemLineMode.DTR_OFF_RTS_OFF, serialConnection.getSerialModemLineMode());
     }
 
     @Test
@@ -128,8 +140,8 @@ class TransportConnectionFactoryTest {
         }
 
         @Override
-        public AdapterState getAdapterState() {
-            return AdapterState.POWERED_ON;
+        public BlePlatform.AdapterState getAdapterState() {
+            return BlePlatform.AdapterState.POWERED_ON;
         }
 
         @Override

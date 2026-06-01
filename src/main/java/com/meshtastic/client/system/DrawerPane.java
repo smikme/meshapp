@@ -17,6 +17,7 @@ import javafx.scene.shape.SVGPath;
 
 import com.meshtastic.client.MeshApp;
 import com.meshtastic.client.forms.FormChat;
+import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.menu.MyDrawerBuilder;
 import com.meshtastic.client.platform.OsDetect;
 import com.meshtastic.client.themes.ThemeManager;
@@ -37,8 +38,6 @@ public class DrawerPane extends StackPane {
     private static final String ORIGINAL_TOOLTIP_KEY = "drawer.originalTooltip";
     private static final String NOTIFICATION_ON_ICON = "/drawer/icon/bell.svg";
     private static final String NOTIFICATION_OFF_ICON = "/drawer/icon/bell-off.svg";
-    private static final String NAVIGATION_BLOCKED_TOOLTIP =
-            "Дождитесь завершения сохранения конфигурации и переподключения";
 
     private final ToolBar toolBar;
     private final Button themeButton;
@@ -162,7 +161,7 @@ public class DrawerPane extends StackPane {
     private Button createThemeButton() {
         Button btn = new Button();
         btn.getStyleClass().add("drawer-toolbar-button");
-        btn.setTooltip(new Tooltip("Переключить тему"));
+        btn.setTooltip(new Tooltip(I18n.t("drawer.theme.toggle")));
         updateThemeIcon(btn, AppPreferences.isDarkMode());
         btn.setOnAction(e -> {
             boolean newDark = !AppPreferences.isDarkMode();
@@ -213,7 +212,7 @@ public class DrawerPane extends StackPane {
             btn.setText(enabled ? "N" : "N/");
             btn.setContentDisplay(ContentDisplay.TEXT_ONLY);
         }
-        btn.setTooltip(new Tooltip(enabled ? "Оповещения включены" : "Оповещения выключены"));
+        btn.setTooltip(new Tooltip(I18n.t(enabled ? "drawer.notifications.on" : "drawer.notifications.off")));
         btn.setOpacity(1.0);
     }
 
@@ -265,7 +264,7 @@ public class DrawerPane extends StackPane {
 
         Object originalTooltip = btn.getProperties().get(ORIGINAL_TOOLTIP_KEY);
         String tooltipText = blocked
-                ? NAVIGATION_BLOCKED_TOOLTIP
+                ? I18n.t("drawer.navigationBlocked")
                 : originalTooltip instanceof String text ? text : null;
         btn.setTooltip(tooltipText != null ? new Tooltip(tooltipText) : null);
     }

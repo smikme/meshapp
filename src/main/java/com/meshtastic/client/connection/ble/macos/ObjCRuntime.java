@@ -18,10 +18,10 @@ import com.sun.jna.Native;
 public final class ObjCRuntime {
 
     private static final NativeLibrary OBJC = NativeLibrary.getInstance("objc");
-    @SuppressWarnings("PMD.UnusedPrivateField") // loading framework into process is a required side effect
+    @SuppressWarnings({"unused", "PMD.UnusedPrivateField"}) // loading framework into process is a required side effect
     private static final NativeLibrary FOUNDATION = NativeLibrary.getInstance(
             "/System/Library/Frameworks/Foundation.framework/Foundation");
-    @SuppressWarnings("PMD.UnusedPrivateField")
+    @SuppressWarnings({"unused", "PMD.UnusedPrivateField"}) // loading framework into process is a required side effect
     private static final NativeLibrary CORE_BLUETOOTH = NativeLibrary.getInstance(
             "/System/Library/Frameworks/CoreBluetooth.framework/CoreBluetooth");
     private static final NativeLibrary DISPATCH = NativeLibrary.getInstance(

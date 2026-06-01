@@ -7,8 +7,7 @@ import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.model.TelemetryEntry;
 import com.meshtastic.client.protocol.FromRadioListener;
 import com.meshtastic.client.protocol.ProtocolHandler;
-import com.meshtastic.client.system.DrawerManager;
-import javafx.application.Platform;
+import com.meshtastic.client.system.AppUi;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -274,7 +273,7 @@ public class ConfigExchangeService implements FromRadioListener {
 
         if (nodeInfo.hasDeviceMetrics()) {
             TelemetryProtos.DeviceMetrics dm = nodeInfo.getDeviceMetrics();
-            if (dm.getBatteryLevel() != 0) { node.setBatteryLevel(dm.getBatteryLevel()); }
+            applyBatteryLevel(dm.getBatteryLevel(), node, null);
 
             if (dm.getVoltage() != 0) { node.setVoltage(dm.getVoltage()); }
 
@@ -290,7 +289,7 @@ public class ConfigExchangeService implements FromRadioListener {
             if (dm.getBatteryLevel() != 0 || dm.getChannelUtilization() != 0 || dm.getAirUtilTx() != 0) {
                 long ts = nodeInfo.getLastHeard() > 0 ? nodeInfo.getLastHeard() : System.currentTimeMillis() / 1000;
                 TelemetryEntry entry = new TelemetryEntry(ts, node.getNodeId());
-                entry.setBatteryLevel(dm.getBatteryLevel());
+                applyBatteryLevel(dm.getBatteryLevel(), node, entry);
                 entry.setVoltage(dm.getVoltage());
                 entry.setChannelUtilization(dm.getChannelUtilization());
                 entry.setAirUtilTx(dm.getAirUtilTx());
@@ -301,6 +300,17 @@ public class ConfigExchangeService implements FromRadioListener {
         }
 
         log.debug("Updated node: {}", node);
+    }
+
+    private static void applyBatteryLevel(int rawBatteryLevel, NodeData node, TelemetryEntry entry) {
+        if (rawBatteryLevel > 100) {
+            node.setExternallyPowered(true);
+            if (entry != null) { entry.setExternallyPowered(true); }
+        } else if (rawBatteryLevel > 0) {
+            node.setBatteryLevel(rawBatteryLevel);
+            node.setExternallyPowered(false);
+            if (entry != null) { entry.setBatteryLevel(rawBatteryLevel); }
+        }
     }
 
     @Override
@@ -347,7 +357,6 @@ public class ConfigExchangeService implements FromRadioListener {
                 + ", address='" + mqtt.getAddress() + "'"
                 + ", tls=" + mqtt.getTlsEnabled()
                 + ", encryption=" + mqtt.getEncryptionEnabled()
-                + ", json=" + mqtt.getJsonEnabled()
                 + ", mapReporting=" + mqtt.getMapReportingEnabled()
                 + ", usernameSet=" + !mqtt.getUsername().isBlank()
                 + ", passwordSet=" + !mqtt.getPassword().isBlank();
@@ -394,8 +403,7 @@ public class ConfigExchangeService implements FromRadioListener {
             }
         }
 
-        boolean show = hasUnread;
-        Platform.runLater(() -> DrawerManager.setChatUnreadDot(show));
+        AppUi.setChatUnreadDot(hasUnread);
     }
 
     @Override

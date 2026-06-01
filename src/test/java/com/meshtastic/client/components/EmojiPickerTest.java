@@ -1,6 +1,7 @@
 package com.meshtastic.client.components;
 
 import com.meshtastic.client.TestEnvironmentSupport;
+import com.meshtastic.client.i18n.I18n;
 import javafx.application.Platform;
 import javafx.scene.control.Label;
 import javafx.scene.control.TextField;
@@ -29,13 +30,29 @@ class EmojiPickerTest {
     }
 
     @Test
-    void searchPromptCanUseEmoji() {
+    void searchPromptUsesRussianLocalization() {
         onFxThread(() -> {
-            EmojiPicker picker = new EmojiPicker(emoji -> {});
-            Field searchFieldRef = EmojiPicker.class.getDeclaredField("searchField");
-            searchFieldRef.setAccessible(true);
-            TextField searchField = (TextField) searchFieldRef.get(picker);
-            assertEquals("Поиск emoji...", searchField.getPromptText());
+            String previousLanguage = I18n.getLanguageTag();
+            try {
+                I18n.setLanguageTagForTests(I18n.LANGUAGE_RU);
+                assertEquals("Поиск emoji...", searchPromptText());
+            } finally {
+                I18n.setLanguageTagForTests(previousLanguage);
+            }
+            return null;
+        });
+    }
+
+    @Test
+    void searchPromptUsesEnglishLocalization() {
+        onFxThread(() -> {
+            String previousLanguage = I18n.getLanguageTag();
+            try {
+                I18n.setLanguageTagForTests(I18n.LANGUAGE_EN);
+                assertEquals("Search emoji...", searchPromptText());
+            } finally {
+                I18n.setLanguageTagForTests(previousLanguage);
+            }
             return null;
         });
     }
@@ -83,6 +100,21 @@ class EmojiPickerTest {
             assertEquals("🪿", ((Label) fallback).getText());
             return null;
         });
+    }
+
+    @Test
+    void emojiSearchMatchesRussianKeywordsAndEnglishUnicodeNames() {
+        assertTrue(EmojiData.search("сердце").contains("❤️"));
+        assertTrue(EmojiData.search("heart").contains("❤️"));
+        assertTrue(EmojiData.search("thumbs").contains("👍"));
+    }
+
+    private static String searchPromptText() throws Exception {
+        EmojiPicker picker = new EmojiPicker(emoji -> {});
+        Field searchFieldRef = EmojiPicker.class.getDeclaredField("searchField");
+        searchFieldRef.setAccessible(true);
+        TextField searchField = (TextField) searchFieldRef.get(picker);
+        return searchField.getPromptText();
     }
 
     private static <T> T onFxThread(FxSupplier<T> supplier) {

@@ -5,31 +5,103 @@ plugins {
 	id 'java'
 	id 'application'
 	id 'org.graalvm.buildtools.native' version '0.10.6'
-	id 'com.google.protobuf' version '0.9.4'
+	id 'com.google.protobuf' version '0.10.0'
 	id 'org.openjfx.javafxplugin' version '0.1.0'
 }
 
 def javaVersion = 25
 def javaFxVersion = '25.0.3'
+def jmxDebugEnabled = providers.gradleProperty('jmxDebugEnabled')
+		.orElse(providers.environmentVariable('MESHAPP_JMX_DEBUG'))
+		.map { it.toString().trim().equalsIgnoreCase('true') }
+		.orElse(false)
+def visualVmProfilerEnabled = providers.gradleProperty('visualVmProfilerEnabled')
+		.orElse(providers.environmentVariable('MESHAPP_VISUALVM_PROFILER'))
+		.map { it.toString().trim().equalsIgnoreCase('true') }
+		.orElse(false)
+def visualVmSoftwareRenderingEnabled = providers.gradleProperty('visualVmSoftwareRenderingEnabled')
+		.orElse(providers.environmentVariable('MESHAPP_VISUALVM_SW_RENDERING'))
+		.map { it.toString().trim().equalsIgnoreCase('true') }
+		.orElse(false)
+def jmxDebugPort = providers.gradleProperty('jmxDebugPort')
+		.orElse(providers.environmentVariable('MESHAPP_JMX_PORT'))
+		.map { it.toString().trim() }
+		.orElse('9010')
+
+def jmxDebugJvmArgs = {
+	def port = jmxDebugPort.get()
+	if (!(port ==~ /\d{1,5}/)) {
+		throw new GradleException("jmxDebugPort must be a TCP port number, got '${port}'")
+	}
+	def portNumber = Integer.parseInt(port)
+	if (portNumber < 1 || portNumber > 65535) {
+		throw new GradleException("jmxDebugPort must be between 1 and 65535, got '${port}'")
+	}
+	return [
+		'-Dcom.sun.management.jmxremote',
+		'-Dcom.sun.management.jmxremote.authenticate=false',
+		'-Dcom.sun.management.jmxremote.ssl=false',
+		'-Dcom.sun.management.jmxremote.local.only=true',
+		'-Dcom.sun.management.jmxremote.host=127.0.0.1',
+		"-Dcom.sun.management.jmxremote.port=${port}",
+		"-Dcom.sun.management.jmxremote.rmi.port=${port}",
+		'-Djava.rmi.server.hostname=127.0.0.1'
+	]
+}
+
+def visualVmProfilerJvmArgs = {
+	return [
+		'-Xshare:off',
+		'-XX:+IgnoreUnrecognizedVMOptions',
+		'-XX:-UseJVMCICompiler'
+	]
+}
+
+def visualVmSoftwareRenderingJvmArgs = {
+	return [
+		'-Djavafx.animation.fullspeed=true',
+		'-Dprism.vsync=false',
+		'-Dprism.order=sw'
+	]
+}
+
+def baseRuntimeJvmArgs = {
+	return [
+		'-Xmx512m',
+		'-Xms128m',
+		'-XX:+IgnoreUnrecognizedVMOptions',
+		'--sun-misc-unsafe-memory-access=allow',
+		'-XX:ErrorFile=%h/.meshapp/logs/diagnostics/active/hs_err_pid%p.log'
+	]
+}
 
 application {
 	mainClass = 'com.meshtastic.client.MeshAppLauncher'
-	def jvmArgs = [
-//		'-Xmx256m',
-//		'-Xms256m',
+	def jvmArgs = baseRuntimeJvmArgs() + [
 //		'-Dprism.order=sw',
 		'--add-opens', 'javafx.graphics/javafx.stage=ALL-UNNAMED',
 		'--add-exports', 'javafx.graphics/com.sun.javafx.scene=ALL-UNNAMED',
 		'--add-opens', 'javafx.graphics/com.sun.javafx.tk=ALL-UNNAMED',
 		'--add-opens', 'javafx.graphics/com.sun.javafx.tk.quantum=ALL-UNNAMED',
-		'--add-opens', 'javafx.graphics/com.sun.glass.ui=ALL-UNNAMED',
-		'-XX:ErrorFile=%h/.meshapp/logs/diagnostics/active/hs_err_pid%p.log'
+		'--add-opens', 'javafx.graphics/com.sun.glass.ui=ALL-UNNAMED'
 	]
 	if (org.gradle.internal.os.OperatingSystem.current().isWindows()) {
 		jvmArgs += ['--add-opens', 'javafx.graphics/com.sun.glass.ui.win=ALL-UNNAMED']
 	}
 	if (org.gradle.internal.os.OperatingSystem.current().isMacOsX()) {
 		jvmArgs += ['--add-opens', 'javafx.graphics/com.sun.glass.ui.mac=ALL-UNNAMED']
+	}
+	if (jmxDebugEnabled.get() || visualVmProfilerEnabled.get()) {
+		jvmArgs += jmxDebugJvmArgs()
+		logger.lifecycle("JMX debug enabled at 127.0.0.1:${jmxDebugPort.get()}")
+	}
+	if (visualVmProfilerEnabled.get()) {
+		jvmArgs += visualVmProfilerJvmArgs()
+		logger.lifecycle('VisualVM profiler mode enabled (-Xshare:off, JVMCI compiler disabled)')
+	}
+	if (visualVmSoftwareRenderingEnabled.get()) {
+		jvmArgs += visualVmSoftwareRenderingJvmArgs()
+		logger.lifecycle('VisualVM experimental software rendering enabled')
 	}
 	applicationDefaultJvmArgs = jvmArgs
 }
@@ -47,6 +119,7 @@ version = {
 		return 'dev'
 	}
 }()
+def applicationVersion = version.toString()
 
 java {
 	toolchain {
@@ -72,11 +145,14 @@ configurations.configureEach {
 
 dependencies {
 	implementation 'com.google.protobuf:protobuf-java:4.33.4'
+	implementation 'com.googlecode.lanterna:lanterna:3.1.5'
 	implementation 'com.miglayout:miglayout-javafx:11.4.2'
 	implementation 'ch.qos.logback:logback-classic:1.5.32'
 	implementation 'com.fazecast:jSerialComm:2.11.0'
 	implementation 'com.google.code.gson:gson:2.11.0'
-	implementation 'com.h2database:h2:2.3.232'
+	implementation 'com.h2database:h2:2.4.240'
+	implementation 'org.luaj:luaj-jse:3.0.1'
+	implementation 'org.fxmisc.richtext:richtextfx:0.11.7'
 	implementation('io.github.mkpaz:atlantafx-base:2.1.0') {
 		// AtlantaFX публикует собственный org.openjfx version, который иначе
 		// может поднять проект на другую JavaFX-линейку через conflict resolution.
@@ -97,6 +173,40 @@ protobuf {
 	}
 }
 
+def generatedResourcesDir = layout.buildDirectory.dir('generated/resources')
+def buildshipGeneratedClasspathDirs = [
+		layout.buildDirectory.dir('generated/source/proto/main/java'),
+		layout.buildDirectory.dir('generated/source/proto/test/java'),
+		layout.buildDirectory.dir('generated/sources/proto/main/java'),
+		layout.buildDirectory.dir('generated/sources/proto/test/java'),
+		layout.buildDirectory.dir('generated/proto-resources/main'),
+		layout.buildDirectory.dir('generated/proto-resources/test'),
+		generatedResourcesDir
+]
+
+// Buildship/JDTLS validates generated classpath entries before Gradle generation tasks run.
+// Keep those directories present even after a fresh checkout, IDE import, or clean.
+buildshipGeneratedClasspathDirs.each { it.get().asFile.mkdirs() }
+
+def prepareBuildshipGeneratedDirs = tasks.register('prepareBuildshipGeneratedDirs') {
+	doLast {
+		buildshipGeneratedClasspathDirs.each { it.get().asFile.mkdirs() }
+	}
+}
+
+[
+		'clean',
+		'generateProto',
+		'generateTestProto',
+		'processProtoResources',
+		'processTestProtoResources',
+		'generateVersionProperties'
+].each { taskName ->
+	tasks.matching { it.name == taskName }.configureEach {
+		finalizedBy(prepareBuildshipGeneratedDirs)
+	}
+}
+
 jar {
 	manifest {
 		attributes(
@@ -111,7 +221,7 @@ jar {
 
 // Генерация version.properties при каждой сборке
 tasks.register('generateVersionProperties') {
-	def outputDir = layout.buildDirectory.dir('generated/resources')
+	def outputDir = generatedResourcesDir
 	outputs.dir(outputDir)
 	// Всегда пересоздавать — версия может измениться (dirty/commit)
 	outputs.upToDateWhen { false }
@@ -123,11 +233,12 @@ tasks.register('generateVersionProperties') {
 			versionCode = 'git rev-list --count HEAD'.execute().text.trim() ?: '0'
 		} catch (ignored) {}
 		new File(dir, 'version.properties').text =
-			"version=${project.version}\nversionCode=${versionCode}\n"
+			"version=${applicationVersion}\n" +
+			"versionCode=${versionCode}\n"
 	}
 }
 
-sourceSets.main.resources.srcDir(layout.buildDirectory.dir('generated/resources'))
+sourceSets.main.resources.srcDir(generatedResourcesDir)
 tasks.named('processResources') { dependsOn 'generateVersionProperties' }
 
 def macOsJnaResourcePrefix = {
@@ -329,6 +440,7 @@ tasks.withType(JavaCompile).configureEach {
 
 tasks.named('test') {
 	useJUnitPlatform()
+	jvmArgs '--enable-native-access=ALL-UNNAMED', '--sun-misc-unsafe-memory-access=allow'
 	if (org.gradle.internal.os.OperatingSystem.current().isLinux()
 			&& !System.getenv('DISPLAY')?.trim()
 			&& !System.getenv('WAYLAND_DISPLAY')?.trim()) {
@@ -1269,6 +1381,22 @@ tasks.named("run") {
 		enabled = false
 	}
 }
+
+tasks.register('runTerminal', JavaExec) {
+	group = 'application'
+	description = 'Запуск MeshApp в терминальном режиме Lanterna (--terminal)'
+	dependsOn classes
+	mainClass = application.mainClass
+	classpath = sourceSets.main.runtimeClasspath
+	jvmArgs = baseRuntimeJvmArgs()
+	standardInput = System.in
+	doFirst {
+		if (!args.contains('--terminal')) {
+			args = ['--terminal'] + args
+		}
+	}
+}
+
 tasks.named('installDist') {
 	doLast {
 		def installDir = layout.buildDirectory.dir("install/${project.name}").get().asFile

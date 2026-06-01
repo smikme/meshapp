@@ -7,6 +7,9 @@ import com.meshtastic.client.components.chat.ChatListCell;
 import com.meshtastic.client.components.chat.ChatNameResolver;
 import com.meshtastic.client.components.chat.MessageBubbleFactory;
 import com.meshtastic.client.components.chat.TracerouteView;
+import com.meshtastic.client.i18n.I18n;
+import com.meshtastic.client.lua.LuaScript;
+import com.meshtastic.client.lua.LuaScriptService;
 import com.meshtastic.client.modal.Toast;
 import com.meshtastic.client.model.ChatItem;
 import com.meshtastic.client.model.MeshMessage;
@@ -23,8 +26,10 @@ import javafx.collections.transformation.SortedList;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.control.Button;
+import javafx.scene.control.ContextMenu;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListView;
+import javafx.scene.control.MenuItem;
 import javafx.scene.control.ScrollPane;
 import javafx.scene.control.Separator;
 import javafx.scene.control.SplitPane;
@@ -41,6 +46,7 @@ import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
 
 import java.util.Comparator;
+import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
@@ -57,6 +63,8 @@ import java.util.Optional;
 abstract class FormChatUi extends FormChatBase {
 
     private Region headerSpacer;
+    private Button quickScriptButton;
+    private ContextMenu quickScriptMenu;
     private FormChatMessageSearchController messageSearchController;
 
     /**
@@ -93,7 +101,7 @@ abstract class FormChatUi extends FormChatBase {
 
     private TextField createSearchField() {
         TextField searchField = new TextField();
-        searchField.setPromptText("Поиск чатов");
+        searchField.setPromptText(I18n.t("chat.search.placeholder"));
         searchField.getStyleClass().add("chat-search-field");
         return searchField;
     }
@@ -101,7 +109,7 @@ abstract class FormChatUi extends FormChatBase {
     private Button createNewChatButton() {
         Button button = new Button("✎");
         button.getStyleClass().add("chat-new-btn");
-        button.setTooltip(new Tooltip("Новый чат"));
+        button.setTooltip(new Tooltip(I18n.t("chat.new.tooltip")));
         button.setOnAction(event -> showNewChatDialog());
         return button;
     }
@@ -212,7 +220,7 @@ abstract class FormChatUi extends FormChatBase {
         box.setAlignment(Pos.CENTER);
         VBox.setVgrow(box, Priority.ALWAYS);
 
-        Label placeholder = new Label("Выберите, кому хотели бы написать");
+        Label placeholder = new Label(I18n.t("chat.emptySelection"));
         placeholder.getStyleClass().add("form-placeholder-label");
         placeholder.setWrapText(true);
         box.getChildren().add(placeholder);
@@ -234,12 +242,14 @@ abstract class FormChatUi extends FormChatBase {
         headerNameLabel.getStyleClass().add("chat-header-name");
 
         headerSpacer = new Region();
+        quickScriptButton = createQuickScriptButton();
         messageSearchController = createMessageSearchController();
 
         chatHeader = new HBox(10,
                 headerAvatarPane,
                 headerNameLabel,
                 headerSpacer,
+                quickScriptButton,
                 messageSearchController.searchButton(),
                 messageSearchController.controls());
         chatHeader.setAlignment(Pos.CENTER_LEFT);
@@ -264,6 +274,80 @@ abstract class FormChatUi extends FormChatBase {
                 headerSpacer);
     }
 
+    private Button createQuickScriptButton() {
+        Button button = FormChatUiSupport.createHeaderIconButton(
+                "/icons/autoplay.svg",
+                I18n.t("chat.quickBots.tooltip"),
+                "▶");
+        button.setOnAction(event -> toggleQuickScriptMenu(button));
+        return button;
+    }
+
+    private void toggleQuickScriptMenu(Button anchor) {
+        if (quickScriptMenu != null && quickScriptMenu.isShowing()) {
+            quickScriptMenu.hide();
+            return;
+        }
+        quickScriptMenu = buildQuickScriptMenu();
+        quickScriptMenu.setOnShowing(event -> anchor.getStyleClass().add("chat-header-icon-btn-active"));
+        quickScriptMenu.setOnHidden(event -> anchor.getStyleClass().remove("chat-header-icon-btn-active"));
+        quickScriptMenu.show(anchor, javafx.geometry.Side.BOTTOM, 0, 4);
+    }
+
+    private ContextMenu buildQuickScriptMenu() {
+        ContextMenu menu = new ContextMenu();
+        List<LuaScript> scripts = quickLaunchScripts();
+        if (scripts.isEmpty()) {
+            MenuItem emptyItem = new MenuItem(I18n.t("chat.quickBots.empty"));
+            emptyItem.setDisable(true);
+            menu.getItems().add(emptyItem);
+            return menu;
+        }
+
+        scripts.forEach(script -> menu.getItems().add(createQuickScriptMenuItem(script)));
+        return menu;
+    }
+
+    private List<LuaScript> quickLaunchScripts() {
+        return LuaScriptService.getInstance().listScripts().stream()
+                .filter(LuaScript::isEnabled)
+                .filter(script -> script.getBotType() == LuaScript.BotType.AUTOMATION_BOT)
+                .filter(script -> hasText(script.getAutomationName()))
+                .sorted(Comparator
+                        .comparing(FormChatUi::quickScriptDisplayName, String.CASE_INSENSITIVE_ORDER)
+                        .thenComparing(script -> script.getAutomationName().trim(), String.CASE_INSENSITIVE_ORDER))
+                .toList();
+    }
+
+    private MenuItem createQuickScriptMenuItem(LuaScript script) {
+        String name = quickScriptDisplayName(script);
+        String handle = script.getAutomationName().trim();
+        MenuItem item = new MenuItem(UnicodeTextUtils.sanitizeForJavaFxDisplay(
+                scriptIcon(script) + "  " + name + "  " + handle));
+        item.setOnAction(event -> launchQuickScript(script));
+        return item;
+    }
+
+    private void launchQuickScript(LuaScript script) {
+        ChatBotCommandHelper.ParsedBotCommand command = new ChatBotCommandHelper.ParsedBotCommand(
+                ChatBotCommandHelper.BotAction.AUTOMATION,
+                script.getAutomationName().trim(),
+                "",
+                false,
+                "",
+                List.of(),
+                script.getId());
+        handleBotCommand(command);
+    }
+
+    private static String quickScriptDisplayName(LuaScript script) {
+        return hasText(script.getName()) ? script.getName().trim() : script.getAutomationName().trim();
+    }
+
+    private static String scriptIcon(LuaScript script) {
+        return hasText(script.getIcon()) ? script.getIcon().trim() : LuaScript.DEFAULT_ICON;
+    }
+
     private VBox createMessageContainer() {
         VBox container = new VBox(6);
         container.setPadding(new Insets(10, 15, 10, 15));
@@ -285,8 +369,6 @@ abstract class FormChatUi extends FormChatBase {
                 messageContainer.widthProperty(),
                 new MessageBubbleFactory.BubbleActions() {
                     @Override public void startReply(MeshMessage msg) { FormChatUi.this.startReply(msg); }
-                    @Override public void requestTraceroute(MeshMessage msg) { FormChatUi.this.requestTraceroute(msg); }
-                    @Override public void requestNodeInfo(MeshMessage msg) { FormChatUi.this.requestNodeInfo(msg); }
                     @Override public void sendReaction(MeshMessage msg, String emoji) {
                         FormChatUi.this.sendReaction(msg, emoji);
                     }
@@ -437,8 +519,38 @@ abstract class FormChatUi extends FormChatBase {
         return new ChatInputBar(
                 this::sendChatMessage,
                 this::handleBotCommand,
+                this::suggestBotCommands,
                 query -> ChatBotCommandHelper.suggestNodes(listBotCommandNodes(), query, 8)
         );
+    }
+
+    private List<ChatBotCommandHelper.BotDefinition> suggestBotCommands(String query) {
+        return ChatBotCommandHelper.suggestBots(query, automationBotDefinitions());
+    }
+
+    private List<ChatBotCommandHelper.BotDefinition> automationBotDefinitions() {
+        return LuaScriptService.getInstance().listScripts().stream()
+                .filter(LuaScript::isEnabled)
+                .filter(script -> script.getBotType() == LuaScript.BotType.AUTOMATION_BOT)
+                .filter(script -> hasText(script.getAutomationName()))
+                .map(script -> new ChatBotCommandHelper.BotDefinition(
+                        script.getAutomationName().trim(),
+                        automationSuggestionDescription(script),
+                        ChatBotCommandHelper.BotAction.AUTOMATION,
+                        script.getId()))
+                .toList();
+    }
+
+    private static String automationSuggestionDescription(LuaScript script) {
+        String scriptName = hasText(script.getName()) ? script.getName().trim() : "Lua";
+        String description = script.getDescription();
+        return hasText(description)
+                ? I18n.t("chat.automation.descriptionWithDetails", scriptName, description.trim())
+                : I18n.t("chat.automation.description", scriptName);
+    }
+
+    private static boolean hasText(String value) {
+        return value != null && !value.isBlank();
     }
 
     private void sendChatMessage(ChatInputBar.SendRequest request) {
@@ -478,7 +590,7 @@ abstract class FormChatUi extends FormChatBase {
     private boolean sendDirectMessage(ChatInputBar.SendRequest request) {
         NodeData peerNode = NodeUtils.resolveNode(state, selectedChat.getPeerNodeId());
         if (Optional.ofNullable(peerNode).filter(NodeData::isUnmessagable).isPresent()) {
-            Toast.show(Toast.Type.WARNING, "Нода объявила, что не принимает личные сообщения");
+            Toast.show(Toast.Type.WARNING, I18n.t("chat.toast.unmessagable"));
             return false;
         }
 
@@ -491,7 +603,7 @@ abstract class FormChatUi extends FormChatBase {
                     if (Optional.ofNullable(sent).isPresent()) {
                         return true;
                     }
-                    Toast.show(Toast.Type.ERROR, "Не удалось определить MeshCore contact для DM");
+                    Toast.show(Toast.Type.ERROR, I18n.t("chat.toast.meshcoreDmContactMissing"));
                     return false;
                 })
                 .orElseGet(() -> {
@@ -504,7 +616,7 @@ abstract class FormChatUi extends FormChatBase {
                     if (Optional.ofNullable(sent).isPresent()) {
                         return true;
                     }
-                    Toast.show(Toast.Type.ERROR, "Не удалось определить ноду для DM");
+                    Toast.show(Toast.Type.ERROR, I18n.t("chat.toast.dmNodeMissing"));
                     return false;
                 });
     }
@@ -592,7 +704,7 @@ abstract class FormChatUi extends FormChatBase {
     protected void handleChatFontSizeChanged() {
         applyChatTypography();
         Optional.ofNullable(chatListView).ifPresent(ListView::refresh);
-        Optional.ofNullable(selectedChat).ifPresent(chat -> refreshLoadedMessageRows());
+        Optional.ofNullable(selectedChat).ifPresent(chat -> refreshLoadedMessageRows(true));
     }
 
     protected void applyChatTypography() {

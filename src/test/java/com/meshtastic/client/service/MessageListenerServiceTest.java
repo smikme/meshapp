@@ -12,6 +12,7 @@ import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.MessageReaction;
 import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.model.NodeData;
+import com.meshtastic.client.model.TelemetryEntry;
 import com.meshtastic.client.protocol.ProtocolHandler;
 import com.meshtastic.client.utils.AppPreferences;
 import org.junit.jupiter.api.AfterEach;
@@ -408,6 +409,45 @@ class MessageListenerServiceTest {
     }
 
     @Test
+    void onMeshPacketSeparatesExternalPowerFlagFromBatteryPercent() {
+        TelemetryProtos.Telemetry telemetry = TelemetryProtos.Telemetry.newBuilder()
+                .setDeviceMetrics(TelemetryProtos.DeviceMetrics.newBuilder()
+                        .setBatteryLevel(101)
+                        .setVoltage(4.0f)
+                        .build())
+                .build();
+        MeshProtos.MeshPacket packet = MeshProtos.MeshPacket.newBuilder()
+                .setFrom(0xCAFEBABE)
+                .setTo(0xFFFFFFFF)
+                .setId(7013)
+                .setRxTime(1_700_000_333)
+                .setDecoded(MeshProtos.Data.newBuilder()
+                        .setPortnum(Portnums.PortNum.TELEMETRY_APP)
+                        .setPayload(telemetry.toByteString())
+                        .build())
+                .build();
+
+        service.onMeshPacket(packet);
+
+        NodeData node = state.getOrCreateNode(0xCAFEBABE);
+        assertEquals(0, node.getBatteryLevel());
+        assertTrue(node.isExternallyPowered());
+        assertEquals(4.0f, node.getVoltage());
+
+        TelemetryEntry runtimeEntry = state.getTelemetryHistory().getFirst();
+        assertEquals(0, runtimeEntry.getBatteryLevel());
+        assertTrue(runtimeEntry.isExternallyPowered());
+        assertEquals(4.0f, runtimeEntry.getVoltage());
+
+        List<TelemetryEntry> persistedEntries = NodeCacheService.getInstance().loadTelemetrySince(0, "!12345678");
+        assertEquals(1, persistedEntries.size());
+        TelemetryEntry persisted = persistedEntries.getFirst();
+        assertEquals(0, persisted.getBatteryLevel());
+        assertTrue(persisted.isExternallyPowered());
+        assertEquals(4.0f, persisted.getVoltage());
+    }
+
+    @Test
     void onMeshPacketDefersBroadcastMessagesUntilChannelCatalogReady() {
         state.clear();
         state.setMyNodeNum(0x12345678);
@@ -649,9 +689,13 @@ class MessageListenerServiceTest {
     }
 
     @Test
-    void onMeshPacketIgnoresEmptyTraceroutePayloadWithoutRequestId() {
+    void onMeshPacketFiresTracerouteListenerForEmptyPayloadWithoutRequestIdAddressedToLocalNode() {
         List<MeshProtos.RouteDiscovery> routes = new ArrayList<>();
-        state.addTracerouteListener((nodeNum, route) -> routes.add(route));
+        List<Integer> fromNodes = new ArrayList<>();
+        state.addTracerouteListener((nodeNum, route) -> {
+            fromNodes.add(nodeNum);
+            routes.add(route);
+        });
 
         MeshProtos.MeshPacket packet = MeshProtos.MeshPacket.newBuilder()
                 .setFrom(0x11111111)
@@ -665,7 +709,9 @@ class MessageListenerServiceTest {
 
         service.onMeshPacket(packet);
 
-        assertTrue(routes.isEmpty());
+        assertEquals(List.of(0x11111111), fromNodes);
+        assertEquals(1, routes.size());
+        assertEquals(0, routes.getFirst().getRouteCount());
     }
 
     @Test

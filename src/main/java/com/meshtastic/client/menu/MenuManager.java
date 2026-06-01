@@ -25,12 +25,12 @@ public class MenuManager {
     }
 
     public MenuManager addLabel(String name) {
-        items.add(new MenuItem(name, null, MenuItem.Type.LABEL, null));
+        items.add(new MenuItem(name, name, null, null, MenuItem.Type.LABEL, null));
         return this;
     }
 
     public MenuManager addSeparator() {
-        items.add(new MenuItem(null, null, MenuItem.Type.SEPARATOR, null));
+        items.add(new MenuItem(null, null, null, null, MenuItem.Type.SEPARATOR, null));
         return this;
     }
 
@@ -40,8 +40,8 @@ public class MenuManager {
         return this;
     }
 
-    public MenuManager registerAction(String itemName, Runnable action) {
-        customActions.put(itemName, action);
+    public MenuManager registerAction(String itemId, Runnable action) {
+        customActions.put(itemId, action);
         return this;
     }
 
@@ -62,8 +62,7 @@ public class MenuManager {
 
             Runnable action = null;
             if (item.type() == MenuItem.Type.ITEM) {
-                String name = item.name();
-                Runnable customAction = customActions.get(name);
+                Runnable customAction = customActions.get(item.id());
                 Class<?> formClass = item.formClass();
                 if (customAction != null) {
                     action = customAction;
@@ -81,10 +80,14 @@ public class MenuManager {
         drawerPane.rebuildMenu(drawerItems);
     }
 
-    public record MenuItem(String name, String iconText, String iconPath, Type type, Class<?> formClass) {
+    public record MenuItem(String id, String name, String iconText, String iconPath, Type type, Class<?> formClass) {
+        public MenuItem(String name, String iconText, String iconPath, Type type, Class<?> formClass) {
+            this(name, name, iconText, iconPath, type, formClass);
+        }
+
         /** Конструктор без iconPath (обратная совместимость) */
         public MenuItem(String name, String iconText, Type type, Class<?> formClass) {
-            this(name, iconText, null, type, formClass);
+            this(name, name, iconText, null, type, formClass);
         }
         public enum Type { ITEM, LABEL, SEPARATOR }
     }

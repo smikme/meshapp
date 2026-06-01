@@ -5,11 +5,17 @@ import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.LoggerContext;
 import ch.qos.logback.classic.spi.LoggingEvent;
 import com.meshtastic.client.TestEnvironmentSupport;
+import com.meshtastic.client.components.EmojiRenderingSupport;
 import com.meshtastic.client.logging.SessionCrashLogManager;
 import com.meshtastic.client.logging.UiLogAppender;
 import com.meshtastic.client.model.LogEntry;
 import javafx.application.Platform;
 import javafx.collections.ObservableList;
+import javafx.scene.Node;
+import javafx.scene.Scene;
+import javafx.scene.control.TableCell;
+import javafx.scene.control.TableView;
+import javafx.scene.text.Text;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -25,6 +31,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -97,6 +104,45 @@ class FormLogsTest {
         });
     }
 
+    @Test
+    void emojiLogMessageRemainsVisibleWhenEmojiRenderingSupportIsInstalled() {
+        UiLogAppender appender = new UiLogAppender();
+        appender.start();
+        String message = "Connection 'Home' node identified: name='COVOX BASE 📡'";
+
+        FormLogs form = onFxThread(() -> {
+            FormLogs created = new FormLogs();
+            Scene scene = new Scene(created, 900, 400);
+            EmojiRenderingSupport.install(scene);
+            created.formOpen();
+            created.resize(900, 400);
+            created.applyCss();
+            created.layout();
+            return created;
+        });
+
+        try {
+            appendEvent(appender, message);
+            waitForFxEvents();
+
+            onFxThread(() -> {
+                @SuppressWarnings("unchecked")
+                TableView<LogEntry> table = (TableView<LogEntry>) readField(form, "logTable");
+                table.applyCss();
+                table.layout();
+
+                TableCell<?, ?> messageCell = findMessageCell(table, message);
+                assertNotNull(messageCell);
+                return null;
+            });
+        } finally {
+            onFxThread(() -> {
+                form.formClose();
+                return null;
+            });
+        }
+    }
+
     private static void appendEvent(UiLogAppender appender, String message) {
         LoggerContext context = new LoggerContext();
         Logger logger = context.getLogger("form-logs-test");
@@ -118,6 +164,17 @@ class FormLogsTest {
             ObservableList<LogEntry> entries = (ObservableList<LogEntry>) readField(form, "logData");
             return entries.stream().map(LogEntry::getMessage).toList();
         });
+    }
+
+    private static TableCell<?, ?> findMessageCell(TableView<LogEntry> table, String message) {
+        for (Node node : table.lookupAll(".table-cell")) {
+            if (node instanceof TableCell<?, ?> cell
+                    && cell.getGraphic() instanceof Text text
+                    && message.equals(text.getText())) {
+                return cell;
+            }
+        }
+        return null;
     }
 
     private static void invoke(Object target, String methodName) {

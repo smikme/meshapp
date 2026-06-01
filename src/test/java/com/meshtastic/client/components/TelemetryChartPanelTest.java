@@ -1,16 +1,24 @@
 package com.meshtastic.client.components;
 
 import com.meshtastic.client.TestEnvironmentSupport;
+import com.meshtastic.client.forms.FormDashboard;
+import com.meshtastic.client.i18n.I18n;
+import com.meshtastic.client.model.DeviceState;
+import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.model.TelemetryEntry;
 import javafx.application.Platform;
 import javafx.scene.chart.AreaChart;
 import javafx.scene.chart.NumberAxis;
 import javafx.scene.chart.XYChart;
+import javafx.scene.control.TableColumn;
+import javafx.scene.control.TableView;
+import org.meshtastic.proto.MeshProtos;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -19,7 +27,6 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
@@ -42,23 +49,42 @@ class TelemetryChartPanelTest {
         AreaChart<Number, Number> qualityChart = chartField(panel, "qualityChart");
         AreaChart<Number, Number> hopsChart = chartField(panel, "hopsChart");
 
-        assertEquals("Базовые метрики", basicChart.getTitle());
-        assertEquals(List.of("Battery %", "Voltage В", "ChUtil %", "AirUtil %"), seriesNames(basicChart));
+        assertEquals(t("telemetry.chart.title.basic"), basicChart.getTitle());
+        assertEquals(labels(
+                "telemetry.chart.series.voltage",
+                "telemetry.chart.series.battery",
+                "telemetry.chart.series.chUtil",
+                "telemetry.chart.series.airUtil"), seriesNames(basicChart));
 
-        assertEquals("Статистика эфира", rxChart.getTitle());
-        assertEquals(List.of("Good RX %", "Bad RX %", "Dupe RX %"), seriesNames(rxChart));
+        assertEquals(t("telemetry.chart.title.rx"), rxChart.getTitle());
+        assertEquals(labels(
+                "telemetry.chart.series.goodRx",
+                "telemetry.chart.series.badRx",
+                "telemetry.chart.series.dupeRx"), seriesNames(rxChart));
 
-        assertEquals("Скорость приема", rateChart.getTitle());
-        assertEquals(List.of("Packets Received", "Bad Packets", "Duplicates"), seriesNames(rateChart));
+        assertEquals(t("telemetry.chart.title.rate"), rateChart.getTitle());
+        assertEquals(labels(
+                "telemetry.chart.series.packetsReceived",
+                "telemetry.chart.series.badPackets",
+                "telemetry.chart.series.duplicates"), seriesNames(rateChart));
 
-        assertEquals("Скорость передачи", txChart.getTitle());
-        assertEquals(List.of("Packets Transmitted", "Dropped", "Relayed", "Relay Canceled"), seriesNames(txChart));
+        assertEquals(t("telemetry.chart.title.tx"), txChart.getTitle());
+        assertEquals(labels(
+                "telemetry.chart.series.packetsTransmitted",
+                "telemetry.chart.series.dropped",
+                "telemetry.chart.series.relayed",
+                "telemetry.chart.series.relayCanceled"), seriesNames(txChart));
 
-        assertEquals("Качество соединения", qualityChart.getTitle());
-        assertEquals(List.of("SNR (dB)", "RSSI (dBm)"), seriesNames(qualityChart));
+        assertEquals(t("telemetry.chart.title.quality"), qualityChart.getTitle());
+        assertEquals(labels(
+                "telemetry.chart.series.snr",
+                "telemetry.chart.series.rssi"), seriesNames(qualityChart));
 
-        assertEquals("Прыжки", hopsChart.getTitle());
-        assertEquals(List.of("Макс", "Мин", "Среднее"), seriesNames(hopsChart));
+        assertEquals(t("telemetry.chart.title.hops"), hopsChart.getTitle());
+        assertEquals(labels(
+                "telemetry.chart.series.hopsMax",
+                "telemetry.chart.series.hopsMin",
+                "telemetry.chart.series.hopsAvg"), seriesNames(hopsChart));
 
         assertFalse(((NumberAxis) basicChart.getXAxis()).isAutoRanging());
         assertFalse(((NumberAxis) rxChart.getXAxis()).isAutoRanging());
@@ -70,8 +96,12 @@ class TelemetryChartPanelTest {
         TelemetryChartPanel panel = onFxThread(() -> new TelemetryChartPanel(true));
         AreaChart<Number, Number> basicChart = chartField(panel, "chart");
 
-        assertEquals("Базовые метрики", basicChart.getTitle());
-        assertEquals(List.of("Battery %", "Voltage В", "ChUtil %", "AirUtil %"), seriesNames(basicChart));
+        assertEquals(t("telemetry.chart.title.basic"), basicChart.getTitle());
+        assertEquals(labels(
+                "telemetry.chart.series.voltage",
+                "telemetry.chart.series.battery",
+                "telemetry.chart.series.chUtil",
+                "telemetry.chart.series.airUtil"), seriesNames(basicChart));
         assertFalse(((NumberAxis) basicChart.getXAxis()).isAutoRanging());
     }
 
@@ -79,7 +109,7 @@ class TelemetryChartPanelTest {
     void storesActualVoltageForDisplayInsteadOfScaledPercent() {
         TelemetryChartPanel panel = onFxThread(() -> new TelemetryChartPanel(true));
         TelemetryEntry entry = new TelemetryEntry(1_700_000_000L, "!test");
-        entry.setVoltage(4.2f);
+        entry.setVoltage(4.0f);
 
         onFxThread(() -> {
             invokeUpdateChart(panel, List.of(entry), List.of());
@@ -88,15 +118,122 @@ class TelemetryChartPanelTest {
 
         AreaChart<Number, Number> basicChart = chartField(panel, "chart");
         XYChart.Series<Number, Number> voltageSeries = basicChart.getData().stream()
-                .filter(series -> "Voltage В".equals(series.getName()))
+                .filter(series -> t("telemetry.chart.series.voltage").equals(series.getName()))
                 .findFirst()
                 .orElseThrow();
         XYChart.Data<Number, Number> point = voltageSeries.getData().getFirst();
 
-        assertEquals(100.0, point.getYValue().doubleValue(), 0.0001);
+        assertEquals(83.0, point.getYValue().doubleValue(), 0.0001);
         Number actualVoltage = assertInstanceOf(Number.class, point.getExtraValue());
-        assertEquals(4.2, actualVoltage.doubleValue(), 0.0001);
-        assertTrue(TelemetryChartPanel.formatSeriesValue(voltageSeries.getName(), point).matches("4[,.]20V"));
+        assertEquals(4.0, actualVoltage.doubleValue(), 0.0001);
+        String expectedVoltage = I18n.t("telemetry.chart.value.voltage",
+                String.format(I18n.locale(), "%.2f", 4.0));
+        assertEquals(expectedVoltage, TelemetryChartPanel.formatSeriesValue(voltageSeries.getName(), point));
+
+        assertSeriesValues(basicChart, t("telemetry.chart.series.battery"), 83.0);
+    }
+
+    @Test
+    void plotsMeshtasticBatteryPercentWhenDeviceMetricsProvideLevel() {
+        TelemetryChartPanel panel = onFxThread(() -> new TelemetryChartPanel(true));
+        TelemetryEntry entry = new TelemetryEntry(1_700_000_000L, "!test");
+        entry.setBatteryLevel(77);
+
+        onFxThread(() -> {
+            invokeUpdateChart(panel, List.of(entry), List.of());
+            return null;
+        });
+
+        AreaChart<Number, Number> basicChart = chartField(panel, "chart");
+        assertSeriesValues(basicChart, t("telemetry.chart.series.battery"), 77.0);
+    }
+
+    @Test
+    void plotsPoweredFlagBatteryFromVoltageEstimateWithoutUsingFlagAsPercent() {
+        TelemetryChartPanel panel = onFxThread(() -> new TelemetryChartPanel(true));
+        TelemetryEntry entry = new TelemetryEntry(1_700_000_000L, "!test");
+        entry.setExternallyPowered(true);
+        entry.setVoltage(4.0f);
+
+        onFxThread(() -> {
+            invokeUpdateChart(panel, List.of(entry), List.of());
+            return null;
+        });
+
+        AreaChart<Number, Number> basicChart = chartField(panel, "chart");
+        assertSeriesValues(basicChart, t("telemetry.chart.series.battery"), 83.0);
+    }
+
+    @Test
+    void usesDeviceStateOwnerIdForTelemetryHistoryQueries() {
+        TelemetryChartPanel panel = onFxThread(() -> new TelemetryChartPanel(true));
+        DeviceState state = new DeviceState();
+        state.setMyNodeNum(0x1234ABCD);
+        state.setOwnerInfo(MeshProtos.User.newBuilder()
+                .setId("!1234abcd")
+                .build());
+
+        assertEquals("!1234abcd", invokeOwnerNodeId(panel, state));
+    }
+
+    @Test
+    void telemetryLogRowShowsDerivedBatteryPercentAndOwnerNameForMeshtasticVoltageOnlyEntry() {
+        DeviceState state = new DeviceState();
+        state.setOwnerInfo(MeshProtos.User.newBuilder()
+                .setId("!1234abcd")
+                .setLongName("Meshtastic Radio")
+                .build());
+        TelemetryEntry entry = new TelemetryEntry(1_700_000_000L, "!1234abcd");
+        entry.setVoltage(4.0f);
+
+        FormDashboard.TelemetryLogRow row = new FormDashboard.TelemetryLogRow(entry, state);
+
+        assertEquals("83%", row.getBattery());
+        assertEquals("Meshtastic Radio (!1234abcd)", row.getNode());
+    }
+
+    @Test
+    void telemetryLogRowDoesNotMixPoweredFlagIntoBatteryPercent() {
+        TelemetryEntry entry = new TelemetryEntry(1_700_000_000L, "!1234abcd");
+        entry.setExternallyPowered(true);
+        entry.setVoltage(4.0f);
+
+        FormDashboard.TelemetryLogRow row = new FormDashboard.TelemetryLogRow(entry, null);
+
+        assertEquals("83%", row.getBattery());
+    }
+
+    @Test
+    void telemetryLogRowUsesShortNameWhenLongNameIsMissing() {
+        DeviceState state = new DeviceState();
+        NodeData node = state.getOrCreateNode(0x1234ABCD);
+        node.setShortName("MESH");
+        TelemetryEntry entry = new TelemetryEntry(1_700_000_000L, "!1234abcd");
+        entry.setBatteryLevel(77);
+
+        FormDashboard.TelemetryLogRow row = new FormDashboard.TelemetryLogRow(entry, state);
+
+        assertEquals("MESH (!1234abcd)", row.getNode());
+    }
+
+    @Test
+    void telemetryLogNodeColumnUsesExplicitValueFactoryAfterRowsAreRebuilt() {
+        FormDashboard dashboard = onFxThread(FormDashboard::new);
+        TableColumn<FormDashboard.TelemetryLogRow, String> nodeColumn = telemetryNodeColumn(dashboard);
+
+        DeviceState state = new DeviceState();
+        NodeData node = state.getOrCreateNode(0x1234ABCD);
+        node.setLongName("Meshtastic Radio");
+
+        TelemetryEntry firstEntry = new TelemetryEntry(1_700_000_000L, "!1234abcd");
+        TelemetryEntry secondEntry = new TelemetryEntry(1_700_000_060L, "!1234abcd");
+        FormDashboard.TelemetryLogRow firstRow = new FormDashboard.TelemetryLogRow(firstEntry, state);
+        FormDashboard.TelemetryLogRow secondRow = new FormDashboard.TelemetryLogRow(secondEntry, state);
+
+        assertEquals("Meshtastic Radio (!1234abcd)",
+                nodeColumn.getCellObservableValue(firstRow).getValue());
+        assertEquals("Meshtastic Radio (!1234abcd)",
+                nodeColumn.getCellObservableValue(secondRow).getValue());
     }
 
     @Test
@@ -116,18 +253,18 @@ class TelemetryChartPanelTest {
         AreaChart<Number, Number> rateChart = chartField(panel, "rateChart");
         AreaChart<Number, Number> txChart = chartField(panel, "txChart");
 
-        assertSeriesValues(rateChart, "Packets Received", 15.0, 5.0);
-        assertSeriesValues(rateChart, "Bad Packets", 3.0, 1.0);
-        assertSeriesValues(rateChart, "Duplicates", 1.0, 0.0);
+        assertSeriesValues(rateChart, t("telemetry.chart.series.packetsReceived"), 15.0, 5.0);
+        assertSeriesValues(rateChart, t("telemetry.chart.series.badPackets"), 3.0, 1.0);
+        assertSeriesValues(rateChart, t("telemetry.chart.series.duplicates"), 1.0, 0.0);
 
-        assertSeriesValues(rxChart, "Good RX %", 73.33333333333333, 80.0);
-        assertSeriesValues(rxChart, "Bad RX %", 20.0, 20.0);
-        assertSeriesValues(rxChart, "Dupe RX %", 6.666666666666667, 0.0);
+        assertSeriesValues(rxChart, t("telemetry.chart.series.goodRx"), 73.33333333333333, 80.0);
+        assertSeriesValues(rxChart, t("telemetry.chart.series.badRx"), 20.0, 20.0);
+        assertSeriesValues(rxChart, t("telemetry.chart.series.dupeRx"), 6.666666666666667, 0.0);
 
-        assertSeriesValues(txChart, "Packets Transmitted", 12.0, 6.0);
-        assertSeriesValues(txChart, "Dropped", 3.0, 1.0);
-        assertSeriesValues(txChart, "Relayed", 4.0, 1.0);
-        assertSeriesValues(txChart, "Relay Canceled", 1.0, 0.0);
+        assertSeriesValues(txChart, t("telemetry.chart.series.packetsTransmitted"), 12.0, 6.0);
+        assertSeriesValues(txChart, t("telemetry.chart.series.dropped"), 3.0, 1.0);
+        assertSeriesValues(txChart, t("telemetry.chart.series.relayed"), 4.0, 1.0);
+        assertSeriesValues(txChart, t("telemetry.chart.series.relayCanceled"), 1.0, 0.0);
     }
 
     @Test
@@ -144,9 +281,9 @@ class TelemetryChartPanelTest {
         });
 
         AreaChart<Number, Number> hopsChart = chartField(panel, "hopsChart");
-        assertSeriesValues(hopsChart, "Макс", 2.0, 3.0);
-        assertSeriesValues(hopsChart, "Мин", 2.0, 3.0);
-        assertSeriesValues(hopsChart, "Среднее", 2.0, 3.0);
+        assertSeriesValues(hopsChart, t("telemetry.chart.series.hopsMax"), 2.0, 3.0);
+        assertSeriesValues(hopsChart, t("telemetry.chart.series.hopsMin"), 2.0, 3.0);
+        assertSeriesValues(hopsChart, t("telemetry.chart.series.hopsAvg"), 2.0, 3.0);
     }
 
     private static List<String> seriesNames(AreaChart<Number, Number> chart) {
@@ -211,6 +348,16 @@ class TelemetryChartPanelTest {
         }
     }
 
+    private static String invokeOwnerNodeId(TelemetryChartPanel panel, DeviceState state) {
+        try {
+            Method method = TelemetryChartPanel.class.getDeclaredMethod("ownerNodeId", DeviceState.class);
+            method.setAccessible(true);
+            return (String) method.invoke(panel, state);
+        } catch (ReflectiveOperationException e) {
+            throw new AssertionError("Failed to invoke ownerNodeId", e);
+        }
+    }
+
     @SuppressWarnings("unchecked")
     private static AreaChart<Number, Number> chartField(TelemetryChartPanel panel, String fieldName) {
         try {
@@ -219,6 +366,23 @@ class TelemetryChartPanelTest {
             return (AreaChart<Number, Number>) field.get(panel);
         } catch (ReflectiveOperationException e) {
             throw new AssertionError("Failed to read chart field " + fieldName, e);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static TableColumn<FormDashboard.TelemetryLogRow, String> telemetryNodeColumn(FormDashboard dashboard) {
+        try {
+            Field field = FormDashboard.class.getDeclaredField("logTable");
+            field.setAccessible(true);
+            TableView<FormDashboard.TelemetryLogRow> table =
+                    (TableView<FormDashboard.TelemetryLogRow>) field.get(dashboard);
+            return table.getColumns().stream()
+                    .filter(column -> t("telemetry.column.node").equals(column.getText()))
+                    .findFirst()
+                    .map(column -> (TableColumn<FormDashboard.TelemetryLogRow, String>) column)
+                    .orElseThrow();
+        } catch (ReflectiveOperationException e) {
+            throw new AssertionError("Failed to read telemetry log table", e);
         }
     }
 
@@ -253,6 +417,16 @@ class TelemetryChartPanelTest {
             Thread.currentThread().interrupt();
             throw new AssertionError("Interrupted while waiting for JavaFX task", e);
         }
+    }
+
+    private static String t(String key) {
+        return I18n.t(key);
+    }
+
+    private static List<String> labels(String... keys) {
+        return Arrays.stream(keys)
+                .map(I18n::t)
+                .toList();
     }
 
     @FunctionalInterface

@@ -1,5 +1,7 @@
 package com.meshtastic.client.model;
 
+import com.meshtastic.client.i18n.I18n;
+
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
@@ -30,6 +32,7 @@ public class NodeData {
     private float snr;
     private int lastHeard;
     private int batteryLevel;
+    private boolean externallyPowered;
     private float voltage;
     private float channelUtilization;
     private float airUtilTx;
@@ -85,6 +88,9 @@ public class NodeData {
 
     public int getBatteryLevel() { return batteryLevel; }
     public void setBatteryLevel(int batteryLevel) { this.batteryLevel = batteryLevel; }
+
+    public boolean isExternallyPowered() { return externallyPowered; }
+    public void setExternallyPowered(boolean externallyPowered) { this.externallyPowered = externallyPowered; }
 
     public float getVoltage() { return voltage; }
     public void setVoltage(float voltage) { this.voltage = voltage; }
@@ -171,20 +177,9 @@ public class NodeData {
      */
     public static String translateRole(String role) {
         if (role == null || role.isEmpty()) { return null; }
-        return switch (role) {
-            case "CLIENT"         -> "Клиент";
-            case "CLIENT_MUTE"    -> "Клиент (без звука)";
-            case "CLIENT_HIDDEN"  -> "Клиент (скрытый)";
-            case "TRACKER"        -> "Трекер";
-            case "LOST_AND_FOUND" -> "Потерянное и найденное";
-            case "SENSOR"         -> "Датчик";
-            case "TAK"            -> "TAK";
-            case "TAK_TRACKER"    -> "TAK-трекер";
-            case "REPEATER"       -> "Ретранслятор";
-            case "ROUTER"         -> "Маршрутизатор";
-            case "ROUTER_CLIENT"  -> "Маршрутизатор-клиент";
-            default               -> role;
-        };
+        String key = "node.role." + role;
+        String translated = I18n.t(key);
+        return translated.equals("!" + key + "!") ? role : translated;
     }
 
     @Override

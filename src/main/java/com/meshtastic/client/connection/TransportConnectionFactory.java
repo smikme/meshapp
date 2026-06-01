@@ -52,7 +52,8 @@ public final class TransportConnectionFactory {
             case SERIAL -> new SerialConnection(
                     entry.getPortName(),
                     entry.getBaudRate() > 0 ? entry.getBaudRate() : SerialConnection.DEFAULT_BAUD_RATE,
-                    frameFormat
+                    frameFormat,
+                    entry.getEffectiveSerialModemLineMode()
             );
             case BLE -> new BleConnection(
                     entry.getBleAddress(),

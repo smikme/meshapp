@@ -3,6 +3,8 @@ package com.meshtastic.client.connection;
 import com.fazecast.jSerialComm.SerialPort;
 import com.meshtastic.client.connection.serial.NativeSerialPort;
 import com.meshtastic.client.connection.serial.NativeSerialPortFactory;
+import com.meshtastic.client.connection.serial.SerialModemLinePolicy;
+import com.meshtastic.client.model.SerialModemLineMode;
 import com.meshtastic.client.platform.OsDetect;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -51,6 +53,7 @@ public class SerialConnection implements MeshtasticConnection, FrameFormatAwareC
     private final long writeResponseTimeoutMs;
     private final long readCallStallTimeoutMs;
     private final long readWatchdogPeriodMs;
+    private final SerialModemLineMode serialModemLineMode;
 
     private volatile NativeSerialPort nativePort;
     private volatile Consumer<byte[]> dataListener;
@@ -71,14 +74,38 @@ public class SerialConnection implements MeshtasticConnection, FrameFormatAwareC
     private final AtomicBoolean terminalSignalSent = new AtomicBoolean();
 
     public SerialConnection(String portName, int baudRate) {
+        this(portName, baudRate, SerialModemLineMode.AUTO);
+    }
+
+    /**
+     * Создаёт serial-подключение с явным режимом управления DTR/RTS.
+     *
+     * @param portName системное имя порта
+     * @param baudRate скорость порта
+     * @param serialModemLineMode режим modem lines или {@link SerialModemLineMode#AUTO}
+     */
+    public SerialConnection(String portName, int baudRate, SerialModemLineMode serialModemLineMode) {
         this(portName, baudRate, NativeSerialPortFactory::create, System::currentTimeMillis,
                 DEFAULT_READ_TIMEOUT_MS, DEFAULT_PORT_INIT_DELAY_MS, DEFAULT_WRITE_RESPONSE_TIMEOUT_MS,
                 DEFAULT_READ_CALL_STALL_TIMEOUT_MS, DEFAULT_READ_WATCHDOG_PERIOD_MS,
-                DEFAULT_PARTIAL_FRAME_SILENCE_TIMEOUT_MS);
+                DEFAULT_PARTIAL_FRAME_SILENCE_TIMEOUT_MS, serialModemLineMode);
     }
 
     public SerialConnection(String portName, int baudRate, FrameFormat frameFormat) {
-        this(portName, baudRate);
+        this(portName, baudRate, frameFormat, SerialModemLineMode.AUTO);
+    }
+
+    /**
+     * Создаёт serial-подключение с заданным frame format и режимом DTR/RTS.
+     *
+     * @param portName системное имя порта
+     * @param baudRate скорость порта
+     * @param frameFormat формат фрейминга для stream-протокола
+     * @param serialModemLineMode режим modem lines или {@link SerialModemLineMode#AUTO}
+     */
+    public SerialConnection(String portName, int baudRate, FrameFormat frameFormat,
+                            SerialModemLineMode serialModemLineMode) {
+        this(portName, baudRate, serialModemLineMode);
         setFrameFormat(frameFormat);
     }
 
@@ -94,7 +121,7 @@ public class SerialConnection implements MeshtasticConnection, FrameFormatAwareC
                      long writeResponseTimeoutMs) {
         this(portName, baudRate, portFactory, currentTimeMillis, readTimeoutMs, portInitDelayMs,
                 writeResponseTimeoutMs, DEFAULT_READ_CALL_STALL_TIMEOUT_MS, DEFAULT_READ_WATCHDOG_PERIOD_MS,
-                DEFAULT_PARTIAL_FRAME_SILENCE_TIMEOUT_MS);
+                DEFAULT_PARTIAL_FRAME_SILENCE_TIMEOUT_MS, SerialModemLineMode.AUTO);
     }
 
     SerialConnection(String portName, int baudRate,
@@ -107,7 +134,7 @@ public class SerialConnection implements MeshtasticConnection, FrameFormatAwareC
                      long readWatchdogPeriodMs) {
         this(portName, baudRate, portFactory, currentTimeMillis, readTimeoutMs, portInitDelayMs,
                 writeResponseTimeoutMs, readCallStallTimeoutMs, readWatchdogPeriodMs,
-                DEFAULT_PARTIAL_FRAME_SILENCE_TIMEOUT_MS);
+                DEFAULT_PARTIAL_FRAME_SILENCE_TIMEOUT_MS, SerialModemLineMode.AUTO);
     }
 
     SerialConnection(String portName, int baudRate,
@@ -119,6 +146,21 @@ public class SerialConnection implements MeshtasticConnection, FrameFormatAwareC
                      long readCallStallTimeoutMs,
                      long readWatchdogPeriodMs,
                      int partialFrameSilenceTimeoutMs) {
+        this(portName, baudRate, portFactory, currentTimeMillis, readTimeoutMs, portInitDelayMs,
+                writeResponseTimeoutMs, readCallStallTimeoutMs, readWatchdogPeriodMs,
+                partialFrameSilenceTimeoutMs, SerialModemLineMode.AUTO);
+    }
+
+    SerialConnection(String portName, int baudRate,
+                     Supplier<NativeSerialPort> portFactory,
+                     LongSupplier currentTimeMillis,
+                     int readTimeoutMs,
+                     int portInitDelayMs,
+                     long writeResponseTimeoutMs,
+                     long readCallStallTimeoutMs,
+                     long readWatchdogPeriodMs,
+                     int partialFrameSilenceTimeoutMs,
+                     SerialModemLineMode serialModemLineMode) {
         this.portName = portName;
         this.baudRate = baudRate;
         this.portFactory = portFactory;
@@ -129,6 +171,7 @@ public class SerialConnection implements MeshtasticConnection, FrameFormatAwareC
         this.writeResponseTimeoutMs = writeResponseTimeoutMs;
         this.readCallStallTimeoutMs = readCallStallTimeoutMs;
         this.readWatchdogPeriodMs = readWatchdogPeriodMs;
+        this.serialModemLineMode = normalizeSerialModemLineMode(serialModemLineMode);
         this.frameFormat = FrameFormat.MESHTASTIC;
         this.frameParser = FrameParsers.create(this.frameFormat);
     }
@@ -139,16 +182,24 @@ public class SerialConnection implements MeshtasticConnection, FrameFormatAwareC
             String desc = getDescriptivePortName(portName);
             log.info("Opening serial port: {} ({})", portName, desc);
 
-            boolean assertDtr = shouldAssertDtr(portName, desc, OsDetect.isWindows());
+            SerialModemLinePolicy modemLinePolicy = modemLinePolicy(
+                    portName, desc, OsDetect.isWindows(), serialModemLineMode);
+            log.info("Serial modem line policy for {}: DTR={}, RTS={} ({})",
+                    portName,
+                    modemLinePolicy.assertDtr() ? "on" : "off",
+                    modemLinePolicy.assertRts() ? "on" : "off",
+                    modemLinePolicy.reason());
 
             NativeSerialPort port = portFactory.get();
-            port.open(portName, baudRate, assertDtr);
+            port.open(portName, baudRate, modemLinePolicy);
             this.nativePort = port;
 
             Thread.sleep(portInitDelayMs);
             port.drainInput();
-            log.info("Connected to serial port {} at {} baud (native JNA, DTR={})",
-                    portName, baudRate, assertDtr ? "on" : "off");
+            log.info("Connected to serial port {} at {} baud (native JNA, DTR={}, RTS={})",
+                    portName, baudRate,
+                    modemLinePolicy.assertDtr() ? "on" : "off",
+                    modemLinePolicy.assertRts() ? "on" : "off");
 
             running = true;
             long now = currentTimeMillis.getAsLong();
@@ -259,6 +310,10 @@ public class SerialConnection implements MeshtasticConnection, FrameFormatAwareC
     @Override
     public FrameFormat getFrameFormat() {
         return frameFormat;
+    }
+
+    SerialModemLineMode getSerialModemLineMode() {
+        return serialModemLineMode;
     }
 
     /**
@@ -520,9 +575,10 @@ public class SerialConnection implements MeshtasticConnection, FrameFormatAwareC
      * jSerialComm используется ТОЛЬКО для обнаружения портов, не для I/O.
      */
     private static String getDescriptivePortName(String systemName) {
+        String normalizedSystemName = normalizeSystemPortName(systemName);
         try {
             for (SerialPort port : SerialPort.getCommPorts()) {
-                if (port.getSystemPortName().equals(systemName)) {
+                if (normalizeSystemPortName(port.getSystemPortName()).equals(normalizedSystemName)) {
                     return port.getDescriptivePortName();
                 }
             }
@@ -530,6 +586,13 @@ public class SerialConnection implements MeshtasticConnection, FrameFormatAwareC
             log.debug("Failed to get descriptive name for {}", systemName, e);
         }
         return systemName;
+    }
+
+    private static String normalizeSystemPortName(String systemName) {
+        if (systemName == null) {
+            return "";
+        }
+        return systemName.startsWith("/dev/") ? systemName.substring("/dev/".length()) : systemName;
     }
 
     /**
@@ -541,22 +604,48 @@ public class SerialConnection implements MeshtasticConnection, FrameFormatAwareC
         String lower = (portName + " " + desc).toLowerCase(java.util.Locale.ROOT);
         return lower.contains("usbserial") || lower.contains("ttyusb")
                 || lower.contains("ch340") || lower.contains("ch341") || lower.contains("ch9102")
-                || lower.contains("cp210") || lower.contains("ftdi");
+                || lower.contains("cp210") || lower.contains("slab") || lower.contains("silicon labs")
+                || lower.contains("usb to uart") || lower.contains("usbtouart")
+                || lower.contains("ftdi");
+    }
+
+    private static boolean isNativeUsbCdc(String portName, String desc) {
+        String lower = (portName + " " + desc).toLowerCase(java.util.Locale.ROOT);
+        return lower.contains("usbmodem") || lower.contains("ttyacm")
+                || lower.contains("usb cdc") || lower.contains("cdc acm")
+                || lower.contains("esp32-s2") || lower.contains("esp32-s3")
+                || lower.contains("nrf52");
+    }
+
+    static SerialModemLinePolicy modemLinePolicy(String portName, String desc, boolean isWindows) {
+        return modemLinePolicy(portName, desc, isWindows, SerialModemLineMode.AUTO);
+    }
+
+    static SerialModemLinePolicy modemLinePolicy(String portName, String desc, boolean isWindows,
+                                                 SerialModemLineMode serialModemLineMode) {
+        SerialModemLineMode mode = normalizeSerialModemLineMode(serialModemLineMode);
+        if (!mode.isAuto()) {
+            return SerialModemLinePolicy.manual(mode.assertDtr(), mode.assertRts());
+        }
+        if (isUsbSerialBridge(portName, desc)) {
+            return SerialModemLinePolicy.usbSerialBridge();
+        }
+        if (isNativeUsbCdc(portName, desc)) {
+            return SerialModemLinePolicy.nativeUsbCdc();
+        }
+        return SerialModemLinePolicy.generic();
     }
 
     static boolean shouldAssertDtr(String portName, String desc, boolean isWindows) {
-        boolean isUsbBridge = isUsbSerialBridge(portName, desc);
-        if (!isUsbBridge) {
-            return true;
-        }
+        return modemLinePolicy(portName, desc, isWindows).assertDtr();
+    }
 
-        String lower = (portName + " " + desc).toLowerCase(java.util.Locale.ROOT);
-        // Windows + CP210x/CH9102: некоторые драйверы держат RX "тихим", пока DTR не asserted.
-        // Это выглядит как "порт открыт, запись идёт, но ответов нет вообще".
-        // Для CH340/FTDI сохраняем старое поведение, чтобы не провоцировать лишний reset ESP32.
-        return isWindows && (lower.contains("cp210")
-                || lower.contains("silicon labs")
-                || lower.contains("ch9102"));
+    static boolean shouldAssertRts(String portName, String desc, boolean isWindows) {
+        return modemLinePolicy(portName, desc, isWindows).assertRts();
+    }
+
+    private static SerialModemLineMode normalizeSerialModemLineMode(SerialModemLineMode mode) {
+        return mode != null ? mode : SerialModemLineMode.AUTO;
     }
 
     private void closePort() {

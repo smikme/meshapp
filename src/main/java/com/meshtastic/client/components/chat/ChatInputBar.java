@@ -2,6 +2,7 @@ package com.meshtastic.client.components.chat;
 
 import com.meshtastic.client.components.EmojiImageCache;
 import com.meshtastic.client.components.EmojiPicker;
+import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.utils.UnicodeTextUtils;
 import javafx.application.Platform;
@@ -49,8 +50,13 @@ public class ChatInputBar extends VBox {
     /** Данные для колбэка отправки. */
     public record SendRequest(String text, int replyId) {}
 
+    /** Данные inline-запроса выбора ноды из Lua UI API. */
+    private record ActiveNodePick(Consumer<ChatBotCommandHelper.NodeSuggestion> onSelected,
+                                  Runnable onCancelled) {}
+
     private final Consumer<SendRequest> onSend;
     private final Predicate<ChatBotCommandHelper.ParsedBotCommand> onBotCommand;
+    private final Function<String, List<ChatBotCommandHelper.BotDefinition>> botSuggestionProvider;
     private final Function<String, List<ChatBotCommandHelper.NodeSuggestion>> nodeSuggestionProvider;
     private final EmojiTextField messageInput;
     private final SendButtonWithRing sendRing;
@@ -65,15 +71,20 @@ public class ChatInputBar extends VBox {
     private MeshMessage replyToMessage;
     private int savedCaretPosition;
     private int selectedSuggestionIndex = -1;
+    private ActiveNodePick activeNodePick;
 
     /**
      * @param onSend колбэк отправки сообщения (текст + replyId)
      */
     public ChatInputBar(Consumer<SendRequest> onSend,
                         Predicate<ChatBotCommandHelper.ParsedBotCommand> onBotCommand,
+                        Function<String, List<ChatBotCommandHelper.BotDefinition>> botSuggestionProvider,
                         Function<String, List<ChatBotCommandHelper.NodeSuggestion>> nodeSuggestionProvider) {
         this.onSend = onSend;
         this.onBotCommand = onBotCommand;
+        this.botSuggestionProvider = botSuggestionProvider != null
+                ? botSuggestionProvider
+                : ChatBotCommandHelper::suggestBots;
         this.nodeSuggestionProvider = nodeSuggestionProvider;
         getStyleClass().add("chat-input-wrapper");
 
@@ -90,7 +101,7 @@ public class ChatInputBar extends VBox {
             emojiBtn.setText("\uD83D\uDE00");
         }
         emojiBtn.getStyleClass().add("chat-emoji-btn");
-        emojiBtn.setTooltip(new Tooltip("Эмодзи"));
+        emojiBtn.setTooltip(new Tooltip(I18n.t("chat.emoji")));
         emojiPicker = new EmojiPicker(this::insertEmoji);
         emojiBtn.setOnAction(e -> emojiPicker.toggle(emojiBtn));
 
@@ -101,7 +112,7 @@ public class ChatInputBar extends VBox {
 
         // Поле ввода (кастомное с emoji-картинками)
         messageInput = new EmojiTextField();
-        messageInput.setPromptText("Сообщение...");
+        messageInput.setPromptText(defaultPromptText());
         messageInput.setMaxBytesSupplier(this::getMaxTextBytes);
         HBox.setHgrow(messageInput, Priority.ALWAYS);
 
@@ -111,6 +122,11 @@ public class ChatInputBar extends VBox {
         messageInput.focusedProperty().addListener((obs, wasFocused, isFocused) -> {
             if (!isFocused) {
                 savedCaretPosition = messageInput.getCaretPosition();
+                Platform.runLater(() -> {
+                    if (activeNodePick != null && !messageInput.isFocused() && !commandSuggestionRoot.isHover()) {
+                        cancelActiveNodePick(true);
+                    }
+                });
             }
             Platform.runLater(this::refreshCommandSuggestions);
         });
@@ -160,7 +176,7 @@ public class ChatInputBar extends VBox {
 
         Button cancelReplyBtn = new Button("✕");
         cancelReplyBtn.getStyleClass().add("chat-reply-cancel");
-        cancelReplyBtn.setTooltip(new Tooltip("Отменить ответ"));
+        cancelReplyBtn.setTooltip(new Tooltip(I18n.t("chat.input.cancelReply")));
         cancelReplyBtn.setOnAction(e -> cancelReply());
 
         replyBar = new HBox(8, replyIcon, replyQuoteLabel, cancelReplyBtn);
@@ -180,6 +196,7 @@ public class ChatInputBar extends VBox {
 
     /** Очистить поле ввода и сбросить режим ответа. */
     public void clear() {
+        cancelActiveNodePick(true);
         hideCommandSuggestions();
         messageInput.clear();
         cancelReply();
@@ -191,8 +208,31 @@ public class ChatInputBar extends VBox {
         sendRing.setSendDisable(!enabled
                 || messageInput.getText().trim().isEmpty());
         if (!enabled) {
+            cancelActiveNodePick(true);
             hideCommandSuggestions();
         }
+    }
+
+    /**
+     * Запустить старый inline-pickup ноды прямо в панели ввода чата.
+     * Используется Lua API {@code mesh.ui.pick_node()}.
+     */
+    public void startNodePick(String query,
+                              String prompt,
+                              Consumer<ChatBotCommandHelper.NodeSuggestion> onSelected,
+                              Runnable onCancelled) {
+        cancelActiveNodePick(true);
+        activeNodePick = new ActiveNodePick(onSelected, onCancelled);
+        hideCommandSuggestions();
+        cancelReply();
+
+        String initialQuery = query != null ? query : "";
+        messageInput.setPromptText(prompt != null && !prompt.isBlank() ? prompt : nodePickPromptText());
+        messageInput.setText(initialQuery);
+        savedCaretPosition = initialQuery.length();
+        messageInput.requestFocus();
+        messageInput.positionCaret(savedCaretPosition);
+        Platform.runLater(this::refreshCommandSuggestions);
     }
 
     /** Включить режим ответа на сообщение. */
@@ -240,13 +280,18 @@ public class ChatInputBar extends VBox {
     }
 
     private void doSend() {
+        if (activeNodePick != null) {
+            return;
+        }
         String text = messageInput.getText();
         if (text == null || text.trim().isEmpty()) {
             return;
         }
         text = text.trim();
 
-        ChatBotCommandHelper.ParsedBotCommand botCommand = ChatBotCommandHelper.parseCommand(text);
+        ChatBotCommandHelper.ParsedBotCommand botCommand = ChatBotCommandHelper.parseCommand(
+                text,
+                botSuggestionProvider.apply(""));
         if (botCommand.isCommand()) {
             hideCommandSuggestions();
             if (onBotCommand != null && onBotCommand.test(botCommand)) {
@@ -302,6 +347,19 @@ public class ChatInputBar extends VBox {
             return;
         }
 
+        if (activeNodePick != null) {
+            List<Button> rows = buildActiveNodePickRows();
+            if (rows.isEmpty()) {
+                hideCommandSuggestions();
+                return;
+            }
+            commandSuggestionRoot.getChildren().setAll(rows);
+            selectedSuggestionIndex = 0;
+            updateSelectedSuggestionStyles();
+            showCommandSuggestions();
+            return;
+        }
+
         ChatBotCommandHelper.SuggestionContext context = ChatBotCommandHelper.detectSuggestionContext(
                 messageInput.getText(),
                 messageInput.getCaretPosition()
@@ -328,13 +386,17 @@ public class ChatInputBar extends VBox {
     }
 
     private List<Button> buildBotSuggestionRows(ChatBotCommandHelper.SuggestionContext context) {
-        return ChatBotCommandHelper.suggestBots(context.query())
+        List<ChatBotCommandHelper.BotDefinition> suggestions = botSuggestionProvider.apply(context.query());
+        if (suggestions == null || suggestions.isEmpty()) {
+            return List.of();
+        }
+        return suggestions
                 .stream()
                 .limit(MAX_COMMAND_SUGGESTIONS)
                 .map(bot -> buildSuggestionButton(
                         bot.handle(),
                         bot.description(),
-                        () -> applyBotSuggestion(bot.handle())))
+                        () -> applyBotSuggestion(bot)))
                 .toList();
     }
 
@@ -350,6 +412,21 @@ public class ChatInputBar extends VBox {
                         suggestion.primaryText(),
                         suggestion.secondaryText(),
                         () -> applyNodeSuggestion(context, suggestion.insertText())))
+                .toList();
+    }
+
+    private List<Button> buildActiveNodePickRows() {
+        List<ChatBotCommandHelper.NodeSuggestion> suggestions = nodeSuggestionProvider.apply(messageInput.getText());
+        if (suggestions == null || suggestions.isEmpty()) {
+            return List.of();
+        }
+        return suggestions
+                .stream()
+                .limit(MAX_COMMAND_SUGGESTIONS)
+                .map(suggestion -> buildSuggestionButton(
+                        suggestion.primaryText(),
+                        suggestion.secondaryText(),
+                        () -> completeActiveNodePick(suggestion)))
                 .toList();
     }
 
@@ -377,7 +454,29 @@ public class ChatInputBar extends VBox {
         return button;
     }
 
-    private void applyBotSuggestion(String handle) {
+    private void applyBotSuggestion(ChatBotCommandHelper.BotDefinition bot) {
+        if (bot != null && bot.action() == ChatBotCommandHelper.BotAction.AUTOMATION) {
+            hideCommandSuggestions();
+            ChatBotCommandHelper.ParsedBotCommand command = new ChatBotCommandHelper.ParsedBotCommand(
+                    bot.action(),
+                    bot.handle(),
+                    "",
+                    false,
+                    "",
+                    List.of(),
+                    bot.scriptId());
+            if (onBotCommand != null && onBotCommand.test(command)) {
+                messageInput.clear();
+                savedCaretPosition = 0;
+                cancelReply();
+                return;
+            }
+        }
+
+        insertBotHandle(bot != null ? bot.handle() : "");
+    }
+
+    private void insertBotHandle(String handle) {
         String current = messageInput.getText();
         ChatBotCommandHelper.SuggestionContext context = ChatBotCommandHelper.detectSuggestionContext(
                 current, messageInput.getCaretPosition());
@@ -409,6 +508,37 @@ public class ChatInputBar extends VBox {
         messageInput.positionCaret(newCaret);
     }
 
+    private void completeActiveNodePick(ChatBotCommandHelper.NodeSuggestion suggestion) {
+        ActiveNodePick pick = activeNodePick;
+        if (pick == null) {
+            return;
+        }
+        activeNodePick = null;
+        hideCommandSuggestions();
+        messageInput.clear();
+        messageInput.setPromptText(defaultPromptText());
+        savedCaretPosition = 0;
+        messageInput.requestFocus();
+        if (pick.onSelected() != null) {
+            pick.onSelected().accept(suggestion);
+        }
+    }
+
+    private void cancelActiveNodePick(boolean notify) {
+        ActiveNodePick pick = activeNodePick;
+        if (pick == null) {
+            return;
+        }
+        activeNodePick = null;
+        hideCommandSuggestions();
+        messageInput.clear();
+        messageInput.setPromptText(defaultPromptText());
+        savedCaretPosition = 0;
+        if (notify && pick.onCancelled() != null) {
+            pick.onCancelled().run();
+        }
+    }
+
     private void showCommandSuggestions() {
         double width = Math.max(messageInput.getWidth(), 260);
         commandSuggestionRoot.setPrefWidth(width);
@@ -426,6 +556,10 @@ public class ChatInputBar extends VBox {
     }
 
     private boolean handleCommandSuggestionKeyPressed(KeyEvent event) {
+        if (activeNodePick != null && event.getCode() == KeyCode.ESCAPE) {
+            cancelActiveNodePick(true);
+            return true;
+        }
         if (!isCommandSuggestionsVisible() || commandSuggestionRoot.getChildren().isEmpty()) {
             return false;
         }
@@ -503,6 +637,14 @@ public class ChatInputBar extends VBox {
 
     private boolean isCommandSuggestionsVisible() {
         return commandSuggestionRoot.isVisible();
+    }
+
+    private static String defaultPromptText() {
+        return I18n.t("chat.input.message");
+    }
+
+    private static String nodePickPromptText() {
+        return I18n.t("chat.input.nodePick");
     }
 
 }

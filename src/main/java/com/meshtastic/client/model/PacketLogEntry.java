@@ -1,5 +1,7 @@
 package com.meshtastic.client.model;
 
+import com.meshtastic.client.i18n.I18n;
+
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
@@ -109,9 +111,9 @@ public class PacketLogEntry {
 
     public String getDirectionText() {
         return switch (direction) {
-            case INCOMING -> "Входящий";
-            case OUTGOING -> "Исходящий";
-            case INTERNAL -> "Внутренний";
+            case INCOMING -> I18n.t("packetMonitor.direction.incoming");
+            case OUTGOING -> I18n.t("packetMonitor.direction.outgoing");
+            case INTERNAL -> I18n.t("packetMonitor.direction.internal");
         };
     }
 
@@ -129,9 +131,9 @@ public class PacketLogEntry {
 
     public String getRouteText() {
         if (direction == Direction.OUTGOING && (transportMechanism == null || transportMechanism.isBlank())) {
-            return "Исходящий / Без подтверждения LoRa";
+            return I18n.t("packetMonitor.route.noAck");
         }
-        return getDirectionText() + " / " + getTransportText();
+        return I18n.t("packetMonitor.route.pattern", getDirectionText(), getTransportText());
     }
 
     public String getFromNode() {
@@ -171,7 +173,7 @@ public class PacketLogEntry {
 
     public static String formatTransportMechanism(String transportMechanism) {
         if (transportMechanism == null || transportMechanism.isBlank()) {
-            return "Локальный";
+            return I18n.t("packetMonitor.transport.local");
         }
         return switch (transportMechanism) {
             case "TRANSPORT_LORA" -> "LoRa";
@@ -182,7 +184,7 @@ public class PacketLogEntry {
             case "TRANSPORT_MQTT" -> "MQTT";
             case "TRANSPORT_MULTICAST_UDP" -> "Multicast UDP";
             case "TRANSPORT_API" -> "API";
-            case "TRANSPORT_INTERNAL" -> "Локальный";
+            case "TRANSPORT_INTERNAL" -> I18n.t("packetMonitor.transport.local");
             default -> transportMechanism;
         };
     }

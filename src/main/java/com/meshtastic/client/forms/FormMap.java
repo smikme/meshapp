@@ -6,10 +6,10 @@ import com.meshtastic.client.components.chat.ChatBotCommandHelper;
 import com.meshtastic.client.components.chat.TracerouteView;
 import com.meshtastic.client.components.map.MapMarker;
 import com.meshtastic.client.components.map.TileMapView;
+import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.modal.Toast;
 import com.meshtastic.client.model.ConnectionEntry;
 import com.meshtastic.client.model.DeviceState;
-import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.service.ConnectionManager;
 import com.meshtastic.client.service.FavoriteNodeService;
@@ -44,6 +44,7 @@ import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
 import javafx.scene.shape.SVGPath;
 import javafx.stage.DirectoryChooser;
+import org.meshtastic.proto.MeshProtos;
 
 import java.nio.file.InvalidPathException;
 import java.nio.file.Files;
@@ -54,6 +55,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.function.IntConsumer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -64,7 +66,7 @@ import java.util.regex.Pattern;
  * <p>
  * Форма связывает UI приложения с низкоуровневым компонентом {@link TileMapView}:
  * собирает ноды из текущего {@link DeviceState} и кэша, применяет фильтры,
- * парсит сохранённые traceroute-сообщения и передаёт готовые маркеры/сегменты
+ * парсит сохранённые результаты traceroute и передаёт готовые маркеры/сегменты
  * в карту.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
@@ -78,7 +80,8 @@ public class FormMap extends Form {
     private static final double STATUS_LEGEND_WIDTH = 260;
     private static final Pattern TRACE_SEGMENT_PATTERN = Pattern.compile(" →(-?\\d+[.,]\\d+)dB→ | → ");
     private static final Pattern TRACE_NODE_ID_PATTERN = Pattern.compile("!([0-9a-fA-F]{1,8})");
-    private static final Pattern TRACE_SECTION_LABEL_PATTERN = Pattern.compile("(?iu)^\\s*(?:прямой|обратный)\\s*:\\s*");
+    private static final Pattern TRACE_SECTION_LABEL_PATTERN =
+            Pattern.compile("(?iu)^\\s*(?:прямой|обратный|forward|reverse)\\s*:\\s*");
 
     private final TileMapView mapView = new TileMapView();
     private final Label statusLabel = new Label();
@@ -92,7 +95,7 @@ public class FormMap extends Form {
     private final TextField searchField = new TextField();
     private final ContextMenu searchSuggestionMenu = new ContextMenu();
     private final Button favoriteFilterButton = new Button();
-    private final ToggleButton offlineButton = new ToggleButton("Оффлайн");
+    private final ToggleButton offlineButton = new ToggleButton(I18n.t("map.offline"));
     private final ToggleButton nightModeButton = new ToggleButton();
     private final ToggleButton measureButton = new ToggleButton();
     private final ToggleButton areaButton = new ToggleButton();
@@ -100,7 +103,7 @@ public class FormMap extends Form {
     private final Button fitNodesButton = new Button();
     private final Button tracesButton = new Button();
     private final ContextMenu tracesMenu = new ContextMenu();
-    private final Button downloadButton = new Button("Скачать область");
+    private final Button downloadButton = new Button(I18n.t("map.downloadArea"));
 
     private DeviceState state;
     private int localNodeNum;
@@ -171,6 +174,37 @@ public class FormMap extends Form {
     }
 
     /**
+     * Показывает на карте один сохранённый traceroute-результат.
+     *
+     * <p>Метод используется внешними формами, которые уже знают id записи
+     * {@code traceroute_results}. Предыдущий выбор трейсов очищается, чтобы
+     * карта сфокусировалась только на указанном маршруте.
+     *
+     * @param tracerouteResultId id записи {@code traceroute_results}
+     */
+    public void showTracerouteResult(long tracerouteResultId) {
+        if (!Platform.isFxApplicationThread()) {
+            Platform.runLater(() -> showTracerouteResult(tracerouteResultId));
+            return;
+        }
+
+        MessageDbService.getInstance()
+                .loadTracerouteResult(tracerouteResultId, currentOwnerNodeId())
+                .flatMap(this::parseTraceRecord)
+                .ifPresentOrElse(
+                        trace -> {
+                            selectedTraces.clear();
+                            selectedTraces.put(trace.dbId(), trace);
+                            syncTracesButton();
+                            refreshSelectedTraceOverlay(true);
+                            if (tracesMenu.isShowing()) {
+                                refreshTracesMenu();
+                            }
+                        },
+                        () -> Toast.show(Toast.Type.WARNING, I18n.t("map.trace.notFound")));
+    }
+
+    /**
      * Собирает тулбар, карту и статусную строку, затем восстанавливает сохранённые
      * настройки карты: центр, масштаб, оффлайн-режим, ночной режим и каталог тайлов.
      */
@@ -194,14 +228,14 @@ public class FormMap extends Form {
         configureSearchControls();
 
         offlineButton.setSelected(mapView.isOfflineOnly());
-        offlineButton.setTooltip(new Tooltip("Использовать только локальные тайлы из кэша и выбранного каталога"));
+        offlineButton.setTooltip(new Tooltip(I18n.t("map.tooltip.offline")));
         offlineButton.setOnAction(event -> {
             boolean offline = offlineButton.isSelected();
             mapView.setOfflineOnly(offline);
             AppPreferences.setMapOfflineMode(offline);
         });
 
-        configureIconToggleButton(nightModeButton, "/icons/dark.svg", "Ночной режим карты");
+        configureIconToggleButton(nightModeButton, "/icons/dark.svg", I18n.t("map.tooltip.nightMode"));
         nightModeButton.setSelected(mapView.isNightMode());
         nightModeButton.setOnAction(event -> {
             boolean nightMode = nightModeButton.isSelected();
@@ -209,20 +243,20 @@ public class FormMap extends Form {
             AppPreferences.setMapNightMode(nightMode);
         });
 
-        configureIconButton(myNodeButton, "/icons/map-my-node.svg", "К своей ноде");
+        configureIconButton(myNodeButton, "/icons/map-my-node.svg", I18n.t("map.tooltip.myNode"));
         myNodeButton.setOnAction(event -> centerOnMyNode());
 
-        configureIconButton(fitNodesButton, "/drawer/icon/nodes.svg", "Показать ноды с координатами");
+        configureIconButton(fitNodesButton, "/drawer/icon/nodes.svg", I18n.t("map.tooltip.fitNodes"));
         fitNodesButton.setOnAction(event -> {
             if (!mapView.fitMarkers()) {
-                statusLabel.setText("Нет нод с координатами");
+                statusLabel.setText(I18n.t("map.status.noNodesWithCoordinates"));
             }
         });
 
         configureTraceButton();
 
-        configureIconToggleButton(measureButton, "/icons/map-ruler.svg", "Измерить расстояние между точками на карте");
-        measureButton.setTooltip(new Tooltip("Измерить расстояние между точками на карте"));
+        configureIconToggleButton(measureButton, "/icons/map-ruler.svg", I18n.t("map.tooltip.measure"));
+        measureButton.setTooltip(new Tooltip(I18n.t("map.tooltip.measure")));
         measureButton.setOnAction(event -> {
             boolean measuring = measureButton.isSelected();
             if (measuring) {
@@ -232,8 +266,8 @@ public class FormMap extends Form {
             mapView.setMeasuring(measuring);
         });
 
-        configureIconToggleButton(areaButton, "/icons/map-select-area.svg", "Выделить прямоугольную область и приблизить карту к ней");
-        areaButton.setTooltip(new Tooltip("Выделить прямоугольную область и приблизить карту к ней"));
+        configureIconToggleButton(areaButton, "/icons/map-select-area.svg", I18n.t("map.tooltip.area"));
+        areaButton.setTooltip(new Tooltip(I18n.t("map.tooltip.area")));
         areaButton.setOnAction(event -> {
             boolean selectingArea = areaButton.isSelected();
             if (selectingArea) {
@@ -243,8 +277,8 @@ public class FormMap extends Form {
             mapView.setAreaSelectionMode(selectingArea);
         });
 
-        Button clearMeasureButton = new Button("Сброс");
-        clearMeasureButton.setTooltip(new Tooltip("Очистить измерение расстояния, выделенную область и трейсы"));
+        Button clearMeasureButton = new Button(I18n.t("common.reset"));
+        clearMeasureButton.setTooltip(new Tooltip(I18n.t("map.tooltip.clearTools")));
         clearMeasureButton.setOnAction(event -> {
             mapView.clearMeasure();
             mapView.clearSelectedArea();
@@ -254,20 +288,20 @@ public class FormMap extends Form {
             if (tracesMenu.isShowing()) {
                 refreshTracesMenu();
             }
-            statusLabel.setText("Измерение, область и трейсы очищены");
+            statusLabel.setText(I18n.t("map.status.toolsCleared"));
         });
 
-        Button zoomInButton = iconButton("+", "Приблизить");
+        Button zoomInButton = iconButton("+", I18n.t("map.zoom.in"));
         zoomInButton.setOnAction(event -> mapView.zoomIn());
 
-        Button zoomOutButton = iconButton("−", "Отдалить");
+        Button zoomOutButton = iconButton("−", I18n.t("map.zoom.out"));
         zoomOutButton.setOnAction(event -> mapView.zoomOut());
 
-        downloadButton.setTooltip(new Tooltip("Скачать явно выделенную область на всех масштабах"));
+        downloadButton.setTooltip(new Tooltip(I18n.t("map.tooltip.downloadArea")));
         downloadButton.setOnAction(event -> downloadSelectedAreaTiles());
 
-        Button tileDirectoryButton = new Button("Каталог тайлов");
-        tileDirectoryButton.setTooltip(new Tooltip("Выбрать локальный каталог формата z/x/y.png|jpg|jpeg"));
+        Button tileDirectoryButton = new Button(I18n.t("map.tileDirectory.button"));
+        tileDirectoryButton.setTooltip(new Tooltip(I18n.t("map.tooltip.tileDirectory")));
         tileDirectoryButton.setOnAction(event -> chooseTileDirectory());
 
         Button filterButton = createFilterButton();
@@ -306,8 +340,8 @@ public class FormMap extends Form {
         downloadProgressBar.setMinWidth(DOWNLOAD_PROGRESS_WIDTH);
         downloadProgressBar.setPrefWidth(DOWNLOAD_PROGRESS_WIDTH);
         downloadProgressBar.setMaxWidth(DOWNLOAD_PROGRESS_WIDTH);
-        configureDownloadControlButton(downloadPauseButton, "/icons/pause.svg", "Пауза скачивания", "||");
-        configureDownloadControlButton(downloadCancelButton, "/icons/close.svg", "Отменить скачивание", "x");
+        configureDownloadControlButton(downloadPauseButton, "/icons/pause.svg", I18n.t("map.tooltip.downloadPause"), "||");
+        configureDownloadControlButton(downloadCancelButton, "/icons/close.svg", I18n.t("map.tooltip.downloadCancel"), "x");
         downloadPauseButton.setOnAction(event -> toggleDownloadPause());
         downloadCancelButton.setOnAction(event -> cancelDownload());
         hideDownloadProgress();
@@ -350,7 +384,7 @@ public class FormMap extends Form {
      * Настраивает предиктивный поиск нод на карте и быстрый фильтр избранного.
      */
     private void configureSearchControls() {
-        searchField.setPromptText("Поиск");
+        searchField.setPromptText(I18n.t("map.search.placeholder"));
         searchField.getStyleClass().add("map-search-field");
         searchField.setPrefWidth(180);
         searchField.setMaxWidth(260);
@@ -367,7 +401,7 @@ public class FormMap extends Form {
         });
         searchField.addEventFilter(KeyEvent.KEY_PRESSED, this::handleSearchKeyPressed);
 
-        configureIconButton(favoriteFilterButton, "/icons/favorite.svg", "Только избранные");
+        configureIconButton(favoriteFilterButton, "/icons/favorite.svg", I18n.t("node.filter.favoriteOnly"));
         favoriteFilterButton.setOnAction(event -> {
             showFavoritesOnly = !showFavoritesOnly;
             AppPreferences.setNodesFilterFavorites(showFavoritesOnly);
@@ -390,7 +424,7 @@ public class FormMap extends Form {
      * Настраивает кнопку меню последних трейсов.
      */
     private void configureTraceButton() {
-        configureIconButton(tracesButton, "/icons/map-traces.svg", "Последние трейсы");
+        configureIconButton(tracesButton, "/icons/map-traces.svg", I18n.t("map.traces.recent"));
         tracesMenu.getStyleClass().add("map-traces-menu");
         tracesButton.setOnAction(event -> {
             if (tracesMenu.isShowing()) {
@@ -408,13 +442,13 @@ public class FormMap extends Form {
      */
     private Button createFilterButton() {
         Button filterButton = new Button();
-        configureIconButton(filterButton, "/icons/sort.svg", "Фильтры нод на карте");
+        configureIconButton(filterButton, "/icons/sort.svg", I18n.t("map.filter.button"));
 
-        CheckMenuItem filterUnknown = new CheckMenuItem("Показывать неизвестные ноды");
-        CheckMenuItem filterHideOffline = new CheckMenuItem("Скрыть офлайн-ноды");
-        filterFavorites = new CheckMenuItem("Только избранные");
-        CheckMenuItem filterDirect = new CheckMenuItem("Только прямые (0 хопов)");
-        filterIgnored = new CheckMenuItem("Игнорируемые");
+        CheckMenuItem filterUnknown = new CheckMenuItem(I18n.t("node.filter.showUnknown"));
+        CheckMenuItem filterHideOffline = new CheckMenuItem(I18n.t("node.filter.hideOffline"));
+        filterFavorites = new CheckMenuItem(I18n.t("node.filter.favoriteOnly"));
+        CheckMenuItem filterDirect = new CheckMenuItem(I18n.t("node.filter.directOnly"));
+        filterIgnored = new CheckMenuItem(I18n.t("node.filter.ignored"));
 
         Map<CheckMenuItem, Runnable> actions = new LinkedHashMap<>();
         actions.put(filterUnknown, () -> {
@@ -490,28 +524,28 @@ public class FormMap extends Form {
             if (!favoriteFilterButton.getStyleClass().contains("favorite-btn-active")) {
                 favoriteFilterButton.getStyleClass().add("favorite-btn-active");
             }
-            favoriteFilterButton.getTooltip().setText("Показать все ноды");
+            favoriteFilterButton.getTooltip().setText(I18n.t("map.filter.showAllNodes"));
         } else {
             favoriteFilterButton.getStyleClass().remove("favorite-btn-active");
-            favoriteFilterButton.getTooltip().setText("Только избранные");
+            favoriteFilterButton.getTooltip().setText(I18n.t("node.filter.favoriteOnly"));
         }
     }
 
     /**
-     * Перечитывает последние системные traceroute-сообщения и строит меню выбора.
+     * Перечитывает последние сохранённые результаты traceroute и строит меню выбора.
      * Можно выбрать несколько трейсов, выбранные элементы остаются отмеченными.
      */
     private void refreshTracesMenu() {
         recentTraces = MessageDbService.getInstance()
-                .loadRecentSystemMessagesByPrefix(TracerouteView.TRACEROUTE_PREFIX, RECENT_TRACE_LIMIT, currentOwnerNodeId())
+                .loadRecentTracerouteResults(RECENT_TRACE_LIMIT, currentOwnerNodeId())
                 .stream()
-                .map(this::parseTraceMessage)
-                .filter(trace -> trace != null)
+                .map(this::parseTraceRecord)
+                .flatMap(Optional::stream)
                 .toList();
 
         tracesMenu.getItems().clear();
         if (recentTraces.isEmpty()) {
-            MenuItem emptyItem = new MenuItem("Нет сохранённых трейсов");
+            MenuItem emptyItem = new MenuItem(I18n.t("map.traces.empty"));
             emptyItem.setDisable(true);
             tracesMenu.getItems().add(emptyItem);
             return;
@@ -538,7 +572,7 @@ public class FormMap extends Form {
         }
 
         tracesMenu.getItems().add(new SeparatorMenuItem());
-        MenuItem clearItem = new MenuItem("Очистить выбранные");
+        MenuItem clearItem = new MenuItem(I18n.t("map.traces.clearSelected"));
         clearItem.setDisable(selectedTraces.isEmpty());
         clearItem.setOnAction(event -> {
             selectedTraces.clear();
@@ -554,12 +588,12 @@ public class FormMap extends Form {
     private void syncTracesButton() {
         if (selectedTraces.isEmpty()) {
             tracesButton.getStyleClass().remove("map-traces-button-active");
-            tracesButton.getTooltip().setText("Последние трейсы");
+            tracesButton.getTooltip().setText(I18n.t("map.traces.recent"));
         } else {
             if (!tracesButton.getStyleClass().contains("map-traces-button-active")) {
                 tracesButton.getStyleClass().add("map-traces-button-active");
             }
-            tracesButton.getTooltip().setText("Последние трейсы: выбрано " + selectedTraces.size());
+            tracesButton.getTooltip().setText(I18n.t("map.traces.selected", selectedTraces.size()));
         }
     }
 
@@ -570,7 +604,7 @@ public class FormMap extends Form {
         int linkCount = trace.paths().stream()
                 .mapToInt(path -> Math.max(0, path.names().size() - 1))
                 .sum();
-        String suffix = linkCount == 1 ? "1 связь" : linkCount + " связ.";
+        String suffix = linkCount + " " + pluralUnit("map.trace.link", linkCount);
         return NodeData.formatTime(trace.timestamp()) + " · " + trace.targetName() + " · " + suffix;
     }
 
@@ -729,18 +763,56 @@ public class FormMap extends Form {
     }
 
     /**
-     * Парсит сохранённое системное traceroute-сообщение в структуру для карты.
-     * Поддерживает прямой маршрут и, если он есть в тексте, явный обратный маршрут.
+     * Парсит сохранённую запись traceroute в структуру для карты.
+     * Новые записи читаются из protobuf RouteDiscovery, legacy-записи — из старого текстового формата.
      *
-     * @return разобранный трейс или {@code null}, если сообщение не является traceroute
+     * @return разобранный трейс или пустое значение, если запись повреждена
      */
-    private ParsedTrace parseTraceMessage(MeshMessage message) {
-        if (message == null || message.getText() == null
-                || !message.getText().startsWith(TracerouteView.TRACEROUTE_PREFIX)) {
+    private Optional<ParsedTrace> parseTraceRecord(MessageDbService.TracerouteResultRecord record) {
+        if (record == null) {
+            return Optional.empty();
+        }
+        byte[] routeData = record.routeData();
+        if (routeData != null && routeData.length > 0) {
+            try {
+                return Optional.of(parseTraceRoute(record, MeshProtos.RouteDiscovery.parseFrom(routeData)));
+            } catch (Exception ignored) {
+                // Старые или повреждённые записи пробуем восстановить из formatted_text ниже.
+            }
+        }
+        return Optional.ofNullable(parseTraceText(
+                record.id(),
+                record.timestamp(),
+                record.formattedText(),
+                record.targetName()));
+    }
+
+    private ParsedTrace parseTraceRoute(MessageDbService.TracerouteResultRecord record,
+                                        MeshProtos.RouteDiscovery route) {
+        String targetName = firstNonBlank(record.targetName(), record.targetNodeId(), I18n.t("map.trace.targetFallback"));
+        List<TracePath> paths = new ArrayList<>();
+        paths.add(new TracePath(
+                false,
+                routeNodeNames(traceSelfName(), route.getRouteList(), targetName),
+                snrValues(route.getSnrTowardsList())));
+        if (route.getRouteBackCount() > 0 || route.getSnrBackCount() > 0) {
+            paths.add(new TracePath(
+                    true,
+                    routeNodeNames(targetName, route.getRouteBackList(), traceSelfName()),
+                    snrValues(route.getSnrBackList())));
+        }
+        return new ParsedTrace(record.id(), targetName, record.timestamp(), List.copyOf(paths));
+    }
+
+    /**
+     * Парсит legacy-текст traceroute из старых системных сообщений.
+     */
+    private ParsedTrace parseTraceText(long id, long timestamp, String text, String targetFallback) {
+        if (text == null || !text.startsWith(TracerouteView.TRACEROUTE_PREFIX)) {
             return null;
         }
 
-        String[] lines = message.getText().split("\\R");
+        String[] lines = text.split("\\R");
         if (lines.length < 2) {
             return null;
         }
@@ -748,7 +820,7 @@ public class FormMap extends Form {
         String header = lines[0];
         String targetName = header.substring(TracerouteView.TRACEROUTE_PREFIX.length()).trim();
         if (targetName.isBlank()) {
-            targetName = "нода";
+            targetName = firstNonBlank(targetFallback, I18n.t("map.trace.targetFallback"));
         }
 
         List<TracePath> paths = new ArrayList<>();
@@ -775,11 +847,62 @@ public class FormMap extends Form {
         }
 
         return new ParsedTrace(
-                message.getDbId(),
+                id,
                 targetName,
-                message.getTimestamp(),
+                timestamp,
                 List.copyOf(paths)
         );
+    }
+
+    private List<String> routeNodeNames(String firstName, List<Integer> intermediateNodeNums, String lastName) {
+        List<String> names = new ArrayList<>();
+        names.add(firstName);
+        for (Integer nodeNum : intermediateNodeNums) {
+            if (nodeNum != null) {
+                names.add(traceNodeName(nodeNum));
+            }
+        }
+        names.add(lastName);
+        return List.copyOf(names);
+    }
+
+    private List<Double> snrValues(List<Integer> rawValues) {
+        List<Double> values = new ArrayList<>();
+        for (Integer rawValue : rawValues) {
+            if (rawValue != null) {
+                values.add(rawValue / 4.0);
+            }
+        }
+        return List.copyOf(values);
+    }
+
+    private String traceNodeName(int nodeNum) {
+        NodeData node = state != null ? state.getNodeDb().get(nodeNum) : null;
+        if (node == null) {
+            node = NodeCacheService.getInstance().get(nodeIdFromNum(nodeNum));
+        }
+        return node != null ? nodeTitle(node) : nodeIdFromNum(nodeNum);
+    }
+
+    private static String nodeIdFromNum(int nodeNum) {
+        return String.format(Locale.ROOT, "!%08x", nodeNum);
+    }
+
+    private static String firstNonBlank(String... values) {
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                return value;
+            }
+        }
+        return "";
+    }
+
+    private static String traceSelfName() {
+        return I18n.t("chat.self.avatar");
+    }
+
+    private static String pluralUnit(String keyPrefix, long value) {
+        return I18n.t(keyPrefix + "." + I18n.pluralCategory(value));
     }
 
     /**
@@ -837,7 +960,7 @@ public class FormMap extends Form {
         if (selectedTraces.isEmpty()) {
             mapView.clearTraceSegments();
             if (fitAndReport) {
-                statusLabel.setText("Трейсы скрыты");
+                statusLabel.setText(I18n.t("map.trace.hidden"));
             }
             return;
         }
@@ -849,16 +972,18 @@ public class FormMap extends Form {
         }
 
         if (build.segments().isEmpty()) {
-            statusLabel.setText("Не удалось построить трейсы: нет координат выбранных нод");
+            statusLabel.setText(I18n.t("map.trace.noCoordinates"));
             return;
         }
         mapView.fitTraceSegments();
         String skipped = build.skippedPoints() > 0
-                ? " · точек без координат: " + build.skippedPoints()
+                ? I18n.t("map.trace.skippedPoints", build.skippedPoints())
                 : "";
-        statusLabel.setText("Показано трейсов: " + selectedTraces.size()
-                + " · хопов по трейсу: " + build.totalHops()
-                + " · линий на карте: " + build.segments().size() + skipped);
+        statusLabel.setText(I18n.t("map.trace.shown",
+                selectedTraces.size(),
+                build.totalHops(),
+                build.segments().size(),
+                skipped));
     }
 
     /**
@@ -1018,6 +1143,8 @@ public class FormMap extends Form {
         NodeData localNode = state != null ? state.getNodeDb().get(localNodeNum) : null;
         if (localNode != null) {
             putTraceLookupToken(byToken, "Я", localNode);
+            putTraceLookupToken(byToken, "Me", localNode);
+            putTraceLookupToken(byToken, traceSelfName(), localNode);
         }
         return new TraceNodeIndex(List.copyOf(nodes), byToken, localNode);
     }
@@ -1040,7 +1167,9 @@ public class FormMap extends Form {
         if (normalized.isBlank()) {
             return null;
         }
-        if ("я".equals(normalized)) {
+        if ("я".equals(normalized)
+                || "me".equals(normalized)
+                || normalizeTraceToken(traceSelfName()).equals(normalized)) {
             return index.localNode();
         }
 
@@ -1092,26 +1221,15 @@ public class FormMap extends Form {
      * Формирует подпись линии трейса с направлением, исходным числом хопов и SNR.
      */
     private String formatTraceSignal(double snr, boolean reverse, int totalHops) {
-        String direction = reverse ? "обратно" : "туда";
-        String hops = totalHops > 0 ? " · " + totalHops + " " + traceHopWord(totalHops) : "";
+        String direction = I18n.t(reverse ? "map.trace.direction.reverse" : "map.trace.direction.forward");
+        String hops = totalHops > 0 ? " · " + totalHops + " " + pluralUnit("node.unit.hop", totalHops) : "";
         return Double.isNaN(snr)
-                ? direction + hops + " · SNR н/д"
-                : String.format(Locale.ROOT, "%s%s · SNR %.1f dB", direction, hops, snr);
-    }
-
-    /**
-     * Возвращает правильную русскую форму слова «хоп» для указанного числа.
-     */
-    private String traceHopWord(int hops) {
-        int mod10 = hops % 10;
-        int mod100 = hops % 100;
-        if (mod10 == 1 && mod100 != 11) {
-            return "хоп";
-        }
-        if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) {
-            return "хопа";
-        }
-        return "хопов";
+                ? I18n.t("map.trace.signalNoSnr", direction, hops, I18n.t("map.trace.snrUnavailable"))
+                : I18n.t("map.trace.signalWithSnr",
+                direction,
+                hops,
+                String.format(I18n.locale(), "%.1f", snr),
+                I18n.t("node.unit.db"));
     }
 
     /**
@@ -1133,7 +1251,7 @@ public class FormMap extends Form {
     private void centerOnSelectedSearchMatch() {
         ensureSearchSuggestions();
         if (currentSearchMatches.isEmpty()) {
-            statusLabel.setText("Нода не найдена");
+            statusLabel.setText(I18n.t("map.search.nodeNotFound"));
             return;
         }
         int index = selectedSearchSuggestionIndex >= 0 && selectedSearchSuggestionIndex < currentSearchMatches.size()
@@ -1151,7 +1269,7 @@ public class FormMap extends Form {
      */
     private void centerOnSearchNode(NodeData node, String searchText) {
         if (!hasCoordinate(node)) {
-            statusLabel.setText("У найденной ноды нет координат");
+            statusLabel.setText(I18n.t("map.search.nodeNoCoordinates"));
             return;
         }
         suppressSearchSuggestions = true;
@@ -1163,7 +1281,7 @@ public class FormMap extends Form {
             suppressSearchSuggestions = false;
         }
         mapView.setView(node.getLatitude(), node.getLongitude(), Math.max(mapView.getZoom(), 13));
-        statusLabel.setText("Найдена нода: " + nodeTitle(node));
+        statusLabel.setText(I18n.t("map.search.foundNode", nodeTitle(node)));
     }
 
     /**
@@ -1313,19 +1431,19 @@ public class FormMap extends Form {
      */
     private void showMarkerDetails(MapMarker marker) {
         if (marker == null || marker.id() == null || marker.id().isBlank()) {
-            statusLabel.setText("Не удалось определить ноду на карте");
+            statusLabel.setText(I18n.t("map.marker.unresolved"));
             return;
         }
 
         NodeData node = resolveMarkerNode(marker.id());
         if (node == null) {
-            statusLabel.setText("Нода не найдена: " + marker.title());
+            statusLabel.setText(I18n.t("map.marker.notFound", marker.title()));
             return;
         }
 
         NodeCacheService.getInstance().enrichFromCache(node);
         NodeDetailPanel.showForNode(state, node);
-        statusLabel.setText("Открыта информация о ноде: " + nodeTitle(node));
+        statusLabel.setText(I18n.t("map.marker.opened", nodeTitle(node)));
     }
 
     /**
@@ -1405,18 +1523,18 @@ public class FormMap extends Form {
      */
     private void centerOnMyNode() {
         if (state == null) {
-            statusLabel.setText("Нет подключения к ноде");
+            statusLabel.setText(I18n.t("map.myNode.noConnection"));
             return;
         }
 
         NodeData myNode = state.getNodeDb().get(localNodeNum);
         if (!hasCoordinate(myNode)) {
-            statusLabel.setText("Нет координат своей ноды");
+            statusLabel.setText(I18n.t("map.myNode.noCoordinates"));
             return;
         }
 
         mapView.setView(myNode.getLatitude(), myNode.getLongitude(), Math.max(mapView.getZoom(), 13));
-        statusLabel.setText("Карта центрирована по своей ноде");
+        statusLabel.setText(I18n.t("map.myNode.centered"));
     }
 
     /**
@@ -1474,7 +1592,7 @@ public class FormMap extends Form {
      */
     private void chooseTileDirectory() {
         DirectoryChooser chooser = new DirectoryChooser();
-        chooser.setTitle("Каталог тайлов OSM");
+        chooser.setTitle(I18n.t("map.tileDirectory.title"));
         Path current = mapView.getExternalTileRoot();
         if (current != null && Files.isDirectory(current)) {
             chooser.setInitialDirectory(current.toFile());
@@ -1498,9 +1616,9 @@ public class FormMap extends Form {
     private void updateTileDirectoryLabel() {
         Path root = mapView.getExternalTileRoot();
         if (root == null) {
-            tileDirectoryLabel.setText("Тайлы: кэш " + mapView.cacheRoot());
+            tileDirectoryLabel.setText(I18n.t("map.tileDirectory.cache", mapView.cacheRoot()));
         } else {
-            tileDirectoryLabel.setText("Тайлы: " + root);
+            tileDirectoryLabel.setText(I18n.t("map.tileDirectory.external", root));
         }
     }
 
@@ -1509,7 +1627,7 @@ public class FormMap extends Form {
      */
     private void downloadSelectedAreaTiles() {
         if (!mapView.hasSelectedArea()) {
-            String message = "Сначала выделите область на карте";
+            String message = I18n.t("map.download.selectAreaFirst");
             statusLabel.setText(message);
             hideDownloadProgress();
             Toast.show(Toast.Type.WARNING, message);
@@ -1520,7 +1638,7 @@ public class FormMap extends Form {
         long count = mapView.downloadTileCount();
         if (count <= 0) {
             downloadButton.setDisable(false);
-            String message = "Нет тайлов для загрузки";
+            String message = I18n.t("map.download.noTiles");
             statusLabel.setText(message);
             Toast.show(Toast.Type.WARNING, message);
             return;
@@ -1528,7 +1646,7 @@ public class FormMap extends Form {
 
         downloadPaused = false;
         updateDownloadPauseButton();
-        statusLabel.setText("Загрузка " + count + " тайлов...");
+        statusLabel.setText(I18n.t("map.download.starting", count, pluralUnit("map.status.tile", count)));
         showDownloadProgress(0);
 
         TileMapView.DownloadHandle[] handleRef = new TileMapView.DownloadHandle[1];
@@ -1554,12 +1672,15 @@ public class FormMap extends Form {
             return;
         }
         if (progress.state() == TileMapView.DownloadState.COMPLETED || progress.completed() >= progress.total()) {
-            finishDownload("Доступно " + progress.available() + " из " + progress.total() + " тайлов");
+            finishDownload(I18n.t("map.download.available",
+                    progress.available(),
+                    progress.total(),
+                    pluralUnit("map.status.tile", progress.total())));
             return;
         }
 
         statusLabel.setText(downloadPaused
-                ? "Загрузка приостановлена: " + progress.completed() + " из " + progress.total()
+                ? I18n.t("map.download.pausedProgress", progress.completed(), progress.total())
                 : progress.message());
     }
 
@@ -1570,11 +1691,11 @@ public class FormMap extends Form {
         if (downloadPaused) {
             activeDownload.resume();
             downloadPaused = false;
-            statusLabel.setText("Загрузка продолжена");
+            statusLabel.setText(I18n.t("map.download.resumed"));
         } else {
             activeDownload.pause();
             downloadPaused = true;
-            statusLabel.setText("Загрузка приостановлена");
+            statusLabel.setText(I18n.t("map.download.paused"));
         }
         updateDownloadPauseButton();
     }
@@ -1582,10 +1703,10 @@ public class FormMap extends Form {
     private void updateDownloadPauseButton() {
         if (downloadPaused) {
             setButtonIcon(downloadPauseButton, "/icons/play.svg", ">", 14);
-            downloadPauseButton.setTooltip(new Tooltip("Продолжить скачивание"));
+            downloadPauseButton.setTooltip(new Tooltip(I18n.t("map.tooltip.downloadResume")));
         } else {
             setButtonIcon(downloadPauseButton, "/icons/pause.svg", "||", 14);
-            downloadPauseButton.setTooltip(new Tooltip("Пауза скачивания"));
+            downloadPauseButton.setTooltip(new Tooltip(I18n.t("map.tooltip.downloadPause")));
         }
     }
 
@@ -1594,7 +1715,7 @@ public class FormMap extends Form {
             return;
         }
         activeDownload.cancel();
-        finishDownload("Загрузка отменена");
+        finishDownload(I18n.t("map.download.cancelled"));
     }
 
     private void finishDownload(String message) {
@@ -1626,11 +1747,11 @@ public class FormMap extends Form {
     }
 
     /**
-     * Сохранённый трейс, извлечённый из системного сообщения.
+     * Сохранённый трейс, извлечённый из отдельной таблицы результатов.
      *
-     * @param dbId       id сообщения в БД
+     * @param dbId       id записи traceroute_results
      * @param targetName имя целевой ноды
-     * @param timestamp  время сообщения
+     * @param timestamp  время результата
      * @param paths      прямой и, при наличии, обратный путь
      */
     private record ParsedTrace(long dbId, String targetName, long timestamp, List<TracePath> paths) {

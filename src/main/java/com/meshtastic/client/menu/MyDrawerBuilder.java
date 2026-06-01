@@ -6,8 +6,10 @@ import com.meshtastic.client.forms.FormConnections;
 import com.meshtastic.client.forms.FormDashboard;
 import com.meshtastic.client.forms.FormLogs;
 import com.meshtastic.client.forms.FormMap;
+import com.meshtastic.client.forms.FormMeshAppIde;
 import com.meshtastic.client.forms.FormNodes;
 import com.meshtastic.client.forms.FormSetting;
+import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.system.DrawerManager;
 import com.meshtastic.client.system.DrawerPane;
 import com.meshtastic.client.system.FormManager;
@@ -40,26 +42,32 @@ public class MyDrawerBuilder {
     private static void initMenuStructure() {
         menuManager.clear()
                 .addLabel("")
-                .add(new MenuManager.MenuItem("Чаты", null, "/drawer/icon/chat.svg",
-                        MenuManager.MenuItem.Type.ITEM, FormChat.class))
-                .add(new MenuManager.MenuItem("Ноды", null, "/drawer/icon/nodes.svg",
-                        MenuManager.MenuItem.Type.ITEM, FormNodes.class))
-                .add(new MenuManager.MenuItem("Карты", null, "/drawer/icon/map.svg",
-                        MenuManager.MenuItem.Type.ITEM, FormMap.class))
-                .add(new MenuManager.MenuItem("Телеметрия", null, "/drawer/icon/chart.svg",
-                        MenuManager.MenuItem.Type.ITEM, FormDashboard.class))
-                .add(new MenuManager.MenuItem("Подключение", null, "/drawer/icon/plugin.svg",
-                        MenuManager.MenuItem.Type.ITEM, FormConnections.class))
-                .add(new MenuManager.MenuItem("Логирование", null, "/drawer/icon/eye.svg",
-                        MenuManager.MenuItem.Type.ITEM, FormLogs.class))
-                .add(new MenuManager.MenuItem("LoRa пакеты", null, "/drawer/icon/packet-monitor.svg",
-                        MenuManager.MenuItem.Type.ITEM, null))
-                .add(new MenuManager.MenuItem("Настройки", null, "/drawer/icon/setting.svg",
-                        MenuManager.MenuItem.Type.ITEM, FormSetting.class))
-                .add(new MenuManager.MenuItem("Помощь", null, "/drawer/icon/about.svg",
-                        MenuManager.MenuItem.Type.ITEM, null));
+                .add(menuItem("chat", "drawer.chat", "/drawer/icon/chat.svg", FormChat.class))
+                .add(menuItem("nodes", "drawer.nodes", "/drawer/icon/nodes.svg", FormNodes.class))
+                .add(menuItem("map", "drawer.map", "/drawer/icon/map.svg", FormMap.class))
+                .add(menuItem("telemetry", "drawer.telemetry", "/drawer/icon/chart.svg", FormDashboard.class))
+                .add(menuItem("connections", "drawer.connections", "/drawer/icon/plugin.svg", FormConnections.class))
+                .add(menuItem("logs", "drawer.logs", "/drawer/icon/eye.svg", FormLogs.class))
+                .add(menuItem("packet-monitor", "drawer.packetMonitor", "/drawer/icon/packet-monitor.svg", null));
 
-        menuManager.registerAction("LoRa пакеты", PacketMonitorWindow::showWindow);
-        menuManager.registerAction("Помощь", FormManager::showAbout);
+        menuManager.add(menuItem("ide", "drawer.ide", "/drawer/icon/lua.svg", FormMeshAppIde.class))
+                .add(menuItem("settings", "drawer.settings", "/drawer/icon/setting.svg", FormSetting.class))
+                .add(menuItem("about", "drawer.help", "/drawer/icon/about.svg", null));
+
+        menuManager.registerAction("packet-monitor", PacketMonitorWindow::showWindow);
+        menuManager.registerAction("about", FormManager::showAbout);
+    }
+
+    private static MenuManager.MenuItem menuItem(String id,
+                                                 String labelKey,
+                                                 String iconPath,
+                                                 Class<?> formClass) {
+        return new MenuManager.MenuItem(
+                id,
+                I18n.t(labelKey),
+                null,
+                iconPath,
+                MenuManager.MenuItem.Type.ITEM,
+                formClass);
     }
 }

@@ -3,6 +3,7 @@ package com.meshtastic.client.forms;
 import com.meshtastic.client.components.chat.ChannelPropertiesDialog;
 import com.meshtastic.client.components.chat.ChatDbKey;
 import com.meshtastic.client.components.chat.CreateChannelDialog;
+import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.modal.ModalPane;
 import com.meshtastic.client.modal.Toast;
 import com.meshtastic.client.model.ChatItem;
@@ -126,7 +127,7 @@ abstract class FormChatData extends FormChatRequests {
 
     private void unbindPreviousState() {
         if (state != null) {
-            state.removeMessageListener(messageListener);
+            state.removeMessageChangeListener(messageChangeListener);
         }
     }
 
@@ -157,7 +158,7 @@ abstract class FormChatData extends FormChatRequests {
         }
 
         if (state != null) {
-            state.addMessageListener(messageListener);
+            state.addMessageChangeListener(messageChangeListener);
         }
     }
 
@@ -326,10 +327,10 @@ abstract class FormChatData extends FormChatRequests {
         }
         if (state == null || protocolHandler == null) {
             if (meshCoreCompanionRuntime != null) {
-                Toast.show(Toast.Type.WARNING, "Свойства канала доступны только для Meshtastic");
+                Toast.show(Toast.Type.WARNING, I18n.t("chat.toast.channelPropertiesMeshtasticOnly"));
                 return;
             }
-            Toast.show(Toast.Type.WARNING, "Нет подключения к радио");
+            Toast.show(Toast.Type.WARNING, I18n.t("chat.toast.radioNotConnected"));
             return;
         }
         ChannelPropertiesDialog.show(state, protocolHandler,
@@ -397,7 +398,7 @@ abstract class FormChatData extends FormChatRequests {
         String preview = msg.getText();
         preview = UnicodeTextUtils.truncateWithSuffix(preview, 40, "…");
         ModalPane.showConfirm(
-                "Удалить сообщение?",
+                I18n.t("chat.confirm.deleteMessage.title"),
                 preview != null ? preview : "",
                 confirmed -> {
                     if (!confirmed) { return; }
@@ -410,6 +411,7 @@ abstract class FormChatData extends FormChatRequests {
         MessageDbService.getInstance().deleteMessage(msg.getDbId());
         loadedMessages.removeIf(loaded -> loaded.getDbId() == msg.getDbId());
         loadedMessageRows.remove(msg.getDbId());
+        loadedRenderedMessageRows.remove(msg.getDbId());
         recalcLoadedBounds();
         messageContainer.getChildren().remove(bubbleRow);
         refreshMessageSearchResults(false);
@@ -447,7 +449,7 @@ abstract class FormChatData extends FormChatRequests {
         }
 
         ContextMenu menu = new ContextMenu();
-        MenuItem createChannel = new MenuItem("Создать канал");
+        MenuItem createChannel = new MenuItem(I18n.t("chat.menu.createChannel"));
         createChannel.setOnAction(event -> showCreateChannelDialog());
         menu.getItems().add(createChannel);
         return menu;
@@ -455,7 +457,7 @@ abstract class FormChatData extends FormChatRequests {
 
     protected void showCreateChannelDialog() {
         if (protocolHandler == null) {
-            Toast.show(Toast.Type.WARNING, "Создание каналов доступно только для Meshtastic");
+            Toast.show(Toast.Type.WARNING, I18n.t("chat.toast.createChannelsMeshtasticOnly"));
             return;
         }
         CreateChannelDialog.show(state, protocolHandler, this::reloadChatList);

@@ -3,9 +3,11 @@ package com.meshtastic.client.simple;
 import com.meshtastic.client.connection.ble.BleDevice;
 import com.meshtastic.client.connection.ble.BlePlatformFactory;
 import com.meshtastic.client.connection.ble.BleProtocolProfile;
+import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.model.ConnectionEntry;
 import com.meshtastic.client.model.ConnectionType;
 import com.meshtastic.client.model.ProtocolType;
+import com.meshtastic.client.model.SerialModemLineMode;
 import com.meshtastic.client.service.BleDeviceDiscoveryService;
 import com.meshtastic.client.service.SerialPortDiscoveryService;
 import com.meshtastic.client.service.SerialPortDiscoveryService.DiscoveredPort;
@@ -13,6 +15,7 @@ import javafx.application.Platform;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.control.Button;
+import javafx.scene.control.CheckBox;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.Separator;
@@ -30,10 +33,26 @@ import java.util.function.Consumer;
  */
 public class SimpleConnectionForm extends VBox {
 
+    private static final List<ConnectionType> BASE_CONNECTION_TYPES = List.of(ConnectionType.TCP, ConnectionType.SERIAL);
+    private static final List<ProtocolType> STREAM_PROTOCOLS = List.of(
+            ProtocolType.MESHTASTIC,
+            ProtocolType.MESHCORE_KISS,
+            ProtocolType.MESHCORE_COMPANION);
+    private static final List<ProtocolType> BLE_PROTOCOLS = List.of(
+            ProtocolType.MESHTASTIC,
+            ProtocolType.MESHCORE_COMPANION);
+    private static final List<SerialModemLineMode> SERIAL_MODE_OPTIONS = List.of(
+            SerialModemLineMode.AUTO,
+            SerialModemLineMode.DTR_OFF_RTS_OFF,
+            SerialModemLineMode.DTR_OFF_RTS_ON,
+            SerialModemLineMode.DTR_ON_RTS_OFF,
+            SerialModemLineMode.DTR_ON_RTS_ON);
+
     private final ConnectionEntry editingEntry;
     private final ComboBox<String> cmbType;
     private final ComboBox<String> cmbProtocol;
     private final TextField txtName;
+    private final CheckBox chkAutoconnect;
 
     // TCP fields
     private final VBox tcpFields;
@@ -45,6 +64,7 @@ public class SimpleConnectionForm extends VBox {
     private final ComboBox<String> cmbPort;
     private final Label lblSerialStatus;
     private final TextField txtBaudRate;
+    private final ComboBox<String> cmbSerialModemLines;
 
     // BLE fields
     private final VBox bleFields;
@@ -72,15 +92,19 @@ public class SimpleConnectionForm extends VBox {
         setMaxHeight(Double.MAX_VALUE);
         getStyleClass().add("modal-side-panel");
 
-        Label title = new Label(editingEntry == null ? "Новое подключение" : "Редактирование подключения");
+        Label title = new Label(I18n.t(editingEntry == null
+                ? "connection.form.createTitle"
+                : "connection.form.editTitle"));
         title.getStyleClass().add("dialog-title");
 
         // Тип подключения
         cmbType = new ComboBox<>();
-        cmbType.getItems().addAll("TCP", "Serial / USB");
+        cmbType.getItems().addAll(BASE_CONNECTION_TYPES.stream()
+                .map(SimpleConnectionForm::labelForConnectionType)
+                .toList());
         if (BlePlatformFactory.isSupported()
                 || (editingEntry != null && editingEntry.getEffectiveType() == ConnectionType.BLE)) {
-            cmbType.getItems().add("BLE");
+            cmbType.getItems().add(labelForConnectionType(ConnectionType.BLE));
         }
         cmbType.getSelectionModel().selectFirst();
         cmbType.setMaxWidth(Double.MAX_VALUE);
@@ -101,7 +125,10 @@ public class SimpleConnectionForm extends VBox {
 
         // Название
         txtName = new TextField();
-        txtName.setPromptText("Например: Дом, Офис");
+        txtName.setPromptText(I18n.t("connection.form.namePrompt"));
+
+        chkAutoconnect = new CheckBox(I18n.t("connection.form.autoconnect"));
+        chkAutoconnect.setTooltip(new Tooltip(I18n.t("connection.form.autoconnect.tooltip")));
 
         // --- TCP fields ---
         txtHost = new TextField();
@@ -111,20 +138,20 @@ public class SimpleConnectionForm extends VBox {
 
         tcpFields = new VBox(8);
         tcpFields.getChildren().addAll(
-                new Label("Хост"), txtHost,
-                new Label("Порт"), txtPort
+                new Label(I18n.t("connection.form.host")), txtHost,
+                new Label(I18n.t("connection.form.port")), txtPort
         );
 
         // --- Serial fields ---
         cmbPort = new ComboBox<>();
         cmbPort.setEditable(true);
-        cmbPort.setPromptText("Выберите порт...");
+        cmbPort.setPromptText(I18n.t("connection.form.portPrompt"));
         cmbPort.setMaxWidth(Double.MAX_VALUE);
         cmbPort.setOnAction(e -> updateSerialAccessStatus());
         HBox.setHgrow(cmbPort, Priority.ALWAYS);
 
         Button btnRefresh = new Button("\u27F3");
-        btnRefresh.setTooltip(new Tooltip("Обновить список портов"));
+        btnRefresh.setTooltip(new Tooltip(I18n.t("connection.form.refreshPorts")));
         btnRefresh.setOnAction(e -> refreshPorts());
 
         HBox portRow = new HBox(6, cmbPort, btnRefresh);
@@ -138,11 +165,19 @@ public class SimpleConnectionForm extends VBox {
 
         txtBaudRate = new TextField("115200");
 
+        cmbSerialModemLines = new ComboBox<>();
+        cmbSerialModemLines.getItems().addAll(SERIAL_MODE_OPTIONS.stream()
+                .map(SimpleConnectionForm::labelForSerialModemLineMode)
+                .toList());
+        cmbSerialModemLines.setValue(labelForSerialModemLineMode(SerialModemLineMode.AUTO));
+        cmbSerialModemLines.setMaxWidth(Double.MAX_VALUE);
+
         serialFields = new VBox(8);
         serialFields.getChildren().addAll(
-                new Label("Порт устройства"), portRow,
+                new Label(I18n.t("connection.form.devicePort")), portRow,
                 lblSerialStatus,
-                new Label("Скорость (бод)"), txtBaudRate
+                new Label(I18n.t("connection.form.baudRate")), txtBaudRate,
+                new Label(I18n.t("connection.form.serialLines")), cmbSerialModemLines
         );
         serialFields.setVisible(false);
         serialFields.setManaged(false);
@@ -150,12 +185,12 @@ public class SimpleConnectionForm extends VBox {
         // --- BLE fields ---
         cmbBleDevice = new ComboBox<>();
         cmbBleDevice.setEditable(true);
-        cmbBleDevice.setPromptText("Поиск устройств...");
+        cmbBleDevice.setPromptText(I18n.t("connection.form.bleDevicePrompt"));
         cmbBleDevice.setMaxWidth(Double.MAX_VALUE);
         HBox.setHgrow(cmbBleDevice, Priority.ALWAYS);
 
         Button btnBleScan = new Button("\u27F3");
-        btnBleScan.setTooltip(new Tooltip("Сканировать BLE устройства"));
+        btnBleScan.setTooltip(new Tooltip(I18n.t("connection.form.scanBleDevices")));
         btnBleScan.setOnAction(e -> refreshBleDevices());
 
         HBox bleDeviceRow = new HBox(6, cmbBleDevice, btnBleScan);
@@ -166,18 +201,18 @@ public class SimpleConnectionForm extends VBox {
 
         bleFields = new VBox(8);
         bleFields.getChildren().addAll(
-                new Label("BLE устройство"), bleDeviceRow,
+                new Label(I18n.t("connection.form.bleDevice")), bleDeviceRow,
                 lblBleStatus
         );
         bleFields.setVisible(false);
         bleFields.setManaged(false);
 
         // Buttons
-        Button btnSave = new Button("Сохранить");
+        Button btnSave = new Button(I18n.t("common.save"));
         btnSave.getStyleClass().add("accent");
         btnSave.setOnAction(e -> doSave());
 
-        Button btnCancel = new Button("Отмена");
+        Button btnCancel = new Button(I18n.t("common.cancel"));
         btnCancel.setOnAction(e -> doCancel());
 
         HBox buttons = new HBox(10, btnCancel, btnSave);
@@ -186,9 +221,10 @@ public class SimpleConnectionForm extends VBox {
 
         getChildren().addAll(
                 title, new Separator(),
-                new Label("Тип подключения"), cmbType,
-                new Label("Протокол"), cmbProtocol,
-                new Label("Название"), txtName,
+                new Label(I18n.t("connection.form.connectionType")), cmbType,
+                new Label(I18n.t("connection.form.protocol")), cmbProtocol,
+                new Label(I18n.t("connection.form.connectionName")), txtName,
+                chkAutoconnect,
                 tcpFields,
                 serialFields,
                 bleFields,
@@ -236,10 +272,12 @@ public class SimpleConnectionForm extends VBox {
                 }
                 ConnectionEntry entry = new ConnectionEntry(name, address, extractBleDeviceName(selectedDevice));
                 entry.setProtocol(selectedProtocolType());
+                entry.setAutoconnect(chkAutoconnect.isSelected());
                 return withEditingMetadata(entry);
             }
             ConnectionEntry entry = new ConnectionEntry(name, device.address(), device.displayName());
             entry.setProtocol(selectedProtocolForDevice(device));
+            entry.setAutoconnect(chkAutoconnect.isSelected());
             return withEditingMetadata(entry);
         } else if (isSerialMode()) {
             String selectedPort = cmbPort.getValue();
@@ -255,6 +293,8 @@ public class SimpleConnectionForm extends VBox {
             }
             ConnectionEntry entry = new ConnectionEntry(name, portName, baudRate, ConnectionType.SERIAL);
             entry.setProtocol(selectedProtocolType());
+            entry.setSerialModemLineMode(selectedSerialModemLineMode());
+            entry.setAutoconnect(chkAutoconnect.isSelected());
             return withEditingMetadata(entry);
         } else {
             String host = txtHost.getText().trim();
@@ -269,6 +309,7 @@ public class SimpleConnectionForm extends VBox {
             }
             ConnectionEntry entry = new ConnectionEntry(name, host, port);
             entry.setProtocol(selectedProtocolType());
+            entry.setAutoconnect(chkAutoconnect.isSelected());
             return withEditingMetadata(entry);
         }
     }
@@ -287,12 +328,11 @@ public class SimpleConnectionForm extends VBox {
     }
 
     private boolean isSerialMode() {
-        return "Serial / USB".equals(cmbType.getSelectionModel().getSelectedItem());
+        return selectedConnectionType() == ConnectionType.SERIAL;
     }
 
     private boolean isBleMode() {
-        String selected = cmbType.getSelectionModel().getSelectedItem();
-        return "BLE".equals(selected);
+        return selectedConnectionType() == ConnectionType.BLE;
     }
 
     private void updateFieldVisibility() {
@@ -322,6 +362,7 @@ public class SimpleConnectionForm extends VBox {
         }
 
         txtName.setText(valueOrEmpty(entry.getName()));
+        chkAutoconnect.setSelected(entry.isAutoconnect());
         selectConnectionType(entry.getEffectiveType());
         updateProtocolOptions();
         String protocolLabel = labelForProtocol(entry.getEffectiveProtocol());
@@ -340,6 +381,8 @@ public class SimpleConnectionForm extends VBox {
                     cmbPort.setValue(savedPortName);
                 }
                 txtBaudRate.setText(String.valueOf(entry.getBaudRate() > 0 ? entry.getBaudRate() : 115200));
+                cmbSerialModemLines.setValue(labelForSerialModemLineMode(
+                        entry.getEffectiveSerialModemLineMode()));
             }
             case BLE -> {
                 savedBleDeviceLabel = savedBleDeviceLabel(entry);
@@ -354,29 +397,25 @@ public class SimpleConnectionForm extends VBox {
     }
 
     private void selectConnectionType(ConnectionType type) {
-        if (type == ConnectionType.BLE && !cmbType.getItems().contains("BLE")) {
-            cmbType.getItems().add("BLE");
+        String label = labelForConnectionType(type);
+        if (type == ConnectionType.BLE && !cmbType.getItems().contains(label)) {
+            cmbType.getItems().add(label);
         }
-        cmbType.setValue(switch (type) {
-            case SERIAL -> "Serial / USB";
-            case BLE -> "BLE";
-            case TCP -> "TCP";
-        });
+        cmbType.setValue(label);
     }
 
     private void updateProtocolOptions() {
         ProtocolType previous = selectedProtocolType();
         cmbProtocol.getItems().clear();
-        if (isBleMode()) {
-            cmbProtocol.getItems().addAll("Meshtastic", "MeshCore Companion");
-        } else {
-            cmbProtocol.getItems().addAll("Meshtastic", "MeshCore KISS", "MeshCore Companion");
-        }
+        List<ProtocolType> protocolOptions = isBleMode() ? BLE_PROTOCOLS : STREAM_PROTOCOLS;
+        cmbProtocol.getItems().addAll(protocolOptions.stream()
+                .map(SimpleConnectionForm::labelForProtocol)
+                .toList());
         String previousLabel = labelForProtocol(previous);
         if (cmbProtocol.getItems().contains(previousLabel)) {
             cmbProtocol.setValue(previousLabel);
         } else {
-            cmbProtocol.setValue("Meshtastic");
+            cmbProtocol.setValue(labelForProtocol(ProtocolType.MESHTASTIC));
         }
     }
 
@@ -386,7 +425,7 @@ public class SimpleConnectionForm extends VBox {
     }
 
     private void refreshBleDevices() {
-        lblBleStatus.setText("Сканирование...");
+        lblBleStatus.setText(I18n.t("connection.ble.scanning"));
         BleDeviceDiscoveryService discovery = BleDeviceDiscoveryService.getInstance();
         discovery.setScanProfile(BleProtocolProfile.forProtocol(selectedProtocolType()));
         discovery.addListener(bleDiscoveryListener);
@@ -394,7 +433,7 @@ public class SimpleConnectionForm extends VBox {
         if (!discovery.isScanning()) {
             String errorMessage = discovery.getLastErrorMessage();
             lblBleStatus.setText(errorMessage == null || errorMessage.isBlank()
-                    ? "BLE сканирование не запущено."
+                    ? I18n.t("connection.ble.scanNotStarted")
                     : errorMessage);
             return;
         }
@@ -488,7 +527,7 @@ public class SimpleConnectionForm extends VBox {
 
     private void showSerialAccessStatus(String message) {
         lblSerialStatus.setText(message == null || message.isBlank()
-                ? "Нет доступа к выбранному serial-порту."
+                ? I18n.t("connection.serial.noAccessSelected")
                 : message);
         lblSerialStatus.setStyle("-fx-text-fill: #B45309;");
         lblSerialStatus.setVisible(true);
@@ -533,9 +572,17 @@ public class SimpleConnectionForm extends VBox {
         }
 
         int count = devices.size();
-        lblBleStatus.setText(count == 0
-                ? "Устройства не найдены. Убедитесь, что Bluetooth включён."
-                : "Найдено устройств: " + count);
+        BleDeviceDiscoveryService discovery = BleDeviceDiscoveryService.getInstance();
+        String errorMessage = discovery.getLastErrorMessage();
+        if (!discovery.isScanning() && errorMessage != null && !errorMessage.isBlank()) {
+            lblBleStatus.setText(errorMessage);
+        } else if (count == 0) {
+            lblBleStatus.setText(discovery.isScanning()
+                    ? I18n.t("connection.ble.scanning")
+                    : I18n.t("connection.ble.noDevices"));
+        } else {
+            lblBleStatus.setText(I18n.t("connection.ble.devicesFound", count));
+        }
     }
 
     /**
@@ -650,22 +697,72 @@ public class SimpleConnectionForm extends VBox {
         if (value == null || value.isBlank()) {
             return ProtocolType.MESHTASTIC;
         }
-        return switch (value) {
-            case "Meshtastic" -> ProtocolType.MESHTASTIC;
-            case "MeshCore KISS" -> ProtocolType.MESHCORE_KISS;
-            case "MeshCore Companion" -> ProtocolType.MESHCORE_COMPANION;
-            default -> ProtocolType.MESHTASTIC;
+        for (ProtocolType protocolType : ProtocolType.values()) {
+            if (labelForProtocol(protocolType).equals(value)) {
+                return protocolType;
+            }
+        }
+        return ProtocolType.MESHTASTIC;
+    }
+
+    private SerialModemLineMode selectedSerialModemLineMode() {
+        String value = cmbSerialModemLines == null ? null : cmbSerialModemLines.getValue();
+        if (value == null || value.isBlank()) {
+            return SerialModemLineMode.AUTO;
+        }
+        for (SerialModemLineMode mode : SerialModemLineMode.values()) {
+            if (labelForSerialModemLineMode(mode).equals(value)) {
+                return mode;
+            }
+        }
+        return SerialModemLineMode.AUTO;
+    }
+
+    private ConnectionType selectedConnectionType() {
+        String value = cmbType == null ? null : cmbType.getValue();
+        if (value == null || value.isBlank()) {
+            return ConnectionType.TCP;
+        }
+        for (ConnectionType type : ConnectionType.values()) {
+            if (labelForConnectionType(type).equals(value)) {
+                return type;
+            }
+        }
+        return ConnectionType.TCP;
+    }
+
+    private static String labelForConnectionType(ConnectionType type) {
+        if (type == null) {
+            return I18n.t("connection.type.tcp");
+        }
+        return switch (type) {
+            case TCP -> I18n.t("connection.type.tcp");
+            case SERIAL -> I18n.t("connection.type.serial");
+            case BLE -> I18n.t("connection.type.ble");
         };
     }
 
     private static String labelForProtocol(ProtocolType protocolType) {
         if (protocolType == null) {
-            return "Meshtastic";
+            return I18n.t("connection.protocol.meshtastic");
         }
         return switch (protocolType) {
-            case MESHTASTIC -> "Meshtastic";
-            case MESHCORE_KISS -> "MeshCore KISS";
-            case MESHCORE_COMPANION -> "MeshCore Companion";
+            case MESHTASTIC -> I18n.t("connection.protocol.meshtastic");
+            case MESHCORE_KISS -> I18n.t("connection.protocol.meshcoreKiss");
+            case MESHCORE_COMPANION -> I18n.t("connection.protocol.meshcoreCompanion");
+        };
+    }
+
+    private static String labelForSerialModemLineMode(SerialModemLineMode mode) {
+        if (mode == null) {
+            return I18n.t("connection.serialLine.auto");
+        }
+        return switch (mode) {
+            case AUTO -> I18n.t("connection.serialLine.auto");
+            case DTR_OFF_RTS_OFF -> I18n.t("connection.serialLine.dtrOffRtsOff");
+            case DTR_OFF_RTS_ON -> I18n.t("connection.serialLine.dtrOffRtsOn");
+            case DTR_ON_RTS_OFF -> I18n.t("connection.serialLine.dtrOnRtsOff");
+            case DTR_ON_RTS_ON -> I18n.t("connection.serialLine.dtrOnRtsOn");
         };
     }
 }

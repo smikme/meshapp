@@ -2,6 +2,7 @@ package com.meshtastic.client.modal;
 
 import com.meshtastic.client.MeshApp;
 import com.meshtastic.client.components.CrashReportFlow;
+import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.utils.ExternalUrlLauncher;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
@@ -34,7 +35,7 @@ public class About extends VBox {
         setPadding(new Insets(20, 30, 20, 30));
         setPrefWidth(400);
 
-        Label title = new Label("Клиент для mesh сети Meshtastic");
+        Label title = new Label(I18n.t("about.title"));
         title.getStyleClass().add("hero-title");
 
         // ── О проекте ────────────────────────────────────────────
@@ -47,7 +48,7 @@ public class About extends VBox {
         Label projectName = new Label("MeshApp");
         projectName.getStyleClass().add("item-title");
 
-        Label projectDesc = new Label("Кроссплатформенный desktop-клиент\nдля управления сетями Meshtastic");
+        Label projectDesc = new Label(I18n.t("about.project.description"));
         projectDesc.setWrapText(true);
 
         VBox projectTitleBox = new VBox(2, projectName, projectDesc);
@@ -56,8 +57,8 @@ public class About extends VBox {
         projectHeader.setAlignment(Pos.TOP_LEFT);
 
         Hyperlink siteLink = createLink("meshapp.ru", "https://meshapp.ru");
-        Hyperlink codeLink = createLink("Исходный код", "https://git.privatepractice.app/covox/meshapp");
-        Hyperlink issuesLink = createLink("Багтрекер", "https://git.privatepractice.app/covox/meshapp/issues");
+        Hyperlink codeLink = createLink(I18n.t("about.link.source"), "https://git.privatepractice.app/covox/meshapp");
+        Hyperlink issuesLink = createLink(I18n.t("about.link.issues"), "https://git.privatepractice.app/covox/meshapp/issues");
 
         HBox linksRow = new HBox(12, siteLink, codeLink, issuesLink);
         linksRow.setAlignment(Pos.CENTER_LEFT);
@@ -69,7 +70,7 @@ public class About extends VBox {
         partnerBox.setPadding(new Insets(10));
         partnerBox.setStyle(BORDER_STYLE);
 
-        Label partnerTitle = new Label("Партнёр проекта");
+        Label partnerTitle = new Label(I18n.t("about.partner.title"));
         partnerTitle.getStyleClass().add("section-title");
 
         ImageView partnerLogo = new ImageView(
@@ -79,10 +80,10 @@ public class About extends VBox {
         partnerLogo.setPreserveRatio(true);
         partnerLogo.setSmooth(true);
 
-        Label partnerName = new Label("OneMesh — Карта Meshtastic");
+        Label partnerName = new Label(I18n.t("about.partner.name"));
         partnerName.getStyleClass().add("section-title");
 
-        Label partnerDesc = new Label("Интерактивная карта устройств Meshtastic в России");
+        Label partnerDesc = new Label(I18n.t("about.partner.description"));
         partnerDesc.setWrapText(true);
 
         Hyperlink partnerLink = createLink("map.onemesh.ru", "https://map.onemesh.ru/");
@@ -99,7 +100,7 @@ public class About extends VBox {
         sysInfo.setPadding(new Insets(10));
         sysInfo.setStyle(BORDER_STYLE);
 
-        Label sysTitle = new Label("Системная информация");
+        Label sysTitle = new Label(I18n.t("about.system.title"));
         sysTitle.getStyleClass().add("section-title");
 
         String version = MeshApp.APPLICATION_VERSION;
@@ -108,12 +109,12 @@ public class About extends VBox {
         String system = System.getProperty("os.name") + " " + System.getProperty("os.arch")
                 + " - v" + System.getProperty("os.version");
 
-        Label sysVersion = new Label("Version: " + version);
-        Label sysBuild = new Label("Build: " + build);
-        Label sysJava = new Label("Java: " + java);
-        Label sysOs = new Label("System: " + system);
+        Label sysVersion = new Label(I18n.t("about.system.version", version));
+        Label sysBuild = new Label(I18n.t("about.system.build", build));
+        Label sysJava = new Label(I18n.t("about.system.java", java));
+        Label sysOs = new Label(I18n.t("about.system.os", system));
 
-        Label memTitle = new Label("Память:");
+        Label memTitle = new Label(I18n.t("about.memory.title"));
         MemoryBar memoryBar = new MemoryBar();
 
         sysInfo.getChildren().addAll(sysTitle, sysVersion, sysBuild, sysJava, sysOs, memTitle, memoryBar);
@@ -122,13 +123,13 @@ public class About extends VBox {
         reportBox.setPadding(new Insets(10));
         reportBox.setStyle(BORDER_STYLE);
 
-        Label reportTitle = new Label("Поддержка");
+        Label reportTitle = new Label(I18n.t("about.support.title"));
         reportTitle.getStyleClass().add("section-title");
 
-        Label reportDesc = new Label("Если приложение работает некорректно, отправьте технический лог текущей сессии разработчикам.");
+        Label reportDesc = new Label(I18n.t("about.support.description"));
         reportDesc.setWrapText(true);
 
-        Button reportButton = new Button("Сообщить о проблеме");
+        Button reportButton = new Button(I18n.t("about.support.report"));
         reportButton.getStyleClass().add("report-problem-button");
         reportButton.setMaxWidth(Double.MAX_VALUE);
         reportButton.setOnAction(event -> openProblemReportFlow());

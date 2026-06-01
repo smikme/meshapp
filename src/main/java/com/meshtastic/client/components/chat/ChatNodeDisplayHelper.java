@@ -1,5 +1,6 @@
 package com.meshtastic.client.components.chat;
 
+import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.MessageReaction;
 import com.meshtastic.client.model.MeshMessage;
@@ -27,7 +28,6 @@ final class ChatNodeDisplayHelper {
 
     private static final String DEFAULT_AVATAR_COLOR = "#5B8DEF";
     private static final String OUTGOING_AVATAR_COLOR = "#1EA97C";
-    private static final String SELF_AVATAR_TEXT = "Я";
     private static final String UNKNOWN_AVATAR_TEXT = "?";
     private static final int MAX_AVATAR_TEXT_LENGTH = 4;
     private static final int MIN_NODE_ID_LENGTH = 2;
@@ -85,7 +85,7 @@ final class ChatNodeDisplayHelper {
      */
     static String resolveReplySenderName(DeviceState state, MeshMessage msg) {
         return Optional.ofNullable(msg)
-                .map(message -> message.isOutgoing() ? "Вы" : resolveIncomingSenderName(state, message))
+                .map(message -> message.isOutgoing() ? I18n.t("chat.self") : resolveIncomingSenderName(state, message))
                 .orElse("");
     }
 
@@ -121,7 +121,7 @@ final class ChatNodeDisplayHelper {
     static AvatarDescriptor resolveOutgoingAvatar(DeviceState state) {
         NodeData myNode = state == null ? null : state.getNodeDb().get(state.getMyNodeNum());
         return new AvatarDescriptor(
-                firstNonBlank(myNode != null ? myNode.getShortName() : null, SELF_AVATAR_TEXT),
+                firstNonBlank(myNode != null ? myNode.getShortName() : null, I18n.t("chat.self.avatar")),
                 OUTGOING_AVATAR_COLOR
         );
     }

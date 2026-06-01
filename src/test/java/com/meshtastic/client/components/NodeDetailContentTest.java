@@ -1,11 +1,21 @@
 package com.meshtastic.client.components;
 
 import com.meshtastic.client.TestEnvironmentSupport;
+import com.meshtastic.client.i18n.I18n;
+import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.NodeData;
+import com.meshtastic.client.service.MessageDbService;
 import javafx.application.Platform;
 import javafx.scene.Node;
+import javafx.scene.Parent;
 import javafx.scene.Scene;
+import javafx.scene.control.Button;
 import javafx.scene.control.ContentDisplay;
+import javafx.scene.control.DatePicker;
+import javafx.scene.control.Label;
+import javafx.scene.control.ScrollPane;
+import javafx.scene.control.Tab;
+import javafx.scene.control.TabPane;
 import javafx.scene.control.TableCell;
 import javafx.scene.image.ImageView;
 import javafx.scene.layout.StackPane;
@@ -14,11 +24,16 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.meshtastic.proto.MeshProtos;
 
 import java.nio.file.Path;
+import java.time.LocalDate;
+import java.time.ZoneId;
+import java.util.Objects;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -31,6 +46,7 @@ class NodeDetailContentTest {
 
     @TempDir
     Path tempHome;
+    private String previousLanguage;
 
     @BeforeAll
     static void startJavaFx() {
@@ -41,10 +57,13 @@ class NodeDetailContentTest {
     void setUp() {
         TestEnvironmentSupport.setUserHome(tempHome);
         TestEnvironmentSupport.resetSingletons();
+        previousLanguage = I18n.getLanguageTag();
+        I18n.setLanguageTagForTests(I18n.LANGUAGE_RU);
     }
 
     @AfterEach
     void tearDown() {
+        I18n.setLanguageTagForTests(previousLanguage);
         TestEnvironmentSupport.resetSingletons();
     }
 
@@ -84,19 +103,153 @@ class NodeDetailContentTest {
             root.applyCss();
             root.layout();
 
-            TableCell<?, ?> emojiCell = null;
-            for (Node node : root.lookupAll(".table-cell")) {
-                if (node instanceof TableCell<?, ?> cell && "😻".equals(cell.getText())) {
-                    emojiCell = cell;
-                    break;
-                }
-            }
+            TableCell<?, ?> emojiCell = root.lookupAll(".table-cell").stream()
+                    .filter(TableCell.class::isInstance)
+                    .map(node -> (TableCell<?, ?>) node)
+                    .filter(cell -> "😻".equals(cell.getText()))
+                    .findFirst()
+                    .orElse(null);
 
             assertNotNull(emojiCell);
             assertEquals(ContentDisplay.GRAPHIC_ONLY, emojiCell.getContentDisplay());
             assertTrue(emojiCell.getGraphic() instanceof ImageView);
             return null;
         });
+    }
+
+    @Test
+    void rendersDisabledTracerouteButtonWithoutActiveHandler() {
+        NodeDetailContent content = onFxThread(() -> new NodeDetailContent(null, node("Traceable", 80, 3.95f), null));
+
+        assertTrue(onFxThread(() -> {
+            StackPane root = new StackPane(content);
+            Scene scene = new Scene(root, 900, 600);
+            assertNotNull(scene);
+            root.applyCss();
+            root.layout();
+
+            return root.lookupAll(".drawer-toolbar-button").stream()
+                    .filter(Button.class::isInstance)
+                    .map(Button.class::cast)
+                    .anyMatch(button -> button.getTooltip() != null
+                            && "Traceroute до ноды".equals(button.getTooltip().getText())
+                            && button.isDisabled());
+        }));
+    }
+
+    @Test
+    void tracesTabRendersSavedTraceroutesWithCreationDateTime() {
+        DeviceState state = new DeviceState();
+        state.setMyNodeNum(0x11111111);
+        NodeData target = node("Traceable", 80, 3.95f);
+        long timestamp = 1_775_588_044L;
+        MeshProtos.RouteDiscovery route = MeshProtos.RouteDiscovery.newBuilder()
+                .addSnrTowards(24)
+                .build();
+        MessageDbService.getInstance().saveTracerouteResult(
+                state.getOwnerNodeId(),
+                "",
+                "",
+                "test",
+                "trace-1",
+                0,
+                Integer.toUnsignedLong(target.getNodeNum()),
+                target.getNodeId(),
+                target.getLongName(),
+                target.getNodeNum(),
+                target.getNodeId(),
+                route.toByteArray(),
+                null,
+                timestamp);
+
+        NodeDetailContent content = onFxThread(() -> new NodeDetailContent(state, target, null));
+
+        assertTrue(onFxThread(() -> {
+            StackPane root = new StackPane(content);
+            Scene scene = new Scene(root, 900, 600);
+            EmojiRenderingSupport.install(scene);
+            root.applyCss();
+            root.layout();
+
+            TabPane tabPane = findFirst(root, TabPane.class);
+            assertNotNull(tabPane);
+            Tab tracesTab = tabPane.getTabs().stream()
+                    .filter(tab -> "Трейсы".equals(tab.getText()))
+                    .findFirst()
+                    .orElseThrow();
+            tabPane.getSelectionModel().select(tracesTab);
+            root.applyCss();
+            root.layout();
+
+            String expectedCreatedAt = "Создан: " + NodeTracerouteHistoryPanel.formatTraceTimestamp(timestamp);
+            boolean hasDateTime = root.lookupAll(".node-trace-created-label").stream()
+                    .filter(Label.class::isInstance)
+                    .map(Label.class::cast)
+                    .anyMatch(label -> expectedCreatedAt.equals(label.getText()));
+            boolean hasTraceBubble = !root.lookupAll(".chat-bubble-system").isEmpty();
+            boolean hasMapButton = root.lookupAll(".node-trace-map-button").stream()
+                    .filter(Button.class::isInstance)
+                    .map(Button.class::cast)
+                    .anyMatch(button -> button.getTooltip() != null
+                            && "Показать трейс на карте".equals(button.getTooltip().getText()));
+            boolean hasDateFilter = findFirst(root, DatePicker.class) != null;
+            return hasDateTime && hasTraceBubble && hasMapButton && hasDateFilter;
+        }));
+    }
+
+    @Test
+    void tracesTabLoadsPagesDynamicallyAndFiltersByDate() {
+        DeviceState state = new DeviceState();
+        state.setMyNodeNum(0x11111111);
+        NodeData target = node("Traceable", 80, 3.95f);
+        MeshProtos.RouteDiscovery route = MeshProtos.RouteDiscovery.newBuilder()
+                .addSnrTowards(24)
+                .build();
+        LocalDate mainDate = LocalDate.of(2026, 5, 30);
+        LocalDate otherDate = mainDate.minusDays(1);
+        long mainStart = mainDate.atStartOfDay(ZoneId.systemDefault()).toEpochSecond();
+        long otherStart = otherDate.atStartOfDay(ZoneId.systemDefault()).toEpochSecond();
+        for (int i = 0; i < 25; i++) {
+            saveTrace(state, target, route, mainStart + i, "main-" + i);
+        }
+        saveTrace(state, target, route, otherStart, "other-date");
+
+        NodeDetailContent content = onFxThread(() -> new NodeDetailContent(state, target, null));
+
+        assertTrue(onFxThread(() -> {
+            StackPane root = new StackPane(content);
+            Scene scene = new Scene(root, 900, 600);
+            EmojiRenderingSupport.install(scene);
+            root.applyCss();
+            root.layout();
+
+            TabPane tabPane = findFirst(root, TabPane.class);
+            assertNotNull(tabPane);
+            tabPane.getSelectionModel().select(tabPane.getTabs().stream()
+                    .filter(tab -> "Трейсы".equals(tab.getText()))
+                    .findFirst()
+                    .orElseThrow());
+            root.applyCss();
+            root.layout();
+
+            boolean firstPageHasTwentyRecords = traceRecordCount(root) == 20;
+
+            ScrollPane scrollPane = (ScrollPane) root.lookup(".node-trace-history-scroll");
+            assertNotNull(scrollPane);
+            scrollPane.setVvalue(1.0);
+            root.applyCss();
+            root.layout();
+            boolean scrollLoadedSecondPage = traceRecordCount(root) == 26;
+
+            DatePicker datePicker = findFirst(root, DatePicker.class);
+            assertNotNull(datePicker);
+            datePicker.setValue(otherDate);
+            root.applyCss();
+            root.layout();
+            boolean dateFilterShowsOnlySelectedDay = traceRecordCount(root) == 1;
+
+            return firstPageHasTwentyRecords && scrollLoadedSecondPage && dateFilterShowsOnlySelectedDay;
+        }));
     }
 
     private static NodeData node(String longName, int battery, float voltage) {
@@ -115,6 +268,32 @@ class NodeDetailContentTest {
         node.setUnmessagable(Boolean.FALSE);
         node.setLastHeard(1_775_588_044);
         return node;
+    }
+
+    private static void saveTrace(DeviceState state,
+                                  NodeData target,
+                                  MeshProtos.RouteDiscovery route,
+                                  long timestamp,
+                                  String requestId) {
+        MessageDbService.getInstance().saveTracerouteResult(
+                state.getOwnerNodeId(),
+                "",
+                "",
+                "test",
+                requestId,
+                0,
+                Integer.toUnsignedLong(target.getNodeNum()),
+                target.getNodeId(),
+                target.getLongName(),
+                target.getNodeNum(),
+                target.getNodeId(),
+                route.toByteArray(),
+                null,
+                timestamp);
+    }
+
+    private static long traceRecordCount(Node root) {
+        return root.lookupAll(".node-trace-record").size();
     }
 
     private static <T> T onFxThread(FxSupplier<T> supplier) {
@@ -153,5 +332,21 @@ class NodeDetailContentTest {
     @FunctionalInterface
     private interface FxSupplier<T> {
         T get() throws Exception;
+    }
+
+    private static <T> T findFirst(Node root, Class<T> type) {
+        return Stream.concat(
+                        type.isInstance(root) ? Stream.of(type.cast(root)) : Stream.empty(),
+                        childNodes(root)
+                                .map(child -> findFirst(child, type))
+                                .filter(Objects::nonNull))
+                .findFirst()
+                .orElse(null);
+    }
+
+    private static Stream<Node> childNodes(Node root) {
+        return root instanceof Parent parent
+                ? parent.getChildrenUnmodifiable().stream()
+                : Stream.empty();
     }
 }

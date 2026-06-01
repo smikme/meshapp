@@ -40,7 +40,7 @@ public class FormChat extends FormChatData {
             suspendScrollStateSync();
             try {
                 requestMessageViewportLayout();
-                refreshLoadedMessageRows();
+                refreshLoadedMessageRows(true);
                 ChatScrollState savedState = getSavedScrollState(selectedChat);
                 if (savedState != null) {
                     if (savedState.atBottom()) {

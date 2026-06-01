@@ -5,8 +5,8 @@
 <h1 align="center">MeshApp</h1>
 
 <p align="center">
-  Кросс-платформенный десктопный клиент для mesh-сети
-  <a href="https://meshtastic.org">Meshtastic</a> и MeshCore
+  Cross-platform desktop client for the
+  <a href="https://meshtastic.org">Meshtastic</a> and MeshCore mesh networks
   <br/>
   <b>Java 25 &nbsp;·&nbsp; JavaFX &nbsp;·&nbsp; Protobuf &nbsp;·&nbsp; LoRa</b>
 </p>
@@ -23,25 +23,23 @@
 
 <div align="right">
 
-
+<strong>English</strong> | <a href="README.ru.md">Русский</a>
 
 </div>
 
 ---
 
+## About
 
+**MeshApp** is a full-featured cross-platform desktop client for [Meshtastic](https://meshtastic.org) and MeshCore. It works over **TCP**, **Serial / USB** and **BLE** and is designed for device management, messaging, network monitoring and radio module configuration from Windows, macOS and Linux PCs.
 
-## О проекте
+The codebase supports multiple communication protocols: the transport layer is separated from protocol runtimes. MeshApp currently includes **Meshtastic**, the **MeshCore KISS** runtime over TCP/Serial byte streams, and the **MeshCore Companion Protocol** runtime for BLE and raw TCP/Serial byte streams. New connections use Meshtastic by default; MeshCore is selected explicitly in the connection form.
 
-**MeshApp** — полнофункциональный кроссплатформенный десктопный клиент для [Meshtastic](https://meshtastic.org) и MeshCore, работающий по **TCP**, **Serial / USB** и **BLE**. Приложение предназначено для управления устройствами, обмена сообщениями, мониторинга сети и редактирования конфигурации радиомодулей с ПК на Windows, macOS и Linux.
+Meshtastic is an open project that turns inexpensive LoRa modules into decentralized mesh-network nodes. Messages can travel from hundreds of meters to tens of kilometers without internet access, cellular towers or any other infrastructure.
 
-Кодовая база поддерживает несколько коммуникационных протоколов: транспортный слой отделён от протокольного runtime-а. Сейчас реализованы **Meshtastic**, runtime **MeshCore KISS** поверх TCP/Serial byte stream и runtime **MeshCore Companion Protocol** для BLE и raw TCP/Serial byte stream; новые подключения по умолчанию используют Meshtastic, а MeshCore выбирается явно в форме подключения.
+MeshCore is a lightweight mesh protocol for LoRa and other packet-radio devices. MeshApp supports **MeshCore KISS modem** mode for TCP/Serial and **MeshCore Companion Protocol** for BLE, TCP and Serial endpoints that provide raw Companion packets.
 
-Meshtastic — открытый проект, превращающий недорогие LoRa-модули в узлы децентрализованной mesh-сети. Сообщения передаются на расстояние от сотен метров до десятков километров — без интернета, вышек сотовой связи и какой-либо инфраструктуры.
-
-MeshCore — лёгкий mesh-протокол для LoRa и других packet-radio устройств. В MeshApp поддержаны режим **MeshCore KISS modem** для TCP/Serial и **MeshCore Companion Protocol** для BLE, TCP и Serial endpoint-ов, которые передают raw Companion packets.
-
-```
+```text
                      +------------------------------------------------------+
                      |                       MeshApp                         |
                      |                                                      |
@@ -59,329 +57,417 @@ MeshCore — лёгкий mesh-протокол для LoRa и других pack
 
 ---
 
-## Новые возможности
+## What's New
 
-- **Архитектура под несколько протоколов** — транспортный слой (`TCP`, `Serial`, `BLE`) отделён от протокольных адаптеров; Meshtastic, MeshCore KISS и MeshCore Companion вынесены в отдельные runtime-ы
-- **Явный выбор протокола** — новые подключения по умолчанию используют Meshtastic; MeshCore KISS и MeshCore Companion выбираются в профиле подключения
-- **MeshCore Companion в основных экранах** — Chat, Nodes, DM, Dashboard, Settings и LoRa Monitor используют общий `DeviceState` bridge для MeshCore Companion Protocol
-- **Команды в поле ввода** — `@tracebot` и `@infobot` с автодополнением по нодам для быстрого `Traceroute` и запроса `NodeInfo`
-- **Оповещения по чатам** — mute/unmute отдельно для каждого канала и личного диалога, с сохранением настройки локально
-- **Crash / problem reporting** — предложение отправить лог после аварийного завершения и ручная отправка отчёта из окна помощи
-- **Мониторинг LoRa-пакетов** — отдельное окно live-захвата с фильтрами по направлению, типу, диапазону даты/времени, поиском, HEX / ASCII предпросмотром и экспортом в текст/JSON
-- **Синхронизация времени с ПК** — установка текущего времени на радио с обновлением GMT при необходимости
-- **Очистка локальной БД** — полный сброс сообщений, реакций, кэша нод, телеметрии и журнала LoRa-пакетов из интерфейса
-- **Расширенный редактор конфигурации** — человекочитаемый ввод IPv4, node ID, hex-значений и bitmask-полей, плюс поэлементное редактирование repeated-полей
-
----
-
-## Возможности
-
-### Chat и обмен сообщениями
-
-<p align="center">
-  <img src="docs/screenshots/chat-b.png" width="49%" alt="Chat — тёмная тема"/>
-  <img src="docs/screenshots/chat-w.png" width="49%" alt="Chat — светлая тема"/>
-</p>
-
-- **Многоканальный чат** — отправка и приём сообщений в нескольких mesh-каналах
-- **Личные сообщения** — приватная переписка с отдельными узлами
-- **Ответы на сообщения** — цитирование с контекстом
-- **Реакции на сообщения** — быстрые emoji-реакции с сохранением и отслеживанием статуса доставки
-- **Статусы доставки** — ACK/NAK отслеживание отправленных сообщений
-- **Traceroute** — визуализация маршрута до любого узла сети
-- **Запрос NodeInfo** — получение актуальных данных об узле по запросу
-- **Команды `@tracebot` и `@infobot`** — запуск traceroute и запроса информации прямо из строки ввода с подсказками по имени и `!nodeid`
-- **Управление каналами** — создание secondary-каналов и редактирование имени, PSK, uplink/downlink и точности публикации позиции
-- **Emoji** — встроенный выбор эмодзи
-- **Счётчик непрочитанных** — бейджи на каждом чате
-- **Оповещения по чатам** — включение и отключение уведомлений отдельно для каждого канала и DM через иконку звонка и контекстное меню
-- **История** — полная история сообщений с поиском, хранится в локальной БД
-- **Локальная очистка истории** — удаление отдельных сообщений и целых чатов из встроенной базы
+- **Multi-protocol architecture**: the transport layer (`TCP`, `Serial`, `BLE`) is separated from protocol adapters; Meshtastic, MeshCore KISS and MeshCore Companion have independent runtimes.
+- **Explicit protocol selection**: new connections use Meshtastic by default; MeshCore KISS and MeshCore Companion are selected in the connection profile.
+- **MeshCore Companion in main screens**: Chat, Nodes, direct messages, Telemetry, Settings and LoRa Packets use a shared `DeviceState` bridge for MeshCore Companion Protocol.
+- **Connection profile autostart**: selected connections can be established automatically when the application starts.
+- **Maps and trace history**: saved traceroute results are available from the node tab and can be opened on the map.
+- **MeshApp IDE**: Lua scripts, script store, import/export, autostart, KV storage, editor and debugger are built into the app.
+- **Input commands**: `@tracebot` and `@infobot` include node autocompletion for quick `Traceroute` and `NodeInfo` requests.
+- **Chat notifications**: mute/unmute per channel and DM, saved locally.
+- **Crash / problem reporting**: MeshApp can offer to send a log after a crash or send a manual report from the Help window.
+- **LoRa packet monitoring**: a live capture window with direction/type/date-time filters, search, HEX / ASCII preview and JSON/CSV export.
+- **PC time synchronization**: set the current radio time from the PC clock and update GMT when needed.
+- **Local database cleanup**: reset messages, reactions, node cache, telemetry and the LoRa packet journal from the UI.
+- **Advanced configuration editor**: human-readable editors for IPv4, node IDs, hex values and bitmask fields, plus per-item editing for repeated fields.
 
 ---
 
-### Узлы сети
+## Features
+
+### Chat and Messaging
 
 <p align="center">
-  <img src="docs/screenshots/nodes-b.png" width="49%" alt="Узлы — тёмная тема"/>
-  <img src="docs/screenshots/nodes-w.png" width="49%" alt="Узлы — светлая тема"/>
+  <img src="docs/screenshots/chat-b.png" width="49%" alt="Chat - dark theme"/>
+  <img src="docs/screenshots/chat-w.png" width="49%" alt="Chat - light theme"/>
 </p>
 
-- **Гибкая сортировка и фильтры** — последний отклик, дистанция, SNR, хопы, канал, избранные, игнорируемые, прямые и офлайн-ноды
-- **Поиск** по имени, короткому имени, ID или числовому адресу
-- **Детальная карточка узла** — железо, роль, координаты, прошивка, SNR/RSSI и график телеметрии
-- **Быстрые действия** — открыть приватный чат, запросить свежий NodeInfo, удалить узел из локального списка
-- **Избранные и игнорируемые узлы** — локальное хранение и синхронизация статуса с устройством
-- **Кэширование узлов** — локальная база с пагинацией
+- **Multi-channel chat**: send and receive messages in several mesh channels.
+- **Direct messages**: private conversations with individual nodes.
+- **Replies**: quote messages with context.
+- **Message reactions**: quick emoji reactions with persistence and delivery tracking.
+- **Delivery status**: ACK/NAK tracking for sent messages.
+- **Traceroute**: visualize routes to network nodes and save successful results.
+- **NodeInfo request**: request current node data on demand.
+- **`@tracebot` and `@infobot` commands**: run traceroute and node-info requests directly from the input line with suggestions by name and `!nodeid`.
+- **Channel management**: create secondary channels and edit name, PSK, uplink/downlink and position precision.
+- **Emoji**: built-in emoji picker.
+- **Unread counter**: badges for every chat.
+- **Chat notifications**: enable or disable notifications per channel and DM through the bell icon and context menu.
+- **History**: searchable full message history stored in the local database.
+- **Local history cleanup**: delete individual messages and entire chats from the embedded database.
 
 ---
 
-### Телеметрия и мониторинг
+### Network Nodes
 
 <p align="center">
-  <img src="docs/screenshots/telemetry-b.png" width="49%" alt="Телеметрия — тёмная тема"/>
-  <img src="docs/screenshots/telemetry-w.png" width="49%" alt="Телеметрия — светлая тема"/>
+  <img src="docs/screenshots/nodes-b.png" width="49%" alt="Nodes - dark theme"/>
+  <img src="docs/screenshots/nodes-w.png" width="49%" alt="Nodes - light theme"/>
 </p>
 
-- **Дашборд устройства** — отдельный экран со вкладками «Графики» и «Данные»
-- **Графики в реальном времени** — батарея, напряжение, загрузка канала, Air Util TX
-- **Фильтрация по периодам** — от 1 часа до всей истории
-- **Агрегация данных** — автоматическое усреднение для плавных кривых
-- **Таблица телеметрии** — детализированные записи с временными метками
-- **Расширенные метрики** — Good RX, Bad RX, Dupe RX, TX, Dropped, Relayed, RSSI, SNR и hop-данные
-- **Ленивая подгрузка журнала** — догрузка длинной истории при прокрутке
+- **Flexible sorting and filters**: last heard time, distance, SNR, hops, channel, favorites, ignored nodes, direct nodes and offline nodes.
+- **Search** by name, short name, ID or numeric address.
+- **Detailed node card**: hardware, role, coordinates, firmware, SNR/RSSI and telemetry chart.
+- **Quick actions**: open private chat, run traceroute, request fresh NodeInfo or remove a node from the local list.
+- **Traces tab**: traceroute history for the selected node with creation date, date filter and lazy loading on scroll.
+- **Open trace on map**: each saved trace can be opened in the map form through the map icon.
+- **Favorite and ignored nodes**: local storage and synchronization with the device.
+- **Node caching**: local database with pagination.
 
 ---
 
-### Подключения
+### Maps
+
+- **OSM node map**: display current and cached nodes with coordinates.
+- **Online and offline tiles**: network OSM tiles, local cache and selected `z/x/y.png|jpg|jpeg` directory.
+- **Search and filters**: search nodes, filter unknown/offline/favorite/direct/ignored nodes.
+- **Navigation**: jump to own node, fit all nodes with coordinates, zoom and use night map mode.
+- **Measurements**: measure distance between points and select a rectangular area.
+- **Area download**: download tiles for a selected area with progress, pause and cancel.
+- **Trace visualization**: select recent saved traceroute results and overlay one or more routes on the map.
+
+---
+
+### Telemetry and Monitoring
 
 <p align="center">
-  <img src="docs/screenshots/connections-b.png" width="49%" alt="Подключения — тёмная тема"/>
-  <img src="docs/screenshots/connections-w.png" width="49%" alt="Подключения — светлая тема"/>
+  <img src="docs/screenshots/telemetry-b.png" width="49%" alt="Telemetry - dark theme"/>
+  <img src="docs/screenshots/telemetry-w.png" width="49%" alt="Telemetry - light theme"/>
 </p>
 
-- **TCP, Serial / USB и BLE** — подключение по сети, через COM/tty-порт или Bluetooth LE
-- **Отдельные transport и protocol слои** — подключение открывает низкоуровневый transport и запускает runtime выбранного в профиле протокола
-- **Поиск устройств** — автопоиск serial-портов и BLE-сканирование Meshtastic/MeshCore-устройств
-- **Профили подключений** — сохранение адресов, портов и BLE-устройств для быстрого повторного подключения
-- **Одно активное подключение** — в каждый момент времени приложение работает с одним выбранным устройством
-- **BLE-сопряжение** — passkey/pairing flow, когда этого требует устройство или платформа
-- **Автообмен конфигурацией** — автоматическое получение параметров устройства при подключении
-- **Автопереподключение** — повторные попытки восстановления соединения после разрыва
-- **Надёжный Serial для USB-UART мостов** — корректная работа с CH340/CP210x/FTDI, чтобы не провоцировать лишний reset ESP32; отдельная совместимость для Windows + Silicon Labs / CP210x
+- **Device dashboard**: a dedicated screen with Charts and Data tabs.
+- **Real-time charts**: battery, voltage, channel utilization and Air Util TX.
+- **Period filters**: from 1 hour to the full history.
+- **Data aggregation**: automatic averaging for smoother curves.
+- **Telemetry table**: detailed records with timestamps.
+- **Advanced metrics**: Good RX, Bad RX, Dupe RX, TX, Dropped, Relayed, RSSI, SNR and hop data.
+- **Lazy log loading**: long histories are loaded while scrolling.
+
+---
+
+### Connections
+
+<p align="center">
+  <img src="docs/screenshots/connections-b.png" width="49%" alt="Connections - dark theme"/>
+  <img src="docs/screenshots/connections-w.png" width="49%" alt="Connections - light theme"/>
+</p>
+
+- **TCP, Serial / USB and BLE**: connect over the network, a COM/tty port or Bluetooth LE.
+- **Separate transport and protocol layers**: a connection opens a low-level transport and starts the runtime of the protocol selected in the profile.
+- **Device discovery**: serial-port discovery and BLE scanning for Meshtastic/MeshCore devices.
+- **Connection profiles**: store addresses, ports and BLE devices for quick reconnects.
+- **Autoconnect**: profile flag that starts the connection automatically when the app launches; disabled by default.
+- **Single active connection**: the app works with one selected device at a time.
+- **BLE pairing**: passkey/pairing flow when required by the device or platform.
+- **Automatic configuration exchange**: device parameters are fetched automatically on connect.
+- **Automatic reconnect**: retry recovery after disconnects.
+- **Serial DTR/RTS setup**: select modem-line mode for USB-UART adapters.
+- **Reliable Serial for USB-UART bridges**: works with CH340/CP210x/FTDI without causing unnecessary ESP32 resets; includes separate compatibility handling for Windows + Silicon Labs / CP210x.
 
 #### MeshCore
 
-Текущая MeshCore-интеграция в MeshApp поддерживает **MeshCore KISS modem protocol** поверх **Serial / USB** или **TCP**, а также **MeshCore Companion Protocol** поверх **BLE**, **TCP** и **Serial**. Для новых профилей по умолчанию выбран Meshtastic; для MeshCore нужно явно выбрать `MeshCore KISS` или `MeshCore Companion` в поле протокола.
+The current MeshCore integration in MeshApp supports **MeshCore KISS modem protocol** over **Serial / USB** or **TCP**, and **MeshCore Companion Protocol** over **BLE**, **TCP** and **Serial**. New profiles use Meshtastic by default; to use MeshCore, explicitly select `MeshCore KISS` or `MeshCore Companion` in the protocol field.
 
-MeshCore Companion не использует KISS framing. Для BLE используется service `6E400001-B5A3-F393-E0A9-E50E24DCCA9E`, RX characteristic `6E400002-B5A3-F393-E0A9-E50E24DCCA9E` и TX notifications `6E400003-B5A3-F393-E0A9-E50E24DCCA9E`. Для TCP/Serial поддерживаются endpoint-ы, которые передают raw Companion packets без KISS-обёртки.
+MeshCore Companion does not use KISS framing. BLE uses service `6E400001-B5A3-F393-E0A9-E50E24DCCA9E`, RX characteristic `6E400002-B5A3-F393-E0A9-E50E24DCCA9E` and TX notifications `6E400003-B5A3-F393-E0A9-E50E24DCCA9E`. TCP/Serial endpoints are supported when they provide raw Companion packets without a KISS wrapper.
 
-Что уже поддерживается:
+Currently supported:
 
-- стандартное KISS-фреймирование (`FEND`, `FESC`, escape-последовательности) для TCP/Serial byte stream
-- явный выбор `MESHCORE_KISS` в форме подключения
-- чтение базовых metadata через MeshCore `SetHardware`: имя устройства, версия, identity, radio parameters, TX power, battery, stats, RSSI/SNR metadata и TX status
-- BLE-профиль MeshCore Companion с отдельными RX/TX UUID, подпиской на TX notifications и `APP_START` handshake
-- `FrameFormat.MESHCORE_COMPANION` для TCP/Serial raw Companion packets
-- чтение Companion metadata: self-info, public key, имя устройства, device info и battery/storage packet
-- синхронизация MeshCore contacts и channel info в общий список Nodes/Chat
-- входящие channel messages и DM из очереди Companion Protocol
-- отправка channel messages и DM через MeshCore Companion Protocol
-- read-only MeshCore metadata в Settings
-- raw MeshCore Companion packets в LoRa Monitor
-- отображение фактически выбранного протокола в карточке подключения
+- standard KISS framing (`FEND`, `FESC`, escape sequences) for TCP/Serial byte streams
+- explicit `MESHCORE_KISS` selection in the connection form
+- basic metadata through MeshCore `SetHardware`: device name, version, identity, radio parameters, TX power, battery, stats, RSSI/SNR metadata and TX status
+- BLE MeshCore Companion profile with separate RX/TX UUIDs, subscription to TX notifications and `APP_START` handshake
+- `FrameFormat.MESHCORE_COMPANION` for TCP/Serial raw Companion packets
+- Companion metadata: self-info, public key, device name, device info and battery/storage packet
+- MeshCore contacts and channel info synchronized into the shared Nodes/Chat state
+- incoming channel messages and DMs from the Companion Protocol queue
+- outgoing channel messages and DMs through MeshCore Companion Protocol
+- read-only MeshCore metadata in Settings
+- raw MeshCore Companion packets in LoRa Packets
+- active protocol display in the connection card
 
-Текущие ограничения:
+Current limitations:
 
-- MeshCore KISS поддерживается только для TCP/Serial; MeshCore Companion по TCP/Serial требует endpoint, который действительно отдаёт raw Companion packets
-- MeshCore KISS остаётся modem/metadata-интеграцией; application workflow реализован через MeshCore Companion Protocol
-- для MeshCore Companion недоступны Meshtastic-only функции: Admin protobuf save-flow, reactions, traceroute и Meshtastic bot-команды
+- MeshCore KISS is TCP/Serial only; MeshCore Companion over TCP/Serial requires an endpoint that really provides raw Companion packets.
+- MeshCore KISS remains a modem/metadata integration; application workflows are implemented through MeshCore Companion Protocol.
+- MeshCore Companion does not support Meshtastic-only features: Admin protobuf save-flow, reactions, traceroute and Meshtastic bot commands.
 
-Подробности вынесены в [docs/meshcore-support.md](docs/meshcore-support.md).
-
----
-
-### Конфигурация устройства
-
-<p align="center">
-  <img src="docs/screenshots/settings-b.png" width="49%" alt="Настройки — тёмная тема"/>
-  <img src="docs/screenshots/settings-w.png" width="49%" alt="Настройки — светлая тема"/>
-</p>
-
-- **Редактирование параметров** — полное управление настройками LoRa-модуля через древовидный интерфейс
-- **Имя узла** — установка Long Name (40 символов) и Short Name (4 символа)
-- **Атомарное сохранение** — транзакционный механизм begin/commit для групповых изменений
-- **Все модули** — настройка Device, LoRa, Position, Power, Network, Bluetooth, Display и других модулей
-- **Человекочитаемые редакторы полей** — IPv4-адреса, node ID, hex-значения и bitmask-поля редактируются без ручного пересчёта protobuf-значений
-- **Repeated-поля как отдельные слоты** — списки вроде `admin_key` и `ignore_incoming` можно добавлять, удалять и править поэлементно
-- **Синхронизация времени с ПК** — установка времени на ноде из системных часов компьютера с обновлением GMT и повторной синхронизацией после переподключения, если нужен reboot
-- **Snapshot-файлы конфигурации** — экспорт и импорт полной конфигурации в формате `.mcf`
-- **Шаблоны конфигурации** — экспорт и импорт обезличенных шаблонов `.mtp` без персональных и секретных полей
-- **Очистка локальной базы данных** — полный сброс встроенной H2-базы с удалением сообщений, реакций, телеметрии, кэша нод и журнала пакетов
-- **Управление питанием устройства** — перезапуск и выключение оборудования из интерфейса
+Details are available in [docs/meshcore-support.md](docs/meshcore-support.md).
 
 ---
 
-### Диагностика и логирование
+### Device Configuration
 
 <p align="center">
-  <img src="docs/screenshots/logs-b.png" width="49%" alt="Логи — тёмная тема"/>
-  <img src="docs/screenshots/logs-w.png" width="49%" alt="Логи — светлая тема"/>
+  <img src="docs/screenshots/settings-b.png" width="49%" alt="Settings - dark theme"/>
+  <img src="docs/screenshots/settings-w.png" width="49%" alt="Settings - light theme"/>
 </p>
 
-- **Встроенные логи** — просмотр отладочной информации с цветовой кодировкой по уровню
-- **Управление логами** — пауза/возобновление автопрокрутки, копирование, очистка и экспорт в `.log`
-- **Мониторинг LoRa-пакетов** — отдельное окно live-захвата входящих и исходящих mesh-пакетов
-- **Управление захватом** — запуск, остановка и полная очистка накопленного журнала пакетов
-- **Фильтры и поиск** — отбор по направлению, типу, диапазону даты/времени, узлам и payload, плюс пагинация для длинных журналов
-- **HEX / ASCII и дерево пакета** — просмотр сырых байт, protobuf-структуры и подсветка выбранных полей
-- **Экспорт пакетов** — копирование и сохранение выбранного пакета в текстовом виде или protobuf-style JSON
-- **Отчёты о сбоях и проблемах** — отправка технического лога разработчикам после crash или вручную из окна «Помощь»
+- **Parameter editing**: full LoRa module configuration through a tree interface.
+- **Node name**: set Long Name (40 characters) and Short Name (4 characters).
+- **Atomic save**: transactional begin/commit mechanism for grouped changes.
+- **All modules**: configure Device, LoRa, Position, Power, Network, Bluetooth, Display and other modules.
+- **Human-readable field editors**: IPv4 addresses, node IDs, hex values and bitmask fields can be edited without manually recalculating protobuf values.
+- **Repeated fields as slots**: lists such as `admin_key` and `ignore_incoming` can be added, removed and edited item by item.
+- **PC time synchronization**: set node time from the computer clock, update GMT and resynchronize after reconnect when reboot is required.
+- **Configuration snapshots**: export and import full configuration as `.mcf`.
+- **Configuration templates**: export and import depersonalized `.mtp` templates without personal or secret fields.
+- **Local database cleanup**: reset the embedded H2 database, deleting messages, reactions, telemetry, node cache and packet journal.
+- **Device power management**: restart and shut down hardware from the UI.
+
+---
+
+### Diagnostics and Logging
+
+<p align="center">
+  <img src="docs/screenshots/logs-b.png" width="49%" alt="Logs - dark theme"/>
+  <img src="docs/screenshots/logs-w.png" width="49%" alt="Logs - light theme"/>
+</p>
+
+- **Built-in logs**: view debug information with level coloring.
+- **Log controls**: pause/resume autoscroll, copy, clear and export to `.log`.
+- **LoRa packet monitor**: separate live-capture window for incoming and outgoing mesh packets.
+- **Capture controls**: start, stop and clear the accumulated packet journal.
+- **Filters and search**: filter by direction, type, date/time range, nodes and payload, with pagination for long logs.
+- **HEX / ASCII and packet tree**: inspect raw bytes, protobuf structure and highlighted selected fields.
+- **Packet export**: copy or save the selected packet as text or protobuf-style JSON, and export the whole filtered set as JSON or CSV.
+- **Crash and problem reports**: send technical logs to developers after a crash or manually from the Help window.
 
 #### LoRa Debug
 
 <p align="center">
-  <img src="docs/screenshots/loradebug-b.png" width="49%" alt="LoRa Debug — тёмная тема"/>
-  <img src="docs/screenshots/loradebug-w.png" width="49%" alt="LoRa Debug — светлая тема"/>
+  <img src="docs/screenshots/loradebug-b.png" width="49%" alt="LoRa Debug - dark theme"/>
+  <img src="docs/screenshots/loradebug-w.png" width="49%" alt="LoRa Debug - light theme"/>
 </p>
 
-`LoRa Debug` помогает разбирать реальный mesh-трафик на уровне отдельных пакетов. Окно показывает входящие, исходящие и внутренние `MeshPacket`, позволяет быстро отфильтровать журнал по направлению, типу сообщения и содержимому, а выбранный тип фильтра сохраняется при обновлении списка доступных типов.
+`LoRa Debug` helps inspect real mesh traffic at the individual-packet level. The window shows incoming, outgoing and internal `MeshPacket` records, lets you filter the journal by direction, message type and content, and keeps the selected type filter when the available type list is refreshed.
 
-Инструмент полезен для диагностики доставки сообщений, проверки `NodeInfo` / `Telemetry` / `Position` пакетов, анализа `MQTT proxy` трафика и просмотра сырых protobuf-данных через HEX / ASCII предпросмотр и дерево структуры пакета.
-
----
-
-### Интерфейс
-
-- **Тёмная и светлая тема** — AtlantaFX Cupertino
-- **Нативное оформление окна** — эффект Mica (Windows 11), vibrancy (macOS)
-- **Кастомный titlebar** — кнопки управления окном в стиле платформы
-- **Боковая панель** — быстрая навигация между разделами
-- **Системный трей / status item** — сворачивание в трей, восстановление окна и выход из приложения
-- **Системные уведомления** — нативные OS-уведомления для входящих сообщений с подавлением при активном открытом чате
-- **Переключатели в боковой панели** — быстрое переключение темы и уведомлений без захода в настройки
-- **Проверка обновлений** — опциональная проверка новой версии при запуске
-- **Настройки приложения** — отключение визуальных эффектов, программный рендеринг и выбор режима минимизации в трей
-- **Запоминание состояния окна** — восстановление размера, позиции, развёрнутого состояния и сплиттеров между сессиями
-- **Toast-уведомления** — информирование о событиях без отрыва от работы
+The tool is useful for delivery diagnostics, checking `NodeInfo` / `Telemetry` / `Position` packets, analyzing `MQTT proxy` traffic and viewing raw protobuf data through HEX / ASCII preview and a packet-structure tree. Large journals use dynamic page loading, and JSON/CSV export is performed in batches with a progress indicator.
 
 ---
 
-### Кэш и интеграции
+### MeshApp IDE and Lua Scripts
 
-- **Импорт из OneMesh** — загрузка публичного кэша узлов в локальную H2-базу для быстрого старта и обогащения карточек узлов
-- **MQTT proxy bridge** — при включённом `MQTT proxy_to_client` MeshApp автоматически поднимает клиентский мост к брокеру и проксирует сообщения между устройством и MQTT
-- **Параметры брокера из устройства** — адрес, root topic, TLS, логин/пароль и retained-публикации берутся из конфигурации модуля MQTT, с подавлением локального loopback
-- **Локальная персистентность** — сообщения, реакции, непрочитанные чаты, избранные/игнорируемые узлы, телеметрия и журнал LoRa-пакетов сохраняются между сессиями
+- **Script list**: cards with name, emoji icon, author, version, type, run status and last-modified time without exposing the internal ID.
+- **Script settings**: name, author, description, icon, autostart, bot type and binding to a node or automation name.
+- **Code versioning**: version is incremented only when Lua code changes; settings changes do not increment it.
+- **Air and automation bots**: scripts can listen to chat through `on_message` or start from the input line command through `on_command`.
+- **Script autostart**: scripts with autostart enabled start for the selected node after the connection is ready.
+- **Lua editor**: separate window with syntax highlighting, line numbers, auto-indent and `mesh.*` completion.
+- **Debugger**: breakpoints, debug run, continue, step execution and local/global variable inspection.
+- **KV storage**: isolated key-value storage per script with a dedicated editor.
+- **Import and export**: move scripts in `.meshapp-script.json` JSON files with metadata.
+- **Script store**: load catalog from MeshApp Store, filter by type, display author, install, update and remove local copies.
+- **API documentation**: the built-in sandbox API is documented separately with a short Lua reference and examples.
 
 ---
 
-## Быстрый старт
+### Interface
 
-### Требования
+- **Dark and light themes**: AtlantaFX Cupertino.
+- **Native window appearance**: Mica effect on Windows 11 and vibrancy on macOS.
+- **Custom titlebar**: platform-style window buttons.
+- **Sidebar**: fast navigation between sections.
+- **System tray / status item**: minimize to tray, restore the window and quit the app.
+- **System notifications**: native OS notifications for incoming messages, suppressed when the active chat is already open.
+- **Sidebar toggles**: quickly switch theme and notifications without opening Settings.
+- **Update check**: optional new-version check on startup.
+- **Application settings**: disable visual effects, use software rendering and choose minimize-to-tray mode.
+- **Window state persistence**: restore size, position, maximized state and splitters between sessions.
+- **Toast notifications**: non-disruptive event feedback.
+- **Terminal mode**: Lanterna TUI client for connecting and using chats without the JavaFX UI.
 
-Для сборки и запуска из исходников:
+---
 
-- **JDK 25 toolchain** (скачивается автоматически через Gradle Toolchain)
-- **Git** для клонирования репозитория
-- **macOS**: Xcode Command Line Tools (`cc`) для сборки `libmeshapp-serial.dylib` и `libmeshapp-tray.dylib`
-- **Windows**: CMake + MSVC Build Tools для сборки `meshapp-ble.dll`
-- **Linux**: CMake + C/C++ toolchain + `libsystemd-dev` / `systemd-devel` для сборки `libmeshapp-ble.so`
+### Cache and Integrations
 
-Для готовых релизных пакетов (`.dmg`, `.msi`, `.deb`, `.AppImage`, `.flatpak`) эти build-зависимости не нужны.
+- **OneMesh import**: load a public node cache into the local H2 database for a faster start and richer node cards.
+- **MQTT proxy bridge**: when `MQTT proxy_to_client` is enabled, MeshApp starts a desktop-side bridge to the broker and proxies messages between the device and MQTT.
+- **Broker parameters from the device**: address, root topic, TLS, login/password and retained publications are taken from the MQTT module configuration, with local loopback suppression.
+- **Local persistence**: messages, reactions, unread chats, favorite/ignored nodes, telemetry, scripts, KV data, traces and the LoRa packet journal are preserved between sessions.
 
-### Сборка и запуск
+---
+
+## Lua API for Scripts
+
+MeshApp supports custom Lua scripts and bots in a LuaJ sandbox. Scripts can use the `mesh` namespace for chats, local KV storage, limited HTTP(S) requests, node selection, traceroute and NodeInfo. Unsafe global APIs such as `io`, `os`, `debug`, `package`, `require`, `dofile`, `loadfile` and `luajava` are disabled.
+
+Scripts can react to new messages through `on_message(msg)`, handle bot commands through `on_command(command)` and receive asynchronous operation results through `on_node_selected(event)`, `on_traceroute(event)` and `on_node_info(event)`.
+
+Full Lua API documentation, object fields and working examples are available in [docs/lua-api.md](docs/lua-api.md).
+
+---
+
+## Quick Start
+
+### Requirements
+
+To build and run from source:
+
+- **JDK 25 toolchain** (downloaded automatically by Gradle Toolchain)
+- **Git** for cloning the repository
+- **macOS**: Xcode Command Line Tools (`cc`) to build `libmeshapp-serial.dylib` and `libmeshapp-tray.dylib`
+- **Windows**: CMake + MSVC Build Tools to build `meshapp-ble.dll`
+- **Linux**: CMake + C/C++ toolchain + `libsystemd-dev` / `systemd-devel` to build `libmeshapp-ble.so`
+
+Release packages (`.dmg`, `.msi`, `.deb`, `.AppImage`, `.flatpak`) do not require these build dependencies.
+
+### Build and Run
 
 ```bash
-# Клонировать репозиторий
+# Clone the repository
 git clone https://git.privatepractice.app/covox/meshapp.git
 cd meshapp
 
-# Запустить приложение
+# Run the application
 ./gradlew run
 
-# Собрать нативный инсталлятор (.dmg / .msi / .deb)
+# Run terminal mode
+./gradlew runTerminal
+
+# Terminal mode with a temporary TCP profile
+./gradlew runTerminal --args="--host 192.168.1.10 --protocol meshtastic"
+
+# Run with local JMX for VisualVM/JConsole/JMC
+./gradlew run -PjmxDebugEnabled=true
+
+# Run VisualVM memory profiler mode
+./gradlew run -PvisualVmProfilerEnabled=true
+
+# Build .app/.dmg with VisualVM memory profiler mode
+./gradlew jpackage -PvisualVmProfilerEnabled=true
+
+# JMX on a different local port
+./gradlew run -PjmxDebugEnabled=true -PjmxDebugPort=9011
+
+# Build native installer (.dmg / .msi / .deb)
 ./gradlew jpackage
 
-# Linux: собрать portable AppImage
+# Linux: build portable AppImage
 ./gradlew appImage -Pappimagetool=/path/to/appimagetool.AppImage
 
-# Linux: собрать Flatpak bundle
+# Linux: build Flatpak bundle
 ./gradlew flatpak
 ```
 
-### Подключение к устройству
+When JMX is enabled, the app listens on `127.0.0.1` only; connection address:
+`service:jmx:rmi:///jndi/rmi://127.0.0.1:9010/jmxrmi`. For another port, replace
+`9010` with the `jmxDebugPort` value. The same can be enabled through
+`MESHAPP_JMX_DEBUG=true` and `MESHAPP_JMX_PORT=9011`.
 
-1. Подключите Meshtastic- или MeshCore-устройство по USB/TCP/BLE.
-2. В разделе **Подключения** добавьте новый профиль и выберите тип: **TCP**, **Serial / USB** или **BLE**.
-3. Выберите протокол. По умолчанию установлен **Meshtastic**; для MeshCore выберите **MeshCore KISS** или **MeshCore Companion**.
-4. Для **Serial / USB** выберите найденный порт; для **BLE** запустите сканирование и выберите устройство из списка.
-5. Если платформа или устройство требуют сопряжения, подтвердите pairing / введите passkey.
-6. Нажмите **Подключить** — для Meshtastic будет запущен config exchange; для MeshCore KISS будет выполнен SetHardware handshake; для MeshCore Companion будет выполнен `APP_START` handshake.
-7. Для Meshtastic переключитесь в **Чат**, **Узлы** или **Настройки**. Для MeshCore Companion доступны **Чат**, **Узлы**, **DM**, **Статистика**, **Настройки** и **LoRa Monitor**; для MeshCore KISS отображается modem metadata.
+For memory analysis in VisualVM, use `Sampler > Memory` over a local JMX connection. `Profiler > Memory` is an instrumentation profiler; on Java 25/GraalVM/JavaFX/macOS its native agent may crash together with the target JVM.
 
-### Linux: доступ к USB Serial
+If you still need to test `Profiler > Memory`, start the app with `-PvisualVmProfilerEnabled=true`. This mode also enables local JMX, disables class data sharing (`-Xshare:off`) and disables the Graal/JVMCI JIT compiler during profiling. For another port use `-PvisualVmProfilerEnabled=true -PjmxDebugPort=9011`. The mode can also be enabled with the `MESHAPP_VISUALVM_PROFILER=true` environment variable.
 
-Если USB-порт виден в списке, но подключение падает с `Permission denied`, у текущего пользователя нет прав на `/dev/ttyUSB*` или `/dev/ttyACM*`. Проверьте группу device node и добавьте пользователя в неё:
+If profiling a packaged macOS `.app`, rebuild it with `-PvisualVmProfilerEnabled=true`: an already existing `.app` does not receive new JVM options automatically.
+
+Software-rendering flags for bypassing macOS `CVDisplayLink` are not enabled by default because they can make the UI unusable. For a one-off test, add:
+`-PvisualVmSoftwareRenderingEnabled=true`.
+
+If VisualVM shows `Provided Memory settings are invalid` when starting `Profiler > Memory`, open memory profiler settings and replace the placeholder in `Profile classes` with a valid filter, for example `com.meshtastic.client.**` for application code or `**` for all classes.
+
+### Connecting to a Device
+
+1. Connect a Meshtastic or MeshCore device over USB/TCP/BLE.
+2. In **Connections**, add a new profile and choose type: **TCP**, **Serial / USB** or **BLE**.
+3. Select the protocol. **Meshtastic** is selected by default; for MeshCore choose **MeshCore KISS** or **MeshCore Companion**.
+4. For **Serial / USB**, select the detected port; for **BLE**, start scanning and select a device from the list.
+5. If the platform or device requires pairing, confirm pairing / enter passkey.
+6. Click **Connect**. Meshtastic starts config exchange; MeshCore KISS performs the SetHardware handshake; MeshCore Companion performs the `APP_START` handshake.
+7. For Meshtastic, switch to **Chats**, **Nodes** or **Settings**. For MeshCore Companion, **Chats**, **Nodes**, direct messages, **Telemetry**, **Settings** and **LoRa Packets** are available; MeshCore KISS shows modem metadata.
+
+### Linux: USB Serial Access
+
+If the USB port is visible in the list but connection fails with `Permission denied`, the current user has no access to `/dev/ttyUSB*` or `/dev/ttyACM*`. Check the device-node group and add the user to it:
 
 ```bash
 ls -l /dev/ttyUSB0
 sudo usermod -aG dialout "$USER"
 ```
 
-На некоторых дистрибутивах группа называется `uucp` или `lock`; используйте группу из вывода `ls -l`. После изменения групп нужно выйти из системы и войти снова. `.deb`-пакет MeshApp также устанавливает udev-правила для типичных USB-UART Meshtastic-плат, чтобы активный локальный пользователь получил `uaccess` ACL, а ModemManager не занимал порт.
+On some distributions the group is named `uucp` or `lock`; use the group shown by `ls -l`. After changing groups, log out and back in. The MeshApp `.deb` package also installs udev rules for common USB-UART Meshtastic boards so the active local user receives a `uaccess` ACL and ModemManager does not claim the port.
 
-Если ошибка выглядит как `Device or resource busy`, порт уже открыт другим процессом. Чаще всего это другой serial monitor/CLI или ModemManager.
-
----
-
-## Технологии
-
-| Компонент | Технология | Назначение |
-|-----------|-----------|------------|
-| UI | JavaFX 25.0.3 + AtlantaFX | Интерфейс с нативным оформлением |
-| Protocol runtime | `CommunicationProtocol` + `ProtocolRuntime` | Запуск протокольных адаптеров поверх открытого транспорта |
-| Protocol selection | `ProtocolRegistry` + `ProtocolType` | Запуск runtime-а выбранного в профиле протокола |
-| Meshtastic protocol | Protobuf 4.33 + Meshtastic schemas | Сериализация `ToRadio` / `FromRadio` и обработка mesh-пакетов |
-| MeshCore KISS protocol | KISS framing + MeshCore `SetHardware` | Базовый handshake и чтение metadata MeshCore KISS modem |
-| MeshCore Companion protocol | MeshCore Companion Protocol + BLE RX/TX или raw TCP/Serial packets | Handshake, metadata, contacts, channels, Chat/DM и raw packet monitor |
-| Transport layer | `TransportConnection` | Единый контракт для TCP, Serial, BLE и будущих transport-реализаций |
-| База данных | H2 (embedded) | Локальное хранение сообщений и телеметрии |
-| MQTT bridge | Eclipse Paho MQTT | Desktop-side proxy к внешнему MQTT-брокеру для `proxy_to_client` |
-| TCP | `java.net.Socket` | Подключение к Meshtastic TCP API, MeshCore KISS endpoint или raw MeshCore Companion endpoint |
-| Serial | Native JNA backends + jSerialComm discovery | Нативный доступ к COM/tty без jSerialComm I/O; Meshtastic, MeshCore KISS и MeshCore Companion framing |
-| BLE | CoreBluetooth / WinRT / BlueZ через JNA | BLE-сканирование, GATT и pairing на поддерживаемых платформах |
-| Нативные интеграции | JNA + platform bridges | Mica (Win), vibrancy (macOS), tray/status item, системные bridge-слои |
-| Сборка | Gradle 9.4.1 + Protobuf + CMake + jpackage | Компиляция Java/native слоёв и сборка инсталляторов |
+If the error looks like `Device or resource busy`, the port is already open in another process. Usually it is another serial monitor/CLI or ModemManager.
 
 ---
 
-## Архитектура протоколов
+## Technologies
 
-Подключение в MeshApp теперь разделено на два независимых уровня:
+| Component | Technology | Purpose |
+|-----------|------------|---------|
+| UI | JavaFX 25.0.3 + AtlantaFX | Interface with native appearance |
+| Protocol runtime | `CommunicationProtocol` + `ProtocolRuntime` | Run protocol adapters over an open transport |
+| Protocol selection | `ProtocolRegistry` + `ProtocolType` | Start the runtime selected in the connection profile |
+| Meshtastic protocol | Protobuf 4.33.4 + Meshtastic schemas | Serialize `ToRadio` / `FromRadio` and process mesh packets |
+| MeshCore KISS protocol | KISS framing + MeshCore `SetHardware` | Basic handshake and MeshCore KISS modem metadata |
+| MeshCore Companion protocol | MeshCore Companion Protocol + BLE RX/TX or raw TCP/Serial packets | Handshake, metadata, contacts, channels, Chat/DM and raw packet monitor |
+| Transport layer | `TransportConnection` | Common contract for TCP, Serial, BLE and future transport implementations |
+| Database | H2 (embedded) | Local storage for messages, telemetry, scripts, traces and journals |
+| Maps | JavaFX `TileMapView` + OSM tiles | Online/offline node map, tile cache and trace visualization |
+| Lua runtime | LuaJ 3.0.1 | Sandbox scripts, bots, KV storage and `mesh.*` API |
+| Lua editor | RichTextFX | Code editor with highlighting, lines, completion and debugger |
+| Terminal mode | Lanterna | TUI client for running without the JavaFX interface |
+| MQTT bridge | Eclipse Paho MQTT | Desktop-side proxy to an external MQTT broker for `proxy_to_client` |
+| TCP | `java.net.Socket` | Meshtastic TCP API, MeshCore KISS endpoint or raw MeshCore Companion endpoint |
+| Serial | Native JNA backends + jSerialComm discovery | Native COM/tty access without jSerialComm I/O; Meshtastic, MeshCore KISS and MeshCore Companion framing |
+| BLE | CoreBluetooth / WinRT / BlueZ through JNA | BLE scanning, GATT and pairing on supported platforms |
+| Native integrations | JNA + platform bridges | Mica (Win), vibrancy (macOS), tray/status item and system bridges |
+| Build | Gradle 9.4.1 + Protobuf + CMake + jpackage | Java/native compilation and installer packaging |
 
-- **Transport** — отвечает только за доставку байтов: открыть/закрыть соединение, записать данные, передать входящий payload выше. Общий контракт находится в `TransportConnection`, фабрика transport-ов — в `TransportConnectionFactory`.
-- **Protocol runtime** — отвечает за смысл этих байтов: framing, parsing, handshake/config exchange, runtime state и протокольные сервисы. Общие контракты находятся в `CommunicationProtocol`, `ProtocolRuntime`, `ProtocolRuntimeContext` и `ProtocolRegistry`.
+---
 
-Сейчас зарегистрированы протоколы:
+## Protocol Architecture
 
-| ProtocolType | Runtime | Назначение |
-|--------------|---------|------------|
-| `MESHTASTIC` | `MeshtasticProtocolRuntime` | `ProtocolHandler`, `DeviceState`, config exchange, обработка входящих mesh-пакетов, MQTT proxy |
+Connections in MeshApp are now split into two independent layers:
+
+- **Transport**: only delivers bytes by opening/closing the connection, writing data and forwarding incoming payloads upward. The common contract is `TransportConnection`; transport factory is `TransportConnectionFactory`.
+- **Protocol runtime**: gives meaning to those bytes: framing, parsing, handshake/config exchange, runtime state and protocol services. Common contracts are `CommunicationProtocol`, `ProtocolRuntime`, `ProtocolRuntimeContext` and `ProtocolRegistry`.
+
+Currently registered protocols:
+
+| ProtocolType | Runtime | Purpose |
+|--------------|---------|---------|
+| `MESHTASTIC` | `MeshtasticProtocolRuntime` | `ProtocolHandler`, `DeviceState`, config exchange, incoming mesh packets, MQTT proxy |
 | `MESHCORE_KISS` | `MeshCoreKissProtocolRuntime` | KISS SetHardware handshake, device name/version/identity/radio/battery/stats metadata |
 | `MESHCORE_COMPANION` | `MeshCoreCompanionProtocolRuntime` | MeshCore Companion `APP_START`, self-info/device-info/battery, contacts, channel info, Chat/DM |
 
-Выбор protocol runtime-а выполняется из сохранённого `ProtocolType`. TCP/Serial сразу получают соответствующий `FrameFormat`, BLE сразу подключается к GATT profile выбранного протокола. Старые профили без поля `protocol` используют Meshtastic.
+The protocol runtime is selected from the saved `ProtocolType`. TCP/Serial immediately receive the matching `FrameFormat`; BLE connects to the selected protocol's GATT profile. Old profiles without a `protocol` field use Meshtastic.
 
-Чтобы добавить новый протокол:
+To add a new protocol:
 
-1. Добавить значение в `ProtocolType`
-2. Реализовать `CommunicationProtocol<S>` и `ProtocolRuntime<S>`
-3. Зарегистрировать адаптер в `ProtocolRegistry`
-4. Добавить UI/сервисы, которые работают с состоянием нового runtime-а
-5. При необходимости расширить `ConnectionEntry` и `TransportConnectionFactory`, если протоколу нужен новый тип транспорта
+1. Add a value to `ProtocolType`.
+2. Implement `CommunicationProtocol<S>` and `ProtocolRuntime<S>`.
+3. Register the adapter in `ProtocolRegistry`.
+4. Add UI/services that work with the new runtime state.
+5. Extend `ConnectionEntry` and `TransportConnectionFactory` if the protocol requires a new transport type.
 
-Существующий UI пока использует совместимые Meshtastic accessors из `ConnectionManager` (`getDeviceState`, `getProtocolHandler`, `getConfigFuture`). Новые протоколы должны получать своё состояние через runtime-абстракцию или отдельные typed accessors.
+The existing UI still uses compatible Meshtastic accessors from `ConnectionManager` (`getDeviceState`, `getProtocolHandler`, `getConfigFuture`). New protocols should access their state through the runtime abstraction or dedicated typed accessors.
 
 ---
 
-## Структура проекта
+## Project Structure
 
-```
+```text
 meshapp/
 |-- src/main/java/com/meshtastic/client/
-|   |-- MeshApp.java              # Entry point (JavaFX Application)
+|   |-- MeshAppLauncher.java      # Entry point: JavaFX or terminal mode
+|   |-- MeshApp.java              # JavaFX Application
 |   |-- connection/               # TransportConnection, TCP/Serial/BLE transport layer
 |   |   |-- ble/                  # BLE transport + platform backends
 |   |   \-- serial/               # Native serial I/O (Win/macOS/Linux)
-|   |-- protocol/                 # Общие protocol runtime API и registry
-|   |   |-- meshcore/              # MeshCore KISS и Companion protocol adapters/runtimes
+|   |-- lua/                      # Lua runtime, sandbox API, script store/import/export
+|   |-- protocol/                 # Shared protocol runtime API and registry
+|   |   |-- meshcore/             # MeshCore KISS and Companion protocol adapters/runtimes
 |   |   \-- meshtastic/           # Meshtastic protocol adapter/runtime
-|   |-- model/                    # Data models и runtime state
+|   |-- terminal/                 # Lanterna TUI
+|   |-- model/                    # Data models and runtime state
 |   |-- service/                  # Persistence, discovery, reconnect, config exchange
-|   |-- forms/                    # Основные экраны приложения
+|   |-- forms/                    # Main application screens
 |   |-- components/               # Reusable UI components
-|   |-- notification/             # Системные уведомления
+|   |   \-- map/                  # OSM tile map components
+|   |-- notification/             # System notifications
 |   |-- platform/                 # OS-specific UI / system integration
 |   |-- system/                   # App framework (FormManager, RootPane)
 |   |-- tray/                     # System tray / status item
@@ -398,21 +484,21 @@ meshapp/
 
 ---
 
-## Сборка инсталляторов
+## Building Installers
 
-MeshApp собирается в нативные пакеты через `jpackage`, а для Linux дополнительно поддерживает portable `AppImage` и sandboxed `Flatpak`:
+MeshApp uses `jpackage` for native packages and additionally supports portable `AppImage` and sandboxed `Flatpak` on Linux:
 
-| Платформа | Формат | Команда |
-|-----------|--------|---------|
+| Platform | Format | Command |
+|----------|--------|---------|
 | Windows | `.msi` | `./gradlew jpackage` |
 | macOS | `.dmg` | `./gradlew jpackage` |
 | Linux | `.deb` | `./gradlew jpackage` |
 | Linux | `.AppImage` | `./gradlew appImage -Pappimagetool=/path/to/appimagetool.AppImage` |
 | Linux | `.flatpak` | `./gradlew flatpak` |
 
-Для `AppImage` нужен `appimagetool`: либо в `PATH`, либо через `-Pappimagetool=...` / `APPIMAGETOOL=...`. Если используется `.AppImage`-версия самого `appimagetool`, может понадобиться `APPIMAGE_EXTRACT_AND_RUN=1`.
+`AppImage` requires `appimagetool`: either in `PATH` or provided through `-Pappimagetool=...` / `APPIMAGETOOL=...`. If using the `.AppImage` version of `appimagetool`, `APPIMAGE_EXTRACT_AND_RUN=1` may be required.
 
-Для `Flatpak` нужны `flatpak` и `flatpak-builder`, а также установленный runtime/SDK. По умолчанию задача использует `org.freedesktop.Platform//24.08` и `org.freedesktop.Sdk//24.08`:
+`Flatpak` requires `flatpak` and `flatpak-builder`, plus installed runtime/SDK. By default the task uses `org.freedesktop.Platform//24.08` and `org.freedesktop.Sdk//24.08`:
 
 ```bash
 flatpak --user remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
@@ -420,70 +506,72 @@ flatpak --user install -y flathub org.freedesktop.Platform//24.08 org.freedeskto
 ./gradlew flatpak
 ```
 
-При необходимости runtime можно переопределить через `-PflatpakRuntime=...`, `-PflatpakRuntimeVersion=...`, `-PflatpakSdk=...` и `-PflatpakBranch=...`.
+When needed, override the runtime through `-PflatpakRuntime=...`, `-PflatpakRuntimeVersion=...`, `-PflatpakSdk=...` and `-PflatpakBranch=...`.
 
-Для `jpackage` можно явно указать JDK, из которого будет собран bundled runtime: `-PpackagingJavaHome=/path/to/jdk` или `PACKAGING_JAVA_HOME=/path/to/jdk`. На macOS сборка дополнительно проверяет `.app` через `otool -L` и завершится ошибкой, если внутри bundle останутся внешние зависимости вроде `/opt/homebrew/...` или `/usr/local/...`.
+For `jpackage`, explicitly set the JDK used for the bundled runtime with `-PpackagingJavaHome=/path/to/jdk` or `PACKAGING_JAVA_HOME=/path/to/jdk`. On macOS the build additionally validates the `.app` with `otool -L` and fails if external dependencies such as `/opt/homebrew/...` or `/usr/local/...` remain inside the bundle.
 
-Во время `processResources` Gradle автоматически собирает платформенные native-компоненты:
+During `processResources`, Gradle automatically builds platform native components:
 
-- **Windows** — `meshapp-ble.dll` для BLE через WinRT
-- **Linux** — `libmeshapp-ble.so` для BLE через BlueZ
-- **macOS** — `libmeshapp-serial.dylib` для безопасного управления serial modem lines
-- **macOS** — `libmeshapp-tray.dylib` для нативного status item / tray bridge
+- **Windows**: `meshapp-ble.dll` for BLE through WinRT.
+- **Linux**: `libmeshapp-ble.so` for BLE through BlueZ.
+- **macOS**: `libmeshapp-serial.dylib` for safe serial modem-line control.
+- **macOS**: `libmeshapp-tray.dylib` for the native status item / tray bridge.
 
-### Подпись и notarization на macOS
+### macOS Signing and Notarization
 
-По умолчанию `./gradlew jpackage` на macOS делает только ad-hoc подпись `.app`. Такой `.dmg` подходит для локальной проверки, но для скачивания из браузера этого недостаточно: Gatekeeper может показать **«Приложение повреждено, его не удается открыть»**.
+By default, `./gradlew jpackage` on macOS performs only an ad-hoc `.app` signature. Such a `.dmg` is fine for local testing, but not enough for browser downloads: Gatekeeper may show **"App is damaged and can't be opened"**.
 
-Для release-сборки нужно передать credentials для `Developer ID` подписи:
+For a release build, pass credentials for `Developer ID` signing:
 
-- `MAC_SIGNING_KEY_USER_NAME` или `-PmacSigningKeyUserName=...` — Team/User name из Apple Developer certificate
-- `MAC_SIGNING_KEYCHAIN` или `-PmacSigningKeychain=...` — optional keychain с сертификатом
-- `MAC_PACKAGE_SIGNING_PREFIX` или `-PmacPackageSigningPrefix=...` — optional signing prefix, по умолчанию `com.meshtastic`
+- `MAC_SIGNING_KEY_USER_NAME` or `-PmacSigningKeyUserName=...`: Team/User name from the Apple Developer certificate.
+- `MAC_SIGNING_KEYCHAIN` or `-PmacSigningKeychain=...`: optional keychain with the certificate.
+- `MAC_PACKAGE_SIGNING_PREFIX` or `-PmacPackageSigningPrefix=...`: optional signing prefix, defaults to `com.meshtastic`.
 
-Для Gitea runner в daemon-режиме предпочтительно не полагаться на пользовательский `login.keychain`, а импортировать сертификат в temporary keychain из secrets:
+For a Gitea runner in daemon mode, prefer importing the certificate into a temporary keychain from secrets instead of relying on the user's `login.keychain`:
 
-- `MAC_SIGNING_CERTIFICATE_P12` — base64 от `.p12` с `Developer ID Application` сертификатом
-- `MAC_SIGNING_CERTIFICATE_PASSWORD` — пароль от `.p12`
-- `MAC_SIGNING_KEYCHAIN_PASSWORD` — пароль для temporary keychain
+- `MAC_SIGNING_CERTIFICATE_P12`: base64 of the `.p12` with the `Developer ID Application` certificate.
+- `MAC_SIGNING_CERTIFICATE_PASSWORD`: password for the `.p12`.
+- `MAC_SIGNING_KEYCHAIN_PASSWORD`: password for the temporary keychain.
 
-Сертификат `Apple Development` для release DMG не подходит: он предназначен для разработки. Для скачиваемых сборок нужен именно `Developer ID Application`.
+An `Apple Development` certificate is not suitable for a release DMG: it is intended for development. Downloadable builds require `Developer ID Application`.
 
-И один из вариантов notarization:
+Then use one of the notarization options:
 
-- `MAC_NOTARY_KEYCHAIN_PROFILE` или `-PmacNotaryKeychainProfile=...`
+- `MAC_NOTARY_KEYCHAIN_PROFILE` or `-PmacNotaryKeychainProfile=...`
 - `MAC_NOTARY_APPLE_ID` + `MAC_NOTARY_TEAM_ID` + `MAC_NOTARY_PASSWORD`
 - `MAC_NOTARY_KEY_FILE` + `MAC_NOTARY_KEY_ID` + `MAC_NOTARY_ISSUER`
-- В CI вместо `MAC_NOTARY_KEY_FILE` можно передать `MAC_NOTARY_KEY_FILE_BASE64`; workflow создаст `.p8` файл сам.
+- In CI, `MAC_NOTARY_KEY_FILE_BASE64` can be used instead of `MAC_NOTARY_KEY_FILE`; the workflow creates the `.p8` file itself.
 
-После этого обычный `./gradlew jpackage` соберёт signed `.app`, signed `.dmg` и выполнит `notarytool submit --wait` + `stapler`.
+After that, a normal `./gradlew jpackage` builds a signed `.app`, a signed `.dmg` and runs `notarytool submit --wait` plus `stapler`.
 
-Если в Gitea runner нет `Developer ID Application`, workflow всё равно соберёт macOS артефакт с прежним именем, но пропустит `spctl`/notarization-проверку.
+If the Gitea runner has no `Developer ID Application`, the workflow still builds the macOS artifact with the previous name, but skips `spctl`/notarization checks.
 
-### Установка на macOS
+### Installing on macOS
 
-Если сборка сделана без `Developer ID` и notarization, macOS может показать предупреждение **«от неизвестного разработчика»** или **«Приложение повреждено, его не удается открыть»**. Это ожидаемо для локального ad-hoc build.
+If the build was made without `Developer ID` and notarization, macOS may show an **"unidentified developer"** or **"App is damaged and can't be opened"** warning. This is expected for a local ad-hoc build.
 
-**Способ 1** — через Finder:
-1. Откройте папку Applications (или куда вы установили MeshApp)
-2. Нажмите **правой кнопкой мыши** (или Control+клик) на MeshApp → **Открыть**
-3. В диалоге подтвердите открытие — это нужно сделать только один раз
+**Method 1** - Finder:
 
-**Способ 2** — через терминал:
+1. Open Applications, or the folder where MeshApp is installed.
+2. Right-click, or Control-click, MeshApp and choose **Open**.
+3. Confirm opening in the dialog. This is required only once.
+
+**Method 2** - Terminal:
+
 ```bash
 xattr -cr /Applications/MeshApp.app
 ```
 
 ---
 
-## Лицензия
+## License
 
-Распространяется под лицензией [GPL-3.0](LICENSE).
+Distributed under the [GPL-3.0](LICENSE).
 
 ---
 
 <p align="center">
-  Создано Konstantin A. Smirnov <a href="mailto:covox@covox.ru">covox@covox.ru</a>
+  Created by Konstantin A. Smirnov <a href="mailto:covox@covox.ru">covox@covox.ru</a>
   <br>
 <a href="https://t.me/coVox">
   <img src="https://img.shields.io/badge/Telegram-2CA5E0?style=for-the-badge&logo=telegram&logoColor=white" alt="Telegram">

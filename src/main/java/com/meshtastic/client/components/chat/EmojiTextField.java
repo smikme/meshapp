@@ -2,6 +2,7 @@ package com.meshtastic.client.components.chat;
 
 import com.meshtastic.client.components.EmojiImageCache;
 import com.meshtastic.client.components.EmojiTextFlow;
+import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.themes.TypographyManager;
 import com.meshtastic.client.utils.UnicodeTextUtils;
 import javafx.animation.KeyFrame;
@@ -794,16 +795,16 @@ public class EmojiTextField extends StackPane {
     }
 
     private void buildContextMenu() {
-        MenuItem cutItem = new MenuItem("Вырезать");
+        MenuItem cutItem = new MenuItem(I18n.t("common.cut"));
         cutItem.setOnAction(e -> cutSelection());
 
-        MenuItem copyItem = new MenuItem("Копировать");
+        MenuItem copyItem = new MenuItem(I18n.t("common.copy"));
         copyItem.setOnAction(e -> copySelection());
 
-        MenuItem pasteItem = new MenuItem("Вставить");
+        MenuItem pasteItem = new MenuItem(I18n.t("common.paste"));
         pasteItem.setOnAction(e -> paste());
 
-        MenuItem selectAllItem = new MenuItem("Выделить всё");
+        MenuItem selectAllItem = new MenuItem(I18n.t("common.selectAll"));
         selectAllItem.setOnAction(e -> selectAll());
 
         contextMenu = new ContextMenu(cutItem, copyItem, pasteItem,

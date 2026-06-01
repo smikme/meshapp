@@ -6,6 +6,7 @@ import org.meshtastic.proto.MeshProtos;
 import org.meshtastic.proto.Portnums;
 import com.google.protobuf.InvalidProtocolBufferException;
 import com.meshtastic.client.model.DeviceState;
+import com.meshtastic.client.model.MessageChangeEvent;
 import com.meshtastic.client.model.MessageReaction;
 import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.model.NodeData;
@@ -13,8 +14,7 @@ import com.meshtastic.client.model.TelemetryEntry;
 import com.meshtastic.client.notification.NotificationManager;
 import com.meshtastic.client.protocol.FromRadioListener;
 import com.meshtastic.client.protocol.ProtocolHandler;
-import com.meshtastic.client.system.DrawerManager;
-import javafx.application.Platform;
+import com.meshtastic.client.system.AppUi;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -74,12 +74,24 @@ public class MessageListenerService implements FromRadioListener {
 
     @Override
     public void onMyNodeInfo(MeshProtos.MyNodeInfo myInfo) {
-        Platform.runLater(this::flushDeferredMeshPacketsIfOwnerKnown);
+        AppUi.runLater(this::flushDeferredMeshPacketsIfOwnerKnown);
     }
 
     @Override
     public void onConfigComplete(int configCompleteId) {
-        Platform.runLater(this::flushDeferredMeshPacketsIfOwnerKnown);
+        AppUi.runLater(this::flushDeferredMeshPacketsIfOwnerKnown);
+    }
+
+    @Override
+    public void onNodeInfo(MeshProtos.NodeInfo nodeInfo) {
+        if (nodeInfo == null || nodeInfo.getNum() == 0) {
+            return;
+        }
+        NodeData node = applyNodeInfo(nodeInfo);
+        int nodeNum = nodeInfo.getNum();
+        deviceState.fireNodeUpdateListeners(nodeNum);
+        NodeCacheService.getInstance().update(node);
+        log.info("Received NodeInfo from !{}: {}", Integer.toHexString(nodeNum), node.getLongName());
     }
 
     @Override
@@ -234,7 +246,7 @@ public class MessageListenerService implements FromRadioListener {
         }
 
         // Показать красную точку на иконке "Чаты"
-        Platform.runLater(() -> DrawerManager.setChatUnreadDot(true));
+        AppUi.setChatUnreadDot(true);
     }
 
     private void hydrateReplyText(MeshMessage msg, String ownerNodeId, String chatType, String chatKey) {
@@ -381,6 +393,11 @@ public class MessageListenerService implements FromRadioListener {
             MessageDbService.getInstance().saveReaction(reaction, "dm", fromNodeId, ownerNodeId);
         }
 
+        deviceState.fireMessageChange(MessageChangeEvent.reactionChanged(
+                channelMessage ? "channel" : "dm",
+                channelMessage ? String.valueOf(packet.getChannel()) : fromNodeId,
+                ownerNodeId,
+                data.getReplyId()));
         deviceState.fireMessageListeners();
     }
 
@@ -408,8 +425,9 @@ public class MessageListenerService implements FromRadioListener {
             String reactionError = routing.getErrorReason() == MeshProtos.Routing.Error.NONE
                     ? null
                     : routing.getErrorReason().name();
-            boolean updatedReaction = MessageDbService.getInstance()
-                    .updateReactionStatus(requestId, reactionStatus, reactionError);
+            MessageDbService db = MessageDbService.getInstance();
+            MessageDbService.ReactionScope reactionScope = db.findReactionScopeByPacketId(requestId);
+            boolean updatedReaction = db.updateReactionStatus(requestId, reactionStatus, reactionError);
 
             if (pending == null && !completedPacketAck && !updatedReaction) {
                 log.debug("No pending message or packet ACK waiter found for requestId={}", requestId);
@@ -418,6 +436,7 @@ public class MessageListenerService implements FromRadioListener {
 
             if (pending == null) {
                 if (updatedReaction) {
+                    fireReactionChanged(reactionScope);
                     deviceState.fireMessageListeners();
                     log.debug("Routing ACK received for reaction packet {}", requestId);
                 } else {
@@ -439,6 +458,7 @@ public class MessageListenerService implements FromRadioListener {
             pending.setStatus(MeshMessage.DeliveryStatus.FAILED);
             pending.setErrorReason(routing.getErrorReason().name());
             MessageDbService.getInstance().updateStatus(requestId, pending.getStatus(), pending.getErrorReason());
+            fireMessageStatusChanged(pending);
             deviceState.fireMessageListeners();
             log.warn("NAK received for packet {}: {}", requestId, routing.getErrorReason());
             return;
@@ -449,6 +469,7 @@ public class MessageListenerService implements FromRadioListener {
             pending.setStatus(MeshMessage.DeliveryStatus.CONFIRMED);
             pending.setErrorReason(null);
             MessageDbService.getInstance().updateStatus(requestId, pending.getStatus(), null);
+            fireMessageStatusChanged(pending);
             deviceState.fireMessageListeners();
             log.debug("Recipient ACK received for DM packet {}", requestId);
             return;
@@ -457,6 +478,7 @@ public class MessageListenerService implements FromRadioListener {
         pending.setStatus(MeshMessage.DeliveryStatus.DELIVERED);
         pending.setErrorReason(null);
         MessageDbService.getInstance().updateStatus(requestId, pending.getStatus(), null);
+        fireMessageStatusChanged(pending);
         deviceState.fireMessageListeners();
         if (pending.isDirectMessage()) {
             log.debug("Non-recipient ACK received for DM packet {} from !{}; waiting for ACK from {}",
@@ -476,6 +498,43 @@ public class MessageListenerService implements FromRadioListener {
         } catch (NumberFormatException e) {
             return false;
         }
+    }
+
+    private void fireMessageStatusChanged(MeshMessage message) {
+        if (message == null) {
+            return;
+        }
+        deviceState.fireMessageChange(MessageChangeEvent.statusChanged(
+                chatType(message),
+                chatKey(message),
+                currentOwnerNodeId(),
+                message));
+    }
+
+    private void fireReactionChanged(MessageDbService.ReactionScope reactionScope) {
+        if (reactionScope == null) {
+            return;
+        }
+        deviceState.fireMessageChange(MessageChangeEvent.reactionChanged(
+                reactionScope.chatType(),
+                reactionScope.chatKey(),
+                reactionScope.ownerNodeId(),
+                reactionScope.targetPacketId()));
+    }
+
+    private static String chatType(MeshMessage message) {
+        return message.isDirectMessage() ? "dm" : "channel";
+    }
+
+    private static String chatKey(MeshMessage message) {
+        if (!message.isDirectMessage()) {
+            return String.valueOf(message.getChannelIndex());
+        }
+        return message.isOutgoing() ? message.getToNodeId() : message.getFromNodeId();
+    }
+
+    private String currentOwnerNodeId() {
+        return String.format("!%08x", deviceState.getMyNodeNum());
     }
 
     private void handleNodeInfoResponse(MeshProtos.MeshPacket packet, MeshProtos.Data data) {
@@ -499,6 +558,7 @@ public class MessageListenerService implements FromRadioListener {
             if (!user.getPublicKey().isEmpty()) {
                 node.setPublicKey(user.getPublicKey().toByteArray());
             }
+            node.setLicensed(user.getIsLicensed());
             if (user.hasIsUnmessagable()) {
                 node.setUnmessagable(user.getIsUnmessagable());
             }
@@ -510,6 +570,86 @@ public class MessageListenerService implements FromRadioListener {
                     user.hasIsUnmessagable() ? user.getIsUnmessagable() : null);
         } catch (InvalidProtocolBufferException e) {
             log.warn("Failed to parse User from NODEINFO_APP packet from !{}", Integer.toHexString(fromNum), e);
+        }
+    }
+
+    private NodeData applyNodeInfo(MeshProtos.NodeInfo nodeInfo) {
+        NodeData node = deviceState.getOrCreateNode(nodeInfo.getNum());
+
+        if (nodeInfo.hasUser()) {
+            applyUserInfo(node, nodeInfo.getUser());
+        }
+
+        if (nodeInfo.hasPosition()) {
+            MeshProtos.Position position = nodeInfo.getPosition();
+            if (position.getLatitudeI() != 0) {
+                node.setLatitude(position.getLatitudeI() * 1e-7);
+            }
+            if (position.getLongitudeI() != 0) {
+                node.setLongitude(position.getLongitudeI() * 1e-7);
+            }
+            if (position.getAltitude() != 0) {
+                node.setAltitude(position.getAltitude());
+            }
+        }
+
+        if (nodeInfo.getSnr() != 0) {
+            node.setSnr(nodeInfo.getSnr());
+        }
+        if (nodeInfo.getLastHeard() != 0) {
+            node.setLastHeard(nodeInfo.getLastHeard());
+        } else {
+            node.setLastHeard((int) (System.currentTimeMillis() / 1000));
+        }
+        if (nodeInfo.hasHopsAway()) {
+            node.setHopsAway((int) nodeInfo.getHopsAway());
+        }
+        if (nodeInfo.getChannel() != 0) {
+            node.setChannel((int) nodeInfo.getChannel());
+        }
+
+        if (nodeInfo.hasDeviceMetrics()) {
+            org.meshtastic.proto.TelemetryProtos.DeviceMetrics metrics = nodeInfo.getDeviceMetrics();
+            applyBatteryLevel(metrics.getBatteryLevel(), node, null);
+            if (metrics.getVoltage() != 0) {
+                node.setVoltage(metrics.getVoltage());
+            }
+            if (metrics.getChannelUtilization() != 0) {
+                node.setChannelUtilization(metrics.getChannelUtilization());
+            }
+            if (metrics.getAirUtilTx() != 0) {
+                node.setAirUtilTx(metrics.getAirUtilTx());
+            }
+            if (metrics.getUptimeSeconds() != 0) {
+                node.setUptimeSeconds(metrics.getUptimeSeconds());
+            }
+        }
+
+        return node;
+    }
+
+    private static void applyUserInfo(NodeData node, MeshProtos.User user) {
+        if (!user.getLongName().isEmpty()) {
+            node.setLongName(user.getLongName());
+        }
+        if (!user.getShortName().isEmpty()) {
+            node.setShortName(user.getShortName());
+        }
+        if (!user.getId().isEmpty()) {
+            node.setNodeId(user.getId());
+        }
+        if (user.getRole() != ConfigProtos.Config.DeviceConfig.Role.CLIENT || node.getRole() == null) {
+            node.setRole(user.getRole().name());
+        }
+        if (user.getHwModel() != MeshProtos.HardwareModel.UNSET || node.getHwModel() == null) {
+            node.setHwModel(user.getHwModel().name());
+        }
+        if (!user.getPublicKey().isEmpty()) {
+            node.setPublicKey(user.getPublicKey().toByteArray());
+        }
+        node.setLicensed(user.getIsLicensed());
+        if (user.hasIsUnmessagable()) {
+            node.setUnmessagable(user.getIsUnmessagable());
         }
     }
 
@@ -577,13 +717,12 @@ public class MessageListenerService implements FromRadioListener {
 
             if (telemetry.hasDeviceMetrics()) {
                 org.meshtastic.proto.TelemetryProtos.DeviceMetrics dm = telemetry.getDeviceMetrics();
-                node.setBatteryLevel(dm.getBatteryLevel());
+                applyBatteryLevel(dm.getBatteryLevel(), node, entry);
                 node.setVoltage(dm.getVoltage());
                 node.setChannelUtilization(dm.getChannelUtilization());
                 node.setAirUtilTx(dm.getAirUtilTx());
                 node.setUptimeSeconds(dm.getUptimeSeconds());
 
-                entry.setBatteryLevel(dm.getBatteryLevel());
                 entry.setVoltage(dm.getVoltage());
                 entry.setChannelUtilization(dm.getChannelUtilization());
                 entry.setAirUtilTx(dm.getAirUtilTx());
@@ -645,6 +784,17 @@ public class MessageListenerService implements FromRadioListener {
             NodeCacheService.getInstance().persistTelemetry(entry, ownerNodeId);
         } catch (InvalidProtocolBufferException e) {
             log.warn("Failed to parse Telemetry from TELEMETRY_APP packet from !{}", Integer.toHexString(fromNum), e);
+        }
+    }
+
+    private static void applyBatteryLevel(int rawBatteryLevel, NodeData node, TelemetryEntry entry) {
+        if (rawBatteryLevel > 100) {
+            node.setExternallyPowered(true);
+            if (entry != null) { entry.setExternallyPowered(true); }
+        } else if (rawBatteryLevel > 0) {
+            node.setBatteryLevel(rawBatteryLevel);
+            node.setExternallyPowered(false);
+            if (entry != null) { entry.setBatteryLevel(rawBatteryLevel); }
         }
     }
 
@@ -723,14 +873,14 @@ public class MessageListenerService implements FromRadioListener {
         try {
             MeshProtos.RouteDiscovery route = MeshProtos.RouteDiscovery.parseFrom(data.getPayload());
             if (data.getRequestId() == 0) {
-                if (!hasRouteDiscoveryData(route)) {
-                    log.debug("Ignoring TRACEROUTE_APP packet without requestId or route data");
-                    return;
-                }
                 if (packet.getTo() != myNodeNum) {
                     log.debug("Ignoring TRACEROUTE_APP route data without requestId addressed to !{}",
                             Integer.toHexString(packet.getTo()));
                     return;
+                }
+                if (!hasRouteDiscoveryData(route)) {
+                    log.debug("Accepting empty TRACEROUTE_APP response from !{} addressed to local node",
+                            Integer.toHexString(packet.getFrom()));
                 }
             }
             deviceState.fireTracerouteListeners(packet.getFrom(), route);

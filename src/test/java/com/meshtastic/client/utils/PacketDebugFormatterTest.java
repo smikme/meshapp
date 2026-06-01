@@ -3,11 +3,13 @@ package com.meshtastic.client.utils;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.google.protobuf.ByteString;
+import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.model.PacketLogEntry;
 import com.meshtastic.client.model.PacketTreeNode;
 import javafx.scene.control.TreeItem;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.meshtastic.proto.MeshProtos;
 import org.meshtastic.proto.Portnums;
@@ -24,6 +26,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 class PacketDebugFormatterTest {
+
+    @BeforeEach
+    void setLanguage() {
+        I18n.setLanguageTagForTests(I18n.LANGUAGE_RU);
+    }
 
     @Test
     void packetTreeContainsByteRangesForNestedPayloadSelection() {

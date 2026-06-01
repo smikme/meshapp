@@ -1,6 +1,7 @@
 package com.meshtastic.client.components.map;
 
 import com.meshtastic.client.MeshApp;
+import com.meshtastic.client.i18n.I18n;
 import javafx.application.Platform;
 import javafx.geometry.Point2D;
 import javafx.geometry.Pos;
@@ -630,7 +631,7 @@ public class TileMapView extends StackPane {
                     0,
                     0,
                     0,
-                    "Выделите область для загрузки тайлов",
+                    I18n.t("map.download.selectAreaForTiles"),
                     DownloadState.CANCELLED
             ));
             return DownloadHandle.inactive();
@@ -688,7 +689,7 @@ public class TileMapView extends StackPane {
                                     done,
                                     total,
                                     cached,
-                                    "Загружено " + done + " из " + total,
+                                    I18n.t("map.download.loadedProgress", done, total),
                                     DownloadState.RUNNING
                             )));
                         }
@@ -706,8 +707,8 @@ public class TileMapView extends StackPane {
                     ? DownloadState.CANCELLED
                     : DownloadState.COMPLETED;
             String message = finalState == DownloadState.CANCELLED
-                    ? "Загрузка отменена: " + done + " из " + total
-                    : "Загружено " + done + " из " + total;
+                    ? I18n.t("map.download.cancelledProgress", done, total)
+                    : I18n.t("map.download.loadedProgress", done, total);
             Platform.runLater(() -> {
                 progressConsumer.accept(new DownloadProgress(done, total, cached, message, finalState));
                 render();
@@ -725,9 +726,9 @@ public class TileMapView extends StackPane {
      */
     public static String formatDistance(double meters) {
         if (meters < 1000.0) {
-            return String.format(Locale.ROOT, "%.0f м", meters);
+            return I18n.t("map.distance.meters", String.format(I18n.locale(), "%.0f", meters));
         }
-        return String.format(Locale.ROOT, "%.2f км", meters / 1000.0);
+        return I18n.t("map.distance.kilometers", String.format(I18n.locale(), "%.2f", meters / 1000.0));
     }
 
     /**
@@ -1489,9 +1490,13 @@ public class TileMapView extends StackPane {
      * Отправляет наружу актуальный текст статуса карты.
      */
     private void notifyStatus() {
-        statusListener.accept("z" + zoom + " · " + visibleTileCount() + " тайлов · "
-                + (offlineOnly ? "оффлайн" : "онлайн/кэш")
-                + (nightMode ? " · ночь" : ""));
+        int tileCount = visibleTileCount();
+        statusListener.accept(I18n.t("map.status.summary",
+                zoom,
+                tileCount,
+                pluralUnit("map.status.tile", tileCount),
+                I18n.t(offlineOnly ? "map.status.mode.offline" : "map.status.mode.onlineCache"),
+                nightMode ? I18n.t("map.status.nightSuffix") : ""));
     }
 
     /**
@@ -1499,7 +1504,7 @@ public class TileMapView extends StackPane {
      */
     private void notifyMeasure() {
         if (measurePoints.isEmpty()) {
-            measureListener.accept(measuring ? "Кликните по карте, чтобы поставить первую точку" : "Измерение выключено");
+            measureListener.accept(I18n.t(measuring ? "map.measure.clickFirst" : "map.measure.off"));
             return;
         }
 
@@ -1508,9 +1513,12 @@ public class TileMapView extends StackPane {
             total += distanceMeters(measurePoints.get(i - 1), measurePoints.get(i));
         }
         if (measurePoints.size() == 1) {
-            measureListener.accept("1 точка · добавьте следующую точку");
+            measureListener.accept(I18n.t("map.measure.onePoint"));
         } else {
-            measureListener.accept(measurePoints.size() + " точек · " + formatDistance(total));
+            measureListener.accept(I18n.t("map.measure.points",
+                    measurePoints.size(),
+                    pluralUnit("map.unit.point", measurePoints.size()),
+                    formatDistance(total)));
         }
     }
 
@@ -1519,11 +1527,11 @@ public class TileMapView extends StackPane {
      */
     private void notifyAreaSelection() {
         if (areaSelectionActive) {
-            areaSelectionListener.accept("Область: выделение...");
+            areaSelectionListener.accept(I18n.t("map.area.selecting"));
             return;
         }
         if (selectedArea == null) {
-            areaSelectionListener.accept(areaSelectionMode ? "Область: протяните прямоугольник" : "Область не выбрана");
+            areaSelectionListener.accept(I18n.t(areaSelectionMode ? "map.area.drag" : "map.area.none"));
             return;
         }
 
@@ -1537,8 +1545,9 @@ public class TileMapView extends StackPane {
                 new GeoPoint(selectedArea.north(), centerLon),
                 new GeoPoint(selectedArea.south(), centerLon)
         );
-        areaSelectionListener.accept("Область: "
-                + formatDistance(widthMeters) + " x " + formatDistance(heightMeters));
+        areaSelectionListener.accept(I18n.t("map.area.selected",
+                formatDistance(widthMeters),
+                formatDistance(heightMeters)));
     }
 
     /**
@@ -1706,6 +1715,10 @@ public class TileMapView extends StackPane {
      */
     public static String formatCoordinate(double latitude, double longitude) {
         return String.format(Locale.ROOT, "%.6f, %.6f", latitude, longitude);
+    }
+
+    private static String pluralUnit(String keyPrefix, long value) {
+        return I18n.t(keyPrefix + "." + I18n.pluralCategory(value));
     }
 
     /**

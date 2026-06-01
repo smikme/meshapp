@@ -1,6 +1,7 @@
 package com.meshtastic.client.components;
 
 import com.meshtastic.client.MeshApp;
+import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.logging.SessionCrashLogManager;
 import com.meshtastic.client.modal.ModalPane;
 import com.meshtastic.client.modal.Toast;
@@ -55,7 +56,7 @@ public final class CrashReportFlow {
                                     null,
                                     onFinished,
                                     decision.email(),
-                                    "Лог отправлен разработчикам: issue #"
+                                    "crashReport.toast.logSubmitted"
                             )
                     );
                 })
@@ -74,8 +75,8 @@ public final class CrashReportFlow {
             } catch (IOException e) {
                 log.error("Failed to create session log snapshot for problem report", e);
                 ModalPane.showError(
-                        "Не удалось подготовить отчёт",
-                        "Не получилось собрать технический лог текущей сессии.\n\n" + humanizeError(e)
+                        I18n.t("crashReport.error.prepareTitle"),
+                        I18n.t("crashReport.error.prepareMessage", humanizeError(e))
                 );
                 return;
             }
@@ -91,7 +92,7 @@ public final class CrashReportFlow {
                             () -> deleteReportSnapshot(snapshot),
                             null,
                             decision.email(),
-                            "Отчёт отправлен разработчикам: issue #"
+                            "crashReport.toast.reportSubmitted"
                     )
             );
         });
@@ -132,7 +133,7 @@ public final class CrashReportFlow {
                         return;
                     }
                     progressDialog.close(() -> {
-                        Toast.show(Toast.Type.SUCCESS, hooks.successMessagePrefix() + result.issueIndex());
+                        Toast.show(Toast.Type.SUCCESS, I18n.t(hooks.successMessageKey(), result.issueIndex()));
                         runHook(hooks.onFinished());
                     });
                 });
@@ -149,7 +150,9 @@ public final class CrashReportFlow {
                     }
                     progressDialog.close(() -> {
                         ModalPane.showError(
-                                problemReport ? "Не удалось отправить отчёт" : "Не удалось отправить лог",
+                                I18n.t(problemReport
+                                        ? "crashReport.error.submitReportTitle"
+                                        : "crashReport.error.submitLogTitle"),
                                 failureMessage(problemReport, e)
                         );
                         ModalPane pane = ModalPane.getInstance();
@@ -181,15 +184,15 @@ public final class CrashReportFlow {
 
     private static String failureMessage(boolean problemReport, Exception exception) {
         String prefix = problemReport
-                ? "Не удалось отправить отчёт о проблеме."
-                : "Сохранённый лог останется на диске и будет снова предложен при следующем запуске.";
+                ? I18n.t("crashReport.error.reportFailurePrefix")
+                : I18n.t("crashReport.error.logFailurePrefix");
         return prefix + "\n\n" + humanizeError(exception);
     }
 
     private static String humanizeError(Exception exception) {
         String message = exception.getMessage();
         if (message == null || message.isBlank()) {
-            return "Неизвестная ошибка отправки.";
+            return I18n.t("crashReport.error.unknown");
         }
         return message;
     }
@@ -290,5 +293,5 @@ public final class CrashReportFlow {
                                    Runnable onFailure,
                                    Runnable onFinished,
                                    String contactEmail,
-                                   String successMessagePrefix) {}
+                                   String successMessageKey) {}
 }

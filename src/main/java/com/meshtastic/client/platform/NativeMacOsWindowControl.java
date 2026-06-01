@@ -1,6 +1,7 @@
 package com.meshtastic.client.platform;
 
 import com.meshtastic.client.connection.ble.macos.ObjCRuntime;
+import com.meshtastic.client.i18n.I18n;
 import com.sun.jna.*;
 import javafx.stage.Window;
 import org.slf4j.Logger;
@@ -56,6 +57,32 @@ public class NativeMacOsWindowControl {
 
     public long getNativeViewHandle() {
         return nsView;
+    }
+
+    /**
+     * Для вспомогательных tool windows: оставить нативную close-кнопку,
+     * но скрыть minimize/zoom, сохранив resizable style mask.
+     */
+    public void hideMiniaturizeAndZoomButtons() {
+        if (nsWindow == 0) { return; }
+        try {
+            hideStandardWindowButton(1L); // NSWindowMiniaturizeButton
+            hideStandardWindowButton(2L); // NSWindowZoomButton
+        } catch (Throwable t) {
+            log.warn("Не удалось скрыть кнопки tool window", t);
+        }
+    }
+
+    private void hideStandardWindowButton(long buttonType) {
+        long button = OBJC_MSG_SEND.invokeLong(new Object[]{
+                nsWindow,
+                sel("standardWindowButton:"),
+                buttonType
+        });
+        if (button != 0) {
+            msgSendBool(button, "setHidden:", true);
+            msgSendBool(button, "setEnabled:", false);
+        }
     }
 
     /**
@@ -140,7 +167,7 @@ public class NativeMacOsWindowControl {
             hideTitlebarContainer();
 
             // Установить title для NSWindow (AltTab и другие app-switcher'ы используют его)
-            long nsTitle = createNSString("MeshApp");
+            long nsTitle = createNSString(I18n.t("app.title"));
             try {
                 msgSendId(nsWindow, "setTitle:", nsTitle);
             } finally {

@@ -49,6 +49,43 @@ class EmojiImageCacheTest {
     }
 
     @Test
+    void knownEmojiCacheDoesNotRetainPlainTextCandidates() {
+        EmojiImageCache.clearKnownEmojiCacheForTests();
+
+        assertFalse(EmojiImageCache.isKnownEmoji("plain chat message"));
+        assertFalse(EmojiImageCache.isKnownEmoji("another ordinary message"));
+
+        assertEquals(0, EmojiImageCache.knownEmojiCacheSizeForTests());
+    }
+
+    @Test
+    void knownEmojiCacheIsBounded() {
+        EmojiImageCache.clearKnownEmojiCacheForTests();
+        int limit = EmojiImageCache.knownEmojiCacheLimitForTests();
+
+        for (int i = 0; i < limit + 100; i++) {
+            assertFalse(EmojiImageCache.isKnownEmoji("☀" + i));
+        }
+
+        assertTrue(EmojiImageCache.knownEmojiCacheSizeForTests() <= limit);
+    }
+
+    @Test
+    void segmentCacheIsBounded() {
+        onFxThread(() -> {
+            EmojiTextFlow.clearSegmentCacheForTests();
+            int limit = EmojiTextFlow.segmentCacheLimitForTests();
+
+            for (int i = 0; i < limit + 100; i++) {
+                new EmojiTextFlow("cached message " + i + " 😺");
+            }
+
+            assertTrue(EmojiTextFlow.segmentCacheSizeForTests() <= limit);
+            return null;
+        });
+    }
+
+    @Test
     void emojiImageViewBaselineKeepsInlineEmojiSlightlyRaised() {
         onFxThread(() -> {
             var imageView = EmojiImageCache.createImageView("😺", 24);

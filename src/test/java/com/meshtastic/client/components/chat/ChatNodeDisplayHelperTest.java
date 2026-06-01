@@ -1,5 +1,6 @@
 package com.meshtastic.client.components.chat;
 
+import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.MessageReaction;
 import com.meshtastic.client.model.MeshMessage;
@@ -32,18 +33,25 @@ class ChatNodeDisplayHelperTest {
 
     @Test
     void shouldResolveReplySenderNameAndReactionFallbacks() {
-        MeshMessage outgoing = new MeshMessage("!00000001", "!ffffffff", 0, "outgoing", 10, true);
-        MeshMessage incoming = new MeshMessage("!00000022", "!ffffffff", 0, "incoming", 10, false);
-        incoming.setSenderName("Remote User");
+        String previous = I18n.getLanguageTag();
+        try {
+            I18n.setLanguageTagForTests(I18n.LANGUAGE_RU);
 
-        MessageReaction storedNameReaction = new MessageReaction(100, "!00000033", "🎉", 20, false);
-        storedNameReaction.setSenderName("Stored Name");
+            MeshMessage outgoing = new MeshMessage("!00000001", "!ffffffff", 0, "outgoing", 10, true);
+            MeshMessage incoming = new MeshMessage("!00000022", "!ffffffff", 0, "incoming", 10, false);
+            incoming.setSenderName("Remote User");
 
-        MessageReaction nodeIdOnlyReaction = new MessageReaction(100, "!00000044", "🎉", 20, false);
+            MessageReaction storedNameReaction = new MessageReaction(100, "!00000033", "🎉", 20, false);
+            storedNameReaction.setSenderName("Stored Name");
 
-        assertEquals("Вы", ChatNodeDisplayHelper.resolveReplySenderName(null, outgoing));
-        assertEquals("Remote User", ChatNodeDisplayHelper.resolveReplySenderName(null, incoming));
-        assertEquals("Stored Name", ChatNodeDisplayHelper.resolveReactionSenderDisplayName(null, storedNameReaction));
-        assertEquals("!00000044", ChatNodeDisplayHelper.resolveReactionSenderDisplayName(null, nodeIdOnlyReaction));
+            MessageReaction nodeIdOnlyReaction = new MessageReaction(100, "!00000044", "🎉", 20, false);
+
+            assertEquals("Вы", ChatNodeDisplayHelper.resolveReplySenderName(null, outgoing));
+            assertEquals("Remote User", ChatNodeDisplayHelper.resolveReplySenderName(null, incoming));
+            assertEquals("Stored Name", ChatNodeDisplayHelper.resolveReactionSenderDisplayName(null, storedNameReaction));
+            assertEquals("!00000044", ChatNodeDisplayHelper.resolveReactionSenderDisplayName(null, nodeIdOnlyReaction));
+        } finally {
+            I18n.setLanguageTagForTests(previous);
+        }
     }
 }

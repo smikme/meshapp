@@ -1,6 +1,7 @@
 package com.meshtastic.client.system;
 
 import com.meshtastic.client.MeshApp;
+import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.modal.ModalPane;
 import com.meshtastic.client.modal.Toast;
 import com.meshtastic.client.model.ConnectionEntry;
@@ -49,7 +50,6 @@ public class RootPane extends BorderPane {
 
     private static final double RESIZE_MARGIN = 8;
     private static final double CORNER_MARGIN = 16;
-    private static final String APPLICATION_TITLE = "MeshApp";
     /**
      * Для transparent/layered окна Windows нужен хотя бы минимальный alpha,
      * иначе hit-test проваливается сквозь полностью прозрачные пиксели.
@@ -164,7 +164,7 @@ public class RootPane extends BorderPane {
         HBox.setHgrow(spacer, Priority.ALWAYS);
         spacer.setMouseTransparent(true);
 
-        titleLabel = new Label(APPLICATION_TITLE);
+        titleLabel = new Label(applicationTitle());
         titleLabel.getStyleClass().add("title-bar-label");
         titleLabel.setMinWidth(0);
         titleLabel.setMaxWidth(520);
@@ -232,14 +232,18 @@ public class RootPane extends BorderPane {
         ConnectionManager manager = ConnectionManager.getInstance();
         ConnectionEntry entry = findCurrentConnection(manager);
         if (entry == null) {
-            return APPLICATION_TITLE;
+            return applicationTitle();
         }
 
         String nodeTitle = resolveNodeTitle(manager, entry);
         if (entry.isReconnecting() && !entry.isConnected()) {
-            nodeTitle += " (переподключение)";
+            nodeTitle += " " + I18n.t("connection.windowTitle.reconnectingSuffix");
         }
-        return APPLICATION_TITLE + ": " + nodeTitle;
+        return I18n.t("app.windowTitle.withConnection", applicationTitle(), nodeTitle);
+    }
+
+    private static String applicationTitle() {
+        return I18n.t("app.title");
     }
 
     private static ConnectionEntry findCurrentConnection(ConnectionManager manager) {

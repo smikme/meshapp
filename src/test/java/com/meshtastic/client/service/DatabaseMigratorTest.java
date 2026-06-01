@@ -13,9 +13,12 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -137,6 +140,8 @@ class DatabaseMigratorTest {
             assertTrue(columnExists(connection, "CHAT_READ_COUNTS", "OWNER_NODE_ID"));
             assertTrue(columnExists(connection, "TELEMETRY_HISTORY", "OWNER_NODE_ID"));
             assertTrue(columnExists(connection, "NODES", "IGNORED"));
+            assertTrue(columnExists(connection, "NODES", "EXTERNALLY_POWERED"));
+            assertTrue(columnExists(connection, "TELEMETRY_HISTORY", "EXTERNALLY_POWERED"));
             assertTrue(indexExists(connection, "IDX_MSG_CHAT_PACKET"));
 
             assertEquals(1, countRows(connection, "messages"));
@@ -291,6 +296,110 @@ class DatabaseMigratorTest {
     }
 
     @Test
+    void migrateFromV15AddsUniqueGuidsToExistingLuaScripts() throws Exception {
+        try (Connection connection = openConnection("upgrade-v15-lua-guid")) {
+            createSchemaVersion(connection, 15);
+
+            try (Statement stmt = connection.createStatement()) {
+                stmt.execute("""
+                        CREATE TABLE lua_scripts (
+                            id          BIGINT AUTO_INCREMENT PRIMARY KEY,
+                            name        VARCHAR(120) NOT NULL,
+                            code        CLOB NOT NULL,
+                            enabled     BOOLEAN NOT NULL DEFAULT TRUE,
+                            node_id     VARCHAR(60) NOT NULL DEFAULT '',
+                            bot_type    VARCHAR(30) NOT NULL DEFAULT 'AIR_BOT',
+                            automation_name VARCHAR(80) NOT NULL DEFAULT '',
+                            created_at  BIGINT NOT NULL,
+                            updated_at  BIGINT NOT NULL,
+                            last_run_at BIGINT DEFAULT 0,
+                            last_status VARCHAR(20),
+                            last_error  CLOB
+                        )
+                        """);
+                stmt.execute("""
+                        INSERT INTO lua_scripts (name, code, enabled, created_at, updated_at, last_status)
+                        VALUES ('one', '', TRUE, 1, 1, 'NEW')
+                        """);
+                stmt.execute("""
+                        INSERT INTO lua_scripts (name, code, enabled, created_at, updated_at, last_status)
+                        VALUES ('two', '', TRUE, 1, 1, 'NEW')
+                        """);
+            }
+
+            DatabaseMigrator.migrate(connection);
+
+            assertEquals(DatabaseMigrator.CURRENT_VERSION, schemaVersion(connection));
+            assertTrue(columnExists(connection, "LUA_SCRIPTS", "GUID"));
+            assertTrue(columnExists(connection, "LUA_SCRIPTS", "ICON"));
+            assertTrue(columnExists(connection, "LUA_SCRIPTS", "AUTHOR"));
+            assertTrue(indexExists(connection, "IDX_LUA_SCRIPTS_GUID"));
+            String firstGuid = stringValue(connection, "SELECT guid FROM lua_scripts WHERE name = 'one'");
+            String secondGuid = stringValue(connection, "SELECT guid FROM lua_scripts WHERE name = 'two'");
+            assertValidGuid(firstGuid);
+            assertValidGuid(secondGuid);
+            assertNotEquals(firstGuid, secondGuid);
+            assertEquals("🤖", stringValue(connection, "SELECT icon FROM lua_scripts WHERE name = 'one'"));
+            assertEquals("", stringValue(connection, "SELECT author FROM lua_scripts WHERE name = 'one'"));
+        }
+    }
+
+    @Test
+    void migrateFromV17CreatesTracerouteResultsAndBackfillsLegacyMessages() throws Exception {
+        try (Connection connection = openConnection("upgrade-v17-traceroute-results")) {
+            createSchemaVersion(connection, 17);
+
+            try (Statement stmt = connection.createStatement()) {
+                stmt.execute("""
+                        CREATE TABLE messages (
+                            id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                            owner_node_id VARCHAR(20) NOT NULL DEFAULT '',
+                            chat_type VARCHAR(10) NOT NULL,
+                            chat_key VARCHAR(20) NOT NULL,
+                            text CLOB,
+                            timestamp BIGINT NOT NULL,
+                            system_msg BOOLEAN DEFAULT FALSE
+                        )
+                        """);
+            }
+            try (PreparedStatement ps = connection.prepareStatement("""
+                    INSERT INTO messages (owner_node_id, chat_type, chat_key, text, timestamp, system_msg)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """)) {
+                ps.setString(1, "!12345678");
+                ps.setString(2, "channel");
+                ps.setString(3, "0");
+                ps.setString(4, "\uD83D\uDD0D Traceroute → Alpha\nЯ → Alpha");
+                ps.setLong(5, 100);
+                ps.setBoolean(6, true);
+                ps.executeUpdate();
+
+                ps.setString(1, "!12345678");
+                ps.setString(2, "channel");
+                ps.setString(3, "0");
+                ps.setString(4, "ordinary system message");
+                ps.setLong(5, 101);
+                ps.setBoolean(6, true);
+                ps.executeUpdate();
+            }
+
+            DatabaseMigrator.migrate(connection);
+
+            assertEquals(DatabaseMigrator.CURRENT_VERSION, schemaVersion(connection));
+            assertTrue(tableExists(connection, "TRACEROUTE_RESULTS"));
+            assertTrue(columnExists(connection, "TRACEROUTE_RESULTS", "ROUTE_DATA"));
+            assertTrue(indexExists(connection, "IDX_TRACEROUTE_OWNER_TIME"));
+            assertTrue(indexExists(connection, "IDX_TRACEROUTE_REQUEST"));
+            assertEquals(1, countRows(connection, "traceroute_results"));
+            assertEquals("legacy.messages", stringValue(connection, "SELECT source FROM traceroute_results"));
+            assertEquals("legacy:1", stringValue(connection, "SELECT request_id FROM traceroute_results"));
+            assertEquals("!12345678", stringValue(connection, "SELECT owner_node_id FROM traceroute_results"));
+            assertEquals("\uD83D\uDD0D Traceroute → Alpha\nЯ → Alpha",
+                    stringValue(connection, "SELECT formatted_text FROM traceroute_results"));
+        }
+    }
+
+    @Test
     void migrateLegacyAppDatabaseWithoutSchemaVersionPreservesMessages() throws Exception {
         try (Connection connection = openConnection("legacy-app-preserve")) {
             try (Statement stmt = connection.createStatement()) {
@@ -319,8 +428,142 @@ class DatabaseMigratorTest {
         }
     }
 
+    @Test
+    void migrateLegacyNumericAppDatabaseWithoutSchemaVersionConvertsNodeColumns() throws Exception {
+        try (Connection connection = openConnection("legacy-numeric-app-preserve")) {
+            createLegacyNumericAppTables(connection);
+
+            DatabaseMigrator.migrate(connection);
+
+            assertLegacyNumericSchemaWasConverted(connection);
+        }
+    }
+
+    @Test
+    void migrateLegacyNumericVersionOneConvertsNodeColumns() throws Exception {
+        try (Connection connection = openConnection("legacy-numeric-v1")) {
+            createSchemaVersion(connection, 1);
+            createLegacyNumericAppTables(connection);
+
+            DatabaseMigrator.migrate(connection);
+
+            assertLegacyNumericSchemaWasConverted(connection);
+        }
+    }
+
     private Connection openConnection(String name) throws SQLException {
         return DriverManager.getConnection("jdbc:h2:" + tempDir.resolve(name) + ";AUTO_SERVER=FALSE;TRACE_LEVEL_FILE=0");
+    }
+
+    private static void createLegacyNumericAppTables(Connection connection) throws SQLException {
+        try (Statement stmt = connection.createStatement()) {
+            stmt.execute("""
+                    CREATE TABLE messages (
+                        id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                        chat_type VARCHAR(10) NOT NULL,
+                        chat_key INT NOT NULL,
+                        from_num INT NOT NULL,
+                        to_num INT NOT NULL,
+                        channel_idx INT NOT NULL,
+                        text CLOB,
+                        timestamp BIGINT NOT NULL,
+                        outgoing BOOLEAN NOT NULL,
+                        packet_id INT DEFAULT 0,
+                        status VARCHAR(20),
+                        error_reason VARCHAR(100),
+                        reply_id INT DEFAULT 0,
+                        reply_text CLOB,
+                        hop_start INT DEFAULT 0,
+                        hop_limit INT DEFAULT 0,
+                        sender_name VARCHAR(100),
+                        system_msg BOOLEAN DEFAULT FALSE
+                    )
+                    """);
+            stmt.execute("CREATE INDEX idx_msg_chat ON messages (chat_type, chat_key, id)");
+            stmt.execute("CREATE INDEX idx_msg_packet ON messages (packet_id)");
+            stmt.execute("""
+                    INSERT INTO messages (chat_type, chat_key, from_num, to_num, channel_idx, text, timestamp, outgoing)
+                    VALUES ('channel', 0, 48956964, -1, 0, 'legacy channel', 1, FALSE)
+                    """);
+            stmt.execute("""
+                    INSERT INTO messages (chat_type, chat_key, from_num, to_num, channel_idx, text, timestamp, outgoing)
+                    VALUES ('dm', -160835988, 48956964, -160835988, 0, 'legacy dm', 2, FALSE)
+                    """);
+
+            stmt.execute("""
+                    CREATE TABLE chat_read_counts (
+                        chat_type VARCHAR(10) NOT NULL,
+                        chat_key INT NOT NULL,
+                        read_count INT NOT NULL DEFAULT 0,
+                        PRIMARY KEY (chat_type, chat_key)
+                    )
+                    """);
+            stmt.execute("INSERT INTO chat_read_counts (chat_type, chat_key, read_count) VALUES ('channel', 0, 3)");
+            stmt.execute("INSERT INTO chat_read_counts (chat_type, chat_key, read_count) VALUES ('dm', -160835988, 2)");
+
+            stmt.execute("""
+                    CREATE TABLE telemetry_history (
+                        id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                        ts BIGINT NOT NULL,
+                        node_num INT NOT NULL,
+                        battery_level INT,
+                        voltage REAL,
+                        channel_utilization REAL,
+                        air_util_tx REAL,
+                        temperature REAL,
+                        relative_humidity REAL,
+                        barometric_pressure REAL
+                    )
+                    """);
+            stmt.execute("CREATE INDEX idx_telemetry_node_ts ON telemetry_history (node_num, ts)");
+            stmt.execute("INSERT INTO telemetry_history (ts, node_num, battery_level) VALUES (100, 48956964, 95)");
+
+            stmt.execute("""
+                    CREATE TABLE nodes (
+                        node_num INT PRIMARY KEY,
+                        long_name VARCHAR(100),
+                        short_name VARCHAR(10),
+                        node_id VARCHAR(20),
+                        role VARCHAR(30),
+                        hw_model VARCHAR(50),
+                        latitude DOUBLE,
+                        longitude DOUBLE,
+                        altitude INT,
+                        snr REAL,
+                        last_heard INT,
+                        battery_level INT,
+                        voltage REAL,
+                        hops_away INT
+                    )
+                    """);
+            stmt.execute("""
+                    INSERT INTO nodes (node_num, long_name, short_name, node_id)
+                    VALUES (48956964, 'LYBER_0624', 'DIM4', '!02eb0624')
+                    """);
+        }
+    }
+
+    private static void assertLegacyNumericSchemaWasConverted(Connection connection) throws SQLException {
+        assertEquals(DatabaseMigrator.CURRENT_VERSION, schemaVersion(connection));
+        assertTrue(columnExists(connection, "MESSAGES", "FROM_NODE_ID"));
+        assertTrue(columnExists(connection, "MESSAGES", "TO_NODE_ID"));
+        assertTrue(columnExists(connection, "MESSAGES", "OWNER_NODE_ID"));
+        assertTrue(columnExists(connection, "MESSAGES", "RX_RSSI"));
+        assertTrue(columnExists(connection, "MESSAGES", "RX_SNR"));
+        assertTrue(columnExists(connection, "TELEMETRY_HISTORY", "NODE_ID"));
+        assertTrue(columnExists(connection, "TELEMETRY_HISTORY", "OWNER_NODE_ID"));
+        assertTrue(columnExists(connection, "TELEMETRY_HISTORY", "EXTERNALLY_POWERED"));
+        assertTrue(columnExists(connection, "CHAT_READ_COUNTS", "OWNER_NODE_ID"));
+        assertTrue(columnExists(connection, "NODES", "EXTERNALLY_POWERED"));
+
+        assertEquals(2, countRows(connection, "messages"));
+        assertEquals(1, countRows(connection, "telemetry_history"));
+        assertEquals("!02eb0624", stringValue(connection, "SELECT from_node_id FROM messages WHERE text = 'legacy channel'"));
+        assertEquals("!ffffffff", stringValue(connection, "SELECT to_node_id FROM messages WHERE text = 'legacy channel'"));
+        assertEquals("0", stringValue(connection, "SELECT chat_key FROM messages WHERE text = 'legacy channel'"));
+        assertEquals("!f669d66c", stringValue(connection, "SELECT chat_key FROM messages WHERE text = 'legacy dm'"));
+        assertEquals("!02eb0624", stringValue(connection, "SELECT node_id FROM telemetry_history WHERE ts = 100"));
+        assertEquals("!f669d66c", stringValue(connection, "SELECT chat_key FROM chat_read_counts WHERE chat_type = 'dm'"));
     }
 
     private static void createSchemaVersion(Connection connection, int version) throws SQLException {
@@ -431,5 +674,18 @@ class DatabaseMigratorTest {
             rs.next();
             return rs.getString(1);
         }
+    }
+
+    private static String stringValue(Connection connection, String sql) throws SQLException {
+        try (Statement stmt = connection.createStatement();
+             ResultSet rs = stmt.executeQuery(sql)) {
+            rs.next();
+            return rs.getString(1);
+        }
+    }
+
+    private static void assertValidGuid(String guid) {
+        assertNotNull(guid);
+        assertEquals(guid, UUID.fromString(guid).toString());
     }
 }

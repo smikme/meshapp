@@ -1,14 +1,12 @@
 package com.meshtastic.client.notification;
 
-import com.meshtastic.client.MeshApp;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.platform.OsDetect;
+import com.meshtastic.client.system.AppUi;
 import com.meshtastic.client.utils.AppPreferences;
 import com.meshtastic.client.utils.UnicodeTextUtils;
 import org.meshtastic.proto.ChannelProtos;
-import javafx.application.Platform;
-import javafx.stage.Stage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -105,7 +103,7 @@ public class NotificationManager {
         int bodyLength = body.length();
         int packetId = msg.getPacketId();
 
-        Platform.runLater(() -> {
+        AppUi.runLater(() -> {
             try {
                 service.showNotification(title, body);
                 log.debug("OS notification shown for packet {} (chatType={}, bodyChars={})",
@@ -172,6 +170,9 @@ public class NotificationManager {
     }
 
     private static NotificationService createPlatformService() {
+        if (AppUi.isTerminal()) {
+            return new NoOpNotificationService();
+        }
         return switch (OsDetect.current()) {
             case MACOS -> new MacOsNotificationService();
             case WINDOWS -> new WindowsNotificationService();
@@ -181,14 +182,8 @@ public class NotificationManager {
     }
 
     private void initFocusTracking() {
-        Platform.runLater(() -> {
-            Stage stage = MeshApp.getPrimaryStage();
-            if (stage != null) {
-                windowFocused = stage.isFocused();
-                stage.focusedProperty().addListener(
-                        (obs, wasFocused, isFocused) -> windowFocused = isFocused);
-            }
-        });
+        windowFocused = AppUi.isPrimaryWindowFocused();
+        AppUi.addPrimaryWindowFocusListener(focused -> windowFocused = focused);
     }
 
     /** Заглушка для неподдерживаемых платформ. */

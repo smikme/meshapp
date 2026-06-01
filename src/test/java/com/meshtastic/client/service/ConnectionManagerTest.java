@@ -7,9 +7,11 @@ import com.meshtastic.client.connection.FrameParser;
 import com.meshtastic.client.connection.KissFrameParser;
 import com.meshtastic.client.connection.ble.BleDevice;
 import com.meshtastic.client.connection.ble.BlePlatform;
-import com.meshtastic.client.connection.ble.BlePlatform.AdapterState;
 import com.meshtastic.client.connection.ble.BleProtocolProfile;
 import com.meshtastic.client.connection.ble.BleState;
+import com.meshtastic.client.i18n.I18n;
+import com.meshtastic.client.lua.LuaScript;
+import com.meshtastic.client.lua.LuaScriptService;
 import com.meshtastic.client.model.ConnectionEntry;
 import com.meshtastic.client.model.ConnectionType;
 import com.meshtastic.client.model.DeviceState;
@@ -99,6 +101,51 @@ class ConnectionManagerTest {
             assertNull(manager.getProtocolHandler(entry.getId()));
             assertNull(manager.getMessageListenerService(entry.getId()));
             assertNull(manager.getConfigFuture(entry.getId()));
+        }
+    }
+
+    @Test
+    void connectAutostartsMatchingLuaScriptsAfterConfigExchange() throws Exception {
+        try (TcpMeshtasticStubServer server = new TcpMeshtasticStubServer(0x1234ABCD)) {
+            ConnectionManager manager = ConnectionManager.getInstance();
+            LuaScriptService scriptService = LuaScriptService.getInstance();
+            LuaScript matching = scriptService.createScript(
+                    "matching-autostart",
+                    "mesh.kv.set('ready_node', mesh.owner().node_id)",
+                    true,
+                    "!1234ABCD",
+                    LuaScript.BotType.AIR_BOT,
+                    "");
+            LuaScript otherNode = scriptService.createScript(
+                    "other-node-autostart",
+                    "mesh.kv.set('ready_node', 'wrong-node')",
+                    true,
+                    "!00000000",
+                    LuaScript.BotType.AIR_BOT,
+                    "");
+            LuaScript disabled = scriptService.createScript(
+                    "disabled-autostart",
+                    "mesh.kv.set('ready_node', 'disabled')",
+                    false,
+                    "!1234ABCD",
+                    LuaScript.BotType.AIR_BOT,
+                    "");
+            ConnectionEntry entry = new ConnectionEntry("stub", "127.0.0.1", server.port());
+            manager.addEntry(entry);
+
+            manager.connect(entry.getId());
+
+            CompletableFuture<DeviceState> future = manager.getConfigFuture(entry.getId());
+            assertNotNull(future);
+            DeviceState state = future.get(5, TimeUnit.SECONDS);
+
+            assertEquals(0x1234ABCD, state.getMyNodeNum());
+            assertTrue(waitUntil(() -> "!1234abcd".equals(scriptService.getKv(matching.getId(), "ready_node")),
+                    4_000));
+            assertNull(scriptService.getKv(otherNode.getId(), "ready_node"));
+            assertNull(scriptService.getKv(disabled.getId(), "ready_node"));
+
+            manager.disconnect(entry.getId());
         }
     }
 
@@ -211,11 +258,34 @@ class ConnectionManagerTest {
         ConnectionException error = assertThrows(ConnectionException.class,
                 () -> manager.connect(second.getId()));
 
-        assertTrue(error.getMessage().contains("Параллельные BLE-подключения"));
+        assertEquals(I18n.t("connection.error.parallelBleUnsupported", first.getName(), second.getName()),
+                error.getMessage());
         assertTrue(first.isConnected());
         assertFalse(second.isConnected());
 
         manager.disconnect(first.getId());
+    }
+
+    @Test
+    void failedBleConnectDisconnectsAndDisposesTransport() {
+        FailingBlePlatform platform = new FailingBlePlatform();
+        installBlePlatformFactory(() -> platform, true);
+
+        ConnectionManager manager = ConnectionManager.getInstance();
+        ConnectionEntry entry = new ConnectionEntry("ble", "AA:BB:CC:DD:EE:FF", "Test BLE");
+        manager.addEntry(entry);
+
+        ConnectionException error = assertThrows(ConnectionException.class,
+                () -> manager.connect(entry.getId()));
+
+        assertEquals("Pairing failed", error.getMessage());
+        assertEquals(1, platform.connectCalls);
+        assertEquals(1, platform.disconnectCalls);
+        assertEquals(1, platform.disposeCalls);
+        assertFalse(entry.isConnected());
+        assertFalse(entry.isReconnecting());
+        assertFalse(manager.hasActiveConnection());
+        assertFalse(pendingReconnects().containsKey(entry.getId()));
     }
 
     @Test
@@ -268,6 +338,43 @@ class ConnectionManagerTest {
     }
 
     @Test
+    void connectAutoconnectEntriesConnectsOnlyFlaggedProfiles() throws Exception {
+        try (TcpMeshtasticStubServer autoconnectServer = new TcpMeshtasticStubServer(0x1234ABCD);
+             TcpMeshtasticStubServer manualServer = new TcpMeshtasticStubServer(0x22222222)) {
+            ConnectionManager manager = ConnectionManager.getInstance();
+            ConnectionEntry autoconnect = new ConnectionEntry("auto", "127.0.0.1", autoconnectServer.port());
+            autoconnect.setAutoconnect(true);
+            ConnectionEntry manual = new ConnectionEntry("manual", "127.0.0.1", manualServer.port());
+            manager.addEntry(autoconnect);
+            manager.addEntry(manual);
+
+            manager.connectAutoconnectEntries();
+
+            assertTrue(waitUntil(autoconnect::isConnected, 2_000));
+            CompletableFuture<DeviceState> future = manager.getConfigFuture(autoconnect.getId());
+            assertNotNull(future);
+            assertEquals(0x1234ABCD, future.get(5, TimeUnit.SECONDS).getMyNodeNum());
+            assertFalse(manual.isConnected());
+            assertNull(manager.getConfigFuture(manual.getId()));
+
+            manager.disconnect(autoconnect.getId());
+        }
+    }
+
+    @Test
+    void autoconnectFlagIsStoredInConnectionsJson() {
+        ConnectionManager manager = ConnectionManager.getInstance();
+        ConnectionEntry entry = new ConnectionEntry("auto", "127.0.0.1", 4403);
+        entry.setAutoconnect(true);
+        manager.addEntry(entry);
+
+        TestEnvironmentSupport.resetSingletons();
+        ConnectionEntry loaded = ConnectionManager.getInstance().getEntries().getFirst();
+
+        assertTrue(loaded.isAutoconnect());
+    }
+
+    @Test
     void connectAllowsMultipleActiveConnectionsAndTracksSelectedConnection() throws Exception {
         try (TcpMeshtasticStubServer serverA = new TcpMeshtasticStubServer(0x11111111);
              TcpMeshtasticStubServer serverB = new TcpMeshtasticStubServer(0x22222222)) {
@@ -316,7 +423,10 @@ class ConnectionManagerTest {
             ConnectionException error = assertThrows(ConnectionException.class,
                     () -> manager.connect(duplicate.getId()));
 
-            assertTrue(error.getMessage().contains("уже подключена"));
+            assertEquals(I18n.t("connection.error.duplicateNode",
+                    duplicate.getNodeId(),
+                    active.getName(),
+                    active.getEffectiveType()), error.getMessage());
             assertFalse(duplicate.isConnected());
             assertEquals(1, manager.getActiveConnectionEntries().size());
 
@@ -372,6 +482,7 @@ class ConnectionManagerTest {
         ConnectionEntry updated = new ConnectionEntry("office", "192.0.2.10", 4404);
         updated.setId(entry.getId());
         updated.setProtocol(ProtocolType.MESHCORE_KISS);
+        updated.setAutoconnect(true);
 
         manager.updateEntry(updated);
 
@@ -384,6 +495,7 @@ class ConnectionManagerTest {
         assertEquals(4404, stored.getPort());
         assertEquals("!12345678", stored.getNodeId());
         assertEquals(ProtocolType.MESHCORE_KISS, stored.getProtocol());
+        assertTrue(stored.isAutoconnect());
     }
 
     @Test
@@ -399,7 +511,7 @@ class ConnectionManagerTest {
         IllegalStateException error = assertThrows(IllegalStateException.class,
                 () -> manager.updateEntry(updated));
 
-        assertTrue(error.getMessage().contains("Нельзя редактировать активное подключение"));
+        assertEquals(I18n.t("connection.error.editActive"), error.getMessage());
         assertEquals("home", manager.findEntry(entry.getId()).getName());
     }
 
@@ -719,8 +831,8 @@ class ConnectionManagerTest {
         }
 
         @Override
-        public AdapterState getAdapterState() {
-            return AdapterState.POWERED_ON;
+        public BlePlatform.AdapterState getAdapterState() {
+            return BlePlatform.AdapterState.POWERED_ON;
         }
 
         @Override
@@ -803,12 +915,75 @@ class ConnectionManagerTest {
         }
 
         @Override
-        public AdapterState getAdapterState() {
-            return AdapterState.POWERED_ON;
+        public BlePlatform.AdapterState getAdapterState() {
+            return BlePlatform.AdapterState.POWERED_ON;
         }
 
         @Override
         public void dispose() {
+        }
+    }
+
+    private static final class FailingBlePlatform implements BlePlatform {
+        private volatile Consumer<BleState> stateListener;
+        private int connectCalls;
+        private int disconnectCalls;
+        private int disposeCalls;
+
+        @Override
+        public void startScan(Consumer<BleDevice> onDeviceFound) {
+        }
+
+        @Override
+        public void stopScan() {
+        }
+
+        @Override
+        public void connect(String address) throws ConnectionException {
+            connectCalls++;
+            throw new ConnectionException("Pairing failed");
+        }
+
+        @Override
+        public void disconnect() {
+            disconnectCalls++;
+            Consumer<BleState> listener = stateListener;
+            if (listener != null) {
+                listener.accept(new BleState.Disconnected());
+            }
+        }
+
+        @Override
+        public boolean isConnected() {
+            return false;
+        }
+
+        @Override
+        public boolean writeToRadio(byte[] protobufPayload) {
+            return false;
+        }
+
+        @Override
+        public void setFromRadioListener(Consumer<byte[]> listener) {
+        }
+
+        @Override
+        public void setStateListener(Consumer<BleState> listener) {
+            this.stateListener = listener;
+        }
+
+        @Override
+        public void setPasskeyRequestHandler(Consumer<String> handler) {
+        }
+
+        @Override
+        public BlePlatform.AdapterState getAdapterState() {
+            return BlePlatform.AdapterState.POWERED_ON;
+        }
+
+        @Override
+        public void dispose() {
+            disposeCalls++;
         }
     }
 
@@ -898,8 +1073,8 @@ class ConnectionManagerTest {
         }
 
         @Override
-        public AdapterState getAdapterState() {
-            return AdapterState.POWERED_ON;
+        public BlePlatform.AdapterState getAdapterState() {
+            return BlePlatform.AdapterState.POWERED_ON;
         }
 
         @Override

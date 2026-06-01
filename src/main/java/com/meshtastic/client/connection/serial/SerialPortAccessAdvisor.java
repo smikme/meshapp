@@ -1,5 +1,6 @@
 package com.meshtastic.client.connection.serial;
 
+import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.platform.OsDetect;
 
 import java.nio.file.Files;
@@ -52,7 +53,7 @@ public final class SerialPortAccessAdvisor {
             fallbackError = "unknown error";
         }
         if (isMissingError(errno, fallbackError) || (errno == 0 && deviceMissing(path))) {
-            return "Cannot open " + path + ": device not found";
+            return I18n.t("connection.serial.error.deviceNotFound", path);
         }
         if (linux && isPermissionError(errno, fallbackError)) {
             return linuxPermissionMessage(Path.of(path));
@@ -60,7 +61,7 @@ public final class SerialPortAccessAdvisor {
         if (linux && isBusyError(errno, fallbackError)) {
             return linuxBusyMessage(path);
         }
-        return "Cannot open " + path + ": " + fallbackError;
+        return I18n.t("connection.serial.error.open", path, fallbackError);
     }
 
     static boolean isPermissionError(int errno, String nativeError) {
@@ -90,29 +91,19 @@ public final class SerialPortAccessAdvisor {
     static String linuxPermissionMessage(Path path) {
         PosixDetails details = readPosixDetails(path);
         String group = recommendedGroup(details.group());
-        StringBuilder message = new StringBuilder("Нет доступа к serial-порту ")
-                .append(path)
-                .append(".");
+        StringBuilder message = new StringBuilder(I18n.t("connection.serial.permission", path));
         if (details.present()) {
-            message.append(" Права: ")
-                    .append(details.permissions())
-                    .append(' ')
-                    .append(details.owner())
-                    .append(':')
-                    .append(details.group())
-                    .append('.');
+            message.append(I18n.t("connection.serial.permissionDetails",
+                    details.permissions(),
+                    details.owner(),
+                    details.group()));
         }
-        message.append(" Добавьте пользователя в группу ")
-                .append(group)
-                .append(": sudo usermod -aG ")
-                .append(group)
-                .append(" $USER, затем выйдите из системы и войдите снова.");
+        message.append(I18n.t("connection.serial.permissionFix", group));
         return message.toString();
     }
 
     private static String linuxBusyMessage(String path) {
-        return "Serial-порт " + path + " занят другим процессом. Закройте serial monitor/CLI "
-                + "или остановите ModemManager для проверки: sudo systemctl stop ModemManager.";
+        return I18n.t("connection.serial.busy", path);
     }
 
     private static boolean deviceMissing(String path) {

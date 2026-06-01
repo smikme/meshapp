@@ -14,6 +14,7 @@ import java.util.UUID;
  * Новые профили по умолчанию используют {@link ProtocolType#MESHTASTIC}.
  * Поле {@code protocol} может быть {@code null} для legacy-записей —
  * в этом случае {@link #getEffectiveProtocol()} возвращает {@link ProtocolType#MESHTASTIC}.
+ * Поле {@code autoconnect} сохраняется и по умолчанию равно {@code false}.
  * Поля {@code connected} и {@code reconnecting} помечены как {@code transient} —
  * не сохраняются, отражают текущее runtime-состояние.
  *
@@ -29,9 +30,11 @@ public class ConnectionEntry {
     private int port;
     private String portName;
     private int baudRate;
+    private SerialModemLineMode serialModemLineMode;
     private String bleAddress;
     private String bleDeviceName;
     private String nodeId;
+    private boolean autoconnect;
     private transient boolean connected;
     private transient boolean reconnecting;
 
@@ -85,6 +88,14 @@ public class ConnectionEntry {
      */
     public ProtocolType getEffectiveProtocol() {
         return protocol != null ? protocol : ProtocolType.MESHTASTIC;
+    }
+
+    /**
+     * Возвращает режим DTR/RTS для serial-подключения.
+     * Для legacy-записей без поля возвращает {@link SerialModemLineMode#AUTO}.
+     */
+    public SerialModemLineMode getEffectiveSerialModemLineMode() {
+        return serialModemLineMode != null ? serialModemLineMode : SerialModemLineMode.AUTO;
     }
 
     public String getId() {
@@ -164,6 +175,19 @@ public class ConnectionEntry {
         this.baudRate = baudRate;
     }
 
+    public SerialModemLineMode getSerialModemLineMode() {
+        return serialModemLineMode;
+    }
+
+    /**
+     * Задаёт режим DTR/RTS для serial-подключения.
+     *
+     * @param serialModemLineMode сохранённый режим или {@code null} для legacy-compatible {@code AUTO}
+     */
+    public void setSerialModemLineMode(SerialModemLineMode serialModemLineMode) {
+        this.serialModemLineMode = serialModemLineMode;
+    }
+
     public String getBleAddress() {
         return bleAddress;
     }
@@ -186,6 +210,14 @@ public class ConnectionEntry {
 
     public void setNodeId(String nodeId) {
         this.nodeId = nodeId;
+    }
+
+    public boolean isAutoconnect() {
+        return autoconnect;
+    }
+
+    public void setAutoconnect(boolean autoconnect) {
+        this.autoconnect = autoconnect;
     }
 
     public boolean isConnected() {

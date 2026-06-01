@@ -2,6 +2,7 @@ package com.meshtastic.client.components.chat;
 
 import com.meshtastic.client.components.EmojiImageCache;
 import com.meshtastic.client.components.EmojiTextFlow;
+import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.themes.TypographyManager;
 import javafx.beans.property.ReadOnlyDoubleProperty;
@@ -61,6 +62,7 @@ public class TracerouteView {
     private final ReadOnlyDoubleProperty containerWidthProp;
     private final IntFunction<String> nodeNameResolver;
     private final BiConsumer<MeshMessage, HBox> onDeleteMessage;
+    private final boolean showAvatar;
 
     /**
      * @param containerWidthProp ширина контейнера сообщений для binding maxWidth
@@ -70,9 +72,26 @@ public class TracerouteView {
     public TracerouteView(ReadOnlyDoubleProperty containerWidthProp,
                           IntFunction<String> nodeNameResolver,
                           BiConsumer<MeshMessage, HBox> onDeleteMessage) {
+        this(containerWidthProp, nodeNameResolver, onDeleteMessage, true);
+    }
+
+    /**
+     * Создаёт визуализатор traceroute с настраиваемым отображением системного аватара.
+     *
+     * @param containerWidthProp ширина контейнера сообщений для binding maxWidth
+     * @param nodeNameResolver   функция int -&gt; String, возвращает имя ноды по nodeNum
+     * @param onDeleteMessage    колбэк удаления сообщения (msg, bubbleRow), может быть {@code null}
+     * @param showAvatar         {@code true}, чтобы показывать системный avatar как в чате;
+     *                           {@code false} для standalone-панелей и окон traceroute
+     */
+    public TracerouteView(ReadOnlyDoubleProperty containerWidthProp,
+                          IntFunction<String> nodeNameResolver,
+                          BiConsumer<MeshMessage, HBox> onDeleteMessage,
+                          boolean showAvatar) {
         this.containerWidthProp = containerWidthProp;
         this.nodeNameResolver = nodeNameResolver;
         this.onDeleteMessage = onDeleteMessage;
+        this.showAvatar = showAvatar;
     }
 
     /**
@@ -85,7 +104,7 @@ public class TracerouteView {
     public String formatText(String targetName, MeshProtos.RouteDiscovery route) {
         StringBuilder sb = new StringBuilder();
         sb.append(TRACEROUTE_PREFIX).append(targetName).append("\n");
-        sb.append("Я");
+        sb.append(selfName());
         List<Integer> hops = route.getRouteList();
         int snrCount = route.getSnrTowardsCount();
         for (int i = 0; i <= hops.size(); i++) {
@@ -110,7 +129,7 @@ public class TracerouteView {
                     sb.append(" → ");
                 }
                 sb.append((i < backHops.size())
-                        ? nodeNameResolver.apply(backHops.get(i)) : "Я");
+                        ? nodeNameResolver.apply(backHops.get(i)) : selfName());
             }
         }
         return sb.toString();
@@ -138,17 +157,17 @@ public class TracerouteView {
 
         // Прямой маршрут
         content.getChildren().add(buildRouteChain(
-                "Я", targetName,
+                selfName(), targetName,
                 route.getRouteList(), route.getSnrTowardsList(), true));
 
         // Обратный маршрут
         if (hasReverseRoute(route)) {
-            Label backLabel = new Label("Обратный:");
+            Label backLabel = new Label(I18n.t("chat.traceroute.reverse"));
             backLabel.getStyleClass().addAll(
                     "chat-bubble-text", "traceroute-section-label");
             content.getChildren().add(backLabel);
             content.getChildren().add(buildRouteChain(
-                    targetName, "Я",
+                    targetName, selfName(),
                     route.getRouteBackList(), route.getSnrBackList(), false));
         }
 
@@ -198,7 +217,7 @@ public class TracerouteView {
                 buildRouteChainFromNames(fwd.names, fwd.snrValues, true));
 
         if (back != null) {
-            Label backLabel = new Label("Обратный:");
+            Label backLabel = new Label(I18n.t("chat.traceroute.reverse"));
             backLabel.getStyleClass().addAll(
                     "chat-bubble-text", "traceroute-section-label");
             content.getChildren().add(backLabel);
@@ -215,7 +234,7 @@ public class TracerouteView {
     private VBox createBubbleContent() {
         VBox content = new VBox(6);
         content.getStyleClass().add("chat-bubble-system");
-        content.maxWidthProperty().bind(containerWidthProp.multiply(0.85));
+        content.maxWidthProperty().bind(containerWidthProp.multiply(showAvatar ? 0.85 : 0.98));
         content.setMinHeight(Region.USE_PREF_SIZE);
         return content;
     }
@@ -228,6 +247,14 @@ public class TracerouteView {
     }
 
     private HBox wrapWithAvatar(VBox content, MeshMessage msg) {
+        if (!showAvatar) {
+            HBox row = new HBox(content);
+            row.setAlignment(Pos.BOTTOM_LEFT);
+            row.getStyleClass().add("chat-message-row-system");
+            attachContextMenu(content, msg, row);
+            return row;
+        }
+
         StackPane botAvatar = new StackPane();
         botAvatar.setMinSize(28, 28);
         botAvatar.setMaxSize(28, 28);
@@ -251,16 +278,20 @@ public class TracerouteView {
     }
 
     private void attachContextMenu(VBox content, MeshMessage msg, HBox row) {
-        MenuItem copyItem = new MenuItem("Копировать");
+        MenuItem copyItem = new MenuItem(I18n.t("common.copy"));
         copyItem.setOnAction(ev -> {
             ClipboardContent cc = new ClipboardContent();
             cc.putString(msg.getText());
             Clipboard.getSystemClipboard().setContent(cc);
         });
-        MenuItem deleteItem = new MenuItem("Удалить");
-        deleteItem.setOnAction(ev -> onDeleteMessage.accept(msg, row));
-        ContextMenu ctxMenu = new ContextMenu(
-                copyItem, new SeparatorMenuItem(), deleteItem);
+        ContextMenu ctxMenu;
+        if (onDeleteMessage != null) {
+            MenuItem deleteItem = new MenuItem(I18n.t("common.delete"));
+            deleteItem.setOnAction(ev -> onDeleteMessage.accept(msg, row));
+            ctxMenu = new ContextMenu(copyItem, new SeparatorMenuItem(), deleteItem);
+        } else {
+            ctxMenu = new ContextMenu(copyItem);
+        }
         content.setOnContextMenuRequested(ev -> {
             ctxMenu.show(content, ev.getScreenX(), ev.getScreenY());
             ev.consume();
@@ -381,6 +412,10 @@ public class TracerouteView {
     private static boolean hasReverseRoute(MeshProtos.RouteDiscovery route) {
         // route_back stores only intermediate nodes; direct return links are represented by snr_back alone.
         return route.getRouteBackCount() > 0 || route.getSnrBackCount() > 0;
+    }
+
+    private static String selfName() {
+        return I18n.t("chat.self.avatar");
     }
 
     private static ParsedRoute parseRouteLine(String line) {

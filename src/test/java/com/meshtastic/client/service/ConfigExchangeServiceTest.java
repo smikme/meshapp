@@ -6,6 +6,7 @@ import com.meshtastic.client.connection.ConnectionListener;
 import com.meshtastic.client.connection.MeshtasticConnection;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.NodeData;
+import com.meshtastic.client.model.TelemetryEntry;
 import com.meshtastic.client.protocol.ProtocolHandler;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -170,6 +171,39 @@ class ConfigExchangeServiceTest {
         assertEquals(4.1f, node.getVoltage());
         assertEquals(1, state.getTelemetryHistory().size());
         assertEquals(1, NodeCacheService.getInstance().countTelemetryEntries("!12345678"));
+    }
+
+    @Test
+    void onNodeInfoSeparatesExternalPowerFlagFromBatteryPercent() {
+        FakeConnection connection = new FakeConnection();
+        ProtocolHandler handler = track(new ProtocolHandler(connection));
+        DeviceState state = new DeviceState();
+        state.setMyNodeNum(0x12345678);
+        ConfigExchangeService service = track(new ConfigExchangeService(handler, state));
+
+        service.onNodeInfo(MeshProtos.NodeInfo.newBuilder()
+                .setNum(0xCAFEBABE)
+                .setLastHeard(1_700_000_444)
+                .setUser(MeshProtos.User.newBuilder()
+                        .setId("!cafebabe")
+                        .setLongName("Alice")
+                        .build())
+                .setDeviceMetrics(TelemetryProtos.DeviceMetrics.newBuilder()
+                        .setBatteryLevel(101)
+                        .setVoltage(4.0f)
+                        .setChannelUtilization(12.5f)
+                        .build())
+                .build());
+
+        NodeData node = state.getOrCreateNode(0xCAFEBABE);
+        assertEquals(0, node.getBatteryLevel());
+        assertTrue(node.isExternallyPowered());
+        assertEquals(4.0f, node.getVoltage());
+
+        TelemetryEntry runtimeEntry = state.getTelemetryHistory().getFirst();
+        assertEquals(0, runtimeEntry.getBatteryLevel());
+        assertTrue(runtimeEntry.isExternallyPowered());
+        assertEquals(4.0f, runtimeEntry.getVoltage());
     }
 
     @Test
@@ -445,8 +479,6 @@ class ConfigExchangeServiceTest {
 
     private static final class FakeConnection implements MeshtasticConnection {
         // Нам нужен только факт отправки want_config_id; входящие события вызываем напрямую у сервиса.
-        private Consumer<byte[]> dataListener;
-        private ConnectionListener connectionListener;
         private volatile Integer lastWantConfigId;
         private final List<Integer> sentWantConfigIds = new ArrayList<>();
         private final List<MeshProtos.MeshPacket> sentPackets = new ArrayList<>();
@@ -487,12 +519,10 @@ class ConfigExchangeServiceTest {
 
         @Override
         public void setDataListener(Consumer<byte[]> listener) {
-            this.dataListener = listener;
         }
 
         @Override
         public void setConnectionListener(ConnectionListener listener) {
-            this.connectionListener = listener;
         }
 
         int awaitLastWantConfigId() throws InterruptedException {

@@ -1,6 +1,7 @@
 package com.meshtastic.client.components;
 
 import com.meshtastic.client.forms.FormChat;
+import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.modal.ModalPane;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.NodeData;
@@ -81,10 +82,10 @@ public class NodeDetailContent extends HBox {
         boolean hasPublicKey = node.getPublicKey() != null && node.getPublicKey().length > 0;
         boolean canDirectMessage = hasPublicKey && !node.isUnmessagable();
         String privateChatTooltip = node.isUnmessagable()
-                ? "Нода объявила, что не принимает личные сообщения"
+                ? I18n.t("node.action.privateChatUnavailable")
                 : hasPublicKey
-                ? "Приватный чат"
-                : "Приватный чат недоступен: у ноды нет публичного ключа";
+                ? I18n.t("node.action.privateChat")
+                : I18n.t("node.action.privateChatNoPublicKey");
         privateChatBtn.setTooltip(new Tooltip(privateChatTooltip));
         privateChatBtn.setDisable(!canDirectMessage);
 
@@ -97,20 +98,30 @@ public class NodeDetailContent extends HBox {
             formChat.openDirectChat(node.getNodeId(), node);
         });
 
+        // Кнопка «Traceroute» — live-трассировка маршрута до выбранной ноды
+        SVGPath tracerouteIcon = SvgIconLoader.load("/icons/map-traces.svg", 22);
+        Button tracerouteBtn = new Button();
+        tracerouteBtn.setGraphic(tracerouteIcon);
+        tracerouteBtn.setContentDisplay(ContentDisplay.GRAPHIC_ONLY);
+        tracerouteBtn.getStyleClass().add("drawer-toolbar-button");
+        tracerouteBtn.setTooltip(new Tooltip(I18n.t("node.action.traceroute")));
+        tracerouteBtn.setDisable(handler == null || state == null || nodeNum == 0);
+        tracerouteBtn.setOnAction(e ->
+                NodeTracerouteWindow.showWindow(this.state, node, protocolHandler));
+
         // Кнопка «Обновить ноду» — запрос информации по радио + обмен User-данными
         SVGPath refreshIcon = SvgIconLoader.load("/drawer/icon/refresh-node.svg", 22);
         Button refreshBtn = new Button();
         refreshBtn.setGraphic(refreshIcon);
         refreshBtn.setContentDisplay(ContentDisplay.GRAPHIC_ONLY);
         refreshBtn.getStyleClass().add("drawer-toolbar-button");
-        refreshBtn.setTooltip(new Tooltip("Обновить информацию о ноде и обменяться данными пользователя"));
+        refreshBtn.setTooltip(new Tooltip(I18n.t("node.action.refresh")));
         refreshBtn.setDisable(handler == null || state == null);
         refreshBtn.setOnAction(e -> {
             if (protocolHandler != null && this.state != null) {
                 ModalPane.showConfirm(
-                        "Обновить информацию?",
-                        "Запросить обновление информации о ноде \"" + displayName
-                                + "\" и обменяться пользовательскими данными по радио?",
+                        I18n.t("node.confirm.refresh.title"),
+                        I18n.t("node.confirm.refresh.message", displayName),
                         confirmed -> {
                             if (confirmed) {
                                 MessageService.exchangeNodeUserInfo(protocolHandler, this.state, nodeNum);
@@ -126,13 +137,13 @@ public class NodeDetailContent extends HBox {
         deleteBtn.setGraphic(deleteIcon);
         deleteBtn.setContentDisplay(ContentDisplay.GRAPHIC_ONLY);
         deleteBtn.getStyleClass().add("drawer-toolbar-button");
-        deleteBtn.setTooltip(new Tooltip("Удалить ноду"));
+        deleteBtn.setTooltip(new Tooltip(I18n.t("node.action.delete")));
         deleteBtn.setDisable(state == null);
         deleteBtn.setOnAction(e -> {
             if (this.state != null) {
                 ModalPane.showConfirm(
-                        "Удалить ноду?",
-                        "Удалить ноду \"" + displayName + "\" из списка? Данные телеметрии также будут удалены.",
+                        I18n.t("node.confirm.delete.title"),
+                        I18n.t("node.confirm.delete.message", displayName),
                         confirmed -> {
                             if (confirmed) {
                                 this.state.removeNode(nodeNum);
@@ -158,7 +169,7 @@ public class NodeDetailContent extends HBox {
         if (initFav) {
             favoriteBtn.getStyleClass().add("favorite-btn-active");
         }
-        favoriteBtn.setTooltip(new Tooltip(initFav ? "Убрать из избранного" : "Добавить в избранное"));
+        favoriteBtn.setTooltip(new Tooltip(favoriteTooltip(initFav)));
 
         favoriteBtn.setOnAction(e -> {
             boolean nowFav = favService.toggleFavorite(nodeId);
@@ -167,7 +178,7 @@ public class NodeDetailContent extends HBox {
             } else {
                 favoriteBtn.getStyleClass().remove("favorite-btn-active");
             }
-            favoriteBtn.getTooltip().setText(nowFav ? "Убрать из избранного" : "Добавить в избранное");
+            favoriteBtn.getTooltip().setText(favoriteTooltip(nowFav));
         });
 
         // Кнопка «Игнорировать»
@@ -182,7 +193,7 @@ public class NodeDetailContent extends HBox {
         if (initIgn) {
             ignoredBtn.getStyleClass().add("ignored-btn-active");
         }
-        ignoredBtn.setTooltip(new Tooltip(initIgn ? "Убрать из игнорируемых" : "Добавить в игнорируемые"));
+        ignoredBtn.setTooltip(new Tooltip(ignoredTooltip(initIgn)));
 
         ignoredBtn.setOnAction(e -> {
             boolean nowIgn = ignService.toggleIgnored(nodeId);
@@ -191,10 +202,10 @@ public class NodeDetailContent extends HBox {
             } else {
                 ignoredBtn.getStyleClass().remove("ignored-btn-active");
             }
-            ignoredBtn.getTooltip().setText(nowIgn ? "Убрать из игнорируемых" : "Добавить в игнорируемые");
+            ignoredBtn.getTooltip().setText(ignoredTooltip(nowIgn));
         });
 
-        actionToolbar.getItems().addAll(privateChatBtn, favoriteBtn, ignoredBtn, refreshBtn, deleteBtn);
+        actionToolbar.getItems().addAll(privateChatBtn, tracerouteBtn, favoriteBtn, ignoredBtn, refreshBtn, deleteBtn);
 
         VBox toolbarContainer = new VBox(actionToolbar);
         toolbarContainer.setAlignment(Pos.TOP_CENTER);
@@ -250,7 +261,22 @@ public class NodeDetailContent extends HBox {
             chartPanel.bind(state, node.getNodeId());
         }
 
-        VBox contentPane = new VBox(10, header, sep, table, chartPanel);
+        VBox infoPane = new VBox(10, table, chartPanel);
+        VBox.setVgrow(infoPane, Priority.ALWAYS);
+
+        NodeTracerouteHistoryPanel tracesPanel = new NodeTracerouteHistoryPanel(this.state, node, onBeforeNavigate);
+        Tab infoTab = new Tab(I18n.t("node.tab.info"), infoPane);
+        Tab tracesTab = new Tab(I18n.t("node.tab.traces"), tracesPanel);
+        TabPane tabPane = new TabPane(infoTab, tracesTab);
+        tabPane.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
+        tabPane.getSelectionModel().selectedItemProperty().addListener((obs, oldTab, selectedTab) -> {
+            if (selectedTab == tracesTab) {
+                tracesPanel.refresh();
+            }
+        });
+        VBox.setVgrow(tabPane, Priority.ALWAYS);
+
+        VBox contentPane = new VBox(10, header, sep, tabPane);
         contentPane.setPadding(new Insets(4, 8, 8, 0));
         HBox.setHgrow(contentPane, Priority.ALWAYS);
 
@@ -275,5 +301,13 @@ public class NodeDetailContent extends HBox {
 
     public int getNodeNum() {
         return nodeNum;
+    }
+
+    private static String favoriteTooltip(boolean favorite) {
+        return I18n.t(favorite ? "node.menu.removeFavorite" : "node.menu.addFavorite");
+    }
+
+    private static String ignoredTooltip(boolean ignored) {
+        return I18n.t(ignored ? "node.menu.removeIgnored" : "node.menu.addIgnored");
     }
 }

@@ -2,12 +2,18 @@ package com.meshtastic.client.forms;
 
 import com.meshtastic.client.components.EmojiTextFlow;
 import com.meshtastic.client.components.chat.ChatBotCommandHelper;
-import com.meshtastic.client.components.chat.NodeInfoFormatter;
+import com.meshtastic.client.i18n.I18n;
+import com.meshtastic.client.lua.LuaAutomationCommand;
+import com.meshtastic.client.lua.LuaScript;
+import com.meshtastic.client.lua.LuaScriptEvent;
+import com.meshtastic.client.lua.LuaScriptRuntimeService;
+import com.meshtastic.client.lua.LuaScriptService;
+import com.meshtastic.client.lua.LuaUiBotNotice;
+import com.meshtastic.client.lua.LuaUiNodePickRequest;
+import com.meshtastic.client.lua.LuaUiNodeSelection;
 import com.meshtastic.client.modal.Toast;
-import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.model.NodeData;
-import com.meshtastic.client.protocol.ProtocolHandler;
 import com.meshtastic.client.service.MessageService;
 import com.meshtastic.client.service.NodeCacheService;
 import com.meshtastic.client.utils.NodeUtils;
@@ -27,17 +33,13 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
-import java.util.function.BiConsumer;
-import java.util.function.IntConsumer;
-
-import org.meshtastic.proto.MeshProtos;
+import java.util.Optional;
 
 /**
  * Обрабатывает пользовательские действия, создающие протокольные запросы из открытого чата.
  *
- * <p>Сюда относятся ответы, реакции, повторная отправка, команды tracebot/infobot
- * и временные пузыри обратного отсчёта, которые показываются во время ожидания
- * ответа от радио.
+ * <p>Сюда относятся ответы, реакции, повторная отправка, Lua automation-команды
+ * и временные пузыри обратного отсчёта.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -66,7 +68,7 @@ abstract class FormChatRequests extends FormChatMessages {
         pc.countdownLabel = (EmojiTextFlow) content.getChildren().getFirst();
 
         // Кнопка «Отменить»
-        Label cancelBtn = new Label("Отменить");
+        Label cancelBtn = new Label(I18n.t("chat.cancel"));
         cancelBtn.getStyleClass().add("chat-countdown-cancel");
         cancelBtn.setCursor(Cursor.HAND);
         cancelBtn.setOnMouseClicked(e -> {
@@ -124,20 +126,20 @@ abstract class FormChatRequests extends FormChatMessages {
     protected void sendReaction(MeshMessage msg, String emoji) {
         if (msg == null || emoji == null || emoji.isEmpty()) { return; }
         if (selectedChat == null || state == null || (protocolHandler == null && meshCoreCompanionRuntime == null)) {
-            Toast.show(Toast.Type.WARNING, "Нет подключения к радио");
+            Toast.show(Toast.Type.WARNING, I18n.t("chat.toast.radioNotConnected"));
             return;
         }
         if (meshCoreCompanionRuntime != null) {
-            Toast.show(Toast.Type.WARNING, "Реакции пока недоступны для MeshCore Companion Protocol");
+            Toast.show(Toast.Type.WARNING, I18n.t("chat.toast.reactionsMeshcoreUnavailable"));
             return;
         }
         if (msg.getPacketId() == 0) {
-            Toast.show(Toast.Type.WARNING, "Реакция недоступна: у сообщения нет packet id");
+            Toast.show(Toast.Type.WARNING, I18n.t("chat.toast.reactionUnavailableNoPacket"));
             return;
         }
 
         if (!sendReactionToSelectedChat(msg, emoji)) {
-            Toast.show(Toast.Type.ERROR, "Не удалось сохранить реакцию локально");
+            Toast.show(Toast.Type.ERROR, I18n.t("chat.toast.reactionSaveFailed"));
             return;
         }
         refreshCurrentChatAfterLocalReaction();
@@ -157,7 +159,7 @@ abstract class FormChatRequests extends FormChatMessages {
             return false;
         }
         if (state == null || (protocolHandler == null && meshCoreCompanionRuntime == null)) {
-            Toast.show(Toast.Type.WARNING, "Нет подключения к радио");
+            Toast.show(Toast.Type.WARNING, I18n.t("chat.toast.radioNotConnected"));
             return false;
         }
 
@@ -188,7 +190,7 @@ abstract class FormChatRequests extends FormChatMessages {
 
         NodeData peerNode = NodeUtils.resolveNode(state, msg.getToNodeId());
         if (peerNode != null && peerNode.isUnmessagable()) {
-            Toast.show(Toast.Type.WARNING, "Нода объявила, что не принимает личные сообщения");
+            Toast.show(Toast.Type.WARNING, I18n.t("chat.toast.unmessagable"));
             return false;
         }
         return true;
@@ -197,61 +199,105 @@ abstract class FormChatRequests extends FormChatMessages {
     private void showRetryFailedToast(MeshMessage msg) {
         Toast.show(
                 Toast.Type.ERROR,
-                isChannelMessage(msg) ? "Не удалось переотправить сообщение" : "Не удалось определить ноду для DM");
+                isChannelMessage(msg)
+                        ? I18n.t("chat.toast.retryMessageFailed")
+                        : I18n.t("chat.toast.dmNodeMissing"));
     }
 
-    // ==================== Трассировка / информация о ноде ====================
+    // ==================== Lua automation ====================
 
     protected boolean handleBotCommand(ChatBotCommandHelper.ParsedBotCommand command) {
         if (command == null || !command.isCommand()) {
             return false;
         }
         if (selectedChat == null || state == null || (protocolHandler == null && meshCoreCompanionRuntime == null)) {
-            Toast.show(Toast.Type.WARNING, "Нет подключения к радио");
+            Toast.show(Toast.Type.WARNING, I18n.t("chat.toast.radioNotConnected"));
             return false;
         }
-        if (command.hasExtraTokens()) {
-            Toast.show(Toast.Type.WARNING, "Команда бота принимает только одну ноду");
-            return false;
+        if (command.action() == ChatBotCommandHelper.BotAction.AUTOMATION) {
+            return runLuaAutomationCommand(command);
         }
-        if (command.targetToken() == null || command.targetToken().isBlank()) {
-            Toast.show(Toast.Type.WARNING, switch (command.action()) {
-                case TRACEROUTE -> "Используйте: @tracebot имя(!nodeid)";
-                case NODE_INFO -> "Используйте: @infobot имя(!nodeid)";
-            });
+        return false;
+    }
+
+    private boolean runLuaAutomationCommand(ChatBotCommandHelper.ParsedBotCommand command) {
+        Optional<LuaScript> script = LuaScriptService.getInstance().findScript(command.scriptId());
+        if (script.isEmpty()
+                || !script.get().isEnabled()
+                || script.get().getBotType() != LuaScript.BotType.AUTOMATION_BOT) {
+            Toast.show(Toast.Type.WARNING, I18n.t("chat.toast.automationNotFound", command.botHandle()));
             return false;
         }
 
+        String chatType = currentChatType();
+        String chatKey = currentChatKey();
+        if (chatType == null || chatKey == null) {
+            return false;
+        }
+
+        LuaAutomationCommand luaCommand = new LuaAutomationCommand(
+                chatType,
+                chatKey,
+                command.botHandle(),
+                command.botHandle() + (command.arguments().isBlank() ? "" : " " + command.arguments()),
+                command.arguments(),
+                command.argumentTokens(),
+                script.get().getId() + ":command:" + System.nanoTime());
+        LuaScriptRuntimeService.getInstance().runAutomationCommand(
+                script.get(),
+                luaCommand,
+                event -> handleLuaAutomationEvent(chatType, chatKey, event),
+                this::handleLuaNodePickRequest);
+        return true;
+    }
+
+    private void handleLuaAutomationEvent(String chatType, String chatKey, LuaScriptEvent event) {
+        if (event == null) {
+            return;
+        }
+        if (event.type() == LuaScriptEvent.Type.ERROR || event.type() == LuaScriptEvent.Type.WARNING) {
+            Platform.runLater(() -> addSystemMessageTo(chatType, chatKey, "Lua: " + event.message()));
+            return;
+        }
+        if (event.type() == LuaScriptEvent.Type.UI_BOT_NOTICE && event.payload() instanceof LuaUiBotNotice notice) {
+            Platform.runLater(() -> showTransientSystemMessageTo(notice.chatType(), notice.chatKey(), notice.text()));
+        }
+    }
+
+    private void handleLuaNodePickRequest(LuaUiNodePickRequest request) {
+        if (request == null) {
+            return;
+        }
+        Platform.runLater(() -> startLuaNodePickup(request));
+    }
+
+    private void startLuaNodePickup(LuaUiNodePickRequest request) {
+        if (chatInputBar == null) {
+            deliverLuaNodeSelection(request, null);
+            return;
+        }
+        chatInputBar.startNodePick(
+                request.query(),
+                request.prompt(),
+                suggestion -> deliverLuaNodeSelection(request, resolveNodeSuggestion(suggestion).orElse(null)),
+                () -> deliverLuaNodeSelection(request, null));
+    }
+
+    private Optional<NodeData> resolveNodeSuggestion(ChatBotCommandHelper.NodeSuggestion suggestion) {
         ChatBotCommandHelper.NodeResolution resolution =
-                ChatBotCommandHelper.resolveTarget(command.targetToken(), listBotCommandNodes());
-        if (resolution.status() == ChatBotCommandHelper.NodeResolutionStatus.AMBIGUOUS) {
-            Toast.show(Toast.Type.WARNING, "Найдено несколько нод. Уточните выбор через подсказку");
-            return false;
-        }
+                ChatBotCommandHelper.resolveTarget(suggestion.insertText(), listBotCommandNodes());
         if (resolution.status() != ChatBotCommandHelper.NodeResolutionStatus.FOUND || resolution.node() == null) {
-            Toast.show(Toast.Type.WARNING, "Нода не найдена: " + command.targetToken());
-            return false;
+            return Optional.empty();
         }
+        return Optional.of(resolution.node());
+    }
 
-        return switch (command.action()) {
-            case TRACEROUTE -> {
-                if (meshCoreCompanionRuntime != null) {
-                    Toast.show(Toast.Type.WARNING, "Traceroute недоступен для MeshCore Companion Protocol");
-                    yield true;
-                }
-                requestTraceroute(resolution.node());
-                yield true;
-            }
-            case NODE_INFO -> {
-                if (meshCoreCompanionRuntime != null) {
-                    addSystemMessageTo(currentChatType(), currentChatKey(),
-                            NodeInfoFormatter.format(resolution.node()));
-                    yield true;
-                }
-                requestNodeInfo(resolution.node());
-                yield true;
-            }
-        };
+    private void deliverLuaNodeSelection(LuaUiNodePickRequest request, NodeData node) {
+        LuaScriptRuntimeService.getInstance().deliverNodeSelection(
+                request.scriptId(),
+                node != null
+                        ? LuaUiNodeSelection.selected(request, node)
+                        : LuaUiNodeSelection.cancelled(request));
     }
 
     protected List<NodeData> listBotCommandNodes() {
@@ -283,151 +329,4 @@ abstract class FormChatRequests extends FormChatMessages {
         return msg != null && "!ffffffff".equalsIgnoreCase(msg.getToNodeId());
     }
 
-    protected NodeData resolveTargetNodeFromMessage(MeshMessage msg) {
-        if (msg == null || state == null) {
-            return null;
-        }
-        NodeData targetNode = state.getNodeByNodeId(msg.getFromNodeId());
-        if (targetNode != null) {
-            return targetNode;
-        }
-
-        String nodeId = msg.getFromNodeId();
-        if (nodeId == null || nodeId.length() < 2 || !nodeId.startsWith("!")) {
-            return null;
-        }
-
-        int nodeNum = (int) Long.parseUnsignedLong(nodeId.substring(1), 16);
-        targetNode = state.getOrCreateNode(nodeNum);
-        NodeCacheService.getInstance().enrichFromCache(targetNode);
-        return targetNode;
-    }
-
-    /** Запрос трассировки до ноды — ответ показывается как системное сообщение. */
-    protected void requestTraceroute(MeshMessage msg) {
-        requestTraceroute(resolveTargetNodeFromMessage(msg));
-    }
-
-    /** Запрос трассировки до указанной ноды — ответ показывается как системное сообщение. */
-    protected void requestTraceroute(NodeData targetNode) {
-        DeviceState requestState = state;
-        ProtocolHandler requestHandler = protocolHandler;
-        if (requestState == null || requestHandler == null) {
-            if (meshCoreCompanionRuntime != null) {
-                Toast.show(Toast.Type.WARNING, "Traceroute недоступен для MeshCore Companion Protocol");
-            }
-            return;
-        }
-        if (targetNode == null) {
-            return;
-        }
-        int targetNum = targetNode.getNodeNum();
-        String name = nameResolver.resolveNodeName(targetNum);
-        String prefix = "🔍 Traceroute → " + name;
-
-        String chatType = currentChatType();
-        String chatKey = currentChatKey();
-        if (chatType == null) { return; }
-
-        PendingCountdown pc = createCountdown(chatType, chatKey, prefix);
-
-        @SuppressWarnings("unchecked")
-        BiConsumer<Integer, MeshProtos.RouteDiscovery>[] holder = new BiConsumer[1];
-        Timeline timer = createCountdownTimer(pc, prefix);
-
-        holder[0] = (fromNodeNum, route) -> {
-            // Фильтр: реагируем только на ответ от целевой ноды
-            if (fromNodeNum != targetNum) { return; }
-            requestState.removeTracerouteListener(holder[0]);
-            Platform.runLater(() -> {
-                timer.stop();
-                finishCountdown(pc);
-                addTracerouteResult(chatType, chatKey, name, route);
-            });
-        };
-
-        timer.setOnFinished(e -> {
-            if (!pc.done[0]) {
-                requestState.removeTracerouteListener(holder[0]);
-                finishCountdown(pc);
-                addSystemMessageTo(chatType, chatKey, "❌ Traceroute → " + name + ": ответ не получен");
-            }
-        });
-
-        pc.cancelAction = () -> {
-            requestState.removeTracerouteListener(holder[0]);
-            timer.stop();
-            finishCountdown(pc);
-        };
-
-        requestState.addTracerouteListener(holder[0]);
-        timer.play();
-        MessageService.requestTraceroute(requestHandler, requestState, targetNum);
-    }
-
-    /** Запрос информации о ноде — всегда запрашивает актуальные данные по сети */
-    protected void requestNodeInfo(MeshMessage msg) {
-        requestNodeInfo(resolveTargetNodeFromMessage(msg));
-    }
-
-    /** Запрос информации о ноде — всегда запрашивает актуальные данные по сети */
-    protected void requestNodeInfo(NodeData targetNode) {
-        DeviceState requestState = state;
-        ProtocolHandler requestHandler = protocolHandler;
-        if (requestState == null || requestHandler == null) {
-            if (meshCoreCompanionRuntime != null && targetNode != null) {
-                addSystemMessageTo(currentChatType(), currentChatKey(), NodeInfoFormatter.format(targetNode));
-            }
-            return;
-        }
-        if (targetNode == null) {
-            return;
-        }
-        int targetNum = targetNode.getNodeNum();
-        String name = nameResolver.resolveNodeName(targetNum);
-
-        String chatType = currentChatType();
-        String chatKey = currentChatKey();
-        if (chatType == null) { return; }
-        String prefix = "📋 Запрос информации о " + name;
-
-        PendingCountdown pc = createCountdown(chatType, chatKey, prefix);
-
-        IntConsumer[] holder = new IntConsumer[1];
-        Timeline timer = createCountdownTimer(pc, prefix);
-
-        holder[0] = nodeNum -> {
-            if (nodeNum != targetNum) { return; }
-            requestState.removeNodeUpdateListener(holder[0]);
-            Platform.runLater(() -> {
-                timer.stop();
-                finishCountdown(pc);
-
-                NodeData n = requestState.getNodeDb().get(targetNum);
-                if (n == null) {
-                    addSystemMessageTo(chatType, chatKey, "📋 Нода " + name + " не найдена");
-                    return;
-                }
-                addSystemMessageTo(chatType, chatKey, NodeInfoFormatter.format(n));
-            });
-        };
-
-        timer.setOnFinished(e -> {
-            if (!pc.done[0]) {
-                requestState.removeNodeUpdateListener(holder[0]);
-                finishCountdown(pc);
-                addSystemMessageTo(chatType, chatKey, "❌ Информация о " + name + ": ответ не получен");
-            }
-        });
-
-        pc.cancelAction = () -> {
-            requestState.removeNodeUpdateListener(holder[0]);
-            timer.stop();
-            finishCountdown(pc);
-        };
-
-        requestState.addNodeUpdateListener(holder[0]);
-        timer.play();
-        MessageService.requestNodeInfo(requestHandler, requestState, targetNum);
-    }
 }

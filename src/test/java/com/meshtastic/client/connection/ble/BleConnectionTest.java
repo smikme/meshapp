@@ -333,7 +333,6 @@ class BleConnectionTest {
     }
 
     private static final class FakePlatform implements BlePlatform {
-        private Consumer<byte[]> fromRadioListener;
         private Consumer<BleState> stateListener;
         private Consumer<String> passkeyRequestHandler;
         private boolean connected;
@@ -342,7 +341,6 @@ class BleConnectionTest {
         private volatile String lastWriteThread;
         private volatile BleProtocolProfile profile = BleProtocolProfile.MESHTASTIC;
         private volatile byte[] lastPayload;
-        private int connectCalls;
         private int disposeCalls;
 
         @Override
@@ -355,7 +353,6 @@ class BleConnectionTest {
 
         @Override
         public void connect(String address) throws ConnectionException {
-            connectCalls++;
             connectAction.run(this);
         }
 
@@ -376,7 +373,6 @@ class BleConnectionTest {
 
         @Override
         public void setFromRadioListener(Consumer<byte[]> listener) {
-            this.fromRadioListener = listener;
         }
 
         @Override

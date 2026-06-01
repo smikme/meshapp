@@ -9,6 +9,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.Map;
 
@@ -94,6 +96,89 @@ class MessageDbServiceTest {
                         .stream()
                         .map(MeshMessage::getText)
                         .toList());
+    }
+
+    @Test
+    void loadTracerouteResultsForNodeMatchesTargetResponseAndLegacyDmScope() {
+        long targetNodeNum = Integer.toUnsignedLong(0x71A67CF5);
+
+        service.saveTracerouteResult(
+                "!owner", "", "", "test", "target", 0,
+                targetNodeNum, "!71a67cf5", "Target", 0, null, null, null, 300);
+        service.saveTracerouteResult(
+                "!owner", "", "", "test", "response", 0,
+                0, null, "Target", targetNodeNum, "!71a67cf5", null, null, 200);
+        service.saveTracerouteResult(
+                "!owner", "dm", "!71a67cf5", "test", "legacy-dm", 0,
+                0, null, "Target", 0, null, null, null, 100);
+        service.saveTracerouteResult(
+                "!owner", "", "", "test", "other-target", 0,
+                Integer.toUnsignedLong(0x22222222), "!22222222", "Other", 0, null, null, null, 400);
+        service.saveTracerouteResult(
+                "!other-owner", "", "", "test", "other-owner", 0,
+                targetNodeNum, "!71a67cf5", "Target", 0, null, null, null, 500);
+
+        List<MessageDbService.TracerouteResultRecord> traces =
+                service.loadTracerouteResultsForNode("!owner", targetNodeNum, "!71a67cf5");
+
+        assertEquals(
+                List.of("target", "response", "legacy-dm"),
+                traces.stream().map(MessageDbService.TracerouteResultRecord::requestId).toList());
+    }
+
+    @Test
+    void loadTracerouteResultsForNodeSupportsDateFilterAndCursorPaging() {
+        long targetNodeNum = Integer.toUnsignedLong(0x71A67CF5);
+        LocalDate traceDate = LocalDate.of(2026, 5, 30);
+        long start = traceDate.atStartOfDay(ZoneId.systemDefault()).toEpochSecond();
+        long end = traceDate.plusDays(1).atStartOfDay(ZoneId.systemDefault()).toEpochSecond();
+
+        for (int i = 0; i < 25; i++) {
+            service.saveTracerouteResult(
+                    "!owner", "", "", "test", "page-" + i, 0,
+                    targetNodeNum, "!71a67cf5", "Target", 0, null, null, null, start + i);
+        }
+        service.saveTracerouteResult(
+                "!owner", "", "", "test", "next-day", 0,
+                targetNodeNum, "!71a67cf5", "Target", 0, null, null, null, end + 1);
+
+        List<MessageDbService.TracerouteResultRecord> firstPage = service.loadTracerouteResultsForNode(
+                "!owner", targetNodeNum, "!71a67cf5", start, end, 20, 0, 0);
+        MessageDbService.TracerouteResultRecord lastFirstPageRecord = firstPage.getLast();
+        List<MessageDbService.TracerouteResultRecord> secondPage = service.loadTracerouteResultsForNode(
+                "!owner",
+                targetNodeNum,
+                "!71a67cf5",
+                start,
+                end,
+                20,
+                lastFirstPageRecord.timestamp(),
+                lastFirstPageRecord.id());
+
+        assertEquals(20, firstPage.size());
+        assertEquals("page-24", firstPage.getFirst().requestId());
+        assertEquals("page-5", firstPage.getLast().requestId());
+        assertEquals(
+                List.of("page-4", "page-3", "page-2", "page-1", "page-0"),
+                secondPage.stream().map(MessageDbService.TracerouteResultRecord::requestId).toList());
+    }
+
+    @Test
+    void loadTracerouteResultReturnsOneRecordInsideOwnerScope() {
+        long requestedId = service.saveTracerouteResult(
+                "!owner", "", "", "test", "requested", 0,
+                Integer.toUnsignedLong(0x71A67CF5), "!71a67cf5", "Target",
+                0, null, null, null, 100);
+        service.saveTracerouteResult(
+                "!other-owner", "", "", "test", "other-owner", 0,
+                Integer.toUnsignedLong(0x71A67CF5), "!71a67cf5", "Target",
+                0, null, null, null, 200);
+
+        assertEquals("requested",
+                service.loadTracerouteResult(requestedId, "!owner")
+                        .map(MessageDbService.TracerouteResultRecord::requestId)
+                        .orElseThrow());
+        assertTrue(service.loadTracerouteResult(requestedId, "!other-owner").isEmpty());
     }
 
     @Test

@@ -131,7 +131,9 @@
 }
 
 .config-toolbar,
-.logs-toolbar {
+.logs-toolbar,
+.connection-toolbar,
+.ide-toolbar {
     -fx-padding: 4 6 4 6;
     -fx-spacing: 4;
     -fx-background-color: rgba(255, 255, 255, 0.05);
@@ -142,19 +144,25 @@
 }
 
 .config-toolbar > .container,
-.logs-toolbar > .container {
+.logs-toolbar > .container,
+.connection-toolbar > .container,
+.ide-toolbar > .container {
     -fx-spacing: 4;
     -fx-alignment: center-left;
 }
 
 .light-theme .config-toolbar,
-.light-theme .logs-toolbar {
+.light-theme .logs-toolbar,
+.light-theme .connection-toolbar,
+.light-theme .ide-toolbar {
     -fx-background-color: rgba(0, 0, 0, 0.03);
     -fx-border-color: rgba(0, 0, 0, 0.1);
 }
 
 .config-toolbar-button,
-.logs-toolbar-button {
+.logs-toolbar-button,
+.connection-toolbar-button,
+.ide-toolbar-button {
     -fx-background-color: transparent;
     -fx-background-radius: 8;
     -fx-border-color: transparent;
@@ -169,39 +177,69 @@
 }
 
 .config-toolbar-button .svg-icon,
-.logs-toolbar-button .svg-icon {
+.logs-toolbar-button .svg-icon,
+.connection-toolbar-button .svg-icon,
+.ide-toolbar-button .svg-icon {
     -fx-fill: rgba(255, 255, 255, 0.75);
 }
 
 .config-toolbar-button:hover,
-.logs-toolbar-button:hover {
+.logs-toolbar-button:hover,
+.connection-toolbar-button:hover,
+.ide-toolbar-button:hover {
     -fx-background-color: rgba(255, 255, 255, 0.1);
 }
 
 .config-toolbar-button:hover .svg-icon,
-.logs-toolbar-button:hover .svg-icon {
+.logs-toolbar-button:hover .svg-icon,
+.connection-toolbar-button:hover .svg-icon,
+.ide-toolbar-button:hover .svg-icon {
     -fx-fill: rgba(255, 255, 255, 0.92);
 }
 
 .config-toolbar-button:disabled,
-.logs-toolbar-button:disabled {
+.logs-toolbar-button:disabled,
+.connection-toolbar-button:disabled,
+.ide-toolbar-button:disabled {
     -fx-opacity: 0.5;
     -fx-cursor: default;
 }
 
 .light-theme .config-toolbar-button .svg-icon,
-.light-theme .logs-toolbar-button .svg-icon {
+.light-theme .logs-toolbar-button .svg-icon,
+.light-theme .connection-toolbar-button .svg-icon,
+.light-theme .ide-toolbar-button .svg-icon {
     -fx-fill: rgba(0, 0, 0, 0.65);
 }
 
 .light-theme .config-toolbar-button:hover,
-.light-theme .logs-toolbar-button:hover {
+.light-theme .logs-toolbar-button:hover,
+.light-theme .connection-toolbar-button:hover,
+.light-theme .ide-toolbar-button:hover {
     -fx-background-color: rgba(0, 0, 0, 0.08);
 }
 
 .light-theme .config-toolbar-button:hover .svg-icon,
-.light-theme .logs-toolbar-button:hover .svg-icon {
+.light-theme .logs-toolbar-button:hover .svg-icon,
+.light-theme .connection-toolbar-button:hover .svg-icon,
+.light-theme .ide-toolbar-button:hover .svg-icon {
     -fx-fill: rgba(0, 0, 0, 0.88);
+}
+
+.script-store-toolbar-button {
+    -fx-background-color: rgba(245, 158, 11, 0.20);
+}
+
+.script-store-toolbar-button:hover {
+    -fx-background-color: rgba(245, 158, 11, 0.34);
+}
+
+.light-theme .script-store-toolbar-button {
+    -fx-background-color: rgba(245, 158, 11, 0.24);
+}
+
+.light-theme .script-store-toolbar-button:hover {
+    -fx-background-color: rgba(245, 158, 11, 0.38);
 }
 
 .packet-monitor-toolbar-button {
@@ -608,6 +646,30 @@
     -fx-text-fill: -color-fg-muted;
 }
 
+.packet-monitor-payload-flow {
+    -fx-padding: 0;
+}
+
+.packet-monitor-payload-text {
+    -fx-fill: -color-fg-default;
+}
+
+.packet-monitor-payload-incoming {
+    -fx-fill: -color-accent-emphasis;
+}
+
+.packet-monitor-payload-outgoing {
+    -fx-fill: -color-success-emphasis;
+}
+
+.packet-monitor-payload-internal {
+    -fx-fill: -color-fg-muted;
+}
+
+.table-row-cell:selected .packet-monitor-payload-text {
+    -fx-fill: -color-fg-default;
+}
+
 .packet-monitor-side-toolbar {
     -fx-orientation: vertical;
     -fx-background-color: transparent;
@@ -984,6 +1046,78 @@
     -fx-font-size: 1.0769em;
 }
 
+/* Lua Canvas */
+.lua-canvas-root {
+    -fx-background-color: -color-bg-default;
+}
+
+.lua-canvas-minimized-root {
+    -fx-background-color: rgba(0, 0, 0, 0.68);
+    -fx-border-color: rgba(255, 255, 255, 0.22);
+    -fx-border-width: 1;
+}
+
+.lua-canvas-host {
+    -fx-background-color: #05070a;
+    -fx-background-radius: 8;
+    -fx-border-color: -color-border-default;
+    -fx-border-radius: 8;
+}
+
+.lua-canvas-minimized-badge {
+    -fx-background-color: transparent;
+    -fx-alignment: center;
+    -fx-cursor: move;
+}
+
+.lua-canvas-minimized-icon {
+    -fx-font-size: 2.1538em;
+    -fx-text-fill: white;
+}
+
+.lua-canvas-close-button {
+    -fx-background-color: rgba(0, 0, 0, 0.58);
+    -fx-background-radius: 14;
+    -fx-border-color: rgba(255, 255, 255, 0.18);
+    -fx-border-radius: 14;
+    -fx-border-width: 1;
+    -fx-alignment: center;
+    -fx-cursor: hand;
+}
+
+.lua-canvas-close-icon {
+    -fx-font-size: 1.0769em;
+    -fx-font-weight: bold;
+    -fx-text-fill: rgba(255, 255, 255, 0.9);
+}
+
+.lua-canvas-close-button:hover {
+    -fx-background-color: rgba(220, 38, 38, 0.88);
+    -fx-border-color: rgba(255, 255, 255, 0.28);
+}
+
+.lua-canvas-close-button:hover .lua-canvas-close-icon {
+    -fx-text-fill: white;
+}
+
+.light-theme .lua-canvas-close-button {
+    -fx-background-color: rgba(255, 255, 255, 0.82);
+    -fx-border-color: rgba(0, 0, 0, 0.16);
+}
+
+.light-theme .lua-canvas-close-icon {
+    -fx-text-fill: rgba(0, 0, 0, 0.78);
+}
+
+.light-theme .lua-canvas-close-button:hover {
+    -fx-background-color: rgba(220, 38, 38, 0.92);
+    -fx-border-color: rgba(0, 0, 0, 0.12);
+}
+
+.light-theme .lua-canvas-close-button:hover .lua-canvas-close-icon {
+    -fx-text-fill: white;
+}
+
 .muted-note-label {
     -fx-opacity: 0.6;
     -fx-font-size: 0.8462em;
@@ -1002,6 +1136,29 @@
 .node-detail-name-label {
     -fx-font-size: 1.3846em;
     -fx-font-weight: bold;
+}
+
+.node-trace-history-list {
+    -fx-background-color: transparent;
+}
+
+.node-trace-record {
+    -fx-padding: 0 0 8 0;
+}
+
+.node-trace-created-label {
+    -fx-text-fill: -color-fg-muted;
+    -fx-font-size: 0.8462em;
+    -fx-font-weight: bold;
+}
+
+.node-trace-map-button {
+    -fx-min-width: 30;
+    -fx-pref-width: 30;
+    -fx-max-width: 30;
+    -fx-min-height: 30;
+    -fx-pref-height: 30;
+    -fx-max-height: 30;
 }
 
 .dashboard-log-count-label {
@@ -2296,6 +2453,15 @@
     -fx-font-style: italic;
 }
 
+.chat-bubble-url-node {
+    -fx-fill: -color-accent-emphasis;
+    -fx-underline: true;
+}
+
+.chat-bubble-url-node:hover {
+    -fx-opacity: 0.85;
+}
+
 /* ═══════════════════ EmojiTextField — кастомное поле ввода ═══════════════════ */
 
 .emoji-text-field {
@@ -2444,4 +2610,400 @@
 
 .light-theme .ignored-btn-active:hover .svg-icon {
     -fx-fill: #C62828;
+}
+
+/* ============================================================
+   MeshApp IDE
+   ============================================================ */
+
+.lua-dev-root {
+    -fx-background-color: -color-bg-default;
+}
+
+.lua-dev-root:seamless-frame {
+    -fx-background-color: transparent;
+}
+
+.lua-dev-body {
+    -fx-background-color: transparent;
+}
+
+.lua-dev-side-menu {
+    -fx-background-color: rgba(255, 255, 255, 0.06);
+    -fx-border-color: rgba(255, 255, 255, 0.10);
+    -fx-border-width: 0 1 0 0;
+    -fx-min-width: 56;
+    -fx-pref-width: 56;
+    -fx-max-width: 56;
+    -fx-padding: 4 0 8 0;
+}
+
+.lua-dev-root:seamless-frame .lua-dev-side-menu {
+    -fx-background-color: transparent;
+    -fx-border-color: transparent;
+}
+
+.lua-dev-root.light-theme .lua-dev-side-menu {
+    -fx-background-color: rgba(0, 0, 0, 0.045);
+    -fx-border-color: rgba(0, 0, 0, 0.10);
+}
+
+.lua-dev-root.light-theme:seamless-frame .lua-dev-side-menu {
+    -fx-background-color: transparent;
+    -fx-border-color: transparent;
+}
+
+.lua-dev-root:seamless-frame .lua-dev-content {
+    -fx-background-color: -color-bg-default;
+    -fx-background-radius: 10 0 0 0;
+}
+
+.lua-dev-content,
+.lua-dev-status-bar {
+    -fx-background-color: transparent;
+}
+
+.lua-dev-split-pane {
+    -fx-background-color: transparent;
+    -fx-background-insets: 0;
+    -fx-padding: 0;
+}
+
+.lua-dev-split-pane:horizontal > .split-pane-divider {
+    -fx-background-color: -color-bg-default;
+    -fx-padding: 0 5 0 5;
+}
+
+.lua-dev-split-pane:vertical > .split-pane-divider {
+    -fx-background-color: -color-bg-default;
+    -fx-padding: 5 0 5 0;
+}
+
+.lua-dev-panel {
+    -fx-background-color: -color-bg-subtle;
+    -fx-background-radius: 8;
+    -fx-border-color: -color-border-default;
+    -fx-border-radius: 8;
+    -fx-padding: 10;
+}
+
+.lua-kv-search-field {
+    -fx-min-width: 260;
+    -fx-pref-width: 320;
+    -fx-max-width: 360;
+}
+
+.lua-kv-value-area {
+    -fx-font-family: "Menlo", "Consolas", "DejaVu Sans Mono", monospace;
+    -fx-font-size: 12px;
+}
+
+.lua-kv-value-area .content {
+    -fx-background-color: -color-bg-default;
+}
+
+.lua-dev-code-slot {
+    -fx-background-color: transparent;
+    -fx-padding: 0 0 6 0;
+}
+
+.lua-dev-console-slot {
+    -fx-background-color: transparent;
+    -fx-padding: 6 0 0 0;
+}
+
+.lua-dev-table .column-header-background {
+    -fx-min-height: 20;
+    -fx-pref-height: 20;
+    -fx-max-height: 20;
+}
+
+.lua-dev-table .column-header,
+.lua-dev-table .filler {
+    -fx-size: 20;
+    -fx-min-height: 20;
+    -fx-pref-height: 20;
+    -fx-max-height: 20;
+    -fx-padding: 0;
+}
+
+.lua-dev-table .column-header .label {
+    -fx-padding: 1 8 1 8;
+    -fx-alignment: center-left;
+}
+
+.lua-value-cell {
+    -fx-padding: 0 4 0 6;
+}
+
+.lua-value-cell-text {
+    -fx-text-fill: -color-fg-default;
+}
+
+.lua-value-details-button {
+    -fx-min-width: 22;
+    -fx-pref-width: 22;
+    -fx-max-width: 22;
+    -fx-min-height: 22;
+    -fx-pref-height: 22;
+    -fx-max-height: 22;
+    -fx-padding: 0;
+    -fx-background-radius: 3;
+    -fx-border-radius: 3;
+    -fx-font-size: 11px;
+    -fx-font-weight: bold;
+    -fx-cursor: hand;
+}
+
+.lua-json-window-root,
+.lua-json-scroll,
+.lua-json-scroll > .viewport,
+.lua-json-code-area,
+.lua-json-code-area .paragraph-box {
+    -fx-background-color: -color-bg-default;
+}
+
+.lua-json-code-area {
+    -fx-font-family: "Menlo", "Consolas", "DejaVu Sans Mono", monospace;
+    -fx-font-size: 12px;
+    -fx-padding: 12;
+}
+
+.lua-json-code-area .text {
+    -fx-fill: -color-fg-default;
+}
+
+.lua-json-code-area .caret {
+    -fx-stroke: -color-fg-default;
+}
+
+.json-key {
+    -fx-fill: #79c0ff;
+}
+
+.json-string {
+    -fx-fill: #a5d6ff;
+}
+
+.json-number {
+    -fx-fill: #f2cc60;
+}
+
+.json-boolean {
+    -fx-fill: #ff7b72;
+    -fx-font-weight: bold;
+}
+
+.json-null {
+    -fx-fill: #8b949e;
+    -fx-font-style: italic;
+}
+
+.light-theme .json-key {
+    -fx-fill: #0550ae;
+}
+
+.light-theme .json-string {
+    -fx-fill: #116329;
+}
+
+.light-theme .json-number {
+    -fx-fill: #953800;
+}
+
+.light-theme .json-boolean {
+    -fx-fill: #cf222e;
+}
+
+.light-theme .json-null {
+    -fx-fill: #6e7781;
+}
+
+.lua-dev-status-bar {
+    -fx-min-height: 24;
+    -fx-pref-height: 24;
+    -fx-max-height: 24;
+    -fx-padding: 3 8 0 8;
+    -fx-border-color: rgba(255, 255, 255, 0.10);
+    -fx-border-width: 1 0 0 0;
+}
+
+.lua-dev-script-name {
+    -fx-font-weight: bold;
+    -fx-text-fill: -color-fg-default;
+}
+
+.lua-dev-root.light-theme .lua-dev-status-bar {
+    -fx-border-color: rgba(0, 0, 0, 0.10);
+}
+
+.lua-script-list .list-cell {
+    -fx-padding: 8 10;
+}
+
+.lua-script-list .list-cell:filled {
+    -fx-font-size: 0.9231em;
+}
+
+.lua-code-area {
+    -fx-background-color: -color-bg-subtle;
+    -fx-font-family: "Menlo", "Consolas", "DejaVu Sans Mono", monospace;
+    -fx-font-size: 13px;
+}
+
+.lua-code-area .paragraph-box {
+    -fx-background-color: -color-bg-subtle;
+}
+
+.lua-code-area .text {
+    -fx-fill: -color-fg-default;
+}
+
+.lua-code-area .caret {
+    -fx-stroke: -color-fg-default;
+}
+
+.lua-code-area .lineno {
+    -fx-background-color: rgba(255, 255, 255, 0.04);
+    -fx-text-fill: -color-fg-muted;
+    -fx-padding: 0 8 0 8;
+}
+
+.lua-gutter-line {
+    -fx-alignment: top-right;
+    -fx-background-color: rgba(255, 255, 255, 0.04);
+}
+
+.lua-gutter-line-current {
+    -fx-background-color: rgba(88, 166, 255, 0.18);
+}
+
+.lua-breakpoint-marker {
+    -fx-min-width: 14;
+    -fx-pref-width: 14;
+    -fx-max-width: 14;
+    -fx-alignment: center;
+    -fx-text-fill: transparent;
+    -fx-font-size: 11px;
+    -fx-cursor: hand;
+}
+
+.lua-breakpoint-marker:hover {
+    -fx-text-fill: rgba(255, 107, 107, 0.48);
+}
+
+.lua-breakpoint-marker-active {
+    -fx-text-fill: #ff6b6b;
+}
+
+.light-theme .lua-code-area .lineno {
+    -fx-background-color: rgba(0, 0, 0, 0.04);
+}
+
+.light-theme .lua-gutter-line {
+    -fx-background-color: rgba(0, 0, 0, 0.04);
+}
+
+.light-theme .lua-gutter-line-current {
+    -fx-background-color: rgba(9, 105, 218, 0.12);
+}
+
+.light-theme .lua-breakpoint-marker-active {
+    -fx-text-fill: #cf222e;
+}
+
+.lua-keyword {
+    -fx-fill: #ff7b72;
+    -fx-font-weight: bold;
+}
+
+.lua-builtin {
+    -fx-fill: #d2a8ff;
+}
+
+.lua-api {
+    -fx-fill: #7ee787;
+    -fx-font-weight: bold;
+}
+
+.lua-string {
+    -fx-fill: #a5d6ff;
+}
+
+.lua-number {
+    -fx-fill: #ffa657;
+}
+
+.lua-comment {
+    -fx-fill: #8b949e;
+}
+
+.light-theme .lua-keyword {
+    -fx-fill: #cf222e;
+}
+
+.light-theme .lua-builtin {
+    -fx-fill: #8250df;
+}
+
+.light-theme .lua-api {
+    -fx-fill: #116329;
+}
+
+.light-theme .lua-string {
+    -fx-fill: #0550ae;
+}
+
+.light-theme .lua-number {
+    -fx-fill: #953800;
+}
+
+.light-theme .lua-comment {
+    -fx-fill: #6e7781;
+}
+
+.lua-console {
+    -fx-font-family: "Menlo", "Consolas", "DejaVu Sans Mono", monospace;
+    -fx-font-size: 12px;
+}
+
+.lua-completion-popup {
+    -fx-background-color: -color-bg-subtle;
+    -fx-background-radius: 6;
+    -fx-border-color: -color-border-default;
+    -fx-border-radius: 6;
+    -fx-border-width: 1;
+    -fx-padding: 4;
+    -fx-effect: dropshadow(gaussian, rgba(0, 0, 0, 0.32), 14, 0, 0, 5);
+}
+
+.lua-completion-scroll-pane,
+.lua-completion-scroll-pane > .viewport {
+    -fx-background-color: transparent;
+    -fx-background: transparent;
+}
+
+.lua-completion-scroll-pane {
+    -fx-padding: 0;
+}
+
+.lua-completion-row {
+    -fx-padding: 4 8;
+    -fx-background-radius: 4;
+    -fx-font-family: "Menlo", "Consolas", "DejaVu Sans Mono", monospace;
+    -fx-font-size: 13px;
+}
+
+.lua-completion-row .text {
+    -fx-fill: -color-fg-default;
+    -fx-font-family: "Menlo", "Consolas", "DejaVu Sans Mono", monospace;
+    -fx-font-size: 13px;
+}
+
+.lua-completion-row-selected {
+    -fx-background-color: rgba(255, 255, 255, 0.10);
+}
+
+.light-theme .lua-completion-row-selected {
+    -fx-background-color: rgba(0, 0, 0, 0.08);
 }

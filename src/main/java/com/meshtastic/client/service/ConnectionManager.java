@@ -4,10 +4,13 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.reflect.TypeToken;
 import com.meshtastic.client.connection.*;
+import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.model.ConnectionEntry;
 import com.meshtastic.client.model.ConnectionType;
 import com.meshtastic.client.model.DeviceState;
+import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.model.ProtocolType;
+import com.meshtastic.client.lua.LuaScriptRuntimeService;
 import com.meshtastic.client.protocol.ProtocolRegistry;
 import com.meshtastic.client.protocol.ProtocolRuntime;
 import com.meshtastic.client.protocol.ProtocolRuntimeContext;
@@ -16,6 +19,7 @@ import com.meshtastic.client.protocol.meshcore.MeshCoreCompanionState;
 import com.meshtastic.client.protocol.meshcore.MeshCoreKissState;
 import com.meshtastic.client.protocol.meshtastic.MeshtasticProtocol;
 import com.meshtastic.client.protocol.meshtastic.MeshtasticProtocolRuntime;
+import com.meshtastic.client.system.AppUi;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -29,6 +33,7 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Менеджер транспортных подключений и протокольных runtime-адаптеров (singleton).
@@ -64,6 +69,7 @@ public final class ConnectionManager {
     private final Set<String> expectedDeviceRebootIds = ConcurrentHashMap.newKeySet();
     private final Map<String, String> userDisconnectReasons = new ConcurrentHashMap<>();
     private final List<Runnable> listeners = new CopyOnWriteArrayList<>();
+    private final AtomicBoolean startupAutoconnectStarted = new AtomicBoolean(false);
     private final Gson gson = new GsonBuilder().setPrettyPrinting().create();
     private final Path configPath;
     private volatile String selectedConnectionId;
@@ -155,8 +161,7 @@ public final class ConnectionManager {
                     || existing.isReconnecting()
                     || activeConnections.containsKey(updated.getId())
                     || pendingConnections.containsKey(updated.getId())) {
-                throw new IllegalStateException(
-                        "Нельзя редактировать активное подключение. Отключитесь перед изменением параметров.");
+                throw new IllegalStateException(I18n.t("connection.error.editActive"));
             }
 
             updated.setConnected(existing.isConnected());
@@ -213,7 +218,7 @@ public final class ConnectionManager {
             expectedDeviceRebootIds.remove(id);
             entry = findEntry(id);
             if (entry == null) {
-                throw new ConnectionException("Connection entry not found: " + id);
+                throw new ConnectionException(I18n.t("connection.error.entryNotFound", id));
             }
             if (activeConnections.containsKey(id) || pendingConnections.containsKey(id)) {
                 return;
@@ -224,7 +229,7 @@ public final class ConnectionManager {
             try {
                 conn = createConnection(entry);
             } catch (RuntimeException e) {
-                throw new ConnectionException("Не удалось создать транспорт подключения: " + e.getMessage(), e);
+                throw new ConnectionException(I18n.t("connection.error.createTransport", e.getMessage()), e);
             }
             pendingConnections.put(id, conn);
         }
@@ -326,13 +331,13 @@ public final class ConnectionManager {
         try {
             conn.connect();
             if (!conn.isConnected()) {
-                throw new ConnectionException("Подключение завершилось без активного транспорта: " + entry.getName());
+                throw new ConnectionException(I18n.t("connection.error.noActiveTransport", entry.getName()));
             }
         } catch (ConnectionException e) {
-            abortPendingConnection(id, conn);
+            cleanupFailedConnect(id, conn);
             throw e;
         } catch (RuntimeException e) {
-            abortPendingConnection(id, conn);
+            cleanupFailedConnect(id, conn);
             throw e;
         }
 
@@ -417,10 +422,87 @@ public final class ConnectionManager {
                     return;
                 }
             }
+            String readyNodeId = nodeId != null && !nodeId.isBlank() && !"?".equals(nodeId)
+                    ? nodeId
+                    : entry.getNodeId();
             activeRuntime.onReady();
+            if (activeConnections.get(id) != conn || !entry.isConnected()) {
+                log.debug("Skipping Lua autostart for '{}' because transport is no longer active",
+                        entry.getName());
+                return;
+            }
+            LuaScriptRuntimeService.getInstance().autostartScriptsForNode(
+                    readyNodeId,
+                    event -> fireChanged());
             fireChanged();
         });
         fireChanged();
+    }
+
+    /**
+     * Запускает фоновые подключения для профилей с включённым автоподключением.
+     * Метод идемпотентен для текущего экземпляра менеджера и предназначен для вызова
+     * один раз во время старта приложения.
+     */
+    public void connectAutoconnectEntries() {
+        if (!startupAutoconnectStarted.compareAndSet(false, true)) {
+            return;
+        }
+        List<ConnectionEntry> targets = getEntries().stream()
+                .filter(ConnectionEntry::isAutoconnect)
+                .toList();
+        if (targets.isEmpty()) {
+            return;
+        }
+        for (ConnectionEntry entry : targets) {
+            Thread worker = new Thread(
+                    () -> connectAutoconnectEntry(entry.getId()),
+                    "autoconnect-" + entry.getId());
+            worker.setDaemon(true);
+            worker.start();
+        }
+    }
+
+    private void connectAutoconnectEntry(String id) {
+        ConnectionEntry entry = findEntry(id);
+        if (entry == null || !entry.isAutoconnect()) {
+            return;
+        }
+        try {
+            connect(id);
+            AppUi.showStatus(AppUi.StatusType.SUCCESS, I18n.t("connection.autoconnect.connected", entry.getName()));
+            handlePostAutoconnectReady(id, entry);
+        } catch (ConnectionException e) {
+            log.warn("Autoconnect failed for '{}': {}", entry.getName(), e.getMessage());
+            AppUi.showStatus(AppUi.StatusType.ERROR,
+                    I18n.t("connection.autoconnect.error", entry.getName(), e.getMessage()));
+        } catch (RuntimeException e) {
+            log.warn("Autoconnect failed for '{}'", entry.getName(), e);
+            AppUi.showStatus(AppUi.StatusType.ERROR,
+                    I18n.t("connection.autoconnect.error", entry.getName(), e.getMessage()));
+        }
+    }
+
+    private void handlePostAutoconnectReady(String id, ConnectionEntry entry) {
+        CompletableFuture<DeviceState> future = getConfigFuture(id);
+        if (future == null) {
+            return;
+        }
+        future.whenComplete((state, ex) -> {
+            if (state == null || ex != null) {
+                return;
+            }
+            NodeData myNode = state.getNodeDb().get(state.getMyNodeNum());
+            if (myNode == null) {
+                return;
+            }
+            String shortName = myNode.getShortName() != null ? myNode.getShortName() : "?";
+            String longName = myNode.getLongName() != null ? myNode.getLongName() : "?";
+            String nodeId = myNode.getNodeId() != null ? myNode.getNodeId() : "?";
+            if (entry.isConnected() && Objects.equals(selectedConnectionId, id)) {
+                AppUi.updateHeader(shortName, longName, nodeId);
+            }
+        });
     }
 
     /**
@@ -863,6 +945,21 @@ public final class ConnectionManager {
     }
 
     /**
+     * Закрывает transport, который не смог завершить connect().
+     * Это важно для BLE: ошибка pairing/connect может оставить native backend,
+     * BlueZ agent или worker thread живыми, если не выполнить обычный disconnect.
+     */
+    private void cleanupFailedConnect(String id, TransportConnection conn) {
+        abortPendingConnection(id, conn);
+        conn.setConnectionListener(null);
+        try {
+            conn.disconnect();
+        } catch (RuntimeException cleanupError) {
+            log.warn("Failed to cleanup transport after unsuccessful connect", cleanupError);
+        }
+    }
+
+    /**
      * Закрывает transport, который успел подключиться уже после удаления/отмены профиля.
      */
     private void disconnectStalePendingConnection(String id, ConnectionEntry entry, TransportConnection conn) {
@@ -922,9 +1019,10 @@ public final class ConnectionManager {
             return;
         }
 
-        throw new ConnectionException("Нода " + entry.getNodeId()
-                + " уже подключена через \"" + duplicateEntry.getName()
-                + "\" (" + duplicateEntry.getEffectiveType() + ")");
+        throw new ConnectionException(I18n.t("connection.error.duplicateNode",
+                entry.getNodeId(),
+                duplicateEntry.getName(),
+                duplicateEntry.getEffectiveType()));
     }
 
     private void ensureBleConcurrencyAllowedLocked(String id, ConnectionEntry entry) throws ConnectionException {
@@ -939,8 +1037,9 @@ public final class ConnectionManager {
         if (activeBle == null) {
             return;
         }
-        throw new ConnectionException("Параллельные BLE-подключения на этой платформе пока не поддерживаются. "
-                + "Отключите \"" + activeBle.getName() + "\" перед подключением \"" + entry.getName() + "\".");
+        throw new ConnectionException(I18n.t("connection.error.parallelBleUnsupported",
+                activeBle.getName(),
+                entry.getName()));
     }
 
     private ConnectionEntry findActiveBleTransportLocked(String excludeId) {
@@ -1079,7 +1178,7 @@ public final class ConnectionManager {
         switch (entry.getEffectiveType()) {
             case BLE -> {
                 if (requestedProtocol == ProtocolType.MESHCORE_KISS) {
-                    throw new ConnectionException("MeshCore KISS не поддерживается по BLE. Выберите MeshCore Companion.");
+                    throw new ConnectionException(I18n.t("connection.error.meshcoreKissBleUnsupported"));
                 }
             }
             case TCP, SERIAL -> {

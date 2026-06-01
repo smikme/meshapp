@@ -3,13 +3,15 @@ package com.meshtastic.client.components.chat;
 import com.meshtastic.client.components.EmojiImageCache;
 import com.meshtastic.client.components.EmojiTextFlow;
 import com.meshtastic.client.components.NodeDetailPanel;
+import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.service.MessageDbService;
 import com.meshtastic.client.themes.TypographyManager;
-import com.meshtastic.client.utils.SvgIconLoader;
+import com.meshtastic.client.utils.ExternalUrlLauncher;
 import com.meshtastic.client.utils.NodeUtils;
+import com.meshtastic.client.utils.SvgIconLoader;
 import com.meshtastic.client.utils.UnicodeTextUtils;
 import javafx.beans.property.ReadOnlyDoubleProperty;
 import javafx.geometry.Bounds;
@@ -29,6 +31,7 @@ import javafx.scene.input.Clipboard;
 import javafx.scene.input.ClipboardContent;
 import javafx.scene.input.MouseButton;
 import javafx.scene.layout.HBox;
+import javafx.scene.layout.Pane;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.StackPane;
@@ -36,6 +39,8 @@ import javafx.scene.layout.VBox;
 import javafx.scene.shape.SVGPath;
 import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
+import javafx.scene.text.Text;
+import javafx.scene.text.TextFlow;
 import javafx.stage.Popup;
 
 import java.util.Arrays;
@@ -44,7 +49,9 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
 import java.util.stream.Stream;
 
 /**
@@ -88,8 +95,6 @@ public class MessageBubbleFactory {
     private static final double SMALL_AVATAR_RADIUS = SMALL_AVATAR_SIZE / 2.0;
     private static final String AVATAR_LABEL_STYLE = "-fx-text-fill: white; -fx-padding: 0;";
     private static final String LIGHT_THEME_STYLE_CLASS = "light-theme";
-    private static final String REACTION_UNAVAILABLE_TOOLTIP = "Реакция недоступна: у сообщения нет packet id";
-    private static final String RETRY_TOOLTIP = "Повторить отправку";
     private static final String RETRY_ICON_PATH = "/icons/refresh.svg";
     private static final String OK_STATUS_ICON_PATH = "/icons/status-ok-flat.svg";
     private static final int OK_STATUS_ICON_SIZE = 18;
@@ -109,12 +114,6 @@ public class MessageBubbleFactory {
         /** Начать ответ на сообщение. */
         void startReply(MeshMessage msg);
 
-        /** Запросить traceroute до ноды-отправителя. */
-        void requestTraceroute(MeshMessage msg);
-
-        /** Запросить информацию о ноде-отправителе. */
-        void requestNodeInfo(MeshMessage msg);
-
         /** Отправить emoji-реакцию на сообщение. */
         void sendReaction(MeshMessage msg, String emoji);
 
@@ -124,6 +123,55 @@ public class MessageBubbleFactory {
         /** Повторно отправить недоставленное сообщение. */
         boolean retryMessage(MeshMessage msg);
     }
+
+    /**
+     * Строка сообщения с прямыми ссылками на изменяемые UI-узлы.
+     *
+     * <p>Форма чата хранит этот объект для адресного обновления статуса,
+     * реакций, quote preview и meta-индикаторов без полной замены строки в
+     * {@code messageContainer}.
+     */
+    public static final class RenderedMessageRow {
+        private final HBox row;
+        private final VBox content;
+        private final VBox quoteSlot;
+        private final HBox reactionSlot;
+        private final HBox routingMetaSlot;
+        private final HBox meta;
+        private final StackPane mqttBadge;
+        private final double defaultWidthRatio;
+        private final boolean incoming;
+        private final boolean outgoing;
+        private Label statusLabel;
+
+        private RenderedMessageRow(HBox row,
+                                   VBox content,
+                                   VBox quoteSlot,
+                                   HBox reactionSlot,
+                                   HBox routingMetaSlot,
+                                   HBox meta,
+                                   Label statusLabel,
+                                   StackPane mqttBadge,
+                                   double defaultWidthRatio,
+                                   boolean incoming,
+                                   boolean outgoing) {
+            this.row = row;
+            this.content = content;
+            this.quoteSlot = quoteSlot;
+            this.reactionSlot = reactionSlot;
+            this.routingMetaSlot = routingMetaSlot;
+            this.meta = meta;
+            this.statusLabel = statusLabel;
+            this.mqttBadge = mqttBadge;
+            this.defaultWidthRatio = defaultWidthRatio;
+            this.incoming = incoming;
+            this.outgoing = outgoing;
+        }
+
+        public HBox row() { return row; }
+    }
+
+    private record MqttBubble(StackPane wrapper, StackPane badge) {}
 
     private DeviceState state;
     private final ReadOnlyDoubleProperty containerWidthProp;
@@ -174,6 +222,16 @@ public class MessageBubbleFactory {
      * @return готовый JavaFX-узел пузыря
      */
     public HBox build(MeshMessage msg) {
+        return buildRendered(msg).row();
+    }
+
+    /**
+     * Строит bubble и возвращает управляемую строку для последующих patch-обновлений.
+     *
+     * @param msg сообщение для рендера
+     * @return строка сообщения с ссылками на изменяемые UI-узлы
+     */
+    public RenderedMessageRow buildRendered(MeshMessage msg) {
         if (msg.isSystemMessage()) {
             return buildSystemBubble(msg);
         }
@@ -256,12 +314,68 @@ public class MessageBubbleFactory {
     }
 
     /**
+     * Обновляет статус доставки в уже отрисованной строке без пересборки bubble.
+     *
+     * @param rendered строка сообщения
+     * @param msg актуальное сообщение
+     */
+    public void refreshRenderedStatus(RenderedMessageRow rendered, MeshMessage msg) {
+        if (rendered == null || msg == null || !rendered.outgoing || rendered.meta == null) {
+            return;
+        }
+        if (rendered.statusLabel == null) {
+            rendered.statusLabel = createStatusLabel(msg).orElse(null);
+            if (rendered.statusLabel != null) {
+                rendered.meta.getChildren().add(rendered.statusLabel);
+            }
+        }
+        refreshStatusLabel(rendered.statusLabel, msg);
+    }
+
+    /**
+     * Обновляет reaction bar в уже отрисованной строке.
+     *
+     * @param rendered строка сообщения
+     * @param msg актуальное сообщение с гидратированными реакциями
+     */
+    public void refreshRenderedReactions(RenderedMessageRow rendered, MeshMessage msg) {
+        if (rendered == null || msg == null || rendered.reactionSlot == null || rendered.content == null) {
+            return;
+        }
+        HBox reactionBar = buildReactionsBar(msg);
+        setSlotContent(rendered.reactionSlot, reactionBar);
+        bindBubbleWidth(rendered.content, reactionBar != null, rendered.defaultWidthRatio);
+    }
+
+    /**
+     * Обновляет quote, meta и MQTT badge в уже отрисованной строке.
+     *
+     * @param rendered строка сообщения
+     * @param msg актуальное сообщение
+     */
+    public void refreshRenderedMetadata(RenderedMessageRow rendered, MeshMessage msg) {
+        if (rendered == null || msg == null) {
+            return;
+        }
+        if (rendered.quoteSlot != null) {
+            setSlotContent(rendered.quoteSlot, createQuoteNode(msg).orElse(null));
+        }
+        if (rendered.incoming && rendered.routingMetaSlot != null) {
+            setSlotContent(rendered.routingMetaSlot, createRoutingMetaNode(msg).orElse(null));
+        }
+        if (rendered.outgoing) {
+            refreshRenderedStatus(rendered, msg);
+        }
+        refreshMqttBadge(rendered.content, rendered.mqttBadge, msg);
+    }
+
+    /**
      * Собирает входящий bubble: аватар, имя отправителя, текст, реакции и meta-блок.
      *
      * @param msg входящее сообщение
      * @return готовая строка чата для входящего сообщения
      */
-    private HBox buildIncomingBubble(MeshMessage msg) {
+    private RenderedMessageRow buildIncomingBubble(MeshMessage msg) {
         HBox reactionBar = buildReactionsBar(msg);
         ChatNodeDisplayHelper.IncomingMessagePresentation senderPresentation =
                 ChatNodeDisplayHelper.resolveIncomingMessagePresentation(state, msg);
@@ -269,22 +383,37 @@ public class MessageBubbleFactory {
         StackPane avatar = buildAvatar(senderPresentation.avatar());
         configureIncomingAvatar(avatar, msg);
 
+        VBox quoteSlot = createQuoteSlot(createQuoteNode(msg).orElse(null));
+        HBox reactionSlot = createReactionSlot(reactionBar);
+        HBox routingMetaSlot = createRoutingMetaSlot(createRoutingMetaNode(msg).orElse(null));
+        HBox meta = buildIncomingMeta(msg, routingMetaSlot);
         VBox content = createMessageContent("chat-bubble-incoming", reactionBar != null, DEFAULT_BUBBLE_WIDTH_RATIO);
         Optional.of(msg)
                 .filter(this::isMentioningMe)
                 .ifPresent(ignored -> content.getStyleClass().add("chat-bubble-mentioned"));
         content.getChildren().addAll(nodes(
                 createSenderNameLabel(senderPresentation.senderName()),
-                createQuoteNode(msg).orElse(null),
+                quoteSlot,
                 createTextNode(msg),
-                buildIncomingFooter(msg, reactionBar)
+                buildIncomingFooter(msg, reactionSlot, meta)
         ));
 
-        Node bubbleNode = wrapWithMqttBadge(content, msg);
-        HBox row = createMessageRow(Pos.BOTTOM_LEFT, "chat-message-row-incoming", avatar, bubbleNode);
+        MqttBubble mqttBubble = wrapWithMqttBadge(content, msg);
+        HBox row = createMessageRow(Pos.BOTTOM_LEFT, "chat-message-row-incoming", avatar, mqttBubble.wrapper());
         attachReplyOnDoubleClick(content, msg);
         attachIncomingContextMenu(content, msg, row);
-        return row;
+        return new RenderedMessageRow(
+                row,
+                content,
+                quoteSlot,
+                reactionSlot,
+                routingMetaSlot,
+                meta,
+                null,
+                mqttBubble.badge(),
+                DEFAULT_BUBBLE_WIDTH_RATIO,
+                true,
+                false);
     }
 
     /**
@@ -293,22 +422,37 @@ public class MessageBubbleFactory {
      * @param msg исходящее сообщение
      * @return готовая строка чата для исходящего сообщения
      */
-    private HBox buildOutgoingBubble(MeshMessage msg) {
+    private RenderedMessageRow buildOutgoingBubble(MeshMessage msg) {
         HBox reactionBar = buildReactionsBar(msg);
+        VBox quoteSlot = createQuoteSlot(createQuoteNode(msg).orElse(null));
+        HBox reactionSlot = createReactionSlot(reactionBar);
+        Label statusLabel = createStatusLabel(msg).orElse(null);
+        HBox meta = buildOutgoingMeta(msg, statusLabel);
         VBox content = createMessageContent("chat-bubble-outgoing", reactionBar != null, DEFAULT_BUBBLE_WIDTH_RATIO);
         content.getChildren().addAll(nodes(
-                createQuoteNode(msg).orElse(null),
+                quoteSlot,
                 createTextNode(msg),
-                buildOutgoingFooter(msg, reactionBar)
+                buildOutgoingFooter(msg, reactionSlot, meta)
         ));
 
         StackPane avatar = buildAvatar(ChatNodeDisplayHelper.resolveOutgoingAvatar(state));
         Region spacer = createFlexibleSpacer();
 
-        Node bubbleNode = wrapWithMqttBadge(content, msg);
-        HBox row = createMessageRow(Pos.BOTTOM_RIGHT, "chat-message-row-outgoing", spacer, bubbleNode, avatar);
+        MqttBubble mqttBubble = wrapWithMqttBadge(content, msg);
+        HBox row = createMessageRow(Pos.BOTTOM_RIGHT, "chat-message-row-outgoing", spacer, mqttBubble.wrapper(), avatar);
         attachCopyDeleteMenu(content, msg, row);
-        return row;
+        return new RenderedMessageRow(
+                row,
+                content,
+                quoteSlot,
+                reactionSlot,
+                null,
+                meta,
+                statusLabel,
+                mqttBubble.badge(),
+                DEFAULT_BUBBLE_WIDTH_RATIO,
+                false,
+                true);
     }
 
     /**
@@ -317,11 +461,11 @@ public class MessageBubbleFactory {
      * @param msg системное сообщение
      * @return bubble системного сообщения
      */
-    private HBox buildSystemBubble(MeshMessage msg) {
+    private RenderedMessageRow buildSystemBubble(MeshMessage msg) {
         return tryBuildTracerouteBubble(msg).orElseGet(() -> createDefaultSystemBubble(msg));
     }
 
-    private HBox createDefaultSystemBubble(MeshMessage msg) {
+    private RenderedMessageRow createDefaultSystemBubble(MeshMessage msg) {
         StackPane botAvatar = buildBotAvatar();
         VBox content = new VBox(BASE_VERTICAL_SPACING);
         content.getStyleClass().add("chat-bubble-system");
@@ -334,7 +478,18 @@ public class MessageBubbleFactory {
 
         HBox row = createMessageRow(Pos.BOTTOM_LEFT, "chat-message-row-system", botAvatar, content);
         attachCopyDeleteMenu(content, msg, row);
-        return row;
+        return new RenderedMessageRow(
+                row,
+                content,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                SYSTEM_BUBBLE_WIDTH_RATIO,
+                false,
+                false);
     }
 
     /**
@@ -343,12 +498,24 @@ public class MessageBubbleFactory {
      * @param msg системное сообщение
      * @return визуальный traceroute bubble, если сообщение содержит traceroute payload
      */
-    private Optional<HBox> tryBuildTracerouteBubble(MeshMessage msg) {
+    private Optional<RenderedMessageRow> tryBuildTracerouteBubble(MeshMessage msg) {
         return Optional.ofNullable(tracerouteView)
                 .filter(ignored -> Optional.ofNullable(msg.getText())
                         .filter(text -> text.startsWith(TracerouteView.TRACEROUTE_PREFIX))
                         .isPresent())
-                .map(view -> view.tryBuildFromText(msg));
+                .map(view -> view.tryBuildFromText(msg))
+                .map(row -> new RenderedMessageRow(
+                        row,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        SYSTEM_BUBBLE_WIDTH_RATIO,
+                        false,
+                        false));
     }
 
     /**
@@ -446,13 +613,7 @@ public class MessageBubbleFactory {
      * @param msg сообщение
      * @return исходный content или wrapper с badge
      */
-    private static Node wrapWithMqttBadge(VBox content, MeshMessage msg) {
-        if (msg == null || !msg.isViaMqtt()) {
-            return content;
-        }
-
-        content.getStyleClass().add("chat-bubble-with-mqtt-badge");
-
+    private MqttBubble wrapWithMqttBadge(VBox content, MeshMessage msg) {
         StackPane badge = createMqttBadge();
         StackPane wrapper = new StackPane(content, badge);
         wrapper.setMinHeight(Region.USE_PREF_SIZE);
@@ -460,7 +621,8 @@ public class MessageBubbleFactory {
         StackPane.setAlignment(content, Pos.TOP_LEFT);
         StackPane.setAlignment(badge, Pos.TOP_RIGHT);
         StackPane.setMargin(badge, MQTT_BADGE_MARGIN);
-        return wrapper;
+        refreshMqttBadge(content, badge, msg);
+        return new MqttBubble(wrapper, badge);
     }
 
     /**
@@ -523,6 +685,41 @@ public class MessageBubbleFactory {
         return nameLabel;
     }
 
+    private static VBox createQuoteSlot(Node quoteNode) {
+        VBox slot = new VBox();
+        setSlotContent(slot, quoteNode);
+        return slot;
+    }
+
+    private static HBox createReactionSlot(HBox reactionBar) {
+        HBox slot = new HBox();
+        slot.setAlignment(Pos.CENTER_LEFT);
+        setSlotContent(slot, reactionBar);
+        return slot;
+    }
+
+    private static HBox createRoutingMetaSlot(HBox routingMetaNode) {
+        HBox slot = new HBox();
+        slot.setAlignment(Pos.CENTER_RIGHT);
+        setSlotContent(slot, routingMetaNode);
+        return slot;
+    }
+
+    private static void setSlotContent(Pane slot, Node child) {
+        if (slot == null) {
+            return;
+        }
+        if (child == null) {
+            slot.getChildren().clear();
+            slot.setVisible(false);
+            slot.setManaged(false);
+            return;
+        }
+        slot.getChildren().setAll(child);
+        slot.setVisible(true);
+        slot.setManaged(true);
+    }
+
     /**
      * Создаёт общий footer bubble с заданным направлением выравнивания.
      *
@@ -543,13 +740,13 @@ public class MessageBubbleFactory {
      * @param reactionBar готовая панель реакций или {@code null}
      * @return footer входящего bubble
      */
-    private HBox buildIncomingFooter(MeshMessage msg, HBox reactionBar) {
+    private HBox buildIncomingFooter(MeshMessage msg, HBox reactionSlot, HBox meta) {
         HBox footer = createFooter(Pos.CENTER_LEFT);
         footer.getChildren().addAll(nodes(
                 buildReactionButton(msg),
-                reactionBar,
+                reactionSlot,
                 createFlexibleSpacer(),
-                buildIncomingMeta(msg)
+                meta
         ));
         return footer;
     }
@@ -561,12 +758,12 @@ public class MessageBubbleFactory {
      * @param reactionBar готовая панель реакций или {@code null}
      * @return footer исходящего bubble
      */
-    private HBox buildOutgoingFooter(MeshMessage msg, HBox reactionBar) {
+    private HBox buildOutgoingFooter(MeshMessage msg, HBox reactionSlot, HBox meta) {
         HBox footer = createFooter(Pos.CENTER_RIGHT);
         footer.getChildren().addAll(nodes(
                 createFlexibleSpacer(),
-                reactionBar,
-                buildOutgoingMeta(msg)
+                reactionSlot,
+                meta
         ));
         return footer;
     }
@@ -625,9 +822,27 @@ public class MessageBubbleFactory {
     private boolean isReplyToOutgoingMessage(MeshMessage msg) {
         return Optional.of(msg.getReplyId())
                 .filter(replyId -> replyId != ZERO_VALUE)
-                .map(replyId -> MessageDbService.getInstance().findByPacketId(replyId))
+                .map(replyId -> findReplyTargetInCurrentScope(replyId, msg))
                 .map(MeshMessage::isOutgoing)
                 .orElse(false);
+    }
+
+    private MeshMessage findReplyTargetInCurrentScope(int replyId, MeshMessage msg) {
+        if (state == null || msg == null) {
+            return null;
+        }
+        String ownerNodeId = state.getOwnerNodeId();
+        if (ownerNodeId == null || ownerNodeId.isBlank()) {
+            return null;
+        }
+
+        String chatType = msg.isDirectMessage() ? "dm" : "channel";
+        String chatKey = msg.isDirectMessage() ? msg.getFromNodeId() : String.valueOf(msg.getChannelIndex());
+        if (chatKey == null || chatKey.isBlank()) {
+            return null;
+        }
+
+        return MessageDbService.getInstance().findByPacketId(replyId, chatType, chatKey, ownerNodeId);
     }
 
     /**
@@ -679,25 +894,69 @@ public class MessageBubbleFactory {
     }
 
     /**
-     * Создаёт единый {@link EmojiTextFlow} для текста сообщения и цитаты.
+     * Создаёт единый {@link TextFlow} для текста сообщения и цитаты.
      *
      * @param text исходный текст
      * @param emojiSize размер emoji
      * @param textStyleClass css-класс текстовых нод внутри flow
      * @param styleClass css-класс самого flow
-     * @return настроенный {@link EmojiTextFlow}
+     * @return настроенный {@link TextFlow}
      */
-    private static EmojiTextFlow createBubbleTextFlow(String text,
-                                                      double emojiSize,
-                                                      String textStyleClass,
-                                                      String styleClass) {
-        EmojiTextFlow textFlow = new EmojiTextFlow(
-                text == null ? "" : text,
-                TypographyManager.scaleChat(emojiSize));
-        textFlow.setTextStyleClass(textStyleClass);
+    private static TextFlow createBubbleTextFlow(String text,
+                                                 double emojiSize,
+                                                 String textStyleClass,
+                                                 String styleClass) {
+        TextFlow textFlow = new TextFlow();
         textFlow.getStyleClass().add(styleClass);
         textFlow.setMinHeight(Region.USE_PREF_SIZE);
+
+        double scaledEmojiSize = TypographyManager.scaleChat(emojiSize);
+        for (ChatUrlParser.Segment segment : ChatUrlParser.split(text == null ? "" : text)) {
+            if (segment.url()) {
+                textFlow.getChildren().add(createUrlTextNode(segment.text(), textStyleClass));
+            } else {
+                addEmojiTextNodes(textFlow, segment.text(), scaledEmojiSize, textStyleClass);
+            }
+        }
         return textFlow;
+    }
+
+    private static void addEmojiTextNodes(TextFlow textFlow,
+                                          String text,
+                                          double emojiSize,
+                                          String textStyleClass) {
+        for (EmojiTextFlow.Segment segment : EmojiTextFlow.parseSegments(text)) {
+            if (segment.isEmoji()) {
+                ImageView emoji = EmojiImageCache.createImageView(segment.text(), emojiSize);
+                if (emoji != null) {
+                    textFlow.getChildren().add(emoji);
+                    continue;
+                }
+            }
+            textFlow.getChildren().add(createPlainTextNode(segment.text(), textStyleClass));
+        }
+    }
+
+    private static Text createUrlTextNode(String url, String textStyleClass) {
+        Text textNode = createPlainTextNode(url, textStyleClass);
+        textNode.getStyleClass().add("chat-bubble-url-node");
+        textNode.setCursor(Cursor.HAND);
+        textNode.setOnMouseClicked(event -> {
+            if (event.getButton() != MouseButton.PRIMARY) {
+                return;
+            }
+            if (event.getClickCount() == 1) {
+                ExternalUrlLauncher.open(url);
+            }
+            event.consume();
+        });
+        return textNode;
+    }
+
+    private static Text createPlainTextNode(String text, String textStyleClass) {
+        Text textNode = new Text(UnicodeTextUtils.sanitizeForJavaFxDisplay(text));
+        textNode.getStyleClass().add(textStyleClass);
+        return textNode;
     }
 
     /**
@@ -709,7 +968,18 @@ public class MessageBubbleFactory {
      */
     private void bindBubbleWidth(VBox content, boolean hasReactions, double defaultWidthRatio) {
         double widthRatio = hasReactions ? REACTION_BUBBLE_WIDTH_RATIO : defaultWidthRatio;
+        content.maxWidthProperty().unbind();
         content.maxWidthProperty().bind(containerWidthProp.multiply(widthRatio));
+    }
+
+    private void refreshMqttBadge(VBox content, StackPane badge, MeshMessage msg) {
+        if (content == null || badge == null) {
+            return;
+        }
+        boolean visible = msg != null && msg.isViaMqtt();
+        setStyleClassPresence(content, "chat-bubble-with-mqtt-badge", visible);
+        badge.setVisible(visible);
+        badge.setManaged(visible);
     }
 
     /**
@@ -824,10 +1094,10 @@ public class MessageBubbleFactory {
      * @param msg входящее сообщение
      * @return meta container
      */
-    private HBox buildIncomingMeta(MeshMessage msg) {
+    private HBox buildIncomingMeta(MeshMessage msg, HBox routingMetaSlot) {
         HBox meta = createMetaBox();
         meta.getChildren().addAll(nodes(
-                createRoutingMetaNode(msg).orElse(null),
+                routingMetaSlot,
                 createTimeLabel(msg.getTimestamp())
         ));
         return meta;
@@ -839,12 +1109,12 @@ public class MessageBubbleFactory {
      * @param msg исходящее сообщение
      * @return meta container
      */
-    private HBox buildOutgoingMeta(MeshMessage msg) {
+    private HBox buildOutgoingMeta(MeshMessage msg, Label statusLabel) {
         HBox meta = createMetaBox();
         meta.setAlignment(Pos.CENTER_RIGHT);
         meta.getChildren().addAll(nodes(
                 createTimeLabel(msg.getTimestamp()),
-                createStatusLabel(msg).orElse(null)
+                statusLabel
         ));
         return meta;
     }
@@ -918,9 +1188,11 @@ public class MessageBubbleFactory {
 
     private Button createEnabledReactionButton(MeshMessage msg) {
         Button reactionButton = createReactionButton();
-        Popup reactionPopup = buildReactionPopup(msg);
+        AtomicReference<Popup> reactionPopup = new AtomicReference<>();
         reactionButton.setOnAction(e -> {
-            toggleReactionPopup(reactionButton, reactionPopup);
+            Popup popup = reactionPopup.updateAndGet(existing ->
+                    existing != null ? existing : buildReactionPopup(msg));
+            toggleReactionPopup(reactionButton, popup);
             e.consume();
         });
         return reactionButton;
@@ -954,7 +1226,7 @@ public class MessageBubbleFactory {
     private static void disableReactionButton(Button reactionButton) {
         reactionButton.getStyleClass().add("chat-reaction-btn-disabled");
         reactionButton.setCursor(Cursor.DEFAULT);
-        reactionButton.setTooltip(new Tooltip(REACTION_UNAVAILABLE_TOOLTIP));
+        reactionButton.setTooltip(new Tooltip(I18n.t("chat.bubble.reactionUnavailable")));
     }
 
     /**
@@ -1176,7 +1448,7 @@ public class MessageBubbleFactory {
             retryAction.getChildren().add(fallback);
         }
 
-        Tooltip.install(retryAction, new Tooltip(RETRY_TOOLTIP));
+        Tooltip.install(retryAction, new Tooltip(I18n.t("chat.bubble.retry")));
         retryAction.setOnMouseClicked(event -> {
             if (event.getButton() != MouseButton.PRIMARY) {
                 return;
@@ -1190,22 +1462,19 @@ public class MessageBubbleFactory {
     }
 
     /**
-     * Навешивает контекстное меню входящего сообщения с reply/trace/info действиями.
+     * Навешивает контекстное меню входящего сообщения с reply/delete действиями.
      *
      * @param content bubble-контент
      * @param msg сообщение
      * @param row строка чата
      */
     private void attachIncomingContextMenu(VBox content, MeshMessage msg, HBox row) {
-        ContextMenu menu = new ContextMenu(
-                createMenuItem("Копировать", () -> copyText(msg.getText())),
-                createMenuItem("Ответить", () -> actions.startReply(msg)),
-                createMenuItem("Trace", () -> actions.requestTraceroute(msg)),
-                createMenuItem("Инфо", () -> actions.requestNodeInfo(msg)),
+        installContextMenu(content, () -> new ContextMenu(
+                createMenuItem(I18n.t("common.copy"), () -> copyText(msg.getText())),
+                createMenuItem(I18n.t("chat.bubble.reply"), () -> actions.startReply(msg)),
                 new SeparatorMenuItem(),
-                createMenuItem("Удалить", () -> actions.confirmDeleteMessage(msg, row))
-        );
-        installContextMenu(content, menu);
+                createMenuItem(I18n.t("common.delete"), () -> actions.confirmDeleteMessage(msg, row))
+        ));
     }
 
     /**
@@ -1216,12 +1485,11 @@ public class MessageBubbleFactory {
      * @param row строка чата
      */
     private void attachCopyDeleteMenu(VBox content, MeshMessage msg, HBox row) {
-        ContextMenu menu = new ContextMenu(
-                createMenuItem("Копировать", () -> copyText(msg.getText())),
+        installContextMenu(content, () -> new ContextMenu(
+                createMenuItem(I18n.t("common.copy"), () -> copyText(msg.getText())),
                 new SeparatorMenuItem(),
-                createMenuItem("Удалить", () -> actions.confirmDeleteMessage(msg, row))
-        );
-        installContextMenu(content, menu);
+                createMenuItem(I18n.t("common.delete"), () -> actions.confirmDeleteMessage(msg, row))
+        ));
     }
 
     /**
@@ -1238,13 +1506,16 @@ public class MessageBubbleFactory {
     }
 
     /**
-     * Привязывает готовое контекстное меню к bubble-контенту.
+     * Привязывает лениво создаваемое контекстное меню к bubble-контенту.
      *
      * @param content bubble-контент
-     * @param menu меню действий
+     * @param menuSupplier фабрика меню действий
      */
-    private static void installContextMenu(VBox content, ContextMenu menu) {
+    private static void installContextMenu(VBox content, Supplier<ContextMenu> menuSupplier) {
+        AtomicReference<ContextMenu> menuRef = new AtomicReference<>();
         content.setOnContextMenuRequested(ev -> {
+            ContextMenu menu = menuRef.updateAndGet(existing ->
+                    existing != null ? existing : menuSupplier.get());
             menu.show(content, ev.getScreenX(), ev.getScreenY());
             ev.consume();
         });

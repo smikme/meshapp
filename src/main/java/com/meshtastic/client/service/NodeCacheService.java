@@ -91,6 +91,7 @@ public final class NodeCacheService {
                         snr           REAL,
                         last_heard    INT,
                         battery_level INT,
+                        externally_powered BOOLEAN DEFAULT FALSE,
                         voltage       REAL,
                         hops_away     INT,
                         channel       INT DEFAULT 0,
@@ -108,6 +109,7 @@ public final class NodeCacheService {
                         node_id             VARCHAR(20) NOT NULL,
                         owner_node_id       VARCHAR(20) NOT NULL DEFAULT '',
                         battery_level       INT,
+                        externally_powered  BOOLEAN DEFAULT FALSE,
                         voltage             REAL,
                         channel_utilization REAL,
                         air_util_tx         REAL,
@@ -140,6 +142,8 @@ public final class NodeCacheService {
                 // Migration: connection quality columns
                 try { stmt.execute("ALTER TABLE telemetry_history ADD COLUMN rx_snr REAL DEFAULT 0"); } catch (SQLException ignored) {}
                 try { stmt.execute("ALTER TABLE telemetry_history ADD COLUMN rx_rssi INT DEFAULT 0"); } catch (SQLException ignored) {}
+                // Migration: separate power-source flag from battery percentage
+                try { stmt.execute("ALTER TABLE telemetry_history ADD COLUMN externally_powered BOOLEAN DEFAULT FALSE"); } catch (SQLException ignored) {}
                 // Migration: hop columns
                 try { stmt.execute("ALTER TABLE telemetry_history ADD COLUMN hop_start INT DEFAULT 0"); } catch (SQLException ignored) {}
                 try { stmt.execute("ALTER TABLE telemetry_history ADD COLUMN hop_limit INT DEFAULT 0"); } catch (SQLException ignored) {}
@@ -151,6 +155,8 @@ public final class NodeCacheService {
                 try { stmt.execute("ALTER TABLE nodes ADD COLUMN unmessagable BOOLEAN"); } catch (SQLException ignored) {}
                 // Migration: ignored column (v5 migration may not have run on fresh-install DBs)
                 try { stmt.execute("ALTER TABLE nodes ADD COLUMN IF NOT EXISTS ignored BOOLEAN DEFAULT FALSE"); } catch (SQLException ignored) {}
+                // Migration: separate power-source flag from battery percentage
+                try { stmt.execute("ALTER TABLE nodes ADD COLUMN IF NOT EXISTS externally_powered BOOLEAN DEFAULT FALSE"); } catch (SQLException ignored) {}
 
                 stmt.execute("""
                     CREATE INDEX IF NOT EXISTS idx_telemetry_ts ON telemetry_history (ts)
@@ -164,17 +170,17 @@ public final class NodeCacheService {
             mergeStmt = dbConnection.prepareStatement("""
                 MERGE INTO nodes (node_id, node_num, long_name, short_name, role, hw_model,
                                   latitude, longitude, altitude, snr, last_heard,
-                                  battery_level, voltage, hops_away, channel, public_key, unmessagable)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                  battery_level, externally_powered, voltage, hops_away, channel, public_key, unmessagable)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """);
 
             insertTelemetryStmt = dbConnection.prepareStatement("""
-                INSERT INTO telemetry_history (ts, node_id, battery_level, voltage,
+                INSERT INTO telemetry_history (ts, node_id, battery_level, externally_powered, voltage,
                     channel_utilization, air_util_tx, temperature, relative_humidity, barometric_pressure,
                     num_packets_rx, num_packets_rx_bad, num_rx_dupe,
                     num_packets_tx, num_tx_dropped, num_tx_relay, num_tx_relay_canceled,
                     rx_snr, rx_rssi, hop_start, hop_limit, owner_node_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """);
 
             log.info("Node cache DB initialized");
@@ -564,24 +570,25 @@ public final class NodeCacheService {
             insertTelemetryStmt.setLong(1, entry.getTimestamp());
             insertTelemetryStmt.setString(2, entry.getNodeId());
             insertTelemetryStmt.setInt(3, entry.getBatteryLevel());
-            insertTelemetryStmt.setFloat(4, entry.getVoltage());
-            insertTelemetryStmt.setFloat(5, entry.getChannelUtilization());
-            insertTelemetryStmt.setFloat(6, entry.getAirUtilTx());
-            insertTelemetryStmt.setFloat(7, entry.getTemperature());
-            insertTelemetryStmt.setFloat(8, entry.getRelativeHumidity());
-            insertTelemetryStmt.setFloat(9, entry.getBarometricPressure());
-            insertTelemetryStmt.setInt(10, entry.getNumPacketsRx());
-            insertTelemetryStmt.setInt(11, entry.getNumPacketsRxBad());
-            insertTelemetryStmt.setInt(12, entry.getNumRxDupe());
-            insertTelemetryStmt.setInt(13, entry.getNumPacketsTx());
-            insertTelemetryStmt.setInt(14, entry.getNumTxDropped());
-            insertTelemetryStmt.setInt(15, entry.getNumTxRelay());
-            insertTelemetryStmt.setInt(16, entry.getNumTxRelayCanceled());
-            insertTelemetryStmt.setFloat(17, entry.getRxSnr());
-            insertTelemetryStmt.setInt(18, entry.getRxRssi());
-            insertTelemetryStmt.setInt(19, entry.getHopStart());
-            insertTelemetryStmt.setInt(20, entry.getHopLimit());
-            insertTelemetryStmt.setString(21, ownerNodeId != null ? ownerNodeId : "");
+            insertTelemetryStmt.setBoolean(4, entry.isExternallyPowered());
+            insertTelemetryStmt.setFloat(5, entry.getVoltage());
+            insertTelemetryStmt.setFloat(6, entry.getChannelUtilization());
+            insertTelemetryStmt.setFloat(7, entry.getAirUtilTx());
+            insertTelemetryStmt.setFloat(8, entry.getTemperature());
+            insertTelemetryStmt.setFloat(9, entry.getRelativeHumidity());
+            insertTelemetryStmt.setFloat(10, entry.getBarometricPressure());
+            insertTelemetryStmt.setInt(11, entry.getNumPacketsRx());
+            insertTelemetryStmt.setInt(12, entry.getNumPacketsRxBad());
+            insertTelemetryStmt.setInt(13, entry.getNumRxDupe());
+            insertTelemetryStmt.setInt(14, entry.getNumPacketsTx());
+            insertTelemetryStmt.setInt(15, entry.getNumTxDropped());
+            insertTelemetryStmt.setInt(16, entry.getNumTxRelay());
+            insertTelemetryStmt.setInt(17, entry.getNumTxRelayCanceled());
+            insertTelemetryStmt.setFloat(18, entry.getRxSnr());
+            insertTelemetryStmt.setInt(19, entry.getRxRssi());
+            insertTelemetryStmt.setInt(20, entry.getHopStart());
+            insertTelemetryStmt.setInt(21, entry.getHopLimit());
+            insertTelemetryStmt.setString(22, ownerNodeId != null ? ownerNodeId : "");
             insertTelemetryStmt.executeUpdate();
         } catch (SQLException e) {
             log.error("Failed to persist telemetry entry", e);
@@ -734,7 +741,8 @@ public final class NodeCacheService {
 
     private static TelemetryEntry readTelemetryRow(ResultSet rs) throws SQLException {
         TelemetryEntry e = new TelemetryEntry(rs.getLong("ts"), rs.getString("node_id"));
-        e.setBatteryLevel(rs.getInt("battery_level"));
+        applyBatteryLevel(rs.getInt("battery_level"), e);
+        e.setExternallyPowered(e.isExternallyPowered() || rs.getBoolean("externally_powered"));
         e.setVoltage(rs.getFloat("voltage"));
         e.setChannelUtilization(rs.getFloat("channel_utilization"));
         e.setAirUtilTx(rs.getFloat("air_util_tx"));
@@ -925,7 +933,7 @@ public final class NodeCacheService {
 
         // [18] batteryLevel
         if (!row.get(18).isJsonNull()) {
-            node.setBatteryLevel(row.get(18).getAsInt());
+            applyBatteryLevel(row.get(18).getAsInt(), node);
         }
 
         // [19] voltage (строка → float)
@@ -972,7 +980,13 @@ public final class NodeCacheService {
 
         if (src.getLastHeard() != 0) { dst.setLastHeard(src.getLastHeard()); }
 
-        if (src.getBatteryLevel() != 0) { dst.setBatteryLevel(src.getBatteryLevel()); }
+        if (src.getBatteryLevel() != 0) {
+            dst.setBatteryLevel(src.getBatteryLevel());
+            dst.setExternallyPowered(false);
+        }
+        if (src.isExternallyPowered()) {
+            dst.setExternallyPowered(true);
+        }
 
         if (src.getVoltage() != 0) { dst.setVoltage(src.getVoltage()); }
 
@@ -1145,23 +1159,24 @@ public final class NodeCacheService {
         ps.setFloat(10, n.getSnr());
         ps.setInt(11, n.getLastHeard());
         ps.setInt(12, n.getBatteryLevel());
-        ps.setFloat(13, n.getVoltage());
+        ps.setBoolean(13, n.isExternallyPowered());
+        ps.setFloat(14, n.getVoltage());
         if (n.hasHopsAway()) {
-            ps.setInt(14, n.getHopsAway());
+            ps.setInt(15, n.getHopsAway());
         } else {
-            ps.setNull(14, Types.INTEGER);
+            ps.setNull(15, Types.INTEGER);
         }
-        ps.setInt(15, n.getChannel());
+        ps.setInt(16, n.getChannel());
         byte[] publicKey = n.getPublicKey();
         if (publicKey != null && publicKey.length > 0) {
-            ps.setBytes(16, publicKey);
+            ps.setBytes(17, publicKey);
         } else {
-            ps.setNull(16, Types.VARBINARY);
+            ps.setNull(17, Types.VARBINARY);
         }
         if (n.getUnmessagable() != null) {
-            ps.setBoolean(17, n.getUnmessagable());
+            ps.setBoolean(18, n.getUnmessagable());
         } else {
-            ps.setNull(17, Types.BOOLEAN);
+            ps.setNull(18, Types.BOOLEAN);
         }
     }
 
@@ -1188,7 +1203,8 @@ public final class NodeCacheService {
         node.setAltitude(rs.getInt("altitude"));
         node.setSnr(rs.getFloat("snr"));
         node.setLastHeard(rs.getInt("last_heard"));
-        node.setBatteryLevel(rs.getInt("battery_level"));
+        applyBatteryLevel(rs.getInt("battery_level"), node);
+        node.setExternallyPowered(node.isExternallyPowered() || rs.getBoolean("externally_powered"));
         node.setVoltage(rs.getFloat("voltage"));
         int hopsAway = rs.getInt("hops_away");
         if (rs.wasNull()) {
@@ -1206,5 +1222,21 @@ public final class NodeCacheService {
             node.setUnmessagable(unmessagable);
         }
         return node;
+    }
+
+    private static void applyBatteryLevel(int rawBatteryLevel, NodeData node) {
+        if (rawBatteryLevel > 100) {
+            node.setExternallyPowered(true);
+        } else {
+            node.setBatteryLevel(rawBatteryLevel);
+        }
+    }
+
+    private static void applyBatteryLevel(int rawBatteryLevel, TelemetryEntry entry) {
+        if (rawBatteryLevel > 100) {
+            entry.setExternallyPowered(true);
+        } else {
+            entry.setBatteryLevel(rawBatteryLevel);
+        }
     }
 }

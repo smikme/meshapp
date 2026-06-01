@@ -1,6 +1,8 @@
 package com.meshtastic.client.connection;
 
 import com.meshtastic.client.connection.serial.NativeSerialPort;
+import com.meshtastic.client.connection.serial.SerialModemLinePolicy;
+import com.meshtastic.client.model.SerialModemLineMode;
 import com.meshtastic.client.protocol.meshcore.MeshCoreCompanionFrames;
 import org.junit.jupiter.api.Test;
 
@@ -11,6 +13,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -234,13 +237,13 @@ class SerialConnectionTest {
     }
 
     @Test
-    void shouldAssertDtrForWindowsCp210Bridge() {
-        assertTrue(SerialConnection.shouldAssertDtr(
+    void shouldNotAssertDtrForUsbSerialBridges() {
+        assertFalse(SerialConnection.shouldAssertDtr(
                 "COM3",
                 "Silicon Labs CP210x USB to UART Bridge (COM3)",
                 true
         ));
-        assertTrue(SerialConnection.shouldAssertDtr(
+        assertFalse(SerialConnection.shouldAssertDtr(
                 "COM4",
                 "USB-Enhanced-SERIAL CH9102 (COM4)",
                 true
@@ -255,6 +258,72 @@ class SerialConnectionTest {
                 "CP2102 USB to UART Bridge Controller",
                 false
         ));
+        assertFalse(SerialConnection.shouldAssertDtr(
+                "/dev/cu.SLAB_USBtoUART",
+                "/dev/cu.SLAB_USBtoUART",
+                false
+        ));
+    }
+
+    @Test
+    void shouldAssertRtsForUsbSerialBridges() {
+        assertTrue(SerialConnection.shouldAssertRts(
+                "COM3",
+                "Silicon Labs CP210x USB to UART Bridge (COM3)",
+                true
+        ));
+        assertTrue(SerialConnection.shouldAssertRts(
+                "/dev/cu.SLAB_USBtoUART",
+                "CP2102 USB to UART Bridge Controller",
+                false
+        ));
+        assertTrue(SerialConnection.shouldAssertRts(
+                "cu.usbserial-1234",
+                "USB Serial",
+                false
+        ));
+    }
+
+    @Test
+    void nativeUsbCdcAssertsDtrButNotRts() {
+        assertTrue(SerialConnection.shouldAssertDtr(
+                "cu.usbmodem1234",
+                "ESP32-S3 USB CDC",
+                false
+        ));
+        assertFalse(SerialConnection.shouldAssertRts(
+                "cu.usbmodem1234",
+                "ESP32-S3 USB CDC",
+                false
+        ));
+    }
+
+    @Test
+    void manualModemLineModeOverridesUsbSerialBridgeDetection() {
+        SerialModemLinePolicy policy = SerialConnection.modemLinePolicy(
+                "ttyUSB0",
+                "CP2102 USB to UART Bridge Controller",
+                false,
+                SerialModemLineMode.DTR_OFF_RTS_OFF
+        );
+
+        assertFalse(policy.assertDtr());
+        assertFalse(policy.assertRts());
+        assertEquals("manual override", policy.reason());
+    }
+
+    @Test
+    void manualModemLineModeCanAssertBothLines() {
+        SerialModemLinePolicy policy = SerialConnection.modemLinePolicy(
+                "ttyUSB0",
+                "CP2102 USB to UART Bridge Controller",
+                false,
+                SerialModemLineMode.DTR_ON_RTS_ON
+        );
+
+        assertTrue(policy.assertDtr());
+        assertTrue(policy.assertRts());
+        assertEquals("manual override", policy.reason());
     }
 
     private static final class TestConnectionListener implements ConnectionListener {
@@ -308,7 +377,7 @@ class SerialConnectionTest {
         private volatile boolean open;
 
         @Override
-        public void open(String portName, int baudRate, boolean assertDtr) {
+        public void open(String portName, int baudRate, SerialModemLinePolicy modemLinePolicy) {
             open = true;
         }
 
@@ -371,7 +440,7 @@ class SerialConnectionTest {
         private volatile boolean open;
 
         @Override
-        public void open(String portName, int baudRate, boolean assertDtr) {
+        public void open(String portName, int baudRate, SerialModemLinePolicy modemLinePolicy) {
             open = true;
         }
 

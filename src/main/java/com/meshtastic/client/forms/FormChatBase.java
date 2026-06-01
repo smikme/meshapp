@@ -8,6 +8,7 @@ import com.meshtastic.client.components.chat.MessageBubbleFactory;
 import com.meshtastic.client.components.chat.TracerouteView;
 import com.meshtastic.client.model.ChatItem;
 import com.meshtastic.client.model.DeviceState;
+import com.meshtastic.client.model.MessageChangeEvent;
 import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.protocol.ProtocolHandler;
@@ -35,7 +36,10 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Queue;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.function.Consumer;
 
 /**
  * Общее состояние и контракты между слоями реализации формы чата.
@@ -116,6 +120,7 @@ abstract class FormChatBase extends Form {
     protected boolean loadingNewerMessages = false;
     protected final List<MeshMessage> loadedMessages = new ArrayList<>();
     protected final Map<Long, HBox> loadedMessageRows = new HashMap<>();
+    protected final Map<Long, MessageBubbleFactory.RenderedMessageRow> loadedRenderedMessageRows = new HashMap<>();
     protected String loadedChatScrollCacheKey;
     protected int openingChatUnreadCount = 0;
     protected final Map<String, ChatScrollState> savedChatScrollStates = new HashMap<>();
@@ -173,10 +178,12 @@ abstract class FormChatBase extends Form {
     protected long scrollOperationGeneration;
     protected final AtomicBoolean messageRefreshQueued = new AtomicBoolean();
     protected final AtomicBoolean messageRefreshDirty = new AtomicBoolean();
+    protected final Queue<MessageChangeEvent> pendingMessageChanges = new ConcurrentLinkedQueue<>();
     protected final AtomicBoolean viewportLayoutQueued = new AtomicBoolean();
     protected final AtomicBoolean viewportLayoutDirty = new AtomicBoolean();
 
     protected final Runnable messageListener = this::scheduleMessageRefresh;
+    protected final Consumer<MessageChangeEvent> messageChangeListener = this::scheduleMessageChangeRefresh;
     protected final Runnable connectionListener = () -> Platform.runLater(this::rebindState);
     protected final ChangeListener<Number> chatFontSizeListener =
             (obs, oldValue, newValue) -> Platform.runLater(this::handleChatFontSizeChanged);
@@ -195,18 +202,37 @@ abstract class FormChatBase extends Form {
         Platform.runLater(this::flushQueuedMessageRefresh);
     }
 
+    protected void scheduleMessageChangeRefresh(MessageChangeEvent event) {
+        pendingMessageChanges.add(event != null ? event : MessageChangeEvent.unknown());
+        scheduleMessageRefresh();
+    }
+
     protected void flushQueuedMessageRefresh() {
-        while (messageRefreshDirty.getAndSet(false)) {
+        messageRefreshDirty.getAndSet(false);
+        List<MessageChangeEvent> events = drainPendingMessageChanges();
+        if (events.isEmpty()) {
             refreshCurrentChat();
-            reloadChatList();
+        } else {
+            processMessageChangeEvents(events);
         }
+        reloadChatList();
         messageRefreshQueued.set(false);
         if (messageRefreshDirty.get() && messageRefreshQueued.compareAndSet(false, true)) {
             Platform.runLater(this::flushQueuedMessageRefresh);
         }
     }
 
+    private List<MessageChangeEvent> drainPendingMessageChanges() {
+        List<MessageChangeEvent> events = new ArrayList<>();
+        MessageChangeEvent event;
+        while ((event = pendingMessageChanges.poll()) != null) {
+            events.add(event);
+        }
+        return events;
+    }
+
     protected abstract void refreshCurrentChat();
+    protected abstract void processMessageChangeEvents(List<MessageChangeEvent> events);
     protected abstract void reloadChatList();
     protected abstract void rebindState();
     protected abstract void handleChatFontSizeChanged();
@@ -236,9 +262,8 @@ abstract class FormChatBase extends Form {
     protected abstract void restorePendingCountdowns();
     protected abstract void updateInputEnabled();
     protected abstract void refreshLoadedMessageRows();
+    protected abstract void refreshLoadedMessageRows(boolean force);
     protected abstract void startReply(MeshMessage msg);
-    protected abstract void requestTraceroute(MeshMessage msg);
-    protected abstract void requestNodeInfo(MeshMessage msg);
     protected abstract void sendReaction(MeshMessage msg, String emoji);
     protected abstract void confirmDeleteMessage(MeshMessage msg, HBox row);
     protected abstract boolean retryMessage(MeshMessage msg);

@@ -1,6 +1,7 @@
 package com.meshtastic.client.utils;
 
 import com.google.protobuf.Descriptors.FieldDescriptor;
+import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.model.ConfigTreeItem;
 import org.meshtastic.proto.ConfigProtos;
 import org.meshtastic.proto.PowerMonProtos;
@@ -37,35 +38,35 @@ public final class ConfigValueFormatter {
     );
     private static final Map<String, BitmaskFieldSpec> BITMASK_FIELD_SPECS = Map.of(
             "meshtastic.Config.NetworkConfig.enabled_protocols",
-            new BitmaskFieldSpec("Отключено", List.of(
+            new BitmaskFieldSpec("settings.config.bitmask.disabled", List.of(
                     new BitmaskOption(ConfigProtos.Config.NetworkConfig.ProtocolFlags.UDP_BROADCAST.getNumber(),
-                            "UDP broadcast (локальная сеть)")
+                            "settings.config.bitmask.udpBroadcastLocal")
             )),
             "meshtastic.Config.PositionConfig.position_flags",
-            new BitmaskFieldSpec("Не выбрано", List.of(
+            new BitmaskFieldSpec("settings.config.bitmask.notSelected", List.of(
                     new BitmaskOption(ConfigProtos.Config.PositionConfig.PositionFlags.ALTITUDE.getNumber(),
-                            "Высота"),
+                            "settings.config.bitmask.altitude"),
                     new BitmaskOption(ConfigProtos.Config.PositionConfig.PositionFlags.ALTITUDE_MSL.getNumber(),
-                            "Высота MSL"),
+                            "settings.config.bitmask.altitudeMsl"),
                     new BitmaskOption(ConfigProtos.Config.PositionConfig.PositionFlags.GEOIDAL_SEPARATION.getNumber(),
-                            "Разделение геоида"),
+                            "settings.config.bitmask.geoidalSeparation"),
                     new BitmaskOption(ConfigProtos.Config.PositionConfig.PositionFlags.DOP.getNumber(),
                             "DOP"),
                     new BitmaskOption(ConfigProtos.Config.PositionConfig.PositionFlags.HVDOP.getNumber(),
                             "HDOP/VDOP"),
                     new BitmaskOption(ConfigProtos.Config.PositionConfig.PositionFlags.SATINVIEW.getNumber(),
-                            "Спутники в видимости"),
+                            "settings.config.bitmask.satellitesInView"),
                     new BitmaskOption(ConfigProtos.Config.PositionConfig.PositionFlags.SEQ_NO.getNumber(),
-                            "Порядковый номер"),
+                            "settings.config.bitmask.sequenceNumber"),
                     new BitmaskOption(ConfigProtos.Config.PositionConfig.PositionFlags.TIMESTAMP.getNumber(),
-                            "Временная метка"),
+                            "settings.config.bitmask.timestamp"),
                     new BitmaskOption(ConfigProtos.Config.PositionConfig.PositionFlags.HEADING.getNumber(),
-                            "Курс"),
+                            "settings.config.bitmask.heading"),
                     new BitmaskOption(ConfigProtos.Config.PositionConfig.PositionFlags.SPEED.getNumber(),
-                            "Скорость")
+                            "settings.config.bitmask.speed")
             )),
             "meshtastic.Config.PowerConfig.powermon_enables",
-            new BitmaskFieldSpec("Выключено", List.of(
+            new BitmaskFieldSpec("settings.config.bitmask.off", List.of(
                     new BitmaskOption(PowerMonProtos.PowerMon.State.CPU_DeepSleep.getNumber(), "CPU Deep Sleep"),
                     new BitmaskOption(PowerMonProtos.PowerMon.State.CPU_LightSleep.getNumber(), "CPU Light Sleep"),
                     new BitmaskOption(PowerMonProtos.PowerMon.State.Vext1_On.getNumber(), "Vext1 On"),
@@ -89,9 +90,18 @@ public final class ConfigValueFormatter {
      * @param mask числовая маска флага
      * @param label пользовательское имя флага
      */
-    public record BitmaskOption(long mask, String label) {}
+    public record BitmaskOption(long mask, String labelKey) {
+        public String label() {
+            String translated = I18n.t(labelKey);
+            return translated.startsWith("!") && translated.endsWith("!") ? labelKey : translated;
+        }
+    }
 
-    private record BitmaskFieldSpec(String zeroLabel, List<BitmaskOption> options) {}
+    private record BitmaskFieldSpec(String zeroLabelKey, List<BitmaskOption> options) {
+        String zeroLabel() {
+            return I18n.t(zeroLabelKey);
+        }
+    }
 
     /**
      * Форматирует значение поля дерева для отображения в UI.
@@ -280,13 +290,13 @@ public final class ConfigValueFormatter {
         }
         FieldDescriptor fieldDescriptor = item.getFieldDescriptor();
         if (isHumanReadableIpv4Field(fieldDescriptor)) {
-            return "Введите IPv4-адрес в формате 192.168.1.10";
+            return I18n.t("settings.config.validation.ipv4Hint");
         }
         if (isHumanReadableNodeIdField(fieldDescriptor)) {
-            return "Введите node ID в формате !1234abcd или uint32-значение";
+            return I18n.t("settings.config.validation.nodeIdHint");
         }
         if (isHumanReadableHexField(fieldDescriptor)) {
-            return "Введите I2C-адрес в формате 0x40 или десятичное значение";
+            return I18n.t("settings.config.validation.i2cHint");
         }
         return null;
     }
@@ -375,7 +385,7 @@ public final class ConfigValueFormatter {
      */
     static int parseIpv4(String text) {
         if (text == null || text.isBlank()) {
-            throw new IllegalArgumentException("IPv4-адрес не может быть пустым");
+            throw new IllegalArgumentException(I18n.t("settings.config.validation.ipv4Empty"));
         }
 
         if (!text.contains(".")) {
@@ -384,25 +394,25 @@ public final class ConfigValueFormatter {
 
         String[] parts = text.split("\\.");
         if (parts.length != 4) {
-            throw new IllegalArgumentException("IPv4-адрес должен содержать 4 октета");
+            throw new IllegalArgumentException(I18n.t("settings.config.validation.ipv4OctetCount"));
         }
 
         long value = 0;
         for (int i = 0; i < parts.length; i++) {
             String part = parts[i].trim();
             if (part.isEmpty()) {
-                throw new IllegalArgumentException("IPv4-адрес содержит пустой октет");
+                throw new IllegalArgumentException(I18n.t("settings.config.validation.ipv4EmptyOctet"));
             }
 
             int octet;
             try {
                 octet = Integer.parseInt(part);
             } catch (NumberFormatException e) {
-                throw new IllegalArgumentException("IPv4-адрес содержит нечисловой октет", e);
+                throw new IllegalArgumentException(I18n.t("settings.config.validation.ipv4NonNumericOctet"), e);
             }
 
             if (octet < 0 || octet > 255) {
-                throw new IllegalArgumentException("Каждый октет IPv4-адреса должен быть в диапазоне 0-255");
+                throw new IllegalArgumentException(I18n.t("settings.config.validation.ipv4OctetRange"));
             }
             value |= ((long) octet) << (8 * i);
         }
@@ -419,7 +429,7 @@ public final class ConfigValueFormatter {
      */
     static int parseNodeId(String text) {
         if (text == null || text.isBlank()) {
-            throw new IllegalArgumentException("Node ID не может быть пустым");
+            throw new IllegalArgumentException(I18n.t("settings.config.validation.nodeIdEmpty"));
         }
 
         String candidate = text.trim();
@@ -432,11 +442,11 @@ public final class ConfigValueFormatter {
             }
             long value = Long.parseLong(candidate);
             if (value < 0 || value > UINT32_MAX) {
-                throw new IllegalArgumentException("Номер ноды вне диапазона uint32");
+                throw new IllegalArgumentException(I18n.t("settings.config.validation.nodeIdRange"));
             }
             return (int) value;
         } catch (NumberFormatException e) {
-            throw new IllegalArgumentException("Введите node ID в формате !1234abcd или uint32-значение", e);
+            throw new IllegalArgumentException(I18n.t("settings.config.validation.nodeIdInvalid"), e);
         }
     }
 
@@ -449,7 +459,7 @@ public final class ConfigValueFormatter {
      */
     static int parseHexInt(String text) {
         if (text == null || text.isBlank()) {
-            throw new IllegalArgumentException("Значение не может быть пустым");
+            throw new IllegalArgumentException(I18n.t("settings.config.validation.emptyValue"));
         }
 
         String candidate = text.trim();
@@ -459,7 +469,7 @@ public final class ConfigValueFormatter {
             }
             return Integer.parseInt(candidate);
         } catch (NumberFormatException e) {
-            throw new IllegalArgumentException("Введите hex-значение в формате 0x40 или десятичное число", e);
+            throw new IllegalArgumentException(I18n.t("settings.config.validation.hexInvalid"), e);
         }
     }
 
@@ -479,12 +489,12 @@ public final class ConfigValueFormatter {
 
             long unsigned = Long.parseLong(text);
             if (unsigned < 0 || unsigned > UINT32_MAX) {
-                throw new IllegalArgumentException("Числовое представление IPv4 вне диапазона uint32");
+                throw new IllegalArgumentException(I18n.t("settings.config.validation.ipv4NumberRange"));
             }
             return (int) unsigned;
         } catch (NumberFormatException e) {
             throw new IllegalArgumentException(
-                    "Введите IPv4-адрес в формате 192.168.1.10 или старое uint32-значение",
+                    I18n.t("settings.config.validation.ipv4LegacyInvalid"),
                     e
             );
         }
