@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.util.Locale;
 import java.util.Properties;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -34,6 +35,38 @@ class I18nTest {
             assertEquals("!missing.key!", I18n.t("missing.key"));
         } finally {
             I18n.setLanguageTagForTests(previous);
+        }
+    }
+
+    @Test
+    void systemLanguageFallsBackToEnglishForUnsupportedLocales() {
+        String previousLanguage = I18n.getLanguageTag();
+        Locale previousLocale = Locale.getDefault(Locale.Category.DISPLAY);
+        try {
+            Locale.setDefault(Locale.Category.DISPLAY, Locale.GERMAN);
+            I18n.setLanguageTagForTests(I18n.LANGUAGE_SYSTEM);
+
+            assertEquals(Locale.ENGLISH.getLanguage(), I18n.locale().getLanguage());
+            assertEquals("Close", I18n.t("common.close"));
+        } finally {
+            Locale.setDefault(Locale.Category.DISPLAY, previousLocale);
+            I18n.setLanguageTagForTests(previousLanguage);
+        }
+    }
+
+    @Test
+    void explicitRussianLanguageOverridesUnsupportedSystemLocale() {
+        String previousLanguage = I18n.getLanguageTag();
+        Locale previousLocale = Locale.getDefault(Locale.Category.DISPLAY);
+        try {
+            Locale.setDefault(Locale.Category.DISPLAY, Locale.GERMAN);
+            I18n.setLanguageTagForTests(I18n.LANGUAGE_RU);
+
+            assertEquals(I18n.LANGUAGE_RU, I18n.locale().getLanguage());
+            assertEquals("Закрыть", I18n.t("common.close"));
+        } finally {
+            Locale.setDefault(Locale.Category.DISPLAY, previousLocale);
+            I18n.setLanguageTagForTests(previousLanguage);
         }
     }
 

@@ -110,9 +110,10 @@ public final class I18n {
         }
         Locale defaultLocale = Locale.getDefault(Locale.Category.DISPLAY);
         String language = defaultLocale.getLanguage();
-        return LANGUAGE_EN.equals(language)
-                ? Locale.ENGLISH
-                : Locale.forLanguageTag(LANGUAGE_RU);
+        if (LANGUAGE_RU.equals(language)) {
+            return Locale.forLanguageTag(LANGUAGE_RU);
+        }
+        return Locale.ENGLISH;
     }
 
     private static String normalizeLanguageTag(String tag) {
