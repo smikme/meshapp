@@ -1,6 +1,7 @@
 package com.meshtastic.client.system;
 
 import atlantafx.base.theme.Styles;
+import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.modal.Toast;
 import com.meshtastic.client.model.ConnectionEntry;
 import com.meshtastic.client.model.DeviceState;
@@ -235,10 +236,10 @@ public class ConnectionTabsPane extends TabPane {
             try {
                 ConnectionManager.getInstance().disconnect(entry.getId());
                 Platform.runLater(() ->
-                        Toast.show(Toast.Type.SUCCESS, "Отключено: " + entry.getName()));
+                        Toast.show(Toast.Type.SUCCESS, I18n.t("connection.toast.disconnected", entry.getName())));
             } catch (RuntimeException ex) {
                 Platform.runLater(() ->
-                        Toast.show(Toast.Type.ERROR, "Ошибка отключения: " + ex.getMessage()));
+                        Toast.show(Toast.Type.ERROR, I18n.t("connection.toast.disconnectError", ex.getMessage())));
             }
         }, "disconnect-tab-" + entry.getId());
         worker.setDaemon(true);

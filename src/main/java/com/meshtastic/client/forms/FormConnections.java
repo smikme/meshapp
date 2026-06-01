@@ -1,6 +1,7 @@
 package com.meshtastic.client.forms;
 
 import com.meshtastic.client.connection.ConnectionException;
+import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.menu.MyDrawerBuilder;
 import com.meshtastic.client.modal.ModalPane;
 import com.meshtastic.client.modal.Toast;
@@ -56,7 +57,7 @@ public class FormConnections extends Form {
         HBox titleRow = new HBox(10);
         titleRow.setAlignment(Pos.CENTER_LEFT);
 
-        Label title = new Label("Подключения");
+        Label title = new Label(I18n.t("connection.form.name"));
         title.getStyleClass().add("form-title");
 
         Region spacer = new Region();
@@ -65,8 +66,8 @@ public class FormConnections extends Form {
         ToolBar actionToolbar = new ToolBar();
         actionToolbar.getStyleClass().add("connection-toolbar");
         actionToolbar.getItems().add(createToolbarButton(
-                "Добавить",
-                "Создать новое подключение",
+                I18n.t("connection.action.add"),
+                I18n.t("connection.action.add.tooltip"),
                 "/icons/add.svg",
                 this::showAddDialog));
 
@@ -125,7 +126,9 @@ public class FormConnections extends Form {
         Label lblName = new Label(entry.getName());
         lblName.getStyleClass().add("connection-card-name");
 
-        String statusText = connected ? "\u2713 Подключено" : reconnecting ? "\u21BB Переподключение..." : "";
+        String statusText = connected
+                ? I18n.t("connection.status.connected")
+                : reconnecting ? I18n.t("connection.status.reconnecting") : "";
         String statusColor = connected ? "#1EA97C" : "#F59E0B";
         Label lblStatus = new Label(statusText);
         lblStatus.setStyle("-fx-text-fill: " + statusColor + "; -fx-font-weight: bold;");
@@ -137,19 +140,13 @@ public class FormConnections extends Form {
 
         topRow.getChildren().addAll(indicator, lblName, lblStatus, spacer, actionToolbar);
 
-        String addressText;
-        if (entry.getEffectiveType() == ConnectionType.BLE) {
-            String devName = entry.getBleDeviceName() != null ? entry.getBleDeviceName() : "";
-            addressText = "BLE: " + devName + " (" + entry.getBleAddress() + ")";
-        } else if (entry.getEffectiveType() == ConnectionType.SERIAL) {
-            addressText = "Serial: " + entry.getPortName() + " (" + entry.getBaudRate() + " бод"
-                    + ", " + formatSerialModemLineMode(entry.getEffectiveSerialModemLineMode()) + ")";
-        } else {
-            addressText = "TCP: " + entry.getHost() + ":" + entry.getPort();
-        }
         ProtocolType protocolType = ConnectionManager.getInstance().getActiveProtocolType(entry.getId());
-        addressText += " · Протокол: " + formatProtocol(protocolType);
-        addressText += " · Автоподключение: " + (entry.isAutoconnect() ? "вкл" : "выкл");
+        String addressText = String.join(" · ",
+                formatTransportAddress(entry),
+                I18n.t("connection.card.protocol", formatProtocol(protocolType)),
+                I18n.t("connection.card.autoconnect", I18n.t(entry.isAutoconnect()
+                        ? "connection.state.on"
+                        : "connection.state.off")));
 
         Label lblAddress = new Label(addressText);
         lblAddress.setStyle("-fx-opacity: 0.6;");
@@ -163,8 +160,10 @@ public class FormConnections extends Form {
         actionToolbar.getStyleClass().add("connection-toolbar");
 
         Button connectButton = createToolbarButton(
-                connected || reconnecting ? "Отключить" : "Подключить",
-                connected || reconnecting ? "Отключить текущее соединение" : "Подключиться к устройству",
+                connected || reconnecting ? I18n.t("connection.action.disconnect") : I18n.t("connection.action.connect"),
+                connected || reconnecting
+                        ? I18n.t("connection.action.disconnect.tooltip")
+                        : I18n.t("connection.action.connect.tooltip"),
                 connected || reconnecting ? "/icons/disconnect.svg" : "/icons/connect.svg",
                 () -> {
                     if (entry.isConnected() || entry.isReconnecting()) {
@@ -175,15 +174,15 @@ public class FormConnections extends Form {
                 });
 
         Button editButton = createToolbarButton(
-                "Изменить",
-                "Изменить параметры подключения",
+                I18n.t("common.edit"),
+                I18n.t("connection.action.edit.tooltip"),
                 "/drawer/icon/setting.svg",
                 () -> showEditDialog(entry));
         editButton.setDisable(connected || reconnecting);
 
         Button deleteButton = createToolbarButton(
-                "Удалить",
-                "Удалить подключение",
+                I18n.t("common.delete"),
+                I18n.t("connection.action.delete.tooltip"),
                 "/drawer/icon/delete-node.svg",
                 () -> doDelete(entry));
 
@@ -230,7 +229,7 @@ public class FormConnections extends Form {
                 mgr.connect(entry.getId());
                 mgr.setSelectedConnectionId(entry.getId());
                 Platform.runLater(() ->
-                        Toast.show(Toast.Type.SUCCESS, "Подключено: " + entry.getName()));
+                        Toast.show(Toast.Type.SUCCESS, I18n.t("connection.toast.connected", entry.getName())));
 
                 CompletableFuture<DeviceState> future = mgr.getConfigFuture(entry.getId());
                 if (future != null) {
@@ -250,7 +249,7 @@ public class FormConnections extends Form {
                 }
             } catch (ConnectionException ex) {
                 Platform.runLater(() ->
-                        Toast.show(Toast.Type.ERROR, "Ошибка: " + ex.getMessage()));
+                        Toast.show(Toast.Type.ERROR, I18n.t("connection.toast.error", ex.getMessage())));
             }
         }, "connect-" + entry.getId()).start();
     }
@@ -261,11 +260,11 @@ public class FormConnections extends Form {
                 ConnectionManager.getInstance().disconnect(entry.getId());
                 Platform.runLater(() -> {
                     MyDrawerBuilder.updateHeader("?", "?", "?");
-                    Toast.show(Toast.Type.SUCCESS, "Отключено: " + entry.getName());
+                    Toast.show(Toast.Type.SUCCESS, I18n.t("connection.toast.disconnected", entry.getName()));
                 });
             } catch (RuntimeException ex) {
                 Platform.runLater(() ->
-                        Toast.show(Toast.Type.ERROR, "Ошибка отключения: " + ex.getMessage()));
+                        Toast.show(Toast.Type.ERROR, I18n.t("connection.toast.disconnectError", ex.getMessage())));
             }
         }, "disconnect-" + entry.getId());
         worker.setDaemon(true);
@@ -274,8 +273,8 @@ public class FormConnections extends Form {
 
     private void doDelete(ConnectionEntry entry) {
         ModalPane.showConfirm(
-                "Подтверждение",
-                "Удалить подключение \"" + entry.getName() + "\"?",
+                I18n.t("connection.confirm.delete.title"),
+                I18n.t("connection.confirm.delete.message", entry.getName()),
                 confirmed -> {
                     if (confirmed) {
                         boolean resetHeader = entry.isConnected() || entry.isReconnecting();
@@ -286,11 +285,11 @@ public class FormConnections extends Form {
                                     if (resetHeader) {
                                         MyDrawerBuilder.updateHeader("?", "?", "?");
                                     }
-                                    Toast.show(Toast.Type.SUCCESS, "Удалено: " + entry.getName());
+                                    Toast.show(Toast.Type.SUCCESS, I18n.t("connection.toast.deleted", entry.getName()));
                                 });
                             } catch (RuntimeException ex) {
                                 Platform.runLater(() ->
-                                        Toast.show(Toast.Type.ERROR, "Ошибка удаления: " + ex.getMessage()));
+                                        Toast.show(Toast.Type.ERROR, I18n.t("connection.toast.deleteError", ex.getMessage())));
                             }
                         }, "delete-connection-" + entry.getId());
                         worker.setDaemon(true);
@@ -308,7 +307,7 @@ public class FormConnections extends Form {
             form.cleanup();
             modalPane.hide();
             ConnectionManager.getInstance().addEntry(entry);
-            Toast.show(Toast.Type.SUCCESS, "Добавлено: " + entry.getName());
+            Toast.show(Toast.Type.SUCCESS, I18n.t("connection.toast.added", entry.getName()));
         });
 
         modalPane.show(form);
@@ -317,7 +316,7 @@ public class FormConnections extends Form {
 
     private void showEditDialog(ConnectionEntry entry) {
         if (entry.isConnected() || entry.isReconnecting()) {
-            Toast.show(Toast.Type.WARNING, "Отключите подключение перед изменением параметров");
+            Toast.show(Toast.Type.WARNING, I18n.t("connection.toast.disconnectBeforeEdit"));
             return;
         }
 
@@ -330,9 +329,9 @@ public class FormConnections extends Form {
                 ConnectionManager.getInstance().updateEntry(updated);
                 form.cleanup();
                 modalPane.hide();
-                Toast.show(Toast.Type.SUCCESS, "Сохранено: " + updated.getName());
+                Toast.show(Toast.Type.SUCCESS, I18n.t("connection.toast.saved", updated.getName()));
             } catch (RuntimeException ex) {
-                Toast.show(Toast.Type.ERROR, "Ошибка сохранения: " + ex.getMessage());
+                Toast.show(Toast.Type.ERROR, I18n.t("connection.toast.saveError", ex.getMessage()));
             }
         });
 
@@ -340,27 +339,40 @@ public class FormConnections extends Form {
         form.formOpen();
     }
 
+    private static String formatTransportAddress(ConnectionEntry entry) {
+        return switch (entry.getEffectiveType()) {
+            case BLE -> I18n.t("connection.card.address.ble",
+                    entry.getBleDeviceName() != null ? entry.getBleDeviceName() : "",
+                    entry.getBleAddress());
+            case SERIAL -> I18n.t("connection.card.address.serial",
+                    entry.getPortName(),
+                    entry.getBaudRate(),
+                    formatSerialModemLineMode(entry.getEffectiveSerialModemLineMode()));
+            case TCP -> I18n.t("connection.card.address.tcp", entry.getHost(), entry.getPort());
+        };
+    }
+
     private static String formatProtocol(ProtocolType protocolType) {
         if (protocolType == null) {
             return "?";
         }
         return switch (protocolType) {
-            case MESHTASTIC -> "Meshtastic";
-            case MESHCORE_KISS -> "MeshCore KISS";
-            case MESHCORE_COMPANION -> "MeshCore Companion";
+            case MESHTASTIC -> I18n.t("connection.protocol.meshtastic");
+            case MESHCORE_KISS -> I18n.t("connection.protocol.meshcoreKiss");
+            case MESHCORE_COMPANION -> I18n.t("connection.protocol.meshcoreCompanion");
         };
     }
 
     private static String formatSerialModemLineMode(SerialModemLineMode mode) {
         if (mode == null) {
-            return "Auto";
+            return I18n.t("connection.serialLine.auto");
         }
         return switch (mode) {
-            case AUTO -> "Auto";
-            case DTR_OFF_RTS_OFF -> "DTR off, RTS off";
-            case DTR_OFF_RTS_ON -> "DTR off, RTS on";
-            case DTR_ON_RTS_OFF -> "DTR on, RTS off";
-            case DTR_ON_RTS_ON -> "DTR on, RTS on";
+            case AUTO -> I18n.t("connection.serialLine.auto");
+            case DTR_OFF_RTS_OFF -> I18n.t("connection.serialLine.dtrOffRtsOff");
+            case DTR_OFF_RTS_ON -> I18n.t("connection.serialLine.dtrOffRtsOn");
+            case DTR_ON_RTS_OFF -> I18n.t("connection.serialLine.dtrOnRtsOff");
+            case DTR_ON_RTS_ON -> I18n.t("connection.serialLine.dtrOnRtsOn");
         };
     }
 }

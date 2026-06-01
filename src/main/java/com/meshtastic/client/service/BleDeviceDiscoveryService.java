@@ -4,6 +4,7 @@ import com.meshtastic.client.connection.ble.BleDevice;
 import com.meshtastic.client.connection.ble.BlePlatform;
 import com.meshtastic.client.connection.ble.BlePlatformFactory;
 import com.meshtastic.client.connection.ble.BleProtocolProfile;
+import com.meshtastic.client.i18n.I18n;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -66,13 +67,13 @@ public final class BleDeviceDiscoveryService {
     public void startScanning() {
         if (scanning || disposed) { return; }
         if (!BlePlatformFactory.isSupported()) {
-            lastErrorMessage = "BLE не поддерживается на этой платформе";
+            lastErrorMessage = I18n.t("connection.ble.unsupported");
             log.warn(lastErrorMessage);
             return;
         }
 
         if (!supportsParallelConnections() && ConnectionManager.getInstance().hasActiveBleTransport()) {
-            lastErrorMessage = "BLE сканирование недоступно, пока активно BLE-подключение";
+            lastErrorMessage = I18n.t("connection.ble.scanUnavailableActive");
             log.warn(lastErrorMessage);
             return;
         }
@@ -90,7 +91,7 @@ public final class BleDeviceDiscoveryService {
             scanExecutor.execute(() -> startScanningOnWorker(generation));
         } catch (RejectedExecutionException e) {
             scanning = false;
-            lastErrorMessage = "BLE discovery service is stopped";
+            lastErrorMessage = I18n.t("connection.ble.discoveryStopped");
             log.warn("BLE scanning failed: {}", e.getMessage());
         }
     }
@@ -352,7 +353,7 @@ public final class BleDeviceDiscoveryService {
         synchronized (platformLock) {
             if (disposed) {
                 created.dispose();
-                throw new IllegalStateException("BLE discovery service is stopped");
+                throw new IllegalStateException(I18n.t("connection.ble.discoveryStopped"));
             }
             if (platform == null) {
                 platform = created;

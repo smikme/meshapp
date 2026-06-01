@@ -4,6 +4,7 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.reflect.TypeToken;
 import com.meshtastic.client.connection.*;
+import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.model.ConnectionEntry;
 import com.meshtastic.client.model.ConnectionType;
 import com.meshtastic.client.model.DeviceState;
@@ -160,8 +161,7 @@ public final class ConnectionManager {
                     || existing.isReconnecting()
                     || activeConnections.containsKey(updated.getId())
                     || pendingConnections.containsKey(updated.getId())) {
-                throw new IllegalStateException(
-                        "Нельзя редактировать активное подключение. Отключитесь перед изменением параметров.");
+                throw new IllegalStateException(I18n.t("connection.error.editActive"));
             }
 
             updated.setConnected(existing.isConnected());
@@ -218,7 +218,7 @@ public final class ConnectionManager {
             expectedDeviceRebootIds.remove(id);
             entry = findEntry(id);
             if (entry == null) {
-                throw new ConnectionException("Connection entry not found: " + id);
+                throw new ConnectionException(I18n.t("connection.error.entryNotFound", id));
             }
             if (activeConnections.containsKey(id) || pendingConnections.containsKey(id)) {
                 return;
@@ -229,7 +229,7 @@ public final class ConnectionManager {
             try {
                 conn = createConnection(entry);
             } catch (RuntimeException e) {
-                throw new ConnectionException("Не удалось создать транспорт подключения: " + e.getMessage(), e);
+                throw new ConnectionException(I18n.t("connection.error.createTransport", e.getMessage()), e);
             }
             pendingConnections.put(id, conn);
         }
@@ -331,7 +331,7 @@ public final class ConnectionManager {
         try {
             conn.connect();
             if (!conn.isConnected()) {
-                throw new ConnectionException("Подключение завершилось без активного транспорта: " + entry.getName());
+                throw new ConnectionException(I18n.t("connection.error.noActiveTransport", entry.getName()));
             }
         } catch (ConnectionException e) {
             cleanupFailedConnect(id, conn);
@@ -470,16 +470,16 @@ public final class ConnectionManager {
         }
         try {
             connect(id);
-            AppUi.showStatus(AppUi.StatusType.SUCCESS, "Автоподключено: " + entry.getName());
+            AppUi.showStatus(AppUi.StatusType.SUCCESS, I18n.t("connection.autoconnect.connected", entry.getName()));
             handlePostAutoconnectReady(id, entry);
         } catch (ConnectionException e) {
             log.warn("Autoconnect failed for '{}': {}", entry.getName(), e.getMessage());
             AppUi.showStatus(AppUi.StatusType.ERROR,
-                    "Ошибка автоподключения \"" + entry.getName() + "\": " + e.getMessage());
+                    I18n.t("connection.autoconnect.error", entry.getName(), e.getMessage()));
         } catch (RuntimeException e) {
             log.warn("Autoconnect failed for '{}'", entry.getName(), e);
             AppUi.showStatus(AppUi.StatusType.ERROR,
-                    "Ошибка автоподключения \"" + entry.getName() + "\": " + e.getMessage());
+                    I18n.t("connection.autoconnect.error", entry.getName(), e.getMessage()));
         }
     }
 
@@ -1019,9 +1019,10 @@ public final class ConnectionManager {
             return;
         }
 
-        throw new ConnectionException("Нода " + entry.getNodeId()
-                + " уже подключена через \"" + duplicateEntry.getName()
-                + "\" (" + duplicateEntry.getEffectiveType() + ")");
+        throw new ConnectionException(I18n.t("connection.error.duplicateNode",
+                entry.getNodeId(),
+                duplicateEntry.getName(),
+                duplicateEntry.getEffectiveType()));
     }
 
     private void ensureBleConcurrencyAllowedLocked(String id, ConnectionEntry entry) throws ConnectionException {
@@ -1036,8 +1037,9 @@ public final class ConnectionManager {
         if (activeBle == null) {
             return;
         }
-        throw new ConnectionException("Параллельные BLE-подключения на этой платформе пока не поддерживаются. "
-                + "Отключите \"" + activeBle.getName() + "\" перед подключением \"" + entry.getName() + "\".");
+        throw new ConnectionException(I18n.t("connection.error.parallelBleUnsupported",
+                activeBle.getName(),
+                entry.getName()));
     }
 
     private ConnectionEntry findActiveBleTransportLocked(String excludeId) {
@@ -1176,7 +1178,7 @@ public final class ConnectionManager {
         switch (entry.getEffectiveType()) {
             case BLE -> {
                 if (requestedProtocol == ProtocolType.MESHCORE_KISS) {
-                    throw new ConnectionException("MeshCore KISS не поддерживается по BLE. Выберите MeshCore Companion.");
+                    throw new ConnectionException(I18n.t("connection.error.meshcoreKissBleUnsupported"));
                 }
             }
             case TCP, SERIAL -> {

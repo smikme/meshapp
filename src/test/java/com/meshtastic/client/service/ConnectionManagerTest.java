@@ -9,6 +9,7 @@ import com.meshtastic.client.connection.ble.BleDevice;
 import com.meshtastic.client.connection.ble.BlePlatform;
 import com.meshtastic.client.connection.ble.BleProtocolProfile;
 import com.meshtastic.client.connection.ble.BleState;
+import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.lua.LuaScript;
 import com.meshtastic.client.lua.LuaScriptService;
 import com.meshtastic.client.model.ConnectionEntry;
@@ -257,7 +258,8 @@ class ConnectionManagerTest {
         ConnectionException error = assertThrows(ConnectionException.class,
                 () -> manager.connect(second.getId()));
 
-        assertTrue(error.getMessage().contains("Параллельные BLE-подключения"));
+        assertEquals(I18n.t("connection.error.parallelBleUnsupported", first.getName(), second.getName()),
+                error.getMessage());
         assertTrue(first.isConnected());
         assertFalse(second.isConnected());
 
@@ -421,7 +423,10 @@ class ConnectionManagerTest {
             ConnectionException error = assertThrows(ConnectionException.class,
                     () -> manager.connect(duplicate.getId()));
 
-            assertTrue(error.getMessage().contains("уже подключена"));
+            assertEquals(I18n.t("connection.error.duplicateNode",
+                    duplicate.getNodeId(),
+                    active.getName(),
+                    active.getEffectiveType()), error.getMessage());
             assertFalse(duplicate.isConnected());
             assertEquals(1, manager.getActiveConnectionEntries().size());
 
@@ -506,7 +511,7 @@ class ConnectionManagerTest {
         IllegalStateException error = assertThrows(IllegalStateException.class,
                 () -> manager.updateEntry(updated));
 
-        assertTrue(error.getMessage().contains("Нельзя редактировать активное подключение"));
+        assertEquals(I18n.t("connection.error.editActive"), error.getMessage());
         assertEquals("home", manager.findEntry(entry.getId()).getName());
     }
 

@@ -2,6 +2,7 @@ package com.meshtastic.client.service;
 
 import com.meshtastic.client.connection.ConnectionException;
 import com.meshtastic.client.connection.ble.BleDevice;
+import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.model.ConnectionEntry;
 import com.meshtastic.client.model.ConnectionType;
 import com.meshtastic.client.model.DeviceState;
@@ -152,7 +153,7 @@ public final class ReconnectService {
         String name = entry != null ? entry.getName() : id;
 
         AppUi.showStatus(AppUi.StatusType.WARNING,
-                "Соединение потеряно: " + name + ". Переподключение через " + delaySec + "с...");
+                I18n.t("connection.reconnect.lost", name, delaySec));
 
         ScheduledFuture<?> future = scheduler.schedule(
                 () -> attemptReconnect(id), delaySec, TimeUnit.SECONDS);
@@ -190,7 +191,7 @@ public final class ReconnectService {
             deviceRebootReconnects.remove(id);
             entry.setReconnecting(false);
 
-            AppUi.showStatus(AppUi.StatusType.SUCCESS, "Переподключено: " + entry.getName());
+            AppUi.showStatus(AppUi.StatusType.SUCCESS, I18n.t("connection.reconnect.connected", entry.getName()));
 
             handlePostReconnectConfigExchange(id, entry);
 

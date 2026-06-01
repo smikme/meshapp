@@ -1,6 +1,7 @@
 package com.meshtastic.client.system;
 
 import com.meshtastic.client.MeshApp;
+import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.modal.ModalPane;
 import com.meshtastic.client.modal.Toast;
 import com.meshtastic.client.model.ConnectionEntry;
@@ -237,7 +238,7 @@ public class RootPane extends BorderPane {
 
         String nodeTitle = resolveNodeTitle(manager, entry);
         if (entry.isReconnecting() && !entry.isConnected()) {
-            nodeTitle += " (переподключение)";
+            nodeTitle += " " + I18n.t("connection.windowTitle.reconnectingSuffix");
         }
         return APPLICATION_TITLE + ": " + nodeTitle;
     }

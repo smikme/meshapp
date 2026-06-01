@@ -1,5 +1,6 @@
 package com.meshtastic.client.connection.serial;
 
+import com.meshtastic.client.i18n.I18n;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -17,7 +18,7 @@ class SerialPortAccessAdvisorTest {
                 true
         );
 
-        assertTrue(message.contains("Нет доступа к serial-порту /dev/ttyUSB0"));
+        assertTrue(message.contains(I18n.t("connection.serial.permission", "/dev/ttyUSB0")));
         assertTrue(message.contains("sudo usermod -aG"));
         assertTrue(message.contains("$USER"));
     }
@@ -31,7 +32,7 @@ class SerialPortAccessAdvisorTest {
                 false
         );
 
-        assertEquals("Cannot open /dev/cu.usbserial-1: Device busy", message);
+        assertEquals(I18n.t("connection.serial.error.open", "/dev/cu.usbserial-1", "Device busy"), message);
     }
 
     @Test
@@ -43,7 +44,7 @@ class SerialPortAccessAdvisorTest {
                 true
         );
 
-        assertTrue(message.contains("занят другим процессом"));
+        assertEquals(I18n.t("connection.serial.busy", "/dev/ttyUSB0"), message);
         assertTrue(message.contains("ModemManager"));
     }
 
