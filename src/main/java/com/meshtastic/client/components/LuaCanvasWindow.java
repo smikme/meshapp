@@ -1,6 +1,7 @@
 package com.meshtastic.client.components;
 
 import com.meshtastic.client.MeshApp;
+import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.lua.LuaCanvasDrawCommand;
 import com.meshtastic.client.lua.LuaCanvasEvent;
 import com.meshtastic.client.lua.LuaCanvasKeyState;
@@ -544,7 +545,7 @@ public final class LuaCanvasWindow {
         button.setMaxSize(CLOSE_BUTTON_SIZE, CLOSE_BUTTON_SIZE);
         button.setFocusTraversable(false);
         button.setCursor(Cursor.HAND);
-        Tooltip.install(button, new Tooltip("Закрыть"));
+        Tooltip.install(button, new Tooltip(I18n.t("meshIde.canvas.closeTooltip")));
         button.addEventHandler(MouseEvent.MOUSE_CLICKED, event -> {
             if (event.getButton() == MouseButton.PRIMARY) {
                 requestCloseFromUser();
@@ -565,7 +566,7 @@ public final class LuaCanvasWindow {
         badge.setMaxSize(MINIMIZED_SIZE, MINIMIZED_SIZE);
         badge.setFocusTraversable(true);
         badge.setCursor(Cursor.MOVE);
-        Tooltip.install(badge, new Tooltip("Двойной клик - восстановить"));
+        Tooltip.install(badge, new Tooltip(I18n.t("meshIde.canvas.restoreTooltip")));
         return badge;
     }
 
@@ -578,13 +579,13 @@ public final class LuaCanvasWindow {
     }
 
     private boolean confirmUserClose() {
-        ButtonType cancelButton = new ButtonType("Отмена", ButtonBar.ButtonData.CANCEL_CLOSE);
-        ButtonType closeButtonType = new ButtonType("Закрыть", ButtonBar.ButtonData.OK_DONE);
+        ButtonType cancelButton = new ButtonType(I18n.t("common.cancel"), ButtonBar.ButtonData.CANCEL_CLOSE);
+        ButtonType closeButtonType = new ButtonType(I18n.t("common.close"), ButtonBar.ButtonData.OK_DONE);
 
         Alert alert = new Alert(Alert.AlertType.CONFIRMATION);
-        alert.setTitle("Закрыть форму");
-        alert.setHeaderText("Закрыть Canvas-форму?");
-        alert.setContentText("Текущее состояние формы может быть потеряно.");
+        alert.setTitle(I18n.t("meshIde.canvas.confirmClose.title"));
+        alert.setHeaderText(I18n.t("meshIde.canvas.confirmClose.header"));
+        alert.setContentText(I18n.t("meshIde.canvas.confirmClose.content"));
         alert.getButtonTypes().setAll(cancelButton, closeButtonType);
         if (stage != null) {
             alert.initOwner(stage);

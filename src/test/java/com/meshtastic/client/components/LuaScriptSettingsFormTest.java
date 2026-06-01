@@ -1,6 +1,7 @@
 package com.meshtastic.client.components;
 
 import com.meshtastic.client.TestEnvironmentSupport;
+import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.lua.LuaScript;
 import com.meshtastic.client.model.ConnectionEntry;
 import com.meshtastic.client.model.ConnectionType;
@@ -39,6 +40,8 @@ class LuaScriptSettingsFormTest {
     @TempDir
     Path tempHome;
 
+    private String previousLanguage;
+
     @BeforeAll
     static void startJavaFx() {
         TestEnvironmentSupport.ensureJavaFxStarted();
@@ -46,6 +49,8 @@ class LuaScriptSettingsFormTest {
 
     @BeforeEach
     void setUp() {
+        previousLanguage = I18n.getLanguageTag();
+        I18n.setLanguageTagForTests(I18n.LANGUAGE_RU);
         TestEnvironmentSupport.setUserHome(tempHome);
         TestEnvironmentSupport.resetSingletons();
     }
@@ -53,6 +58,7 @@ class LuaScriptSettingsFormTest {
     @AfterEach
     void tearDown() {
         TestEnvironmentSupport.resetSingletons();
+        I18n.setLanguageTagForTests(previousLanguage);
     }
 
     @Test

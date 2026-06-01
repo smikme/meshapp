@@ -1,5 +1,6 @@
 package com.meshtastic.client.components;
 
+import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.lua.LuaScript;
 import com.meshtastic.client.modal.ModalPane;
 import com.meshtastic.client.model.ConnectionEntry;
@@ -40,7 +41,6 @@ public final class LuaScriptSettingsForm extends VBox {
 
     private static final double NODE_COMBO_HEIGHT = 34.0;
     private static final int NODE_COMBO_VISIBLE_ROWS = 6;
-    private static final String ICON_VALIDATION_MESSAGE = "Иконка должна быть одним emoji-символом";
 
     private final LuaScript script;
     private final TextField iconField = new TextField();
@@ -50,11 +50,11 @@ public final class LuaScriptSettingsForm extends VBox {
     private final TextField guidField = new TextField();
     private final TextField versionField = new TextField();
     private final TextArea descriptionArea = new TextArea();
-    private final CheckBox autostartCheck = new CheckBox("Автозапуск");
-    private final Label nodeLabel = new Label("Нода исполнения");
+    private final CheckBox autostartCheck = new CheckBox(I18n.t("meshIde.settings.autostart"));
+    private final Label nodeLabel = new Label(I18n.t("meshIde.settings.node"));
     private final ComboBox<NodeChoice> nodeCombo = new ComboBox<>();
     private final ComboBox<LuaScript.BotType> botTypeCombo = new ComboBox<>();
-    private final Label automationNameLabel = new Label("Имя автоматизации");
+    private final Label automationNameLabel = new Label(I18n.t("meshIde.settings.automationName"));
     private final TextField automationNameField = new TextField();
     private final Label statusLabel = new Label();
     private final ConnectionManager connectionManager = ConnectionManager.getInstance();
@@ -92,17 +92,19 @@ public final class LuaScriptSettingsForm extends VBox {
         setMaxHeight(Double.MAX_VALUE);
         getStyleClass().add("modal-side-panel");
 
-        Label title = new Label(isNewScript() ? "Новый скрипт" : "Редактировать скрипт");
+        Label title = new Label(I18n.t(isNewScript()
+                ? "meshIde.settings.title.new"
+                : "meshIde.settings.title.edit"));
         title.getStyleClass().add("dialog-title");
 
         iconField.setPromptText(LuaScript.DEFAULT_ICON);
         iconField.setMaxWidth(Double.MAX_VALUE);
         iconField.setTextFormatter(new TextFormatter<>(this::filterIconChange));
 
-        nameField.setPromptText("Имя скрипта");
+        nameField.setPromptText(I18n.t("meshIde.settings.namePrompt"));
         nameField.setMaxWidth(Double.MAX_VALUE);
 
-        authorField.setPromptText("Автор скрипта");
+        authorField.setPromptText(I18n.t("meshIde.settings.authorPrompt"));
         authorField.setMaxWidth(Double.MAX_VALUE);
 
         guidField.setEditable(false);
@@ -113,7 +115,7 @@ public final class LuaScriptSettingsForm extends VBox {
         versionField.setFocusTraversable(true);
         versionField.setMaxWidth(Double.MAX_VALUE);
 
-        descriptionArea.setPromptText("Подробное многострочное описание скрипта");
+        descriptionArea.setPromptText(I18n.t("meshIde.settings.descriptionPrompt"));
         descriptionArea.setWrapText(true);
         descriptionArea.setPrefRowCount(7);
         descriptionArea.setMinHeight(120);
@@ -124,7 +126,7 @@ public final class LuaScriptSettingsForm extends VBox {
         nodeCombo.setPrefHeight(NODE_COMBO_HEIGHT);
         nodeCombo.setMaxHeight(NODE_COMBO_HEIGHT);
         nodeCombo.setVisibleRowCount(NODE_COMBO_VISIBLE_ROWS);
-        nodeCombo.setPromptText("Выберите ноду");
+        nodeCombo.setPromptText(I18n.t("meshIde.settings.nodePrompt"));
         nodeCombo.setConverter(new StringConverter<>() {
             @Override
             public String toString(NodeChoice choice) {
@@ -159,16 +161,16 @@ public final class LuaScriptSettingsForm extends VBox {
         });
         botTypeCombo.valueProperty().addListener((obs, oldType, newType) -> updateAutomationVisibility());
 
-        automationNameField.setPromptText("@имя_бота");
+        automationNameField.setPromptText(I18n.t("meshIde.settings.automationNamePrompt"));
         automationNameField.setMaxWidth(Double.MAX_VALUE);
 
         statusLabel.getStyleClass().add("muted-small-label");
         statusLabel.setWrapText(true);
 
-        Button cancelButton = new Button("Отмена");
+        Button cancelButton = new Button(I18n.t("common.cancel"));
         cancelButton.setOnAction(event -> closeModal());
 
-        Button saveButton = new Button("Сохранить");
+        Button saveButton = new Button(I18n.t("common.save"));
         saveButton.getStyleClass().add("accent");
         saveButton.setOnAction(event -> save());
 
@@ -179,22 +181,22 @@ public final class LuaScriptSettingsForm extends VBox {
         getChildren().addAll(
                 title,
                 new Separator(),
-                new Label("Иконка"),
+                new Label(I18n.t("meshIde.column.icon")),
                 iconField,
-                new Label("Имя скрипта"),
+                new Label(I18n.t("meshIde.column.scriptName")),
                 nameField,
-                new Label("Автор"),
+                new Label(I18n.t("meshIde.column.author")),
                 authorField,
                 guidLabel,
                 guidField,
-                new Label("Версия"),
+                new Label(I18n.t("meshIde.column.version")),
                 versionField,
-                new Label("Описание"),
+                new Label(I18n.t("meshIde.column.description")),
                 descriptionArea,
                 autostartCheck,
                 nodeLabel,
                 nodeCombo,
-                new Label("Тип"),
+                new Label(I18n.t("meshIde.column.type")),
                 botTypeCombo,
                 automationNameLabel,
                 automationNameField,
@@ -316,14 +318,14 @@ public final class LuaScriptSettingsForm extends VBox {
     private Draft buildDraft() {
         String name = nameField.getText() != null ? nameField.getText().trim() : "";
         if (name.isEmpty()) {
-            statusLabel.setText("Введите имя скрипта");
+            statusLabel.setText(I18n.t("meshIde.settings.validation.nameRequired"));
             return null;
         }
         String icon;
         try {
             icon = LuaScript.requireValidIcon(iconField.getText());
         } catch (IllegalArgumentException e) {
-            statusLabel.setText(ICON_VALIDATION_MESSAGE);
+            statusLabel.setText(iconValidationMessage());
             return null;
         }
 
@@ -334,7 +336,7 @@ public final class LuaScriptSettingsForm extends VBox {
         String nodeId = "";
         if (botType != LuaScript.BotType.AUTOMATION_BOT) {
             if (nodeChoice == null || isBlank(nodeChoice.nodeId())) {
-                statusLabel.setText("Выберите ноду исполнения");
+                statusLabel.setText(I18n.t("meshIde.settings.validation.nodeRequired"));
                 return null;
             }
             nodeId = nodeChoice.nodeId();
@@ -344,7 +346,7 @@ public final class LuaScriptSettingsForm extends VBox {
                 : "";
         if (botType == LuaScript.BotType.AUTOMATION_BOT
                 && !automationName.matches("@[\\p{L}\\p{N}_]+")) {
-            statusLabel.setText("Имя автоматизации должно быть в формате @имя_бота");
+            statusLabel.setText(I18n.t("meshIde.settings.validation.automationNameFormat"));
             return null;
         }
 
@@ -357,12 +359,12 @@ public final class LuaScriptSettingsForm extends VBox {
     private TextFormatter.Change filterIconChange(TextFormatter.Change change) {
         String nextText = change.getControlNewText();
         if (nextText == null || nextText.isEmpty() || LuaScript.isEmojiIcon(nextText)) {
-            if (ICON_VALIDATION_MESSAGE.equals(statusLabel.getText())) {
+            if (iconValidationMessage().equals(statusLabel.getText())) {
                 statusLabel.setText("");
             }
             return change;
         }
-        statusLabel.setText(ICON_VALIDATION_MESSAGE);
+        statusLabel.setText(iconValidationMessage());
         return null;
     }
 
@@ -377,12 +379,14 @@ public final class LuaScriptSettingsForm extends VBox {
 
         String savedNodeId = normalizeNodeId(script.getNodeId());
         if (!savedNodeId.isBlank()) {
-            choices.putIfAbsent(savedNodeId, new NodeChoice(savedNodeId, "Сохраненная нода (" + savedNodeId + ")", false));
+            choices.putIfAbsent(savedNodeId,
+                    new NodeChoice(savedNodeId, I18n.t("meshIde.settings.savedNode", savedNodeId), false));
         }
 
         String preferred = normalizeNodeId(preferredNodeId);
         if (!preferred.isBlank()) {
-            choices.putIfAbsent(preferred, new NodeChoice(preferred, "Нода (" + preferred + ")", false));
+            choices.putIfAbsent(preferred,
+                    new NodeChoice(preferred, I18n.t("meshIde.settings.nodeWithId", preferred), false));
         }
         return List.copyOf(choices.values());
     }
@@ -407,9 +411,13 @@ public final class LuaScriptSettingsForm extends VBox {
         NodeData node = state != null ? state.getNodeDb().get(state.getMyNodeNum()) : null;
         String nodeName = node != null ? firstNonBlank(node.getLongName(), node.getShortName()) : "";
         if (nodeName.isBlank()) {
-            nodeName = firstNonBlank(entry.getName(), "Нода");
+            nodeName = firstNonBlank(entry.getName(), I18n.t("meshIde.settings.nodeFallback"));
         }
         return nodeName + " (" + nodeId + ")";
+    }
+
+    private static String iconValidationMessage() {
+        return I18n.t("meshIde.settings.validation.iconEmoji");
     }
 
     private static void closeModal() {
@@ -450,7 +458,7 @@ public final class LuaScriptSettingsForm extends VBox {
 
     private record NodeChoice(String nodeId, String displayName, boolean connected) {
         private String displayText() {
-            return displayName + (connected ? " · подключена" : "");
+            return displayName + (connected ? " · " + I18n.t("meshIde.settings.connectedSuffix") : "");
         }
 
         @Override

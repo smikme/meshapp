@@ -4,6 +4,7 @@ import com.meshtastic.client.components.LuaDevWindow;
 import com.meshtastic.client.components.LuaKvEditorWindow;
 import com.meshtastic.client.components.LuaScriptSettingsForm;
 import com.meshtastic.client.components.LuaScriptStoreForm;
+import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.lua.LuaScript;
 import com.meshtastic.client.lua.LuaScriptEvent;
 import com.meshtastic.client.lua.LuaScriptRuntimeService;
@@ -39,6 +40,7 @@ import java.io.IOException;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
@@ -74,7 +76,7 @@ public class FormMeshAppIde extends Form {
         HBox titleRow = new HBox(10);
         titleRow.setAlignment(Pos.CENTER_LEFT);
 
-        Label title = new Label("MeshApp IDE");
+        Label title = new Label(I18n.t("meshIde.title"));
         title.getStyleClass().add("form-title");
 
         Region spacer = new Region();
@@ -84,25 +86,25 @@ public class FormMeshAppIde extends Form {
         actionToolbar.getStyleClass().add("ide-toolbar");
 
         Button refreshButton = createToolbarButton(
-                "Обновить",
-                "Перестроить список скриптов",
+                I18n.t("meshIde.action.refresh"),
+                I18n.t("meshIde.tooltip.refresh"),
                 "/icons/refresh.svg",
                 this::rebuildCards);
 
         Button importButton = createToolbarButton(
-                "Импорт",
-                "Загрузить Lua-скрипт из JSON-файла",
+                I18n.t("meshIde.action.import"),
+                I18n.t("meshIde.tooltip.import"),
                 "/icons/load-config.svg",
                 this::importScript);
 
         Button storeButton = createStoreToolbarButton(
-                "Магазин",
-                "Открыть магазин скриптов",
+                I18n.t("meshIde.action.store"),
+                I18n.t("meshIde.tooltip.store"),
                 this::showScriptStore);
 
         Button createButton = createToolbarButton(
-                "Новый скрипт",
-                "Создать новый Lua-скрипт",
+                I18n.t("meshIde.action.newScript"),
+                I18n.t("meshIde.tooltip.newScript"),
                 "/icons/add.svg",
                 this::createScript);
 
@@ -116,7 +118,7 @@ public class FormMeshAppIde extends Form {
 
         titleRow.getChildren().addAll(title, spacer, actionToolbar);
 
-        emptyLabel = new Label("Скриптов пока нет");
+        emptyLabel = new Label(I18n.t("meshIde.empty.noScripts"));
         emptyLabel.setStyle("-fx-opacity: 0.65;");
 
         cardsBox = new VBox(10);
@@ -200,7 +202,7 @@ public class FormMeshAppIde extends Form {
             card.getChildren().add(description);
         }
         if (script.getLastError() != null && !script.getLastError().isBlank()) {
-            Label error = new Label("Ошибка: " + truncate(script.getLastError(), 240));
+            Label error = new Label(I18n.t("meshIde.error.prefix", truncate(script.getLastError(), 240)));
             error.setWrapText(true);
             error.setStyle("-fx-text-fill: #EF4444;");
             card.getChildren().add(error);
@@ -213,8 +215,8 @@ public class FormMeshAppIde extends Form {
         actionToolbar.getStyleClass().add("ide-toolbar");
 
         Button runButton = createToolbarButton(
-                running ? "Остановить" : "Запустить",
-                running ? "Остановить выполнение скрипта" : "Запустить скрипт",
+                running ? I18n.t("meshIde.action.stop") : I18n.t("meshIde.action.run"),
+                running ? I18n.t("meshIde.tooltip.stop") : I18n.t("meshIde.tooltip.run"),
                 running ? "/icons/ide-stop.svg" : "/icons/ide-terminal-run.svg",
                 () -> {
                     if (running) {
@@ -225,40 +227,42 @@ public class FormMeshAppIde extends Form {
                 });
 
         Button autostartButton = createToolbarButton(
-                script.isAutostart() ? "Отключить автозапуск" : "Включить автозапуск",
                 script.isAutostart()
-                        ? "Не запускать скрипт автоматически"
-                        : "Запускать скрипт автоматически",
+                        ? I18n.t("meshIde.action.disableAutostart")
+                        : I18n.t("meshIde.action.enableAutostart"),
+                script.isAutostart()
+                        ? I18n.t("meshIde.tooltip.disableAutostart")
+                        : I18n.t("meshIde.tooltip.enableAutostart"),
                 "/icons/autoplay.svg",
                 () -> toggleAutostart(script));
 
         Button ideButton = createToolbarButton(
-                "Открыть IDE",
-                "Открыть редактор и отладчик скрипта",
+                I18n.t("meshIde.action.openIde"),
+                I18n.t("meshIde.tooltip.openIde"),
                 "/icons/ide-file-code.svg",
                 () -> LuaDevWindow.showWindow(script.getId()));
 
         Button kvButton = createToolbarButton(
                 "KV",
-                "Открыть KV-редактор скрипта",
+                I18n.t("meshIde.tooltip.kvEditor"),
                 "/icons/database.svg",
                 () -> LuaKvEditorWindow.showWindow(script));
 
         Button exportButton = createToolbarButton(
-                "Экспорт",
-                "Сохранить скрипт и его свойства в JSON-файл",
+                I18n.t("meshIde.action.export"),
+                I18n.t("meshIde.tooltip.export"),
                 "/icons/export.svg",
                 () -> exportScript(script));
 
         Button editButton = createToolbarButton(
-                "Настройки",
-                "Изменить параметры скрипта",
+                I18n.t("meshIde.action.settings"),
+                I18n.t("meshIde.tooltip.settings"),
                 "/drawer/icon/setting.svg",
                 () -> showSettingsDialog(script));
 
         Button deleteButton = createToolbarButton(
-                "Удалить",
-                "Удалить скрипт",
+                I18n.t("common.delete"),
+                I18n.t("meshIde.tooltip.delete"),
                 "/drawer/icon/delete-node.svg",
                 () -> deleteScript(script));
 
@@ -339,9 +343,9 @@ public class FormMeshAppIde extends Form {
                         draft.author());
                 modalPane.hide();
                 rebuildCards();
-                Toast.show(Toast.Type.SUCCESS, "Создан скрипт: " + created.getName());
+                Toast.show(Toast.Type.SUCCESS, I18n.t("meshIde.toast.created", created.getName()));
             } catch (Exception e) {
-                Toast.show(Toast.Type.ERROR, "Не удалось создать скрипт: " + e.getMessage());
+                Toast.show(Toast.Type.ERROR, I18n.t("meshIde.toast.createFailed", userMessage(e)));
             }
         });
         modalPane.show(form);
@@ -359,7 +363,7 @@ public class FormMeshAppIde extends Form {
     }
 
     private void importScript() {
-        FileChooser chooser = createScriptJsonChooser("Импорт скрипта", false, null);
+        FileChooser chooser = createScriptJsonChooser(I18n.t("meshIde.file.importTitle"), false, null);
         File source = chooser.showOpenDialog(currentWindow());
         if (source == null) {
             return;
@@ -369,15 +373,15 @@ public class FormMeshAppIde extends Form {
             rebuildCards();
             Toast.show(
                     Toast.Type.SUCCESS,
-                    (result.updated() ? "Обновлен скрипт: " : "Импортирован скрипт: ")
-                            + result.script().getName());
+                    I18n.t(result.updated() ? "meshIde.toast.updated" : "meshIde.toast.imported",
+                            result.script().getName()));
         } catch (Exception e) {
-            Toast.show(Toast.Type.ERROR, "Ошибка импорта: " + userMessage(e));
+            Toast.show(Toast.Type.ERROR, I18n.t("meshIde.toast.importFailed", userMessage(e)));
         }
     }
 
     private void exportScript(LuaScript script) {
-        FileChooser chooser = createScriptJsonChooser("Экспорт скрипта", true, script);
+        FileChooser chooser = createScriptJsonChooser(I18n.t("meshIde.file.exportTitle"), true, script);
         File target = chooser.showSaveDialog(currentWindow());
         if (target == null) {
             return;
@@ -385,11 +389,11 @@ public class FormMeshAppIde extends Form {
         File outputFile = ensureJsonExtension(target);
         try {
             scriptService.exportScript(script.getId(), outputFile.toPath());
-            Toast.show(Toast.Type.SUCCESS, "Экспортирован скрипт: " + outputFile.getName());
+            Toast.show(Toast.Type.SUCCESS, I18n.t("meshIde.toast.exported", outputFile.getName()));
         } catch (IOException e) {
-            Toast.show(Toast.Type.ERROR, "Ошибка экспорта: " + userMessage(e));
+            Toast.show(Toast.Type.ERROR, I18n.t("meshIde.toast.exportFailed", userMessage(e)));
         } catch (Exception e) {
-            Toast.show(Toast.Type.ERROR, "Ошибка экспорта: " + userMessage(e));
+            Toast.show(Toast.Type.ERROR, I18n.t("meshIde.toast.exportFailed", userMessage(e)));
         }
     }
 
@@ -398,7 +402,7 @@ public class FormMeshAppIde extends Form {
             scriptService.saveScript(script.getId(), script.getName(), script.getCode(), !script.isAutostart());
             rebuildCards();
         } catch (Exception e) {
-            Toast.show(Toast.Type.ERROR, "Не удалось изменить состояние: " + e.getMessage());
+            Toast.show(Toast.Type.ERROR, I18n.t("meshIde.toast.stateChangeFailed", userMessage(e)));
         }
     }
 
@@ -422,9 +426,9 @@ public class FormMeshAppIde extends Form {
                         draft.author());
                 modalPane.hide();
                 rebuildCards();
-                Toast.show(Toast.Type.SUCCESS, "Сохранено: " + saved.getName());
+                Toast.show(Toast.Type.SUCCESS, I18n.t("meshIde.toast.saved", saved.getName()));
             } catch (Exception e) {
-                Toast.show(Toast.Type.ERROR, "Ошибка сохранения: " + e.getMessage());
+                Toast.show(Toast.Type.ERROR, I18n.t("meshIde.toast.saveFailed", userMessage(e)));
             }
         });
         modalPane.show(form);
@@ -434,19 +438,19 @@ public class FormMeshAppIde extends Form {
     private void runScript(LuaScript script) {
         runtimeService.runScript(script, this::handleRuntimeEvent);
         rebuildCards();
-        Toast.show(Toast.Type.INFO, "Запуск: " + script.getName());
+        Toast.show(Toast.Type.INFO, I18n.t("meshIde.toast.run", script.getName()));
     }
 
     private void stopScript(LuaScript script) {
         runtimeService.stopScript(script.getId(), this::handleRuntimeEvent);
         rebuildCards();
-        Toast.show(Toast.Type.INFO, "Остановлен: " + script.getName());
+        Toast.show(Toast.Type.INFO, I18n.t("meshIde.toast.stopped", script.getName()));
     }
 
     private void deleteScript(LuaScript script) {
         ModalPane.showConfirm(
-                "Подтверждение",
-                "Удалить скрипт \"" + script.getName() + "\"?",
+                I18n.t("meshIde.confirm.delete.title"),
+                I18n.t("meshIde.confirm.delete.message", script.getName()),
                 confirmed -> {
                     if (!confirmed) {
                         return;
@@ -454,7 +458,7 @@ public class FormMeshAppIde extends Form {
                     runtimeService.stopScript(script.getId(), this::handleRuntimeEvent);
                     scriptService.deleteScript(script.getId());
                     rebuildCards();
-                    Toast.show(Toast.Type.SUCCESS, "Удален скрипт: " + script.getName());
+                    Toast.show(Toast.Type.SUCCESS, I18n.t("meshIde.toast.deleted", script.getName()));
                 });
     }
 
@@ -468,23 +472,45 @@ public class FormMeshAppIde extends Form {
     }
 
     private String scriptSummary(LuaScript script) {
-        return "v" + script.getVersion()
-                + authorSummary(script)
-                + " · " + (script.isAutostart() ? "автозапуск" : "без автозапуска")
-                + " · " + script.getBotType().getDisplayName()
-                + automationSummary(script)
-                + " · " + nodeSummary(script)
-                + " · строк: " + lineCount(script.getCode())
-                + " · изменен: " + formatTime(script.getUpdatedAt())
-                + " · запуск: " + formatLastRun(script.getLastRunAt());
+        List<String> parts = new ArrayList<>();
+        parts.add(I18n.t("meshIde.summary.version", Long.toString(script.getVersion())));
+        String author = authorSummary(script);
+        if (!author.isBlank()) {
+            parts.add(author);
+        }
+        parts.add(I18n.t(script.isAutostart()
+                ? "meshIde.summary.autostartOn"
+                : "meshIde.summary.autostartOff"));
+        parts.add(script.getBotType().getDisplayName());
+        String automation = automationSummary(script);
+        if (!automation.isBlank()) {
+            parts.add(automation);
+        }
+        parts.add(nodeSummary(script));
+        parts.add(I18n.t("meshIde.summary.lines", Integer.toString(lineCount(script.getCode()))));
+        parts.add(I18n.t("meshIde.summary.updated", formatTime(script.getUpdatedAt())));
+        parts.add(I18n.t("meshIde.summary.lastRun", formatLastRun(script.getLastRunAt())));
+        return String.join(" · ", parts);
     }
 
     private String statusText(LuaScript script, boolean running) {
         if (running) {
-            return "RUNNING";
+            return I18n.t("meshIde.status.running");
         }
         String status = script.getLastStatus();
-        return status == null || status.isBlank() ? "NEW" : status.toUpperCase(Locale.ROOT);
+        if (status == null || status.isBlank() || "NEW".equalsIgnoreCase(status)) {
+            return I18n.t("meshIde.status.new");
+        }
+        if ("ERROR".equalsIgnoreCase(status)) {
+            return I18n.t("meshIde.status.error");
+        }
+        if ("STOPPED".equalsIgnoreCase(status)) {
+            return I18n.t("meshIde.status.stopped");
+        }
+        if ("OK".equalsIgnoreCase(status)) {
+            return I18n.t("meshIde.status.ok");
+        }
+        return status.toUpperCase(Locale.ROOT);
     }
 
     private String indicatorColor(LuaScript script, boolean running) {
@@ -506,30 +532,32 @@ public class FormMeshAppIde extends Form {
             return "";
         }
         String automationName = script.getAutomationName();
-        return automationName == null || automationName.isBlank() ? " · автоматизация не задана" : " · " + automationName;
+        return automationName == null || automationName.isBlank()
+                ? I18n.t("meshIde.summary.automationMissing")
+                : automationName;
     }
 
     private String authorSummary(LuaScript script) {
         String author = script.getAuthor();
-        return author == null || author.isBlank() ? "" : " · автор: " + author;
+        return author == null || author.isBlank() ? "" : I18n.t("meshIde.summary.author", author);
     }
 
     private String nodeSummary(LuaScript script) {
         if (script.getBotType() == LuaScript.BotType.AUTOMATION_BOT) {
-            return "соединение: текущее при вызове";
+            return I18n.t("meshIde.summary.connectionCurrent");
         }
         String nodeId = script.getNodeId();
         if (nodeId == null || nodeId.isBlank()) {
-            return "нода: не выбрана";
+            return I18n.t("meshIde.summary.nodeMissing");
         }
         ConnectionManager manager = ConnectionManager.getInstance();
         for (ConnectionEntry entry : manager.getEntries()) {
             String entryNodeId = firstNonBlank(manager.getOwnerNodeId(entry.getId()), entry.getNodeId());
             if (nodeId.equalsIgnoreCase(entryNodeId)) {
-                return "нода: " + entry.getName() + " (" + nodeId + ")";
+                return I18n.t("meshIde.summary.nodeWithName", entry.getName(), nodeId);
             }
         }
-        return "нода: " + nodeId;
+        return I18n.t("meshIde.summary.node", nodeId);
     }
 
     private static String firstNonBlank(String first, String second) {
@@ -537,7 +565,7 @@ public class FormMeshAppIde extends Form {
     }
 
     private String formatLastRun(long epochSeconds) {
-        return epochSeconds > 0 ? formatTime(epochSeconds) : "никогда";
+        return epochSeconds > 0 ? formatTime(epochSeconds) : I18n.t("meshIde.summary.never");
     }
 
     private String formatTime(long epochSeconds) {
@@ -555,7 +583,7 @@ public class FormMeshAppIde extends Form {
         FileChooser chooser = new FileChooser();
         chooser.setTitle(title);
         chooser.getExtensionFilters().add(
-                new FileChooser.ExtensionFilter("MeshApp Lua Script (*.json)", "*.json"));
+                new FileChooser.ExtensionFilter(I18n.t("meshIde.file.type"), "*.json"));
         if (saveMode && script != null) {
             chooser.setInitialFileName(suggestedExportFileName(script));
         }
@@ -590,7 +618,7 @@ public class FormMeshAppIde extends Form {
 
     private String userMessage(Exception e) {
         String message = e.getMessage();
-        return message == null || message.isBlank() ? "операция не выполнена" : message;
+        return message == null || message.isBlank() ? I18n.t("meshIde.operationFailed") : message;
     }
 
     private String truncate(String value, int maxLength) {

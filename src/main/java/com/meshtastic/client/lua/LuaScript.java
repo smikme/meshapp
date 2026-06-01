@@ -1,5 +1,7 @@
 package com.meshtastic.client.lua;
 
+import com.meshtastic.client.i18n.I18n;
+
 /**
  * Модель Lua-скрипта MeshApp, сохраненного в БД приложения.
  * <p>
@@ -59,7 +61,7 @@ public class LuaScript {
             return DEFAULT_ICON;
         }
         if (!isEmojiIcon(value)) {
-            throw new IllegalArgumentException("Script icon must be a single emoji");
+            throw new IllegalArgumentException(I18n.t("meshIde.service.iconEmoji"));
         }
         return value;
     }
@@ -165,19 +167,19 @@ public class LuaScript {
 
     /** Тип сценария, определяющий способ его использования в MeshApp. */
     public enum BotType {
-        AIR_BOT("AIR_BOT", "Эфирный бот"),
-        AUTOMATION_BOT("AUTOMATION_BOT", "Бот автоматизации");
+        AIR_BOT("AIR_BOT", "meshIde.botType.air"),
+        AUTOMATION_BOT("AUTOMATION_BOT", "meshIde.botType.automation");
 
         private final String storageValue;
-        private final String displayName;
+        private final String displayKey;
 
-        BotType(String storageValue, String displayName) {
+        BotType(String storageValue, String displayKey) {
             this.storageValue = storageValue;
-            this.displayName = displayName;
+            this.displayKey = displayKey;
         }
 
         public String getStorageValue() { return storageValue; }
-        public String getDisplayName() { return displayName; }
+        public String getDisplayName() { return I18n.t(displayKey); }
 
         public static BotType fromStorage(String value) {
             if (value != null) {
@@ -192,7 +194,7 @@ public class LuaScript {
 
         @Override
         public String toString() {
-            return displayName;
+            return getDisplayName();
         }
     }
 
@@ -386,6 +388,6 @@ public class LuaScript {
 
     @Override
     public String toString() {
-        return name == null || name.isBlank() ? "Lua script " + id : name;
+        return name == null || name.isBlank() ? I18n.t("meshIde.script.fallback", Long.toString(id)) : name;
     }
 }

@@ -1,6 +1,7 @@
 package com.meshtastic.client.lua;
 
 import com.meshtastic.client.components.LuaCanvasWindow;
+import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.lua.api.LuaSandboxApi;
 import com.meshtastic.client.lua.api.LuaSandboxContext;
 import com.meshtastic.client.lua.api.LuaValueMapper;
@@ -138,7 +139,7 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
         if (!running.compareAndSet(false, true)) {
             return;
         }
-        emit(LuaScriptEvent.started(script.getId(), "Запуск " + script.getName()));
+        emit(LuaScriptEvent.started(script.getId(), I18n.t("meshIde.runtime.start", script.getName())));
         activeFuture = executor.submit(this::runInitialChunk);
     }
 
@@ -353,7 +354,7 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
         executor.shutdownNow();
         scheduler.shutdownNow();
         scriptService.updateRunState(script.getId(), "STOPPED", null);
-        emit(LuaScriptEvent.stopped(script.getId(), "Скрипт остановлен"));
+        emit(LuaScriptEvent.stopped(script.getId(), I18n.t("meshIde.runtime.stopped")));
     }
 
     private boolean matchesTracerouteResponse(LuaTracerouteRequest request, int fromNodeNum) {
@@ -757,7 +758,7 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
                 keepListening = attachMessageListener();
             } else {
                 if (command == null) {
-                    emit(LuaScriptEvent.info(script.getId(), "Выполнено: on_message не объявлен, скрипт завершен"));
+                    emit(LuaScriptEvent.info(script.getId(), I18n.t("meshIde.runtime.noOnMessage")));
                 }
                 if (!hasPendingAsyncWork()) {
                     scriptService.updateRunState(script.getId(), "FINISHED", null);
@@ -775,7 +776,7 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
     private void deliverAutomationCommand() {
         LuaValue onCommand = globals.get("on_command");
         if (!onCommand.isfunction()) {
-            emit(LuaScriptEvent.warning(script.getId(), "Automation script has no on_command(command) callback"));
+            emit(LuaScriptEvent.warning(script.getId(), I18n.t("meshIde.runtime.noOnCommand")));
             return;
         }
         debugLib.begin(CALLBACK_TIMEOUT_MS);
@@ -784,15 +785,16 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
 
     private boolean attachMessageListener() {
         if (target.state() == null) {
-            emit(LuaScriptEvent.warning(script.getId(), "on_message объявлен, но нет активного подключения"));
-            scriptService.updateRunState(script.getId(), "FINISHED", "No active connection for on_message");
+            emit(LuaScriptEvent.warning(script.getId(), I18n.t("meshIde.runtime.noActiveConnection")));
+            scriptService.updateRunState(script.getId(), "FINISHED",
+                    I18n.t("meshIde.runtime.noActiveConnectionStatus"));
             return false;
         }
         initializeMessageCursors();
         target.state().addMessageListener(deviceMessageListener);
         listenerRegistered = true;
         scriptService.updateRunState(script.getId(), "RUNNING", null);
-        emit(LuaScriptEvent.info(script.getId(), "Ожидание новых сообщений"));
+        emit(LuaScriptEvent.info(script.getId(), I18n.t("meshIde.runtime.waitingMessages")));
         return true;
     }
 
@@ -850,13 +852,16 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
 
         pauseOnNextLine = false;
         lastPausedLine = line;
-        String reason = breakpointHit ? "breakpoint" : "step";
+        String reason = breakpointHit
+                ? I18n.t("meshIde.runtime.debugReason.breakpoint")
+                : I18n.t("meshIde.runtime.debugReason.step");
         debugSnapshot = createDebugSnapshot(line, reason);
         synchronized (debugLock) {
             paused = true;
             debugCommand = DebugCommand.NONE;
         }
-        emit(LuaScriptEvent.debugPaused(script.getId(), "Пауза на строке " + line + " (" + reason + ")"));
+        emit(LuaScriptEvent.debugPaused(script.getId(),
+                I18n.t("meshIde.runtime.debugPause", Integer.toString(line), reason)));
 
         synchronized (debugLock) {
             while (running.get() && debugCommand == DebugCommand.NONE) {
@@ -878,7 +883,7 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
                 debugLib.deferDeadline();
             }
         }
-        emit(LuaScriptEvent.debugResumed(script.getId(), "Продолжение выполнения"));
+        emit(LuaScriptEvent.debugResumed(script.getId(), I18n.t("meshIde.runtime.debugResumed")));
     }
 
     private void resumeDebuggee(DebugCommand command) {
@@ -1085,7 +1090,7 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
         if (outputChars >= MAX_OUTPUT_CHARS) {
             if (!outputLimitReported) {
                 outputLimitReported = true;
-                emit(LuaScriptEvent.warning(script.getId(), "Лимит вывода скрипта исчерпан"));
+                emit(LuaScriptEvent.warning(script.getId(), I18n.t("meshIde.runtime.outputLimit")));
             }
             return;
         }

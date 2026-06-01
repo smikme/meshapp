@@ -1,5 +1,6 @@
 package com.meshtastic.client.components;
 
+import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.lua.LuaScript;
 import com.meshtastic.client.lua.LuaScriptEvent;
 import com.meshtastic.client.lua.LuaScriptRuntimeService;
@@ -45,7 +46,7 @@ public final class LuaScriptStoreForm extends VBox {
     private final Runnable onScriptsChanged;
     private final VBox cardsBox = new VBox(10);
     private final Label statusLabel = new Label();
-    private final Button refreshButton = new Button("Обновить");
+    private final Button refreshButton = new Button(I18n.t("meshIde.action.refresh"));
     private final ComboBox<ScriptTypeFilter> typeFilter = new ComboBox<>(
             FXCollections.observableArrayList(ScriptTypeFilter.values()));
 
@@ -75,7 +76,7 @@ public final class LuaScriptStoreForm extends VBox {
         setMaxHeight(Double.MAX_VALUE);
         getStyleClass().add("modal-side-panel");
 
-        Label title = new Label("Магазин скриптов");
+        Label title = new Label(I18n.t("meshIde.store.title"));
         title.getStyleClass().add("dialog-title");
 
         Region spacer = new Region();
@@ -98,7 +99,7 @@ public final class LuaScriptStoreForm extends VBox {
         scrollPane.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
         VBox.setVgrow(scrollPane, Priority.ALWAYS);
 
-        Button closeButton = new Button("Закрыть");
+        Button closeButton = new Button(I18n.t("common.close"));
         closeButton.setOnAction(event -> closeModal());
         HBox actions = new HBox(closeButton);
         actions.setAlignment(Pos.CENTER_RIGHT);
@@ -108,7 +109,7 @@ public final class LuaScriptStoreForm extends VBox {
     }
 
     private HBox createFilterBar() {
-        Label typeLabel = new Label("Тип");
+        Label typeLabel = new Label(I18n.t("meshIde.column.type"));
         typeLabel.getStyleClass().add("packet-monitor-filter-label");
 
         typeFilter.getSelectionModel().select(ScriptTypeFilter.ALL);
@@ -124,8 +125,8 @@ public final class LuaScriptStoreForm extends VBox {
 
     private void loadScripts() {
         refreshButton.setDisable(true);
-        statusLabel.setText("Загрузка магазина...");
-        cardsBox.getChildren().setAll(placeholder("Загрузка..."));
+        statusLabel.setText(I18n.t("meshIde.store.loadingStore"));
+        cardsBox.getChildren().setAll(placeholder(I18n.t("meshIde.store.loading")));
 
         CompletableFuture
                 .supplyAsync(() -> {
@@ -154,13 +155,13 @@ public final class LuaScriptStoreForm extends VBox {
 
     private void showLoadError(Throwable error) {
         String message = userMessage(error);
-        statusLabel.setText("Не удалось загрузить магазин: " + message);
+        statusLabel.setText(I18n.t("meshIde.store.loadFailed", message));
 
-        Button retryButton = new Button("Повторить");
+        Button retryButton = new Button(I18n.t("meshIde.action.retry"));
         retryButton.getStyleClass().add("accent");
         retryButton.setOnAction(event -> loadScripts());
 
-        VBox box = new VBox(10, placeholder("Магазин недоступен"), retryButton);
+        VBox box = new VBox(10, placeholder(I18n.t("meshIde.store.unavailable")), retryButton);
         box.setAlignment(Pos.CENTER_LEFT);
         box.setPadding(new Insets(15));
         box.getStyleClass().add("connection-card");
@@ -171,8 +172,8 @@ public final class LuaScriptStoreForm extends VBox {
         Map<String, LuaScript> installedByGuid = installedScriptsByGuid();
         cardsBox.getChildren().clear();
         if (currentScripts.isEmpty()) {
-            statusLabel.setText("В магазине нет доступных скриптов");
-            cardsBox.getChildren().setAll(placeholder("Список пуст"));
+            statusLabel.setText(I18n.t("meshIde.store.empty"));
+            cardsBox.getChildren().setAll(placeholder(I18n.t("meshIde.store.emptyList")));
             return;
         }
 
@@ -180,8 +181,8 @@ public final class LuaScriptStoreForm extends VBox {
                 .filter(this::matchesTypeFilter)
                 .toList();
         if (visibleScripts.isEmpty()) {
-            statusLabel.setText("Скриптов выбранного типа нет");
-            cardsBox.getChildren().setAll(placeholder("Список пуст"));
+            statusLabel.setText(I18n.t("meshIde.store.noScriptsForType"));
+            cardsBox.getChildren().setAll(placeholder(I18n.t("meshIde.store.emptyList")));
             return;
         }
 
@@ -213,7 +214,7 @@ public final class LuaScriptStoreForm extends VBox {
         Label version = new Label(versionText(storeScript, installed));
         version.getStyleClass().add("muted-small-label");
 
-        Label type = new Label("Тип: " + scriptTypeText(storeScript.botType()));
+        Label type = new Label(I18n.t("meshIde.store.typePrefix", scriptTypeText(storeScript.botType())));
         type.getStyleClass().add("muted-small-label");
 
         Label author = new Label(authorText(storeScript.author()));
@@ -244,7 +245,7 @@ public final class LuaScriptStoreForm extends VBox {
         actions.setAlignment(Pos.CENTER_RIGHT);
 
         if (installed == null) {
-            Button installButton = new Button("Установить");
+            Button installButton = new Button(I18n.t("meshIde.action.install"));
             installButton.getStyleClass().add("accent");
             installButton.setOnAction(event -> installOrUpdate(storeScript, null));
             actions.getChildren().add(installButton);
@@ -252,13 +253,13 @@ public final class LuaScriptStoreForm extends VBox {
         }
 
         if (updateAvailable) {
-            Button updateButton = new Button("Обновить");
+            Button updateButton = new Button(I18n.t("meshIde.action.update"));
             updateButton.getStyleClass().add("accent");
             updateButton.setOnAction(event -> installOrUpdate(storeScript, installed));
             actions.getChildren().add(updateButton);
         }
 
-        Button deleteButton = new Button("Удалить");
+        Button deleteButton = new Button(I18n.t("common.delete"));
         deleteButton.setOnAction(event -> deleteInstalledScript(installed));
         actions.getChildren().add(deleteButton);
         return actions;
@@ -274,10 +275,10 @@ public final class LuaScriptStoreForm extends VBox {
             rebuildCards();
             Toast.show(
                     Toast.Type.SUCCESS,
-                    (result.updated() ? "Обновлен скрипт: " : "Установлен скрипт: ")
-                            + result.script().getName());
+                    I18n.t(result.updated() ? "meshIde.store.installedUpdated" : "meshIde.store.installed",
+                            result.script().getName()));
         } catch (Exception e) {
-            Toast.show(Toast.Type.ERROR, "Ошибка установки: " + userMessage(e));
+            Toast.show(Toast.Type.ERROR, I18n.t("meshIde.store.installFailed", userMessage(e)));
         }
     }
 
@@ -289,17 +290,17 @@ public final class LuaScriptStoreForm extends VBox {
         scriptService.deleteScript(installed.getId());
         notifyScriptsChanged();
         rebuildCards();
-        Toast.show(Toast.Type.SUCCESS, "Удален скрипт: " + installed.getName());
+        Toast.show(Toast.Type.SUCCESS, I18n.t("meshIde.store.deleted", installed.getName()));
     }
 
     private boolean confirmDelete(LuaScript script) {
-        ButtonType deleteButton = new ButtonType("Удалить", ButtonBar.ButtonData.OK_DONE);
-        ButtonType cancelButton = new ButtonType("Отмена", ButtonBar.ButtonData.CANCEL_CLOSE);
+        ButtonType deleteButton = new ButtonType(I18n.t("common.delete"), ButtonBar.ButtonData.OK_DONE);
+        ButtonType cancelButton = new ButtonType(I18n.t("common.cancel"), ButtonBar.ButtonData.CANCEL_CLOSE);
 
         Alert alert = new Alert(Alert.AlertType.CONFIRMATION);
-        alert.setTitle("Удалить скрипт");
-        alert.setHeaderText("Удалить скрипт \"" + script.getName() + "\"?");
-        alert.setContentText("Скрипт будет удален из локального списка MeshApp IDE.");
+        alert.setTitle(I18n.t("meshIde.store.delete.title"));
+        alert.setHeaderText(I18n.t("meshIde.store.delete.header", script.getName()));
+        alert.setContentText(I18n.t("meshIde.store.delete.content"));
         alert.getButtonTypes().setAll(cancelButton, deleteButton);
         if (getScene() != null && getScene().getWindow() != null) {
             alert.initOwner(getScene().getWindow());
@@ -325,12 +326,16 @@ public final class LuaScriptStoreForm extends VBox {
             return "v" + storeScript.version();
         }
         if (storeScript.version() > installed.getVersion()) {
-            return "v" + storeScript.version() + " доступна, установлена v" + installed.getVersion();
+            return I18n.t("meshIde.store.version.updateAvailable",
+                    Long.toString(storeScript.version()),
+                    Long.toString(installed.getVersion()));
         }
         if (storeScript.version() == installed.getVersion()) {
-            return "v" + storeScript.version() + " установлена";
+            return I18n.t("meshIde.store.version.installed", Long.toString(storeScript.version()));
         }
-        return "v" + storeScript.version() + " в магазине, установлена v" + installed.getVersion();
+        return I18n.t("meshIde.store.version.storeOlder",
+                Long.toString(storeScript.version()),
+                Long.toString(installed.getVersion()));
     }
 
     private boolean matchesTypeFilter(LuaScriptStoreService.StoreScript script) {
@@ -341,18 +346,24 @@ public final class LuaScriptStoreForm extends VBox {
     private String statusText(int visibleCount, int totalCount) {
         ScriptTypeFilter filter = typeFilter.getValue();
         if (filter == null || filter == ScriptTypeFilter.ALL) {
-            return "Доступно скриптов: " + totalCount;
+            return I18n.t("meshIde.store.count.total", Integer.toString(totalCount));
         }
-        return "Показано: " + visibleCount + " из " + totalCount;
+        return I18n.t("meshIde.store.count.filtered",
+                Integer.toString(visibleCount),
+                Integer.toString(totalCount));
     }
 
     private static String scriptTypeText(LuaScript.BotType botType) {
-        return botType == LuaScript.BotType.AUTOMATION_BOT ? "Автоматизация" : "Бот";
+        return botType == LuaScript.BotType.AUTOMATION_BOT
+                ? I18n.t("meshIde.scriptType.automation")
+                : I18n.t("meshIde.scriptType.bot");
     }
 
     private static String authorText(String author) {
         String value = author == null ? "" : author.trim();
-        return value.isBlank() ? "Автор: не указан" : "Автор: " + value;
+        return value.isBlank()
+                ? I18n.t("meshIde.store.author.missing")
+                : I18n.t("meshIde.store.author.value", value);
     }
 
     private void notifyScriptsChanged() {
@@ -389,7 +400,7 @@ public final class LuaScriptStoreForm extends VBox {
             current = current.getCause();
         }
         String message = current.getMessage();
-        return message == null || message.isBlank() ? "операция не выполнена" : message;
+        return message == null || message.isBlank() ? I18n.t("meshIde.operationFailed") : message;
     }
 
     private static String truncate(String value, int maxLength) {
@@ -400,15 +411,15 @@ public final class LuaScriptStoreForm extends VBox {
     }
 
     private enum ScriptTypeFilter {
-        ALL("Все типы", null),
-        BOT("Бот", LuaScript.BotType.AIR_BOT),
-        AUTOMATION("Автоматизация", LuaScript.BotType.AUTOMATION_BOT);
+        ALL("meshIde.store.filter.allTypes", null),
+        BOT("meshIde.scriptType.bot", LuaScript.BotType.AIR_BOT),
+        AUTOMATION("meshIde.scriptType.automation", LuaScript.BotType.AUTOMATION_BOT);
 
-        private final String label;
+        private final String labelKey;
         private final LuaScript.BotType botType;
 
-        ScriptTypeFilter(String label, LuaScript.BotType botType) {
-            this.label = label;
+        ScriptTypeFilter(String labelKey, LuaScript.BotType botType) {
+            this.labelKey = labelKey;
             this.botType = botType;
         }
 
@@ -418,7 +429,7 @@ public final class LuaScriptStoreForm extends VBox {
 
         @Override
         public String toString() {
-            return label;
+            return I18n.t(labelKey);
         }
     }
 }

@@ -1,6 +1,7 @@
 package com.meshtastic.client.components;
 
 import com.meshtastic.client.MeshApp;
+import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.lua.LuaScript;
 import com.meshtastic.client.lua.LuaScriptService;
 import com.meshtastic.client.themes.ThemeManager;
@@ -171,7 +172,7 @@ public final class LuaKvEditorWindow {
         header.setAlignment(Pos.CENTER_LEFT);
 
         VBox titleBox = new VBox(2);
-        Label titleLabel = new Label("KV редактор");
+        Label titleLabel = new Label(I18n.t("meshIde.kv.title"));
         titleLabel.getStyleClass().add("form-title");
         scriptLabel = new Label(scriptName);
         scriptLabel.getStyleClass().add("muted-small-label");
@@ -182,22 +183,22 @@ public final class LuaKvEditorWindow {
 
         searchField = new TextField();
         searchField.getStyleClass().add("lua-kv-search-field");
-        searchField.setPromptText("Поиск по ключу или значению");
+        searchField.setPromptText(I18n.t("meshIde.kv.searchPrompt"));
         searchField.textProperty().addListener((obs, oldValue, newValue) -> applyFilter());
 
         ToolBar toolbar = new ToolBar();
         toolbar.getStyleClass().add("ide-toolbar");
         Button refreshButton = createToolbarButton(
-                "Обновить",
-                "Перечитать KV-хранилище из БД",
+                I18n.t("meshIde.action.refresh"),
+                I18n.t("meshIde.kv.tooltip.refresh"),
                 "/icons/refresh.svg",
                 () -> {
                     refreshRows(selectedKey());
-                    setStatus("Обновлено. " + countText());
+                    setStatus(I18n.t("meshIde.kv.status.refreshed", countText()));
                 });
         Button newButton = createToolbarButton(
-                "Новая запись",
-                "Очистить поля для добавления новой KV-записи",
+                I18n.t("meshIde.action.newEntry"),
+                I18n.t("meshIde.kv.tooltip.newEntry"),
                 "/icons/add.svg",
                 this::beginNewEntry);
         toolbar.getItems().addAll(refreshButton, new Separator(Orientation.VERTICAL), newButton);
@@ -210,15 +211,15 @@ public final class LuaKvEditorWindow {
         table = new TableView<>(filteredRows);
         table.getStyleClass().addAll("lua-dev-table", "lua-kv-table");
         table.setEditable(false);
-        table.setPlaceholder(new Label("KV-хранилище пусто"));
+        table.setPlaceholder(new Label(I18n.t("meshIde.kv.empty")));
         table.getSelectionModel().setSelectionMode(SelectionMode.SINGLE);
         table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
 
-        TableColumn<KvEntryRow, String> keyColumn = new TableColumn<>("Ключ");
+        TableColumn<KvEntryRow, String> keyColumn = new TableColumn<>(I18n.t("meshIde.column.key"));
         keyColumn.setCellValueFactory(data -> data.getValue().keyProperty());
         keyColumn.setPrefWidth(260);
 
-        TableColumn<KvEntryRow, String> valueColumn = new TableColumn<>("Значение");
+        TableColumn<KvEntryRow, String> valueColumn = new TableColumn<>(I18n.t("meshIde.column.value"));
         valueColumn.setCellValueFactory(data -> data.getValue().valueProperty());
         valueColumn.setCellFactory(column -> createValueCell());
         valueColumn.setPrefWidth(520);
@@ -227,31 +228,31 @@ public final class LuaKvEditorWindow {
         table.getColumns().add(valueColumn);
         table.getSelectionModel().selectedItemProperty().addListener((obs, oldRow, newRow) -> showEntry(newRow));
 
-        VBox panel = createPanel("KV база скрипта", table);
+        VBox panel = createPanel(I18n.t("meshIde.kv.panel.database"), table);
         VBox.setVgrow(table, Priority.ALWAYS);
         return panel;
     }
 
     private VBox createEditorPanel() {
         keyField = new TextField();
-        keyField.setPromptText("Ключ");
+        keyField.setPromptText(I18n.t("meshIde.column.key"));
         keyField.setMaxWidth(Double.MAX_VALUE);
 
         valueArea = new TextArea();
         valueArea.getStyleClass().add("lua-kv-value-area");
-        valueArea.setPromptText("Значение");
+        valueArea.setPromptText(I18n.t("meshIde.column.value"));
         valueArea.setWrapText(false);
         valueArea.setPrefRowCount(7);
         valueArea.setMaxWidth(Double.MAX_VALUE);
 
-        Button newButton = new Button("Новая запись");
+        Button newButton = new Button(I18n.t("meshIde.action.newEntry"));
         newButton.setOnAction(event -> beginNewEntry());
 
-        deleteButton = new Button("Удалить");
+        deleteButton = new Button(I18n.t("common.delete"));
         deleteButton.setDisable(true);
         deleteButton.setOnAction(event -> deleteSelectedEntry());
 
-        Button saveButton = new Button("Сохранить");
+        Button saveButton = new Button(I18n.t("common.save"));
         saveButton.getStyleClass().add("accent");
         saveButton.setOnAction(event -> saveCurrentEntry());
 
@@ -259,14 +260,14 @@ public final class LuaKvEditorWindow {
         actions.setAlignment(Pos.CENTER_RIGHT);
 
         VBox editor = new VBox(7,
-                fieldLabel("Ключ"),
+                fieldLabel(I18n.t("meshIde.column.key")),
                 keyField,
-                fieldLabel("Значение"),
+                fieldLabel(I18n.t("meshIde.column.value")),
                 valueArea,
                 actions);
         VBox.setVgrow(valueArea, Priority.ALWAYS);
 
-        VBox panel = createPanel("Редактирование", editor);
+        VBox panel = createPanel(I18n.t("meshIde.kv.panel.editor"), editor);
         VBox.setVgrow(editor, Priority.ALWAYS);
         return panel;
     }
@@ -275,7 +276,7 @@ public final class LuaKvEditorWindow {
         HBox statusBar = new HBox(8);
         statusBar.getStyleClass().add("lua-dev-status-bar");
         statusBar.setAlignment(Pos.CENTER_LEFT);
-        statusLabel = new Label("Готово");
+        statusLabel = new Label(I18n.t("meshIde.dev.status.ready"));
         statusLabel.getStyleClass().add("config-status-label");
         statusBar.getChildren().add(statusLabel);
         return statusBar;
@@ -385,7 +386,7 @@ public final class LuaKvEditorWindow {
     private void beginNewEntry() {
         table.getSelectionModel().clearSelection();
         clearEditorFields();
-        setStatus("Новая KV-запись");
+        setStatus(I18n.t("meshIde.kv.status.newEntry"));
         Platform.runLater(keyField::requestFocus);
     }
 
@@ -404,12 +405,12 @@ public final class LuaKvEditorWindow {
     private void saveCurrentEntry() {
         String key = keyField.getText() != null ? keyField.getText().trim() : "";
         if (key.isEmpty()) {
-            setStatus("Введите ключ");
+            setStatus(I18n.t("meshIde.kv.status.enterKey"));
             keyField.requestFocus();
             return;
         }
         if (key.length() > MAX_KEY_LENGTH) {
-            setStatus("Ключ не должен быть длиннее " + MAX_KEY_LENGTH + " символов");
+            setStatus(I18n.t("meshIde.kv.status.keyTooLong", Integer.toString(MAX_KEY_LENGTH)));
             keyField.requestFocus();
             return;
         }
@@ -418,7 +419,7 @@ public final class LuaKvEditorWindow {
         String originalKey = selected != null ? selected.key() : null;
         boolean keyChanged = originalKey != null && !originalKey.equals(key);
         if ((originalKey == null || keyChanged) && keyExists(key)) {
-            setStatus("Ключ уже существует: " + key);
+            setStatus(I18n.t("meshIde.kv.status.keyExists", key));
             keyField.requestFocus();
             return;
         }
@@ -430,16 +431,16 @@ public final class LuaKvEditorWindow {
             }
             scriptService.setKv(scriptId, key, value);
             refreshRows(key);
-            setStatus("Сохранено: " + key);
+            setStatus(I18n.t("meshIde.kv.status.saved", key));
         } catch (Exception e) {
-            setStatus("Ошибка сохранения: " + e.getMessage());
+            setStatus(I18n.t("meshIde.kv.status.saveError", e.getMessage()));
         }
     }
 
     private void deleteSelectedEntry() {
         KvEntryRow selected = table.getSelectionModel().getSelectedItem();
         if (selected == null) {
-            setStatus("Выберите запись для удаления");
+            setStatus(I18n.t("meshIde.kv.status.selectForDelete"));
             return;
         }
         if (!confirmDelete(selected.key())) {
@@ -448,16 +449,16 @@ public final class LuaKvEditorWindow {
         boolean deleted = scriptService.deleteKv(scriptId, selected.key());
         refreshRows(null);
         beginNewEntry();
-        setStatus(deleted ? "Удалено: " + selected.key() : "Запись не найдена: " + selected.key());
+        setStatus(I18n.t(deleted ? "meshIde.kv.status.deleted" : "meshIde.kv.status.notFound", selected.key()));
     }
 
     private boolean confirmDelete(String key) {
-        ButtonType deleteType = new ButtonType("Удалить", ButtonBar.ButtonData.OK_DONE);
-        ButtonType cancelType = new ButtonType("Отмена", ButtonBar.ButtonData.CANCEL_CLOSE);
+        ButtonType deleteType = new ButtonType(I18n.t("common.delete"), ButtonBar.ButtonData.OK_DONE);
+        ButtonType cancelType = new ButtonType(I18n.t("common.cancel"), ButtonBar.ButtonData.CANCEL_CLOSE);
         Alert alert = new Alert(Alert.AlertType.CONFIRMATION);
-        alert.setTitle("Удалить KV-запись");
-        alert.setHeaderText("Удалить ключ \"" + key + "\"?");
-        alert.setContentText("Запись будет удалена только из KV-хранилища этого скрипта.");
+        alert.setTitle(I18n.t("meshIde.kv.delete.title"));
+        alert.setHeaderText(I18n.t("meshIde.kv.delete.header", key));
+        alert.setContentText(I18n.t("meshIde.kv.delete.content"));
         alert.getButtonTypes().setAll(cancelType, deleteType);
         alert.initOwner(stage);
         return alert.showAndWait().orElse(cancelType) == deleteType;
@@ -492,9 +493,11 @@ public final class LuaKvEditorWindow {
 
     private String countText() {
         if (normalizedSearchQuery().isBlank()) {
-            return "Записей: " + rows.size();
+            return I18n.t("meshIde.kv.count.total", Integer.toString(rows.size()));
         }
-        return "Найдено: " + filteredRows.size() + " из " + rows.size();
+        return I18n.t("meshIde.kv.count.filtered",
+                Integer.toString(filteredRows.size()),
+                Integer.toString(rows.size()));
     }
 
     private void setStatus(String text) {
@@ -511,12 +514,14 @@ public final class LuaKvEditorWindow {
     }
 
     private String windowTitle() {
-        return "KV: " + scriptName;
+        return I18n.t("meshIde.kv.windowTitle", scriptName);
     }
 
     private static String displayScriptName(LuaScript script) {
         String name = script.getName();
-        return name == null || name.isBlank() ? "Скрипт #" + script.getId() : name;
+        return name == null || name.isBlank()
+                ? I18n.t("meshIde.kv.scriptFallback", Long.toString(script.getId()))
+                : name;
     }
 
     static boolean matchesSearch(String key, String value, String query) {

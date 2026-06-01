@@ -6,6 +6,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonParser;
 import com.google.gson.JsonSyntaxException;
 import com.meshtastic.client.MeshApp;
+import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.lua.LuaDebugSnapshot;
 import com.meshtastic.client.lua.LuaDebugVariable;
 import com.meshtastic.client.lua.LuaCompletionEngine;
@@ -241,7 +242,7 @@ public final class LuaDevWindow {
         if (!wasShowing && useCustomFrame() && !nativeEffectsApplied) {
             NativeWindowHelper.applyNativeEffects(stage, AppPreferences.isDarkMode());
             nativeEffectsApplied = true;
-            stage.setTitle("MeshApp IDE");
+            stage.setTitle(I18n.t("meshIde.title"));
         }
         stage.toFront();
         stage.requestFocus();
@@ -254,7 +255,7 @@ public final class LuaDevWindow {
         } else {
             stage.initStyle(StageStyle.DECORATED);
         }
-        stage.setTitle("MeshApp IDE");
+        stage.setTitle(I18n.t("meshIde.title"));
         stage.setResizable(true);
         if (MeshApp.getPrimaryStage() != null && !MeshApp.getPrimaryStage().getIcons().isEmpty()) {
             stage.getIcons().setAll(MeshApp.getPrimaryStage().getIcons());
@@ -324,7 +325,7 @@ public final class LuaDevWindow {
         HBox.setHgrow(leftSpacer, Priority.ALWAYS);
         leftSpacer.setMouseTransparent(true);
 
-        Label title = new Label("MeshApp IDE");
+        Label title = new Label(I18n.t("meshIde.title"));
         title.getStyleClass().add("title-bar-label");
         title.setMinWidth(0);
         title.setMaxWidth(520);
@@ -598,17 +599,17 @@ public final class LuaDevWindow {
     }
 
     private CloseChoice promptSaveBeforeClose() {
-        ButtonType saveButton = new ButtonType("Сохранить", ButtonBar.ButtonData.YES);
-        ButtonType discardButton = new ButtonType("Не сохранять", ButtonBar.ButtonData.NO);
-        ButtonType cancelButton = new ButtonType("Отмена", ButtonBar.ButtonData.CANCEL_CLOSE);
+        ButtonType saveButton = new ButtonType(I18n.t("meshIde.dev.unsaved.save"), ButtonBar.ButtonData.YES);
+        ButtonType discardButton = new ButtonType(I18n.t("meshIde.dev.unsaved.discard"), ButtonBar.ButtonData.NO);
+        ButtonType cancelButton = new ButtonType(I18n.t("common.cancel"), ButtonBar.ButtonData.CANCEL_CLOSE);
 
         Alert alert = new Alert(Alert.AlertType.CONFIRMATION);
-        alert.setTitle("Несохраненные изменения");
-        alert.setHeaderText("Сохранить изменения в скрипте?");
+        alert.setTitle(I18n.t("meshIde.dev.unsaved.title"));
+        alert.setHeaderText(I18n.t("meshIde.dev.unsaved.header"));
         String scriptName = currentScript.getName() == null || currentScript.getName().isBlank()
-                ? "скрипт"
+                ? I18n.t("meshIde.dev.unsaved.scriptFallback")
                 : currentScript.getName();
-        alert.setContentText("В скрипте \"" + scriptName + "\" есть несохраненные изменения.");
+        alert.setContentText(I18n.t("meshIde.dev.unsaved.content", scriptName));
         alert.getButtonTypes().setAll(saveButton, discardButton, cancelButton);
         if (stage != null) {
             alert.initOwner(stage);
@@ -646,9 +647,9 @@ public final class LuaDevWindow {
         HBox statusBar = new HBox(8);
         statusBar.getStyleClass().add("lua-dev-status-bar");
         statusBar.setAlignment(Pos.CENTER_LEFT);
-        scriptNameLabel = new Label("Скрипт не выбран");
+        scriptNameLabel = new Label(I18n.t("meshIde.dev.scriptNotSelected"));
         scriptNameLabel.getStyleClass().add("lua-dev-script-name");
-        statusLabel = new Label("Готово");
+        statusLabel = new Label(I18n.t("meshIde.dev.status.ready"));
         statusLabel.getStyleClass().add("config-status-label");
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
@@ -661,15 +662,24 @@ public final class LuaDevWindow {
         toolbar.setOrientation(Orientation.VERTICAL);
         toolbar.getStyleClass().add("drawer-toolbar");
 
-        Button saveButton = createSideMenuButton("Сохранить код в БД", "/icons/ide-file-code.svg", this::saveCurrentScriptSafely);
-        kvButton = createSideMenuButton("KV редактор", "/icons/database.svg", this::openCurrentScriptKvEditor);
-        Button checkButton = createSideMenuButton("Проверить синтаксис Lua", "/icons/ide-code-check.svg", this::checkCurrentScript);
-        runButton = createSideMenuButton("Запустить скрипт", "/icons/ide-terminal-run.svg", this::runCurrentScript);
-        debugButton = createSideMenuButton("Отладка", "/icons/ide-bug.svg", this::debugCurrentScript);
-        continueButton = createSideMenuButton("Продолжить выполнение", "/icons/ide-debug-continue.svg", this::continueDebuggee);
-        stepButton = createSideMenuButton("Шаг отладки", "/icons/ide-debug-step-over.svg", this::stepDebuggee);
-        stopButton = createSideMenuButton("Остановить скрипт", "/icons/ide-stop.svg", this::stopCurrentScript);
-        Button clearConsoleButton = createSideMenuButton("Очистить консоль", "/icons/ide-console-clear.svg", () -> consoleArea.clear());
+        Button saveButton = createSideMenuButton(
+                I18n.t("meshIde.dev.tooltip.saveCode"), "/icons/ide-file-code.svg", this::saveCurrentScriptSafely);
+        kvButton = createSideMenuButton(
+                I18n.t("meshIde.dev.tooltip.kvEditor"), "/icons/database.svg", this::openCurrentScriptKvEditor);
+        Button checkButton = createSideMenuButton(
+                I18n.t("meshIde.dev.tooltip.checkSyntax"), "/icons/ide-code-check.svg", this::checkCurrentScript);
+        runButton = createSideMenuButton(
+                I18n.t("meshIde.dev.tooltip.runScript"), "/icons/ide-terminal-run.svg", this::runCurrentScript);
+        debugButton = createSideMenuButton(
+                I18n.t("meshIde.dev.tooltip.debug"), "/icons/ide-bug.svg", this::debugCurrentScript);
+        continueButton = createSideMenuButton(
+                I18n.t("meshIde.dev.tooltip.continue"), "/icons/ide-debug-continue.svg", this::continueDebuggee);
+        stepButton = createSideMenuButton(
+                I18n.t("meshIde.dev.tooltip.step"), "/icons/ide-debug-step-over.svg", this::stepDebuggee);
+        stopButton = createSideMenuButton(
+                I18n.t("meshIde.dev.tooltip.stop"), "/icons/ide-stop.svg", this::stopCurrentScript);
+        Button clearConsoleButton = createSideMenuButton(
+                I18n.t("meshIde.dev.tooltip.clearConsole"), "/icons/ide-console-clear.svg", () -> consoleArea.clear());
 
         toolbar.getItems().addAll(
                 saveButton,
@@ -727,7 +737,7 @@ public final class LuaDevWindow {
         VBox editorBox = createPanel(null, editorStack);
         VBox.setVgrow(editorStack, Priority.ALWAYS);
 
-        VBox consoleBox = createPanel("Консоль", consoleArea);
+        VBox consoleBox = createPanel(I18n.t("meshIde.dev.panel.console"), consoleArea);
         VBox.setVgrow(consoleArea, Priority.ALWAYS);
 
         StackPane editorSlot = createSplitSlot(editorBox, "lua-dev-code-slot");
@@ -748,20 +758,20 @@ public final class LuaDevWindow {
         kvTable.getStyleClass().add("lua-dev-table");
         kvTable.setPlaceholder(new Region());
         kvTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
-        TableColumn<KvRow, String> keyColumn = new TableColumn<>("Ключ");
+        TableColumn<KvRow, String> keyColumn = new TableColumn<>(I18n.t("meshIde.column.key"));
         keyColumn.setCellValueFactory(data -> new ReadOnlyStringWrapper(data.getValue().key()));
         keyColumn.setPrefWidth(110);
-        TableColumn<KvRow, String> valueColumn = new TableColumn<>("Значение");
+        TableColumn<KvRow, String> valueColumn = new TableColumn<>(I18n.t("meshIde.column.value"));
         valueColumn.setCellValueFactory(data -> new ReadOnlyStringWrapper(data.getValue().value()));
         valueColumn.setCellFactory(column -> createValueCell());
         kvTable.getColumns().add(keyColumn);
         kvTable.getColumns().add(valueColumn);
 
-        VBox kvBox = createPanel("KV выбранного скрипта", kvTable);
+        VBox kvBox = createPanel(I18n.t("meshIde.dev.panel.kv"), kvTable);
         VBox.setVgrow(kvTable, Priority.ALWAYS);
 
         debugTable = createDebugTable();
-        VBox debugBox = createPanel("Переменные", debugTable);
+        VBox debugBox = createPanel(I18n.t("meshIde.dev.panel.variables"), debugTable);
         VBox.setVgrow(debugTable, Priority.ALWAYS);
 
         infoSplit = new SplitPane(debugBox, kvBox);
@@ -780,13 +790,13 @@ public final class LuaDevWindow {
         table.getStyleClass().add("lua-dev-table");
         table.setPlaceholder(new Region());
         table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
-        TableColumn<DebugVarRow, String> scopeColumn = new TableColumn<>("Scope");
+        TableColumn<DebugVarRow, String> scopeColumn = new TableColumn<>(I18n.t("meshIde.column.scope"));
         scopeColumn.setCellValueFactory(data -> new ReadOnlyStringWrapper(data.getValue().scope()));
         scopeColumn.setPrefWidth(68);
-        TableColumn<DebugVarRow, String> nameColumn = new TableColumn<>("Имя");
+        TableColumn<DebugVarRow, String> nameColumn = new TableColumn<>(I18n.t("meshIde.column.name"));
         nameColumn.setCellValueFactory(data -> new ReadOnlyStringWrapper(data.getValue().name()));
         nameColumn.setPrefWidth(92);
-        TableColumn<DebugVarRow, String> valueColumn = new TableColumn<>("Значение");
+        TableColumn<DebugVarRow, String> valueColumn = new TableColumn<>(I18n.t("meshIde.column.value"));
         valueColumn.setCellValueFactory(data -> new ReadOnlyStringWrapper(data.getValue().value()));
         valueColumn.setCellFactory(column -> createValueCell());
         table.getColumns().add(scopeColumn);
@@ -867,7 +877,7 @@ public final class LuaDevWindow {
         if (stage != null && stage.isShowing()) {
             valueStage.initOwner(stage);
         }
-        valueStage.setTitle("Значение");
+        valueStage.setTitle(I18n.t("meshIde.dev.valueWindow.title"));
         valueStage.setScene(scene);
         valueStage.setOnHidden(event -> ThemeManager.unregisterScene(scene));
         valueStage.show();
@@ -899,9 +909,9 @@ public final class LuaDevWindow {
     }
 
     private void installJsonCopyActions(CodeArea jsonArea) {
-        MenuItem copyItem = new MenuItem("Копировать");
+        MenuItem copyItem = new MenuItem(I18n.t("common.copy"));
         copyItem.setOnAction(event -> copySelectedJsonText(jsonArea));
-        MenuItem selectAllItem = new MenuItem("Выделить все");
+        MenuItem selectAllItem = new MenuItem(I18n.t("common.selectAll"));
         selectAllItem.setOnAction(event -> {
             jsonArea.requestFocus();
             jsonArea.selectAll();
@@ -977,7 +987,7 @@ public final class LuaDevWindow {
         if (hasBreakpoint) {
             breakpoint.getStyleClass().add("lua-breakpoint-marker-active");
         }
-        breakpoint.setTooltip(new Tooltip("Breakpoint"));
+        breakpoint.setTooltip(new Tooltip(I18n.t("meshIde.dev.breakpoint")));
         breakpoint.setOnMouseClicked(event -> toggleBreakpoint(line));
 
         HBox graphic = new HBox(4, breakpoint, lineNumberFactory.apply(paragraphIndex));
@@ -1450,7 +1460,9 @@ public final class LuaDevWindow {
         refreshKvRows();
         recreateLineGraphics();
         updateButtons();
-        setStatus(runtimeService.isRunning(script.getId()) ? "Скрипт запущен" : "Готово");
+        setStatus(runtimeService.isRunning(script.getId())
+                ? I18n.t("meshIde.dev.status.scriptRunning")
+                : I18n.t("meshIde.dev.status.ready"));
     }
 
     private boolean saveCurrentScriptSafely() {
@@ -1468,11 +1480,11 @@ public final class LuaDevWindow {
             dirty = false;
             refreshKvRows();
             updateButtons();
-            setStatus("Сохранено в БД");
-            appendConsole("Сохранено: " + saved.getName());
+            setStatus(I18n.t("meshIde.dev.status.savedToDb"));
+            appendConsole(I18n.t("meshIde.dev.status.saved", saved.getName()));
             return true;
         } catch (Exception e) {
-            setStatus("Ошибка сохранения");
+            setStatus(I18n.t("meshIde.dev.status.saveError"));
             appendConsole("ERROR " + e.getMessage());
             return false;
         }
@@ -1485,10 +1497,10 @@ public final class LuaDevWindow {
         saveCurrentScriptSafely();
         String error = runtimeService.checkSyntax(codeArea.getText(), currentScript.getName());
         if (error == null) {
-            setStatus("Синтаксис OK");
-            appendConsole("Синтаксис OK");
+            setStatus(I18n.t("meshIde.dev.status.syntaxOk"));
+            appendConsole(I18n.t("meshIde.dev.status.syntaxOk"));
         } else {
-            setStatus("Ошибка синтаксиса");
+            setStatus(I18n.t("meshIde.dev.status.syntaxError"));
             appendConsole("SYNTAX ERROR " + error);
         }
     }
@@ -1507,7 +1519,7 @@ public final class LuaDevWindow {
         saveCurrentScriptSafely();
         consoleArea.clear();
         clearDebugState();
-        appendConsole("Запуск " + currentScript.getName());
+        appendConsole(I18n.t("meshIde.dev.status.run", currentScript.getName()));
         runtimeService.runScript(currentScript, this::handleRuntimeEvent);
         updateButtons();
     }
@@ -1519,7 +1531,7 @@ public final class LuaDevWindow {
         saveCurrentScriptSafely();
         consoleArea.clear();
         clearDebugState();
-        appendConsole("Отладка " + currentScript.getName());
+        appendConsole(I18n.t("meshIde.dev.status.debug", currentScript.getName()));
         runtimeService.debugScript(currentScript, new HashSet<>(currentBreakpoints), this::handleRuntimeEvent);
         updateButtons();
     }
@@ -1565,18 +1577,18 @@ public final class LuaDevWindow {
             };
             appendConsole(prefix + " " + event.message());
             if (event.type() == LuaScriptEvent.Type.ERROR) {
-                setStatus("Ошибка выполнения");
+                setStatus(I18n.t("meshIde.dev.status.executionError"));
             } else if (event.type() == LuaScriptEvent.Type.STARTED) {
-                setStatus("Скрипт запущен");
+                setStatus(I18n.t("meshIde.dev.status.scriptRunning"));
             } else if (event.type() == LuaScriptEvent.Type.DEBUG_PAUSED) {
                 runtimeService.debugSnapshot(event.scriptId()).ifPresent(this::showDebugSnapshot);
-                setStatus("Пауза отладки");
+                setStatus(I18n.t("meshIde.dev.status.debugPaused"));
             } else if (event.type() == LuaScriptEvent.Type.DEBUG_RESUMED) {
                 currentDebugLine = -1;
                 recreateLineGraphics();
-                setStatus("Отладка выполняется");
+                setStatus(I18n.t("meshIde.dev.status.debugRunning"));
             } else if (event.type() == LuaScriptEvent.Type.STOPPED) {
-                setStatus("Скрипт остановлен");
+                setStatus(I18n.t("meshIde.dev.status.scriptStopped"));
                 clearDebugState();
             }
             updateButtons();
@@ -1617,7 +1629,7 @@ public final class LuaDevWindow {
             return;
         }
         dirty = true;
-        setStatus("Есть несохраненные изменения");
+        setStatus(I18n.t("meshIde.dev.status.dirty"));
     }
 
     private void updateButtons() {
@@ -1638,8 +1650,8 @@ public final class LuaDevWindow {
         }
         String name = currentScript != null ? currentScript.getName() : null;
         scriptNameLabel.setText(name == null || name.isBlank()
-                ? "Скрипт не выбран"
-                : name + " · v" + currentScript.getVersion());
+                ? I18n.t("meshIde.dev.scriptNotSelected")
+                : I18n.t("meshIde.dev.scriptVersion", name, Long.toString(currentScript.getVersion())));
     }
 
     private void setStatus(String text) {

@@ -3,6 +3,7 @@ package com.meshtastic.client.lua;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonParseException;
+import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.service.DatabaseProvider;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -314,7 +315,7 @@ public final class LuaScriptService {
                                            String description,
                                            String author) {
         if (dbConnection == null) {
-            throw new IllegalStateException("Database connection is not available");
+            throw new IllegalStateException(I18n.t("meshIde.service.databaseUnavailable"));
         }
         LuaScript.BotType normalizedType = botType != null ? botType : LuaScript.BotType.AIR_BOT;
         long now = nowSeconds();
@@ -349,14 +350,15 @@ public final class LuaScriptService {
                 }
             }
         } catch (SQLException e) {
-            throw new IllegalStateException("Failed to create Lua script", e);
+            throw new IllegalStateException(I18n.t("meshIde.service.createFailed"), e);
         }
-        throw new IllegalStateException("Failed to create Lua script");
+        throw new IllegalStateException(I18n.t("meshIde.service.createFailed"));
     }
 
     public synchronized void exportScript(long scriptId, Path targetPath) throws IOException {
         LuaScript script = findScript(scriptId)
-                .orElseThrow(() -> new IllegalStateException("Lua script not found: " + scriptId));
+                .orElseThrow(() -> new IllegalStateException(
+                        I18n.t("meshIde.service.scriptNotFound", Long.toString(scriptId))));
         LuaScriptExportFile exportFile = LuaScriptExportFile.from(script);
         Files.writeString(targetPath, SCRIPT_JSON.toJson(exportFile), StandardCharsets.UTF_8);
     }
@@ -367,7 +369,7 @@ public final class LuaScriptService {
             exportFile = SCRIPT_JSON.fromJson(Files.readString(sourcePath, StandardCharsets.UTF_8),
                     LuaScriptExportFile.class);
         } catch (JsonParseException e) {
-            throw new IllegalArgumentException("Некорректный JSON-файл скрипта", e);
+            throw new IllegalArgumentException(I18n.t("meshIde.service.invalidJson"), e);
         }
         return importScriptExport(exportFile);
     }
@@ -377,20 +379,21 @@ public final class LuaScriptService {
         try {
             exportFile = SCRIPT_JSON.fromJson(json, LuaScriptExportFile.class);
         } catch (JsonParseException e) {
-            throw new IllegalArgumentException("Некорректный JSON-файл скрипта", e);
+            throw new IllegalArgumentException(I18n.t("meshIde.service.invalidJson"), e);
         }
         return importScriptExport(exportFile);
     }
 
     public synchronized ScriptImportResult importScriptExport(LuaScriptExportFile exportFile) {
         if (exportFile == null) {
-            throw new IllegalArgumentException("Файл скрипта пуст");
+            throw new IllegalArgumentException(I18n.t("meshIde.service.emptyFile"));
         }
         if (!EXPORT_FORMAT.equals(exportFile.format())) {
-            throw new IllegalArgumentException("Файл не является экспортом Lua-скрипта MeshApp");
+            throw new IllegalArgumentException(I18n.t("meshIde.service.invalidFormat"));
         }
         if (exportFile.version() > EXPORT_VERSION) {
-            throw new IllegalArgumentException("Версия файла скрипта не поддерживается: " + exportFile.version());
+            throw new IllegalArgumentException(I18n.t("meshIde.service.unsupportedVersion",
+                    Integer.toString(exportFile.version())));
         }
 
         String guid = normalizeGuid(exportFile.guid());
@@ -532,11 +535,12 @@ public final class LuaScriptService {
                                          String author,
                                          Long explicitVersion) {
         if (dbConnection == null || scriptId <= 0) {
-            throw new IllegalStateException("Database connection is not available");
+            throw new IllegalStateException(I18n.t("meshIde.service.databaseUnavailable"));
         }
         LuaScript.BotType normalizedType = botType != null ? botType : LuaScript.BotType.AIR_BOT;
         LuaScript existing = findScript(scriptId)
-                .orElseThrow(() -> new IllegalStateException("Lua script not found: " + scriptId));
+                .orElseThrow(() -> new IllegalStateException(
+                        I18n.t("meshIde.service.scriptNotFound", Long.toString(scriptId))));
         String normalizedName = normalizeName(name);
         String normalizedCode = normalizeCode(code);
         String normalizedIcon = normalizeIcon(icon);
@@ -590,11 +594,11 @@ public final class LuaScriptService {
             ps.setLong(11, now);
             ps.setLong(12, scriptId);
             if (ps.executeUpdate() == 0) {
-                throw new IllegalStateException("Lua script not found: " + scriptId);
+                throw new IllegalStateException(I18n.t("meshIde.service.scriptNotFound", Long.toString(scriptId)));
             }
             return findScript(scriptId).orElseThrow();
         } catch (SQLException e) {
-            throw new IllegalStateException("Failed to save Lua script", e);
+            throw new IllegalStateException(I18n.t("meshIde.service.saveFailed"), e);
         }
     }
 
@@ -605,7 +609,8 @@ public final class LuaScriptService {
                                                      LuaScript.BotType botType,
                                                      String automationName) {
         LuaScript existing = findScript(scriptId)
-                .orElseThrow(() -> new IllegalStateException("Lua script not found: " + scriptId));
+                .orElseThrow(() -> new IllegalStateException(
+                        I18n.t("meshIde.service.scriptNotFound", Long.toString(scriptId))));
         return saveScript(scriptId, name, existing.getCode(), autostart, existing.getIcon(), nodeId, botType, automationName,
                 existing.getDescription(), existing.getAuthor());
     }
@@ -618,7 +623,8 @@ public final class LuaScriptService {
                                                      LuaScript.BotType botType,
                                                      String automationName) {
         LuaScript existing = findScript(scriptId)
-                .orElseThrow(() -> new IllegalStateException("Lua script not found: " + scriptId));
+                .orElseThrow(() -> new IllegalStateException(
+                        I18n.t("meshIde.service.scriptNotFound", Long.toString(scriptId))));
         return saveScript(scriptId, name, existing.getCode(), autostart, icon, nodeId, botType, automationName,
                 existing.getDescription(), existing.getAuthor());
     }
@@ -632,7 +638,8 @@ public final class LuaScriptService {
                                                      String automationName,
                                                      String description) {
         LuaScript existing = findScript(scriptId)
-                .orElseThrow(() -> new IllegalStateException("Lua script not found: " + scriptId));
+                .orElseThrow(() -> new IllegalStateException(
+                        I18n.t("meshIde.service.scriptNotFound", Long.toString(scriptId))));
         return saveScript(scriptId, name, existing.getCode(), autostart, icon, nodeId, botType, automationName,
                 description, existing.getAuthor());
     }
@@ -647,7 +654,8 @@ public final class LuaScriptService {
                                                      String description,
                                                      String author) {
         LuaScript existing = findScript(scriptId)
-                .orElseThrow(() -> new IllegalStateException("Lua script not found: " + scriptId));
+                .orElseThrow(() -> new IllegalStateException(
+                        I18n.t("meshIde.service.scriptNotFound", Long.toString(scriptId))));
         return saveScript(scriptId, name, existing.getCode(), autostart, icon, nodeId, botType, automationName,
                 description, author);
     }
@@ -880,16 +888,16 @@ public final class LuaScriptService {
     private String nextDefaultName() {
         int index = 1;
         List<String> names = listScripts().stream().map(LuaScript::getName).toList();
-        while (names.contains("Новый скрипт " + index)) {
+        while (names.contains(I18n.t("meshIde.service.defaultName", Integer.toString(index)))) {
             index++;
         }
-        return "Новый скрипт " + index;
+        return I18n.t("meshIde.service.defaultName", Integer.toString(index));
     }
 
     private static String normalizeName(String name) {
         String value = name == null ? "" : name.trim();
         if (value.isEmpty()) {
-            throw new IllegalArgumentException("Script name is required");
+            throw new IllegalArgumentException(I18n.t("meshIde.service.nameRequired"));
         }
         return value.length() > 120 ? value.substring(0, 120) : value;
     }
@@ -928,10 +936,10 @@ public final class LuaScriptService {
             return "";
         }
         if (value.isEmpty()) {
-            throw new IllegalArgumentException("Automation bot name is required");
+            throw new IllegalArgumentException(I18n.t("meshIde.service.automationRequired"));
         }
         if (!value.matches("@[\\p{L}\\p{N}_]+")) {
-            throw new IllegalArgumentException("Automation bot name must match @имя_бота");
+            throw new IllegalArgumentException(I18n.t("meshIde.service.automationFormat"));
         }
         return value.length() > 80 ? value.substring(0, 80) : value;
     }
@@ -939,7 +947,7 @@ public final class LuaScriptService {
     private static String normalizeKey(String key) {
         String value = key == null ? "" : key.trim();
         if (value.isEmpty()) {
-            throw new IllegalArgumentException("KV key is required");
+            throw new IllegalArgumentException(I18n.t("meshIde.service.kvKeyRequired"));
         }
         return value.length() > 200 ? value.substring(0, 200) : value;
     }
