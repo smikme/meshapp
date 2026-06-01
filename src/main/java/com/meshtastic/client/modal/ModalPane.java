@@ -24,6 +24,7 @@ import javafx.util.Duration;
 
 import com.meshtastic.client.MeshApp;
 import com.meshtastic.client.components.EmojiTextFlow;
+import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.model.UpdateInfo;
 import com.meshtastic.client.utils.ExternalUrlLauncher;
 import java.util.function.Consumer;
@@ -171,14 +172,14 @@ public class ModalPane extends StackPane {
         ModalPane pane = getInstance();
         if (pane == null) { return; }
 
-        Button btnYes = new Button("Да");
+        Button btnYes = new Button(I18n.t("common.yes"));
         btnYes.getStyleClass().add("accent");
         btnYes.setOnAction(e -> {
             pane.hide();
             callback.accept(true);
         });
 
-        Button btnNo = new Button("Нет");
+        Button btnNo = new Button(I18n.t("common.no"));
         btnNo.setOnAction(e -> {
             pane.hide();
             callback.accept(false);
@@ -194,7 +195,7 @@ public class ModalPane extends StackPane {
         ModalPane pane = getInstance();
         if (pane == null) { return; }
 
-        Button btnOk = new Button("ОК");
+        Button btnOk = new Button(I18n.t("common.ok"));
         btnOk.getStyleClass().add("accent");
         btnOk.setOnAction(e -> pane.hide());
 
@@ -208,7 +209,7 @@ public class ModalPane extends StackPane {
         ModalPane pane = getInstance();
         if (pane == null) { return; }
 
-        Button btnOk = new Button("ОК");
+        Button btnOk = new Button(I18n.t("common.ok"));
         btnOk.getStyleClass().add("accent");
         btnOk.setOnAction(e -> pane.hide());
 
@@ -227,7 +228,7 @@ public class ModalPane extends StackPane {
         About about = new About();
         about.getStyleClass().add("modal-side-panel");
 
-        Button btnClose = new Button("Закрыть");
+        Button btnClose = new Button(I18n.t("common.close"));
         btnClose.getStyleClass().add("accent");
         btnClose.setOnAction(e -> pane.hide());
 
@@ -253,16 +254,16 @@ public class ModalPane extends StackPane {
         panel.setMaxHeight(Double.MAX_VALUE);
         panel.getStyleClass().add("modal-side-panel");
 
-        Label lblTitle = new Label("Доступно обновление");
+        Label lblTitle = new Label(I18n.t("modal.update.title"));
         lblTitle.getStyleClass().add("dialog-title");
 
-        Label lblCurrent = new Label("Текущая версия: " + MeshApp.APPLICATION_VERSION);
-        Label lblNew = new Label("Новая версия: " + info.getVersion());
+        Label lblCurrent = new Label(I18n.t("modal.update.currentVersion", MeshApp.APPLICATION_VERSION));
+        Label lblNew = new Label(I18n.t("modal.update.newVersion", info.getVersion()));
         lblNew.setStyle("-fx-font-weight: bold;");
 
         VBox versionBox = new VBox(4, lblCurrent, lblNew);
 
-        Button btnDownload = new Button("Скачать");
+        Button btnDownload = new Button(I18n.t("common.download"));
         btnDownload.getStyleClass().add("accent");
         btnDownload.setOnAction(e -> {
             pane.hide();
@@ -272,7 +273,7 @@ public class ModalPane extends StackPane {
             }
         });
 
-        Button btnLater = new Button("Позже");
+        Button btnLater = new Button(I18n.t("common.later"));
         btnLater.setOnAction(e -> pane.hide());
 
         HBox btnRow = new HBox(10, btnLater, btnDownload);

@@ -1,6 +1,7 @@
 package com.meshtastic.client.forms;
 
 import com.google.protobuf.Descriptors.EnumValueDescriptor;
+import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.modal.ModalPane;
 import com.meshtastic.client.modal.Toast;
 import com.meshtastic.client.model.ConfigTreeItem;
@@ -201,16 +202,16 @@ public class FormSetting extends Form {
         VBox content = new VBox(10);
         content.setPadding(new Insets(10));
 
-        Label title = new Label("Настройки");
+        Label title = new Label(I18n.t("settings.title"));
         title.getStyleClass().add("form-title");
 
         TabPane tabPane = new TabPane();
         tabPane.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
 
-        cacheTab = new Tab("Кэш", createCachePanel());
-        configTab = new Tab("Конфигурация", createConfigPanel());
+        cacheTab = new Tab(I18n.t("settings.tab.cache"), createCachePanel());
+        configTab = new Tab(I18n.t("settings.tab.config"), createConfigPanel());
         appearanceTab = new Tab(
-            "Настройки приложения",
+            I18n.t("settings.tab.app"),
             createAppSettingsPanel()
         );
 
@@ -811,11 +812,11 @@ public class FormSetting extends Form {
         panel.setPadding(new Insets(15));
 
         // --- Группа «Оформление» ---
-        Label appearanceHeader = new Label("Оформление");
+        Label appearanceHeader = new Label(I18n.t("settings.appearance.title"));
         appearanceHeader.getStyleClass().add("section-title");
 
         CheckBox disableEffectsCb = new CheckBox(
-            "Выключить эффекты оформления"
+            I18n.t("settings.effects.disable")
         );
         disableEffectsCb.setSelected(
             AppPreferences.isDisableEffectsEffective()
@@ -830,7 +831,7 @@ public class FormSetting extends Form {
             );
 
         CheckBox softwareRenderingCb = new CheckBox(
-            "Включить программный рендеринг"
+            I18n.t("settings.rendering.software")
         );
         softwareRenderingCb.setSelected(AppPreferences.isSoftwareRendering());
         softwareRenderingCb
@@ -839,7 +840,7 @@ public class FormSetting extends Form {
                 AppPreferences.setSoftwareRendering(val)
             );
 
-        CheckBox minimizeToTrayCb = new CheckBox("Минимизация в трей");
+        CheckBox minimizeToTrayCb = new CheckBox(I18n.t("settings.tray.minimize"));
         minimizeToTrayCb.setSelected(AppPreferences.isMinimizeToTray());
         minimizeToTrayCb
             .selectedProperty()
@@ -850,8 +851,8 @@ public class FormSetting extends Form {
         VBox typographyGroup = new VBox(
             10,
             createFontSizeSettingRow(
-                "Размер шрифта приложения",
-                "Управляет шрифтом форм, таблиц и типовых диалогов.",
+                I18n.t("settings.font.app.title"),
+                I18n.t("settings.font.app.description"),
                 TypographyManager.MIN_APP_FONT_SIZE,
                 TypographyManager.MAX_APP_FONT_SIZE,
                 TypographyManager.getAppFontSize(),
@@ -859,8 +860,8 @@ public class FormSetting extends Form {
                 TypographyManager::setAppFontSize
             ),
             createFontSizeSettingRow(
-                "Размер шрифта чатов",
-                "Управляет списком чатов, сообщениями и полем ввода.",
+                I18n.t("settings.font.chat.title"),
+                I18n.t("settings.font.chat.description"),
                 TypographyManager.MIN_CHAT_FONT_SIZE,
                 TypographyManager.MAX_CHAT_FONT_SIZE,
                 TypographyManager.getChatFontSize(),
@@ -871,15 +872,17 @@ public class FormSetting extends Form {
 
         Label restartNote = new Label(
             OsDetect.isWindows10()
-                ? "На Windows 10 эффекты оформления принудительно выключены"
-                : "Изменения вступят в силу после перезапуска приложения"
+                ? I18n.t("settings.restart.windows10")
+                : I18n.t("settings.restart.required")
         );
         restartNote.getStyleClass().add("muted-note-label");
 
+        VBox languageGroup = createLanguageSettingRow();
         VBox appearanceGroup = new VBox(
             8,
             appearanceHeader,
             typographyGroup,
+            languageGroup,
             disableEffectsCb,
             softwareRenderingCb,
             minimizeToTrayCb,
@@ -887,11 +890,11 @@ public class FormSetting extends Form {
         );
 
         // --- Группа «Интеграции» ---
-        Label integrationsHeader = new Label("Интеграции");
+        Label integrationsHeader = new Label(I18n.t("settings.integrations.title"));
         integrationsHeader.getStyleClass().add("section-title");
 
         CheckBox checkUpdatesCb = new CheckBox(
-            "Проверять обновления при старте приложения"
+            I18n.t("settings.updates.checkOnStart")
         );
         checkUpdatesCb.setSelected(AppPreferences.isCheckUpdates());
         checkUpdatesCb
@@ -901,7 +904,7 @@ public class FormSetting extends Form {
             );
 
         CheckBox jfrDiagnosticsCb = new CheckBox(
-            "JFR-диагностика зависаний и сбоев"
+            I18n.t("settings.diagnostics.jfr")
         );
         jfrDiagnosticsCb.setSelected(AppPreferences.isJfrDiagnosticsEnabled());
         jfrDiagnosticsCb
@@ -911,7 +914,7 @@ public class FormSetting extends Form {
             );
 
         Label diagnosticsNote = new Label(
-            "Увеличивает нагрузку на приложение. Включайте только для диагностики по запросу поддержки. Требует перезапуска."
+            I18n.t("settings.diagnostics.note")
         );
         diagnosticsNote.getStyleClass().add("muted-note-label");
         diagnosticsNote.setWrapText(true);
@@ -928,6 +931,42 @@ public class FormSetting extends Form {
             .getChildren()
             .addAll(appearanceGroup, new Separator(), integrationsGroup);
         return panel;
+    }
+
+    private VBox createLanguageSettingRow() {
+        Label titleLabel = new Label(I18n.t("settings.language.title"));
+        titleLabel.getStyleClass().add("item-title");
+
+        Label descriptionLabel = new Label(I18n.t("settings.language.description"));
+        descriptionLabel.getStyleClass().add("muted-note-label");
+        descriptionLabel.setWrapText(true);
+
+        ComboBox<I18n.LanguageOption> languageBox = new ComboBox<>(
+                FXCollections.observableArrayList(I18n.supportedLanguages()));
+        languageBox.setButtonCell(createLanguageCell());
+        languageBox.setCellFactory(ignored -> createLanguageCell());
+        languageBox.getSelectionModel().select(I18n.languageOption(AppPreferences.getLanguageTag()));
+        languageBox.valueProperty().addListener((obs, oldValue, newValue) -> {
+            if (newValue != null && !newValue.tag().equals(I18n.getLanguageTag())) {
+                I18n.setLanguageTag(newValue.tag());
+            }
+        });
+
+        Label restartLabel = new Label(I18n.t("settings.language.restartRequired"));
+        restartLabel.getStyleClass().add("muted-note-label");
+        restartLabel.setWrapText(true);
+
+        return new VBox(6, titleLabel, descriptionLabel, languageBox, restartLabel);
+    }
+
+    private ListCell<I18n.LanguageOption> createLanguageCell() {
+        return new ListCell<>() {
+            @Override
+            protected void updateItem(I18n.LanguageOption item, boolean empty) {
+                super.updateItem(item, empty);
+                setText(empty || item == null ? null : I18n.t(item.displayKey()));
+            }
+        };
     }
 
     private VBox createFontSizeSettingRow(
@@ -961,7 +1000,7 @@ public class FormSetting extends Form {
         slider.setShowTickLabels(true);
         slider.setMinWidth(0);
 
-        Button resetButton = new Button("Сброс");
+        Button resetButton = new Button(I18n.t("common.reset"));
         resetButton.setOnAction(event -> slider.setValue(defaultValue));
 
         HBox sliderRow = new HBox(10, slider, resetButton);

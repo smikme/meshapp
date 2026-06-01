@@ -31,6 +31,7 @@ public class AppPreferences {
     public static final String KEY_CHECK_UPDATES = "checkUpdates";
     public static final String KEY_MINIMIZE_TO_TRAY = "minimizeToTray";
     public static final String KEY_JFR_DIAGNOSTICS = "jfrDiagnostics";
+    public static final String KEY_LANGUAGE = "language";
     public static final String KEY_APP_FONT_SIZE = "appFontSize";
     public static final String KEY_CHAT_FONT_SIZE = "chatFontSize";
     public static final String KEY_PACKET_MONITOR_WINDOW_X = "packetMonitorWindowX";
@@ -147,6 +148,14 @@ public class AppPreferences {
 
     public static void setJfrDiagnosticsEnabled(boolean value) {
         state().putBoolean(KEY_JFR_DIAGNOSTICS, value);
+    }
+
+    public static String getLanguageTag() {
+        return state().get(KEY_LANGUAGE, "system");
+    }
+
+    public static void setLanguageTag(String value) {
+        state().put(KEY_LANGUAGE, value == null || value.isBlank() ? "system" : value.trim());
     }
 
     public static int getAppFontSize() {

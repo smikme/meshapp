@@ -4,6 +4,7 @@ import com.meshtastic.client.components.CrashReportFlow;
 import com.meshtastic.client.components.EmojiImageCache;
 import com.meshtastic.client.components.EmojiRenderingSupport;
 import com.meshtastic.client.components.LuaDevWindow;
+import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.logging.JfrDiagnosticSupport;
 import com.meshtastic.client.logging.SessionCrashLogManager;
 import com.meshtastic.client.lua.LuaScriptRuntimeService;
@@ -140,6 +141,7 @@ public class MeshApp extends Application {
         );
 
         AppPreferences.init();
+        I18n.initFromPreferences();
 
         // Предзагрузить часто используемые эмодзи для ускорения отображения
         EmojiImageCache.preloadCommonEmojis();
