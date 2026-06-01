@@ -111,7 +111,8 @@ public final class LuaDevWindow {
     private static final double COMPLETION_MIN_WIDTH = 260.0;
     private static final double COMPLETION_MIN_VISIBLE_HEIGHT = 36.0;
     private static final double COMPLETION_VERTICAL_GAP = 2.0;
-    private static final int MAX_COMPLETIONS = 9;
+    private static final double COMPLETION_SCROLL_EDGE_PADDING = 4.0;
+    private static final double COMPLETION_SCROLL_GUARD_ROWS = 1.0;
     private static final Gson PRETTY_GSON = new GsonBuilder().setPrettyPrinting().create();
     private static final DateTimeFormatter TIME_FORMAT =
             DateTimeFormatter.ofPattern("HH:mm:ss").withZone(ZoneId.systemDefault());
@@ -142,6 +143,7 @@ public final class LuaDevWindow {
 
     private final VBox completionBox = new VBox();
     private final VBox completionRows = new VBox();
+    private final Region completionScrollTail = new Region();
     private final ScrollPane completionScrollPane = new ScrollPane(completionRows);
 
     private Stage stage;
@@ -634,6 +636,7 @@ public final class LuaDevWindow {
         completionScrollPane.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
         completionScrollPane.setVbarPolicy(ScrollPane.ScrollBarPolicy.AS_NEEDED);
         completionScrollPane.setPannable(true);
+        completionScrollTail.setMouseTransparent(true);
         completionBox.getChildren().setAll(completionScrollPane);
         String appCss = LuaDevWindow.class.getResource("/css/app.css") != null
                 ? LuaDevWindow.class.getResource("/css/app.css").toExternalForm()
@@ -1150,9 +1153,7 @@ public final class LuaDevWindow {
             return;
         }
 
-        visibleCompletions = result.items().stream()
-                .limit(MAX_COMPLETIONS)
-                .toList();
+        visibleCompletions = result.items();
         completionReplaceStart = result.replaceStart();
         completionReplaceEnd = result.replaceEnd();
         selectedCompletionIndex = 0;
@@ -1198,22 +1199,51 @@ public final class LuaDevWindow {
         completionScrollPane.applyCss();
         completionBox.applyCss();
         double rowWidth = COMPLETION_MIN_WIDTH;
-        double contentHeight = 0;
+        Insets rowsInsets = completionRows.getInsets();
+        double contentHeight = rowsInsets.getTop() + rowsInsets.getBottom();
+        double rowHeight = 0;
         for (Node child : completionRows.getChildren()) {
+            if (child == completionScrollTail) {
+                continue;
+            }
+            double childHeight;
             if (child instanceof Region region) {
                 rowWidth = Math.max(rowWidth, region.prefWidth(-1));
-                contentHeight += region.prefHeight(rowWidth);
+                childHeight = region.prefHeight(rowWidth);
             } else {
                 Bounds bounds = child.getLayoutBounds();
                 rowWidth = Math.max(rowWidth, bounds.getWidth());
-                contentHeight += bounds.getHeight();
+                childHeight = bounds.getHeight();
+            }
+            contentHeight += childHeight;
+            if (rowHeight <= 0 && childHeight > 0) {
+                rowHeight = childHeight;
             }
         }
         double verticalInsets = completionBox.getInsets().getTop() + completionBox.getInsets().getBottom();
         double horizontalInsets = completionBox.getInsets().getLeft() + completionBox.getInsets().getRight();
+        double preferredHeightWithoutTail = verticalInsets + contentHeight;
+        double maxPopupHeight = Math.max(COMPLETION_MIN_VISIBLE_HEIGHT, maxHeight);
+        boolean scrolls = preferredHeightWithoutTail > maxPopupHeight;
+        double tailHeight = scrolls && rowHeight > 0
+                ? Math.max(COMPLETION_SCROLL_EDGE_PADDING, rowHeight * COMPLETION_SCROLL_GUARD_ROWS)
+                : 0;
+        completionScrollTail.setManaged(scrolls);
+        completionScrollTail.setVisible(scrolls);
+        completionScrollTail.setMinHeight(tailHeight);
+        completionScrollTail.setPrefHeight(tailHeight);
+        completionScrollTail.setMaxHeight(tailHeight);
+        contentHeight += tailHeight;
         double preferredHeight = verticalInsets + contentHeight;
-        double height = Math.min(preferredHeight, Math.max(COMPLETION_MIN_VISIBLE_HEIGHT, maxHeight));
+        double height = Math.min(preferredHeight, maxPopupHeight);
         double viewportHeight = Math.max(0, height - verticalInsets);
+        if (preferredHeight > height && rowHeight > 0) {
+            double wholeRowsHeight = Math.floor(viewportHeight / rowHeight) * rowHeight;
+            if (wholeRowsHeight >= rowHeight && wholeRowsHeight < viewportHeight) {
+                viewportHeight = wholeRowsHeight;
+                height = viewportHeight + verticalInsets;
+            }
+        }
         completionRows.setMinWidth(rowWidth);
         completionRows.setPrefWidth(rowWidth);
         completionScrollPane.setMinWidth(rowWidth);
@@ -1309,6 +1339,7 @@ public final class LuaDevWindow {
         completionRows.getChildren().setAll(java.util.stream.IntStream.range(0, visibleCompletions.size())
                 .mapToObj(index -> createCompletionRow(visibleCompletions.get(index), index))
                 .toList());
+        completionRows.getChildren().add(completionScrollTail);
         completionScrollPane.setVvalue(0);
         updateSelectedCompletionRow();
     }
@@ -1364,21 +1395,29 @@ public final class LuaDevWindow {
         if (visibleCompletions.isEmpty()) {
             return;
         }
-        selectedCompletionIndex = Math.floorMod(selectedCompletionIndex + offset, visibleCompletions.size());
-        updateSelectedCompletionRow();
+        int nextIndex = Math.max(0, Math.min(visibleCompletions.size() - 1, selectedCompletionIndex + offset));
+        if (nextIndex == selectedCompletionIndex) {
+            return;
+        }
+        selectedCompletionIndex = nextIndex;
+        updateSelectedCompletionRow(Integer.compare(offset, 0));
     }
 
     private void updateSelectedCompletionRow() {
+        updateSelectedCompletionRow(0);
+    }
+
+    private void updateSelectedCompletionRow(int scrollDirection) {
         for (javafx.scene.Node node : completionRows.getChildren()) {
             node.getStyleClass().remove("lua-completion-row-selected");
             if (node.getUserData() instanceof Integer index && index == selectedCompletionIndex) {
                 node.getStyleClass().add("lua-completion-row-selected");
             }
         }
-        scrollSelectedCompletionIntoView();
+        scrollSelectedCompletionIntoView(scrollDirection);
     }
 
-    private void scrollSelectedCompletionIntoView() {
+    private void scrollSelectedCompletionIntoView(int direction) {
         Node selectedNode = completionRows.getChildren().stream()
                 .filter(node -> node.getUserData() instanceof Integer index && index == selectedCompletionIndex)
                 .findFirst()
@@ -1395,12 +1434,20 @@ public final class LuaDevWindow {
             return;
         }
         Bounds selectedBounds = selectedNode.getBoundsInParent();
+        double selectedHeight = Math.max(1, selectedBounds.getHeight());
+        double edgePadding = direction == 0
+                ? COMPLETION_SCROLL_EDGE_PADDING
+                : Math.max(COMPLETION_SCROLL_EDGE_PADDING, selectedHeight * COMPLETION_SCROLL_GUARD_ROWS);
         double currentTop = completionScrollPane.getVvalue() * scrollableHeight;
         double currentBottom = currentTop + viewportHeight;
-        double targetTop = selectedBounds.getMinY();
-        double targetBottom = selectedBounds.getMaxY();
+        double targetTop = Math.max(0, selectedBounds.getMinY() - edgePadding);
+        double targetBottom = Math.min(contentHeight, selectedBounds.getMaxY() + edgePadding);
         double newTop = currentTop;
-        if (targetTop < currentTop) {
+        if (direction < 0 && targetTop < currentTop) {
+            newTop = targetTop;
+        } else if (direction > 0 && targetBottom > currentBottom) {
+            newTop = targetBottom - viewportHeight;
+        } else if (targetTop < currentTop) {
             newTop = targetTop;
         } else if (targetBottom > currentBottom) {
             newTop = targetBottom - viewportHeight;
