@@ -50,14 +50,19 @@ public final class NodeInfoFormatter {
             sb.append(battIcon).append(" ")
                     .append(node.getBatteryLevel()).append("%");
             if (node.getVoltage() > 0) {
-                sb.append(String.format(" (%.1fV)", node.getVoltage()));
+                sb.append(String.format(I18n.locale(),
+                        " (%.1f%s)", node.getVoltage(), I18n.t("node.unit.volt")));
             }
             sb.append("\n");
         }
 
         // Сигнал и хопы
         if (node.getSnr() != 0) {
-            sb.append(String.format("\uD83D\uDCE1 SNR: %.1f dB\n", node.getSnr()));
+            sb.append("\uD83D\uDCE1 ")
+                    .append(I18n.t("node.list.snr",
+                            String.format(I18n.locale(), "%.1f", node.getSnr()),
+                            I18n.t("node.unit.db")))
+                    .append("\n");
         }
         if (node.getHopsAway() > 0) {
             sb.append(I18n.t("chat.nodeInfo.hops", node.getHopsAway())).append("\n");

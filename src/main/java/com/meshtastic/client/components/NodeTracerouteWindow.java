@@ -2,6 +2,7 @@ package com.meshtastic.client.components;
 
 import com.meshtastic.client.MeshApp;
 import com.meshtastic.client.components.chat.TracerouteView;
+import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.model.NodeData;
@@ -145,7 +146,7 @@ public final class NodeTracerouteWindow {
     private void createStage() {
         stage = new Stage();
         stage.initStyle(StageStyle.UNDECORATED);
-        stage.setTitle("Traceroute: " + targetName);
+        stage.setTitle(I18n.t("node.trace.window.title", targetName));
         stage.setResizable(false);
         Stage owner = MeshApp.getPrimaryStage();
         if (owner != null) {
@@ -195,7 +196,7 @@ public final class NodeTracerouteWindow {
 
     private HBox createHeader() {
         VBox titleBox = new VBox(2);
-        Label title = new Label("Traceroute");
+        Label title = new Label(I18n.t("node.trace.window.heading"));
         title.getStyleClass().add("form-title");
         Label subtitle = new Label(UnicodeTextUtils.sanitizeForJavaFxDisplay(targetName));
         subtitle.getStyleClass().add("muted-small-label");
@@ -208,11 +209,11 @@ public final class NodeTracerouteWindow {
         statusLabel = new Label();
         statusLabel.getStyleClass().add("config-status-label");
 
-        retryButton = new Button("Повторить");
+        retryButton = new Button(I18n.t("node.trace.window.retry"));
         retryButton.getStyleClass().add("accent");
         retryButton.setOnAction(event -> restartTrace());
 
-        closeButton = new Button("Закрыть");
+        closeButton = new Button(I18n.t("node.trace.window.close"));
         closeButton.setOnAction(event -> {
             if (traceInProgress) {
                 cancelTrace();
@@ -372,7 +373,7 @@ public final class NodeTracerouteWindow {
         finishActiveTrace();
 
         if (state == null || handler == null || nodeNum == 0) {
-            showFailure("Traceroute недоступен: нет активного подключения к радио");
+            showFailure(I18n.t("node.trace.window.unavailable"));
             return;
         }
 
@@ -383,12 +384,12 @@ public final class NodeTracerouteWindow {
 
         state.addTracerouteListener(tracerouteListener);
         remainingSeconds = TIMEOUT_SECONDS;
-        statusLabel.setText("Ожидание ответа " + remainingSeconds + " с");
+        statusLabel.setText(I18n.t("node.trace.window.waiting", remainingSeconds));
         timeoutTimer = new Timeline(new KeyFrame(Duration.seconds(1), event -> tickTimeout()));
         timeoutTimer.setCycleCount(TIMEOUT_SECONDS);
         timeoutTimer.setOnFinished(event -> {
             if (traceInProgress) {
-                showFailure("Ответ traceroute не получен");
+                showFailure(I18n.t("node.trace.window.timeout"));
             }
         });
         timeoutTimer.play();
@@ -396,7 +397,7 @@ public final class NodeTracerouteWindow {
         try {
             MessageService.requestTraceroute(handler, state, nodeNum);
         } catch (Throwable error) {
-            showFailure("Не удалось отправить traceroute: " + errorMessage(error));
+            showFailure(I18n.t("node.trace.window.sendFailed", errorMessage(error)));
         }
     }
 
@@ -405,7 +406,7 @@ public final class NodeTracerouteWindow {
             return;
         }
         remainingSeconds = Math.max(0, remainingSeconds - 1);
-        statusLabel.setText("Ожидание ответа " + remainingSeconds + " с");
+        statusLabel.setText(I18n.t("node.trace.window.waiting", remainingSeconds));
     }
 
     private void handleTracerouteResult(int fromNodeNum, MeshProtos.RouteDiscovery route) {
@@ -429,7 +430,7 @@ public final class NodeTracerouteWindow {
         }
         finishActiveTrace();
 
-        statusLabel.setText("Готово");
+        statusLabel.setText(I18n.t("node.trace.window.ready"));
 
         MeshProtos.RouteDiscovery safeRoute = route != null
                 ? route
@@ -561,7 +562,7 @@ public final class NodeTracerouteWindow {
 
     private void showFailure(String message) {
         finishActiveTrace();
-        statusLabel.setText("Ошибка");
+        statusLabel.setText(I18n.t("node.trace.window.error"));
         resultBox.getChildren().add(wrappedLabel(message));
         Platform.runLater(this::resizeToResults);
     }
@@ -571,7 +572,7 @@ public final class NodeTracerouteWindow {
             return;
         }
         finishActiveTrace();
-        statusLabel.setText("Отменено");
+        statusLabel.setText(I18n.t("node.trace.window.cancelled"));
     }
 
     private void cancelTraceAndClose() {
@@ -632,7 +633,9 @@ public final class NodeTracerouteWindow {
             progressIndicator.setManaged(traceInProgress);
         }
         if (closeButton != null) {
-            closeButton.setText(traceInProgress ? "Отменить" : "Закрыть");
+            closeButton.setText(I18n.t(traceInProgress
+                    ? "node.trace.window.cancel"
+                    : "node.trace.window.close"));
         }
     }
 

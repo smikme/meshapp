@@ -2,6 +2,7 @@ package com.meshtastic.client.components;
 
 import com.meshtastic.client.components.chat.TracerouteView;
 import com.meshtastic.client.forms.FormMap;
+import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.modal.ModalPane;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.MeshMessage;
@@ -132,18 +133,18 @@ public final class NodeTracerouteHistoryPanel extends BorderPane {
 
     private DatePicker createDateFilter() {
         DatePicker picker = new DatePicker();
-        picker.setPromptText("Все даты");
+        picker.setPromptText(I18n.t("node.trace.date.all"));
         picker.getStyleClass().add("node-trace-date-filter");
-        picker.setTooltip(new Tooltip("Фильтр по дате создания трейса"));
+        picker.setTooltip(new Tooltip(I18n.t("node.trace.dateFilter.tooltip")));
         picker.valueProperty().addListener((observable, oldValue, newValue) -> refresh());
         return picker;
     }
 
     private HBox createFilterBar() {
-        Label dateLabel = new Label("Дата");
+        Label dateLabel = new Label(I18n.t("node.trace.date"));
         dateLabel.getStyleClass().add("muted-small-label");
 
-        Button clearButton = new Button("Сброс");
+        Button clearButton = new Button(I18n.t("common.reset"));
         clearButton.getStyleClass().add("node-trace-date-clear");
         clearButton.disableProperty().bind(dateFilter.valueProperty().isNull());
         clearButton.setOnAction(event -> dateFilter.setValue(null));
@@ -224,7 +225,7 @@ public final class NodeTracerouteHistoryPanel extends BorderPane {
     }
 
     private VBox wrapTrace(MessageDbService.TracerouteResultRecord trace, Node traceNode) {
-        Label dateLabel = new Label("Создан: " + formatTraceTimestamp(trace.timestamp()));
+        Label dateLabel = new Label(I18n.t("node.trace.created", formatTraceTimestamp(trace.timestamp())));
         dateLabel.getStyleClass().add("node-trace-created-label");
 
         Region spacer = new Region();
@@ -247,7 +248,7 @@ public final class NodeTracerouteHistoryPanel extends BorderPane {
             button.setText("?");
         }
         button.getStyleClass().addAll("map-icon-button", "node-trace-map-button");
-        button.setTooltip(new Tooltip("Показать трейс на карте"));
+        button.setTooltip(new Tooltip(I18n.t("node.trace.showOnMap")));
         button.setUserData(tracerouteResultId);
         button.setOnAction(event -> openTraceOnMap(tracerouteResultId));
         return button;
@@ -300,7 +301,7 @@ public final class NodeTracerouteHistoryPanel extends BorderPane {
     }
 
     private Optional<Node> fallbackTraceNode() {
-        Label fallback = new Label("Не удалось отобразить сохранённый трейс");
+        Label fallback = new Label(I18n.t("node.trace.renderFailed"));
         fallback.setWrapText(true);
         fallback.getStyleClass().add("config-status-label");
         return Optional.of(fallback);
@@ -364,8 +365,8 @@ public final class NodeTracerouteHistoryPanel extends BorderPane {
 
     private Label emptyTraceLabel() {
         String text = dateFilter.getValue() == null
-                ? "Сохранённых трейсов к этой ноде нет"
-                : "Сохранённых трейсов за выбранную дату нет";
+                ? I18n.t("node.trace.empty.all")
+                : I18n.t("node.trace.empty.date");
         Label emptyLabel = new Label(text);
         emptyLabel.getStyleClass().add("form-placeholder-label");
         return emptyLabel;

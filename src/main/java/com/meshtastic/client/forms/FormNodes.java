@@ -1,6 +1,7 @@
 package com.meshtastic.client.forms;
 
 import com.meshtastic.client.components.NodeDetailContent;
+import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.model.ConnectionEntry;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.NodeData;
@@ -161,7 +162,7 @@ public class FormNodes extends Form {
         }
 
         searchField = new TextField();
-        searchField.setPromptText("\uD83D\uDD0D Поиск");
+        searchField.setPromptText(I18n.t("node.search.placeholder"));
         searchField.getStyleClass().add("node-search-field");
 
         // Кнопка фильтра «Только избранные»
@@ -170,7 +171,7 @@ public class FormNodes extends Form {
         favFilterBtn.setGraphic(favFilterIcon);
         favFilterBtn.setContentDisplay(ContentDisplay.GRAPHIC_ONLY);
         favFilterBtn.getStyleClass().add("chat-new-btn");
-        favFilterBtn.setTooltip(new Tooltip("Только избранные"));
+        favFilterBtn.setTooltip(new Tooltip(I18n.t("node.filter.favoriteOnly")));
         favFilterBtn.setOnAction(e -> {
             showFavoritesOnly = !showFavoritesOnly;
             syncFavoritesState();
@@ -184,16 +185,16 @@ public class FormNodes extends Form {
         sortBtn.setGraphic(sortIcon);
         sortBtn.setContentDisplay(ContentDisplay.GRAPHIC_ONLY);
         sortBtn.getStyleClass().add("chat-new-btn");
-        sortBtn.setTooltip(new Tooltip("Сортировка и фильтры"));
+        sortBtn.setTooltip(new Tooltip(I18n.t("node.sortAndFilters")));
 
         // --- Сортировки ---
         ToggleGroup sortGroup = new ToggleGroup();
-        RadioMenuItem sortLastHeardNew = new RadioMenuItem("Последний отклик (новые)");
-        RadioMenuItem sortLastHeardOld = new RadioMenuItem("Последний отклик (старые)");
-        RadioMenuItem sortDistance = new RadioMenuItem("Расстояние");
-        RadioMenuItem sortSignal = new RadioMenuItem("Сигнал (SNR)");
-        RadioMenuItem sortHops = new RadioMenuItem("Количество хопов");
-        RadioMenuItem sortChannel = new RadioMenuItem("Канал");
+        RadioMenuItem sortLastHeardNew = new RadioMenuItem(I18n.t("node.sort.lastHeardNew"));
+        RadioMenuItem sortLastHeardOld = new RadioMenuItem(I18n.t("node.sort.lastHeardOld"));
+        RadioMenuItem sortDistance = new RadioMenuItem(I18n.t("node.sort.distance"));
+        RadioMenuItem sortSignal = new RadioMenuItem(I18n.t("node.sort.signal"));
+        RadioMenuItem sortHops = new RadioMenuItem(I18n.t("node.sort.hops"));
+        RadioMenuItem sortChannel = new RadioMenuItem(I18n.t("node.sort.channel"));
         sortLastHeardNew.setToggleGroup(sortGroup);
         sortLastHeardOld.setToggleGroup(sortGroup);
         sortDistance.setToggleGroup(sortGroup);
@@ -202,12 +203,12 @@ public class FormNodes extends Form {
         sortChannel.setToggleGroup(sortGroup);
 
         // --- Фильтры ---
-        CheckMenuItem filterUnknown = new CheckMenuItem("Показывать неизвестные ноды");
-        CheckMenuItem filterDetails = new CheckMenuItem("Показать детали");
-        CheckMenuItem filterHideOffline = new CheckMenuItem("Скрыть офлайн-ноды");
-        filterFavorites = new CheckMenuItem("Только избранные");
-        CheckMenuItem filterDirect = new CheckMenuItem("Только прямые (0 хопов)");
-        filterIgnored = new CheckMenuItem("Игнорируемые");
+        CheckMenuItem filterUnknown = new CheckMenuItem(I18n.t("node.filter.showUnknown"));
+        CheckMenuItem filterDetails = new CheckMenuItem(I18n.t("node.filter.showDetails"));
+        CheckMenuItem filterHideOffline = new CheckMenuItem(I18n.t("node.filter.hideOffline"));
+        filterFavorites = new CheckMenuItem(I18n.t("node.filter.favoriteOnly"));
+        CheckMenuItem filterDirect = new CheckMenuItem(I18n.t("node.filter.directOnly"));
+        filterIgnored = new CheckMenuItem(I18n.t("node.filter.ignored"));
 
         ContextMenu sortMenu = new ContextMenu(
                 sortLastHeardNew, sortLastHeardOld, sortDistance, sortSignal, sortHops, sortChannel,
@@ -315,7 +316,7 @@ public class FormNodes extends Form {
         // Синхронизировать favFilterBtn
         if (showFavoritesOnly) {
             favFilterBtn.getStyleClass().add("favorite-btn-active");
-            favFilterBtn.getTooltip().setText("Показать все");
+            favFilterBtn.getTooltip().setText(I18n.t("node.filter.showAll"));
         }
 
         // Восстановить сортировку
@@ -366,7 +367,7 @@ public class FormNodes extends Form {
         detailPane.setPadding(Insets.EMPTY);
         detailPane.getStyleClass().add("node-detail-pane");
 
-        detailPlaceholder = new Label("Выберите ноду из списка");
+        detailPlaceholder = new Label(I18n.t("node.placeholder.select"));
         detailPlaceholder.getStyleClass().add("form-placeholder-label");
         detailPlaceholder.setMaxWidth(Double.MAX_VALUE);
         detailPlaceholder.setAlignment(Pos.CENTER);
@@ -414,11 +415,11 @@ public class FormNodes extends Form {
     private void syncFavoritesState() {
         if (showFavoritesOnly) {
             favFilterBtn.getStyleClass().add("favorite-btn-active");
-            favFilterBtn.getTooltip().setText("Показать все");
+            favFilterBtn.getTooltip().setText(I18n.t("node.filter.showAll"));
             injectOfflineFavorites();
         } else {
             favFilterBtn.getStyleClass().remove("favorite-btn-active");
-            favFilterBtn.getTooltip().setText("Только избранные");
+            favFilterBtn.getTooltip().setText(I18n.t("node.filter.favoriteOnly"));
             removeOfflineNodes();
         }
         updateFilterPredicate();
@@ -608,10 +609,10 @@ public class FormNodes extends Form {
             root.getChildren().addAll(avatarPane, textBox, starPane);
 
             // Контекстное меню
-            MenuItem addFavItem = new MenuItem("Добавить в избранное");
-            MenuItem removeFavItem = new MenuItem("Убрать из избранного");
-            MenuItem addIgnItem = new MenuItem("Добавить в игнорируемые");
-            MenuItem removeIgnItem = new MenuItem("Убрать из игнорируемых");
+            MenuItem addFavItem = new MenuItem(I18n.t("node.menu.addFavorite"));
+            MenuItem removeFavItem = new MenuItem(I18n.t("node.menu.removeFavorite"));
+            MenuItem addIgnItem = new MenuItem(I18n.t("node.menu.addIgnored"));
+            MenuItem removeIgnItem = new MenuItem(I18n.t("node.menu.removeIgnored"));
             ContextMenu ctxMenu = new ContextMenu(addFavItem, removeFavItem,
                     new SeparatorMenuItem(), addIgnItem, removeIgnItem);
             setContextMenu(ctxMenu);
@@ -680,31 +681,35 @@ public class FormNodes extends Form {
             // Подстрока
             String subtitle = formatLastHeardRelative(node.getLastHeard());
             if (node.hasHopsAway() && node.getHopsAway() > 0) {
-                subtitle += " · " + node.getHopsAway() + " хоп";
+                subtitle += " · " + hopText(node.getHopsAway());
             }
             subtitleLabel.setText(subtitle);
 
             // Расширенные детали
             if (showDetails) {
                 StringBuilder sb = new StringBuilder();
-                if (node.getSnr() != 0) { sb.append("SNR: ").append(String.format("%.1f", node.getSnr())).append(" дБ"); }
+                if (node.getSnr() != 0) {
+                    sb.append(I18n.t("node.list.snr",
+                            String.format(I18n.locale(), "%.1f", node.getSnr()),
+                            I18n.t("node.unit.db")));
+                }
                 if (node.hasHopsAway() && node.getHopsAway() > 0) {
                     if (!sb.isEmpty()) { sb.append(" · "); }
-                    sb.append(node.getHopsAway()).append(" хоп");
+                    sb.append(hopText(node.getHopsAway()));
                 }
                 if (BatteryLevelEstimator.hasBatteryPercent(node.getBatteryLevel(), node.getVoltage())) {
                     if (!sb.isEmpty()) { sb.append(" · "); }
-                    sb.append("Бат: ")
-                            .append(BatteryLevelEstimator.effectivePercent(node.getBatteryLevel(), node.getVoltage()))
-                            .append("%");
+                    sb.append(I18n.t("node.list.battery",
+                            BatteryLevelEstimator.effectivePercent(node.getBatteryLevel(), node.getVoltage())));
                 }
                 if (node.getVoltage() > 0) {
                     if (!sb.isEmpty()) { sb.append(" · "); }
-                    sb.append(String.format("%.1fV", node.getVoltage()));
+                    sb.append(String.format(I18n.locale(), "%.1f%s",
+                            node.getVoltage(), I18n.t("node.unit.volt")));
                 }
                 if (node.getChannel() > 0) {
                     if (!sb.isEmpty()) { sb.append(" · "); }
-                    sb.append("Кан: ").append(node.getChannel());
+                    sb.append(I18n.t("node.list.channel", node.getChannel()));
                 }
                 detailsLabel.setText(sb.toString());
                 if (!textBox.getChildren().contains(detailsLabel)) {
@@ -840,47 +845,40 @@ public class FormNodes extends Form {
      * Относительное время: «в сети», «X минут назад», «X часов назад», «X дней назад».
      */
     private static String formatLastHeardRelative(int epochSeconds) {
-        if (epochSeconds <= 0) { return "нет данных"; }
+        if (epochSeconds <= 0) { return I18n.t("node.status.noData"); }
         long now = System.currentTimeMillis() / 1000;
         long diff = now - epochSeconds;
-        if (diff < 60) { return "в сети"; }
+        if (diff < 60) { return I18n.t("node.status.online"); }
         if (diff < 3600) {
             long min = diff / 60;
-            return "был(а) " + min + " " + minuteWord(min) + " назад";
+            return I18n.t("node.status.lastHeard", min, pluralNodeUnit("minute", min));
         }
         if (diff < 86400) {
             long hours = diff / 3600;
-            return "был(а) " + hours + " " + hourWord(hours) + " назад";
+            return I18n.t("node.status.lastHeard", hours, pluralNodeUnit("hour", hours));
         }
         long days = diff / 86400;
-        return "был(а) " + days + " " + dayWord(days) + " назад";
+        return I18n.t("node.status.lastHeard", days, pluralNodeUnit("day", days));
     }
 
-    private static String minuteWord(long n) {
-        n = Math.abs(n) % 100;
-        long n1 = n % 10;
-        if (n > 10 && n < 20) { return "минут"; }
-        if (n1 == 1) { return "минуту"; }
-        if (n1 >= 2 && n1 <= 4) { return "минуты"; }
-        return "минут";
+    private static String hopText(long hops) {
+        return hops + " " + pluralNodeUnit("hop", hops);
     }
 
-    private static String hourWord(long n) {
-        n = Math.abs(n) % 100;
-        long n1 = n % 10;
-        if (n > 10 && n < 20) { return "часов"; }
-        if (n1 == 1) { return "час"; }
-        if (n1 >= 2 && n1 <= 4) { return "часа"; }
-        return "часов";
+    private static String pluralNodeUnit(String unit, long value) {
+        return I18n.t("node.unit." + unit + "." + pluralSuffix(value));
     }
 
-    private static String dayWord(long n) {
+    private static String pluralSuffix(long n) {
+        if (!I18n.LANGUAGE_RU.equals(I18n.locale().getLanguage())) {
+            return Math.abs(n) == 1 ? "one" : "many";
+        }
         n = Math.abs(n) % 100;
         long n1 = n % 10;
-        if (n > 10 && n < 20) { return "дней"; }
-        if (n1 == 1) { return "день"; }
-        if (n1 >= 2 && n1 <= 4) { return "дня"; }
-        return "дней";
+        if (n > 10 && n < 20) { return "many"; }
+        if (n1 == 1) { return "one"; }
+        if (n1 >= 2 && n1 <= 4) { return "few"; }
+        return "many";
     }
 
     private static boolean containsIgnoreCase(String text, String query) {

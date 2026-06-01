@@ -1,6 +1,7 @@
 package com.meshtastic.client.components;
 
 import com.meshtastic.client.TestEnvironmentSupport;
+import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.service.MessageDbService;
@@ -45,6 +46,7 @@ class NodeDetailContentTest {
 
     @TempDir
     Path tempHome;
+    private String previousLanguage;
 
     @BeforeAll
     static void startJavaFx() {
@@ -55,10 +57,13 @@ class NodeDetailContentTest {
     void setUp() {
         TestEnvironmentSupport.setUserHome(tempHome);
         TestEnvironmentSupport.resetSingletons();
+        previousLanguage = I18n.getLanguageTag();
+        I18n.setLanguageTagForTests(I18n.LANGUAGE_RU);
     }
 
     @AfterEach
     void tearDown() {
+        I18n.setLanguageTagForTests(previousLanguage);
         TestEnvironmentSupport.resetSingletons();
     }
 

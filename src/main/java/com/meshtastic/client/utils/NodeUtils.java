@@ -1,6 +1,7 @@
 package com.meshtastic.client.utils;
 
 import com.meshtastic.client.components.EmojiImageCache;
+import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.service.NodeCacheService;
@@ -234,15 +235,21 @@ public final class NodeUtils {
      * Формат: {@code String[]{emoji, label, value}} — emoji рендерится как PNG-картинка.
      */
     public static void fillDetailRows(ObservableList<String[]> rows, NodeData node) {
-        rows.add(new String[]{"\uD83D\uDC64", "Имя", node.getLongName()});
-        rows.add(new String[]{"\uD83C\uDFF7", "Короткое имя", node.getShortName()});
-        rows.add(new String[]{"\uD83D\uDD11", "ID ноды", node.getNodeId()});
-        rows.add(new String[]{"\u2699", "Роль", node.getRole() != null ? NodeData.translateRole(node.getRole()) : null});
-        rows.add(new String[]{"\uD83D\uDCDF", "Модель", node.getHwModel()});
-        rows.add(new String[]{"\uD83D\uDCAC", "Личные сообщения",
-                node.getUnmessagable() == null ? null : node.isUnmessagable() ? "Недоступны" : "Доступны"});
-        rows.add(new String[]{"\uD83D\uDCF6", "SNR", node.getSnr() != 0 ? String.valueOf(node.getSnr()) : null});
-        rows.add(new String[]{"\uD83D\uDD00", "Хопы",
+        rows.add(new String[]{"\uD83D\uDC64", I18n.t("node.detail.name"), node.getLongName()});
+        rows.add(new String[]{"\uD83C\uDFF7", I18n.t("node.detail.shortName"), node.getShortName()});
+        rows.add(new String[]{"\uD83D\uDD11", I18n.t("node.detail.nodeId"), node.getNodeId()});
+        rows.add(new String[]{"\u2699", I18n.t("node.detail.role"),
+                node.getRole() != null ? NodeData.translateRole(node.getRole()) : null});
+        rows.add(new String[]{"\uD83D\uDCDF", I18n.t("node.detail.model"), node.getHwModel()});
+        rows.add(new String[]{"\uD83D\uDCAC", I18n.t("node.detail.directMessages"),
+                node.getUnmessagable() == null
+                        ? null
+                        : node.isUnmessagable()
+                        ? I18n.t("node.detail.directMessages.unavailable")
+                        : I18n.t("node.detail.directMessages.available")});
+        rows.add(new String[]{"\uD83D\uDCF6", I18n.t("node.detail.snr"),
+                node.getSnr() != 0 ? String.valueOf(node.getSnr()) : null});
+        rows.add(new String[]{"\uD83D\uDD00", I18n.t("node.detail.hops"),
                 node.hasHopsAway() ? String.valueOf(node.getHopsAway()) : null});
 
         int level = node.getBatteryLevel();
@@ -250,13 +257,18 @@ public final class NodeUtils {
         if (BatteryLevelEstimator.hasBatteryPercent(level, node.getVoltage())) {
             battery = BatteryLevelEstimator.effectivePercent(level, node.getVoltage()) + "%";
         }
-        rows.add(new String[]{"\uD83D\uDD0B", "Батарея", battery});
+        rows.add(new String[]{"\uD83D\uDD0B", I18n.t("node.detail.battery"), battery});
 
-        rows.add(new String[]{"\u26A1", "Напряжение", node.getVoltage() > 0 ? String.format("%.2f В", node.getVoltage()) : null});
-        rows.add(new String[]{"\uD83D\uDD50", "Последний", node.getLastHeard() > 0 ? NodeData.formatTime(node.getLastHeard()) : null});
-        rows.add(new String[]{"\uD83C\uDF0D", "Широта", node.getLatitude() != 0 ? String.format("%.6f", node.getLatitude()) : null});
-        rows.add(new String[]{"\uD83C\uDF0D", "Долгота", node.getLongitude() != 0 ? String.format("%.6f", node.getLongitude()) : null});
-        rows.add(new String[]{"\uD83D\uDCD0", "Высота", node.getAltitude() != 0 ? node.getAltitude() + " м" : null});
+        rows.add(new String[]{"\u26A1", I18n.t("node.detail.voltage"),
+                node.getVoltage() > 0 ? I18n.t("node.detail.voltageValue", node.getVoltage()) : null});
+        rows.add(new String[]{"\uD83D\uDD50", I18n.t("node.detail.last"),
+                node.getLastHeard() > 0 ? NodeData.formatTime(node.getLastHeard()) : null});
+        rows.add(new String[]{"\uD83C\uDF0D", I18n.t("node.detail.latitude"),
+                node.getLatitude() != 0 ? String.format("%.6f", node.getLatitude()) : null});
+        rows.add(new String[]{"\uD83C\uDF0D", I18n.t("node.detail.longitude"),
+                node.getLongitude() != 0 ? String.format("%.6f", node.getLongitude()) : null});
+        rows.add(new String[]{"\uD83D\uDCD0", I18n.t("node.detail.altitude"),
+                node.getAltitude() != 0 ? I18n.t("node.detail.altitudeValue", node.getAltitude()) : null});
     }
 
     /**
@@ -322,7 +334,7 @@ public final class NodeUtils {
                 } else {
                     setText(value);
                     setStyle("-fx-font-weight: bold;");
-                    MenuItem copyItem = new MenuItem("Копировать");
+                    MenuItem copyItem = new MenuItem(I18n.t("common.copy"));
                     copyItem.setOnAction(e -> {
                         ClipboardContent cc = new ClipboardContent();
                         cc.putString(value);
