@@ -1,5 +1,6 @@
 package com.meshtastic.client.tray;
 
+import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.platform.OsDetect;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -38,15 +39,15 @@ public class AwtAppTrayService implements AppTrayService {
             Image image = TrayIconResources.loadAwtTrayImage(systemTray);
 
             PopupMenu menu = new PopupMenu();
-            MenuItem openItem = new MenuItem("Открыть");
+            MenuItem openItem = new MenuItem(I18n.t("tray.open"));
             openItem.addActionListener(e -> onActivate.run());
-            MenuItem exitItem = new MenuItem("Выход");
+            MenuItem exitItem = new MenuItem(I18n.t("tray.exit"));
             exitItem.addActionListener(e -> onExit.run());
             menu.add(openItem);
             menu.addSeparator();
             menu.add(exitItem);
 
-            TrayIcon icon = new TrayIcon(image, "MeshApp", menu);
+            TrayIcon icon = new TrayIcon(image, I18n.t("app.title"), menu);
             icon.setImageAutoSize(!OsDetect.isLinux());
             icon.addActionListener(e -> onActivate.run());
 
@@ -67,7 +68,7 @@ public class AwtAppTrayService implements AppTrayService {
         }
         try {
             icon.displayMessage(
-                    title != null ? title : "MeshApp",
+                    title != null ? title : I18n.t("app.title"),
                     message != null ? message : "",
                     TrayIcon.MessageType.INFO);
         } catch (Exception e) {

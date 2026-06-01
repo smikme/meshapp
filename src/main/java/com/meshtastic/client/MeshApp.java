@@ -179,7 +179,7 @@ public class MeshApp extends Application {
         FormManager.install(rootPane);
         EmojiRenderingSupport.install(scene);
 
-        stage.setTitle("MeshApp");
+        stage.setTitle(I18n.t("app.title"));
         // На macOS иконка берётся из .app bundle (MeshApp.icns в Contents/Resources).
         // На Windows/Linux — через stage.getIcons().
         if (!OsDetect.isMacOs()) {

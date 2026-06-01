@@ -1,5 +1,6 @@
 package com.meshtastic.client.tray;
 
+import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.utils.NativeResourceLoader;
 import com.sun.jna.Callback;
 import com.sun.jna.Library;
@@ -122,14 +123,14 @@ public final class LinuxGtkTrayService implements AppTrayService {
                 return;
             }
 
-            gtk.gtk_status_icon_set_tooltip_text(statusIcon, "MeshApp");
+            gtk.gtk_status_icon_set_tooltip_text(statusIcon, I18n.t("app.title"));
             gtk.gtk_status_icon_set_visible(statusIcon, true);
 
             Pointer gtkMenu = gtk.gtk_menu_new();
             menu = gtkMenu;
-            Pointer openItem = gtk.gtk_menu_item_new_with_label("Открыть");
+            Pointer openItem = gtk.gtk_menu_item_new_with_label(I18n.t("tray.open"));
             Pointer separator = gtk.gtk_separator_menu_item_new();
-            Pointer exitItem = gtk.gtk_menu_item_new_with_label("Выход");
+            Pointer exitItem = gtk.gtk_menu_item_new_with_label(I18n.t("tray.exit"));
             gtk.gtk_menu_shell_append(gtkMenu, openItem);
             gtk.gtk_menu_shell_append(gtkMenu, separator);
             gtk.gtk_menu_shell_append(gtkMenu, exitItem);

@@ -5,6 +5,7 @@ import com.meshtastic.client.forms.FormConnections;
 import com.meshtastic.client.forms.FormDashboard;
 import com.meshtastic.client.forms.FormMap;
 import com.meshtastic.client.forms.FormNodes;
+import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.modal.ModalPane;
 import com.meshtastic.client.modal.Toast;
 import com.meshtastic.client.service.ConnectionManager;
@@ -63,7 +64,7 @@ public class FormManager {
         }
         if (form != currentForm && isConfigSaveNavigationBlockedFor(form.getClass())) {
             Toast.show(Toast.Type.WARNING,
-                    "Дождитесь завершения сохранения конфигурации и переподключения");
+                    I18n.t("drawer.navigationBlocked"));
             return;
         }
         if (currentForm != null && currentForm != form) {

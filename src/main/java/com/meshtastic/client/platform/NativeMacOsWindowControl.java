@@ -1,6 +1,7 @@
 package com.meshtastic.client.platform;
 
 import com.meshtastic.client.connection.ble.macos.ObjCRuntime;
+import com.meshtastic.client.i18n.I18n;
 import com.sun.jna.*;
 import javafx.stage.Window;
 import org.slf4j.Logger;
@@ -166,7 +167,7 @@ public class NativeMacOsWindowControl {
             hideTitlebarContainer();
 
             // Установить title для NSWindow (AltTab и другие app-switcher'ы используют его)
-            long nsTitle = createNSString("MeshApp");
+            long nsTitle = createNSString(I18n.t("app.title"));
             try {
                 msgSendId(nsWindow, "setTitle:", nsTitle);
             } finally {

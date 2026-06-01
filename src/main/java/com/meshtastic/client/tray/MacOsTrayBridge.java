@@ -1,5 +1,6 @@
 package com.meshtastic.client.tray;
 
+import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.utils.NativeResourceLoader;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -27,7 +28,7 @@ final class MacOsTrayBridge {
         activateHandler = onActivate != null ? onActivate : NO_OP;
         ensureLibraryLoaded();
 
-        boolean installed = install0(resolveTrayIconPath(), "MeshApp");
+        boolean installed = install0(resolveTrayIconPath(), I18n.t("app.title"));
         INSTALLED.set(installed);
         if (installed) {
             log.info("macOS tray bridge initialized");
