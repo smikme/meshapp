@@ -8,8 +8,9 @@ import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.service.MessageDbService;
 import com.meshtastic.client.themes.TypographyManager;
-import com.meshtastic.client.utils.SvgIconLoader;
+import com.meshtastic.client.utils.ExternalUrlLauncher;
 import com.meshtastic.client.utils.NodeUtils;
+import com.meshtastic.client.utils.SvgIconLoader;
 import com.meshtastic.client.utils.UnicodeTextUtils;
 import javafx.beans.property.ReadOnlyDoubleProperty;
 import javafx.geometry.Bounds;
@@ -37,6 +38,8 @@ import javafx.scene.layout.VBox;
 import javafx.scene.shape.SVGPath;
 import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
+import javafx.scene.text.Text;
+import javafx.scene.text.TextFlow;
 import javafx.stage.Popup;
 
 import java.util.Arrays;
@@ -892,25 +895,69 @@ public class MessageBubbleFactory {
     }
 
     /**
-     * Создаёт единый {@link EmojiTextFlow} для текста сообщения и цитаты.
+     * Создаёт единый {@link TextFlow} для текста сообщения и цитаты.
      *
      * @param text исходный текст
      * @param emojiSize размер emoji
      * @param textStyleClass css-класс текстовых нод внутри flow
      * @param styleClass css-класс самого flow
-     * @return настроенный {@link EmojiTextFlow}
+     * @return настроенный {@link TextFlow}
      */
-    private static EmojiTextFlow createBubbleTextFlow(String text,
-                                                      double emojiSize,
-                                                      String textStyleClass,
-                                                      String styleClass) {
-        EmojiTextFlow textFlow = new EmojiTextFlow(
-                text == null ? "" : text,
-                TypographyManager.scaleChat(emojiSize));
-        textFlow.setTextStyleClass(textStyleClass);
+    private static TextFlow createBubbleTextFlow(String text,
+                                                 double emojiSize,
+                                                 String textStyleClass,
+                                                 String styleClass) {
+        TextFlow textFlow = new TextFlow();
         textFlow.getStyleClass().add(styleClass);
         textFlow.setMinHeight(Region.USE_PREF_SIZE);
+
+        double scaledEmojiSize = TypographyManager.scaleChat(emojiSize);
+        for (ChatUrlParser.Segment segment : ChatUrlParser.split(text == null ? "" : text)) {
+            if (segment.url()) {
+                textFlow.getChildren().add(createUrlTextNode(segment.text(), textStyleClass));
+            } else {
+                addEmojiTextNodes(textFlow, segment.text(), scaledEmojiSize, textStyleClass);
+            }
+        }
         return textFlow;
+    }
+
+    private static void addEmojiTextNodes(TextFlow textFlow,
+                                          String text,
+                                          double emojiSize,
+                                          String textStyleClass) {
+        for (EmojiTextFlow.Segment segment : EmojiTextFlow.parseSegments(text)) {
+            if (segment.isEmoji()) {
+                ImageView emoji = EmojiImageCache.createImageView(segment.text(), emojiSize);
+                if (emoji != null) {
+                    textFlow.getChildren().add(emoji);
+                    continue;
+                }
+            }
+            textFlow.getChildren().add(createPlainTextNode(segment.text(), textStyleClass));
+        }
+    }
+
+    private static Text createUrlTextNode(String url, String textStyleClass) {
+        Text textNode = createPlainTextNode(url, textStyleClass);
+        textNode.getStyleClass().add("chat-bubble-url-node");
+        textNode.setCursor(Cursor.HAND);
+        textNode.setOnMouseClicked(event -> {
+            if (event.getButton() != MouseButton.PRIMARY) {
+                return;
+            }
+            if (event.getClickCount() == 1) {
+                ExternalUrlLauncher.open(url);
+            }
+            event.consume();
+        });
+        return textNode;
+    }
+
+    private static Text createPlainTextNode(String text, String textStyleClass) {
+        Text textNode = new Text(UnicodeTextUtils.sanitizeForJavaFxDisplay(text));
+        textNode.getStyleClass().add(textStyleClass);
+        return textNode;
     }
 
     /**

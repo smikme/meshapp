@@ -2453,6 +2453,15 @@
     -fx-font-style: italic;
 }
 
+.chat-bubble-url-node {
+    -fx-fill: -color-accent-emphasis;
+    -fx-underline: true;
+}
+
+.chat-bubble-url-node:hover {
+    -fx-opacity: 0.85;
+}
+
 /* ═══════════════════ EmojiTextField — кастомное поле ввода ═══════════════════ */
 
 .emoji-text-field {

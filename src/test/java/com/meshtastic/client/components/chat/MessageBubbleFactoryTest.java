@@ -14,6 +14,7 @@ import javafx.scene.layout.Region;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 import javafx.scene.shape.SVGPath;
+import javafx.scene.text.Text;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -80,6 +81,27 @@ class MessageBubbleFactoryTest {
             assertNotNull(badge);
             assertNotNull(icon);
             assertTrue(content.getStyleClass().contains("chat-bubble-with-mqtt-badge"));
+            return null;
+        });
+    }
+
+    @Test
+    void incomingBubbleRendersHttpUrlAsClickableText() {
+        onFxThread(() -> {
+            MessageBubbleFactory factory = new MessageBubbleFactory(
+                    null,
+                    new SimpleDoubleProperty(600),
+                    new NoOpBubbleActions(),
+                    new HashMap<>());
+            MeshMessage incoming = new MeshMessage("!00000002", "!ffffffff", 0,
+                    "open https://meshapp.ru now", 10, false);
+
+            HBox row = factory.build(incoming);
+            Text link = findNodeWithStyle(row, "chat-bubble-url-node", Text.class).orElse(null);
+
+            assertNotNull(link);
+            assertEquals("https://meshapp.ru", link.getText());
+            assertNotNull(link.getOnMouseClicked());
             return null;
         });
     }
