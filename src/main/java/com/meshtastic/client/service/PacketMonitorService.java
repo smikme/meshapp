@@ -1117,7 +1117,7 @@ public final class PacketMonitorService {
                         LOWER(COALESCE(packet_type, '')) LIKE ?
                         OR LOWER(COALESCE(transport_mechanism, '')) LIKE ?
                         OR LOWER(CASE
-                            WHEN transport_mechanism IS NULL OR TRIM(transport_mechanism) = '' THEN 'локальный'
+                            WHEN transport_mechanism IS NULL OR TRIM(transport_mechanism) = '' THEN 'локальный local'
                             WHEN transport_mechanism = 'TRANSPORT_LORA' THEN 'lora'
                             WHEN transport_mechanism = 'TRANSPORT_LORA_ALT1' THEN 'lora alt 1'
                             WHEN transport_mechanism = 'TRANSPORT_LORA_ALT2' THEN 'lora alt 2'
@@ -1126,22 +1126,22 @@ public final class PacketMonitorService {
                             WHEN transport_mechanism = 'TRANSPORT_MQTT' THEN 'mqtt'
                             WHEN transport_mechanism = 'TRANSPORT_MULTICAST_UDP' THEN 'multicast udp'
                             WHEN transport_mechanism = 'TRANSPORT_API' THEN 'api'
-                            WHEN transport_mechanism = 'TRANSPORT_INTERNAL' THEN 'локальный'
+                            WHEN transport_mechanism = 'TRANSPORT_INTERNAL' THEN 'локальный local'
                             ELSE transport_mechanism
                         END) LIKE ?
                         OR LOWER(CONCAT(
                             CASE direction
-                                WHEN 'INCOMING' THEN 'входящий'
-                                WHEN 'OUTGOING' THEN 'исходящий'
-                                WHEN 'INTERNAL' THEN 'внутренний'
+                                WHEN 'INCOMING' THEN 'входящий incoming'
+                                WHEN 'OUTGOING' THEN 'исходящий outgoing'
+                                WHEN 'INTERNAL' THEN 'внутренний internal'
                                 ELSE direction
                             END,
                             ' / ',
                             CASE
                                 WHEN direction = 'OUTGOING'
                                      AND (transport_mechanism IS NULL OR TRIM(transport_mechanism) = '')
-                                    THEN 'без подтверждения lora'
-                                WHEN transport_mechanism IS NULL OR TRIM(transport_mechanism) = '' THEN 'локальный'
+                                    THEN 'без подтверждения lora no lora acknowledgment'
+                                WHEN transport_mechanism IS NULL OR TRIM(transport_mechanism) = '' THEN 'локальный local'
                                 WHEN transport_mechanism = 'TRANSPORT_LORA' THEN 'lora'
                                 WHEN transport_mechanism = 'TRANSPORT_LORA_ALT1' THEN 'lora alt 1'
                                 WHEN transport_mechanism = 'TRANSPORT_LORA_ALT2' THEN 'lora alt 2'
@@ -1149,7 +1149,7 @@ public final class PacketMonitorService {
                                 WHEN transport_mechanism = 'TRANSPORT_MQTT' THEN 'mqtt'
                                 WHEN transport_mechanism = 'TRANSPORT_MULTICAST_UDP' THEN 'multicast udp'
                                 WHEN transport_mechanism = 'TRANSPORT_API' THEN 'api'
-                                WHEN transport_mechanism = 'TRANSPORT_INTERNAL' THEN 'локальный'
+                                WHEN transport_mechanism = 'TRANSPORT_INTERNAL' THEN 'локальный local'
                                 ELSE LOWER(COALESCE(transport_mechanism, ''))
                             END
                         )) LIKE ?
@@ -1157,9 +1157,9 @@ public final class PacketMonitorService {
                         OR LOWER(COALESCE(to_node, '')) LIKE ?
                         OR LOWER(COALESCE(CAST(payload_text AS VARCHAR), '')) LIKE ?
                         OR LOWER(CASE direction
-                            WHEN 'INCOMING' THEN 'входящий'
-                            WHEN 'OUTGOING' THEN 'исходящий'
-                            WHEN 'INTERNAL' THEN 'внутренний'
+                            WHEN 'INCOMING' THEN 'входящий incoming'
+                            WHEN 'OUTGOING' THEN 'исходящий outgoing'
+                            WHEN 'INTERNAL' THEN 'внутренний internal'
                             ELSE direction
                         END) LIKE ?
                     )
@@ -1263,6 +1263,7 @@ public final class PacketMonitorService {
             patterns.add("%" + parsedNodeNum + "%");
             if (unsignedNodeNum == BROADCAST_NODE_NUM) {
                 patterns.add("%вещание%");
+                patterns.add("%broadcast%");
             }
         }
 

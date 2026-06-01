@@ -2,6 +2,7 @@ package com.meshtastic.client.service;
 
 import com.google.protobuf.ByteString;
 import com.meshtastic.client.TestEnvironmentSupport;
+import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.model.NodeData;
@@ -36,6 +37,7 @@ class PacketMonitorServiceTest {
 
     @BeforeEach
     void setUp() {
+        I18n.setLanguageTagForTests(I18n.LANGUAGE_RU);
         TestEnvironmentSupport.setUserHome(tempHome);
         TestEnvironmentSupport.resetSingletons();
         service = PacketMonitorService.getInstance();

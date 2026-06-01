@@ -1,7 +1,9 @@
 package com.meshtastic.client.components;
 
+import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.model.PacketLogEntry;
 import javafx.geometry.Rectangle2D;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -12,6 +14,11 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 class PacketMonitorWindowTest {
+
+    @BeforeEach
+    void setLanguage() {
+        I18n.setLanguageTagForTests(I18n.LANGUAGE_RU);
+    }
 
     @Test
     void shouldKeepSelectedTypeInOptionsWhenFilterListRefreshes() {

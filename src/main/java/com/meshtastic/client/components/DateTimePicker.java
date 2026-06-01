@@ -1,6 +1,7 @@
 package com.meshtastic.client.components;
 
 import atlantafx.base.controls.Calendar;
+import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.utils.SvgIconLoader;
 import javafx.beans.property.ReadOnlyBooleanProperty;
 import javafx.beans.property.ReadOnlyBooleanWrapper;
@@ -81,7 +82,7 @@ public final class DateTimePicker extends HBox {
         clearButton = new Button();
         clearButton.getStyleClass().add("packet-monitor-date-time-clear");
         clearButton.setFocusTraversable(false);
-        clearButton.setTooltip(new Tooltip("Сбросить дату и время"));
+        clearButton.setTooltip(new Tooltip(I18n.t("packetMonitor.date.clear")));
 
         SVGPath clearIcon = SvgIconLoader.load("/icons/clear.svg", 12);
         if (clearIcon != null) {
@@ -108,7 +109,7 @@ public final class DateTimePicker extends HBox {
         calendar.setShowWeekNumbers(false);
         calendar.valueProperty().addListener((obs, oldValue, newValue) -> draftDate = newValue);
 
-        allDayCheckBox = new CheckBox("Весь день");
+        allDayCheckBox = new CheckBox(I18n.t("packetMonitor.date.allDay"));
         allDayCheckBox.getStyleClass().add("packet-monitor-date-time-popup-all-day");
         allDayCheckBox.selectedProperty().addListener((obs, oldValue, newValue) -> {
             draftAllDay = Boolean.TRUE.equals(newValue);
@@ -210,17 +211,17 @@ public final class DateTimePicker extends HBox {
      * {@code Применить} переводит draft-состояние в committed-состояние control.
      */
     private VBox createPopupBottom() {
-        HBox hourRow = createSliderRow("Часы", hourSlider, hourValueLabel);
-        HBox minuteRow = createSliderRow("Минуты", minuteSlider, minuteValueLabel);
+        HBox hourRow = createSliderRow(I18n.t("packetMonitor.date.hours"), hourSlider, hourValueLabel);
+        HBox minuteRow = createSliderRow(I18n.t("packetMonitor.date.minutes"), minuteSlider, minuteValueLabel);
 
-        Button clearPopupButton = new Button("Сбросить");
+        Button clearPopupButton = new Button(I18n.t("packetMonitor.date.reset"));
         clearPopupButton.getStyleClass().add("packet-monitor-date-time-popup-action");
         clearPopupButton.setOnAction(event -> {
             clear();
             popup.hide();
         });
 
-        Button applyButton = new Button("Применить");
+        Button applyButton = new Button(I18n.t("packetMonitor.date.apply"));
         applyButton.getStyleClass().add("packet-monitor-date-time-popup-action");
         applyButton.setDefaultButton(true);
         applyButton.setOnAction(event -> applyDraftAndHide());
@@ -421,12 +422,12 @@ public final class DateTimePicker extends HBox {
     private void updateCommittedDisplay() {
         displayPicker.setValue(dateValue);
         if (dateValue == null) {
-            timeSummaryLabel.setText("Весь день");
+            timeSummaryLabel.setText(I18n.t("packetMonitor.date.allDay"));
             if (!getStyleClass().contains("packet-monitor-date-time-box-empty")) {
                 getStyleClass().add("packet-monitor-date-time-box-empty");
             }
         } else if (timeValue == null) {
-            timeSummaryLabel.setText("Весь день");
+            timeSummaryLabel.setText(I18n.t("packetMonitor.date.allDay"));
             getStyleClass().remove("packet-monitor-date-time-box-empty");
         } else {
             timeSummaryLabel.setText(TIME_FORMAT.format(timeValue));

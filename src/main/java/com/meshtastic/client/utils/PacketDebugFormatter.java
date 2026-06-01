@@ -13,6 +13,7 @@ import com.google.protobuf.Descriptors.EnumValueDescriptor;
 import com.google.protobuf.InvalidProtocolBufferException;
 import com.google.protobuf.Message;
 import com.google.protobuf.WireFormat;
+import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.model.PacketLogEntry;
@@ -287,7 +288,8 @@ public final class PacketDebugFormatter {
      */
     public static HexPreview formatHexPreview(byte[] bytes) {
         if (bytes == null || bytes.length == 0) {
-            return new HexPreview("", "Нет данных", "", new int[0], new int[0], new int[0], new int[0]);
+            return new HexPreview("", I18n.t("packetMonitor.preview.noData"), "",
+                    new int[0], new int[0], new int[0], new int[0]);
         }
 
         int[] hexByteStartChars = new int[bytes.length];
@@ -361,17 +363,18 @@ public final class PacketDebugFormatter {
 
         PacketEndpoints endpoints = resolvePacketEndpoints(entry, deviceState);
         StringBuilder sb = new StringBuilder(1024);
-        appendExportLine(sb, "ID", Long.toString(entry.getId()));
-        appendExportLine(sb, "Дата/время", entry.getCapturedAtText());
-        appendExportLine(sb, "Направление", entry.getDirectionText());
-        appendExportLine(sb, "Тип пакета", entry.getPacketType());
-        appendExportLine(sb, "От", endpoints.fromNode());
-        appendExportLine(sb, "Кому", endpoints.toNode());
-        appendExportLine(sb, "Payload", entry.getPayloadText());
-        appendExportLine(sb, "Размер", entry.getPacketBytes().length + " байт");
-        sb.append('\n').append("HEX").append('\n');
+        appendExportLine(sb, I18n.t("packetMonitor.export.label.id"), Long.toString(entry.getId()));
+        appendExportLine(sb, I18n.t("packetMonitor.export.label.time"), entry.getCapturedAtText());
+        appendExportLine(sb, I18n.t("packetMonitor.export.label.direction"), entry.getDirectionText());
+        appendExportLine(sb, I18n.t("packetMonitor.export.label.type"), entry.getPacketType());
+        appendExportLine(sb, I18n.t("packetMonitor.export.label.from"), endpoints.fromNode());
+        appendExportLine(sb, I18n.t("packetMonitor.export.label.to"), endpoints.toNode());
+        appendExportLine(sb, I18n.t("packetMonitor.export.label.payload"), entry.getPayloadText());
+        appendExportLine(sb, I18n.t("packetMonitor.export.label.size"),
+                I18n.t("packetMonitor.export.sizeBytes", Integer.toString(entry.getPacketBytes().length)));
+        sb.append('\n').append(I18n.t("packetMonitor.export.label.hex")).append('\n');
         sb.append(formatHex(entry.getPacketBytes()));
-        sb.append('\n').append('\n').append("Иерархия").append('\n');
+        sb.append('\n').append('\n').append(I18n.t("packetMonitor.export.label.hierarchy")).append('\n');
         appendTreeText(sb, buildPacketTree(entry.getPacketBytes()), 0);
         return sb.toString();
     }
@@ -800,18 +803,21 @@ public final class PacketDebugFormatter {
     public static TreeItem<PacketTreeNode> buildRawPacketTree(String rootLabel, byte[] packetBytes) {
         byte[] bytes = packetBytes != null ? packetBytes : new byte[0];
         TreeItem<PacketTreeNode> root = new TreeItem<>(
-                new PacketTreeNode(rootLabel == null || rootLabel.isBlank() ? "Raw packet" : rootLabel,
+                new PacketTreeNode(rootLabel == null || rootLabel.isBlank()
+                        ? I18n.t("packetMonitor.tree.rawPacket")
+                        : rootLabel,
                         0, bytes.length));
         root.setExpanded(true);
         if (bytes.length == 0) {
-            root.getChildren().add(new TreeItem<>(new PacketTreeNode("Нет данных")));
+            root.getChildren().add(new TreeItem<>(new PacketTreeNode(I18n.t("packetMonitor.tree.noData"))));
             return root;
         }
         root.getChildren().add(new TreeItem<>(
                 new PacketTreeNode("type = 0x%02X".formatted(bytes[0] & 0xFF), 0, 1)));
         if (bytes.length > 1) {
             root.getChildren().add(new TreeItem<>(
-                    new PacketTreeNode("payload (%d bytes)".formatted(bytes.length - 1), 1, bytes.length)));
+                    new PacketTreeNode(I18n.t("packetMonitor.tree.payloadBytes", Integer.toString(bytes.length - 1)),
+                            1, bytes.length)));
         }
         return root;
     }
@@ -994,11 +1000,14 @@ public final class PacketDebugFormatter {
     private static String describeTextPayload(MeshProtos.Data data) {
         String text = data.getPayload().toString(StandardCharsets.UTF_8);
         if (text.isBlank()) {
-            return data.getEmoji() != 0 ? "Реакция без текста" : "Пустое текстовое сообщение";
+            return data.getEmoji() != 0
+                    ? I18n.t("packetMonitor.payload.reactionNoText")
+                    : I18n.t("packetMonitor.payload.emptyText");
         }
         if (data.getEmoji() != 0) {
-            return "Реакция " + quote(text)
-                    + (data.getReplyId() != 0 ? " на packet_id=" + formatUint32(data.getReplyId()) : "");
+            return data.getReplyId() != 0
+                    ? I18n.t("packetMonitor.payload.reactionToPacket", quote(text), formatUint32(data.getReplyId()))
+                    : I18n.t("packetMonitor.payload.reaction", quote(text));
         }
         if (data.getReplyId() != 0) {
             return quote(text) + " (reply_id=" + formatUint32(data.getReplyId()) + ")";
@@ -1096,7 +1105,7 @@ public final class PacketDebugFormatter {
 
     private static String describeGenericPayload(MeshProtos.MeshPacket packet, MeshProtos.Data data) {
         if (data.getPayload().isEmpty()) {
-            return "Пустой payload";
+            return I18n.t("packetMonitor.payload.emptyPayload");
         }
         if (isProbablyText(data.getPayload())) {
             return quote(truncate(data.getPayload().toString(StandardCharsets.UTF_8), TEXT_PREVIEW_LIMIT));
@@ -1106,7 +1115,7 @@ public final class PacketDebugFormatter {
     }
 
     private static String describeEncryptedPacket(MeshProtos.MeshPacket packet) {
-        return "Encrypted payload, bytes=" + packet.getEncrypted().size();
+        return I18n.t("packetMonitor.payload.encrypted", Integer.toString(packet.getEncrypted().size()));
     }
 
     private static boolean isPackedRepeatedField(FieldDescriptor field, int wireType) {
@@ -1439,7 +1448,7 @@ public final class PacketDebugFormatter {
     private static String formatNode(int nodeNum, com.meshtastic.client.model.DeviceState deviceState) {
         long unsignedNodeNum = Integer.toUnsignedLong(nodeNum);
         if (unsignedNodeNum == BROADCAST_NODE_NUM) {
-            return "Вещание (" + unsignedNodeNum + ")";
+            return I18n.t("packetMonitor.node.broadcast", Long.toString(unsignedNodeNum));
         }
         if (nodeNum == 0) {
             return "-";
@@ -1465,7 +1474,7 @@ public final class PacketDebugFormatter {
     private static String formatNodeDisplay(int nodeNum, com.meshtastic.client.model.DeviceState deviceState) {
         String nodeId = String.format("!%08x", nodeNum);
         if (Integer.toUnsignedLong(nodeNum) == BROADCAST_NODE_NUM) {
-            return "Вещание (" + nodeId + ")";
+            return I18n.t("packetMonitor.node.broadcast", nodeId);
         }
 
         String name = null;
