@@ -1,5 +1,6 @@
 package com.meshtastic.client.components.chat;
 
+import com.meshtastic.client.i18n.I18n;
 import javafx.collections.ListChangeListener;
 import javafx.scene.canvas.Canvas;
 import javafx.scene.canvas.GraphicsContext;
@@ -49,7 +50,7 @@ public class SendButtonWithRing extends StackPane {
         // Кнопка отправки
         sendButton = new Button("➤");
         sendButton.getStyleClass().add("chat-send-btn");
-        sendButton.setTooltip(new Tooltip("Отправить"));
+        sendButton.setTooltip(new Tooltip(I18n.t("chat.send")));
         sendButton.setOnAction(e -> onSend.run());
         sendButton.setDisable(true);
 

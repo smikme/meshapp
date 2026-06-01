@@ -7,6 +7,7 @@ import com.meshtastic.client.components.chat.ChatListCell;
 import com.meshtastic.client.components.chat.ChatNameResolver;
 import com.meshtastic.client.components.chat.MessageBubbleFactory;
 import com.meshtastic.client.components.chat.TracerouteView;
+import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.lua.LuaScript;
 import com.meshtastic.client.lua.LuaScriptService;
 import com.meshtastic.client.modal.Toast;
@@ -100,7 +101,7 @@ abstract class FormChatUi extends FormChatBase {
 
     private TextField createSearchField() {
         TextField searchField = new TextField();
-        searchField.setPromptText("Поиск чатов");
+        searchField.setPromptText(I18n.t("chat.search.placeholder"));
         searchField.getStyleClass().add("chat-search-field");
         return searchField;
     }
@@ -108,7 +109,7 @@ abstract class FormChatUi extends FormChatBase {
     private Button createNewChatButton() {
         Button button = new Button("✎");
         button.getStyleClass().add("chat-new-btn");
-        button.setTooltip(new Tooltip("Новый чат"));
+        button.setTooltip(new Tooltip(I18n.t("chat.new.tooltip")));
         button.setOnAction(event -> showNewChatDialog());
         return button;
     }
@@ -219,7 +220,7 @@ abstract class FormChatUi extends FormChatBase {
         box.setAlignment(Pos.CENTER);
         VBox.setVgrow(box, Priority.ALWAYS);
 
-        Label placeholder = new Label("Выберите, кому хотели бы написать");
+        Label placeholder = new Label(I18n.t("chat.emptySelection"));
         placeholder.getStyleClass().add("form-placeholder-label");
         placeholder.setWrapText(true);
         box.getChildren().add(placeholder);
@@ -276,7 +277,7 @@ abstract class FormChatUi extends FormChatBase {
     private Button createQuickScriptButton() {
         Button button = FormChatUiSupport.createHeaderIconButton(
                 "/icons/autoplay.svg",
-                "Быстрый запуск ботов",
+                I18n.t("chat.quickBots.tooltip"),
                 "▶");
         button.setOnAction(event -> toggleQuickScriptMenu(button));
         return button;
@@ -297,7 +298,7 @@ abstract class FormChatUi extends FormChatBase {
         ContextMenu menu = new ContextMenu();
         List<LuaScript> scripts = quickLaunchScripts();
         if (scripts.isEmpty()) {
-            MenuItem emptyItem = new MenuItem("Нет доступных ботов");
+            MenuItem emptyItem = new MenuItem(I18n.t("chat.quickBots.empty"));
             emptyItem.setDisable(true);
             menu.getItems().add(emptyItem);
             return menu;
@@ -544,8 +545,8 @@ abstract class FormChatUi extends FormChatBase {
         String scriptName = hasText(script.getName()) ? script.getName().trim() : "Lua";
         String description = script.getDescription();
         return hasText(description)
-                ? "Автоматизация: " + scriptName + " - " + description.trim()
-                : "Автоматизация: " + scriptName;
+                ? I18n.t("chat.automation.descriptionWithDetails", scriptName, description.trim())
+                : I18n.t("chat.automation.description", scriptName);
     }
 
     private static boolean hasText(String value) {
@@ -589,7 +590,7 @@ abstract class FormChatUi extends FormChatBase {
     private boolean sendDirectMessage(ChatInputBar.SendRequest request) {
         NodeData peerNode = NodeUtils.resolveNode(state, selectedChat.getPeerNodeId());
         if (Optional.ofNullable(peerNode).filter(NodeData::isUnmessagable).isPresent()) {
-            Toast.show(Toast.Type.WARNING, "Нода объявила, что не принимает личные сообщения");
+            Toast.show(Toast.Type.WARNING, I18n.t("chat.toast.unmessagable"));
             return false;
         }
 
@@ -602,7 +603,7 @@ abstract class FormChatUi extends FormChatBase {
                     if (Optional.ofNullable(sent).isPresent()) {
                         return true;
                     }
-                    Toast.show(Toast.Type.ERROR, "Не удалось определить MeshCore contact для DM");
+                    Toast.show(Toast.Type.ERROR, I18n.t("chat.toast.meshcoreDmContactMissing"));
                     return false;
                 })
                 .orElseGet(() -> {
@@ -615,7 +616,7 @@ abstract class FormChatUi extends FormChatBase {
                     if (Optional.ofNullable(sent).isPresent()) {
                         return true;
                     }
-                    Toast.show(Toast.Type.ERROR, "Не удалось определить ноду для DM");
+                    Toast.show(Toast.Type.ERROR, I18n.t("chat.toast.dmNodeMissing"));
                     return false;
                 });
     }

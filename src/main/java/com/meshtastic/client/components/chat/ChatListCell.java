@@ -1,6 +1,7 @@
 package com.meshtastic.client.components.chat;
 
 import com.meshtastic.client.components.EmojiTextFlow;
+import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.modal.ModalPane;
 import com.meshtastic.client.model.ChatItem;
 import com.meshtastic.client.themes.TypographyManager;
@@ -51,7 +52,7 @@ public class ChatListCell extends ListCell<ChatItem> {
     private final VBox textBox = new VBox(2);
     private final Label nameLabel = new Label();
     private final Label muteIconLabel = new Label();
-    private final Tooltip muteIconTooltip = new Tooltip("Оповещения чата");
+    private final Tooltip muteIconTooltip = new Tooltip(I18n.t("chat.notifications.tooltip"));
     private final EmojiTextFlow messagePreview = new EmojiTextFlow();
     private final VBox metaBox = new VBox(4);
     private final HBox timeBox = new HBox(6);
@@ -135,7 +136,7 @@ public class ChatListCell extends ListCell<ChatItem> {
         root.getChildren().addAll(avatarPane, textBox, metaBox);
 
         // Контекстное меню (правый клик)
-        MenuItem propertiesItem = new MenuItem("Свойства");
+        MenuItem propertiesItem = new MenuItem(I18n.t("chat.menu.properties"));
         propertiesItem.setOnAction(ev -> {
             ChatItem chatItem = getItem();
             if (chatItem != null) {
@@ -151,7 +152,7 @@ public class ChatListCell extends ListCell<ChatItem> {
             }
         });
 
-        MenuItem closeItem = new MenuItem("Удалить локально");
+        MenuItem closeItem = new MenuItem(I18n.t("chat.menu.deleteLocal"));
         chatContextMenu = new ContextMenu(propertiesItem, notificationsItem, new SeparatorMenuItem(), closeItem);
 
         // «Свойства» только для каналов
@@ -166,10 +167,10 @@ public class ChatListCell extends ListCell<ChatItem> {
             propertiesItem.setVisible(isChannel);
             if (chatItem != null) {
                 notificationsItem.setText(chatItem.isMuted()
-                        ? "Включить оповещения"
-                        : "Выключить оповещения");
+                        ? I18n.t("chat.menu.notificationsEnable")
+                        : I18n.t("chat.menu.notificationsDisable"));
             }
-            closeItem.setText(isChannel ? "Отключить канал" : "Удалить локально");
+            closeItem.setText(isChannel ? I18n.t("chat.menu.disableChannel") : I18n.t("chat.menu.deleteLocal"));
         });
 
         closeItem.setOnAction(ev -> {
@@ -178,13 +179,12 @@ public class ChatListCell extends ListCell<ChatItem> {
                 return;
             }
             ModalPane.showConfirm(
-                    (chatItem.getType() == ChatItem.ChatType.CHANNEL
-                            ? "Отключить канал «"
-                            : "Удалить локально «")
-                            + chatItem.getDisplayName() + "»?",
                     chatItem.getType() == ChatItem.ChatType.CHANNEL
-                            ? "Канал будет отключён на устройстве, а сообщения удалены локально."
-                            : "История этого DM будет удалена только на этом клиенте.",
+                            ? I18n.t("chat.confirm.disableChannel.title", chatItem.getDisplayName())
+                            : I18n.t("chat.confirm.deleteDm.title", chatItem.getDisplayName()),
+                    chatItem.getType() == ChatItem.ChatType.CHANNEL
+                            ? I18n.t("chat.confirm.disableChannel.message")
+                            : I18n.t("chat.confirm.deleteDm.message"),
                     confirmed -> {
                         if (confirmed) {
                             onDeleteChat.accept(chatItem);
@@ -217,8 +217,8 @@ public class ChatListCell extends ListCell<ChatItem> {
         muteIconLabel.setText(null);
         muteIconLabel.setGraphic(createMuteIcon(item.isMuted()));
         muteIconTooltip.setText(item.isMuted()
-                ? "Оповещения чата выключены"
-                : "Оповещения чата включены");
+                ? I18n.t("chat.notifications.disabled")
+                : I18n.t("chat.notifications.enabled"));
         previewSourceText = item.getLastMessageText() != null ? item.getLastMessageText() : "";
         messagePreview.setEmojiSize(TypographyManager.scaleChat(PREVIEW_FONT_SIZE));
         applyFixedPreviewHeight();

@@ -1,12 +1,12 @@
 package com.meshtastic.client.components.chat;
 
+import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.model.NodeData;
 
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.time.format.TextStyle;
-import java.util.Locale;
 
 /**
  * Утилита форматирования времени для чата (русская локаль, Telegram-стиль).
@@ -54,14 +54,14 @@ public final class ChatTimeFormatter {
                     .format(TIME_FORMAT);
         }
         if (diff < SECONDS_IN_TWO_DAYS) {
-            return "вчера";
+            return I18n.t("chat.time.yesterday");
         }
         if (diff < SECONDS_IN_WEEK) {
             return Instant.ofEpochSecond(epochSeconds)
                     .atZone(ZoneId.systemDefault())
                     .toLocalDate()
                     .getDayOfWeek()
-                    .getDisplayName(TextStyle.SHORT, Locale.of("ru"));
+                    .getDisplayName(TextStyle.SHORT, I18n.locale());
         }
         return NodeData.formatTime((int) epochSeconds);
     }

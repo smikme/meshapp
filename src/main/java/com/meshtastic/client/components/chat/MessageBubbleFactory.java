@@ -3,6 +3,7 @@ package com.meshtastic.client.components.chat;
 import com.meshtastic.client.components.EmojiImageCache;
 import com.meshtastic.client.components.EmojiTextFlow;
 import com.meshtastic.client.components.NodeDetailPanel;
+import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.model.NodeData;
@@ -94,8 +95,6 @@ public class MessageBubbleFactory {
     private static final double SMALL_AVATAR_RADIUS = SMALL_AVATAR_SIZE / 2.0;
     private static final String AVATAR_LABEL_STYLE = "-fx-text-fill: white; -fx-padding: 0;";
     private static final String LIGHT_THEME_STYLE_CLASS = "light-theme";
-    private static final String REACTION_UNAVAILABLE_TOOLTIP = "Реакция недоступна: у сообщения нет packet id";
-    private static final String RETRY_TOOLTIP = "Повторить отправку";
     private static final String RETRY_ICON_PATH = "/icons/refresh.svg";
     private static final String OK_STATUS_ICON_PATH = "/icons/status-ok-flat.svg";
     private static final int OK_STATUS_ICON_SIZE = 18;
@@ -1227,7 +1226,7 @@ public class MessageBubbleFactory {
     private static void disableReactionButton(Button reactionButton) {
         reactionButton.getStyleClass().add("chat-reaction-btn-disabled");
         reactionButton.setCursor(Cursor.DEFAULT);
-        reactionButton.setTooltip(new Tooltip(REACTION_UNAVAILABLE_TOOLTIP));
+        reactionButton.setTooltip(new Tooltip(I18n.t("chat.bubble.reactionUnavailable")));
     }
 
     /**
@@ -1449,7 +1448,7 @@ public class MessageBubbleFactory {
             retryAction.getChildren().add(fallback);
         }
 
-        Tooltip.install(retryAction, new Tooltip(RETRY_TOOLTIP));
+        Tooltip.install(retryAction, new Tooltip(I18n.t("chat.bubble.retry")));
         retryAction.setOnMouseClicked(event -> {
             if (event.getButton() != MouseButton.PRIMARY) {
                 return;
@@ -1471,10 +1470,10 @@ public class MessageBubbleFactory {
      */
     private void attachIncomingContextMenu(VBox content, MeshMessage msg, HBox row) {
         installContextMenu(content, () -> new ContextMenu(
-                createMenuItem("Копировать", () -> copyText(msg.getText())),
-                createMenuItem("Ответить", () -> actions.startReply(msg)),
+                createMenuItem(I18n.t("common.copy"), () -> copyText(msg.getText())),
+                createMenuItem(I18n.t("chat.bubble.reply"), () -> actions.startReply(msg)),
                 new SeparatorMenuItem(),
-                createMenuItem("Удалить", () -> actions.confirmDeleteMessage(msg, row))
+                createMenuItem(I18n.t("common.delete"), () -> actions.confirmDeleteMessage(msg, row))
         ));
     }
 
@@ -1487,9 +1486,9 @@ public class MessageBubbleFactory {
      */
     private void attachCopyDeleteMenu(VBox content, MeshMessage msg, HBox row) {
         installContextMenu(content, () -> new ContextMenu(
-                createMenuItem("Копировать", () -> copyText(msg.getText())),
+                createMenuItem(I18n.t("common.copy"), () -> copyText(msg.getText())),
                 new SeparatorMenuItem(),
-                createMenuItem("Удалить", () -> actions.confirmDeleteMessage(msg, row))
+                createMenuItem(I18n.t("common.delete"), () -> actions.confirmDeleteMessage(msg, row))
         ));
     }
 

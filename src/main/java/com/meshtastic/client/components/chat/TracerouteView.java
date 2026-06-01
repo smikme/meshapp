@@ -2,6 +2,7 @@ package com.meshtastic.client.components.chat;
 
 import com.meshtastic.client.components.EmojiImageCache;
 import com.meshtastic.client.components.EmojiTextFlow;
+import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.themes.TypographyManager;
 import javafx.beans.property.ReadOnlyDoubleProperty;
@@ -103,7 +104,7 @@ public class TracerouteView {
     public String formatText(String targetName, MeshProtos.RouteDiscovery route) {
         StringBuilder sb = new StringBuilder();
         sb.append(TRACEROUTE_PREFIX).append(targetName).append("\n");
-        sb.append("Я");
+        sb.append(selfName());
         List<Integer> hops = route.getRouteList();
         int snrCount = route.getSnrTowardsCount();
         for (int i = 0; i <= hops.size(); i++) {
@@ -128,7 +129,7 @@ public class TracerouteView {
                     sb.append(" → ");
                 }
                 sb.append((i < backHops.size())
-                        ? nodeNameResolver.apply(backHops.get(i)) : "Я");
+                        ? nodeNameResolver.apply(backHops.get(i)) : selfName());
             }
         }
         return sb.toString();
@@ -156,17 +157,17 @@ public class TracerouteView {
 
         // Прямой маршрут
         content.getChildren().add(buildRouteChain(
-                "Я", targetName,
+                selfName(), targetName,
                 route.getRouteList(), route.getSnrTowardsList(), true));
 
         // Обратный маршрут
         if (hasReverseRoute(route)) {
-            Label backLabel = new Label("Обратный:");
+            Label backLabel = new Label(I18n.t("chat.traceroute.reverse"));
             backLabel.getStyleClass().addAll(
                     "chat-bubble-text", "traceroute-section-label");
             content.getChildren().add(backLabel);
             content.getChildren().add(buildRouteChain(
-                    targetName, "Я",
+                    targetName, selfName(),
                     route.getRouteBackList(), route.getSnrBackList(), false));
         }
 
@@ -216,7 +217,7 @@ public class TracerouteView {
                 buildRouteChainFromNames(fwd.names, fwd.snrValues, true));
 
         if (back != null) {
-            Label backLabel = new Label("Обратный:");
+            Label backLabel = new Label(I18n.t("chat.traceroute.reverse"));
             backLabel.getStyleClass().addAll(
                     "chat-bubble-text", "traceroute-section-label");
             content.getChildren().add(backLabel);
@@ -277,7 +278,7 @@ public class TracerouteView {
     }
 
     private void attachContextMenu(VBox content, MeshMessage msg, HBox row) {
-        MenuItem copyItem = new MenuItem("Копировать");
+        MenuItem copyItem = new MenuItem(I18n.t("common.copy"));
         copyItem.setOnAction(ev -> {
             ClipboardContent cc = new ClipboardContent();
             cc.putString(msg.getText());
@@ -285,7 +286,7 @@ public class TracerouteView {
         });
         ContextMenu ctxMenu;
         if (onDeleteMessage != null) {
-            MenuItem deleteItem = new MenuItem("Удалить");
+            MenuItem deleteItem = new MenuItem(I18n.t("common.delete"));
             deleteItem.setOnAction(ev -> onDeleteMessage.accept(msg, row));
             ctxMenu = new ContextMenu(copyItem, new SeparatorMenuItem(), deleteItem);
         } else {
@@ -411,6 +412,10 @@ public class TracerouteView {
     private static boolean hasReverseRoute(MeshProtos.RouteDiscovery route) {
         // route_back stores only intermediate nodes; direct return links are represented by snr_back alone.
         return route.getRouteBackCount() > 0 || route.getSnrBackCount() > 0;
+    }
+
+    private static String selfName() {
+        return I18n.t("chat.self.avatar");
     }
 
     private static ParsedRoute parseRouteLine(String line) {

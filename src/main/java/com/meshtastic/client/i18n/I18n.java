@@ -35,6 +35,10 @@ public final class I18n {
         return languageTag;
     }
 
+    public static Locale locale() {
+        return bundle.getLocale();
+    }
+
     public static void setLanguageTag(String tag) {
         String normalized = normalizeLanguageTag(tag);
         AppPreferences.setLanguageTag(normalized);
@@ -69,7 +73,7 @@ public final class I18n {
         return new MessageFormat(pattern, bundle.getLocale()).format(args);
     }
 
-    static void setLanguageTagForTests(String tag) {
+    public static void setLanguageTagForTests(String tag) {
         setCurrentLanguageTag(tag);
     }
 

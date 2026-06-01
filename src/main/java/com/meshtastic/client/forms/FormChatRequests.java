@@ -2,6 +2,7 @@ package com.meshtastic.client.forms;
 
 import com.meshtastic.client.components.EmojiTextFlow;
 import com.meshtastic.client.components.chat.ChatBotCommandHelper;
+import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.lua.LuaAutomationCommand;
 import com.meshtastic.client.lua.LuaScript;
 import com.meshtastic.client.lua.LuaScriptEvent;
@@ -67,7 +68,7 @@ abstract class FormChatRequests extends FormChatMessages {
         pc.countdownLabel = (EmojiTextFlow) content.getChildren().getFirst();
 
         // Кнопка «Отменить»
-        Label cancelBtn = new Label("Отменить");
+        Label cancelBtn = new Label(I18n.t("chat.cancel"));
         cancelBtn.getStyleClass().add("chat-countdown-cancel");
         cancelBtn.setCursor(Cursor.HAND);
         cancelBtn.setOnMouseClicked(e -> {
@@ -125,20 +126,20 @@ abstract class FormChatRequests extends FormChatMessages {
     protected void sendReaction(MeshMessage msg, String emoji) {
         if (msg == null || emoji == null || emoji.isEmpty()) { return; }
         if (selectedChat == null || state == null || (protocolHandler == null && meshCoreCompanionRuntime == null)) {
-            Toast.show(Toast.Type.WARNING, "Нет подключения к радио");
+            Toast.show(Toast.Type.WARNING, I18n.t("chat.toast.radioNotConnected"));
             return;
         }
         if (meshCoreCompanionRuntime != null) {
-            Toast.show(Toast.Type.WARNING, "Реакции пока недоступны для MeshCore Companion Protocol");
+            Toast.show(Toast.Type.WARNING, I18n.t("chat.toast.reactionsMeshcoreUnavailable"));
             return;
         }
         if (msg.getPacketId() == 0) {
-            Toast.show(Toast.Type.WARNING, "Реакция недоступна: у сообщения нет packet id");
+            Toast.show(Toast.Type.WARNING, I18n.t("chat.toast.reactionUnavailableNoPacket"));
             return;
         }
 
         if (!sendReactionToSelectedChat(msg, emoji)) {
-            Toast.show(Toast.Type.ERROR, "Не удалось сохранить реакцию локально");
+            Toast.show(Toast.Type.ERROR, I18n.t("chat.toast.reactionSaveFailed"));
             return;
         }
         refreshCurrentChatAfterLocalReaction();
@@ -158,7 +159,7 @@ abstract class FormChatRequests extends FormChatMessages {
             return false;
         }
         if (state == null || (protocolHandler == null && meshCoreCompanionRuntime == null)) {
-            Toast.show(Toast.Type.WARNING, "Нет подключения к радио");
+            Toast.show(Toast.Type.WARNING, I18n.t("chat.toast.radioNotConnected"));
             return false;
         }
 
@@ -189,7 +190,7 @@ abstract class FormChatRequests extends FormChatMessages {
 
         NodeData peerNode = NodeUtils.resolveNode(state, msg.getToNodeId());
         if (peerNode != null && peerNode.isUnmessagable()) {
-            Toast.show(Toast.Type.WARNING, "Нода объявила, что не принимает личные сообщения");
+            Toast.show(Toast.Type.WARNING, I18n.t("chat.toast.unmessagable"));
             return false;
         }
         return true;
@@ -198,7 +199,9 @@ abstract class FormChatRequests extends FormChatMessages {
     private void showRetryFailedToast(MeshMessage msg) {
         Toast.show(
                 Toast.Type.ERROR,
-                isChannelMessage(msg) ? "Не удалось переотправить сообщение" : "Не удалось определить ноду для DM");
+                isChannelMessage(msg)
+                        ? I18n.t("chat.toast.retryMessageFailed")
+                        : I18n.t("chat.toast.dmNodeMissing"));
     }
 
     // ==================== Lua automation ====================
@@ -208,7 +211,7 @@ abstract class FormChatRequests extends FormChatMessages {
             return false;
         }
         if (selectedChat == null || state == null || (protocolHandler == null && meshCoreCompanionRuntime == null)) {
-            Toast.show(Toast.Type.WARNING, "Нет подключения к радио");
+            Toast.show(Toast.Type.WARNING, I18n.t("chat.toast.radioNotConnected"));
             return false;
         }
         if (command.action() == ChatBotCommandHelper.BotAction.AUTOMATION) {
@@ -222,7 +225,7 @@ abstract class FormChatRequests extends FormChatMessages {
         if (script.isEmpty()
                 || !script.get().isEnabled()
                 || script.get().getBotType() != LuaScript.BotType.AUTOMATION_BOT) {
-            Toast.show(Toast.Type.WARNING, "Автоматизация не найдена: " + command.botHandle());
+            Toast.show(Toast.Type.WARNING, I18n.t("chat.toast.automationNotFound", command.botHandle()));
             return false;
         }
 

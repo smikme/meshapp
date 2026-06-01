@@ -1,6 +1,7 @@
 package com.meshtastic.client.forms;
 
 import com.meshtastic.client.components.chat.ChatBotCommandHelper;
+import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.service.ChatMessageSearchService;
 
@@ -284,14 +285,15 @@ final class FormChatMessageSearchController {
     }
 
     private Button createSearchButton() {
-        Button button = FormChatUiSupport.createHeaderIconButton("/icons/search.svg", "Поиск сообщений", "🔍");
+        Button button = FormChatUiSupport.createHeaderIconButton(
+                "/icons/search.svg", I18n.t("chat.searchMessages.tooltip"), "🔍");
         button.setOnAction(event -> open());
         return button;
     }
 
     private TextField createSearchField() {
         TextField field = new TextField();
-        field.setPromptText("Поиск сообщений");
+        field.setPromptText(I18n.t("chat.searchMessages.placeholder"));
         field.setMinWidth(54);
         field.getStyleClass().add("chat-message-search-field");
         field.textProperty().addListener((obs, oldValue, newValue) -> handleTextChanged(newValue));
@@ -306,7 +308,8 @@ final class FormChatMessageSearchController {
     }
 
     private Button createNodeButton() {
-        Button button = FormChatUiSupport.createHeaderIconButton("/icons/user.svg", "Фильтр по ноде", "👤");
+        Button button = FormChatUiSupport.createHeaderIconButton(
+                "/icons/user.svg", I18n.t("chat.searchMessages.nodeFilter"), "👤");
         button.setOnAction(event -> toggleNodeLookup());
         return button;
     }
@@ -318,19 +321,22 @@ final class FormChatMessageSearchController {
     }
 
     private Button createPreviousButton() {
-        Button button = FormChatUiSupport.createMessageSearchNavButton("↑", "Предыдущее совпадение");
+        Button button = FormChatUiSupport.createMessageSearchNavButton(
+                "↑", I18n.t("chat.searchMessages.previous"));
         button.setOnAction(event -> showPreviousResult());
         return button;
     }
 
     private Button createNextButton() {
-        Button button = FormChatUiSupport.createMessageSearchNavButton("↓", "Следующее совпадение");
+        Button button = FormChatUiSupport.createMessageSearchNavButton(
+                "↓", I18n.t("chat.searchMessages.next"));
         button.setOnAction(event -> showNextResult());
         return button;
     }
 
     private Button createCloseButton() {
-        Button button = FormChatUiSupport.createHeaderIconButton("/icons/close.svg", "Закрыть поиск", "×");
+        Button button = FormChatUiSupport.createHeaderIconButton(
+                "/icons/close.svg", I18n.t("chat.searchMessages.close"), "×");
         button.getStyleClass().add("chat-message-search-close-btn");
         button.setOnAction(event -> close(true));
         return button;
@@ -703,10 +709,10 @@ final class FormChatMessageSearchController {
 
     private void updateFieldPrompt() {
         String prompt = nodeLookupActive
-                ? "Поиск ноды"
+                ? I18n.t("chat.searchMessages.nodeLookup")
                 : Optional.ofNullable(currentNodeFilterId())
-                        .map(id -> "Поиск сообщений от " + nodeFilterLabel)
-                        .orElse("Поиск сообщений");
+                        .map(id -> I18n.t("chat.searchMessages.fromNode", nodeFilterLabel))
+                        .orElse(I18n.t("chat.searchMessages.placeholder"));
         searchField.setPromptText(prompt);
     }
 
@@ -717,10 +723,10 @@ final class FormChatMessageSearchController {
             nodeButton.getStyleClass().add("chat-header-icon-btn-active");
         }
         String tooltip = nodeLookupActive
-                ? "Выбор ноды"
+                ? I18n.t("chat.searchMessages.nodePick")
                 : Optional.ofNullable(filterId)
-                        .map(id -> "Фильтр: " + nodeFilterLabel)
-                        .orElse("Фильтр по ноде");
+                        .map(id -> I18n.t("chat.searchMessages.filterActive", nodeFilterLabel))
+                        .orElse(I18n.t("chat.searchMessages.nodeFilter"));
         nodeButton.setTooltip(new Tooltip(tooltip));
     }
 

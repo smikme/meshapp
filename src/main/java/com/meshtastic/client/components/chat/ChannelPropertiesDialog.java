@@ -1,5 +1,6 @@
 package com.meshtastic.client.components.chat;
 
+import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.modal.ModalPane;
 import com.meshtastic.client.modal.Toast;
 import com.meshtastic.client.model.DeviceState;
@@ -34,11 +35,13 @@ import java.util.List;
 public final class ChannelPropertiesDialog {
 
     private static final int[] PRECISION_BITS = {10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 32};
-    private static final String[] PRECISION_LABELS = {
-            "В пределах 23 км", "В пределах 12 км", "В пределах 5.8 км",
-            "В пределах 2.9 км", "В пределах 1.5 км", "В пределах 700 м",
-            "В пределах 350 м", "В пределах 200 м", "В пределах 90 м",
-            "В пределах 50 м", "Точная позиция"
+    private static final String[] PRECISION_KEYS = {
+            "chat.channel.precision.23km", "chat.channel.precision.12km",
+            "chat.channel.precision.5_8km", "chat.channel.precision.2_9km",
+            "chat.channel.precision.1_5km", "chat.channel.precision.700m",
+            "chat.channel.precision.350m", "chat.channel.precision.200m",
+            "chat.channel.precision.90m", "chat.channel.precision.50m",
+            "chat.channel.precision.exact"
     };
 
     private ChannelPropertiesDialog() {}
@@ -56,14 +59,14 @@ public final class ChannelPropertiesDialog {
                             int channelIndex,
                             Runnable onSaved) {
         if (state == null || protocolHandler == null) {
-            Toast.show(Toast.Type.WARNING, "Нет подключения к радио");
+            Toast.show(Toast.Type.WARNING, I18n.t("chat.toast.radioNotConnected"));
             return;
         }
 
         // Найти канал по индексу
         ChannelProtos.Channel currentChannel = findChannel(state, channelIndex);
         if (currentChannel == null) {
-            Toast.show(Toast.Type.WARNING, "Канал не найден");
+            Toast.show(Toast.Type.WARNING, I18n.t("chat.toast.channelNotFound"));
             return;
         }
 
@@ -82,15 +85,15 @@ public final class ChannelPropertiesDialog {
         panel.setMaxHeight(Double.MAX_VALUE);
         panel.getStyleClass().add("modal-side-panel");
 
-        Label title = new Label("Свойства канала");
+        Label title = new Label(I18n.t("chat.channel.properties.title"));
         title.getStyleClass().add("dialog-title");
 
         Separator sep = new Separator();
 
         // Имя канала
-        Label nameLabel = new Label("Имя канала:");
+        Label nameLabel = new Label(I18n.t("chat.channel.name"));
         TextField nameField = new TextField(currentSettings.getName());
-        nameField.setPromptText("До 11 символов");
+        nameField.setPromptText(I18n.t("chat.channel.namePrompt"));
         nameField.setMaxWidth(280);
         nameField.textProperty().addListener((obs, oldVal, newVal) -> {
             if (newVal != null
@@ -100,15 +103,15 @@ public final class ChannelPropertiesDialog {
         });
 
         // Ключ шифрования (PSK)
-        Label encLabel = new Label("Ключ шифрования (PSK):");
+        Label encLabel = new Label(I18n.t("chat.channel.psk"));
         String currentPskBase64 = currentSettings.getPsk().isEmpty()
                 ? ""
                 : Base64.getEncoder().encodeToString(currentSettings.getPsk().toByteArray());
         TextField pskField = new TextField(currentPskBase64);
-        pskField.setPromptText("Base64-ключ или пусто (без шифрования)");
+        pskField.setPromptText(I18n.t("chat.channel.pskPrompt"));
         pskField.setMaxWidth(280);
 
-        Button generateKeyBtn = new Button("Сгенерировать");
+        Button generateKeyBtn = new Button(I18n.t("common.generate"));
         generateKeyBtn.setOnAction(ev -> {
             byte[] key = new byte[32];
             new SecureRandom().nextBytes(key);
@@ -126,7 +129,7 @@ public final class ChannelPropertiesDialog {
         CheckBox downlinkCheck = new CheckBox("Downlink");
         downlinkCheck.setSelected(currentSettings.getDownlinkEnabled());
 
-        CheckBox positionCheck = new CheckBox("Позиция");
+        CheckBox positionCheck = new CheckBox(I18n.t("chat.channel.position"));
         int currentPrecisionVal = currentSettings.hasModuleSettings()
                 ? currentSettings.getModuleSettings().getPositionPrecision() : 0;
         positionCheck.setSelected(currentPrecisionVal > 0);
@@ -142,7 +145,7 @@ public final class ChannelPropertiesDialog {
             }
         }
 
-        Label precisionLabel = new Label(PRECISION_LABELS[initIndex]);
+        Label precisionLabel = new Label(precisionLabel(initIndex));
         precisionLabel.getStyleClass().add("muted-small-label");
 
         Slider precisionSlider = new Slider(0, PRECISION_BITS.length - 1, initIndex);
@@ -151,7 +154,7 @@ public final class ChannelPropertiesDialog {
         precisionSlider.setSnapToTicks(true);
         precisionSlider.setMaxWidth(280);
         precisionSlider.valueProperty().addListener((obs, oldVal, newVal) ->
-                precisionLabel.setText(PRECISION_LABELS[newVal.intValue()]));
+                precisionLabel.setText(precisionLabel(newVal.intValue())));
 
         VBox precisionBox = new VBox(4, precisionSlider, precisionLabel);
         precisionBox.setPadding(new Insets(0, 0, 0, 24));
@@ -168,10 +171,10 @@ public final class ChannelPropertiesDialog {
         statusLabel.setWrapText(true);
 
         // Кнопки
-        Button saveBtn = new Button("Сохранить");
+        Button saveBtn = new Button(I18n.t("common.save"));
         saveBtn.getStyleClass().add("accent");
 
-        Button cancelBtn = new Button("Отмена");
+        Button cancelBtn = new Button(I18n.t("common.cancel"));
         cancelBtn.setOnAction(e -> modalPane.hide());
 
         HBox btnRow = new HBox(10, cancelBtn, saveBtn);
@@ -197,7 +200,7 @@ public final class ChannelPropertiesDialog {
                     byte[] decoded = Base64.getDecoder().decode(pskText);
                     psk = com.google.protobuf.ByteString.copyFrom(decoded);
                 } catch (IllegalArgumentException ex) {
-                    statusLabel.setText("Некорректный Base64-ключ");
+                    statusLabel.setText(I18n.t("chat.channel.invalidPsk"));
                     return;
                 }
             }
@@ -231,20 +234,20 @@ public final class ChannelPropertiesDialog {
                     .build();
 
             saveBtn.setDisable(true);
-            statusLabel.setText("Запрос session key...");
+            statusLabel.setText(I18n.t("chat.channel.requestSessionKey"));
 
             // Паттерн session_passkey: запрос → ожидание → отправка
             Runnable[] listenerHolder = new Runnable[1];
             listenerHolder[0] = () -> Platform.runLater(() -> {
                 state.removeOwnerInfoListener(listenerHolder[0]);
-                statusLabel.setText("Отправка...");
+                statusLabel.setText(I18n.t("chat.channel.sending"));
 
                 MessageService.setChannel(
                         protocolHandler, state, channel, state.getSessionPasskey());
                 state.updateChannel(channel);
 
                 Toast.show(Toast.Type.SUCCESS,
-                        "Канал \"" + (channelName.isEmpty() ? "Ch " + channelIndex : channelName) + "\" обновлён");
+                        I18n.t("chat.channel.updated", displayChannelName(channelName, channelIndex)));
                 modalPane.hide();
                 onSaved.run();
             });
@@ -265,7 +268,7 @@ public final class ChannelPropertiesDialog {
                         state.updateChannel(channel);
 
                         Toast.show(Toast.Type.SUCCESS,
-                                "Канал \"" + (channelName.isEmpty() ? "Ch " + channelIndex : channelName) + "\" обновлён");
+                                I18n.t("chat.channel.updated", displayChannelName(channelName, channelIndex)));
                         modalPane.hide();
                         onSaved.run();
                     }
@@ -292,5 +295,15 @@ public final class ChannelPropertiesDialog {
             }
         }
         return null;
+    }
+
+    private static String displayChannelName(String channelName, int channelIndex) {
+        return channelName.isEmpty()
+                ? I18n.t("chat.channel.defaultName", channelIndex)
+                : channelName;
+    }
+
+    private static String precisionLabel(int index) {
+        return I18n.t(PRECISION_KEYS[index]);
     }
 }

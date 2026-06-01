@@ -2,6 +2,7 @@ package com.meshtastic.client.components.chat;
 
 import com.meshtastic.client.components.EmojiImageCache;
 import com.meshtastic.client.components.EmojiPicker;
+import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.utils.UnicodeTextUtils;
 import javafx.application.Platform;
@@ -45,8 +46,6 @@ public class ChatInputBar extends VBox {
     private static final int REPLY_ID_OVERHEAD = 5;
     private static final int MAX_COMMAND_SUGGESTIONS = 8;
     private static final String SELECTED_SUGGESTION_STYLE_CLASS = "chat-command-suggestion-btn-selected";
-    private static final String DEFAULT_PROMPT_TEXT = "Сообщение...";
-    private static final String NODE_PICK_PROMPT_TEXT = "Имя или !nodeid";
 
     /** Данные для колбэка отправки. */
     public record SendRequest(String text, int replyId) {}
@@ -102,7 +101,7 @@ public class ChatInputBar extends VBox {
             emojiBtn.setText("\uD83D\uDE00");
         }
         emojiBtn.getStyleClass().add("chat-emoji-btn");
-        emojiBtn.setTooltip(new Tooltip("Эмодзи"));
+        emojiBtn.setTooltip(new Tooltip(I18n.t("chat.emoji")));
         emojiPicker = new EmojiPicker(this::insertEmoji);
         emojiBtn.setOnAction(e -> emojiPicker.toggle(emojiBtn));
 
@@ -113,7 +112,7 @@ public class ChatInputBar extends VBox {
 
         // Поле ввода (кастомное с emoji-картинками)
         messageInput = new EmojiTextField();
-        messageInput.setPromptText(DEFAULT_PROMPT_TEXT);
+        messageInput.setPromptText(defaultPromptText());
         messageInput.setMaxBytesSupplier(this::getMaxTextBytes);
         HBox.setHgrow(messageInput, Priority.ALWAYS);
 
@@ -177,7 +176,7 @@ public class ChatInputBar extends VBox {
 
         Button cancelReplyBtn = new Button("✕");
         cancelReplyBtn.getStyleClass().add("chat-reply-cancel");
-        cancelReplyBtn.setTooltip(new Tooltip("Отменить ответ"));
+        cancelReplyBtn.setTooltip(new Tooltip(I18n.t("chat.input.cancelReply")));
         cancelReplyBtn.setOnAction(e -> cancelReply());
 
         replyBar = new HBox(8, replyIcon, replyQuoteLabel, cancelReplyBtn);
@@ -228,7 +227,7 @@ public class ChatInputBar extends VBox {
         cancelReply();
 
         String initialQuery = query != null ? query : "";
-        messageInput.setPromptText(prompt != null && !prompt.isBlank() ? prompt : NODE_PICK_PROMPT_TEXT);
+        messageInput.setPromptText(prompt != null && !prompt.isBlank() ? prompt : nodePickPromptText());
         messageInput.setText(initialQuery);
         savedCaretPosition = initialQuery.length();
         messageInput.requestFocus();
@@ -517,7 +516,7 @@ public class ChatInputBar extends VBox {
         activeNodePick = null;
         hideCommandSuggestions();
         messageInput.clear();
-        messageInput.setPromptText(DEFAULT_PROMPT_TEXT);
+        messageInput.setPromptText(defaultPromptText());
         savedCaretPosition = 0;
         messageInput.requestFocus();
         if (pick.onSelected() != null) {
@@ -533,7 +532,7 @@ public class ChatInputBar extends VBox {
         activeNodePick = null;
         hideCommandSuggestions();
         messageInput.clear();
-        messageInput.setPromptText(DEFAULT_PROMPT_TEXT);
+        messageInput.setPromptText(defaultPromptText());
         savedCaretPosition = 0;
         if (notify && pick.onCancelled() != null) {
             pick.onCancelled().run();
@@ -638,6 +637,14 @@ public class ChatInputBar extends VBox {
 
     private boolean isCommandSuggestionsVisible() {
         return commandSuggestionRoot.isVisible();
+    }
+
+    private static String defaultPromptText() {
+        return I18n.t("chat.input.message");
+    }
+
+    private static String nodePickPromptText() {
+        return I18n.t("chat.input.nodePick");
     }
 
 }
