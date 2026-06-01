@@ -25,11 +25,11 @@ public record SerialModemLinePolicy(boolean assertDtr, boolean assertRts, String
     }
 
     /**
-     * Создаёт policy из сохранённого ручного режима serial-профиля.
+     * Creates a policy from the persisted manual mode of a serial profile.
      *
-     * @param assertDtr включать ли DTR при открытии порта
-     * @param assertRts включать ли RTS при открытии порта
-     * @return policy с явными значениями DTR/RTS
+     * @param assertDtr whether to assert DTR when the port opens
+     * @param assertRts whether to assert RTS when the port opens
+     * @return policy with explicit DTR/RTS values
      */
     public static SerialModemLinePolicy manual(boolean assertDtr, boolean assertRts) {
         return new SerialModemLinePolicy(assertDtr, assertRts, "manual override");

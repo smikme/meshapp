@@ -3,11 +3,11 @@ package com.meshtastic.client.protocol;
 import org.meshtastic.proto.*;
 
 /**
- * Слушатель входящих сообщений {@code FromRadio} от Meshtastic-устройства.
+ * Listener for incoming {@code FromRadio} messages from a Meshtastic device.
  * <p>
- * Все методы имеют пустую реализацию по умолчанию ({@code default}),
- * что позволяет реализовывать только нужные callback-и.
- * Вызываются из transport reader-потока при получении и парсинге {@code FromRadio}.
+ * Every method has an empty default implementation so callers can implement
+ * only the callbacks they need. Methods are invoked after transport input has
+ * been parsed into {@code FromRadio}.
  *
  * @see ProtocolHandler
  *
@@ -15,36 +15,36 @@ import org.meshtastic.proto.*;
  */
 public interface FromRadioListener {
 
-    /** Получена информация о локальной ноде (номер, версия прошивки). */
+    /** Receives local node information such as node number and firmware version. */
     default void onMyNodeInfo(MeshProtos.MyNodeInfo myInfo) {}
 
-    /** Получена информация о ноде сети (имя, позиция, метрики). */
+    /** Receives information about a mesh node, including name, position, and metrics. */
     default void onNodeInfo(MeshProtos.NodeInfo nodeInfo) {}
 
-    /** Получена секция конфигурации устройства (Device, Position, LoRa и др.). */
+    /** Receives a device configuration section such as Device, Position, or LoRa. */
     default void onConfig(ConfigProtos.Config config) {}
 
-    /** Получена секция модульной конфигурации (MQTT, Serial, Telemetry и др.). */
+    /** Receives a module configuration section such as MQTT, Serial, or Telemetry. */
     default void onModuleConfig(ModuleConfigProtos.ModuleConfig moduleConfig) {}
 
-    /** Получен канал (PRIMARY или SECONDARY). */
+    /** Receives a PRIMARY or SECONDARY channel. */
     default void onChannel(ChannelProtos.Channel channel) {}
 
-    /** Config exchange завершён. {@code configCompleteId} должен совпадать с отправленным {@code want_config_id}. */
+    /** Receives config-exchange completion; {@code configCompleteId} should match the sent {@code want_config_id}. */
     default void onConfigComplete(int configCompleteId) {}
 
-    /** Радио сообщило, что только что перезагрузилось. */
+    /** Receives the radio reboot marker. */
     default void onRebooted() {}
 
-    /** Получен mesh-пакет (текстовое сообщение, телеметрия, routing ACK и др.). */
+    /** Receives a mesh packet such as text, telemetry, routing ACK, or similar payload. */
     default void onMeshPacket(MeshProtos.MeshPacket packet) {}
 
-    /** Получено MQTT proxy-сообщение для публикации через клиент / desktop bridge. */
+    /** Receives an MQTT proxy message to publish through the desktop bridge. */
     default void onMqttClientProxyMessage(MeshProtos.MqttClientProxyMessage proxyMessage) {}
 
-    /** Получена запись лога устройства. */
+    /** Receives one device log record. */
     default void onLogRecord(MeshProtos.LogRecord logRecord) {}
 
-    /** Получен статус очереди отправки устройства. */
+    /** Receives the device transmit queue status. */
     default void onQueueStatus(MeshProtos.QueueStatus queueStatus) {}
 }

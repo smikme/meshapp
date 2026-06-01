@@ -5,12 +5,13 @@ import com.sun.jna.Native;
 import com.sun.jna.ptr.IntByReference;
 
 /**
- * macOS shim для безопасного управления modem lines через не-variadic C API.
+ * macOS shim for safe modem-line control through a non-variadic C API.
  * <p>
- * Системный {@code ioctl()} на macOS объявлен как variadic. На Apple Silicon
- * прямой вызов этого API через JNA может завершить JVM abort'ом из-за отличий ABI.
- * Поэтому Java-код вызывает маленькую native-библиотеку с фиксированными сигнатурами,
- * а уже она делает {@code ioctl(TIOCMBIS/TIOCMBIC/TIOCMGET)} внутри C.
+ * macOS declares the system {@code ioctl()} function as variadic. On Apple
+ * Silicon, calling it directly through JNA can abort the JVM because of ABI
+ * differences. Java therefore calls a small native library with fixed
+ * signatures; that library performs {@code ioctl(TIOCMBIS/TIOCMBIC/TIOCMGET)}
+ * from C.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -27,10 +28,10 @@ final class MacOsSerialLibrary {
     private MacOsSerialLibrary() {}
 
     /**
-     * Лениво загружает macOS serial shim из classpath resources через JNA.
+     * Lazily loads the macOS serial shim from classpath resources through JNA.
      *
-     * @return singleton JNA-мэппинг {@code libmeshapp-serial.dylib}
-     * @throws IllegalStateException если библиотека не собрана или не может быть загружена
+     * @return singleton JNA mapping for {@code libmeshapp-serial.dylib}
+     * @throws IllegalStateException if the library is missing or cannot be loaded
      */
     static Api instance() {
         Api library = instance;

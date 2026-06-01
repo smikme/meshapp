@@ -36,17 +36,17 @@ import java.util.Objects;
 import java.util.Optional;
 
 /**
- * Обрабатывает пользовательские действия, создающие протокольные запросы из открытого чата.
+ * Handles chat actions that create protocol requests from the open conversation.
  *
- * <p>Сюда относятся ответы, реакции, повторная отправка, Lua automation-команды
- * и временные пузыри обратного отсчёта.
+ * <p>This includes replies, reactions, retries, Lua automation commands, and
+ * temporary countdown bubbles.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 abstract class FormChatRequests extends FormChatMessages {
 
     /**
-     * Создать PendingCountdown, зарегистрировать и прикрепить пузырь интерфейса.
+     * Creates a {@link PendingCountdown}, registers it, and attaches its UI bubble.
      */
     protected PendingCountdown createCountdown(String chatType, String chatKey, String prefix) {
         PendingCountdown pc = new PendingCountdown(chatType, chatKey, prefix, REQUEST_TIMEOUT_SECONDS);
@@ -55,7 +55,7 @@ abstract class FormChatRequests extends FormChatMessages {
         return pc;
     }
 
-    /** Прикрепить пузырь интерфейса к PendingCountdown (создать или пересоздать при переключении чата). */
+    /** Attaches or recreates the UI bubble for a pending countdown. */
     protected void attachCountdownBubble(PendingCountdown pc) {
         MeshMessage tmp = new MeshMessage("!00000000", "!00000000", 0,
                 pc.prefix + " ⏱ " + pc.remaining[0], System.currentTimeMillis() / 1000, false);
@@ -63,11 +63,11 @@ abstract class FormChatRequests extends FormChatMessages {
         HBox bubble = bubbleFactory.build(tmp);
         messageContainer.getChildren().add(bubble);
         scrollToBottom();
-        // buildSystemBubble возвращает HBox(botAvatar, VBox(textLabel, timeLabel))
+        // buildSystemBubble returns HBox(botAvatar, VBox(textLabel, timeLabel)).
         VBox content = (VBox) bubble.getChildren().get(1);
         pc.countdownLabel = (EmojiTextFlow) content.getChildren().getFirst();
 
-        // Кнопка «Отменить»
+        // Cancel button.
         Label cancelBtn = new Label(I18n.t("chat.cancel"));
         cancelBtn.getStyleClass().add("chat-countdown-cancel");
         cancelBtn.setCursor(Cursor.HAND);
@@ -76,13 +76,13 @@ abstract class FormChatRequests extends FormChatMessages {
                 pc.cancelAction.run();
             }
         });
-        // Вставить перед timeLabel
+        // Insert before the time label.
         content.getChildren().add(content.getChildren().size() - 1, cancelBtn);
 
         pc.tempBubble = bubble;
     }
 
-    /** Завершить обратный отсчёт: удалить из списка и убрать пузырь из контейнера. */
+    /** Finishes a countdown by removing it from both the list and the message container. */
     protected void finishCountdown(PendingCountdown pc) {
         pc.done[0] = true;
         pendingCountdowns.remove(pc);
@@ -90,8 +90,8 @@ abstract class FormChatRequests extends FormChatMessages {
     }
 
     /**
-     * Создать Timeline-таймер обратного отсчёта для PendingCountdown.
-     * Обновляет текст countdownLabel каждую секунду.
+     * Creates the countdown timer for a pending request.
+     * The visible countdown label is updated once per second.
      */
     protected Timeline createCountdownTimer(PendingCountdown pc, String prefix) {
         Timeline timer = new Timeline(new KeyFrame(Duration.seconds(1), tick -> {
@@ -104,7 +104,7 @@ abstract class FormChatRequests extends FormChatMessages {
         return timer;
     }
 
-    /** Восстановить пузыри активных запросов при переключении в чат */
+    /** Restores active request bubbles when switching back to a chat. */
     protected void restorePendingCountdowns() {
         if (selectedChat == null) { return; }
         String chatType = currentChatType();
@@ -116,9 +116,9 @@ abstract class FormChatRequests extends FormChatMessages {
         }
     }
 
-    // ==================== Ответ на сообщение ====================
+    // Replying to messages.
 
-    /** Включить режим ответа на сообщение */
+    /** Starts reply mode for a message. */
     protected void startReply(MeshMessage msg) {
         chatInputBar.startReply(msg, nameResolver.resolveSenderName(msg));
     }

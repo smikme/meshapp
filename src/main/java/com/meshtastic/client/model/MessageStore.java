@@ -9,17 +9,17 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
 
 /**
- * Управление сообщениями Meshtastic-чата.
+ * Meshtastic chat message store.
  * <p>
- * Хранит канальные и личные сообщения, отслеживает pending ACK.
- * Потокобезопасность через ConcurrentHashMap и synchronized списки.
+ * Stores channel and direct messages and tracks pending ACKs. Thread safety is
+ * provided by ConcurrentHashMap and synchronized lists.
  * <p>
- * Ответственность:
+ * Responsibilities:
  * <ul>
- *   <li>Хранение канальных сообщений по channelIndex</li>
- *   <li>Хранение личных сообщений (DM) по peerNodeId</li>
- *   <li>Отслеживание pending ACK для исходящих сообщений</li>
- *   <li>Дедупликация сообщений по packetId</li>
+ *   <li>store channel messages by channelIndex</li>
+ *   <li>store direct messages by peerNodeId</li>
+ *   <li>track pending ACKs for outgoing messages</li>
+ *   <li>deduplicate messages by packetId</li>
  * </ul>
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
@@ -28,39 +28,39 @@ public class MessageStore {
 
     private static final Logger log = LoggerFactory.getLogger(MessageStore.class);
 
-    /** Максимум сообщений в памяти на канал/DM */
+    /** Maximum number of in-memory messages per channel or DM. */
     private static final int MAX_MESSAGES_IN_MEMORY = 100;
 
-    /** Служебная запись для pending ACK */
+    /** Internal entry for a pending ACK. */
     public record PendingAckEntry(MeshMessage message, long registeredAtMillis) {}
 
-    /** Канальные сообщения: channelIndex -> List<MeshMessage> */
+    /** Channel messages: channelIndex -> List<MeshMessage>. */
     private final Map<Integer, List<MeshMessage>> messagesByChannel = new ConcurrentHashMap<>();
 
-    /** Личные сообщения: peerNodeId -> List<MeshMessage> */
+    /** Direct messages: peerNodeId -> List<MeshMessage>. */
     private final Map<String, List<MeshMessage>> directMessages = new ConcurrentHashMap<>();
 
     /** Pending ACK: packetId -> PendingAckEntry */
     private final ConcurrentHashMap<Integer, PendingAckEntry> pendingAcks = new ConcurrentHashMap<>();
 
-    /** Слушатели обновлений сообщений */
+    /** Message update listeners. */
     private final CopyOnWriteArrayList<Runnable> messageListeners = new CopyOnWriteArrayList<>();
-    /** Детальные слушатели изменений сообщений для точечного UI-обновления. */
+    /** Detailed message-change listeners used for targeted UI updates. */
     private final CopyOnWriteArrayList<Consumer<MessageChangeEvent>> messageChangeListeners = new CopyOnWriteArrayList<>();
 
     /**
-     * Добавляет канальное сообщение с дедупликацией по идентичности пакета
-     * ({@code packetId + from/to + outgoing + channel}).
+     * Adds a channel message with packet-identity deduplication:
+     * {@code packetId + from/to + outgoing + channel}.
      *
-     * @param msg сообщение для добавления
+     * @param msg message to add
      */
     public void addMessage(MeshMessage msg) {
         List<MeshMessage> list = messagesByChannel
                 .computeIfAbsent(msg.getChannelIndex(), k -> Collections.synchronizedList(new ArrayList<>()));
         boolean notifyListeners = false;
         synchronized (list) {
-            // В канале packetId сам по себе недостаточен: у разных sender'ов
-            // может совпасть идентификатор пакета.
+        // In a channel, packetId alone is not enough: different senders can use
+        // the same packet id.
             if (msg.getPacketId() != 0) {
                 for (MeshMessage existing : list) {
                     if (isDuplicateMessage(existing, msg)) {
@@ -86,10 +86,10 @@ public class MessageStore {
     }
 
     /**
-     * Возвращает список канальных сообщений для указанного канала.
+     * Returns channel messages for the given channel.
      *
-     * @param channelIndex индекс канала
-     * @return список сообщений (не null)
+     * @param channelIndex channel index
+     * @return message list, never null
      */
     public List<MeshMessage> getMessages(int channelIndex) {
         List<MeshMessage> list = messagesByChannel.get(channelIndex);
@@ -97,7 +97,7 @@ public class MessageStore {
     }
 
     /**
-     * Возвращает все канальные сообщения.
+     * Returns all channel messages.
      *
      * @return {@code Map<channelIndex, List<MeshMessage>>}
      */
@@ -106,11 +106,11 @@ public class MessageStore {
     }
 
     /**
-     * Добавляет личное сообщение с дедупликацией по идентичности пакета
-     * ({@code packetId + from/to + outgoing + channel}).
+     * Adds a direct message with packet-identity deduplication:
+     * {@code packetId + from/to + outgoing + channel}.
      *
-     * @param msg        сообщение для добавления
-     * @param peerNodeId node_id собеседника (ключ группировки)
+     * @param msg        message to add
+     * @param peerNodeId peer node_id, used as the grouping key
      */
     public void addDirectMessage(MeshMessage msg, String peerNodeId) {
         List<MeshMessage> list = directMessages
@@ -142,10 +142,10 @@ public class MessageStore {
     }
 
     /**
-     * Возвращает список личных сообщений для указанного собеседника.
+     * Returns direct messages for the given peer.
      *
-     * @param peerNodeId node_id собеседника
-     * @return список сообщений (не null)
+     * @param peerNodeId peer node_id
+     * @return message list, never null
      */
     public List<MeshMessage> getDirectMessages(String peerNodeId) {
         List<MeshMessage> list = directMessages.get(peerNodeId);
@@ -153,7 +153,7 @@ public class MessageStore {
     }
 
     /**
-     * Возвращает все личные сообщения.
+     * Returns all direct messages.
      *
      * @return {@code Map<peerNodeId, List<MeshMessage>>}
      */
@@ -162,18 +162,18 @@ public class MessageStore {
     }
 
     /**
-     * Удаляет историю личных сообщений с указанным собеседником.
+     * Deletes direct-message history for the given peer.
      *
-     * @param peerNodeId node_id собеседника
+     * @param peerNodeId peer node_id
      */
     public void removeDirectMessages(String peerNodeId) {
         directMessages.remove(peerNodeId);
     }
 
     /**
-     * Гарантирует наличие списка DM для указанного собеседника.
+     * Ensures that a DM list exists for the given peer.
      *
-     * @param peerNodeId node_id собеседника
+     * @param peerNodeId peer node_id
      */
     public void ensureDirectMessageThread(String peerNodeId) {
         if (peerNodeId == null || peerNodeId.isEmpty()) { return; }
@@ -185,43 +185,43 @@ public class MessageStore {
     }
 
     /**
-     * Добавляет listener для уведомлений об изменениях в сообщениях.
+     * Adds a listener for message-change notifications.
      *
-     * @param listener функция без параметров
+     * @param listener no-argument callback
      */
     public void addMessageListener(Runnable listener) {
         messageListeners.add(listener);
     }
 
     /**
-     * Удаляет listener для уведомлений об изменениях в сообщениях.
+     * Removes a message-change listener.
      *
-     * @param listener ранее добавленный listener
+     * @param listener previously added listener
      */
     public void removeMessageListener(Runnable listener) {
         messageListeners.remove(listener);
     }
 
     /**
-     * Добавляет listener детальных изменений сообщений.
+     * Adds a listener for detailed message changes.
      *
-     * @param listener consumer события
+     * @param listener event consumer
      */
     public void addMessageChangeListener(Consumer<MessageChangeEvent> listener) {
         messageChangeListeners.add(listener);
     }
 
     /**
-     * Удаляет listener детальных изменений сообщений.
+     * Removes a detailed message-change listener.
      *
-     * @param listener ранее добавленный consumer
+     * @param listener previously added consumer
      */
     public void removeMessageChangeListener(Consumer<MessageChangeEvent> listener) {
         messageChangeListeners.remove(listener);
     }
 
     /**
-     * Оповещает всех listener'ов об изменениях в сообщениях.
+     * Notifies all listeners about message changes.
      */
     public void fireMessageListeners() {
         for (Runnable r : messageListeners) {
@@ -231,9 +231,9 @@ public class MessageStore {
     }
 
     /**
-     * Оповещает детальные listener'ы о конкретном изменении сообщения.
+     * Notifies detailed listeners about a specific message change.
      *
-     * @param event событие изменения
+     * @param event change event
      */
     public void fireMessageChange(MessageChangeEvent event) {
         MessageChangeEvent safeEvent = event != null ? event : MessageChangeEvent.unknown();
@@ -244,20 +244,20 @@ public class MessageStore {
     }
 
     /**
-     * Регистрирует исходящее сообщение для отслеживания ACK/NAK.
+     * Registers an outgoing message for ACK/NAK tracking.
      *
-     * @param packetId уникальный идентификатор пакета
-     * @param msg      сообщение в статусе SENDING
+     * @param packetId unique packet identifier
+     * @param msg      message in SENDING status
      */
     public void registerPendingAck(int packetId, MeshMessage msg) {
         pendingAcks.put(packetId, new PendingAckEntry(msg, System.currentTimeMillis()));
     }
 
     /**
-     * Извлекает и удаляет сообщение из очереди ожидающих ACK.
+     * Retrieves and removes a message from the pending ACK queue.
      *
-     * @param packetId идентификатор пакета из routing-ответа
-     * @return сообщение, ожидавшее подтверждения, или {@code null}
+     * @param packetId packet identifier from the routing response
+     * @return message waiting for acknowledgement, or {@code null}
      */
     public MeshMessage resolvePendingAck(int packetId) {
         PendingAckEntry entry = pendingAcks.remove(packetId);
@@ -265,9 +265,9 @@ public class MessageStore {
     }
 
     /**
-     * Помечает все ожидающие ACK сообщения как FAILED с указанной причиной.
+     * Marks all pending-ACK messages as FAILED with the given reason.
      *
-     * @param reason причина неудачи (например, "DISCONNECTED")
+     * @param reason failure reason, for example "DISCONNECTED"
      */
     public void failAllPendingAcks(String reason) {
         if (pendingAcks.isEmpty()) { return; }
@@ -288,10 +288,10 @@ public class MessageStore {
     }
 
     /**
-     * Помечает сообщения как FAILED и обновляет статус в БД.
-     * Вызывает MessageDbService.updateStatus для каждого сообщения.
+     * Marks messages as FAILED and updates their status in the database.
+     * Calls MessageDbService.updateStatus for every message.
      *
-     * @param reason причина неудачи
+     * @param reason failure reason
      */
     public void failAllPendingAcksWithDbUpdate(String reason,
                                                java.util.function.BiConsumer<Integer, MeshMessage> updateDb) {
@@ -307,7 +307,7 @@ public class MessageStore {
             msg.setStatus(MeshMessage.DeliveryStatus.FAILED);
             msg.setErrorReason(reason);
             
-            // Обновляем в БД
+        // Update in the database.
             if (updateDb != null && packetId > 0) {
                 updateDb.accept(packetId, msg);
             }
@@ -321,14 +321,14 @@ public class MessageStore {
     }
 
     /**
-     * Ищет сообщение по {@code packetId} в памяти.
+     * Finds a message by {@code packetId} in memory.
      *
-     * @param packetId идентификатор пакета
-     * @return найденное сообщение или {@code null}
+     * @param packetId packet identifier
+     * @return matching message, or {@code null}
      */
     public MeshMessage findMessageByPacketId(int packetId) {
         if (packetId == 0) { return null; }
-        // Ищем в канальных сообщениях
+        // Search channel messages.
         for (List<MeshMessage> msgs : messagesByChannel.values()) {
             synchronized (msgs) {
                 for (MeshMessage msg : msgs) {
@@ -336,7 +336,7 @@ public class MessageStore {
                 }
             }
         }
-        // Ищем в личных сообщениях
+        // Search direct messages.
         for (List<MeshMessage> msgs : directMessages.values()) {
             synchronized (msgs) {
                 for (MeshMessage msg : msgs) {
@@ -348,7 +348,7 @@ public class MessageStore {
     }
 
     /**
-     * Очищает все сообщения из памяти (оставляет pending ACK для обработки).
+     * Clears all messages from memory while leaving pending ACKs for processing.
      */
     public void clear() {
         messagesByChannel.clear();
@@ -356,7 +356,7 @@ public class MessageStore {
     }
 
     /**
-     * Возвращает internal map pending ACK (для ACK sweep).
+     * Returns the internal pending ACK map for ACK sweeping.
      *
      * @return {@code ConcurrentHashMap<Integer, PendingAckEntry>}
      */

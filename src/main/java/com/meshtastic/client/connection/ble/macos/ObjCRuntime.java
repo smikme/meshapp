@@ -4,14 +4,14 @@ import com.sun.jna.*;
 import com.sun.jna.Native;
 
 /**
- * Утилиты для работы с Objective-C runtime через JNA.
+ * Utilities for working with the Objective-C runtime through JNA.
  * <p>
- * Расширяет паттерн из {@code NativeMacOsWindowControl}: помимо отправки сообщений
- * (objc_msgSend), поддерживает создание классов и регистрацию callback-методов
- * (делегатов) — необходимо для CoreBluetooth, который использует delegate-паттерн.
+ * Extends the pattern used by {@code NativeMacOsWindowControl}: besides sending
+ * messages with objc_msgSend, it supports class creation and callback-method
+ * registration for delegates. CoreBluetooth relies on this delegate pattern.
  * <p>
- * На arm64 (Apple Silicon) нельзя использовать variadic objc_msgSend через JNA —
- * все вызовы используют {@code Function.invoke*()} с фиксированными типами.
+ * On arm64 Apple Silicon, variadic objc_msgSend must not be called through JNA;
+ * every call goes through {@code Function.invoke*()} with fixed argument types.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -43,7 +43,7 @@ public final class ObjCRuntime {
     // libdispatch
     private static final Function DISPATCH_QUEUE_CREATE = DISPATCH.getFunction("dispatch_queue_create");
     private static final Function DISPATCH_RELEASE = DISPATCH.getFunction("dispatch_release");
-    // ====== Класс и селектор ======
+    // ====== Class and Selector ======
 
     /** objc_getClass(name) → Class pointer */
     public static long cls(String name) {
@@ -55,7 +55,7 @@ public final class ObjCRuntime {
         return SEL_REGISTER.invokeLong(new Object[]{name});
     }
 
-    // ====== Отправка сообщений (objc_msgSend) ======
+    // ====== Message Sending (objc_msgSend) ======
 
     /** objc_msgSend(receiver, sel) → id */
     public static long msgSend(long receiver, String selector) {
@@ -106,7 +106,7 @@ public final class ObjCRuntime {
         return MSG_SEND.invokeLong(new Object[]{receiver, sel(selector), ptr, arg});
     }
 
-    // ====== Создание объектов ======
+    // ====== Object Creation ======
 
     /** [[cls alloc] init] */
     public static long allocInit(String className) {
@@ -123,8 +123,8 @@ public final class ObjCRuntime {
     }
 
     /**
-     * Извлекает Java String из NSString pointer.
-     * [nsStr UTF8String] → const char* → Java String
+     * Extracts a Java String from an NSString pointer.
+     * [nsStr UTF8String] -> const char* -> Java String
      */
     public static String toJavaString(long nsStr) {
         if (nsStr == 0) { return null; }
@@ -159,7 +159,7 @@ public final class ObjCRuntime {
     }
 
     /**
-     * Создаёт NSArray из одного объекта: @[obj]
+     * Creates an NSArray containing one object: @[obj].
      */
     public static long nsArrayWith(long obj) {
         long nsArrayClass = cls("NSArray");
@@ -168,10 +168,10 @@ public final class ObjCRuntime {
         });
     }
 
-    // ====== NSData ↔ byte[] ======
+    // ====== NSData <-> byte[] ======
 
     /**
-     * Создаёт owned NSData из byte[].
+     * Creates owned NSData from byte[].
      * [[NSData alloc] initWithBytes:bytes length:len]
      */
     public static long nsData(byte[] bytes) {
@@ -185,7 +185,7 @@ public final class ObjCRuntime {
     }
 
     /**
-     * Извлекает byte[] из NSData.
+     * Extracts byte[] from NSData.
      * [nsData bytes] + [nsData length]
      */
     public static byte[] toBytes(long nsData) {
@@ -202,8 +202,8 @@ public final class ObjCRuntime {
     // ====== Dispatch Queue ======
 
     /**
-     * dispatch_queue_create(label, attr)
-     * Создаёт serial dispatch queue для CoreBluetooth.
+     * dispatch_queue_create(label, attr).
+     * Creates a serial dispatch queue for CoreBluetooth.
      */
     public static long createDispatchQueue(String label) {
         return DISPATCH_QUEUE_CREATE.invokeLong(new Object[]{label, Pointer.NULL});
@@ -216,10 +216,10 @@ public final class ObjCRuntime {
         }
     }
 
-    // ====== Создание делегат-классов ======
+    // ====== Delegate Class Creation ======
 
     /**
-     * Создаёт новый Objective-C класс, наследующий от NSObject.
+     * Creates a new Objective-C class that inherits from NSObject.
      * <pre>
      *   long cls = createClass("MeshBleDelegate", "NSObject");
      *   addMethod(cls, "someCallback:", callback, "v@:@");
@@ -227,22 +227,22 @@ public final class ObjCRuntime {
      *   long instance = allocInit(cls);
      * </pre>
      *
-     * @param name      имя нового класса
-     * @param superName имя суперкласса
-     * @return указатель на новый (незарегистрированный) класс
+     * @param name      new class name
+     * @param superName superclass name
+     * @return pointer to the new, not-yet-registered class
      */
     public static long createClass(String name, String superName) {
         long superCls = cls(superName);
         long newCls = ALLOCATE_CLASS_PAIR.invokeLong(new Object[]{superCls, name, 0L});
         if (newCls == 0) {
-            // Класс уже существует — вернуть существующий
+            // The class already exists; return the existing class.
             return cls(name);
         }
         return newCls;
     }
 
     /**
-     * Добавляет Objective-C протокол к классу.
+     * Adds an Objective-C protocol to a class.
      */
     public static void addProtocol(long clazz, String protocolName) {
         long protocol = GET_PROTOCOL.invokeLong(new Object[]{protocolName});
@@ -252,12 +252,12 @@ public final class ObjCRuntime {
     }
 
     /**
-     * Добавляет метод (callback) к классу.
-     *
-     * @param clazz    указатель на класс
-     * @param selector имя селектора (напр. "centralManagerDidUpdateState:")
-     * @param callback JNA Callback-реализация
-     * @param types    Objective-C type encoding (напр. "v@:@" = void(self, _cmd, arg))
+     * Adds a callback method to a class.
+ *
+     * @param clazz    class pointer
+     * @param selector selector name, for example "centralManagerDidUpdateState:"
+     * @param callback JNA Callback implementation
+     * @param types    Objective-C type encoding, for example "v@:@" = void(self, _cmd, arg)
      */
     public static void addMethod(long clazz, String selector, Callback callback, String types) {
         long sel = sel(selector);
@@ -265,33 +265,33 @@ public final class ObjCRuntime {
     }
 
     /**
-     * Регистрирует ранее созданный класс. После вызова можно создавать экземпляры.
+     * Registers a previously created class. Instances can be created after this call.
      */
     public static void registerClass(long clazz) {
         REGISTER_CLASS_PAIR.invoke(new Object[]{clazz});
     }
 
     /**
-     * Создаёт экземпляр класса по его pointer: [[cls alloc] init]
+     * Creates an instance from a class pointer: [[cls alloc] init].
      */
     public static long allocInitClass(long clazz) {
         long alloc = MSG_SEND.invokeLong(new Object[]{clazz, sel("alloc")});
         return MSG_SEND.invokeLong(new Object[]{alloc, sel("init")});
     }
 
-    /** Добавляет instance variable к незарегистрированному классу. */
+    /** Adds an instance variable to an unregistered class. */
     public static void addIvar(long clazz, String name, int size, int alignment, String types) {
         ADD_IVAR.invokeLong(new Object[]{clazz, name, (long) size, (byte) alignment, types});
     }
 
-    /** Получает значение ivar как pointer. */
+    /** Reads an ivar value as a pointer. */
     public static long getIvar(long obj, String name) {
         Memory outValue = new Memory(Native.POINTER_SIZE);
         GET_IVAR.invokeLong(new Object[]{obj, name, outValue});
         return outValue.getLong(0);
     }
 
-    /** Устанавливает значение ivar. */
+    /** Sets an ivar value. */
     public static void setIvar(long obj, String name, long value) {
         SET_IVAR.invokeLong(new Object[]{obj, name, value});
     }

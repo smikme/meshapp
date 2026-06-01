@@ -3,12 +3,12 @@ package com.meshtastic.client.lua;
 import java.util.List;
 
 /**
- * Снимок состояния Lua-отладки в момент остановки на строке.
+ * Snapshot of Lua debug state while execution is paused on a line.
  *
- * @param scriptId  идентификатор скрипта
- * @param line      текущая строка выполнения
- * @param reason    причина остановки
- * @param variables видимые локальные, upvalue и глобальные переменные
+ * @param scriptId  script identifier
+ * @param line      current execution line
+ * @param reason    pause reason
+ * @param variables visible locals, upvalues, and globals
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */

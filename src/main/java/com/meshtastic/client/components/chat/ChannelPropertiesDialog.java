@@ -26,9 +26,10 @@ import java.util.Base64;
 import java.util.List;
 
 /**
- * Модальная панель свойств канала с возможностью редактирования.
+ * Modal editor for an existing channel and its radio-side settings.
  *
- * <p>Вызывается статическим методом {@link #show(DeviceState, ProtocolHandler, int, Runnable)}.
+ * <p>Use {@link #show(DeviceState, ProtocolHandler, int, Runnable)} to open
+ * the panel for a channel index.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -47,12 +48,12 @@ public final class ChannelPropertiesDialog {
     private ChannelPropertiesDialog() {}
 
     /**
-     * Показать панель свойств канала.
+     * Opens the editable channel properties panel.
      *
-     * @param state           текущее состояние устройства
-     * @param protocolHandler обработчик протокола для отправки команд
-     * @param channelIndex    индекс канала (0 = PRIMARY, 1–7 = SECONDARY)
-     * @param onSaved         колбэк, вызываемый после успешного сохранения
+     * @param state current device state
+     * @param protocolHandler protocol handler used to send radio commands
+     * @param channelIndex channel index, where 0 is PRIMARY and 1-7 are SECONDARY
+     * @param onSaved callback invoked after a successful save
      */
     public static void show(DeviceState state,
                             ProtocolHandler protocolHandler,
@@ -63,7 +64,7 @@ public final class ChannelPropertiesDialog {
             return;
         }
 
-        // Найти канал по индексу
+        // Resolve the channel before constructing the editor.
         ChannelProtos.Channel currentChannel = findChannel(state, channelIndex);
         if (currentChannel == null) {
             Toast.show(Toast.Type.WARNING, I18n.t("chat.toast.channelNotFound"));
@@ -77,7 +78,7 @@ public final class ChannelPropertiesDialog {
 
         ChannelProtos.ChannelSettings currentSettings = currentChannel.getSettings();
 
-        // === Форма ===
+        // Build the form.
         VBox panel = new VBox(12);
         panel.setPadding(new Insets(20, 30, 20, 30));
         panel.setPrefWidth(340);
@@ -90,7 +91,7 @@ public final class ChannelPropertiesDialog {
 
         Separator sep = new Separator();
 
-        // Имя канала
+        // Channel name.
         Label nameLabel = new Label(I18n.t("chat.channel.name"));
         TextField nameField = new TextField(currentSettings.getName());
         nameField.setPromptText(I18n.t("chat.channel.namePrompt"));
@@ -102,7 +103,7 @@ public final class ChannelPropertiesDialog {
             }
         });
 
-        // Ключ шифрования (PSK)
+        // Encryption key (PSK).
         Label encLabel = new Label(I18n.t("chat.channel.psk"));
         String currentPskBase64 = currentSettings.getPsk().isEmpty()
                 ? ""
@@ -134,8 +135,8 @@ public final class ChannelPropertiesDialog {
                 ? currentSettings.getModuleSettings().getPositionPrecision() : 0;
         positionCheck.setSelected(currentPrecisionVal > 0);
 
-        // Слайдер точности позиции
-        int initIndex = 4; // default: 14 бит (~1.5 км)
+        // Position precision slider.
+        int initIndex = 4; // Default: 14 bits, about 1.5 km.
         if (currentPrecisionVal > 0) {
             for (int i = 0; i < PRECISION_BITS.length; i++) {
                 if (PRECISION_BITS[i] >= currentPrecisionVal) {
@@ -165,12 +166,12 @@ public final class ChannelPropertiesDialog {
             precisionBox.setManaged(newVal);
         });
 
-        // Статус
+        // Status message.
         Label statusLabel = new Label("");
         statusLabel.getStyleClass().add("muted-small-label");
         statusLabel.setWrapText(true);
 
-        // Кнопки
+        // Action buttons.
         Button saveBtn = new Button(I18n.t("common.save"));
         saveBtn.getStyleClass().add("accent");
 
@@ -184,12 +185,12 @@ public final class ChannelPropertiesDialog {
         panel.getChildren().addAll(title, sep, nameLabel, nameField, encLabel, pskRow,
                 uplinkCheck, downlinkCheck, positionCheck, precisionBox, statusLabel, btnRow);
 
-        // === Обработка «Сохранить» ===
+        // Save handling.
         saveBtn.setOnAction(e -> {
             String channelName = nameField.getText() != null
                     ? nameField.getText().trim() : "";
 
-            // PSK из текстового поля (base64)
+            // Decode the PSK from the Base64 text field.
             com.google.protobuf.ByteString psk;
             String pskText = pskField.getText() != null
                     ? pskField.getText().trim() : "";
@@ -205,7 +206,7 @@ public final class ChannelPropertiesDialog {
                 }
             }
 
-            // Собрать Channel protobuf (сохраняем id и role из текущего канала)
+            // Build the Channel protobuf while preserving the current id and role.
             ChannelProtos.ChannelSettings.Builder settingsBuilder =
                     ChannelProtos.ChannelSettings.newBuilder()
                             .setName(channelName)
@@ -236,7 +237,7 @@ public final class ChannelPropertiesDialog {
             saveBtn.setDisable(true);
             statusLabel.setText(I18n.t("chat.channel.requestSessionKey"));
 
-            // Паттерн session_passkey: запрос → ожидание → отправка
+            // session_passkey flow: request it, wait for it, then send the update.
             Runnable[] listenerHolder = new Runnable[1];
             listenerHolder[0] = () -> Platform.runLater(() -> {
                 state.removeOwnerInfoListener(listenerHolder[0]);
@@ -253,7 +254,7 @@ public final class ChannelPropertiesDialog {
             });
             state.addOwnerInfoListener(listenerHolder[0]);
 
-            // Таймаут 5 сек — отправить без passkey (для локальных устройств)
+            // After 5 seconds, fall back to sending without a passkey for local devices.
             Thread timeout = new Thread(() -> {
                 try {
                     Thread.sleep(5000);
@@ -285,7 +286,7 @@ public final class ChannelPropertiesDialog {
     }
 
     /**
-     * Найти канал по индексу в текущем состоянии устройства.
+     * Finds a channel by index in the current device state.
      */
     private static ChannelProtos.Channel findChannel(DeviceState state, int channelIndex) {
         List<ChannelProtos.Channel> channels = state.getChannels();

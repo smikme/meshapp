@@ -14,7 +14,7 @@ import java.awt.desktop.AppReopenedListener;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * Единая точка управления tray icon/status item и поведением minimize-to-tray.
+ * Single control point for the tray icon/status item and minimize-to-tray behavior.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */

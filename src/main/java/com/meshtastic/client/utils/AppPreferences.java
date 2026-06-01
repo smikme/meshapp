@@ -202,55 +202,55 @@ public class AppPreferences {
     }
 
     /**
-     * @return {@code true}, если для окна мониторинга LoRa-пакетов уже сохранены координаты и размер
+     * @return {@code true} if the LoRa packet monitor already has saved bounds
      */
     public static boolean hasPacketMonitorWindowBounds() {
         return !Double.isNaN(state().getDouble(KEY_PACKET_MONITOR_WINDOW_WIDTH, Double.NaN));
     }
 
     /**
-     * @return сохранённая X-координата окна мониторинга LoRa-пакетов или {@link Double#NaN}
+     * @return saved X coordinate for the LoRa packet monitor window, or {@link Double#NaN}
      */
     public static double getPacketMonitorWindowX() {
         return state().getDouble(KEY_PACKET_MONITOR_WINDOW_X, Double.NaN);
     }
 
     /**
-     * @return сохранённая Y-координата окна мониторинга LoRa-пакетов или {@link Double#NaN}
+     * @return saved Y coordinate for the LoRa packet monitor window, or {@link Double#NaN}
      */
     public static double getPacketMonitorWindowY() {
         return state().getDouble(KEY_PACKET_MONITOR_WINDOW_Y, Double.NaN);
     }
 
     /**
-     * @return сохранённая ширина окна мониторинга LoRa-пакетов или {@link Double#NaN}
+     * @return saved width for the LoRa packet monitor window, or {@link Double#NaN}
      */
     public static double getPacketMonitorWindowWidth() {
         return state().getDouble(KEY_PACKET_MONITOR_WINDOW_WIDTH, Double.NaN);
     }
 
     /**
-     * @return сохранённая высота окна мониторинга LoRa-пакетов или {@link Double#NaN}
+     * @return saved height for the LoRa packet monitor window, or {@link Double#NaN}
      */
     public static double getPacketMonitorWindowHeight() {
         return state().getDouble(KEY_PACKET_MONITOR_WINDOW_HEIGHT, Double.NaN);
     }
 
     /**
-     * @return сохранённое состояние максимизации окна мониторинга LoRa-пакетов
+     * @return saved maximized state for the LoRa packet monitor window
      */
     public static boolean isPacketMonitorWindowMaximized() {
         return state().getBoolean(KEY_PACKET_MONITOR_WINDOW_MAXIMIZED, false);
     }
 
     /**
-     * Сохраняет положение, размер и состояние максимизации окна мониторинга LoRa-пакетов.
-     *
-     * @param x         X-координата окна
-     * @param y         Y-координата окна
-     * @param w         ширина окна
-     * @param h         высота окна
-     * @param maximized признак максимизации
+     * Saves the LoRa packet monitor window position, size, and maximized state.
+ *
+     * @param x         window X coordinate
+     * @param y         window Y coordinate
+     * @param w         window width
+     * @param h         window height
+     * @param maximized whether the window is maximized
      */
     public static void savePacketMonitorWindowBounds(double x, double y, double w, double h, boolean maximized) {
         state().putDouble(KEY_PACKET_MONITOR_WINDOW_X, x);
@@ -262,7 +262,7 @@ public class AppPreferences {
     }
 
     /**
-     * @return {@code true}, если для окна MeshApp IDE уже сохранены координаты и размер
+     * @return {@code true} if the MeshApp IDE window already has saved bounds
      */
     public static boolean hasLuaDevWindowBounds() {
         return !Double.isNaN(state().getDouble(KEY_LUA_DEV_WINDOW_WIDTH, Double.NaN));
@@ -277,7 +277,7 @@ public class AppPreferences {
     }
 
     /**
-     * Сохраняет положение, размер и состояние максимизации окна MeshApp IDE.
+     * Saves the MeshApp IDE window position, size, and maximized state.
      */
     public static void saveLuaDevWindowBounds(double x, double y, double w, double h, boolean maximized) {
         state().putDouble(KEY_LUA_DEV_WINDOW_X, x);
@@ -291,28 +291,28 @@ public class AppPreferences {
     // ==================== Map ====================
 
     /**
-     * Возвращает сохранённую широту центра карты.
+     * Returns the saved map center latitude.
      */
     public static double getMapCenterLatitude() {
         return state().getDouble(KEY_MAP_CENTER_LATITUDE, 20);
     }
 
     /**
-     * Возвращает сохранённую долготу центра карты.
+     * Returns the saved map center longitude.
      */
     public static double getMapCenterLongitude() {
         return state().getDouble(KEY_MAP_CENTER_LONGITUDE, 0);
     }
 
     /**
-     * Возвращает сохранённый масштаб карты.
+     * Returns the saved map zoom level.
      */
     public static int getMapZoom() {
         return state().getInt(KEY_MAP_ZOOM, 2);
     }
 
     /**
-     * Проверяет, был ли пользовательский центр карты уже сохранён.
+     * Checks whether a user-selected map center has already been saved.
      */
     public static boolean hasMapView() {
         return !Double.isNaN(state().getDouble(KEY_MAP_CENTER_LATITUDE, Double.NaN))
@@ -320,7 +320,7 @@ public class AppPreferences {
     }
 
     /**
-     * Сохраняет текущий центр и масштаб карты.
+     * Saves the current map center and zoom level.
      */
     public static void saveMapView(double latitude, double longitude, int zoom) {
         state().putDouble(KEY_MAP_CENTER_LATITUDE, latitude);
@@ -330,14 +330,14 @@ public class AppPreferences {
     }
 
     /**
-     * Возвращает состояние режима «только локальные тайлы».
+     * Returns whether the map is restricted to local tiles.
      */
     public static boolean isMapOfflineMode() {
         return state().getBoolean(KEY_MAP_OFFLINE_MODE, false);
     }
 
     /**
-     * Сохраняет состояние режима «только локальные тайлы».
+     * Saves whether the map should use only local tiles.
      */
     public static void setMapOfflineMode(boolean offline) {
         state().putBoolean(KEY_MAP_OFFLINE_MODE, offline);
@@ -345,14 +345,14 @@ public class AppPreferences {
     }
 
     /**
-     * Возвращает состояние ночного режима карты.
+     * Returns whether map night mode is enabled.
      */
     public static boolean isMapNightMode() {
         return state().getBoolean(KEY_MAP_NIGHT_MODE, false);
     }
 
     /**
-     * Сохраняет состояние ночного режима карты.
+     * Saves whether map night mode is enabled.
      */
     public static void setMapNightMode(boolean nightMode) {
         state().putBoolean(KEY_MAP_NIGHT_MODE, nightMode);
@@ -360,14 +360,14 @@ public class AppPreferences {
     }
 
     /**
-     * Возвращает сохранённый внешний каталог оффлайн-тайлов.
+     * Returns the saved external directory for offline map tiles.
      */
     public static String getMapTileDirectory() {
         return state().get(KEY_MAP_TILE_DIRECTORY, "");
     }
 
     /**
-     * Сохраняет внешний каталог оффлайн-тайлов или очищает настройку при пустом значении.
+     * Saves the external offline-tile directory, or clears the setting when the value is blank.
      */
     public static void setMapTileDirectory(String directory) {
         if (directory == null || directory.isBlank()) {
@@ -437,14 +437,14 @@ public class AppPreferences {
     public static void setNodesDividerPos(double pos) { state().putDouble(KEY_NODES_DIVIDER, pos); }
 
     /**
-     * @return сохранённая позиция вертикального разделителя окна мониторинга LoRa-пакетов
+     * @return saved vertical divider position for the LoRa packet monitor window
      */
     public static double getPacketMonitorDividerPos() { return state().getDouble(KEY_PACKET_MONITOR_DIVIDER, 0.58); }
 
     /**
-     * Сохраняет позицию вертикального разделителя окна мониторинга LoRa-пакетов.
-     *
-     * @param pos позиция разделителя в диапазоне {@code 0..1}
+     * Saves the vertical divider position for the LoRa packet monitor window.
+ *
+     * @param pos divider position in the {@code 0..1} range
      */
     public static void setPacketMonitorDividerPos(double pos) { state().putDouble(KEY_PACKET_MONITOR_DIVIDER, pos); }
 
@@ -473,7 +473,7 @@ public class AppPreferences {
     }
 
     /**
-     * Сохраняет компоновку SplitPane в окне MeshApp IDE и сразу сбрасывает её в backing store.
+     * Saves the MeshApp IDE SplitPane layout and flushes it to the backing store immediately.
      */
     public static void saveLuaDevDividerPositions(double mainPos, double editorPos, double infoPos) {
         setLuaDevMainDividerPos(mainPos);
@@ -490,22 +490,22 @@ public class AppPreferences {
     }
 
     /**
-     * Возвращает сохранённую ширину колонки таблицы LoRa-мониторинга.
-     * Если пользователь ещё не менял размер, возвращается переданное стартовое значение.
-     *
-     * @param key          preference-key конкретной колонки
-     * @param defaultWidth стартовая ширина, используемая как fallback
-     * @return сохранённая либо стартовая ширина колонки
+     * Returns the saved LoRa monitor table-column width.
+     * If the user has not resized the column yet, the supplied default is returned.
+ *
+     * @param key          preference key for the specific column
+     * @param defaultWidth initial width used as a fallback
+     * @return saved column width, or the initial width
      */
     public static double getPacketMonitorColumnWidth(String key, double defaultWidth) {
         return state().getDouble(key, defaultWidth);
     }
 
     /**
-     * Сохраняет текущую ширину колонки таблицы LoRa-мониторинга.
-     *
-     * @param key   preference-key конкретной колонки
-     * @param width фактическая ширина колонки в пикселях
+     * Saves the current LoRa monitor table-column width.
+ *
+     * @param key   preference key for the specific column
+     * @param width actual column width in pixels
      */
     public static void setPacketMonitorColumnWidth(String key, double width) {
         state().putDouble(key, width);

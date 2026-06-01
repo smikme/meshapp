@@ -5,20 +5,20 @@ extern "C" {
 #endif
 
 /**
- * Выставляет указанные modem bits через ioctl(TIOCMBIS).
- * Возвращает 0 при успехе или -errno при ошибке.
+ * Sets the requested modem bits through ioctl(TIOCMBIS).
+ * Returns 0 on success or -errno on failure.
  */
 int meshserial_set_modem_bits(int fd, int bits);
 
 /**
- * Сбрасывает указанные modem bits через ioctl(TIOCMBIC).
- * Возвращает 0 при успехе или -errno при ошибке.
+ * Clears the requested modem bits through ioctl(TIOCMBIC).
+ * Returns 0 on success or -errno on failure.
  */
 int meshserial_clear_modem_bits(int fd, int bits);
 
 /**
- * Читает текущее состояние modem bits через ioctl(TIOCMGET).
- * Возвращает 0 при успехе или -errno при ошибке.
+ * Reads the current modem-bit state through ioctl(TIOCMGET).
+ * Returns 0 on success or -errno on failure.
  */
 int meshserial_get_modem_bits(int fd, int *bits);
 

@@ -9,7 +9,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Загрузка нативных библиотек и бинарных ресурсов из classpath resources.
+ * Loads native libraries and binary resources from classpath resources.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */

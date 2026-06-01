@@ -4,12 +4,12 @@ import com.meshtastic.client.connection.TransportConnection;
 import com.meshtastic.client.model.ConnectionEntry;
 
 /**
- * Неизменяемый набор входных данных для создания протокольного runtime-а.
+ * Immutable input set used to create a protocol runtime.
  *
- * @param connectionId строковый id профиля подключения
- * @param connectionEntry сохранённый профиль подключения
- * @param transportConnection открытый transport, через который протокол пишет и читает байты
- * @param transportDescription человекочитаемое описание транспорта для логов
+ * @param connectionId string id of the connection profile
+ * @param connectionEntry persisted connection profile
+ * @param transportConnection open transport used by the protocol for byte I/O
+ * @param transportDescription human-readable transport description for logs
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */

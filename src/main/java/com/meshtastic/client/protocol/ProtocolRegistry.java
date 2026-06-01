@@ -9,12 +9,11 @@ import java.util.EnumMap;
 import java.util.Map;
 
 /**
- * Реестр коммуникационных протоколов, доступных приложению.
+ * Registry of communication protocols available to the application.
  * <p>
- * {@code ConnectionManager} использует реестр, чтобы по значению
- * {@link ProtocolType} из профиля подключения получить нужный протокольный
- * адаптер. Для добавления нового протокола нужно зарегистрировать здесь
- * соответствующую реализацию {@link CommunicationProtocol}.
+ * {@code ConnectionManager} uses the registry to resolve a protocol adapter
+ * from the {@link ProtocolType} stored in the connection profile. Adding a new
+ * protocol means registering its {@link CommunicationProtocol} implementation here.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -32,20 +31,20 @@ public final class ProtocolRegistry {
     }
 
     /**
-     * Регистрирует или заменяет адаптер протокола.
+     * Registers or replaces a protocol adapter.
      *
-     * @param protocol адаптер, возвращающий свой {@link ProtocolType}
+     * @param protocol adapter that exposes its {@link ProtocolType}
      */
     public static void register(CommunicationProtocol<?> protocol) {
         PROTOCOLS.put(protocol.getType(), protocol);
     }
 
     /**
-     * Находит адаптер протокола по типу из профиля подключения.
+     * Finds a protocol adapter by connection profile type.
      *
-     * @param type тип протокола
-     * @return зарегистрированный адаптер
-     * @throws IllegalArgumentException если адаптер для типа не зарегистрирован
+     * @param type protocol type
+     * @return registered adapter
+     * @throws IllegalArgumentException when no adapter is registered for the type
      */
     public static CommunicationProtocol<?> get(ProtocolType type) {
         CommunicationProtocol<?> protocol = PROTOCOLS.get(type);

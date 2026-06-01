@@ -7,8 +7,8 @@ import com.meshtastic.client.terminal.TerminalApp;
 import com.meshtastic.client.utils.AppPreferences;
 
 /**
- * Точка входа до загрузки JavaFX Application.
- * Нужна для ранней установки JVM/System properties вроде prism.order.
+ * Entry point that runs before the JavaFX Application class is loaded.
+ * Used for early JVM and system properties such as {@code prism.order}.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */

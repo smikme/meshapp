@@ -29,11 +29,10 @@ import java.util.Map;
 import java.util.function.Consumer;
 
 /**
- * Боковая форма редактирования параметров Lua-скрипта MeshApp IDE.
+ * Side form for editing MeshApp IDE Lua script settings.
  * <p>
- * Форма изменяет только метаданные сценария: имя, автозапуск, тип бота,
- * имя автоматизации и, для эфирных ботов, привязку к ноде. Исходный код
- * остается в отдельном IDE-окне.
+ * The form edits only script metadata: name, autostart, bot type, automation
+ * name, and node binding for on-air bots. Source code stays in the separate IDE window.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */

@@ -1,6 +1,6 @@
 #!/bin/bash
-# Запуск MeshApp на macOS с отображением в Dock и Cmd+Tab.
-# Обёртка над Gradle-задачей runMac.
+# Runs MeshApp on macOS with Dock and Cmd+Tab visibility.
+# Thin wrapper around the Gradle runMac task.
 
 set -e
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"

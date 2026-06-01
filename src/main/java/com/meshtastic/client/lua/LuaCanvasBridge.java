@@ -1,57 +1,57 @@
 package com.meshtastic.client.lua;
 
 /**
- * Мост из Lua sandbox к встроенному Canvas-окну приложения.
+ * Bridge from the Lua sandbox to the application's built-in Canvas window.
  *
- * <p>Окно создается только по явному вызову Lua API и не участвует в
- * навигации бокового меню.
+ * <p>The window is created only by an explicit Lua API call and does not appear
+ * in side-menu navigation.
  */
 public interface LuaCanvasBridge {
 
     /**
-     * Открывает или обновляет Canvas-окно текущего скрипта.
+     * Opens or updates the Canvas window for the current script.
      *
-     * @param options параметры окна
+     * @param options window options
      */
     void openCanvas(LuaCanvasOptions options);
 
     /**
-     * Закрывает Canvas-окно текущего скрипта.
+     * Closes the Canvas window for the current script.
      */
     void closeCanvas();
 
     /**
-     * Добавляет команду рисования в очередь JavaFX Canvas.
+     * Queues a drawing command for the JavaFX Canvas.
      *
-     * @param command команда рисования
+     * @param command drawing command
      */
     void enqueueCanvasDraw(LuaCanvasDrawCommand command);
 
     /**
-     * Устанавливает частоту callback {@code on_canvas_frame(event)}.
+     * Sets the callback rate for {@code on_canvas_frame(event)}.
      *
-     * @param fps кадров в секунду, 0 выключает таймер
+     * @param fps frames per second; {@code 0} disables the timer
      */
     void setCanvasFrameRate(double fps);
 
     /**
-     * Возвращает текущее состояние мыши внутри Canvas.
+     * Returns the current mouse state inside the Canvas.
      *
-     * @return snapshot состояния мыши
+     * @return mouse-state snapshot
      */
     LuaCanvasMouseState canvasMouseState();
 
     /**
-     * Возвращает текущее состояние клавиатуры для Canvas-окна.
+     * Returns the current keyboard state for the Canvas window.
      *
-     * @return snapshot состояния клавиатуры
+     * @return keyboard-state snapshot
      */
     LuaCanvasKeyState canvasKeyState();
 
     /**
-     * Возвращает текущий размер Canvas.
+     * Returns the current Canvas size.
      *
-     * @return snapshot размера
+     * @return size snapshot
      */
     LuaCanvasSize canvasSize();
 }

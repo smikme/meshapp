@@ -1,7 +1,7 @@
 package com.meshtastic.client.protocol.meshcore;
 
 /**
- * Runtime-состояние, собранное из MeshCore KISS {@code SetHardware} responses.
+ * Runtime state assembled from MeshCore KISS {@code SetHardware} responses.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -22,9 +22,9 @@ public class MeshCoreKissState {
     private volatile String lastError;
 
     /**
-     * Проверяет, получил ли runtime хотя бы один валидный response от устройства.
-     *
-     * @return {@code true}, если handshake считается успешным
+     * Reports whether the runtime has received at least one valid device response.
+ *
+     * @return {@code true} once the handshake is considered successful
      */
     public boolean isReady() {
         return ready;
@@ -35,9 +35,9 @@ public class MeshCoreKissState {
     }
 
     /**
-     * Возвращает имя MeshCore-устройства.
-     *
-     * @return имя устройства или {@code null}, если оно ещё не получено
+     * Returns the MeshCore device name.
+ *
+     * @return device name, or {@code null} before it is received
      */
     public String getDeviceName() {
         return deviceName;
@@ -48,9 +48,9 @@ public class MeshCoreKissState {
     }
 
     /**
-     * Возвращает identity public key в HEX.
-     *
-     * @return HEX-строка identity или {@code null}
+     * Returns the identity public key as HEX.
+ *
+     * @return identity HEX string, or {@code null}
      */
     public String getIdentityHex() {
         return identityHex;
@@ -62,18 +62,18 @@ public class MeshCoreKissState {
     }
 
     /**
-     * Возвращает стабильный owner id для сервисов верхнего уровня.
-     *
-     * @return короткий MeshCore node id вида {@code mc:<12 hex>} или {@code null}
+     * Returns the stable owner id used by higher-level services.
+ *
+     * @return short MeshCore node id in the {@code mc:<12 hex>} form, or {@code null}
      */
     public String getOwnerId() {
         return ownerId;
     }
 
     /**
-     * Возвращает числовую версию firmware, полученную из KISS metadata.
-     *
-     * @return версия firmware или {@code null}
+     * Returns the numeric firmware version from KISS metadata.
+ *
+     * @return firmware version, or {@code null}
      */
     public Integer getFirmwareVersion() {
         return firmwareVersion;
@@ -84,9 +84,9 @@ public class MeshCoreKissState {
     }
 
     /**
-     * Возвращает текущую мощность передачи.
-     *
-     * @return TX power в dBm или {@code null}
+     * Returns the current transmit power.
+ *
+     * @return TX power in dBm, or {@code null}
      */
     public Integer getTxPowerDbm() {
         return txPowerDbm;
@@ -97,9 +97,9 @@ public class MeshCoreKissState {
     }
 
     /**
-     * Возвращает напряжение батареи.
-     *
-     * @return напряжение в millivolts или {@code null}
+     * Returns the battery voltage.
+ *
+     * @return voltage in millivolts, or {@code null}
      */
     public Integer getBatteryMillivolts() {
         return batteryMillivolts;
@@ -110,9 +110,9 @@ public class MeshCoreKissState {
     }
 
     /**
-     * Возвращает параметры radio, полученные через MeshCore KISS.
-     *
-     * @return параметры radio или {@code null}
+     * Returns radio parameters received through MeshCore KISS.
+ *
+     * @return radio parameters, or {@code null}
      */
     public RadioParameters getRadioParameters() {
         return radioParameters;
@@ -123,9 +123,9 @@ public class MeshCoreKissState {
     }
 
     /**
-     * Возвращает счётчики packets.
-     *
-     * @return statistics или {@code null}
+     * Returns packet counters.
+ *
+     * @return statistics, or {@code null}
      */
     public Stats getStats() {
         return stats;
@@ -136,18 +136,18 @@ public class MeshCoreKissState {
     }
 
     /**
-     * Возвращает RSSI последнего принятого packet-а.
-     *
-     * @return RSSI в dBm или {@code null}
+     * Returns RSSI for the last received packet.
+ *
+     * @return RSSI in dBm, or {@code null}
      */
     public Integer getLastRxRssiDbm() {
         return lastRxRssiDbm;
     }
 
     /**
-     * Возвращает SNR последнего принятого packet-а.
-     *
-     * @return SNR в dB или {@code null}
+     * Returns SNR for the last received packet.
+ *
+     * @return SNR in dB, or {@code null}
      */
     public Float getLastRxSnrDb() {
         return lastRxSnrDb;
@@ -159,9 +159,9 @@ public class MeshCoreKissState {
     }
 
     /**
-     * Возвращает результат последней передачи, если устройство его сообщило.
-     *
-     * @return {@code true}/{@code false} или {@code null}, если статуса ещё нет
+     * Returns the last transmit result when the device reported one.
+ *
+     * @return {@code true}/{@code false}, or {@code null} when no status is available yet
      */
     public Boolean getLastTxSuccess() {
         return lastTxSuccess;
@@ -172,9 +172,9 @@ public class MeshCoreKissState {
     }
 
     /**
-     * Возвращает последнюю ошибку MeshCore KISS.
-     *
-     * @return текст ошибки или {@code null}
+     * Returns the latest MeshCore KISS error.
+ *
+     * @return error text, or {@code null}
      */
     public String getLastError() {
         return lastError;
@@ -185,10 +185,10 @@ public class MeshCoreKissState {
     }
 
     /**
-     * Параметры LoRa radio, возвращаемые MeshCore KISS modem.
-     *
-     * @param frequencyHz рабочая частота в Hz
-     * @param bandwidthHz bandwidth в Hz
+     * LoRa radio parameters returned by the MeshCore KISS modem.
+ *
+     * @param frequencyHz operating frequency in Hz
+     * @param bandwidthHz bandwidth in Hz
      * @param spreadingFactor LoRa spreading factor
      * @param codingRate LoRa coding rate
      */
@@ -196,11 +196,11 @@ public class MeshCoreKissState {
     }
 
     /**
-     * Счётчики packet statistics MeshCore KISS modem.
-     *
-     * @param receivedPackets количество принятых packets
-     * @param transmittedPackets количество отправленных packets
-     * @param receiveErrors количество ошибок приёма
+     * Packet-statistics counters from the MeshCore KISS modem.
+ *
+     * @param receivedPackets received packet count
+     * @param transmittedPackets transmitted packet count
+     * @param receiveErrors receive error count
      */
     public record Stats(long receivedPackets, long transmittedPackets, long receiveErrors) {
     }

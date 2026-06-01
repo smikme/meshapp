@@ -75,7 +75,7 @@ class ConfigExchangeServiceTest {
         state.getOrCreateNode(1).setLongName("stale");
         ConfigExchangeService service = track(new ConfigExchangeService(handler, state));
 
-        // startConfigExchange должен сбрасывать runtime-state перед новым потоком конфигурации.
+        // startConfigExchange must reset runtime state before a new configuration stream.
         CompletableFuture<DeviceState> future = service.startConfigExchange();
 
         assertNotNull(future);
@@ -93,8 +93,7 @@ class ConfigExchangeServiceTest {
         state.setPendingFixedPosition(55.7558, 37.6173, 205);
         ConfigExchangeService service = track(new ConfigExchangeService(handler, state));
 
-        // Для своей ноды берём сохранённую пользователем fixed position,
-        // а не потенциально устаревшие координаты из устройства.
+        // For the local node, use the user-saved fixed position, not potentially stale device coordinates.
         MeshProtos.NodeInfo nodeInfo = MeshProtos.NodeInfo.newBuilder()
                 .setNum(0x12345678)
                 .setUser(MeshProtos.User.newBuilder()
@@ -364,8 +363,7 @@ class ConfigExchangeServiceTest {
                         .build())
                 .build());
 
-        // Завершение exchange должно материализовать накопленные данные в cache/H2
-        // и закрыть future для ConnectionManager/UI.
+        // Exchange completion must materialize accumulated data into cache/H2 and complete the UI future.
         service.onConfigComplete(wantConfigId);
 
         assertTrue(future.isDone());
@@ -478,7 +476,7 @@ class ConfigExchangeServiceTest {
     }
 
     private static final class FakeConnection implements MeshtasticConnection {
-        // Нам нужен только факт отправки want_config_id; входящие события вызываем напрямую у сервиса.
+        // We only need the want_config_id send; inbound events are invoked directly on the service.
         private volatile Integer lastWantConfigId;
         private final List<Integer> sentWantConfigIds = new ArrayList<>();
         private final List<MeshProtos.MeshPacket> sentPackets = new ArrayList<>();

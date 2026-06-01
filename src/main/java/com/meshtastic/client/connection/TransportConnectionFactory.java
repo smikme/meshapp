@@ -9,11 +9,11 @@ import com.meshtastic.client.model.ConnectionType;
 import java.util.function.Supplier;
 
 /**
- * Фабрика транспортных соединений из сохранённых профилей подключения.
+ * Factory for transport connections created from saved connection profiles.
  * <p>
- * Класс знает только о способе доставки байтов (TCP, Serial, BLE). Настройка
- * протокола, handshake и сервисы более высокого уровня остаются в реализациях
- * {@code CommunicationProtocol}.
+ * This class knows only how bytes are delivered through TCP, Serial, or BLE.
+ * Protocol selection, handshake, and higher-level services remain in
+ * {@code CommunicationProtocol} implementations.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -23,25 +23,23 @@ public final class TransportConnectionFactory {
     }
 
     /**
-     * Создаёт transport-реализацию для указанного профиля подключения.
+     * Creates a transport implementation for a connection profile.
      *
-     * @param entry профиль подключения из {@code connections.json}
-     * @param blePlatformSupplier поставщик платформенного BLE backend-а; вызывается
-     *                            только для BLE-подключений
-     * @return transport-объект, готовый к вызову {@link TransportConnection#connect()}
+     * @param entry connection profile from {@code connections.json}
+     * @param blePlatformSupplier supplier for the platform BLE backend, invoked only for BLE connections
+     * @return transport object ready for {@link TransportConnection#connect()}
      */
     public static TransportConnection create(ConnectionEntry entry, Supplier<BlePlatform> blePlatformSupplier) {
         return create(entry, blePlatformSupplier, false);
     }
 
     /**
-     * Создаёт transport-реализацию для указанного профиля подключения.
+     * Creates a transport implementation for a connection profile.
      *
-     * @param entry профиль подключения из {@code connections.json}
-     * @param blePlatformSupplier поставщик платформенного BLE backend-а; вызывается
-     *                            только для BLE-подключений
-     * @param disposeBlePlatformOnDisconnect освобождать ли BLE backend вместе с transport-ом
-     * @return transport-объект, готовый к вызову {@link TransportConnection#connect()}
+     * @param entry connection profile from {@code connections.json}
+     * @param blePlatformSupplier supplier for the platform BLE backend, invoked only for BLE connections
+     * @param disposeBlePlatformOnDisconnect whether to dispose the BLE backend with the transport
+     * @return transport object ready for {@link TransportConnection#connect()}
      */
     public static TransportConnection create(ConnectionEntry entry,
                                              Supplier<BlePlatform> blePlatformSupplier,
@@ -65,10 +63,10 @@ public final class TransportConnectionFactory {
     }
 
     /**
-     * Формирует человекочитаемое описание параметров транспорта для логов.
+     * Builds a readable transport description for logs.
      *
-     * @param entry профиль подключения
-     * @return строка с типом транспорта и ключевыми параметрами
+     * @param entry connection profile
+     * @return transport type and key parameters
      */
     public static String describe(ConnectionEntry entry) {
         ConnectionType type = entry.getEffectiveType();

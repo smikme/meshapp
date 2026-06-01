@@ -9,13 +9,13 @@ import com.meshtastic.client.utils.NativeResourceLoader;
 import java.nio.file.Path;
 
 /**
- * JNA-маппинг нативной библиотеки meshapp-ble.dll (WinRT BLE).
+ * JNA mapping for the native meshapp-ble.dll library, which implements WinRT BLE.
  * <p>
- * DLL предоставляет плоский C API для работы с Windows Bluetooth LE:
- * сканирование, подключение, GATT чтение/запись, notifications.
+ * The DLL exposes a flat C API for Windows Bluetooth LE operations: scanning,
+ * connecting, GATT read/write, and notifications.
  * <p>
- * Все callbacks вызываются из WinRT потоков — вызывающий код
- * должен обеспечить thread-safety.
+ * All callbacks are invoked from WinRT threads, so callers must provide their
+ * own thread-safety boundary.
  *
  * @see WinBle
  *
@@ -34,107 +34,107 @@ public interface WinBleLibrary extends Library {
 
     // ==================== Initialization ====================
 
-    /** Инициализация WinRT apartment. Вызывать один раз. */
+    /** Initializes the WinRT apartment. Call once. */
     int meshble_init();
 
-    /** Освобождение всех ресурсов. */
+    /** Releases all native resources. */
     void meshble_cleanup();
 
     // ==================== Adapter State ====================
 
     /**
-     * Состояние BLE-адаптера.
+     * Returns the BLE adapter state.
      * @return 0=UNKNOWN, 1=POWERED_OFF, 2=POWERED_ON, 3=UNSUPPORTED, 4=UNAUTHORIZED
      */
     int meshble_get_adapter_state();
 
     // ==================== Scanning ====================
 
-    /** Настраивает BLE profile: 0=Meshtastic, 1=MeshCore Companion. */
+    /** Selects the BLE profile: 0=Meshtastic, 1=MeshCore Companion. */
     void meshble_set_profile(int profile);
 
     /**
-     * Запуск сканирования BLE с фильтром по service UUID выбранного profile.
-     * @return 0 при успехе, отрицательное при ошибке
+     * Starts BLE scanning with a service UUID filter for the selected profile.
+     * @return 0 on success, negative on error
      */
     int meshble_start_scan(DeviceCallback callback);
 
-    /** Остановка сканирования. */
+    /** Stops BLE scanning. */
     void meshble_stop_scan();
 
     // ==================== Connection ====================
 
     /**
-     * Подключение к BLE-устройству. Блокирует до обнаружения GATT или таймаута.
+     * Connects to a BLE device. Blocks until GATT discovery or timeout.
      * @return 0=OK, -1=timeout, -2=not found, -3=GATT error, -4=access denied
      */
     int meshble_connect(String address, int timeoutMs);
 
-    /** Отключение от BLE-устройства. */
+    /** Disconnects from the BLE device. */
     void meshble_disconnect();
 
-    /** @return 1 если подключено, 0 иначе */
+    /** @return 1 when connected, otherwise 0 */
     int meshble_is_connected();
 
     // ==================== Data Transfer ====================
 
     /**
-     * Запись protobuf в toRadio GATT characteristic.
-     * @return 0 при успехе, отрицательное при ошибке
+     * Writes protobuf bytes to the toRadio GATT characteristic.
+     * @return 0 on success, negative on error
      */
     int meshble_write_to_radio(byte[] data, int length);
 
     /**
-     * Чтение fromRadio (для polling fallback).
-     * @param buffer   выходной буфер
-     * @param bufSize  размер буфера
-     * @param outLen   указатель на int — количество прочитанных байт
-     * @return 0 при успехе
+     * Reads fromRadio for the polling fallback.
+     * @param buffer  output buffer
+     * @param bufSize buffer size
+     * @param outLen  int pointer receiving the number of bytes read
+     * @return 0 on success
      */
     int meshble_read_from_radio(byte[] buffer, int bufSize, int[] outLen);
 
-    /** Установка слушателя входящих данных из fromRadio. */
+    /** Installs the listener for incoming fromRadio data. */
     void meshble_set_from_radio_listener(DataCallback callback);
 
     // ==================== Connection State ====================
 
-    /** Установка слушателя изменений состояния подключения. */
+    /** Installs the connection-state listener. */
     void meshble_set_state_listener(StateCallback callback);
 
     // ==================== Pairing ====================
 
-    /** Установка callback запроса passkey при app-managed BLE pairing. */
+    /** Installs the passkey request callback for app-managed BLE pairing. */
     void meshble_set_passkey_request_callback(PasskeyRequestCallback callback);
 
-    /** Передаёт введённый пользователем BLE passkey в pending pairing request. */
+    /** Supplies the user-entered BLE passkey to the pending pairing request. */
     void meshble_respond_passkey(int passkey);
 
-    /** Отменяет pending BLE pairing request. */
+    /** Cancels the pending BLE pairing request. */
     void meshble_cancel_passkey();
 
     // ==================== Info ====================
 
-    /** @return 1 если notifications активны, 0 если polling */
+    /** @return 1 when notifications are active, 0 when polling is used */
     int meshble_notifications_active();
 
     // ==================== Callback Interfaces ====================
 
     /**
-     * Callback обнаружения BLE-устройства при сканировании.
+     * Callback invoked when a BLE device is discovered during scanning.
      */
     interface DeviceCallback extends Callback {
         void callback(String address, String name, int rssi);
     }
 
     /**
-     * Callback получения данных из fromRadio characteristic.
+     * Callback invoked when data arrives from the fromRadio characteristic.
      */
     interface DataCallback extends Callback {
         void callback(Pointer data, int length);
     }
 
     /**
-     * Callback изменения состояния BLE-подключения.
+     * Callback for BLE connection-state changes.
      * state: 0=connected, 1=disconnected, 2=error
      */
     interface StateCallback extends Callback {
@@ -142,8 +142,8 @@ public interface WinBleLibrary extends Library {
     }
 
     /**
-     * Callback запроса BLE passkey. Вызывается только когда WinRT pairing
-     * реально требует ввод PIN-кода со стороны приложения.
+     * Callback for BLE passkey requests. Invoked only when WinRT pairing
+     * actually requires the application to provide a PIN.
      */
     interface PasskeyRequestCallback extends Callback {
         void callback(String address);

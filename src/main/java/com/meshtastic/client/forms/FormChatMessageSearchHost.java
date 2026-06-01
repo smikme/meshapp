@@ -9,11 +9,11 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * Адаптер между формой чата и компонентом поиска сообщений.
+ * Adapter between the chat form and the message-search component.
  *
- * <p>Класс убирает анонимный вложенный объект из {@link FormChatUi}. Поиск
- * получает только нужные операции, а форма не раскрывает контроллеру лишние
- * детали своей иерархии наследования.
+ * <p>This class removes the anonymous nested object from {@link FormChatUi}.
+ * Search receives only the operations it needs, while the form keeps the
+ * internals of its inheritance hierarchy private from the controller.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */

@@ -26,9 +26,9 @@ import java.util.Base64;
 import java.util.concurrent.ThreadLocalRandom;
 
 /**
- * Модальное окно создания SECONDARY канала на устройстве.
+ * Modal dialog for creating a SECONDARY channel on the connected device.
  *
- * <p>Вызывается статическим методом {@link #show(DeviceState, ProtocolHandler, Runnable)}.
+ * <p>Use {@link #show(DeviceState, ProtocolHandler, Runnable)} to open it.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -47,11 +47,11 @@ public final class CreateChannelDialog {
     private CreateChannelDialog() {}
 
     /**
-     * Показать диалог создания канала.
+     * Opens the channel creation dialog.
      *
-     * @param state           текущее состояние устройства
-     * @param protocolHandler обработчик протокола для отправки команд
-     * @param onCreated       колбэк, вызываемый после успешного создания канала
+     * @param state current device state
+     * @param protocolHandler protocol handler used to send radio commands
+     * @param onCreated callback invoked after the channel is created
      */
     public static void show(DeviceState state,
                             ProtocolHandler protocolHandler,
@@ -72,7 +72,7 @@ public final class CreateChannelDialog {
             return;
         }
 
-        // === Форма ===
+        // Build the form.
         VBox panel = new VBox(12);
         panel.setPadding(new Insets(20, 30, 20, 30));
         panel.setPrefWidth(340);
@@ -85,7 +85,7 @@ public final class CreateChannelDialog {
 
         Separator sep = new Separator();
 
-        // Имя канала
+        // Channel name.
         Label nameLabel = new Label(I18n.t("chat.channel.name"));
         TextField nameField = new TextField();
         nameField.setPromptText(I18n.t("chat.channel.namePrompt"));
@@ -97,7 +97,7 @@ public final class CreateChannelDialog {
             }
         });
 
-        // Ключ шифрования (PSK)
+        // Encryption key (PSK).
         Label encLabel = new Label(I18n.t("chat.channel.psk"));
         TextField pskField = new TextField();
         pskField.setPromptText(I18n.t("chat.channel.pskPrompt"));
@@ -119,7 +119,7 @@ public final class CreateChannelDialog {
         CheckBox downlinkCheck = new CheckBox("Downlink");
         CheckBox positionCheck = new CheckBox(I18n.t("chat.channel.position"));
 
-        // Слайдер точности позиции
+        // Position precision slider.
         Label precisionLabel = new Label(precisionLabel(4));
         precisionLabel.getStyleClass().add("muted-small-label");
 
@@ -140,12 +140,12 @@ public final class CreateChannelDialog {
             precisionBox.setManaged(newVal);
         });
 
-        // Статус
+        // Status message.
         Label statusLabel = new Label("");
         statusLabel.getStyleClass().add("muted-small-label");
         statusLabel.setWrapText(true);
 
-        // Кнопки
+        // Action buttons.
         Button createBtn = new Button(I18n.t("common.create"));
         createBtn.getStyleClass().add("accent");
 
@@ -159,7 +159,7 @@ public final class CreateChannelDialog {
         panel.getChildren().addAll(title, sep, nameLabel, nameField, encLabel, pskRow,
                 uplinkCheck, downlinkCheck, positionCheck, precisionBox, statusLabel, btnRow);
 
-        // === Обработка «Создать» ===
+        // Create handling.
         createBtn.setOnAction(e -> {
             String channelName = nameField.getText() != null
                     ? nameField.getText().trim() : "";
@@ -168,7 +168,7 @@ public final class CreateChannelDialog {
                 return;
             }
 
-            // PSK из текстового поля (base64)
+            // Decode the PSK from the Base64 text field.
             com.google.protobuf.ByteString psk;
             String pskText = pskField.getText() != null
                     ? pskField.getText().trim() : "";
@@ -185,7 +185,7 @@ public final class CreateChannelDialog {
                 return;
             }
 
-            // Собрать Channel protobuf
+            // Build the Channel protobuf.
             ChannelProtos.ChannelSettings.Builder settingsBuilder =
                     ChannelProtos.ChannelSettings.newBuilder()
                             .setName(channelName)
@@ -213,7 +213,7 @@ public final class CreateChannelDialog {
             createBtn.setDisable(true);
             statusLabel.setText(I18n.t("chat.channel.requestSessionKey"));
 
-            // Паттерн session_passkey: запрос → ожидание → отправка
+            // session_passkey flow: request it, wait for it, then send the channel.
             Runnable[] listenerHolder = new Runnable[1];
             listenerHolder[0] = () -> Platform.runLater(() -> {
                 state.removeOwnerInfoListener(listenerHolder[0]);
@@ -229,7 +229,7 @@ public final class CreateChannelDialog {
             });
             state.addOwnerInfoListener(listenerHolder[0]);
 
-            // Таймаут 5 сек — отправить без passkey (для локальных устройств)
+            // After 5 seconds, fall back to sending without a passkey for local devices.
             Thread timeout = new Thread(() -> {
                 try {
                     Thread.sleep(5000);

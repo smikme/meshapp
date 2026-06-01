@@ -8,10 +8,10 @@ import org.luaj.vm2.LuaValue;
 import org.meshtastic.proto.ChannelProtos;
 
 /**
- * Преобразует внутренние модели MeshApp в Lua-таблицы sandbox API.
+ * Maps MeshApp internal models to Lua tables exposed by the sandbox API.
  * <p>
- * Используется для объектов сообщений, нод и каналов, которые доступны скриптам
- * через {@code on_message(msg)} и функции {@code mesh.chat.*}.
+ * Used for messages, nodes, and channels available to scripts through
+ * {@code on_message(msg)} and {@code mesh.chat.*} functions.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -24,12 +24,12 @@ public final class LuaValueMapper {
     }
 
     /**
-     * Преобразует сообщение чата в Lua-таблицу.
+     * Converts a chat message to a Lua table.
      *
-     * @param message  сообщение MeshApp
-     * @param chatType тип чата
-     * @param chatKey  ключ чата
-     * @return Lua-таблица сообщения
+     * @param message MeshApp message
+     * @param chatType chat type
+     * @param chatKey chat key
+     * @return Lua message table
      */
     public LuaTable messageToTable(MeshMessage message, String chatType, String chatKey) {
         LuaTable table = new LuaTable();
@@ -60,10 +60,10 @@ public final class LuaValueMapper {
     }
 
     /**
-     * Преобразует ноду в Lua-таблицу.
+     * Converts a node to a Lua table.
      *
-     * @param node нода MeshApp
-     * @return Lua-таблица ноды
+     * @param node MeshApp node
+     * @return Lua node table
      */
     public LuaTable nodeToTable(NodeData node) {
         LuaTable table = new LuaTable();
@@ -96,10 +96,10 @@ public final class LuaValueMapper {
     }
 
     /**
-     * Преобразует канал в Lua-таблицу.
+     * Converts a channel to a Lua table.
      *
-     * @param channel канал Meshtastic
-     * @return Lua-таблица канала
+     * @param channel Meshtastic channel
+     * @return Lua channel table
      */
     public LuaTable channelToTable(ChannelProtos.Channel channel) {
         LuaTable table = new LuaTable();
@@ -112,12 +112,12 @@ public final class LuaValueMapper {
     }
 
     /**
-     * Безопасно читает целое поле из Lua-таблицы.
+     * Safely reads an integer field from a Lua table.
      *
-     * @param table        Lua-таблица
-     * @param key          имя поля
-     * @param defaultValue значение по умолчанию
-     * @return значение поля или default
+     * @param table Lua table
+     * @param key field name
+     * @param defaultValue fallback value
+     * @return field value or fallback
      */
     public static int tableInt(LuaTable table, String key, int defaultValue) {
         LuaValue value = table.get(key);
@@ -125,16 +125,17 @@ public final class LuaValueMapper {
     }
 
     /**
-     * Безопасно читает uint32-поле из Lua-таблицы в Java int с сохранением битов.
+     * Safely reads a uint32 field from a Lua table into a Java int while preserving bits.
      * <p>
-     * Meshtastic хранит node_num как unsigned 32-bit, а protobuf/Java держит его
-     * в signed {@code int}. Lua API показывает такие значения как положительные
-     * числа 0..4294967295, но обратно в Java их нужно свернуть в те же 32 бита.
+     * Meshtastic stores {@code node_num} as unsigned 32-bit, while protobuf and
+     * Java store it in a signed {@code int}. The Lua API presents those values as
+     * positive numbers in the {@code 0..4294967295} range; on return to Java they
+     * must be folded back into the same 32 bits.
      *
-     * @param table        Lua-таблица
-     * @param key          имя поля
-     * @param defaultValue значение по умолчанию
-     * @return signed int с исходными uint32-битами
+     * @param table Lua table
+     * @param key field name
+     * @param defaultValue fallback value
+     * @return signed int containing the original uint32 bits
      */
     public static int tableUInt32(LuaTable table, String key, int defaultValue) {
         LuaValue value = table.get(key);
@@ -152,11 +153,11 @@ public final class LuaValueMapper {
     }
 
     /**
-     * Безопасно читает строковое поле из Lua-таблицы.
+     * Safely reads a string field from a Lua table.
      *
-     * @param table Lua-таблица
-     * @param key   имя поля
-     * @return строка или {@code null}
+     * @param table Lua table
+     * @param key field name
+     * @return string value, or {@code null}
      */
     public static String tableString(LuaTable table, String key) {
         LuaValue value = table.get(key);

@@ -4,10 +4,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Linux-уведомления через {@code notify-send} (libnotify).
+ * Linux notifications delivered through {@code notify-send} (libnotify).
  * <p>
- * {@code notify-send} доступен на всех основных DE (GNOME, KDE, XFCE и др.).
- * При отсутствии утилиты ошибка логируется, приложение продолжает работу.
+ * {@code notify-send} is available in the major desktop environments. If the
+ * utility is missing, the error is logged and the application keeps running.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */

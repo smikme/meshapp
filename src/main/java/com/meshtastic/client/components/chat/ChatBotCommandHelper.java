@@ -14,7 +14,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Разбор команд встроенных чат-ботов и подготовка подсказок для autocomplete.
+ * Parses built-in chat bot commands and prepares autocomplete suggestions.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */

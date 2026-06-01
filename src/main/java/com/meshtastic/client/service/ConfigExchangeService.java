@@ -26,20 +26,20 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * Сервис обмена конфигурацией с Meshtastic-устройством.
+ * Service that exchanges configuration with a Meshtastic device.
  * <p>
- * Реализует протокол config exchange: отправляет {@code want_config_id},
- * получает поток MyNodeInfo, NodeInfo, Channel, Config, ModuleConfig,
- * и завершается при получении {@code config_complete_id}.
+ * Implements the config-exchange protocol: sends {@code want_config_id},
+ * receives a stream of MyNodeInfo, NodeInfo, Channel, Config, and ModuleConfig
+ * messages, and completes when {@code config_complete_id} arrives.
  * <p>
- * Жизненный цикл:
+ * Lifecycle:
  * <ol>
- *   <li>Создание с привязкой к {@link ProtocolHandler} и {@link com.meshtastic.client.model.DeviceState}</li>
- *   <li>{@link #startConfigExchange()} — отправка {@code want_config_id}, возврат {@link CompletableFuture}</li>
- *   <li>Приём данных через callback-и {@link com.meshtastic.client.protocol.FromRadioListener}</li>
- *   <li>Завершение — future.complete(deviceState), снятие слушателя</li>
+ *   <li>Create with a {@link ProtocolHandler} and {@link com.meshtastic.client.model.DeviceState}</li>
+ *   <li>{@link #startConfigExchange()} sends {@code want_config_id} and returns a {@link CompletableFuture}</li>
+ *   <li>Receive data through {@link com.meshtastic.client.protocol.FromRadioListener} callbacks</li>
+ *   <li>Complete the future with deviceState and remove the listener</li>
  * </ol>
- * После завершения обновляет {@link NodeCacheService}, загружает архив телеметрии из H2.
+ * After completion, updates {@link NodeCacheService} and loads archived telemetry from H2.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -47,9 +47,9 @@ public class ConfigExchangeService implements FromRadioListener {
 
     private static final Logger log = LoggerFactory.getLogger(ConfigExchangeService.class);
 
-    /** Интервал повтора want_config_id если устройство не ответило (мс).
-     *  Покрывает случай когда USB-Serial мост (CH340) сбросил устройство при openPort(),
-     *  и первый want_config_id был отправлен до завершения загрузки ESP32. */
+    /** Retry interval for want_config_id when the device does not respond, in milliseconds.
+     *  Covers the case where a USB-Serial bridge such as CH340 resets the device
+     *  during openPort(), and the first want_config_id is sent before the ESP32 finishes booting. */
     private static final int RETRY_INTERVAL_MS = 3000;
     private static final int MAX_RETRIES = 5;
     private static final int AUTO_TIME_SYNC_ACK_TIMEOUT_MS = 10_000;
@@ -78,13 +78,13 @@ public class ConfigExchangeService implements FromRadioListener {
     }
 
     /**
-     * Запускает обмен конфигурацией. Очищает текущее состояние устройства,
-     * генерирует случайный {@code want_config_id} и отправляет его на радио.
-     * Регистрирует себя как {@link com.meshtastic.client.protocol.FromRadioListener}
-     * для приёма потока конфигурации.
-     *
-     * @return {@link CompletableFuture}, который завершится с заполненным
-     *         {@link DeviceState} после получения {@code config_complete_id}
+     * Starts config exchange. Clears current device state, generates a random
+     * {@code want_config_id}, and sends it to the radio. Registers this service
+     * as a {@link com.meshtastic.client.protocol.FromRadioListener} to receive
+     * the configuration stream.
+ *
+     * @return {@link CompletableFuture} completed with populated {@link DeviceState}
+     *         after {@code config_complete_id} is received
      */
     public CompletableFuture<DeviceState> startConfigExchange() {
         future = new CompletableFuture<>();
@@ -113,9 +113,9 @@ public class ConfigExchangeService implements FromRadioListener {
     }
 
     /**
-     * Планирует повторную отправку want_config_id, если устройство не ответило.
-     * Покрывает случай, когда USB-Serial мост (CH340/CH9102) сбросил ESP32 при
-     * открытии порта и первый want_config_id был потерян во время загрузки.
+     * Schedules another want_config_id send when the device does not respond.
+     * Covers the case where a USB-Serial bridge (CH340/CH9102) reset the ESP32
+     * during port open and the first want_config_id was lost during boot.
      */
     private void scheduleRetry(int attempt) {
         if (attempt > MAX_RETRIES || aborted.get() || retryScheduler.isShutdown()) {
@@ -210,8 +210,8 @@ public class ConfigExchangeService implements FromRadioListener {
 
         if (nodeInfo.hasUser()) {
             MeshProtos.User user = nodeInfo.getUser();
-            // Protobuf возвращает "" для незаполненных строковых полей —
-            // пустые значения не должны затирать существующие данные
+            // Protobuf returns "" for unset string fields; blank values should
+            // not overwrite existing data.
             if (!user.getLongName().isEmpty()) { node.setLongName(user.getLongName()); }
             if (!user.getShortName().isEmpty()) { node.setShortName(user.getShortName()); }
             if (!user.getId().isEmpty()) { node.setNodeId(user.getId()); }
@@ -246,7 +246,7 @@ public class ConfigExchangeService implements FromRadioListener {
                 node.setLongitude(Math.round(deviceState.getPendingFixedLon() * 1e7) * 1e-7);
                 node.setAltitude(deviceState.getPendingFixedAlt());
             } else {
-                // Нулевые координаты означают отсутствие данных — не затираем существующие
+                // Zero coordinates mean "no data"; keep existing values.
                 if (pos.getLatitudeI() != 0) { node.setLatitude(pos.getLatitudeI() * 1e-7); }
                 if (pos.getLongitudeI() != 0) { node.setLongitude(pos.getLongitudeI() * 1e-7); }
                 if (pos.getAltitude() != 0) { node.setAltitude(pos.getAltitude()); }
@@ -265,7 +265,7 @@ public class ConfigExchangeService implements FromRadioListener {
 
         if (nodeInfo.getChannel() != 0) { node.setChannel((int) nodeInfo.getChannel()); }
 
-        // Запомнить флаги избранного и игнорирования — применим после записи нод в БД (onConfigComplete)
+        // Remember favorite/ignored flags and apply them after nodes are written to the database.
         if (node.getNodeId() != null) {
             favoriteFlags.put(node.getNodeId(), nodeInfo.getIsFavorite());
             ignoredFlags.put(node.getNodeId(), nodeInfo.getIsIgnored());
@@ -284,8 +284,8 @@ public class ConfigExchangeService implements FromRadioListener {
             if (dm.getUptimeSeconds() != 0) { node.setUptimeSeconds(dm.getUptimeSeconds()); }
 
 
-            // Сохранить начальную точку телеметрии, если есть реальные данные
-            // (пропускаем полностью нулевые записи — артефакты config exchange)
+            // Store the initial telemetry point when real data is present.
+            // Fully zero records are config-exchange artifacts and are skipped.
             if (dm.getBatteryLevel() != 0 || dm.getChannelUtilization() != 0 || dm.getAirUtilTx() != 0) {
                 long ts = nodeInfo.getLastHeard() > 0 ? nodeInfo.getLastHeard() : System.currentTimeMillis() / 1000;
                 TelemetryEntry entry = new TelemetryEntry(ts, node.getNodeId());
@@ -439,35 +439,35 @@ public class ConfigExchangeService implements FromRadioListener {
         NodeCacheService ncs = NodeCacheService.getInstance();
         ncs.updateAll(deviceState.getNodeDb());
 
-        // Применить флаги избранного — теперь ноды есть в БД
+        // Apply favorite flags now that nodes exist in the database.
         for (Map.Entry<String, Boolean> e : favoriteFlags.entrySet()) {
             ncs.setFavorite(e.getKey(), e.getValue());
         }
 
-        // Применить флаги игнорирования (только true — дефолт уже FALSE)
+        // Apply ignored flags; only true values matter because the default is already FALSE.
         for (Map.Entry<String, Boolean> e : ignoredFlags.entrySet()) {
             if (e.getValue()) {
                 ncs.setIgnored(e.getKey(), true);
             }
         }
 
-        // Обогатить bare-ноды (только телеметрия) кэшированными именами из H2
+        // Enrich bare telemetry-only nodes with cached names from H2.
         for (NodeData node : deviceState.getNodeDb().values()) {
             ncs.enrichFromCache(node);
         }
 
-        // Уведомить UI об обновлённых избранных и игнорируемых (один раз после всех нод)
+        // Notify the UI about updated favorites and ignored nodes once after all nodes are processed.
         FavoriteNodeService.getInstance().fireListeners();
         IgnoredNodeService.getInstance().fireListeners();
 
-        // Загрузить архив телеметрии из H2 + подчистить старые записи
+        // Load archived telemetry from H2 and prune old records.
         String ownerNodeId = String.format("!%08x", deviceState.getMyNodeNum());
         ncs.pruneTelemetryHistory(30, ownerNodeId);
         var archived = ncs.loadTelemetryHistory(200, ownerNodeId);
         deviceState.prependTelemetryHistory(archived);
         log.info("Loaded {} archived telemetry entries from DB", archived.size());
 
-        // Проверить наличие непрочитанных сообщений и обновить badge
+        // Check unread messages and update the badge.
         checkUnreadMessages(ownerNodeId);
 
         if (future != null) {

@@ -4,10 +4,10 @@ import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.MeshMessage;
 
 /**
- * Разрешение имён нод и отправителей для чата.
+ * Resolves node and sender names for chat UI.
  *
- * <p>Инстанс хранит ссылку на {@link DeviceState}, которая обновляется
- * при переподключении через {@link #setState(DeviceState)}.
+ * <p>The instance keeps a {@link DeviceState} reference that is replaced after
+ * reconnect through {@link #setState(DeviceState)}.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -19,26 +19,26 @@ public class ChatNameResolver {
         this.state = state;
     }
 
-    /** Обновить DeviceState (при reconnect). */
+    /** Updates DeviceState after reconnect. */
     public void setState(DeviceState state) {
         this.state = state;
     }
 
     /**
-     * Разрешить имя ноды по nodeNum — longName или fallback {@code !hex}.
+     * Resolves a node name by numeric id, using longName or {@code !hex} fallback.
      *
-     * @param nodeNum номер ноды
-     * @return отображаемое имя
+     * @param nodeNum numeric node id
+     * @return display name
      */
     public String resolveNodeName(int nodeNum) {
         return ChatNodeDisplayHelper.resolveNodeName(state, nodeNum);
     }
 
     /**
-     * Определить имя отправителя для цитаты ответа.
+     * Resolves the sender name shown in a reply quote.
      *
-     * @param msg сообщение
-     * @return «Вы» для исходящих, longName / senderName / nodeId для входящих
+     * @param msg message
+     * @return local-user label for outgoing messages, or longName/senderName/nodeId for incoming messages
      */
     public String resolveSenderName(MeshMessage msg) {
         return ChatNodeDisplayHelper.resolveReplySenderName(state, msg);

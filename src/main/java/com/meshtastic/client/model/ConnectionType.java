@@ -1,8 +1,9 @@
 package com.meshtastic.client.model;
 
 /**
- * Тип транспорта для подключения к Meshtastic-устройству.
- * Gson сериализует по имени — обратная совместимость с существующим JSON.
+ * Transport type used to connect to a Meshtastic device.
+ * <p>
+ * Gson serializes enum values by name, preserving compatibility with existing JSON.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */

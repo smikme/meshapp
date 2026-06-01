@@ -11,12 +11,11 @@ import javafx.scene.control.Tooltip;
 import java.util.Optional;
 
 /**
- * Малые UI-хелперы формы чата, не завязанные на состояние выбранного чата.
+ * Small chat-form UI helpers that do not depend on the selected chat state.
  *
- * <p>Класс содержит только фабрики повторяемых контролов и безопасные операции
- * над JavaFX-узлами. Логика чата, поиска и данных остаётся в отдельных
- * компонентах, чтобы эти методы можно было переиспользовать без побочных
- * эффектов.
+ * <p>The class contains only reusable control factories and safe JavaFX node
+ * operations. Chat, search, and data logic remain in separate components so
+ * these helpers can be reused without side effects.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -25,8 +24,8 @@ final class FormChatUiSupport {
     private FormChatUiSupport() {}
 
     /**
-     * Добавляет почти прозрачный фон на Windows, где пустые JavaFX-узлы иначе
-     * могут не участвовать в hit-test области окна.
+     * Adds an almost transparent background on Windows, where empty JavaFX nodes
+     * may otherwise be skipped by window hit testing.
      */
     static void applyWindowsHitTestBackground(Node node) {
         if (OsDetect.isWindows() && !AppPreferences.isDisableEffectsEffective()) {
@@ -35,7 +34,7 @@ final class FormChatUiSupport {
     }
 
     /**
-     * Создаёт компактную кнопку заголовка с SVG-иконкой и текстовым fallback.
+     * Creates a compact header button with an SVG icon and text fallback.
      */
     static Button createHeaderIconButton(String iconPath, String tooltip, String fallbackText) {
         Button button = new Button();
@@ -47,7 +46,7 @@ final class FormChatUiSupport {
     }
 
     /**
-     * Создаёт кнопку навигации по результатам поиска сообщений.
+     * Creates a button for navigating message search results.
      */
     static Button createMessageSearchNavButton(String text, String tooltip) {
         Button button = new Button(text);
@@ -57,8 +56,8 @@ final class FormChatUiSupport {
     }
 
     /**
-     * Синхронно меняет {@code visible} и {@code managed}, чтобы скрытый узел не
-     * занимал место в layout.
+     * Updates {@code visible} and {@code managed} together so hidden nodes do not
+     * reserve layout space.
      */
     static void setVisibleManaged(Node node, boolean visible) {
         Optional.ofNullable(node).ifPresent(target -> {

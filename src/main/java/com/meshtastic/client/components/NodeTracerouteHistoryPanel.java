@@ -42,11 +42,11 @@ import java.util.Optional;
 import java.util.stream.Stream;
 
 /**
- * История сохранённых traceroute-результатов для одной ноды.
+ * Saved traceroute history for one node.
  *
- * <p>Компонент читает записи из {@code traceroute_results}, восстанавливает
- * визуализацию из protobuf {@link MeshProtos.RouteDiscovery} или legacy-текста
- * и показывает дату создания каждого трейса.
+ * <p>The component reads {@code traceroute_results}, rebuilds visuals from
+ * protobuf {@link MeshProtos.RouteDiscovery} payloads or legacy text, and shows
+ * the creation time of each trace.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -74,21 +74,21 @@ public final class NodeTracerouteHistoryPanel extends BorderPane {
     private boolean allPagesLoaded;
 
     /**
-     * Создаёт панель истории traceroute для выбранной ноды.
+     * Creates a traceroute history panel for the selected node.
      *
-     * @param state состояние активного подключения, используется для owner scope и имён нод
-     * @param node  нода, для которой нужно показывать сохранённые трейсы
+     * @param state active connection state, used for owner scope and node names
+     * @param node node whose saved traces should be shown
      */
     public NodeTracerouteHistoryPanel(DeviceState state, NodeData node) {
         this(state, node, null);
     }
 
     /**
-     * Создаёт панель истории traceroute для выбранной ноды.
+     * Creates a traceroute history panel for the selected node.
      *
-     * @param state            состояние активного подключения, используется для owner scope и имён нод
-     * @param node             нода, для которой нужно показывать сохранённые трейсы
-     * @param onBeforeNavigate действие перед переходом на карту, например закрытие боковой панели
+     * @param state active connection state, used for owner scope and node names
+     * @param node node whose saved traces should be shown
+     * @param onBeforeNavigate action run before navigating to the map, such as closing a side panel
      */
     public NodeTracerouteHistoryPanel(DeviceState state, NodeData node, Runnable onBeforeNavigate) {
         this.state = state;
@@ -124,7 +124,7 @@ public final class NodeTracerouteHistoryPanel extends BorderPane {
     }
 
     /**
-     * Перечитывает сохранённые трейсы из БД и заново строит визуализацию.
+     * Reloads saved traces from the database and rebuilds the visualization.
      */
     public void refresh() {
         resetPaging();
@@ -330,10 +330,10 @@ public final class NodeTracerouteHistoryPanel extends BorderPane {
     }
 
     /**
-     * Форматирует время создания трейса в виде полной локальной даты и времени.
+     * Formats trace creation time as full local date and time.
      *
-     * @param epochSeconds Unix timestamp в секундах
-     * @return строка {@code dd.MM.yyyy HH:mm} или пустая строка для невалидного времени
+     * @param epochSeconds Unix timestamp in seconds
+     * @return {@code dd.MM.yyyy HH:mm} string, or empty string for invalid time
      */
     static String formatTraceTimestamp(long epochSeconds) {
         return epochSeconds <= 0

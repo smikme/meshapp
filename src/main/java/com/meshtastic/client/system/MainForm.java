@@ -30,9 +30,8 @@ public class MainForm extends VBox {
     public void setForm(Form form) {
         mainPanel.getChildren().setAll(form);
 
-        // Формы с прозрачным фоном (например, ноды) убирают фон content-area,
-        // чтобы vibrancy/backdrop просвечивал под списком.
-        // Сначала убираем ВСЕ экземпляры (removeAll), потом добавляем один если нужно.
+        // Transparent forms, such as nodes and chat, let vibrancy or the backdrop
+        // show through the list area. Remove all copies first, then add one if needed.
         mainPanel.getStyleClass().removeAll("transparent-content");
         if (form.getStyleClass().contains("node-form") || form.getStyleClass().contains("chat-form")) {
             mainPanel.getStyleClass().add("transparent-content");

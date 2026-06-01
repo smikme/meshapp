@@ -1,35 +1,35 @@
 package com.meshtastic.client.lua;
 
 /**
- * Мост из Lua sandbox к JavaFX-интерфейсу MeshApp.
+ * Bridge from the Lua sandbox to the MeshApp JavaFX interface.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public interface LuaUiBridge {
 
     /**
-     * @return {@code true}, если текущий runtime может показать UI-запрос.
+     * @return {@code true} when the current runtime can show a UI request
      */
     boolean isAvailable();
 
     /**
-     * Создает уникальный request id внутри текущей Lua-сессии.
+     * Creates a unique request id within the current Lua session.
      *
      * @return request id
      */
     String nextRequestId();
 
     /**
-     * Передает запрос выбора ноды в UI.
+     * Sends a node-pick request to the UI.
      *
-     * @param request запрос из Lua
+     * @param request Lua request
      */
     void requestNodePick(LuaUiNodePickRequest request);
 
     /**
-     * Показывает временное сообщение встроенного бота без сохранения в БД.
+     * Shows a temporary built-in bot message without saving it to the database.
      *
-     * @param notice сообщение для UI
+     * @param notice UI notice
      */
     void showBotNotice(LuaUiBotNotice notice);
 }

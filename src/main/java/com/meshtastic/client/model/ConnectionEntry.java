@@ -3,20 +3,13 @@ package com.meshtastic.client.model;
 import java.util.UUID;
 
 /**
- * Профиль подключения к устройству или endpoint-у поддерживаемого протокола.
+ * Saved connection profile for a device or supported protocol endpoint.
  * <p>
- * Сериализуется в JSON ({@code ~/.meshapp/connections.json}) через Gson.
- * Поддерживает три типа транспорта: TCP (host + port), Serial (portName + baudRate)
- * и BLE (address + deviceName).
- * <p>
- * Поле {@code type} может быть {@code null} для legacy-записей —
- * в этом случае {@link #getEffectiveType()} возвращает {@link ConnectionType#TCP}.
- * Новые профили по умолчанию используют {@link ProtocolType#MESHTASTIC}.
- * Поле {@code protocol} может быть {@code null} для legacy-записей —
- * в этом случае {@link #getEffectiveProtocol()} возвращает {@link ProtocolType#MESHTASTIC}.
- * Поле {@code autoconnect} сохраняется и по умолчанию равно {@code false}.
- * Поля {@code connected} и {@code reconnecting} помечены как {@code transient} —
- * не сохраняются, отражают текущее runtime-состояние.
+ * Profiles are serialized to {@code ~/.meshapp/connections.json} through Gson
+ * and support TCP, Serial, and BLE transports. Legacy entries may not contain
+ * {@code type} or {@code protocol}; effective accessors provide TCP and
+ * Meshtastic defaults for those cases. Runtime flags such as {@code connected}
+ * and {@code reconnecting} are transient and are not persisted.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -44,7 +37,7 @@ public class ConnectionEntry {
         this.port = 4403;
     }
 
-    /** Конструктор для TCP-подключения. */
+    /** Constructor for TCP connections. */
     public ConnectionEntry(String name, String host, int port) {
         this.id = UUID.randomUUID().toString();
         this.protocol = ProtocolType.MESHTASTIC;
@@ -54,7 +47,7 @@ public class ConnectionEntry {
         this.port = port;
     }
 
-    /** Конструктор для Serial-подключения (USB / Bluetooth SPP). */
+    /** Constructor for Serial connections over USB or Bluetooth SPP. */
     public ConnectionEntry(String name, String portName, int baudRate, ConnectionType type) {
         this.id = UUID.randomUUID().toString();
         this.protocol = ProtocolType.MESHTASTIC;
@@ -64,7 +57,7 @@ public class ConnectionEntry {
         this.baudRate = baudRate;
     }
 
-    /** Конструктор для BLE-подключения. */
+    /** Constructor for BLE connections. */
     public ConnectionEntry(String name, String bleAddress, String bleDeviceName) {
         this.id = UUID.randomUUID().toString();
         this.protocol = ProtocolType.MESHTASTIC;
@@ -75,24 +68,24 @@ public class ConnectionEntry {
     }
 
     /**
-     * Возвращает эффективный тип подключения.
-     * Для legacy-записей (type == null) возвращает {@link ConnectionType#TCP}.
+     * Returns the effective connection type.
+     * Legacy entries with {@code type == null} are treated as TCP.
      */
     public ConnectionType getEffectiveType() {
         return type != null ? type : ConnectionType.TCP;
     }
 
     /**
-     * Возвращает эффективный протокол подключения.
-     * Для legacy-записей (protocol == null) возвращает {@link ProtocolType#MESHTASTIC}.
+     * Returns the effective connection protocol.
+     * Legacy entries with {@code protocol == null} are treated as Meshtastic.
      */
     public ProtocolType getEffectiveProtocol() {
         return protocol != null ? protocol : ProtocolType.MESHTASTIC;
     }
 
     /**
-     * Возвращает режим DTR/RTS для serial-подключения.
-     * Для legacy-записей без поля возвращает {@link SerialModemLineMode#AUTO}.
+     * Returns the DTR/RTS mode for Serial connections.
+     * Legacy entries without the field use {@link SerialModemLineMode#AUTO}.
      */
     public SerialModemLineMode getEffectiveSerialModemLineMode() {
         return serialModemLineMode != null ? serialModemLineMode : SerialModemLineMode.AUTO;
@@ -115,21 +108,21 @@ public class ConnectionEntry {
     }
 
     /**
-     * Возвращает явно сохранённый протокол подключения.
+     * Returns the protocol value stored in the profile.
      * <p>
-     * Для старых JSON-записей может быть {@code null}; в бизнес-логике обычно
-     * нужно использовать {@link #getEffectiveProtocol()}.
+     * Older JSON entries may contain {@code null}; business logic should usually
+     * use {@link #getEffectiveProtocol()} instead.
      *
-     * @return сохранённый тип протокола или {@code null}
+     * @return stored protocol type, or {@code null}
      */
     public ProtocolType getProtocol() {
         return protocol;
     }
 
     /**
-     * Задаёт протокол, который будет поднят поверх выбранного транспорта.
+     * Sets the protocol that will run over the selected transport.
      *
-     * @param protocol тип протокола для сохранения в профиле подключения
+     * @param protocol protocol type to store in the connection profile
      */
     public void setProtocol(ProtocolType protocol) {
         this.protocol = protocol;
@@ -180,9 +173,9 @@ public class ConnectionEntry {
     }
 
     /**
-     * Задаёт режим DTR/RTS для serial-подключения.
+     * Sets the DTR/RTS mode for Serial connections.
      *
-     * @param serialModemLineMode сохранённый режим или {@code null} для legacy-compatible {@code AUTO}
+     * @param serialModemLineMode stored mode, or {@code null} for legacy-compatible {@code AUTO}
      */
     public void setSerialModemLineMode(SerialModemLineMode serialModemLineMode) {
         this.serialModemLineMode = serialModemLineMode;

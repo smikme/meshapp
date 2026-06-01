@@ -76,15 +76,15 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /**
- * Отдельное окно мониторинга LoRa mesh-пакетов.
- * Класс инкапсулирует всё состояние UI подсистемы: фильтры, выбранный пакет,
- * HEX/ASCII предпросмотр, дерево разбора, экспорт и сохранение геометрии окна.
+ * Standalone monitor window for LoRa mesh packets.
+ * The class encapsulates all UI subsystem state: filters, selected packet,
+ * HEX/ASCII preview, parsed tree, export, and window geometry persistence.
  *
- * Основной контракт окна:
- * - новые пакеты появляются вверху таблицы;
- * - если пользователь изучает уже выбранный пакет, приход новых данных не должен
- *   сбрасывать выделение строки, дерева и HEX/ASCII подсветку;
- * - дерево и предпросмотр перестраиваются только при фактической смене выбранного пакета.
+ * Window contract:
+ * - new packets appear at the top of the table;
+ * - if the user is inspecting the currently selected packet, incoming data must
+ *   not reset row selection, tree selection, or HEX/ASCII highlighting;
+ * - the tree and preview are rebuilt only when the selected packet actually changes.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -215,8 +215,8 @@ public final class PacketMonitorWindow {
     }
 
     /**
-     * Показывает singleton-окно мониторинга.
-     * Если окно ещё не создано, оно инициализируется вместе со всем внутренним состоянием.
+     * Shows the singleton monitor window.
+     * If the window has not been created yet, it is initialized together with all internal state.
      */
     public static void showWindow() {
         if (Platform.isFxApplicationThread()) {
@@ -227,8 +227,8 @@ public final class PacketMonitorWindow {
     }
 
     /**
-     * Скрывает уже открытое окно без уничтожения singleton-состояния.
-     * Используется, когда приложение целиком уходит в tray или скрывается системой.
+     * Hides an open window without destroying singleton state.
+     * Used when the whole application moves to tray or is hidden by the system.
      */
     public static void hideWindowIfOpen() {
         if (Platform.isFxApplicationThread()) {
@@ -239,7 +239,7 @@ public final class PacketMonitorWindow {
     }
 
     /**
-     * Возвращает ранее скрытое окно, только если пользователь уже открывал его в этой сессии.
+     * Restores a previously hidden window only if the user opened it in this session.
      */
     public static void restoreWindowIfOpen() {
         if (Platform.isFxApplicationThread()) {
@@ -250,8 +250,8 @@ public final class PacketMonitorWindow {
     }
 
     /**
-     * Полностью закрывает окно мониторинга, если оно уже было создано.
-     * Используется при завершении приложения, когда состояние singleton больше не нужно сохранять в памяти.
+     * Fully closes the monitor window if it has been created.
+     * Used during application shutdown, when singleton state no longer needs to stay in memory.
      */
     public static void closeWindowIfOpen() {
         if (Platform.isFxApplicationThread()) {
@@ -262,8 +262,8 @@ public final class PacketMonitorWindow {
     }
 
     /**
-     * Создаёт singleton-окно при первом вызове и показывает его повторно при последующих.
-     * Состояние окна живёт до фактического закрытия stage.
+     * Creates the singleton window on first use and shows it again on later calls.
+     * Window state lives until the stage is actually closed.
      */
     private static void showWindowInternal() {
         if (instance == null) {
@@ -330,11 +330,11 @@ public final class PacketMonitorWindow {
     }
 
     /**
-     * Создаёт сцену и stage окна мониторинга.
-     * Контракт:
-     * - окно использует стандартную системную рамку;
-     * - геометрия восстанавливается до {@code show()};
-     * - геометрия сохраняется на hiding при любом способе закрытия окна.
+     * Creates the monitor window scene and stage.
+     * Contract:
+     * - the window uses the standard system frame;
+     * - geometry is restored before {@code show()};
+     * - geometry is saved on hiding, regardless of how the window is closed.
      */
     private void createStage() {
         VBox root = new VBox(10);
@@ -478,9 +478,8 @@ public final class PacketMonitorWindow {
     }
 
     /**
-     * Собирает основной вертикальный split-контент окна:
-     * сверху таблица пакетов, снизу предпросмотр и дерево разбора.
-     * Положение разделителя хранится в {@link AppPreferences}.
+     * Builds the main vertical split content: packet table on top, preview and
+     * parsed tree below. The divider position is stored in {@link AppPreferences}.
      */
     private SplitPane createContentSplitPane() {
         packetTable = createPacketTable();
@@ -526,8 +525,9 @@ public final class PacketMonitorWindow {
     }
 
     /**
-     * Создаёт фиксированный трёхколоночный HEX/ASCII предпросмотр.
-     * Адреса, HEX и ASCII рендерятся отдельно, чтобы подсветка никогда не затрагивала адресную колонку.
+     * Creates the fixed three-column HEX/ASCII preview.
+     * Addresses, HEX, and ASCII are rendered separately so highlighting never
+     * affects the address column.
      */
     private HBox createHexPreviewBox(TextArea addressPreviewArea,
                                      TextArea hexPreviewArea,
@@ -552,8 +552,8 @@ public final class PacketMonitorWindow {
     }
 
     /**
-     * Создаёт вертикальный toolbar действий над текущим пакетом.
-     * Кнопки зависят только от {@link #viewedPacketEntry} и не должны менять selection в таблице.
+     * Creates the vertical action toolbar for the current packet.
+     * Buttons depend only on {@link #viewedPacketEntry} and must not change table selection.
      */
     private ToolBar createPacketActionsToolbar() {
         btnCopyText = createPacketActionButton(
@@ -622,11 +622,10 @@ public final class PacketMonitorWindow {
     }
 
     /**
-     * Создаёт таблицу логов пакетов.
-     * Selection listener перестраивает детали только если выбран другой пакет,
-     * а не если JavaFX переиздал событие на ту же запись.
-     * Стартовые ширины колонок задаются явно, но после открытия окна пользователь
-     * может свободно менять их вручную.
+     * Creates the packet log table.
+     * The selection listener rebuilds details only when a different packet is
+     * selected, not when JavaFX re-emits an event for the same row. Initial column
+     * widths are explicit, but the user can resize them freely after the window opens.
      */
     private TableView<PacketLogEntry> createPacketTable() {
         TableView<PacketLogEntry> table = new TableView<>(packetItems);
@@ -836,8 +835,8 @@ public final class PacketMonitorWindow {
     }
 
     /**
-     * Восстанавливает пользовательские ширины колонок таблицы из конфигурации приложения.
-     * Стартовые размеры остаются fallback-значениями на первый запуск либо если настройка отсутствует.
+     * Restores user-defined table column widths from application preferences.
+     * Initial widths remain fallback values on first launch or when preferences are absent.
      */
     private void restorePacketTableColumnWidths(TableColumn<PacketLogEntry, String> colTime,
                                                 TableColumn<PacketLogEntry, String> colType,
@@ -868,7 +867,7 @@ public final class PacketMonitorWindow {
     }
 
     /**
-     * Применяет сохранённую ширину к одной колонке с учётом её runtime-ограничений.
+     * Applies a saved width to one column, respecting its runtime constraints.
      */
     private void applyPacketTableColumnWidth(TableColumn<PacketLogEntry, String> column,
                                              String preferenceKey,
@@ -879,9 +878,9 @@ public final class PacketMonitorWindow {
     }
 
     /**
-     * Подписывает колонку на сохранение текущей ширины в preferences.
-     * Во время начального восстановления значения игнорируются, чтобы стартовый layout
-     * не перетирал уже сохранённые пользовательские настройки.
+     * Subscribes a column so its current width is saved to preferences.
+     * Width changes during initial restore are ignored so startup layout does
+     * not overwrite already saved user settings.
      */
     private void trackPacketTableColumnWidth(TableColumn<PacketLogEntry, String> column, String preferenceKey) {
         column.widthProperty().addListener((obs, oldValue, newValue) -> {
@@ -914,8 +913,8 @@ public final class PacketMonitorWindow {
     }
 
     /**
-     * Создаёт фильтр даты/времени на базе DatePicker с кастомным popup-календарём.
-     * В нижней части popup доступны выбор времени через слайдеры часов и минут.
+     * Creates a date/time filter based on DatePicker with a custom calendar popup.
+     * Time can be selected at the bottom of the popup with hour and minute sliders.
      */
     private DateTimePicker createDateTimePicker(String promptText) {
         return new DateTimePicker(promptText, this::onFilterChanged);
@@ -952,9 +951,9 @@ public final class PacketMonitorWindow {
     }
 
     /**
-     * Срабатывает при изменении любого UI-фильтра.
-     * Таблица всегда возвращается к верхнему срезу выборки, потому что клиент
-     * больше не держит полный набор записей в памяти.
+     * Runs when any UI filter changes.
+     * The table always returns to the top slice because the client no longer
+     * keeps the full row set in memory.
      */
     private void onFilterChanged() {
         if (suppressFilterReload) {
@@ -965,8 +964,8 @@ public final class PacketMonitorWindow {
     }
 
     /**
-     * Загружает самый новый sliding-window выборки из БД.
-     * Используется при старте окна и смене фильтров как базовое состояние таблицы.
+     * Loads the newest sliding-window slice from the database.
+     * Used as the table baseline on window startup and filter changes.
      */
     private void reloadCurrentFrame(boolean preserveViewedPacket, boolean clearDetailsIfSelectionLost) {
         pageLoadInProgress = true;
@@ -986,8 +985,9 @@ public final class PacketMonitorWindow {
     }
 
     /**
-     * Подгружает следующую страницу старых пакетов, когда пользователь дошёл до низа таблицы.
-     * Новый срез полностью заменяет предыдущий, поэтому в памяти не остаётся больше {@value #PAGE_SIZE} строк.
+     * Loads the next page of older packets when the user reaches the bottom of the table.
+     * The new slice fully replaces the previous one, so memory never keeps more
+     * than {@value #PAGE_SIZE} rows.
      */
     private void loadOlderPageFromScroll() {
         if (pageLoadInProgress || !currentPageHasOlder || packetItems.isEmpty()) {
@@ -1014,9 +1014,9 @@ public final class PacketMonitorWindow {
     }
 
     /**
-     * Подгружает предыдущий фрейм более новых пакетов, когда пользователь дошёл до верха таблицы.
-     * Если текущий фрейм уже является самым новым, но был помечен грязным из-за live-вставок,
-     * выполняется переагрузка первого фрейма.
+     * Loads the previous frame of newer packets when the user reaches the top of the table.
+     * If the current frame is already the newest but was marked dirty by live
+     * inserts, the first frame is reloaded.
      */
     private void loadNewerPageFromScroll() {
         if (pageLoadInProgress || (!currentPageHasNewer && !latestFrameDirty) || packetItems.isEmpty()) {
@@ -1044,12 +1044,12 @@ public final class PacketMonitorWindow {
     }
 
     /**
-     * Применяет к таблице уже загруженную страницу.
-     * Контракт:
-     * - список таблицы полностью заменяется новым срезом;
-     * - если просматриваемый пакет остался в срезе, selection сохраняется;
-     * - если пакет исчез из таблицы, детали очищаются только в тех сценариях,
-     *   где это инициировал пользователь явно (например сменой фильтра).
+     * Applies an already loaded page to the table.
+     * Contract:
+     * - the table list is fully replaced by the new slice;
+     * - if the viewed packet is still present in the slice, selection is preserved;
+     * - if the packet disappeared from the table, details are cleared only in
+     *   scenarios explicitly initiated by the user, such as a filter change.
      */
     private void applyLoadedPage(PacketMonitorService.PacketPage page,
                                  long packetIdToKeep,
@@ -1127,9 +1127,9 @@ public final class PacketMonitorWindow {
     }
 
     /**
-     * Перестраивает набор значений фильтра по типу пакета.
-     * Значения загружаются из БД по текущим фильтрам направления и поиска, но
-     * ещё не ограничиваются уже выбранным типом.
+     * Rebuilds the packet-type filter values.
+     * Values are loaded from the database using the current route and search
+     * filters, but are not yet constrained by the already selected type.
      */
     private void refreshTypeFilters() {
         if (typeFilter == null) {
@@ -1184,10 +1184,10 @@ public final class PacketMonitorWindow {
     }
 
     /**
-     * Обрабатывает live-приход нового пакета.
-     * Автоматическая вставка выполняется только если пользователь реально находится
-     * у верхней границы newest-page; иначе окно лишь помечает, что сверху появились
-     * новые данные, и подхватит их при обратной прокрутке к верху.
+     * Handles a live incoming packet.
+     * Automatic insertion happens only while the user is truly at the top of the
+     * newest page. Otherwise the window only marks that newer data is available
+     * and picks it up when the user scrolls back to the top.
      */
     private void handlePacketLogged(PacketLogEntry entry) {
         totalStoredPacketCount++;
@@ -1250,8 +1250,8 @@ public final class PacketMonitorWindow {
     }
 
     /**
-     * Сбрасывает окно после полной очистки журнала.
-     * После вызова не должно оставаться ссылки на ранее открытый пакет.
+     * Resets the window after the packet log is fully cleared.
+     * No reference to the previously open packet may remain afterward.
      */
     private void handleCleared() {
         packetItems.clear();
@@ -1267,8 +1267,8 @@ public final class PacketMonitorWindow {
     }
 
     /**
-     * Перестраивает дерево и предпросмотр под выбранный пакет.
-     * При {@code null} переводит правую часть окна в placeholder-состояние.
+     * Rebuilds the tree and preview for the selected packet.
+     * With {@code null}, moves the right side of the window into placeholder state.
      */
     private void updatePacketDetails(PacketLogEntry entry) {
         if (entry == null) {
@@ -1307,10 +1307,10 @@ public final class PacketMonitorWindow {
     }
 
     /**
-     * Возвращает selection на уже просматриваемый пакет после замены страницы.
-     * Не должен пересобирать детали, если пользователь по факту остаётся на той же записи.
+     * Restores selection to the already viewed packet after page replacement.
+     * Must not rebuild details when the user effectively remains on the same row.
      *
-     * @return {@code true}, если пакет по-прежнему присутствует в текущей странице
+     * @return {@code true} if the packet is still present in the current page
      */
     private boolean restoreViewedSelection(long packetIdToKeep) {
         if (packetTable == null) {
@@ -1338,17 +1338,17 @@ public final class PacketMonitorWindow {
     }
 
     /**
-     * После сдвига sliding-window не позволяет JavaFX самовольно переключить выбор
-     * на соседнюю строку, если исходный пакет вышел из окна.
+     * After the sliding window shifts, prevents JavaFX from silently selecting a
+     * neighboring row when the original packet left the window.
      */
     private void preserveViewedSelectionAfterWindowShift() {
         synchronizeTableSelectionWithViewedPacket();
     }
 
     /**
-     * Держит table selection согласованным с уже открытым пакетом.
-     * Если пакет вышел из текущего sliding-window, выделение строки снимается,
-     * но правая панель не переключается на соседний элемент.
+     * Keeps table selection consistent with the currently opened packet.
+     * If the packet leaves the current sliding window, row selection is cleared
+     * but the right panel does not switch to a neighboring item.
      */
     private void synchronizeTableSelectionWithViewedPacket() {
         if (packetTable == null) {
@@ -1382,10 +1382,10 @@ public final class PacketMonitorWindow {
     }
 
     /**
-     * Сравнивает записи в том же порядке, в котором они отображаются в таблице:
-     * сначала более новое {@code capturedAt}, затем больший {@code id}.
+     * Compares entries in the same order as the table: newest {@code capturedAt}
+     * first, then larger {@code id}.
      *
-     * @return отрицательное значение, если {@code left} должен идти раньше {@code right}
+     * @return negative value if {@code left} should come before {@code right}
      */
     private int comparePacketOrder(PacketLogEntry left, PacketLogEntry right) {
         int byCapturedAt = Long.compare(right.getCapturedAt(), left.getCapturedAt());
@@ -1426,9 +1426,9 @@ public final class PacketMonitorWindow {
     }
 
     /**
-     * Локальная проверка live-пакета на соответствие текущим UI-фильтрам.
-     * Используется только для инкрементального обновления счётчиков и верхнего среза,
-     * тогда как основная фильтрация выполняется на стороне БД.
+     * Locally checks whether a live packet matches the current UI filters.
+     * Used only for incremental counter and top-slice updates; authoritative
+     * filtering remains on the database side.
      */
     private boolean matchesCurrentFilters(PacketLogEntry entry) {
         if (entry == null) {
@@ -1485,39 +1485,39 @@ public final class PacketMonitorWindow {
     }
 
     /**
-     * Формирует UI-представление поля {@code from} в виде {@code Имя (!nodeId)}.
-     * Если имя ноды недоступно, возвращается только стандартный {@code !nodeId};
-     * сохранённое в БД значение используется только как fallback при ошибке разбора пакета.
+     * Builds the UI representation of the {@code from} field as {@code Name (!nodeId)}.
+     * If the node name is unavailable, only the standard {@code !nodeId} is returned;
+     * the value saved in the database is used only as a fallback after packet parsing errors.
      */
     private String formatPacketFromNode(PacketLogEntry entry) {
         return resolvePacketEndpoints(entry).fromNode();
     }
 
     /**
-     * Формирует UI-представление поля {@code to} в виде {@code Имя (!nodeId)}.
-     * Если имя ноды недоступно, возвращается только стандартный {@code !nodeId};
-     * сохранённое в БД значение используется только как fallback при ошибке разбора пакета.
+     * Builds the UI representation of the {@code to} field as {@code Name (!nodeId)}.
+     * If the node name is unavailable, only the standard {@code !nodeId} is returned;
+     * the value saved in the database is used only as a fallback after packet parsing errors.
      */
     private String formatPacketToNode(PacketLogEntry entry) {
         return resolvePacketEndpoints(entry).toNode();
     }
 
     /**
-     * Пересчитывает подписи {@code От}/{@code Кому} из байтов пакета без модификации БД.
-     * Для уже сохранённых записей это позволяет показывать одинаковый формат в таблице
-     * и текстовом экспорте независимо от исторического содержимого колонок {@code from_node/to_node}.
+     * Recomputes the From/To labels from packet bytes without modifying the database.
+     * For already saved rows, this keeps table and text-export formatting consistent
+     * regardless of historical contents of {@code from_node/to_node}.
      */
     private PacketDebugFormatter.PacketEndpoints resolvePacketEndpoints(PacketLogEntry entry) {
         return PacketDebugFormatter.resolvePacketEndpoints(entry, resolveEntryDeviceState(entry));
     }
 
     /**
-     * Подбирает {@link DeviceState}, соответствующий owner-нode записи пакета.
-     * Контракт:
-     * - при точном совпадении {@code ownerNodeId} используется связанный активный {@link DeviceState};
-     * - если owner пустой и есть единственное активное подключение, используется его состояние;
-     * - при отсутствии подходящего подключения возвращается {@code null}, и formatter
-     *   отображает только стандартные {@code !nodeId} без имени.
+     * Selects the {@link DeviceState} matching the packet row owner node.
+     * Contract:
+     * - an exact {@code ownerNodeId} match uses the linked active {@link DeviceState};
+     * - if owner is blank and there is exactly one active connection, its state is used;
+     * - without a suitable connection, {@code null} is returned and the formatter
+     *   displays only standard {@code !nodeId} values without names.
      */
     private DeviceState resolveEntryDeviceState(PacketLogEntry entry) {
         if (entry == null) {
@@ -1666,9 +1666,9 @@ public final class PacketMonitorWindow {
     }
 
     /**
-     * Подключает наблюдение за вертикальным scrollbar таблицы.
-     * Подгрузка выполняется только при достижении границ viewport и никогда не
-     * приводит к накоплению нескольких страниц в памяти.
+     * Attaches observation to the table's vertical scrollbar.
+     * Loading happens only at viewport boundaries and never accumulates multiple
+     * pages in memory.
      */
     private void attachPacketTableScrollListener() {
         if (packetTable == null) {
@@ -1714,8 +1714,8 @@ public final class PacketMonitorWindow {
     }
 
     /**
-     * Повторная подгрузка страницы на той же границе разрешается только после того,
-     * как пользователь реально ушёл от края scroll range и затем вернулся обратно.
+     * Re-loading a page at the same boundary is allowed only after the user has
+     * actually moved away from the scroll-range edge and returned to it.
      */
     private void rearmEdgeLoads(double scrollValue) {
         if (scrollValue > TABLE_SCROLL_PAGE_REARM_UP_THRESHOLD) {
@@ -1777,8 +1777,8 @@ public final class PacketMonitorWindow {
     }
 
     /**
-     * Приблизительно вычисляет первую видимую строку таблицы.
-     * Используется как anchor для плавного сдвига окна данных при подгрузке.
+     * Approximates the first visible table row.
+     * Used as an anchor for smooth data-window shifts during loading.
      */
     private int estimateFirstVisibleRow() {
         if (packetItems.isEmpty() || packetTable == null || packetTableVerticalScrollBar == null) {
@@ -1801,9 +1801,9 @@ public final class PacketMonitorWindow {
     }
 
     /**
-     * Программно выбирает пакет в таблице.
-     * Флаг {@link #restoringSelection} подавляет побочные реакции selection listener-а
-     * во время служебного восстановления выбора.
+     * Programmatically selects a packet in the table.
+     * The {@link #restoringSelection} flag suppresses selection-listener side
+     * effects during internal selection restore.
      */
     private void selectPacket(PacketLogEntry entry, boolean scrollToEntry, boolean refreshDetails) {
         if (entry == null || packetTable == null) {
@@ -1825,8 +1825,8 @@ public final class PacketMonitorWindow {
     }
 
     /**
-     * Подсвечивает диапазон байт выбранного узла дерева в HEX и ASCII колонках.
-     * Адресная колонка намеренно не участвует в подсветке.
+     * Highlights the byte range of the selected tree node in the HEX and ASCII columns.
+     * The address column is intentionally excluded from highlighting.
      */
     private void highlightHexForSelection(TreeItem<PacketTreeNode> selectedItem) {
         if (selectedItem == null || selectedItem.getValue() == null || !selectedItem.getValue().hasByteRange()) {
@@ -1851,7 +1851,7 @@ public final class PacketMonitorWindow {
     }
 
     /**
-     * Снимает выделение со всех колонок предпросмотра.
+     * Clears highlighting from all preview columns.
      */
     private void clearPreviewSelection() {
         if (addressPreview != null) {
@@ -1866,7 +1866,7 @@ public final class PacketMonitorWindow {
     }
 
     /**
-     * Синхронизирует доступность action-кнопок с наличием выбранного пакета.
+     * Synchronizes action-button availability with the selected packet state.
      */
     private void updatePacketActionButtonsState() {
         boolean disabled = viewedPacketEntry == null;
@@ -1885,7 +1885,7 @@ public final class PacketMonitorWindow {
     }
 
     /**
-     * Копирует текущий пакет в текстовом экспортном формате.
+     * Copies the current packet in text export format.
      */
     private void copyViewedPacketAsText() {
                 copyViewedPacket(PacketDebugFormatter.exportPacketAsText(
@@ -1895,7 +1895,7 @@ public final class PacketMonitorWindow {
     }
 
     /**
-     * Копирует текущий пакет как protobuf-style JSON, совместимый с Meshtastic Web.
+     * Copies the current packet as protobuf-style JSON compatible with Meshtastic Web.
      */
     private void copyViewedPacketAsJson() {
         copyViewedPacket(PacketDebugFormatter.exportPacketAsJson(viewedPacketEntry),
@@ -1903,8 +1903,8 @@ public final class PacketMonitorWindow {
     }
 
     /**
-     * Общая реализация копирования в clipboard.
-     * Пустой экспорт тихо игнорируется и не считается ошибкой.
+     * Shared clipboard-copy implementation.
+     * Empty export is ignored quietly and is not treated as an error.
      */
     private void copyViewedPacket(String content, String successMessage) {
         if (viewedPacketEntry == null || content == null || content.isBlank()) {
@@ -1927,11 +1927,11 @@ public final class PacketMonitorWindow {
     }
 
     /**
-     * Сохраняет текущий пакет в файл.
-     * Контракт:
-     * - расширение приводится к ожидаемому формату;
-     * - cancel не вызывает побочных эффектов;
-     * - ошибки записи отражаются через toast.
+     * Saves the current packet to a file.
+     * Contract:
+     * - extension is normalized to the expected format;
+     * - cancel has no side effects;
+     * - write errors are reported through a toast.
      */
     private void saveViewedPacket(String content, boolean jsonFormat) {
         if (viewedPacketEntry == null || content == null || content.isBlank()) {
@@ -2167,7 +2167,7 @@ public final class PacketMonitorWindow {
     }
 
     /**
-     * Формирует имя файла экспорта из времени захвата и id записи.
+     * Builds the export file name from capture time and row id.
      */
     private String buildPacketExportFileName(boolean jsonFormat) {
         if (viewedPacketEntry == null) {
@@ -2199,7 +2199,7 @@ public final class PacketMonitorWindow {
     }
 
     /**
-     * Гарантирует наличие ожидаемого расширения файла, даже если пользователь его не указал.
+     * Ensures the expected file extension is present even when the user omitted it.
      */
     private File ensureExtension(File file, String extension) {
         if (file.getName().toLowerCase(java.util.Locale.ROOT).endsWith(extension)) {
@@ -2209,8 +2209,8 @@ public final class PacketMonitorWindow {
     }
 
     /**
-     * Полностью раскрывает дерево пакета.
-     * Вызывается только после пересборки дерева для нового выбранного пакета.
+     * Fully expands the packet tree.
+     * Called only after the tree has been rebuilt for a newly selected packet.
      */
     private void expandTree(TreeItem<PacketTreeNode> item) {
         if (item == null) {
@@ -2223,7 +2223,7 @@ public final class PacketMonitorWindow {
     }
 
     /**
-     * Освобождает window-level ресурсы и снимает регистрацию singleton-окна.
+     * Releases window-level resources and unregisters the singleton window.
      */
     private void dispose() {
         packetMonitorService.removeListener(packetListener);
@@ -2235,9 +2235,9 @@ public final class PacketMonitorWindow {
     }
 
     /**
-     * Восстанавливает координаты, размер и флаг maximized.
-     * Если сохранённый прямоугольник больше не попадает на доступные экраны,
-     * окно возвращается в видимую область ближайшего дисплея.
+     * Restores coordinates, size, and maximized flag.
+     * If the saved rectangle no longer intersects available screens, the window
+     * is moved back into the visible area of the nearest display.
      */
     private void restoreWindowState() {
         restoreWindowMaximized = AppPreferences.isPacketMonitorWindowMaximized();
@@ -2254,8 +2254,8 @@ public final class PacketMonitorWindow {
     }
 
     /**
-     * Подписывает окно на отслеживание изменения геометрии.
-     * Сохраняются только normal bounds, а не текущие размеры maximized-окна.
+     * Subscribes the window to geometry changes.
+     * Only normal bounds are saved, not the current size of a maximized window.
      */
     private void trackWindowBounds() {
         stage.xProperty().addListener((obs, oldValue, newValue) -> captureCurrentWindowBounds());
@@ -2270,7 +2270,7 @@ public final class PacketMonitorWindow {
     }
 
     /**
-     * Обновляет normal bounds окна, если оно не maximized.
+     * Updates normal window bounds when the window is not maximized.
      */
     private void captureCurrentWindowBounds() {
         if (stage == null || stage.isMaximized()) {
@@ -2291,7 +2291,7 @@ public final class PacketMonitorWindow {
     }
 
     /**
-     * Сохраняет геометрию окна и положение вертикального разделителя в preferences.
+     * Saves window geometry and vertical divider position to preferences.
      */
     private void saveWindowState() {
         boolean maximized = stage != null && stage.isMaximized();
@@ -2315,7 +2315,7 @@ public final class PacketMonitorWindow {
     }
 
     /**
-     * Возвращает окно в видимую область, если его normal bounds ушли за пределы доступных экранов.
+     * Moves the window back into visible space if its normal bounds left all available screens.
      */
     private void ensureWindowVisible() {
         if (stage == null || stage.isMaximized()) {
@@ -2475,11 +2475,11 @@ public final class PacketMonitorWindow {
     record WindowBounds(double x, double y, double width, double height) {}
 
     /**
-     * Преобразует выбранное значение date/time filter-а в границу SQL-диапазона.
-     * Контракт:
-     * - отсутствие даты выключает фильтр и возвращает {@code null};
-     * - режим {@code Весь день} разворачивается в начало или конец суток;
-     * - верхняя граница включительная и поэтому доводится до последней наносекунды минуты/дня.
+     * Converts the selected date/time filter value into an SQL range boundary.
+     * Contract:
+     * - absence of a date disables the filter and returns {@code null};
+     * - all-day mode expands to the beginning or end of the day;
+     * - the upper bound is inclusive, so it is moved to the last nanosecond of the minute/day.
      */
     private static Long resolveCapturedAtBoundary(DateTimePicker dateTimePicker, boolean lowerBound) {
         if (dateTimePicker == null || dateTimePicker.getDate() == null) {

@@ -3,48 +3,42 @@ package com.meshtastic.client.connection.serial;
 import com.meshtastic.client.connection.ConnectionException;
 
 /**
- * Нативный доступ к serial-порту через JNA (без jSerialComm).
+ * Native serial-port access through JNA, without jSerialComm I/O.
  * <p>
- * Ключевое отличие от jSerialComm: приложение явно управляет DTR/RTS при открытии.
- * Это предотвращает сброс ESP32-устройств на USB-Serial мостах (CH340, CP210x и др.),
- * где линии DTR/RTS часто подключены к цепи автосброса (EN/RST/GPIO0).
- * <p>
- * Реализации:
- * <ul>
- *   <li>{@link WinSerialPort} — Windows (kernel32: CreateFileW, SetCommState)</li>
- *   <li>{@link PosixSerialPort} — macOS / Linux (libc: open, tcsetattr)</li>
- * </ul>
+ * The key difference from jSerialComm is explicit DTR/RTS control at open time.
+ * This prevents ESP32 resets on USB-Serial bridges such as CH340 and CP210x,
+ * where DTR/RTS lines are often wired into the auto-reset circuit.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public interface NativeSerialPort {
 
     /**
-     * Открывает порт с заданной скоростью (8N1, без flow control) и modem-line policy.
+     * Opens a port at the requested speed using 8N1 and no flow control.
      *
-     * @param portName  системное имя порта ("COM3", "cu.usbserial-1234", "ttyUSB0")
-     * @param baudRate  скорость (напр. 115200)
-     * @param modemLinePolicy политика DTR/RTS для выбранного адаптера
+     * @param portName system port name such as {@code "COM3"}, {@code "cu.usbserial-1234"}, or {@code "ttyUSB0"}
+     * @param baudRate port speed, for example {@code 115200}
+     * @param modemLinePolicy DTR/RTS policy for the selected adapter
      */
     void open(String portName, int baudRate, SerialModemLinePolicy modemLinePolicy) throws ConnectionException;
 
     /**
-     * Чтение с таймаутом.
+     * Reads with a timeout.
      *
-     * @return количество прочитанных байт ({@code 0} = таймаут, {@code -1} = ошибка/закрыт)
+     * @return number of bytes read; {@code 0} means timeout and {@code -1} means error or closed port
      */
     int read(byte[] buf, int len, int timeoutMs);
 
     /**
-     * Запись в порт.
+     * Writes to the port.
      */
     void write(byte[] data, int offset, int len) throws ConnectionException;
 
-    /** Сброс входного буфера. */
+    /** Clears the input buffer. */
     void drainInput();
 
     boolean isOpen();
 
-    /** Закрывает порт и освобождает нативный handle/fd. */
+    /** Closes the port and releases the native handle or file descriptor. */
     void close();
 }

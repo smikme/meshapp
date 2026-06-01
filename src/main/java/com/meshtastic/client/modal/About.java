@@ -38,7 +38,7 @@ public class About extends VBox {
         Label title = new Label(I18n.t("about.title"));
         title.getStyleClass().add("hero-title");
 
-        // ── О проекте ────────────────────────────────────────────
+        // About the project.
         VBox projectBox = new VBox(8);
         projectBox.setPadding(new Insets(10));
         projectBox.setStyle(BORDER_STYLE);
@@ -65,7 +65,7 @@ public class About extends VBox {
 
         projectBox.getChildren().addAll(projectHeader, linksRow);
 
-        // ── Партнёр проекта ──────────────────────────────────────
+        // Project partner.
         VBox partnerBox = new VBox(8);
         partnerBox.setPadding(new Insets(10));
         partnerBox.setStyle(BORDER_STYLE);
@@ -95,7 +95,7 @@ public class About extends VBox {
 
         partnerBox.getChildren().addAll(partnerTitle, partnerContent);
 
-        // ── Системная информация ─────────────────────────────────
+        // System information.
         VBox sysInfo = new VBox(5);
         sysInfo.setPadding(new Insets(10));
         sysInfo.setStyle(BORDER_STYLE);
@@ -140,13 +140,13 @@ public class About extends VBox {
     }
 
     /**
-     * Mesh-сеть логотип MeshApp (как на meshapp.ru).
-     * Три основных узла, три вторичных, соединения между ними.
+     * MeshApp logo mark matching meshapp.ru: three primary nodes, three
+     * secondary nodes, and links between them.
      */
     private Region createMeshIcon(double size) {
         double s = size / 32.0;
 
-        // Вторичные линии (рисуем первыми — под узлами)
+        // Secondary lines are drawn first, below the nodes.
         Line l4 = line(16, 6, 26, 14, s, 1.0, 0.3);
         Line l5 = line(16, 6, 6, 14, s, 1.0, 0.3);
         Line l6 = line(6, 14, 6, 26, s, 1.0, 0.3);
@@ -154,17 +154,17 @@ public class About extends VBox {
         Line l8 = line(6, 26, 16, 28, s, 1.0, 0.3);
         Line l9 = line(26, 26, 16, 28, s, 1.0, 0.3);
 
-        // Основные линии
+        // Primary lines.
         Line l1 = line(16, 6, 6, 26, s, 1.5, 0.4);
         Line l2 = line(16, 6, 26, 26, s, 1.5, 0.4);
         Line l3 = line(6, 26, 26, 26, s, 1.5, 0.4);
 
-        // Основные узлы
+        // Primary nodes.
         Circle c1 = circle(16, 6, 3, s, 1.0);
         Circle c2 = circle(6, 26, 3, s, 1.0);
         Circle c3 = circle(26, 26, 3, s, 1.0);
 
-        // Вторичные узлы
+        // Secondary nodes.
         Circle c4 = circle(26, 14, 2.5, s, 0.6);
         Circle c5 = circle(6, 14, 2.5, s, 0.6);
         Circle c6 = circle(16, 28, 2.5, s, 0.6);

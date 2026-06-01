@@ -1,23 +1,23 @@
 package com.meshtastic.client.notification;
 
 /**
- * Платформенная доставка OS-уведомлений.
- * Реализации должны быть потокобезопасными.
+ * Platform-specific delivery of operating-system notifications.
+ * Implementations must be thread-safe.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public interface NotificationService {
 
     /**
-     * Показать системное уведомление.
+     * Shows a system notification.
      *
-     * @param title   заголовок (имя отправителя / канала)
-     * @param message текст сообщения (обрезанный)
+     * @param title   notification title, typically sender or channel name
+     * @param message truncated notification body
      */
     void showNotification(String title, String message);
 
     /**
-     * Освободить ресурсы (например, SystemTray иконку).
+     * Releases notification resources, such as a {@code SystemTray} icon.
      */
     default void dispose() {}
 }

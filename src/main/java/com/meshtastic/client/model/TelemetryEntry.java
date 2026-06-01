@@ -1,15 +1,16 @@
 package com.meshtastic.client.model;
 
 /**
- * Одна запись телеметрии, привязанная к моменту времени.
+ * Single telemetry sample tied to a point in time.
  * <p>
- * Хранит метрики устройства ({@code batteryLevel}, {@code voltage}, {@code channelUtilization}),
- * метрики окружающей среды ({@code temperature}, {@code humidity}, {@code pressure}) и
- * статистику пакетов ({@code numPacketsRx}, {@code numPacketsTx}).
+ * Stores device metrics ({@code batteryLevel}, {@code voltage},
+ * {@code channelUtilization}), environmental metrics ({@code temperature},
+ * {@code humidity}, {@code pressure}), and packet statistics
+ * ({@code numPacketsRx}, {@code numPacketsTx}).
  * <p>
- * Используется для построения графиков телеметрии и отслеживания состояния узлов сети.
+ * Used to build telemetry charts and track mesh node health.
  * <p>
- * Пример создания записи:
+ * Example:
  * <pre>{@code
  * TelemetryEntry entry = new TelemetryEntry(System.currentTimeMillis() / 1000, "!00000001");
  * entry.setBatteryLevel(85);

@@ -7,7 +7,7 @@ import java.util.Map;
 import java.util.Locale;
 
 /**
- * Определение операционной системы.
+ * Operating-system detection helpers.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -51,7 +51,7 @@ public final class OsDetect {
     public static PackageFormat currentPackageFormat() { return detectPackageFormat(CURRENT, System.getenv()); }
     public static String normalizedArch() { return normalizeArch(System.getProperty("os.arch", "")); }
 
-    /** Поддерживает ли ОС объединённый title bar + backdrop эффекты */
+    /** Whether the OS supports a unified title bar and backdrop effects. */
     public static boolean supportsSeamlessFrame() {
         return isMacOs() || isWindows11OrGreater();
     }

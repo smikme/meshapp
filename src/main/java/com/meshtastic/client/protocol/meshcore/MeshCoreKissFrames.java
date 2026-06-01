@@ -6,10 +6,10 @@ import java.io.ByteArrayOutputStream;
 import java.util.Arrays;
 
 /**
- * Утилиты для сборки KISS frame-ов и константы MeshCore {@code SetHardware}.
+ * Helpers for building KISS frames and MeshCore {@code SetHardware} constants.
  * <p>
- * Методы этого класса работают с телом KISS frame-а: первый byte является KISS command,
- * второй byte для {@code SetHardware} является MeshCore sub-command.
+ * Methods operate on the KISS frame body: the first byte is the KISS command,
+ * and the second byte of {@code SetHardware} frames is the MeshCore sub-command.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -44,21 +44,21 @@ public final class MeshCoreKissFrames {
     }
 
     /**
-     * Создаёт KISS {@code SetHardware} request без payload-а.
+     * Creates a KISS {@code SetHardware} request without a payload.
      *
      * @param subCommand MeshCore request sub-command
-     * @return полностью escaped KISS frame для отправки в transport
+     * @return escaped KISS frame ready for transport
      */
     public static byte[] setHardwareRequest(int subCommand) {
         return setHardwareRequest(subCommand, new byte[0]);
     }
 
     /**
-     * Создаёт KISS {@code SetHardware} request с payload-ом.
+     * Creates a KISS {@code SetHardware} request with a payload.
      *
      * @param subCommand MeshCore request sub-command
-     * @param payload данные request-а без command bytes
-     * @return полностью escaped KISS frame для отправки в transport
+     * @param payload request data without command bytes
+     * @return escaped KISS frame ready for transport
      */
     public static byte[] setHardwareRequest(int subCommand, byte[] payload) {
         byte[] body = new byte[2 + payload.length];
@@ -69,10 +69,10 @@ public final class MeshCoreKissFrames {
     }
 
     /**
-     * Создаёт KISS data frame с MeshCore packet payload-ом.
+     * Creates a KISS data frame carrying a MeshCore packet payload.
      *
      * @param payload raw MeshCore packet payload
-     * @return полностью escaped KISS data frame
+     * @return escaped KISS data frame
      */
     public static byte[] dataFrame(byte[] payload) {
         byte[] body = new byte[1 + payload.length];
@@ -82,10 +82,10 @@ public final class MeshCoreKissFrames {
     }
 
     /**
-     * Оборачивает body в KISS frame и применяет escape-последовательности.
+     * Wraps a body in a KISS frame and applies escape sequences.
      *
-     * @param body тело KISS frame-а без начального и конечного {@code FEND}
-     * @return байты, готовые для записи в TCP/Serial stream
+     * @param body KISS frame body without leading and trailing {@code FEND}
+     * @return bytes ready for a TCP or Serial stream
      */
     public static byte[] frame(byte[] body) {
         ByteArrayOutputStream out = new ByteArrayOutputStream(body.length + 2);
@@ -106,10 +106,10 @@ public final class MeshCoreKissFrames {
     }
 
     /**
-     * Проверяет, является ли frame ответом/командой MeshCore {@code SetHardware}.
+     * Returns whether a frame is a MeshCore {@code SetHardware} command or response.
      *
-     * @param frame unescaped тело KISS frame-а
-     * @return {@code true}, если frame содержит KISS command {@code SetHardware}
+     * @param frame unescaped KISS frame body
+     * @return {@code true} when the frame contains a KISS {@code SetHardware} command
      */
     public static boolean isSetHardwareFrame(byte[] frame) {
         return frame != null
@@ -118,10 +118,10 @@ public final class MeshCoreKissFrames {
     }
 
     /**
-     * Проверяет, является ли frame распознанным ответом MeshCore KISS handshake/metadata.
+     * Returns whether a frame is a recognized MeshCore KISS handshake or metadata response.
      *
-     * @param frame unescaped тело KISS frame-а
-     * @return {@code true}, если sub-command входит в список поддерживаемых ответов
+     * @param frame unescaped KISS frame body
+     * @return {@code true} when the sub-command is one of the supported responses
      */
     public static boolean isRecognizedResponseFrame(byte[] frame) {
         if (!isSetHardwareFrame(frame)) {
@@ -137,20 +137,20 @@ public final class MeshCoreKissFrames {
     }
 
     /**
-     * Возвращает MeshCore sub-command из {@code SetHardware} frame-а.
+     * Extracts the MeshCore sub-command from a {@code SetHardware} frame.
      *
-     * @param frame unescaped тело KISS frame-а
-     * @return sub-command или {@code -1}, если frame не является {@code SetHardware}
+     * @param frame unescaped KISS frame body
+     * @return sub-command, or {@code -1} when the frame is not {@code SetHardware}
      */
     public static int subCommand(byte[] frame) {
         return isSetHardwareFrame(frame) ? frame[1] & 0xFF : -1;
     }
 
     /**
-     * Извлекает payload из {@code SetHardware} frame-а.
+     * Extracts payload bytes from a {@code SetHardware} frame.
      *
-     * @param frame unescaped тело KISS frame-а
-     * @return payload без KISS command и MeshCore sub-command
+     * @param frame unescaped KISS frame body
+     * @return payload without KISS command and MeshCore sub-command bytes
      */
     public static byte[] setHardwarePayload(byte[] frame) {
         if (!isSetHardwareFrame(frame) || frame.length <= 2) {
@@ -160,10 +160,10 @@ public final class MeshCoreKissFrames {
     }
 
     /**
-     * Кодирует байты в lowercase HEX.
+     * Encodes bytes as lowercase hexadecimal.
      *
-     * @param data исходные байты
-     * @return HEX-строка без разделителей
+     * @param data source bytes
+     * @return hexadecimal string without separators
      */
     public static String hex(byte[] data) {
         StringBuilder sb = new StringBuilder(data.length * 2);

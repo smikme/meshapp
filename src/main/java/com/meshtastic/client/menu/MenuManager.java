@@ -85,7 +85,7 @@ public class MenuManager {
             this(name, name, iconText, iconPath, type, formClass);
         }
 
-        /** Конструктор без iconPath (обратная совместимость) */
+        /** Constructor without {@code iconPath}, kept for backward compatibility. */
         public MenuItem(String name, String iconText, Type type, Class<?> formClass) {
             this(name, name, iconText, null, type, formClass);
         }

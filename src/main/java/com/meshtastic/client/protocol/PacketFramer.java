@@ -3,27 +3,27 @@ package com.meshtastic.client.protocol;
 import com.google.protobuf.MessageLite;
 
 /**
- * Создаёт Meshtastic serial/TCP фреймы из protobuf-сообщений.
+ * Builds Meshtastic serial/TCP frames from protobuf messages.
  * <p>
- * Формат фрейма: {@code [0x94][0xC3][len_msb][len_lsb][protobuf payload]}.
- * BLE transport использует тот же входной формат на уровне {@link ProtocolHandler},
- * но перед записью в GATT-характеристику вырезает 4-байтный заголовок.
+ * Frame format: {@code [0x94][0xC3][len_msb][len_lsb][protobuf payload]}.
+ * BLE transport receives the same input format at {@link ProtocolHandler} level
+ * but removes the four-byte header before writing to the GATT characteristic.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class PacketFramer {
 
-    /** Утилитный класс: экземпляры не создаются. */
+    /** Utility class; instances are not created. */
     private PacketFramer() {}
 
     private static final byte START_BYTE_1 = (byte) 0x94;
     private static final byte START_BYTE_2 = (byte) 0xC3;
 
     /**
-     * Оборачивает protobuf-сообщение в фрейм Meshtastic.
+     * Wraps a protobuf message in a Meshtastic frame.
      *
-     * @param message protobuf-сообщение для фреймирования
-     * @return байтовый массив с заголовком (4 байта) и payload
+     * @param message protobuf message to frame
+     * @return byte array containing the four-byte header and payload
      */
     public static byte[] frame(MessageLite message) {
         byte[] payload = message.toByteArray();

@@ -26,11 +26,11 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * Реализация {@code mesh.curl} для Lua-песочницы.
+ * Implementation of {@code mesh.curl} for the Lua sandbox.
  * <p>
- * Это не обертка над системным {@code curl}: API выполняет HTTP(S)-запросы через
- * Java {@link HttpClient}, блокирует локальные и приватные адреса, ограничивает
- * методы, заголовки, таймаут и размер ответа.
+ * This is not a wrapper around the system {@code curl} binary. Requests are
+ * performed through Java {@link HttpClient}, while local and private addresses,
+ * methods, headers, timeouts, and response size are constrained by the API.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -53,9 +53,9 @@ public final class LuaCurlApi {
             .build();
 
     /**
-     * Создает Lua-таблицу {@code mesh.curl}.
+     * Creates the Lua table for {@code mesh.curl}.
      *
-     * @return таблица curl API
+     * @return curl API table
      */
     public LuaTable create() {
         LuaTable curl = new LuaTable();

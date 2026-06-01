@@ -8,18 +8,18 @@ import com.meshtastic.client.protocol.CommunicationProtocol;
 import com.meshtastic.client.protocol.ProtocolRuntimeContext;
 
 /**
- * Адаптер протокола Meshtastic.
+ * Meshtastic protocol adapter.
  * <p>
- * Отвечает за создание runtime-а Meshtastic поверх уже открытого транспорта.
- * Сам адаптер не хранит состояние подключения: всё runtime-состояние находится
- * в {@link MeshtasticProtocolRuntime}.
+ * Creates a Meshtastic runtime over an already opened transport. The adapter
+ * does not hold connection state; all runtime state lives in
+ * {@link MeshtasticProtocolRuntime}.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public final class MeshtasticProtocol implements CommunicationProtocol<DeviceState> {
 
     /**
-     * @return тип протокола, по которому адаптер доступен в реестре
+     * @return protocol type used by the registry
      */
     @Override
     public ProtocolType getType() {
@@ -27,10 +27,10 @@ public final class MeshtasticProtocol implements CommunicationProtocol<DeviceSta
     }
 
     /**
-     * Создаёт Meshtastic runtime для конкретного подключения.
+     * Creates a Meshtastic runtime for one connection.
      *
-     * @param context параметры подключения и transport
-     * @return runtime Meshtastic-протокола
+     * @param context connection parameters and transport
+     * @return Meshtastic protocol runtime
      */
     @Override
     public MeshtasticProtocolRuntime createRuntime(ProtocolRuntimeContext context) {
@@ -38,14 +38,13 @@ public final class MeshtasticProtocol implements CommunicationProtocol<DeviceSta
     }
 
     /**
-     * Проверяет, нужен ли Meshtastic heartbeat для выбранного транспорта.
+     * Returns whether the selected transport needs Meshtastic heartbeat traffic.
      * <p>
-     * Heartbeat является частью протокола Meshtastic, но необходимость его
-     * отправки зависит от транспорта: TCP и Serial требуют keepalive-записей,
-     * а BLE не требует.
+     * Heartbeat is part of the Meshtastic protocol, but only TCP and Serial need
+     * keepalive writes; BLE does not.
      *
-     * @param entry профиль подключения
-     * @return {@code true}, если для подключения нужно запускать heartbeat
+     * @param entry connection profile
+     * @return {@code true} when heartbeat should be started
      */
     public static boolean shouldStartHeartbeat(ConnectionEntry entry) {
         ConnectionType type = entry.getEffectiveType();

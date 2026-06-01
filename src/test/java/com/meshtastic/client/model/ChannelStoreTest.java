@@ -149,7 +149,7 @@ class ChannelStoreTest {
     void findFirstAvailableChannelSlotReturnsFirstFreeSlot() {
         ChannelStore store = new ChannelStore();
         
-        // Заняты 1,2,3 - свободен 4
+        // Channels 1, 2, and 3 are occupied; 4 is the next free slot.
         store.addChannel(createChannel(1, ChannelProtos.Channel.Role.SECONDARY));
         store.addChannel(createChannel(2, ChannelProtos.Channel.Role.SECONDARY));
         store.addChannel(createChannel(3, ChannelProtos.Channel.Role.SECONDARY));
@@ -161,7 +161,7 @@ class ChannelStoreTest {
     void findFirstAvailableChannelSlotReturnsMinusOneWhenAllFull() {
         ChannelStore store = new ChannelStore();
         
-        // Заняты 1,2,3,4,5,6,7
+        // Channels 1 through 7 are occupied.
         for (int i = 1; i <= 7; i++) {
             store.addChannel(createChannel(i, ChannelProtos.Channel.Role.SECONDARY));
         }

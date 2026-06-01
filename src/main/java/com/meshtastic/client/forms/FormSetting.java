@@ -93,44 +93,45 @@ public class FormSetting extends Form {
         FormSetting.class
     );
     /**
-     * Базовая пауза между admin-пакетами при сохранении конфигурации.
-     * Для Serial/TCP 200ms обычно достаточно, чтобы прошивка успела обработать
-     * begin/set/commit без "слипания" сообщений.
+     * Base delay between admin packets while saving configuration.
+     * For Serial/TCP, 200 ms is usually enough for firmware to process
+     * begin/set/commit without packets bunching together.
      */
     private static final long CONFIG_SAVE_MESSAGE_DELAY_MS = 200;
     /**
-     * BLE получает более длинную паузу между admin-пакетами: Heltec V3 и похожие
-     * устройства иногда успевают уйти в reboot прямо после commit, и короткие интервалы
-     * повышают шанс гонки между последними GATT write и закрытием сессии.
+     * BLE uses a longer delay between admin packets. Heltec V3 and similar
+     * devices may reboot immediately after commit, and short intervals increase
+     * the chance of a race between the last GATT writes and session shutdown.
      */
     private static final long BLE_CONFIG_SAVE_MESSAGE_DELAY_MS = 350;
     /**
-     * Дополнительная пауза перед commit после последнего mutating шага.
-     * Даже на TCP/Serial прошивке может потребоваться время, чтобы применить
-     * финальный set_config/set_module_config до reboot-triggering commit.
+     * Extra pause before commit after the last mutating step.
+     * Even over TCP/Serial, firmware may need time to apply the final
+     * set_config/set_module_config before a reboot-triggering commit.
      */
     private static final long CONFIG_SAVE_PRE_COMMIT_SETTLE_DELAY_MS = 1_000;
     /**
-     * TCP/Serial после commit может держать socket живым ещё десятки секунд,
-     * а потом закрыть его уже во время реального reboot. Поэтому для non-BLE
-     * не форсируем disconnect сразу: ждём естественный разрыв и используем это
-     * значение только как fallback, если устройство так и не закрыло transport.
+     * After commit, TCP/Serial can keep the socket alive for tens of seconds and
+     * close it only when the actual reboot starts. For non-BLE transports we do
+     * not force an immediate disconnect; we wait for the natural break and use
+     * this value only as a fallback if the device never closes the transport.
      */
     private static final long CONFIG_SAVE_REBOOT_HANDOFF_DELAY_MS = 60_000;
     private static final long BLE_CONFIG_SAVE_REBOOT_HANDOFF_DELAY_MS = 4_000;
     /**
-     * Последний BLE set_config/set_module_config отправляется асинхронно на уровне GATT write.
-     * Перед commit даём дополнительное время, чтобы write с response успел физически дойти
-     * до устройства до того, как commit поставит reboot-triggering пакет в ту же очередь.
+     * The final BLE set_config/set_module_config is sent asynchronously at the
+     * GATT-write level. Before commit, we give the write-with-response extra time
+     * to physically reach the device before commit places the reboot-triggering
+     * packet into the same queue.
      */
     private static final long BLE_CONFIG_SAVE_PRE_COMMIT_SETTLE_DELAY_MS =
         1_000;
-    /** Таймаут ожидания routing ACK для шага сохранения конфигурации. */
+    /** Timeout for waiting for a routing ACK during a configuration-save step. */
     private static final long CONFIG_SAVE_ACK_TIMEOUT_MS = 8_000;
-    /** Короткая задержка перед reboot/shutdown, чтобы routing ACK успел вернуться до разрыва линка. */
+    /** Short delay before reboot/shutdown so the routing ACK can arrive before the link drops. */
     private static final int DEVICE_POWER_ACTION_DELAY_SECONDS = 1;
     private static final long DEVICE_POWER_ACTION_HANDOFF_DELAY_MS = 1_000;
-    /** Сколько максимум ждём routing ACK для reboot/shutdown перед fallback-поведением. */
+    /** Maximum wait for a reboot/shutdown routing ACK before falling back. */
     private static final long DEVICE_POWER_ACTION_ACK_TIMEOUT_MS = 2_500;
     private static final String OWNER_INFO_CONFIG_TYPE = "owner_info";
     private static final String OWNER_LONG_NAME_FIELD = "long_name";
@@ -181,7 +182,7 @@ public class FormSetting extends Form {
     private volatile Runnable ringtoneListener;
     private volatile DeviceState ringtoneRequestState;
 
-    // Оригинальные protobuf-объекты для пересборки при сохранении
+    // Original protobuf objects used to rebuild messages during save.
     private List<ConfigProtos.Config> originalConfigs = new ArrayList<>();
     private List<ModuleConfigProtos.ModuleConfig> originalModuleConfigs =
         new ArrayList<>();
@@ -243,7 +244,7 @@ public class FormSetting extends Form {
     }
 
     /**
-     * Находит выбранное активное подключение и обновляет ссылки state/handler.
+     * Finds the selected active connection and updates the state/handler references.
      */
     private void refreshConnection() {
         ConnectionManager mgr = ConnectionManager.getInstance();
@@ -263,8 +264,8 @@ public class FormSetting extends Form {
     }
 
     /**
-     * Сбрасывает локальный UI-контекст текущего устройства.
-     * Нужен при disconnect, чтобы редактор не держал stale-конфигурацию.
+     * Resets the local UI context for the current device.
+     * Used on disconnect so the editor does not keep stale configuration.
      */
     private void clearConfigContext() {
         observeRingtoneState(null);
@@ -312,9 +313,9 @@ public class FormSetting extends Form {
     }
 
     /**
-     * Возвращает активный профиль подключения целиком.
-     * Нужен save-flow, чтобы выбрать transport-aware pacing и корректно передать
-     * соединение в reconnect path после reboot устройства.
+     * Returns the full active connection profile.
+     * The save flow uses it to choose transport-aware pacing and to hand the
+     * connection to the reconnect path after the device reboots.
      */
     private ConnectionEntry findActiveConnectionEntry() {
         ConnectionManager mgr = ConnectionManager.getInstance();
@@ -414,9 +415,10 @@ public class FormSetting extends Form {
     }
 
     /**
-     * Возвращает {@code true}, если для активного подключения ещё идёт initial config exchange.
-     * Пока не пришёл {@code config_complete_id}, дерево может быть заполнено лишь частично,
-     * и запуск save-flow в этот момент конфликтует с продолжающимся чтением конфигурации.
+     * Returns {@code true} while the active connection is still running the initial
+     * configuration exchange. Until {@code config_complete_id} arrives, the tree
+     * may be only partially populated, and starting the save flow would conflict
+     * with the in-flight configuration read.
      */
     private boolean isConfigExchangeInProgress(ConnectionEntry entry) {
         if (entry == null) {
@@ -428,8 +430,8 @@ public class FormSetting extends Form {
     }
 
     /**
-     * Подписывается на завершение текущего config exchange, чтобы автоматически
-     * перевести форму из "идёт загрузка" в обычный режим без ручного refresh.
+     * Subscribes to completion of the current configuration exchange so the form
+     * can leave the loading state automatically, without a manual refresh.
      */
     private void watchConfigExchangeCompletion(ConnectionEntry entry) {
         if (entry == null) {
@@ -524,7 +526,7 @@ public class FormSetting extends Form {
     }
 
     /**
-     * Ждёт routing ACK для шага сохранения конфигурации и считает отсутствие ACK ошибкой.
+     * Waits for the routing ACK for a configuration-save step and treats a missing ACK as an error.
      */
     private void waitForRequiredConfigSaveAck(
         CompletableFuture<MeshProtos.Routing.Error> ackFuture,
@@ -552,10 +554,11 @@ public class FormSetting extends Form {
     }
 
     /**
-     * BLE save-flow должен упорядочивать admin-пакеты по routing ACK: иначе следующий
-     * GATT write может догнать ещё не обработанный begin/set. Serial/TCP локальные
-     * admin-пакеты на части прошивок routing ACK не присылают, поэтому там используем
-     * transport-aware паузы, а ACK оставляем только диагностикой.
+     * The BLE save flow must order admin packets by routing ACK; otherwise the next
+     * GATT write can overtake a begin/set packet that the device has not processed
+     * yet. Some firmware does not send routing ACKs for local Serial/TCP admin
+     * packets, so those transports use transport-aware delays and keep ACKs as
+     * diagnostics only.
      */
     private void waitForTransportRequiredConfigSaveAck(
         ConnectionType transport,
@@ -570,12 +573,12 @@ public class FormSetting extends Form {
     }
 
     /**
-     * Ждёт routing ACK для reboot-triggering commit, но не считает ошибкой случай,
-     * когда устройство успело разорвать линк раньше подтверждения.
+     * Waits for the routing ACK for a reboot-triggering commit, but does not fail
+     * if the device drops the link before the ACK arrives.
      * <p>
-     * commit применяет изменения и почти сразу запускает reboot, поэтому на любом
-     * транспорте ACK может потеряться уже после успешного принятия команды.
-     * Явный routing NAK при этом остаётся настоящей ошибкой.
+     * Commit applies changes and almost immediately starts a reboot, so on any
+     * transport the ACK can be lost after the command was accepted successfully.
+     * An explicit routing NAK is still a real error.
      */
     private void waitForCommitConfigSaveAckOrExpectedReboot(
         CompletableFuture<MeshProtos.Routing.Error> ackFuture,
@@ -697,11 +700,11 @@ public class FormSetting extends Form {
     }
 
     /**
-     * Подключает диагностику к ACK, который не должен блокировать commit/reconnect flow.
+     * Attaches diagnostics to an ACK that must not block the commit/reconnect flow.
      * <p>
-     * Финальный mutating step и BLE commit не должны держать транзакцию открытой в UI:
-     * некоторые устройства рвут линк почти сразу после применения шага, и если ждать
-     * этот ACK синхронно, commit просто не будет отправлен.
+     * The final mutating step and BLE commit must not keep the UI transaction open:
+     * some devices drop the link almost immediately after applying the step, and
+     * waiting for this ACK synchronously would prevent commit from being sent.
      */
     private void observeDeferredConfigSaveAck(
         CompletableFuture<MeshProtos.Routing.Error> ackFuture,
@@ -736,12 +739,12 @@ public class FormSetting extends Form {
     }
 
     /**
-     * Возвращает паузу между двумя шагами save-flow.
+     * Returns the delay between two save-flow steps.
      * <p>
-     * Перед {@code commitEditSettings} любому транспорту даём отдельное settle-окно
-     * после последнего mutating шага. Для BLE оно длиннее, потому что
-     * {@code writeToRadio()} возвращается раньше фактического завершения
-     * CoreBluetooth write-with-response.
+     * Before {@code commitEditSettings}, every transport gets a separate settle
+     * window after the last mutating step. BLE gets a longer one because
+     * {@code writeToRadio()} returns before CoreBluetooth's write-with-response
+     * has actually completed.
      */
     private long getConfigSaveInterTaskDelayMs(
         ConnectionType transport,
@@ -766,14 +769,15 @@ public class FormSetting extends Form {
     }
 
     /**
-     * Некоторые BLE-устройства рвут линк сразу после {@code set_module_config(MQTT)},
-     * не дожидаясь {@code commit_edit_settings}, даже если {@code begin_edit_settings}
-     * был принят. Для такого узкого кейса транзакционная обёртка только мешает:
-     * save уже стартовал на стороне устройства, а commit гарантированно не успевает.
+     * Some BLE devices drop the link immediately after {@code set_module_config(MQTT)}
+     * without waiting for {@code commit_edit_settings}, even after accepting
+     * {@code begin_edit_settings}. In this narrow case the transactional wrapper
+     * only gets in the way: the save has already started on the device, and commit
+     * cannot arrive in time.
      * <p>
-     * Поэтому для одиночного BLE-save секции MQTT используется implicit save path:
-     * отправляется только {@code set_module_config}, после чего приложение ждёт
-     * reboot/disconnect и передаёт соединение в reconnect flow.
+     * For a single-section BLE MQTT save, the form therefore uses an implicit save
+     * path: it sends only {@code set_module_config}, then waits for reboot/disconnect
+     * and hands the connection to the reconnect flow.
      */
     static boolean shouldUseImplicitBleModuleSave(
         ConnectionType transport,
@@ -805,13 +809,13 @@ public class FormSetting extends Form {
         );
     }
 
-    // ==================== Настройки приложения ====================
+    // ==================== Application Settings ====================
 
     private VBox createAppSettingsPanel() {
         VBox panel = new VBox(16);
         panel.setPadding(new Insets(15));
 
-        // --- Группа «Оформление» ---
+        // --- Appearance Group ---
         Label appearanceHeader = new Label(I18n.t("settings.appearance.title"));
         appearanceHeader.getStyleClass().add("section-title");
 
@@ -889,7 +893,7 @@ public class FormSetting extends Form {
             restartNote
         );
 
-        // --- Группа «Интеграции» ---
+        // --- Integrations Group ---
         Label integrationsHeader = new Label(I18n.t("settings.integrations.title"));
         integrationsHeader.getStyleClass().add("section-title");
 
@@ -1027,7 +1031,7 @@ public class FormSetting extends Form {
         return value + " px";
     }
 
-    // ==================== Кэш ====================
+    // ==================== Cache ====================
 
     @SuppressWarnings("unchecked")
     private VBox createCachePanel() {
@@ -1127,7 +1131,7 @@ public class FormSetting extends Form {
             TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN
         );
 
-        // Lazy-load: слушаем вертикальный ScrollBar таблицы
+        // Lazy-load by observing the table's vertical ScrollBar.
         cacheTable.skinProperty().addListener((obs, oldSkin, newSkin) -> {
             if (newSkin != null) {
                 cacheTable
@@ -1242,8 +1246,8 @@ public class FormSetting extends Form {
     }
 
     /**
-     * Вкладка «Кэш» показывает имена только для чтения. Оставляем общую
-     * нормализацию пользовательского Unicode без удаления валидных emoji.
+     * The Cache tab displays names as read-only values. Keep the general Unicode
+     * normalization for user text without removing valid emoji.
      */
     static String sanitizeCacheDisplayText(String value) {
         return com.meshtastic.client.utils.UnicodeTextUtils.sanitizeForJavaFxDisplay(
@@ -1258,7 +1262,7 @@ public class FormSetting extends Form {
         VBox panel = new VBox(8);
         panel.setPadding(new Insets(5));
 
-        // Поиск
+        // Search.
         configSearchField = new TextField();
         configSearchField.setPromptText(
             I18n.t("settings.config.search.placeholder")
@@ -1267,7 +1271,7 @@ public class FormSetting extends Form {
             .textProperty()
             .addListener((obs, oldVal, newVal) -> filterConfigTree(newVal));
 
-        // Toolbar действий
+        // Action toolbar.
         ToolBar actionToolbar = new ToolBar();
         actionToolbar.getStyleClass().add("config-toolbar");
 
@@ -1373,7 +1377,7 @@ public class FormSetting extends Form {
         configTree.setShowRoot(false);
         configTree.setEditable(true);
 
-        // Колонка «Параметр»
+        // Parameter column.
         TreeTableColumn<ConfigTreeItem, String> nameCol = new TreeTableColumn<>(
             I18n.t("settings.config.column.parameter")
         );
@@ -1409,7 +1413,7 @@ public class FormSetting extends Form {
             }
         );
 
-        // Колонка «Значение» с кастомными редакторами
+        // Value column with custom editors.
         TreeTableColumn<ConfigTreeItem, ConfigTreeItem> valueCol =
             new TreeTableColumn<>(I18n.t("settings.config.column.value"));
         valueCol.setCellValueFactory(param ->
@@ -3130,7 +3134,7 @@ public class FormSetting extends Form {
     }
 
     /**
-     * Загружает конфигурацию из DeviceState и строит дерево.
+     * Loads configuration from DeviceState and builds the tree.
      */
     private void reloadConfigTree() {
         refreshConnection();
@@ -3165,7 +3169,7 @@ public class FormSetting extends Form {
             configExchangeInProgress
         );
 
-        // Сохраняем оригинальные protobuf для пересборки
+        // Keep original protobuf objects for rebuilding.
         List<ConfigProtos.Config> stateConfigs;
         List<ModuleConfigProtos.ModuleConfig> stateModuleConfigs;
         List<ChannelProtos.Channel> stateChannels;
@@ -3183,13 +3187,13 @@ public class FormSetting extends Form {
         originalChannels = stateChannels;
         workingChannels = new ArrayList<>(stateChannels);
 
-        // Корневой элемент (невидимый)
+        // Root item, hidden in the UI.
         TreeItem<ConfigTreeItem> root = new TreeItem<>(
             new ConfigTreeItem(I18n.t("settings.config.root"), null, 0)
         );
         root.setExpanded(true);
 
-        // Виртуальная секция: Имя устройства
+        // Virtual section: device name.
         TreeItem<ConfigTreeItem> ownerSection = new TreeItem<>(
             new ConfigTreeItem(I18n.t("settings.config.ownerInfo"), OWNER_INFO_CONFIG_TYPE, 0)
         );
@@ -3246,7 +3250,7 @@ public class FormSetting extends Form {
             );
         root.getChildren().add(ownerSection);
 
-        // Виртуальная секция: Фиксированная позиция
+        // Virtual section: fixed position.
         TreeItem<ConfigTreeItem> posSection = new TreeItem<>(
             new ConfigTreeItem(I18n.t("settings.config.fixedPosition"), "fixed_position", 0)
         );
@@ -3303,7 +3307,7 @@ public class FormSetting extends Form {
             );
         root.getChildren().add(posSection);
 
-        // Виртуальная секция: RTTTL ringtone для External Notification
+        // Virtual section: RTTTL ringtone for External Notification.
         TreeItem<ConfigTreeItem> ringtoneSection = new TreeItem<>(
             new ConfigTreeItem(I18n.t("settings.config.ringtone"), RINGTONE_CONFIG_TYPE, 0)
         );
@@ -3325,14 +3329,14 @@ public class FormSetting extends Form {
             );
         root.getChildren().add(ringtoneSection);
 
-        // Конфигурация устройства
+        // Device configuration.
         if (!originalConfigs.isEmpty()) {
             TreeItem<ConfigTreeItem> configRoot =
                 ProtobufTreeBuilder.buildConfigTree(originalConfigs);
             root.getChildren().add(configRoot);
         }
 
-        // Конфигурация модулей
+        // Module configuration.
         if (!originalModuleConfigs.isEmpty()) {
             TreeItem<ConfigTreeItem> moduleRoot =
                 ProtobufTreeBuilder.buildModuleConfigTree(
@@ -3374,13 +3378,13 @@ public class FormSetting extends Form {
     }
 
     /**
-     * Строит read-only дерево настроек MeshCore Companion Protocol.
+     * Builds the read-only settings tree for MeshCore Companion Protocol.
      * <p>
-     * MeshCore Companion не отдаёт Meshtastic Admin protobuf-конфиг, поэтому
-     * вкладка показывает доступные metadata, radio-параметры, storage и каналы,
-     * а действия сохранения/перезагрузки Meshtastic-конфига отключаются.
+     * MeshCore Companion does not expose the Meshtastic Admin protobuf
+     * configuration, so this tab shows available metadata, radio parameters,
+     * storage, and channels while disabling Meshtastic configuration save/reboot actions.
      *
-     * @param meshCoreState runtime-состояние MeshCore Companion
+     * @param meshCoreState MeshCore Companion runtime state
      */
     private void showMeshCoreSettingsTree(
         MeshCoreCompanionState meshCoreState
@@ -3676,7 +3680,7 @@ public class FormSetting extends Form {
     }
 
     /**
-     * Подсчитывает количество редактируемых полей в дереве.
+     * Counts editable fields in the tree.
      */
     private int countFields(TreeItem<ConfigTreeItem> item) {
         int count = 0;
@@ -3690,9 +3694,9 @@ public class FormSetting extends Form {
     }
 
     /**
-     * Фильтрует дерево конфигурации по строке поиска.
-     * Показывает только параметры, содержащие запрос в имени или fieldName,
-     * а также их родительские категории.
+     * Filters the configuration tree by the search string.
+     * Shows only parameters whose name or fieldName contains the query, along
+     * with their parent categories.
      */
     private void filterConfigTree(String query) {
         if (fullConfigRoot == null) {
@@ -3724,7 +3728,7 @@ public class FormSetting extends Form {
     }
 
     /**
-     * Рекурсивно фильтрует узел дерева. Возвращает копию с совпадающими потомками или null.
+     * Recursively filters a tree node and returns a copy with matching descendants, or null.
      */
     private TreeItem<ConfigTreeItem> filterTreeItem(
         TreeItem<ConfigTreeItem> item,
@@ -3746,14 +3750,14 @@ public class FormSetting extends Form {
                 name.contains(lowerQuery) || fieldName.contains(lowerQuery);
         }
 
-        // Категория с совпадающим именем — показать целиком
+            // Category name matched; show the whole section.
         if (data != null && data.isCategory()) {
             String name =
                 data.getName() != null
                     ? data.getName().toLowerCase(Locale.ROOT)
                     : "";
             if (name.contains(lowerQuery)) {
-                // Показать всю секцию
+            // Show the full section.
                 TreeItem<ConfigTreeItem> copy = new TreeItem<>(data);
                 copy.setExpanded(true);
                 for (TreeItem<ConfigTreeItem> child : item.getChildren()) {
@@ -3767,7 +3771,7 @@ public class FormSetting extends Form {
             return new TreeItem<>(data);
         }
 
-        // Проверить детей
+        // Check children.
         List<TreeItem<ConfigTreeItem>> matchedChildren = new ArrayList<>();
         for (TreeItem<ConfigTreeItem> child : item.getChildren()) {
             TreeItem<ConfigTreeItem> filtered = filterTreeItem(
@@ -3790,7 +3794,7 @@ public class FormSetting extends Form {
     }
 
     /**
-     * Глубокая копия узла дерева (для показа полной секции при совпадении категории).
+     * Deep-copies a tree node so a full section can be shown when its category matches.
      */
     private TreeItem<ConfigTreeItem> copyTreeItem(
         TreeItem<ConfigTreeItem> item
@@ -3804,8 +3808,8 @@ public class FormSetting extends Form {
     }
 
     /**
-     * Сохраняет изменённые настройки на устройство.
-     * Использует begin_edit_settings / commit_edit_settings для батч-отправки.
+     * Saves changed settings to the device.
+     * Uses begin_edit_settings / commit_edit_settings for batched delivery.
      */
     private void onSaveConfig() {
         DeviceState actionState = state;
@@ -3830,7 +3834,7 @@ public class FormSetting extends Form {
             return;
         }
 
-        // Собрать виртуальные (admin) изменения
+        // Collect virtual admin changes.
         boolean ownerModified = false;
         String newLongName = null;
         String newShortName = null;
@@ -3845,7 +3849,7 @@ public class FormSetting extends Form {
         boolean ringtoneModified = false;
         String newRingtone = "";
 
-        // Собрать protobuf-изменения
+        // Collect protobuf changes.
         List<ConfigProtos.Config> modifiedConfigs = new ArrayList<>();
         List<ModuleConfigProtos.ModuleConfig> modifiedModuleConfigs =
             new ArrayList<>();
@@ -3856,7 +3860,7 @@ public class FormSetting extends Form {
                 continue;
             }
 
-            // Виртуальная секция: Имя устройства
+        // Virtual section: device name.
             if (
                 OWNER_INFO_CONFIG_TYPE.equals(topData.getConfigType()) &&
                 hasMoifiedFields(topLevel)
@@ -3876,7 +3880,7 @@ public class FormSetting extends Form {
                 }
             }
 
-            // Виртуальная секция: Фиксированная позиция
+        // Virtual section: fixed position.
             if (
                 "fixed_position".equals(topData.getConfigType()) &&
                 hasMoifiedFields(topLevel)
@@ -3896,7 +3900,7 @@ public class FormSetting extends Form {
                 }
             }
 
-            // Виртуальная секция: Ringtone
+        // Virtual section: ringtone.
             if (
                 RINGTONE_CONFIG_TYPE.equals(topData.getConfigType()) &&
                 hasMoifiedFields(topLevel)
@@ -3905,7 +3909,7 @@ public class FormSetting extends Form {
                 newRingtone = stringValue(topLevel, RINGTONE_FIELD);
             }
 
-            // Protobuf-секции: "Конфигурация устройства" / "Конфигурация модулей"
+        // Protobuf sections: device configuration / module configuration.
             if (
                 "config".equals(topData.getConfigType()) ||
                 "module_config".equals(topData.getConfigType())
@@ -3989,7 +3993,7 @@ public class FormSetting extends Form {
         saveConfigBtn.setDisable(true);
         configStatusLabel.setText(I18n.t("settings.status.requestSessionKey"));
 
-        // Захватываем финальные значения для лямбды
+        // Capture final values for the lambda.
         final boolean fOwnerModified = ownerModified;
         final String fLongName = newLongName;
         final String fShortName = newShortName;
@@ -4001,10 +4005,10 @@ public class FormSetting extends Form {
         final boolean fRingtoneModified = ringtoneModified;
         final String fRingtone = newRingtone;
 
-        // Запрашиваем session key → отправляем настройки.
-        // OwnerInfo listener и timeout fallback работают параллельно, поэтому нужен
-        // single-shot guard: повторный begin/set/commit через ~5 секунд ломает save-flow
-        // на любом транспорте, если owner info уже успел прийти раньше таймаута.
+        // Request the session key, then send settings. The OwnerInfo listener and
+        // timeout fallback run in parallel, so a single-shot guard is required:
+        // repeating begin/set/commit after about five seconds breaks the save flow
+        // on any transport if owner info already arrived before the timeout.
         AtomicBoolean saveDispatchStarted = new AtomicBoolean(false);
         Runnable[] listenerHolder = new Runnable[1];
         listenerHolder[0] = () ->
@@ -4034,7 +4038,7 @@ public class FormSetting extends Form {
             });
         actionState.addOwnerInfoListener(listenerHolder[0]);
 
-        // Таймаут — отправить без passkey
+            // Timeout: send without a passkey.
         Thread timeoutThread = new Thread(() -> {
             try {
                 Thread.sleep(5000);
@@ -4082,9 +4086,9 @@ public class FormSetting extends Form {
     }
 
     /**
-     * Отправляет изменённые конфигурации на устройство.
-     * Виртуальные секции (имя, позиция) отправляются отдельными admin-сообщениями.
-     * Protobuf-секции оборачиваются в begin/commit edit.
+     * Sends changed configuration to the device.
+     * Virtual sections such as name and position are sent as separate admin
+     * messages. Protobuf sections are wrapped in begin/commit edit.
      */
     private void sendConfigChanges(
         ConnectionEntry activeEntry,
@@ -4134,7 +4138,7 @@ public class FormSetting extends Form {
             }
         }
 
-        // Виртуальные секции — отправить напрямую
+        // Send virtual sections directly.
         if (ownerModified && newLongName != null && newShortName != null) {
             MessageService.setOwnerInfo(
                 actionHandler,
@@ -4205,9 +4209,10 @@ public class FormSetting extends Form {
             actionState.setRingtone(ringtone);
         }
 
-        // Protobuf-секции обычно идут через begin/commit edit с задержками между сообщениями.
-        // Исключение ниже — одиночный BLE-save MQTT, где некоторые устройства reboot/disconnect
-        // уже на set_module_config и не дают commit дойти до firmware.
+        // Protobuf sections usually go through begin/commit edit with delays
+        // between messages. The exception below is a single-section BLE MQTT save:
+        // some devices reboot/disconnect at set_module_config and never let commit
+        // reach firmware.
         if (hasPacketConfigChanges) {
             List<Runnable> tasks = new ArrayList<>();
             AtomicBoolean saveFailed = new AtomicBoolean(false);
@@ -4454,10 +4459,10 @@ public class FormSetting extends Form {
                         }
                     });
 
-                    // После commit переводим соединение в reboot-aware reconnect path.
-                    // Обычный user disconnect здесь вреден: он помечает разрыв как ручной
-                    // и запрещает auto-reconnect, а BLE как раз нуждается в мягком handoff
-                    // на время device reboot / повторной рекламы.
+            // After commit, hand the connection to the reboot-aware reconnect path.
+            // A normal user disconnect is harmful here: it marks the break as manual
+            // and disables auto-reconnect, while BLE needs a soft handoff during the
+            // device reboot and advertising window.
                     if (!requiresReconnect) {
                         finishConfigSaveNavigationBlock();
                         return;
@@ -4576,7 +4581,7 @@ public class FormSetting extends Form {
             reconnectThread.setDaemon(true);
             reconnectThread.start();
         } else {
-            // Только виртуальные секции — завершить сразу (устройство не перезагружается)
+            // Virtual sections only: finish immediately because the device does not reboot.
             resetModifiedFlags(
                 fullConfigRoot != null ? fullConfigRoot : configTree.getRoot()
             );
@@ -4590,7 +4595,7 @@ public class FormSetting extends Form {
     }
 
     /**
-     * Проверяет, есть ли изменённые поля в секции.
+     * Checks whether a section contains changed fields.
      */
     private boolean hasMoifiedFields(TreeItem<ConfigTreeItem> item) {
         ConfigTreeItem data = item.getValue();
@@ -4606,7 +4611,7 @@ public class FormSetting extends Form {
     }
 
     /**
-     * Сбрасывает флаги модификации после сохранения.
+     * Clears modification flags after saving.
      */
     private void resetModifiedFlags(TreeItem<ConfigTreeItem> item) {
         if (item == null) {
@@ -4679,7 +4684,7 @@ public class FormSetting extends Form {
     }
 
     /**
-     * Получает номер активного oneof-поля у Config.
+     * Gets the active oneof field number from Config.
      */
     private int getActiveOneofFieldNumber(ConfigProtos.Config config) {
         var oneof = config
@@ -4697,7 +4702,7 @@ public class FormSetting extends Form {
     }
 
     /**
-     * Получает номер активного oneof-поля у ModuleConfig.
+     * Gets the active oneof field number from ModuleConfig.
      */
     private int getActiveModuleOneofFieldNumber(
         ModuleConfigProtos.ModuleConfig mc
@@ -4719,8 +4724,8 @@ public class FormSetting extends Form {
     // ==================== Config Value Cell ====================
 
     /**
-     * Кастомная ячейка для колонки «Значение» в TreeTableView.
-     * Отображает CheckBox для boolean, ComboBox для enum, TextField для строк/чисел.
+     * Custom cell for the Value column in the TreeTableView.
+     * Displays CheckBox for booleans, ComboBox for enums, and TextField for strings/numbers.
      */
     private final class ConfigValueCell
         extends TreeTableCell<ConfigTreeItem, ConfigTreeItem>
@@ -4738,7 +4743,7 @@ public class FormSetting extends Form {
             }
 
             if (item.isCategory()) {
-                // Категории — без значения
+                // Categories have no value.
                 return;
             }
 
@@ -4770,7 +4775,7 @@ public class FormSetting extends Form {
                         comboBox.getItems().add(evd);
                     }
                 }
-                // Отображать имя enum
+                    // Display enum name.
                 comboBox.setCellFactory(lv ->
                     new ListCell<>() {
                         @Override
@@ -4814,15 +4819,15 @@ public class FormSetting extends Form {
             ) {
                 setGraphic(createTextEditor(item));
             } else {
-                // Fallback — просто текст
+            // Fallback: plain text.
                 setText(ConfigValueFormatter.formatValue(item));
             }
         }
 
         /**
-         * Создаёт текстовый редактор для строковых и числовых полей.
-         * Если для поля подключён форматтер, в текстовое поле подставляется
-         * уже человекочитаемое представление значения.
+         * Creates a text editor for string and numeric fields.
+         * If the field has a formatter, the editor receives the existing
+         * human-readable representation of the value.
          */
         private TextField createTextEditor(ConfigTreeItem item) {
             TextField textField = new TextField(
@@ -4852,8 +4857,8 @@ public class FormSetting extends Form {
         }
 
         /**
-         * Создаёт selector для bitmask-полей, которые хранятся как число,
-         * но по смыслу состоят из набора включаемых флагов.
+         * Creates a selector for bitmask fields stored as numbers but representing
+         * a set of independently enabled flags.
          */
         private MenuButton createBitmaskEditor(ConfigTreeItem item) {
             MenuButton menuButton = new MenuButton();
@@ -4901,8 +4906,8 @@ public class FormSetting extends Form {
         }
 
         /**
-         * Применяет текст из редактора к модели поля. При успешном парсинге
-         * нормализует отображение значения, при ошибке подсвечивает поле.
+         * Applies editor text to the field model. On successful parsing it
+         * normalizes the displayed value; on failure it highlights the field.
          */
         private void commitTextValue(ConfigTreeItem item, TextField textField) {
             try {

@@ -1,11 +1,11 @@
 package com.meshtastic.client.connection;
 
 /**
- * Совместимый маркер для существующих Meshtastic transport-реализаций.
+ * Compatibility marker for existing Meshtastic transport implementations.
  * <p>
- * Новые протокольные адаптеры должны зависеть от {@link TransportConnection}.
- * TCP/Serial/BLE классы пока продолжают реализовывать этот интерфейс, чтобы
- * существующие Meshtastic-специфичные тесты и call site-ы остались совместимыми.
+ * New protocol adapters should depend on {@link TransportConnection}. TCP,
+ * Serial, and BLE classes still implement this interface so existing
+ * Meshtastic-specific tests and call sites remain compatible.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */

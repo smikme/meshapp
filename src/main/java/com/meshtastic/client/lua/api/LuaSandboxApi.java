@@ -10,12 +10,13 @@ import org.luaj.vm2.lib.VarArgFunction;
 import org.luaj.vm2.lib.ZeroArgFunction;
 
 /**
- * Корневой установщик разрешенного API Lua-песочницы MeshApp.
+ * Root installer for the MeshApp Lua sandbox API.
  * <p>
- * Создает namespace {@code mesh} и подключает отдельные модули расширений:
+ * Creates the {@code mesh} namespace and attaches the available extension
+ * modules:
  * {@code mesh.chat}, {@code mesh.kv}, {@code mesh.curl}, {@code mesh.ui},
- * {@code mesh.canvas}, {@code mesh.traceroute}, {@code mesh.nodeinfo}, а также базовые
- * функции {@code mesh.log}, {@code mesh.now}, {@code mesh.owner},
+ * {@code mesh.canvas}, {@code mesh.traceroute}, {@code mesh.nodeinfo}, plus the
+ * core functions {@code mesh.log}, {@code mesh.now}, {@code mesh.owner}, and
  * {@code mesh.sleep}.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
@@ -33,9 +34,9 @@ public final class LuaSandboxApi {
     }
 
     /**
-     * Устанавливает разрешенный API в Lua globals.
+     * Installs the allowed API into the Lua globals table.
      *
-     * @param globals Lua globals конкретной sandbox-сессии
+     * @param globals Lua globals for the current sandbox session
      */
     public void install(Globals globals) {
         globals.set("print", new VarArgFunction() {
@@ -100,9 +101,9 @@ public final class LuaSandboxApi {
     }
 
     /**
-     * Преобразователь моделей в Lua-таблицы, общий для callback и sandbox API.
+     * Returns the model-to-table mapper shared by callbacks and sandbox APIs.
      *
-     * @return mapper текущей сессии
+     * @return mapper for the current session
      */
     public LuaValueMapper mapper() {
         return mapper;

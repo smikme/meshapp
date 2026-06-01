@@ -12,15 +12,15 @@ import java.sql.*;
 import java.util.*;
 
 /**
- * Персистентное хранилище сообщений в H2 (общая БД {@code ~/.meshapp/nodedb}).
+ * Persistent message store backed by H2, using the shared {@code ~/.meshapp/nodedb} database.
  * <p>
- * Все сообщения каналов и DM сохраняются немедленно при получении/отправке.
- * FormChat загружает сообщения порциями по 50 (пагинация по {@code id}).
+ * Channel and DM messages are saved immediately on receive/send. FormChat loads
+ * messages in batches of 50, paginated by {@code id}.
  * <p>
- * Типы чатов ({@code chat_type}):
+ * Chat types ({@code chat_type}):
  * <ul>
- *   <li>{@code "channel"} — канальные сообщения, {@code chat_key} = channelIndex</li>
- *   <li>{@code "dm"} — личные сообщения, {@code chat_key} = peerNodeNum</li>
+ *   <li>{@code "channel"} - channel messages, {@code chat_key} = channelIndex</li>
+ *   <li>{@code "dm"} - direct messages, {@code chat_key} = peerNodeNum</li>
  * </ul>
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
@@ -73,7 +73,7 @@ public final class MessageDbService {
     }
 
     // ═══════════════════════════════════════════════════════════
-    //  Инициализация БД
+    // Database initialization.
     // ═══════════════════════════════════════════════════════════
 
     private void initDb() {
@@ -224,11 +224,11 @@ public final class MessageDbService {
     }
 
     /**
-     * Проверяет наличие полнотекстового индекса сообщений на старте сервиса.
+     * Checks that the message full-text index exists when the service starts.
      * <p>
-     * Основной путь создания индекса — миграция БД, но эта проверка оставлена
-     * для новых баз и для восстановления после ручного повреждения служебных
-     * объектов H2 full-text.
+     * The normal index creation path is a database migration, but this check is
+     * kept for new databases and for recovery after manual damage to H2 full-text
+     * service objects.
      */
     private void ensureMessageFullTextIndex() {
         try {
@@ -239,10 +239,9 @@ public final class MessageDbService {
     }
 
     /**
-     * Помечает все сообщения со статусом {@code SENDING} как {@code FAILED}
-     * с причиной {@code STALE}. Вызывается один раз при старте приложения,
-     * чтобы очистить «зависшие» сообщения от предыдущей сессии
-     * (аварийное завершение, потеря питания и т.д.).
+     * Marks all {@code SENDING} messages as {@code FAILED} with reason {@code STALE}.
+     * Called once on application startup to clean up messages left hanging from
+     * the previous session, such as after a crash or power loss.
      */
     public synchronized void markStaleSendingAsFailed() {
         if (dbConnection == null) { return; }
@@ -270,16 +269,16 @@ public final class MessageDbService {
     }
 
     // ═══════════════════════════════════════════════════════════
-    //  Запись
+    // Writes.
     // ═══════════════════════════════════════════════════════════
 
     /**
-     * Сохраняет сообщение в БД. Устанавливает {@code msg.setDbId()} после вставки.
+     * Saves a message to the database and sets {@code msg.setDbId()} after insert.
      *
-     * @param msg         сообщение для сохранения
-     * @param chatType    "channel" или "dm"
-     * @param chatKey     channelIndex (как строка) или peerNodeId
-     * @param ownerNodeId nodeId устройства-владельца (например, "!9e755af0")
+     * @param msg         message to save
+     * @param chatType    "channel" or "dm"
+     * @param chatKey     channelIndex as string, or peerNodeId
+     * @param ownerNodeId owner device nodeId, for example "!9e755af0"
      */
     public synchronized void save(MeshMessage msg, String chatType, String chatKey, String ownerNodeId) {
         if (msg == null) { return; }
@@ -448,8 +447,8 @@ public final class MessageDbService {
     }
 
     /**
-     * Сохраняет реакцию на сообщение в отдельной таблице, чтобы она не влияла
-     * на preview чатов, unread-счётчики и обычную историю сообщений.
+     * Saves a message reaction in a separate table so it does not affect chat
+     * previews, unread counters, or the regular message history.
      */
     public synchronized boolean saveReaction(MessageReaction reaction,
                                              String chatType,
@@ -488,12 +487,12 @@ public final class MessageDbService {
     }
 
     /**
-     * Сохраняет успешный результат traceroute в отдельной таблице.
+     * Saves a successful traceroute result in a separate table.
      * <p>
-     * В отличие от старого механизма системных сообщений, эта запись не попадает
-     * в историю чата и не участвует в полнотекстовом поиске сообщений.
+     * Unlike the old system-message mechanism, this row does not enter chat
+     * history and is not included in message full-text search.
      *
-     * @return id записи в {@code traceroute_results}; {@code 0}, если сохранить не удалось
+     * @return id of the row in {@code traceroute_results}; {@code 0} if saving failed
      */
     public synchronized long saveTracerouteResult(String ownerNodeId,
                                                   String chatType,
@@ -549,12 +548,12 @@ public final class MessageDbService {
     }
 
     /**
-     * Область чата, к которой относится сохранённая реакция.
+     * Chat scope for a saved reaction.
      *
-     * @param ownerNodeId владелец локальной истории
-     * @param chatType тип чата
-     * @param chatKey ключ чата
-     * @param targetPacketId packet id сообщения, на которое поставлена реакция
+     * @param ownerNodeId owner of the local history
+     * @param chatType chat type
+     * @param chatKey chat key
+     * @param targetPacketId packet id of the message being reacted to
      */
     public record ReactionScope(String ownerNodeId, String chatType, String chatKey, int targetPacketId) {}
 
@@ -585,7 +584,7 @@ public final class MessageDbService {
     }
 
     /**
-     * Обновляет статус доставки сообщения по packetId.
+     * Updates message delivery status by packetId.
      */
     public synchronized void updateStatus(int packetId, MeshMessage.DeliveryStatus status, String errorReason) {
         if (packetId == 0) { return; }
@@ -604,10 +603,10 @@ public final class MessageDbService {
     }
 
     /**
-     * Переводит существующее сообщение в новую попытку отправки:
-     * обновляет packetId, статус и причину ошибки.
+     * Moves an existing message into a new send attempt by updating packetId,
+     * status, and error reason.
      *
-     * @return {@code true}, если обновлена хотя бы одна запись
+     * @return {@code true} if at least one row was updated
      */
     public synchronized boolean updateMessageForRetry(long dbId,
                                                       int previousPacketId,
@@ -644,9 +643,9 @@ public final class MessageDbService {
     }
 
     /**
-     * Обновляет статус доставки реакции по packetId.
+     * Updates reaction delivery status by packetId.
      *
-     * @return {@code true}, если найдена и обновлена хотя бы одна запись
+     * @return {@code true} if at least one row was found and updated
      */
     public synchronized boolean updateReactionStatus(int packetId,
                                                      MeshMessage.DeliveryStatus status,
@@ -668,17 +667,17 @@ public final class MessageDbService {
     }
 
     // ═══════════════════════════════════════════════════════════
-    //  Чтение — пагинация
+    // Reads: pagination.
     // ═══════════════════════════════════════════════════════════
 
     /**
-     * Загружает последние N сообщений чата (в хронологическом порядке).
+     * Loads the last N messages for a chat in chronological order.
      *
-     * @param chatType    "channel" или "dm"
-     * @param chatKey     channelIndex (как строка) или peerNodeId
-     * @param limit       максимальное количество
-     * @param ownerNodeId nodeId устройства-владельца
-     * @return список сообщений (старые → новые)
+     * @param chatType    "channel" or "dm"
+     * @param chatKey     channelIndex as string, or peerNodeId
+     * @param limit       maximum number of messages
+     * @param ownerNodeId owner device nodeId
+     * @return messages from oldest to newest
      */
     public List<MeshMessage> loadLast(String chatType, String chatKey, int limit, String ownerNodeId) {
         List<MeshMessage> result = new ArrayList<>();
@@ -706,14 +705,14 @@ public final class MessageDbService {
     }
 
     /**
-     * Загружает N сообщений ДО указанного id (для скролла вверх).
+     * Loads N messages before the given id, used when scrolling upward.
      *
-     * @param chatType    "channel" или "dm"
-     * @param chatKey     channelIndex (как строка) или peerNodeId
-     * @param beforeDbId  загружать сообщения с id &lt; beforeDbId
-     * @param limit       максимальное количество
-     * @param ownerNodeId nodeId устройства-владельца
-     * @return список сообщений (старые → новые)
+     * @param chatType    "channel" or "dm"
+     * @param chatKey     channelIndex as string, or peerNodeId
+     * @param beforeDbId  load messages with id &lt; beforeDbId
+     * @param limit       maximum number of messages
+     * @param ownerNodeId owner device nodeId
+     * @return messages from oldest to newest
      */
     public List<MeshMessage> loadBefore(String chatType, String chatKey, long beforeDbId, int limit, String ownerNodeId) {
         List<MeshMessage> result = new ArrayList<>();
@@ -742,28 +741,28 @@ public final class MessageDbService {
     }
 
     /**
-     * Загружает новые сообщения ПОСЛЕ указанного id (для real-time обновления).
+     * Loads new messages after the given id, used for real-time updates.
      *
-     * @param chatType    "channel" или "dm"
-     * @param chatKey     channelIndex (как строка) или peerNodeId
-     * @param afterDbId   загружать сообщения с id > afterDbId
-     * @param ownerNodeId nodeId устройства-владельца
-     * @return список новых сообщений (хронологический порядок)
+     * @param chatType    "channel" or "dm"
+     * @param chatKey     channelIndex as string, or peerNodeId
+     * @param afterDbId   load messages with id > afterDbId
+     * @param ownerNodeId owner device nodeId
+     * @return new messages in chronological order
      */
     public List<MeshMessage> loadAfter(String chatType, String chatKey, long afterDbId, String ownerNodeId) {
         return loadAfter(chatType, chatKey, afterDbId, 0, ownerNodeId);
     }
 
     /**
-     * Загружает новые сообщения ПОСЛЕ указанного id (для real-time обновления и
-     * постраничной навигации вниз).
+     * Loads new messages after the given id, used for real-time updates and
+     * downward pagination.
      *
-     * @param chatType    "channel" или "dm"
-     * @param chatKey     channelIndex (как строка) или peerNodeId
-     * @param afterDbId   загружать сообщения с id > afterDbId
-     * @param limit       максимальное количество; {@code <= 0} означает без лимита
-     * @param ownerNodeId nodeId устройства-владельца
-     * @return список новых сообщений (хронологический порядок)
+     * @param chatType    "channel" or "dm"
+     * @param chatKey     channelIndex as string, or peerNodeId
+     * @param afterDbId   load messages with id > afterDbId
+     * @param limit       maximum number of messages; {@code <= 0} means unlimited
+     * @param ownerNodeId owner device nodeId
+     * @return new messages in chronological order
      */
     public List<MeshMessage> loadAfter(String chatType,
                                        String chatKey,
@@ -795,13 +794,13 @@ public final class MessageDbService {
     }
 
     /**
-     * Загружает одно сообщение чата по id БД.
+     * Loads one chat message by database id.
      *
-     * @param chatType    "channel" или "dm"
-     * @param chatKey     channelIndex (как строка) или peerNodeId
-     * @param dbId        id сообщения в БД
-     * @param ownerNodeId nodeId устройства-владельца
-     * @return сообщение или {@code null}, если оно не принадлежит указанному чату
+     * @param chatType    "channel" or "dm"
+     * @param chatKey     channelIndex as string, or peerNodeId
+     * @param dbId        message id in the database
+     * @param ownerNodeId owner device nodeId
+     * @return message, or {@code null} if it does not belong to the requested chat
      */
     public MeshMessage findByDbId(String chatType, String chatKey, long dbId, String ownerNodeId) {
         if (dbConnection == null || dbId <= 0) { return null; }
@@ -827,16 +826,16 @@ public final class MessageDbService {
     }
 
     // ═══════════════════════════════════════════════════════════
-    //  Чтение — поиск и метаданные
+    // Reads: search and metadata.
     // ═══════════════════════════════════════════════════════════
 
     /**
-     * Загружает последние системные сообщения, начинающиеся с указанного префикса.
+     * Loads recent system messages whose text starts with the given prefix.
      *
-     * @param textPrefix  префикс текста системного сообщения
-     * @param limit       максимальное количество
-     * @param ownerNodeId nodeId устройства-владельца
-     * @return список сообщений (новые → старые)
+     * @param textPrefix  system-message text prefix
+     * @param limit       maximum number of messages
+     * @param ownerNodeId owner device nodeId
+     * @return messages from newest to oldest
      */
     public List<MeshMessage> loadRecentSystemMessagesByPrefix(String textPrefix, int limit, String ownerNodeId) {
         List<MeshMessage> result = new ArrayList<>();
@@ -867,11 +866,11 @@ public final class MessageDbService {
     }
 
     /**
-     * Загружает последние сохранённые traceroute-результаты.
+     * Loads recent saved traceroute results.
      *
-     * @param limit       максимальное количество записей
-     * @param ownerNodeId nodeId устройства-владельца
-     * @return список результатов (новые → старые)
+     * @param limit       maximum number of rows
+     * @param ownerNodeId owner device nodeId
+     * @return results from newest to oldest
      */
     public List<TracerouteResultRecord> loadRecentTracerouteResults(int limit, String ownerNodeId) {
         List<TracerouteResultRecord> result = new ArrayList<>();
@@ -899,12 +898,12 @@ public final class MessageDbService {
     }
 
     /**
-     * Загружает сохранённые traceroute-результаты, относящиеся к конкретной ноде.
+     * Loads saved traceroute results for a specific node.
      *
-     * @param ownerNodeId   nodeId устройства-владельца
-     * @param targetNodeNum числовой id целевой ноды как unsigned int
-     * @param targetNodeId  строковый nodeId целевой ноды
-     * @return список результатов (новые → старые)
+     * @param ownerNodeId   owner device nodeId
+     * @param targetNodeNum numeric target node id as unsigned int
+     * @param targetNodeId  target nodeId string
+     * @return results from newest to oldest
      */
     public List<TracerouteResultRecord> loadTracerouteResultsForNode(String ownerNodeId,
                                                                      long targetNodeNum,
@@ -921,17 +920,17 @@ public final class MessageDbService {
     }
 
     /**
-     * Загружает страницу сохранённых traceroute-результатов для конкретной ноды.
+     * Loads one page of saved traceroute results for a specific node.
      *
-     * @param ownerNodeId            nodeId устройства-владельца
-     * @param targetNodeNum          числовой id целевой ноды как unsigned int
-     * @param targetNodeId           строковый nodeId целевой ноды
-     * @param startTimestampInclusive начало фильтра по времени; {@code <= 0} отключает нижнюю границу
-     * @param endTimestampExclusive   конец фильтра по времени; {@code <= 0} отключает верхнюю границу
-     * @param limit                  максимальное количество записей
-     * @param beforeTimestamp        timestamp последней загруженной записи; {@code <= 0} для первой страницы
-     * @param beforeId               id последней загруженной записи; используется вместе с {@code beforeTimestamp}
-     * @return страница результатов (новые → старые)
+     * @param ownerNodeId            owner device nodeId
+     * @param targetNodeNum          numeric target node id as unsigned int
+     * @param targetNodeId           target nodeId string
+     * @param startTimestampInclusive start of the time filter; {@code <= 0} disables the lower bound
+     * @param endTimestampExclusive   end of the time filter; {@code <= 0} disables the upper bound
+     * @param limit                  maximum number of rows
+     * @param beforeTimestamp        timestamp of the last loaded row; {@code <= 0} for the first page
+     * @param beforeId               id of the last loaded row, used with {@code beforeTimestamp}
+     * @return page of results from newest to oldest
      */
     public List<TracerouteResultRecord> loadTracerouteResultsForNode(String ownerNodeId,
                                                                      long targetNodeNum,
@@ -999,11 +998,11 @@ public final class MessageDbService {
     }
 
     /**
-     * Загружает один сохранённый traceroute-результат по id внутри owner scope.
+     * Loads one saved traceroute result by id inside the owner scope.
      *
-     * @param id          id записи в {@code traceroute_results}
-     * @param ownerNodeId nodeId устройства-владельца
-     * @return запись результата или пустое значение, если она не найдена
+     * @param id          row id in {@code traceroute_results}
+     * @param ownerNodeId owner device nodeId
+     * @return result row, or empty when it is not found
      */
     public Optional<TracerouteResultRecord> loadTracerouteResult(long id, String ownerNodeId) {
         if (dbConnection == null || id <= 0) {
@@ -1029,30 +1028,30 @@ public final class MessageDbService {
     }
 
     /**
-     * Проверяет, совпадает ли конкретное сообщение с поисковым запросом.
+     * Checks whether a specific message matches a search query.
      *
-     * @param chatType    тип чата
-     * @param chatKey     ключ чата
-     * @param query       поисковая строка
-     * @param ownerNodeId nodeId устройства-владельца
-     * @param dbId        id сообщения в БД
-     * @return {@code true}, если сообщение найдено full-text индексом
+     * @param chatType    chat type
+     * @param chatKey     chat key
+     * @param query       search string
+     * @param ownerNodeId owner device nodeId
+     * @param dbId        message id in the database
+     * @return {@code true} if the full-text index finds the message
      */
     public boolean messageMatchesSearch(String chatType, String chatKey, String query, String ownerNodeId, long dbId) {
         return messageMatchesSearch(chatType, chatKey, query, ownerNodeId, null, dbId);
     }
 
     /**
-     * Проверяет, совпадает ли конкретное сообщение с поисковым запросом и
-     * опциональным фильтром автора.
+     * Checks whether a specific message matches a search query and an optional
+     * author filter.
      *
-     * @param chatType    тип чата
-     * @param chatKey     ключ чата
-     * @param query       поисковая строка
-     * @param ownerNodeId nodeId устройства-владельца
-     * @param fromNodeId  nodeId автора сообщения; пустое значение отключает фильтр
-     * @param dbId        id сообщения в БД
-     * @return {@code true}, если сообщение найдено full-text индексом
+     * @param chatType    chat type
+     * @param chatKey     chat key
+     * @param query       search string
+     * @param ownerNodeId owner device nodeId
+     * @param fromNodeId  author nodeId; blank value disables the filter
+     * @param dbId        message id in the database
+     * @return {@code true} if the full-text index finds the message
      */
     public boolean messageMatchesSearch(String chatType,
                                         String chatKey,
@@ -1106,18 +1105,18 @@ public final class MessageDbService {
     }
 
     /**
-     * Считает совпадения поиска через полнотекстовый индекс с верхним лимитом.
+     * Counts search matches through the full-text index with an upper limit.
      * <p>
-     * Точный {@code COUNT(*)} по частому слову может проходить очень большой
-     * набор FT-строк. Поэтому UI получает точное число только в обычных
-     * сценариях, а для слишком частых запросов — ограниченное значение с
-     * признаком {@link MessageSearchCount#limited()}.
+     * An exact {@code COUNT(*)} for a common word can scan a very large set of
+     * FT rows. The UI therefore gets an exact count in normal scenarios, and a
+     * capped value with {@link MessageSearchCount#limited()} for overly frequent
+     * queries.
      *
-     * @param chatType    тип чата
-     * @param chatKey     ключ чата
-     * @param query       поисковая строка
-     * @param ownerNodeId nodeId устройства-владельца
-     * @return количество совпадений, возможно ограниченное сверху
+     * @param chatType    chat type
+     * @param chatKey     chat key
+     * @param query       search string
+     * @param ownerNodeId owner device nodeId
+     * @return number of matches, possibly capped
      */
     public MessageSearchCount countMessageSearchMatchesLimited(String chatType,
                                                                String chatKey,
@@ -1127,15 +1126,15 @@ public final class MessageDbService {
     }
 
     /**
-     * Считает совпадения поиска через полнотекстовый индекс с верхним лимитом
-     * и опциональным фильтром автора сообщения.
+     * Counts search matches through the full-text index with an upper limit and
+     * an optional author filter.
      *
-     * @param chatType    тип чата
-     * @param chatKey     ключ чата
-     * @param query       поисковая строка
-     * @param ownerNodeId nodeId устройства-владельца
-     * @param fromNodeId  nodeId автора сообщения; пустое значение отключает фильтр
-     * @return количество совпадений, возможно ограниченное сверху
+     * @param chatType    chat type
+     * @param chatKey     chat key
+     * @param query       search string
+     * @param ownerNodeId owner device nodeId
+     * @param fromNodeId  author nodeId; blank value disables the filter
+     * @return number of matches, possibly capped
      */
     public MessageSearchCount countMessageSearchMatchesLimited(String chatType,
                                                                String chatKey,
@@ -1231,28 +1230,27 @@ public final class MessageDbService {
     }
 
     /**
-     * Находит самое новое сообщение, совпадающее с поисковым запросом.
+     * Finds the newest message matching the search query.
      *
-     * @param chatType    тип чата
-     * @param chatKey     ключ чата
-     * @param query       поисковая строка
-     * @param ownerNodeId nodeId устройства-владельца
-     * @return id сообщения или {@code 0}, если совпадений нет
+     * @param chatType    chat type
+     * @param chatKey     chat key
+     * @param query       search string
+     * @param ownerNodeId owner device nodeId
+     * @return message id, or {@code 0} when there are no matches
      */
     public long findLatestMessageSearchMatch(String chatType, String chatKey, String query, String ownerNodeId) {
         return findLatestMessageSearchMatch(chatType, chatKey, query, ownerNodeId, null);
     }
 
     /**
-     * Находит самое новое сообщение, совпадающее с поисковым запросом и
-     * опциональным фильтром автора.
+     * Finds the newest message matching the search query and optional author filter.
      *
-     * @param chatType    тип чата
-     * @param chatKey     ключ чата
-     * @param query       поисковая строка
-     * @param ownerNodeId nodeId устройства-владельца
-     * @param fromNodeId  nodeId автора сообщения; пустое значение отключает фильтр
-     * @return id сообщения или {@code 0}, если совпадений нет
+     * @param chatType    chat type
+     * @param chatKey     chat key
+     * @param query       search string
+     * @param ownerNodeId owner device nodeId
+     * @param fromNodeId  author nodeId; blank value disables the filter
+     * @return message id, or {@code 0} when there are no matches
      */
     public long findLatestMessageSearchMatch(String chatType,
                                              String chatKey,
@@ -1263,14 +1261,14 @@ public final class MessageDbService {
     }
 
     /**
-     * Находит ближайшее предыдущее совпадение перед указанным сообщением.
+     * Finds the nearest previous match before the specified message.
      *
-     * @param chatType    тип чата
-     * @param chatKey     ключ чата
-     * @param query       поисковая строка
-     * @param ownerNodeId nodeId устройства-владельца
-     * @param beforeDbId  id сообщения, перед которым нужно искать
-     * @return id сообщения или {@code 0}, если предыдущего совпадения нет
+     * @param chatType    chat type
+     * @param chatKey     chat key
+     * @param query       search string
+     * @param ownerNodeId owner device nodeId
+     * @param beforeDbId  message id before which to search
+     * @return message id, or {@code 0} when there is no previous match
      */
     public long findPreviousMessageSearchMatch(String chatType,
                                                String chatKey,
@@ -1284,16 +1282,16 @@ public final class MessageDbService {
     }
 
     /**
-     * Находит ближайшее предыдущее совпадение перед указанным сообщением с
-     * опциональным фильтром автора.
+     * Finds the nearest previous match before the specified message with an
+     * optional author filter.
      *
-     * @param chatType    тип чата
-     * @param chatKey     ключ чата
-     * @param query       поисковая строка
-     * @param ownerNodeId nodeId устройства-владельца
-     * @param fromNodeId  nodeId автора сообщения; пустое значение отключает фильтр
-     * @param beforeDbId  id сообщения, перед которым нужно искать
-     * @return id сообщения или {@code 0}, если предыдущего совпадения нет
+     * @param chatType    chat type
+     * @param chatKey     chat key
+     * @param query       search string
+     * @param ownerNodeId owner device nodeId
+     * @param fromNodeId  author nodeId; blank value disables the filter
+     * @param beforeDbId  message id before which to search
+     * @return message id, or {@code 0} when there is no previous match
      */
     public long findPreviousMessageSearchMatch(String chatType,
                                                String chatKey,
@@ -1308,14 +1306,14 @@ public final class MessageDbService {
     }
 
     /**
-     * Находит ближайшее следующее совпадение после указанного сообщения.
+     * Finds the nearest next match after the specified message.
      *
-     * @param chatType    тип чата
-     * @param chatKey     ключ чата
-     * @param query       поисковая строка
-     * @param ownerNodeId nodeId устройства-владельца
-     * @param afterDbId   id сообщения, после которого нужно искать
-     * @return id сообщения или {@code 0}, если следующего совпадения нет
+     * @param chatType    chat type
+     * @param chatKey     chat key
+     * @param query       search string
+     * @param ownerNodeId owner device nodeId
+     * @param afterDbId   message id after which to search
+     * @return message id, or {@code 0} when there is no next match
      */
     public long findNextMessageSearchMatch(String chatType,
                                            String chatKey,
@@ -1329,16 +1327,16 @@ public final class MessageDbService {
     }
 
     /**
-     * Находит ближайшее следующее совпадение после указанного сообщения с
-     * опциональным фильтром автора.
+     * Finds the nearest next match after the specified message with an optional
+     * author filter.
      *
-     * @param chatType    тип чата
-     * @param chatKey     ключ чата
-     * @param query       поисковая строка
-     * @param ownerNodeId nodeId устройства-владельца
-     * @param fromNodeId  nodeId автора сообщения; пустое значение отключает фильтр
-     * @param afterDbId   id сообщения, после которого нужно искать
-     * @return id сообщения или {@code 0}, если следующего совпадения нет
+     * @param chatType    chat type
+     * @param chatKey     chat key
+     * @param query       search string
+     * @param ownerNodeId owner device nodeId
+     * @param fromNodeId  author nodeId; blank value disables the filter
+     * @param afterDbId   message id after which to search
+     * @return message id, or {@code 0} when there is no next match
      */
     public long findNextMessageSearchMatch(String chatType,
                                            String chatKey,
@@ -1710,16 +1708,16 @@ public final class MessageDbService {
     private record FullTextCandidate(long rowId, long messageId) {}
 
     /**
-     * Результат ограниченного подсчета совпадений поиска.
+     * Result of a capped search-match count.
      *
-     * @param count   найденное количество совпадений
-     * @param limited {@code true}, если подсчет остановлен по лимиту и
-     *                фактическое количество может быть больше
+     * @param count   number of matches found
+     * @param limited {@code true} if counting stopped at the cap and the actual
+     *                count may be higher
      */
     public record MessageSearchCount(int count, boolean limited) {}
 
     /**
-     * Сохранённый результат traceroute.
+     * Saved traceroute result.
      */
     public record TracerouteResultRecord(long id,
                                          String ownerNodeId,
@@ -1738,7 +1736,7 @@ public final class MessageDbService {
                                          long timestamp) {}
 
     /**
-     * Находит сообщение по packetId (для reply_text).
+     * Finds a message by packetId, used for reply_text.
      */
     public MeshMessage findByPacketId(int packetId) {
         if (dbConnection == null || packetId == 0) { return null; }
@@ -1755,7 +1753,7 @@ public final class MessageDbService {
     }
 
     /**
-     * Находит сообщение по packetId только внутри конкретного owner/chat scope.
+     * Finds a message by packetId inside one owner/chat scope only.
      */
     public MeshMessage findByPacketId(int packetId, String chatType, String chatKey, String ownerNodeId) {
         if (dbConnection == null || packetId == 0) { return null; }
@@ -1780,10 +1778,10 @@ public final class MessageDbService {
     }
 
     /**
-     * Восстанавливает текст цитаты для reply-сообщений, если оригинал уже есть
-     * в том же owner/chat scope. Найденные quote-тексты сразу сохраняются в БД.
+     * Restores quote text for reply messages when the original already exists in
+     * the same owner/chat scope. Resolved quote texts are saved to the database immediately.
      *
-     * @return количество сообщений, для которых удалось заполнить replyText
+     * @return number of messages whose replyText was filled
      */
     public synchronized int hydrateReplyTexts(List<MeshMessage> messages,
                                               String chatType,
@@ -1814,8 +1812,8 @@ public final class MessageDbService {
     }
 
     /**
-     * Заполняет отсутствующие reply_text во всём указанном чате, когда оригинал
-     * сообщения уже сохранён в этом же owner/chat scope.
+     * Fills missing reply_text values across the given chat when the original
+     * message is already saved in the same owner/chat scope.
      */
     public synchronized int backfillMissingReplyTexts(String chatType, String chatKey, String ownerNodeId) {
         if (dbConnection == null) {
@@ -1876,7 +1874,7 @@ public final class MessageDbService {
     private record ReplyBackfillTarget(long dbId, int replyId) {}
 
     /**
-     * Загружает реакции для набора packetId сообщений, сгруппированные по target_packet_id.
+     * Loads reactions for a set of message packetIds, grouped by target_packet_id.
      */
     public Map<Integer, List<MessageReaction>> loadReactionsByTargetPacketIds(String chatType,
                                                                               String chatKey,
@@ -1922,7 +1920,7 @@ public final class MessageDbService {
     }
 
     /**
-     * Возвращает список уникальных DM-пиров (chat_key) из БД для данного устройства.
+     * Returns the list of unique DM peers (chat_key) from the database for the device.
      */
     public List<String> getDistinctDmPeers(String ownerNodeId) {
         List<String> peers = new ArrayList<>();
@@ -1942,8 +1940,8 @@ public final class MessageDbService {
     }
 
     /**
-     * Возвращает последнее сообщение для каждого chat_key данного типа и устройства.
-     * Ключ — chat_key, значение — последнее MeshMessage.
+     * Returns the latest message for each chat_key of the given type and device.
+     * Key is chat_key; value is the latest MeshMessage.
      */
     public Map<String, MeshMessage> getLastMessagePerChat(String chatType, String ownerNodeId) {
         Map<String, MeshMessage> result = new LinkedHashMap<>();
@@ -1973,7 +1971,7 @@ public final class MessageDbService {
     }
 
     /**
-     * Возвращает количество сообщений в чате для данного устройства.
+     * Returns the number of messages in a chat for the given device.
      */
     public int getMessageCount(String chatType, String chatKey, String ownerNodeId) {
         if (dbConnection == null) { return 0; }
@@ -1992,8 +1990,8 @@ public final class MessageDbService {
     }
 
     /**
-     * Возвращает количество сообщений, которые могут считаться непрочитанными:
-     * любые не-исходящие сообщения, включая системные.
+     * Returns the number of messages that can count as unread: any non-outgoing
+     * messages, including system messages.
      */
     public int getUnreadEligibleMessageCount(String chatType, String chatKey, String ownerNodeId) {
         if (dbConnection == null) { return 0; }
@@ -2015,15 +2013,15 @@ public final class MessageDbService {
     }
 
     // ═══════════════════════════════════════════════════════════
-    //  Удаление
+    // Deletion.
     // ═══════════════════════════════════════════════════════════
 
     /**
-     * Удаляет все сообщения и счётчик прочитанных для указанного чата и устройства.
+     * Deletes all messages and the read counter for the given chat and device.
      *
-     * @param chatType    "channel" или "dm"
-     * @param chatKey     channelIndex (как строка) или peerNodeId
-     * @param ownerNodeId nodeId устройства-владельца
+     * @param chatType    "channel" or "dm"
+     * @param chatKey     channelIndex as string, or peerNodeId
+     * @param ownerNodeId owner device nodeId
      */
     public synchronized void deleteChat(String chatType, String chatKey, String ownerNodeId) {
         if (dbConnection == null) { return; }
@@ -2053,7 +2051,7 @@ public final class MessageDbService {
     }
 
     /**
-     * Удаляет одно сообщение по его id в БД.
+     * Deletes one message by its database id.
      */
     public synchronized void deleteMessage(long dbId) {
         if (dbConnection == null || dbId <= 0) { return; }
@@ -2101,11 +2099,11 @@ public final class MessageDbService {
     }
 
     // ═══════════════════════════════════════════════════════════
-    //  Трекинг прочитанных сообщений
+    // Read-message tracking.
     // ═══════════════════════════════════════════════════════════
 
     /**
-     * Сохранить количество прочитанных сообщений для чата и устройства.
+     * Saves the read-message count for a chat and device.
      */
     public void saveReadCount(String chatType, String chatKey, int readCount, String ownerNodeId) {
         if (dbConnection == null) { return; }
@@ -2122,8 +2120,8 @@ public final class MessageDbService {
     }
 
     /**
-     * Загрузить все счётчики прочитанных сообщений для данного устройства.
-     * @return Map с ключами "ch:KEY" / "dm:KEY" → readCount
+     * Loads all read-message counters for the device.
+     * @return map with "ch:KEY" / "dm:KEY" keys and readCount values
      */
     public Map<String, Integer> loadAllReadCounts(String ownerNodeId) {
         Map<String, Integer> result = new HashMap<>();
@@ -2157,10 +2155,10 @@ public final class MessageDbService {
     }
 
     /**
-     * Считает суммарное количество непрочитанных сообщений по всем чатам владельца.
+     * Counts total unread messages across all chats for the owner.
      *
-     * @param ownerNodeId nodeId устройства-владельца
-     * @return сумма непрочитанных входящих сообщений
+     * @param ownerNodeId owner device nodeId
+     * @return total unread incoming messages
      */
     public int getTotalUnreadCount(String ownerNodeId) {
         if (dbConnection == null) { return 0; }
@@ -2216,18 +2214,18 @@ public final class MessageDbService {
     }
 
     // ═══════════════════════════════════════════════════════════
-    //  Миграция JSON → H2
+    // JSON to H2 migration.
     // ═══════════════════════════════════════════════════════════
 
     /**
-     * Импортирует сообщения из JSON-файлов (MessageHistoryService формат) в H2.
-     * Вызывается один раз при первом запуске, если {@code ~/.meshapp/history/} существует.
+     * Imports messages from JSON files in the MessageHistoryService format into H2.
+     * Called once on first startup if {@code ~/.meshapp/history/} exists.
      */
     public void migrateFromJsonHistory() {
         Path historyDir = Path.of(System.getProperty("user.home"), ".meshapp", "history");
         if (!Files.isDirectory(historyDir)) { return; }
 
-        // Проверяем, есть ли уже данные (legacy check без ownerNodeId)
+        // Check whether data already exists, using the legacy check without ownerNodeId.
         if (getMessageCount("channel", "0", "") > 0 || !getDistinctDmPeers("").isEmpty()) {
             log.info("Messages already exist in DB, skipping JSON migration");
             return;
@@ -2255,7 +2253,7 @@ public final class MessageDbService {
                             chatKey = name.replace("channel_", "").replace(".json", "");
                         } else if (name.startsWith("dm_")) {
                             chatType = "dm";
-                            // dm файл содержит hex nodeNum — создаём NodeData для получения nodeId
+                        // A DM file contains a hex nodeNum; create NodeData to derive nodeId.
                             int dmNodeNum = (int) Long.parseLong(name.replace("dm_", "").replace(".json", ""), 16);
                             chatKey = new NodeData(dmNodeNum).getNodeId();
                         } else {
@@ -2323,7 +2321,7 @@ public final class MessageDbService {
             dbConnection.commit();
             dbConnection.setAutoCommit(true);
 
-            // Переименовать history → history.bak
+            // Rename history to history.bak.
             Path backup = historyDir.resolveSibling("history.bak");
             try {
                 Files.move(historyDir, backup);
@@ -2341,7 +2339,7 @@ public final class MessageDbService {
         }
     }
 
-    /** Структура JSON-файлов из MessageHistoryService */
+    /** Structure of JSON files produced by MessageHistoryService. */
     @SuppressWarnings("unused")
     private static final class JsonStoredMessage {
         int fromNum;
@@ -2361,7 +2359,7 @@ public final class MessageDbService {
     }
 
     // ═══════════════════════════════════════════════════════════
-    //  Утилиты
+    // Utilities.
     // ═══════════════════════════════════════════════════════════
 
     private static MeshMessage readMessage(ResultSet rs) throws SQLException {
@@ -2417,7 +2415,7 @@ public final class MessageDbService {
     }
 
     /**
-     * Закрывает соединение с БД.
+     * Closes the database connection.
      */
     public void close() {
         closeStatements();

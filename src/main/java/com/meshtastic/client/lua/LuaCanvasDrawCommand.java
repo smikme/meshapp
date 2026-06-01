@@ -3,15 +3,15 @@ package com.meshtastic.client.lua;
 import javafx.scene.canvas.GraphicsContext;
 
 /**
- * Одна команда рисования для Canvas-окна Lua.
+ * Single drawing command for a Lua canvas window.
  */
 @FunctionalInterface
 public interface LuaCanvasDrawCommand {
 
     /**
-     * Выполняет рисование на JavaFX Canvas.
+     * Draws on a JavaFX canvas.
      *
-     * @param gc graphics context Canvas
+     * @param gc canvas graphics context
      */
     void draw(GraphicsContext gc);
 }

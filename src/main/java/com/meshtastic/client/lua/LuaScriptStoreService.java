@@ -22,7 +22,7 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * Загружает каталог Lua-скриптов из Gitea-хранилища MeshApp Store.
+ * Loads the Lua script catalog from the MeshApp Store Gitea repository.
  */
 public final class LuaScriptStoreService {
 

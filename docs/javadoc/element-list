@@ -9,7 +9,10 @@ com.meshtastic.client.connection.ble.macos
 com.meshtastic.client.connection.ble.windows
 com.meshtastic.client.connection.serial
 com.meshtastic.client.forms
+com.meshtastic.client.i18n
 com.meshtastic.client.logging
+com.meshtastic.client.lua
+com.meshtastic.client.lua.api
 com.meshtastic.client.menu
 com.meshtastic.client.modal
 com.meshtastic.client.model
@@ -21,6 +24,7 @@ com.meshtastic.client.protocol.meshtastic
 com.meshtastic.client.service
 com.meshtastic.client.simple
 com.meshtastic.client.system
+com.meshtastic.client.terminal
 com.meshtastic.client.themes
 com.meshtastic.client.tray
 com.meshtastic.client.utils

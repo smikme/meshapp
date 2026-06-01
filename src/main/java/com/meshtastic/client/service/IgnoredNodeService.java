@@ -12,9 +12,11 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
- * Сервис управления игнорируемыми нодами.
- * Делегирует персистентность в {@link NodeCacheService} (H2, колонка {@code ignored}).
- * При изменении из UI отправляет AdminMessage на устройство для двусторонней синхронизации.
+ * Manages the set of ignored nodes.
+ * <p>
+ * Persistence is delegated to {@link NodeCacheService} through the H2
+ * {@code ignored} column. UI-initiated changes are also sent to the device as
+ * admin messages so firmware state can stay in sync with the local cache.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -26,7 +28,7 @@ public final class IgnoredNodeService {
 
     private final List<Runnable> listeners = new CopyOnWriteArrayList<>();
 
-    /** Ноды, для которых пользователь снял игнорирование, но устройство ещё не подтвердило изменение. */
+    /** Nodes the user unignored locally but the device has not confirmed yet. */
     private final Set<String> pendingUnignores = ConcurrentHashMap.newKeySet();
 
     private IgnoredNodeService() {}
@@ -60,12 +62,14 @@ public final class IgnoredNodeService {
     }
 
     /**
-     * Обновляет H2 без уведомления listeners и без отправки на устройство.
-     * Используется при config exchange, когда данные уже пришли с устройства.
+     * Updates H2 without notifying listeners or sending anything to the device.
+     * This path is used during config exchange, when the data already came from
+     * the device.
      * <p>
-     * Если для ноды есть pending unignore (пользователь снял игнорирование,
-     * но прошивка не сохранила изменение), пропускаем перезапись и повторно
-     * отправляем {@code remove_ignored_node} AdminMessage.
+     * If a node has a pending unignore, the user removed the ignore locally but
+     * firmware has not persisted it yet. In that case the device value is not
+     * allowed to overwrite local intent; {@code remove_ignored_node} is sent
+     * again instead.
      */
     public void setIgnoredQuiet(String nodeId, boolean ignored) {
         if (nodeId == null) { return; }
@@ -119,7 +123,7 @@ public final class IgnoredNodeService {
                 log.info("Sent ignored change to device: nodeId={}, ignored={}, via='{}'",
                         nodeId, ignored, entry.getName());
                 sent = true;
-                break; // отправляем только на первое активное соединение
+                break; // Send the update only through the first active connection.
             }
             if (!sent) {
                 log.warn("No active connection found to send ignored change for node {}", nodeId);

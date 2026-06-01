@@ -28,10 +28,10 @@ import java.util.TreeMap;
 import java.util.UUID;
 
 /**
- * Сервис хранения Lua-скриптов MeshApp и их изолированных KV-хранилищ.
+ * Stores MeshApp Lua scripts and their isolated key-value data.
  * <p>
- * Инкапсулирует таблицы БД приложения для исходного кода, статусов запуска,
- * ошибок выполнения и key-value данных, принадлежащих конкретному скрипту.
+ * Encapsulates the application database tables for source code, launch state,
+ * runtime errors, and key-value entries owned by individual scripts.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -984,7 +984,7 @@ public final class LuaScriptService {
     public record ScriptImportResult(LuaScript script, boolean updated) {}
 
     /**
-     * JSON-представление Lua-скрипта для переноса между установками MeshApp.
+     * JSON representation of a Lua script for transfer between MeshApp installs.
      *
      * @author Konstantin A. Smirnov (ks@privatepractice.app)
      */

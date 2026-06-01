@@ -18,15 +18,17 @@ import org.slf4j.LoggerFactory;
 import java.lang.reflect.Method;
 
 /**
- * Windows: управление Mica/Acrylic через DWM API.
+ * Windows Mica/Acrylic control through the DWM API.
  * <p>
- * Windows 11 22H2+: {@code DWMWA_SYSTEMBACKDROP_TYPE} (dwmapi.dll) — системный Acrylic/Mica.
- * Windows 10: {@code SetWindowCompositionAttribute} (user32.dll) — ACCENT_ENABLE_ACRYLICBLURBEHIND.
+ * Windows 11 22H2+: {@code DWMWA_SYSTEMBACKDROP_TYPE} from dwmapi.dll provides
+ * the system Acrylic/Mica backdrop. Windows 10 falls back to
+ * {@code SetWindowCompositionAttribute} from user32.dll with
+ * {@code ACCENT_ENABLE_ACRYLICBLURBEHIND}.
  * <p>
- * Совместно с StageStyle.TRANSPARENT обеспечивает кастомный title bar
- * (идентичный macOS) и blur backdrop.
+ * Together with StageStyle.TRANSPARENT this gives the app a custom title bar,
+ * matching the macOS implementation, and a blurred backdrop.
  * <p>
- * Drag и resize реализованы в RootPane через JavaFX EventFilter.
+ * Dragging and resizing are handled by RootPane through JavaFX EventFilters.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -65,7 +67,7 @@ public class NativeWinWindowControl {
     }
 
     /**
-     * Рефлексия: Window → TkStage → PlatformWindow → getNativeHandle() → HWND
+     * Reflection path: Window -> TkStage -> PlatformWindow -> getNativeHandle() -> HWND.
      */
     private static WinDef.HWND extractHwnd(Window window) {
         try {
@@ -91,12 +93,12 @@ public class NativeWinWindowControl {
     // ==================== UxTheme Dark Mode (Win10) ====================
 
     /**
-     * Инициализация поддержки тёмного режима на Windows 10.
-     * Вызвать один раз до создания окна.
+     * Initializes Windows 10 dark-mode support.
+     * Call this once before creating the window.
      * <p>
-     * На Win10 {@code DWMWA_USE_IMMERSIVE_DARK_MODE} игнорируется без предварительного
-     * вызова undocumented uxtheme.dll ordinal 135 ({@code SetPreferredAppMode}).
-     * На Win11 эти вызовы безвредны (non-fatal).
+     * On Windows 10, {@code DWMWA_USE_IMMERSIVE_DARK_MODE} is ignored unless
+     * the undocumented uxtheme.dll ordinal 135 ({@code SetPreferredAppMode}) is
+     * called first. On Windows 11 these calls are harmless.
      */
     public static void initDarkModeSupport() {
         if (uxThemeInitialized) { return; }
@@ -109,7 +111,7 @@ public class NativeWinWindowControl {
             uxRefreshImmersiveColorPolicy = resolveUxThemeOrdinal(
                     uxTheme, "#104", "RefreshImmersiveColorPolicyState");
 
-            // SetPreferredAppMode(AllowDark) — разрешить тёмный режим на уровне процесса
+            // SetPreferredAppMode(AllowDark) enables dark mode at process scope.
             if (uxSetPreferredAppMode != null) {
                 int result = uxSetPreferredAppMode.invokeInt(new Object[]{APP_MODE_ALLOW_DARK});
                 log.info("UxTheme: SetPreferredAppMode(AllowDark) = {}", result);
@@ -136,9 +138,9 @@ public class NativeWinWindowControl {
     // ==================== DWM Frame ====================
 
     /**
-     * Расширить DWM frame на всю клиентскую область.
-     * MARGINS{-1,-1,-1,-1} = «sheet of glass» — DWM-поверхность
-     * покрывает всю клиентскую область, через неё виден backdrop.
+     * Extends the DWM frame over the entire client area.
+     * MARGINS{-1,-1,-1,-1} creates a "sheet of glass": the DWM surface covers
+     * the full client area and lets the backdrop show through it.
      */
     public boolean extendFrameIntoClientArea() {
         if (hwnd == null) { return false; }
@@ -160,7 +162,7 @@ public class NativeWinWindowControl {
 
     // ==================== Backdrop & Appearance ====================
 
-    /** Установить системный backdrop (Mica, Mica Alt, Acrylic, None). Windows 11 22H2+. */
+    /** Applies a system backdrop: Mica, Mica Alt, Acrylic, or None. Windows 11 22H2+. */
     public boolean setWindowBackdrop(DwmSystemBackdropType backdrop) {
         if (hwnd == null) { return false; }
         try {
@@ -179,20 +181,20 @@ public class NativeWinWindowControl {
     }
 
     /**
-     * Тёмный режим title bar.
+     * Enables or disables dark mode for the title bar.
      * <p>
-     * Стратегия (от надёжного к фоллбэкам):
-     * 1. DWMWA_USE_IMMERSIVE_DARK_MODE (attr 20) — Win10 20H1+, Win11
-     * 2. DWMWA_USE_IMMERSIVE_DARK_MODE (attr 19) — Win10 1809–18985
-     * 3. DWMWA_CAPTION_COLOR (attr 35) — Win11 22000+ (явный цвет caption)
+     * Strategy, from preferred path to fallbacks:
+     * 1. DWMWA_USE_IMMERSIVE_DARK_MODE (attribute 20) on Win10 20H1+ and Win11
+     * 2. DWMWA_USE_IMMERSIVE_DARK_MODE (attribute 19) on Win10 1809-18985
+     * 3. DWMWA_CAPTION_COLOR (attribute 35) on Win11 22000+, with an explicit caption color
      * <p>
-     * Используем raw Pointer + Memory вместо BOOLByReference чтобы гарантировать
-     * корректную передачу LPCVOID в DwmSetWindowAttribute.
+     * Raw Pointer + Memory is used instead of BOOLByReference to guarantee that
+     * DwmSetWindowAttribute receives the expected LPCVOID payload.
      */
     public boolean setDarkMode(boolean dark) {
         if (hwnd == null) { return false; }
         try {
-            // 1. AllowDarkModeForWindow (ordinal 133) — per-window, до DWM-атрибутов
+            // 1. AllowDarkModeForWindow (ordinal 133) is per-window and must run before DWM attributes.
             if (uxAllowDarkModeForWindow != null) {
                 try {
                     long hwndVal = Pointer.nativeValue(hwnd.getPointer());
@@ -204,7 +206,7 @@ public class NativeWinWindowControl {
                 }
             }
 
-            // 2. DWM атрибуты (attr 20 для Win10 20H1+/Win11, attr 19 для старых билдов)
+            // 2. DWM attributes: attr 20 for Win10 20H1+/Win11, attr 19 for older builds.
             Memory val = new Memory(4);
             val.setInt(0, dark ? 1 : 0);
 
@@ -216,7 +218,7 @@ public class NativeWinWindowControl {
             log.info("setDarkMode({}): attr20=0x{} attr19=0x{}",
                     dark, Long.toHexString(hr20), Long.toHexString(hr19));
 
-            // 3. RefreshImmersiveColorPolicyState (ordinal 104) — принудительное обновление
+            // 3. RefreshImmersiveColorPolicyState (ordinal 104) forces the system to refresh.
             if (uxRefreshImmersiveColorPolicy != null) {
                 try {
                     uxRefreshImmersiveColorPolicy.invokeVoid(new Object[]{});
@@ -225,7 +227,7 @@ public class NativeWinWindowControl {
                 }
             }
 
-            // 4. Fallback: явный цвет caption (Win11 22000+, non-fatal на Win10)
+            // 4. Fallback: explicit caption color on Win11 22000+, non-fatal on Win10.
             if (hr20 != 0 && hr19 != 0) {
                 setCaptionColor(dark ? DARK_CAPTION_COLORREF : LIGHT_CAPTION_COLORREF);
             }
@@ -238,8 +240,8 @@ public class NativeWinWindowControl {
     }
 
     /**
-     * Установить цвет caption bar напрямую. COLORREF формат: 0x00BBGGRR.
-     * Win11 22000+, non-fatal на Win10.
+     * Sets the caption bar color directly. COLORREF format: 0x00BBGGRR.
+     * Available on Win11 22000+ and non-fatal on Win10.
      */
     public boolean setCaptionColor(int colorRef) {
         if (hwnd == null) { return false; }
@@ -258,9 +260,9 @@ public class NativeWinWindowControl {
     }
 
     /**
-     * Нативный DECORATED title bar без backdrop-эффектов.
-     * На Win11 стандартный dark title bar визуально похож на Mica, поэтому
-     * при выключенных эффектах задаём явный solid caption color.
+     * Native DECORATED title bar without backdrop effects.
+     * On Win11 the standard dark title bar visually resembles Mica, so when
+     * effects are disabled we set an explicit solid caption color.
      */
     public void applyPlainDecoratedTitleBar(boolean isDark) {
         setDarkMode(isDark);
@@ -269,17 +271,18 @@ public class NativeWinWindowControl {
     }
 
     /**
-     * Принудительная перерисовка non-client area (title bar).
+     * Forces the non-client area, including the title bar, to repaint.
      * <p>
-     * WM_NCACTIVATE deactivate→activate заставляет Windows полностью перерисовать
-     * title bar с новыми DWM-атрибутами (dark mode). SWP_FRAMECHANGED одного
-     * недостаточно на Win10 — он пересчитывает рамку, но не перерисовывает caption.
+     * A WM_NCACTIVATE deactivate/activate cycle makes Windows repaint the title
+     * bar with the latest DWM attributes, including dark mode. SWP_FRAMECHANGED
+     * alone is not enough on Win10: it recalculates the frame but does not repaint
+     * the caption.
      */
     public void redrawFrame() {
         if (hwnd == null) { return; }
         try {
-            // WM_NCACTIVATE: деактивировать → активировать non-client area
-            // lParam = -1 предотвращает обновление client area (только title bar)
+            // WM_NCACTIVATE deactivates, then activates the non-client area.
+            // lParam = -1 prevents client-area updates; only the title bar is repainted.
             User32.INSTANCE.SendMessage(hwnd, WM_NCACTIVATE, new WinDef.WPARAM(0), new WinDef.LPARAM(-1));
             User32.INSTANCE.SendMessage(hwnd, WM_NCACTIVATE, new WinDef.WPARAM(1), new WinDef.LPARAM(-1));
         } catch (Exception e) {
@@ -287,7 +290,7 @@ public class NativeWinWindowControl {
         }
     }
 
-    /** Скруглённые углы (Windows 11+, non-fatal на Win10) */
+    /** Enables rounded corners on Windows 11+. Non-fatal on Win10. */
     public boolean setRoundedCorners() {
         if (hwnd == null) { return false; }
         try {
@@ -305,14 +308,14 @@ public class NativeWinWindowControl {
     // ==================== Win10 Fallback: SetWindowCompositionAttribute ====================
 
     /**
-     * Acrylic blur через SetWindowCompositionAttribute (user32.dll).
-     * Недокументированный API, работает с layered windows (StageStyle.TRANSPARENT).
+     * Applies Acrylic blur through SetWindowCompositionAttribute (user32.dll).
+     * This undocumented API works with layered windows created by StageStyle.TRANSPARENT.
      * <p>
-     * ACCENT_POLICY: {AccentState, AccentFlags, GradientColor(ABGR), AnimationId} — 16 байт.
+     * ACCENT_POLICY: {AccentState, AccentFlags, GradientColor(ABGR), AnimationId}, 16 bytes.
      * WINDOWCOMPOSITIONATTRIBDATA: {Attribute(int), pad, pData(ptr), cbData(size_t)}.
-     *
-     * @param isDark тёмная тема — тинт тёмный, иначе светлый
-     * @return true если acrylic blur успешно применён
+ *
+     * @param isDark dark theme uses a dark tint; light theme uses a light tint
+     * @return true if Acrylic blur was applied successfully
      */
     public boolean setAcrylicViaCompositionAttribute(boolean isDark) {
         if (hwnd == null) { return false; }
@@ -325,11 +328,11 @@ public class NativeWinWindowControl {
             accent.animationId = 0;
             accent.write();
 
-            // WINDOWCOMPOSITIONATTRIBDATA layout (зависит от разрядности):
-            // 64-bit: int(4) + pad(4) + ptr(8) + size_t(8) = 24 байт
-            // 32-bit: int(4) + ptr(4) + size_t(4) = 12 байт
+            // WINDOWCOMPOSITIONATTRIBDATA layout depends on pointer width:
+            // 64-bit: int(4) + pad(4) + ptr(8) + size_t(8) = 24 bytes.
+            // 32-bit: int(4) + ptr(4) + size_t(4) = 12 bytes.
             int ps = Native.POINTER_SIZE;
-            int offPData = (ps > 4) ? ps : 4;      // выровнять pData по размеру указателя
+            int offPData = (ps > 4) ? ps : 4;      // Align pData to pointer width.
             int total = offPData + ps + ps;
             Memory wca = new Memory(total);
             wca.clear();
@@ -350,30 +353,31 @@ public class NativeWinWindowControl {
     // ==================== Orchestration ====================
 
     /**
-     * Настроить окно для blur backdrop.
+     * Prepares the window for a blurred backdrop.
      * <p>
-     * Стратегия: Win11 22H2+ — DWMWA_SYSTEMBACKDROP_TYPE (системный Acrylic),
-     * fallback Win10 — SetWindowCompositionAttribute (ACCENT_ENABLE_ACRYLICBLURBEHIND).
+     * Strategy: Windows 11 22H2+ uses DWMWA_SYSTEMBACKDROP_TYPE for system
+     * Acrylic; Windows 10 falls back to SetWindowCompositionAttribute with
+     * ACCENT_ENABLE_ACRYLICBLURBEHIND.
      * <p>
-     * Не модифицирует стили окна (WS_CAPTION и пр.) — StageStyle.TRANSPARENT
-     * обеспечивает borderless окно, drag/resize реализованы в JavaFX (RootPane).
-     *
-     * @return true если backdrop успешно применён
+     * This does not modify window styles such as WS_CAPTION. StageStyle.TRANSPARENT
+     * provides the borderless window, while JavaFX RootPane handles drag and resize.
+ *
+     * @return true if the backdrop was applied successfully
      */
     public boolean prepareMicaWindow(boolean isDark) {
         if (hwnd == null) { return false; }
 
-        // 1. Dark mode (Win10 1903+)
+        // 1. Dark mode on Win10 1903+.
         setDarkMode(isDark);
 
-        // 2. Backdrop: Win11 API (Mica) → Win10 fallback (Acrylic)
+        // 2. Backdrop: Win11 API (Mica), then Win10 fallback (Acrylic).
         boolean backdropOk = setWindowBackdrop(DwmSystemBackdropType.MICA);
         if (!backdropOk) {
             log.info("DWMWA_SYSTEMBACKDROP_TYPE недоступен, пробуем SetWindowCompositionAttribute...");
             backdropOk = setAcrylicViaCompositionAttribute(isDark);
         }
 
-        // 3. Скруглённые углы (Win11+, non-fatal на Win10)
+        // 3. Rounded corners on Win11+, non-fatal on Win10.
         setRoundedCorners();
 
         return backdropOk;
@@ -381,7 +385,7 @@ public class NativeWinWindowControl {
 
     // ==================== JNA Structures & Interfaces ====================
 
-    /** Win32 MARGINS structure для DwmExtendFrameIntoClientArea */
+    /** Win32 MARGINS structure for DwmExtendFrameIntoClientArea. */
     @Structure.FieldOrder({"cxLeftWidth", "cxRightWidth", "cyTopHeight", "cyBottomHeight"})
     public static class MARGINS extends Structure {
         public int cxLeftWidth;
@@ -405,7 +409,7 @@ public class NativeWinWindowControl {
         DwmSystemBackdropType(int v) { this.value = v; }
     }
 
-    /** ACCENT_POLICY для SetWindowCompositionAttribute */
+    /** ACCENT_POLICY for SetWindowCompositionAttribute. */
     @Structure.FieldOrder({"accentState", "accentFlags", "gradientColor", "animationId"})
     public static class ACCENT_POLICY extends Structure {
         public int accentState;
@@ -414,7 +418,7 @@ public class NativeWinWindowControl {
         public int animationId;
     }
 
-    /** JNA-интерфейс к dwmapi.dll (typed params — для backdrop, corners и пр.) */
+    /** JNA interface for dwmapi.dll with typed params for backdrop, corners, and related attributes. */
     public interface Dwm extends Library {
         Dwm INSTANCE = Native.load("dwmapi", Dwm.class);
 
@@ -426,7 +430,7 @@ public class NativeWinWindowControl {
                 WinDef.HWND hwnd, MARGINS pMarInset);
     }
 
-    /** JNA-интерфейс к dwmapi.dll (raw Pointer — для dark mode, caption color) */
+    /** JNA interface for dwmapi.dll with raw Pointer params for dark mode and caption color. */
     public interface DwmRaw extends Library {
         DwmRaw INSTANCE = Native.load("dwmapi", DwmRaw.class);
 
@@ -435,7 +439,7 @@ public class NativeWinWindowControl {
                 Pointer pvAttribute, int cbAttribute);
     }
 
-    /** JNA-интерфейс к user32.dll — SetWindowCompositionAttribute (Windows 10+) */
+    /** JNA interface for user32.dll SetWindowCompositionAttribute on Windows 10+. */
     public interface User32Ext extends Library {
         User32Ext INSTANCE = Native.load("user32", User32Ext.class);
 

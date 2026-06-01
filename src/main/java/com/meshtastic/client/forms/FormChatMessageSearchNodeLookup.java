@@ -20,13 +20,12 @@ import java.util.function.Supplier;
 import java.util.stream.IntStream;
 
 /**
- * Отдельный компонент popup-поиска ноды для фильтра сообщений.
+ * Dedicated node lookup popup used by the message sender filter.
  *
- * <p>Компонент не знает о полнотекстовом поиске сообщений. Он читает текущий
- * текст из поля, строит список подходящих нод через {@link ChatBotCommandHelper},
- * держит выбранную строку popup-меню и сообщает наружу только выбранную
- * {@link NodeData}. Благодаря этому основной контроллер поиска не хранит
- * детали меню и клавиатурной навигации по подсказкам.
+ * <p>The component is deliberately unaware of full-text message search. It reads
+ * the current field text, builds matching node suggestions through
+ * {@link ChatBotCommandHelper}, owns popup selection and keyboard navigation,
+ * and reports only the chosen {@link NodeData} to the outer controller.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -44,21 +43,21 @@ final class FormChatMessageSearchNodeLookup {
     private int selectedIndex = -1;
 
     /**
-     * Связка найденной ноды и готовой строки popup-меню.
+     * Pair of a matched node and a prepared popup menu row.
      *
-     * @param node нода, которую нужно выбрать при активации строки
-     * @param item JavaFX-элемент меню с текстом подсказки
+     * @param node node selected when the row is activated
+     * @param item JavaFX menu item containing the suggestion text
      */
     private record SuggestionRow(NodeData node, CustomMenuItem item) {}
 
     /**
-     * Создаёт popup-компонент и регистрирует обработчик клавиш меню.
+     * Creates the popup component and registers menu key handling.
      *
-     * @param searchField поле, из которого берётся строка фильтра нод
-     * @param nodeSupplier источник кандидатов для подсказок
-     * @param nodeSelected callback выбора ноды
-     * @param active признак активного режима выбора ноды
-     * @param cancelLookup callback отмены режима выбора ноды
+     * @param searchField field containing node filter text
+     * @param nodeSupplier source of suggestion candidates
+     * @param nodeSelected callback invoked when a node is selected
+     * @param active whether node-pick mode is active
+     * @param cancelLookup callback that cancels node-pick mode
      */
     FormChatMessageSearchNodeLookup(TextField searchField,
                                     Supplier<List<NodeData>> nodeSupplier,
@@ -74,7 +73,7 @@ final class FormChatMessageSearchNodeLookup {
     }
 
     /**
-     * Обновляет список подсказок по текущему тексту поля.
+     * Refreshes suggestions from the current field text.
      */
     void refreshSuggestions() {
         if (!active.getAsBoolean()) {
@@ -109,7 +108,7 @@ final class FormChatMessageSearchNodeLookup {
     }
 
     /**
-     * Показывает подсказки, если список ещё не построен или меню временно скрыто.
+     * Shows suggestions when the list is not yet built or the menu is temporarily hidden.
      */
     void ensureSuggestions() {
         if (currentMatches.isEmpty()) {
@@ -120,7 +119,7 @@ final class FormChatMessageSearchNodeLookup {
     }
 
     /**
-     * Сдвигает выделение подсказки с зацикливанием по списку.
+     * Moves suggestion selection with wraparound.
      */
     void moveSelection(int delta) {
         if (currentMatches.isEmpty()) {
@@ -133,7 +132,7 @@ final class FormChatMessageSearchNodeLookup {
     }
 
     /**
-     * Выбирает текущую подсказку и передаёт её внешнему контроллеру.
+     * Chooses the current suggestion and passes it to the outer controller.
      */
     void selectCurrent() {
         ensureSuggestions();
@@ -144,7 +143,7 @@ final class FormChatMessageSearchNodeLookup {
     }
 
     /**
-     * Очищает состояние popup и скрывает меню.
+     * Clears popup state and hides the menu.
      */
     void hide() {
         currentMatches = List.of();

@@ -37,12 +37,11 @@ import java.util.Set;
 import org.meshtastic.proto.ChannelProtos;
 
 /**
- * Связывает интерфейс чата с выбранным подключением к радио и сохранёнными данными.
+ * Binds the chat UI to the selected radio connection and persisted chat data.
  *
- * <p>Слой отвечает за перепривязку устройства, составление списка чатов,
- * счётчики прочитанных, удаление каналов и личных чатов, состояние заглушения и
- * точки входа в модальные окна. Окно сообщений и запросы ботов остаются в
- * нижних слоях.
+ * <p>This layer handles device rebinding, chat-list composition, read counters,
+ * channel and direct-chat deletion, mute state, and modal entry points. Message
+ * windows and bot requests are handled by lower layers.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -61,10 +60,9 @@ abstract class FormChatData extends FormChatRequests {
     }
 
     /**
-     * Перепривязывает форму к выбранному подключённому радио и обновляет зависимое
-     * состояние интерфейса. Метод намеренно линейный: найти подключение,
-     * отвязать старое состояние, привязать новое, обновить данные и затем
-     * по возможности снова открыть выбранный чат.
+     * Rebinds the form to the selected connected radio and refreshes dependent UI state.
+     * The method is deliberately linear: find the connection, detach old state,
+     * attach new state, refresh data, and reopen the selected chat when possible.
      */
     protected void rebindState() {
         var mgr = ConnectionManager.getInstance();
@@ -319,7 +317,7 @@ abstract class FormChatData extends FormChatRequests {
     }
 
     /**
-     * Открывает панель свойств канала.
+     * Opens the channel properties panel.
      */
     protected void showChannelProperties(ChatItem item) {
         if (item == null || item.getType() != ChatItem.ChatType.CHANNEL) {
@@ -346,7 +344,7 @@ abstract class FormChatData extends FormChatRequests {
     }
 
     /**
-     * Удаляет канал (DISABLED на устройстве) или личный чат (только локально).
+     * Deletes a channel on the device or removes a direct chat locally.
      */
     protected void deleteChat(ChatItem item) {
         if (item == null) {
@@ -393,7 +391,7 @@ abstract class FormChatData extends FormChatRequests {
         lastReadCounts.remove(key.readKey());
     }
 
-    /** Подтверждение и удаление одного сообщения */
+    /** Confirms and deletes one message. */
     protected void confirmDeleteMessage(MeshMessage msg, HBox bubbleRow) {
         String preview = msg.getText();
         preview = UnicodeTextUtils.truncateWithSuffix(preview, 40, "…");
@@ -463,7 +461,7 @@ abstract class FormChatData extends FormChatRequests {
         CreateChannelDialog.show(state, protocolHandler, this::reloadChatList);
     }
 
-    // ==================== Вспомогательные методы ====================
+    // Helpers.
 
     protected boolean isCurrentChat(String chatType, String chatKey) {
         return selectedChat != null

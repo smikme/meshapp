@@ -18,9 +18,11 @@ import java.time.Duration;
 import java.util.function.Consumer;
 
 /**
- * Проверка обновлений при запуске приложения.
- * Асинхронный HTTP-запрос к серверу, сравнение versionCode,
- * callback на FX-потоке если доступна новая версия.
+ * Checks for application updates at startup.
+ * <p>
+ * Performs an asynchronous HTTP request, compares the remote version code with
+ * the local one, and invokes the callback on the JavaFX thread when an update is
+ * available.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -33,8 +35,8 @@ public final class UpdateCheckService {
     private UpdateCheckService() {}
 
     /**
-     * Проверить обновления асинхронно. Если доступна новая версия,
-     * callback вызывается на JavaFX Application Thread.
+     * Checks for updates asynchronously. When a newer version is available, the
+     * callback is invoked on the JavaFX application thread.
      */
     public static void checkAsync(Consumer<UpdateInfo> onUpdateAvailable) {
         if (MeshApp.VERSION_CODE == 0) {

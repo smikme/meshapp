@@ -3,15 +3,15 @@ package com.meshtastic.client.lua;
 import com.meshtastic.client.model.NodeData;
 
 /**
- * Результат интерактивного выбора ноды для Lua-скрипта.
+ * Result of an interactive node selection made for a Lua script.
  *
- * @param requestId id исходного запроса
- * @param source Lua API, который создал исходный запрос
- * @param name имя исходного запроса, заданное скриптом
- * @param selected {@code true}, если пользователь выбрал ноду
- * @param node выбранная нода или {@code null}
- * @param chatType тип чата исходного запроса
- * @param chatKey ключ чата исходного запроса
+ * @param requestId id of the original request
+ * @param source Lua API that created the original request
+ * @param name script-defined name of the original request
+ * @param selected {@code true} when the user selected a node
+ * @param node selected node, or {@code null}
+ * @param chatType chat type associated with the original request
+ * @param chatKey chat key associated with the original request
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */

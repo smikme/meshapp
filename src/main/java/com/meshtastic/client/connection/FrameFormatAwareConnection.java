@@ -1,27 +1,26 @@
 package com.meshtastic.client.connection;
 
 /**
- * Transport-подключение, в котором можно переключить парсер потока перед запуском protocol runtime-а.
+ * Transport connection whose stream parser can be switched before protocol runtime startup.
  * <p>
- * Интерфейс реализуют byte-stream transport-ы: TCP и Serial. Это позволяет сначала
- * открыть соединение, а затем закрепить Meshtastic, KISS или MeshCore Companion
- * framing выбранного protocol runtime-а.
+ * Implemented by byte-stream transports such as TCP and Serial. The connection
+ * can be opened first, then configured with the framing required by the chosen protocol.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public interface FrameFormatAwareConnection {
 
     /**
-     * Переключает формат фрейминга для последующих входящих байтов.
+     * Switches the framing format for subsequent inbound bytes.
      *
-     * @param frameFormat новый формат фрейминга
+     * @param frameFormat new framing format
      */
     void setFrameFormat(FrameFormat frameFormat);
 
     /**
-     * Возвращает текущий формат фрейминга transport-а.
+     * Returns the transport's current framing format.
      *
-     * @return активный формат фрейминга
+     * @return active framing format
      */
     FrameFormat getFrameFormat();
 }

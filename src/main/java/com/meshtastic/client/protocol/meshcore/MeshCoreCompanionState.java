@@ -13,7 +13,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Runtime-состояние, собранное из MeshCore Companion packets.
+ * Runtime state assembled from MeshCore Companion packets.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -57,9 +57,9 @@ public class MeshCoreCompanionState {
     private volatile Long contactsLastModified;
 
     /**
-     * Проверяет, получен ли обязательный {@code SELF_INFO} response.
-     *
-     * @return {@code true}, если Companion handshake считается успешным
+     * Reports whether the required {@code SELF_INFO} response has been received.
+ *
+     * @return {@code true} once the Companion handshake is considered complete
      */
     public boolean isReady() {
         return ready;
@@ -70,22 +70,22 @@ public class MeshCoreCompanionState {
     }
 
     /**
-     * Возвращает совместимое состояние устройства для существующих экранов UI.
+     * Returns a {@link DeviceState} bridge for existing UI screens.
      * <p>
-     * MeshCore Companion не использует Meshtastic protobuf как wire format,
-     * но Chat/Nodes/Dashboard уже работают через {@link DeviceState}. Runtime
-     * заполняет этот объект контактами, каналами, сообщениями и телеметрией.
-     *
-     * @return bridge-состояние для UI и локальной истории
+     * MeshCore Companion does not use Meshtastic protobuf as its wire format,
+     * but Chat, Nodes, and Dashboard already consume {@link DeviceState}. The
+     * runtime fills this object with contacts, channels, messages, and telemetry.
+ *
+     * @return bridge state for the UI and local history
      */
     public DeviceState getDeviceState() {
         return deviceState;
     }
 
     /**
-     * Возвращает имя MeshCore-устройства из {@code SELF_INFO}.
-     *
-     * @return имя устройства или {@code null}
+     * Returns the MeshCore device name reported by {@code SELF_INFO}.
+ *
+     * @return device name, or {@code null}
      */
     public String getDeviceName() {
         return deviceName;
@@ -97,9 +97,9 @@ public class MeshCoreCompanionState {
     }
 
     /**
-     * Возвращает public key устройства в HEX.
-     *
-     * @return HEX-строка public key или {@code null}
+     * Returns the device public key as HEX.
+ *
+     * @return public-key HEX string, or {@code null}
      */
     public String getPublicKeyHex() {
         return publicKeyHex;
@@ -117,18 +117,18 @@ public class MeshCoreCompanionState {
     }
 
     /**
-     * Возвращает стабильный owner id для сервисов верхнего уровня.
-     *
-     * @return {@code meshcore:<publicKeyHex>} или {@code null}
+     * Returns the stable owner id used by higher-level services.
+ *
+     * @return {@code meshcore:<publicKeyHex>}, or {@code null}
      */
     public String getOwnerId() {
         return ownerId;
     }
 
     /**
-     * Возвращает тип MeshCore advertisement для локального устройства.
-     *
-     * @return raw {@code ADV_TYPE_*} или {@code null}
+     * Returns the MeshCore advertisement type for the local device.
+ *
+     * @return raw {@code ADV_TYPE_*}, or {@code null}
      */
     public Integer getAdvertisementType() {
         return advertisementType;
@@ -140,18 +140,18 @@ public class MeshCoreCompanionState {
     }
 
     /**
-     * Возвращает latitude из self advertisement.
-     *
-     * @return широта или {@code null}
+     * Returns the latitude from the self advertisement.
+ *
+     * @return latitude, or {@code null}
      */
     public Double getAdvertisementLatitude() {
         return advertisementLatitude;
     }
 
     /**
-     * Возвращает longitude из self advertisement.
-     *
-     * @return долгота или {@code null}
+     * Returns the longitude from the self advertisement.
+ *
+     * @return longitude, or {@code null}
      */
     public Double getAdvertisementLongitude() {
         return advertisementLongitude;
@@ -229,9 +229,9 @@ public class MeshCoreCompanionState {
     }
 
     /**
-     * Возвращает текущую мощность передачи устройства.
-     *
-     * @return TX power в dBm или {@code null}
+     * Returns the device's current transmit power.
+ *
+     * @return TX power in dBm, or {@code null}
      */
     public Integer getTxPowerDbm() {
         return txPowerDbm;
@@ -243,9 +243,9 @@ public class MeshCoreCompanionState {
     }
 
     /**
-     * Возвращает максимальную допустимую мощность передачи.
-     *
-     * @return max TX power в dBm или {@code null}
+     * Returns the maximum allowed transmit power.
+ *
+     * @return maximum TX power in dBm, or {@code null}
      */
     public Integer getMaxTxPowerDbm() {
         return maxTxPowerDbm;
@@ -256,9 +256,9 @@ public class MeshCoreCompanionState {
     }
 
     /**
-     * Возвращает версию Companion firmware protocol.
-     *
-     * @return protocol version или {@code null}
+     * Returns the Companion firmware protocol version.
+ *
+     * @return protocol version, or {@code null}
      */
     public Integer getFirmwareProtocolVersion() {
         return firmwareProtocolVersion;
@@ -269,9 +269,9 @@ public class MeshCoreCompanionState {
     }
 
     /**
-     * Возвращает максимальное количество контактов, которое сообщает устройство.
-     *
-     * @return max contacts или {@code null}
+     * Returns the maximum contact count reported by the device.
+ *
+     * @return maximum contact count, or {@code null}
      */
     public Integer getMaxContacts() {
         return maxContacts;
@@ -282,9 +282,9 @@ public class MeshCoreCompanionState {
     }
 
     /**
-     * Возвращает максимальное количество каналов, которое сообщает устройство.
-     *
-     * @return max channels или {@code null}
+     * Returns the maximum channel count reported by the device.
+ *
+     * @return maximum channel count, or {@code null}
      */
     public Integer getMaxChannels() {
         return maxChannels;
@@ -295,9 +295,9 @@ public class MeshCoreCompanionState {
     }
 
     /**
-     * Возвращает BLE PIN из device-info, если firmware его отдаёт.
-     *
-     * @return PIN или {@code null}
+     * Returns the BLE PIN from device info when the firmware exposes it.
+ *
+     * @return PIN, or {@code null}
      */
     public Integer getBlePin() {
         return blePin;
@@ -308,9 +308,9 @@ public class MeshCoreCompanionState {
     }
 
     /**
-     * Возвращает firmware build string.
-     *
-     * @return build или {@code null}
+     * Returns the firmware build string.
+ *
+     * @return build string, or {@code null}
      */
     public String getFirmwareBuild() {
         return firmwareBuild;
@@ -321,9 +321,9 @@ public class MeshCoreCompanionState {
     }
 
     /**
-     * Возвращает модель устройства.
-     *
-     * @return model или {@code null}
+     * Returns the device model.
+ *
+     * @return model, or {@code null}
      */
     public String getModel() {
         return model;
@@ -335,9 +335,9 @@ public class MeshCoreCompanionState {
     }
 
     /**
-     * Возвращает текстовую версию firmware.
-     *
-     * @return firmware version или {@code null}
+     * Returns the firmware version text.
+ *
+     * @return firmware version, or {@code null}
      */
     public String getFirmwareVersion() {
         return firmwareVersion;
@@ -348,9 +348,9 @@ public class MeshCoreCompanionState {
     }
 
     /**
-     * Возвращает напряжение батареи.
-     *
-     * @return напряжение в millivolts или {@code null}
+     * Returns the battery voltage.
+ *
+     * @return voltage in millivolts, or {@code null}
      */
     public Integer getBatteryMillivolts() {
         return batteryMillivolts;
@@ -363,18 +363,18 @@ public class MeshCoreCompanionState {
     }
 
     /**
-     * Возвращает объём занятого storage.
-     *
-     * @return used storage в KB или {@code null}
+     * Returns the amount of used device storage.
+ *
+     * @return used storage in KB, or {@code null}
      */
     public Long getUsedStorageKb() {
         return usedStorageKb;
     }
 
     /**
-     * Возвращает общий объём storage.
-     *
-     * @return total storage в KB или {@code null}
+     * Returns the total device storage capacity.
+ *
+     * @return total storage in KB, or {@code null}
      */
     public Long getTotalStorageKb() {
         return totalStorageKb;
@@ -386,9 +386,9 @@ public class MeshCoreCompanionState {
     }
 
     /**
-     * Возвращает последнюю ошибку MeshCore Companion.
-     *
-     * @return текст ошибки или {@code null}
+     * Returns the latest MeshCore Companion error.
+ *
+     * @return error text, or {@code null}
      */
     public String getLastError() {
         return lastError;
@@ -399,9 +399,9 @@ public class MeshCoreCompanionState {
     }
 
     /**
-     * Возвращает количество контактов, объявленное началом sync-ответа.
-     *
-     * @return количество контактов или {@code null}
+     * Returns the contact count announced at the start of a sync response.
+ *
+     * @return contact count, or {@code null}
      */
     public Integer getContactCount() {
         return contactCount;
@@ -412,9 +412,9 @@ public class MeshCoreCompanionState {
     }
 
     /**
-     * Возвращает timestamp последнего изменения списка контактов.
-     *
-     * @return Unix timestamp или {@code null}
+     * Returns the timestamp of the latest contact-list change.
+ *
+     * @return Unix timestamp, or {@code null}
      */
     public Long getContactsLastModified() {
         return contactsLastModified;
@@ -425,11 +425,11 @@ public class MeshCoreCompanionState {
     }
 
     /**
-     * Обновляет канал в совместимом {@link DeviceState}.
-     *
-     * @param channelIndex индекс MeshCore-канала
-     * @param channelName имя канала
-     * @param enabled активен ли канал
+     * Updates a channel in the compatible {@link DeviceState}.
+ *
+     * @param channelIndex MeshCore channel index
+     * @param channelName  channel name
+     * @param enabled      whether the channel is active
      */
     void updateChannel(int channelIndex, String channelName, boolean enabled) {
         ChannelProtos.Channel.Role role = !enabled
@@ -450,7 +450,7 @@ public class MeshCoreCompanionState {
     }
 
     /**
-     * Создаёт базовый публичный канал, чтобы Chat мог открыться до ответа
+     * Creates a basic public channel so Chat can open before the
      * {@code PACKET_CHANNEL_INFO}.
      */
     void ensureDefaultChannel() {
@@ -460,15 +460,15 @@ public class MeshCoreCompanionState {
     }
 
     /**
-     * Добавляет или обновляет MeshCore contact в node database.
-     *
-     * @param publicKey public key контакта, полный или частичный
+     * Adds or updates a MeshCore contact in the node database.
+ *
+     * @param publicKey  full or partial contact public key
      * @param type raw {@code ADV_TYPE_*}
      * @param name advertised name
-     * @param lastAdvert Unix timestamp последнего advert
-     * @param latitude advertised latitude или {@code null}
-     * @param longitude advertised longitude или {@code null}
-     * @return node id контакта или {@code null}
+     * @param lastAdvert Unix timestamp of the latest advertisement
+     * @param latitude   advertised latitude, or {@code null}
+     * @param longitude  advertised longitude, or {@code null}
+     * @return contact node id, or {@code null}
      */
     String updateContact(byte[] publicKey,
                          int type,
@@ -506,7 +506,7 @@ public class MeshCoreCompanionState {
     }
 
     /**
-     * Добавляет входящее канальное сообщение MeshCore.
+     * Adds an incoming MeshCore channel message.
      */
     void addIncomingChannelMessage(int channelIndex,
                                    String text,
@@ -536,7 +536,7 @@ public class MeshCoreCompanionState {
     }
 
     /**
-     * Добавляет входящее личное сообщение MeshCore.
+     * Adds an incoming MeshCore direct message.
      */
     void addIncomingDirectMessage(byte[] publicKeyPrefix,
                                   String text,
@@ -573,10 +573,10 @@ public class MeshCoreCompanionState {
     }
 
     /**
-     * Возвращает первые 6 байт public key для отправки DM.
-     *
-     * @param nodeId MeshCore node id контакта
-     * @return 6-байтовый prefix или пустой массив
+     * Returns the first 6 bytes of a public key for sending a direct message.
+ *
+     * @param nodeId MeshCore contact node id
+     * @return 6-byte prefix, or an empty array
      */
     byte[] publicKeyPrefixForNode(String nodeId) {
         byte[] publicKey = publicKeysByNodeId.get(nodeId);

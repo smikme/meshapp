@@ -6,12 +6,11 @@ import com.meshtastic.client.utils.AppPreferences;
 import java.util.Objects;
 
 /**
- * Стабильные ключи БД и пользовательских настроек для чата.
+ * Stable database and preference keys for a chat.
  *
- * <p>Интерфейс работает с {@link ChatItem}, а слой хранения использует строковые
- * пары вроде {@code channel/0} и {@code dm/!abcd1234}. Запись держит эти
- * преобразования в одном месте, чтобы код формы не дублировал ветвления
- * канал/личный чат.
+ * <p>The UI works with {@link ChatItem}, while persistence uses string pairs
+ * such as {@code channel/0} and {@code dm/!abcd1234}. This record keeps those
+ * conversions in one place so form code does not repeat channel/direct branches.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -23,10 +22,10 @@ public record ChatDbKey(
         String scrollStateKey) {
 
     /**
-     * Создаёт ключи для канального чата.
+     * Creates keys for a channel chat.
      *
-     * @param channelIndex индекс канала из настроек Meshtastic
-     * @return ключи БД и настроек для канала
+     * @param channelIndex channel index from Meshtastic settings
+     * @return database and preference keys for the channel
      */
     public static ChatDbKey channel(int channelIndex) {
         String key = String.valueOf(channelIndex);
@@ -39,10 +38,10 @@ public record ChatDbKey(
     }
 
     /**
-     * Создаёт ключи для личного чата.
+     * Creates keys for a direct chat.
      *
-     * @param peerNodeId идентификатор ноды собеседника, например {@code !9e755af0}
-     * @return ключи БД и настроек для личного чата
+     * @param peerNodeId peer node id, for example {@code !9e755af0}
+     * @return database and preference keys for the direct chat
      */
     public static ChatDbKey direct(String peerNodeId) {
         return new ChatDbKey(
@@ -54,10 +53,10 @@ public record ChatDbKey(
     }
 
     /**
-     * Создаёт ключи по элементу из списка чатов.
+     * Creates keys from a chat-list item.
      *
-     * @param item элемент списка чатов
-     * @return ключи БД и настроек для элемента
+     * @param item chat-list item
+     * @return database and preference keys for the item
      */
     public static ChatDbKey from(ChatItem item) {
         Objects.requireNonNull(item, "item");

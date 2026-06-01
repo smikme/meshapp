@@ -17,11 +17,11 @@ import java.util.Objects;
 import java.util.Set;
 
 /**
- * Управляет навигацией между формами приложения.
+ * Coordinates navigation between application forms.
  * <p>
- * Статический менеджер. Инициализируется через {@link #install(RootPane)},
- * после чего {@link #showForm(Form)} переключает активную форму
- * внутри {@link MainForm}. Навигация блокируется при открытом модальном окне.
+ * This static manager is initialized through {@link #install(RootPane)}.
+ * Once installed, {@link #showForm(Form)} replaces the active content inside
+ * {@link MainForm}. Navigation is ignored while a modal pane is open.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -46,7 +46,7 @@ public class FormManager {
         DrawerManager.setDrawerPane(root.getDrawerPane());
         updateDrawerNavigationBlockState();
 
-        // Показать начальную форму
+        // Show the initial form.
         Form initialForm = AllForms.getForm(FormConnections.class);
         showForm(initialForm);
         DrawerManager.setSelectedItemClass(FormConnections.class);
@@ -57,7 +57,7 @@ public class FormManager {
     }
 
     private static void showForm(Form form, boolean rememberForConnection) {
-        // Блокировать навигацию, пока открыто модальное окно
+        // Do not navigate away while a modal dialog is active.
         ModalPane modal = ModalPane.getInstance();
         if (modal != null && modal.isVisible()) {
             return;
@@ -80,15 +80,14 @@ public class FormManager {
     }
 
     /**
-     * Переключает приложение на указанное подключение и восстанавливает форму,
-     * которая была открыта для него в последний раз.
+     * Switches the application to the requested connection and restores the form
+     * that was last active for it.
      * <p>
-     * Перед переключением текущая форма запоминается для ранее выбранного
-     * подключения. Если для нового подключения форма ещё не запоминалась,
-     * остаётся текущая форма и она становится начальным состоянием этого
-     * подключения.
+     * Before switching, the current form is remembered for the previously
+     * selected connection. If the target connection has no saved form yet, the
+     * current form remains visible and becomes that connection's initial state.
      *
-     * @param connectionId идентификатор профиля подключения
+     * @param connectionId connection profile identifier
      */
     public static void switchToConnection(String connectionId) {
         if (connectionId == null || connectionId.isBlank()) {

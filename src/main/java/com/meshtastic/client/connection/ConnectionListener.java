@@ -1,24 +1,24 @@
 package com.meshtastic.client.connection;
 
 /**
- * Слушатель событий жизненного цикла соединения с Meshtastic-устройством.
- * Callback-методы вызываются из потока, управляющего соединением (не из UI-потока).
+ * Listener for connection lifecycle events.
+ * Callback methods are invoked from the connection-management thread, not the UI thread.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public interface ConnectionListener {
 
-    /** Вызывается после успешного установления соединения. */
+    /** Called after a connection is established successfully. */
     void onConnected();
 
-    /** Вызывается после штатного разрыва соединения. */
+    /** Called after a normal disconnection. */
     void onDisconnected();
 
     /**
-     * Вызывается при ошибке соединения (таймаут, обрыв, ошибка записи/чтения).
+     * Called when the connection fails.
      *
-     * @param message описание ошибки
-     * @param cause   исключение-причина (может быть {@code null})
+     * @param message error description
+     * @param cause cause exception, or {@code null}
      */
     void onConnectionError(String message, Throwable cause);
 }

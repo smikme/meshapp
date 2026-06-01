@@ -1,28 +1,28 @@
 package com.meshtastic.client.model;
 
 /**
- * Режим управления modem lines для одного serial-профиля подключения.
+ * Modem-line control mode for a Serial connection profile.
  * <p>
- * Значение сохраняется по имени в {@code ~/.meshapp/connections.json}. {@link #AUTO}
- * оставляет прежнюю эвристику по типу адаптера, а явные режимы позволяют настроить
- * проблемные USB-UART платы с нестандартной разводкой DTR/RTS.
+ * The value is stored by name in {@code ~/.meshapp/connections.json}. {@link #AUTO}
+ * keeps the adapter-based heuristic, while explicit modes support USB-UART
+ * boards with unusual DTR/RTS wiring.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public enum SerialModemLineMode {
-    /** Автоматический выбор по имени порта и описанию адаптера. */
+    /** Automatic selection based on port name and adapter description. */
     AUTO(null, null),
 
-    /** DTR и RTS явно отключены. */
+    /** DTR and RTS are explicitly disabled. */
     DTR_OFF_RTS_OFF(false, false),
 
-    /** DTR отключён, RTS включён. */
+    /** DTR is disabled and RTS is enabled. */
     DTR_OFF_RTS_ON(false, true),
 
-    /** DTR включён, RTS отключён. */
+    /** DTR is enabled and RTS is disabled. */
     DTR_ON_RTS_OFF(true, false),
 
-    /** DTR и RTS явно включены. */
+    /** DTR and RTS are explicitly enabled. */
     DTR_ON_RTS_ON(true, true);
 
     private final Boolean assertDtr;
@@ -34,27 +34,27 @@ public enum SerialModemLineMode {
     }
 
     /**
-     * Проверяет, нужно ли использовать автоматическую эвристику адаптера.
+     * Returns whether adapter heuristics should decide modem-line state.
      *
-     * @return {@code true}, если режим не задаёт DTR/RTS явно
+     * @return {@code true} when the mode does not explicitly set DTR or RTS
      */
     public boolean isAuto() {
         return this == AUTO;
     }
 
     /**
-     * Возвращает требуемое состояние DTR для явного режима.
+     * Returns the required DTR state for an explicit mode.
      *
-     * @return {@code true}, если DTR должен быть включён
+     * @return {@code true} when DTR should be enabled
      */
     public boolean assertDtr() {
         return Boolean.TRUE.equals(assertDtr);
     }
 
     /**
-     * Возвращает требуемое состояние RTS для явного режима.
+     * Returns the required RTS state for an explicit mode.
      *
-     * @return {@code true}, если RTS должен быть включён
+     * @return {@code true} when RTS should be enabled
      */
     public boolean assertRts() {
         return Boolean.TRUE.equals(assertRts);

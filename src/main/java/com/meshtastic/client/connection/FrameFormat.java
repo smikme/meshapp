@@ -3,29 +3,29 @@ package com.meshtastic.client.connection;
 import com.meshtastic.client.model.ProtocolType;
 
 /**
- * Формат фрейминга, который transport применяет к непрерывному потоку байтов.
+ * Framing format a transport applies to a continuous byte stream.
  * <p>
- * TCP и Serial не сохраняют границы протокольных сообщений, поэтому перед
- * запуском runtime-а transport выбирает парсер, соответствующий активному
- * протоколу. BLE обычно передаёт уже готовые payload-ы и этот enum не использует.
+ * TCP and Serial do not preserve protocol message boundaries, so the transport
+ * selects the parser matching the active protocol before runtime startup. BLE
+ * usually delivers complete payloads and does not use this enum.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public enum FrameFormat {
-    /** Meshtastic serial/TCP framing с заголовком {@code 0x94 0xC3}. */
+    /** Meshtastic serial/TCP framing with the {@code 0x94 0xC3} header. */
     MESHTASTIC,
 
-    /** Стандартный KISS TNC framing для MeshCore KISS modem protocol. */
+    /** Standard KISS TNC framing for the MeshCore KISS modem protocol. */
     KISS,
 
-    /** Raw MeshCore Companion packets без KISS-обёртки. */
+    /** Raw MeshCore Companion packets without a KISS wrapper. */
     MESHCORE_COMPANION;
 
     /**
-     * Возвращает формат фрейминга, который должен быть включён для указанного протокола.
+     * Returns the framing format required by the selected protocol.
      *
-     * @param protocolType выбранный протокол
-     * @return формат фрейминга для TCP/Serial transport-а
+     * @param protocolType selected protocol
+     * @return framing format for TCP or Serial transport
      */
     public static FrameFormat forProtocol(ProtocolType protocolType) {
         if (protocolType == ProtocolType.MESHCORE_KISS) {

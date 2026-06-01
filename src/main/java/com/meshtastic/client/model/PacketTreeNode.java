@@ -1,9 +1,11 @@
 package com.meshtastic.client.model;
 
 /**
- * Узел дерева пакета с привязкой к диапазону байт в сериализованном {@code MeshPacket}.
- * Диапазон хранится как полуинтервал {@code [startByte, endByte)} и используется
- * для подсветки соответствующего фрагмента в HEX/ASCII предпросмотре.
+ * Packet tree node optionally tied to a byte range in a serialized
+ * {@code MeshPacket}.
+ * <p>
+ * Ranges are stored as half-open intervals, {@code [startByte, endByte)}, and
+ * are used to highlight the corresponding fragment in the HEX/ASCII preview.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -14,21 +16,23 @@ public class PacketTreeNode {
     private final int endByte;
 
     /**
-     * Создаёт узел без диапазона байт.
-     * Такой узел участвует только в визуализации текста и не должен инициировать подсветку.
+     * Creates a node with no byte range.
+     * <p>
+     * Such nodes participate only in the textual tree view and should not
+     * trigger byte highlighting.
      *
-     * @param label подпись узла
+     * @param label node label
      */
     public PacketTreeNode(String label) {
         this(label, -1, -1);
     }
 
     /**
-     * Создаёт узел с диапазоном байт.
+     * Creates a node bound to a byte range.
      *
-     * @param label     подпись узла
-     * @param startByte начало диапазона включительно
-     * @param endByte   конец диапазона исключительно
+     * @param label     node label
+     * @param startByte inclusive start of the range
+     * @param endByte   exclusive end of the range
      */
     public PacketTreeNode(String label, int startByte, int endByte) {
         this.label = label;
@@ -49,7 +53,7 @@ public class PacketTreeNode {
     }
 
     /**
-     * @return {@code true}, если узел действительно связан с байтами пакета и может подсвечиваться
+     * @return {@code true} when the node maps to packet bytes and can be highlighted
      */
     public boolean hasByteRange() {
         return startByte >= 0 && endByte > startByte;

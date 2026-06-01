@@ -9,7 +9,7 @@ import java.util.MissingResourceException;
 import java.util.ResourceBundle;
 
 /**
- * Центральная точка доступа к локализованным UI-строкам.
+ * Central access point for localized UI strings.
  */
 public final class I18n {
 

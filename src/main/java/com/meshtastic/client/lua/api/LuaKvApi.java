@@ -9,10 +9,10 @@ import org.luaj.vm2.lib.ZeroArgFunction;
 import java.util.Map;
 
 /**
- * Реализация {@code mesh.kv} для Lua-песочницы.
+ * Implementation of {@code mesh.kv} for the Lua sandbox.
  * <p>
- * Предоставляет изолированное key-value хранилище, где каждое значение
- * привязано к конкретному скрипту в БД приложения.
+ * Provides isolated key-value storage where each value is scoped to a specific
+ * script in the application database.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -25,9 +25,9 @@ public final class LuaKvApi {
     }
 
     /**
-     * Создает Lua-таблицу {@code mesh.kv}.
+     * Creates the Lua table for {@code mesh.kv}.
      *
-     * @return таблица KV API
+     * @return key-value API table
      */
     public LuaTable create() {
         LuaTable kv = new LuaTable();

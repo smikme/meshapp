@@ -11,10 +11,11 @@ import java.sql.Statement;
 import java.sql.SQLException;
 
 /**
- * Единственное соединение с H2 embedded БД {@code ~/.meshapp/nodedb}.
+ * Owns the single connection to the embedded H2 database at
+ * {@code ~/.meshapp/nodedb}.
  * <p>
- * Используется всеми сервисами ({@link MessageDbService}, {@link NodeCacheService})
- * вместо создания отдельных соединений к одному файлу.
+ * Shared by services such as {@link MessageDbService} and {@link NodeCacheService}
+ * instead of opening separate connections to the same database file.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -27,7 +28,7 @@ public final class DatabaseProvider {
     private DatabaseProvider() {}
 
     /**
-     * Возвращает единственное соединение с БД. Создаёт при первом вызове.
+     * Returns the shared database connection, creating it on first use.
      */
     public static synchronized Connection getConnection() {
         if (connection != null) {
@@ -49,8 +50,10 @@ public final class DatabaseProvider {
     }
 
     /**
-     * Закрывает соединение с БД. Вызывается один раз при завершении приложения,
-     * после того как все сервисы закроют свои PreparedStatement.
+     * Closes the database connection.
+     * <p>
+     * Called once during application shutdown, after services have closed their
+     * prepared statements.
      */
     public static synchronized void close() {
         if (connection == null) { return; }
@@ -66,10 +69,10 @@ public final class DatabaseProvider {
     }
 
     /**
-     * Полностью удаляет все объекты текущей БД и заново подготавливает базовую схему.
+     * Drops every object in the current database and recreates the base schema.
      * <p>
-     * Используется для "жёсткого" сброса локальных данных. После вызова
-     * прикладные сервисы должны заново создать свои таблицы и PreparedStatement-ы.
+     * Used for a hard local-data reset. After this method returns, application
+     * services must recreate their tables and prepared statements.
      */
     public static synchronized void resetDatabase() throws SQLException {
         Connection activeConnection = getConnection();

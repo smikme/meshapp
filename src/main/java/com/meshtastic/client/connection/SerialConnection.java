@@ -19,15 +19,13 @@ import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 /**
- * Подключение к Meshtastic-устройству через serial-порт (USB / Bluetooth SPP).
+ * Serial connection to a Meshtastic device over USB or Bluetooth SPP.
  * <p>
- * Использует JNA-обёртки ({@link NativeSerialPort}) для прямого доступа к serial-порту
- * через kernel32 (Windows) или libc/termios (macOS/Linux).
- * Ключевое отличие от jSerialComm: порт открывается <b>без активации DTR</b>,
- * что предотвращает сброс ESP32 на USB-Serial мостах (CH340, CP210x и др.).
- * <p>
- * jSerialComm используется только для обнаружения портов ({@code getCommPorts()})
- * и определения типа адаптера ({@code getDescriptivePortName()}).
+ * Uses JNA wrappers ({@link NativeSerialPort}) for direct port access through
+ * kernel32 on Windows or libc/termios on macOS and Linux. Unlike jSerialComm,
+ * the port can be opened without asserting DTR, preventing ESP32 resets on
+ * USB-Serial bridges such as CH340 and CP210x. jSerialComm remains limited to
+ * discovery and adapter identification.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -78,11 +76,11 @@ public class SerialConnection implements MeshtasticConnection, FrameFormatAwareC
     }
 
     /**
-     * Создаёт serial-подключение с явным режимом управления DTR/RTS.
+     * Creates a Serial connection with an explicit DTR/RTS control mode.
      *
-     * @param portName системное имя порта
-     * @param baudRate скорость порта
-     * @param serialModemLineMode режим modem lines или {@link SerialModemLineMode#AUTO}
+     * @param portName system port name
+     * @param baudRate port speed
+     * @param serialModemLineMode modem-line mode, or {@link SerialModemLineMode#AUTO}
      */
     public SerialConnection(String portName, int baudRate, SerialModemLineMode serialModemLineMode) {
         this(portName, baudRate, NativeSerialPortFactory::create, System::currentTimeMillis,
@@ -96,12 +94,13 @@ public class SerialConnection implements MeshtasticConnection, FrameFormatAwareC
     }
 
     /**
-     * Создаёт serial-подключение с заданным frame format и режимом DTR/RTS.
+     * Creates a Serial connection with the requested stream frame format and
+     * DTR/RTS control mode.
      *
-     * @param portName системное имя порта
-     * @param baudRate скорость порта
-     * @param frameFormat формат фрейминга для stream-протокола
-     * @param serialModemLineMode режим modem lines или {@link SerialModemLineMode#AUTO}
+     * @param portName system port name
+     * @param baudRate port speed
+     * @param frameFormat framing format for the stream protocol
+     * @param serialModemLineMode modem-line mode, or {@link SerialModemLineMode#AUTO}
      */
     public SerialConnection(String portName, int baudRate, FrameFormat frameFormat,
                             SerialModemLineMode serialModemLineMode) {
@@ -317,11 +316,10 @@ public class SerialConnection implements MeshtasticConnection, FrameFormatAwareC
     }
 
     /**
-     * Цикл чтения данных из serial-порта.
+     * Reads data from the serial port in a loop.
      * <p>
-     * Использует {@link NativeSerialPort#read(byte[], int, int)} с таймаутом.
-     * Возвращаемые значения: {@code >0} — прочитано байт, {@code 0} — таймаут,
-     * {@code -1} — ошибка/порт закрыт.
+     * Uses {@link NativeSerialPort#read(byte[], int, int)} with a timeout. Return
+     * values mean: {@code >0} bytes read, {@code 0} timeout, {@code -1} error or closed port.
      */
     private void readLoop() {
         log.debug("Serial reader thread started for {}", portName);
@@ -366,7 +364,7 @@ public class SerialConnection implements MeshtasticConnection, FrameFormatAwareC
                             frameParser.reset();
                         }
                     }
-                    // Таймаут — данных нет, проверяем что порт ещё открыт
+                // Timeout means no data; verify that the port is still open.
                     if (!port.isOpen()) {
                         if (running) {
                             log.info("Serial port {} disconnected", portName);
@@ -406,8 +404,7 @@ public class SerialConnection implements MeshtasticConnection, FrameFormatAwareC
             }
         }
 
-        // Закрываем порт ДО оповещения слушателя, чтобы порт был освобождён
-        // к моменту попытки переподключения через ReconnectService
+        // Close the port before notifying listeners so reconnect attempts see it released.
         closePort();
         stopReadWatchdog();
         notifyConnectionErrorOnce(errorMessage, errorCause);
@@ -571,8 +568,8 @@ public class SerialConnection implements MeshtasticConnection, FrameFormatAwareC
     }
 
     /**
-     * Получает описательное имя порта через jSerialComm (для логирования).
-     * jSerialComm используется ТОЛЬКО для обнаружения портов, не для I/O.
+     * Reads the descriptive port name through jSerialComm for logging.
+     * jSerialComm is used only for discovery, never for I/O.
      */
     private static String getDescriptivePortName(String systemName) {
         String normalizedSystemName = normalizeSystemPortName(systemName);
@@ -596,9 +593,9 @@ public class SerialConnection implements MeshtasticConnection, FrameFormatAwareC
     }
 
     /**
-     * Определяет USB-serial мост по имени порта и описанию.
-     * Мосты (CH340/CP210x/FTDI): DTR вызывает сброс ESP32 через auto-reset circuit.
-     * Native USB CDC (usbmodem/ttyACM): DTR = сигнал "хост подключён".
+     * Identifies the USB-Serial bridge from port name and description.
+     * On bridges such as CH340, CP210x, and FTDI, DTR can reset ESP32 through
+     * the auto-reset circuit. Native USB CDC ports use DTR as a host-connected signal.
      */
     private static boolean isUsbSerialBridge(String portName, String desc) {
         String lower = (portName + " " + desc).toLowerCase(java.util.Locale.ROOT);

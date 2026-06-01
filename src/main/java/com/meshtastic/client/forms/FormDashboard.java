@@ -37,11 +37,11 @@ import java.util.Collections;
 import java.util.List;
 
 /**
- * Дашборд телеметрии устройства.
+ * Device telemetry dashboard.
  * <p>
- * Использует переиспользуемый компонент {@link TelemetryChartPanel} для графика и фильтра периода.
- * Таблица логов телеметрии внизу.
- * Данные загружаются из H2 (архив) + live из DeviceState.
+ * Uses reusable {@link TelemetryChartPanel} for the chart and period filter.
+ * The telemetry log table is shown below. Data comes from the H2 archive plus
+ * live values from DeviceState.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -56,9 +56,9 @@ public class FormDashboard extends Form {
     private TableView<TelemetryLogRow> logTable;
     private final ObservableList<TelemetryLogRow> logData = FXCollections.observableArrayList();
 
-    /** Полный список записей (новые первыми) для постраничной подгрузки */
+    /** Full entry list, newest first, used for paged loading. */
     private List<TelemetryEntry> allEntries = Collections.emptyList();
-    /** Сколько строк уже загружено в logData */
+    /** Number of rows already loaded into logData. */
     private int loadedCount;
 
     private DeviceState state;
@@ -73,7 +73,7 @@ public class FormDashboard extends Form {
         VBox content = new VBox(0);
         content.setPadding(new Insets(10));
 
-        // --- График телеметрии (переиспользуемый компонент) ---
+        // --- Telemetry chart, using the shared component ---
         chartPanel = new TelemetryChartPanel();
         chartPanel.setOnDataRefreshed(this::onChartDataRefreshed);
         VBox.setVgrow(chartPanel, Priority.ALWAYS);
@@ -82,12 +82,12 @@ public class FormDashboard extends Form {
         chartTab.setPadding(new Insets(10, 0, 0, 0));
         VBox.setVgrow(chartPanel, Priority.ALWAYS);
 
-        // --- Счётчик логов ---
+        // --- Log counter ---
         logCountLabel = new Label(formatLogCount(0, 0));
         logCountLabel.getStyleClass().add("dashboard-log-count-label");
         logCountLabel.setPadding(new Insets(4, 0, 4, 2));
 
-        // --- Таблица логов ---
+        // --- Log table ---
         logTable = createLogTable();
         VBox.setVgrow(logTable, Priority.ALWAYS);
 
@@ -125,7 +125,7 @@ public class FormDashboard extends Form {
         refresh();
     }
 
-    // ==================== Привязка к DeviceState ====================
+    // ==================== DeviceState Binding ====================
 
     private void rebindState() {
         var mgr = ConnectionManager.getInstance();
@@ -138,10 +138,10 @@ public class FormDashboard extends Form {
         refresh();
     }
 
-    // ==================== Обновление данных ====================
+    // ==================== Data Refresh ====================
 
     private void refresh() {
-        // Без подключения — не показываем данные
+        // No connection: do not show stale data.
         if (state == null || state.getMyNodeNum() == 0) {
             chartPanel.unbind();
             logData.clear();
@@ -149,18 +149,18 @@ public class FormDashboard extends Form {
             return;
         }
 
-        // bind() внутри проверяет — если state и nodeId не изменились, просто обновит данные
+        // bind() checks internally; if state and nodeId are unchanged, it only refreshes data.
         NodeData myNode = state.getNodeDb().get(state.getMyNodeNum());
         String myNodeId = myNode != null ? myNode.getNodeId() : String.format("!%08x", state.getMyNodeNum());
         chartPanel.bind(state, myNodeId);
     }
 
-    /** Вызывается из TelemetryChartPanel после обновления данных графика */
+    /** Called by TelemetryChartPanel after chart data is refreshed. */
     private void onChartDataRefreshed() {
         updateLogTable(chartPanel.getFilteredEntries());
     }
 
-    // ==================== Таблица логов ====================
+    // ==================== Log Table ====================
 
     @SuppressWarnings("unchecked")
     private TableView<TelemetryLogRow> createLogTable() {
@@ -242,7 +242,7 @@ public class FormDashboard extends Form {
 
         table.getColumns().addAll(colTime, colBattery, colVoltage, colChUtil, colAirUtil, colGoodRx, colBadRx, colDupeRx, colTx, colTxDropped, colTxRelay, colTxCanceled, colSnr, colRssi, colHops, colNode);
 
-        // Lazy loading: подгружать следующую страницу при прокрутке до конца
+        // Lazy loading: load the next page when scrolling near the bottom.
         table.skinProperty().addListener((obs, oldSkin, newSkin) -> {
             if (newSkin == null) return;
             for (Node node : table.lookupAll(".scroll-bar")) {
@@ -261,7 +261,7 @@ public class FormDashboard extends Form {
     }
 
     private void updateLogTable(List<TelemetryEntry> entries) {
-        // Сохраняем полный список в обратном порядке (новые сверху)
+        // Store the full list in reverse order, newest first.
         List<TelemetryEntry> reversed = new ArrayList<>(entries.size());
         for (int i = entries.size() - 1; i >= 0; i--) {
             reversed.add(entries.get(i));
@@ -274,7 +274,7 @@ public class FormDashboard extends Form {
         loadNextPage();
     }
 
-    /** Подгружает следующие PAGE_SIZE строк в таблицу */
+    /** Loads the next PAGE_SIZE rows into the table. */
     private void loadNextPage() {
         if (loadedCount >= allEntries.size()) {
             logCountLabel.setText(formatLogCount(loadedCount, allEntries.size()));
@@ -296,11 +296,11 @@ public class FormDashboard extends Form {
                 : I18n.t("telemetry.log.count", loaded, total);
     }
 
-    // ==================== Модель строки таблицы ====================
+    // ==================== Table Row Model ====================
 
     /**
-     * Одна строка таблицы логов телеметрии.
-     * JavaFX PropertyValueFactory требует публичных геттеров.
+     * One telemetry log table row.
+     * JavaFX PropertyValueFactory requires public getters.
      */
     public static class TelemetryLogRow {
         private final String time;

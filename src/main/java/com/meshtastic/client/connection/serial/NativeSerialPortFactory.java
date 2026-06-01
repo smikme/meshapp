@@ -3,7 +3,7 @@ package com.meshtastic.client.connection.serial;
 import com.meshtastic.client.platform.OsDetect;
 
 /**
- * Фабрика для создания платформо-специфичного {@link NativeSerialPort}.
+ * Factory for platform-specific {@link NativeSerialPort} implementations.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */

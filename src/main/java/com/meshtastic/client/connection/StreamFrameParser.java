@@ -1,41 +1,40 @@
 package com.meshtastic.client.connection;
 
 /**
- * Состояний парсер, который восстанавливает протокольные сообщения из byte stream.
+ * Stateful parser that reconstructs protocol messages from a byte stream.
  * <p>
- * TCP и Serial отдают произвольные куски байтов, поэтому parser хранит промежуточное
- * состояние между вызовами и возвращает frame только после получения полной границы
- * сообщения.
+ * TCP and Serial can deliver arbitrary byte chunks, so parsers keep intermediate
+ * state between calls and return a frame only after a complete message boundary.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public interface StreamFrameParser {
 
     /**
-     * Обрабатывает один байт из нижележащего stream-а.
+     * Processes one byte from the underlying stream.
      *
-     * @param b очередной байт
-     * @return готовый payload frame-а или {@code null}, если frame ещё не завершён
+     * @param b next byte
+     * @return completed frame payload, or {@code null} while the frame is incomplete
      */
     byte[] processByte(byte b);
 
     /**
-     * Проверяет, хранит ли parser незавершённый frame.
+     * Returns whether the parser holds an incomplete frame.
      *
-     * @return {@code true}, если внутри parser-а есть частично полученные данные
+     * @return {@code true} when partial data is buffered
      */
     boolean hasPartialFrame();
 
     /**
-     * Даёт parser-у шанс завершить frame, граница которого определяется не delimiter-ом,
-     * а паузой чтения или inter-byte silence.
+     * Lets the parser complete a frame whose boundary is defined by read timeout
+     * or inter-byte silence rather than an explicit delimiter.
      *
-     * @return готовый payload frame-а или {@code null}, если сбрасывать нечего
+     * @return completed frame payload, or {@code null} when nothing can be flushed
      */
     default byte[] flushPartialFrame() {
         return null;
     }
 
-    /** Сбрасывает состояние parser-а и отбрасывает незавершённый frame. */
+    /** Resets parser state and discards any incomplete frame. */
     void reset();
 }

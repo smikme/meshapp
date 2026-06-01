@@ -18,7 +18,7 @@ import java.nio.file.StandardCopyOption;
 import java.util.Objects;
 
 /**
- * Подбор и масштабирование tray-иконки под фактический размер системного слота.
+ * Chooses and scales the tray icon for the system slot's actual size.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */

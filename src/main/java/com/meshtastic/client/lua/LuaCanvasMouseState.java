@@ -1,7 +1,7 @@
 package com.meshtastic.client.lua;
 
 /**
- * Snapshot состояния мыши внутри Lua Canvas.
+ * Snapshot of mouse state inside a Lua canvas.
  */
 public record LuaCanvasMouseState(double x,
                                   double y,

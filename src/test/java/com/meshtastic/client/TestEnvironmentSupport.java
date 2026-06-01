@@ -15,7 +15,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  */
 public final class TestEnvironmentSupport {
 
-    // JavaFX toolkit можно поднять только один раз на JVM.
+    // The JavaFX toolkit can be started only once per JVM.
     private static final AtomicBoolean FX_START_REQUESTED = new AtomicBoolean(false);
     private static final CountDownLatch FX_READY = new CountDownLatch(1);
 
@@ -44,7 +44,7 @@ public final class TestEnvironmentSupport {
         await(FX_READY);
         Platform.setImplicitExit(false);
 
-        // Для повторных вызовов и гонок во время старта достаточно убедиться, что FX event loop жив.
+        // Repeated calls and startup races only need to prove that the FX event loop is alive.
         CountDownLatch latch = new CountDownLatch(1);
         Platform.runLater(latch::countDown);
         await(latch);
@@ -82,8 +82,8 @@ public final class TestEnvironmentSupport {
 
     public static void resetSingletons() {
         try {
-            // Тесты поднимают реальные singleton-сервисы с H2/threads, поэтому
-            // каждый кейс должен стартовать с полностью чистого runtime-состояния.
+            // Tests start real singleton services backed by H2 and background threads, so
+            // every case must begin from a clean runtime state.
             Class<?> luaRuntimeService = Class.forName("com.meshtastic.client.lua.LuaScriptRuntimeService");
             Object luaRuntimeInstance = readStaticField(luaRuntimeService, "instance");
             if (luaRuntimeInstance != null) {

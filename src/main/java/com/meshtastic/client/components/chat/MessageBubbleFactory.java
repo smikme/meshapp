@@ -55,10 +55,10 @@ import java.util.function.Supplier;
 import java.util.stream.Stream;
 
 /**
- * Фабрика пузырей сообщений: входящие, исходящие и системные.
+ * Factory for incoming, outgoing, and system message bubbles.
  *
- * <p>Класс отвечает только за JavaFX-рендеринг и делегирует выбор имён,
- * аватаров и агрегирование реакций специализированным helper-классам.
+ * <p>The class owns JavaFX rendering only. Name resolution, avatars, and
+ * reaction aggregation are delegated to specialized helper classes.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -107,29 +107,29 @@ public class MessageBubbleFactory {
     );
 
     /**
-     * Колбэки для действий из контекстного меню пузырей.
+     * Callbacks for actions exposed from bubble context menus.
      */
     public interface BubbleActions {
 
-        /** Начать ответ на сообщение. */
+        /** Starts replying to a message. */
         void startReply(MeshMessage msg);
 
-        /** Отправить emoji-реакцию на сообщение. */
+        /** Sends an emoji reaction to a message. */
         void sendReaction(MeshMessage msg, String emoji);
 
-        /** Подтвердить и удалить сообщение. */
+        /** Confirms and deletes a message. */
         void confirmDeleteMessage(MeshMessage msg, HBox bubbleRow);
 
-        /** Повторно отправить недоставленное сообщение. */
+        /** Resends an undelivered message. */
         boolean retryMessage(MeshMessage msg);
     }
 
     /**
-     * Строка сообщения с прямыми ссылками на изменяемые UI-узлы.
+     * Rendered message row with direct references to mutable UI nodes.
      *
-     * <p>Форма чата хранит этот объект для адресного обновления статуса,
-     * реакций, quote preview и meta-индикаторов без полной замены строки в
-     * {@code messageContainer}.
+     * <p>The chat form keeps this object so it can update status, reactions,
+     * quote previews, and meta indicators in place without replacing the whole
+     * row in {@code messageContainer}.
      */
     public static final class RenderedMessageRow {
         private final HBox row;
@@ -181,10 +181,10 @@ public class MessageBubbleFactory {
     private Popup openReactionPopup;
 
     /**
-     * @param state текущее состояние устройства (может быть {@code null})
-     * @param containerWidthProp свойство ширины messageContainer для maxWidth binding
-     * @param actions колбэки действий (ответ, traceroute, удаление)
-     * @param pendingStatusLabels карта packetId -&gt; Label для трекинга статусов доставки
+     * @param state current device state, or {@code null}
+     * @param containerWidthProp width property of messageContainer for maxWidth binding
+     * @param actions action callbacks for reply, traceroute, and deletion
+     * @param pendingStatusLabels packetId -&gt; Label map for delivery-status tracking
      */
     public MessageBubbleFactory(DeviceState state,
                                 ReadOnlyDoubleProperty containerWidthProp,
@@ -196,17 +196,17 @@ public class MessageBubbleFactory {
         this.pendingStatusLabels = pendingStatusLabels;
     }
 
-    /** Обновить DeviceState (при rebind подключения). */
+    /** Updates DeviceState after connection rebind. */
     public void setState(DeviceState state) {
         this.state = state;
     }
 
-    /** Установить TracerouteView для визуализации traceroute-пузырей. */
+    /** Sets the TracerouteView used to render traceroute bubbles. */
     public void setTracerouteView(TracerouteView tracerouteView) {
         this.tracerouteView = tracerouteView;
     }
 
-    /** Закрыть открытый picker реакций, если он есть. */
+    /** Closes the open reaction picker, if any. */
     public void hideOpenReactionPopup() {
         if (openReactionPopup == null) {
             return;
@@ -216,20 +216,20 @@ public class MessageBubbleFactory {
     }
 
     /**
-     * Строит bubble по типу сообщения.
+     * Builds a bubble according to the message type.
      *
-     * @param msg сообщение для рендера
-     * @return готовый JavaFX-узел пузыря
+     * @param msg message to render
+     * @return rendered JavaFX bubble node
      */
     public HBox build(MeshMessage msg) {
         return buildRendered(msg).row();
     }
 
     /**
-     * Строит bubble и возвращает управляемую строку для последующих patch-обновлений.
+     * Builds a bubble and returns a managed row for later patch-style updates.
      *
-     * @param msg сообщение для рендера
-     * @return строка сообщения с ссылками на изменяемые UI-узлы
+     * @param msg message to render
+     * @return rendered row with references to mutable UI nodes
      */
     public RenderedMessageRow buildRendered(MeshMessage msg) {
         if (msg.isSystemMessage()) {
@@ -242,10 +242,10 @@ public class MessageBubbleFactory {
     }
 
     /**
-     * Обновляет иконку статуса доставки на существующем label.
+     * Updates the delivery-status icon on an existing label.
      *
-     * @param label целевой label
-     * @param status новый статус доставки
+     * @param label target label
+     * @param status new delivery status
      */
     public static void updateStatusLabel(Label label,
                                          MeshMessage.DeliveryStatus status) {
@@ -297,10 +297,10 @@ public class MessageBubbleFactory {
     }
 
     /**
-     * Обновляет визуал и интерактивность статус-контрола исходящего сообщения.
+     * Updates the visuals and interactivity of the outgoing-message status control.
      *
-     * @param label контрол статуса
-     * @param msg сообщение, связанное с этим контролом
+     * @param label status control
+     * @param msg message associated with this control
      */
     public void refreshStatusLabel(Label label, MeshMessage msg) {
         if (label == null || msg == null || msg.getStatus() == null) {
@@ -314,10 +314,10 @@ public class MessageBubbleFactory {
     }
 
     /**
-     * Обновляет статус доставки в уже отрисованной строке без пересборки bubble.
+     * Updates delivery status in an already rendered row without rebuilding the bubble.
      *
-     * @param rendered строка сообщения
-     * @param msg актуальное сообщение
+     * @param rendered rendered message row
+     * @param msg current message
      */
     public void refreshRenderedStatus(RenderedMessageRow rendered, MeshMessage msg) {
         if (rendered == null || msg == null || !rendered.outgoing || rendered.meta == null) {
@@ -333,10 +333,10 @@ public class MessageBubbleFactory {
     }
 
     /**
-     * Обновляет reaction bar в уже отрисованной строке.
+     * Updates the reaction bar in an already rendered row.
      *
-     * @param rendered строка сообщения
-     * @param msg актуальное сообщение с гидратированными реакциями
+     * @param rendered rendered message row
+     * @param msg current message with hydrated reactions
      */
     public void refreshRenderedReactions(RenderedMessageRow rendered, MeshMessage msg) {
         if (rendered == null || msg == null || rendered.reactionSlot == null || rendered.content == null) {
@@ -348,10 +348,10 @@ public class MessageBubbleFactory {
     }
 
     /**
-     * Обновляет quote, meta и MQTT badge в уже отрисованной строке.
+     * Updates quote, meta, and MQTT badge in an already rendered row.
      *
-     * @param rendered строка сообщения
-     * @param msg актуальное сообщение
+     * @param rendered rendered message row
+     * @param msg current message
      */
     public void refreshRenderedMetadata(RenderedMessageRow rendered, MeshMessage msg) {
         if (rendered == null || msg == null) {
@@ -370,10 +370,10 @@ public class MessageBubbleFactory {
     }
 
     /**
-     * Собирает входящий bubble: аватар, имя отправителя, текст, реакции и meta-блок.
+     * Builds an incoming bubble: avatar, sender name, text, reactions, and meta block.
      *
-     * @param msg входящее сообщение
-     * @return готовая строка чата для входящего сообщения
+     * @param msg incoming message
+     * @return rendered chat row for the incoming message
      */
     private RenderedMessageRow buildIncomingBubble(MeshMessage msg) {
         HBox reactionBar = buildReactionsBar(msg);
@@ -417,10 +417,10 @@ public class MessageBubbleFactory {
     }
 
     /**
-     * Собирает исходящий bubble с правым выравниванием и индикатором статуса доставки.
+     * Builds an outgoing bubble with right alignment and a delivery-status indicator.
      *
-     * @param msg исходящее сообщение
-     * @return готовая строка чата для исходящего сообщения
+     * @param msg outgoing message
+     * @return rendered chat row for the outgoing message
      */
     private RenderedMessageRow buildOutgoingBubble(MeshMessage msg) {
         HBox reactionBar = buildReactionsBar(msg);
@@ -456,10 +456,10 @@ public class MessageBubbleFactory {
     }
 
     /**
-     * Рендерит системное сообщение или восстанавливает специальный traceroute bubble из текста.
+     * Renders a system message, or restores a special traceroute bubble from its text.
      *
-     * @param msg системное сообщение
-     * @return bubble системного сообщения
+     * @param msg system message
+     * @return system-message bubble
      */
     private RenderedMessageRow buildSystemBubble(MeshMessage msg) {
         return tryBuildTracerouteBubble(msg).orElseGet(() -> createDefaultSystemBubble(msg));
@@ -493,10 +493,10 @@ public class MessageBubbleFactory {
     }
 
     /**
-     * Проверяет, можно ли вместо обычного текстового system bubble показать traceroute-представление.
+     * Checks whether a traceroute view can replace the regular text system bubble.
      *
-     * @param msg системное сообщение
-     * @return визуальный traceroute bubble, если сообщение содержит traceroute payload
+     * @param msg system message
+     * @return visual traceroute bubble when the message contains a traceroute payload
      */
     private Optional<RenderedMessageRow> tryBuildTracerouteBubble(MeshMessage msg) {
         return Optional.ofNullable(tracerouteView)
@@ -519,9 +519,9 @@ public class MessageBubbleFactory {
     }
 
     /**
-     * Создаёт компактный аватар бота для системных сообщений.
+     * Creates a compact bot avatar for system messages.
      *
-     * @return avatar pane с emoji бота
+     * @return avatar pane with the bot emoji
      */
     private static StackPane buildBotAvatar() {
         StackPane avatar = createAvatarPane();
@@ -530,10 +530,10 @@ public class MessageBubbleFactory {
     }
 
     /**
-     * Строит круглый текстовый аватар на основе уже подготовленного descriptor.
+     * Builds a circular text avatar from a prepared descriptor.
      *
-     * @param descriptor текст и цвет аватара
-     * @return готовый JavaFX-узел аватара
+     * @param descriptor avatar text and color
+     * @return rendered JavaFX avatar node
      */
     private static StackPane buildAvatar(ChatNodeDisplayHelper.AvatarDescriptor descriptor) {
         StackPane avatar = createAvatarPane();
@@ -551,9 +551,9 @@ public class MessageBubbleFactory {
     }
 
     /**
-     * Создаёт базовый контейнер аватара фиксированного размера.
+     * Creates the fixed-size base avatar container.
      *
-     * @return пустой центрированный avatar pane
+     * @return empty centered avatar pane
      */
     private static StackPane createAvatarPane() {
         StackPane avatar = new StackPane();
@@ -564,10 +564,10 @@ public class MessageBubbleFactory {
     }
 
     /**
-     * Назначает обработчик клика по входящему аватару для открытия карточки ноды.
+     * Adds the click handler that opens the node card from an incoming avatar.
      *
      * @param avatar avatar pane
-     * @param msg входящее сообщение
+     * @param msg incoming message
      */
     private void configureIncomingAvatar(StackPane avatar, MeshMessage msg) {
         avatar.setCursor(Cursor.HAND);
@@ -578,9 +578,9 @@ public class MessageBubbleFactory {
     }
 
     /**
-     * Открывает панель ноды, если отправителя удалось разрешить в {@link NodeData}.
+     * Opens the node panel if the sender can be resolved to {@link NodeData}.
      *
-     * @param nodeId идентификатор ноды отправителя
+     * @param nodeId sender node identifier
      */
     private void showNodeDetails(String nodeId) {
         Optional.ofNullable(state)
@@ -589,12 +589,12 @@ public class MessageBubbleFactory {
     }
 
     /**
-     * Создаёт общий контейнер bubble-контента и сразу биндинг максимальной ширины.
+     * Creates the common bubble-content container and binds its maximum width.
      *
-     * @param styleClass css-класс конкретного типа bubble
-     * @param hasReactions есть ли у bubble панель реакций
-     * @param defaultWidthRatio стандартная доля ширины контейнера
-     * @return VBox-контент bubble
+     * @param styleClass CSS class for the concrete bubble type
+     * @param hasReactions whether the bubble has a reaction bar
+     * @param defaultWidthRatio default fraction of the container width
+     * @return VBox bubble content
      */
     private VBox createMessageContent(String styleClass,
                                       boolean hasReactions,
@@ -607,11 +607,11 @@ public class MessageBubbleFactory {
     }
 
     /**
-     * Накладывает монохромный индикатор MQTT поверх правого верхнего угла bubble.
+     * Overlays a monochrome MQTT indicator in the top-right corner of the bubble.
      *
-     * @param content bubble-контент
-     * @param msg сообщение
-     * @return исходный content или wrapper с badge
+     * @param content bubble content
+     * @param msg message
+     * @return original content or a wrapper with the badge
      */
     private MqttBubble wrapWithMqttBadge(VBox content, MeshMessage msg) {
         StackPane badge = createMqttBadge();
@@ -626,9 +626,9 @@ public class MessageBubbleFactory {
     }
 
     /**
-     * Создаёт облако MQTT без цветного акцента; цвет задаётся темой через CSS.
+     * Creates an MQTT cloud without a colored accent; CSS theme rules provide the color.
      *
-     * @return badge с shape-иконкой
+     * @return badge with a shape icon
      */
     private static StackPane createMqttBadge() {
         Region icon = new Region();
@@ -647,12 +647,12 @@ public class MessageBubbleFactory {
     }
 
     /**
-     * Создаёт строку чата с общими отступами и выравниванием.
+     * Creates a chat row with shared spacing and alignment.
      *
-     * @param alignment выравнивание по горизонтали
-     * @param styleClass css-класс строки
-     * @param children дочерние узлы строки
-     * @return готовый row container
+     * @param alignment horizontal alignment
+     * @param styleClass row CSS class
+     * @param children row children
+     * @return rendered row container
      */
     private static HBox createMessageRow(Pos alignment, String styleClass, Node... children) {
         HBox row = new HBox(MESSAGE_ROW_SPACING, children);
@@ -663,9 +663,9 @@ public class MessageBubbleFactory {
     }
 
     /**
-     * Создаёт эластичный spacer для раздвигания footer/meta блоков.
+     * Creates a flexible spacer that separates footer/meta blocks.
      *
-     * @return region с grow priority
+     * @return region with grow priority
      */
     private static Region createFlexibleSpacer() {
         Region spacer = new Region();
@@ -674,10 +674,10 @@ public class MessageBubbleFactory {
     }
 
     /**
-     * Создаёт label с именем отправителя над входящим сообщением.
+     * Creates the sender-name label above an incoming message.
      *
-     * @param senderName отображаемое имя отправителя
-     * @return стилизованный label имени
+     * @param senderName sender name to display
+     * @return styled name label
      */
     private static Label createSenderNameLabel(String senderName) {
         Label nameLabel = new Label(UnicodeTextUtils.sanitizeForJavaFxDisplay(senderName));
@@ -721,10 +721,10 @@ public class MessageBubbleFactory {
     }
 
     /**
-     * Создаёт общий footer bubble с заданным направлением выравнивания.
+     * Creates the common bubble footer with the requested alignment.
      *
-     * @param alignment выравнивание footer
-     * @return HBox footer-контейнер
+     * @param alignment footer alignment
+     * @return HBox footer container
      */
     private static HBox createFooter(Pos alignment) {
         HBox footer = new HBox(FOOTER_SPACING);
@@ -734,11 +734,11 @@ public class MessageBubbleFactory {
     }
 
     /**
-     * Формирует footer входящего сообщения: кнопка реакции, bar реакций и meta-данные.
+     * Builds the incoming-message footer: reaction button, reaction bar, and meta data.
      *
-     * @param msg входящее сообщение
-     * @param reactionBar готовая панель реакций или {@code null}
-     * @return footer входящего bubble
+     * @param msg incoming message
+     * @param reactionBar prepared reaction bar, or {@code null}
+     * @return incoming bubble footer
      */
     private HBox buildIncomingFooter(MeshMessage msg, HBox reactionSlot, HBox meta) {
         HBox footer = createFooter(Pos.CENTER_LEFT);
@@ -752,11 +752,11 @@ public class MessageBubbleFactory {
     }
 
     /**
-     * Формирует footer исходящего сообщения: реакции слева и статус/время справа.
+     * Builds the outgoing-message footer: reactions on the left, status/time on the right.
      *
-     * @param msg исходящее сообщение
-     * @param reactionBar готовая панель реакций или {@code null}
-     * @return footer исходящего bubble
+     * @param msg outgoing message
+     * @param reactionBar prepared reaction bar, or {@code null}
+     * @return outgoing bubble footer
      */
     private HBox buildOutgoingFooter(MeshMessage msg, HBox reactionSlot, HBox meta) {
         HBox footer = createFooter(Pos.CENTER_RIGHT);
@@ -769,10 +769,10 @@ public class MessageBubbleFactory {
     }
 
     /**
-     * Вешает double-click обработчик для быстрого ответа на сообщение.
+     * Installs a double-click handler for quick reply.
      *
-     * @param content bubble-контент
-     * @param msg сообщение, на которое будет создан reply
+     * @param content bubble content
+     * @param msg message that will be replied to
      */
     private void attachReplyOnDoubleClick(VBox content, MeshMessage msg) {
         content.setOnMouseClicked(e -> {
@@ -785,10 +785,10 @@ public class MessageBubbleFactory {
     }
 
     /**
-     * Определяет, нужно ли подсветить входящее сообщение как mention локального пользователя.
+     * Decides whether an incoming message should be highlighted as a mention of the local user.
      *
-     * @param msg входящее сообщение
-     * @return {@code true}, если текст содержит имя локальной ноды или это reply на исходящее
+     * @param msg incoming message
+     * @return {@code true} when the text names the local node or replies to an outgoing message
      */
     private boolean isMentioningMe(MeshMessage msg) {
         return Optional.ofNullable(state)
@@ -797,10 +797,10 @@ public class MessageBubbleFactory {
     }
 
     /**
-     * Проверяет текстовое упоминание по longName и shortName локальной ноды.
+     * Checks text mentions against the local node's longName and shortName.
      *
-     * @param msg входящее сообщение
-     * @return {@code true}, если в тексте найдено имя локальной ноды
+     * @param msg incoming message
+     * @return {@code true} if the local node name is found in the text
      */
     private boolean messageMentionsLocalUser(MeshMessage msg) {
         NodeData myNode = state.getNodeDb().get(state.getMyNodeNum());
@@ -814,10 +814,10 @@ public class MessageBubbleFactory {
     }
 
     /**
-     * Проверяет, является ли сообщение ответом на одно из наших исходящих сообщений.
+     * Checks whether the message replies to one of our outgoing messages.
      *
-     * @param msg входящее сообщение
-     * @return {@code true}, если reply target найден в БД и он исходящий
+     * @param msg incoming message
+     * @return {@code true} if the reply target is found in the database and is outgoing
      */
     private boolean isReplyToOutgoingMessage(MeshMessage msg) {
         return Optional.of(msg.getReplyId())
@@ -846,21 +846,21 @@ public class MessageBubbleFactory {
     }
 
     /**
-     * Нормализует текст для регистронезависимых поисков mention-подстрок.
+     * Normalizes text for case-insensitive mention substring searches.
      *
-     * @param value исходный текст
-     * @return lower-case строка или пустая строка
+     * @param value source text
+     * @return lower-case string, or an empty string
      */
     private static String normalizeText(String value) {
         return value == null ? "" : value.toLowerCase(Locale.ROOT);
     }
 
     /**
-     * Проверяет вхождение уже нормализованного имени в уже нормализованный текст.
+     * Checks whether an already normalized name appears in already normalized text.
      *
-     * @param normalizedText текст сообщения в lower-case
-     * @param candidate имя ноды в исходном виде
-     * @return {@code true}, если имя найдено как подстрока
+     * @param normalizedText message text in lower case
+     * @param candidate node name in its original form
+     * @return {@code true} if the name is found as a substring
      */
     private static boolean containsNormalizedText(String normalizedText, String candidate) {
         return candidate != null
@@ -869,9 +869,9 @@ public class MessageBubbleFactory {
     }
 
     /**
-     * Добавляет quote preview только для reply-сообщений.
+     * Adds a quote preview for reply messages only.
      *
-     * @param msg сообщение
+     * @param msg message
      */
     private Optional<Node> createQuoteNode(MeshMessage msg) {
         return Optional.ofNullable(msg.getReplyText())
@@ -885,22 +885,22 @@ public class MessageBubbleFactory {
     }
 
     /**
-     * Добавляет основной текст сообщения в bubble.
+     * Adds the main message text to the bubble.
      *
-     * @param msg сообщение
+     * @param msg message
      */
     private Node createTextNode(MeshMessage msg) {
         return createBubbleTextFlow(msg.getText(), MESSAGE_TEXT_EMOJI_SIZE, "chat-bubble-text-node", "chat-bubble-text");
     }
 
     /**
-     * Создаёт единый {@link TextFlow} для текста сообщения и цитаты.
+     * Creates a single {@link TextFlow} for message text and quote text.
      *
-     * @param text исходный текст
-     * @param emojiSize размер emoji
-     * @param textStyleClass css-класс текстовых нод внутри flow
-     * @param styleClass css-класс самого flow
-     * @return настроенный {@link TextFlow}
+     * @param text source text
+     * @param emojiSize emoji size
+     * @param textStyleClass CSS class for text nodes inside the flow
+     * @param styleClass CSS class for the flow itself
+     * @return configured {@link TextFlow}
      */
     private static TextFlow createBubbleTextFlow(String text,
                                                  double emojiSize,
@@ -960,11 +960,11 @@ public class MessageBubbleFactory {
     }
 
     /**
-     * Биндит ширину bubble с поправкой на наличие reaction bar.
+     * Binds bubble width, accounting for the presence of a reaction bar.
      *
-     * @param content bubble-контент
-     * @param hasReactions есть ли бар реакций
-     * @param defaultWidthRatio базовая доля ширины контейнера
+     * @param content bubble content
+     * @param hasReactions whether a reaction bar is present
+     * @param defaultWidthRatio base fraction of the container width
      */
     private void bindBubbleWidth(VBox content, boolean hasReactions, double defaultWidthRatio) {
         double widthRatio = hasReactions ? REACTION_BUBBLE_WIDTH_RATIO : defaultWidthRatio;
@@ -983,10 +983,10 @@ public class MessageBubbleFactory {
     }
 
     /**
-     * Строит панель реакций из уже агрегированных reaction summary.
+     * Builds a reaction bar from already aggregated reaction summaries.
      *
-     * @param msg сообщение
-     * @return bar реакций или {@code null}, если отображать нечего
+     * @param msg message
+     * @return reaction bar, or {@code null} when there is nothing to display
      */
     private HBox buildReactionsBar(MeshMessage msg) {
         List<ChatReactionHelper.ReactionSummary> reactionSummaries =
@@ -1010,12 +1010,12 @@ public class MessageBubbleFactory {
     }
 
     /**
-     * Создаёт один reaction-chip: emoji, count, tooltip и click-state.
+     * Creates one reaction chip: emoji, count, tooltip, and click state.
      *
-     * @param msg сообщение-владелец чипа
-     * @param reactionAvailable можно ли отправлять реакцию повторным кликом
-     * @param summary агрегированные данные реакции
-     * @return один UI-чип реакции
+     * @param msg message that owns the chip
+     * @param reactionAvailable whether another click may send a reaction
+     * @param summary aggregated reaction data
+     * @return one UI reaction chip
      */
     private HBox buildReactionChip(MeshMessage msg,
                                    boolean reactionAvailable,
@@ -1045,12 +1045,12 @@ public class MessageBubbleFactory {
     }
 
     /**
-     * Назначает визуальное состояние чипа: own-style или click handler для повторной реакции.
+     * Applies chip visual state: own-style or click handler for sending another reaction.
      *
-     * @param chip ui-чип реакции
-     * @param msg сообщение-владелец
-     * @param reactionAvailable доступна ли отправка реакции
-     * @param summary агрегированные данные реакции
+     * @param chip UI reaction chip
+     * @param msg owning message
+     * @param reactionAvailable whether sending a reaction is available
+     * @param summary aggregated reaction data
      */
     private void applyReactionChipState(HBox chip,
                                         MeshMessage msg,
@@ -1076,10 +1076,10 @@ public class MessageBubbleFactory {
     }
 
     /**
-     * Устанавливает tooltip только если в нём есть полезный текст.
+     * Installs a tooltip only when it has useful text.
      *
-     * @param node узел, на который ставится tooltip
-     * @param tooltipText текст tooltip
+     * @param node node that receives the tooltip
+     * @param tooltipText tooltip text
      */
     private static void installTooltip(Node node, String tooltipText) {
         Optional.ofNullable(tooltipText)
@@ -1089,9 +1089,9 @@ public class MessageBubbleFactory {
     }
 
     /**
-     * Собирает meta-блок входящего сообщения: hops/сигнал и время.
+     * Builds the incoming-message meta block: hops/signal and time.
      *
-     * @param msg входящее сообщение
+     * @param msg incoming message
      * @return meta container
      */
     private HBox buildIncomingMeta(MeshMessage msg, HBox routingMetaSlot) {
@@ -1104,9 +1104,9 @@ public class MessageBubbleFactory {
     }
 
     /**
-     * Собирает meta-блок исходящего сообщения: время и индикатор доставки.
+     * Builds the outgoing-message meta block: time and delivery indicator.
      *
-     * @param msg исходящее сообщение
+     * @param msg outgoing message
      * @return meta container
      */
     private HBox buildOutgoingMeta(MeshMessage msg, Label statusLabel) {
@@ -1120,9 +1120,9 @@ public class MessageBubbleFactory {
     }
 
     /**
-     * Создаёт общий контейнер meta-информации bubble.
+     * Creates the common bubble metadata container.
      *
-     * @return HBox для времени, статуса и route metrics
+     * @return HBox for time, status, and route metrics
      */
     private static HBox createMetaBox() {
         HBox meta = new HBox(MESSAGE_ROW_SPACING);
@@ -1132,10 +1132,10 @@ public class MessageBubbleFactory {
     }
 
     /**
-     * Подбирает вторичный meta-индикатор: либо hops, либо сигнал, либо ничего.
+     * Chooses the secondary meta indicator: hops, signal, or nothing.
      *
-     * @param msg входящее сообщение
-     * @return узел meta-индикатора, если данные доступны
+     * @param msg incoming message
+     * @return meta-indicator node when data is available
      */
     private Optional<HBox> createRoutingMetaNode(MeshMessage msg) {
         int hops = msg.getHopsTraveled();
@@ -1147,11 +1147,11 @@ public class MessageBubbleFactory {
     }
 
     /**
-     * Создаёт компактный meta-элемент из emoji и текстового значения.
+     * Creates a compact meta item from an emoji and a text value.
      *
-     * @param emoji emoji-иконка
-     * @param value текст индикатора
-     * @return HBox с иконкой и значением
+     * @param emoji emoji icon
+     * @param value indicator text
+     * @return HBox with icon and value
      */
     private static HBox createMetaIndicator(String emoji, String value) {
         HBox indicator = new HBox(META_INDICATOR_SPACING);
@@ -1162,10 +1162,10 @@ public class MessageBubbleFactory {
     }
 
     /**
-     * Форматирует RSSI/SNR в одну короткую строку для meta-блока.
+     * Formats RSSI/SNR into one compact string for the meta block.
      *
-     * @param msg входящее сообщение
-     * @return строка вида {@code -90dBm/12.4dB}
+     * @param msg incoming message
+     * @return string such as {@code -90dBm/12.4dB}
      */
     private static String formatSignalMetrics(MeshMessage msg) {
         String snrStr = msg.getRxSnr() == (int) msg.getRxSnr()
@@ -1175,10 +1175,10 @@ public class MessageBubbleFactory {
     }
 
     /**
-     * Создаёт кнопку выбора реакции и привязывает popup только когда сообщение имеет packet id.
+     * Creates the reaction button and attaches the popup only when the message has a packet id.
      *
-     * @param msg сообщение
-     * @return кнопка реакции
+     * @param msg message
+     * @return reaction button
      */
     private Button buildReactionButton(MeshMessage msg) {
         return isReactionAvailable(msg)
@@ -1206,9 +1206,9 @@ public class MessageBubbleFactory {
     }
 
     /**
-     * Создаёт базовую кнопку реакции без состояния enabled/disabled.
+     * Creates the base reaction button before enabled/disabled state is applied.
      *
-     * @return кнопка с emoji-иконкой
+     * @return button with an emoji icon
      */
     private static Button createReactionButton() {
         Button reactionButton = new Button();
@@ -1219,9 +1219,9 @@ public class MessageBubbleFactory {
     }
 
     /**
-     * Переводит кнопку реакции в disabled-состояние с поясняющим tooltip.
+     * Disables the reaction button and adds an explanatory tooltip.
      *
-     * @param reactionButton кнопка реакции
+     * @param reactionButton reaction button
      */
     private static void disableReactionButton(Button reactionButton) {
         reactionButton.getStyleClass().add("chat-reaction-btn-disabled");
@@ -1230,20 +1230,20 @@ public class MessageBubbleFactory {
     }
 
     /**
-     * Проверяет, можно ли отправить реакцию на сообщение.
+     * Checks whether a reaction can be sent for the message.
      *
-     * @param msg сообщение
-     * @return {@code true}, если есть packet id
+     * @param msg message
+     * @return {@code true} when a packet id is present
      */
     private static boolean isReactionAvailable(MeshMessage msg) {
         return msg.getPacketId() != ZERO_VALUE;
     }
 
     /**
-     * Переключает popup реакций по клику на кнопку.
+     * Toggles the reaction popup from the reaction button click.
      *
-     * @param anchor кнопка-источник
-     * @param popup popup выбора реакции
+     * @param anchor source button
+     * @param popup reaction picker popup
      */
     private void toggleReactionPopup(Button anchor, Popup popup) {
         Runnable action = popup.isShowing() ? popup::hide : () -> showReactionPopup(anchor, popup);
@@ -1251,10 +1251,10 @@ public class MessageBubbleFactory {
     }
 
     /**
-     * Создаёт popup-пикер реакций с фиксированными строками emoji.
+     * Creates a reaction picker popup with fixed emoji rows.
      *
-     * @param msg сообщение, к которому относится popup
-     * @return настроенный popup выбора реакции
+     * @param msg message that owns the popup
+     * @return configured reaction picker popup
      */
     private Popup buildReactionPopup(MeshMessage msg) {
         VBox picker = new VBox(REACTION_POPUP_SPACING);
@@ -1279,12 +1279,12 @@ public class MessageBubbleFactory {
     }
 
     /**
-     * Строит одну строку popup-пикера из набора emoji.
+     * Builds one picker row from an emoji set.
      *
-     * @param msg сообщение
-     * @param popup popup, который надо закрыть после выбора
-     * @param emojiRow строка emoji
-     * @return HBox одной строки picker-а
+     * @param msg message
+     * @param popup popup to close after selection
+     * @param emojiRow emoji row
+     * @return HBox for one picker row
      */
     private HBox buildReactionPopupRow(MeshMessage msg, Popup popup, List<String> emojiRow) {
         HBox row = new HBox(REACTION_POPUP_SPACING);
@@ -1296,12 +1296,12 @@ public class MessageBubbleFactory {
     }
 
     /**
-     * Создаёт кнопку отдельной emoji-реакции внутри popup.
+     * Creates the button for one emoji reaction inside the popup.
      *
-     * @param msg сообщение
-     * @param popup popup для скрытия после выбора
-     * @param emoji выбранная emoji
-     * @return кнопка picker-а
+     * @param msg message
+     * @param popup popup to hide after selection
+     * @param emoji selected emoji
+     * @return picker button
      */
     private Button buildReactionPopupButton(MeshMessage msg, Popup popup, String emoji) {
         Button emojiButton = new Button();
@@ -1321,10 +1321,10 @@ public class MessageBubbleFactory {
     }
 
     /**
-     * Показывает popup под кнопкой реакции и синхронизирует тему с текущей сценой.
+     * Shows the popup below the reaction button and syncs its theme with the current scene.
      *
-     * @param anchor кнопка-якорь
-     * @param popup popup выбора реакции
+     * @param anchor anchor button
+     * @param popup reaction picker popup
      */
     private void showReactionPopup(Button anchor, Popup popup) {
         Optional.ofNullable(openReactionPopup)
@@ -1342,10 +1342,10 @@ public class MessageBubbleFactory {
     }
 
     /**
-     * Копирует в popup светлую тему, если корневая сцена сейчас в light-mode.
+     * Copies the light theme into the popup when the root scene is in light mode.
      *
-     * @param anchor кнопка-якорь
-     * @param popup popup выбора реакции
+     * @param anchor anchor button
+     * @param popup reaction picker popup
      */
     private void syncReactionPopupTheme(Button anchor, Popup popup) {
         popup.getContent().stream()
@@ -1372,11 +1372,11 @@ public class MessageBubbleFactory {
     }
 
     /**
-     * Создаёт emoji-узел с fallback на текст, если PNG-ресурс не найден.
+     * Creates an emoji node with a text fallback when the PNG resource is missing.
      *
-     * @param emoji emoji-символ
-     * @param size желаемый размер
-     * @return {@link ImageView} или {@link Label}
+     * @param emoji emoji character
+     * @param size desired size
+     * @return {@link ImageView} or {@link Label}
      */
     private static Node createEmojiNode(String emoji, double size) {
         double scaledSize = TypographyManager.scaleChat(size);
@@ -1394,10 +1394,10 @@ public class MessageBubbleFactory {
     }
 
     /**
-     * Создаёт label времени сообщения в принятом для чата формате.
+     * Creates the message-time label in the chat's standard format.
      *
-     * @param timestamp epoch seconds сообщения
-     * @return label времени
+     * @param timestamp message timestamp in epoch seconds
+     * @return time label
      */
     private static Label createTimeLabel(long timestamp) {
         Label timeLabel = new Label(ChatTimeFormatter.formatMessageTime(timestamp));
@@ -1406,10 +1406,10 @@ public class MessageBubbleFactory {
     }
 
     /**
-     * Создаёт label статуса доставки и регистрирует его для live-обновления pending-ACK.
+     * Creates the delivery-status label and registers it for live pending-ACK updates.
      *
-     * @param msg исходящее сообщение
-     * @return label статуса, если у сообщения есть status
+     * @param msg outgoing message
+     * @return status label when the message has a status
      */
     private Optional<Label> createStatusLabel(MeshMessage msg) {
         return Optional.ofNullable(msg.getStatus())
@@ -1462,11 +1462,11 @@ public class MessageBubbleFactory {
     }
 
     /**
-     * Навешивает контекстное меню входящего сообщения с reply/delete действиями.
+     * Attaches the incoming-message context menu with reply/delete actions.
      *
-     * @param content bubble-контент
-     * @param msg сообщение
-     * @param row строка чата
+     * @param content bubble content
+     * @param msg message
+     * @param row chat row
      */
     private void attachIncomingContextMenu(VBox content, MeshMessage msg, HBox row) {
         installContextMenu(content, () -> new ContextMenu(
@@ -1478,11 +1478,11 @@ public class MessageBubbleFactory {
     }
 
     /**
-     * Навешивает упрощённое контекстное меню без reply/trace действий.
+     * Attaches a simplified context menu without reply/trace actions.
      *
-     * @param content bubble-контент
-     * @param msg сообщение
-     * @param row строка чата
+     * @param content bubble content
+     * @param msg message
+     * @param row chat row
      */
     private void attachCopyDeleteMenu(VBox content, MeshMessage msg, HBox row) {
         installContextMenu(content, () -> new ContextMenu(
@@ -1493,11 +1493,11 @@ public class MessageBubbleFactory {
     }
 
     /**
-     * Создаёт элемент контекстного меню и связывает его с runnable-действием.
+     * Creates a context-menu item and binds it to a runnable action.
      *
-     * @param title заголовок menu item
-     * @param action действие по клику
-     * @return настроенный item меню
+     * @param title menu-item title
+     * @param action click action
+     * @return configured menu item
      */
     private static MenuItem createMenuItem(String title, Runnable action) {
         MenuItem menuItem = new MenuItem(title);
@@ -1506,10 +1506,10 @@ public class MessageBubbleFactory {
     }
 
     /**
-     * Привязывает лениво создаваемое контекстное меню к bubble-контенту.
+     * Attaches a lazily created context menu to bubble content.
      *
-     * @param content bubble-контент
-     * @param menuSupplier фабрика меню действий
+     * @param content bubble content
+     * @param menuSupplier action-menu factory
      */
     private static void installContextMenu(VBox content, Supplier<ContextMenu> menuSupplier) {
         AtomicReference<ContextMenu> menuRef = new AtomicReference<>();
@@ -1522,9 +1522,9 @@ public class MessageBubbleFactory {
     }
 
     /**
-     * Копирует текст сообщения в системный clipboard.
+     * Copies message text to the system clipboard.
      *
-     * @param text текст сообщения
+     * @param text message text
      */
     private static void copyText(String text) {
         Optional.ofNullable(text)

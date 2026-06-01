@@ -3,8 +3,8 @@ package com.meshtastic.client.components;
 import java.util.*;
 
 /**
- * Статические данные эмодзи: категории, символы, ключевые слова для поиска.
- * ~240 наиболее популярных эмодзи (без вариантов тона кожи, без флагов).
+ * Static emoji catalog: categories, symbols, and search keywords.
+ * The list contains roughly 240 common emoji, excluding skin-tone variants and flags.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -12,7 +12,7 @@ public class EmojiData {
 
     private EmojiData() {} // utility class
 
-    /** Категория эмодзи */
+    /** Emoji category shown by the picker. */
     public record Category(String id, String icon, List<String> emojis) {
         public String labelKey() {
             return "emoji.category." + id;
@@ -110,11 +110,11 @@ public class EmojiData {
         ))
     );
 
-    // Ключевые слова для поиска (русский)
+    // Search keywords are intentionally Russian; Unicode names cover English queries.
     private static final Map<String, List<String>> KEYWORDS;
     static {
         Map<String, List<String>> m = new HashMap<>();
-        // Смайлики
+        // Smileys.
         m.put("😀", List.of("улыбка", "радость", "смайл"));
         m.put("😃", List.of("улыбка", "глаза", "радость"));
         m.put("😄", List.of("улыбка", "смех", "счастье"));
@@ -213,7 +213,7 @@ public class EmojiData {
         m.put("👾", List.of("монстр", "игра", "пиксель"));
         m.put("🤖", List.of("робот", "бот", "машина"));
 
-        // Люди / жесты
+        // People and gestures.
         m.put("👋", List.of("привет", "пока", "рука"));
         m.put("🤚", List.of("ладонь", "стоп", "рука"));
         m.put("✋", List.of("стоп", "ладонь", "пять"));
@@ -243,7 +243,7 @@ public class EmojiData {
         m.put("👅", List.of("язык", "вкус"));
         m.put("💋", List.of("поцелуй", "губы", "след"));
 
-        // Природа
+        // Nature.
         m.put("🐶", List.of("собака", "пёс", "щенок"));
         m.put("🐱", List.of("кот", "кошка", "котик"));
         m.put("🐭", List.of("мышь", "мышка"));
@@ -296,7 +296,7 @@ public class EmojiData {
         m.put("🌙", List.of("луна", "месяц", "ночь"));
         m.put("🔥", List.of("огонь", "жара", "горячо", "пламя"));
 
-        // Еда
+        // Food.
         m.put("🍎", List.of("яблоко", "красное", "фрукт"));
         m.put("🍊", List.of("апельсин", "мандарин", "фрукт"));
         m.put("🍋", List.of("лимон", "кислый"));
@@ -342,7 +342,7 @@ public class EmojiData {
         m.put("🥂", List.of("шампанское", "тост", "бокалы"));
         m.put("🍷", List.of("вино", "бокал", "красное"));
 
-        // Путешествия
+        // Travel.
         m.put("🚗", List.of("машина", "автомобиль", "авто"));
         m.put("🚌", List.of("автобус", "транспорт"));
         m.put("🚑", List.of("скорая", "помощь"));
@@ -368,7 +368,7 @@ public class EmojiData {
         m.put("🌠", List.of("падающая звезда", "желание"));
         m.put("🎆", List.of("фейерверк", "салют", "праздник"));
 
-        // Активности
+        // Activities.
         m.put("⚽", List.of("футбол", "мяч"));
         m.put("🏀", List.of("баскетбол", "мяч"));
         m.put("🏈", List.of("американский футбол", "мяч"));
@@ -397,7 +397,7 @@ public class EmojiData {
         m.put("🎉", List.of("хлопушка", "праздник", "ура"));
         m.put("🎈", List.of("шарик", "воздушный", "праздник"));
 
-        // Объекты
+        // Objects.
         m.put("📱", List.of("телефон", "смартфон", "мобильный"));
         m.put("💻", List.of("ноутбук", "компьютер"));
         m.put("⌨️", List.of("клавиатура", "ввод"));
@@ -428,7 +428,7 @@ public class EmojiData {
         m.put("⚔️", List.of("мечи", "битва", "бой"));
         m.put("🔫", List.of("пистолет", "водяной"));
 
-        // Символы
+        // Symbols.
         m.put("❤️", List.of("сердце", "красное", "любовь"));
         m.put("🧡", List.of("сердце", "оранжевое"));
         m.put("💛", List.of("сердце", "жёлтое", "дружба"));
@@ -490,17 +490,17 @@ public class EmojiData {
 
     public static List<Category> getCategories() { return CATEGORIES; }
 
-    /** Множество всех известных эмодзи для быстрого поиска. */
+    /** Complete emoji set used for quick lookup. */
     public static Set<String> getAllEmojis() { return ALL_EMOJIS; }
 
     /**
-     * Поиск эмодзи по русским ключевым словам и английским Unicode-именам (substring match).
-     * Возвращает уникальные эмодзи в порядке категорий.
+     * Searches emoji by Russian keywords and English Unicode names using substring matching.
+     * Results are unique and keep category order.
      */
     public static List<String> search(String query) {
         if (query == null || query.isBlank()) { return List.of(); }
         String q = query.toLowerCase(java.util.Locale.ROOT).trim();
-        // Собираем все emoji из всех категорий в порядке их расположения
+        // Walk categories in display order and keep the first occurrence of each emoji.
         List<String> results = new ArrayList<>();
         Set<String> seen = new HashSet<>();
         for (Category cat : CATEGORIES) {

@@ -24,15 +24,16 @@ import java.util.function.Consumer;
 import com.meshtastic.client.service.MessageDbService;
 
 /**
- * Центральное хранилище состояния подключённого Meshtastic-устройства.
+ * Central state store for a connected Meshtastic device.
  * <p>
- * Содержит базу нод, каналы, конфиги, сообщения (канальные и личные),
- * телеметрию и ожидающие подтверждения ACK. Каждое TCP-соединение получает свой экземпляр
- * {@code DeviceState} через {@link com.meshtastic.client.service.ConnectionManager}.
+ * Contains the node database, channels, configuration, channel and direct
+ * messages, telemetry, and pending ACK tracking. Each TCP connection receives
+ * its own {@code DeviceState} through
+ * {@link com.meshtastic.client.service.ConnectionManager}.
  * <p>
- * После рефакторинга: делегирует большую часть операций компонентам
- * ({@link NodeDatabase}, {@link ChannelStore}, {@link ConfigStore}, {@link MessageStore}).
- * UI-обновления выполняются через {@code Platform.runLater()}.
+ * After refactoring, most operations are delegated to components:
+ * {@link NodeDatabase}, {@link ChannelStore}, {@link ConfigStore}, and
+ * {@link MessageStore}. UI updates are performed through {@code Platform.runLater()}.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -40,40 +41,40 @@ public class DeviceState {
 
     private static final Logger log = LoggerFactory.getLogger(DeviceState.class);
 
-    /** Таймаут ожидания ACK: DM без ACK получателя остаётся отправленным, каналы получают FAILED. */
+    /** ACK wait timeout: DMs without recipient ACK stay sent, while channels become FAILED. */
     private static final long ACK_TIMEOUT_MS = 240_000;
-    /** Интервал проверки просроченных pending ACK */
+    /** Interval for checking expired pending ACKs. */
     private static final long ACK_SWEEP_INTERVAL_MS = 10_000;
 
     // ═══════════════════════════════════════════════════════════
-    //  Компоненты состояния (новая архитектура)
+    // State components in the newer architecture.
     // ═══════════════════════════════════════════════════════════
 
-    /** Управление узлами сети */
+    /** Network node management. */
     private final NodeDatabase nodeDatabase = new NodeDatabase();
 
-    /** Управление каналами */
+    /** Channel management. */
     private final ChannelStore channelStore = new ChannelStore();
 
-    /** Управление конфигурацией */
+    /** Configuration management. */
     private final ConfigStore configStore = new ConfigStore();
 
-    /** Управление сообщениями и ACK */
+    /** Message and ACK management. */
     private final MessageStore messageStore = new MessageStore();
 
     // ═══════════════════════════════════════════════════════════
-    //  Message DB Service (для сохранения сообщений)
+    // Message DB service used for persistence.
     // ═══════════════════════════════════════════════════════════
 
     private final MessageDbService messageDbService;
 
     // ═══════════════════════════════════════════════════════════
-    //  Специфичные для DeviceState поля (не вынесены в компоненты)
+    // Fields specific to DeviceState that have not been moved into components.
     // ═══════════════════════════════════════════════════════════
 
     private volatile int myNodeNum;
 
-    /** Pending packet ACK waiters для generic (non-chat) пакетов */
+    /** Pending packet ACK waiters for generic non-chat packets. */
     private final ConcurrentHashMap<Integer, CompletableFuture<MeshProtos.Routing.Error>> pendingPacketAcks =
             new ConcurrentHashMap<>();
 
@@ -83,7 +84,7 @@ public class DeviceState {
         return t;
     });
 
-    /** История телеметрии (последние MAX_TELEMETRY_HISTORY записей). */
+    /** Telemetry history, limited to the last MAX_TELEMETRY_HISTORY entries. */
     private static final int MAX_TELEMETRY_HISTORY = 200;
     private final List<TelemetryEntry> telemetryHistory = new LinkedList<>();
     private final CopyOnWriteArrayList<Runnable> telemetryListeners = new CopyOnWriteArrayList<>();
@@ -111,7 +112,7 @@ public class DeviceState {
     }
 
     // ═══════════════════════════════════════════════════════════
-    //  Getters/Setters для компонентов (для backward compatibility)
+    // Component getters/setters kept for backward compatibility.
     // ═══════════════════════════════════════════════════════════
 
     public NodeDatabase getNodeDatabase() { return nodeDatabase; }
@@ -127,14 +128,14 @@ public class DeviceState {
     public void setMyNodeNum(int myNodeNum) { this.myNodeNum = myNodeNum; }
 
     /**
-     * Возвращает внутренний map узлов (для backward compatibility).
+     * Returns the internal node map for backward compatibility.
      *
      * @return {@code ConcurrentHashMap<Integer, NodeData>}
      */
     public ConcurrentHashMap<Integer, NodeData> getNodeDb() { return nodeDatabase.getNodeDb(); }
 
     /**
-     * Возвращает ноду из базы или создаёт новую атомарно.
+     * Returns a node from the database, or creates it atomically.
      */
     public NodeData getOrCreateNode(int nodeNum) {
         return nodeDatabase.getOrCreateNode(nodeNum);
@@ -147,7 +148,7 @@ public class DeviceState {
     }
 
     /**
-     * Обновить канал по индексу. Если канал с таким индексом есть — заменить, иначе добавить.
+     * Updates a channel by index. Existing channels are replaced; missing ones are added.
      */
     public void updateChannel(ChannelProtos.Channel channel) {
         channelStore.updateChannel(channel);
@@ -171,7 +172,7 @@ public class DeviceState {
     }
 
     /**
-     * Найти первый свободный слот для SECONDARY канала (индексы 1-7).
+     * Finds the first free slot for a SECONDARY channel, using indexes 1-7.
      */
     public int findFirstAvailableChannelSlot() {
         return channelStore.findFirstAvailableChannelSlot();
@@ -221,7 +222,7 @@ public class DeviceState {
     public void removeTelemetryListener(Runnable listener) { telemetryListeners.remove(listener); }
 
     /**
-     * Добавляет запись телеметрии в историю.
+     * Adds a telemetry entry to history.
      */
     public void addTelemetryEntry(TelemetryEntry entry) {
         synchronized (telemetryHistory) {
@@ -240,7 +241,7 @@ public class DeviceState {
     }
 
     /**
-     * Загружает архивные записи телеметрии в начало истории.
+     * Loads archived telemetry entries at the beginning of history.
      */
     public void prependTelemetryHistory(List<TelemetryEntry> archived) {
         if (archived == null || archived.isEmpty()) { return; }
@@ -262,12 +263,12 @@ public class DeviceState {
     }
 
     /**
-     * Добавляет канальное сообщение с дедупликацией по {@code packetId}.
-     * Сохраняет сообщение в БД сразу после добавления.
+     * Adds a channel message with {@code packetId} deduplication.
+     * Saves the message to the database immediately after adding it.
      */
     public void addMessage(MeshMessage msg) {
         messageStore.addMessage(msg);
-        // Сохраняем в БД
+            // Save to the database.
         String ownerNodeId = getOwnerNodeId();
         if (ownerNodeId != null && msg.getPacketId() > 0) {
             messageDbService.save(msg, "channel", String.valueOf(msg.getChannelIndex()), ownerNodeId);
@@ -284,12 +285,12 @@ public class DeviceState {
     }
 
     /**
-     * Добавляет личное (DM) сообщение с дедупликацией по {@code packetId}.
-     * Сохраняет сообщение в БД сразу после добавления.
+     * Adds a direct message with {@code packetId} deduplication.
+     * Saves the message to the database immediately after adding it.
      */
     public void addDirectMessage(MeshMessage msg, String peerNodeId) {
         messageStore.addDirectMessage(msg, peerNodeId);
-        // Сохраняем в БД
+            // Save to the database.
         String ownerNodeId = getOwnerNodeId();
         if (ownerNodeId != null && msg.getPacketId() > 0) {
             messageDbService.save(msg, "dm", peerNodeId, ownerNodeId);
@@ -313,13 +314,13 @@ public class DeviceState {
         messageStore.removeDirectMessages(peerNodeId);
     }
 
-    /** Удалить ноду из nodeDb и directMessages. */
+    /** Removes a node from nodeDb and directMessages. */
     public void removeNode(int nodeNum) {
         nodeDatabase.removeNode(nodeNum);
     }
 
     /**
-     * Найти ноду по node_id (перебор nodeDb.values()).
+     * Finds a node by node_id by scanning nodeDb values.
      */
     public NodeData getNodeByNodeId(String nodeId) {
         return nodeDatabase.getNodeByNodeId(nodeId);
@@ -334,21 +335,21 @@ public class DeviceState {
     // ═══════════════════════════════════════════════════════════
 
     /**
-     * Регистрирует исходящее сообщение для отслеживания ACK/NAK.
+     * Registers an outgoing message for ACK/NAK tracking.
      */
     public void registerPendingAck(int packetId, MeshMessage msg) {
         messageStore.registerPendingAck(packetId, msg);
     }
 
     /**
-     * Извлекает и удаляет сообщение из очереди ожидающих ACK.
+     * Retrieves and removes a message from the pending ACK queue.
      */
     public MeshMessage resolvePendingAck(int packetId) {
         return messageStore.resolvePendingAck(packetId);
     }
 
     /**
-     * Регистрирует generic ACK waiter для не-чатовых пакетов.
+     * Registers a generic ACK waiter for non-chat packets.
      */
     public CompletableFuture<MeshProtos.Routing.Error> registerPendingPacketAck(int packetId) {
         CompletableFuture<MeshProtos.Routing.Error> future = new CompletableFuture<>();
@@ -358,7 +359,7 @@ public class DeviceState {
     }
 
     /**
-     * Завершает generic ACK waiter для не-чатового пакета.
+     * Completes a generic ACK waiter for a non-chat packet.
      */
     public boolean completePendingPacketAck(int packetId, MeshProtos.Routing.Error error) {
         CompletableFuture<MeshProtos.Routing.Error> future = pendingPacketAcks.remove(packetId);
@@ -370,10 +371,10 @@ public class DeviceState {
     }
 
     /**
-     * Помечает все ожидающие ACK сообщения как FAILED с указанной причиной.
+     * Marks all pending-ACK messages as FAILED with the given reason.
      */
     public void failAllPendingAcks(String reason) {
-        // Обновляем статус в БД для каждого сообщения
+        // Update each message status in the database.
         messageStore.failAllPendingAcksWithDbUpdate(reason, (packetId, msg) -> {
             if (msg != null) {
                 messageDbService.updateStatus(packetId, msg.getStatus(), msg.getErrorReason());
@@ -383,7 +384,7 @@ public class DeviceState {
     }
 
     /**
-     * Завершает все generic ACK waiter-ы ошибкой disconnect/cleanup.
+     * Completes all generic ACK waiters with a disconnect/cleanup error.
      */
     public void failAllPendingPacketAcks(String reason) {
         if (pendingPacketAcks.isEmpty()) { return; }
@@ -397,22 +398,22 @@ public class DeviceState {
     }
 
     /**
-     * Останавливает фоновый поток проверки таймаутов ACK.
+     * Stops the background thread that checks ACK timeouts.
      */
     public void shutdown() {
         ackTimeoutExecutor.shutdownNow();
     }
 
     /**
-     * Ищет сообщение по {@code packetId} в памяти, затем в БД.
+     * Finds a message by {@code packetId}, checking memory first and then the database.
      */
     public MeshMessage findMessageByPacketId(int packetId) {
-        // Сначала ищем в памяти
+        // Search in memory first.
         MeshMessage msg = findRuntimeMessageByPacketId(packetId);
         if (msg != null) {
             return msg;
         }
-        // Если не найдено, ищем в БД
+        // If not found, search in the database.
         if (packetId > 0) {
             return messageDbService.findByPacketId(packetId);
         }
@@ -420,7 +421,7 @@ public class DeviceState {
     }
 
     /**
-     * Ищет сообщение только в текущем runtime-хранилище, без fallback в БД.
+     * Finds a message only in the current runtime store, without falling back to the database.
      */
     public MeshMessage findRuntimeMessageByPacketId(int packetId) {
         return messageStore.findMessageByPacketId(packetId);
@@ -523,7 +524,7 @@ public class DeviceState {
                         log.warn("ACK timeout for packetId {}", packetId);
                     }
                     
-                    // Обновляем в БД
+        // Update in the database.
                     if (packetId > 0) {
                         messageDbService.updateStatus(packetId, msg.getStatus(), msg.getErrorReason());
                     }
@@ -564,8 +565,8 @@ public class DeviceState {
     }
 
     /**
-     * Возвращает {@code true}, если фиксированная позиция была недавно задана пользователем
-     * (менее 120 секунд назад).
+     * Returns {@code true} if the fixed position was set by the user recently,
+     * within the last 120 seconds.
      */
     public boolean hasPendingFixedPosition() {
         long setAt = pendingFixedSetAt;
@@ -577,9 +578,9 @@ public class DeviceState {
     public int getPendingFixedAlt() { return pendingFixedAlt; }
 
     /**
-     * Полностью сбрасывает состояние устройства: очищает nodeDb, каналы,
-     * конфиги, все сообщения, ожидающие ACK, owner info и историю телеметрии.
-     * Pending fixed position НЕ сбрасывается — он должен пережить переподключение.
+     * Fully resets device state: clears nodeDb, channels, configuration, all
+     * messages, pending ACKs, owner info, and telemetry history. Pending fixed
+     * position is intentionally not reset because it must survive reconnection.
      */
     public void clear() {
         myNodeNum = 0;
@@ -607,7 +608,7 @@ public class DeviceState {
     // ═══════════════════════════════════════════════════════════
 
     /**
-     * Возвращает nodeId устройства-владельца из ownerInfo.
+     * Returns the owner device nodeId from ownerInfo.
      */
     public String getOwnerNodeId() {
         if (ownerInfo != null) {

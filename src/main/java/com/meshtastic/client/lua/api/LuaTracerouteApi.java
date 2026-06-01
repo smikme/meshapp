@@ -9,7 +9,7 @@ import org.luaj.vm2.Varargs;
 import org.luaj.vm2.lib.VarArgFunction;
 
 /**
- * Traceroute API для Lua sandbox.
+ * Traceroute API exposed to the Lua sandbox.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -25,9 +25,9 @@ public final class LuaTracerouteApi {
     }
 
     /**
-     * Создает Lua-таблицу {@code mesh.traceroute}.
+     * Creates the Lua table for {@code mesh.traceroute}.
      *
-     * @return таблица traceroute API
+     * @return traceroute API table
      */
     public LuaTable create() {
         LuaTable traceroute = new LuaTable();

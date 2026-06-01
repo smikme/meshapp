@@ -28,7 +28,8 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
 /**
- * Отправляет в Gitea отчёты о сбоях и проблемах, создавая issue и прикладывая ZIP-архив session-лога.
+ * Sends crash and problem reports to Gitea by creating an issue with a zipped
+ * session log attached.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */

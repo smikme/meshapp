@@ -9,17 +9,16 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * POSIX-реализация serial-порта через libc (macOS + Linux).
+ * POSIX serial-port implementation through libc on macOS and Linux.
  * <p>
- * Открывает устройство через {@code open()} с {@code O_NOCTTY} и настраивает termios
- * с {@code CLOCAL} (игнорировать auto-modem control) и без {@code HUPCL}
- * (не дёргать DTR при close). Явное управление DTR/RTS выполняется отдельным шагом
- * после {@code tcsetattr()}, чтобы порт не менял линии самопроизвольно.
+ * Opens the device with {@code open()} and {@code O_NOCTTY}, then configures
+ * termios with {@code CLOCAL} to ignore auto-modem control and without
+ * {@code HUPCL} so DTR is not dropped on close. Explicit DTR/RTS control is
+ * applied after {@code tcsetattr()} so the port does not toggle lines on its own.
  * <p>
- * Linux дополнительно управляет RTS/DTR через прямой вызов {@code ioctl()} из libc.
- * На macOS для modem lines используется отдельный native shim: системный
- * {@code ioctl()} variadic, и его прямой вызов через JNA на Apple Silicon
- * может abort'ить JVM.
+ * Linux controls RTS/DTR directly through libc {@code ioctl()}. macOS uses a
+ * separate native shim for modem lines because the system {@code ioctl()} is
+ * variadic, and calling it directly through JNA on Apple Silicon can abort the JVM.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -27,7 +26,7 @@ class PosixSerialPort implements NativeSerialPort {
 
     private static final Logger log = LoggerFactory.getLogger(PosixSerialPort.class);
 
-    // --- POSIX constants (общие для macOS и Linux) ---
+    // --- POSIX constants shared by macOS and Linux ---
     private static final int O_RDWR = 0x0002;
     private static final int O_NOCTTY = 0x20000;   // macOS: 0x20000, Linux: 0x100
     private static final int O_NONBLOCK_MAC = 0x0004;
@@ -38,7 +37,7 @@ class PosixSerialPort implements NativeSerialPort {
     private static final int TCIFLUSH = 0;
     private static final int F_SETFL = 4;
 
-    // c_cflag bits (одинаковые на macOS и Linux)
+    // c_cflag bits shared by macOS and Linux.
     private static final long CLOCAL = 0x00008000L;
     private static final long CREAD = 0x00000800L;
     private static final long CSIZE = 0x00000300L;
@@ -47,7 +46,7 @@ class PosixSerialPort implements NativeSerialPort {
     private static final long CSTOPB = 0x00000400L;
     private static final long HUPCL = 0x00004000L;
 
-    // c_cflag bits (Linux-specific, отличаются от macOS)
+    // Linux-specific c_cflag bits; values differ from macOS.
     private static final long CLOCAL_LINUX = 0x00000800L;
     private static final long CREAD_LINUX = 0x00000080L;
     private static final long CSIZE_LINUX = 0x00000030L;
@@ -143,7 +142,7 @@ class PosixSerialPort implements NativeSerialPort {
         String strerror(int errnum);
     }
 
-    // errno — берём из JNA LastError
+    // errno is exposed through JNA LastError.
     private static int errno() {
         return Native.getLastError();
     }
@@ -153,7 +152,7 @@ class PosixSerialPort implements NativeSerialPort {
 
     @Override
     public void open(String portName, int baudRate, SerialModemLinePolicy modemLinePolicy) throws ConnectionException {
-        // Дополняем путь /dev/ если нужно
+        // Add the /dev/ prefix when needed.
         String path = portName.startsWith("/dev/") ? portName : "/dev/" + portName;
         boolean isMac = OsDetect.isMacOs();
         if (!isMac) {
@@ -196,9 +195,9 @@ class PosixSerialPort implements NativeSerialPort {
     }
 
     /**
-     * Настраивает RTS/DTR после termios-конфигурации.
-     * Linux использует прямой вызов libc. macOS идёт через отдельный shim с фиксированной ABI,
-     * чтобы не вызывать variadic {@code ioctl()} из JNA на Apple Silicon.
+     * Configures RTS/DTR after termios setup.
+     * Linux uses a direct libc call. macOS goes through a separate fixed-ABI shim
+     * to avoid calling variadic {@code ioctl()} from JNA on Apple Silicon.
      */
     private void configureModemLines(boolean isMac, SerialModemLinePolicy modemLinePolicy) throws ConnectionException {
         if (isMac) {
@@ -209,9 +208,9 @@ class PosixSerialPort implements NativeSerialPort {
     }
 
     /**
-     * macOS modem-line control через маленькую native-библиотеку с фиксированными сигнатурами.
-     * Это сохраняет полный контроль над DTR/RTS, но избегает прямого JNA-вызова variadic
-     * {@code ioctl()}, который на arm64 может аварийно завершить JVM.
+     * macOS modem-line control through a small native library with fixed signatures.
+     * This preserves full DTR/RTS control while avoiding a direct JNA call to
+     * variadic {@code ioctl()}, which can crash the JVM on arm64.
      */
     private void configureMacModemLines(SerialModemLinePolicy modemLinePolicy) throws ConnectionException {
         MacOsSerialLibrary.Api serialLib = MacOsSerialLibrary.instance();
@@ -305,7 +304,7 @@ class PosixSerialPort implements NativeSerialPort {
     }
 
     /**
-     * Преобразует код возврата native shim в диагностическое сообщение с errno.
+     * Converts a native-shim return code into a diagnostic message with errno.
      */
     private ConnectionException modemLineError(String operation, int nativeResult) {
         return new ConnectionException(operation + " failed: " + describeNativeError(nativeResult));
@@ -331,7 +330,7 @@ class PosixSerialPort implements NativeSerialPort {
             configureLinux(termios, modemLinePolicy);
         }
 
-        // Установить скорость через cfsetispeed/cfsetospeed
+        // Set speed through cfsetispeed/cfsetospeed.
         long speed = isMac ? baudRateMac(baudRate) : baudRateLinux(baudRate);
         CLib.INSTANCE.cfsetispeed(termios, new NativeLong(speed));
         CLib.INSTANCE.cfsetospeed(termios, new NativeLong(speed));
@@ -342,7 +341,7 @@ class PosixSerialPort implements NativeSerialPort {
     }
 
     private void configureMac(Memory t) {
-        // c_iflag: raw input (как jSerialComm)
+        // c_iflag: raw input, matching jSerialComm behavior.
         long iflag = t.getLong(OFF_IFLAG_MAC);
         iflag &= ~(IXON_MAC | IXOFF_MAC | BRKINT_MAC | ICRNL_MAC | INLCR_MAC | PARMRK_MAC | INPCK_MAC | ISTRIP_MAC);
         t.setLong(OFF_IFLAG_MAC, iflag);
@@ -352,8 +351,8 @@ class PosixSerialPort implements NativeSerialPort {
         oflag &= ~OPOST_MAC;
         t.setLong(OFF_OFLAG_MAC, oflag);
 
-        // c_cflag: 8N1, CLOCAL, CREAD, без HUPCL
-        // На macOS не хотим опускать DTR при close, иначе часть USB-UART мостов ресетит ESP32.
+        // c_cflag: 8N1, CLOCAL, CREAD, without HUPCL.
+        // On macOS we avoid dropping DTR on close because some USB-UART bridges reset ESP32 boards.
         long cflag = t.getLong(OFF_CFLAG_MAC);
         cflag &= ~(CSIZE | PARENB | CSTOPB | HUPCL);
         cflag |= CS8 | CLOCAL | CREAD;
@@ -364,13 +363,13 @@ class PosixSerialPort implements NativeSerialPort {
         lflag &= ~(ECHO_MAC | ICANON_MAC | ISIG_MAC | IEXTEN_MAC);
         t.setLong(OFF_LFLAG_MAC, lflag);
 
-        // VMIN=0, VTIME=0 — non-blocking (таймаут через poll)
+        // VMIN=0, VTIME=0: non-blocking, with timeout handled by poll.
         t.setByte(OFF_CC_MAC + VMIN_MAC, (byte) 0);
         t.setByte(OFF_CC_MAC + VTIME_MAC, (byte) 0);
     }
 
     private void configureLinux(Memory t, SerialModemLinePolicy modemLinePolicy) {
-        // c_iflag: raw input (как jSerialComm)
+        // c_iflag: raw input, matching jSerialComm behavior.
         int iflag = t.getInt(OFF_IFLAG_LINUX);
         iflag &= ~((int) IXON_LINUX | (int) IXOFF_LINUX | (int) BRKINT_LINUX
                 | (int) ICRNL_LINUX | (int) INLCR_LINUX | (int) PARMRK_LINUX
@@ -407,7 +406,7 @@ class PosixSerialPort implements NativeSerialPort {
         int f = fd;
         if (f < 0 || !open) return -1;
 
-        // poll() для таймаута перед read()
+        // poll() enforces the timeout before read().
         // struct pollfd: int fd (4) + short events (2) + short revents (2) = 8 bytes
         Memory pollFd = new Memory(8);
         pollFd.setInt(0, f);
@@ -416,19 +415,19 @@ class PosixSerialPort implements NativeSerialPort {
 
         int pollResult = CLib.INSTANCE.poll(pollFd, 1, timeoutMs);
         if (pollResult <= 0) {
-            return 0; // таймаут или ошибка
+            return 0; // timeout or error
         }
 
         int bytesRead = CLib.INSTANCE.read(f, buf, len);
         if (bytesRead < 0) {
             int err = errno();
-            // EAGAIN/EWOULDBLOCK — нет данных (не ошибка)
+            // EAGAIN/EWOULDBLOCK means no data yet, not a fatal error.
             if (err == 11 || err == 35) return 0;
             log.debug("read() error: {} ({})", CLib.INSTANCE.strerror(err), err);
             return -1;
         }
         if (bytesRead == 0) {
-            return -1; // EOF — порт закрыт
+            return -1; // EOF: the port is closed.
         }
         return bytesRead;
     }
@@ -482,7 +481,7 @@ class PosixSerialPort implements NativeSerialPort {
     }
 
     private static long baudRateMac(int baudRate) {
-        return baudRate; // macOS: числовое значение = константа скорости
+        return baudRate; // macOS: numeric value equals the speed constant.
     }
 
     private static long baudRateLinux(int baudRate) {

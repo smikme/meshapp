@@ -1,28 +1,28 @@
 package com.meshtastic.client.tray;
 
 /**
- * Платформенный tray/status item приложения.
+ * Platform integration for the application's tray icon or status item.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public interface AppTrayService {
 
     /**
-     * Установить tray icon/status item.
+     * Installs the tray icon or status item.
      *
-     * @param onActivate показать главное окно приложения
-     * @param onExit     завершить приложение
-     * @return {@code true}, если tray успешно создан
+     * @param onActivate callback that brings the main window forward
+     * @param onExit     callback that terminates the application
+     * @return {@code true} when the tray item was created successfully
      */
     boolean install(Runnable onActivate, Runnable onExit);
 
     /**
-     * Показать системное сообщение через tray, если платформа это поддерживает.
+     * Shows a system notification through the tray integration when supported.
      */
     default void showNotification(String title, String message) {}
 
     /**
-     * Освободить ресурсы tray.
+     * Releases resources owned by the tray integration.
      */
     default void dispose() {}
 }

@@ -20,10 +20,10 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * Реализация {@code mesh.chat} для Lua-песочницы.
+ * Implementation of {@code mesh.chat} for the Lua sandbox.
  * <p>
- * Предоставляет скриптам доступ только к разрешенным чат-функциям приложения:
- * отправке сообщений, ответам, чтению последних сообщений, списку нод и каналов.
+ * Gives scripts access only to approved chat operations: sending messages,
+ * replying, reading recent messages, and listing nodes and channels.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -43,9 +43,9 @@ public final class LuaChatApi {
     }
 
     /**
-     * Создает Lua-таблицу {@code mesh.chat}.
+     * Creates the Lua table for {@code mesh.chat}.
      *
-     * @return таблица чат API
+     * @return chat API table
      */
     public LuaTable create() {
         LuaTable chat = new LuaTable();

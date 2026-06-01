@@ -21,17 +21,12 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 /**
- * BLE-транспорт для Meshtastic и MeshCore Companion устройств.
+ * BLE transport for Meshtastic and MeshCore Companion devices.
  * <p>
- * Реализует {@link MeshtasticConnection}, делегируя BLE-операции
- * платформо-зависимому {@link BlePlatform}. В отличие от TCP/Serial,
- * Meshtastic BLE не использует serial-фрейминг ({@code [0x94][0xC3][len][payload]}) —
- * GATT-характеристики передают protobuf напрямую. MeshCore Companion передаёт
- * собственные бинарные BLE-пакеты без Meshtastic serial-заголовка.
- * <p>
- * {@link #sendBytes(byte[])} ожидает фреймированные данные от
- * {@link com.meshtastic.client.protocol.PacketFramer} и автоматически
- * вырезает 4-байтный заголовок перед записью в toRadio-характеристику.
+ * BLE operations are delegated to the platform-specific {@link BlePlatform}.
+ * Unlike TCP and Serial, Meshtastic BLE does not use serial framing; GATT
+ * characteristics carry protobuf payloads directly. MeshCore Companion carries
+ * its own binary BLE packets without the Meshtastic serial header.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -81,11 +76,11 @@ public class BleConnection implements MeshtasticConnection {
     }
 
     /**
-     * Подключает BLE transport, нормализуя различия платформенных backends:
-     * часть реализаций шлёт {@link BleState.Connected} из native callbacks,
-     * а часть считает успешным сам факт завершения {@link BlePlatform#connect(String)}.
+     * Connects the BLE transport while normalizing platform backend differences.
+     * Some implementations emit {@link BleState.Connected} from native callbacks;
+     * others treat a successful {@link BlePlatform#connect(String)} call as connected.
      *
-     * @throws ConnectionException если платформенный backend не смог завершить подключение
+     * @throws ConnectionException when the platform backend cannot connect
      */
     @Override
     public void connect() throws ConnectionException {
@@ -99,7 +94,7 @@ public class BleConnection implements MeshtasticConnection {
         AtomicBoolean terminalStateObserved = new AtomicBoolean(false);
         AtomicBoolean suppressTerminalStateEvents = new AtomicBoolean(false);
 
-        // Устанавливаем слушатели перед подключением — при reconnect они могут быть stale
+        // Set listeners before connecting; after reconnect they may otherwise be stale.
         platform.setFromRadioListener(data -> {
             Consumer<byte[]> listener = dataListener;
             if (listener != null) {
@@ -145,8 +140,8 @@ public class BleConnection implements MeshtasticConnection {
             }
         });
 
-        // Pairing UI поднимается в общий BLE-контракт: Linux/Windows могут запросить passkey
-        // из native backend, а macOS просто никогда не вызовет этот handler.
+            // Pairing UI is lifted into the common BLE contract: Linux and Windows may request
+            // a passkey from native code, while macOS simply never calls this handler.
         platform.setPasskeyRequestHandler(deviceAddress -> {
             try {
                 AppUi.requestBlePasskey(deviceAddress,
@@ -213,11 +208,11 @@ public class BleConnection implements MeshtasticConnection {
     }
 
     /**
-     * Отправляет данные на устройство. Входные данные содержат serial-фрейм
-     * ({@code [0x94][0xC3][len_msb][len_lsb][payload]}), из которого
-     * извлекается только payload для записи в toRadio-характеристику.
+     * Sends data to the device.
+     * For Meshtastic BLE, serial/TCP framed input is stripped down to payload
+     * before writing to the toRadio characteristic.
      *
-     * @param data фреймированные данные (формат serial/TCP)
+     * @param data framed data in serial/TCP format
      */
     @Override
     public void sendBytes(byte[] data) {

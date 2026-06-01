@@ -134,9 +134,9 @@ repositories {
 configurations.configureEach {
 	resolutionStrategy.eachDependency { details ->
 		if (details.requested.group == 'org.openjfx' && details.requested.name.startsWith('javafx-')) {
-			// Любой транзитивный org.openjfx должен совпадать с версией,
-			// заданной через org.openjfx.javafxplugin, иначе Gradle берёт
-			// старшую и можно незаметно уехать на другую JavaFX-линейку.
+			// Any transitive org.openjfx dependency must match the version declared
+			// through org.openjfx.javafxplugin; otherwise Gradle may resolve a newer
+			// version and silently move the build to another JavaFX line.
 			details.useVersion(javaFxVersion)
 			details.because("Keep all JavaFX modules aligned with the configured project version ${javaFxVersion}")
 		}
@@ -154,15 +154,15 @@ dependencies {
 	implementation 'org.luaj:luaj-jse:3.0.1'
 	implementation 'org.fxmisc.richtext:richtextfx:0.11.7'
 	implementation('io.github.mkpaz:atlantafx-base:2.1.0') {
-		// AtlantaFX публикует собственный org.openjfx version, который иначе
-		// может поднять проект на другую JavaFX-линейку через conflict resolution.
+		// AtlantaFX publishes its own org.openjfx version, which can otherwise move
+		// the project to another JavaFX line through conflict resolution.
 		exclude group: 'org.openjfx'
 	}
 	implementation 'net.java.dev.jna:jna:5.16.0'
 	implementation 'net.java.dev.jna:jna-platform:5.16.0'
 	implementation 'org.eclipse.paho:org.eclipse.paho.client.mqttv3:1.2.5'
 	testImplementation 'org.junit.jupiter:junit-jupiter:5.11.4'
-	// У TestFX Monocle пока нет 25.x-артефакта; org.openjfx модули всё равно фиксируются на javaFxVersion выше.
+	// TestFX Monocle does not have a 25.x artifact yet; org.openjfx modules are still pinned to javaFxVersion above.
 	testRuntimeOnly 'org.testfx:openjfx-monocle:21.0.2'
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
@@ -214,16 +214,16 @@ jar {
 			'Implementation-Version': project.version
 		)
 	}
-	// Файлы только для jpackage/бандла — в jar не нужны
+	// Files used only by jpackage/bundles are not needed in the jar.
 	exclude 'logo/MeshApp.icns', 'logo/MeshApp.ico'
 	exclude 'macos/**'
 }
 
-// Генерация version.properties при каждой сборке
+// Generate version.properties on every build.
 tasks.register('generateVersionProperties') {
 	def outputDir = generatedResourcesDir
 	outputs.dir(outputDir)
-	// Всегда пересоздавать — версия может измениться (dirty/commit)
+	// Always recreate it because version metadata can change through dirty/commit state.
 	outputs.upToDateWhen { false }
 	doLast {
 		def dir = outputDir.get().asFile
@@ -254,8 +254,8 @@ def macOsJnaResourcePrefix = {
 }
 
 // ============================================================
-// macOS Serial: сборка libmeshapp-serial.dylib для безопасного ioctl wrapper
-// Использование: ./gradlew buildSerialNative (или автоматически при processResources на macOS)
+// macOS Serial: build libmeshapp-serial.dylib for the safe ioctl wrapper.
+// Usage: ./gradlew buildSerialNative, or automatically through processResources on macOS.
 // ============================================================
 if (org.gradle.internal.os.OperatingSystem.current().isMacOsX()) {
 	tasks.register('buildSerialNative') {
@@ -342,8 +342,8 @@ if (org.gradle.internal.os.OperatingSystem.current().isMacOsX()) {
 }
 
 // ============================================================
-// Windows BLE: сборка meshapp-ble.dll из native/windows-ble/
-// Использование: ./gradlew buildBleNative (или автоматически при processResources на Windows)
+// Windows BLE: build meshapp-ble.dll from native/windows-ble/.
+// Usage: ./gradlew buildBleNative, or automatically through processResources on Windows.
 // ============================================================
 if (org.gradle.internal.os.OperatingSystem.current().isWindows()) {
 	tasks.register('buildBleNative') {
@@ -388,9 +388,9 @@ if (org.gradle.internal.os.OperatingSystem.current().isWindows()) {
 }
 
 // ============================================================
-// Linux BLE: сборка libmeshapp-ble.so из native/linux-ble/
-// Использование: ./gradlew buildBleNative (или автоматически при processResources на Linux)
-// Требует: libsystemd-dev (Ubuntu/Debian) или systemd-devel (Fedora/RHEL)
+// Linux BLE: build libmeshapp-ble.so from native/linux-ble/.
+// Usage: ./gradlew buildBleNative, or automatically through processResources on Linux.
+// Requires libsystemd-dev on Ubuntu/Debian or systemd-devel on Fedora/RHEL.
 // ============================================================
 if (org.gradle.internal.os.OperatingSystem.current().isLinux()) {
 	tasks.register('buildBleNative') {
@@ -527,8 +527,8 @@ def resolvePackageVersion = { os ->
 			return "2.0.${count}"
 		}
 		def hash = 'git rev-parse --short=4 HEAD'.execute().text.trim()
-		// Fallback для dev-сборок без release-тега; у MSI upgrade всё равно
-		// ориентируется на первые три компонента версии.
+		// Fallback for dev builds without a release tag; MSI upgrades still use
+		// the first three version components.
 		def minor = Integer.parseInt(hash, 16) % 65536
 		return "2.0.${count}.${minor}"
 	} catch (ignored) {
@@ -557,9 +557,9 @@ def resolvePackagingJavaHome = {
 
 def buildPackagingJvmArgs = {
 	def jvmArgsList = application.applicationDefaultJvmArgs.collect()
-	// $APPDIR — токен jpackage/AppImage, заменяется на реальную директорию приложения при запуске.
-	// Абсолютные пути билд-машины не работают на других компьютерах.
-	// $APPDIR/fx — только JavaFX модули, app остаётся на classpath (unnamed module).
+	// $APPDIR is a jpackage/AppImage token replaced with the real application directory at launch.
+	// Absolute paths from the build machine do not work on other computers.
+	// $APPDIR/fx contains only JavaFX modules; the app remains on the classpath as an unnamed module.
 	jvmArgsList << "--module-path"
 	jvmArgsList << '$APPDIR/fx'
 	jvmArgsList << "--add-modules"
@@ -655,12 +655,12 @@ def preparePackagingLibDir = { os, installDir, stagingRoot ->
 		into libDir
 	}
 
-	// Выделить JavaFX JAR в поддиректорию — только они должны быть на module path.
-	// Если $APPDIR целиком на module path, app JAR становится automatic module,
-	// и --add-opens ...=ALL-UNNAMED перестаёт действовать (рефлексия для HWND ломается).
+	// Move JavaFX JARs into a subdirectory; only they should be on the module path.
+	// If the whole $APPDIR is on the module path, the app JAR becomes an automatic module,
+	// and --add-opens ...=ALL-UNNAMED stops working, breaking HWND reflection.
 	relocateJavaFxJars(libDir)
 
-	// Windows: скопировать meshapp-ble.dll (WinRT BLE) в lib/ для упаковки
+	// Windows: copy meshapp-ble.dll (WinRT BLE) into lib/ for packaging.
 	if (os.isWindows()) {
 		def bleDll = file('src/main/resources/win32-x86-64/meshapp-ble.dll')
 		if (bleDll.exists()) {
@@ -707,7 +707,7 @@ def preparePackagingLibDir = { os, installDir, stagingRoot ->
 		logger.lifecycle("packaging: jSerialComm.dll (${jSerialCommArch}) извлечён в lib/")
 	}
 
-	// Linux: скопировать libmeshapp-ble.so (BlueZ BLE) в lib/ для упаковки
+	// Linux: copy libmeshapp-ble.so (BlueZ BLE) into lib/ for packaging.
 	if (os.isLinux()) {
 		def bleSo = file('src/main/resources/linux-x86-64/libmeshapp-ble.so')
 		if (bleSo.exists()) {
@@ -1353,8 +1353,8 @@ def patchLinuxDebControl = { File outputDir ->
 }
 
 // ============================================================
-// JavaDoc: генерация документации в docs/javadoc/
-// Использование: ./gradlew javadoc
+// JavaDoc: generate documentation in docs/javadoc/.
+// Usage: ./gradlew javadoc.
 // ============================================================
 javadoc {
 	destinationDir = file("${projectDir}/docs/javadoc")
@@ -1366,18 +1366,18 @@ javadoc {
 	options.docTitle = "MeshApp — Meshtastic Desktop Client"
 	options.header = "MeshApp ${project.version}"
 	options.links('https://docs.oracle.com/en/java/javase/21/docs/api/')
-	// Не падать при предупреждениях (protobuf-generated классы и т.д.)
+	// Do not fail on warnings from protobuf-generated classes and similar sources.
 	options.addBooleanOption('Xdoclint:none', true)
-	// Исключить protobuf-generated классы из документации
+	// Exclude protobuf-generated classes from documentation.
 	exclude 'org/meshtastic/proto/**'
 	failOnError = false
 }
 tasks.named("run") {
 	outputs.upToDateWhen { false }
-	// macOS: перенаправить на runMac для отображения в Dock и Cmd+Tab
+	// macOS: redirect to runMac so the app appears in Dock and Cmd+Tab.
 	if (org.gradle.internal.os.OperatingSystem.current().isMacOsX()) {
 		dependsOn 'runMac'
-		// Отключить саму JavaExec — приложение запускается через runMac
+		// Disable JavaExec itself; the application is launched through runMac.
 		enabled = false
 	}
 }
@@ -1407,9 +1407,9 @@ tasks.named('installDist') {
 }
 
 // ============================================================
-// jpackage: создание нативного инсталлятора
+// jpackage: create a native installer.
 // Windows: .msi, macOS: .dmg, Linux: .deb
-// Использование: ./gradlew jpackage
+// Usage: ./gradlew jpackage.
 // ============================================================
 tasks.register('jpackage') {
 	dependsOn installDist
@@ -1435,7 +1435,7 @@ tasks.register('jpackage') {
 		def jvmArgsList = buildPackagingJvmArgs()
 		def jlinkOptions = buildPackagingJlinkOptions()
 
-		// macOS: app-image → копируем Icon Composer ресурсы → DMG
+		// macOS: app-image -> copy Icon Composer resources -> DMG.
 		def macBuild = os.isMacOsX()
 		File linuxResourceDir = null
 
@@ -1462,7 +1462,7 @@ tasks.register('jpackage') {
 			args << arg
 		}
 
-		// Иконка для jpackage (Windows .ico, macOS — заменяется Icon Composer версией)
+		// Icon for jpackage; Windows uses .ico, macOS is replaced by the Icon Composer version.
 		if (os.isWindows()) {
 			def icoFile = file('src/main/resources/logo/MeshApp.ico')
 			if (icoFile.exists()) {
@@ -1506,7 +1506,7 @@ tasks.register('jpackage') {
 			args << 'MeshApp'
 		}
 
-		// Шаг 1: создать app-image (macOS) или финальный инсталлятор (Windows/Linux)
+		// Step 1: create an app-image on macOS, or the final installer on Windows/Linux.
 		def strArgs = args.collect { it.toString() }
 		def proc1 = new ProcessBuilder(strArgs).redirectErrorStream(true).start()
 		def proc1Output = proc1.inputStream.text
@@ -1522,13 +1522,13 @@ tasks.register('jpackage') {
 			patchLinuxDebControl(outputDir)
 		}
 
-		// macOS шаг 2: патчить Info.plist, скопировать Assets.car, собрать DMG
+		// macOS step 2: patch Info.plist, copy Assets.car, and build DMG.
 		if (macBuild) {
 			def appDir = new File(outputDir, "MeshApp.app")
 			def resourcesDir = new File(appDir, "Contents/Resources")
 
-			// Добавить NSBluetoothAlwaysUsageDescription — без него macOS 10.15+
-			// убивает процесс при инициализации CBCentralManager (BLE)
+			// Add NSBluetoothAlwaysUsageDescription; without it macOS 10.15+
+			// terminates the process when CBCentralManager initializes for BLE.
 			def infoPlist = new File(appDir, "Contents/Info.plist")
 			if (infoPlist.exists()) {
 				def plistText = infoPlist.text
@@ -1542,7 +1542,7 @@ tasks.register('jpackage') {
 				}
 			}
 
-			// Assets.car содержит иконку из Icon Composer с вариантами стилей
+			// Assets.car contains the Icon Composer icon with style variants.
 			def assetsCar = file('src/main/resources/macos/Assets.car')
 			if (assetsCar.exists()) {
 				java.nio.file.Files.copy(assetsCar.toPath(), new File(resourcesDir, assetsCar.name).toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
@@ -1551,8 +1551,8 @@ tasks.register('jpackage') {
 
 			normalizeMacBundleInstallNames(appDir, 'jpackage')
 
-			// Release bundle должен быть самодостаточным: допускаем только @rpath/@loader_path
-			// и системные Apple библиотеки. Любые /opt/homebrew, /usr/local, $HOME и т.п. запрещены.
+			// The release bundle must be self-contained: allow only @rpath/@loader_path
+			// and Apple system libraries. Any /opt/homebrew, /usr/local, $HOME, etc. paths are forbidden.
 			assertMacBundleSelfContained(appDir, 'jpackage')
 
 			def entitlements = file('src/main/resources/macos/entitlements.plist')
@@ -1576,13 +1576,13 @@ tasks.register('jpackage') {
 				)
 				logger.lifecycle("jpackage: Developer ID подпись применена к ${appDir.name}")
 			} else {
-				// Локальный fallback: ad-hoc подпись убирает immediate launch failures,
-				// но не подходит для распространяемого из интернета DMG.
+				// Local fallback: ad-hoc signing avoids immediate launch failures,
+				// but is not suitable for an internet-distributed DMG.
 				adHocSignMacBundle(appDir, entitlements)
 				logger.lifecycle("jpackage: ad-hoc подпись применена и верифицирована")
 			}
 
-			// Собрать DMG
+			// Build the DMG.
 			def dmgFile = new File(outputDir, "MeshApp-${appVersion}.dmg")
 			if (dmgFile.exists()) dmgFile.delete()
 
@@ -1613,8 +1613,8 @@ tasks.register('jpackage') {
 }
 
 // ============================================================
-// AppImage: создание portable Linux AppImage из jpackage app-image
-// Использование: ./gradlew appImage [-Pappimagetool=/path/to/appimagetool.AppImage]
+// AppImage: create a portable Linux AppImage from the jpackage app-image.
+// Usage: ./gradlew appImage [-Pappimagetool=/path/to/appimagetool.AppImage].
 // ============================================================
 tasks.register('appImage') {
 	dependsOn installDist
@@ -1730,9 +1730,9 @@ exec "$HERE/usr/bin/MeshApp" "$@"
 }
 
 // ============================================================
-// Flatpak: создание sandboxed Linux bundle через flatpak-builder
-// Использование: ./gradlew flatpak
-// Требует: flatpak + flatpak-builder + установленный runtime/SDK
+// Flatpak: create a sandboxed Linux bundle with flatpak-builder.
+// Usage: ./gradlew flatpak.
+// Requires flatpak, flatpak-builder, and the installed runtime/SDK.
 // ============================================================
 tasks.register('flatpak') {
 	dependsOn installDist
@@ -1806,7 +1806,7 @@ tasks.register('flatpak') {
 	}
 }
 
-// macOS: запуск через .app bundle для отображения в Dock и Cmd+Tab
+// macOS: launch through the .app bundle so the app appears in Dock and Cmd+Tab.
 if (org.gradle.internal.os.OperatingSystem.current().isMacOsX()) {
 	tasks.register('runMac') {
 		dependsOn classes
@@ -1821,7 +1821,7 @@ if (org.gradle.internal.os.OperatingSystem.current().isMacOsX()) {
 			macosDir.mkdirs()
 			resourcesDir.mkdirs()
 
-			// Скопировать иконку в .app bundle
+			// Copy the icon into the .app bundle.
 			def icnsSource = file('src/main/resources/logo/MeshApp.icns')
 			if (icnsSource.exists()) {
 				java.nio.file.Files.copy(icnsSource.toPath(), new File(resourcesDir, icnsSource.name).toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)

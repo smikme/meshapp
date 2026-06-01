@@ -4,7 +4,7 @@ import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.model.NodeData;
 
 /**
- * Форматирование информации о ноде в текст системного сообщения чата.
+ * Formats node details as chat system-message text.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -13,17 +13,17 @@ public final class NodeInfoFormatter {
     private NodeInfoFormatter() {}
 
     /**
-     * Форматировать информацию о ноде в текст для системного сообщения.
+     * Formats node details for a system message.
      *
-     * @param node данные ноды
-     * @return многострочный текст с иконками и разделителями
+     * @param node node data
+     * @return multiline text with icons and separators
      */
     public static String format(NodeData node) {
         StringBuilder sb = new StringBuilder();
         sb.append(I18n.t("chat.nodeInfo.title")).append("\n");
         sb.append("━━━━━━━━━━━━━━━━━━━━\n");
 
-        // Имя и ID
+        // Name and id.
         if (node.getLongName() != null && !node.getLongName().isEmpty()) {
             sb.append("\uD83D\uDC64 ").append(node.getLongName());
             if (node.getShortName() != null && !node.getShortName().isEmpty()) {
@@ -33,7 +33,7 @@ public final class NodeInfoFormatter {
         }
         sb.append("\uD83C\uDD94 ").append(node.getNodeId()).append("\n");
 
-        // Роль и модель
+        // Role and hardware model.
         String role = NodeData.translateRole(node.getRole());
         if (role != null) {
             sb.append("\uD83C\uDFAD ").append(role).append("\n");
@@ -43,7 +43,7 @@ public final class NodeInfoFormatter {
             sb.append("\uD83D\uDCDF ").append(node.getHwModel()).append("\n");
         }
 
-        // Батарея
+        // Battery.
         if (node.getBatteryLevel() > 0) {
             String battIcon = node.getBatteryLevel() > 50
                     ? "\uD83D\uDD0B" : "\uD83E\uDEAB";
@@ -56,7 +56,7 @@ public final class NodeInfoFormatter {
             sb.append("\n");
         }
 
-        // Сигнал и хопы
+        // Signal and hop count.
         if (node.getSnr() != 0) {
             sb.append("\uD83D\uDCE1 ")
                     .append(I18n.t("node.list.snr",
@@ -68,7 +68,7 @@ public final class NodeInfoFormatter {
             sb.append(I18n.t("chat.nodeInfo.hops", node.getHopsAway())).append("\n");
         }
 
-        // Координаты и высота
+        // Coordinates and altitude.
         if (node.getLatitude() != 0 || node.getLongitude() != 0) {
             sb.append(String.format("\uD83D\uDCCD %.4f, %.4f\n",
                     node.getLatitude(), node.getLongitude()));
@@ -77,7 +77,7 @@ public final class NodeInfoFormatter {
             sb.append(I18n.t("chat.nodeInfo.altitude", node.getAltitude())).append("\n");
         }
 
-        // Публичный ключ
+        // Public key.
         if (node.getPublicKey() != null && node.getPublicKey().length > 0) {
             StringBuilder hex = new StringBuilder();
             for (byte b : node.getPublicKey()) {
@@ -86,7 +86,7 @@ public final class NodeInfoFormatter {
             sb.append("\uD83D\uDD10 ").append(hex).append("\n");
         }
 
-        // Время и аптайм
+        // Last-heard time and uptime.
         String lastHeard = NodeData.formatTime(node.getLastHeard());
         if (!lastHeard.isEmpty()) {
             sb.append("\uD83D\uDD53 ").append(lastHeard).append("\n");

@@ -8,8 +8,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Фабрика платформо-зависимых BLE-реализаций.
- * Выбирает реализацию на основе текущей ОС ({@link OsDetect}).
+ * Factory for platform-specific BLE implementations.
+ * Selects an implementation from the current operating system ({@link OsDetect}).
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -18,10 +18,10 @@ public final class BlePlatformFactory {
     private static final Logger log = LoggerFactory.getLogger(BlePlatformFactory.class);
 
     /**
-     * Создаёт BLE-платформу для текущей ОС.
+     * Creates a BLE platform for the current operating system.
      *
-     * @return реализация {@link BlePlatform}
-     * @throws UnsupportedOperationException если ОС не поддерживает BLE
+     * @return {@link BlePlatform} implementation
+     * @throws UnsupportedOperationException when BLE is not supported on this OS
      */
     public static BlePlatform create() {
         return switch (OsDetect.current()) {
@@ -43,20 +43,19 @@ public final class BlePlatformFactory {
     }
 
     /**
-     * Проверяет, поддерживается ли BLE на текущей платформе.
+     * Returns whether BLE is supported on the current platform.
      */
     public static boolean isSupported() {
         return OsDetect.isMacOs() || OsDetect.isWindows() || OsDetect.isLinux();
     }
 
     /**
-     * Возвращает {@code true}, если backend может безопасно держать несколько
-     * независимых BLE-сессий в одном процессе.
+     * Returns {@code true} when the backend can safely hold multiple independent
+     * BLE sessions in one process.
      * <p>
-     * На macOS backend хранит состояние в отдельных {@link MacOsBle} экземплярах.
-     * На Linux/Windows каждый {@link LinuxBle}/{@link WinBle} загружает свою
-     * временную копию native library, поэтому singleton {@code meshble_*} state
-     * изолирован внутри конкретного экземпляра SO/DLL.
+     * macOS keeps state in separate {@link MacOsBle} instances. Linux and Windows
+     * load an isolated native library copy per {@link LinuxBle} or {@link WinBle},
+     * so singleton native state remains scoped to one SO/DLL instance.
      */
     public static boolean supportsParallelConnections() {
         return isSupported();

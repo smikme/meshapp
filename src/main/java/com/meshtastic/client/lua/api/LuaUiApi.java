@@ -9,7 +9,7 @@ import org.luaj.vm2.Varargs;
 import org.luaj.vm2.lib.VarArgFunction;
 
 /**
- * UI-функции Lua sandbox, требующие участия пользователя.
+ * User-facing UI functions exposed to the Lua sandbox.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -22,9 +22,9 @@ public final class LuaUiApi {
     }
 
     /**
-     * Создает Lua-таблицу {@code mesh.ui}.
+     * Creates the Lua table for {@code mesh.ui}.
      *
-     * @return таблица UI API
+     * @return UI API table
      */
     public LuaTable create() {
         LuaTable ui = new LuaTable();

@@ -1,18 +1,18 @@
 package com.meshtastic.client.lua;
 
 /**
- * Traceroute-запрос из Lua.
+ * Traceroute request issued from Lua.
  *
- * @param scriptId id Lua-скрипта
- * @param requestId id запроса внутри сессии
- * @param source источник события
- * @param name имя сценария/запроса
- * @param targetNodeNum node_num целевой ноды
- * @param targetNodeId node_id целевой ноды
- * @param targetName имя целевой ноды для вывода
- * @param chatType тип чата
- * @param chatKey ключ чата
- * @param timeoutSeconds таймаут ожидания ответа
+ * @param scriptId Lua script id
+ * @param requestId request id inside the runtime session
+ * @param source event source
+ * @param name script or request name
+ * @param targetNodeNum node_num of the target node
+ * @param targetNodeId node_id of the target node
+ * @param targetName display name of the target node
+ * @param chatType chat type
+ * @param chatKey chat key
+ * @param timeoutSeconds response timeout in seconds
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */

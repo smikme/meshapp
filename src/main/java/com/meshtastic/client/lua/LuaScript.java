@@ -3,11 +3,10 @@ package com.meshtastic.client.lua;
 import com.meshtastic.client.i18n.I18n;
 
 /**
- * Модель Lua-скрипта MeshApp, сохраненного в БД приложения.
+ * Database model of a MeshApp Lua script.
  * <p>
- * Содержит стабильный GUID, emoji-иконку, исходный код, пользовательские
- * параметры включения и метаданные последнего запуска, которые отображаются
- * в списке скриптов MeshApp IDE.
+ * Stores a stable GUID, emoji icon, source code, user enablement settings, and
+ * last-run metadata shown by the MeshApp IDE script list.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -22,10 +21,10 @@ public class LuaScript {
     private static final int KEYCAP_MARK = 0x20E3;
 
     /**
-     * Проверяет, что значение является одним emoji-символом или emoji ZWJ-последовательностью.
+     * Returns whether a value is one emoji symbol or one emoji ZWJ sequence.
      *
-     * @param icon проверяемая строка
-     * @return {@code true}, если строка содержит только одну emoji-иконку
+     * @param icon string to validate
+     * @return {@code true} when the string contains exactly one emoji icon
      */
     public static boolean isEmojiIcon(String icon) {
         String value = icon == null ? "" : icon.trim();
@@ -39,10 +38,10 @@ public class LuaScript {
     }
 
     /**
-     * Возвращает дефолтную иконку для пустого или некорректного значения.
+     * Returns the default icon for blank or invalid input.
      *
-     * @param icon исходная иконка
-     * @return валидная emoji-иконка
+     * @param icon source icon
+     * @return valid emoji icon
      */
     public static String normalizeIcon(String icon) {
         String value = icon == null ? "" : icon.trim();
@@ -50,10 +49,10 @@ public class LuaScript {
     }
 
     /**
-     * Нормализует пустое значение в дефолтную иконку и запрещает не-emoji текст.
+     * Normalizes blank values to the default icon and rejects non-emoji text.
      *
-     * @param icon исходная иконка
-     * @return валидная emoji-иконка
+     * @param icon source icon
+     * @return valid emoji icon
      */
     public static String requireValidIcon(String icon) {
         String value = icon == null ? "" : icon.trim();
@@ -165,7 +164,7 @@ public class LuaScript {
         return (codePoint >= '0' && codePoint <= '9') || codePoint == '#' || codePoint == '*';
     }
 
-    /** Тип сценария, определяющий способ его использования в MeshApp. */
+    /** Script type that determines how MeshApp uses it. */
     public enum BotType {
         AIR_BOT("AIR_BOT", "meshIde.botType.air"),
         AUTOMATION_BOT("AUTOMATION_BOT", "meshIde.botType.automation");

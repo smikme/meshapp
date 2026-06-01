@@ -31,11 +31,11 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 
 /**
- * Управляет жизненным циклом Lua-скриптов MeshApp.
+ * Manages the lifecycle of MeshApp Lua scripts.
  * <p>
- * Сервис создает песочницы выполнения, выбирает активное подключение приложения,
- * запускает обычный режим и режим отладки, останавливает активные сессии и
- * предоставляет состояние выполнения для UI MeshApp IDE.
+ * Creates execution sandboxes, binds scripts to the active application
+ * connection, starts normal and debug sessions, stops active sessions, and
+ * exposes runtime state to the MeshApp IDE UI.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -110,14 +110,13 @@ public final class LuaScriptRuntimeService {
     }
 
     /**
-     * Запускает все эфирные Lua-скрипты с включенным автозапуском,
-     * привязанные к указанной ноде.
+     * Starts all radio Lua scripts with autorun enabled for the specified node.
      * <p>
-     * Метод вызывается после готовности протокольного runtime-а подключения, чтобы
-     * скрипт получал уже заполненное состояние ноды и корректный transport target.
+     * Called after the connection's protocol runtime is ready, so scripts receive
+     * populated node state and the correct transport target.
      *
-     * @param nodeId идентификатор локальной ноды активного подключения
-     * @param sink получатель событий запуска; может быть {@code null}
+     * @param nodeId local node id of the active connection
+     * @param sink launch-event sink; may be {@code null}
      */
     public void autostartScriptsForNode(String nodeId, Consumer<LuaScriptEvent> sink) {
         String normalizedNodeId = normalizeNodeId(nodeId);

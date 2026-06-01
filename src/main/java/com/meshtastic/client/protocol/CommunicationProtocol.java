@@ -3,31 +3,31 @@ package com.meshtastic.client.protocol;
 import com.meshtastic.client.model.ProtocolType;
 
 /**
- * Фабрика runtime-а коммуникационного протокола.
+ * Factory for a communication protocol runtime.
  * <p>
- * Протокольный адаптер отвечает за парсинг входящих payload-ов, формирование
- * исходящих команд и запуск сервисов, специфичных для конкретного протокола.
- * На вход он получает уже открытый byte transport от {@code ConnectionManager}
- * и возвращает runtime-объект для управления жизненным циклом и состоянием.
+ * A protocol adapter parses inbound payloads, builds outbound commands, and
+ * starts services specific to that protocol. It receives an already opened byte
+ * transport from {@code ConnectionManager} and returns a runtime that owns the
+ * lifecycle and state.
  *
- * @param <S> тип состояния, которое ведёт конкретный протокол
+ * @param <S> state type maintained by the concrete protocol
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public interface CommunicationProtocol<S> {
 
     /**
-     * Возвращает тип протокола, по которому адаптер регистрируется в {@link ProtocolRegistry}.
+     * Returns the protocol type used to register this adapter in {@link ProtocolRegistry}.
      *
-     * @return тип протокола из профиля подключения
+     * @return protocol type from the connection profile
      */
     ProtocolType getType();
 
     /**
-     * Создаёт runtime протокола для одного transport-соединения.
+     * Creates a protocol runtime for one transport connection.
      *
-     * @param context неизменяемые параметры подключения и открытый transport
-     * @return runtime, который будет запущен менеджером подключений
+     * @param context immutable connection parameters and opened transport
+     * @return runtime to be started by the connection manager
      */
     ProtocolRuntime<S> createRuntime(ProtocolRuntimeContext context);
 }

@@ -52,11 +52,11 @@ import java.util.Objects;
 import java.util.Optional;
 
 /**
- * Создаёт и хранит JavaFX-структуру формы чата.
+ * Builds and owns the JavaFX structure of the chat form.
  *
- * <p>Слой намеренно отвечает только за интерфейс: связывает контролы,
- * делегирует загрузку сообщений слою сообщений и делегирует сохранение
- * слою данных.
+ * <p>This layer is deliberately limited to UI composition: it wires controls,
+ * delegates message loading to the message layer, and leaves persistence to the
+ * data layer.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -68,9 +68,9 @@ abstract class FormChatUi extends FormChatBase {
     private FormChatMessageSearchController messageSearchController;
 
     /**
-     * Создаёт раздельную компоновку и переиспользуемые контролы активного чата.
-     * Правая панель сохраняется при переключении чатов, чтобы не пересоздавать
-     * слушатели и тяжёлые элементы управления.
+     * Creates the split layout and reusable controls for the active chat.
+     * The right pane is kept across chat switches so listeners and heavier
+     * controls are not recreated.
      */
     protected void initComponents() {
         getStyleClass().add("chat-form");
@@ -197,7 +197,7 @@ abstract class FormChatUi extends FormChatBase {
     }
 
     /**
-     * Один раз создаёт контролы правой панели и переиспользует их для всех чатов.
+     * Creates right-pane controls once and reuses them for every chat.
      */
     protected void buildRightPanelComponents() {
         placeholderBox = createPlaceholderBox();
@@ -263,9 +263,9 @@ abstract class FormChatUi extends FormChatBase {
     }
 
     /**
-     * Создаёт компонент поиска сообщений и связывает его с минимальным набором
-     * действий формы: текущий чат, загруженные строки и прокрутка остаются во
-     * внешнем слое, а вся логика поиска живёт внутри компонента.
+     * Creates the message search component and gives it only the form hooks it
+     * needs. Current chat, loaded rows, and scrolling remain in the outer layer;
+     * search behavior stays inside the component.
      */
     private FormChatMessageSearchController createMessageSearchController() {
         return new FormChatMessageSearchController(
@@ -621,12 +621,12 @@ abstract class FormChatUi extends FormChatBase {
                 });
     }
 
-    // ==================== Правая панель: открытие/закрытие чата ====================
+    // Right pane: opening and closing chats.
 
     /**
-     * Программно открыть личный чат с указанной нодой.
-     * Вызывается извне (например, из NodeDetailContent) после навигации на эту форму.
-     * Если чат с этим собеседником ещё не существует в списке — добавляет его.
+     * Opens a direct chat with the requested node programmatically.
+     * External callers use this after navigating to the chat form. If the
+     * conversation is not yet in the list, it is added first.
      */
     public void openDirectChat(String peerNodeId, NodeData peerNode) {
         saveCurrentChatScrollState();
@@ -640,7 +640,7 @@ abstract class FormChatUi extends FormChatBase {
                         AppPreferences.composeChatPreferenceId("dm", peerNodeId)));
         openingChatUnreadCount = 0;
 
-        // Добавить в список, если личного чата с этим собеседником ещё нет
+        // Add the conversation when it is not already visible in the chat list.
         boolean exists = chatItems.stream()
                 .anyMatch(item -> item.getType() == ChatItem.ChatType.DIRECT_MESSAGE
                                && Objects.equals(item.getPeerNodeId(), peerNodeId));
@@ -648,7 +648,7 @@ abstract class FormChatUi extends FormChatBase {
             chatItems.add(dm);
         }
 
-        // Выделить в списке с подавлением слушателя, чтобы не вызвать openChat дважды
+        // Select the row while suppressing the listener to avoid opening it twice.
         suppressSelectionListener = true;
         try {
             chatListView.getItems().stream()
@@ -671,7 +671,7 @@ abstract class FormChatUi extends FormChatBase {
             this.selectedChat = chat;
             rememberSelectedChatForBoundConnection();
 
-            // Обновить заголовок
+            // Refresh the header.
             String safeAvatarText = UnicodeTextUtils.sanitizeForJavaFxDisplay(chat.getAvatarText());
             headerAvatarLabel.setText(safeAvatarText);
             headerAvatarLabel.setFont(Font.font("Roboto", FontWeight.BOLD,
@@ -680,18 +680,18 @@ abstract class FormChatUi extends FormChatBase {
                     "; -fx-background-radius: 18;");
             headerNameLabel.setText(UnicodeTextUtils.sanitizeForJavaFxDisplay(chat.getDisplayName()));
 
-            // Показать заголовок, сообщения и панель ввода
+            // Show header, messages, and input controls.
             detailPane.getChildren().clear();
             detailPane.getChildren().addAll(
                     chatHeader, headerSep, messageArea,
                     chatInputBar.getInputSeparator(), chatInputBar);
 
-            // Сбросить режим ответа при переключении чата
+            // Leaving a chat also leaves reply mode.
             chatInputBar.cancelReply();
 
-            // Загрузить последние сообщения из БД
+            // Load the latest messages from the database.
             loadInitialMessages(true);
-            // Восстановить пузыри активных запросов (трассировка/инфо) для этого чата
+            // Restore pending request bubbles such as traceroute and node info.
             restorePendingCountdowns();
 
             updateInputEnabled();
@@ -735,9 +735,9 @@ abstract class FormChatUi extends FormChatBase {
                 && detailPane.getChildren().contains(messageArea);
     }
 
-    // ==================== Сообщения: загрузка из БД с пагинацией ====================
+    // Messages: paged database loading.
 
-    /** Определить тип и ключ чата для запросов к MessageDbService */
+    /** Returns the chat type used by {@link com.meshtastic.client.service.MessageDbService}. */
     protected String currentChatType() {
         return Optional.ofNullable(currentChatDbKey())
                 .map(ChatDbKey::dbType)

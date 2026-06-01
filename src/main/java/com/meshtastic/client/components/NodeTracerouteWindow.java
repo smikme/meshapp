@@ -45,11 +45,11 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.BiConsumer;
 
 /**
- * Отдельное окно live traceroute до выбранной ноды.
+ * Standalone live traceroute window for a selected node.
  *
- * <p>Окно запускает новый traceroute-запрос при открытии или повторе,
- * показывает полученные результаты без очистки предыдущих запусков и сохраняет
- * успешные ответы в {@code traceroute_results} для вкладки истории ноды.
+ * <p>The window starts a new traceroute on open or retry, keeps previous results
+ * visible, and saves successful responses to {@code traceroute_results} for the
+ * node history tab.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -108,14 +108,14 @@ public final class NodeTracerouteWindow {
     }
 
     /**
-     * Открывает окно traceroute для указанной ноды и сразу запускает запрос.
+     * Opens the traceroute window for a node and starts a request immediately.
      *
-     * <p>Для одной ноды переиспользуется уже открытое окно с тем же состоянием
-     * подключения; при вызове из фонового потока открытие переносится в JavaFX thread.
+     * <p>An existing window for the same node and connection state is reused.
+     * Calls from background threads are transferred to the JavaFX thread.
      *
-     * @param state   состояние активного подключения
-     * @param node    целевая нода
-     * @param handler протокольный обработчик для отправки traceroute-запроса
+     * @param state active connection state
+     * @param node target node
+     * @param handler protocol handler used to send the traceroute request
      */
     public static void showWindow(DeviceState state, NodeData node, ProtocolHandler handler) {
         if (!Platform.isFxApplicationThread()) {

@@ -12,14 +12,15 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * macOS: NSVisualEffectView через JNA + Objective-C runtime (libobjc.dylib).
- * Добавляет vibrancy-эффект (frosted glass blur) за JavaFX контентом окна.
+ * macOS NSVisualEffectView integration through JNA and the Objective-C runtime
+ * (libobjc.dylib). Adds a vibrancy effect, or frosted-glass blur, behind JavaFX
+ * window content.
  *
- * На Apple Silicon (arm64) нельзя использовать objc_msgSend с varargs через JNA —
- * нужен com.sun.jna.Function.invoke() с фиксированными типами аргументов.
+ * On Apple Silicon (arm64), objc_msgSend with varargs cannot be used safely
+ * through JNA; com.sun.jna.Function.invoke() with fixed argument types is required.
  *
- * Для установки размера NSVisualEffectView используем Auto Layout constraints
- * вместо initWithFrame: (передача CGRect struct через JNA на arm64 проблематична).
+ * NSVisualEffectView sizing uses Auto Layout constraints instead of initWithFrame:
+ * because passing a CGRect struct through JNA on arm64 is problematic.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -60,8 +61,8 @@ public class NativeMacOsWindowControl {
     }
 
     /**
-     * Для вспомогательных tool windows: оставить нативную close-кнопку,
-     * но скрыть minimize/zoom, сохранив resizable style mask.
+     * For auxiliary tool windows: keep the native close button, but hide
+     * minimize/zoom while preserving the resizable style mask.
      */
     public void hideMiniaturizeAndZoomButtons() {
         if (nsWindow == 0) { return; }
@@ -86,7 +87,7 @@ public class NativeMacOsWindowControl {
     }
 
     /**
-     * Рефлексия: Window → TkStage → PlatformWindow → getNativeHandle() → NSWindow pointer
+     * Reflection path: Window -> TkStage -> PlatformWindow -> getNativeHandle() -> NSWindow pointer.
      */
     private static long extractNsWindow(Window window) {
         try {
@@ -141,10 +142,10 @@ public class NativeMacOsWindowControl {
     }
 
     /**
-     * Делает окно видимым в Cmd+Tab (App Switcher).
-     * JavaFX StageStyle.TRANSPARENT создаёт NSWindow с NSWindowStyleMaskBorderless (0).
-     * Добавляем Titled + FullSizeContentView + Resizable для нативного вида и ресайза.
-     * Кастомный resize из RootPane отключается на macOS — ресайз обрабатывает macOS нативно.
+     * Makes the window visible in Cmd+Tab (App Switcher).
+     * JavaFX StageStyle.TRANSPARENT creates an NSWindow with NSWindowStyleMaskBorderless (0).
+     * Add Titled + FullSizeContentView + Resizable for native appearance and resizing.
+     * RootPane custom resizing is disabled on macOS because resizing is handled natively.
      */
     public void makeVisibleInAppSwitcher() {
         if (nsWindow == 0) { return; }
@@ -158,15 +159,15 @@ public class NativeMacOsWindowControl {
             long newMask = currentMask | titled | resizable | fullSizeContent;
             msgSendLong(nsWindow, "setStyleMask:", newMask);
 
-            // Скрыть нативный titlebar
+        // Hide the native titlebar.
             msgSendBool(nsWindow, "setTitlebarAppearsTransparent:", true);
             msgSendLong(nsWindow, "setTitleVisibility:", 1L); // NSWindowTitleHidden
 
-            // Полностью скрыть NSTitlebarContainerView — убирает нативные кнопки,
-            // иконку документа и весь titlebar контейнер (у нас свой titlebar в RootPane)
+        // Fully hide NSTitlebarContainerView: native buttons, document icon, and
+        // the whole titlebar container. RootPane provides the custom titlebar.
             hideTitlebarContainer();
 
-            // Установить title для NSWindow (AltTab и другие app-switcher'ы используют его)
+        // Set the NSWindow title; AltTab and other app switchers use it.
             long nsTitle = createNSString(I18n.t("app.title"));
             try {
                 msgSendId(nsWindow, "setTitle:", nsTitle);
@@ -174,10 +175,10 @@ public class NativeMacOsWindowControl {
                 ObjCRuntime.release(nsTitle);
             }
 
-            // Отключить нативное перемещение — drag реализован в RootPane
+        // Disable native movement; dragging is implemented in RootPane.
             msgSendBool(nsWindow, "setMovable:", false);
 
-            // collectionBehavior: добавить Managed + ParticipatesInCycle
+        // collectionBehavior: add Managed + ParticipatesInCycle.
             long behavior = msgSend(nsWindow, "collectionBehavior");
             long managed = 1L << 2;        // NSWindowCollectionBehaviorManaged
             long participates = 1L << 5;    // NSWindowCollectionBehaviorParticipatesInCycle
@@ -193,23 +194,23 @@ public class NativeMacOsWindowControl {
     }
 
     /**
-     * Подход:
-     * 1. Создаём NSVisualEffectView с init (zero frame).
-     * 2. Добавляем как subview в contentView позади JavaFX layer.
-     * 3. Используем Auto Layout constraints чтобы view заполнил весь contentView.
-     *    Это надёжнее чем initWithFrame/autoresizingMask, т.к. не требует
-     *    передачи CGRect struct через JNA на arm64.
+     * Approach:
+     * 1. Create NSVisualEffectView with init, using a zero frame.
+     * 2. Add it as a subview of contentView behind the JavaFX layer.
+     * 3. Use Auto Layout constraints so the view fills the whole contentView.
+     *    This is more reliable than initWithFrame/autoresizingMask because it
+     *    does not require passing a CGRect struct through JNA on arm64.
      */
     public boolean applyVisualEffect(boolean darkMode) {
         if (nsWindow == 0) { return false; }
         long pool = ObjCRuntime.createAutoreleasePool();
         long vev = 0;
         try {
-            // Получить contentView окна
+        // Get the window contentView.
             long contentView = msgSend(nsWindow, "contentView");
             if (contentView == 0) { return false; }
 
-            // Разрешить прозрачность окна
+        // Allow window transparency.
             msgSendBool(nsWindow, "setOpaque:", false);
 
             // [nsWindow setBackgroundColor:[NSColor clearColor]]
@@ -217,41 +218,41 @@ public class NativeMacOsWindowControl {
             long clearColor = msgSend(nsColorClass, "clearColor");
             msgSendId(nsWindow, "setBackgroundColor:", clearColor);
 
-            // Сделать contentView layer-backed
+        // Make contentView layer-backed.
             msgSendBool(contentView, "setWantsLayer:", true);
 
-            // Создать NSVisualEffectView
+        // Create NSVisualEffectView.
             long vevClass = cls("NSVisualEffectView");
             vev = msgSend(vevClass, "alloc");
             vev = msgSend(vev, "init");
 
-            // material = NSVisualEffectMaterialHUDWindow (13) — выраженный frosted glass
+        // material = NSVisualEffectMaterialHUDWindow (13): pronounced frosted glass.
             msgSendLong(vev, "setMaterial:", 13L);
 
             // blendingMode = NSVisualEffectBlendingModeBehindWindow (0)
             msgSendLong(vev, "setBlendingMode:", 0L);
 
-            // state = NSVisualEffectStateActive (1) — всегда активен, даже когда окно не в фокусе
+        // state = NSVisualEffectStateActive (1): always active, even when the window is not focused.
             msgSendLong(vev, "setState:", 1L);
 
-            // Установить appearance (dark/light)
+        // Set appearance (dark/light).
             setAppearanceOnView(vev, darkMode);
 
-            // Отключить autoresizing mask → используем Auto Layout
+        // Disable autoresizing mask; Auto Layout is used instead.
             // setTranslatesAutoresizingMaskIntoConstraints:NO
             msgSendBool(vev, "setTranslatesAutoresizingMaskIntoConstraints:", false);
 
-            // Вставить за всеми subview: [contentView addSubview:vev positioned:NSWindowBelow relativeTo:nil]
+        // Insert behind all subviews: [contentView addSubview:vev positioned:NSWindowBelow relativeTo:nil].
             msgSendAddSubview(contentView, vev);
 
-            // Auto Layout: привязать все 4 стороны к contentView
+        // Auto Layout: pin all four edges to contentView.
             pinToSuperview(contentView, vev);
 
-            // Тень окна
+        // Window shadow.
             msgSendBool(nsWindow, "setHasShadow:", true);
 
-            // Скруглённые углы — только на NSVisualEffectView (визуальный эффект),
-            // НЕ на contentView, чтобы masksToBounds не обрезал hit-test зону по краям
+        // Rounded corners belong only to NSVisualEffectView, the visual effect layer.
+        // Do not apply them to contentView, or masksToBounds clips edge hit-testing.
             msgSendBool(vev, "setWantsLayer:", true);
             long vevLayer = msgSend(vev, "layer");
             if (vevLayer != 0) {
@@ -271,8 +272,8 @@ public class NativeMacOsWindowControl {
     }
 
     /**
-     * Auto Layout: привязать view ко всем 4 сторонам superview с отступом 0.
-     * Эквивалент:
+     * Auto Layout: pin the view to all four edges of its superview with zero inset.
+     * Equivalent to:
      *   [view.leadingAnchor constraintEqualToAnchor:superview.leadingAnchor].active = YES
      *   [view.trailingAnchor constraintEqualToAnchor:superview.trailingAnchor].active = YES
      *   [view.topAnchor constraintEqualToAnchor:superview.topAnchor].active = YES
@@ -289,8 +290,8 @@ public class NativeMacOsWindowControl {
     }
 
     /**
-     * Обновить appearance на NSVisualEffectView при смене темы.
-     * Находит существующий NSVisualEffectView среди subviews contentView.
+     * Updates NSVisualEffectView appearance when the theme changes.
+     * Finds the existing NSVisualEffectView among contentView subviews.
      */
     public void updateVisualEffectAppearance(boolean dark) {
         if (nsWindow == 0) { return; }
@@ -298,7 +299,7 @@ public class NativeMacOsWindowControl {
             long contentView = msgSend(nsWindow, "contentView");
             if (contentView == 0) { return; }
 
-            // Перебрать subviews, найти NSVisualEffectView
+        // Iterate subviews and find NSVisualEffectView.
             long subviews = msgSend(contentView, "subviews");
             long count = msgSend(subviews, "count");
             long vevClass = cls("NSVisualEffectView");
@@ -318,7 +319,7 @@ public class NativeMacOsWindowControl {
         }
     }
 
-    /** Переключить NSAppearance на окне (DarkAqua / Aqua) */
+    /** Switches NSAppearance on the window: DarkAqua or Aqua. */
     public void setDarkMode(boolean dark) {
         if (nsWindow == 0) { return; }
         try {
@@ -329,7 +330,7 @@ public class NativeMacOsWindowControl {
     }
 
     /**
-     * Скрыть окно из window list, не вводя его предварительно в native miniaturized-state.
+     * Hides the window from the window list without first entering native miniaturized state.
      */
     public void hideToTray() {
         if (nsWindow == 0) { return; }
@@ -341,7 +342,7 @@ public class NativeMacOsWindowControl {
     }
 
     /**
-     * Увести уже miniaturized окно в tray-state, чтобы оно не оставалось в Dock.
+     * Moves an already miniaturized window into tray state so it does not remain in Dock.
      */
     public void hideMiniaturizedToTray() {
         if (nsWindow == 0) { return; }
@@ -354,7 +355,7 @@ public class NativeMacOsWindowControl {
     }
 
     /**
-     * Вернуть ранее скрытое через orderOut окно на экран.
+     * Restores a window previously hidden through orderOut back to the screen.
      */
     public void restoreFromTray() {
         if (nsWindow == 0) { return; }
@@ -367,7 +368,7 @@ public class NativeMacOsWindowControl {
     }
 
     /**
-     * Поднять окно наверх и сделать его key window, чтобы оно сразу принимало клавиатурный ввод.
+     * Brings the window forward and makes it key so it immediately accepts keyboard input.
      */
     public void makeKeyAndOrderFront() {
         if (nsWindow == 0) { return; }
@@ -380,7 +381,7 @@ public class NativeMacOsWindowControl {
     }
 
     /**
-     * Передать first responder в JavaFX Glass view, чтобы аппаратный keyDown не оставался на самом NSWindow.
+     * Transfers first responder to the JavaFX Glass view so hardware keyDown does not stay on NSWindow itself.
      */
     public void focusTextInputView() {
         if (nsWindow == 0 || nsView == 0) {
@@ -401,8 +402,9 @@ public class NativeMacOsWindowControl {
     }
 
     /**
-     * Нативный перехват минимизации окна macOS.
-     * Нужен для DECORATED окна, где native traffic-light minimise может не дойти до JavaFX iconifiedProperty.
+     * Native hook for macOS window minimization.
+     * Needed for DECORATED windows where the native traffic-light minimize action
+     * may not reach JavaFX iconifiedProperty.
      */
     public long installMiniaturizeObserver(Runnable onMiniaturize) {
         if (nsWindow == 0 || onMiniaturize == null) {
@@ -467,8 +469,8 @@ public class NativeMacOsWindowControl {
     }
 
     /**
-     * Скрыть NSTitlebarContainerView — контейнер нативных кнопок и иконки в titlebar.
-     * Ищем его среди subviews contentView.superview (themeFrame).
+     * Hides NSTitlebarContainerView, the container for native titlebar buttons and icon.
+     * It is searched among subviews of contentView.superview, the theme frame.
      */
     private void hideTitlebarContainer() {
         try {
@@ -515,7 +517,7 @@ public class NativeMacOsWindowControl {
         }
     }
 
-    // ====== Low-level helpers — фиксированные сигнатуры для arm64 ABI ======
+    // ====== Low-Level Helpers: Fixed Signatures for arm64 ABI ======
 
     private static long cls(String name) {
         return GET_CLASS.invokeLong(new Object[]{name});
@@ -530,7 +532,7 @@ public class NativeMacOsWindowControl {
         return OBJC_MSG_SEND.invokeLong(new Object[]{receiver, sel(selectorName)});
     }
 
-    /** objc_msgSend(receiver, selector, id) → id — для методов с одним object-аргументом */
+    /** objc_msgSend(receiver, selector, id) -> id, for methods with one object argument. */
     private static long msgSendId(long receiver, String selectorName, long arg) {
         return OBJC_MSG_SEND.invokeLong(new Object[]{receiver, sel(selectorName), arg});
     }
@@ -540,27 +542,27 @@ public class NativeMacOsWindowControl {
         return OBJC_MSG_SEND.invokeLong(new Object[]{receiver, sel(selectorName), arg}) != 0;
     }
 
-    /** objc_msgSend(receiver, selector, long) — для setMaterial:, setState: и т.д. */
+    /** objc_msgSend(receiver, selector, long), for setMaterial:, setState:, and similar calls. */
     private static void msgSendLong(long receiver, String selectorName, long arg) {
         OBJC_MSG_SEND.invokeLong(new Object[]{receiver, sel(selectorName), arg});
     }
 
-    /** objc_msgSend(receiver, selector, bool) — для setWantsLayer:, setActive: и т.д. */
+    /** objc_msgSend(receiver, selector, bool), for setWantsLayer:, setActive:, and similar calls. */
     private static void msgSendBool(long receiver, String selectorName, boolean arg) {
         OBJC_MSG_SEND.invokeLong(new Object[]{receiver, sel(selectorName), arg ? 1L : 0L});
     }
 
     /**
-     * Установка CGFloat свойства через KVC: [receiver setValue:@(value) forKey:key].
-     * Используем NSNumber numberWithInteger: чтобы обойти проблемы arm64 ABI с float/double.
-     * CALayer cornerRadius принимает NSNumber и конвертирует в CGFloat.
+     * Sets a CGFloat property through KVC: [receiver setValue:@(value) forKey:key].
+     * NSNumber numberWithInteger: avoids arm64 ABI issues with float/double.
+     * CALayer cornerRadius accepts NSNumber and converts it to CGFloat.
      */
     private static void setDoubleProperty(long receiver, String key, double value) {
         long pool = ObjCRuntime.createAutoreleasePool();
         long nsKey = 0;
         long nsNumberClass = cls("NSNumber");
         try {
-            // numberWithInteger: принимает long — надёжно на arm64
+        // numberWithInteger: accepts long, which is reliable on arm64.
             long nsNumber = msgSendId(nsNumberClass, "numberWithInteger:", (long) value);
             nsKey = createNSString(key);
             OBJC_MSG_SEND.invokeLong(new Object[]{receiver, sel("setValue:forKey:"), nsNumber, nsKey});

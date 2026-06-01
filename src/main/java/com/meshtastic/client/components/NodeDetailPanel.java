@@ -10,11 +10,9 @@ import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
 
 /**
- * Модальная панель детальной информации о ноде.
- * Показывается в ModalPane (выезжает справа).
- * Делегирует содержимое в {@link NodeDetailContent}.
- * <p>
- * Использование: {@code NodeDetailPanel.showForNode(state, node);}
+ * Side modal with detailed information about a node.
+ * The panel is hosted by {@code ModalPane} and delegates its content to
+ * {@link NodeDetailContent}.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -30,7 +28,7 @@ public class NodeDetailPanel extends VBox {
         setMaxHeight(Double.MAX_VALUE);
         getStyleClass().add("modal-side-panel");
 
-        // === Единый компонент информации о ноде ===
+        // Shared node information component.
         ProtocolHandler handler = findActiveProtocolHandler();
         detailContent = new NodeDetailContent(state, node, handler, this::close);
         VBox.setVgrow(detailContent, Priority.ALWAYS);
@@ -38,7 +36,7 @@ public class NodeDetailPanel extends VBox {
         getChildren().add(detailContent);
     }
 
-    /** Закрыть панель: отвязать телеметрию и скрыть модалку */
+    /** Closes the panel by unbinding telemetry and hiding the modal. */
     public void close() {
         detailContent.getChartPanel().unbind();
         ModalPane modal = ModalPane.getInstance();
@@ -47,7 +45,7 @@ public class NodeDetailPanel extends VBox {
         }
     }
 
-    /** Найти ProtocolHandler выбранного соединения */
+    /** Finds the ProtocolHandler for the selected connection. */
     private static ProtocolHandler findActiveProtocolHandler() {
         ConnectionManager mgr = ConnectionManager.getInstance();
         ConnectionEntry entry = mgr.getSelectedConnectionEntry();
@@ -55,8 +53,8 @@ public class NodeDetailPanel extends VBox {
     }
 
     /**
-     * Показать детальную информацию о ноде в ModalPane.
-     * Универсальный метод — можно вызывать из любого места приложения.
+     * Shows node details in the ModalPane.
+     * This entry point can be called from anywhere in the application.
      */
     public static void showForNode(DeviceState state, NodeData node) {
         if (node == null) { return; }

@@ -13,10 +13,10 @@ import com.meshtastic.client.protocol.meshcore.MeshCoreCompanionProtocolRuntime;
 import java.util.function.Consumer;
 
 /**
- * Контекст выполнения прикладного API Lua-песочницы.
+ * Execution context for the Lua sandbox application API.
  * <p>
- * Содержит только те сервисы и состояние приложения, которые разрешенные
- * расширения {@code mesh.*} могут использовать во время выполнения скрипта.
+ * Exposes only the services and application state that approved {@code mesh.*}
+ * extensions may use while a script is running.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -36,27 +36,27 @@ public record LuaSandboxContext(long scriptId,
                                 Runnable executionDeadlineDeferrer) {
 
     /**
-     * Проверяет, есть ли активный транспорт для отправки сообщений.
+     * Returns whether an active transport is available for sending messages.
      *
-     * @return {@code true}, если доступен обычный протокол или MeshCore Companion
+     * @return {@code true} when Meshtastic or MeshCore Companion can send
      */
     public boolean hasChatTransport() {
         return state != null && (handler != null || meshCoreRuntime != null);
     }
 
     /**
-     * Возвращает node_id владельца подключения или пустую строку.
+     * Returns the connection owner node id or an empty string.
      *
-     * @return безопасное значение owner node id
+     * @return safe owner node id value
      */
     public String ownerNodeIdOrEmpty() {
         return ownerNodeId != null ? ownerNodeId : "";
     }
 
     /**
-     * Передает строку вывода из sandbox API в рантайм скрипта.
+     * Sends a sandbox API output line to the script runtime.
      *
-     * @param message строка вывода
+     * @param message output line
      */
     public void emitOutput(String message) {
         if (outputSink != null) {
@@ -65,7 +65,7 @@ public record LuaSandboxContext(long scriptId,
     }
 
     /**
-     * Продлевает лимит выполнения после разрешенного блокирующего вызова API.
+     * Extends the execution budget after an allowed blocking API call.
      */
     public void deferExecutionDeadline() {
         if (executionDeadlineDeferrer != null) {

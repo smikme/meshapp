@@ -16,11 +16,10 @@ import java.util.Set;
 import java.util.concurrent.*;
 
 /**
- * Сервис автоматического переподключения соединений (singleton).
+ * Singleton service that automatically reconnects dropped connections.
  * <p>
- * При разрыве соединения запускает цикл повторных попыток
- * с экспоненциальным backoff (2с → 4с → 8с → 16с → 30с max).
- * Показывает статусные Toast-уведомления и обновляет состояние
+ * When a connection is lost, it starts a retry loop with exponential backoff
+ * from two seconds up to thirty seconds, shows status toasts, and updates
  * {@link ConnectionEntry#isReconnecting()}.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
@@ -32,15 +31,15 @@ public final class ReconnectService {
     private static final long INITIAL_DELAY_SECONDS = 2;
     private static final long DEVICE_REBOOT_INITIAL_DELAY_SECONDS = 6;
     /**
-     * BLE-устройствам после reboot обычно нужно больше времени, чем TCP/Serial,
-     * чтобы снова начать рекламироваться и принять GATT connect.
+     * BLE devices usually need more time than TCP or Serial devices after reboot
+     * before they advertise again and accept a GATT connection.
      */
     private static final long BLE_INITIAL_DELAY_SECONDS = 5;
     private static final long BLE_DEVICE_REBOOT_INITIAL_DELAY_SECONDS = 10;
     private static final long MAX_DELAY_SECONDS = 30;
     /**
-     * Перед BLE reconnect даём короткое scan window, чтобы прогреть discovery cache
-     * и не стучаться в устройство, которое ещё не вернулось в advertising state.
+     * Before BLE reconnect, run a short scan window to warm the discovery cache
+     * and avoid connecting before the device has returned to advertising state.
      */
     private static final long BLE_RESCAN_WINDOW_MS = 4_000;
     private static final long BLE_RESCAN_POLL_MS = 250;
@@ -69,17 +68,17 @@ public final class ReconnectService {
     }
 
     /**
-     * Запускает цикл переподключения для указанного соединения.
-     * Идемпотентен — повторный вызов для того же id игнорируется.
+     * Starts the reconnect loop for a connection.
+     * The method is idempotent; repeated calls for the same id are ignored.
      */
     public synchronized void startReconnect(String id) {
         startReconnect(id, false);
     }
 
     /**
-     * Запускает reconnect после ожидаемого reboot устройства.
-     * Использует более длинную первую паузу, чтобы не делать раннюю неудачную попытку,
-     * пока радио ещё перезагружается или BLE ещё не рекламируется.
+     * Starts reconnect after an expected device reboot.
+     * The first delay is longer so the app does not fail early while the radio
+     * is still rebooting or BLE has not started advertising.
      */
     public synchronized void startReconnectAfterDeviceReboot(String id) {
         startReconnect(id, true);
@@ -126,7 +125,7 @@ public final class ReconnectService {
     }
 
     /**
-     * Отменяет цикл переподключения для указанного соединения.
+     * Cancels the reconnect loop for a connection.
      */
     public void cancelReconnect(String id) {
         ScheduledFuture<?> future = pendingReconnects.remove(id);
@@ -185,7 +184,7 @@ public final class ReconnectService {
             prepareBleReconnect(entry);
             mgr.connect(id);
 
-            // Успех — очищаем состояние reconnect
+                    // Success clears reconnect state.
             pendingReconnects.remove(id);
             attemptCounts.remove(id);
             deviceRebootReconnects.remove(id);
@@ -203,9 +202,9 @@ public final class ReconnectService {
     }
 
     /**
-     * Возвращает начальную задержку reconnect для выбранного транспорта.
-     * BLE получает больший grace period, потому что после reboot устройство может
-     * появиться в advertising state только через несколько секунд.
+     * Returns the initial reconnect delay for the selected transport.
+     * BLE gets a longer grace period because a rebooted device may not advertise
+     * again for several seconds.
      */
     private static long initialDelaySeconds(ConnectionEntry entry, boolean afterDeviceReboot) {
         if (entry != null && entry.getEffectiveType() == ConnectionType.BLE) {
@@ -215,9 +214,9 @@ public final class ReconnectService {
     }
 
     /**
-     * Для BLE перед reconnect открываем короткое scan window.
-     * Это помогает платформенным backends обновить discovery/system cache и
-     * уменьшает число ложных "device not found" сразу после reboot.
+     * Opens a short scan window before BLE reconnect.
+     * This helps platform backends refresh discovery and system caches, reducing
+     * false "device not found" errors immediately after reboot.
      */
     private void prepareBleReconnect(ConnectionEntry entry) {
         if (entry.getEffectiveType() != ConnectionType.BLE) {

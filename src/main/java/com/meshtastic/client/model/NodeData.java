@@ -7,14 +7,12 @@ import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 
 /**
- * Данные одной ноды Meshtastic-сети.
+ * Mutable data object for one Meshtastic node.
  * <p>
- * Изменяемый POJO, содержащий идентификацию (longName, shortName, nodeId),
- * позицию (lat/lon/alt), метрики устройства (батарея, напряжение, утилизация канала),
- * метрики окружения (температура, влажность, давление) и метаданные (роль, hw_model, hopsAway).
- * <p>
- * Создаётся через {@link DeviceState#getOrCreateNode(int)} или напрямую по номеру ноды.
- * Поле {@code nodeId} генерируется автоматически в формате {@code !XXXXXXXX} (hex).
+ * Contains identity, position, device metrics, environment metrics, and metadata
+ * such as role, hardware model, and hop distance. Instances are usually created
+ * through {@link DeviceState#getOrCreateNode(int)}; {@code nodeId} is generated
+ * automatically in the {@code !XXXXXXXX} form.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -50,10 +48,9 @@ public class NodeData {
     private Boolean licensed;
 
     /**
-     * Создаёт ноду с указанным номером. Автоматически генерирует {@code nodeId}
-     * в формате {@code !XXXXXXXX} (hex-представление nodeNum).
+     * Creates a node with the given numeric id and generated {@code nodeId}.
      *
-     * @param nodeNum уникальный числовой идентификатор ноды
+     * @param nodeNum unique numeric node id
      */
     public NodeData(int nodeNum) {
         this.nodeNum = nodeNum;
@@ -146,9 +143,9 @@ public class NodeData {
     public boolean isLicensed() { return Boolean.TRUE.equals(licensed); }
 
     /**
-     * Проверяет, есть ли у ноды хотя бы одно непустое имя (longName или shortName).
+     * Returns whether the node has at least one non-empty name.
      *
-     * @return {@code true} если longName или shortName заполнено
+     * @return {@code true} when longName or shortName is set
      */
     public boolean hasName() {
         return (longName != null && !longName.isEmpty())
@@ -156,10 +153,10 @@ public class NodeData {
     }
 
     /**
-     * Форматирует Unix-время (секунды) в строку {@code dd.MM.yy HH:mm}.
+     * Formats Unix time in seconds as {@code dd.MM.yy HH:mm}.
      *
-     * @param epochSeconds время в секундах с начала эпохи
-     * @return отформатированная строка или пустая строка для значений ≤ 0
+     * @param epochSeconds seconds since Unix epoch
+     * @return formatted string, or empty string for non-positive values
      */
     public static String formatTime(long epochSeconds) {
         if (epochSeconds <= 0) { return ""; }
@@ -170,10 +167,10 @@ public class NodeData {
     }
 
     /**
-     * Переводит строковый идентификатор роли ноды в русскоязычное название.
+     * Converts a role identifier into the localized role name shown by the UI.
      *
-     * @param role идентификатор роли (например, {@code "CLIENT"}, {@code "ROUTER"})
-     * @return русскоязычное название роли, или исходная строка если перевод не найден
+     * @param role role identifier, for example {@code "CLIENT"} or {@code "ROUTER"}
+     * @return localized role name, or the original value when no mapping exists
      */
     public static String translateRole(String role) {
         if (role == null || role.isEmpty()) { return null; }

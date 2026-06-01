@@ -32,7 +32,7 @@ class MessageStoreTest {
         
         List<MeshMessage> messages = store.getMessages(0);
         assertEquals(1, messages.size());
-        // Добавлено сообщение содержит ту же ссылку
+        // The inserted message keeps the same object reference.
         assertEquals("Hello", messages.getFirst().getText());
     }
 
@@ -43,12 +43,12 @@ class MessageStoreTest {
         MeshMessage msg1 = createMessage("First", 0, 100);
         store.addMessage(msg1);
         
-        // Second - тоже с packetId 100, должно быть проигнорировано
+        // The second message also has packetId 100 and must be ignored.
         MeshMessage msg2 = createMessage("Second", 0, 100);
         store.addMessage(msg2);
         
         List<MeshMessage> messages = store.getMessages(0);
-        // Первый тест показывал, что length равен 1
+        // The first assertion verifies that only one entry remains.
         assertEquals(1, messages.size());
     }
 
@@ -113,7 +113,7 @@ class MessageStoreTest {
         
         List<MeshMessage> messages = store.getMessages(1);
         assertEquals(100, messages.size());
-        // После дедупликации проверяем только first/last
+        // After deduplication only first and last boundaries matter here.
     }
 
     @Test
@@ -288,11 +288,11 @@ class MessageStoreTest {
     void ensureDirectMessageThreadDoesNotFireForExisting() {
         MessageStore store = new MessageStore();
         
-        // Создаем поток
+        // Create the thread.
         store.ensureDirectMessageThread("!existingPeer");
         int initialSize = store.getDirectMessages("!existingPeer").size();
         
-        // Повторный вызов не должен создавать новый поток
+        // Repeated start must not create another thread.
         store.ensureDirectMessageThread("!existingPeer");
         
         List<MeshMessage> messages = store.getDirectMessages("!existingPeer");
@@ -305,7 +305,7 @@ class MessageStoreTest {
         
         store.ensureDirectMessageThread(null);
         
-        // Ничего не должно сломаться
+        // The call should be harmless.
     }
 
     @Test
@@ -314,7 +314,7 @@ class MessageStoreTest {
         
         store.ensureDirectMessageThread("");
         
-        // Ничего не должно сломаться
+        // The second call should also be harmless.
     }
 
     @Test
@@ -382,7 +382,7 @@ class MessageStoreTest {
         MeshMessage msg = createMessage("channel", 0, 700);
         store.addMessage(msg);
         
-        // Устанавливаем packetId - так как createMessage не устанавливает его
+        // Set packetId explicitly because createMessage does not populate it.
         msg.setPacketId(700);
         
         assertNotNull(store.findMessageByPacketId(700));
@@ -395,7 +395,7 @@ class MessageStoreTest {
         MeshMessage msg = createMessage("dm", 0, 800);
         store.addDirectMessage(msg, "!peer");
         
-        // Устанавливаем packetId
+        // Set packetId explicitly.
         msg.setPacketId(800);
         
         assertNotNull(store.findMessageByPacketId(800));

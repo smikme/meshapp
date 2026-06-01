@@ -13,11 +13,10 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 /**
- * Подготавливает данные реакций для рендера в чате.
+ * Prepares message reactions for chat rendering.
  *
- * <p>Helper агрегирует одинаковые emoji, сохраняет их исходный порядок появления
- * и вычисляет tooltip авторов за один проход группировки, чтобы UI-слой
- * не выполнял повторные линейные сканирования по всем реакциям.
+ * <p>The helper groups identical emoji, preserves first-seen order, and builds
+ * author tooltips in one pass so the UI layer does not repeatedly scan every reaction.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -26,23 +25,23 @@ final class ChatReactionHelper {
     private ChatReactionHelper() {}
 
     /**
-     * Итоговая модель одного reaction-chip в UI.
+     * Final model for one reaction chip in the UI.
      *
-     * @param emoji emoji реакции
-     * @param own есть ли среди реакций локальная
-     * @param count количество одинаковых реакций
-     * @param tooltipText текст tooltip с именами авторов
+     * @param emoji reaction emoji
+     * @param own whether the local user is among the authors
+     * @param count number of identical reactions
+     * @param tooltipText tooltip text with author names
      */
     record ReactionSummary(String emoji, boolean own, int count, String tooltipText) {}
 
     private record SenderKey(String nodeId, String senderName) {}
 
     /**
-     * Агрегирует набор видимых реакций для рендера reaction-bar.
+     * Aggregates visible reactions for the reaction bar.
      *
-     * @param state состояние устройства
-     * @param reactions список реакций сообщения
-     * @return список summaries в порядке первого появления emoji
+     * @param state device state
+     * @param reactions message reactions
+     * @return summaries in first-seen emoji order
      */
     static List<ReactionSummary> summarize(DeviceState state, List<MessageReaction> reactions) {
         Map<SenderKey, String> senderNameCache = new HashMap<>();
@@ -62,13 +61,13 @@ final class ChatReactionHelper {
     }
 
     /**
-     * Собирает итоговую модель одного emoji из уже сгруппированных реакций.
+     * Builds the final model for one emoji from an existing reaction group.
      *
-     * @param state состояние устройства
-     * @param emoji emoji группы
-     * @param groupedReactions все реакции с этим emoji
-     * @param senderNameCache локальный cache разрешённых имён авторов
-     * @return summary для одного reaction-chip
+     * @param state device state
+     * @param emoji group emoji
+     * @param groupedReactions all reactions with this emoji
+     * @param senderNameCache local cache of resolved author names
+     * @return summary for one reaction chip
      */
     private static ReactionSummary toSummary(DeviceState state,
                                              String emoji,
@@ -84,12 +83,12 @@ final class ChatReactionHelper {
     }
 
     /**
-     * Разрешает имя автора реакции и кэширует результат по nodeId/senderName.
+     * Resolves a reaction author name and caches it by node id or sender name.
      *
-     * @param state состояние устройства
-     * @param reaction реакция
-     * @param senderNameCache cache имён внутри одной операции агрегации
-     * @return отображаемое имя автора реакции
+     * @param state device state
+     * @param reaction reaction
+     * @param senderNameCache name cache scoped to one aggregation run
+     * @return display name of the reaction author
      */
     private static String resolveSenderName(DeviceState state,
                                             MessageReaction reaction,
@@ -102,10 +101,10 @@ final class ChatReactionHelper {
     }
 
     /**
-     * Отфильтровывает технические/битые реакции без emoji.
+     * Filters technical or malformed reactions that have no emoji.
      *
-     * @param reaction реакция
-     * @return {@code true}, если emoji можно отрисовать
+     * @param reaction reaction
+     * @return {@code true} when the emoji can be rendered
      */
     private static boolean hasEmoji(MessageReaction reaction) {
         return reaction.getEmoji() != null && !reaction.getEmoji().isBlank();

@@ -35,19 +35,16 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Визуализация traceroute-маршрутов: цепочки нод с SNR-метками и стрелками.
+ * Visualizes traceroute paths as chains of nodes with SNR labels and arrows.
  *
- * <p>Содержит два режима построения:
- * <ul>
- *   <li>Из protobuf {@link MeshProtos.RouteDiscovery} (live данные от устройства)</li>
- *   <li>Из текста БД (восстановление при загрузке истории)</li>
- * </ul>
+ * <p>The view can be built from live {@link MeshProtos.RouteDiscovery} payloads
+ * or reconstructed from the text persisted in message history.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class TracerouteView {
 
-    /** Префикс текста traceroute-сообщений в БД. */
+    /** Text prefix used for traceroute messages stored in the database. */
     public static final String TRACEROUTE_PREFIX = "\uD83D\uDD0D Traceroute → ";
 
     private static final Pattern ROUTE_SEGMENT =
@@ -65,9 +62,9 @@ public class TracerouteView {
     private final boolean showAvatar;
 
     /**
-     * @param containerWidthProp ширина контейнера сообщений для binding maxWidth
-     * @param nodeNameResolver   функция int -&gt; String, возвращает имя ноды по nodeNum
-     * @param onDeleteMessage    колбэк удаления сообщения (msg, bubbleRow)
+     * @param containerWidthProp message container width used to bind max width
+     * @param nodeNameResolver function mapping a numeric node id to a display name
+     * @param onDeleteMessage message deletion callback receiving message and bubble row
      */
     public TracerouteView(ReadOnlyDoubleProperty containerWidthProp,
                           IntFunction<String> nodeNameResolver,
@@ -76,13 +73,13 @@ public class TracerouteView {
     }
 
     /**
-     * Создаёт визуализатор traceroute с настраиваемым отображением системного аватара.
+     * Creates a traceroute renderer with optional system-avatar rendering.
      *
-     * @param containerWidthProp ширина контейнера сообщений для binding maxWidth
-     * @param nodeNameResolver   функция int -&gt; String, возвращает имя ноды по nodeNum
-     * @param onDeleteMessage    колбэк удаления сообщения (msg, bubbleRow), может быть {@code null}
-     * @param showAvatar         {@code true}, чтобы показывать системный avatar как в чате;
-     *                           {@code false} для standalone-панелей и окон traceroute
+     * @param containerWidthProp message container width used to bind max width
+     * @param nodeNameResolver function mapping a numeric node id to a display name
+     * @param onDeleteMessage message deletion callback, or {@code null}
+     * @param showAvatar {@code true} to render the system avatar as chat does;
+     *                   {@code false} for standalone traceroute panels and windows
      */
     public TracerouteView(ReadOnlyDoubleProperty containerWidthProp,
                           IntFunction<String> nodeNameResolver,
@@ -95,11 +92,11 @@ public class TracerouteView {
     }
 
     /**
-     * Форматировать traceroute в текст для сохранения в БД.
+     * Formats a traceroute result as text for database storage.
      *
-     * @param targetName имя целевой ноды
-     * @param route      protobuf RouteDiscovery
-     * @return текстовое представление маршрута
+     * @param targetName target node display name
+     * @param route protobuf route discovery payload
+     * @return textual route representation
      */
     public String formatText(String targetName, MeshProtos.RouteDiscovery route) {
         StringBuilder sb = new StringBuilder();
@@ -136,12 +133,12 @@ public class TracerouteView {
     }
 
     /**
-     * Построить визуальный пузырь traceroute из protobuf данных.
+     * Builds a visual traceroute bubble from protobuf data.
      *
-     * @param targetName имя целевой ноды
-     * @param route      protobuf RouteDiscovery
-     * @param msg        MeshMessage для времени и контекстного меню
-     * @return HBox — готовый row для messageContainer
+     * @param targetName target node display name
+     * @param route protobuf route discovery payload
+     * @param msg message supplying timestamp and context-menu data
+     * @return row ready to be added to the message container
      */
     public HBox buildFromProto(String targetName,
                                MeshProtos.RouteDiscovery route,
@@ -155,12 +152,12 @@ public class TracerouteView {
         header.getStyleClass().add("chat-bubble-text");
         content.getChildren().add(header);
 
-        // Прямой маршрут
+        // Forward route.
         content.getChildren().add(buildRouteChain(
                 selfName(), targetName,
                 route.getRouteList(), route.getSnrTowardsList(), true));
 
-        // Обратный маршрут
+        // Reverse route.
         if (hasReverseRoute(route)) {
             Label backLabel = new Label(I18n.t("chat.traceroute.reverse"));
             backLabel.getStyleClass().addAll(
@@ -176,10 +173,10 @@ public class TracerouteView {
     }
 
     /**
-     * Попытаться восстановить визуальный traceroute-пузырь из текста БД.
+     * Attempts to rebuild a visual traceroute bubble from stored text.
      *
-     * @param msg системное сообщение с текстом traceroute
-     * @return визуальный пузырь или {@code null} если текст не распознан
+     * @param msg system message containing traceroute text
+     * @return visual bubble, or {@code null} when the text is not recognized
      */
     public HBox tryBuildFromText(MeshMessage msg) {
         String text = msg.getText();
@@ -188,17 +185,17 @@ public class TracerouteView {
             return null;
         }
 
-        // Строка 0: "🔍 Traceroute → TargetName"
+        // Line 0: "Traceroute -> TargetName".
         String headerLine = lines[0];
         String targetName = headerLine.substring(headerLine.indexOf("→") + 1).trim();
 
-        // Строка 1: прямой маршрут
+        // Line 1: forward route.
         ParsedRoute fwd = parseRouteLine(lines[1]);
         if (fwd == null) {
             return null;
         }
 
-        // Строка 2 (опц.): обратный маршрут
+        // Optional line 2: reverse route.
         ParsedRoute back = null;
         if (lines.length >= 3) {
             back = parseRouteLine(lines[2]);
@@ -229,7 +226,7 @@ public class TracerouteView {
         return wrapWithAvatar(content, msg);
     }
 
-    // === Внутренние методы ===
+    // Internal helpers.
 
     private VBox createBubbleContent() {
         VBox content = new VBox(6);
