@@ -4,6 +4,7 @@ import com.google.protobuf.Descriptors;
 import com.google.protobuf.Descriptors.EnumValueDescriptor;
 import com.google.protobuf.Descriptors.FieldDescriptor;
 import com.google.protobuf.Message;
+import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.model.ConfigTreeItem;
 import javafx.scene.control.TreeItem;
 import org.meshtastic.proto.ConfigProtos;
@@ -32,33 +33,32 @@ public final class ProtobufTreeBuilder {
     private static final int MIN_VISIBLE_REPEATED_BYTES_SLOTS = 3;
     private static final int MIN_VISIBLE_REPEATED_SCALAR_SLOTS = 1;
 
-    /** Русские названия секций конфига */
-    private static final Map<String, String> SECTION_NAMES = Map.ofEntries(
-            Map.entry("device", "Устройство"),
-            Map.entry("position", "Позиция"),
-            Map.entry("power", "Питание"),
-            Map.entry("network", "Сеть"),
-            Map.entry("display", "Дисплей"),
-            Map.entry("lora", "LoRa"),
-            Map.entry("bluetooth", "Bluetooth"),
-            Map.entry("security", "Безопасность"),
-            Map.entry("sessionkey", "Ключ сессии"),
-            Map.entry("device_ui", "UI устройства"),
-            Map.entry("mqtt", "MQTT"),
-            Map.entry("serial", "Серийный порт"),
-            Map.entry("external_notification", "Внешние уведомления"),
-            Map.entry("store_forward", "Store & Forward"),
-            Map.entry("range_test", "Тест дальности"),
-            Map.entry("telemetry", "Телеметрия"),
-            Map.entry("canned_message", "Готовые сообщения"),
-            Map.entry("audio", "Аудио"),
-            Map.entry("remote_hardware", "Удалённое оборудование"),
-            Map.entry("neighbor_info", "Информация о соседях"),
-            Map.entry("ambient_lighting", "Подсветка"),
-            Map.entry("detection_sensor", "Датчик обнаружения"),
-            Map.entry("paxcounter", "Счётчик PAX"),
-            Map.entry("statusmessage", "Статус"),
-            Map.entry("traffic_management", "Управление трафиком")
+    private static final Map<String, String> SECTION_NAME_KEYS = Map.ofEntries(
+            Map.entry("device", "settings.config.section.device"),
+            Map.entry("position", "settings.config.section.position"),
+            Map.entry("power", "settings.config.section.power"),
+            Map.entry("network", "settings.config.section.network"),
+            Map.entry("display", "settings.config.section.display"),
+            Map.entry("lora", "settings.config.section.lora"),
+            Map.entry("bluetooth", "settings.config.section.bluetooth"),
+            Map.entry("security", "settings.config.section.security"),
+            Map.entry("sessionkey", "settings.config.section.sessionkey"),
+            Map.entry("device_ui", "settings.config.section.device_ui"),
+            Map.entry("mqtt", "settings.config.section.mqtt"),
+            Map.entry("serial", "settings.config.section.serial"),
+            Map.entry("external_notification", "settings.config.section.external_notification"),
+            Map.entry("store_forward", "settings.config.section.store_forward"),
+            Map.entry("range_test", "settings.config.section.range_test"),
+            Map.entry("telemetry", "settings.config.section.telemetry"),
+            Map.entry("canned_message", "settings.config.section.canned_message"),
+            Map.entry("audio", "settings.config.section.audio"),
+            Map.entry("remote_hardware", "settings.config.section.remote_hardware"),
+            Map.entry("neighbor_info", "settings.config.section.neighbor_info"),
+            Map.entry("ambient_lighting", "settings.config.section.ambient_lighting"),
+            Map.entry("detection_sensor", "settings.config.section.detection_sensor"),
+            Map.entry("paxcounter", "settings.config.section.paxcounter"),
+            Map.entry("statusmessage", "settings.config.section.statusmessage"),
+            Map.entry("traffic_management", "settings.config.section.traffic_management")
     );
 
     private ProtobufTreeBuilder() {}
@@ -67,7 +67,7 @@ public final class ProtobufTreeBuilder {
      * Строит дерево из списка Config (устройство).
      */
     public static TreeItem<ConfigTreeItem> buildConfigTree(List<ConfigProtos.Config> configs) {
-        ConfigTreeItem rootData = new ConfigTreeItem("Конфигурация устройства", "config", 0);
+        ConfigTreeItem rootData = new ConfigTreeItem(I18n.t("settings.config.section.root.device"), "config", 0);
         TreeItem<ConfigTreeItem> root = new TreeItem<>(rootData);
         root.setExpanded(true);
 
@@ -79,7 +79,7 @@ public final class ProtobufTreeBuilder {
             String sectionName = oneofField.getName();
             int variantNumber = oneofField.getNumber();
 
-            String displayName = SECTION_NAMES.getOrDefault(sectionName, humanize(sectionName));
+            String displayName = sectionDisplayName(sectionName);
             ConfigTreeItem sectionData = new ConfigTreeItem(displayName, "config", variantNumber);
             TreeItem<ConfigTreeItem> sectionItem = new TreeItem<>(sectionData);
 
@@ -97,7 +97,7 @@ public final class ProtobufTreeBuilder {
      * Строит дерево из списка ModuleConfig (модули).
      */
     public static TreeItem<ConfigTreeItem> buildModuleConfigTree(List<ModuleConfigProtos.ModuleConfig> moduleConfigs) {
-        ConfigTreeItem rootData = new ConfigTreeItem("Конфигурация модулей", "module_config", 0);
+        ConfigTreeItem rootData = new ConfigTreeItem(I18n.t("settings.config.section.root.module"), "module_config", 0);
         TreeItem<ConfigTreeItem> root = new TreeItem<>(rootData);
         root.setExpanded(true);
 
@@ -109,7 +109,7 @@ public final class ProtobufTreeBuilder {
             String sectionName = oneofField.getName();
             int variantNumber = oneofField.getNumber();
 
-            String displayName = SECTION_NAMES.getOrDefault(sectionName, humanize(sectionName));
+            String displayName = sectionDisplayName(sectionName);
             ConfigTreeItem sectionData = new ConfigTreeItem(displayName, "module_config", variantNumber);
             TreeItem<ConfigTreeItem> sectionItem = new TreeItem<>(sectionData);
 
@@ -332,6 +332,11 @@ public final class ProtobufTreeBuilder {
         if (fieldName == null || fieldName.isEmpty()) { return fieldName; }
         String result = fieldName.replace('_', ' ');
         return result.substring(0, 1).toUpperCase(Locale.ROOT) + result.substring(1);
+    }
+
+    private static String sectionDisplayName(String sectionName) {
+        String key = SECTION_NAME_KEYS.get(sectionName);
+        return key != null ? I18n.t(key) : humanize(sectionName);
     }
 
     /**

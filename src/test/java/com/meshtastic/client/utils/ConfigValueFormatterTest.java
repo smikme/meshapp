@@ -1,6 +1,9 @@
 package com.meshtastic.client.utils;
 
 import com.google.protobuf.Descriptors.FieldDescriptor;
+import com.meshtastic.client.i18n.I18n;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.meshtastic.proto.ConfigProtos;
 import org.meshtastic.proto.PowerMonProtos;
@@ -28,6 +31,19 @@ class ConfigValueFormatterTest {
             ConfigProtos.Config.PowerConfig.getDescriptor().findFieldByName("device_battery_ina_address");
     private static final FieldDescriptor IGNORE_INCOMING_FIELD =
             ConfigProtos.Config.LoRaConfig.getDescriptor().findFieldByName("ignore_incoming");
+
+    private String previousLanguage;
+
+    @BeforeEach
+    void setUpLanguage() {
+        previousLanguage = I18n.getLanguageTag();
+        I18n.setLanguageTagForTests(I18n.LANGUAGE_RU);
+    }
+
+    @AfterEach
+    void restoreLanguage() {
+        I18n.setLanguageTagForTests(previousLanguage);
+    }
 
     @Test
     void formatsIpv4Fixed32AsDottedDecimal() {
@@ -136,5 +152,16 @@ class ConfigValueFormatterTest {
         assertEquals("GPS Active",
                 ConfigValueFormatter.formatValue(POWERMON_ENABLES_FIELD,
                         (long) PowerMonProtos.PowerMon.State.GPS_Active.getNumber()));
+    }
+
+    @Test
+    void formatsBitmaskLabelsInEnglish() {
+        I18n.setLanguageTagForTests(I18n.LANGUAGE_EN);
+
+        int flags = ConfigProtos.Config.PositionConfig.PositionFlags.ALTITUDE.getNumber()
+                | ConfigProtos.Config.PositionConfig.PositionFlags.TIMESTAMP.getNumber();
+
+        assertEquals("Altitude, Timestamp",
+                ConfigValueFormatter.formatValue(POSITION_FLAGS_FIELD, flags));
     }
 }

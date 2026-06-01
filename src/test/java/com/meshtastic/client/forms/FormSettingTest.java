@@ -4,6 +4,7 @@ import com.meshtastic.client.TestEnvironmentSupport;
 import com.meshtastic.client.connection.ConnectionException;
 import com.meshtastic.client.connection.ConnectionListener;
 import com.meshtastic.client.connection.MeshtasticConnection;
+import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.model.ConfigTreeItem;
 import com.meshtastic.client.model.ConnectionEntry;
 import com.meshtastic.client.model.ConnectionType;
@@ -60,6 +61,7 @@ class FormSettingTest {
     Path tempHome;
 
     private final List<ProtocolHandler> handlersToShutdown = new ArrayList<>();
+    private String previousLanguage;
 
     @BeforeAll
     static void startJavaFx() {
@@ -68,6 +70,8 @@ class FormSettingTest {
 
     @BeforeEach
     void setUp() {
+        previousLanguage = I18n.getLanguageTag();
+        I18n.setLanguageTagForTests(I18n.LANGUAGE_RU);
         TestEnvironmentSupport.setUserHome(tempHome);
         TestEnvironmentSupport.resetSingletons();
     }
@@ -78,6 +82,7 @@ class FormSettingTest {
             handler.shutdown();
         }
         TestEnvironmentSupport.resetSingletons();
+        I18n.setLanguageTagForTests(previousLanguage);
     }
 
     @Test
@@ -334,7 +339,9 @@ class FormSettingTest {
                 (Runnable) () -> confirmed.set(true)));
 
         CheckBox acknowledgeCheckBox = onFxThread(() -> findFirst(panel, CheckBox.class));
-        Button confirmButton = onFxThread(() -> findButtonByText(panel, "Удалить данные"));
+        Button confirmButton = onFxThread(() -> findButtonByText(
+                panel,
+                I18n.t("settings.databaseReset.confirm")));
 
         assertNotNull(acknowledgeCheckBox);
         assertNotNull(confirmButton);
@@ -357,6 +364,22 @@ class FormSettingTest {
             return null;
         });
         assertTrue(confirmed.get());
+    }
+
+    @Test
+    void databaseResetConfirmationUsesEnglishLocalization() {
+        I18n.setLanguageTagForTests(I18n.LANGUAGE_EN);
+
+        FormSetting form = onFxThread(FormSetting::new);
+        VBox panel = onFxThread(() -> (VBox) invokeReturning(
+                form,
+                "buildDatabaseResetConfirmationPanel",
+                new Class<?>[] { Runnable.class },
+                (Runnable) () -> {}));
+
+        Button confirmButton = onFxThread(() -> findButtonByText(panel, "Delete Data"));
+
+        assertNotNull(confirmButton);
     }
 
     @Test

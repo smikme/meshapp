@@ -1035,10 +1035,10 @@ public class FormSetting extends Form {
         panel.setPadding(new Insets(5));
 
         HBox btnRow = new HBox(8);
-        Button importButton = new Button("Загрузить из OneMesh");
+        Button importButton = new Button(I18n.t("settings.cache.importOneMesh"));
         importButton.setOnAction(e -> onImportFromOneMesh(importButton));
 
-        Button clearButton = new Button("Очистить кэш");
+        Button clearButton = new Button(I18n.t("settings.cache.clear"));
         clearButton.setStyle("-fx-text-fill: #E53935;");
         clearButton.setOnAction(e -> onClearCache());
 
@@ -1047,7 +1047,9 @@ public class FormSetting extends Form {
         cacheTable = new TableView<>(cacheData);
         cacheTable.setFixedCellSize(28);
 
-        TableColumn<NodeData, String> colLongName = new TableColumn<>("Имя");
+        TableColumn<NodeData, String> colLongName = new TableColumn<>(
+            I18n.t("settings.cache.column.longName")
+        );
         colLongName.setCellValueFactory(cd ->
             new SimpleStringProperty(
                 sanitizeCacheDisplayText(cd.getValue().getLongName())
@@ -1056,7 +1058,7 @@ public class FormSetting extends Form {
         colLongName.setPrefWidth(150);
 
         TableColumn<NodeData, String> colShortName = new TableColumn<>(
-            "Короткое"
+            I18n.t("settings.cache.column.shortName")
         );
         colShortName.setCellValueFactory(cd ->
             new SimpleStringProperty(
@@ -1065,7 +1067,9 @@ public class FormSetting extends Form {
         );
         colShortName.setPrefWidth(80);
 
-        TableColumn<NodeData, String> colNodeId = new TableColumn<>("ID ноды");
+        TableColumn<NodeData, String> colNodeId = new TableColumn<>(
+            I18n.t("settings.cache.column.nodeId")
+        );
         colNodeId.setCellValueFactory(cd ->
             new SimpleStringProperty(
                 cd.getValue().getNodeId() != null
@@ -1075,7 +1079,9 @@ public class FormSetting extends Form {
         );
         colNodeId.setPrefWidth(100);
 
-        TableColumn<NodeData, String> colHwModel = new TableColumn<>("Модель");
+        TableColumn<NodeData, String> colHwModel = new TableColumn<>(
+            I18n.t("settings.cache.column.model")
+        );
         colHwModel.setCellValueFactory(cd ->
             new SimpleStringProperty(
                 cd.getValue().getHwModel() != null
@@ -1085,7 +1091,9 @@ public class FormSetting extends Form {
         );
         colHwModel.setPrefWidth(120);
 
-        TableColumn<NodeData, String> colLat = new TableColumn<>("Широта");
+        TableColumn<NodeData, String> colLat = new TableColumn<>(
+            I18n.t("settings.cache.column.latitude")
+        );
         colLat.setCellValueFactory(cd -> {
             double lat = cd.getValue().getLatitude();
             return new SimpleStringProperty(
@@ -1094,7 +1102,9 @@ public class FormSetting extends Form {
         });
         colLat.setPrefWidth(70);
 
-        TableColumn<NodeData, String> colLon = new TableColumn<>("Долгота");
+        TableColumn<NodeData, String> colLon = new TableColumn<>(
+            I18n.t("settings.cache.column.longitude")
+        );
         colLon.setCellValueFactory(cd -> {
             double lon = cd.getValue().getLongitude();
             return new SimpleStringProperty(
@@ -1152,7 +1162,7 @@ public class FormSetting extends Form {
 
     private void onImportFromOneMesh(Button button) {
         button.setDisable(true);
-        cacheStatusLabel.setText("Загрузка из OneMesh...");
+        cacheStatusLabel.setText(I18n.t("settings.cache.loading"));
 
         new Thread(() -> {
             try {
@@ -1161,8 +1171,8 @@ public class FormSetting extends Form {
                     button.setDisable(false);
                     reloadCacheTable();
                     ModalPane.showInfo(
-                        "Импорт из OneMesh",
-                        "Импорт завершен. Загружено нод: " + count
+                        I18n.t("settings.cache.import.title"),
+                        I18n.t("settings.cache.import.success", count)
                     );
                 });
             } catch (Exception ex) {
@@ -1170,8 +1180,8 @@ public class FormSetting extends Form {
                     button.setDisable(false);
                     reloadCacheTable();
                     ModalPane.showError(
-                        "Ошибка импорта",
-                        "Ошибка при импорте: " + ex.getMessage()
+                        I18n.t("settings.cache.import.error.title"),
+                        I18n.t("settings.cache.import.error.message", ex.getMessage())
                     );
                 });
             }
@@ -1180,8 +1190,8 @@ public class FormSetting extends Form {
 
     private void onClearCache() {
         ModalPane.showConfirm(
-            "Очистка кэша",
-            "Вы уверены, что хотите удалить все данные из кэша?",
+            I18n.t("settings.cache.clear.title"),
+            I18n.t("settings.cache.clear.confirm"),
             confirmed -> {
                 if (confirmed) {
                     NodeCacheService.getInstance().clearAll();
@@ -1215,14 +1225,15 @@ public class FormSetting extends Form {
     private void updateCacheStatus() {
         int loaded = cacheData.size();
         if (cacheTotalInDb == 0) {
-            cacheStatusLabel.setText("Кэш пуст");
+            cacheStatusLabel.setText(I18n.t("settings.cache.empty"));
         } else if (loaded >= cacheTotalInDb) {
             cacheStatusLabel.setText(
-                "Показано %d из %d".formatted(loaded, cacheTotalInDb)
+                I18n.t("settings.cache.loaded", loaded, cacheTotalInDb)
             );
         } else {
             cacheStatusLabel.setText(
-                "Показано %d из %d (прокрутите для загрузки)".formatted(
+                I18n.t(
+                    "settings.cache.loadedMore",
                     loaded,
                     cacheTotalInDb
                 )
@@ -1249,7 +1260,9 @@ public class FormSetting extends Form {
 
         // Поиск
         configSearchField = new TextField();
-        configSearchField.setPromptText("Поиск параметров...");
+        configSearchField.setPromptText(
+            I18n.t("settings.config.search.placeholder")
+        );
         configSearchField
             .textProperty()
             .addListener((obs, oldVal, newVal) -> filterConfigTree(newVal));
@@ -1259,75 +1272,75 @@ public class FormSetting extends Form {
         actionToolbar.getStyleClass().add("config-toolbar");
 
         refreshConfigBtn = createConfigToolbarButton(
-            "Обновить конфигурацию",
-            "Запросить актуальные параметры у подключенного радио",
+            I18n.t("settings.config.toolbar.refresh.title"),
+            I18n.t("settings.config.toolbar.refresh.description"),
             "/icons/refresh.svg",
             this::reloadConfigTree
         );
 
         syncDateTimeBtn = createConfigToolbarButton(
-            "Синхронизировать дату и время",
-            "Установить на ноде текущее время ПК и при необходимости обновить GMT",
+            I18n.t("settings.config.toolbar.syncTime.title"),
+            I18n.t("settings.config.toolbar.syncTime.description"),
             "/icons/sync-time.svg",
             this::onSyncDateTimeWithPc
         );
         syncDateTimeBtn.setDisable(true);
 
         saveConfigBtn = createConfigToolbarButton(
-            "Сохранить на радио",
-            "Отправить изменённые параметры на устройство и применить их",
+            I18n.t("settings.config.toolbar.saveRadio.title"),
+            I18n.t("settings.config.toolbar.saveRadio.description"),
             "/icons/save-radio.svg",
             this::onSaveConfig
         );
         saveConfigBtn.setDisable(true);
 
         restartHardwareBtn = createConfigToolbarButton(
-            "Перезапуск оборудования",
-            "Перезапустить подключенное устройство",
+            I18n.t("settings.config.toolbar.restart.title"),
+            I18n.t("settings.config.toolbar.restart.description"),
             "/icons/restart-radio.svg",
             this::onRestartHardware
         );
         restartHardwareBtn.setDisable(true);
 
         shutdownHardwareBtn = createConfigToolbarButton(
-            "Выключение оборудования",
-            "Выключить подключенное устройство",
+            I18n.t("settings.config.toolbar.shutdown.title"),
+            I18n.t("settings.config.toolbar.shutdown.description"),
             "/icons/shutdown-radio.svg",
             this::onShutdownHardware
         );
         shutdownHardwareBtn.setDisable(true);
 
         resetDatabaseBtn = createConfigToolbarButton(
-            "Очистить базу данных",
-            "Удалить локальные данные H2 и пересоздать все объекты БД",
+            I18n.t("settings.config.toolbar.resetDatabase.title"),
+            I18n.t("settings.config.toolbar.resetDatabase.description"),
             "/icons/clear.svg",
             this::onResetDatabaseRequested
         );
 
         Button exportConfigBtn = createConfigToolbarButton(
-            "Сохранить конфигурацию",
-            "Сохранить текущую конфигурацию в файл .mcf",
+            I18n.t("settings.config.toolbar.saveConfig.title"),
+            I18n.t("settings.config.toolbar.saveConfig.description"),
             "/icons/save-config.svg",
             () -> onExportSnapshot(ConfigSnapshotService.SnapshotKind.CONFIG)
         );
 
         Button importConfigBtn = createConfigToolbarButton(
-            "Загрузить конфигурацию",
-            "Загрузить конфигурацию из файла .mcf в редактор",
+            I18n.t("settings.config.toolbar.loadConfig.title"),
+            I18n.t("settings.config.toolbar.loadConfig.description"),
             "/icons/load-config.svg",
             () -> onImportSnapshot(ConfigSnapshotService.SnapshotKind.CONFIG)
         );
 
         Button exportTemplateBtn = createConfigToolbarButton(
-            "Сохранить шаблон",
-            "Сохранить шаблон без персональных и секретных данных в файл .mtp",
+            I18n.t("settings.config.toolbar.saveTemplate.title"),
+            I18n.t("settings.config.toolbar.saveTemplate.description"),
             "/icons/save-template.svg",
             () -> onExportSnapshot(ConfigSnapshotService.SnapshotKind.TEMPLATE)
         );
 
         Button importTemplateBtn = createConfigToolbarButton(
-            "Загрузить шаблон",
-            "Загрузить шаблон из файла .mtp в редактор",
+            I18n.t("settings.config.toolbar.loadTemplate.title"),
+            I18n.t("settings.config.toolbar.loadTemplate.description"),
             "/icons/load-template.svg",
             () -> onImportSnapshot(ConfigSnapshotService.SnapshotKind.TEMPLATE)
         );
@@ -1362,7 +1375,7 @@ public class FormSetting extends Form {
 
         // Колонка «Параметр»
         TreeTableColumn<ConfigTreeItem, String> nameCol = new TreeTableColumn<>(
-            "Параметр"
+            I18n.t("settings.config.column.parameter")
         );
         nameCol.setCellValueFactory(param -> {
             ConfigTreeItem item = param.getValue().getValue();
@@ -1398,7 +1411,7 @@ public class FormSetting extends Form {
 
         // Колонка «Значение» с кастомными редакторами
         TreeTableColumn<ConfigTreeItem, ConfigTreeItem> valueCol =
-            new TreeTableColumn<>("Значение");
+            new TreeTableColumn<>(I18n.t("settings.config.column.value"));
         valueCol.setCellValueFactory(param ->
             new javafx.beans.property.SimpleObjectProperty<>(
                 param.getValue().getValue()
@@ -1467,21 +1480,20 @@ public class FormSetting extends Form {
         panel.setMaxHeight(Double.MAX_VALUE);
         panel.getStyleClass().add("modal-side-panel");
 
-        Label lblTitle = new Label("Очистка базы данных");
+        Label lblTitle = new Label(I18n.t("settings.databaseReset.title"));
         lblTitle.getStyleClass().add("dialog-title");
 
         Label lblMessage = new Label(
-            "Будут удалены сообщения, реакции, кэш нод, телеметрия и журнал LoRa-пакетов. " +
-                "Активные подключения будут разорваны. Это действие нельзя отменить."
+            I18n.t("settings.databaseReset.message")
         );
         lblMessage.setWrapText(true);
 
         CheckBox acknowledgeCheckBox = new CheckBox(
-            "Я понимаю что все данные будут удалены"
+            I18n.t("settings.databaseReset.acknowledge")
         );
         acknowledgeCheckBox.setWrapText(true);
 
-        Button btnCancel = new Button("Отмена");
+        Button btnCancel = new Button(I18n.t("common.cancel"));
         btnCancel.setOnAction(e -> {
             ModalPane pane = ModalPane.getInstance();
             if (pane != null) {
@@ -1489,7 +1501,7 @@ public class FormSetting extends Form {
             }
         });
 
-        Button btnConfirm = new Button("Удалить данные");
+        Button btnConfirm = new Button(I18n.t("settings.databaseReset.confirm"));
         btnConfirm.getStyleClass().add("accent");
         btnConfirm
             .disableProperty()
@@ -1522,7 +1534,7 @@ public class FormSetting extends Form {
         if (resetDatabaseBtn != null) {
             resetDatabaseBtn.setDisable(true);
         }
-        configStatusLabel.setText("Очистка базы данных...");
+        configStatusLabel.setText(I18n.t("settings.databaseReset.inProgress"));
 
         Thread resetThread = new Thread(() -> {
             try {
@@ -1531,12 +1543,12 @@ public class FormSetting extends Form {
                     reloadCacheTable();
                     reloadConfigTree();
                     configStatusLabel.setText(
-                        "База данных очищена и пересоздана"
+                        I18n.t("settings.databaseReset.successStatus")
                     );
                     if (resetDatabaseBtn != null) {
                         resetDatabaseBtn.setDisable(false);
                     }
-                    Toast.show(Toast.Type.SUCCESS, "База данных очищена");
+                    Toast.show(Toast.Type.SUCCESS, I18n.t("settings.databaseReset.successToast"));
                 });
             } catch (Exception e) {
                 log.error("Database reset failed", e);
@@ -1545,16 +1557,16 @@ public class FormSetting extends Form {
                         resetDatabaseBtn.setDisable(false);
                     }
                     configStatusLabel.setText(
-                        "Ошибка очистки базы данных: " +
-                            (e.getMessage() != null
-                                ? e.getMessage()
-                                : "см. лог")
+                        I18n.t(
+                            "settings.databaseReset.errorStatus",
+                            errorDetail(e)
+                        )
                     );
                     ModalPane.showError(
-                        "Ошибка очистки базы данных",
+                        I18n.t("settings.databaseReset.errorTitle"),
                         e.getMessage() != null
                             ? e.getMessage()
-                            : "Не удалось пересоздать объекты БД"
+                            : I18n.t("settings.databaseReset.errorFallback")
                     );
                 });
             }
@@ -1581,21 +1593,21 @@ public class FormSetting extends Form {
     private void onSyncDateTimeWithPc() {
         refreshConnection();
         if (state == null || handler == null) {
-            configStatusLabel.setText("Нет подключения к радио");
+            configStatusLabel.setText(I18n.t("settings.status.noRadio"));
             setSyncDateTimeButtonDisabled(true);
             return;
         }
 
         ConnectionEntry activeEntry = findActiveConnectionEntry();
         if (activeEntry == null) {
-            configStatusLabel.setText("Нет активного подключения к радио");
+            configStatusLabel.setText(I18n.t("settings.status.noActiveRadio"));
             setSyncDateTimeButtonDisabled(true);
             return;
         }
         if (isConfigExchangeInProgress(activeEntry)) {
             watchConfigExchangeCompletion(activeEntry);
             configStatusLabel.setText(
-                "Дождитесь завершения чтения конфигурации"
+                I18n.t("settings.status.waitConfigRead")
             );
             return;
         }
@@ -1603,7 +1615,7 @@ public class FormSetting extends Form {
         ConfigProtos.Config deviceConfig = findLoadedDeviceConfig();
         if (deviceConfig == null || !deviceConfig.hasDevice()) {
             configStatusLabel.setText(
-                "Секция device ещё не загружена. Сначала обновите конфигурацию."
+                I18n.t("settings.status.deviceSectionMissing")
             );
             return;
         }
@@ -1635,30 +1647,18 @@ public class FormSetting extends Form {
             String nodeGmtLabel =
                 nodeOffset != null
                     ? TimeZoneSyncUtil.formatGmtOffset(nodeOffset)
-                    : "не определён";
-            StringBuilder message = new StringBuilder()
-                .append("GMT ноды не совпадает с GMT ПК.")
-                .append(" Нода: ")
-                .append(nodeGmtLabel)
-                .append(".")
-                .append(" ПК: ")
-                .append(systemGmtLabel)
-                .append(".")
-                .append(
-                    " Для обновления GMT будет изменён параметр device.tzdef, после чего устройство перезагрузится."
-                )
-                .append(
-                    " После переподключения время будет синхронизировано повторно, чтобы reboot не сбросил его."
-                );
-            if (hasPendingEditorChanges()) {
-                message.append(
-                    " Несохранённые изменения в редакторе будут потеряны."
-                );
-            }
-            message.append(" Продолжить?");
+                    : I18n.t("settings.timeSync.unknown");
+            String unsavedWarning = hasPendingEditorChanges()
+                ? I18n.t("settings.timeSync.unsavedWarning")
+                : "";
             ModalPane.showConfirm(
-                "Синхронизация времени и GMT",
-                message.toString(),
+                I18n.t("settings.timeSync.gmtMismatch.title"),
+                I18n.t(
+                    "settings.timeSync.gmtMismatch.message",
+                    nodeGmtLabel,
+                    systemGmtLabel,
+                    unsavedWarning
+                ),
                 confirmed -> {
                     if (confirmed) {
                         startSync.run();
@@ -1681,11 +1681,11 @@ public class FormSetting extends Form {
         String systemGmtLabel
     ) {
         String actionLabel = gmtMatches
-            ? "синхронизации времени"
-            : "синхронизации времени и GMT";
+            ? I18n.t("settings.timeSync.action.time")
+            : I18n.t("settings.timeSync.action.timeAndGmt");
         setSyncDateTimeButtonDisabled(true);
         configStatusLabel.setText(
-            "Запрос session key для " + actionLabel + "..."
+            I18n.t("settings.status.requestSessionKeyFor", actionLabel)
         );
 
         AtomicBoolean dispatchStarted = new AtomicBoolean(false);
@@ -1717,7 +1717,7 @@ public class FormSetting extends Form {
                 actionState.removeOwnerInfoListener(listenerHolder[0]);
                 if (dispatchStarted.compareAndSet(false, true)) {
                     configStatusLabel.setText(
-                        "Отправка синхронизации без session key..."
+                        I18n.t("settings.timeSync.sendingWithoutKey")
                     );
                     sendDateTimeSync(
                         activeEntry,
@@ -1748,8 +1748,8 @@ public class FormSetting extends Form {
     ) {
         configStatusLabel.setText(
             gmtMatches
-                ? "Синхронизация времени с ПК..."
-                : "Синхронизация времени и GMT с ПК..."
+                ? I18n.t("settings.timeSync.sendingTime")
+                : I18n.t("settings.timeSync.sendingTimeAndGmt")
         );
 
         ConnectionType transport =
@@ -1820,7 +1820,7 @@ public class FormSetting extends Form {
                     );
                     Platform.runLater(() ->
                         configStatusLabel.setText(
-                            "GMT обновлён. Устройство перезагрузится, после переподключения время будет синхронизировано повторно..."
+                            I18n.t("settings.timeSync.gmtUpdated")
                         )
                     );
 
@@ -1842,9 +1842,7 @@ public class FormSetting extends Form {
                         Platform.runLater(() -> {
                             setSyncDateTimeButtonDisabled(false);
                             configStatusLabel.setText(
-                                "GMT синхронизирован с ПК (" +
-                                    systemGmtLabel +
-                                    "). Синхронизируйте время после переподключения."
+                                I18n.t("settings.timeSync.gmtSyncedStatus", systemGmtLabel)
                             );
                         });
                     }
@@ -1870,13 +1868,11 @@ public class FormSetting extends Form {
                 Platform.runLater(() -> {
                     setSyncDateTimeButtonDisabled(false);
                     configStatusLabel.setText(
-                        "Время ноды синхронизировано с ПК (" +
-                            systemGmtLabel +
-                            ")."
+                        I18n.t("settings.timeSync.timeSyncedStatus", systemGmtLabel)
                     );
                     Toast.show(
                         Toast.Type.SUCCESS,
-                        "Время ноды синхронизировано с ПК"
+                        I18n.t("settings.timeSync.timeSyncedToast")
                     );
                 });
             } catch (InterruptedException e) {
@@ -1904,10 +1900,7 @@ public class FormSetting extends Form {
                 Platform.runLater(() -> {
                     setSyncDateTimeButtonDisabled(false);
                     configStatusLabel.setText(
-                        "Ошибка синхронизации: " +
-                            (e.getMessage() != null
-                                ? e.getMessage()
-                                : "см. лог")
+                        I18n.t("settings.timeSync.error", errorDetail(e))
                     );
                 });
             }
@@ -1980,7 +1973,7 @@ public class FormSetting extends Form {
             activeEntry.getName()
         );
         configStatusLabel.setText(
-            "Устройство переподключено. Повторная синхронизация времени..."
+            I18n.t("settings.timeSync.reconnected")
         );
         requestDateTimeSync(
             activeEntry,
@@ -1995,8 +1988,8 @@ public class FormSetting extends Form {
 
     private void onRestartHardware() {
         ModalPane.showConfirm(
-            "Перезапуск оборудования",
-            "Вы уверены, что хотите перезапустить оборудование? Соединение с устройством будет временно разорвано.",
+            I18n.t("settings.devicePower.restart.title"),
+            I18n.t("settings.devicePower.restart.confirm"),
             confirmed -> {
                 if (confirmed) {
                     requestDevicePowerAction(true);
@@ -2007,8 +2000,8 @@ public class FormSetting extends Form {
 
     private void onShutdownHardware() {
         ModalPane.showConfirm(
-            "Выключение оборудования",
-            "Вы уверены, что хотите выключить оборудование? Для повторного подключения устройство нужно будет включить вручную.",
+            I18n.t("settings.devicePower.shutdown.title"),
+            I18n.t("settings.devicePower.shutdown.confirm"),
             confirmed -> {
                 if (confirmed) {
                     requestDevicePowerAction(false);
@@ -2020,25 +2013,25 @@ public class FormSetting extends Form {
     private void requestDevicePowerAction(boolean reboot) {
         refreshConnection();
         if (state == null || handler == null) {
-            configStatusLabel.setText("Нет подключения к радио");
+            configStatusLabel.setText(I18n.t("settings.status.noRadio"));
             setDevicePowerButtonsDisabled(true);
             return;
         }
 
         ConnectionEntry activeEntry = findActiveConnectionEntry();
         if (activeEntry == null) {
-            configStatusLabel.setText("Нет активного подключения к радио");
+            configStatusLabel.setText(I18n.t("settings.status.noActiveRadio"));
             setDevicePowerButtonsDisabled(true);
             return;
         }
 
         DeviceState actionState = state;
         ProtocolHandler actionHandler = handler;
-        String actionLabel = reboot ? "перезапуска" : "выключения";
+        String actionLabel = devicePowerActionLabel(reboot);
 
         setDevicePowerButtonsDisabled(true);
         configStatusLabel.setText(
-            "Запрос session key для " + actionLabel + "..."
+            I18n.t("settings.status.requestSessionKeyFor", actionLabel)
         );
 
         AtomicBoolean dispatchStarted = new AtomicBoolean(false);
@@ -2068,9 +2061,7 @@ public class FormSetting extends Form {
                     actionState.removeOwnerInfoListener(listenerHolder[0]);
                     if (dispatchStarted.compareAndSet(false, true)) {
                         configStatusLabel.setText(
-                            "Отправка команды " +
-                                actionLabel +
-                                " без session key..."
+                            I18n.t("settings.devicePower.sendingWithoutKey", actionLabel)
                         );
                         sendDevicePowerAction(
                             activeEntry,
@@ -2095,7 +2086,7 @@ public class FormSetting extends Form {
         ProtocolHandler actionHandler,
         boolean reboot
     ) {
-        String actionLabel = reboot ? "перезапуска" : "выключения";
+        String actionLabel = devicePowerActionLabel(reboot);
         String stepName = reboot ? "rebootDevice" : "shutdownDevice";
         ConnectionType transport = activeEntry.getEffectiveType();
         long reconnectHandoffGeneration = reboot
@@ -2109,7 +2100,9 @@ public class FormSetting extends Form {
             );
         }
 
-        configStatusLabel.setText("Отправка команды " + actionLabel + "...");
+        configStatusLabel.setText(
+            I18n.t("settings.devicePower.sending", actionLabel)
+        );
 
         CompletableFuture<MeshProtos.Routing.Error> ackFuture;
         try {
@@ -2132,7 +2125,9 @@ public class FormSetting extends Form {
                 );
             }
             setDevicePowerButtonsDisabled(false);
-            configStatusLabel.setText("Ошибка отправки команды " + actionLabel);
+            configStatusLabel.setText(
+                I18n.t("settings.devicePower.sendError", actionLabel)
+            );
             return;
         }
 
@@ -2166,8 +2161,8 @@ public class FormSetting extends Form {
                     Platform.runLater(() ->
                         configStatusLabel.setText(
                             reboot
-                                ? "Команда перезапуска отправлена. Ожидание переподключения..."
-                                : "Команда выключения отправлена. Ожидание отключения устройства..."
+                                ? I18n.t("settings.devicePower.restartSent")
+                                : I18n.t("settings.devicePower.shutdownSent")
                         )
                     );
 
@@ -2224,12 +2219,11 @@ public class FormSetting extends Form {
                     Platform.runLater(() -> {
                         setDevicePowerButtonsDisabled(false);
                         configStatusLabel.setText(
-                            "Ошибка отправки команды " +
-                                actionLabel +
-                                ": " +
-                                (e.getMessage() != null
-                                    ? e.getMessage()
-                                    : "см. лог")
+                            I18n.t(
+                                "settings.devicePower.sendErrorDetails",
+                                actionLabel,
+                                errorDetail(e)
+                            )
                         );
                     });
                 }
@@ -2314,20 +2308,25 @@ public class FormSetting extends Form {
             Toast.show(
                 Toast.Type.SUCCESS,
                 switch (kind) {
-                    case CONFIG -> "Конфигурация сохранена: " +
-                        outputFile.getName();
-                    case TEMPLATE -> "Шаблон сохранён: " + outputFile.getName();
+                    case CONFIG -> I18n.t(
+                        "settings.snapshot.saved.config",
+                        outputFile.getName()
+                    );
+                    case TEMPLATE -> I18n.t(
+                        "settings.snapshot.saved.template",
+                        outputFile.getName()
+                    );
                 }
             );
         } catch (Exception e) {
             log.error("Snapshot export failed", e);
             ModalPane.showError(
                 kind == ConfigSnapshotService.SnapshotKind.CONFIG
-                    ? "Ошибка сохранения конфигурации"
-                    : "Ошибка сохранения шаблона",
+                    ? I18n.t("settings.snapshot.saveConfig.error.title")
+                    : I18n.t("settings.snapshot.saveTemplate.error.title"),
                 e.getMessage() != null
                     ? e.getMessage()
-                    : "Не удалось сохранить файл"
+                    : I18n.t("settings.snapshot.save.errorFallback")
             );
         }
     }
@@ -2347,9 +2346,9 @@ public class FormSetting extends Form {
         if (hasPendingEditorChanges()) {
             ModalPane.showConfirm(
                 kind == ConfigSnapshotService.SnapshotKind.CONFIG
-                    ? "Загрузить конфигурацию?"
-                    : "Загрузить шаблон?",
-                "Текущие несохранённые изменения будут потеряны. Продолжить?",
+                    ? I18n.t("settings.snapshot.loadConfig.confirmTitle")
+                    : I18n.t("settings.snapshot.loadTemplate.confirmTitle"),
+                I18n.t("settings.snapshot.unsavedConfirm"),
                 confirmed -> {
                     if (confirmed) {
                         importAction.run();
@@ -2370,7 +2369,7 @@ public class FormSetting extends Form {
             TreeItem<ConfigTreeItem> root = currentEditorRoot();
             if (root == null) {
                 throw new IllegalStateException(
-                    "Конфигурация не загружена в редактор"
+                    I18n.t("settings.snapshot.editorNotLoaded")
                 );
             }
 
@@ -2378,34 +2377,33 @@ public class FormSetting extends Form {
                 ConfigSnapshotService.readSnapshot(source.toPath());
             if (snapshot.kind() != expectedKind) {
                 throw new IllegalArgumentException(
-                    "Выбран файл другого типа: ожидался ." +
+                    I18n.t(
+                        "settings.snapshot.wrongType",
                         expectedKind.extension()
+                    )
                 );
             }
 
             applySnapshotToEditor(snapshot);
             configTree.refresh();
             saveConfigBtn.setDisable(false);
-            String fileKind =
-                expectedKind == ConfigSnapshotService.SnapshotKind.CONFIG
-                    ? "Конфигурация"
-                    : "Шаблон";
+            String fileKind = snapshotKindLabel(expectedKind);
             configStatusLabel.setText(
-                fileKind + " загружен из файла: " + source.getName()
+                I18n.t("settings.snapshot.loadedStatus", fileKind, source.getName())
             );
             Toast.show(
                 Toast.Type.SUCCESS,
-                fileKind + " загружен: " + source.getName()
+                I18n.t("settings.snapshot.loadedToast", fileKind, source.getName())
             );
         } catch (Exception e) {
             log.error("Snapshot import failed", e);
             ModalPane.showError(
                 expectedKind == ConfigSnapshotService.SnapshotKind.CONFIG
-                    ? "Ошибка загрузки конфигурации"
-                    : "Ошибка загрузки шаблона",
+                    ? I18n.t("settings.snapshot.loadConfig.error.title")
+                    : I18n.t("settings.snapshot.loadTemplate.error.title"),
                 e.getMessage() != null
                     ? e.getMessage()
-                    : "Не удалось прочитать файл"
+                    : I18n.t("settings.snapshot.load.errorFallback")
             );
         }
     }
@@ -2420,7 +2418,7 @@ public class FormSetting extends Form {
             watchConfigExchangeCompletion(activeEntry);
             Toast.show(
                 Toast.Type.WARNING,
-                "Дождитесь завершения чтения конфигурации с устройства"
+                I18n.t("settings.status.waitDeviceConfigRead")
             );
             return false;
         }
@@ -2428,7 +2426,7 @@ public class FormSetting extends Form {
         if (currentEditorRoot() == null) {
             Toast.show(
                 Toast.Type.WARNING,
-                "Сначала загрузите конфигурацию с подключённого радио"
+                I18n.t("settings.status.loadRadioConfigFirst")
             );
             return false;
         }
@@ -2443,11 +2441,11 @@ public class FormSetting extends Form {
         chooser.setTitle(
             switch (kind) {
                 case CONFIG -> saveMode
-                    ? "Сохранить конфигурацию"
-                    : "Загрузить конфигурацию";
+                    ? I18n.t("settings.snapshot.fileChooser.saveConfig")
+                    : I18n.t("settings.snapshot.fileChooser.loadConfig");
                 case TEMPLATE -> saveMode
-                    ? "Сохранить шаблон"
-                    : "Загрузить шаблон";
+                    ? I18n.t("settings.snapshot.fileChooser.saveTemplate")
+                    : I18n.t("settings.snapshot.fileChooser.loadTemplate");
             }
         );
         chooser
@@ -2455,8 +2453,8 @@ public class FormSetting extends Form {
             .add(
                 new FileChooser.ExtensionFilter(
                     kind == ConfigSnapshotService.SnapshotKind.CONFIG
-                        ? "MeshApp Config (*." + kind.extension() + ")"
-                        : "MeshApp Template (*." + kind.extension() + ")",
+                        ? I18n.t("settings.snapshot.fileFilter.config", kind.extension())
+                        : I18n.t("settings.snapshot.fileFilter.template", kind.extension()),
                     "*." + kind.extension()
                 )
             );
@@ -2528,6 +2526,36 @@ public class FormSetting extends Form {
 
     private Window getCurrentWindow() {
         return getScene() != null ? getScene().getWindow() : null;
+    }
+
+    private String snapshotKindLabel(ConfigSnapshotService.SnapshotKind kind) {
+        return kind == ConfigSnapshotService.SnapshotKind.CONFIG
+            ? I18n.t("settings.snapshot.kind.config")
+            : I18n.t("settings.snapshot.kind.template");
+    }
+
+    private String devicePowerActionLabel(boolean reboot) {
+        return reboot
+            ? I18n.t("settings.devicePower.action.restart")
+            : I18n.t("settings.devicePower.action.shutdown");
+    }
+
+    private String configSaveReconnectMessage(
+        ConnectionType transport,
+        int totalChanges
+    ) {
+        return transport == ConnectionType.BLE
+            ? I18n.t("settings.config.status.sentSectionsBle", totalChanges)
+            : I18n.t(
+                  "settings.config.status.sentSectionsReconnect",
+                  totalChanges
+              );
+    }
+
+    private String errorDetail(Exception e) {
+        return e.getMessage() != null
+            ? e.getMessage()
+            : I18n.t("settings.status.seeLog");
     }
 
     private TreeItem<ConfigTreeItem> currentEditorRoot() {
@@ -3117,7 +3145,7 @@ public class FormSetting extends Form {
         if (!connected) {
             maybeFinishConfigSaveNavigationBlockAfterReconnect(null, false);
             clearConfigContext();
-            configStatusLabel.setText("Нет подключения к радио");
+            configStatusLabel.setText(I18n.t("settings.status.noRadio"));
             saveConfigBtn.setDisable(true);
             return;
         }
@@ -3157,13 +3185,13 @@ public class FormSetting extends Form {
 
         // Корневой элемент (невидимый)
         TreeItem<ConfigTreeItem> root = new TreeItem<>(
-            new ConfigTreeItem("Корень", null, 0)
+            new ConfigTreeItem(I18n.t("settings.config.root"), null, 0)
         );
         root.setExpanded(true);
 
         // Виртуальная секция: Имя устройства
         TreeItem<ConfigTreeItem> ownerSection = new TreeItem<>(
-            new ConfigTreeItem("Имя устройства", OWNER_INFO_CONFIG_TYPE, 0)
+            new ConfigTreeItem(I18n.t("settings.config.ownerInfo"), OWNER_INFO_CONFIG_TYPE, 0)
         );
         MeshProtos.User ownerInfo = state.getOwnerInfo();
         String longName = resolveOwnerLongName(ownerInfo, myNode);
@@ -3172,7 +3200,7 @@ public class FormSetting extends Form {
             .add(
                 new TreeItem<>(
                     new ConfigTreeItem(
-                        "Длинное имя",
+                        I18n.t("settings.config.ownerLongName"),
                         OWNER_LONG_NAME_FIELD,
                         longName,
                         String.class,
@@ -3189,7 +3217,7 @@ public class FormSetting extends Form {
             .add(
                 new TreeItem<>(
                     new ConfigTreeItem(
-                        "Короткое имя",
+                        I18n.t("settings.config.ownerShortName"),
                         OWNER_SHORT_NAME_FIELD,
                         shortName,
                         String.class,
@@ -3205,7 +3233,7 @@ public class FormSetting extends Form {
             .add(
                 new TreeItem<>(
                     new ConfigTreeItem(
-                        "Лицензированный оператор",
+                        I18n.t("settings.config.licensedOperator"),
                         OWNER_IS_LICENSED_FIELD,
                         resolveOwnerLicensed(ownerInfo, myNode),
                         Boolean.class,
@@ -3220,7 +3248,7 @@ public class FormSetting extends Form {
 
         // Виртуальная секция: Фиксированная позиция
         TreeItem<ConfigTreeItem> posSection = new TreeItem<>(
-            new ConfigTreeItem("Фиксированная позиция", "fixed_position", 0)
+            new ConfigTreeItem(I18n.t("settings.config.fixedPosition"), "fixed_position", 0)
         );
         double lat = myNode != null ? myNode.getLatitude() : 0;
         double lon = myNode != null ? myNode.getLongitude() : 0;
@@ -3230,7 +3258,7 @@ public class FormSetting extends Form {
             .add(
                 new TreeItem<>(
                     new ConfigTreeItem(
-                        "Широта",
+                        I18n.t("settings.config.latitude"),
                         "latitude",
                         lat,
                         Double.class,
@@ -3246,7 +3274,7 @@ public class FormSetting extends Form {
             .add(
                 new TreeItem<>(
                     new ConfigTreeItem(
-                        "Долгота",
+                        I18n.t("settings.config.longitude"),
                         "longitude",
                         lon,
                         Double.class,
@@ -3262,7 +3290,7 @@ public class FormSetting extends Form {
             .add(
                 new TreeItem<>(
                     new ConfigTreeItem(
-                        "Высота (м)",
+                        I18n.t("settings.config.altitudeMeters"),
                         "altitude",
                         alt,
                         Integer.class,
@@ -3277,7 +3305,7 @@ public class FormSetting extends Form {
 
         // Виртуальная секция: RTTTL ringtone для External Notification
         TreeItem<ConfigTreeItem> ringtoneSection = new TreeItem<>(
-            new ConfigTreeItem("Мелодия уведомления", RINGTONE_CONFIG_TYPE, 0)
+            new ConfigTreeItem(I18n.t("settings.config.ringtone"), RINGTONE_CONFIG_TYPE, 0)
         );
         ringtoneSection
             .getChildren()
@@ -3320,14 +3348,14 @@ public class FormSetting extends Form {
         if (configExchangeInProgress) {
             watchConfigExchangeCompletion(activeEntry);
             configStatusLabel.setText(
-                "Идёт чтение конфигурации с устройства..."
+                I18n.t("settings.config.status.loadingDevice")
             );
             saveConfigBtn.setDisable(true);
             setSyncDateTimeButtonDisabled(true);
         } else if (
             originalConfigs.isEmpty() && originalModuleConfigs.isEmpty()
         ) {
-            configStatusLabel.setText("Конфигурация не получена от устройства");
+            configStatusLabel.setText(I18n.t("settings.config.status.notReceived"));
             saveConfigBtn.setDisable(true);
             setSyncDateTimeButtonDisabled(true);
         } else {
@@ -3336,7 +3364,8 @@ public class FormSetting extends Form {
             setSyncDateTimeButtonDisabled(findLoadedDeviceConfig() == null);
             int totalFields = countFields(root);
             configStatusLabel.setText(
-                "Загружено: %d секций, %d параметров".formatted(
+                I18n.t(
+                    "settings.config.status.loaded",
                     originalConfigs.size() + originalModuleConfigs.size(),
                     totalFields
                 )
@@ -3364,66 +3393,66 @@ public class FormSetting extends Form {
         workingChannels = new ArrayList<>(originalChannels);
 
         TreeItem<ConfigTreeItem> root = new TreeItem<>(
-            new ConfigTreeItem("Корень", null, 0)
+            new ConfigTreeItem(I18n.t("settings.config.root"), null, 0)
         );
         root.setExpanded(true);
 
         TreeItem<ConfigTreeItem> deviceSection = section(
-            "MeshCore устройство",
+            I18n.t("settings.meshCore.section.device"),
             "meshcore_device"
         );
         addValue(
             deviceSection,
-            "Имя",
+            I18n.t("settings.meshCore.field.name"),
             "device_name",
             valueOrDash(meshCoreState.getDeviceName()),
             String.class
         );
         addValue(
             deviceSection,
-            "Owner ID",
+            I18n.t("settings.meshCore.field.ownerId"),
             "owner_id",
             valueOrDash(meshCoreState.getOwnerId()),
             String.class
         );
         addValue(
             deviceSection,
-            "Public key",
+            I18n.t("settings.meshCore.field.publicKey"),
             "public_key",
             valueOrDash(meshCoreState.getPublicKeyHex()),
             String.class
         );
         addValue(
             deviceSection,
-            "Модель",
+            I18n.t("settings.meshCore.field.model"),
             "model",
             valueOrDash(meshCoreState.getModel()),
             String.class
         );
         addValue(
             deviceSection,
-            "Firmware",
+            I18n.t("settings.meshCore.field.firmware"),
             "firmware_version",
             valueOrDash(meshCoreState.getFirmwareVersion()),
             String.class
         );
         addValue(
             deviceSection,
-            "Build",
+            I18n.t("settings.meshCore.field.build"),
             "firmware_build",
             valueOrDash(meshCoreState.getFirmwareBuild()),
             String.class
         );
         addValue(
             deviceSection,
-            "Protocol version",
+            I18n.t("settings.meshCore.field.protocolVersion"),
             "protocol_version",
             valueOrDash(meshCoreState.getFirmwareProtocolVersion()),
             String.class
         );
         addValue(
             deviceSection,
-            "BLE PIN",
+            I18n.t("settings.meshCore.field.blePin"),
             "ble_pin",
             valueOrDash(meshCoreState.getBlePin()),
             String.class
@@ -3431,47 +3460,47 @@ public class FormSetting extends Form {
         root.getChildren().add(deviceSection);
 
         TreeItem<ConfigTreeItem> radioSection = section(
-            "MeshCore radio",
+            I18n.t("settings.meshCore.section.radio"),
             "meshcore_radio"
         );
         addValue(
             radioSection,
-            "TX power (dBm)",
+            I18n.t("settings.meshCore.field.txPower"),
             "tx_power",
             valueOrDash(meshCoreState.getTxPowerDbm()),
             String.class
         );
         addValue(
             radioSection,
-            "Max TX power (dBm)",
+            I18n.t("settings.meshCore.field.maxTxPower"),
             "max_tx_power",
             valueOrDash(meshCoreState.getMaxTxPowerDbm()),
             String.class
         );
         addValue(
             radioSection,
-            "Frequency (kHz)",
+            I18n.t("settings.meshCore.field.frequency"),
             "frequency",
             valueOrDash(meshCoreState.getRadioFrequencyKhz()),
             String.class
         );
         addValue(
             radioSection,
-            "Bandwidth (kHz)",
+            I18n.t("settings.meshCore.field.bandwidth"),
             "bandwidth",
             valueOrDash(meshCoreState.getRadioBandwidthKhz()),
             String.class
         );
         addValue(
             radioSection,
-            "Spreading factor",
+            I18n.t("settings.meshCore.field.spreadingFactor"),
             "spreading_factor",
             valueOrDash(meshCoreState.getRadioSpreadingFactor()),
             String.class
         );
         addValue(
             radioSection,
-            "Coding rate",
+            I18n.t("settings.meshCore.field.codingRate"),
             "coding_rate",
             valueOrDash(meshCoreState.getRadioCodingRate()),
             String.class
@@ -3479,54 +3508,54 @@ public class FormSetting extends Form {
         root.getChildren().add(radioSection);
 
         TreeItem<ConfigTreeItem> limitsSection = section(
-            "MeshCore данные",
+            I18n.t("settings.meshCore.section.data"),
             "meshcore_limits"
         );
         addValue(
             limitsSection,
-            "Max contacts",
+            I18n.t("settings.meshCore.field.maxContacts"),
             "max_contacts",
             valueOrDash(meshCoreState.getMaxContacts()),
             String.class
         );
         addValue(
             limitsSection,
-            "Contact count",
+            I18n.t("settings.meshCore.field.contactCount"),
             "contact_count",
             valueOrDash(meshCoreState.getContactCount()),
             String.class
         );
         addValue(
             limitsSection,
-            "Max channels",
+            I18n.t("settings.meshCore.field.maxChannels"),
             "max_channels",
             valueOrDash(meshCoreState.getMaxChannels()),
             String.class
         );
         addValue(
             limitsSection,
-            "Battery (mV)",
+            I18n.t("settings.meshCore.field.battery"),
             "battery_mv",
             valueOrDash(meshCoreState.getBatteryMillivolts()),
             String.class
         );
         addValue(
             limitsSection,
-            "Storage used (KB)",
+            I18n.t("settings.meshCore.field.storageUsed"),
             "storage_used",
             valueOrDash(meshCoreState.getUsedStorageKb()),
             String.class
         );
         addValue(
             limitsSection,
-            "Storage total (KB)",
+            I18n.t("settings.meshCore.field.storageTotal"),
             "storage_total",
             valueOrDash(meshCoreState.getTotalStorageKb()),
             String.class
         );
         addValue(
             limitsSection,
-            "Last error",
+            I18n.t("settings.meshCore.field.lastError"),
             "last_error",
             valueOrDash(meshCoreState.getLastError()),
             String.class
@@ -3534,7 +3563,7 @@ public class FormSetting extends Form {
         root.getChildren().add(limitsSection);
 
         TreeItem<ConfigTreeItem> channelsSection = section(
-            "MeshCore каналы",
+            I18n.t("settings.meshCore.section.channels"),
             "meshcore_channels"
         );
         for (ChannelProtos.Channel channel : state.getChannels()) {
@@ -3544,10 +3573,10 @@ public class FormSetting extends Form {
                 : "";
             addValue(
                 channelsSection,
-                "Канал " + channel.getIndex(),
+                I18n.t("settings.meshCore.channel", channel.getIndex()),
                 "channel_" + channel.getIndex(),
                 (name == null || name.isBlank()
-                    ? "Ch " + channel.getIndex()
+                    ? I18n.t("settings.meshCore.channelFallback", channel.getIndex())
                     : name) +
                     " (" +
                     role +
@@ -3563,7 +3592,7 @@ public class FormSetting extends Form {
         saveConfigBtn.setDisable(true);
         setSyncDateTimeButtonDisabled(true);
         configStatusLabel.setText(
-            "MeshCore Companion: metadata загружены, запись настроек недоступна"
+            I18n.t("settings.meshCore.status.readOnly")
         );
     }
 
@@ -3782,14 +3811,14 @@ public class FormSetting extends Form {
         DeviceState actionState = state;
         ProtocolHandler actionHandler = handler;
         if (actionState == null || actionHandler == null) {
-            configStatusLabel.setText("Нет подключения к радио");
+            configStatusLabel.setText(I18n.t("settings.status.noRadio"));
             return;
         }
         ConnectionEntry activeEntry = findActiveConnectionEntry();
         if (isConfigExchangeInProgress(activeEntry)) {
             watchConfigExchangeCompletion(activeEntry);
             configStatusLabel.setText(
-                "Дождитесь завершения чтения конфигурации"
+                I18n.t("settings.status.waitConfigRead")
             );
             saveConfigBtn.setDisable(true);
             return;
@@ -3945,7 +3974,7 @@ public class FormSetting extends Form {
             modifiedModuleConfigs.isEmpty() &&
             modifiedChannels.isEmpty()
         ) {
-            configStatusLabel.setText("Нет изменений для сохранения");
+            configStatusLabel.setText(I18n.t("settings.config.status.noChanges"));
             return;
         }
 
@@ -3958,7 +3987,7 @@ public class FormSetting extends Form {
             (positionModified ? 1 : 0) +
             (ringtoneModified ? 1 : 0);
         saveConfigBtn.setDisable(true);
-        configStatusLabel.setText("Запрос session key...");
+        configStatusLabel.setText(I18n.t("settings.status.requestSessionKey"));
 
         // Захватываем финальные значения для лямбды
         final boolean fOwnerModified = ownerModified;
@@ -4015,7 +4044,9 @@ public class FormSetting extends Form {
             Platform.runLater(() -> {
                 actionState.removeOwnerInfoListener(listenerHolder[0]);
                 if (saveDispatchStarted.compareAndSet(false, true)) {
-                    configStatusLabel.setText("Отправка без session key...");
+                    configStatusLabel.setText(
+                        I18n.t("settings.status.sendingWithoutSessionKey")
+                    );
                     sendConfigChanges(
                         activeEntry,
                         actionState,
@@ -4074,7 +4105,7 @@ public class FormSetting extends Form {
         String newRingtone,
         int totalChanges
     ) {
-        configStatusLabel.setText("Отправка настроек...");
+        configStatusLabel.setText(I18n.t("settings.config.status.sendingSettings"));
         ConnectionType activeTransport =
             activeEntry != null
                 ? activeEntry.getEffectiveType()
@@ -4365,10 +4396,10 @@ public class FormSetting extends Form {
                                 finishConfigSaveNavigationBlock();
                                 saveConfigBtn.setDisable(false);
                                 configStatusLabel.setText(
-                                    "Ошибка сохранения: " +
-                                        (e.getMessage() != null
-                                            ? e.getMessage()
-                                            : "см. лог")
+                                    I18n.t(
+                                        "settings.config.status.saveError",
+                                        errorDetail(e)
+                                    )
                                 );
                             });
                             return;
@@ -4411,18 +4442,14 @@ public class FormSetting extends Form {
                         originalChannels = getWorkingChannelsSnapshot();
                         saveConfigBtn.setDisable(false);
                         if (requiresReconnect) {
-                            String reconnectMessage =
-                                activeTransport == ConnectionType.BLE
-                                    ? "Отправлено секций: " +
-                                      totalChanges +
-                                      ". Ожидание переподключения по BLE..."
-                                    : "Отправлено секций: " +
-                                      totalChanges +
-                                      ". Устройство перезагрузится. Переподключение...";
+                            String reconnectMessage = configSaveReconnectMessage(
+                                activeTransport,
+                                totalChanges
+                            );
                             configStatusLabel.setText(reconnectMessage);
                         } else {
                             configStatusLabel.setText(
-                                "Отправлено секций: " + totalChanges
+                                I18n.t("settings.config.status.sentSections", totalChanges)
                             );
                         }
                     });
@@ -4500,14 +4527,10 @@ public class FormSetting extends Form {
                 );
                 originalChannels = getWorkingChannelsSnapshot();
                 saveConfigBtn.setDisable(false);
-                String reconnectMessage =
-                    activeTransport == ConnectionType.BLE
-                        ? "Отправлено секций: " +
-                          totalChanges +
-                          ". Ожидание переподключения по BLE..."
-                        : "Отправлено секций: " +
-                          totalChanges +
-                          ". Устройство перезагрузится. Переподключение...";
+                String reconnectMessage = configSaveReconnectMessage(
+                    activeTransport,
+                    totalChanges
+                );
                 configStatusLabel.setText(reconnectMessage);
             });
 
@@ -4559,7 +4582,9 @@ public class FormSetting extends Form {
             );
             originalChannels = getWorkingChannelsSnapshot();
             saveConfigBtn.setDisable(false);
-            configStatusLabel.setText("Отправлено секций: " + totalChanges);
+            configStatusLabel.setText(
+                I18n.t("settings.config.status.sentSections", totalChanges)
+            );
             finishConfigSaveNavigationBlock();
         }
     }
