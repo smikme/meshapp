@@ -231,9 +231,28 @@ HTTP(S)-запросы выполняются встроенным Java HTTP-к�
 | `mesh.curl.get(url[, options])` | `curl.response` | Выполняет GET-запрос |
 | `mesh.curl.request(options)` | `curl.response` | Выполняет запрос с параметрами |
 
-Поля `options`: `url`, `method`, `body`, `headers`, `timeout_ms`, `max_bytes`. Разрешены методы `GET`, `HEAD`, `POST`, `PUT`, `PATCH`, `DELETE`. `timeout_ms` ограничен диапазоном 100..5000, `max_bytes` — до 1 МБ.
+Поля `options`:
 
-Поля ответа: `ok`, `status`, `url`, `body`, `headers`, `truncated`, `error`.
+| Поле | Тип | Назначение / возвращаемое значение |
+|------|-----|------------------------------------|
+| `url` | string | HTTP(S)-URL запроса. В `mesh.curl.get(url[, options])` обычно передаётся первым аргументом, в `mesh.curl.request(options)` обязателен в таблице |
+| `method` | string | HTTP-метод. По умолчанию `GET`; разрешены `GET`, `HEAD`, `POST`, `PUT`, `PATCH`, `DELETE` |
+| `body` | string или `nil` | Тело запроса в UTF-8 для методов с телом; для `GET` и `HEAD` не отправляется |
+| `headers` | table<string,string> | Заголовки запроса. Имена проверяются, служебные заголовки вроде `Host` и `Content-Length` запрещены |
+| `timeout_ms` | number | Таймаут запроса в миллисекундах. Ограничен диапазоном `100..5000`, по умолчанию `1500` |
+| `max_bytes` | number | Максимум байт тела ответа. Ограничен `0..1048576`, по умолчанию `262144`; при обрезке ответа `response.truncated = true` |
+
+Поля `curl.response`:
+
+| Поле | Тип | Назначение / возвращаемое значение |
+|------|-----|------------------------------------|
+| `ok` | boolean | `true`, если HTTP-статус находится в диапазоне `200..299`; иначе `false` |
+| `status` | number | HTTP-статус ответа. Возвращает `0`, если запрос завершился без HTTP-ответа |
+| `url` | string или `nil` | Итоговый URL после редиректов; `nil` при ошибке выполнения запроса |
+| `body` | string | Тело ответа, декодированное как UTF-8 и ограниченное `max_bytes`; при ошибке пустая строка |
+| `headers` | table<string,string> | Заголовки ответа: имена в нижнем регистре, несколько значений объединены через `, `; при ошибке пустая таблица |
+| `truncated` | boolean | `true`, если тело ответа было обрезано по `max_bytes` |
+| `error` | string или `nil` | Текст ошибки выполнения запроса; для обычного HTTP-ответа, включая не-2xx статус, возвращает `nil` |
 
 ## `mesh.ui`
 
@@ -241,9 +260,30 @@ HTTP(S)-запросы выполняются встроенным Java HTTP-к�
 |---------|---------|------------|
 | `mesh.ui.pick_node(options)` | `request_id` | Открывает выбор ноды и позже вызывает `on_node_selected(event)` |
 
-Поля `options`: `name`, `prompt`, `query`, `chat_type`, `chat_key`. Вместо таблицы можно передать строку, она будет использована как `query`.
+Поля `options`. Вместо таблицы можно передать строку, она будет использована как `query`.
 
-Поля `on_node_selected(event)`: `type`, `source`, `name`, `request_id`, `status`, `selected`, `cancelled`, `chat_type`, `chat_key`, `node`.
+| Поле | Тип | Назначение / возвращаемое значение |
+|------|-----|------------------------------------|
+| `name` | string | Произвольное имя запроса, которое вернётся в `event.name` |
+| `prompt` | string | Текст заголовка или подсказки в окне выбора ноды |
+| `query` | string | Начальная строка поиска/фильтра нод |
+| `chat_type` | string | Контекст чата: `channel`, `dm` или пустая строка; возвращается в событии |
+| `chat_key` | string | Ключ чата: индекс канала строкой или node ID собеседника; возвращается в событии |
+
+Поля `on_node_selected(event)`:
+
+| Поле | Тип | Назначение / возвращаемое значение |
+|------|-----|------------------------------------|
+| `type` | string | Тип события; возвращает `ui_result` |
+| `source` | string | API-источник события; обычно `mesh.ui.pick_node` |
+| `name` | string | Имя исходного запроса из `options.name` |
+| `request_id` | string | ID запроса, который вернул `mesh.ui.pick_node(...)` |
+| `status` | string | Результат выбора: `selected` или `cancelled` |
+| `selected` | boolean | `true`, если пользователь выбрал ноду |
+| `cancelled` | boolean | `true`, если выбор отменён |
+| `chat_type` | string | Контекст чата из исходных `options` |
+| `chat_key` | string | Ключ чата из исходных `options` |
+| `node` | `node` или `nil` | Выбранная нода; `nil`, если выбор отменён |
 
 ## `mesh.canvas`
 
@@ -281,13 +321,42 @@ HTTP(S)-запросы выполняются встроенным Java HTTP-к�
 | `mesh.canvas.fill_text(text, x, y[, color])` | `true` | Рисует текст |
 | `mesh.canvas.stroke_text(text, x, y[, color[, line_width]])` | `true` | Рисует контур текста |
 
-Поля `options`: `title`, `width`, `height`, `background`, `resizable`, `fps`. По умолчанию Canvas масштабируется вместе с плавающим окном (`resizable = true`); размер меняется перетаскиванием краёв окна. Кнопка в правом верхнем углу закрывает окно после подтверждения. Двойной клик по верхней зоне переноса сворачивает окно в полупрозрачный квадрат с иконкой скрипта; двойной клик по квадрату восстанавливает прежний размер.
+Поля `options` для `mesh.canvas.open(options)`:
+
+| Поле | Тип | Назначение / возвращаемое значение |
+|------|-----|------------------------------------|
+| `title` | string | Заголовок Canvas-окна. Если в `open` передана строка вместо таблицы, она используется как `title` |
+| `width` | number | Начальная ширина холста в пикселях. По умолчанию `640`; окно ограничивает размер диапазоном `260..1920` |
+| `height` | number | Начальная высота холста в пикселях. По умолчанию `360`; окно ограничивает размер диапазоном `220..1080` |
+| `background` | string | Начальный цвет фона в формате JavaFX/CSS; пустая строка не заливает фон |
+| `resizable` | boolean | `true`, если холст должен масштабироваться вместе с окном; по умолчанию `true` |
+| `fps` | number | Частота вызова `on_canvas_frame(event)`. `0` выключает таймер; окно ограничивает значение диапазоном `0..120` |
+
+По умолчанию Canvas масштабируется вместе с плавающим окном (`resizable = true`); размер меняется перетаскиванием краёв окна. Кнопка в правом верхнем углу закрывает окно после подтверждения. Двойной клик по верхней зоне переноса сворачивает окно в полупрозрачный квадрат с иконкой скрипта; двойной клик по квадрату восстанавливает прежний размер.
 
 Цвет можно передать строкой JavaFX/CSS (`"#ffcc00"`, `"rgba(255,0,0,0.5)"`, `"white"`) или таблицей `{r, g, b, a}`. Компоненты `r/g/b/a` принимаются в диапазоне `0..1` или `0..255`.
 
 `points` можно передать как плоский список `{x1, y1, x2, y2, ...}` или как список точек `{{x=10, y=10}, {x=40, y=20}}`.
 
-Поля `on_canvas_event(event)`: `type`, `source`, `x`, `y`, `screen_x`, `screen_y`, `button`, `click_count`, `primary`, `middle`, `secondary`, `wheel_delta_x`, `wheel_delta_y`, `code`, `key`, `text`, `shift`, `ctrl`, `alt`, `meta`, `width`, `height`, `time`, `dt`.
+Поля `on_canvas_event(event)` и `on_canvas_frame(event)`:
+
+| Поле | Тип | Назначение / возвращаемое значение |
+|------|-----|------------------------------------|
+| `type` | string | Тип события Canvas; для кадрового callback возвращает `frame` |
+| `source` | string | Источник события; возвращает `mesh.canvas` |
+| `x`, `y` | number | Координаты мыши внутри холста для mouse/scroll-событий; для остальных событий `0` |
+| `screen_x`, `screen_y` | number | Экранные координаты мыши для mouse/scroll-событий; для остальных событий `0` |
+| `button` | string | Кнопка мыши: `primary`, `middle`, `secondary`, `back`, `forward` или пустая строка |
+| `click_count` | number | Количество кликов в mouse-событии |
+| `primary`, `middle`, `secondary` | boolean | Состояние соответствующих кнопок мыши в момент события |
+| `wheel_delta_x`, `wheel_delta_y` | number | Горизонтальная и вертикальная прокрутка для `scroll`; иначе `0` |
+| `code` | string | Код клавиши для keyboard-событий, например `Left` или `Enter` |
+| `key` | string | Отображаемое имя клавиши для keyboard-событий |
+| `text` | string | Текст/символ keyboard-события, когда он есть |
+| `shift`, `ctrl`, `alt`, `meta` | boolean | Состояние модификаторов клавиатуры |
+| `width`, `height` | number | Текущий размер холста в пикселях |
+| `time` | number | Unix time события в секундах |
+| `dt` | number | Для `on_canvas_frame` — секунд с прошлого кадра; для остальных событий `0` |
 
 Значения `event.type`: `opened`, `closed`, `resized`, `mouse_moved`, `mouse_pressed`, `mouse_released`, `mouse_clicked`, `mouse_dragged`, `mouse_entered`, `mouse_exited`, `scroll`, `key_pressed`, `key_released`, `key_typed`.
 
@@ -299,11 +368,47 @@ HTTP(S)-запросы выполняются встроенным Java HTTP-к�
 
 `target` может быть node ID строкой (`"!abcdef12"`), числовым `node_num` или таблицей ноды с полями `node_num`, `node_id`, `long_name`, `short_name`.
 
-Поля `options`: `name`, `chat_type`, `chat_key`, `target_name`, `timeout_seconds`. Таймаут ограничен диапазоном 1..600 секунд, по умолчанию 360.
+Поля `options`:
 
-Поля `on_traceroute(event)`: `type`, `source`, `name`, `request_id`, `status`, `ok`, `timeout`, `error`, `target_node_num`, `target_node_id`, `target_name`, `response_from_node_num`, `response_from_node_id`, `chat_type`, `chat_key`, `route`.
+| Поле | Тип | Назначение / возвращаемое значение |
+|------|-----|------------------------------------|
+| `name` | string | Произвольное имя запроса, которое вернётся в `event.name` |
+| `chat_type` | string | Контекст чата: `channel`, `dm` или пустая строка; возвращается в событии |
+| `chat_key` | string | Ключ чата: индекс канала строкой или node ID собеседника; возвращается в событии |
+| `target_name` | string | Отображаемое имя целевой ноды; если не задано, берётся из `target` |
+| `timeout_seconds` | number | Таймаут ожидания результата в секундах. Ограничен диапазоном `1..600`, по умолчанию `360` |
 
-Если `event.route` есть, в нём доступны поля `route`, `route_back`, `route_ids`, `route_back_ids`, `snr_towards`, `snr_back`.
+Поля `on_traceroute(event)`:
+
+| Поле | Тип | Назначение / возвращаемое значение |
+|------|-----|------------------------------------|
+| `type` | string | Тип события; возвращает `traceroute_result` |
+| `source` | string | API-источник события; обычно `mesh.traceroute.request` |
+| `name` | string | Имя исходного запроса из `options.name` |
+| `request_id` | string | ID запроса, который вернул `mesh.traceroute.request(...)` |
+| `status` | string | Статус результата: `ok`, `timeout` или `error` |
+| `ok` | boolean | `true`, если traceroute успешно получил маршрут |
+| `timeout` | boolean | `true`, если истёк `timeout_seconds` |
+| `error` | string или `nil` | Текст ошибки отправки/выполнения запроса; `nil` без ошибки |
+| `target_node_num` | number | Числовой Meshtastic ID целевой ноды (`uint32`) |
+| `target_node_id` | string | Node ID целевой ноды в виде `!abcdef12` |
+| `target_name` | string | Отображаемое имя целевой ноды |
+| `response_from_node_num` | number или `nil` | Числовой ID ноды, от которой пришёл ответ; `nil`, если ответа не было |
+| `response_from_node_id` | string или `nil` | Node ID ноды, от которой пришёл ответ; `nil`, если ответа не было |
+| `chat_type` | string | Контекст чата из исходных `options` |
+| `chat_key` | string | Ключ чата из исходных `options` |
+| `route` | `route.discovery` или `nil` | Таблица маршрута; `nil` при timeout/error или если маршрут не получен |
+
+Поля `route.discovery`:
+
+| Поле | Тип | Назначение / возвращаемое значение |
+|------|-----|------------------------------------|
+| `route` | список number | Прямой маршрут как список `node_num` |
+| `route_back` | список number | Обратный маршрут как список `node_num` |
+| `route_ids` | список string | Прямой маршрут как список node ID вида `!abcdef12` |
+| `route_back_ids` | список string | Обратный маршрут как список node ID вида `!abcdef12` |
+| `snr_towards` | список number | SNR по прямому маршруту в dB |
+| `snr_back` | список number | SNR по обратному маршруту в dB |
 
 ## `mesh.nodeinfo`
 
@@ -313,21 +418,167 @@ HTTP(S)-запросы выполняются встроенным Java HTTP-к�
 
 `target` и `options` такие же, как у `mesh.traceroute.request(...)`, но таймаут по умолчанию 60 секунд.
 
-Поля `on_node_info(event)`: `type`, `source`, `name`, `request_id`, `status`, `ok`, `timeout`, `cached`, `error`, `target_node_num`, `target_node_id`, `target_name`, `chat_type`, `chat_key`, `node`.
+Поля `on_node_info(event)`:
+
+| Поле | Тип | Назначение / возвращаемое значение |
+|------|-----|------------------------------------|
+| `type` | string | Тип события; возвращает `nodeinfo_result` |
+| `source` | string | API-источник события; обычно `mesh.nodeinfo.request` |
+| `name` | string | Имя исходного запроса из `options.name` |
+| `request_id` | string | ID запроса, который вернул `mesh.nodeinfo.request(...)` |
+| `status` | string | Статус результата: `ok`, `timeout` или `error` |
+| `ok` | boolean | `true`, если NodeInfo успешно получен |
+| `timeout` | boolean | `true`, если истёк `timeout_seconds` |
+| `cached` | boolean | `true`, если при timeout/error возвращена локально известная нода |
+| `error` | string или `nil` | Текст ошибки запроса; `nil` без ошибки |
+| `target_node_num` | number | Числовой Meshtastic ID целевой ноды (`uint32`) |
+| `target_node_id` | string | Node ID целевой ноды в виде `!abcdef12` |
+| `target_name` | string | Отображаемое имя целевой ноды |
+| `chat_type` | string | Контекст чата из исходных `options` |
+| `chat_key` | string | Ключ чата из исходных `options` |
+| `node` | `node` или `nil` | Таблица ноды; `nil`, если данных о ноде нет |
 
 ## Поля объектов
 
-`message`: `db_id`, `packet_id`, `chat_type`, `chat_key`, `from`, `to`, `channel`, `channel_name`, `channel_role`, `text`, `reply_id`, `reply_text`, `timestamp`, `outgoing`, `system`, `status`, `sender_name`, `hop_start`, `hop_limit`, `hops`, `rx_rssi`, `rx_snr`.
+Все объекты ниже возвращаются как Lua-таблицы. Поля с типом `... или nil` могут отсутствовать или возвращать `nil`, если MeshApp ещё не получил соответствующие данные.
 
-`node`: `node_num`, `node_id`, `long_name`, `short_name`, `last_heard`, `battery`, `externally_powered`, `voltage`, `snr`, `latitude`, `longitude`, `altitude`, `hops_away`, `channel`, `role`, `hw_model`, `public_key`, `uptime_seconds`, `channel_utilization`, `air_util_tx`, `temperature`, `relative_humidity`, `barometric_pressure`, `unmessagable`, `licensed`.
+### `owner`
 
-`channel`: `index`, `role`, `name`.
+Возвращается из `mesh.owner()`.
 
-`command`: `type`, `source`, `name`, `request_id`, `chat_type`, `chat_key`, `handle`, `text`, `arguments`, `argument_tokens`.
+| Поле | Тип | Назначение / возвращаемое значение |
+|------|-----|------------------------------------|
+| `node_id` | string или `nil` | Node ID текущей собственной ноды, например `!abcdef12` |
+| `node_num` | number или `nil` | Числовой Meshtastic ID текущей собственной ноды (`uint32`) |
+| `connection_id` | string или `nil` | ID активного подключения, в контексте которого запущен скрипт |
 
-`canvas.mouse`: `x`, `y`, `screen_x`, `screen_y`, `over`, `pressed`, `primary`, `middle`, `secondary`, `button`, `click_count`, `wheel_delta_x`, `wheel_delta_y`, `last_type`, `time`.
+### `message`
 
-`canvas.keys`: `pressed`, `last_type`, `last_code`, `last_key`, `text`, `shift`, `ctrl`, `alt`, `meta`, `time`. Для быстрого опроса клавиши также доступны как булевы поля по имени кода, например `mesh.canvas.keys().Left`.
+Возвращается в `on_message(msg)`, `mesh.chat.recent(...)` и функциях отправки/бот-сообщений.
+
+| Поле | Тип | Назначение / возвращаемое значение |
+|------|-----|------------------------------------|
+| `db_id` | number | Локальный ID сообщения в базе MeshApp; может быть `0` для ещё не сохранённых сообщений |
+| `packet_id` | number | ID mesh-пакета; используется как `reply_id` при ответе |
+| `chat_type` | string или `nil` | Тип чата: `channel` или `dm` |
+| `chat_key` | string или `nil` | Ключ чата: индекс канала строкой или node ID собеседника |
+| `from` | string или `nil` | Node ID отправителя |
+| `to` | string или `nil` | Node ID получателя или broadcast-адрес |
+| `channel` | number | Индекс канала сообщения |
+| `channel_name` | string или `nil` | Имя канала, если оно известно |
+| `channel_role` | string или `nil` | Роль канала из Meshtastic, например `PRIMARY` или `SECONDARY` |
+| `text` | string или `nil` | Текст сообщения |
+| `reply_id` | number | `packet_id` сообщения, на которое был ответ; `0`, если это не ответ |
+| `reply_text` | string или `nil` | Текст цитируемого сообщения, если известен |
+| `timestamp` | number | Unix time сообщения в секундах |
+| `outgoing` | boolean | `true`, если сообщение отправлено текущей нодой/клиентом |
+| `system` | boolean | `true` для системных и локальных bot-сообщений |
+| `status` | string или `nil` | Статус доставки/обработки сообщения, если известен |
+| `sender_name` | string или `nil` | Отображаемое имя отправителя |
+| `hop_start` | number | Исходный hop limit пакета |
+| `hop_limit` | number | Оставшийся hop limit пакета |
+| `hops` | number или `nil` | Сколько hop прошёл пакет; `nil`, если данных hop нет |
+| `rx_rssi` | number | RSSI принятого пакета |
+| `rx_snr` | number | SNR принятого пакета в dB |
+
+### `node`
+
+Возвращается из `mesh.chat.nodes()`, `mesh.ui.pick_node(...)`, `mesh.nodeinfo.request(...)` и может передаваться как `target` для запросов.
+
+| Поле | Тип | Назначение / возвращаемое значение |
+|------|-----|------------------------------------|
+| `node_num` | number | Числовой Meshtastic ID ноды (`uint32`) |
+| `node_id` | string или `nil` | Node ID в виде `!abcdef12` |
+| `long_name` | string или `nil` | Полное имя пользователя/ноды |
+| `short_name` | string или `nil` | Короткое имя пользователя/ноды |
+| `last_heard` | number | Unix time последнего известного пакета от ноды |
+| `battery` | number | Уровень батареи в процентах, если он передан устройством |
+| `externally_powered` | boolean | `true`, если нода сообщает внешнее питание |
+| `voltage` | number | Напряжение питания/батареи в вольтах |
+| `snr` | number | Последний известный SNR связи с нодой в dB |
+| `latitude` | number | Широта в десятичных градусах |
+| `longitude` | number | Долгота в десятичных градусах |
+| `altitude` | number | Высота в метрах |
+| `hops_away` | number или `nil` | Оценка количества hop до ноды; `nil`, если неизвестно |
+| `channel` | number | Индекс канала, связанный с последними данными ноды |
+| `role` | string или `nil` | Роль устройства Meshtastic, если известна |
+| `hw_model` | string или `nil` | Модель аппаратной платформы, если известна |
+| `public_key` | string или `nil` | Публичный ключ ноды в hex-строке |
+| `uptime_seconds` | number | Uptime ноды в секундах |
+| `channel_utilization` | number | Channel utilization в процентах |
+| `air_util_tx` | number | Air utilization TX в процентах |
+| `temperature` | number | Температура из telemetry в градусах Celsius |
+| `relative_humidity` | number | Относительная влажность из telemetry в процентах |
+| `barometric_pressure` | number | Барометрическое давление из telemetry |
+| `unmessagable` | boolean | `true`, если приложение считает ноду недоступной для сообщений |
+| `licensed` | boolean или `nil` | Признак licensed-режима ноды; `nil`, если поле не получено |
+
+### `channel`
+
+Возвращается из `mesh.chat.channels()`.
+
+| Поле | Тип | Назначение / возвращаемое значение |
+|------|-----|------------------------------------|
+| `index` | number | Индекс канала |
+| `role` | string или `nil` | Роль канала из Meshtastic |
+| `name` | string или `nil` | Имя канала из настроек канала |
+
+### `command`
+
+Передаётся в `on_command(command)` и возвращается из `mesh.command()` во время командного запуска.
+
+| Поле | Тип | Назначение / возвращаемое значение |
+|------|-----|------------------------------------|
+| `type` | string | Тип команды; для chat automation возвращает `chat_command` |
+| `source` | string | Источник команды; для запуска из чата возвращает `chat` |
+| `name` | string или `nil` | Имя команды, обычно совпадает с `handle` |
+| `request_id` | string | ID конкретного запуска команды |
+| `chat_type` | string или `nil` | Тип чата, где вызвана команда: `channel` или `dm` |
+| `chat_key` | string или `nil` | Ключ чата, где вызвана команда |
+| `handle` | string или `nil` | Командный handle, например `@tracebot` |
+| `text` | string или `nil` | Полный текст пользовательской команды |
+| `arguments` | string или `nil` | Строка аргументов после command handle |
+| `argument_tokens` | список string | Аргументы, разбитые парсером команды; индексация Lua начинается с `1` |
+
+### `canvas.size`
+
+Возвращается из `mesh.canvas.size()`.
+
+| Поле | Тип | Назначение / возвращаемое значение |
+|------|-----|------------------------------------|
+| `width` | number | Текущая ширина холста в пикселях |
+| `height` | number | Текущая высота холста в пикселях |
+
+### `canvas.mouse`
+
+Возвращается из `mesh.canvas.mouse()`.
+
+| Поле | Тип | Назначение / возвращаемое значение |
+|------|-----|------------------------------------|
+| `x`, `y` | number | Последние координаты мыши внутри холста |
+| `screen_x`, `screen_y` | number | Последние экранные координаты мыши |
+| `over` | boolean | `true`, если курсор находится над холстом |
+| `pressed` | boolean | `true`, если нажата любая основная кнопка мыши |
+| `primary`, `middle`, `secondary` | boolean | Состояние соответствующих кнопок мыши |
+| `button` | string | Последняя кнопка события: `primary`, `middle`, `secondary`, `back`, `forward` или пустая строка |
+| `click_count` | number | Количество кликов в последнем mouse-событии |
+| `wheel_delta_x`, `wheel_delta_y` | number | Последняя горизонтальная и вертикальная прокрутка |
+| `last_type` | string | Последний тип mouse/scroll-события |
+| `time` | number | Unix time последнего mouse/scroll-события в секундах |
+
+### `canvas.keys`
+
+Возвращается из `mesh.canvas.keys()`. Для быстрого опроса клавиши также доступны как булевы поля по имени кода, например `mesh.canvas.keys().Left`.
+
+| Поле | Тип | Назначение / возвращаемое значение |
+|------|-----|------------------------------------|
+| `pressed` | список string | Список кодов клавиш, которые сейчас нажаты |
+| `last_type` | string | Последний тип keyboard-события: `key_pressed`, `key_released` или `key_typed` |
+| `last_code` | string | Код последней клавиши, например `Left` или `Enter` |
+| `last_key` | string | Отображаемое имя последней клавиши |
+| `text` | string | Текст/символ последнего keyboard-события, когда он есть |
+| `shift`, `ctrl`, `alt`, `meta` | boolean | Состояние модификаторов клавиатуры |
+| `time` | number | Unix time последнего keyboard-события в секундах |
 
 ## Примеры
 

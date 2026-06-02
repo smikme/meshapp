@@ -231,9 +231,28 @@ HTTP(S) requests are executed by the built-in Java HTTP client. Access to local,
 | `mesh.curl.get(url[, options])` | `curl.response` | Performs a GET request |
 | `mesh.curl.request(options)` | `curl.response` | Performs a request with parameters |
 
-`options` fields: `url`, `method`, `body`, `headers`, `timeout_ms`, `max_bytes`. Allowed methods: `GET`, `HEAD`, `POST`, `PUT`, `PATCH`, `DELETE`. `timeout_ms` is limited to 100..5000, `max_bytes` is limited to 1 MB.
+`options` fields:
 
-Response fields: `ok`, `status`, `url`, `body`, `headers`, `truncated`, `error`.
+| Field | Type | Purpose / returned value |
+|-------|------|--------------------------|
+| `url` | string | HTTP(S) request URL. In `mesh.curl.get(url[, options])` it is usually passed as the first argument; in `mesh.curl.request(options)` it is required in the table |
+| `method` | string | HTTP method. Defaults to `GET`; allowed values are `GET`, `HEAD`, `POST`, `PUT`, `PATCH`, `DELETE` |
+| `body` | string or `nil` | UTF-8 request body for methods with a body; not sent for `GET` and `HEAD` |
+| `headers` | table<string,string> | Request headers. Header names are validated, and service headers such as `Host` and `Content-Length` are blocked |
+| `timeout_ms` | number | Request timeout in milliseconds. Limited to `100..5000`, default `1500` |
+| `max_bytes` | number | Maximum response body bytes. Limited to `0..1048576`, default `262144`; when the limit is reached, `response.truncated = true` |
+
+`curl.response` fields:
+
+| Field | Type | Purpose / returned value |
+|-------|------|--------------------------|
+| `ok` | boolean | `true` when the HTTP status is in `200..299`; otherwise `false` |
+| `status` | number | HTTP response status. Returns `0` if the request ended without an HTTP response |
+| `url` | string or `nil` | Final URL after redirects; `nil` on request execution error |
+| `body` | string | Response body decoded as UTF-8 and limited by `max_bytes`; empty string on error |
+| `headers` | table<string,string> | Response headers: lower-case names, multiple values joined with `, `; empty table on error |
+| `truncated` | boolean | `true` if the response body was cut by `max_bytes` |
+| `error` | string or `nil` | Request execution error text; for a normal HTTP response, including non-2xx status, returns `nil` |
 
 ## `mesh.ui`
 
@@ -241,9 +260,30 @@ Response fields: `ok`, `status`, `url`, `body`, `headers`, `truncated`, `error`.
 |----------|--------|---------|
 | `mesh.ui.pick_node(options)` | `request_id` | Opens node selection and later calls `on_node_selected(event)` |
 
-`options` fields: `name`, `prompt`, `query`, `chat_type`, `chat_key`. A string can be passed instead of a table; it will be used as `query`.
+`options` fields. A string can be passed instead of a table; it will be used as `query`.
 
-`on_node_selected(event)` fields: `type`, `source`, `name`, `request_id`, `status`, `selected`, `cancelled`, `chat_type`, `chat_key`, `node`.
+| Field | Type | Purpose / returned value |
+|-------|------|--------------------------|
+| `name` | string | Custom request name returned later as `event.name` |
+| `prompt` | string | Title or hint text in the node picker |
+| `query` | string | Initial node search/filter text |
+| `chat_type` | string | Chat context: `channel`, `dm`, or empty string; returned in the event |
+| `chat_key` | string | Chat key: channel index as a string or peer node ID; returned in the event |
+
+`on_node_selected(event)` fields:
+
+| Field | Type | Purpose / returned value |
+|-------|------|--------------------------|
+| `type` | string | Event type; returns `ui_result` |
+| `source` | string | Event API source; usually `mesh.ui.pick_node` |
+| `name` | string | Original request name from `options.name` |
+| `request_id` | string | Request ID returned by `mesh.ui.pick_node(...)` |
+| `status` | string | Selection result: `selected` or `cancelled` |
+| `selected` | boolean | `true` when the user selected a node |
+| `cancelled` | boolean | `true` when the picker was cancelled |
+| `chat_type` | string | Chat context from the original `options` |
+| `chat_key` | string | Chat key from the original `options` |
+| `node` | `node` or `nil` | Selected node; `nil` if the picker was cancelled |
 
 ## `mesh.canvas`
 
@@ -281,13 +321,42 @@ Response fields: `ok`, `status`, `url`, `body`, `headers`, `truncated`, `error`.
 | `mesh.canvas.fill_text(text, x, y[, color])` | `true` | Draws text |
 | `mesh.canvas.stroke_text(text, x, y[, color[, line_width]])` | `true` | Draws text outline |
 
-`options` fields: `title`, `width`, `height`, `background`, `resizable`, `fps`. By default, Canvas scales with the floating window (`resizable = true`); resize it by dragging the window edges. The button in the top-right corner closes the window after confirmation. Double-clicking the top drag zone minimizes the window to a translucent square with the script icon; double-clicking the square restores the previous size.
+`options` fields for `mesh.canvas.open(options)`:
+
+| Field | Type | Purpose / returned value |
+|-------|------|--------------------------|
+| `title` | string | Canvas window title. If `open` receives a string instead of a table, it is used as `title` |
+| `width` | number | Initial canvas width in pixels. Defaults to `640`; the window clamps size to `260..1920` |
+| `height` | number | Initial canvas height in pixels. Defaults to `360`; the window clamps size to `220..1080` |
+| `background` | string | Initial background color in JavaFX/CSS format; empty string does not fill the background |
+| `resizable` | boolean | `true` if the canvas should resize with the window; default `true` |
+| `fps` | number | `on_canvas_frame(event)` frequency. `0` disables the timer; the window clamps the value to `0..120` |
+
+By default, Canvas scales with the floating window (`resizable = true`); resize it by dragging the window edges. The button in the top-right corner closes the window after confirmation. Double-clicking the top drag zone minimizes the window to a translucent square with the script icon; double-clicking the square restores the previous size.
 
 Color can be passed as a JavaFX/CSS string (`"#ffcc00"`, `"rgba(255,0,0,0.5)"`, `"white"`) or as a table `{r, g, b, a}`. `r/g/b/a` components are accepted in the `0..1` or `0..255` range.
 
 `points` can be a flat list `{x1, y1, x2, y2, ...}` or a list of points `{{x=10, y=10}, {x=40, y=20}}`.
 
-`on_canvas_event(event)` fields: `type`, `source`, `x`, `y`, `screen_x`, `screen_y`, `button`, `click_count`, `primary`, `middle`, `secondary`, `wheel_delta_x`, `wheel_delta_y`, `code`, `key`, `text`, `shift`, `ctrl`, `alt`, `meta`, `width`, `height`, `time`, `dt`.
+`on_canvas_event(event)` and `on_canvas_frame(event)` fields:
+
+| Field | Type | Purpose / returned value |
+|-------|------|--------------------------|
+| `type` | string | Canvas event type; frame callbacks return `frame` |
+| `source` | string | Event source; returns `mesh.canvas` |
+| `x`, `y` | number | Mouse coordinates inside the canvas for mouse/scroll events; `0` for other events |
+| `screen_x`, `screen_y` | number | Screen mouse coordinates for mouse/scroll events; `0` for other events |
+| `button` | string | Mouse button: `primary`, `middle`, `secondary`, `back`, `forward`, or empty string |
+| `click_count` | number | Click count in a mouse event |
+| `primary`, `middle`, `secondary` | boolean | State of the corresponding mouse buttons at event time |
+| `wheel_delta_x`, `wheel_delta_y` | number | Horizontal and vertical scroll delta for `scroll`; otherwise `0` |
+| `code` | string | Key code for keyboard events, for example `Left` or `Enter` |
+| `key` | string | Display name of the key for keyboard events |
+| `text` | string | Keyboard event text/character when present |
+| `shift`, `ctrl`, `alt`, `meta` | boolean | Keyboard modifier state |
+| `width`, `height` | number | Current canvas size in pixels |
+| `time` | number | Event Unix time in seconds |
+| `dt` | number | For `on_canvas_frame`, seconds since the previous frame; for other events `0` |
 
 `event.type` values: `opened`, `closed`, `resized`, `mouse_moved`, `mouse_pressed`, `mouse_released`, `mouse_clicked`, `mouse_dragged`, `mouse_entered`, `mouse_exited`, `scroll`, `key_pressed`, `key_released`, `key_typed`.
 
@@ -299,11 +368,47 @@ Color can be passed as a JavaFX/CSS string (`"#ffcc00"`, `"rgba(255,0,0,0.5)"`, 
 
 `target` can be a node ID string (`"!abcdef12"`), numeric `node_num` or a node table with `node_num`, `node_id`, `long_name`, `short_name`.
 
-`options` fields: `name`, `chat_type`, `chat_key`, `target_name`, `timeout_seconds`. Timeout is limited to 1..600 seconds, default 360.
+`options` fields:
 
-`on_traceroute(event)` fields: `type`, `source`, `name`, `request_id`, `status`, `ok`, `timeout`, `error`, `target_node_num`, `target_node_id`, `target_name`, `response_from_node_num`, `response_from_node_id`, `chat_type`, `chat_key`, `route`.
+| Field | Type | Purpose / returned value |
+|-------|------|--------------------------|
+| `name` | string | Custom request name returned later as `event.name` |
+| `chat_type` | string | Chat context: `channel`, `dm`, or empty string; returned in the event |
+| `chat_key` | string | Chat key: channel index as a string or peer node ID; returned in the event |
+| `target_name` | string | Display name of the target node; if omitted, it is derived from `target` |
+| `timeout_seconds` | number | Result wait timeout in seconds. Limited to `1..600`, default `360` |
 
-If `event.route` exists, it exposes `route`, `route_back`, `route_ids`, `route_back_ids`, `snr_towards`, `snr_back`.
+`on_traceroute(event)` fields:
+
+| Field | Type | Purpose / returned value |
+|-------|------|--------------------------|
+| `type` | string | Event type; returns `traceroute_result` |
+| `source` | string | Event API source; usually `mesh.traceroute.request` |
+| `name` | string | Original request name from `options.name` |
+| `request_id` | string | Request ID returned by `mesh.traceroute.request(...)` |
+| `status` | string | Result status: `ok`, `timeout`, or `error` |
+| `ok` | boolean | `true` when traceroute successfully received a route |
+| `timeout` | boolean | `true` when `timeout_seconds` expired |
+| `error` | string or `nil` | Send/execution error text; `nil` when there is no error |
+| `target_node_num` | number | Numeric Meshtastic ID of the target node (`uint32`) |
+| `target_node_id` | string | Target node ID in `!abcdef12` form |
+| `target_name` | string | Display name of the target node |
+| `response_from_node_num` | number or `nil` | Numeric ID of the node that responded; `nil` when there was no response |
+| `response_from_node_id` | string or `nil` | Node ID of the node that responded; `nil` when there was no response |
+| `chat_type` | string | Chat context from the original `options` |
+| `chat_key` | string | Chat key from the original `options` |
+| `route` | `route.discovery` or `nil` | Route table; `nil` on timeout/error or when no route was received |
+
+`route.discovery` fields:
+
+| Field | Type | Purpose / returned value |
+|-------|------|--------------------------|
+| `route` | list of number | Forward route as `node_num` values |
+| `route_back` | list of number | Reverse route as `node_num` values |
+| `route_ids` | list of string | Forward route as node IDs in `!abcdef12` form |
+| `route_back_ids` | list of string | Reverse route as node IDs in `!abcdef12` form |
+| `snr_towards` | list of number | Forward-route SNR values in dB |
+| `snr_back` | list of number | Reverse-route SNR values in dB |
 
 ## `mesh.nodeinfo`
 
@@ -313,21 +418,167 @@ If `event.route` exists, it exposes `route`, `route_back`, `route_ids`, `route_b
 
 `target` and `options` are the same as for `mesh.traceroute.request(...)`, but default timeout is 60 seconds.
 
-`on_node_info(event)` fields: `type`, `source`, `name`, `request_id`, `status`, `ok`, `timeout`, `cached`, `error`, `target_node_num`, `target_node_id`, `target_name`, `chat_type`, `chat_key`, `node`.
+`on_node_info(event)` fields:
+
+| Field | Type | Purpose / returned value |
+|-------|------|--------------------------|
+| `type` | string | Event type; returns `nodeinfo_result` |
+| `source` | string | Event API source; usually `mesh.nodeinfo.request` |
+| `name` | string | Original request name from `options.name` |
+| `request_id` | string | Request ID returned by `mesh.nodeinfo.request(...)` |
+| `status` | string | Result status: `ok`, `timeout`, or `error` |
+| `ok` | boolean | `true` when NodeInfo was received successfully |
+| `timeout` | boolean | `true` when `timeout_seconds` expired |
+| `cached` | boolean | `true` if a locally known node is returned on timeout/error |
+| `error` | string or `nil` | Request error text; `nil` when there is no error |
+| `target_node_num` | number | Numeric Meshtastic ID of the target node (`uint32`) |
+| `target_node_id` | string | Target node ID in `!abcdef12` form |
+| `target_name` | string | Display name of the target node |
+| `chat_type` | string | Chat context from the original `options` |
+| `chat_key` | string | Chat key from the original `options` |
+| `node` | `node` or `nil` | Node table; `nil` when no node data is available |
 
 ## Object Fields
 
-`message`: `db_id`, `packet_id`, `chat_type`, `chat_key`, `from`, `to`, `channel`, `channel_name`, `channel_role`, `text`, `reply_id`, `reply_text`, `timestamp`, `outgoing`, `system`, `status`, `sender_name`, `hop_start`, `hop_limit`, `hops`, `rx_rssi`, `rx_snr`.
+All objects below are returned as Lua tables. Fields typed as `... or nil` may be absent or return `nil` when MeshApp has not received the corresponding data yet.
 
-`node`: `node_num`, `node_id`, `long_name`, `short_name`, `last_heard`, `battery`, `externally_powered`, `voltage`, `snr`, `latitude`, `longitude`, `altitude`, `hops_away`, `channel`, `role`, `hw_model`, `public_key`, `uptime_seconds`, `channel_utilization`, `air_util_tx`, `temperature`, `relative_humidity`, `barometric_pressure`, `unmessagable`, `licensed`.
+### `owner`
 
-`channel`: `index`, `role`, `name`.
+Returned by `mesh.owner()`.
 
-`command`: `type`, `source`, `name`, `request_id`, `chat_type`, `chat_key`, `handle`, `text`, `arguments`, `argument_tokens`.
+| Field | Type | Purpose / returned value |
+|-------|------|--------------------------|
+| `node_id` | string or `nil` | Current owner node ID, for example `!abcdef12` |
+| `node_num` | number or `nil` | Numeric Meshtastic ID of the current owner node (`uint32`) |
+| `connection_id` | string or `nil` | Active connection ID for the script run context |
 
-`canvas.mouse`: `x`, `y`, `screen_x`, `screen_y`, `over`, `pressed`, `primary`, `middle`, `secondary`, `button`, `click_count`, `wheel_delta_x`, `wheel_delta_y`, `last_type`, `time`.
+### `message`
 
-`canvas.keys`: `pressed`, `last_type`, `last_code`, `last_key`, `text`, `shift`, `ctrl`, `alt`, `meta`, `time`. For quick polling, keys are also available as boolean fields by code name, for example `mesh.canvas.keys().Left`.
+Returned by `on_message(msg)`, `mesh.chat.recent(...)`, and send/bot-message functions.
+
+| Field | Type | Purpose / returned value |
+|-------|------|--------------------------|
+| `db_id` | number | Local MeshApp database ID; may be `0` for messages not saved yet |
+| `packet_id` | number | Mesh packet ID; used as `reply_id` when replying |
+| `chat_type` | string or `nil` | Chat type: `channel` or `dm` |
+| `chat_key` | string or `nil` | Chat key: channel index as a string or peer node ID |
+| `from` | string or `nil` | Sender node ID |
+| `to` | string or `nil` | Recipient node ID or broadcast address |
+| `channel` | number | Message channel index |
+| `channel_name` | string or `nil` | Channel name when known |
+| `channel_role` | string or `nil` | Meshtastic channel role, for example `PRIMARY` or `SECONDARY` |
+| `text` | string or `nil` | Message text |
+| `reply_id` | number | `packet_id` of the message being replied to; `0` when not a reply |
+| `reply_text` | string or `nil` | Quoted message text when known |
+| `timestamp` | number | Message Unix time in seconds |
+| `outgoing` | boolean | `true` when the message was sent by the current node/client |
+| `system` | boolean | `true` for system and local bot messages |
+| `status` | string or `nil` | Delivery/processing status when known |
+| `sender_name` | string or `nil` | Sender display name |
+| `hop_start` | number | Original packet hop limit |
+| `hop_limit` | number | Remaining packet hop limit |
+| `hops` | number or `nil` | Number of hops the packet travelled; `nil` when hop data is unavailable |
+| `rx_rssi` | number | Received packet RSSI |
+| `rx_snr` | number | Received packet SNR in dB |
+
+### `node`
+
+Returned by `mesh.chat.nodes()`, `mesh.ui.pick_node(...)`, `mesh.nodeinfo.request(...)`, and accepted as a `target` for requests.
+
+| Field | Type | Purpose / returned value |
+|-------|------|--------------------------|
+| `node_num` | number | Numeric Meshtastic node ID (`uint32`) |
+| `node_id` | string or `nil` | Node ID in `!abcdef12` form |
+| `long_name` | string or `nil` | Full user/node name |
+| `short_name` | string or `nil` | Short user/node name |
+| `last_heard` | number | Unix time of the last known packet from the node |
+| `battery` | number | Battery level percentage when reported by the device |
+| `externally_powered` | boolean | `true` when the node reports external power |
+| `voltage` | number | Supply/battery voltage in volts |
+| `snr` | number | Last known SNR for the node in dB |
+| `latitude` | number | Latitude in decimal degrees |
+| `longitude` | number | Longitude in decimal degrees |
+| `altitude` | number | Altitude in meters |
+| `hops_away` | number or `nil` | Estimated hop distance to the node; `nil` when unknown |
+| `channel` | number | Channel index associated with the latest node data |
+| `role` | string or `nil` | Meshtastic device role when known |
+| `hw_model` | string or `nil` | Hardware model when known |
+| `public_key` | string or `nil` | Node public key as a hex string |
+| `uptime_seconds` | number | Node uptime in seconds |
+| `channel_utilization` | number | Channel utilization percentage |
+| `air_util_tx` | number | Air utilization TX percentage |
+| `temperature` | number | Telemetry temperature in degrees Celsius |
+| `relative_humidity` | number | Telemetry relative humidity percentage |
+| `barometric_pressure` | number | Telemetry barometric pressure |
+| `unmessagable` | boolean | `true` when the application considers the node unavailable for messages |
+| `licensed` | boolean or `nil` | Node licensed-mode flag; `nil` when the field was not received |
+
+### `channel`
+
+Returned by `mesh.chat.channels()`.
+
+| Field | Type | Purpose / returned value |
+|-------|------|--------------------------|
+| `index` | number | Channel index |
+| `role` | string or `nil` | Meshtastic channel role |
+| `name` | string or `nil` | Channel settings name |
+
+### `command`
+
+Passed to `on_command(command)` and returned by `mesh.command()` during a command launch.
+
+| Field | Type | Purpose / returned value |
+|-------|------|--------------------------|
+| `type` | string | Command type; chat automation returns `chat_command` |
+| `source` | string | Command source; chat launches return `chat` |
+| `name` | string or `nil` | Command name, usually the same as `handle` |
+| `request_id` | string | ID of this command invocation |
+| `chat_type` | string or `nil` | Chat type where the command was invoked: `channel` or `dm` |
+| `chat_key` | string or `nil` | Chat key where the command was invoked |
+| `handle` | string or `nil` | Command handle, for example `@tracebot` |
+| `text` | string or `nil` | Full user command text |
+| `arguments` | string or `nil` | Raw argument string after the command handle |
+| `argument_tokens` | list of string | Parsed command arguments; Lua indexing starts at `1` |
+
+### `canvas.size`
+
+Returned by `mesh.canvas.size()`.
+
+| Field | Type | Purpose / returned value |
+|-------|------|--------------------------|
+| `width` | number | Current canvas width in pixels |
+| `height` | number | Current canvas height in pixels |
+
+### `canvas.mouse`
+
+Returned by `mesh.canvas.mouse()`.
+
+| Field | Type | Purpose / returned value |
+|-------|------|--------------------------|
+| `x`, `y` | number | Last mouse coordinates inside the canvas |
+| `screen_x`, `screen_y` | number | Last screen mouse coordinates |
+| `over` | boolean | `true` when the pointer is over the canvas |
+| `pressed` | boolean | `true` when any primary mouse button is down |
+| `primary`, `middle`, `secondary` | boolean | State of the corresponding mouse buttons |
+| `button` | string | Last event button: `primary`, `middle`, `secondary`, `back`, `forward`, or empty string |
+| `click_count` | number | Click count in the last mouse event |
+| `wheel_delta_x`, `wheel_delta_y` | number | Last horizontal and vertical scroll delta |
+| `last_type` | string | Last mouse/scroll event type |
+| `time` | number | Unix time of the last mouse/scroll event in seconds |
+
+### `canvas.keys`
+
+Returned by `mesh.canvas.keys()`. For quick polling, keys are also available as boolean fields by code name, for example `mesh.canvas.keys().Left`.
+
+| Field | Type | Purpose / returned value |
+|-------|------|--------------------------|
+| `pressed` | list of string | Key codes that are currently pressed |
+| `last_type` | string | Last keyboard event type: `key_pressed`, `key_released`, or `key_typed` |
+| `last_code` | string | Last key code, for example `Left` or `Enter` |
+| `last_key` | string | Display name of the last key |
+| `text` | string | Last keyboard event text/character when present |
+| `shift`, `ctrl`, `alt`, `meta` | boolean | Keyboard modifier state |
+| `time` | number | Unix time of the last keyboard event in seconds |
 
 ## Examples
 
