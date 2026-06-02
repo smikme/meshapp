@@ -2938,6 +2938,16 @@
     -fx-fill: #8b949e;
 }
 
+.lua-emoji {
+    -fx-font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", "Noto Emoji", "Twitter Color Emoji", "EmojiOne Color", "Symbola", "DejaVu Sans", sans-serif;
+    -fx-font-weight: normal;
+}
+
+.lua-editor-emoji {
+    -fx-fill: transparent;
+    -fx-font-weight: normal;
+}
+
 .light-theme .lua-keyword {
     -fx-fill: #cf222e;
 }

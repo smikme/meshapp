@@ -52,11 +52,13 @@ import javafx.scene.control.TableView;
 import javafx.scene.control.TextArea;
 import javafx.scene.control.ToolBar;
 import javafx.scene.control.Tooltip;
+import javafx.scene.image.ImageView;
 import javafx.scene.input.Clipboard;
 import javafx.scene.input.ClipboardContent;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyEvent;
 import javafx.scene.layout.HBox;
+import javafx.scene.layout.Pane;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.StackPane;
@@ -111,7 +113,8 @@ public final class LuaDevWindow {
     private static final double COMPLETION_MIN_WIDTH = 260.0;
     private static final double COMPLETION_MIN_VISIBLE_HEIGHT = 36.0;
     private static final double COMPLETION_VERTICAL_GAP = 2.0;
-    private static final int MAX_COMPLETIONS = 9;
+    private static final double COMPLETION_SCROLL_EDGE_PADDING = 4.0;
+    private static final double COMPLETION_SCROLL_GUARD_ROWS = 1.0;
     private static final Gson PRETTY_GSON = new GsonBuilder().setPrettyPrinting().create();
     private static final DateTimeFormatter TIME_FORMAT =
             DateTimeFormatter.ofPattern("HH:mm:ss").withZone(ZoneId.systemDefault());
@@ -142,6 +145,7 @@ public final class LuaDevWindow {
 
     private final VBox completionBox = new VBox();
     private final VBox completionRows = new VBox();
+    private final Region completionScrollTail = new Region();
     private final ScrollPane completionScrollPane = new ScrollPane(completionRows);
 
     private Stage stage;
@@ -150,6 +154,7 @@ public final class LuaDevWindow {
     private SplitPane infoSplit;
     private CodeArea codeArea;
     private StackPane editorStack;
+    private final Pane editorEmojiLayer = new Pane();
     private TextArea consoleArea;
     private TableView<KvRow> kvTable;
     private TableView<DebugVarRow> debugTable;
@@ -173,6 +178,7 @@ public final class LuaDevWindow {
     private boolean restoreMaximizedOnShow;
     private boolean restoringDividerPositions;
     private boolean dividerPositionTrackingEnabled;
+    private boolean editorEmojiOverlayUpdateQueued;
     private double normalWindowX = Double.NaN;
     private double normalWindowY = Double.NaN;
     private double normalWindowWidth = DEFAULT_WINDOW_WIDTH;
@@ -634,6 +640,7 @@ public final class LuaDevWindow {
         completionScrollPane.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
         completionScrollPane.setVbarPolicy(ScrollPane.ScrollBarPolicy.AS_NEEDED);
         completionScrollPane.setPannable(true);
+        completionScrollTail.setMouseTransparent(true);
         completionBox.getChildren().setAll(completionScrollPane);
         String appCss = LuaDevWindow.class.getResource("/css/app.css") != null
                 ? LuaDevWindow.class.getResource("/css/app.css").toExternalForm()
@@ -716,12 +723,18 @@ public final class LuaDevWindow {
         installEditorGutter();
         codeArea.multiPlainChanges()
                 .successionEnds(java.time.Duration.ofMillis(120))
-                .subscribe(ignore -> codeArea.setStyleSpans(0, computeHighlighting(codeArea.getText())));
+                .subscribe(ignore -> {
+                    codeArea.setStyleSpans(0, computeHighlighting(codeArea.getText()));
+                    scheduleEditorEmojiOverlayUpdate();
+                });
         codeArea.textProperty().addListener((obs, oldValue, newValue) -> {
             markDirty();
             showCompletion(false);
+            scheduleEditorEmojiOverlayUpdate();
         });
         codeArea.addEventFilter(KeyEvent.KEY_PRESSED, this::handleEditorKeyPressed);
+        codeArea.viewportDirtyEvents().subscribe(ignore -> scheduleEditorEmojiOverlayUpdate());
+        codeArea.layoutBoundsProperty().addListener((obs, oldBounds, newBounds) -> scheduleEditorEmojiOverlayUpdate());
 
         consoleArea = new TextArea();
         consoleArea.getStyleClass().add("lua-console");
@@ -730,8 +743,10 @@ public final class LuaDevWindow {
         consoleArea.setPrefRowCount(9);
 
         VirtualizedScrollPane<CodeArea> codeScrollPane = new VirtualizedScrollPane<>(codeArea);
-        editorStack = new StackPane(codeScrollPane, completionBox);
+        editorEmojiLayer.setMouseTransparent(true);
+        editorStack = new StackPane(codeScrollPane, editorEmojiLayer, completionBox);
         editorStack.setPickOnBounds(false);
+        editorStack.layoutBoundsProperty().addListener((obs, oldBounds, newBounds) -> scheduleEditorEmojiOverlayUpdate());
         StackPane.setAlignment(completionBox, Pos.TOP_LEFT);
 
         VBox editorBox = createPanel(null, editorStack);
@@ -953,6 +968,9 @@ public final class LuaDevWindow {
     }
 
     private static StyleSpans<Collection<String>> computeJsonHighlighting(String text) {
+        if (text == null || text.isEmpty()) {
+            return emptyStyleSpans();
+        }
         Matcher matcher = JSON_HIGHLIGHT_PATTERN.matcher(text);
         int lastEnd = 0;
         StyleSpansBuilder<Collection<String>> spansBuilder = new StyleSpansBuilder<>();
@@ -964,12 +982,15 @@ public final class LuaDevWindow {
                     matcher.group("BOOLEAN") != null ? "json-boolean" :
                     matcher.group("NULL") != null ? "json-null" :
                     null;
-            spansBuilder.add(Collections.emptyList(), matcher.start() - lastEnd);
-            spansBuilder.add(styleClass == null ? Collections.emptyList() : Collections.singleton(styleClass),
-                    matcher.end() - matcher.start());
+            addStyledTextWithEmoji(spansBuilder, text.substring(lastEnd, matcher.start()),
+                    Collections.emptyList(), "lua-emoji");
+            addStyledTextWithEmoji(spansBuilder,
+                    text.substring(matcher.start(), matcher.end()),
+                    styleClass == null ? Collections.emptyList() : Collections.singleton(styleClass),
+                    "lua-emoji");
             lastEnd = matcher.end();
         }
-        spansBuilder.add(Collections.emptyList(), text.length() - lastEnd);
+        addStyledTextWithEmoji(spansBuilder, text.substring(lastEnd), Collections.emptyList(), "lua-emoji");
         return spansBuilder.create();
     }
 
@@ -1139,6 +1160,80 @@ public final class LuaDevWindow {
         codeArea.selectRange(edit.selectionStart(), edit.selectionEnd());
     }
 
+    private void scheduleEditorEmojiOverlayUpdate() {
+        if (editorEmojiOverlayUpdateQueued) {
+            return;
+        }
+        editorEmojiOverlayUpdateQueued = true;
+        Platform.runLater(() -> {
+            editorEmojiOverlayUpdateQueued = false;
+            updateEditorEmojiOverlay();
+        });
+    }
+
+    private void updateEditorEmojiOverlay() {
+        if (editorEmojiLayer == null) {
+            return;
+        }
+        editorEmojiLayer.getChildren().clear();
+        if (codeArea == null || editorStack == null || codeArea.getText().isEmpty()) {
+            return;
+        }
+
+        String text = codeArea.getText();
+        int index = 0;
+        while (index < text.length()) {
+            String emoji = knownEmojiAt(text, index);
+            if (emoji == null) {
+                index += Character.charCount(text.codePointAt(index));
+                continue;
+            }
+            addEditorEmojiOverlay(emoji, index, index + emoji.length());
+            index += emoji.length();
+        }
+    }
+
+    private void addEditorEmojiOverlay(String emoji, int start, int end) {
+        Bounds screenBounds;
+        try {
+            Optional<Bounds> maybeBounds = codeArea.getCharacterBoundsOnScreen(start, end);
+            if (maybeBounds.isEmpty()) {
+                return;
+            }
+            screenBounds = maybeBounds.get();
+        } catch (IllegalArgumentException ignored) {
+            return;
+        }
+
+        Point2D topLeft = editorStack.screenToLocal(screenBounds.getMinX(), screenBounds.getMinY());
+        Point2D bottomRight = editorStack.screenToLocal(screenBounds.getMaxX(), screenBounds.getMaxY());
+        if (topLeft == null || bottomRight == null) {
+            return;
+        }
+        double localX = topLeft.getX();
+        double localY = topLeft.getY();
+        double localWidth = bottomRight.getX() - localX;
+        double localHeight = bottomRight.getY() - localY;
+        if (localWidth <= 0 || localHeight <= 0
+                || localX > editorStack.getWidth()
+                || localY > editorStack.getHeight()
+                || localX + localWidth < 0
+                || localY + localHeight < 0) {
+            return;
+        }
+
+        double size = Math.max(12, Math.min(localHeight - 1, localHeight * 0.92));
+        ImageView imageView = EmojiImageCache.createImageView(emoji, size);
+        if (imageView == null) {
+            return;
+        }
+        imageView.setMouseTransparent(true);
+        double x = localX + Math.max(0, (localWidth - size) / 2.0);
+        double y = localY + Math.max(0, (localHeight - size) / 2.0);
+        imageView.relocate(Math.floor(x), Math.floor(y));
+        editorEmojiLayer.getChildren().add(imageView);
+    }
+
     private void showCompletion(boolean forced) {
         if (loadingScript || codeArea == null) {
             return;
@@ -1150,9 +1245,7 @@ public final class LuaDevWindow {
             return;
         }
 
-        visibleCompletions = result.items().stream()
-                .limit(MAX_COMPLETIONS)
-                .toList();
+        visibleCompletions = result.items();
         completionReplaceStart = result.replaceStart();
         completionReplaceEnd = result.replaceEnd();
         selectedCompletionIndex = 0;
@@ -1198,22 +1291,51 @@ public final class LuaDevWindow {
         completionScrollPane.applyCss();
         completionBox.applyCss();
         double rowWidth = COMPLETION_MIN_WIDTH;
-        double contentHeight = 0;
+        Insets rowsInsets = completionRows.getInsets();
+        double contentHeight = rowsInsets.getTop() + rowsInsets.getBottom();
+        double rowHeight = 0;
         for (Node child : completionRows.getChildren()) {
+            if (child == completionScrollTail) {
+                continue;
+            }
+            double childHeight;
             if (child instanceof Region region) {
                 rowWidth = Math.max(rowWidth, region.prefWidth(-1));
-                contentHeight += region.prefHeight(rowWidth);
+                childHeight = region.prefHeight(rowWidth);
             } else {
                 Bounds bounds = child.getLayoutBounds();
                 rowWidth = Math.max(rowWidth, bounds.getWidth());
-                contentHeight += bounds.getHeight();
+                childHeight = bounds.getHeight();
+            }
+            contentHeight += childHeight;
+            if (rowHeight <= 0 && childHeight > 0) {
+                rowHeight = childHeight;
             }
         }
         double verticalInsets = completionBox.getInsets().getTop() + completionBox.getInsets().getBottom();
         double horizontalInsets = completionBox.getInsets().getLeft() + completionBox.getInsets().getRight();
+        double preferredHeightWithoutTail = verticalInsets + contentHeight;
+        double maxPopupHeight = Math.max(COMPLETION_MIN_VISIBLE_HEIGHT, maxHeight);
+        boolean scrolls = preferredHeightWithoutTail > maxPopupHeight;
+        double tailHeight = scrolls && rowHeight > 0
+                ? Math.max(COMPLETION_SCROLL_EDGE_PADDING, rowHeight * COMPLETION_SCROLL_GUARD_ROWS)
+                : 0;
+        completionScrollTail.setManaged(scrolls);
+        completionScrollTail.setVisible(scrolls);
+        completionScrollTail.setMinHeight(tailHeight);
+        completionScrollTail.setPrefHeight(tailHeight);
+        completionScrollTail.setMaxHeight(tailHeight);
+        contentHeight += tailHeight;
         double preferredHeight = verticalInsets + contentHeight;
-        double height = Math.min(preferredHeight, Math.max(COMPLETION_MIN_VISIBLE_HEIGHT, maxHeight));
+        double height = Math.min(preferredHeight, maxPopupHeight);
         double viewportHeight = Math.max(0, height - verticalInsets);
+        if (preferredHeight > height && rowHeight > 0) {
+            double wholeRowsHeight = Math.floor(viewportHeight / rowHeight) * rowHeight;
+            if (wholeRowsHeight >= rowHeight && wholeRowsHeight < viewportHeight) {
+                viewportHeight = wholeRowsHeight;
+                height = viewportHeight + verticalInsets;
+            }
+        }
         completionRows.setMinWidth(rowWidth);
         completionRows.setPrefWidth(rowWidth);
         completionScrollPane.setMinWidth(rowWidth);
@@ -1309,6 +1431,7 @@ public final class LuaDevWindow {
         completionRows.getChildren().setAll(java.util.stream.IntStream.range(0, visibleCompletions.size())
                 .mapToObj(index -> createCompletionRow(visibleCompletions.get(index), index))
                 .toList());
+        completionRows.getChildren().add(completionScrollTail);
         completionScrollPane.setVvalue(0);
         updateSelectedCompletionRow();
     }
@@ -1364,21 +1487,29 @@ public final class LuaDevWindow {
         if (visibleCompletions.isEmpty()) {
             return;
         }
-        selectedCompletionIndex = Math.floorMod(selectedCompletionIndex + offset, visibleCompletions.size());
-        updateSelectedCompletionRow();
+        int nextIndex = Math.max(0, Math.min(visibleCompletions.size() - 1, selectedCompletionIndex + offset));
+        if (nextIndex == selectedCompletionIndex) {
+            return;
+        }
+        selectedCompletionIndex = nextIndex;
+        updateSelectedCompletionRow(Integer.compare(offset, 0));
     }
 
     private void updateSelectedCompletionRow() {
+        updateSelectedCompletionRow(0);
+    }
+
+    private void updateSelectedCompletionRow(int scrollDirection) {
         for (javafx.scene.Node node : completionRows.getChildren()) {
             node.getStyleClass().remove("lua-completion-row-selected");
             if (node.getUserData() instanceof Integer index && index == selectedCompletionIndex) {
                 node.getStyleClass().add("lua-completion-row-selected");
             }
         }
-        scrollSelectedCompletionIntoView();
+        scrollSelectedCompletionIntoView(scrollDirection);
     }
 
-    private void scrollSelectedCompletionIntoView() {
+    private void scrollSelectedCompletionIntoView(int direction) {
         Node selectedNode = completionRows.getChildren().stream()
                 .filter(node -> node.getUserData() instanceof Integer index && index == selectedCompletionIndex)
                 .findFirst()
@@ -1395,12 +1526,20 @@ public final class LuaDevWindow {
             return;
         }
         Bounds selectedBounds = selectedNode.getBoundsInParent();
+        double selectedHeight = Math.max(1, selectedBounds.getHeight());
+        double edgePadding = direction == 0
+                ? COMPLETION_SCROLL_EDGE_PADDING
+                : Math.max(COMPLETION_SCROLL_EDGE_PADDING, selectedHeight * COMPLETION_SCROLL_GUARD_ROWS);
         double currentTop = completionScrollPane.getVvalue() * scrollableHeight;
         double currentBottom = currentTop + viewportHeight;
-        double targetTop = selectedBounds.getMinY();
-        double targetBottom = selectedBounds.getMaxY();
+        double targetTop = Math.max(0, selectedBounds.getMinY() - edgePadding);
+        double targetBottom = Math.min(contentHeight, selectedBounds.getMaxY() + edgePadding);
         double newTop = currentTop;
-        if (targetTop < currentTop) {
+        if (direction < 0 && targetTop < currentTop) {
+            newTop = targetTop;
+        } else if (direction > 0 && targetBottom > currentBottom) {
+            newTop = targetBottom - viewportHeight;
+        } else if (targetTop < currentTop) {
             newTop = targetTop;
         } else if (targetBottom > currentBottom) {
             newTop = targetBottom - viewportHeight;
@@ -1455,6 +1594,7 @@ public final class LuaDevWindow {
         updateScriptNameLabel();
         codeArea.replaceText(script.getCode() != null ? script.getCode() : "");
         codeArea.setStyleSpans(0, computeHighlighting(codeArea.getText()));
+        scheduleEditorEmojiOverlayUpdate();
         dirty = false;
         loadingScript = false;
         refreshKvRows();
@@ -1664,6 +1804,9 @@ public final class LuaDevWindow {
     }
 
     private static StyleSpans<Collection<String>> computeHighlighting(String text) {
+        if (text == null || text.isEmpty()) {
+            return emptyStyleSpans();
+        }
         Matcher matcher = LUA_HIGHLIGHT_PATTERN.matcher(text);
         int lastKwEnd = 0;
         StyleSpansBuilder<Collection<String>> spansBuilder = new StyleSpansBuilder<>();
@@ -1676,12 +1819,77 @@ public final class LuaDevWindow {
                     matcher.group("KEYWORD") != null ? "lua-keyword" :
                     matcher.group("BUILTIN") != null ? "lua-builtin" :
                     null;
-            spansBuilder.add(Collections.emptyList(), matcher.start() - lastKwEnd);
-            spansBuilder.add(styleClass == null ? Collections.emptyList() : Collections.singleton(styleClass),
-                    matcher.end() - matcher.start());
+            addStyledTextWithEmoji(spansBuilder, text.substring(lastKwEnd, matcher.start()),
+                    Collections.emptyList(), "lua-editor-emoji");
+            addStyledTextWithEmoji(spansBuilder,
+                    text.substring(matcher.start(), matcher.end()),
+                    styleClass == null ? Collections.emptyList() : Collections.singleton(styleClass),
+                    "lua-editor-emoji");
             lastKwEnd = matcher.end();
         }
-        spansBuilder.add(Collections.emptyList(), text.length() - lastKwEnd);
+        addStyledTextWithEmoji(spansBuilder, text.substring(lastKwEnd), Collections.emptyList(), "lua-editor-emoji");
+        return spansBuilder.create();
+    }
+
+    private static void addStyledTextWithEmoji(StyleSpansBuilder<Collection<String>> spansBuilder,
+                                               String text,
+                                               Collection<String> styleClasses,
+                                               String emojiStyleClass) {
+        if (text == null || text.isEmpty()) {
+            return;
+        }
+        int plainStart = 0;
+        int index = 0;
+        while (index < text.length()) {
+            String emoji = knownEmojiAt(text, index);
+            if (emoji == null) {
+                index += Character.charCount(text.codePointAt(index));
+                continue;
+            }
+            if (index > plainStart) {
+                spansBuilder.add(styleClasses, index - plainStart);
+            }
+            spansBuilder.add(withEmojiStyle(styleClasses, emojiStyleClass), emoji.length());
+            index += emoji.length();
+            plainStart = index;
+        }
+        if (plainStart < text.length()) {
+            spansBuilder.add(styleClasses, text.length() - plainStart);
+        }
+    }
+
+    private static Collection<String> withEmojiStyle(Collection<String> styleClasses, String emojiStyleClass) {
+        if (styleClasses == null || styleClasses.isEmpty()) {
+            return Collections.singleton(emojiStyleClass);
+        }
+        List<String> result = new java.util.ArrayList<>(styleClasses);
+        result.add(emojiStyleClass);
+        return result;
+    }
+
+    private static String knownEmojiAt(String text, int startIndex) {
+        int maxCodePoints = EmojiImageCache.getMaxEmojiCodePointCount();
+        int[] endPositions = new int[maxCodePoints + 1];
+        int codePointCount = 0;
+        int position = startIndex;
+        endPositions[0] = startIndex;
+        while (codePointCount < maxCodePoints && position < text.length()) {
+            position += Character.charCount(text.codePointAt(position));
+            codePointCount++;
+            endPositions[codePointCount] = position;
+        }
+        for (int length = codePointCount; length >= 1; length--) {
+            String candidate = text.substring(startIndex, endPositions[length]);
+            if (EmojiImageCache.isKnownEmoji(candidate)) {
+                return candidate;
+            }
+        }
+        return null;
+    }
+
+    private static StyleSpans<Collection<String>> emptyStyleSpans() {
+        StyleSpansBuilder<Collection<String>> spansBuilder = new StyleSpansBuilder<>();
+        spansBuilder.add(Collections.emptyList(), 0);
         return spansBuilder.create();
     }
 
