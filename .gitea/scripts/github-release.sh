@@ -54,9 +54,51 @@ ensure_github_tag() {
   git push --quiet "${remote_url}" "refs/tags/${tag}:refs/tags/${tag}"
 }
 
+find_release_id() {
+  local tag="$1"
+  local response_file status release_id
+
+  response_file="$(mktemp)"
+  status="$(curl -sS -o "${response_file}" -w '%{http_code}' \
+    -H "Authorization: Bearer ${GH_TOKEN}" \
+    -H "Accept: application/vnd.github+json" \
+    -H "X-GitHub-Api-Version: 2022-11-28" \
+    "$(github_repo_api)/releases/tags/${tag}")"
+
+  if [ "${status}" -ge 200 ] && [ "${status}" -lt 300 ]; then
+    jq -r '.id' "${response_file}"
+    rm -f "${response_file}"
+    return 0
+  fi
+
+  rm -f "${response_file}"
+
+  if [ "${status}" != "404" ]; then
+    echo "::error::GitHub release lookup failed with HTTP ${status}" >&2
+    return 2
+  fi
+
+  release_id="$(github_api "$(github_repo_api)/releases?per_page=100" \
+    | jq -r --arg tag "${tag}" 'first(.[] | select(.tag_name == $tag) | .id) // empty')"
+
+  if [ -n "${release_id}" ]; then
+    printf '%s\n' "${release_id}"
+    return 0
+  fi
+
+  return 1
+}
+
 get_release_id() {
   local tag="$1"
-  github_api "$(github_repo_api)/releases/tags/${tag}" | jq -r '.id'
+  local release_id
+
+  if ! release_id="$(find_release_id "${tag}")"; then
+    echo "::error::GitHub release not found for tag ${tag}" >&2
+    exit 1
+  fi
+
+  printf '%s\n' "${release_id}"
 }
 
 ensure_release() {
@@ -64,7 +106,7 @@ ensure_release() {
   local name="$2"
   local prerelease="$3"
   local notes_file="$4"
-  local response_file status release_id create_payload update_payload
+  local release_id lookup_status create_payload update_payload
 
   ensure_github_tag "${tag}"
 
@@ -80,31 +122,22 @@ ensure_release() {
     --argjson prerelease "${prerelease}" \
     '{name:$name,body:$body,draft:true,prerelease:$prerelease}')"
 
-  response_file="$(mktemp)"
-  status="$(curl -sS -o "${response_file}" -w '%{http_code}' \
-    -H "Authorization: Bearer ${GH_TOKEN}" \
-    -H "Accept: application/vnd.github+json" \
-    -H "X-GitHub-Api-Version: 2022-11-28" \
-    "$(github_repo_api)/releases/tags/${tag}")"
+  lookup_status=0
+  release_id="$(find_release_id "${tag}")" || lookup_status=$?
 
-  if [ "${status}" = "404" ]; then
+  if [ "${lookup_status}" -eq 1 ]; then
     github_api -X POST \
       -H "Content-Type: application/json" \
       -d "${create_payload}" \
       "$(github_repo_api)/releases" >/dev/null
-  elif [ "${status}" -ge 200 ] && [ "${status}" -lt 300 ]; then
-    release_id="$(jq -r '.id' "${response_file}")"
+  elif [ "${lookup_status}" -eq 0 ]; then
     github_api -X PATCH \
       -H "Content-Type: application/json" \
       -d "${update_payload}" \
       "$(github_repo_api)/releases/${release_id}" >/dev/null
   else
-    echo "::error::GitHub release lookup failed with HTTP ${status}"
-    cat "${response_file}"
-    exit 1
+    exit "${lookup_status}"
   fi
-
-  rm -f "${response_file}"
 }
 
 upload_assets() {
