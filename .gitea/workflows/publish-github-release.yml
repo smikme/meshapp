@@ -1,0 +1,49 @@
+name: Publish GitHub Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Gitea release tag to publish, for example v2.1.9'
+        required: true
+
+env:
+  GH_REPOSITORY: smikme/meshapp
+
+jobs:
+  publish-github-release:
+    runs-on: ubuntu
+    steps:
+      - name: Resolve release tag
+        run: |
+          TAG="$(jq -r '.inputs.tag // empty' "${GITHUB_EVENT_PATH}" 2>/dev/null || true)"
+
+          if [ -z "${TAG}" ] || [ "${TAG}" = "null" ]; then
+            echo "::error::Set the tag input, for example v2.1.9"
+            exit 1
+          fi
+
+          case "${TAG}" in
+            refs/tags/*)
+              TAG="${TAG#refs/tags/}"
+              ;;
+          esac
+
+          printf 'RELEASE_TAG=%s\n' "${TAG}" >> "${GITHUB_ENV}"
+
+      - name: Checkout repository
+        run: |
+          git clone "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git" .
+          git fetch --tags --force
+
+          if ! git rev-parse -q --verify "refs/tags/${RELEASE_TAG}" >/dev/null; then
+            echo "::error::Tag ${RELEASE_TAG} does not exist in Gitea repository"
+            exit 1
+          fi
+
+      - name: Publish selected release to GitHub
+        env:
+          GITEA_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+        run: |
+          bash .gitea/scripts/github-release.sh publish-from-gitea "${RELEASE_TAG}"
