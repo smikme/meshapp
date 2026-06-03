@@ -280,6 +280,22 @@ The tool is useful for delivery diagnostics, checking `NodeInfo` / `Telemetry` /
   <img src="docs/screenshots/shop-w.jpg" width="49%" alt="Script store - light theme"/>
 </p>
 
+#### Lua Development IDE
+
+MeshApp IDE is the built-in workspace for writing, testing and packaging Lua automation directly inside the client. Basic functions:
+
+- **Script workspace**: create scripts, open the editor, run or stop execution, enable autostart, edit metadata and delete scripts from script cards.
+- **Code editor**: syntax highlighting, line numbers, auto-indent, syntax checks, saving code to the local database and context-aware completion for `mesh.*`, standard Lua libraries and detected local symbols.
+- **Runtime console**: script output, start/stop statuses, syntax errors and runtime errors while testing against the active or configured node.
+- **Debugging**: line-gutter breakpoints, debug run, continue, step execution and local/global variable inspection while execution is paused.
+- **KV storage**: inspect and edit the isolated key-value database for the selected script, including search, create/update and delete operations.
+- **Script packaging**: import and export `.meshapp-script.json` files with source code and metadata.
+- **Script Store**: open the catalog, filter by type and install, update or remove scripts.
+- **Sandboxed runtime**: scripts use the allowed Lua functions and the `mesh` namespace; unsafe APIs such as `io`, `os`, `debug`, `package`, `require`, `dofile`, `loadfile` and `luajava` are disabled.
+- **Mesh API entry points**: use `on_message(msg)` for air bots, `on_command(command)` for automation bots and async callbacks such as `on_node_selected(event)`, `on_traceroute(event)` and `on_node_info(event)`. The full API is documented in [docs/lua-api.md](docs/lua-api.md).
+
+#### Lua Script Features
+
 - **Script list**: cards with name, emoji icon, author, version, type, run status and last-modified time without exposing the internal ID.
 - **Script settings**: name, author, description, icon, autostart, bot type and binding to a node or automation name.
 - **Code versioning**: version is incremented only when Lua code changes; settings changes do not increment it.
