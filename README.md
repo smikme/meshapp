@@ -21,6 +21,11 @@
 </a>
 </p>
 
+<p align="center">
+  Main development platform:
+  <a href="https://git.privatepractice.app/covox/meshapp">git.privatepractice.app/covox/meshapp</a>
+</p>
+
 <div align="right">
 
 <strong>English</strong> | <a href="README.ru.md">Русский</a>
