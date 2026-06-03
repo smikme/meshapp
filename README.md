@@ -85,8 +85,13 @@ MeshCore is a lightweight mesh protocol for LoRa and other packet-radio devices.
 ### Chat and Messaging
 
 <p align="center">
-  <img src="docs/screenshots/chat-b.png" width="49%" alt="Chat - dark theme"/>
-  <img src="docs/screenshots/chat-w.png" width="49%" alt="Chat - light theme"/>
+  <img src="docs/screenshots/chat-b.jpg" width="49%" alt="Chat - dark theme"/>
+  <img src="docs/screenshots/chat-w.jpg" width="49%" alt="Chat - light theme"/>
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/chat-node-info-b.jpg" width="49%" alt="Chat node info - dark theme"/>
+  <img src="docs/screenshots/chat-node-info-w.jpg" width="49%" alt="Chat node info - light theme"/>
 </p>
 
 - **Multi-channel chat**: send and receive messages in several mesh channels.
@@ -109,8 +114,8 @@ MeshCore is a lightweight mesh protocol for LoRa and other packet-radio devices.
 ### Network Nodes
 
 <p align="center">
-  <img src="docs/screenshots/nodes-b.png" width="49%" alt="Nodes - dark theme"/>
-  <img src="docs/screenshots/nodes-w.png" width="49%" alt="Nodes - light theme"/>
+  <img src="docs/screenshots/nodes-b.jpg" width="49%" alt="Nodes - dark theme"/>
+  <img src="docs/screenshots/nodes-w.jpg" width="49%" alt="Nodes - light theme"/>
 </p>
 
 - **Flexible sorting and filters**: last heard time, distance, SNR, hops, channel, favorites, ignored nodes, direct nodes and offline nodes.
@@ -126,6 +131,11 @@ MeshCore is a lightweight mesh protocol for LoRa and other packet-radio devices.
 
 ### Maps
 
+<p align="center">
+  <img src="docs/screenshots/map-b.jpg" width="49%" alt="Map - dark theme"/>
+  <img src="docs/screenshots/map-w.jpg" width="49%" alt="Map - light theme"/>
+</p>
+
 - **OSM node map**: display current and cached nodes with coordinates.
 - **Online and offline tiles**: network OSM tiles, local cache and selected `z/x/y.png|jpg|jpeg` directory.
 - **Search and filters**: search nodes, filter unknown/offline/favorite/direct/ignored nodes.
@@ -139,8 +149,8 @@ MeshCore is a lightweight mesh protocol for LoRa and other packet-radio devices.
 ### Telemetry and Monitoring
 
 <p align="center">
-  <img src="docs/screenshots/telemetry-b.png" width="49%" alt="Telemetry - dark theme"/>
-  <img src="docs/screenshots/telemetry-w.png" width="49%" alt="Telemetry - light theme"/>
+  <img src="docs/screenshots/telemetry-b.jpg" width="49%" alt="Telemetry - dark theme"/>
+  <img src="docs/screenshots/telemetry-w.jpg" width="49%" alt="Telemetry - light theme"/>
 </p>
 
 - **Device dashboard**: a dedicated screen with Charts and Data tabs.
@@ -156,8 +166,8 @@ MeshCore is a lightweight mesh protocol for LoRa and other packet-radio devices.
 ### Connections
 
 <p align="center">
-  <img src="docs/screenshots/connections-b.png" width="49%" alt="Connections - dark theme"/>
-  <img src="docs/screenshots/connections-w.png" width="49%" alt="Connections - light theme"/>
+  <img src="docs/screenshots/connections-b.jpg" width="49%" alt="Connections - dark theme"/>
+  <img src="docs/screenshots/connections-w.jpg" width="49%" alt="Connections - light theme"/>
 </p>
 
 - **TCP, Serial / USB and BLE**: connect over the network, a COM/tty port or Bluetooth LE.
@@ -206,8 +216,8 @@ Details are available in [docs/meshcore-support.md](docs/meshcore-support.md).
 ### Device Configuration
 
 <p align="center">
-  <img src="docs/screenshots/settings-b.png" width="49%" alt="Settings - dark theme"/>
-  <img src="docs/screenshots/settings-w.png" width="49%" alt="Settings - light theme"/>
+  <img src="docs/screenshots/settings-b.jpg" width="49%" alt="Settings - dark theme"/>
+  <img src="docs/screenshots/settings-w.jpg" width="49%" alt="Settings - light theme"/>
 </p>
 
 - **Parameter editing**: full LoRa module configuration through a tree interface.
@@ -227,8 +237,8 @@ Details are available in [docs/meshcore-support.md](docs/meshcore-support.md).
 ### Diagnostics and Logging
 
 <p align="center">
-  <img src="docs/screenshots/logs-b.png" width="49%" alt="Logs - dark theme"/>
-  <img src="docs/screenshots/logs-w.png" width="49%" alt="Logs - light theme"/>
+  <img src="docs/screenshots/logs-b.jpg" width="49%" alt="Logs - dark theme"/>
+  <img src="docs/screenshots/logs-w.jpg" width="49%" alt="Logs - light theme"/>
 </p>
 
 - **Built-in logs**: view debug information with level coloring.
@@ -243,8 +253,8 @@ Details are available in [docs/meshcore-support.md](docs/meshcore-support.md).
 #### LoRa Debug
 
 <p align="center">
-  <img src="docs/screenshots/loradebug-b.png" width="49%" alt="LoRa Debug - dark theme"/>
-  <img src="docs/screenshots/loradebug-w.png" width="49%" alt="LoRa Debug - light theme"/>
+  <img src="docs/screenshots/loradebug-b.jpg" width="49%" alt="LoRa Debug - dark theme"/>
+  <img src="docs/screenshots/loradebug-w.jpg" width="49%" alt="LoRa Debug - light theme"/>
 </p>
 
 `LoRa Debug` helps inspect real mesh traffic at the individual-packet level. The window shows incoming, outgoing and internal `MeshPacket` records, lets you filter the journal by direction, message type and content, and keeps the selected type filter when the available type list is refreshed.
@@ -254,6 +264,21 @@ The tool is useful for delivery diagnostics, checking `NodeInfo` / `Telemetry` /
 ---
 
 ### MeshApp IDE and Lua Scripts
+
+<p align="center">
+  <img src="docs/screenshots/luascripts-b.jpg" width="49%" alt="Lua scripts - dark theme"/>
+  <img src="docs/screenshots/luascripts-w.jpg" width="49%" alt="Lua scripts - light theme"/>
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/ide-b.jpg" width="49%" alt="Lua editor - dark theme"/>
+  <img src="docs/screenshots/ide-w.jpg" width="49%" alt="Lua editor - light theme"/>
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/shop-b.jpg" width="49%" alt="Script store - dark theme"/>
+  <img src="docs/screenshots/shop-w.jpg" width="49%" alt="Script store - light theme"/>
+</p>
 
 - **Script list**: cards with name, emoji icon, author, version, type, run status and last-modified time without exposing the internal ID.
 - **Script settings**: name, author, description, icon, autostart, bot type and binding to a node or automation name.
@@ -270,6 +295,11 @@ The tool is useful for delivery diagnostics, checking `NodeInfo` / `Telemetry` /
 ---
 
 ### Interface
+
+<p align="center">
+  <img src="docs/screenshots/info-b.jpg" width="49%" alt="Help and information - dark theme"/>
+  <img src="docs/screenshots/info-w.jpg" width="49%" alt="Help and information - light theme"/>
+</p>
 
 - **Dark and light themes**: AtlantaFX Cupertino.
 - **Native window appearance**: Mica effect on Windows 11 and vibrancy on macOS.
