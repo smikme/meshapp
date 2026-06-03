@@ -585,7 +585,7 @@ xattr -cr /Applications/MeshApp.app
 ---
 
 <p align="center">
-  Создано Konstantin A. Smirnov <a href="mailto:covox@covox.ru">covox@covox.ru</a>
+  Создано Konstantin A. Smirnov
   <br>
 <a href="https://t.me/coVox">
   <img src="https://img.shields.io/badge/Telegram-2CA5E0?style=for-the-badge&logo=telegram&logoColor=white" alt="Telegram">
