@@ -87,8 +87,13 @@ MeshCore — лёгкий mesh-протокол для LoRa и других pack
 ### Chat и обмен сообщениями
 
 <p align="center">
-  <img src="docs/screenshots/chat-b.png" width="49%" alt="Chat — тёмная тема"/>
-  <img src="docs/screenshots/chat-w.png" width="49%" alt="Chat — светлая тема"/>
+  <img src="docs/screenshots/chat-b.jpg" width="49%" alt="Chat — тёмная тема"/>
+  <img src="docs/screenshots/chat-w.jpg" width="49%" alt="Chat — светлая тема"/>
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/chat-node-info-b.jpg" width="49%" alt="Информация об узле в чате — тёмная тема"/>
+  <img src="docs/screenshots/chat-node-info-w.jpg" width="49%" alt="Информация об узле в чате — светлая тема"/>
 </p>
 
 - **Многоканальный чат** — отправка и приём сообщений в нескольких mesh-каналах
@@ -111,8 +116,8 @@ MeshCore — лёгкий mesh-протокол для LoRa и других pack
 ### Узлы сети
 
 <p align="center">
-  <img src="docs/screenshots/nodes-b.png" width="49%" alt="Узлы — тёмная тема"/>
-  <img src="docs/screenshots/nodes-w.png" width="49%" alt="Узлы — светлая тема"/>
+  <img src="docs/screenshots/nodes-b.jpg" width="49%" alt="Узлы — тёмная тема"/>
+  <img src="docs/screenshots/nodes-w.jpg" width="49%" alt="Узлы — светлая тема"/>
 </p>
 
 - **Гибкая сортировка и фильтры** — последний отклик, дистанция, SNR, хопы, канал, избранные, игнорируемые, прямые и офлайн-ноды
@@ -128,6 +133,11 @@ MeshCore — лёгкий mesh-протокол для LoRa и других pack
 
 ### Карты
 
+<p align="center">
+  <img src="docs/screenshots/map-b.jpg" width="49%" alt="Карта — тёмная тема"/>
+  <img src="docs/screenshots/map-w.jpg" width="49%" alt="Карта — светлая тема"/>
+</p>
+
 - **OSM-карта нод** — отображение текущих и кэшированных нод с координатами
 - **Онлайн и оффлайн тайлы** — работа с сетевыми OSM-тайлами, локальным кэшем и выбранным каталогом `z/x/y.png|jpg|jpeg`
 - **Поиск и фильтры** — поиск по нодам, фильтры неизвестных, офлайн, избранных, прямых и игнорируемых нод
@@ -141,8 +151,8 @@ MeshCore — лёгкий mesh-протокол для LoRa и других pack
 ### Телеметрия и мониторинг
 
 <p align="center">
-  <img src="docs/screenshots/telemetry-b.png" width="49%" alt="Телеметрия — тёмная тема"/>
-  <img src="docs/screenshots/telemetry-w.png" width="49%" alt="Телеметрия — светлая тема"/>
+  <img src="docs/screenshots/telemetry-b.jpg" width="49%" alt="Телеметрия — тёмная тема"/>
+  <img src="docs/screenshots/telemetry-w.jpg" width="49%" alt="Телеметрия — светлая тема"/>
 </p>
 
 - **Дашборд устройства** — отдельный экран со вкладками «Графики» и «Данные»
@@ -158,8 +168,8 @@ MeshCore — лёгкий mesh-протокол для LoRa и других pack
 ### Подключения
 
 <p align="center">
-  <img src="docs/screenshots/connections-b.png" width="49%" alt="Подключения — тёмная тема"/>
-  <img src="docs/screenshots/connections-w.png" width="49%" alt="Подключения — светлая тема"/>
+  <img src="docs/screenshots/connections-b.jpg" width="49%" alt="Подключения — тёмная тема"/>
+  <img src="docs/screenshots/connections-w.jpg" width="49%" alt="Подключения — светлая тема"/>
 </p>
 
 - **TCP, Serial / USB и BLE** — подключение по сети, через COM/tty-порт или Bluetooth LE
@@ -208,8 +218,8 @@ MeshCore Companion не использует KISS framing. Для BLE испол
 ### Конфигурация устройства
 
 <p align="center">
-  <img src="docs/screenshots/settings-b.png" width="49%" alt="Настройки — тёмная тема"/>
-  <img src="docs/screenshots/settings-w.png" width="49%" alt="Настройки — светлая тема"/>
+  <img src="docs/screenshots/settings-b.jpg" width="49%" alt="Настройки — тёмная тема"/>
+  <img src="docs/screenshots/settings-w.jpg" width="49%" alt="Настройки — светлая тема"/>
 </p>
 
 - **Редактирование параметров** — полное управление настройками LoRa-модуля через древовидный интерфейс
@@ -229,8 +239,8 @@ MeshCore Companion не использует KISS framing. Для BLE испол
 ### Диагностика и логирование
 
 <p align="center">
-  <img src="docs/screenshots/logs-b.png" width="49%" alt="Логи — тёмная тема"/>
-  <img src="docs/screenshots/logs-w.png" width="49%" alt="Логи — светлая тема"/>
+  <img src="docs/screenshots/logs-b.jpg" width="49%" alt="Логи — тёмная тема"/>
+  <img src="docs/screenshots/logs-w.jpg" width="49%" alt="Логи — светлая тема"/>
 </p>
 
 - **Встроенные логи** — просмотр отладочной информации с цветовой кодировкой по уровню
@@ -245,8 +255,8 @@ MeshCore Companion не использует KISS framing. Для BLE испол
 #### LoRa Debug
 
 <p align="center">
-  <img src="docs/screenshots/loradebug-b.png" width="49%" alt="LoRa Debug — тёмная тема"/>
-  <img src="docs/screenshots/loradebug-w.png" width="49%" alt="LoRa Debug — светлая тема"/>
+  <img src="docs/screenshots/loradebug-b.jpg" width="49%" alt="LoRa Debug — тёмная тема"/>
+  <img src="docs/screenshots/loradebug-w.jpg" width="49%" alt="LoRa Debug — светлая тема"/>
 </p>
 
 `LoRa Debug` помогает разбирать реальный mesh-трафик на уровне отдельных пакетов. Окно показывает входящие, исходящие и внутренние `MeshPacket`, позволяет быстро отфильтровать журнал по направлению, типу сообщения и содержимому, а выбранный тип фильтра сохраняется при обновлении списка доступных типов.
@@ -256,6 +266,21 @@ MeshCore Companion не использует KISS framing. Для BLE испол
 ---
 
 ### MeshApp IDE и Lua-скрипты
+
+<p align="center">
+  <img src="docs/screenshots/luascripts-b.jpg" width="49%" alt="Lua-скрипты — тёмная тема"/>
+  <img src="docs/screenshots/luascripts-w.jpg" width="49%" alt="Lua-скрипты — светлая тема"/>
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/ide-b.jpg" width="49%" alt="Редактор Lua — тёмная тема"/>
+  <img src="docs/screenshots/ide-w.jpg" width="49%" alt="Редактор Lua — светлая тема"/>
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/shop-b.jpg" width="49%" alt="Магазин скриптов — тёмная тема"/>
+  <img src="docs/screenshots/shop-w.jpg" width="49%" alt="Магазин скриптов — светлая тема"/>
+</p>
 
 - **Список скриптов** — карточки с именем, emoji-иконкой, автором, версией, типом, статусом запуска и временем последнего изменения без вывода внутреннего ID
 - **Настройки скрипта** — имя, автор, описание, иконка, автозапуск, тип бота и привязка к ноде или имени автоматизации
@@ -272,6 +297,11 @@ MeshCore Companion не использует KISS framing. Для BLE испол
 ---
 
 ### Интерфейс
+
+<p align="center">
+  <img src="docs/screenshots/info-b.jpg" width="49%" alt="Справка и информация — тёмная тема"/>
+  <img src="docs/screenshots/info-w.jpg" width="49%" alt="Справка и информация — светлая тема"/>
+</p>
 
 - **Тёмная и светлая тема** — AtlantaFX Cupertino
 - **Нативное оформление окна** — эффект Mica (Windows 11), vibrancy (macOS)
