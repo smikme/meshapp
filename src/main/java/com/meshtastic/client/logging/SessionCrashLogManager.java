@@ -101,6 +101,7 @@ public final class SessionCrashLogManager {
 
     private static BufferedWriter writer;
     private static boolean prepared;
+    private static boolean suspendedForTests;
     private static String sessionId;
     private static Instant sessionStartedAt;
 
@@ -108,6 +109,7 @@ public final class SessionCrashLogManager {
 
     public static void prepareForLaunch() {
         synchronized (LOCK) {
+            suspendedForTests = false;
             refreshPaths();
             installShutdownHookIfNeeded();
             stopHeartbeatLocked();
@@ -141,6 +143,9 @@ public final class SessionCrashLogManager {
 
     public static void append(ILoggingEvent event) {
         synchronized (LOCK) {
+            if (suspendedForTests) {
+                return;
+            }
             ensureReadyForAppend();
 
             try {
@@ -166,6 +171,9 @@ public final class SessionCrashLogManager {
 
     public static void markNormalShutdown() {
         synchronized (LOCK) {
+            if (suspendedForTests) {
+                return;
+            }
             refreshPaths();
             ensureDirectories();
             try {
@@ -228,6 +236,9 @@ public final class SessionCrashLogManager {
     public static void captureUncaughtException(Thread thread, Throwable throwable) {
         Path jfrPath;
         synchronized (LOCK) {
+            if (suspendedForTests) {
+                return;
+            }
             ensureReadyForAppend();
             Map<String, Object> marker = new LinkedHashMap<>();
             marker.put("type", "uncaught-exception");
@@ -247,6 +258,9 @@ public final class SessionCrashLogManager {
     public static void captureUiFreezeDiagnostic(Duration stallDuration) {
         Path jfrPath;
         synchronized (LOCK) {
+            if (suspendedForTests) {
+                return;
+            }
             ensureReadyForAppend();
             Map<String, Object> marker = new LinkedHashMap<>();
             marker.put("type", "ui-stall");
@@ -289,6 +303,7 @@ public final class SessionCrashLogManager {
 
     static void resetForTests() {
         synchronized (LOCK) {
+            suspendedForTests = false;
             stopHeartbeatLocked();
             closeWriterQuietly();
             refreshPaths();
@@ -297,6 +312,13 @@ public final class SessionCrashLogManager {
             sessionStartedAt = null;
             cachedBootIdentity = null;
             bootIdentitySupplier = SessionCrashLogManager::detectBootIdentity;
+        }
+    }
+
+    static void suspendForTests() {
+        synchronized (LOCK) {
+            resetForTests();
+            suspendedForTests = true;
         }
     }
 

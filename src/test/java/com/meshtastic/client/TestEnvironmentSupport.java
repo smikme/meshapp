@@ -154,9 +154,9 @@ public final class TestEnvironmentSupport {
         jfrDiagnosticSupport.getMethod("stop").invoke(null);
 
         Class<?> sessionCrashLogManager = Class.forName("com.meshtastic.client.logging.SessionCrashLogManager");
-        var resetForTests = sessionCrashLogManager.getDeclaredMethod("resetForTests");
-        resetForTests.setAccessible(true);
-        resetForTests.invoke(null);
+        var suspendForTests = sessionCrashLogManager.getDeclaredMethod("suspendForTests");
+        suspendForTests.setAccessible(true);
+        suspendForTests.invoke(null);
     }
 
     private static Object readStaticField(Class<?> type, String fieldName) throws ReflectiveOperationException {
