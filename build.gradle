@@ -454,7 +454,9 @@ if (org.gradle.internal.os.OperatingSystem.current().isLinux()) {
 		def nativeDir = file('native/linux-ble')
 		def buildDir = new File(nativeDir, 'build')
 		def soOutput = new File(buildDir, 'libmeshapp-ble.so')
-		def soDest = file("src/main/resources/${linuxJnaResourcePrefix()}/libmeshapp-ble.so")
+		def resourcePrefix = linuxJnaResourcePrefix()
+		def outputDir = layout.buildDirectory.dir("generated/resources/${resourcePrefix}").get().asFile
+		def soDest = new File(outputDir, 'libmeshapp-ble.so')
 
 		inputs.files(fileTree(nativeDir) { include '*.c', '*.h', 'CMakeLists.txt' })
 		outputs.file(soDest)
@@ -476,8 +478,8 @@ if (org.gradle.internal.os.OperatingSystem.current().isLinux()) {
 			bld.waitFor()
 			if (bldOut) logger.lifecycle(bldOut.trim())
 			if (bld.exitValue() != 0) throw new GradleException("CMake build failed (exit ${bld.exitValue()})")
-			// Copy SO to resources
-			soDest.parentFile.mkdirs()
+			// Copy SO to generated resources so builds do not dirty src/main/resources.
+			outputDir.mkdirs()
 			java.nio.file.Files.copy(
 				soOutput.toPath(), soDest.toPath(),
 				java.nio.file.StandardCopyOption.REPLACE_EXISTING
@@ -793,7 +795,7 @@ def preparePackagingLibDir = { os, installDir, stagingRoot ->
 
 	// Linux: copy libmeshapp-ble.so (BlueZ BLE) into lib/ for packaging.
 	if (os.isLinux()) {
-		def bleSo = file("src/main/resources/${linuxJnaResourcePrefix()}/libmeshapp-ble.so")
+		def bleSo = new File(generatedResourcesDir.get().asFile, "${linuxJnaResourcePrefix()}/libmeshapp-ble.so")
 		if (bleSo.exists()) {
 			java.nio.file.Files.copy(
 				bleSo.toPath(),
