@@ -2,18 +2,61 @@
 <component type="desktop-application">
   <id>com.meshtastic.meshapp</id>
   <metadata_license>CC0-1.0</metadata_license>
-  <project_license>GPL-3.0-only</project_license>
+  <project_license>AGPL-3.0-only</project_license>
   <name>MeshApp</name>
   <summary>Meshtastic desktop client</summary>
-  <developer_name>Konstantin A. Smirnov</developer_name>
+  <summary xml:lang="ru">Десктопный клиент Meshtastic</summary>
+  <developer id="com.meshtastic">
+    <name>Konstantin A. Smirnov</name>
+  </developer>
   <launchable type="desktop-id">com.meshtastic.meshapp.desktop</launchable>
   <description>
     <p>MeshApp is a desktop client for Meshtastic devices and mesh networks.</p>
     <p>It supports TCP, serial or USB and Bluetooth Low Energy connections, chat, node monitoring, telemetry charts, packet debugging and device configuration.</p>
+    <p>USB serial access may require host-side serial device permissions.</p>
+    <p xml:lang="ru">MeshApp — десктопный клиент для устройств Meshtastic и mesh-сетей.</p>
+    <p xml:lang="ru">Поддерживаются подключения по TCP, Serial / USB и Bluetooth Low Energy, чаты, мониторинг узлов, графики телеметрии, отладка пакетов и настройка устройств.</p>
+    <p xml:lang="ru">Для доступа к USB Serial могут потребоваться права на serial-устройства в хост-системе.</p>
   </description>
-  <url type="homepage">https://meshapp.ru</url>
+  <url type="homepage">https://git.privatepractice.app/covox/meshapp</url>
   <url type="bugtracker">https://git.privatepractice.app/covox/meshapp/issues</url>
   <url type="vcs-browser">https://git.privatepractice.app/covox/meshapp</url>
+  <branding>
+    <color type="primary" scheme_preference="light">#2F7D7B</color>
+    <color type="primary" scheme_preference="dark">#55C7C3</color>
+  </branding>
+  <screenshots>
+    <screenshot type="default">
+      <image>https://git.privatepractice.app/covox/meshapp/raw/commit/522bea7b7d8bcff033278767e2d4c447aa23879f/docs/screenshots/chat-w.jpg</image>
+      <caption>Multi-channel mesh chat</caption>
+      <caption xml:lang="ru">Многоканальный mesh-чат</caption>
+    </screenshot>
+    <screenshot>
+      <image>https://git.privatepractice.app/covox/meshapp/raw/commit/522bea7b7d8bcff033278767e2d4c447aa23879f/docs/screenshots/nodes-w.jpg</image>
+      <caption>Node list and device details</caption>
+      <caption xml:lang="ru">Список узлов и сведения об устройствах</caption>
+    </screenshot>
+    <screenshot>
+      <image>https://git.privatepractice.app/covox/meshapp/raw/commit/522bea7b7d8bcff033278767e2d4c447aa23879f/docs/screenshots/map-w.jpg</image>
+      <caption>Mesh node map</caption>
+      <caption xml:lang="ru">Карта узлов mesh-сети</caption>
+    </screenshot>
+  </screenshots>
+  <content_rating type="oars-1.1" />
+  <releases>
+    <release version="2.1.9" date="2026-06-01">
+      <url type="details">https://git.privatepractice.app/covox/meshapp/releases/tag/v2.1.9</url>
+      <description>
+        <p>Improved emoji rendering in the embedded code editor.</p>
+      </description>
+    </release>
+    <release version="2.0.31" date="2026-05-17">
+      <url type="details">https://git.privatepractice.app/covox/meshapp/releases/tag/v2.0.31</url>
+      <description>
+        <p>Stability and usability improvements for Linux USB serial access, BLE pairing, chat, maps and telemetry views.</p>
+      </description>
+    </release>
+  </releases>
   <provides>
     <binary>MeshApp</binary>
   </provides>

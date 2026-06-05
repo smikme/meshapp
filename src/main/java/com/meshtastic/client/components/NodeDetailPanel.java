@@ -62,7 +62,7 @@ public class NodeDetailPanel extends VBox {
         if (modal == null) { return; }
 
         NodeDetailPanel panel = new NodeDetailPanel(state, node);
-        modal.setOnHidden(panel.detailContent.getChartPanel()::unbind);
         modal.show(panel);
+        modal.setOnHidden(panel.detailContent.getChartPanel()::unbind);
     }
 }
