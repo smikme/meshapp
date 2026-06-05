@@ -44,21 +44,7 @@ Meshtastic is an open project that turns inexpensive LoRa modules into decentral
 
 MeshCore is a lightweight mesh protocol for LoRa and other packet-radio devices. MeshApp supports **MeshCore KISS modem** mode for TCP/Serial and **MeshCore Companion Protocol** for BLE, TCP and Serial endpoints that provide raw Companion packets.
 
-```text
-                     +------------------------------------------------------+
-                     |                       MeshApp                         |
-                     |                                                      |
- TCP (IP:4403) ----->|  +----------------+  +----------------+ +---------+ |
- USB Serial -------->|  |   Transport    |->| Protocol       | | UI /    | |
- BLE / GATT -------->|  | TCP/Serial/BLE |  | Runtime        | | Forms   | |
-                     |  +----------------+  | Meshtastic /   | +---------+ |
-                     |                      | MeshCore        |             |
-                     |           |          +----------------+      |       |
-                     |           v                  |               v       |
-                     |   Native serial / BLE        v            H2 / Logs  |
-                     |                         DeviceState / services       |
-                     +------------------------------------------------------+
-```
+![MeshApp architecture](docs/meshapp-architecture.jpg)
 
 ---
 
