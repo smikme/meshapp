@@ -567,7 +567,13 @@ flatpak --user install -y flathub org.freedesktop.Platform//25.08 org.freedeskto
 scripts/update-flatpak-sources.sh
 ```
 
-Сгенерированный `flatpak-sources-x86_64.json`, а также статический `flatpak-sources-foojay.json`, входят в набор файлов для Flathub. Каталог `offline-repository/` является только локальным кешем сборки и не должен попадать в git.
+По умолчанию команда пересобирает оба файла: `flatpak-sources-x86_64.json` и `flatpak-sources-aarch64.json`. Чтобы пересобрать одну архитектуру, передайте её явно:
+
+```bash
+scripts/update-flatpak-sources.sh aarch64
+```
+
+Сгенерированные `flatpak-sources-x86_64.json` и `flatpak-sources-aarch64.json`, а также статический `flatpak-sources-foojay.json`, входят в набор файлов для Flathub. Каталог `offline-repository/` является только локальным кешем сборки и не должен попадать в git.
 
 Локальную проверку в стиле Flathub можно запускать через образ Flathub Builder:
 
