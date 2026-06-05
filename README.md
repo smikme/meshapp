@@ -549,11 +549,11 @@ MeshApp uses `jpackage` for native packages and additionally supports portable `
 
 `AppImage` requires `appimagetool`: either in `PATH` or provided through `-Pappimagetool=...` / `APPIMAGETOOL=...`. If using the `.AppImage` version of `appimagetool`, `APPIMAGE_EXTRACT_AND_RUN=1` may be required.
 
-`Flatpak` requires `flatpak` and `flatpak-builder`, plus installed runtime/SDK. By default the local bundle task uses `org.freedesktop.Platform//24.08` and `org.freedesktop.Sdk//24.08`:
+`Flatpak` requires `flatpak` and `flatpak-builder`, plus installed runtime/SDK. By default the local bundle task uses `org.freedesktop.Platform//25.08` and `org.freedesktop.Sdk//25.08`:
 
 ```bash
 flatpak --user remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
-flatpak --user install -y flathub org.freedesktop.Platform//24.08 org.freedesktop.Sdk//24.08
+flatpak --user install -y flathub org.freedesktop.Platform//25.08 org.freedesktop.Sdk//25.08
 ./gradlew flatpak
 ```
 
