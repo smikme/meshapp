@@ -559,19 +559,19 @@ flatpak --user install -y flathub org.freedesktop.Platform//25.08 org.freedeskto
 
 When needed, override the runtime through `-PflatpakRuntime=...`, `-PflatpakRuntimeVersion=...`, `-PflatpakSdk=...` and `-PflatpakBranch=...`.
 
-For Flathub submission, use the top-level `com.meshtastic.meshapp.yml` manifest. Before submitting or after changing Gradle dependencies, regenerate the offline Maven source lists:
+For Flathub submission, use the top-level `app.privatepractice.meshapp.yml` manifest. Before submitting or after changing Gradle dependencies, regenerate the offline Maven source list:
 
 ```bash
 scripts/update-flatpak-sources.sh
 ```
 
-The generated `flatpak-sources-x86_64.json` and `flatpak-sources-aarch64.json` files, plus the static `flatpak-sources-foojay.json` file, are part of the Flathub submission. The generated `offline-repository/` directory is only a local build cache and must not be committed.
+The generated `flatpak-sources-x86_64.json` file, plus the static `flatpak-sources-foojay.json` file, are part of the Flathub submission. The generated `offline-repository/` directory is only a local build cache and must not be committed.
 
 Local Flathub-style validation can be run with the Flathub builder image:
 
 ```bash
 flatpak install -y flathub org.flatpak.Builder org.freedesktop.Sdk.Extension.openjdk25//25.08
-flatpak run --command=flathub-build org.flatpak.Builder --install com.meshtastic.meshapp.yml
+flatpak run --command=flathub-build org.flatpak.Builder --install app.privatepractice.meshapp.yml
 ```
 
 For `jpackage`, explicitly set the JDK used for the bundled runtime with `-PpackagingJavaHome=/path/to/jdk` or `PACKAGING_JAVA_HOME=/path/to/jdk`. On macOS the build additionally validates the `.app` with `otool -L` and fails if external dependencies such as `/opt/homebrew/...` or `/usr/local/...` remain inside the bundle.

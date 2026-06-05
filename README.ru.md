@@ -575,19 +575,19 @@ flatpak --user install -y flathub org.freedesktop.Platform//25.08 org.freedeskto
 
 При необходимости runtime можно переопределить через `-PflatpakRuntime=...`, `-PflatpakRuntimeVersion=...`, `-PflatpakSdk=...` и `-PflatpakBranch=...`.
 
-Для публикации на Flathub используйте манифест `com.meshtastic.meshapp.yml` в корне проекта. Перед отправкой или после изменения Gradle-зависимостей пересоберите списки Maven-источников для offline-сборки:
+Для публикации на Flathub используйте манифест `app.privatepractice.meshapp.yml` в корне проекта. Перед отправкой или после изменения Gradle-зависимостей пересоберите список Maven-источников для offline-сборки:
 
 ```bash
 scripts/update-flatpak-sources.sh
 ```
 
-Сгенерированные `flatpak-sources-x86_64.json` и `flatpak-sources-aarch64.json`, а также статический `flatpak-sources-foojay.json`, входят в набор файлов для Flathub. Каталог `offline-repository/` является только локальным кешем сборки и не должен попадать в git.
+Сгенерированный `flatpak-sources-x86_64.json`, а также статический `flatpak-sources-foojay.json`, входят в набор файлов для Flathub. Каталог `offline-repository/` является только локальным кешем сборки и не должен попадать в git.
 
 Локальную проверку в стиле Flathub можно запускать через образ Flathub Builder:
 
 ```bash
 flatpak install -y flathub org.flatpak.Builder org.freedesktop.Sdk.Extension.openjdk25//25.08
-flatpak run --command=flathub-build org.flatpak.Builder --install com.meshtastic.meshapp.yml
+flatpak run --command=flathub-build org.flatpak.Builder --install app.privatepractice.meshapp.yml
 ```
 
 Для `jpackage` можно явно указать JDK, из которого будет собран bundled runtime: `-PpackagingJavaHome=/path/to/jdk` или `PACKAGING_JAVA_HOME=/path/to/jdk`. На macOS сборка дополнительно проверяет `.app` через `otool -L` и завершится ошибкой, если внутри bundle останутся внешние зависимости вроде `/opt/homebrew/...` или `/usr/local/...`.
