@@ -7,10 +7,24 @@ plugins {
 	id 'org.graalvm.buildtools.native' version '0.10.6'
 	id 'com.google.protobuf' version '0.10.0'
 	id 'org.openjfx.javafxplugin' version '0.1.0'
+	id 'io.github.jwharm.flatpak-gradle-generator' version '1.7.0'
 }
 
-def javaVersion = 25
+def javaVersion = providers.gradleProperty('meshappJavaVersion')
+		.map { it.toString().trim().toInteger() }
+		.orElse(25)
+		.get()
+def javaReleaseVersion = providers.gradleProperty('meshappJavaReleaseVersion')
+		.map { it.toString().trim().toInteger() }
+		.orElse(javaVersion)
+		.get()
 def javaFxVersion = '25.0.3'
+def javaFxPlatform = providers.gradleProperty('meshappJavaFxPlatform')
+		.map { it.toString().trim() }
+		.orElse('')
+def protocClassifier = providers.gradleProperty('meshappProtocClassifier')
+		.map { it.toString().trim() }
+		.orElse('')
 def jmxDebugEnabled = providers.gradleProperty('jmxDebugEnabled')
 		.orElse(providers.environmentVariable('MESHAPP_JMX_DEBUG'))
 		.map { it.toString().trim().equalsIgnoreCase('true') }
@@ -109,6 +123,9 @@ application {
 javafx {
 	version = javaFxVersion
 	modules = ['javafx.controls']
+	if (javaFxPlatform.get()) {
+		platform = javaFxPlatform.get()
+	}
 }
 
 group = 'com.meshtastic'
@@ -119,7 +136,10 @@ version = {
 		return 'dev'
 	}
 }()
+def applicationName = project.name.toString()
 def applicationVersion = version.toString()
+def applicationJarName = "${applicationName}-${applicationVersion}.jar"
+def projectRootDir = project.projectDir
 
 java {
 	toolchain {
@@ -128,6 +148,7 @@ java {
 }
 
 repositories {
+	maven { url = file('offline-repository') }
 	mavenCentral()
 }
 
@@ -167,9 +188,30 @@ dependencies {
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
+tasks.flatpakGradleGenerator {
+	def sourceArch = (findProperty('flatpakSourcesArch') ?: '').toString().trim()
+	outputFile = file(sourceArch ? "flatpak-sources-${sourceArch}.json" : 'flatpak-sources.json')
+	downloadDirectory = './offline-repository'
+	if (sourceArch) {
+		onlyArches = sourceArch
+	}
+	includeConfigurations = [
+		'compileClasspath',
+		'runtimeClasspath',
+		'compileProtoPath',
+		'protobufToolsLocator_protoc'
+	]
+	excludeConfigurations = [
+		'testCompileClasspath',
+		'testRuntimeClasspath'
+	]
+}
+
 protobuf {
 	protoc {
-		artifact = 'com.google.protobuf:protoc:4.33.4'
+		artifact = protocClassifier.get()
+			? "com.google.protobuf:protoc:4.33.4:${protocClassifier.get()}@exe"
+			: 'com.google.protobuf:protoc:4.33.4'
 	}
 }
 
@@ -210,8 +252,8 @@ def prepareBuildshipGeneratedDirs = tasks.register('prepareBuildshipGeneratedDir
 jar {
 	manifest {
 		attributes(
-			'Implementation-Title': project.name,
-			'Implementation-Version': project.version
+			'Implementation-Title': applicationName,
+			'Implementation-Version': applicationVersion
 		)
 	}
 	// Files used only by jpackage/bundles are not needed in the jar.
@@ -250,6 +292,18 @@ def macOsJnaResourcePrefix = {
 			return 'darwin-aarch64'
 		default:
 			return "darwin-${arch}"
+	}
+}
+
+def linuxJnaResourcePrefix = {
+	def arch = System.getProperty('os.arch').toLowerCase(java.util.Locale.ROOT)
+	switch (arch) {
+		case ['amd64', 'x86_64']:
+			return 'linux-x86-64'
+		case ['aarch64', 'arm64']:
+			return 'linux-aarch64'
+		default:
+			return "linux-${arch}"
 	}
 }
 
@@ -400,7 +454,7 @@ if (org.gradle.internal.os.OperatingSystem.current().isLinux()) {
 		def nativeDir = file('native/linux-ble')
 		def buildDir = new File(nativeDir, 'build')
 		def soOutput = new File(buildDir, 'libmeshapp-ble.so')
-		def soDest = file('src/main/resources/linux-x86-64/libmeshapp-ble.so')
+		def soDest = file("src/main/resources/${linuxJnaResourcePrefix()}/libmeshapp-ble.so")
 
 		inputs.files(fileTree(nativeDir) { include '*.c', '*.h', 'CMakeLists.txt' })
 		outputs.file(soDest)
@@ -436,6 +490,7 @@ if (org.gradle.internal.os.OperatingSystem.current().isLinux()) {
 
 tasks.withType(JavaCompile).configureEach {
 	options.encoding = 'UTF-8'
+	options.release = javaReleaseVersion
 }
 
 tasks.named('test') {
@@ -638,6 +693,38 @@ def patchWindowsStartScriptForJavaFx = { File scriptFile ->
 	scriptFile.setText(patched.join('\r\n') + '\r\n', 'UTF-8')
 }
 
+def copyDirectory = { File sourceDir, File targetDir ->
+	if (!sourceDir.isDirectory()) {
+		throw new GradleException("copyDirectory: source directory not found: ${sourceDir}")
+	}
+	def sourcePath = sourceDir.toPath()
+	def targetPath = targetDir.toPath()
+	def stream = java.nio.file.Files.walk(sourcePath)
+	try {
+		stream.forEach { path ->
+			def relative = sourcePath.relativize(path)
+			def target = targetPath.resolve(relative)
+			if (java.nio.file.Files.isSymbolicLink(path)) {
+				java.nio.file.Files.createDirectories(target.parent)
+				java.nio.file.Files.deleteIfExists(target)
+				java.nio.file.Files.createSymbolicLink(target, java.nio.file.Files.readSymbolicLink(path))
+			} else if (java.nio.file.Files.isDirectory(path, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+				java.nio.file.Files.createDirectories(target)
+			} else {
+				java.nio.file.Files.createDirectories(target.parent)
+				java.nio.file.Files.copy(
+					path,
+					target,
+					java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+					java.nio.file.StandardCopyOption.COPY_ATTRIBUTES
+				)
+			}
+		}
+	} finally {
+		stream.close()
+	}
+}
+
 def preparePackagingLibDir = { os, installDir, stagingRoot ->
 	if (stagingRoot.exists()) {
 		stagingRoot.deleteDir()
@@ -650,10 +737,7 @@ def preparePackagingLibDir = { os, installDir, stagingRoot ->
 	}
 
 	def libDir = new File(stagingRoot, "lib")
-	project.copy {
-		from sourceLibDir
-		into libDir
-	}
+	copyDirectory(sourceLibDir, libDir)
 
 	// Move JavaFX JARs into a subdirectory; only they should be on the module path.
 	// If the whole $APPDIR is on the module path, the app JAR becomes an automatic module,
@@ -709,7 +793,7 @@ def preparePackagingLibDir = { os, installDir, stagingRoot ->
 
 	// Linux: copy libmeshapp-ble.so (BlueZ BLE) into lib/ for packaging.
 	if (os.isLinux()) {
-		def bleSo = file('src/main/resources/linux-x86-64/libmeshapp-ble.so')
+		def bleSo = file("src/main/resources/${linuxJnaResourcePrefix()}/libmeshapp-ble.so")
 		if (bleSo.exists()) {
 			java.nio.file.Files.copy(
 				bleSo.toPath(),
@@ -763,7 +847,7 @@ def resolveBuildOption = { String propertyName, String envName ->
 	return envValue ?: null
 }
 
-def executePackagingCommand = { List<?> args, String failureMessage, File workingDir = project.projectDir, boolean logOutput = true ->
+def executePackagingCommand = { List<?> args, String failureMessage, File workingDir = projectRootDir, boolean logOutput = true ->
 	def process = new ProcessBuilder(args.collect { it.toString() })
 		.directory(workingDir)
 		.redirectErrorStream(true)
@@ -806,7 +890,7 @@ def readMacLinkedLibraries = { File binary, String taskName ->
 	def output = executePackagingCommand(
 		['otool', '-L', binary.absolutePath],
 		"${taskName}: failed to inspect native dependencies for ${binary}",
-		project.projectDir,
+		projectRootDir,
 		false
 	)
 	def lines = output.readLines()
@@ -828,7 +912,7 @@ def readMacInstallName = { File binary, String taskName ->
 	def output = executePackagingCommand(
 		['otool', '-D', binary.absolutePath],
 		"${taskName}: failed to inspect install name for ${binary}",
-		project.projectDir,
+		projectRootDir,
 		false
 	)
 	def lines = output.readLines()
@@ -857,7 +941,7 @@ def normalizeMacBundleInstallNames = { File appDir, String taskName ->
 				executePackagingCommand(
 					['install_name_tool', '-id', normalizedInstallName, binary.absolutePath],
 					"${taskName}: failed to normalize install name for ${binary}",
-					project.projectDir,
+					projectRootDir,
 					false
 				)
 				logger.lifecycle("${taskName}: normalized install name for ${binary.name} -> ${normalizedInstallName}")
@@ -1161,7 +1245,7 @@ def buildLinuxAppImage = { File installDir, File workDir, String taskName ->
 		'--dest', workDir.absolutePath,
 		'--input', libDir.absolutePath,
 		'--jlink-options', jlinkOptions,
-		'--main-jar', "${project.name}-${project.version}.jar",
+		'--main-jar', applicationJarName,
 		'--main-class', application.mainClass.get(),
 		'--resource-dir', linuxResourceDir.absolutePath
 	]
@@ -1191,10 +1275,7 @@ def prepareFlatpakSources = { File workDir, File appImageDir, File iconSource ->
 	}
 	sourceDir.mkdirs()
 
-	project.copy {
-		from appImageDir
-		into new File(sourceDir, 'meshapp')
-	}
+	copyDirectory(appImageDir, new File(sourceDir, 'meshapp'))
 
 	def resourcesDir = new File(sourceDir, 'resources')
 	resourcesDir.mkdirs()
@@ -1362,9 +1443,9 @@ javadoc {
 	options.charSet = 'UTF-8'
 	options.docEncoding = 'UTF-8'
 	options.locale = 'ru'
-	options.windowTitle = "MeshApp ${project.version} API"
+	options.windowTitle = "MeshApp ${applicationVersion} API"
 	options.docTitle = "MeshApp — Meshtastic Desktop Client"
-	options.header = "MeshApp ${project.version}"
+	options.header = "MeshApp ${applicationVersion}"
 	options.links('https://docs.oracle.com/en/java/javase/21/docs/api/')
 	// Do not fail on warnings from protobuf-generated classes and similar sources.
 	options.addBooleanOption('Xdoclint:none', true)
@@ -1399,10 +1480,10 @@ tasks.register('runTerminal', JavaExec) {
 
 tasks.named('installDist') {
 	doLast {
-		def installDir = layout.buildDirectory.dir("install/${project.name}").get().asFile
+		def installDir = layout.buildDirectory.dir("install/${applicationName}").get().asFile
 		relocateJavaFxJars(new File(installDir, 'lib'))
-		patchUnixStartScriptForJavaFx(new File(installDir, "bin/${project.name}"))
-		patchWindowsStartScriptForJavaFx(new File(installDir, "bin/${project.name}.bat"))
+		patchUnixStartScriptForJavaFx(new File(installDir, "bin/${applicationName}"))
+		patchWindowsStartScriptForJavaFx(new File(installDir, "bin/${applicationName}.bat"))
 	}
 }
 
@@ -1418,7 +1499,7 @@ tasks.register('jpackage') {
 
 	doLast {
 		def os = org.gradle.internal.os.OperatingSystem.current()
-		def installDir = layout.buildDirectory.dir("install/${project.name}").get().asFile
+		def installDir = layout.buildDirectory.dir("install/${applicationName}").get().asFile
 		def outputDir = layout.buildDirectory.dir("jpackage").get().asFile
 		if (outputDir.exists()) outputDir.deleteDir()
 		outputDir.mkdirs()
@@ -1453,7 +1534,7 @@ tasks.register('jpackage') {
 			'--dest', outputDir.absolutePath,
 			'--input', libDir.absolutePath,
 			'--jlink-options', jlinkOptions,
-			'--main-jar', "${project.name}-${project.version}.jar",
+			'--main-jar', applicationJarName,
 			'--main-class', application.mainClass.get(),
 		]
 
@@ -1628,7 +1709,7 @@ tasks.register('appImage') {
 			throw new GradleException('appImage task is supported only on Linux')
 		}
 
-		def installDir = layout.buildDirectory.dir("install/${project.name}").get().asFile
+		def installDir = layout.buildDirectory.dir("install/${applicationName}").get().asFile
 		def outputDir = layout.buildDirectory.dir("jpackage").get().asFile
 		def workDir = layout.buildDirectory.dir("appimage").get().asFile
 		outputDir.mkdirs()
@@ -1638,10 +1719,7 @@ tasks.register('appImage') {
 		def jpackageImageDir = appImage.imageDir
 
 		def appDir = new File(workDir, 'MeshApp.AppDir')
-		project.copy {
-			from jpackageImageDir
-			into new File(appDir, 'usr')
-		}
+		copyDirectory(jpackageImageDir, new File(appDir, 'usr'))
 
 		def launcher = new File(appDir, 'usr/bin/MeshApp')
 		if (!launcher.isFile()) {
@@ -1697,7 +1775,7 @@ exec "$HERE/usr/bin/MeshApp" "$@"
 			throw new GradleException('appImage: appimagetool not found. Add it to PATH or pass -Pappimagetool=/path/to/appimagetool.AppImage')
 		}
 
-		def artifactName = "MeshApp-${sanitizeArtifactVersion(project.version.toString())}-${resolveLinuxAppImageArch()}.AppImage"
+		def artifactName = "MeshApp-${sanitizeArtifactVersion(applicationVersion)}-${resolveLinuxAppImageArch()}.AppImage"
 		def appImageFile = new File(outputDir, artifactName)
 		if (appImageFile.exists()) {
 			appImageFile.delete()
@@ -1711,7 +1789,7 @@ exec "$HERE/usr/bin/MeshApp" "$@"
 		).redirectErrorStream(true)
 		def env = appImageProc.environment()
 		env.put('ARCH', resolveLinuxAppImageArch())
-		env.put('VERSION', project.version.toString())
+		env.put('VERSION', applicationVersion)
 		if (appImageTool.name.endsWith('.AppImage') && !env.containsKey('APPIMAGE_EXTRACT_AND_RUN')) {
 			env.put('APPIMAGE_EXTRACT_AND_RUN', '1')
 		}
@@ -1747,7 +1825,7 @@ tasks.register('flatpak') {
 			throw new GradleException('flatpak task is supported only on Linux')
 		}
 
-		def installDir = layout.buildDirectory.dir("install/${project.name}").get().asFile
+		def installDir = layout.buildDirectory.dir("install/${applicationName}").get().asFile
 		def outputDir = layout.buildDirectory.dir("jpackage").get().asFile
 		def workDir = layout.buildDirectory.dir("flatpak").get().asFile
 		if (workDir.exists()) {
@@ -1757,7 +1835,7 @@ tasks.register('flatpak') {
 		outputDir.mkdirs()
 
 		def flatpakRuntime = (findProperty('flatpakRuntime') ?: 'org.freedesktop.Platform').toString().trim()
-		def flatpakRuntimeVersion = (findProperty('flatpakRuntimeVersion') ?: '24.08').toString().trim()
+		def flatpakRuntimeVersion = (findProperty('flatpakRuntimeVersion') ?: '25.08').toString().trim()
 		def flatpakSdk = (findProperty('flatpakSdk') ?: 'org.freedesktop.Sdk').toString().trim()
 		def flatpakBranch = (findProperty('flatpakBranch') ?: 'stable').toString().trim()
 		def flatpakBuilder = resolveCommandExecutable('flatpakBuilder', 'FLATPAK_BUILDER', 'flatpak-builder', 'flatpak')
@@ -1783,7 +1861,7 @@ tasks.register('flatpak') {
 			'flatpak: flatpak-builder failed'
 		)
 
-		def artifactName = "MeshApp-${sanitizeArtifactVersion(project.version.toString())}-${resolveLinuxAppImageArch()}.flatpak"
+		def artifactName = "MeshApp-${sanitizeArtifactVersion(applicationVersion)}-${resolveLinuxAppImageArch()}.flatpak"
 		def bundleFile = new File(outputDir, artifactName)
 		if (bundleFile.exists()) {
 			bundleFile.delete()
