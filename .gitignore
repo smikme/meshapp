@@ -40,3 +40,5 @@ out/
 .vscode/
 docs/.DS_Store
 docs/screenshots/.DS_Store
+docs/.$meshapp-architecture.drawio.bkp
+.DS_Store
