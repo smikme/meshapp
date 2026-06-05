@@ -551,7 +551,13 @@ For Flathub submission, use the top-level `app.privatepractice.meshapp.yml` mani
 scripts/update-flatpak-sources.sh
 ```
 
-The generated `flatpak-sources-x86_64.json` file, plus the static `flatpak-sources-foojay.json` file, are part of the Flathub submission. The generated `offline-repository/` directory is only a local build cache and must not be committed.
+By default this regenerates both `flatpak-sources-x86_64.json` and `flatpak-sources-aarch64.json`. To regenerate one architecture, pass it explicitly:
+
+```bash
+scripts/update-flatpak-sources.sh aarch64
+```
+
+The generated `flatpak-sources-x86_64.json` and `flatpak-sources-aarch64.json` files, plus the static `flatpak-sources-foojay.json` file, are part of the Flathub submission. The generated `offline-repository/` directory is only a local build cache and must not be committed.
 
 Local Flathub-style validation can be run with the Flathub builder image:
 
