@@ -565,11 +565,11 @@ MeshApp собирается в нативные пакеты через `jpacka
 
 Для `AppImage` нужен `appimagetool`: либо в `PATH`, либо через `-Pappimagetool=...` / `APPIMAGETOOL=...`. Если используется `.AppImage`-версия самого `appimagetool`, может понадобиться `APPIMAGE_EXTRACT_AND_RUN=1`.
 
-Для `Flatpak` нужны `flatpak` и `flatpak-builder`, а также установленный runtime/SDK. По умолчанию задача использует `org.freedesktop.Platform//25.08` и `org.freedesktop.Sdk//25.08`:
+Для `Flatpak` нужны `flatpak` и `flatpak-builder`, а также установленный runtime/SDK. По умолчанию задача использует `org.freedesktop.Platform//24.08` и `org.freedesktop.Sdk//24.08`:
 
 ```bash
 flatpak --user remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
-flatpak --user install -y flathub org.freedesktop.Platform//25.08 org.freedesktop.Sdk//25.08
+flatpak --user install -y flathub org.freedesktop.Platform//24.08 org.freedesktop.Sdk//24.08
 ./gradlew flatpak
 ```
 

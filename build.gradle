@@ -1809,7 +1809,7 @@ tasks.register('flatpak') {
 		outputDir.mkdirs()
 
 		def flatpakRuntime = (findProperty('flatpakRuntime') ?: 'org.freedesktop.Platform').toString().trim()
-		def flatpakRuntimeVersion = (findProperty('flatpakRuntimeVersion') ?: '25.08').toString().trim()
+		def flatpakRuntimeVersion = (findProperty('flatpakRuntimeVersion') ?: '24.08').toString().trim()
 		def flatpakSdk = (findProperty('flatpakSdk') ?: 'org.freedesktop.Sdk').toString().trim()
 		def flatpakBranch = (findProperty('flatpakBranch') ?: 'stable').toString().trim()
 		def flatpakBuilder = resolveCommandExecutable('flatpakBuilder', 'FLATPAK_BUILDER', 'flatpak-builder', 'flatpak')

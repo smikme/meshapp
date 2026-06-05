@@ -60,7 +60,7 @@ jobs:
           command -v flatpak >/dev/null 2>&1 || { echo "flatpak is required on the runner" >&2; exit 1; }
           command -v flatpak-builder >/dev/null 2>&1 || { echo "flatpak-builder is required on the runner" >&2; exit 1; }
           flatpak --user remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
-          flatpak --user install -y flathub org.freedesktop.Platform//25.08 org.freedesktop.Sdk//25.08
+          flatpak --user install -y flathub org.freedesktop.Platform//24.08 org.freedesktop.Sdk//24.08
 
       - name: Resolve appimagetool
         run: |
