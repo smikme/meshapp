@@ -36,3 +36,4 @@ out/
 ### VS Code ###
 .vscode/
 docs/.DS_Store
+docs/screenshots/.DS_Store
