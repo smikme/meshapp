@@ -1048,7 +1048,7 @@ def sanitizeArtifactVersion = { value ->
 	value.replaceAll(/[^A-Za-z0-9._-]+/, '_')
 }
 
-def flatpakAppId = 'com.meshtastic.meshapp'
+def flatpakAppId = 'app.privatepractice.meshapp'
 def flatpakMetadataDir = file('src/flatpak')
 def flatpakDesktopFileName = "${flatpakAppId}.desktop"
 def flatpakMetainfoFileName = "${flatpakAppId}.metainfo.xml"
