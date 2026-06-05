@@ -15,7 +15,7 @@
   <img src="https://img.shields.io/badge/Java-25-orange?logo=openjdk" alt="Java 25"/>
   <img src="https://img.shields.io/badge/JavaFX-25.0.3-blue?logo=java" alt="JavaFX"/>
   <img src="https://img.shields.io/badge/Platform-Win%20%7C%20macOS%20%7C%20Linux-brightgreen" alt="Platform"/>
-  <img src="https://img.shields.io/badge/License-GPL--3.0-blue" alt="License"/>
+  <img src="https://img.shields.io/badge/License-AGPL--3.0-blue" alt="License"/>
   <a href="https://t.me/+SRaOd1gftoo5MWRi">
   <img src="https://img.shields.io/badge/Telegram-@MeshAppClient-blue?logo=telegram" alt="Telegram">
 </a>
@@ -549,15 +549,30 @@ MeshApp uses `jpackage` for native packages and additionally supports portable `
 
 `AppImage` requires `appimagetool`: either in `PATH` or provided through `-Pappimagetool=...` / `APPIMAGETOOL=...`. If using the `.AppImage` version of `appimagetool`, `APPIMAGE_EXTRACT_AND_RUN=1` may be required.
 
-`Flatpak` requires `flatpak` and `flatpak-builder`, plus installed runtime/SDK. By default the task uses `org.freedesktop.Platform//24.08` and `org.freedesktop.Sdk//24.08`:
+`Flatpak` requires `flatpak` and `flatpak-builder`, plus installed runtime/SDK. By default the local bundle task uses `org.freedesktop.Platform//25.08` and `org.freedesktop.Sdk//25.08`:
 
 ```bash
 flatpak --user remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
-flatpak --user install -y flathub org.freedesktop.Platform//24.08 org.freedesktop.Sdk//24.08
+flatpak --user install -y flathub org.freedesktop.Platform//25.08 org.freedesktop.Sdk//25.08
 ./gradlew flatpak
 ```
 
 When needed, override the runtime through `-PflatpakRuntime=...`, `-PflatpakRuntimeVersion=...`, `-PflatpakSdk=...` and `-PflatpakBranch=...`.
+
+For Flathub submission, use the top-level `app.privatepractice.meshapp.yml` manifest. Before submitting or after changing Gradle dependencies, regenerate the offline Maven source list:
+
+```bash
+scripts/update-flatpak-sources.sh
+```
+
+The generated `flatpak-sources-x86_64.json` file, plus the static `flatpak-sources-foojay.json` file, are part of the Flathub submission. The generated `offline-repository/` directory is only a local build cache and must not be committed.
+
+Local Flathub-style validation can be run with the Flathub builder image:
+
+```bash
+flatpak install -y flathub org.flatpak.Builder org.freedesktop.Sdk.Extension.openjdk25//25.08
+flatpak run --command=flathub-build org.flatpak.Builder --install app.privatepractice.meshapp.yml
+```
 
 For `jpackage`, explicitly set the JDK used for the bundled runtime with `-PpackagingJavaHome=/path/to/jdk` or `PACKAGING_JAVA_HOME=/path/to/jdk`. On macOS the build additionally validates the `.app` with `otool -L` and fails if external dependencies such as `/opt/homebrew/...` or `/usr/local/...` remain inside the bundle.
 
@@ -617,7 +632,7 @@ xattr -cr /Applications/MeshApp.app
 
 ## License
 
-Distributed under the [GPL-3.0](LICENSE).
+Distributed under the [AGPL-3.0](LICENSE).
 
 ---
 

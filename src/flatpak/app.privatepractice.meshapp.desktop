@@ -1,7 +1,7 @@
 [Desktop Entry]
 Name=MeshApp
 Exec=MeshApp
-Icon=com.meshtastic.meshapp
+Icon=app.privatepractice.meshapp
 Type=Application
 Categories=Network;HamRadio;Utility;
 Comment=Meshtastic desktop client

@@ -350,10 +350,11 @@ class ConnectionManagerTest {
 
             manager.connectAutoconnectEntries();
 
-            assertTrue(waitUntil(autoconnect::isConnected, 2_000));
+            assertTrue(waitUntil(() -> manager.getProtocolReadyFuture(autoconnect.getId()) != null, 2_000));
             CompletableFuture<DeviceState> future = manager.getConfigFuture(autoconnect.getId());
             assertNotNull(future);
             assertEquals(0x1234ABCD, future.get(5, TimeUnit.SECONDS).getMyNodeNum());
+            assertTrue(autoconnect.isConnected());
             assertFalse(manual.isConnected());
             assertNull(manager.getConfigFuture(manual.getId()));
 

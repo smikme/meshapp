@@ -82,6 +82,8 @@ public final class TestEnvironmentSupport {
 
     public static void resetSingletons() {
         try {
+            resetDiagnostics();
+
             // Tests start real singleton services backed by H2 and background threads, so
             // every case must begin from a clean runtime state.
             Class<?> luaRuntimeService = Class.forName("com.meshtastic.client.lua.LuaScriptRuntimeService");
@@ -140,9 +142,21 @@ public final class TestEnvironmentSupport {
                 bleDiscoveryService.getMethod("dispose").invoke(bleDiscoveryInstance);
             }
             writeStaticField(bleDiscoveryService, "instance", null);
+
+            resetDiagnostics();
         } catch (ReflectiveOperationException e) {
             throw new RuntimeException("Failed to reset test singletons", e);
         }
+    }
+
+    private static void resetDiagnostics() throws ReflectiveOperationException {
+        Class<?> jfrDiagnosticSupport = Class.forName("com.meshtastic.client.logging.JfrDiagnosticSupport");
+        jfrDiagnosticSupport.getMethod("stop").invoke(null);
+
+        Class<?> sessionCrashLogManager = Class.forName("com.meshtastic.client.logging.SessionCrashLogManager");
+        var suspendForTests = sessionCrashLogManager.getDeclaredMethod("suspendForTests");
+        suspendForTests.setAccessible(true);
+        suspendForTests.invoke(null);
     }
 
     private static Object readStaticField(Class<?> type, String fieldName) throws ReflectiveOperationException {
