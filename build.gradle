@@ -7,10 +7,24 @@ plugins {
 	id 'org.graalvm.buildtools.native' version '0.10.6'
 	id 'com.google.protobuf' version '0.10.0'
 	id 'org.openjfx.javafxplugin' version '0.1.0'
+	id 'io.github.jwharm.flatpak-gradle-generator' version '1.7.0'
 }
 
-def javaVersion = 25
+def javaVersion = providers.gradleProperty('meshappJavaVersion')
+		.map { it.toString().trim().toInteger() }
+		.orElse(25)
+		.get()
+def javaReleaseVersion = providers.gradleProperty('meshappJavaReleaseVersion')
+		.map { it.toString().trim().toInteger() }
+		.orElse(javaVersion)
+		.get()
 def javaFxVersion = '25.0.3'
+def javaFxPlatform = providers.gradleProperty('meshappJavaFxPlatform')
+		.map { it.toString().trim() }
+		.orElse('')
+def protocClassifier = providers.gradleProperty('meshappProtocClassifier')
+		.map { it.toString().trim() }
+		.orElse('')
 def jmxDebugEnabled = providers.gradleProperty('jmxDebugEnabled')
 		.orElse(providers.environmentVariable('MESHAPP_JMX_DEBUG'))
 		.map { it.toString().trim().equalsIgnoreCase('true') }
@@ -109,6 +123,9 @@ application {
 javafx {
 	version = javaFxVersion
 	modules = ['javafx.controls']
+	if (javaFxPlatform.get()) {
+		platform = javaFxPlatform.get()
+	}
 }
 
 group = 'com.meshtastic'
@@ -128,6 +145,7 @@ java {
 }
 
 repositories {
+	maven { url = file('offline-repository') }
 	mavenCentral()
 }
 
@@ -167,9 +185,30 @@ dependencies {
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
+tasks.flatpakGradleGenerator {
+	def sourceArch = (findProperty('flatpakSourcesArch') ?: '').toString().trim()
+	outputFile = file(sourceArch ? "flatpak-sources-${sourceArch}.json" : 'flatpak-sources.json')
+	downloadDirectory = './offline-repository'
+	if (sourceArch) {
+		onlyArches = sourceArch
+	}
+	includeConfigurations = [
+		'compileClasspath',
+		'runtimeClasspath',
+		'compileProtoPath',
+		'protobufToolsLocator_protoc'
+	]
+	excludeConfigurations = [
+		'testCompileClasspath',
+		'testRuntimeClasspath'
+	]
+}
+
 protobuf {
 	protoc {
-		artifact = 'com.google.protobuf:protoc:4.33.4'
+		artifact = protocClassifier.get()
+			? "com.google.protobuf:protoc:4.33.4:${protocClassifier.get()}@exe"
+			: 'com.google.protobuf:protoc:4.33.4'
 	}
 }
 
@@ -250,6 +289,18 @@ def macOsJnaResourcePrefix = {
 			return 'darwin-aarch64'
 		default:
 			return "darwin-${arch}"
+	}
+}
+
+def linuxJnaResourcePrefix = {
+	def arch = System.getProperty('os.arch').toLowerCase(java.util.Locale.ROOT)
+	switch (arch) {
+		case ['amd64', 'x86_64']:
+			return 'linux-x86-64'
+		case ['aarch64', 'arm64']:
+			return 'linux-aarch64'
+		default:
+			return "linux-${arch}"
 	}
 }
 
@@ -400,7 +451,7 @@ if (org.gradle.internal.os.OperatingSystem.current().isLinux()) {
 		def nativeDir = file('native/linux-ble')
 		def buildDir = new File(nativeDir, 'build')
 		def soOutput = new File(buildDir, 'libmeshapp-ble.so')
-		def soDest = file('src/main/resources/linux-x86-64/libmeshapp-ble.so')
+		def soDest = file("src/main/resources/${linuxJnaResourcePrefix()}/libmeshapp-ble.so")
 
 		inputs.files(fileTree(nativeDir) { include '*.c', '*.h', 'CMakeLists.txt' })
 		outputs.file(soDest)
@@ -436,6 +487,7 @@ if (org.gradle.internal.os.OperatingSystem.current().isLinux()) {
 
 tasks.withType(JavaCompile).configureEach {
 	options.encoding = 'UTF-8'
+	options.release = javaReleaseVersion
 }
 
 tasks.named('test') {
@@ -709,7 +761,7 @@ def preparePackagingLibDir = { os, installDir, stagingRoot ->
 
 	// Linux: copy libmeshapp-ble.so (BlueZ BLE) into lib/ for packaging.
 	if (os.isLinux()) {
-		def bleSo = file('src/main/resources/linux-x86-64/libmeshapp-ble.so')
+		def bleSo = file("src/main/resources/${linuxJnaResourcePrefix()}/libmeshapp-ble.so")
 		if (bleSo.exists()) {
 			java.nio.file.Files.copy(
 				bleSo.toPath(),
@@ -1757,7 +1809,7 @@ tasks.register('flatpak') {
 		outputDir.mkdirs()
 
 		def flatpakRuntime = (findProperty('flatpakRuntime') ?: 'org.freedesktop.Platform').toString().trim()
-		def flatpakRuntimeVersion = (findProperty('flatpakRuntimeVersion') ?: '24.08').toString().trim()
+		def flatpakRuntimeVersion = (findProperty('flatpakRuntimeVersion') ?: '25.08').toString().trim()
 		def flatpakSdk = (findProperty('flatpakSdk') ?: 'org.freedesktop.Sdk').toString().trim()
 		def flatpakBranch = (findProperty('flatpakBranch') ?: 'stable').toString().trim()
 		def flatpakBuilder = resolveCommandExecutable('flatpakBuilder', 'FLATPAK_BUILDER', 'flatpak-builder', 'flatpak')
