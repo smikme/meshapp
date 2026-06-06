@@ -1,15 +1,23 @@
 package com.meshtastic.client.utils;
 
 import com.google.protobuf.Descriptors.FieldDescriptor;
+import com.meshtastic.client.TestEnvironmentSupport;
 import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.model.ConfigTreeItem;
+import com.meshtastic.client.service.DatabaseProvider;
 import javafx.scene.control.TreeItem;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.meshtastic.proto.ConfigProtos;
 import org.meshtastic.proto.ModuleConfigProtos;
 
+import java.nio.file.Path;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.Statement;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
@@ -27,15 +35,26 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class ConfigDescriptionResolverTest {
 
+    @TempDir
+    Path tempHome;
+
     private String previousLanguage;
+    private String previousUserHome;
 
     @BeforeEach
     void setUp() {
         previousLanguage = I18n.getLanguageTag();
+        previousUserHome = System.getProperty("user.home");
+        TestEnvironmentSupport.setUserHome(tempHome);
+        TestEnvironmentSupport.resetSingletons();
     }
 
     @AfterEach
     void tearDown() {
+        TestEnvironmentSupport.resetSingletons();
+        if (previousUserHome != null) {
+            System.setProperty("user.home", previousUserHome);
+        }
         I18n.setLanguageTagForTests(previousLanguage);
     }
 
@@ -115,24 +134,39 @@ class ConfigDescriptionResolverTest {
 
     @Test
     void loadsHelpDocumentsOutsideI18nBundles() {
-        ConfigHelpRepository.HelpBundle englishBundle =
-            ConfigHelpRepository.getInstance().bundleForTests(I18n.LANGUAGE_EN);
-        ConfigHelpRepository.HelpBundle russianBundle =
-            ConfigHelpRepository.getInstance().bundleForTests(I18n.LANGUAGE_RU);
+        ConfigHelpRepository repository = ConfigHelpRepository.getInstance();
 
-        assertTrue(englishBundle.sections().containsKey("lora"));
-        assertTrue(russianBundle.sections().containsKey("lora"));
         assertTrue(
-            englishBundle
-                .fields()
-                .get("meshtastic.Config.DeviceConfig.role")
+            repository.hasArticleForTests(
+                I18n.LANGUAGE_EN,
+                "section",
+                "lora"
+            )
+        );
+        assertTrue(
+            repository.hasArticleForTests(
+                I18n.LANGUAGE_RU,
+                "section",
+                "lora"
+            )
+        );
+        assertTrue(
+            repository
+                .articleForTests(
+                    I18n.LANGUAGE_EN,
+                    "field",
+                    "meshtastic.Config.DeviceConfig.role"
+                )
                 .values()
                 .containsKey("CLIENT_BASE")
         );
         assertTrue(
-            russianBundle
-                .fields()
-                .get("meshtastic.Config.DeviceConfig.role")
+            repository
+                .articleForTests(
+                    I18n.LANGUAGE_RU,
+                    "field",
+                    "meshtastic.Config.DeviceConfig.role"
+                )
                 .summary()
                 .contains("Роль определяет")
         );
@@ -267,26 +301,123 @@ class ConfigDescriptionResolverTest {
         Set<String> required = requiredHelpFieldIds();
         ConfigHelpRepository repository = ConfigHelpRepository.getInstance();
 
-        assertHelpBundleCovers(
+        assertHelpDatabaseCovers(
             required,
-            repository.bundleForTests(I18n.LANGUAGE_RU),
+            repository,
             I18n.LANGUAGE_RU
         );
-        assertHelpBundleCovers(
+        assertHelpDatabaseCovers(
             required,
-            repository.bundleForTests(I18n.LANGUAGE_EN),
+            repository,
             I18n.LANGUAGE_EN
         );
     }
 
-    private static void assertHelpBundleCovers(
+    @Test
+    void importsHelpDocumentsIntoDatabaseWithVersion() throws Exception {
+        ConfigHelpRepository repository = ConfigHelpRepository.getInstance();
+
+        assertEquals(
+            1,
+            repository.documentVersionForTests(
+                I18n.LANGUAGE_EN,
+                "config/common"
+            )
+        );
+
+        Connection connection = DatabaseProvider.getConnection();
+        assertEquals(
+            277,
+            countRows(
+                connection,
+                "config_help_articles",
+                "language_tag = 'en' AND article_type = 'field'"
+            )
+        );
+    }
+
+    @Test
+    void reimportsHelpWhenDatabaseVersionDiffers() throws Exception {
+        ConfigHelpRepository repository = ConfigHelpRepository.getInstance();
+        assertTrue(
+            repository.hasArticleForTests(
+                I18n.LANGUAGE_EN,
+                "field",
+                "owner_info.long_name"
+            )
+        );
+
+        Connection connection = DatabaseProvider.getConnection();
+        try (Statement stmt = connection.createStatement()) {
+            stmt.executeUpdate("""
+                DELETE FROM config_help_articles
+                WHERE language_tag = 'en'
+                  AND document_id = 'config/common'
+                  AND article_type = 'field'
+                  AND article_key = 'owner_info.long_name'
+                """);
+            stmt.executeUpdate("""
+                UPDATE config_help_documents
+                SET version = 0
+                WHERE language_tag = 'en'
+                  AND document_id = 'config/common'
+                """);
+        }
+
+        repository.resetLoadedStateForTests();
+
+        ConfigTreeItem longName = new ConfigTreeItem(
+            "Long name",
+            "long_name",
+            "Alpha",
+            String.class,
+            null,
+            null,
+            "owner_info",
+            0
+        );
+
+        assertTrue(
+            repository
+                .helpFor(longName, I18n.LANGUAGE_EN)
+                .summary()
+                .contains("Full device name")
+        );
+        assertEquals(
+            1,
+            repository.documentVersionForTests(
+                I18n.LANGUAGE_EN,
+                "config/common"
+            )
+        );
+        assertTrue(
+            repository.hasArticleForTests(
+                I18n.LANGUAGE_EN,
+                "field",
+                "owner_info.long_name"
+            )
+        );
+    }
+
+    @Test
+    void searchesHelpArticlesInDatabase() {
+        List<ConfigHelpRepository.HelpSearchResult> results =
+            ConfigHelpRepository.getInstance().search("buzzer", "en", 10);
+
+        assertTrue(results.stream().anyMatch(result ->
+            result.articleType().equals("field") &&
+            result.articleKey().equals("meshtastic.Config.DeviceConfig.buzzer_mode")
+        ));
+    }
+
+    private static void assertHelpDatabaseCovers(
         Set<String> required,
-        ConfigHelpRepository.HelpBundle bundle,
+        ConfigHelpRepository repository,
         String language
     ) {
         List<String> missing = required
             .stream()
-            .filter(id -> !bundle.fields().containsKey(id))
+            .filter(id -> !repository.hasArticleForTests(language, "field", id))
             .toList();
 
         assertTrue(
@@ -399,5 +530,18 @@ class ConfigDescriptionResolverTest {
 
         ids.add(field.getFullName());
         return true;
+    }
+
+    private static int countRows(
+        Connection connection,
+        String tableName,
+        String where
+    ) throws Exception {
+        try (PreparedStatement ps = connection.prepareStatement(
+                "SELECT COUNT(*) FROM " + tableName + " WHERE " + where);
+             ResultSet rs = ps.executeQuery()) {
+            rs.next();
+            return rs.getInt(1);
+        }
     }
 }

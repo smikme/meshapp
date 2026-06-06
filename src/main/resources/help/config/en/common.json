@@ -1,4 +1,5 @@
 {
+  "version": 1,
   "sections": {
     "owner_info": {
       "summary": "Device name and short callsign visible to other users on the mesh.",
@@ -170,6 +171,59 @@
       "summary": "MeshCore Companion channels and their roles. This section is read-only.",
       "whenToUse": "Use it to inspect configured channels.",
       "defaultBehavior": "Values are reported by the device."
+    }
+  },
+  "types": {
+    "category": {
+      "summary": "A section groups related settings.",
+      "whenToUse": "Expand it and change only settings whose purpose you understand.",
+      "defaultBehavior": "If unsure, leave values inside the section unchanged."
+    },
+    "boolean": {
+      "summary": "A switch turns a feature on or off.",
+      "whenToUse": "Change it when you explicitly want to enable or disable the described feature.",
+      "defaultBehavior": "If unsure, keep the current value.",
+      "valueHint": "Only two values are possible.",
+      "values": {
+        "true": {
+          "title": "Enabled",
+          "description": "The feature is active and the device will use the described behavior."
+        },
+        "false": {
+          "title": "Disabled",
+          "description": "The feature is not used. This is usually safe when you do not need it."
+        }
+      }
+    },
+    "enum": {
+      "summary": "This setting chooses one mode from a fixed list.",
+      "whenToUse": "Change it when you know which mode your use case needs.",
+      "defaultBehavior": "If unsure, keep the current mode.",
+      "valueHint": "All firmware-supported choices are listed below."
+    },
+    "number": {
+      "summary": "A numeric setting defines an interval, threshold, pin, power, or another quantity.",
+      "whenToUse": "Change only if you know the unit and understand what the number affects.",
+      "defaultBehavior": "If unsure, keep the current value.",
+      "valueHint": "Enter a number. Very short intervals can drain battery and use more airtime."
+    },
+    "string": {
+      "summary": "A text setting: name, address, key, topic, format, or another string.",
+      "whenToUse": "Change it when you need a specific text, address, or format.",
+      "defaultBehavior": "An empty string often means firmware default behavior.",
+      "valueHint": "Enter text without extra spaces. For addresses and formats, follow the example in the setting description."
+    },
+    "bytes": {
+      "summary": "Binary data shown in encoded form.",
+      "whenToUse": "Change only when you have the exact key or data value.",
+      "defaultBehavior": "A wrong value can break access, encryption, or administrative features.",
+      "valueHint": "Usually a Base64 string."
+    },
+    "repeated": {
+      "summary": "A list of values of the same type.",
+      "whenToUse": "Add or remove list entries only when you understand what each entry means.",
+      "defaultBehavior": "The empty last row is used to add a new value.",
+      "valueHint": "Each row in the list is a separate value."
     }
   },
   "fields": {
@@ -2810,59 +2864,6 @@
           "description": "TAK operational role: K9."
         }
       }
-    }
-  },
-  "types": {
-    "category": {
-      "summary": "A section groups related settings.",
-      "whenToUse": "Expand it and change only settings whose purpose you understand.",
-      "defaultBehavior": "If unsure, leave values inside the section unchanged."
-    },
-    "boolean": {
-      "summary": "A switch turns a feature on or off.",
-      "whenToUse": "Change it when you explicitly want to enable or disable the described feature.",
-      "defaultBehavior": "If unsure, keep the current value.",
-      "valueHint": "Only two values are possible.",
-      "values": {
-        "true": {
-          "title": "Enabled",
-          "description": "The feature is active and the device will use the described behavior."
-        },
-        "false": {
-          "title": "Disabled",
-          "description": "The feature is not used. This is usually safe when you do not need it."
-        }
-      }
-    },
-    "enum": {
-      "summary": "This setting chooses one mode from a fixed list.",
-      "whenToUse": "Change it when you know which mode your use case needs.",
-      "defaultBehavior": "If unsure, keep the current mode.",
-      "valueHint": "All firmware-supported choices are listed below."
-    },
-    "number": {
-      "summary": "A numeric setting defines an interval, threshold, pin, power, or another quantity.",
-      "whenToUse": "Change only if you know the unit and understand what the number affects.",
-      "defaultBehavior": "If unsure, keep the current value.",
-      "valueHint": "Enter a number. Very short intervals can drain battery and use more airtime."
-    },
-    "string": {
-      "summary": "A text setting: name, address, key, topic, format, or another string.",
-      "whenToUse": "Change it when you need a specific text, address, or format.",
-      "defaultBehavior": "An empty string often means firmware default behavior.",
-      "valueHint": "Enter text without extra spaces. For addresses and formats, follow the example in the setting description."
-    },
-    "bytes": {
-      "summary": "Binary data shown in encoded form.",
-      "whenToUse": "Change only when you have the exact key or data value.",
-      "defaultBehavior": "A wrong value can break access, encryption, or administrative features.",
-      "valueHint": "Usually a Base64 string."
-    },
-    "repeated": {
-      "summary": "A list of values of the same type.",
-      "whenToUse": "Add or remove list entries only when you understand what each entry means.",
-      "defaultBehavior": "The empty last row is used to add a new value.",
-      "valueHint": "Each row in the list is a separate value."
     }
   }
 }

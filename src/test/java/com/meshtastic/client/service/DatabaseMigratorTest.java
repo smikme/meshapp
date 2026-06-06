@@ -400,6 +400,25 @@ class DatabaseMigratorTest {
     }
 
     @Test
+    void migrateFromV19CreatesConfigHelpTables() throws Exception {
+        try (Connection connection = openConnection("upgrade-v19-config-help")) {
+            createSchemaVersion(connection, 19);
+
+            DatabaseMigrator.migrate(connection);
+
+            assertEquals(DatabaseMigrator.CURRENT_VERSION, schemaVersion(connection));
+            assertTrue(tableExists(connection, "CONFIG_HELP_DOCUMENTS"));
+            assertTrue(tableExists(connection, "CONFIG_HELP_ARTICLES"));
+            assertTrue(columnExists(connection, "CONFIG_HELP_DOCUMENTS", "VERSION"));
+            assertTrue(columnExists(connection, "CONFIG_HELP_DOCUMENTS", "CHECKSUM"));
+            assertTrue(columnExists(connection, "CONFIG_HELP_ARTICLES", "CONTENT_JSON"));
+            assertTrue(columnExists(connection, "CONFIG_HELP_ARTICLES", "SEARCH_TEXT"));
+            assertTrue(indexExists(connection, "IDX_CONFIG_HELP_LOOKUP"));
+            assertTrue(indexExists(connection, "IDX_CONFIG_HELP_SEARCH_SCOPE"));
+        }
+    }
+
+    @Test
     void migrateLegacyAppDatabaseWithoutSchemaVersionPreservesMessages() throws Exception {
         try (Connection connection = openConnection("legacy-app-preserve")) {
             try (Statement stmt = connection.createStatement()) {

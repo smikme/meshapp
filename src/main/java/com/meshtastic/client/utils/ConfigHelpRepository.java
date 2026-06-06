@@ -1,5 +1,6 @@
 package com.meshtastic.client.utils;
 
+import com.google.gson.Gson;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -7,32 +8,48 @@ import com.google.protobuf.Descriptors.EnumValueDescriptor;
 import com.google.protobuf.Descriptors.FieldDescriptor;
 import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.model.ConfigTreeItem;
+import com.meshtastic.client.service.DatabaseMigrator;
+import com.meshtastic.client.service.DatabaseProvider;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 /**
- * Loads localized configuration help documents and combines them with protobuf metadata.
+ * Resolves localized configuration help from the local H2 database.
  * <p>
- * Help files are searched by language tag, then by base language, then by the
- * fallback language. This lets new UI languages provide help text by adding
- * resources under {@code /help/config/<language>/} without changing Java code.
+ * Bundled JSON files are parsed only during import. Each help request performs
+ * a database lookup for the specific section, field, or type article it needs,
+ * avoiding a process-wide in-memory copy of the help documentation.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public final class ConfigHelpRepository {
 
+    private static final Logger log = LoggerFactory.getLogger(ConfigHelpRepository.class);
     private static final ConfigHelpRepository INSTANCE =
         new ConfigHelpRepository();
+    private static final Gson GSON = new Gson();
     private static final String FALLBACK_LANGUAGE = I18n.LANGUAGE_EN;
     private static final List<String> HELP_FILES = List.of("common.json");
 
-    private final Map<String, HelpBundle> bundles = new HashMap<>();
+    private final Object importLock = new Object();
+    private volatile boolean bundledDocumentsVerified;
 
     /**
      * Returns the shared repository instance.
@@ -41,6 +58,15 @@ public final class ConfigHelpRepository {
      */
     public static ConfigHelpRepository getInstance() {
         return INSTANCE;
+    }
+
+    /**
+     * Marks bundled help documents as needing another version check.
+     * <p>
+     * Used after a full database reset. This flag does not contain help text.
+     */
+    public void invalidateLoadedState() {
+        bundledDocumentsVerified = false;
     }
 
     /**
@@ -54,6 +80,7 @@ public final class ConfigHelpRepository {
     }
 
     ConfigHelpContent helpFor(ConfigTreeItem item, String language) {
+        ensureBundledDocumentsLoaded();
         if (item == null) {
             return new ConfigHelpContent(
                 "",
@@ -68,7 +95,7 @@ public final class ConfigHelpRepository {
             );
         }
 
-        List<HelpBundle> languageBundles = bundlesFor(language);
+        List<String> languageCandidates = languageCandidates(language);
         FieldDescriptor fieldDescriptor = item.getFieldDescriptor();
         boolean category = item.isCategory();
 
@@ -76,12 +103,12 @@ public final class ConfigHelpRepository {
             item,
             fieldDescriptor,
             category,
-            languageBundles
+            languageCandidates
         );
         HelpEntry typeEntry = typeEntry(
             item,
             fieldDescriptor,
-            languageBundles
+            languageCandidates
         );
 
         String title = item.getName();
@@ -151,19 +178,102 @@ public final class ConfigHelpRepository {
         );
     }
 
-    HelpBundle bundleForTests(String language) {
-        return bundle(language);
+    /**
+     * Searches localized help articles in the database.
+     *
+     * @param query user search text
+     * @param language preferred UI language
+     * @param limit maximum number of rows to return
+     * @return matching articles, ordered by language fallback and article key
+     */
+    public List<HelpSearchResult> search(
+        String query,
+        String language,
+        int limit
+    ) {
+        ensureBundledDocumentsLoaded();
+        if (!hasText(query) || limit <= 0) {
+            return List.of();
+        }
+
+        List<HelpSearchResult> results = new ArrayList<>();
+        Set<String> seen = new LinkedHashSet<>();
+        String pattern = "%" + query.trim().toLowerCase(Locale.ROOT) + "%";
+        for (String candidate : languageCandidates(language)) {
+            int remaining = limit - results.size();
+            if (remaining <= 0) {
+                break;
+            }
+            results.addAll(searchLanguage(candidate, pattern, remaining, seen));
+        }
+        return List.copyOf(results);
+    }
+
+    boolean hasArticleForTests(
+        String language,
+        String articleType,
+        String articleKey
+    ) {
+        ensureBundledDocumentsLoaded();
+        return findArticle(
+            articleType,
+            articleKey,
+            List.of(normalizeLanguageTag(language))
+        ) != null;
+    }
+
+    HelpEntry articleForTests(
+        String language,
+        String articleType,
+        String articleKey
+    ) {
+        ensureBundledDocumentsLoaded();
+        return findArticle(
+            articleType,
+            articleKey,
+            List.of(normalizeLanguageTag(language))
+        );
+    }
+
+    int documentVersionForTests(String language, String documentId) {
+        ensureBundledDocumentsLoaded();
+        Connection connection = DatabaseProvider.getConnection();
+        if (connection == null) {
+            return -1;
+        }
+        try (PreparedStatement ps = connection.prepareStatement("""
+                SELECT version
+                FROM config_help_documents
+                WHERE language_tag = ? AND document_id = ?
+                """)) {
+            ps.setString(1, normalizeLanguageTag(language));
+            ps.setString(2, documentId);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next() ? rs.getInt("version") : -1;
+            }
+        } catch (SQLException e) {
+            log.error("Failed to read help document version", e);
+            return -1;
+        }
+    }
+
+    void resetLoadedStateForTests() {
+        invalidateLoadedState();
     }
 
     private HelpEntry findEntry(
         ConfigTreeItem item,
         FieldDescriptor fieldDescriptor,
         boolean category,
-        List<HelpBundle> languageBundles
+        List<String> languageCandidates
     ) {
         if (category) {
             String sectionId = sectionId(item);
-            HelpEntry sectionEntry = findSection(sectionId, languageBundles);
+            HelpEntry sectionEntry = findArticle(
+                "section",
+                sectionId,
+                languageCandidates
+            );
             if (sectionEntry != null) {
                 return sectionEntry;
             }
@@ -188,7 +298,7 @@ public final class ConfigHelpRepository {
         }
 
         for (String id : ids) {
-            HelpEntry entry = findField(id, languageBundles);
+            HelpEntry entry = findArticle("field", id, languageCandidates);
             if (entry != null) {
                 return entry;
             }
@@ -212,10 +322,10 @@ public final class ConfigHelpRepository {
     private HelpEntry typeEntry(
         ConfigTreeItem item,
         FieldDescriptor fieldDescriptor,
-        List<HelpBundle> languageBundles
+        List<String> languageCandidates
     ) {
         String typeKey = typeKey(item, fieldDescriptor);
-        return findType(typeKey, languageBundles);
+        return findArticle("type", typeKey, languageCandidates);
     }
 
     private List<ConfigHelpContent.ValueHelp> valuesFor(
@@ -399,38 +509,295 @@ public final class ConfigHelpRepository {
         return "";
     }
 
-    private HelpEntry findSection(
-        String id,
-        List<HelpBundle> languageBundles
+    private HelpEntry findArticle(
+        String articleType,
+        String articleKey,
+        List<String> languageCandidates
     ) {
-        return firstEntry(languageBundles, bundle -> bundle.sections().get(id));
-    }
-
-    private HelpEntry findField(
-        String id,
-        List<HelpBundle> languageBundles
-    ) {
-        return firstEntry(languageBundles, bundle -> bundle.fields().get(id));
-    }
-
-    private HelpEntry findType(
-        String id,
-        List<HelpBundle> languageBundles
-    ) {
-        return firstEntry(languageBundles, bundle -> bundle.types().get(id));
-    }
-
-    private static HelpEntry firstEntry(
-        List<HelpBundle> languageBundles,
-        java.util.function.Function<HelpBundle, HelpEntry> selector
-    ) {
-        for (HelpBundle bundle : languageBundles) {
-            HelpEntry entry = selector.apply(bundle);
-            if (entry != null) {
-                return entry;
+        if (!hasText(articleKey)) {
+            return null;
+        }
+        for (String language : languageCandidates) {
+            for (String documentId : documentIds()) {
+                HelpEntry entry = findArticle(
+                    normalizeLanguageTag(language),
+                    documentId,
+                    articleType,
+                    articleKey
+                );
+                if (entry != null) {
+                    return entry;
+                }
             }
         }
         return null;
+    }
+
+    private HelpEntry findArticle(
+        String language,
+        String documentId,
+        String articleType,
+        String articleKey
+    ) {
+        Connection connection = DatabaseProvider.getConnection();
+        if (connection == null) {
+            return null;
+        }
+        try (PreparedStatement ps = connection.prepareStatement("""
+                SELECT content_json
+                FROM config_help_articles
+                WHERE language_tag = ?
+                  AND document_id = ?
+                  AND article_type = ?
+                  AND article_key = ?
+                """)) {
+            ps.setString(1, language);
+            ps.setString(2, documentId);
+            ps.setString(3, articleType);
+            ps.setString(4, articleKey);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) {
+                    return null;
+                }
+                return readHelpEntry(
+                    JsonParser.parseString(rs.getString("content_json"))
+                        .getAsJsonObject()
+                );
+            }
+        } catch (Exception e) {
+            log.error(
+                "Failed to load config help article {}:{}:{}:{}",
+                language,
+                documentId,
+                articleType,
+                articleKey,
+                e
+            );
+            return null;
+        }
+    }
+
+    private List<HelpSearchResult> searchLanguage(
+        String language,
+        String pattern,
+        int limit,
+        Set<String> seen
+    ) {
+        Connection connection = DatabaseProvider.getConnection();
+        if (connection == null) {
+            return List.of();
+        }
+        List<HelpSearchResult> results = new ArrayList<>();
+        try (PreparedStatement ps = connection.prepareStatement("""
+                SELECT language_tag, article_type, article_key, content_json
+                FROM config_help_articles
+                WHERE language_tag = ?
+                  AND LOWER(CAST(search_text AS VARCHAR)) LIKE ?
+                ORDER BY article_type, article_key
+                LIMIT ?
+                """)) {
+            ps.setString(1, normalizeLanguageTag(language));
+            ps.setString(2, pattern);
+            ps.setInt(3, limit);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    String key = rs.getString("article_type") +
+                        ":" +
+                        rs.getString("article_key");
+                    if (!seen.add(key)) {
+                        continue;
+                    }
+                    HelpEntry entry = readHelpEntry(
+                        JsonParser.parseString(rs.getString("content_json"))
+                            .getAsJsonObject()
+                    );
+                    results.add(
+                        new HelpSearchResult(
+                            rs.getString("language_tag"),
+                            rs.getString("article_type"),
+                            rs.getString("article_key"),
+                            entry.summary()
+                        )
+                    );
+                }
+            }
+        } catch (Exception e) {
+            log.error("Failed to search config help articles", e);
+        }
+        return results;
+    }
+
+    private void ensureBundledDocumentsLoaded() {
+        if (bundledDocumentsVerified) {
+            return;
+        }
+        synchronized (importLock) {
+            if (bundledDocumentsVerified) {
+                return;
+            }
+            Connection connection = DatabaseProvider.getConnection();
+            if (connection == null) {
+                return;
+            }
+            try {
+                DatabaseMigrator.createConfigHelpTables(connection);
+                for (String language : supportedHelpLanguages()) {
+                    for (String fileName : HELP_FILES) {
+                        importBundledDocumentIfNeeded(
+                            connection,
+                            language,
+                            fileName
+                        );
+                    }
+                }
+                bundledDocumentsVerified = true;
+            } catch (SQLException e) {
+                log.error("Failed to initialize config help tables", e);
+            }
+        }
+    }
+
+    private void importBundledDocumentIfNeeded(
+        Connection connection,
+        String language,
+        String fileName
+    ) {
+        String resource = "/help/config/" + language + "/" + fileName;
+        try (InputStream input =
+                ConfigHelpRepository.class.getResourceAsStream(resource)) {
+            if (input == null) {
+                return;
+            }
+            byte[] bytes = input.readAllBytes();
+            JsonObject root = JsonParser
+                .parseReader(
+                    new InputStreamReader(
+                        new ByteArrayInputStream(bytes),
+                        StandardCharsets.UTF_8
+                    )
+                )
+                .getAsJsonObject();
+            HelpDocument document = new HelpDocument(
+                normalizeLanguageTag(language),
+                documentIdFor(fileName),
+                documentVersion(root),
+                checksum(bytes),
+                root
+            );
+            if (!documentNeedsImport(connection, document)) {
+                return;
+            }
+            importDocument(connection, document);
+        } catch (Exception e) {
+            log.error("Failed to import config help resource {}", resource, e);
+        }
+    }
+
+    private boolean documentNeedsImport(
+        Connection connection,
+        HelpDocument document
+    ) throws SQLException {
+        try (PreparedStatement ps = connection.prepareStatement("""
+                SELECT version, checksum
+                FROM config_help_documents
+                WHERE language_tag = ? AND document_id = ?
+                """)) {
+            ps.setString(1, document.language());
+            ps.setString(2, document.documentId());
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) {
+                    return true;
+                }
+                return rs.getInt("version") != document.version() ||
+                    !document.checksum().equals(rs.getString("checksum"));
+            }
+        }
+    }
+
+    private void importDocument(
+        Connection connection,
+        HelpDocument document
+    ) throws SQLException {
+        boolean autoCommit = connection.getAutoCommit();
+        connection.setAutoCommit(false);
+        try {
+            try (PreparedStatement delete = connection.prepareStatement("""
+                    DELETE FROM config_help_articles
+                    WHERE language_tag = ? AND document_id = ?
+                    """)) {
+                delete.setString(1, document.language());
+                delete.setString(2, document.documentId());
+                delete.executeUpdate();
+            }
+
+            try (PreparedStatement upsert = connection.prepareStatement("""
+                    MERGE INTO config_help_documents (
+                        language_tag, document_id, version, checksum, loaded_at
+                    )
+                    KEY (language_tag, document_id)
+                    VALUES (?, ?, ?, ?, ?)
+                    """)) {
+                upsert.setString(1, document.language());
+                upsert.setString(2, document.documentId());
+                upsert.setInt(3, document.version());
+                upsert.setString(4, document.checksum());
+                upsert.setLong(5, System.currentTimeMillis());
+                upsert.executeUpdate();
+            }
+
+            try (PreparedStatement insert = connection.prepareStatement("""
+                    INSERT INTO config_help_articles (
+                        language_tag, document_id, article_type, article_key,
+                        content_json, search_text, updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """)) {
+                insertEntryMap(insert, document, "section", "sections");
+                insertEntryMap(insert, document, "type", "types");
+                insertEntryMap(insert, document, "field", "fields");
+                insert.executeBatch();
+            }
+
+            connection.commit();
+            log.info(
+                "Imported config help document {}:{} v{}",
+                document.language(),
+                document.documentId(),
+                document.version()
+            );
+        } catch (SQLException e) {
+            connection.rollback();
+            throw e;
+        } finally {
+            connection.setAutoCommit(autoCommit);
+        }
+    }
+
+    private void insertEntryMap(
+        PreparedStatement insert,
+        HelpDocument document,
+        String articleType,
+        String rootKey
+    ) throws SQLException {
+        JsonObject object = document.root().getAsJsonObject(rootKey);
+        if (object == null) {
+            return;
+        }
+        long now = System.currentTimeMillis();
+        for (Map.Entry<String, JsonElement> entry : object.entrySet()) {
+            if (entry.getValue() == null || !entry.getValue().isJsonObject()) {
+                continue;
+            }
+            JsonObject article = entry.getValue().getAsJsonObject();
+            insert.setString(1, document.language());
+            insert.setString(2, document.documentId());
+            insert.setString(3, articleType);
+            insert.setString(4, entry.getKey());
+            insert.setString(5, GSON.toJson(article));
+            insert.setString(6, searchText(entry.getKey(), article));
+            insert.setLong(7, now);
+            insert.addBatch();
+        }
     }
 
     private String sectionId(ConfigTreeItem item) {
@@ -505,69 +872,6 @@ public final class ConfigHelpRepository {
         };
     }
 
-    private HelpBundle bundle(String language) {
-        String normalized = normalizeLanguageTag(language);
-        synchronized (bundles) {
-            return bundles.computeIfAbsent(normalized, this::loadBundle);
-        }
-    }
-
-    private List<HelpBundle> bundlesFor(String language) {
-        return languageCandidates(language)
-            .stream()
-            .map(this::bundle)
-            .toList();
-    }
-
-    private HelpBundle loadBundle(String language) {
-        Map<String, HelpEntry> sections = new HashMap<>();
-        Map<String, HelpEntry> fields = new HashMap<>();
-        Map<String, HelpEntry> types = new HashMap<>();
-        for (String fileName : HELP_FILES) {
-            String resource = "/help/config/" + language + "/" + fileName;
-            try (
-                InputStream input =
-                    ConfigHelpRepository.class.getResourceAsStream(resource)
-            ) {
-                if (input == null) {
-                    continue;
-                }
-                JsonObject root = JsonParser
-                    .parseReader(
-                        new InputStreamReader(input, StandardCharsets.UTF_8)
-                    )
-                    .getAsJsonObject();
-                readEntryMap(root.getAsJsonObject("sections"), sections);
-                readEntryMap(root.getAsJsonObject("fields"), fields);
-                readEntryMap(root.getAsJsonObject("types"), types);
-            } catch (Exception ignored) {
-                // Invalid optional help files should not block configuration editing.
-            }
-        }
-        return new HelpBundle(
-            Map.copyOf(sections),
-            Map.copyOf(fields),
-            Map.copyOf(types)
-        );
-    }
-
-    private static void readEntryMap(
-        JsonObject object,
-        Map<String, HelpEntry> target
-    ) {
-        if (object == null) {
-            return;
-        }
-        for (Map.Entry<String, JsonElement> entry : object.entrySet()) {
-            if (entry.getValue() != null && entry.getValue().isJsonObject()) {
-                target.put(
-                    entry.getKey(),
-                    readHelpEntry(entry.getValue().getAsJsonObject())
-                );
-            }
-        }
-    }
-
     private static HelpEntry readHelpEntry(JsonObject object) {
         return new HelpEntry(
             stringValue(object, "summary"),
@@ -634,6 +938,28 @@ public final class ConfigHelpRepository {
         return List.copyOf(candidates);
     }
 
+    private static List<String> supportedHelpLanguages() {
+        LinkedHashSet<String> languages = new LinkedHashSet<>();
+        for (I18n.LanguageOption option : I18n.supportedLanguages()) {
+            if (!I18n.LANGUAGE_SYSTEM.equals(option.tag())) {
+                languages.add(normalizeLanguageTag(option.tag()));
+            }
+        }
+        languages.add(FALLBACK_LANGUAGE);
+        return List.copyOf(languages);
+    }
+
+    private static List<String> documentIds() {
+        return HELP_FILES.stream().map(ConfigHelpRepository::documentIdFor).toList();
+    }
+
+    private static String documentIdFor(String fileName) {
+        String baseName = fileName.endsWith(".json")
+            ? fileName.substring(0, fileName.length() - ".json".length())
+            : fileName;
+        return "config/" + baseName;
+    }
+
     private static void addLanguageCandidate(
         List<String> candidates,
         String language
@@ -653,6 +979,54 @@ public final class ConfigHelpRepository {
             return FALLBACK_LANGUAGE;
         }
         return locale.toLanguageTag();
+    }
+
+    private static int documentVersion(JsonObject root) {
+        JsonElement version = root.get("version");
+        return version != null && version.isJsonPrimitive()
+            ? Math.max(1, version.getAsInt())
+            : 1;
+    }
+
+    private static String checksum(byte[] bytes) throws Exception {
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        byte[] hash = digest.digest(bytes);
+        StringBuilder builder = new StringBuilder(hash.length * 2);
+        for (byte value : hash) {
+            builder.append(String.format(Locale.ROOT, "%02x", value & 0xff));
+        }
+        return builder.toString();
+    }
+
+    private static String searchText(String articleKey, JsonObject article) {
+        List<String> parts = new ArrayList<>();
+        append(parts, articleKey);
+        append(parts, stringValue(article, "summary"));
+        append(parts, stringValue(article, "whenToUse"));
+        append(parts, stringValue(article, "defaultBehavior"));
+        append(parts, stringValue(article, "valueHint"));
+        parts.addAll(readStringList(article.get("notes")));
+
+        JsonObject values = article.getAsJsonObject("values");
+        if (values != null) {
+            for (Map.Entry<String, JsonElement> value : values.entrySet()) {
+                append(parts, value.getKey());
+                if (value.getValue() != null && value.getValue().isJsonObject()) {
+                    JsonObject valueObject = value.getValue().getAsJsonObject();
+                    append(parts, stringValue(valueObject, "title"));
+                    append(parts, stringValue(valueObject, "description"));
+                }
+            }
+        }
+        return String.join("\n", parts)
+            .toLowerCase(Locale.ROOT)
+            .trim();
+    }
+
+    private static void append(List<String> parts, String value) {
+        if (hasText(value)) {
+            parts.add(value.trim());
+        }
     }
 
     private static boolean shouldShowTechnicalDetails(
@@ -684,10 +1058,27 @@ public final class ConfigHelpRepository {
         return value != null && !value.isBlank();
     }
 
-    record HelpBundle(
-        Map<String, HelpEntry> sections,
-        Map<String, HelpEntry> fields,
-        Map<String, HelpEntry> types
+    /**
+     * Search result for a single help article.
+     *
+     * @param languageTag language of the matched article
+     * @param articleType article collection, such as {@code field}
+     * @param articleKey stable article key
+     * @param summary short article summary
+     */
+    public record HelpSearchResult(
+        String languageTag,
+        String articleType,
+        String articleKey,
+        String summary
+    ) {}
+
+    private record HelpDocument(
+        String language,
+        String documentId,
+        int version,
+        String checksum,
+        JsonObject root
     ) {}
 
     record HelpEntry(
