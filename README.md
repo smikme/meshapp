@@ -5,8 +5,8 @@
 <h1 align="center">MeshApp</h1>
 
 <p align="center">
-  Cross-platform desktop client for the
-  <a href="https://meshtastic.org">Meshtastic</a> and MeshCore mesh networks
+  Desktop client for
+  <a href="https://meshtastic.org">Meshtastic</a> and MeshCore networks
   <br/>
   <b>Java 25 &nbsp;·&nbsp; JavaFX &nbsp;·&nbsp; Protobuf &nbsp;·&nbsp; LoRa</b>
 </p>
@@ -17,8 +17,8 @@
   <img src="https://img.shields.io/badge/Platform-Win%20%7C%20macOS%20%7C%20Linux-brightgreen" alt="Platform"/>
   <img src="https://img.shields.io/badge/License-AGPL--3.0-blue" alt="License"/>
   <a href="https://t.me/+SRaOd1gftoo5MWRi">
-  <img src="https://img.shields.io/badge/Telegram-@MeshAppClient-blue?logo=telegram" alt="Telegram">
-</a>
+    <img src="https://img.shields.io/badge/Telegram-@MeshAppClient-blue?logo=telegram" alt="Telegram">
+  </a>
 </p>
 
 <p align="center">
@@ -36,39 +36,39 @@
 
 ## About
 
-**MeshApp** is a full-featured cross-platform desktop client for [Meshtastic](https://meshtastic.org) and MeshCore. It works over **TCP**, **Serial / USB** and **BLE** and is designed for device management, messaging, network monitoring and radio module configuration from Windows, macOS and Linux PCs.
+MeshApp is a desktop application for Meshtastic and MeshCore devices. It connects to a device over the network, USB, or BLE.
 
-The codebase supports multiple communication protocols: the transport layer is separated from protocol runtimes. MeshApp currently includes **Meshtastic**, the **MeshCore KISS** runtime over TCP/Serial byte streams, and the **MeshCore Companion Protocol** runtime for BLE and raw TCP/Serial byte streams. New connections use Meshtastic by default; MeshCore is selected explicitly in the connection form.
+The application can exchange messages, show network nodes on a map, display telemetry, change device settings, inspect LoRa packets, and run Lua scripts.
 
-Meshtastic is an open project that turns inexpensive LoRa modules into decentralized mesh-network nodes. Messages can travel from hundreds of meters to tens of kilometers without internet access, cellular towers or any other infrastructure.
+New connection profiles use Meshtastic by default. For MeshCore, select the operating mode when creating the profile:
 
-MeshCore is a lightweight mesh protocol for LoRa and other packet-radio devices. MeshApp supports **MeshCore KISS modem** mode for TCP/Serial and **MeshCore Companion Protocol** for BLE, TCP and Serial endpoints that provide raw Companion packets.
+- `MeshCore KISS` - for TCP and Serial / USB
+- `MeshCore Companion` - for BLE, TCP, and Serial / USB
+
+The connection type and protocol are selected separately. For example, you can connect over TCP to a Meshtastic device, over USB to a MeshCore KISS modem, or over BLE to a device with MeshCore Companion.
 
 ![MeshApp architecture](docs/meshapp-architecture.jpg)
 
 ---
 
-## What's New
+## What the App Can Do
 
-- **Multi-protocol architecture**: the transport layer (`TCP`, `Serial`, `BLE`) is separated from protocol adapters; Meshtastic, MeshCore KISS and MeshCore Companion have independent runtimes.
-- **Explicit protocol selection**: new connections use Meshtastic by default; MeshCore KISS and MeshCore Companion are selected in the connection profile.
-- **MeshCore Companion in main screens**: Chat, Nodes, direct messages, Telemetry, Settings and LoRa Packets use a shared `DeviceState` bridge for MeshCore Companion Protocol.
-- **Connection profile autostart**: selected connections can be established automatically when the application starts.
-- **Maps and trace history**: saved traceroute results are available from the node tab and can be opened on the map.
-- **MeshApp IDE**: Lua scripts, script store, import/export, autostart, KV storage, editor and debugger are built into the app.
-- **Input commands**: `@tracebot` and `@infobot` include node autocompletion for quick `Traceroute` and `NodeInfo` requests.
-- **Chat notifications**: mute/unmute per channel and DM, saved locally.
-- **Crash / problem reporting**: MeshApp can offer to send a log after a crash or send a manual report from the Help window.
-- **LoRa packet monitoring**: a live capture window with direction/type/date-time filters, search, HEX / ASCII preview and JSON/CSV export.
-- **PC time synchronization**: set the current radio time from the PC clock and update GMT when needed.
-- **Local database cleanup**: reset messages, reactions, node cache, telemetry and the LoRa packet journal from the UI.
-- **Advanced configuration editor**: human-readable editors for IPv4, node IDs, hex values and bitmask fields, plus per-item editing for repeated fields.
+MeshApp includes:
+
+- Chats in network channels and direct conversations.
+- A network node list with search, filters, favorite devices, and ignored devices.
+- A map with online and offline tiles, network nodes, measurements, and saved routes.
+- Device and network telemetry: current values, history, charts, and table view.
+- Meshtastic device settings: configuration, channels, and editors for complex fields.
+- Connections over TCP, USB/Serial, and BLE; Meshtastic, MeshCore KISS, and MeshCore Companion.
+- Application logs and LoRa packet viewing with filters, search, and export.
+- Lua scripts: editor, debugger, autostart, bots, data storage, and script store.
+- A local database for messages, telemetry, network nodes, routes, scripts, and the packet log.
+- Terminal mode without JavaFX.
 
 ---
 
-## Features
-
-### Chat and Messaging
+## Chats
 
 <p align="center">
   <img src="docs/screenshots/chat-b.jpg" width="49%" alt="Chat - dark theme"/>
@@ -76,180 +76,168 @@ MeshCore is a lightweight mesh protocol for LoRa and other packet-radio devices.
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/chat-node-info-b.jpg" width="49%" alt="Chat node info - dark theme"/>
-  <img src="docs/screenshots/chat-node-info-w.jpg" width="49%" alt="Chat node info - light theme"/>
+  <img src="docs/screenshots/chat-node-info-b.jpg" width="49%" alt="Node information in chat - dark theme"/>
+  <img src="docs/screenshots/chat-node-info-w.jpg" width="49%" alt="Node information in chat - light theme"/>
 </p>
 
-- **Multi-channel chat**: send and receive messages in several mesh channels.
-- **Direct messages**: private conversations with individual nodes.
-- **Replies**: quote messages with context.
-- **Message reactions**: quick emoji reactions with persistence and delivery tracking.
-- **Delivery status**: ACK/NAK tracking for sent messages.
-- **Traceroute**: visualize routes to network nodes and save successful results.
-- **NodeInfo request**: request current node data on demand.
-- **`@tracebot` and `@infobot` commands**: run traceroute and node-info requests directly from the input line with suggestions by name and `!nodeid`.
-- **Channel management**: create secondary channels and edit name, PSK, uplink/downlink and position precision.
-- **Emoji**: built-in emoji picker.
-- **Unread counter**: badges for every chat.
-- **Chat notifications**: enable or disable notifications per channel and DM through the bell icon and context menu.
-- **History**: searchable full message history stored in the local database.
-- **Local history cleanup**: delete individual messages and entire chats from the embedded database.
+Chats include network channels and direct conversations. Messages are stored locally; replies, reactions, delivery status, and unread counters are supported.
+
+The input line can run `@tracebot` and `@infobot` commands. They check the route to the selected node and request information about it; while typing, the app suggests node names and addresses.
+
+Channels can be created and edited: name, access key, position sharing settings, and position precision. Notifications can be enabled or disabled separately for each channel and direct conversation.
 
 ---
 
-### Network Nodes
+## Nodes
 
 <p align="center">
   <img src="docs/screenshots/nodes-b.jpg" width="49%" alt="Nodes - dark theme"/>
   <img src="docs/screenshots/nodes-w.jpg" width="49%" alt="Nodes - light theme"/>
 </p>
 
-- **Flexible sorting and filters**: last heard time, distance, SNR, hops, channel, favorites, ignored nodes, direct nodes and offline nodes.
-- **Search** by name, short name, ID or numeric address.
-- **Detailed node card**: hardware, role, coordinates, firmware, SNR/RSSI and telemetry chart.
-- **Quick actions**: open private chat, run traceroute, request fresh NodeInfo or remove a node from the local list.
-- **Traces tab**: traceroute history for the selected node with creation date, date filter and lazy loading on scroll.
-- **Open trace on map**: each saved trace can be opened in the map form through the map icon.
-- **Favorite and ignored nodes**: local storage and synchronization with the device.
-- **Node caching**: local database with pagination.
+The nodes screen shows devices currently visible in the network and devices already saved in the local database. Search is available by name, short name, identifier, and numeric address. Filters are available by last heard time, distance, signal quality, hop count, channel, favorite nodes, ignored nodes, direct nodes, and unavailable nodes.
+
+The node card shows role, hardware model, coordinates, firmware version, signal level, and a telemetry chart. From the card you can open a direct chat, check the route to the node, refresh information about it, or remove the node from the local list.
+
+Route check history is stored separately for each node. A saved route can be opened on the map.
 
 ---
 
-### Maps
+## Map
 
 <p align="center">
   <img src="docs/screenshots/map-b.jpg" width="49%" alt="Map - dark theme"/>
   <img src="docs/screenshots/map-w.jpg" width="49%" alt="Map - light theme"/>
 </p>
 
-- **OSM node map**: display current and cached nodes with coordinates.
-- **Online and offline tiles**: network OSM tiles, local cache and selected `z/x/y.png|jpg|jpeg` directory.
-- **Search and filters**: search nodes, filter unknown/offline/favorite/direct/ignored nodes.
-- **Navigation**: jump to own node, fit all nodes with coordinates, zoom and use night map mode.
-- **Measurements**: measure distance between points and select a rectangular area.
-- **Area download**: download tiles for a selected area with progress, pause and cancel.
-- **Trace visualization**: select recent saved traceroute results and overlay one or more routes on the map.
+The map shows nodes with coordinates and saved routes. Network OpenStreetMap tiles, local cache, and an offline tile directory in `z/x/y.png|jpg|jpeg` format are supported.
+
+The map includes search, filters, jump to your own device, overview of all nodes with coordinates, night mode, distance measurement, and rectangular area selection. The selected area can be downloaded for use without internet access; the download can be paused or canceled.
 
 ---
 
-### Telemetry and Monitoring
+## Telemetry
 
 <p align="center">
   <img src="docs/screenshots/telemetry-b.jpg" width="49%" alt="Telemetry - dark theme"/>
   <img src="docs/screenshots/telemetry-w.jpg" width="49%" alt="Telemetry - light theme"/>
 </p>
 
-- **Device dashboard**: a dedicated screen with Charts and Data tabs.
-- **Real-time charts**: battery, voltage, channel utilization and Air Util TX.
-- **Period filters**: from 1 hour to the full history.
-- **Data aggregation**: automatic averaging for smoother curves.
-- **Telemetry table**: detailed records with timestamps.
-- **Advanced metrics**: Good RX, Bad RX, Dupe RX, TX, Dropped, Relayed, RSSI, SNR and hop data.
-- **Lazy log loading**: long histories are loaded while scrolling.
+Telemetry shows device and network state: battery charge, voltage, channel load, airtime used for transmission, receive quality, sent, lost, and relayed packet counts, signal level, and hop data.
+
+Data can be viewed on charts or in a table. The period can be selected from 1 hour to the full history. For long periods, values are averaged so the charts remain readable.
 
 ---
 
-### Connections
+## Connections
 
 <p align="center">
   <img src="docs/screenshots/connections-b.jpg" width="49%" alt="Connections - dark theme"/>
   <img src="docs/screenshots/connections-w.jpg" width="49%" alt="Connections - light theme"/>
 </p>
 
-- **TCP, Serial / USB and BLE**: connect over the network, a COM/tty port or Bluetooth LE.
-- **Separate transport and protocol layers**: a connection opens a low-level transport and starts the runtime of the protocol selected in the profile.
-- **Device discovery**: serial-port discovery and BLE scanning for Meshtastic/MeshCore devices.
-- **Connection profiles**: store addresses, ports and BLE devices for quick reconnects.
-- **Autoconnect**: profile flag that starts the connection automatically when the app launches; disabled by default.
-- **Single active connection**: the app works with one selected device at a time.
-- **BLE pairing**: passkey/pairing flow when required by the device or platform.
-- **Automatic configuration exchange**: device parameters are fetched automatically on connect.
-- **Automatic reconnect**: retry recovery after disconnects.
-- **Serial DTR/RTS setup**: select modem-line mode for USB-UART adapters.
-- **Reliable Serial for USB-UART bridges**: works with CH340/CP210x/FTDI without causing unnecessary ESP32 resets; includes separate compatibility handling for Windows + Silicon Labs / CP210x.
+MeshApp can work with several connections in parallel. Connection profiles store the address, port, selected BLE device, USB / Serial settings, and protocol. Automatic connection on application startup can be enabled for the desired profile.
 
-#### MeshCore
+Supported connection types:
 
-The current MeshCore integration in MeshApp supports **MeshCore KISS modem protocol** over **Serial / USB** or **TCP**, and **MeshCore Companion Protocol** over **BLE**, **TCP** and **Serial**. New profiles use Meshtastic by default; to use MeshCore, explicitly select `MeshCore KISS` or `MeshCore Companion` in the protocol field.
+- TCP
+- Serial / USB
+- BLE
 
-MeshCore Companion does not use KISS framing. BLE uses service `6E400001-B5A3-F393-E0A9-E50E24DCCA9E`, RX characteristic `6E400002-B5A3-F393-E0A9-E50E24DCCA9E` and TX notifications `6E400003-B5A3-F393-E0A9-E50E24DCCA9E`. TCP/Serial endpoints are supported when they provide raw Companion packets without a KISS wrapper.
+For Serial / USB, port discovery and DTR/RTS line settings are available. Common USB-UART chips CH340, CP210x, and FTDI are supported; Windows with Silicon Labs / CP210x has separate connection handling.
+
+For BLE, device discovery, GATT connection, and passkey pairing are supported when required by the device or operating system.
+
+After connecting, MeshApp performs the initial exchange with the device:
+
+- Meshtastic: settings exchange
+- MeshCore KISS: negotiation through `SetHardware`
+- MeshCore Companion: exchange startup through `APP_START`
+
+### MeshCore
+
+MeshCore is supported in two variants:
+
+- `MeshCore KISS` works over TCP or Serial / USB.
+- `MeshCore Companion` works over BLE, TCP, or Serial / USB.
+
+MeshCore Companion does not use the KISS format. For BLE it uses:
+
+- service `6E400001-B5A3-F393-E0A9-E50E24DCCA9E`
+- RX characteristic `6E400002-B5A3-F393-E0A9-E50E24DCCA9E`
+- TX notifications `6E400003-B5A3-F393-E0A9-E50E24DCCA9E`
+
+When connecting over TCP or Serial, the device must send Companion packets without an additional KISS wrapper.
 
 Currently supported:
 
-- standard KISS framing (`FEND`, `FESC`, escape sequences) for TCP/Serial byte streams
-- explicit `MESHCORE_KISS` selection in the connection form
-- basic metadata through MeshCore `SetHardware`: device name, version, identity, radio parameters, TX power, battery, stats, RSSI/SNR metadata and TX status
-- BLE MeshCore Companion profile with separate RX/TX UUIDs, subscription to TX notifications and `APP_START` handshake
-- `FrameFormat.MESHCORE_COMPANION` for TCP/Serial raw Companion packets
-- Companion metadata: self-info, public key, device name, device info and battery/storage packet
-- MeshCore contacts and channel info synchronized into the shared Nodes/Chat state
-- incoming channel messages and DMs from the Companion Protocol queue
-- outgoing channel messages and DMs through MeshCore Companion Protocol
-- read-only MeshCore metadata in Settings
-- raw MeshCore Companion packets in LoRa Packets
+- KISS format (`FEND`, `FESC`, and escape sequences) for TCP and Serial
+- reading device information through MeshCore `SetHardware`: name, version, identifier, LoRa parameters, TX power, battery, statistics, RSSI/SNR data, and TX status
+- MeshCore Companion BLE profile with RX/TX UUIDs, subscription to TX notifications, and `APP_START`
+- `FrameFormat.MESHCORE_COMPANION` for Companion packets over TCP and Serial
+- information about the local device, public key, device data, battery, and storage
+- contacts and channel information in the shared nodes and chat screens
+- incoming and outgoing channel messages and direct messages through Companion Protocol
+- viewing MeshCore information in settings without editing
+- MeshCore Companion packets in LoRa Debug
 - active protocol display in the connection card
 
-Current limitations:
+Limitations:
 
-- MeshCore KISS is TCP/Serial only; MeshCore Companion over TCP/Serial requires an endpoint that really provides raw Companion packets.
-- MeshCore KISS remains a modem/metadata integration; application workflows are implemented through MeshCore Companion Protocol.
-- MeshCore Companion does not support Meshtastic-only features: Admin protobuf save-flow, reactions, traceroute and Meshtastic bot commands.
+- MeshCore KISS works only over TCP and Serial.
+- MeshCore Companion over TCP/Serial works only with devices that send Companion packets without a KISS wrapper.
+- MeshCore KISS is currently used for modem mode and reading device information; chats, direct messages, and the main user workflows are implemented through MeshCore Companion.
+- MeshCore Companion does not include functions that belong only to Meshtastic: saving settings through Admin protobuf, reactions, route checks, and Meshtastic bot commands.
 
-Details are available in [docs/meshcore-support.md](docs/meshcore-support.md).
+Details: [docs/meshcore-support.md](docs/meshcore-support.md).
 
 ---
 
-### Device Configuration
+## Device Settings
 
 <p align="center">
   <img src="docs/screenshots/settings-b.jpg" width="49%" alt="Settings - dark theme"/>
   <img src="docs/screenshots/settings-w.jpg" width="49%" alt="Settings - light theme"/>
 </p>
 
-- **Parameter editing**: full LoRa module configuration through a tree interface.
-- **Node name**: set Long Name (40 characters) and Short Name (4 characters).
-- **Atomic save**: transactional begin/commit mechanism for grouped changes.
-- **All modules**: configure Device, LoRa, Position, Power, Network, Bluetooth, Display and other modules.
-- **Human-readable field editors**: IPv4 addresses, node IDs, hex values and bitmask fields can be edited without manually recalculating protobuf values.
-- **Repeated fields as slots**: lists such as `admin_key` and `ignore_incoming` can be added, removed and edited item by item.
-- **PC time synchronization**: set node time from the computer clock, update GMT and resynchronize after reconnect when reboot is required.
-- **Configuration snapshots**: export and import full configuration as `.mcf`.
-- **Configuration templates**: export and import depersonalized `.mtp` templates without personal or secret fields.
-- **Local database cleanup**: reset the embedded H2 database, deleting messages, reactions, telemetry, node cache and packet journal.
-- **Device power management**: restart and shut down hardware from the UI.
+Meshtastic device settings open as a tree of sections: device, LoRa, position, power, network, Bluetooth, display, and other settings.
+
+The interface lets you change the long and short device name, edit configuration fields, save several changes in one operation, synchronize device time with the computer, reboot the device, and shut it down.
+
+For fields that are inconvenient to edit manually, separate editors are available: IPv4 addresses, node identifiers, hexadecimal values, bitmasks, and value lists such as `admin_key` and `ignore_incoming`.
+
+Configuration can be exported and imported:
+
+- `.mcf` - full configuration copy
+- `.mtp` - template without personal and secret data
+
+The interface can also clear the local H2 database: messages, reactions, telemetry, node cache, and packet log.
 
 ---
 
-### Diagnostics and Logging
+## Logs and LoRa Packets
 
 <p align="center">
   <img src="docs/screenshots/logs-b.jpg" width="49%" alt="Logs - dark theme"/>
   <img src="docs/screenshots/logs-w.jpg" width="49%" alt="Logs - light theme"/>
 </p>
 
-- **Built-in logs**: view debug information with level coloring.
-- **Log controls**: pause/resume autoscroll, copy, clear and export to `.log`.
-- **LoRa packet monitor**: separate live-capture window for incoming and outgoing mesh packets.
-- **Capture controls**: start, stop and clear the accumulated packet journal.
-- **Filters and search**: filter by direction, type, date/time range, nodes and payload, with pagination for long logs.
-- **HEX / ASCII and packet tree**: inspect raw bytes, protobuf structure and highlighted selected fields.
-- **Packet export**: copy or save the selected packet as text or protobuf-style JSON, and export the whole filtered set as JSON or CSV.
-- **Crash and problem reports**: send technical logs to developers after a crash or manually from the Help window.
-
-#### LoRa Debug
-
 <p align="center">
   <img src="docs/screenshots/loradebug-b.jpg" width="49%" alt="LoRa Debug - dark theme"/>
   <img src="docs/screenshots/loradebug-w.jpg" width="49%" alt="LoRa Debug - light theme"/>
 </p>
 
-`LoRa Debug` helps inspect real mesh traffic at the individual-packet level. The window shows incoming, outgoing and internal `MeshPacket` records, lets you filter the journal by direction, message type and content, and keeps the selected type filter when the available type list is refreshed.
+The built-in log viewer supports colored log levels, pausing autoscroll, copy, clear, and export to `.log`.
 
-The tool is useful for delivery diagnostics, checking `NodeInfo` / `Telemetry` / `Position` packets, analyzing `MQTT proxy` traffic and viewing raw protobuf data through HEX / ASCII preview and a packet-structure tree. Large journals use dynamic page loading, and JSON/CSV export is performed in batches with a progress indicator.
+LoRa Debug shows incoming, outgoing, and internal `MeshPacket` entries. Packets can be filtered by direction, type, time, nodes, and content. For the selected packet, HEX and ASCII views, protobuf tree, and field highlighting are available.
+
+The selected packet can be copied or saved. The filtered set can be exported to JSON or CSV.
+
+If the application crashes or a problem needs to be sent to the developers, a report can be sent after the crash or manually from the Help window.
 
 ---
 
-### MeshApp IDE and Lua Scripts
+## Lua Scripts and MeshApp IDE
 
 <p align="center">
   <img src="docs/screenshots/luascripts-b.jpg" width="49%" alt="Lua scripts - dark theme"/>
@@ -266,74 +254,46 @@ The tool is useful for delivery diagnostics, checking `NodeInfo` / `Telemetry` /
   <img src="docs/screenshots/shop-w.jpg" width="49%" alt="Script store - light theme"/>
 </p>
 
-#### Lua Development IDE
+MeshApp IDE is a built-in environment for Lua scripts and bots. Scripts are created and run directly from the application, stored in the local database, and can be exported to `.meshapp-script.json`.
 
-MeshApp IDE is the built-in workspace for writing, testing and packaging Lua automation directly inside the client. Basic functions:
+The IDE includes:
 
-- **Script workspace**: create scripts, open the editor, run or stop execution, enable autostart, edit metadata and delete scripts from script cards.
-- **Code editor**: syntax highlighting, line numbers, auto-indent, syntax checks, saving code to the local database and context-aware completion for `mesh.*`, standard Lua libraries and detected local symbols.
-- **Runtime console**: script output, start/stop statuses, syntax errors and runtime errors while testing against the active or configured node.
-- **Debugging**: line-gutter breakpoints, debug run, continue, step execution and local/global variable inspection while execution is paused.
-- **KV storage**: inspect and edit the isolated key-value database for the selected script, including search, create/update and delete operations.
-- **Script packaging**: import and export `.meshapp-script.json` files with source code and metadata.
-- **Script Store**: open the catalog, filter by type and install, update or remove scripts.
-- **Sandboxed runtime**: scripts use the allowed Lua functions and the `mesh` namespace; unsafe APIs such as `io`, `os`, `debug`, `package`, `require`, `dofile`, `loadfile` and `luajava` are disabled.
-- **Mesh API entry points**: use `on_message(msg)` for air bots, `on_command(command)` for automation bots and async callbacks such as `on_node_selected(event)`, `on_traceroute(event)` and `on_node_info(event)`. The full API is documented in [docs/lua-api.md](docs/lua-api.md).
+- script cards with name, icon, author, version, type, and status
+- script settings: description, autostart, bot type, binding to a node or automation name
+- Lua editor with highlighting, line numbers, auto indentation, and `mesh.*` completion
+- syntax checking and runtime error output
+- debugger with breakpoints, step-by-step execution, and local/global variable views
+- isolated data storage for each script
+- script store with install, update, and local copy removal
 
-#### Lua Script Features
+Scripts run in an isolated LuaJ environment. Dangerous APIs are disabled: `io`, `os`, `debug`, `package`, `require`, `dofile`, `loadfile`, `luajava`.
 
-- **Script list**: cards with name, emoji icon, author, version, type, run status and last-modified time without exposing the internal ID.
-- **Script settings**: name, author, description, icon, autostart, bot type and binding to a node or automation name.
-- **Code versioning**: version is incremented only when Lua code changes; settings changes do not increment it.
-- **Air and automation bots**: scripts can listen to chat through `on_message` or start from the input line command through `on_command`.
-- **Script autostart**: scripts with autostart enabled start for the selected node after the connection is ready.
-- **Lua editor**: separate window with syntax highlighting, line numbers, auto-indent and `mesh.*` completion.
-- **Debugger**: breakpoints, debug run, continue, step execution and local/global variable inspection.
-- **KV storage**: isolated key-value storage per script with a dedicated editor.
-- **Import and export**: move scripts in `.meshapp-script.json` JSON files with metadata.
-- **Script store**: load catalog from MeshApp Store, filter by type, display author, install, update and remove local copies.
-- **API documentation**: the built-in sandbox API is documented separately with a short Lua reference and examples.
+Entry points:
+
+- `on_message(msg)` - reaction to a new message
+- `on_command(command)` - command handling
+- `on_node_selected(event)`, `on_traceroute(event)`, `on_node_info(event)` - asynchronous event handlers
+
+API documentation: [docs/lua-api.md](docs/lua-api.md).
 
 ---
 
-### Interface
+## Interface and Local Data
 
 <p align="center">
   <img src="docs/screenshots/info-b.jpg" width="49%" alt="Help and information - dark theme"/>
   <img src="docs/screenshots/info-w.jpg" width="49%" alt="Help and information - light theme"/>
 </p>
 
-- **Dark and light themes**: AtlantaFX Cupertino.
-- **Native window appearance**: Mica effect on Windows 11 and vibrancy on macOS.
-- **Custom titlebar**: platform-style window buttons.
-- **Sidebar**: fast navigation between sections.
-- **System tray / status item**: minimize to tray, restore the window and quit the app.
-- **System notifications**: native OS notifications for incoming messages, suppressed when the active chat is already open.
-- **Sidebar toggles**: quickly switch theme and notifications without opening Settings.
-- **Update check**: optional new-version check on startup.
-- **Application settings**: disable visual effects, use software rendering and choose minimize-to-tray mode.
-- **Window state persistence**: restore size, position, maximized state and splitters between sessions.
-- **Toast notifications**: non-disruptive event feedback.
-- **Terminal mode**: Lanterna TUI client for connecting and using chats without the JavaFX UI.
+The interface includes dark and light AtlantaFX Cupertino themes, a sidebar, a system tray/status item, toast notifications, and quick switches for theme and notifications. Windows 11 uses Mica, and macOS uses vibrancy. Window size and position, as well as splitter positions, are saved between sessions.
 
----
+System notifications are shown for new messages if the corresponding chat is not open. Update checks on startup can be enabled or disabled in settings.
 
-### Cache and Integrations
+Messages, reactions, unread chats, favorite and ignored nodes, telemetry, scripts, script data, route check history, and the LoRa packet log are stored locally.
 
-- **OneMesh import**: load a public node cache into the local H2 database for a faster start and richer node cards.
-- **MQTT proxy bridge**: when `MQTT proxy_to_client` is enabled, MeshApp starts a desktop-side bridge to the broker and proxies messages between the device and MQTT.
-- **Broker parameters from the device**: address, root topic, TLS, login/password and retained publications are taken from the MQTT module configuration, with local loopback suppression.
-- **Local persistence**: messages, reactions, unread chats, favorite/ignored nodes, telemetry, scripts, KV data, traces and the LoRa packet journal are preserved between sessions.
+Importing the public OneMesh cache and a local MQTT bridge for `MQTT proxy_to_client` are also supported. Broker parameters are taken from the device MQTT configuration.
 
----
-
-## Lua API for Scripts
-
-MeshApp supports custom Lua scripts and bots in a LuaJ sandbox. Scripts can use the `mesh` namespace for chats, local KV storage, limited HTTP(S) requests, node selection, traceroute and NodeInfo. Unsafe global APIs such as `io`, `os`, `debug`, `package`, `require`, `dofile`, `loadfile` and `luajava` are disabled.
-
-Scripts can react to new messages through `on_message(msg)`, handle bot commands through `on_command(command)` and receive asynchronous operation results through `on_node_selected(event)`, `on_traceroute(event)` and `on_node_info(event)`.
-
-Full Lua API documentation, object fields and working examples are available in [docs/lua-api.md](docs/lua-api.md).
+For use without JavaFX, a terminal mode based on Lanterna is available.
 
 ---
 
@@ -341,92 +301,104 @@ Full Lua API documentation, object fields and working examples are available in 
 
 ### Requirements
 
-To build and run from source:
+Building and running from source requires:
 
-- **JDK 25 toolchain** (downloaded automatically by Gradle Toolchain)
-- **Git** for cloning the repository
-- **macOS**: Xcode Command Line Tools (`cc`) to build `libmeshapp-serial.dylib` and `libmeshapp-tray.dylib`
-- **Windows**: CMake + MSVC Build Tools to build `meshapp-ble.dll`
-- **Linux**: CMake + C/C++ toolchain + `libsystemd-dev` / `systemd-devel` to build `libmeshapp-ble.so`
+- Git
+- JDK 25; Gradle can download the required toolchain automatically
+- macOS: Xcode Command Line Tools (`cc`) for `libmeshapp-serial.dylib` and `libmeshapp-tray.dylib`
+- Windows: CMake + MSVC Build Tools for `meshapp-ble.dll`
+- Linux: CMake + C/C++ toolchain + `libsystemd-dev` / `systemd-devel` for `libmeshapp-ble.so`
 
-Release packages (`.dmg`, `.msi`, `.deb`, `.AppImage`, `.flatpak`) do not require these build dependencies.
+Ready-made packages (`.dmg`, `.msi`, `.deb`, `.AppImage`, `.flatpak`) do not need these build dependencies.
 
-### Build and Run
+### Running from Source
 
 ```bash
-# Clone the repository
 git clone https://git.privatepractice.app/covox/meshapp.git
 cd meshapp
 
-# Run the application
+# JavaFX application
 ./gradlew run
 
-# Run terminal mode
+# Terminal mode
 ./gradlew runTerminal
 
 # Terminal mode with a temporary TCP profile
 ./gradlew runTerminal --args="--host 192.168.1.10 --protocol meshtastic"
-
-# Run with local JMX for VisualVM/JConsole/JMC
-./gradlew run -PjmxDebugEnabled=true
-
-# Run VisualVM memory profiler mode
-./gradlew run -PvisualVmProfilerEnabled=true
-
-# Build .app/.dmg with VisualVM memory profiler mode
-./gradlew jpackage -PvisualVmProfilerEnabled=true
-
-# JMX on a different local port
-./gradlew run -PjmxDebugEnabled=true -PjmxDebugPort=9011
-
-# Build native installer (.dmg / .msi / .deb)
-./gradlew jpackage
-
-# Linux: build portable AppImage
-./gradlew appImage -Pappimagetool=/path/to/appimagetool.AppImage
-
-# Linux: build Flatpak bundle
-./gradlew flatpak
 ```
-
-When JMX is enabled, the app listens on `127.0.0.1` only; connection address:
-`service:jmx:rmi:///jndi/rmi://127.0.0.1:9010/jmxrmi`. For another port, replace
-`9010` with the `jmxDebugPort` value. The same can be enabled through
-`MESHAPP_JMX_DEBUG=true` and `MESHAPP_JMX_PORT=9011`.
-
-For memory analysis in VisualVM, use `Sampler > Memory` over a local JMX connection. `Profiler > Memory` is an instrumentation profiler; on Java 25/GraalVM/JavaFX/macOS its native agent may crash together with the target JVM.
-
-If you still need to test `Profiler > Memory`, start the app with `-PvisualVmProfilerEnabled=true`. This mode also enables local JMX, disables class data sharing (`-Xshare:off`) and disables the Graal/JVMCI JIT compiler during profiling. For another port use `-PvisualVmProfilerEnabled=true -PjmxDebugPort=9011`. The mode can also be enabled with the `MESHAPP_VISUALVM_PROFILER=true` environment variable.
-
-If profiling a packaged macOS `.app`, rebuild it with `-PvisualVmProfilerEnabled=true`: an already existing `.app` does not receive new JVM options automatically.
-
-Software-rendering flags for bypassing macOS `CVDisplayLink` are not enabled by default because they can make the UI unusable. For a one-off test, add:
-`-PvisualVmSoftwareRenderingEnabled=true`.
-
-If VisualVM shows `Provided Memory settings are invalid` when starting `Profiler > Memory`, open memory profiler settings and replace the placeholder in `Profile classes` with a valid filter, for example `com.meshtastic.client.**` for application code or `**` for all classes.
 
 ### Connecting to a Device
 
-1. Connect a Meshtastic or MeshCore device over USB/TCP/BLE.
-2. In **Connections**, add a new profile and choose type: **TCP**, **Serial / USB** or **BLE**.
-3. Select the protocol. **Meshtastic** is selected by default; for MeshCore choose **MeshCore KISS** or **MeshCore Companion**.
-4. For **Serial / USB**, select the detected port; for **BLE**, start scanning and select a device from the list.
-5. If the platform or device requires pairing, confirm pairing / enter passkey.
-6. Click **Connect**. Meshtastic starts config exchange; MeshCore KISS performs the SetHardware handshake; MeshCore Companion performs the `APP_START` handshake.
-7. For Meshtastic, switch to **Chats**, **Nodes** or **Settings**. For MeshCore Companion, **Chats**, **Nodes**, direct messages, **Telemetry**, **Settings** and **LoRa Packets** are available; MeshCore KISS shows modem metadata.
+1. Connect the device over USB, TCP, or BLE.
+2. Open **Connections**.
+3. Add a profile: **TCP**, **Serial / USB**, or **BLE**.
+4. Select the protocol. New profiles use **Meshtastic** by default; for MeshCore select **MeshCore KISS** or **MeshCore Companion**.
+5. For **Serial / USB**, select the port. For **BLE**, start scanning and select the device.
+6. If the device or operating system requests a passkey, confirm pairing.
+7. Click **Connect**.
+
+After connecting to Meshtastic, chats, nodes, map, settings, and the other main screens are available. For MeshCore Companion, chats, nodes, direct messages, telemetry, settings, and LoRa Debug are available. For MeshCore KISS, modem information is shown.
 
 ### Linux: USB Serial Access
 
-If the USB port is visible in the list but connection fails with `Permission denied`, the current user has no access to `/dev/ttyUSB*` or `/dev/ttyACM*`. Check the device-node group and add the user to it:
+If the USB port is visible but the connection fails with `Permission denied`, the user does not have access to `/dev/ttyUSB*` or `/dev/ttyACM*`.
 
 ```bash
 ls -l /dev/ttyUSB0
 sudo usermod -aG dialout "$USER"
 ```
 
-On some distributions the group is named `uucp` or `lock`; use the group shown by `ls -l`. After changing groups, log out and back in. The MeshApp `.deb` package also installs udev rules for common USB-UART Meshtastic boards so the active local user receives a `uaccess` ACL and ModemManager does not claim the port.
+On some distributions the group is named `uucp` or `lock`; use the group shown by `ls -l`. After changing groups, log out and log back in.
 
-If the error looks like `Device or resource busy`, the port is already open in another process. Usually it is another serial monitor/CLI or ModemManager.
+The MeshApp `.deb` package installs udev rules for common USB-UART Meshtastic boards. The active local user receives a `uaccess` ACL, and ModemManager does not take over the port.
+
+If the error looks like `Device or resource busy`, the port is already open in another process: serial monitor, CLI, or ModemManager.
+
+---
+
+## Debug Run and Profiling
+
+Local JMX for VisualVM, JConsole, or JMC:
+
+```bash
+./gradlew run -PjmxDebugEnabled=true
+./gradlew run -PjmxDebugEnabled=true -PjmxDebugPort=9011
+```
+
+When JMX is enabled, the application listens only on `127.0.0.1`. Connection address:
+`service:jmx:rmi:///jndi/rmi://127.0.0.1:9010/jmxrmi`. For another port, replace `9010` with the `jmxDebugPort` value.
+
+The same can be enabled through environment variables:
+
+```bash
+MESHAPP_JMX_DEBUG=true
+MESHAPP_JMX_PORT=9011
+```
+
+For VisualVM, `Sampler > Memory` over a local JMX connection is usually enough. `Profiler > Memory` instruments classes; on Java 25/GraalVM/JavaFX/macOS its native agent can crash the target JVM.
+
+If you specifically need `Profiler > Memory`, run the application this way:
+
+```bash
+./gradlew run -PvisualVmProfilerEnabled=true
+./gradlew run -PvisualVmProfilerEnabled=true -PjmxDebugPort=9011
+```
+
+This mode enables JMX, disables class data sharing (`-Xshare:off`), and disables the Graal/JVMCI JIT during profiling. It can be enabled through the `MESHAPP_VISUALVM_PROFILER=true` environment variable.
+
+If profiling a built macOS `.app`, rebuild it with the same flag:
+
+```bash
+./gradlew jpackage -PvisualVmProfilerEnabled=true
+```
+
+Software rendering for checking macOS `CVDisplayLink` problems is disabled by default. For a one-time check:
+
+```bash
+./gradlew run -PvisualVmSoftwareRenderingEnabled=true
+```
+
+If VisualVM shows `Provided Memory settings are invalid`, open memory profiler settings and replace the template in `Profile classes` with a valid filter, for example `com.meshtastic.client.**` or `**`.
 
 ---
 
@@ -434,53 +406,53 @@ If the error looks like `Device or resource busy`, the port is already open in a
 
 | Component | Technology | Purpose |
 |-----------|------------|---------|
-| UI | JavaFX 25.0.3 + AtlantaFX | Interface with native appearance |
-| Protocol runtime | `CommunicationProtocol` + `ProtocolRuntime` | Run protocol adapters over an open transport |
-| Protocol selection | `ProtocolRegistry` + `ProtocolType` | Start the runtime selected in the connection profile |
-| Meshtastic protocol | Protobuf 4.33.4 + Meshtastic schemas | Serialize `ToRadio` / `FromRadio` and process mesh packets |
-| MeshCore KISS protocol | KISS framing + MeshCore `SetHardware` | Basic handshake and MeshCore KISS modem metadata |
-| MeshCore Companion protocol | MeshCore Companion Protocol + BLE RX/TX or raw TCP/Serial packets | Handshake, metadata, contacts, channels, Chat/DM and raw packet monitor |
-| Transport layer | `TransportConnection` | Common contract for TCP, Serial, BLE and future transport implementations |
-| Database | H2 (embedded) | Local storage for messages, telemetry, scripts, traces and journals |
-| Maps | JavaFX `TileMapView` + OSM tiles | Online/offline node map, tile cache and trace visualization |
-| Lua runtime | LuaJ 3.0.1 | Sandbox scripts, bots, KV storage and `mesh.*` API |
-| Lua editor | RichTextFX | Code editor with highlighting, lines, completion and debugger |
-| Terminal mode | Lanterna | TUI client for running without the JavaFX interface |
-| MQTT bridge | Eclipse Paho MQTT | Desktop-side proxy to an external MQTT broker for `proxy_to_client` |
-| TCP | `java.net.Socket` | Meshtastic TCP API, MeshCore KISS endpoint or raw MeshCore Companion endpoint |
-| Serial | Native JNA backends + jSerialComm discovery | Native COM/tty access without jSerialComm I/O; Meshtastic, MeshCore KISS and MeshCore Companion framing |
-| BLE | CoreBluetooth / WinRT / BlueZ through JNA | BLE scanning, GATT and pairing on supported platforms |
-| Native integrations | JNA + platform bridges | Mica (Win), vibrancy (macOS), tray/status item and system bridges |
-| Build | Gradle 9.4.1 + Protobuf + CMake + jpackage | Java/native compilation and installer packaging |
+| Interface | JavaFX 25.0.3 + AtlantaFX | Main interface |
+| Meshtastic | Protobuf 4.33.4 + Meshtastic schemas | `ToRadio` / `FromRadio` and mesh packets |
+| MeshCore KISS | KISS format + MeshCore `SetHardware` | Initial exchange and MeshCore KISS modem information |
+| MeshCore Companion | Companion Protocol + BLE RX/TX or TCP/Serial without KISS wrapper | Initial exchange, device information, contacts, channels, chats, and packet viewing |
+| Transport | `TransportConnection` | Shared contract for TCP, Serial, BLE, and future connection methods |
+| Database | Embedded H2 | Messages, telemetry, scripts, routes, and logs |
+| Maps | JavaFX `TileMapView` + OpenStreetMap tiles | Online and offline map, saved routes |
+| Lua environment | LuaJ 3.0.1 | Isolated scripts, bots, data storage, and `mesh.*` API |
+| Lua editor | RichTextFX | Highlighting, line numbers, completion, and debugger |
+| Terminal mode | Lanterna | Text interface without JavaFX |
+| MQTT bridge | Eclipse Paho MQTT | Local proxy for `proxy_to_client` |
+| TCP | `java.net.Socket` | Meshtastic TCP API, MeshCore KISS, or Companion connection without KISS wrapper |
+| Serial | Native JNA backends + jSerialComm discovery | Native COM/tty access |
+| BLE | CoreBluetooth / WinRT / BlueZ through JNA | BLE device discovery, GATT, and pairing |
+| Native integrations | JNA + OS integrations | Mica, vibrancy, system tray/status item, and platform layers |
+| Build | Gradle 9.4.1 + Protobuf + CMake + jpackage | Java code, native library, and installer builds |
 
 ---
 
 ## Protocol Architecture
 
-Connections in MeshApp are now split into two independent layers:
+This section is for developers. To use the application, it is enough to select the connection type and protocol in the profile.
 
-- **Transport**: only delivers bytes by opening/closing the connection, writing data and forwarding incoming payloads upward. The common contract is `TransportConnection`; transport factory is `TransportConnectionFactory`.
-- **Protocol runtime**: gives meaning to those bytes: framing, parsing, handshake/config exchange, runtime state and protocol services. Common contracts are `CommunicationProtocol`, `ProtocolRuntime`, `ProtocolRuntimeContext` and `ProtocolRegistry`.
+Connections in MeshApp are split into two levels:
 
-Currently registered protocols:
+- **Transport** opens the connection, writes bytes, and passes incoming data to the protocol level. Shared contract: `TransportConnection`; factory: `TransportConnectionFactory`.
+- **Protocol environment** handles frame format, packet parsing, initial exchange, protocol state, and services for a specific protocol. Shared contracts: `CommunicationProtocol`, `ProtocolRuntime`, `ProtocolRuntimeContext`, and `ProtocolRegistry`.
 
-| ProtocolType | Runtime | Purpose |
-|--------------|---------|---------|
-| `MESHTASTIC` | `MeshtasticProtocolRuntime` | `ProtocolHandler`, `DeviceState`, config exchange, incoming mesh packets, MQTT proxy |
-| `MESHCORE_KISS` | `MeshCoreKissProtocolRuntime` | KISS SetHardware handshake, device name/version/identity/radio/battery/stats metadata |
-| `MESHCORE_COMPANION` | `MeshCoreCompanionProtocolRuntime` | MeshCore Companion `APP_START`, self-info/device-info/battery, contacts, channel info, Chat/DM |
+Registered protocols:
 
-The protocol runtime is selected from the saved `ProtocolType`. TCP/Serial immediately receive the matching `FrameFormat`; BLE connects to the selected protocol's GATT profile. Old profiles without a `protocol` field use Meshtastic.
+| ProtocolType | Environment | Purpose |
+|--------------|-------------|---------|
+| `MESHTASTIC` | `MeshtasticProtocolRuntime` | `ProtocolHandler`, `DeviceState`, settings exchange, incoming mesh packets, MQTT proxy |
+| `MESHCORE_KISS` | `MeshCoreKissProtocolRuntime` | Initial KISS `SetHardware` exchange, device name, version, identifier, LoRa, battery, and statistics |
+| `MESHCORE_COMPANION` | `MeshCoreCompanionProtocolRuntime` | Companion `APP_START`, local device information, battery, contacts, channels, chats, and direct messages |
+
+The environment is selected from the stored `ProtocolType`. TCP/Serial receive the matching `FrameFormat`; BLE connects to the GATT profile of the selected protocol. Old profiles without a `protocol` field are treated as Meshtastic profiles.
 
 To add a new protocol:
 
-1. Add a value to `ProtocolType`.
-2. Implement `CommunicationProtocol<S>` and `ProtocolRuntime<S>`.
-3. Register the adapter in `ProtocolRegistry`.
-4. Add UI/services that work with the new runtime state.
-5. Extend `ConnectionEntry` and `TransportConnectionFactory` if the protocol requires a new transport type.
+1. Add a value to `ProtocolType`
+2. Implement `CommunicationProtocol<S>` and `ProtocolRuntime<S>`
+3. Register the adapter in `ProtocolRegistry`
+4. Add interface and services for the new protocol state
+5. Extend `ConnectionEntry` and `TransportConnectionFactory` if needed
 
-The existing UI still uses compatible Meshtastic accessors from `ConnectionManager` (`getDeviceState`, `getProtocolHandler`, `getConfigFuture`). New protocols should access their state through the runtime abstraction or dedicated typed accessors.
+Some of the interface still uses Meshtastic-compatible access methods from `ConnectionManager` (`getDeviceState`, `getProtocolHandler`, `getConfigFuture`). New protocols should get their state through the protocol environment abstraction or typed access methods.
 
 ---
 
@@ -490,40 +462,40 @@ The existing UI still uses compatible Meshtastic accessors from `ConnectionManag
 meshapp/
 |-- src/main/java/com/meshtastic/client/
 |   |-- MeshAppLauncher.java      # Entry point: JavaFX or terminal mode
-|   |-- MeshApp.java              # JavaFX Application
-|   |-- connection/               # TransportConnection, TCP/Serial/BLE transport layer
-|   |   |-- ble/                  # BLE transport + platform backends
-|   |   \-- serial/               # Native serial I/O (Win/macOS/Linux)
-|   |-- lua/                      # Lua runtime, sandbox API, script store/import/export
-|   |-- protocol/                 # Shared protocol runtime API and registry
-|   |   |-- meshcore/             # MeshCore KISS and Companion protocol adapters/runtimes
-|   |   \-- meshtastic/           # Meshtastic protocol adapter/runtime
-|   |-- terminal/                 # Lanterna TUI
+|   |-- MeshApp.java              # JavaFX application
+|   |-- connection/               # TransportConnection and TCP/Serial/BLE transport
+|   |   |-- ble/                  # BLE transport and platform implementations
+|   |   \-- serial/               # Native Serial I/O for Windows/macOS/Linux
+|   |-- lua/                      # Lua environment, isolated API, script store, import/export
+|   |-- protocol/                 # Shared protocol environment APIs and registry
+|   |   |-- meshcore/             # MeshCore KISS and Companion adapters/environments
+|   |   \-- meshtastic/           # Meshtastic adapter and environment
+|   |-- terminal/                 # Text interface on Lanterna
 |   |-- model/                    # Data models and runtime state
-|   |-- service/                  # Persistence, discovery, reconnect, config exchange
+|   |-- service/                  # Data storage, device discovery, reconnect, settings exchange
 |   |-- forms/                    # Main application screens
-|   |-- components/               # Reusable UI components
-|   |   \-- map/                  # OSM tile map components
+|   |-- components/               # Reusable interface components
+|   |   \-- map/                  # OpenStreetMap tile map components
 |   |-- notification/             # System notifications
-|   |-- platform/                 # OS-specific UI / system integration
-|   |-- system/                   # App framework (FormManager, RootPane)
-|   |-- tray/                     # System tray / status item
+|   |-- platform/                 # OS interface and system integrations
+|   |-- system/                   # Application framework: FormManager, RootPane
+|   |-- tray/                     # System tray/status item
 |   \-- themes/                   # Theme management
 |-- native/
 |   |-- windows-ble/              # WinRT BLE DLL
 |   |-- linux-ble/                # BlueZ BLE shared library
-|   |-- macos-serial/             # macOS serial helper dylib
-|   \-- macos-tray/               # macOS native tray/status item bridge
-|-- src/main/proto/meshtastic/    # Meshtastic protobuf schemas
+|   |-- macos-serial/             # macOS Serial helper library
+|   \-- macos-tray/               # Native macOS system tray/status item integration
+|-- src/main/proto/meshtastic/    # Meshtastic Protobuf schemas
 |-- src/main/resources/           # CSS, fonts, icons, logos
-\-- build.gradle                  # Build configuration
+\-- build.gradle                  # Build settings
 ```
 
 ---
 
 ## Building Installers
 
-MeshApp uses `jpackage` for native packages and additionally supports portable `AppImage` and sandboxed `Flatpak` on Linux:
+MeshApp is built through `jpackage`. AppImage and Flatpak are additionally supported for Linux.
 
 | Platform | Format | Command |
 |----------|--------|---------|
@@ -533,9 +505,9 @@ MeshApp uses `jpackage` for native packages and additionally supports portable `
 | Linux | `.AppImage` | `./gradlew appImage -Pappimagetool=/path/to/appimagetool.AppImage` |
 | Linux | `.flatpak` | `./gradlew flatpak` |
 
-`AppImage` requires `appimagetool`: either in `PATH` or provided through `-Pappimagetool=...` / `APPIMAGETOOL=...`. If using the `.AppImage` version of `appimagetool`, `APPIMAGE_EXTRACT_AND_RUN=1` may be required.
+`AppImage` requires `appimagetool`: either in `PATH` or through `-Pappimagetool=...` / `APPIMAGETOOL=...`. If the `.AppImage` version of `appimagetool` itself is used, `APPIMAGE_EXTRACT_AND_RUN=1` may be needed.
 
-`Flatpak` requires `flatpak` and `flatpak-builder`, plus installed runtime/SDK. By default the local bundle task uses `org.freedesktop.Platform//25.08` and `org.freedesktop.Sdk//25.08`:
+`Flatpak` requires `flatpak`, `flatpak-builder`, runtime, and SDK. By default, `org.freedesktop.Platform//25.08` and `org.freedesktop.Sdk//25.08` are used.
 
 ```bash
 flatpak --user remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
@@ -543,78 +515,73 @@ flatpak --user install -y flathub org.freedesktop.Platform//25.08 org.freedeskto
 ./gradlew flatpak
 ```
 
-When needed, override the runtime through `-PflatpakRuntime=...`, `-PflatpakRuntimeVersion=...`, `-PflatpakSdk=...` and `-PflatpakBranch=...`.
+The runtime can be overridden with `-PflatpakRuntime=...`, `-PflatpakRuntimeVersion=...`, `-PflatpakSdk=...`, and `-PflatpakBranch=...`.
 
-For Flathub submission, use the top-level `app.privatepractice.meshapp.yml` manifest. Before submitting or after changing Gradle dependencies, regenerate the offline Maven source list:
+Flathub publishing uses `app.privatepractice.meshapp.yml`. After changing Gradle dependencies, rebuild the Maven source list for offline builds:
 
 ```bash
 scripts/update-flatpak-sources.sh
-```
-
-By default this regenerates both `flatpak-sources-x86_64.json` and `flatpak-sources-aarch64.json`. To regenerate one architecture, pass it explicitly:
-
-```bash
 scripts/update-flatpak-sources.sh aarch64
 ```
 
-The generated `flatpak-sources-x86_64.json` and `flatpak-sources-aarch64.json` files, plus the static `flatpak-sources-foojay.json` file, are part of the Flathub submission. The generated `offline-repository/` directory is only a local build cache and must not be committed.
+`flatpak-sources-x86_64.json`, `flatpak-sources-aarch64.json`, and `flatpak-sources-foojay.json` must be committed to git. The `offline-repository/` directory is only a local cache.
 
-Local Flathub-style validation can be run with the Flathub builder image:
+Local verification through Flathub Builder:
 
 ```bash
 flatpak install -y flathub org.flatpak.Builder org.freedesktop.Sdk.Extension.openjdk25//25.08
 flatpak run --command=flathub-build org.flatpak.Builder --install app.privatepractice.meshapp.yml
 ```
 
-For `jpackage`, explicitly set the JDK used for the bundled runtime with `-PpackagingJavaHome=/path/to/jdk` or `PACKAGING_JAVA_HOME=/path/to/jdk`. On macOS the build additionally validates the `.app` with `otool -L` and fails if external dependencies such as `/opt/homebrew/...` or `/usr/local/...` remain inside the bundle.
+For `jpackage`, the JDK for the bundled runtime can be set explicitly: `-PpackagingJavaHome=/path/to/jdk` or `PACKAGING_JAVA_HOME=/path/to/jdk`. On macOS, the build checks the `.app` with `otool -L` and fails if external dependencies such as `/opt/homebrew/...` or `/usr/local/...` remain inside the bundle.
 
-During `processResources`, Gradle automatically builds platform native components:
+During `processResources`, Gradle builds native components:
 
-- **Windows**: `meshapp-ble.dll` for BLE through WinRT.
-- **Linux**: `libmeshapp-ble.so` for BLE through BlueZ.
-- **macOS**: `libmeshapp-serial.dylib` for safe serial modem-line control.
-- **macOS**: `libmeshapp-tray.dylib` for the native status item / tray bridge.
+- Windows: `meshapp-ble.dll` for BLE through WinRT
+- Linux: `libmeshapp-ble.so` for BLE through BlueZ
+- macOS: `libmeshapp-serial.dylib` for serial modem control lines
+- macOS: `libmeshapp-tray.dylib` for the system tray/status item
 
-### macOS Signing and Notarization
+### Signing and Notarization on macOS
 
-By default, `./gradlew jpackage` on macOS performs only an ad-hoc `.app` signature. Such a `.dmg` is fine for local testing, but not enough for browser downloads: Gatekeeper may show **"App is damaged and can't be opened"**.
+By default, `./gradlew jpackage` on macOS applies an ad-hoc signature to `.app`. This is enough for local testing, but a `.dmg` downloaded from a browser may receive the Gatekeeper message **"The application is damaged and can't be opened."**
 
-For a release build, pass credentials for `Developer ID` signing:
+Release builds need credentials for `Developer ID` signing:
 
-- `MAC_SIGNING_KEY_USER_NAME` or `-PmacSigningKeyUserName=...`: Team/User name from the Apple Developer certificate.
-- `MAC_SIGNING_KEYCHAIN` or `-PmacSigningKeychain=...`: optional keychain with the certificate.
-- `MAC_PACKAGE_SIGNING_PREFIX` or `-PmacPackageSigningPrefix=...`: optional signing prefix, defaults to `com.meshtastic`.
+- `MAC_SIGNING_KEY_USER_NAME` or `-PmacSigningKeyUserName=...`
+- `MAC_SIGNING_KEYCHAIN` or `-PmacSigningKeychain=...`
+- `MAC_PACKAGE_SIGNING_PREFIX` or `-PmacPackageSigningPrefix=...`, defaults to `com.meshtastic`
 
-For a Gitea runner in daemon mode, prefer importing the certificate into a temporary keychain from secrets instead of relying on the user's `login.keychain`:
+For a Gitea runner in daemon mode, it is better to import the certificate from secrets into a temporary keychain:
 
-- `MAC_SIGNING_CERTIFICATE_P12`: base64 of the `.p12` with the `Developer ID Application` certificate.
-- `MAC_SIGNING_CERTIFICATE_PASSWORD`: password for the `.p12`.
-- `MAC_SIGNING_KEYCHAIN_PASSWORD`: password for the temporary keychain.
+- `MAC_SIGNING_CERTIFICATE_P12`
+- `MAC_SIGNING_CERTIFICATE_PASSWORD`
+- `MAC_SIGNING_KEYCHAIN_PASSWORD`
 
-An `Apple Development` certificate is not suitable for a release DMG: it is intended for development. Downloadable builds require `Developer ID Application`.
+Downloadable builds need `Developer ID Application`. `Apple Development` is suitable for development, but not for release DMG builds.
 
-Then use one of the notarization options:
+Notarization can be enabled in one of these ways:
 
 - `MAC_NOTARY_KEYCHAIN_PROFILE` or `-PmacNotaryKeychainProfile=...`
 - `MAC_NOTARY_APPLE_ID` + `MAC_NOTARY_TEAM_ID` + `MAC_NOTARY_PASSWORD`
 - `MAC_NOTARY_KEY_FILE` + `MAC_NOTARY_KEY_ID` + `MAC_NOTARY_ISSUER`
-- In CI, `MAC_NOTARY_KEY_FILE_BASE64` can be used instead of `MAC_NOTARY_KEY_FILE`; the workflow creates the `.p8` file itself.
+- In CI, `MAC_NOTARY_KEY_FILE_BASE64` can be passed instead of `MAC_NOTARY_KEY_FILE`
 
-After that, a normal `./gradlew jpackage` builds a signed `.app`, a signed `.dmg` and runs `notarytool submit --wait` plus `stapler`.
+After that, `./gradlew jpackage` builds signed `.app` and `.dmg`, then runs `notarytool submit --wait` and `stapler`.
 
-If the Gitea runner has no `Developer ID Application`, the workflow still builds the macOS artifact with the previous name, but skips `spctl`/notarization checks.
+If the Gitea runner does not have `Developer ID Application`, the workflow still builds the macOS artifact with the same name, but skips `spctl` and notarization checks.
 
-### Installing on macOS
+### Installation on macOS
 
-If the build was made without `Developer ID` and notarization, macOS may show an **"unidentified developer"** or **"App is damaged and can't be opened"** warning. This is expected for a local ad-hoc build.
+If the build is made without `Developer ID` and notarization, macOS may show **"from an unidentified developer"** or **"The application is damaged and can't be opened."** This is expected for a local ad-hoc build.
 
-**Method 1** - Finder:
+Through Finder:
 
-1. Open Applications, or the folder where MeshApp is installed.
-2. Right-click, or Control-click, MeshApp and choose **Open**.
-3. Confirm opening in the dialog. This is required only once.
+1. Open Applications or the directory where MeshApp is installed.
+2. Right-click or Control-click MeshApp.
+3. Select **Open** and confirm launch. This only needs to be done once.
 
-**Method 2** - Terminal:
+Through terminal:
 
 ```bash
 xattr -cr /Applications/MeshApp.app
@@ -624,14 +591,14 @@ xattr -cr /Applications/MeshApp.app
 
 ## License
 
-Distributed under the [AGPL-3.0](LICENSE).
+Distributed under the [AGPL-3.0](LICENSE) license.
 
 ---
 
 <p align="center">
   Created by Konstantin A. Smirnov
   <br>
-<a href="https://t.me/coVox">
-  <img src="https://img.shields.io/badge/Telegram-2CA5E0?style=for-the-badge&logo=telegram&logoColor=white" alt="Telegram">
-</a>
+  <a href="https://t.me/coVox">
+    <img src="https://img.shields.io/badge/Telegram-2CA5E0?style=for-the-badge&logo=telegram&logoColor=white" alt="Telegram">
+  </a>
 </p>
