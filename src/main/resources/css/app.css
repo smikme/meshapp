@@ -1008,6 +1008,16 @@
     -fx-background-color: rgba(0, 0, 0, 0.4);
 }
 
+.modal-scroll-pane,
+.modal-scroll-pane > .viewport {
+    -fx-background-color: transparent;
+}
+
+.modal-scroll-pane {
+    -fx-background-insets: 0;
+    -fx-padding: 0;
+}
+
 /* Боковая панель справа */
 .modal-side-panel {
     -fx-background-color: -color-bg-default;

@@ -3,6 +3,7 @@ package com.meshtastic.client.modal;
 import javafx.animation.FadeTransition;
 import javafx.animation.ParallelTransition;
 import javafx.animation.TranslateTransition;
+import javafx.beans.binding.Bindings;
 import javafx.event.EventHandler;
 import javafx.geometry.Bounds;
 import javafx.geometry.Insets;
@@ -42,6 +43,8 @@ public class ModalPane extends StackPane {
 
     private static ModalPane instance;
     private Node currentContent;
+    private Region currentScrollableRegion;
+    private double currentScrollableRegionMinHeight;
     private Runnable onHidden;
     private boolean dismissOnEscape = true;
 
@@ -99,10 +102,13 @@ public class ModalPane extends StackPane {
      * Shows content with explicit dismiss behavior.
      */
     public void show(Node content, boolean dismissOnBackdrop, boolean dismissOnEscape) {
-        currentContent = content;
+        cleanupCurrentContent();
+
+        Node modalContent = wrapScrollable(content);
+        currentContent = modalContent;
         onHidden = null;
         this.dismissOnEscape = dismissOnEscape;
-        getChildren().setAll(content);
+        getChildren().setAll(modalContent);
         setVisible(true);
 
         // Scene-level filter for closing on backdrop click.
@@ -120,13 +126,72 @@ public class ModalPane extends StackPane {
         bgFade.setToValue(1);
 
         // Content slides in from the right.
-        content.setTranslateX(300);
-        TranslateTransition slide = new TranslateTransition(ANIM_DURATION, content);
+        modalContent.setTranslateX(300);
+        TranslateTransition slide = new TranslateTransition(ANIM_DURATION, modalContent);
         slide.setFromX(300);
         slide.setToX(0);
 
         new ParallelTransition(bgFade, slide).play();
 
+    }
+
+    private void cleanupCurrentContent() {
+        if (currentContent == null) {
+            return;
+        }
+        if (getScene() != null) {
+            getScene().removeEventFilter(MouseEvent.MOUSE_PRESSED, sceneClickFilter);
+            getScene().removeEventFilter(KeyEvent.KEY_PRESSED, sceneKeyFilter);
+        }
+        restoreScrollableRegion();
+    }
+
+    private Node wrapScrollable(Node content) {
+        ScrollPane scrollPane = new ScrollPane(content);
+        scrollPane.setFitToWidth(true);
+        scrollPane.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
+        scrollPane.setVbarPolicy(ScrollPane.ScrollBarPolicy.AS_NEEDED);
+        scrollPane.setPannable(true);
+        scrollPane.setMaxHeight(Double.MAX_VALUE);
+        scrollPane.setMaxWidth(Region.USE_PREF_SIZE);
+        scrollPane.getStyleClass().addAll("modal-scroll-pane", "edge-to-edge");
+
+        if (content instanceof Region region) {
+            double prefWidth = preferredWidth(region);
+            if (prefWidth > 0 && Double.isFinite(prefWidth)) {
+                scrollPane.setPrefWidth(prefWidth);
+            }
+            bindContentMinHeight(region, scrollPane);
+        }
+
+        return scrollPane;
+    }
+
+    private void bindContentMinHeight(Region region, ScrollPane scrollPane) {
+        if (region.minHeightProperty().isBound()) {
+            return;
+        }
+
+        currentScrollableRegion = region;
+        currentScrollableRegionMinHeight = region.getMinHeight();
+        double originalMinHeight = currentScrollableRegionMinHeight;
+        region.minHeightProperty().bind(Bindings.createDoubleBinding(
+                () -> Math.max(
+                        explicitMinHeight(originalMinHeight),
+                        scrollPane.getViewportBounds().getHeight()),
+                scrollPane.viewportBoundsProperty()));
+    }
+
+    private static double preferredWidth(Region region) {
+        double prefWidth = region.getPrefWidth();
+        if (prefWidth == Region.USE_COMPUTED_SIZE) {
+            prefWidth = region.prefWidth(Region.USE_COMPUTED_SIZE);
+        }
+        return prefWidth;
+    }
+
+    private static double explicitMinHeight(double minHeight) {
+        return minHeight >= 0 && Double.isFinite(minHeight) ? minHeight : 0;
     }
 
     /**
@@ -151,6 +216,7 @@ public class ModalPane extends StackPane {
         ParallelTransition anim = new ParallelTransition(bgFade, slide);
         anim.setOnFinished(e -> {
             setVisible(false);
+            restoreScrollableRegion();
             getChildren().clear();
             currentContent = null;
             dismissOnEscape = true;
@@ -161,6 +227,15 @@ public class ModalPane extends StackPane {
             }
         });
         anim.play();
+    }
+
+    private void restoreScrollableRegion() {
+        if (currentScrollableRegion != null && currentScrollableRegion.minHeightProperty().isBound()) {
+            currentScrollableRegion.minHeightProperty().unbind();
+            currentScrollableRegion.setMinHeight(currentScrollableRegionMinHeight);
+        }
+        currentScrollableRegion = null;
+        currentScrollableRegionMinHeight = Region.USE_COMPUTED_SIZE;
     }
 
     // Static dialog helpers
