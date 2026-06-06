@@ -226,6 +226,128 @@
     -fx-fill: rgba(0, 0, 0, 0.88);
 }
 
+.config-help-icon {
+    -fx-min-width: 16;
+    -fx-min-height: 16;
+    -fx-max-width: 16;
+    -fx-max-height: 16;
+    -fx-background-color: rgba(255, 255, 255, 0.12);
+    -fx-background-radius: 999;
+    -fx-border-color: rgba(255, 255, 255, 0.26);
+    -fx-border-radius: 999;
+    -fx-border-width: 1;
+    -fx-font-size: 0.7692em;
+    -fx-font-weight: bold;
+    -fx-text-fill: rgba(255, 255, 255, 0.78);
+    -fx-cursor: hand;
+    -fx-padding: 0;
+}
+
+.config-help-icon:hover,
+.config-help-icon:focused {
+    -fx-background-color: rgba(255, 255, 255, 0.2);
+    -fx-border-color: rgba(255, 255, 255, 0.42);
+    -fx-text-fill: white;
+}
+
+.light-theme .config-help-icon {
+    -fx-background-color: rgba(0, 0, 0, 0.08);
+    -fx-border-color: rgba(0, 0, 0, 0.22);
+    -fx-text-fill: rgba(0, 0, 0, 0.68);
+}
+
+.light-theme .config-help-icon:hover,
+.light-theme .config-help-icon:focused {
+    -fx-background-color: rgba(0, 0, 0, 0.14);
+    -fx-border-color: rgba(0, 0, 0, 0.36);
+    -fx-text-fill: rgba(0, 0, 0, 0.9);
+}
+
+.config-help-popup {
+    -fx-padding: 12;
+    -fx-spacing: 8;
+    -fx-background-color: rgba(28, 30, 36, 0.98);
+    -fx-background-radius: 8;
+    -fx-border-color: rgba(255, 255, 255, 0.16);
+    -fx-border-width: 1;
+    -fx-border-radius: 8;
+    -fx-effect: dropshadow(gaussian, rgba(0, 0, 0, 0.35), 18, 0.2, 0, 6);
+}
+
+.config-help-popup.light-theme {
+    -fx-background-color: rgba(250, 251, 253, 0.98);
+    -fx-border-color: rgba(0, 0, 0, 0.14);
+    -fx-effect: dropshadow(gaussian, rgba(0, 0, 0, 0.22), 18, 0.2, 0, 6);
+}
+
+.config-help-title {
+    -fx-font-size: 1.0769em;
+    -fx-font-weight: bold;
+    -fx-text-fill: rgba(255, 255, 255, 0.96);
+}
+
+.config-help-popup.light-theme .config-help-title {
+    -fx-text-fill: rgba(0, 0, 0, 0.88);
+}
+
+.config-help-path {
+    -fx-font-size: 0.7692em;
+    -fx-text-fill: rgba(255, 255, 255, 0.52);
+}
+
+.config-help-popup.light-theme .config-help-path {
+    -fx-text-fill: rgba(0, 0, 0, 0.48);
+}
+
+.config-help-scroll,
+.config-help-scroll > .viewport {
+    -fx-background-color: transparent;
+    -fx-background-insets: 0;
+    -fx-padding: 0;
+}
+
+.config-help-body {
+    -fx-background-color: transparent;
+    -fx-padding: 0 8 0 0;
+}
+
+.config-help-block {
+    -fx-spacing: 3;
+}
+
+.config-help-block-title {
+    -fx-font-size: 0.8462em;
+    -fx-font-weight: bold;
+    -fx-text-fill: rgba(255, 255, 255, 0.86);
+}
+
+.config-help-popup.light-theme .config-help-block-title {
+    -fx-text-fill: rgba(0, 0, 0, 0.76);
+}
+
+.config-help-text {
+    -fx-font-size: 0.8462em;
+    -fx-text-fill: rgba(255, 255, 255, 0.72);
+}
+
+.config-help-popup.light-theme .config-help-text {
+    -fx-text-fill: rgba(0, 0, 0, 0.68);
+}
+
+.config-help-value-row {
+    -fx-padding: 4 0 4 0;
+}
+
+.config-help-value-title {
+    -fx-font-size: 0.8462em;
+    -fx-font-weight: bold;
+    -fx-text-fill: rgba(255, 255, 255, 0.78);
+}
+
+.config-help-popup.light-theme .config-help-value-title {
+    -fx-text-fill: rgba(0, 0, 0, 0.72);
+}
+
 .script-store-toolbar-button {
     -fx-background-color: rgba(245, 158, 11, 0.20);
 }

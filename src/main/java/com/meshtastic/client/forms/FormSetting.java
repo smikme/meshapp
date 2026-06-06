@@ -21,6 +21,8 @@ import com.meshtastic.client.system.Form;
 import com.meshtastic.client.system.FormManager;
 import com.meshtastic.client.themes.TypographyManager;
 import com.meshtastic.client.utils.AppPreferences;
+import com.meshtastic.client.utils.ConfigHelpContent;
+import com.meshtastic.client.utils.ConfigDescriptionResolver;
 import com.meshtastic.client.utils.ConfigValueFormatter;
 import com.meshtastic.client.utils.ProtobufTreeBuilder;
 import com.meshtastic.client.utils.SvgIconLoader;
@@ -38,13 +40,17 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import javafx.animation.PauseTransition;
 import javafx.application.Platform;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
+import javafx.geometry.Bounds;
 import javafx.geometry.Insets;
 import javafx.geometry.Orientation;
 import javafx.geometry.Pos;
+import javafx.geometry.Rectangle2D;
+import javafx.scene.Node;
 import javafx.scene.control.Button;
 import javafx.scene.control.CheckBox;
 import javafx.scene.control.CheckMenuItem;
@@ -53,6 +59,8 @@ import javafx.scene.control.ContentDisplay;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
 import javafx.scene.control.MenuButton;
+import javafx.scene.control.OverrunStyle;
+import javafx.scene.control.ScrollPane;
 import javafx.scene.control.Separator;
 import javafx.scene.control.Slider;
 import javafx.scene.control.Tab;
@@ -70,8 +78,11 @@ import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
 import javafx.scene.shape.SVGPath;
+import javafx.stage.Popup;
+import javafx.stage.Screen;
 import javafx.stage.FileChooser;
 import javafx.stage.Window;
+import javafx.util.Duration;
 import org.meshtastic.proto.ChannelProtos;
 import org.meshtastic.proto.ConfigProtos;
 import org.meshtastic.proto.MeshProtos;
@@ -133,6 +144,8 @@ public class FormSetting extends Form {
     private static final long DEVICE_POWER_ACTION_HANDOFF_DELAY_MS = 1_000;
     /** Maximum wait for a reboot/shutdown routing ACK before falling back. */
     private static final long DEVICE_POWER_ACTION_ACK_TIMEOUT_MS = 2_500;
+    private static final double CONFIG_HELP_POPUP_WIDTH = 460;
+    private static final double CONFIG_HELP_POPUP_HEIGHT = 360;
     private static final String OWNER_INFO_CONFIG_TYPE = "owner_info";
     private static final String OWNER_LONG_NAME_FIELD = "long_name";
     private static final String OWNER_SHORT_NAME_FIELD = "short_name";
@@ -177,6 +190,8 @@ public class FormSetting extends Form {
     private Button restartHardwareBtn;
     private Button shutdownHardwareBtn;
     private Tab configTab;
+    private Popup configHelpPopup;
+    private PauseTransition configHelpHideDelay;
     private volatile CompletableFuture<DeviceState> observedConfigLoadFuture;
     private volatile DeviceState ringtoneListenerState;
     private volatile Runnable ringtoneListener;
@@ -1389,20 +1404,76 @@ public class FormSetting extends Form {
         nameCol.setEditable(false);
         nameCol.setCellFactory(col ->
             new TreeTableCell<>() {
+                private final Label nameLabel = new Label();
+                private final Label helpIcon = new Label("?");
+                private final HBox content = new HBox(6, nameLabel, helpIcon);
+                private ConfigHelpContent helpContent;
+
+                {
+                    content.setAlignment(Pos.CENTER_LEFT);
+                    nameLabel.setMinWidth(0);
+                    nameLabel.setTextOverrun(OverrunStyle.ELLIPSIS);
+                    HBox.setHgrow(nameLabel, Priority.NEVER);
+
+                    helpIcon.getStyleClass().add("config-help-icon");
+                    helpIcon.setMinSize(16, 16);
+                    helpIcon.setPrefSize(16, 16);
+                    helpIcon.setMaxSize(16, 16);
+                    helpIcon.setAlignment(Pos.CENTER);
+                    helpIcon.setFocusTraversable(true);
+                    helpIcon.setOnMouseEntered(e ->
+                        showConfigHelpPopup(helpIcon, helpContent)
+                    );
+                    helpIcon.setOnMouseExited(e ->
+                        scheduleHideConfigHelpPopup()
+                    );
+                    helpIcon
+                        .focusedProperty()
+                        .addListener((obs, wasFocused, focused) -> {
+                            if (focused) {
+                                showConfigHelpPopup(helpIcon, helpContent);
+                            } else {
+                                scheduleHideConfigHelpPopup();
+                            }
+                        });
+                }
+
                 @Override
                 protected void updateItem(String item, boolean empty) {
                     super.updateItem(item, empty);
                     if (empty || item == null) {
+                        helpContent = null;
                         setText(null);
+                        setGraphic(null);
+                        setContentDisplay(ContentDisplay.LEFT);
                         setStyle("");
                     } else {
-                        setText(item);
                         TreeItem<ConfigTreeItem> treeItem =
-                            getTableRow().getTreeItem();
+                            getTableRow() != null
+                                ? getTableRow().getTreeItem()
+                                : null;
+                        ConfigTreeItem data =
+                            treeItem != null ? treeItem.getValue() : null;
+                        helpContent = ConfigDescriptionResolver.helpFor(data);
+                        String description = helpContent.plainText();
+
+                        nameLabel.setText(item);
+                        helpIcon.setAccessibleText(
+                            I18n.t("settings.config.help.icon") +
+                            (
+                                !helpContent.hasDetails()
+                                    ? ""
+                                    : ": " + description
+                            )
+                        );
+
+                        setText(null);
+                        setGraphic(content);
+                        setContentDisplay(ContentDisplay.GRAPHIC_ONLY);
                         if (
                             treeItem != null &&
-                            treeItem.getValue() != null &&
-                            treeItem.getValue().isCategory()
+                            data != null &&
+                            data.isCategory()
                         ) {
                             setStyle("-fx-font-weight: bold;");
                         } else {
@@ -1440,6 +1511,241 @@ public class FormSetting extends Form {
                 configTree
             );
         return panel;
+    }
+
+    private void showConfigHelpPopup(
+        Node anchor,
+        ConfigHelpContent helpContent
+    ) {
+        if (
+            anchor == null ||
+            helpContent == null ||
+            !helpContent.hasDetails() ||
+            anchor.getScene() == null ||
+            anchor.getScene().getWindow() == null
+        ) {
+            return;
+        }
+
+        cancelConfigHelpPopupHide();
+        hideConfigHelpPopup();
+
+        VBox popupContent = createConfigHelpPopupContent(
+            helpContent,
+            isLightTheme(anchor)
+        );
+        popupContent.setOnMouseEntered(e -> cancelConfigHelpPopupHide());
+        popupContent.setOnMouseExited(e -> scheduleHideConfigHelpPopup());
+
+        Popup popup = new Popup();
+        popup.setAutoHide(true);
+        popup.setHideOnEscape(true);
+        popup.getContent().add(popupContent);
+
+        Bounds anchorBounds = anchor.localToScreen(anchor.getBoundsInLocal());
+        if (anchorBounds == null) {
+            return;
+        }
+        Rectangle2D screenBounds = Screen
+            .getScreensForRectangle(
+                anchorBounds.getMinX(),
+                anchorBounds.getMinY(),
+                anchorBounds.getWidth(),
+                anchorBounds.getHeight()
+            )
+            .stream()
+            .findFirst()
+            .orElse(Screen.getPrimary())
+            .getVisualBounds();
+
+        double x = anchorBounds.getMaxX() + 6;
+        if (x + CONFIG_HELP_POPUP_WIDTH > screenBounds.getMaxX()) {
+            x = anchorBounds.getMinX() - CONFIG_HELP_POPUP_WIDTH - 6;
+        }
+        x = Math.max(screenBounds.getMinX() + 8, x);
+
+        double y = anchorBounds.getMinY();
+        if (y + CONFIG_HELP_POPUP_HEIGHT > screenBounds.getMaxY()) {
+            y = screenBounds.getMaxY() - CONFIG_HELP_POPUP_HEIGHT - 8;
+        }
+        y = Math.max(screenBounds.getMinY() + 8, y);
+
+        configHelpPopup = popup;
+        popup.show(anchor, x, y);
+    }
+
+    private VBox createConfigHelpPopupContent(
+        ConfigHelpContent helpContent,
+        boolean lightTheme
+    ) {
+        VBox popup = new VBox(8);
+        popup.getStyleClass().add("config-help-popup");
+        if (lightTheme) {
+            popup.getStyleClass().add("light-theme");
+        }
+        popup.setPrefWidth(CONFIG_HELP_POPUP_WIDTH);
+        popup.setMaxWidth(CONFIG_HELP_POPUP_WIDTH);
+        popup.setPrefHeight(CONFIG_HELP_POPUP_HEIGHT);
+
+        Label title = new Label(helpContent.title());
+        title.getStyleClass().add("config-help-title");
+        title.setWrapText(true);
+
+        Label path = new Label(helpContent.path());
+        path.getStyleClass().add("config-help-path");
+        path.setWrapText(true);
+
+        VBox body = new VBox(10);
+        body.getStyleClass().add("config-help-body");
+        addConfigHelpBlock(
+            body,
+            I18n.t("settings.config.help.block.summary"),
+            helpContent.summary()
+        );
+        addConfigHelpBlock(
+            body,
+            I18n.t("settings.config.help.block.whenToUse"),
+            helpContent.whenToUse()
+        );
+        addConfigHelpBlock(
+            body,
+            I18n.t("settings.config.help.block.defaultBehavior"),
+            helpContent.defaultBehavior()
+        );
+        addConfigHelpBlock(
+            body,
+            I18n.t("settings.config.help.block.valueHint"),
+            helpContent.valueHint()
+        );
+        addConfigHelpValuesBlock(body, helpContent.values());
+        addConfigHelpListBlock(
+            body,
+            I18n.t("settings.config.help.block.notes"),
+            helpContent.notes()
+        );
+        addConfigHelpBlock(
+            body,
+            I18n.t("settings.config.help.block.technical"),
+            helpContent.technicalDetails()
+        );
+
+        ScrollPane scrollPane = new ScrollPane(body);
+        scrollPane.getStyleClass().add("config-help-scroll");
+        scrollPane.setFitToWidth(true);
+        scrollPane.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
+        scrollPane.setVbarPolicy(ScrollPane.ScrollBarPolicy.AS_NEEDED);
+        scrollPane.setPrefViewportWidth(CONFIG_HELP_POPUP_WIDTH - 28);
+        scrollPane.setPrefViewportHeight(CONFIG_HELP_POPUP_HEIGHT - 82);
+        VBox.setVgrow(scrollPane, Priority.ALWAYS);
+
+        popup.getChildren().addAll(title, path, scrollPane);
+        return popup;
+    }
+
+    private boolean isLightTheme(Node node) {
+        return node != null &&
+            node.getScene() != null &&
+            node
+                .getScene()
+                .getRoot()
+                .getStyleClass()
+                .contains("light-theme");
+    }
+
+    private void addConfigHelpBlock(VBox body, String header, String text) {
+        if (text == null || text.isBlank()) {
+            return;
+        }
+        VBox block = new VBox(3);
+        block.getStyleClass().add("config-help-block");
+        Label headerLabel = new Label(header);
+        headerLabel.getStyleClass().add("config-help-block-title");
+        Label textLabel = new Label(text);
+        textLabel.getStyleClass().add("config-help-text");
+        textLabel.setWrapText(true);
+        block.getChildren().addAll(headerLabel, textLabel);
+        body.getChildren().add(block);
+    }
+
+    private void addConfigHelpValuesBlock(
+        VBox body,
+        List<ConfigHelpContent.ValueHelp> values
+    ) {
+        if (values == null || values.isEmpty()) {
+            return;
+        }
+        VBox block = new VBox(5);
+        block.getStyleClass().add("config-help-block");
+        Label headerLabel = new Label(
+            I18n.t("settings.config.help.block.values")
+        );
+        headerLabel.getStyleClass().add("config-help-block-title");
+        block.getChildren().add(headerLabel);
+        for (ConfigHelpContent.ValueHelp value : values) {
+            VBox row = new VBox(2);
+            row.getStyleClass().add("config-help-value-row");
+            String title = value.value();
+            if (value.title() != null && !value.title().isBlank()) {
+                title += " - " + value.title();
+            }
+            Label valueTitle = new Label(title);
+            valueTitle.getStyleClass().add("config-help-value-title");
+            valueTitle.setWrapText(true);
+            Label valueDescription = new Label(value.description());
+            valueDescription.getStyleClass().add("config-help-text");
+            valueDescription.setWrapText(true);
+            row.getChildren().addAll(valueTitle, valueDescription);
+            block.getChildren().add(row);
+        }
+        body.getChildren().add(block);
+    }
+
+    private void addConfigHelpListBlock(
+        VBox body,
+        String header,
+        List<String> items
+    ) {
+        if (items == null || items.isEmpty()) {
+            return;
+        }
+        VBox block = new VBox(4);
+        block.getStyleClass().add("config-help-block");
+        Label headerLabel = new Label(header);
+        headerLabel.getStyleClass().add("config-help-block-title");
+        block.getChildren().add(headerLabel);
+        for (String item : items) {
+            if (item == null || item.isBlank()) {
+                continue;
+            }
+            Label itemLabel = new Label("- " + item);
+            itemLabel.getStyleClass().add("config-help-text");
+            itemLabel.setWrapText(true);
+            block.getChildren().add(itemLabel);
+        }
+        body.getChildren().add(block);
+    }
+
+    private void scheduleHideConfigHelpPopup() {
+        if (configHelpHideDelay == null) {
+            configHelpHideDelay = new PauseTransition(
+                Duration.millis(220)
+            );
+            configHelpHideDelay.setOnFinished(e -> hideConfigHelpPopup());
+        }
+        configHelpHideDelay.playFromStart();
+    }
+
+    private void cancelConfigHelpPopupHide() {
+        if (configHelpHideDelay != null) {
+            configHelpHideDelay.stop();
+        }
+    }
+
+    private void hideConfigHelpPopup() {
+        if (configHelpPopup != null) {
+            configHelpPopup.hide();
+            configHelpPopup = null;
+        }
     }
 
     private Button createConfigToolbarButton(

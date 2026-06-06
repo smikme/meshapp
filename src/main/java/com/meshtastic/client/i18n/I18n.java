@@ -2,14 +2,23 @@ package com.meshtastic.client.i18n;
 
 import com.meshtastic.client.utils.AppPreferences;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
 import java.text.MessageFormat;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.MissingResourceException;
+import java.util.Properties;
 import java.util.ResourceBundle;
 
 /**
  * Central access point for localized UI strings.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public final class I18n {
 
@@ -18,11 +27,12 @@ public final class I18n {
     public static final String LANGUAGE_EN = "en";
 
     private static final String BUNDLE_BASE_NAME = "i18n.messages";
-    private static final List<LanguageOption> SUPPORTED_LANGUAGES = List.of(
-            new LanguageOption(LANGUAGE_SYSTEM, "language.system"),
-            new LanguageOption(LANGUAGE_RU, "language.ru"),
-            new LanguageOption(LANGUAGE_EN, "language.en")
-    );
+    private static final String LANGUAGE_MANIFEST_RESOURCE =
+            "/i18n/languages.properties";
+    private static final LanguageMetadata LANGUAGE_METADATA =
+            loadLanguageMetadata();
+    private static final List<LanguageOption> SUPPORTED_LANGUAGES =
+            buildSupportedLanguages();
 
     private static volatile String languageTag = LANGUAGE_SYSTEM;
     private static volatile ResourceBundle bundle = loadBundle(resolveLocale(LANGUAGE_SYSTEM));
@@ -73,6 +83,29 @@ public final class I18n {
         return new MessageFormat(pattern, bundle.getLocale()).format(args);
     }
 
+    /**
+     * Resolves a localized string without producing the visible missing-key marker.
+     *
+     * @param key resource bundle key to look up
+     * @param args optional {@link MessageFormat} arguments
+     * @return formatted localized string, or {@code null} when the key is absent
+     */
+    public static String tOrNull(String key, Object... args) {
+        if (key == null || key.isBlank()) {
+            return null;
+        }
+        String pattern;
+        try {
+            pattern = bundle.getString(key);
+        } catch (MissingResourceException e) {
+            return null;
+        }
+        if (args == null || args.length == 0) {
+            return pattern;
+        }
+        return new MessageFormat(pattern, bundle.getLocale()).format(args);
+    }
+
     public static String pluralCategory(long value) {
         long n = Math.abs(value);
         if (!LANGUAGE_RU.equals(locale().getLanguage())) {
@@ -102,31 +135,112 @@ public final class I18n {
 
     private static Locale resolveLocale(String tag) {
         String normalized = normalizeLanguageTag(tag);
-        if (LANGUAGE_RU.equals(normalized)) {
-            return Locale.forLanguageTag(LANGUAGE_RU);
-        }
-        if (LANGUAGE_EN.equals(normalized)) {
-            return Locale.ENGLISH;
+        if (!LANGUAGE_SYSTEM.equals(normalized)) {
+            return Locale.forLanguageTag(normalized);
         }
         Locale defaultLocale = Locale.getDefault(Locale.Category.DISPLAY);
-        String language = defaultLocale.getLanguage();
-        if (LANGUAGE_RU.equals(language)) {
-            return Locale.forLanguageTag(LANGUAGE_RU);
-        }
-        return Locale.ENGLISH;
+        String supportedDefault = supportedLanguageTag(
+                defaultLocale.toLanguageTag());
+        return Locale.forLanguageTag(
+                supportedDefault != null
+                        ? supportedDefault
+                        : LANGUAGE_METADATA.fallbackLanguage()
+        );
     }
 
     private static String normalizeLanguageTag(String tag) {
         if (tag == null || tag.isBlank() || LANGUAGE_SYSTEM.equalsIgnoreCase(tag.trim())) {
             return LANGUAGE_SYSTEM;
         }
-        String language = Locale.forLanguageTag(tag.trim()).getLanguage();
-        return switch (language) {
-            case LANGUAGE_RU -> LANGUAGE_RU;
-            case LANGUAGE_EN -> LANGUAGE_EN;
-            default -> LANGUAGE_SYSTEM;
-        };
+        String supported = supportedLanguageTag(tag);
+        return supported != null ? supported : LANGUAGE_SYSTEM;
     }
+
+    private static LanguageMetadata loadLanguageMetadata() {
+        Properties properties = new Properties();
+        try (InputStream input = I18n.class.getResourceAsStream(
+                LANGUAGE_MANIFEST_RESOURCE)) {
+            if (input != null) {
+                properties.load(new InputStreamReader(
+                        input,
+                        StandardCharsets.UTF_8
+                ));
+            }
+        } catch (IOException ignored) {
+            // Missing language metadata falls back to the built-in languages.
+        }
+
+        String fallback = canonicalLanguageTag(
+                properties.getProperty("fallback", LANGUAGE_EN));
+        if (fallback == null) {
+            fallback = LANGUAGE_EN;
+        }
+
+        LinkedHashSet<String> tags = new LinkedHashSet<>();
+        for (String rawTag : properties
+                .getProperty("languages", LANGUAGE_RU + "," + LANGUAGE_EN)
+                .split(",")) {
+            String canonical = canonicalLanguageTag(rawTag);
+            if (canonical != null) {
+                tags.add(canonical);
+            }
+        }
+        tags.add(fallback);
+        return new LanguageMetadata(List.copyOf(tags), fallback);
+    }
+
+    private static List<LanguageOption> buildSupportedLanguages() {
+        List<LanguageOption> options = new ArrayList<>();
+        options.add(new LanguageOption(LANGUAGE_SYSTEM, "language.system"));
+        for (String tag : LANGUAGE_METADATA.supportedLanguages()) {
+            options.add(new LanguageOption(tag, displayKeyForLanguage(tag)));
+        }
+        return List.copyOf(options);
+    }
+
+    private static String supportedLanguageTag(String tag) {
+        String canonical = canonicalLanguageTag(tag);
+        if (canonical == null) {
+            return null;
+        }
+        if (LANGUAGE_METADATA.supportedLanguages().contains(canonical)) {
+            return canonical;
+        }
+
+        String language = Locale.forLanguageTag(canonical).getLanguage();
+        List<String> matchingLanguages = LANGUAGE_METADATA.supportedLanguages()
+                .stream()
+                .filter(supported ->
+                        Locale.forLanguageTag(supported)
+                                .getLanguage()
+                                .equals(language))
+                .toList();
+        return matchingLanguages.size() == 1
+                ? matchingLanguages.getFirst()
+                : null;
+    }
+
+    private static String canonicalLanguageTag(String tag) {
+        if (tag == null || tag.isBlank()) {
+            return null;
+        }
+        Locale locale = Locale.forLanguageTag(
+                tag.trim().replace('_', '-'));
+        String language = locale.getLanguage();
+        if (language == null || language.isBlank()) {
+            return null;
+        }
+        return locale.toLanguageTag();
+    }
+
+    private static String displayKeyForLanguage(String tag) {
+        return "language." + tag.replace('-', '_');
+    }
+
+    private record LanguageMetadata(
+            List<String> supportedLanguages,
+            String fallbackLanguage
+    ) {}
 
     public record LanguageOption(String tag, String displayKey) {}
 

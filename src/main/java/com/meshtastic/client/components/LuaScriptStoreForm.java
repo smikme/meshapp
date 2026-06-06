@@ -19,7 +19,6 @@ import javafx.scene.control.ButtonType;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.OverrunStyle;
-import javafx.scene.control.ScrollPane;
 import javafx.scene.control.Separator;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
@@ -93,11 +92,8 @@ public final class LuaScriptStoreForm extends VBox {
         statusLabel.setWrapText(true);
 
         cardsBox.setFillWidth(true);
-
-        ScrollPane scrollPane = new ScrollPane(cardsBox);
-        scrollPane.setFitToWidth(true);
-        scrollPane.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
-        VBox.setVgrow(scrollPane, Priority.ALWAYS);
+        cardsBox.setMaxHeight(Double.MAX_VALUE);
+        VBox.setVgrow(cardsBox, Priority.ALWAYS);
 
         Button closeButton = new Button(I18n.t("common.close"));
         closeButton.setOnAction(event -> closeModal());
@@ -105,7 +101,7 @@ public final class LuaScriptStoreForm extends VBox {
         actions.setAlignment(Pos.CENTER_RIGHT);
         actions.setPadding(new Insets(10, 0, 0, 0));
 
-        getChildren().addAll(titleRow, new Separator(), filterBar, statusLabel, scrollPane, actions);
+        getChildren().addAll(titleRow, new Separator(), filterBar, statusLabel, cardsBox, actions);
     }
 
     private HBox createFilterBar() {
