@@ -1,5 +1,6 @@
 package com.meshtastic.client.service;
 
+import com.meshtastic.client.utils.ConfigHelpRepository;
 import com.meshtastic.client.lua.LuaScriptRuntimeService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -44,6 +45,7 @@ public final class DatabaseResetService {
         }
 
         DatabaseProvider.resetDatabase();
+        ConfigHelpRepository.getInstance().invalidateLoadedState();
 
         if (messageDbService != null) {
             messageDbService.reinitializeAfterDatabaseReset();

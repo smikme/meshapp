@@ -37,7 +37,7 @@ public final class DatabaseMigrator {
     private static final Logger log = LoggerFactory.getLogger(DatabaseMigrator.class);
 
     /** Current schema version. Increment on every schema change. */
-    static final int CURRENT_VERSION = 19;
+    static final int CURRENT_VERSION = 20;
     private static final String LEGACY_TRACEROUTE_PREFIX = "\uD83D\uDD0D Traceroute → ";
     private static final Pattern CONNECTION_NODE_ID_PATTERN =
             Pattern.compile("\"nodeId\"\\s*:\\s*\"(![0-9a-fA-F]{8})\"");
@@ -50,7 +50,9 @@ public final class DatabaseMigrator {
             "TRACEROUTE_RESULTS",
             "LORA_PACKET_LOGS",
             "LUA_SCRIPTS",
-            "LUA_SCRIPT_KV"
+            "LUA_SCRIPT_KV",
+            "CONFIG_HELP_DOCUMENTS",
+            "CONFIG_HELP_ARTICLES"
     );
 
     private DatabaseMigrator() {}
@@ -113,6 +115,7 @@ public final class DatabaseMigrator {
             if (version < 17) { migrateToV17(connection); version = 17; }
             if (version < 18) { migrateToV18(connection); version = 18; }
             if (version < 19) { migrateToV19(connection); version = 19; }
+            if (version < 20) { migrateToV20(connection); version = 20; }
 
             setVersion(connection, CURRENT_VERSION);
             log.info("Database migration complete, schema version = {}", CURRENT_VERSION);
@@ -757,6 +760,58 @@ public final class DatabaseMigrator {
         }
         backfillLuaScriptAuthors(connection);
         log.info("Migration v19: added Lua script authors");
+    }
+
+    /** v20: database-backed localized configuration help documents. */
+    private static void migrateToV20(Connection connection) throws SQLException {
+        createConfigHelpTables(connection);
+        log.info("Migration v20: created configuration help document tables");
+    }
+
+    /**
+     * Creates configuration help tables when runtime code starts on a freshly
+     * reset database whose schema version is already current.
+     *
+     * @param connection active H2 database connection
+     * @throws SQLException if H2 cannot create the tables or indexes
+     */
+    public static void createConfigHelpTables(Connection connection) throws SQLException {
+        try (Statement stmt = connection.createStatement()) {
+            stmt.execute("""
+                    CREATE TABLE IF NOT EXISTS config_help_documents (
+                        language_tag VARCHAR(35) NOT NULL,
+                        document_id  VARCHAR(120) NOT NULL,
+                        version      INT NOT NULL,
+                        checksum     VARCHAR(64) NOT NULL,
+                        loaded_at    BIGINT NOT NULL,
+                        PRIMARY KEY (language_tag, document_id)
+                    )
+                    """);
+            stmt.execute("""
+                    CREATE TABLE IF NOT EXISTS config_help_articles (
+                        language_tag VARCHAR(35) NOT NULL,
+                        document_id  VARCHAR(120) NOT NULL,
+                        article_type VARCHAR(20) NOT NULL,
+                        article_key  VARCHAR(240) NOT NULL,
+                        content_json CLOB NOT NULL,
+                        search_text  CLOB NOT NULL,
+                        updated_at   BIGINT NOT NULL,
+                        PRIMARY KEY (language_tag, document_id, article_type, article_key),
+                        CONSTRAINT fk_config_help_document
+                            FOREIGN KEY (language_tag, document_id)
+                            REFERENCES config_help_documents(language_tag, document_id)
+                            ON DELETE CASCADE
+                    )
+                    """);
+            stmt.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_config_help_lookup
+                    ON config_help_articles (language_tag, article_type, article_key)
+                    """);
+            stmt.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_config_help_search_scope
+                    ON config_help_articles (language_tag, document_id, article_type)
+                    """);
+        }
     }
 
     private static void createTracerouteResultsTable(Connection connection) throws SQLException {

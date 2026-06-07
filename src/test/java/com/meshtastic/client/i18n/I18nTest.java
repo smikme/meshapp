@@ -27,6 +27,32 @@ class I18nTest {
     }
 
     @Test
+    void supportedLanguagesAreLoadedFromResourceManifest() {
+        assertTrue(I18n.supportedLanguages().stream().anyMatch(option ->
+                option.tag().equals(I18n.LANGUAGE_SYSTEM) &&
+                option.displayKey().equals("language.system")));
+        assertTrue(I18n.supportedLanguages().stream().anyMatch(option ->
+                option.tag().equals(I18n.LANGUAGE_RU) &&
+                option.displayKey().equals("language.ru")));
+        assertTrue(I18n.supportedLanguages().stream().anyMatch(option ->
+                option.tag().equals(I18n.LANGUAGE_EN) &&
+                option.displayKey().equals("language.en")));
+    }
+
+    @Test
+    void regionalLanguageTagsUseConfiguredBaseLanguage() {
+        String previous = I18n.getLanguageTag();
+        try {
+            I18n.setLanguageTagForTests("en-US");
+
+            assertEquals(I18n.LANGUAGE_EN, I18n.getLanguageTag());
+            assertEquals("Close", I18n.t("common.close"));
+        } finally {
+            I18n.setLanguageTagForTests(previous);
+        }
+    }
+
+    @Test
     void returnsVisibleFallbackForMissingKey() {
         String previous = I18n.getLanguageTag();
         try {

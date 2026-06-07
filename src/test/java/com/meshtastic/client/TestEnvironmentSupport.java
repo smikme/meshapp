@@ -121,6 +121,10 @@ public final class TestEnvironmentSupport {
             databaseProvider.getMethod("close").invoke(null);
             writeStaticField(databaseProvider, "connection", null);
 
+            Class<?> configHelpRepository = Class.forName("com.meshtastic.client.utils.ConfigHelpRepository");
+            Object configHelpInstance = configHelpRepository.getMethod("getInstance").invoke(null);
+            configHelpRepository.getMethod("invalidateLoadedState").invoke(configHelpInstance);
+
             Class<?> reconnectService = Class.forName("com.meshtastic.client.service.ReconnectService");
             Object reconnectInstance = readStaticField(reconnectService, "instance");
             if (reconnectInstance != null) {

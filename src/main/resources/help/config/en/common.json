@@ -1,0 +1,2869 @@
+{
+  "version": 1,
+  "sections": {
+    "owner_info": {
+      "summary": "Device name and short callsign visible to other users on the mesh.",
+      "whenToUse": "Change this when you need to label the device clearly or distinguish several of your nodes.",
+      "defaultBehavior": "If you leave it unchanged, the device keeps using the name already stored on the node."
+    },
+    "fixed_position": {
+      "summary": "Manual device coordinates used when the device is stationary or GPS is not needed.",
+      "whenToUse": "Set a fixed position for a home, rooftop, or other stationary node.",
+      "defaultBehavior": "Without a manual position, the device usually uses GPS or sends no coordinates."
+    },
+    "ringtone": {
+      "summary": "External notification melody in RTTTL format.",
+      "whenToUse": "Change it when you want a different sound for incoming notifications.",
+      "defaultBehavior": "If it is empty or unchanged, the device keeps the stored melody or firmware default."
+    },
+    "device": {
+      "summary": "Core device behavior on the mesh: role, buttons, buzzer, and service announcements.",
+      "whenToUse": "Open this section when choosing what the device is for: normal client, router, tracker, sensor, or TAK node.",
+      "defaultBehavior": "For most users, the normal client role and defaults are appropriate."
+    },
+    "position": {
+      "summary": "How the device gets and broadcasts its location.",
+      "whenToUse": "Change these settings when you need to enable, limit, or tune position broadcasts.",
+      "defaultBehavior": "Default values usually work for portable GPS devices."
+    },
+    "power": {
+      "summary": "Sleep, wake, power saving, and power monitoring settings.",
+      "whenToUse": "Use this for battery-powered devices, solar nodes, and any setup where runtime matters.",
+      "defaultBehavior": "If the device has permanent power, the current values are usually fine."
+    },
+    "network": {
+      "summary": "Wi-Fi, Ethernet, NTP, IP addresses, and network protocols on the device.",
+      "whenToUse": "Change this when the device must join a local network, sync time, or send data over IP.",
+      "defaultBehavior": "If networking is not used, leave these settings disabled or empty."
+    },
+    "display": {
+      "summary": "Device screen behavior: screen timeout, coordinate format, orientation, units, and display mode.",
+      "whenToUse": "Change this if the screen is hard to read, stays on too long, or needs a different coordinate format.",
+      "defaultBehavior": "Default values usually work for the board's normal display."
+    },
+    "lora": {
+      "summary": "LoRa radio settings: region, preset, power, frequency, hop limit, and packet filters.",
+      "whenToUse": "Change only if you understand the regional rules and need compatibility with a specific mesh.",
+      "defaultBehavior": "For non-expert users, keep the region and preset that already work in your network.",
+      "notes": [
+        "Incorrect LoRa settings can make the node invisible to the rest of the mesh."
+      ]
+    },
+    "bluetooth": {
+      "summary": "Bluetooth connection and pairing behavior.",
+      "whenToUse": "Change this when you need to allow or block Bluetooth access or set a fixed PIN.",
+      "defaultBehavior": "Bluetooth is usually enabled when you configure the device from a phone or computer."
+    },
+    "security": {
+      "summary": "Keys and administrative permissions that affect access to the device.",
+      "whenToUse": "Change only if you manage network security or administrator access.",
+      "defaultBehavior": "If you are not sure, do not change keys or administrative options.",
+      "notes": [
+        "Wrong changes can lock you out of remote administration."
+      ]
+    },
+    "sessionkey": {
+      "summary": "Service section used to request a session key before administrative commands.",
+      "whenToUse": "Usually does not require manual changes.",
+      "defaultBehavior": "MeshApp uses this section automatically."
+    },
+    "device_ui": {
+      "summary": "Built-in device UI: brightness, locks, language, node filters, map data, and screen notifications.",
+      "whenToUse": "Change this when the device has its own screen and controls.",
+      "defaultBehavior": "If the built-in UI is not used, most values can stay unchanged."
+    },
+    "mqtt": {
+      "summary": "MQTT gateway for exchanging messages through the internet or a local broker.",
+      "whenToUse": "Enable it when you want to bridge the mesh to MQTT, a map, or external systems.",
+      "defaultBehavior": "If MQTT is not needed, leave the module disabled."
+    },
+    "serial": {
+      "summary": "Serial module for data exchange through UART or the Serial API.",
+      "whenToUse": "Use it when the device is connected to another controller, computer, or external system over serial.",
+      "defaultBehavior": "If no external serial hardware is connected, the module is usually not needed."
+    },
+    "external_notification": {
+      "summary": "External notifications: GPIO, vibration, buzzer, and reactions to messages or bell alerts.",
+      "whenToUse": "Configure this for external LEDs, vibration motors, buzzers, and other indicators.",
+      "defaultBehavior": "If no external notification hardware is connected, leave the module disabled."
+    },
+    "store_forward": {
+      "summary": "Store & Forward stores messages and can return history to other nodes.",
+      "whenToUse": "Useful for stationary nodes that should help the mesh deliver message history.",
+      "defaultBehavior": "Usually not required for a normal portable device."
+    },
+    "range_test": {
+      "summary": "Range Test sends test packets to measure coverage.",
+      "whenToUse": "Enable temporarily while checking connectivity between locations.",
+      "defaultBehavior": "Turn it off after testing to avoid unnecessary airtime."
+    },
+    "telemetry": {
+      "summary": "Device, power, environment, health, and air quality telemetry.",
+      "whenToUse": "Enable only the telemetry types you need for connected sensors or power monitoring.",
+      "defaultBehavior": "Frequent telemetry uses more airtime and power."
+    },
+    "canned_message": {
+      "summary": "Canned messages and hardware input controls for sending text from the device.",
+      "whenToUse": "Use it when the device has buttons or a rotary encoder for predefined messages.",
+      "defaultBehavior": "If those controls are not used, leave this section unchanged."
+    },
+    "audio": {
+      "summary": "Codec2 audio module: PTT, bitrate, and I2S pins.",
+      "whenToUse": "Change only when compatible audio hardware is connected.",
+      "defaultBehavior": "Without audio hardware, the module is usually disabled."
+    },
+    "remote_hardware": {
+      "summary": "Remote access to device GPIO pins through mesh commands.",
+      "whenToUse": "Use this for relays, sensors, and external automation.",
+      "defaultBehavior": "If remote automation is not needed, leave it disabled."
+    },
+    "neighbor_info": {
+      "summary": "Information about nearby nodes that the device can report periodically.",
+      "whenToUse": "Useful for understanding mesh topology and which nodes can hear each other.",
+      "defaultBehavior": "Very frequent reports use airtime, so intervals are usually long."
+    },
+    "ambient_lighting": {
+      "summary": "External RGB lighting: state, current, and colors.",
+      "whenToUse": "Change only when supported lighting hardware is connected.",
+      "defaultBehavior": "If no lighting is connected, leave it disabled."
+    },
+    "detection_sensor": {
+      "summary": "GPIO event sensor, such as a button, reed switch, or motion sensor.",
+      "whenToUse": "Configure this when the device should send a message on input changes.",
+      "defaultBehavior": "A wrong trigger type may send too many messages or none at all."
+    },
+    "paxcounter": {
+      "summary": "Counts nearby Wi-Fi/BLE devices using RSSI thresholds.",
+      "whenToUse": "Use this for nearby presence estimation only where rules and laws allow it.",
+      "defaultBehavior": "If this statistic is not needed, leave the module disabled."
+    },
+    "statusmessage": {
+      "summary": "Text status that the node can rebroadcast periodically.",
+      "whenToUse": "Set a short status when a stationary node should advertise its purpose or state.",
+      "defaultBehavior": "An empty status avoids extra traffic."
+    },
+    "traffic_management": {
+      "summary": "Mesh traffic optimization: deduplication, rate limiting, and unknown-packet handling.",
+      "whenToUse": "Use in busy meshes or on infrastructure nodes.",
+      "defaultBehavior": "If the mesh works normally, avoid changing this without understanding the effects."
+    },
+    "tak": {
+      "summary": "TAK team and member role for TAK_TRACKER.",
+      "whenToUse": "Change only for TAK integration.",
+      "defaultBehavior": "Not needed without TAK."
+    },
+    "meshcore_device": {
+      "summary": "MeshCore Companion device metadata. This section is read-only.",
+      "whenToUse": "Use it to check the name, model, firmware version, and device keys.",
+      "defaultBehavior": "These values are reported by the device and are not edited from MeshApp."
+    },
+    "meshcore_radio": {
+      "summary": "MeshCore Companion radio parameters. This section is read-only.",
+      "whenToUse": "Use it to check frequency, power, and LoRa settings.",
+      "defaultBehavior": "Values are reported by the device."
+    },
+    "meshcore_limits": {
+      "summary": "MeshCore Companion limits, storage, and diagnostics.",
+      "whenToUse": "Use it to understand available storage, contacts, channels, and the last error.",
+      "defaultBehavior": "Values are reported by the device."
+    },
+    "meshcore_channels": {
+      "summary": "MeshCore Companion channels and their roles. This section is read-only.",
+      "whenToUse": "Use it to inspect configured channels.",
+      "defaultBehavior": "Values are reported by the device."
+    }
+  },
+  "types": {
+    "category": {
+      "summary": "A section groups related settings.",
+      "whenToUse": "Expand it and change only settings whose purpose you understand.",
+      "defaultBehavior": "If unsure, leave values inside the section unchanged."
+    },
+    "boolean": {
+      "summary": "A switch turns a feature on or off.",
+      "whenToUse": "Change it when you explicitly want to enable or disable the described feature.",
+      "defaultBehavior": "If unsure, keep the current value.",
+      "valueHint": "Only two values are possible.",
+      "values": {
+        "true": {
+          "title": "Enabled",
+          "description": "The feature is active and the device will use the described behavior."
+        },
+        "false": {
+          "title": "Disabled",
+          "description": "The feature is not used. This is usually safe when you do not need it."
+        }
+      }
+    },
+    "enum": {
+      "summary": "This setting chooses one mode from a fixed list.",
+      "whenToUse": "Change it when you know which mode your use case needs.",
+      "defaultBehavior": "If unsure, keep the current mode.",
+      "valueHint": "All firmware-supported choices are listed below."
+    },
+    "number": {
+      "summary": "A numeric setting defines an interval, threshold, pin, power, or another quantity.",
+      "whenToUse": "Change only if you know the unit and understand what the number affects.",
+      "defaultBehavior": "If unsure, keep the current value.",
+      "valueHint": "Enter a number. Very short intervals can drain battery and use more airtime."
+    },
+    "string": {
+      "summary": "A text setting: name, address, key, topic, format, or another string.",
+      "whenToUse": "Change it when you need a specific text, address, or format.",
+      "defaultBehavior": "An empty string often means firmware default behavior.",
+      "valueHint": "Enter text without extra spaces. For addresses and formats, follow the example in the setting description."
+    },
+    "bytes": {
+      "summary": "Binary data shown in encoded form.",
+      "whenToUse": "Change only when you have the exact key or data value.",
+      "defaultBehavior": "A wrong value can break access, encryption, or administrative features.",
+      "valueHint": "Usually a Base64 string."
+    },
+    "repeated": {
+      "summary": "A list of values of the same type.",
+      "whenToUse": "Add or remove list entries only when you understand what each entry means.",
+      "defaultBehavior": "The empty last row is used to add a new value.",
+      "valueHint": "Each row in the list is a separate value."
+    }
+  },
+  "fields": {
+    "owner_info.long_name": {
+      "summary": "Full device name. Use a human-readable label, such as Home Roof or Car 1.",
+      "whenToUse": "Change it when the device is hard to distinguish from other nodes.",
+      "defaultBehavior": "If unchanged, other users keep seeing the previous name.",
+      "valueHint": "Plain text. A short clear name works best."
+    },
+    "owner_info.short_name": {
+      "summary": "Short device name used on screens and compact lists.",
+      "whenToUse": "Change it together with the long name so the node is recognizable in short form.",
+      "defaultBehavior": "If empty, the firmware or app may keep the existing short name.",
+      "valueHint": "Very short text, usually 2-4 characters."
+    },
+    "owner_info.is_licensed": {
+      "summary": "Marks the owner as a licensed radio operator for regions or modes where radio rules allow different limits for licensed users.",
+      "whenToUse": "Enable only when the operator really has the required license or authorization for the region and band being used.",
+      "defaultBehavior": "If unsure, leave it disabled. In related owner information, the long name may need to contain the license number.",
+      "valueHint": "Only two values are possible: enabled or disabled.",
+      "values": {
+        "true": {
+          "title": "Yes",
+          "description": "The device marks the operator as licensed."
+        },
+        "false": {
+          "title": "No",
+          "description": "Normal mode without this flag."
+        }
+      }
+    },
+    "fixed_position.latitude": {
+      "summary": "Latitude of the device's fixed position.",
+      "whenToUse": "Set it for a stationary node when you want to show its position without GPS.",
+      "defaultBehavior": "A zero or empty value is not a useful coordinate.",
+      "valueHint": "Decimal degrees, for example 55.751244."
+    },
+    "fixed_position.longitude": {
+      "summary": "Longitude of the device's fixed position.",
+      "whenToUse": "Set it together with latitude for a stationary node.",
+      "defaultBehavior": "A zero or empty value is not a useful coordinate.",
+      "valueHint": "Decimal degrees, for example 37.618423."
+    },
+    "fixed_position.altitude": {
+      "summary": "Altitude of the fixed position above sea level.",
+      "whenToUse": "Useful for rooftop and other high-mounted nodes.",
+      "defaultBehavior": "If the exact altitude is unknown, keep the current value.",
+      "valueHint": "Whole number in meters."
+    },
+    "ringtone.ringtone": {
+      "summary": "RTTTL notification melody string.",
+      "whenToUse": "Change it when you want a custom external notification sound.",
+      "defaultBehavior": "An empty string or current value keeps the default behavior.",
+      "valueHint": "RTTTL text. If the format is invalid, the device may not play the melody."
+    },
+    "meshcore_device.device_name": {
+      "summary": "Human-readable MeshCore device name.",
+      "whenToUse": "Use it to verify the connected MeshCore device and diagnose compatibility, capacity, or communication problems.",
+      "defaultBehavior": "This is usually read from the device. Do not edit unless MeshCore explicitly supports changing this value here.",
+      "valueHint": "Use the format expected by the firmware. If unsure, keep the existing value."
+    },
+    "meshcore_device.owner_id": {
+      "summary": "Owner/account identifier reported by the device.",
+      "whenToUse": "Use it to verify the connected MeshCore device and diagnose compatibility, capacity, or communication problems.",
+      "defaultBehavior": "This is usually read from the device. Do not edit unless MeshCore explicitly supports changing this value here.",
+      "valueHint": "Use the format expected by the firmware. If unsure, keep the existing value."
+    },
+    "meshcore_device.public_key": {
+      "summary": "Public cryptographic key used for MeshCore identity and secure communication.",
+      "whenToUse": "Use it to verify the connected MeshCore device and diagnose compatibility, capacity, or communication problems.",
+      "defaultBehavior": "This is usually read from the device. Do not edit unless MeshCore explicitly supports changing this value here.",
+      "valueHint": "Enter the value exactly; an extra space or wrong character can prevent access."
+    },
+    "meshcore_device.model": {
+      "summary": "Hardware model reported by the device.",
+      "whenToUse": "Use it to verify the connected MeshCore device and diagnose compatibility, capacity, or communication problems.",
+      "defaultBehavior": "This is usually read from the device. Do not edit unless MeshCore explicitly supports changing this value here.",
+      "valueHint": "Use the format expected by the firmware. If unsure, keep the existing value."
+    },
+    "meshcore_device.firmware_version": {
+      "summary": "Firmware version running on the device.",
+      "whenToUse": "Use it to verify the connected MeshCore device and diagnose compatibility, capacity, or communication problems.",
+      "defaultBehavior": "This is usually read from the device. Do not edit unless MeshCore explicitly supports changing this value here.",
+      "valueHint": "Use the format expected by the firmware. If unsure, keep the existing value."
+    },
+    "meshcore_device.firmware_build": {
+      "summary": "Specific firmware build identifier.",
+      "whenToUse": "Use it to verify the connected MeshCore device and diagnose compatibility, capacity, or communication problems.",
+      "defaultBehavior": "This is usually read from the device. Do not edit unless MeshCore explicitly supports changing this value here.",
+      "valueHint": "Use the format expected by the firmware. If unsure, keep the existing value."
+    },
+    "meshcore_device.protocol_version": {
+      "summary": "MeshCore protocol version supported by the device.",
+      "whenToUse": "Use it to verify the connected MeshCore device and diagnose compatibility, capacity, or communication problems.",
+      "defaultBehavior": "This is usually read from the device. Do not edit unless MeshCore explicitly supports changing this value here.",
+      "valueHint": "Use the format expected by the firmware. If unsure, keep the existing value."
+    },
+    "meshcore_device.ble_pin": {
+      "summary": "Bluetooth PIN used for BLE pairing.",
+      "whenToUse": "Use it to verify the connected MeshCore device and diagnose compatibility, capacity, or communication problems.",
+      "defaultBehavior": "This is usually read from the device. Do not edit unless MeshCore explicitly supports changing this value here.",
+      "valueHint": "Enter the GPIO or hardware pin number from your board documentation. A wrong pin can stop the feature or affect the wrong circuit."
+    },
+    "meshcore_radio.tx_power": {
+      "summary": "Current MeshCore radio transmit power.",
+      "whenToUse": "Use it to verify the connected MeshCore device and diagnose compatibility, capacity, or communication problems.",
+      "defaultBehavior": "This is usually read from the device. Do not edit unless MeshCore explicitly supports changing this value here.",
+      "valueHint": "Use the format expected by the firmware. If unsure, keep the existing value."
+    },
+    "meshcore_radio.max_tx_power": {
+      "summary": "Maximum transmit power supported or allowed by the device.",
+      "whenToUse": "Use it to verify the connected MeshCore device and diagnose compatibility, capacity, or communication problems.",
+      "defaultBehavior": "This is usually read from the device. Do not edit unless MeshCore explicitly supports changing this value here.",
+      "valueHint": "Use the format expected by the firmware. If unsure, keep the existing value."
+    },
+    "meshcore_radio.frequency": {
+      "summary": "Radio frequency used by MeshCore communication.",
+      "whenToUse": "Use it to verify the connected MeshCore device and diagnose compatibility, capacity, or communication problems.",
+      "defaultBehavior": "This is usually read from the device. Do not edit unless MeshCore explicitly supports changing this value here.",
+      "valueHint": "Use only a frequency allowed in your region and compatible with the rest of your mesh."
+    },
+    "meshcore_radio.bandwidth": {
+      "summary": "Radio channel bandwidth reported by the connected MeshCore device.",
+      "whenToUse": "Use it to check whether the MeshCore radio parameters match the network you expect.",
+      "defaultBehavior": "This is normally read from the device. Changing bandwidth without matching the rest of the mesh can break communication.",
+      "valueHint": "Use the unit and format expected by MeshCore firmware. If unsure, keep the existing value."
+    },
+    "meshcore_radio.spreading_factor": {
+      "summary": "LoRa spreading factor: higher values favor range, lower values favor speed.",
+      "whenToUse": "Use it to verify the connected MeshCore device and diagnose compatibility, capacity, or communication problems.",
+      "defaultBehavior": "This is usually read from the device. Do not edit unless MeshCore explicitly supports changing this value here.",
+      "valueHint": "Use the format expected by the firmware. If unsure, keep the existing value."
+    },
+    "meshcore_radio.coding_rate": {
+      "summary": "LoRa coding rate used for error correction.",
+      "whenToUse": "Use it to verify the connected MeshCore device and diagnose compatibility, capacity, or communication problems.",
+      "defaultBehavior": "This is usually read from the device. Do not edit unless MeshCore explicitly supports changing this value here.",
+      "valueHint": "Use the format expected by the firmware. If unsure, keep the existing value."
+    },
+    "meshcore_limits.max_contacts": {
+      "summary": "Maximum number of contacts the device can store.",
+      "whenToUse": "Use it to verify the connected MeshCore device and diagnose compatibility, capacity, or communication problems.",
+      "defaultBehavior": "This is usually read from the device. Do not edit unless MeshCore explicitly supports changing this value here.",
+      "valueHint": "Use the format expected by the firmware. If unsure, keep the existing value."
+    },
+    "meshcore_limits.contact_count": {
+      "summary": "Current number of contacts stored on the device.",
+      "whenToUse": "Use it to verify the connected MeshCore device and diagnose compatibility, capacity, or communication problems.",
+      "defaultBehavior": "This is usually read from the device. Do not edit unless MeshCore explicitly supports changing this value here.",
+      "valueHint": "Use the format expected by the firmware. If unsure, keep the existing value."
+    },
+    "meshcore_limits.max_channels": {
+      "summary": "Maximum number of MeshCore channels the device can store.",
+      "whenToUse": "Use it to verify the connected MeshCore device and diagnose compatibility, capacity, or communication problems.",
+      "defaultBehavior": "This is usually read from the device. Do not edit unless MeshCore explicitly supports changing this value here.",
+      "valueHint": "Use the format expected by the firmware. If unsure, keep the existing value."
+    },
+    "meshcore_limits.battery_mv": {
+      "summary": "Battery voltage in millivolts.",
+      "whenToUse": "Use it to verify the connected MeshCore device and diagnose compatibility, capacity, or communication problems.",
+      "defaultBehavior": "This is usually read from the device. Do not edit unless MeshCore explicitly supports changing this value here.",
+      "valueHint": "Use the format expected by the firmware. If unsure, keep the existing value."
+    },
+    "meshcore_limits.storage_used": {
+      "summary": "Storage currently used on the device.",
+      "whenToUse": "Use it to verify the connected MeshCore device and diagnose compatibility, capacity, or communication problems.",
+      "defaultBehavior": "This is usually read from the device. Do not edit unless MeshCore explicitly supports changing this value here.",
+      "valueHint": "Use the format expected by the firmware. If unsure, keep the existing value."
+    },
+    "meshcore_limits.storage_total": {
+      "summary": "Total storage capacity reported by the device.",
+      "whenToUse": "Use it to verify the connected MeshCore device and diagnose compatibility, capacity, or communication problems.",
+      "defaultBehavior": "This is usually read from the device. Do not edit unless MeshCore explicitly supports changing this value here.",
+      "valueHint": "Use the format expected by the firmware. If unsure, keep the existing value."
+    },
+    "meshcore_limits.last_error": {
+      "summary": "Last error message or code reported by the device.",
+      "whenToUse": "Use it to verify the connected MeshCore device and diagnose compatibility, capacity, or communication problems.",
+      "defaultBehavior": "This is usually read from the device. Do not edit unless MeshCore explicitly supports changing this value here.",
+      "valueHint": "Use the format expected by the firmware. If unsure, keep the existing value."
+    },
+    "meshcore_channels.channel": {
+      "summary": "MeshCore channel entry used for communication groups or routes.",
+      "whenToUse": "Use it to verify the connected MeshCore device and diagnose compatibility, capacity, or communication problems.",
+      "defaultBehavior": "This is usually read from the device. Do not edit unless MeshCore explicitly supports changing this value here.",
+      "valueHint": "Use the format expected by the firmware. If unsure, keep the existing value."
+    },
+    "meshtastic.Config.DeviceConfig.role": {
+      "summary": "Role defines why the device is on the mesh and how it handles other packets, position reports, and service messages.",
+      "whenToUse": "Change role only when the device's purpose changes: portable node, router, tracker, sensor, or TAK device.",
+      "defaultBehavior": "For most users, CLIENT is the correct choice. A wrong role can drain battery, use extra airtime, or make the node less visible.",
+      "valueHint": "Choose one value. If unsure, use CLIENT.",
+      "values": {
+        "CLIENT": {
+          "title": "Normal node",
+          "description": "Best for a phone, computer, or standalone messaging device. Recommended for most users."
+        },
+        "CLIENT_MUTE": {
+          "title": "Client without rebroadcasting",
+          "description": "Participates in the mesh but does not forward other packets. Useful when you want less airtime usage."
+        },
+        "ROUTER": {
+          "title": "Infrastructure router",
+          "description": "Stationary coverage extender. Usually placed high and powered continuously."
+        },
+        "ROUTER_CLIENT": {
+          "title": "Router-client",
+          "description": "Deprecated mixed mode. Prefer ROUTER or CLIENT."
+        },
+        "REPEATER": {
+          "title": "Simple repeater",
+          "description": "Deprecated mode that only repeats packets and can create routing problems."
+        },
+        "TRACKER": {
+          "title": "Tracker",
+          "description": "Sends position more often. Good for moving objects, but uses more power and airtime."
+        },
+        "SENSOR": {
+          "title": "Sensor",
+          "description": "Prioritizes telemetry. Use for weather, environment, and other sensor nodes."
+        },
+        "TAK": {
+          "title": "TAK",
+          "description": "Mode for ATAK integration. Not needed for normal messaging."
+        },
+        "CLIENT_HIDDEN": {
+          "title": "Hidden client",
+          "description": "Sends fewer routine announcements while still allowing on-demand communication. Use only if you understand the tradeoff."
+        },
+        "LOST_AND_FOUND": {
+          "title": "Lost and found",
+          "description": "Regularly sends a text message with current position to help recover the device."
+        },
+        "TAK_TRACKER": {
+          "title": "TAK tracker",
+          "description": "Automatically sends position for TAK and reduces routine announcements."
+        },
+        "ROUTER_LATE": {
+          "title": "Late router",
+          "description": "Rebroadcasts after other routers. Useful as backup coverage without competing with main routers."
+        },
+        "CLIENT_BASE": {
+          "title": "Base client",
+          "description": "Helps weaker favorite nodes distribute messages more widely. Good for a home or rooftop base station."
+        }
+      }
+    },
+    "meshtastic.Config.DeviceConfig.serial_enabled": {
+      "summary": "Legacy device option that used to enable the Serial Console over the Stream API. New firmware uses Security > Serial enabled, so this field is kept mainly for older configurations.",
+      "whenToUse": "Change only when managing an old firmware/configuration that still reads this Device field.",
+      "defaultBehavior": "For current firmware, configure the Security section instead and leave this legacy value unchanged.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.Config.DeviceConfig.button_gpio": {
+      "summary": "GPIO pin used as the user button on boards without a predefined button, or to remap the button function on boards with multiple buttons.",
+      "whenToUse": "Set it when your board documentation says the user button should be on a specific GPIO, or when you intentionally move that function to another button.",
+      "defaultBehavior": "Boards with a built-in button normally already know the correct pin. Keep the default unless you are wiring your own button.",
+      "valueHint": "Enter the GPIO or hardware pin number from your board documentation. A wrong pin can stop the feature or affect the wrong circuit."
+    },
+    "meshtastic.Config.DeviceConfig.buzzer_gpio": {
+      "summary": "GPIO pin used to drive a PWM buzzer on boards without a predefined buzzer pin.",
+      "whenToUse": "Set it when you have connected an external buzzer or your board needs a custom buzzer pin.",
+      "defaultBehavior": "Boards with a built-in buzzer normally use their predefined pin. Keep the default unless your hardware wiring is different.",
+      "valueHint": "Enter the GPIO or hardware pin number from your board documentation. A wrong pin can stop the feature or affect the wrong circuit."
+    },
+    "meshtastic.Config.DeviceConfig.rebroadcast_mode": {
+      "summary": "Controls which packets this node is allowed to rebroadcast for other nodes. It affects network reach, airtime use, and whether foreign or unknown traffic is forwarded.",
+      "whenToUse": "Change it when you need to reduce airtime, limit forwarding to your own mesh, or configure a tracker/sensor that should not relay packets.",
+      "defaultBehavior": "For normal client nodes, ALL is the usual default. Restrictive modes can reduce mesh coverage if chosen incorrectly.",
+      "valueHint": "Choose one option from the list. The option descriptions explain what each value does.",
+      "values": {
+        "ALL": {
+          "title": "All",
+          "description": "Rebroadcasts normal mesh traffic broadly, including compatible traffic from other meshes with the same radio parameters."
+        },
+        "ALL_SKIP_DECODING": {
+          "title": "All, skip decoding",
+          "description": "Repeats packets without decoding them. Intended for Repeater role; other roles fall back to ALL behavior."
+        },
+        "LOCAL_ONLY": {
+          "title": "Local only",
+          "description": "Rebroadcasts only packets from local primary or secondary channels and ignores open or undecryptable foreign mesh traffic."
+        },
+        "KNOWN_ONLY": {
+          "title": "Known only",
+          "description": "Like LOCAL_ONLY, but also ignores packets from node numbers that are not in this node database."
+        },
+        "NONE": {
+          "title": "None",
+          "description": "Does not rebroadcast packets. Allowed only for Sensor, Tracker, and TAK Tracker style roles."
+        },
+        "CORE_PORTNUMS_ONLY": {
+          "title": "Core packets only",
+          "description": "Rebroadcasts standard Meshtastic packet types such as NodeInfo, Text, Position, Telemetry, and Routing, while ignoring non-standard portnums."
+        }
+      }
+    },
+    "meshtastic.Config.DeviceConfig.node_info_broadcast_secs": {
+      "summary": "How often the node broadcasts its NodeInfo: long name, short name, and identity information that other devices show in node lists.",
+      "whenToUse": "Increase the interval to reduce airtime, or decrease it if nodes often appear unnamed or stale in your network.",
+      "defaultBehavior": "The firmware default is usually safe. Very frequent NodeInfo broadcasts add traffic without improving normal messaging.",
+      "valueHint": "Enter time in seconds. Smaller values update more often and can use more battery and airtime."
+    },
+    "meshtastic.Config.DeviceConfig.double_tap_as_button_press": {
+      "summary": "Treats a double tap from a supported accelerometer as if the user button was pressed.",
+      "whenToUse": "Enable it when the device has a supported accelerometer and you want tap control without pressing a physical button.",
+      "defaultBehavior": "Leave disabled if the device has no accelerometer or accidental taps would be inconvenient.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.Config.DeviceConfig.is_managed": {
+      "summary": "Legacy flag that marked the node as managed by a mesh administrator and limited what normal users could change in clients.",
+      "whenToUse": "Use the Security section for current firmware. This old Device field is useful only for compatibility with old configs.",
+      "defaultBehavior": "Leave disabled unless an administrator intentionally manages the node and the firmware still uses this legacy field.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.Config.DeviceConfig.disable_triple_click": {
+      "summary": "Disables the user-button triple-click shortcut that toggles GPS on or off.",
+      "whenToUse": "Enable this if accidental triple-clicks are turning GPS off, or if the button is used for another enclosure-specific action.",
+      "defaultBehavior": "Leave disabled when you want the quick GPS toggle to remain available from the device button.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.Config.DeviceConfig.tzdef": {
+      "summary": "POSIX timezone string used by the device to show local time on its screen and in logs.",
+      "whenToUse": "Set it when the displayed time is wrong or the device needs a timezone without relying on a connected phone.",
+      "defaultBehavior": "UTC0 is safe for UTC. For local time, use a valid POSIX timezone string for your region.",
+      "valueHint": "Enter a POSIX TZ string, for example UTC0 or a region-specific rule such as PST8PDT,M3.2.0,M11.1.0."
+    },
+    "meshtastic.Config.DeviceConfig.led_heartbeat_disabled": {
+      "summary": "Turns off the default blinking status LED heartbeat.",
+      "whenToUse": "Enable it if the blinking LED is distracting, wastes power, or must stay dark in your installation.",
+      "defaultBehavior": "Leave disabled if you want the LED to keep showing that the device is alive.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.Config.DeviceConfig.buzzer_mode": {
+      "summary": "Controls which sounds the device buzzer is allowed to play: all feedback, no sound, only notifications, only system tones, or only direct-message alerts.",
+      "whenToUse": "Change it to make the device quieter, keep only important alerts, or disable button/startup sounds while still allowing notifications.",
+      "defaultBehavior": "ALL_ENABLED gives full audible feedback. DISABLED makes the device silent, which can cause missed alerts.",
+      "valueHint": "Choose one option from the list. The option descriptions explain what each value does.",
+      "values": {
+        "ALL_ENABLED": {
+          "title": "All sounds",
+          "description": "Buzzer plays all audio feedback: button presses, startup/shutdown tones, notifications, and alerts."
+        },
+        "DISABLED": {
+          "title": "Silent",
+          "description": "All buzzer feedback is disabled. Use when the device must not make sound."
+        },
+        "NOTIFICATIONS_ONLY": {
+          "title": "Notifications only",
+          "description": "Buzzer plays notifications and alerts, but not button-press or routine system tones."
+        },
+        "SYSTEM_ONLY": {
+          "title": "System sounds only",
+          "description": "Buzzer plays non-notification tones such as button presses, startup, and shutdown, but not message alerts."
+        },
+        "DIRECT_MSG_ONLY": {
+          "title": "Direct messages only",
+          "description": "Buzzer plays direct-message notifications and alerts, but not button-press sounds."
+        }
+      }
+    },
+    "meshtastic.Config.PositionConfig.position_broadcast_secs": {
+      "summary": "position broadcast secs controls how often Position sends, updates, or repeats its data. This section controls GPS, fixed location, and how often position packets are sent.",
+      "whenToUse": "Increase it to reduce battery use and airtime; decrease it only when fresher or more noticeable updates are important.",
+      "defaultBehavior": "Default intervals are usually a safe balance between freshness and channel load.",
+      "valueHint": "Enter time in seconds. Smaller values update more often and can use more battery and airtime."
+    },
+    "meshtastic.Config.PositionConfig.position_broadcast_smart_enabled": {
+      "summary": "Enables adaptive position broadcasting. The node sends position updates when movement and timing make the update useful instead of blindly sending on every interval.",
+      "whenToUse": "Keep enabled for most mobile devices to reduce radio traffic and battery use while still updating the map when the node moves.",
+      "defaultBehavior": "Disabling it makes position broadcasts follow the regular interval more directly and can increase airtime.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.Config.PositionConfig.fixed_position": {
+      "summary": "Marks the node as stationary. The device keeps sending the configured last latitude, longitude, and altitude instead of requiring a fresh GPS fix.",
+      "whenToUse": "Use for a base station, repeater, router, or indoor node that has a known permanent location and no useful GPS reception.",
+      "defaultBehavior": "Wrong fixed coordinates will put the node in the wrong place on maps and can mislead other users.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.Config.PositionConfig.gps_enabled": {
+      "summary": "Deprecated GPS on/off flag. New firmware uses GPS mode to say whether GPS is enabled, disabled, or not present on the device.",
+      "whenToUse": "Change only for old firmware that still reads this field. For current firmware, use GPS mode.",
+      "defaultBehavior": "Leave unchanged if GPS mode is available.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.Config.PositionConfig.gps_update_interval": {
+      "summary": "gps update interval controls how often Position sends, updates, or repeats its data. This section controls GPS, fixed location, and how often position packets are sent.",
+      "whenToUse": "Increase it to reduce battery use and airtime; decrease it only when fresher or more noticeable updates are important.",
+      "defaultBehavior": "Default intervals are usually a safe balance between freshness and channel load.",
+      "valueHint": "Enter time in seconds. Smaller values update more often and can use more battery and airtime."
+    },
+    "meshtastic.Config.PositionConfig.gps_attempt_time": {
+      "summary": "Deprecated limit for how long the device tries to obtain a GPS position. Newer firmware relies on smart and regular broadcast timing instead.",
+      "whenToUse": "Use only with old firmware or when diagnosing GPS startup behavior on a specific device.",
+      "defaultBehavior": "Leave unchanged on current firmware.",
+      "valueHint": "Enter a number in the unit described above. Use 0 only when the description says that 0 means default or disabled."
+    },
+    "meshtastic.Config.PositionConfig.position_flags": {
+      "summary": "Bit mask that chooses which extra details are included in POSITION packets, such as altitude, satellite count, timestamp, heading, and speed.",
+      "whenToUse": "Enable extra fields only when receivers need them. More fields make every position packet larger and increase airtime.",
+      "defaultBehavior": "The firmware always includes core coordinates; optional fields should stay minimal on busy meshes.",
+      "valueHint": "This is a bit mask. Use dedicated UI controls if available; otherwise change it only when you know which flags are being combined."
+    },
+    "meshtastic.Config.PositionConfig.rx_gpio": {
+      "summary": "rx gpio selects the hardware line used by Position. This section controls GPS, fixed location, and how often position packets are sent.",
+      "whenToUse": "Set it according to your board or external module wiring.",
+      "defaultBehavior": "Board defaults are safest for built-in hardware; wrong pins can stop the feature or conflict with another function.",
+      "valueHint": "Enter the GPIO or hardware pin number from your board documentation. A wrong pin can stop the feature or affect the wrong circuit."
+    },
+    "meshtastic.Config.PositionConfig.tx_gpio": {
+      "summary": "tx gpio selects the hardware line used by Position. This section controls GPS, fixed location, and how often position packets are sent.",
+      "whenToUse": "Set it according to your board or external module wiring.",
+      "defaultBehavior": "Board defaults are safest for built-in hardware; wrong pins can stop the feature or conflict with another function.",
+      "valueHint": "Enter the GPIO or hardware pin number from your board documentation. A wrong pin can stop the feature or affect the wrong circuit."
+    },
+    "meshtastic.Config.PositionConfig.broadcast_smart_minimum_distance": {
+      "summary": "Minimum movement in meters before smart position broadcasting is allowed to send another location update.",
+      "whenToUse": "Increase it to reduce map updates and save airtime; decrease it when nearby movement must appear quickly.",
+      "defaultBehavior": "Too small a distance can flood the mesh with position packets; too large a distance makes moving nodes look stale.",
+      "valueHint": "Enter distance in meters."
+    },
+    "meshtastic.Config.PositionConfig.broadcast_smart_minimum_interval_secs": {
+      "summary": "broadcast smart minimum interval secs controls how often Position sends, updates, or repeats its data. This section controls GPS, fixed location, and how often position packets are sent.",
+      "whenToUse": "Increase it to reduce battery use and airtime; decrease it only when fresher or more noticeable updates are important.",
+      "defaultBehavior": "Default intervals are usually a safe balance between freshness and channel load.",
+      "valueHint": "Enter time in seconds. Smaller values update more often and can use more battery and airtime."
+    },
+    "meshtastic.Config.PositionConfig.gps_en_gpio": {
+      "summary": "gps en gpio selects the hardware line used by Position. This section controls GPS, fixed location, and how often position packets are sent.",
+      "whenToUse": "Set it according to your board or external module wiring.",
+      "defaultBehavior": "Board defaults are safest for built-in hardware; wrong pins can stop the feature or conflict with another function.",
+      "valueHint": "Enter the GPIO or hardware pin number from your board documentation. A wrong pin can stop the feature or affect the wrong circuit."
+    },
+    "meshtastic.Config.PositionConfig.gps_mode": {
+      "summary": "Tells firmware whether GPS hardware is present and should be used.",
+      "whenToUse": "Use ENABLED when the node has GPS and should report movement, DISABLED when GPS exists but should stay off, and NOT_PRESENT when no GPS hardware is installed.",
+      "defaultBehavior": "Wrong mode can waste power or prevent positions from updating.",
+      "valueHint": "Choose one option from the list. The option descriptions explain what each value does.",
+      "values": {
+        "DISABLED": {
+          "title": "Disabled",
+          "description": "GPS hardware exists but firmware should not use it."
+        },
+        "ENABLED": {
+          "title": "Enabled",
+          "description": "GPS hardware exists and should provide live position data."
+        },
+        "NOT_PRESENT": {
+          "title": "Not present",
+          "description": "The device has no GPS hardware; firmware will not wait for GPS fixes."
+        }
+      }
+    },
+    "meshtastic.Config.PowerConfig.is_power_saving": {
+      "summary": "Lets the device sleep as much as possible. For tracker and sensor roles this can also sleep the LoRa radio between activity periods.",
+      "whenToUse": "Use for battery-powered trackers and sensors that do not need constant phone connection or instant responses.",
+      "defaultBehavior": "Do not use when you need reliable phone app access, quick interaction, or a device without a user button to wake it.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.Config.PowerConfig.on_battery_shutdown_after_secs": {
+      "summary": "on battery shutdown after secs controls how often Power sends, updates, or repeats its data. This section controls sleep, wake-up, and battery behavior.",
+      "whenToUse": "Increase it to reduce battery use and airtime; decrease it only when fresher or more noticeable updates are important.",
+      "defaultBehavior": "Default intervals are usually a safe balance between freshness and channel load.",
+      "valueHint": "Enter time in seconds. Smaller values update more often and can use more battery and airtime."
+    },
+    "meshtastic.Config.PowerConfig.adc_multiplier_override": {
+      "summary": "Overrides the battery-voltage divider ratio used to calculate displayed battery voltage.",
+      "whenToUse": "Use only when the board reports the wrong battery voltage and you know the resistor divider ratio for that hardware.",
+      "defaultBehavior": "Leave empty/default on normal boards. A wrong multiplier makes battery percentage and voltage readings unreliable.",
+      "valueHint": "Enter a decimal ratio, usually between 2 and 6."
+    },
+    "meshtastic.Config.PowerConfig.wait_bluetooth_secs": {
+      "summary": "wait bluetooth secs controls how often Power sends, updates, or repeats its data. This section controls sleep, wake-up, and battery behavior.",
+      "whenToUse": "Increase it to reduce battery use and airtime; decrease it only when fresher or more noticeable updates are important.",
+      "defaultBehavior": "Default intervals are usually a safe balance between freshness and channel load.",
+      "valueHint": "Enter time in seconds. Smaller values update more often and can use more battery and airtime."
+    },
+    "meshtastic.Config.PowerConfig.sds_secs": {
+      "summary": "sds secs controls how often Power sends, updates, or repeats its data. This section controls sleep, wake-up, and battery behavior.",
+      "whenToUse": "Increase it to reduce battery use and airtime; decrease it only when fresher or more noticeable updates are important.",
+      "defaultBehavior": "Default intervals are usually a safe balance between freshness and channel load.",
+      "valueHint": "Enter time in seconds. Smaller values update more often and can use more battery and airtime."
+    },
+    "meshtastic.Config.PowerConfig.ls_secs": {
+      "summary": "ls secs controls how often Power sends, updates, or repeats its data. This section controls sleep, wake-up, and battery behavior.",
+      "whenToUse": "Increase it to reduce battery use and airtime; decrease it only when fresher or more noticeable updates are important.",
+      "defaultBehavior": "Default intervals are usually a safe balance between freshness and channel load.",
+      "valueHint": "Enter time in seconds. Smaller values update more often and can use more battery and airtime."
+    },
+    "meshtastic.Config.PowerConfig.min_wake_secs": {
+      "summary": "min wake secs controls how often Power sends, updates, or repeats its data. This section controls sleep, wake-up, and battery behavior.",
+      "whenToUse": "Increase it to reduce battery use and airtime; decrease it only when fresher or more noticeable updates are important.",
+      "defaultBehavior": "Default intervals are usually a safe balance between freshness and channel load.",
+      "valueHint": "Enter time in seconds. Smaller values update more often and can use more battery and airtime."
+    },
+    "meshtastic.Config.PowerConfig.device_battery_ina_address": {
+      "summary": "device battery ina address is a connection value used by Power. This section controls sleep, wake-up, and battery behavior.",
+      "whenToUse": "Change it when connecting the node to your own Wi-Fi, MQTT broker, NTP server, syslog server, or topic namespace.",
+      "defaultBehavior": "One wrong character can prevent connection. Keep empty/default values when using firmware defaults.",
+      "valueHint": "Use the format expected by the firmware. If unsure, keep the existing value."
+    },
+    "meshtastic.Config.PowerConfig.powermon_enables": {
+      "summary": "Debug bit mask for enabling selected power-monitor log sources.",
+      "whenToUse": "Use while diagnosing power consumption or sleep behavior with logs. It is not needed for normal operation.",
+      "defaultBehavior": "Leave 0/empty unless you are collecting power diagnostics.",
+      "valueHint": "This is a bit mask. Enable only the log sources you need."
+    },
+    "meshtastic.Config.NetworkConfig.wifi_enabled": {
+      "summary": "Enables Wi-Fi on the node. On supported devices, enabling Wi-Fi disables Bluetooth because the radios share resources.",
+      "whenToUse": "Use when the node must connect to a Wi-Fi network for MQTT, NTP time sync, syslog, or other network services.",
+      "defaultBehavior": "Keep disabled if you normally connect from the phone over Bluetooth.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.Config.NetworkConfig.wifi_ssid": {
+      "summary": "wifi ssid is a connection value used by Network. This section controls Wi-Fi, Ethernet, time sync, IP address, and network services.",
+      "whenToUse": "Change it when connecting the node to your own Wi-Fi, MQTT broker, NTP server, syslog server, or topic namespace.",
+      "defaultBehavior": "One wrong character can prevent connection. Keep empty/default values when using firmware defaults.",
+      "valueHint": "Use the format expected by the firmware. If unsure, keep the existing value."
+    },
+    "meshtastic.Config.NetworkConfig.wifi_psk": {
+      "summary": "wifi psk is a connection value used by Network. This section controls Wi-Fi, Ethernet, time sync, IP address, and network services.",
+      "whenToUse": "Change it when connecting the node to your own Wi-Fi, MQTT broker, NTP server, syslog server, or topic namespace.",
+      "defaultBehavior": "One wrong character can prevent connection. Keep empty/default values when using firmware defaults.",
+      "valueHint": "Enter the value exactly; an extra space or wrong character can prevent access."
+    },
+    "meshtastic.Config.NetworkConfig.ntp_server": {
+      "summary": "ntp server is a connection value used by Network. This section controls Wi-Fi, Ethernet, time sync, IP address, and network services.",
+      "whenToUse": "Change it when connecting the node to your own Wi-Fi, MQTT broker, NTP server, syslog server, or topic namespace.",
+      "defaultBehavior": "One wrong character can prevent connection. Keep empty/default values when using firmware defaults.",
+      "valueHint": "Use the format expected by the firmware. If unsure, keep the existing value."
+    },
+    "meshtastic.Config.NetworkConfig.eth_enabled": {
+      "summary": "Enables Ethernet networking on boards that have supported Ethernet hardware.",
+      "whenToUse": "Use for fixed nodes where a wired connection is more reliable than Wi-Fi.",
+      "defaultBehavior": "Leave disabled on boards without Ethernet or when using Wi-Fi/Bluetooth only.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.Config.NetworkConfig.address_mode": {
+      "summary": "Chooses how the node gets its IP address: DHCP automatically from the router, or STATIC from values you enter manually.",
+      "whenToUse": "Use DHCP for ordinary home or field networks. Use STATIC only when the network administrator expects the node to keep a fixed IP address.",
+      "defaultBehavior": "A wrong static IP, gateway, subnet, or DNS can make the node unreachable on the network.",
+      "valueHint": "Choose one option from the list. The option descriptions explain what each value does.",
+      "values": {
+        "DHCP": {
+          "title": "DHCP",
+          "description": "Router gives the node IP address, gateway, subnet, and DNS automatically."
+        },
+        "STATIC": {
+          "title": "Static",
+          "description": "You manually enter IP address, gateway, subnet, and DNS. Use when your network requires a fixed address."
+        }
+      }
+    },
+    "meshtastic.Config.NetworkConfig.ipv4_config": {
+      "summary": "Parameter group \"ipv4 config\" in the \"network\" section. It contains related settings.",
+      "whenToUse": "Open this group when you need to change the related \"ipv4 config\" settings.",
+      "defaultBehavior": "If you are not sure, keep the current value. A wrong setting can reduce connectivity, drain battery, or disable a needed feature.",
+      "valueHint": "Enter text without extra spaces. For addresses, keys, and formats, use the exact value."
+    },
+    "meshtastic.Config.NetworkConfig.IpV4Config.ip": {
+      "summary": "Static IPv4 address assigned to this node when Address mode is STATIC.",
+      "whenToUse": "Set when the router or network plan requires this node to keep a fixed address.",
+      "defaultBehavior": "Do not fill for DHCP. Duplicate or wrong IP addresses cause network conflicts.",
+      "valueHint": "Use a valid IPv4 address for your LAN, for example 192.168.1.50."
+    },
+    "meshtastic.Config.NetworkConfig.IpV4Config.gateway": {
+      "summary": "IPv4 address of the router/gateway used when Address mode is STATIC.",
+      "whenToUse": "Set with the static IP so the node can reach devices outside its local subnet.",
+      "defaultBehavior": "Wrong gateway can leave Wi-Fi/Ethernet connected but prevent internet, MQTT, or NTP access.",
+      "valueHint": "Use your router address, for example 192.168.1.1."
+    },
+    "meshtastic.Config.NetworkConfig.IpV4Config.subnet": {
+      "summary": "Subnet mask for the static IPv4 network.",
+      "whenToUse": "Set together with static IP and gateway according to your LAN addressing plan.",
+      "defaultBehavior": "Wrong subnet can stop the node from reaching nearby devices even when the IP address looks correct.",
+      "valueHint": "Common home networks use 255.255.255.0, but follow your network settings."
+    },
+    "meshtastic.Config.NetworkConfig.IpV4Config.dns": {
+      "summary": "DNS server used to resolve names such as MQTT or NTP hosts when Address mode is STATIC.",
+      "whenToUse": "Set when using host names instead of raw IP addresses with a static network configuration.",
+      "defaultBehavior": "Wrong DNS can break named servers while direct IP addresses still work.",
+      "valueHint": "Use your router DNS or a DNS server allowed by your network."
+    },
+    "meshtastic.Config.NetworkConfig.rsyslog_server": {
+      "summary": "rsyslog server is a connection value used by Network. This section controls Wi-Fi, Ethernet, time sync, IP address, and network services.",
+      "whenToUse": "Change it when connecting the node to your own Wi-Fi, MQTT broker, NTP server, syslog server, or topic namespace.",
+      "defaultBehavior": "One wrong character can prevent connection. Keep empty/default values when using firmware defaults.",
+      "valueHint": "Use the format expected by the firmware. If unsure, keep the existing value."
+    },
+    "meshtastic.Config.NetworkConfig.enabled_protocols": {
+      "summary": "Bit mask for optional network protocols, such as UDP broadcast on the local network.",
+      "whenToUse": "Enable only the protocols you actually need for local discovery or integration.",
+      "defaultBehavior": "Leaving optional broadcasts off reduces unnecessary LAN traffic.",
+      "valueHint": "0 means no auxiliary broadcast. UDP_BROADCAST enables local UDP packet broadcasting."
+    },
+    "meshtastic.Config.NetworkConfig.ipv6_enabled": {
+      "summary": "Enables IPv6 support for network features when the firmware and local network support it.",
+      "whenToUse": "Use only on networks where IPv6 is configured and needed.",
+      "defaultBehavior": "IPv4 is enough for most simple Wi-Fi and Ethernet setups.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.Config.DisplayConfig.screen_on_secs": {
+      "summary": "screen on secs controls how often Display sends, updates, or repeats its data. This section controls the built-in screen and how information is shown on it.",
+      "whenToUse": "Increase it to reduce battery use and airtime; decrease it only when fresher or more noticeable updates are important.",
+      "defaultBehavior": "Default intervals are usually a safe balance between freshness and channel load.",
+      "valueHint": "Enter time in seconds. Smaller values update more often and can use more battery and airtime."
+    },
+    "meshtastic.Config.DisplayConfig.gps_format": {
+      "summary": "Deprecated, unused display GPS format field. New firmware no longer uses this setting.",
+      "whenToUse": "Do not change it for current firmware; use the active GPS format setting in Device UI where available.",
+      "defaultBehavior": "Leave unchanged because this field is kept only for compatibility.",
+      "valueHint": "No useful value is expected for current firmware.",
+      "values": {
+        "UNUSED": {
+          "title": "Unused",
+          "description": "Deprecated value kept only for compatibility."
+        }
+      }
+    },
+    "meshtastic.Config.DisplayConfig.auto_screen_carousel_secs": {
+      "summary": "auto screen carousel secs controls how often Display sends, updates, or repeats its data. This section controls the built-in screen and how information is shown on it.",
+      "whenToUse": "Increase it to reduce battery use and airtime; decrease it only when fresher or more noticeable updates are important.",
+      "defaultBehavior": "Default intervals are usually a safe balance between freshness and channel load.",
+      "valueHint": "Enter time in seconds. Smaller values update more often and can use more battery and airtime."
+    },
+    "meshtastic.Config.DisplayConfig.compass_north_top": {
+      "summary": "Deprecated display option that kept north at the top of the compass instead of rotating the display toward the current heading.",
+      "whenToUse": "Use only on old firmware or old display layouts that still support this behavior.",
+      "defaultBehavior": "Leave unchanged on current firmware unless you are correcting a known compass display issue.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.Config.DisplayConfig.flip_screen": {
+      "summary": "Flips the built-in screen vertically for devices mounted upside down.",
+      "whenToUse": "Use when the physical device or case forces the screen to be installed inverted.",
+      "defaultBehavior": "Leave off when text and icons already appear upright.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.Config.DisplayConfig.units": {
+      "summary": "Chooses metric or imperial units for values shown on the device screen.",
+      "whenToUse": "Set to the units your users expect for distance, speed, altitude, and similar display values.",
+      "defaultBehavior": "Metric is the normal default in firmware.",
+      "valueHint": "Choose one option from the list. The option descriptions explain what each value does.",
+      "values": {
+        "METRIC": {
+          "title": "Metric",
+          "description": "Shows distances and measurements in metric units."
+        },
+        "IMPERIAL": {
+          "title": "Imperial",
+          "description": "Shows distances and measurements in imperial units."
+        }
+      }
+    },
+    "meshtastic.Config.DisplayConfig.oled": {
+      "summary": "Selects the OLED display driver/type when automatic detection fails.",
+      "whenToUse": "Use only when the screen is blank, wrong size, or drawn incorrectly and you know the display controller installed on the board.",
+      "defaultBehavior": "AUTO should be used for most devices.",
+      "valueHint": "Choose one option from the list. The option descriptions explain what each value does.",
+      "values": {
+        "OLED_AUTO": {
+          "title": "Auto detect",
+          "description": "Firmware tries to detect the screen automatically."
+        },
+        "OLED_SSD1306": {
+          "title": "SSD1306",
+          "description": "Use for SSD1306 OLED screens."
+        },
+        "OLED_SH1106": {
+          "title": "SH1106",
+          "description": "Use for SH1106 OLED screens."
+        },
+        "OLED_SH1107": {
+          "title": "SH1107 128x64",
+          "description": "Use for SH1107 128x64 screens."
+        },
+        "OLED_SH1107_128_128": {
+          "title": "SH1107 128x128",
+          "description": "Use for square SH1107 128x128 screens."
+        },
+        "OLED_SH1107_ROTATED": {
+          "title": "SH1107 rotated",
+          "description": "Use for rotated 64x128 SH1107 screens."
+        }
+      }
+    },
+    "meshtastic.Config.DisplayConfig.displaymode": {
+      "summary": "Chooses the layout style used on the device display, including layouts for classic OLED and bicolor screens.",
+      "whenToUse": "Change when the default layout wastes space, looks wrong on a bicolor display, or needs an inverted top bar.",
+      "defaultBehavior": "Default layout is safest for ordinary 128x64 OLED screens.",
+      "valueHint": "Choose one option from the list. The option descriptions explain what each value does.",
+      "values": {
+        "DEFAULT": {
+          "title": "Default",
+          "description": "Classic layout for 128x64 OLED screens."
+        },
+        "TWOCOLOR": {
+          "title": "Two-color",
+          "description": "Layout adjusted for bicolor OLED screens."
+        },
+        "INVERTED": {
+          "title": "Inverted",
+          "description": "Two-color style with inverted top bar."
+        },
+        "COLOR": {
+          "title": "Color",
+          "description": "Color TFT layout where supported."
+        }
+      }
+    },
+    "meshtastic.Config.DisplayConfig.heading_bold": {
+      "summary": "Makes the first line on the device display use a pseudo-bold style.",
+      "whenToUse": "Use when the top line is hard to read at a glance.",
+      "defaultBehavior": "Leave off for the original lighter display style.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.Config.DisplayConfig.wake_on_tap_or_motion": {
+      "summary": "Wakes the screen when a supported accelerometer detects a tap or movement.",
+      "whenToUse": "Use on handheld devices where users expect the screen to wake without pressing the button.",
+      "defaultBehavior": "Leave off if motion wakes the screen too often and wastes battery.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.Config.DisplayConfig.compass_orientation": {
+      "summary": "Rotates or inverts compass readings so the on-screen compass matches the way the hardware is mounted.",
+      "whenToUse": "Change after installing the device in a case or mount where the compass direction is consistently rotated or reversed.",
+      "defaultBehavior": "Use 0 degrees when the compass and display are mounted in the same orientation.",
+      "valueHint": "Choose one option from the list. The option descriptions explain what each value does.",
+      "values": {
+        "DEGREES_0": {
+          "title": "0°",
+          "description": "Compass output is rotated by 0 degrees."
+        },
+        "DEGREES_0_INVERTED": {
+          "title": "0° inverted",
+          "description": "Compass output is rotated by 0 degrees and inverted."
+        },
+        "DEGREES_90": {
+          "title": "90°",
+          "description": "Compass output is rotated by 90 degrees."
+        },
+        "DEGREES_90_INVERTED": {
+          "title": "90° inverted",
+          "description": "Compass output is rotated by 90 degrees and inverted."
+        },
+        "DEGREES_180": {
+          "title": "180°",
+          "description": "Compass output is rotated by 180 degrees."
+        },
+        "DEGREES_180_INVERTED": {
+          "title": "180° inverted",
+          "description": "Compass output is rotated by 180 degrees and inverted."
+        },
+        "DEGREES_270": {
+          "title": "270°",
+          "description": "Compass output is rotated by 270 degrees."
+        },
+        "DEGREES_270_INVERTED": {
+          "title": "270° inverted",
+          "description": "Compass output is rotated by 270 degrees and inverted."
+        }
+      }
+    },
+    "meshtastic.Config.DisplayConfig.use_12h_clock": {
+      "summary": "Chooses 12-hour clock display instead of the default 24-hour format on the device screen.",
+      "whenToUse": "Use when users prefer AM/PM time format.",
+      "defaultBehavior": "Disabled means 24-hour time.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.Config.DisplayConfig.use_long_node_name": {
+      "summary": "Shows long node names on device screens instead of short names where the UI supports it.",
+      "whenToUse": "Use when short names are ambiguous and the screen has enough room.",
+      "defaultBehavior": "Short names are easier to read on small OLED displays.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.Config.DisplayConfig.enable_message_bubbles": {
+      "summary": "Shows received messages as bubbles on the device screen.",
+      "whenToUse": "Use on devices with screens when local users need to read messages without opening the phone app.",
+      "defaultBehavior": "Disable if message bubbles clutter the screen or reveal messages in a shared space.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.Config.LoRaConfig.use_preset": {
+      "summary": "Use a predefined Meshtastic modem preset instead of manual bandwidth, spreading factor, and coding rate. These radio settings determine whether nodes can hear each other and whether operation is legal for the region.",
+      "whenToUse": "Change only when all affected nodes will use compatible radio settings and regional rules allow it.",
+      "defaultBehavior": "Keep known-working LoRa settings to avoid losing contact with the mesh.",
+      "valueHint": "Use the format expected by the firmware. If unsure, keep the existing value."
+    },
+    "meshtastic.Config.LoRaConfig.modem_preset": {
+      "summary": "Preset controls LoRa speed, range, and robustness.",
+      "whenToUse": "Change only if your whole mesh uses the same preset or you understand the speed/range tradeoff.",
+      "defaultBehavior": "If the preset differs from other nodes, the device may stop communicating with them.",
+      "valueHint": "LONG usually gives longer range, SHORT is faster, FAST is faster than SLOW but usually less robust.",
+      "values": {
+        "LONG_FAST": {
+          "title": "Long Fast",
+          "description": "Preset controls range, speed, and robustness. Nodes in the same mesh must use a compatible preset."
+        },
+        "LONG_SLOW": {
+          "title": "Long Slow",
+          "description": "Preset controls range, speed, and robustness. Nodes in the same mesh must use a compatible preset."
+        },
+        "VERY_LONG_SLOW": {
+          "title": "Very Long Slow",
+          "description": "Preset controls range, speed, and robustness. Nodes in the same mesh must use a compatible preset."
+        },
+        "MEDIUM_SLOW": {
+          "title": "Medium Slow",
+          "description": "Preset controls range, speed, and robustness. Nodes in the same mesh must use a compatible preset."
+        },
+        "MEDIUM_FAST": {
+          "title": "Medium Fast",
+          "description": "Preset controls range, speed, and robustness. Nodes in the same mesh must use a compatible preset."
+        },
+        "SHORT_SLOW": {
+          "title": "Short Slow",
+          "description": "Preset controls range, speed, and robustness. Nodes in the same mesh must use a compatible preset."
+        },
+        "SHORT_FAST": {
+          "title": "Short Fast",
+          "description": "Preset controls range, speed, and robustness. Nodes in the same mesh must use a compatible preset."
+        },
+        "LONG_MODERATE": {
+          "title": "Long Moderate",
+          "description": "Preset controls range, speed, and robustness. Nodes in the same mesh must use a compatible preset."
+        },
+        "SHORT_TURBO": {
+          "title": "Short Turbo",
+          "description": "Preset controls range, speed, and robustness. Nodes in the same mesh must use a compatible preset."
+        },
+        "LONG_TURBO": {
+          "title": "Long Turbo",
+          "description": "Preset controls range, speed, and robustness. Nodes in the same mesh must use a compatible preset."
+        },
+        "LITE_FAST": {
+          "title": "Lite Fast",
+          "description": "Preset controls range, speed, and robustness. Nodes in the same mesh must use a compatible preset."
+        },
+        "LITE_SLOW": {
+          "title": "Lite Slow",
+          "description": "Preset controls range, speed, and robustness. Nodes in the same mesh must use a compatible preset."
+        },
+        "NARROW_FAST": {
+          "title": "Narrow Fast",
+          "description": "Preset controls range, speed, and robustness. Nodes in the same mesh must use a compatible preset."
+        },
+        "NARROW_SLOW": {
+          "title": "Narrow Slow",
+          "description": "Preset controls range, speed, and robustness. Nodes in the same mesh must use a compatible preset."
+        }
+      }
+    },
+    "meshtastic.Config.LoRaConfig.bandwidth": {
+      "summary": "Manual LoRa bandwidth used when preset mode is off. It affects speed, range, and compatibility. These radio settings determine whether nodes can hear each other and whether operation is legal for the region.",
+      "whenToUse": "Change only when all affected nodes will use compatible radio settings and regional rules allow it.",
+      "defaultBehavior": "Keep known-working LoRa settings to avoid losing contact with the mesh.",
+      "valueHint": "Use the format expected by the firmware. If unsure, keep the existing value."
+    },
+    "meshtastic.Config.LoRaConfig.spread_factor": {
+      "summary": "Manual LoRa spreading factor. Higher values increase sensitivity and range but slow packets down. These radio settings determine whether nodes can hear each other and whether operation is legal for the region.",
+      "whenToUse": "Change only when all affected nodes will use compatible radio settings and regional rules allow it.",
+      "defaultBehavior": "Keep known-working LoRa settings to avoid losing contact with the mesh.",
+      "valueHint": "Use the format expected by the firmware. If unsure, keep the existing value."
+    },
+    "meshtastic.Config.LoRaConfig.coding_rate": {
+      "summary": "Manual LoRa error-correction coding rate. All nodes must match for reliable communication. These radio settings determine whether nodes can hear each other and whether operation is legal for the region.",
+      "whenToUse": "Change only when all affected nodes will use compatible radio settings and regional rules allow it.",
+      "defaultBehavior": "Keep known-working LoRa settings to avoid losing contact with the mesh.",
+      "valueHint": "Use the format expected by the firmware. If unsure, keep the existing value."
+    },
+    "meshtastic.Config.LoRaConfig.frequency_offset": {
+      "summary": "Small correction to radio center frequency for hardware calibration. These radio settings determine whether nodes can hear each other and whether operation is legal for the region.",
+      "whenToUse": "Change only when all affected nodes will use compatible radio settings and regional rules allow it.",
+      "defaultBehavior": "Keep known-working LoRa settings to avoid losing contact with the mesh.",
+      "valueHint": "Use only a frequency allowed in your region and compatible with the rest of your mesh."
+    },
+    "meshtastic.Config.LoRaConfig.region": {
+      "summary": "Region sets the allowed frequencies and radio restrictions.",
+      "whenToUse": "Choose the region that matches the country where the device is used.",
+      "defaultBehavior": "A wrong region may violate radio rules or make the device incompatible with the mesh.",
+      "valueHint": "Choose a region from the list. If unsure, do not change it before checking local rules.",
+      "values": {
+        "UNSET": {
+          "title": "Unset",
+          "description": "Region is not selected. Usually choose the correct region before using the radio."
+        },
+        "US": {
+          "title": "United States",
+          "description": "United States radio region profile. Select it only when the device is used where this radio plan is legal and all nodes in the mesh use compatible region settings."
+        },
+        "EU_433": {
+          "title": "European Union 433 MHz",
+          "description": "European Union 433 MHz band profile. Select it only when the device is used where this radio plan is legal and all nodes in the mesh use compatible region settings."
+        },
+        "EU_868": {
+          "title": "European Union 868 MHz",
+          "description": "European Union 868 MHz band profile. Select it only when the device is used where this radio plan is legal and all nodes in the mesh use compatible region settings."
+        },
+        "CN": {
+          "title": "China",
+          "description": "China radio region profile. Select it only when the device is used where this radio plan is legal and all nodes in the mesh use compatible region settings."
+        },
+        "JP": {
+          "title": "Japan",
+          "description": "Japan radio region profile. Select it only when the device is used where this radio plan is legal and all nodes in the mesh use compatible region settings."
+        },
+        "ANZ": {
+          "title": "Australia / New Zealand",
+          "description": "Australia and New Zealand radio region profile. Select it only when the device is used where this radio plan is legal and all nodes in the mesh use compatible region settings."
+        },
+        "KR": {
+          "title": "Korea",
+          "description": "Korea radio region profile. Select it only when the device is used where this radio plan is legal and all nodes in the mesh use compatible region settings."
+        },
+        "TW": {
+          "title": "Taiwan",
+          "description": "Taiwan radio region profile. Select it only when the device is used where this radio plan is legal and all nodes in the mesh use compatible region settings."
+        },
+        "RU": {
+          "title": "Russia",
+          "description": "Russia radio region profile. Select it only when the device is used where this radio plan is legal and all nodes in the mesh use compatible region settings."
+        },
+        "IN": {
+          "title": "India",
+          "description": "India radio region profile. Select it only when the device is used where this radio plan is legal and all nodes in the mesh use compatible region settings."
+        },
+        "NZ_865": {
+          "title": "New Zealand 865 MHz",
+          "description": "New Zealand 865 MHz band profile. Select it only when the device is used where this radio plan is legal and all nodes in the mesh use compatible region settings."
+        },
+        "TH": {
+          "title": "Thailand",
+          "description": "Thailand radio region profile. Select it only when the device is used where this radio plan is legal and all nodes in the mesh use compatible region settings."
+        },
+        "LORA_24": {
+          "title": "2.4 GHz LoRa",
+          "description": "2.4 GHz LoRa/WLAN-band profile. Use only with compatible 2.4 GHz hardware. Select it only when the device is used where this radio plan is legal and all nodes in the mesh use compatible region settings."
+        },
+        "UA_433": {
+          "title": "Ukraine 433 MHz",
+          "description": "Ukraine 433 MHz band profile. Select it only when the device is used where this radio plan is legal and all nodes in the mesh use compatible region settings."
+        },
+        "UA_868": {
+          "title": "Ukraine 868 MHz",
+          "description": "Ukraine 868 MHz band profile. Select it only when the device is used where this radio plan is legal and all nodes in the mesh use compatible region settings."
+        },
+        "MY_433": {
+          "title": "Malaysia 433 MHz",
+          "description": "Malaysia 433 MHz band profile. Select it only when the device is used where this radio plan is legal and all nodes in the mesh use compatible region settings."
+        },
+        "MY_919": {
+          "title": "Malaysia 919 MHz",
+          "description": "Malaysia 919 MHz band profile. Select it only when the device is used where this radio plan is legal and all nodes in the mesh use compatible region settings."
+        },
+        "SG_923": {
+          "title": "Singapore 923 MHz",
+          "description": "Singapore 923 MHz band profile. Select it only when the device is used where this radio plan is legal and all nodes in the mesh use compatible region settings."
+        },
+        "PH_433": {
+          "title": "Philippines 433 MHz",
+          "description": "Philippines 433 MHz band profile. Select it only when the device is used where this radio plan is legal and all nodes in the mesh use compatible region settings."
+        },
+        "PH_868": {
+          "title": "Philippines 868 MHz",
+          "description": "Philippines 868 MHz band profile. Select it only when the device is used where this radio plan is legal and all nodes in the mesh use compatible region settings."
+        },
+        "PH_915": {
+          "title": "Philippines 915 MHz",
+          "description": "Philippines 915 MHz band profile. Select it only when the device is used where this radio plan is legal and all nodes in the mesh use compatible region settings."
+        },
+        "ANZ_433": {
+          "title": "Australia / New Zealand 433 MHz",
+          "description": "Australia and New Zealand 433 MHz band profile. Select it only when the device is used where this radio plan is legal and all nodes in the mesh use compatible region settings."
+        },
+        "KZ_433": {
+          "title": "Kazakhstan 433 MHz",
+          "description": "Kazakhstan 433 MHz band profile. Select it only when the device is used where this radio plan is legal and all nodes in the mesh use compatible region settings."
+        },
+        "KZ_863": {
+          "title": "Kazakhstan 863 MHz",
+          "description": "Kazakhstan 863 MHz band profile. Select it only when the device is used where this radio plan is legal and all nodes in the mesh use compatible region settings."
+        },
+        "NP_865": {
+          "title": "Nepal 865 MHz",
+          "description": "Nepal 865 MHz band profile. Select it only when the device is used where this radio plan is legal and all nodes in the mesh use compatible region settings."
+        },
+        "BR_902": {
+          "title": "Brazil 902 MHz",
+          "description": "Brazil 902 MHz band profile. Select it only when the device is used where this radio plan is legal and all nodes in the mesh use compatible region settings."
+        },
+        "ITU1_2M": {
+          "title": "ITU Region 1 amateur 2 m",
+          "description": "Amateur-radio 2 m band profile for ITU Region 1, 144-146 MHz. Use only when licensing and local rules permit. Select it only when the device is used where this radio plan is legal and all nodes in the mesh use compatible region settings."
+        },
+        "ITU23_2M": {
+          "title": "ITU Region 2/3 amateur 2 m",
+          "description": "Amateur-radio 2 m band profile for ITU Regions 2 and 3, 144-148 MHz. Use only when licensing and local rules permit. Select it only when the device is used where this radio plan is legal and all nodes in the mesh use compatible region settings."
+        },
+        "EU_866": {
+          "title": "EU 866 MHz SRD",
+          "description": "European Union 866 MHz short-range-device band profile. Select it only when the device is used where this radio plan is legal and all nodes in the mesh use compatible region settings."
+        },
+        "EU_874": {
+          "title": "EU 874 MHz SRD",
+          "description": "European Union 874 MHz short-range-device band profile. Select it only when the device is used where this radio plan is legal and all nodes in the mesh use compatible region settings."
+        },
+        "EU_917": {
+          "title": "EU 917 MHz SRD",
+          "description": "European Union 917 MHz short-range-device band profile. Select it only when the device is used where this radio plan is legal and all nodes in the mesh use compatible region settings."
+        },
+        "EU_N_868": {
+          "title": "EU narrow 868 MHz",
+          "description": "European Union 868 MHz narrow-preset band profile. Select it only when the device is used where this radio plan is legal and all nodes in the mesh use compatible region settings."
+        }
+      }
+    },
+    "meshtastic.Config.LoRaConfig.hop_limit": {
+      "summary": "Maximum number of rebroadcast hops a packet may use through the mesh. These radio settings determine whether nodes can hear each other and whether operation is legal for the region.",
+      "whenToUse": "Change only when all affected nodes will use compatible radio settings and regional rules allow it.",
+      "defaultBehavior": "Keep known-working LoRa settings to avoid losing contact with the mesh.",
+      "valueHint": "Use the format expected by the firmware. If unsure, keep the existing value."
+    },
+    "meshtastic.Config.LoRaConfig.tx_enabled": {
+      "summary": "Allows the LoRa radio to transmit. If disabled, the node can listen but cannot send or relay. These radio settings determine whether nodes can hear each other and whether operation is legal for the region.",
+      "whenToUse": "Change only when all affected nodes will use compatible radio settings and regional rules allow it.",
+      "defaultBehavior": "Keep known-working LoRa settings to avoid losing contact with the mesh.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.Config.LoRaConfig.tx_power": {
+      "summary": "Transmit power in dBm. Zero lets firmware choose a safe default. These radio settings determine whether nodes can hear each other and whether operation is legal for the region.",
+      "whenToUse": "Change only when all affected nodes will use compatible radio settings and regional rules allow it.",
+      "defaultBehavior": "Keep known-working LoRa settings to avoid losing contact with the mesh.",
+      "valueHint": "Use the format expected by the firmware. If unsure, keep the existing value."
+    },
+    "meshtastic.Config.LoRaConfig.channel_num": {
+      "summary": "Hardware frequency slot/channel number used to calculate the actual LoRa transmit frequency. These radio settings determine whether nodes can hear each other and whether operation is legal for the region.",
+      "whenToUse": "Change only when all affected nodes will use compatible radio settings and regional rules allow it.",
+      "defaultBehavior": "Keep known-working LoRa settings to avoid losing contact with the mesh.",
+      "valueHint": "Use the format expected by the firmware. If unsure, keep the existing value."
+    },
+    "meshtastic.Config.LoRaConfig.override_duty_cycle": {
+      "summary": "Allows transmissions to exceed the region duty-cycle limit when the selected region normally limits airtime.",
+      "whenToUse": "Use only if local radio rules and your operator status permit it.",
+      "defaultBehavior": "For ordinary users this should stay disabled. Enabling it can violate local radio regulations.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.Config.LoRaConfig.sx126x_rx_boosted_gain": {
+      "summary": "Enables boosted receive gain on SX126x-based radios.",
+      "whenToUse": "Use only on compatible SX126x hardware when weak-signal reception needs testing or improvement.",
+      "defaultBehavior": "Leave off if you are not sure the radio supports it; boosted gain can increase power use or noise sensitivity.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.Config.LoRaConfig.override_frequency": {
+      "summary": "Directly overrides the calculated LoRa transmit frequency. These radio settings determine whether nodes can hear each other and whether operation is legal for the region.",
+      "whenToUse": "Change only when all affected nodes will use compatible radio settings and regional rules allow it.",
+      "defaultBehavior": "Keep known-working LoRa settings to avoid losing contact with the mesh.",
+      "valueHint": "Use only a frequency allowed in your region and compatible with the rest of your mesh."
+    },
+    "meshtastic.Config.LoRaConfig.pa_fan_disabled": {
+      "summary": "Disables firmware control of the built-in power-amplifier fan pin.",
+      "whenToUse": "Use only on hardware where that fan output is not connected or must not be driven by firmware.",
+      "defaultBehavior": "Leave enabled on boards that rely on the fan for cooling during high-power transmit.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.Config.LoRaConfig.ignore_incoming": {
+      "summary": "Ignores incoming LoRa packets, useful only for special tests. These radio settings determine whether nodes can hear each other and whether operation is legal for the region.",
+      "whenToUse": "Change only when all affected nodes will use compatible radio settings and regional rules allow it.",
+      "defaultBehavior": "Keep known-working LoRa settings to avoid losing contact with the mesh.",
+      "valueHint": "Use the format expected by the firmware. If unsure, keep the existing value."
+    },
+    "meshtastic.Config.LoRaConfig.ignore_mqtt": {
+      "summary": "Prevents MQTT-originated packets from being sent into local LoRa airtime. These radio settings determine whether nodes can hear each other and whether operation is legal for the region.",
+      "whenToUse": "Change only when all affected nodes will use compatible radio settings and regional rules allow it.",
+      "defaultBehavior": "Keep known-working LoRa settings to avoid losing contact with the mesh.",
+      "valueHint": "Use the format expected by the firmware. If unsure, keep the existing value."
+    },
+    "meshtastic.Config.LoRaConfig.config_ok_to_mqtt": {
+      "summary": "Sets the ok_to_mqtt flag on outgoing packets, allowing eligible packets to be bridged toward MQTT by nodes that gateway traffic.",
+      "whenToUse": "Enable only when you want this node traffic to be allowed onto MQTT paths.",
+      "defaultBehavior": "Keep disabled if packets should remain local to LoRa and not be offered to MQTT gateways.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.Config.LoRaConfig.fem_lna_mode": {
+      "summary": "Tells firmware whether a front-end module low-noise amplifier is present and should be enabled for LoRa reception.",
+      "whenToUse": "Set according to the actual radio hardware. It matters on boards with an external RF front end.",
+      "defaultBehavior": "Wrong mode can reduce reception or enable hardware that is not present.",
+      "valueHint": "Choose one option from the list. The option descriptions explain what each value does.",
+      "values": {
+        "DISABLED": {
+          "title": "Disabled",
+          "description": "FEM/LNA hardware exists but is not used."
+        },
+        "ENABLED": {
+          "title": "Enabled",
+          "description": "Use supported FEM/LNA hardware to improve receive performance."
+        },
+        "NOT_PRESENT": {
+          "title": "Not present",
+          "description": "No supported FEM/LNA hardware is installed."
+        }
+      }
+    },
+    "meshtastic.Config.LoRaConfig.serial_hal_only": {
+      "summary": "Skips normal RadioLib initialization and waits for a Serial HAL radio connection instead.",
+      "whenToUse": "Use only for specialized hardware where the LoRa radio is controlled through Serial HAL.",
+      "defaultBehavior": "Ordinary Meshtastic devices should leave this disabled or the radio may not start.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.Config.BluetoothConfig.enabled": {
+      "summary": "Turns Bluetooth on or off. This section controls phone/computer pairing over Bluetooth.",
+      "whenToUse": "Enable it only when you use bluetooth; disable it to save resources and avoid extra traffic.",
+      "defaultBehavior": "Disabled is safest when the feature is not installed or not needed.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.Config.BluetoothConfig.mode": {
+      "summary": "Chooses how Bluetooth pairing is authorized: a random PIN shown by the device, a fixed PIN, or no PIN.",
+      "whenToUse": "Use random PIN for safer pairing on devices with a screen. Use fixed PIN only when users must pair without reading a changing code.",
+      "defaultBehavior": "No PIN is easiest but least protected against unwanted pairing nearby.",
+      "valueHint": "Choose one option from the list. The option descriptions explain what each value does.",
+      "values": {
+        "RANDOM_PIN": {
+          "title": "Random PIN",
+          "description": "Device generates a new PIN, usually shown on the screen."
+        },
+        "FIXED_PIN": {
+          "title": "Fixed PIN",
+          "description": "Device uses the configured six-digit PIN; useful without a screen."
+        },
+        "NO_PIN": {
+          "title": "No PIN",
+          "description": "Disables PIN authentication; use only in trusted environments."
+        }
+      }
+    },
+    "meshtastic.Config.BluetoothConfig.fixed_pin": {
+      "summary": "fixed pin selects the hardware line used by Bluetooth. This section controls phone/computer pairing over Bluetooth.",
+      "whenToUse": "Set it according to your board or external module wiring.",
+      "defaultBehavior": "Board defaults are safest for built-in hardware; wrong pins can stop the feature or conflict with another function.",
+      "valueHint": "Enter the GPIO or hardware pin number from your board documentation. A wrong pin can stop the feature or affect the wrong circuit."
+    },
+    "meshtastic.Config.SecurityConfig.public_key": {
+      "summary": "public key is part of security and administrative access. This section controls device keys and administrative access.",
+      "whenToUse": "Change it only when setting up admin keys, managed mode, serial console policy, or debug access.",
+      "defaultBehavior": "Back up keys before changing them; a mistake can block remote administration or secure direct messaging.",
+      "valueHint": "Enter the value exactly; an extra space or wrong character can prevent access."
+    },
+    "meshtastic.Config.SecurityConfig.private_key": {
+      "summary": "private key is part of security and administrative access. This section controls device keys and administrative access.",
+      "whenToUse": "Change it only when setting up admin keys, managed mode, serial console policy, or debug access.",
+      "defaultBehavior": "Back up keys before changing them; a mistake can block remote administration or secure direct messaging.",
+      "valueHint": "Enter the value exactly; an extra space or wrong character can prevent access."
+    },
+    "meshtastic.Config.SecurityConfig.admin_key": {
+      "summary": "admin key is part of security and administrative access. This section controls device keys and administrative access.",
+      "whenToUse": "Change it only when setting up admin keys, managed mode, serial console policy, or debug access.",
+      "defaultBehavior": "Back up keys before changing them; a mistake can block remote administration or secure direct messaging.",
+      "valueHint": "Enter the value exactly; an extra space or wrong character can prevent access."
+    },
+    "meshtastic.Config.SecurityConfig.is_managed": {
+      "summary": "is managed is part of security and administrative access. This section controls device keys and administrative access.",
+      "whenToUse": "Change it only when setting up admin keys, managed mode, serial console policy, or debug access.",
+      "defaultBehavior": "Back up keys before changing them; a mistake can block remote administration or secure direct messaging.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.Config.SecurityConfig.serial_enabled": {
+      "summary": "serial enabled is part of security and administrative access. This section controls device keys and administrative access.",
+      "whenToUse": "Change it only when setting up admin keys, managed mode, serial console policy, or debug access.",
+      "defaultBehavior": "Back up keys before changing them; a mistake can block remote administration or secure direct messaging.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.Config.SecurityConfig.debug_log_api_enabled": {
+      "summary": "debug log api enabled is part of security and administrative access. This section controls device keys and administrative access.",
+      "whenToUse": "Change it only when setting up admin keys, managed mode, serial console policy, or debug access.",
+      "defaultBehavior": "Back up keys before changing them; a mistake can block remote administration or secure direct messaging.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.Config.SecurityConfig.admin_channel_enabled": {
+      "summary": "admin channel enabled is part of security and administrative access. This section controls device keys and administrative access.",
+      "whenToUse": "Change it only when setting up admin keys, managed mode, serial console policy, or debug access.",
+      "defaultBehavior": "Back up keys before changing them; a mistake can block remote administration or secure direct messaging.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.DeviceUIConfig.version": {
+      "summary": "Internal version number for the saved on-device UI configuration format.",
+      "whenToUse": "Use it only for diagnostics or migration testing. Normal users should not edit it.",
+      "defaultBehavior": "Firmware uses this value to know whether stored UI data is compatible.",
+      "valueHint": "Enter a number in the unit described above. Use 0 only when the description says that 0 means default or disabled."
+    },
+    "meshtastic.DeviceUIConfig.screen_brightness": {
+      "summary": "Brightness of the device TFT screen.",
+      "whenToUse": "Increase for outdoor readability; decrease to reduce glare and power use.",
+      "defaultBehavior": "Very low values can make the screen look blank in bright light.",
+      "valueHint": "Enter a value from 1 to 255."
+    },
+    "meshtastic.DeviceUIConfig.screen_timeout": {
+      "summary": "Time before the device screen turns off after inactivity.",
+      "whenToUse": "Increase when users need more time to read the screen; decrease to save power.",
+      "defaultBehavior": "0 or very high values can keep the screen on longer than expected depending on firmware limits.",
+      "valueHint": "Enter a number in the unit described above. Use 0 only when the description says that 0 means default or disabled."
+    },
+    "meshtastic.DeviceUIConfig.screen_lock": {
+      "summary": "Locks the device screen so casual touches or button presses cannot immediately access the UI.",
+      "whenToUse": "Use when the device is shared, carried in a pocket, or installed where accidental input is likely.",
+      "defaultBehavior": "If enabled, make sure the PIN code is known to the user.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.DeviceUIConfig.settings_lock": {
+      "summary": "Protects on-device settings from being changed without unlocking.",
+      "whenToUse": "Use on shared or deployed devices where users may view status but should not change configuration.",
+      "defaultBehavior": "Keep disabled on personal devices unless you need local change protection.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.DeviceUIConfig.pin_code": {
+      "summary": "PIN code used with screen or settings lock.",
+      "whenToUse": "Set when locks are enabled so authorized users can unlock the device.",
+      "defaultBehavior": "Do not forget this value after deploying a locked device.",
+      "valueHint": "Enter a number in the unit described above. Use 0 only when the description says that 0 means default or disabled."
+    },
+    "meshtastic.DeviceUIConfig.theme": {
+      "summary": "Color theme used by the device UI.",
+      "whenToUse": "Choose the theme that is easiest to read on the physical screen and lighting conditions.",
+      "defaultBehavior": "Theme affects only the on-device UI appearance.",
+      "valueHint": "Choose one option from the list. The option descriptions explain what each value does.",
+      "values": {
+        "DARK": {
+          "title": "Dark",
+          "description": "Dark device UI theme."
+        },
+        "LIGHT": {
+          "title": "Light",
+          "description": "Light device UI theme."
+        },
+        "RED": {
+          "title": "Red",
+          "description": "Red-tinted theme for low-light use."
+        }
+      }
+    },
+    "meshtastic.DeviceUIConfig.alert_enabled": {
+      "summary": "Enables audible alert behavior in the device UI when supported by the hardware.",
+      "whenToUse": "Use when local users should notice incoming messages without looking at the screen.",
+      "defaultBehavior": "Disable for silent operation or shared quiet environments.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.DeviceUIConfig.banner_enabled": {
+      "summary": "Shows banner notifications in the device UI for supported events.",
+      "whenToUse": "Use when important events should be visible immediately on the screen.",
+      "defaultBehavior": "Disable if banners interrupt normal screen use.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.DeviceUIConfig.ring_tone_id": {
+      "summary": "Selects which built-in ringtone or alert sound the device UI uses.",
+      "whenToUse": "Change to make alerts easier to recognize or less annoying for the user.",
+      "defaultBehavior": "Unsupported IDs may fall back to firmware default or play nothing.",
+      "valueHint": "Enter a number in the unit described above. Use 0 only when the description says that 0 means default or disabled."
+    },
+    "meshtastic.DeviceUIConfig.language": {
+      "summary": "Language used by the device screen UI.",
+      "whenToUse": "Choose the language the device user can read comfortably.",
+      "defaultBehavior": "This changes the device UI language, not necessarily the desktop application language.",
+      "valueHint": "Choose one option from the list. The option descriptions explain what each value does.",
+      "values": {
+        "ENGLISH": {
+          "title": "English",
+          "description": "Shows the device UI in English."
+        },
+        "FRENCH": {
+          "title": "French",
+          "description": "Shows the device UI in French."
+        },
+        "GERMAN": {
+          "title": "German",
+          "description": "Shows the device UI in German."
+        },
+        "ITALIAN": {
+          "title": "Italian",
+          "description": "Shows the device UI in Italian."
+        },
+        "PORTUGUESE": {
+          "title": "Portuguese",
+          "description": "Shows the device UI in Portuguese."
+        },
+        "SPANISH": {
+          "title": "Spanish",
+          "description": "Shows the device UI in Spanish."
+        },
+        "SWEDISH": {
+          "title": "Swedish",
+          "description": "Shows the device UI in Swedish."
+        },
+        "FINNISH": {
+          "title": "Finnish",
+          "description": "Shows the device UI in Finnish."
+        },
+        "POLISH": {
+          "title": "Polish",
+          "description": "Shows the device UI in Polish."
+        },
+        "TURKISH": {
+          "title": "Turkish",
+          "description": "Shows the device UI in Turkish."
+        },
+        "SERBIAN": {
+          "title": "Serbian",
+          "description": "Shows the device UI in Serbian."
+        },
+        "RUSSIAN": {
+          "title": "Russian",
+          "description": "Shows the device UI in Russian."
+        },
+        "DUTCH": {
+          "title": "Dutch",
+          "description": "Shows the device UI in Dutch."
+        },
+        "GREEK": {
+          "title": "Greek",
+          "description": "Shows the device UI in Greek."
+        },
+        "NORWEGIAN": {
+          "title": "Norwegian",
+          "description": "Shows the device UI in Norwegian."
+        },
+        "SLOVENIAN": {
+          "title": "Slovenian",
+          "description": "Shows the device UI in Slovenian."
+        },
+        "UKRAINIAN": {
+          "title": "Ukrainian",
+          "description": "Shows the device UI in Ukrainian."
+        },
+        "BULGARIAN": {
+          "title": "Bulgarian",
+          "description": "Shows the device UI in Bulgarian."
+        },
+        "CZECH": {
+          "title": "Czech",
+          "description": "Shows the device UI in Czech."
+        },
+        "DANISH": {
+          "title": "Danish",
+          "description": "Shows the device UI in Danish."
+        },
+        "SIMPLIFIED_CHINESE": {
+          "title": "Simplified Chinese",
+          "description": "Shows the device UI in Simplified Chinese."
+        },
+        "TRADITIONAL_CHINESE": {
+          "title": "Traditional Chinese",
+          "description": "Shows the device UI in Traditional Chinese."
+        }
+      }
+    },
+    "meshtastic.DeviceUIConfig.node_filter": {
+      "summary": "Saved node-list filter configuration used by the on-device UI.",
+      "whenToUse": "Use when the device screen should hide nodes that are offline, unknown, distant, or not relevant.",
+      "defaultBehavior": "Restrictive filters can make valid nodes disappear from the local screen.",
+      "valueHint": "Enter text in the format expected by the firmware. If unsure, keep the existing value."
+    },
+    "meshtastic.NodeFilter.unknown_switch": {
+      "summary": "Hides nodes whose details are still unknown in the on-device node list.",
+      "whenToUse": "Use to keep the list cleaner when many incomplete or newly heard nodes appear.",
+      "defaultBehavior": "Disable if you want to see every node the device has heard.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.NodeFilter.offline_switch": {
+      "summary": "Hides nodes that are currently considered offline from the on-device node list.",
+      "whenToUse": "Use when the list is crowded and users mostly need active nodes.",
+      "defaultBehavior": "Disable if offline nodes are still important for history or diagnostics.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.NodeFilter.public_key_switch": {
+      "summary": "Hides nodes that do not have a public key recorded.",
+      "whenToUse": "Use when users only want nodes that can participate in secure identity/key features.",
+      "defaultBehavior": "Disable to show older or incomplete node records too.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.NodeFilter.hops_away": {
+      "summary": "Filters the node list by mesh distance in hops.",
+      "whenToUse": "Use to focus the on-device list on nearby nodes or to hide nodes that are many relays away.",
+      "defaultBehavior": "A restrictive hop filter can make valid distant nodes disappear from the display.",
+      "valueHint": "Enter a number in the unit described above. Use 0 only when the description says that 0 means default or disabled."
+    },
+    "meshtastic.NodeFilter.position_switch": {
+      "summary": "Hides nodes that do not have a known position.",
+      "whenToUse": "Use when the display is being used mainly for map/location awareness.",
+      "defaultBehavior": "Disable if non-GPS nodes should still appear.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.NodeFilter.node_name": {
+      "summary": "Filters the node list by a matching name string.",
+      "whenToUse": "Use to show only nodes whose long or short name contains the text you enter.",
+      "defaultBehavior": "Empty text means no name filter.",
+      "valueHint": "Enter text in the format expected by the firmware. If unsure, keep the existing value."
+    },
+    "meshtastic.NodeFilter.channel": {
+      "summary": "Filters the node list by channel index.",
+      "whenToUse": "Use when the device participates in several channels and users need to focus one channel.",
+      "defaultBehavior": "Wrong channel filter can hide nodes that are still present on other channels.",
+      "valueHint": "Enter a number in the unit described above. Use 0 only when the description says that 0 means default or disabled."
+    },
+    "meshtastic.DeviceUIConfig.node_highlight": {
+      "summary": "Saved node-list highlight rules used by the on-device UI.",
+      "whenToUse": "Use when important nodes should stand out by chat, position, telemetry, IAQ, or name.",
+      "defaultBehavior": "Highlighting changes display priority only; it does not change mesh traffic.",
+      "valueHint": "Enter text in the format expected by the firmware. If unsure, keep the existing value."
+    },
+    "meshtastic.NodeHighlight.chat_switch": {
+      "summary": "Highlights nodes with active chat activity in the on-device list.",
+      "whenToUse": "Use when recent conversations should stand out from ordinary nodes.",
+      "defaultBehavior": "Disable for a plainer node list.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.NodeHighlight.position_switch": {
+      "summary": "Highlights nodes that have position information.",
+      "whenToUse": "Use when location-capable nodes should be easy to spot.",
+      "defaultBehavior": "Disable if position should not affect visual priority.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.NodeHighlight.telemetry_switch": {
+      "summary": "Highlights nodes that provide telemetry data.",
+      "whenToUse": "Use when sensor or device-status nodes should stand out.",
+      "defaultBehavior": "Disable if telemetry should not affect the list appearance.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.NodeHighlight.iaq_switch": {
+      "summary": "Highlights nodes with indoor-air-quality data.",
+      "whenToUse": "Use when air quality sensors should be easy to find on the device.",
+      "defaultBehavior": "Disable if IAQ data is not important for the current user.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.NodeHighlight.node_name": {
+      "summary": "Highlights nodes whose name matches the entered text.",
+      "whenToUse": "Use to visually mark a team, site, or group of important nodes.",
+      "defaultBehavior": "Empty text means no name-based highlight.",
+      "valueHint": "Enter text in the format expected by the firmware. If unsure, keep the existing value."
+    },
+    "meshtastic.DeviceUIConfig.calibration_data": {
+      "summary": "Touch or screen calibration bytes stored by the device UI.",
+      "whenToUse": "Use only when restoring calibration data for the same device/screen.",
+      "defaultBehavior": "Wrong calibration data can make touch input inaccurate.",
+      "valueHint": "Enter text in the format expected by the firmware. If unsure, keep the existing value."
+    },
+    "meshtastic.DeviceUIConfig.map_data": {
+      "summary": "Saved map settings for the on-device UI.",
+      "whenToUse": "Use to keep home location, map style, and follow-GPS behavior for devices with map UI.",
+      "defaultBehavior": "Wrong map data changes only local display behavior.",
+      "valueHint": "Enter text in the format expected by the firmware. If unsure, keep the existing value."
+    },
+    "meshtastic.Map.home": {
+      "summary": "Parameter group \"home\" in the \"device screen UI\" section. It contains related settings.",
+      "whenToUse": "Open this group when you need to change the related \"home\" settings.",
+      "defaultBehavior": "If you are not sure, keep the current value. A wrong setting can reduce connectivity, drain battery, or disable a needed feature.",
+      "valueHint": "Enter text without extra spaces. For addresses, keys, and formats, use the exact value."
+    },
+    "meshtastic.GeoPoint.zoom": {
+      "summary": "Zoom level for the saved map point used by the device UI.",
+      "whenToUse": "Increase to show a closer map view around the point; decrease to show a wider area.",
+      "defaultBehavior": "Wrong zoom affects only the local map view, not radio or GPS operation.",
+      "valueHint": "Enter a number in the unit described above. Use 0 only when the description says that 0 means default or disabled."
+    },
+    "meshtastic.GeoPoint.latitude": {
+      "summary": "Latitude of the saved map point, usually the home point for the device UI map.",
+      "whenToUse": "Set when you want the on-device map to open around a known home or base location.",
+      "defaultBehavior": "Wrong latitude moves the displayed home point to the wrong place.",
+      "valueHint": "Use the coordinate format expected by this UI data. If the value was written by the device, keep the same format."
+    },
+    "meshtastic.GeoPoint.longitude": {
+      "summary": "Longitude of the saved map point, usually the home point for the device UI map.",
+      "whenToUse": "Set together with latitude when you want the on-device map to open around a known home or base location.",
+      "defaultBehavior": "Wrong longitude moves the displayed home point to the wrong place.",
+      "valueHint": "Use the coordinate format expected by this UI data. If the value was written by the device, keep the same format."
+    },
+    "meshtastic.Map.style": {
+      "summary": "Map tile/style identifier used by the on-device map UI.",
+      "whenToUse": "Change when the device supports multiple map styles and users need a different visual map layer.",
+      "defaultBehavior": "Unsupported style names may fall back to default or show no map tiles.",
+      "valueHint": "Enter text in the format expected by the firmware. If unsure, keep the existing value."
+    },
+    "meshtastic.Map.follow_gps": {
+      "summary": "Makes the on-device map follow the current GPS position as the node moves.",
+      "whenToUse": "Use for handheld or vehicle devices where the user wants the map centered on the node.",
+      "defaultBehavior": "Disable when users need to pan around the map without it snapping back to GPS.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.DeviceUIConfig.compass_mode": {
+      "summary": "Chooses the visual compass behavior on the device UI.",
+      "whenToUse": "Use the mode that is easiest to read for the device mounting and use case.",
+      "defaultBehavior": "This affects display behavior, not the actual GPS or radio position.",
+      "valueHint": "Choose one option from the list. The option descriptions explain what each value does.",
+      "values": {
+        "DYNAMIC": {
+          "title": "Dynamic",
+          "description": "Compass ring and heading move dynamically."
+        },
+        "FIXED_RING": {
+          "title": "Fixed ring",
+          "description": "Compass ring stays fixed while heading changes."
+        },
+        "FREEZE_HEADING": {
+          "title": "Freeze heading",
+          "description": "Keeps a heading reference frozen for easier navigation."
+        }
+      }
+    },
+    "meshtastic.DeviceUIConfig.screen_rgb_color": {
+      "summary": "RGB accent color used by the BaseUI screen.",
+      "whenToUse": "Use to personalize the device UI or make a deployed group visually distinct.",
+      "defaultBehavior": "Wrong color affects appearance only.",
+      "valueHint": "Use 0xRRGGBB format, for example 0xFF0000 for red."
+    },
+    "meshtastic.DeviceUIConfig.is_clockface_analog": {
+      "summary": "Chooses analog clockface instead of digital clockface on the device UI.",
+      "whenToUse": "Use when the user prefers an analog clock display.",
+      "defaultBehavior": "Disable for digital time display.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.DeviceUIConfig.gps_format": {
+      "summary": "Chooses how GPS coordinates are printed on the device screen.",
+      "whenToUse": "Use the coordinate format your users or external maps expect.",
+      "defaultBehavior": "A different format changes display only; it does not change the actual location.",
+      "valueHint": "Choose one option from the list. The option descriptions explain what each value does.",
+      "values": {
+        "DEC": {
+          "title": "Decimal degrees",
+          "description": "Coordinates as decimal degrees, common for maps and apps."
+        },
+        "DMS": {
+          "title": "Degrees minutes seconds",
+          "description": "Coordinates as degrees, minutes, and seconds."
+        },
+        "UTM": {
+          "title": "UTM",
+          "description": "Universal Transverse Mercator grid format."
+        },
+        "MGRS": {
+          "title": "MGRS",
+          "description": "Military Grid Reference System format."
+        },
+        "OLC": {
+          "title": "Plus Code",
+          "description": "Open Location Code / Plus Code format."
+        },
+        "OSGR": {
+          "title": "OS Grid",
+          "description": "United Kingdom Ordnance Survey grid reference."
+        },
+        "MLS": {
+          "title": "Maidenhead",
+          "description": "Maidenhead Locator System, common in amateur radio."
+        }
+      }
+    },
+    "meshtastic.ModuleConfig.MQTTConfig.enabled": {
+      "summary": "Turns MQTT on or off. MQTT bridges mesh traffic or map reports to an MQTT broker.",
+      "whenToUse": "Enable it only when you use mqtt; disable it to save resources and avoid extra traffic.",
+      "defaultBehavior": "Disabled is safest when the feature is not installed or not needed.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.ModuleConfig.MQTTConfig.address": {
+      "summary": "address is a connection value used by MQTT. MQTT bridges mesh traffic or map reports to an MQTT broker.",
+      "whenToUse": "Change it when connecting the node to your own Wi-Fi, MQTT broker, NTP server, syslog server, or topic namespace.",
+      "defaultBehavior": "One wrong character can prevent connection. Keep empty/default values when using firmware defaults.",
+      "valueHint": "Use the format expected by the firmware. If unsure, keep the existing value."
+    },
+    "meshtastic.ModuleConfig.MQTTConfig.username": {
+      "summary": "username is a connection value used by MQTT. MQTT bridges mesh traffic or map reports to an MQTT broker.",
+      "whenToUse": "Change it when connecting the node to your own Wi-Fi, MQTT broker, NTP server, syslog server, or topic namespace.",
+      "defaultBehavior": "One wrong character can prevent connection. Keep empty/default values when using firmware defaults.",
+      "valueHint": "Use the format expected by the firmware. If unsure, keep the existing value."
+    },
+    "meshtastic.ModuleConfig.MQTTConfig.password": {
+      "summary": "password is a connection value used by MQTT. MQTT bridges mesh traffic or map reports to an MQTT broker.",
+      "whenToUse": "Change it when connecting the node to your own Wi-Fi, MQTT broker, NTP server, syslog server, or topic namespace.",
+      "defaultBehavior": "One wrong character can prevent connection. Keep empty/default values when using firmware defaults.",
+      "valueHint": "Enter the value exactly; an extra space or wrong character can prevent access."
+    },
+    "meshtastic.ModuleConfig.MQTTConfig.encryption_enabled": {
+      "summary": "Controls whether packets published to MQTT stay encrypted or may be sent decrypted for integrations.",
+      "whenToUse": "Keep enabled for privacy. Disable only when a trusted external system must read message contents from MQTT.",
+      "defaultBehavior": "Decrypted MQTT traffic can expose message content outside the radio mesh.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.ModuleConfig.MQTTConfig.json_enabled": {
+      "summary": "Deprecated MQTT JSON packet option. JSON packet support was removed and firmware ignores this field.",
+      "whenToUse": "Do not use for new setups. It remains only so old configurations can still be read.",
+      "defaultBehavior": "Changing it should not enable JSON MQTT output on current firmware.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.ModuleConfig.MQTTConfig.tls_enabled": {
+      "summary": "Enables TLS for the MQTT connection, so the broker connection is encrypted in transit.",
+      "whenToUse": "Use when connecting to an MQTT broker that supports or requires secure TLS connections.",
+      "defaultBehavior": "Wrong TLS setting can prevent connection if the broker expects the opposite mode.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.ModuleConfig.MQTTConfig.root": {
+      "summary": "root is a connection value used by MQTT. MQTT bridges mesh traffic or map reports to an MQTT broker.",
+      "whenToUse": "Change it when connecting the node to your own Wi-Fi, MQTT broker, NTP server, syslog server, or topic namespace.",
+      "defaultBehavior": "One wrong character can prevent connection. Keep empty/default values when using firmware defaults.",
+      "valueHint": "Use the format expected by the firmware. If unsure, keep the existing value."
+    },
+    "meshtastic.ModuleConfig.MQTTConfig.proxy_to_client_enabled": {
+      "summary": "Allows a connected phone or client to proxy MQTT traffic for the node instead of the node connecting directly.",
+      "whenToUse": "Use when the node lacks its own Wi-Fi/Ethernet internet path but a connected client can reach MQTT.",
+      "defaultBehavior": "Disable when the node should only use its own network connection or should not depend on a client.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.ModuleConfig.MQTTConfig.map_reporting_enabled": {
+      "summary": "Periodically publishes unencrypted node information for map reporting through MQTT.",
+      "whenToUse": "Enable only when the user intentionally wants this node to appear in MQTT map/reporting systems.",
+      "defaultBehavior": "This can publish location or identifying information outside the local mesh, so leave off unless the user opts in.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.ModuleConfig.MQTTConfig.map_report_settings": {
+      "summary": "Parameter group \"map report settings\" in the \"MQTT\" section. It contains related settings.",
+      "whenToUse": "Open this group when you need to change the related \"map report settings\" settings.",
+      "defaultBehavior": "If you are not sure, keep the current value. A wrong setting can reduce connectivity, drain battery, or disable a needed feature.",
+      "valueHint": "Enter text without extra spaces. For addresses, keys, and formats, use the exact value."
+    },
+    "meshtastic.ModuleConfig.MapReportSettings.publish_interval_secs": {
+      "summary": "publish interval secs controls how often MQTT map reporting sends, updates, or repeats its data. Map reporting publishes selected node information through MQTT.",
+      "whenToUse": "Increase it to reduce battery use and airtime; decrease it only when fresher or more noticeable updates are important.",
+      "defaultBehavior": "Default intervals are usually a safe balance between freshness and channel load.",
+      "valueHint": "Enter time in seconds. Smaller values update more often and can use more battery and airtime."
+    },
+    "meshtastic.ModuleConfig.MapReportSettings.position_precision": {
+      "summary": "Location precision, in bits, used when reporting position to the MQTT map.",
+      "whenToUse": "Lower it to blur the published location for privacy; use full precision only when exact map location is acceptable.",
+      "defaultBehavior": "32 means full precision. Lower values reduce accuracy before reporting.",
+      "valueHint": "Enter a number in the unit described above. Use 0 only when the description says that 0 means default or disabled."
+    },
+    "meshtastic.ModuleConfig.MapReportSettings.should_report_location": {
+      "summary": "User opt-in for including this node location in MQTT map reporting.",
+      "whenToUse": "Enable only when the user agrees that the node location may be published through MQTT map systems.",
+      "defaultBehavior": "When disabled, map reporting should avoid sending the location even if map reporting is otherwise configured.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.ModuleConfig.SerialConfig.enabled": {
+      "summary": "Turns Serial on or off. The Serial module connects external hardware or software through UART pins.",
+      "whenToUse": "Enable it only when you use serial; disable it to save resources and avoid extra traffic.",
+      "defaultBehavior": "Disabled is safest when the feature is not installed or not needed.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.ModuleConfig.SerialConfig.echo": {
+      "summary": "Echoes serial input back on the Serial module connection for simple testing and diagnostics.",
+      "whenToUse": "Use while checking wiring or terminal communication with an external serial device.",
+      "defaultBehavior": "Disable for normal integrations if echoed data confuses the connected equipment.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.ModuleConfig.SerialConfig.rxd": {
+      "summary": "rxd selects the hardware line used by Serial. The Serial module connects external hardware or software through UART pins.",
+      "whenToUse": "Set it according to your board or external module wiring.",
+      "defaultBehavior": "Board defaults are safest for built-in hardware; wrong pins can stop the feature or conflict with another function.",
+      "valueHint": "Enter the GPIO or hardware pin number from your board documentation. A wrong pin can stop the feature or affect the wrong circuit."
+    },
+    "meshtastic.ModuleConfig.SerialConfig.txd": {
+      "summary": "txd selects the hardware line used by Serial. The Serial module connects external hardware or software through UART pins.",
+      "whenToUse": "Set it according to your board or external module wiring.",
+      "defaultBehavior": "Board defaults are safest for built-in hardware; wrong pins can stop the feature or conflict with another function.",
+      "valueHint": "Enter the GPIO or hardware pin number from your board documentation. A wrong pin can stop the feature or affect the wrong circuit."
+    },
+    "meshtastic.ModuleConfig.SerialConfig.baud": {
+      "summary": "Serial port speed used by the external UART device or software connected to the node.",
+      "whenToUse": "Set it to exactly match the connected GPS, logger, controller, or computer serial setting.",
+      "defaultBehavior": "If baud rates do not match, received text will look corrupted or no data will be exchanged.",
+      "valueHint": "Choose one option from the list. The option descriptions explain what each value does.",
+      "values": {
+        "BAUD_DEFAULT": {
+          "title": "Default",
+          "description": "Firmware chooses the default serial speed."
+        },
+        "BAUD_110": {
+          "title": "110 baud",
+          "description": "Serial speed 110 bit/s; the connected device must match."
+        },
+        "BAUD_300": {
+          "title": "300 baud",
+          "description": "Serial speed 300 bit/s; the connected device must match."
+        },
+        "BAUD_600": {
+          "title": "600 baud",
+          "description": "Serial speed 600 bit/s; the connected device must match."
+        },
+        "BAUD_1200": {
+          "title": "1200 baud",
+          "description": "Serial speed 1200 bit/s; the connected device must match."
+        },
+        "BAUD_2400": {
+          "title": "2400 baud",
+          "description": "Serial speed 2400 bit/s; the connected device must match."
+        },
+        "BAUD_4800": {
+          "title": "4800 baud",
+          "description": "Serial speed 4800 bit/s; the connected device must match."
+        },
+        "BAUD_9600": {
+          "title": "9600 baud",
+          "description": "Serial speed 9600 bit/s; the connected device must match."
+        },
+        "BAUD_19200": {
+          "title": "19200 baud",
+          "description": "Serial speed 19200 bit/s; the connected device must match."
+        },
+        "BAUD_38400": {
+          "title": "38400 baud",
+          "description": "Serial speed 38400 bit/s; the connected device must match."
+        },
+        "BAUD_57600": {
+          "title": "57600 baud",
+          "description": "Serial speed 57600 bit/s; the connected device must match."
+        },
+        "BAUD_115200": {
+          "title": "115200 baud",
+          "description": "Serial speed 115200 bit/s; the connected device must match."
+        },
+        "BAUD_230400": {
+          "title": "230400 baud",
+          "description": "Serial speed 230400 bit/s; the connected device must match."
+        },
+        "BAUD_460800": {
+          "title": "460800 baud",
+          "description": "Serial speed 460800 bit/s; the connected device must match."
+        },
+        "BAUD_576000": {
+          "title": "576000 baud",
+          "description": "Serial speed 576000 bit/s; the connected device must match."
+        },
+        "BAUD_921600": {
+          "title": "921600 baud",
+          "description": "Serial speed 921600 bit/s; the connected device must match."
+        }
+      }
+    },
+    "meshtastic.ModuleConfig.SerialConfig.timeout": {
+      "summary": "timeout controls how often Serial sends, updates, or repeats its data. The Serial module connects external hardware or software through UART pins.",
+      "whenToUse": "Increase it to reduce battery use and airtime; decrease it only when fresher or more noticeable updates are important.",
+      "defaultBehavior": "Default intervals are usually a safe balance between freshness and channel load.",
+      "valueHint": "Enter time in seconds. Smaller values update more often and can use more battery and airtime."
+    },
+    "meshtastic.ModuleConfig.SerialConfig.mode": {
+      "summary": "Selects what the Serial module sends or expects on the UART connection: simple text, protobuf API, NMEA/CalTopo output, logging, or device-specific protocols.",
+      "whenToUse": "Choose the mode required by the external system connected to the serial pins.",
+      "defaultBehavior": "Wrong mode can send data in a format the external device cannot understand.",
+      "valueHint": "Choose one option from the list. The option descriptions explain what each value does.",
+      "values": {
+        "DEFAULT": {
+          "title": "Default",
+          "description": "Firmware default serial behavior."
+        },
+        "SIMPLE": {
+          "title": "Simple",
+          "description": "Simple line-oriented serial communication."
+        },
+        "PROTO": {
+          "title": "Protobuf API",
+          "description": "Binary protobuf/API communication for integrations."
+        },
+        "TEXTMSG": {
+          "title": "Text messages",
+          "description": "Serial data is treated as mesh text messages."
+        },
+        "NMEA": {
+          "title": "NMEA",
+          "description": "Outputs GPS NMEA-style data."
+        },
+        "CALTOPO": {
+          "title": "CalTopo",
+          "description": "NMEA output tailored for CalTopo."
+        },
+        "WS85": {
+          "title": "WS85 weather station",
+          "description": "Integration for Ecowitt WS85 weather station."
+        },
+        "VE_DIRECT": {
+          "title": "VE.Direct",
+          "description": "Protocol used by Victron Energy devices."
+        },
+        "MS_CONFIG": {
+          "title": "MeshSolar config",
+          "description": "Configure and view MeshSolar parameters."
+        },
+        "LOG": {
+          "title": "Packet log",
+          "description": "Logs mesh traffic on serial pins."
+        },
+        "LOGTEXT": {
+          "title": "Text log",
+          "description": "Logs only channel and direct text messages."
+        }
+      }
+    },
+    "meshtastic.ModuleConfig.SerialConfig.override_console_serial_port": {
+      "summary": "Lets the Serial module use the platform default console serial port instead of only the configured module pins.",
+      "whenToUse": "Use mainly for output modes such as NMEA or CalTopo when the connected system is on the console serial port.",
+      "defaultBehavior": "Firmware comments warn that this can behave strangely in other modes; normal serial console logging may still be present.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.ModuleConfig.ExternalNotificationConfig.enabled": {
+      "summary": "Turns External Notification on or off. This module drives LEDs, vibration motors, or buzzers for message and bell alerts.",
+      "whenToUse": "Enable it only when you use external notification; disable it to save resources and avoid extra traffic.",
+      "defaultBehavior": "Disabled is safest when the feature is not installed or not needed.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.ModuleConfig.ExternalNotificationConfig.output_ms": {
+      "summary": "How long the external notification output stays active for each on/off alert pulse.",
+      "whenToUse": "Increase for a longer LED flash, vibration, or buzzer pulse; decrease for a shorter one.",
+      "defaultBehavior": "1000 ms is one second. Very long pulses can waste power or keep an alarm active too long.",
+      "valueHint": "Enter time in milliseconds. 1000 ms equals one second."
+    },
+    "meshtastic.ModuleConfig.ExternalNotificationConfig.output": {
+      "summary": "output selects the hardware line used by External Notification. This module drives LEDs, vibration motors, or buzzers for message and bell alerts.",
+      "whenToUse": "Set it according to your board or external module wiring.",
+      "defaultBehavior": "Board defaults are safest for built-in hardware; wrong pins can stop the feature or conflict with another function.",
+      "valueHint": "Enter the GPIO or hardware pin number from your board documentation. A wrong pin can stop the feature or affect the wrong circuit."
+    },
+    "meshtastic.ModuleConfig.ExternalNotificationConfig.output_vibra": {
+      "summary": "output vibra selects the hardware line used by External Notification. This module drives LEDs, vibration motors, or buzzers for message and bell alerts.",
+      "whenToUse": "Set it according to your board or external module wiring.",
+      "defaultBehavior": "Board defaults are safest for built-in hardware; wrong pins can stop the feature or conflict with another function.",
+      "valueHint": "Enter the GPIO or hardware pin number from your board documentation. A wrong pin can stop the feature or affect the wrong circuit."
+    },
+    "meshtastic.ModuleConfig.ExternalNotificationConfig.output_buzzer": {
+      "summary": "output buzzer selects the hardware line used by External Notification. This module drives LEDs, vibration motors, or buzzers for message and bell alerts.",
+      "whenToUse": "Set it according to your board or external module wiring.",
+      "defaultBehavior": "Board defaults are safest for built-in hardware; wrong pins can stop the feature or conflict with another function.",
+      "valueHint": "Enter the GPIO or hardware pin number from your board documentation. A wrong pin can stop the feature or affect the wrong circuit."
+    },
+    "meshtastic.ModuleConfig.ExternalNotificationConfig.active": {
+      "summary": "Selects electrical polarity for the external notification output: active high or active low.",
+      "whenToUse": "Change it when your LED, relay, transistor, or buzzer board turns on with the opposite signal level.",
+      "defaultBehavior": "Wrong polarity can make the output stay on or never turn on.",
+      "valueHint": "Use the format expected by the firmware. If unsure, keep the existing value."
+    },
+    "meshtastic.ModuleConfig.ExternalNotificationConfig.alert_message": {
+      "summary": "Chooses whether this output reacts to incoming text messages.",
+      "whenToUse": "Enable only for outputs that should notify the user.",
+      "defaultBehavior": "Only enabled alert types trigger the selected LED, vibration motor, or buzzer.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.ModuleConfig.ExternalNotificationConfig.alert_message_vibra": {
+      "summary": "Chooses whether this output reacts to incoming text messages.",
+      "whenToUse": "Enable only for outputs that should notify the user.",
+      "defaultBehavior": "Only enabled alert types trigger the selected LED, vibration motor, or buzzer.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.ModuleConfig.ExternalNotificationConfig.alert_message_buzzer": {
+      "summary": "Chooses whether this output reacts to incoming text messages.",
+      "whenToUse": "Enable only for outputs that should notify the user.",
+      "defaultBehavior": "Only enabled alert types trigger the selected LED, vibration motor, or buzzer.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.ModuleConfig.ExternalNotificationConfig.alert_bell": {
+      "summary": "Chooses whether this output reacts to bell alerts.",
+      "whenToUse": "Enable only for outputs that should notify the user.",
+      "defaultBehavior": "Only enabled alert types trigger the selected LED, vibration motor, or buzzer.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.ModuleConfig.ExternalNotificationConfig.alert_bell_vibra": {
+      "summary": "Chooses whether this output reacts to bell alerts.",
+      "whenToUse": "Enable only for outputs that should notify the user.",
+      "defaultBehavior": "Only enabled alert types trigger the selected LED, vibration motor, or buzzer.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.ModuleConfig.ExternalNotificationConfig.alert_bell_buzzer": {
+      "summary": "Chooses whether this output reacts to bell alerts.",
+      "whenToUse": "Enable only for outputs that should notify the user.",
+      "defaultBehavior": "Only enabled alert types trigger the selected LED, vibration motor, or buzzer.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.ModuleConfig.ExternalNotificationConfig.use_pwm": {
+      "summary": "Uses PWM buzzer output instead of a simple on/off notification output.",
+      "whenToUse": "Use when the alert should drive a PWM buzzer through the device buzzer GPIO.",
+      "defaultBehavior": "When enabled, firmware ignores output, output_ms, and active for this behavior and uses device.buzzer_gpio instead.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.ModuleConfig.ExternalNotificationConfig.nag_timeout": {
+      "summary": "nag timeout controls how often External Notification sends, updates, or repeats its data. This module drives LEDs, vibration motors, or buzzers for message and bell alerts.",
+      "whenToUse": "Increase it to reduce battery use and airtime; decrease it only when fresher or more noticeable updates are important.",
+      "defaultBehavior": "Default intervals are usually a safe balance between freshness and channel load.",
+      "valueHint": "Enter time in seconds. Smaller values update more often and can use more battery and airtime."
+    },
+    "meshtastic.ModuleConfig.ExternalNotificationConfig.use_i2s_as_buzzer": {
+      "summary": "Allows devices with native I2S audio output to use the speaker like a buzzer for RTTTL-style alert sounds.",
+      "whenToUse": "Use on supported devices such as T-Watch S3 or T-Deck when alerts should play through the speaker.",
+      "defaultBehavior": "Disable on devices without supported I2S audio hardware.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.ModuleConfig.StoreForwardConfig.enabled": {
+      "summary": "Turns Store & Forward on or off. A server node stores recent text messages and replays history to clients that were offline.",
+      "whenToUse": "Enable it only when you use store & forward; disable it to save resources and avoid extra traffic.",
+      "defaultBehavior": "Disabled is safest when the feature is not installed or not needed.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.ModuleConfig.StoreForwardConfig.heartbeat": {
+      "summary": "Periodic server announcement that lets clients know a Store & Forward server is nearby.",
+      "whenToUse": "Use when configuring an always-on history server for clients that may be offline or out of range.",
+      "defaultBehavior": "Server mode needs suitable hardware and can add traffic when history is requested.",
+      "valueHint": "Use the format expected by the firmware. If unsure, keep the existing value."
+    },
+    "meshtastic.ModuleConfig.StoreForwardConfig.records": {
+      "summary": "Maximum number of message records the server keeps in memory.",
+      "whenToUse": "Use when configuring an always-on history server for clients that may be offline or out of range.",
+      "defaultBehavior": "Server mode needs suitable hardware and can add traffic when history is requested.",
+      "valueHint": "Use the format expected by the firmware. If unsure, keep the existing value."
+    },
+    "meshtastic.ModuleConfig.StoreForwardConfig.history_return_max": {
+      "summary": "Maximum number of messages returned when a client requests history.",
+      "whenToUse": "Use when configuring an always-on history server for clients that may be offline or out of range.",
+      "defaultBehavior": "Server mode needs suitable hardware and can add traffic when history is requested.",
+      "valueHint": "Use the format expected by the firmware. If unsure, keep the existing value."
+    },
+    "meshtastic.ModuleConfig.StoreForwardConfig.history_return_window": {
+      "summary": "Maximum time window, in minutes, that a client may request from history.",
+      "whenToUse": "Use when configuring an always-on history server for clients that may be offline or out of range.",
+      "defaultBehavior": "Server mode needs suitable hardware and can add traffic when history is requested.",
+      "valueHint": "Use the format expected by the firmware. If unsure, keep the existing value."
+    },
+    "meshtastic.ModuleConfig.StoreForwardConfig.is_server": {
+      "summary": "Makes this node a Store & Forward server. The server stores received text messages and sends recent history to clients that request it after being offline.",
+      "whenToUse": "Enable on a stable node with good power and coverage, so mobile users can recover missed messages later.",
+      "defaultBehavior": "Do not enable on every node. Too many servers waste storage and mesh traffic without improving reliability.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.ModuleConfig.RangeTestConfig.enabled": {
+      "summary": "Turns Range Test on or off. This module sends numbered packets to measure where LoRa messages are received.",
+      "whenToUse": "Enable it only when you use range test; disable it to save resources and avoid extra traffic.",
+      "defaultBehavior": "Disabled is safest when the feature is not installed or not needed.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.ModuleConfig.RangeTestConfig.sender": {
+      "summary": "Interval for sending sequential Range Test packets from this node; zero disables sending.",
+      "whenToUse": "Set on the sender node during a planned range test.",
+      "defaultBehavior": "Turn it back to zero after testing because range-test packets use a lot of airtime.",
+      "valueHint": "Use the format expected by the firmware. If unsure, keep the existing value."
+    },
+    "meshtastic.ModuleConfig.RangeTestConfig.save": {
+      "summary": "Saves received range-test results to a RangeTest.csv file on supported ESP32 devices.",
+      "whenToUse": "Enable when you want to collect range-test data for later review after walking or driving a test route.",
+      "defaultBehavior": "Disable when you only need live range-test messages and do not want files written on the device.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.ModuleConfig.RangeTestConfig.clear_on_reboot": {
+      "summary": "Deletes the RangeTest.csv file when the device reboots on supported ESP32 devices.",
+      "whenToUse": "Enable before a new test run when old measurements should not mix with new results.",
+      "defaultBehavior": "Leave disabled if you need to keep the previous range-test log across reboots.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.ModuleConfig.TelemetryConfig.device_update_interval": {
+      "summary": "device update interval controls how often Telemetry sends, updates, or repeats its data. Telemetry sends device, environment, air-quality, power, or health readings over the mesh.",
+      "whenToUse": "Increase it to reduce battery use and airtime; decrease it only when fresher or more noticeable updates are important.",
+      "defaultBehavior": "Default intervals are usually a safe balance between freshness and channel load.",
+      "valueHint": "Enter time in seconds. Smaller values update more often and can use more battery and airtime."
+    },
+    "meshtastic.ModuleConfig.TelemetryConfig.environment_update_interval": {
+      "summary": "environment update interval controls how often Telemetry sends, updates, or repeats its data. Telemetry sends device, environment, air-quality, power, or health readings over the mesh.",
+      "whenToUse": "Increase it to reduce battery use and airtime; decrease it only when fresher or more noticeable updates are important.",
+      "defaultBehavior": "Default intervals are usually a safe balance between freshness and channel load.",
+      "valueHint": "Enter time in seconds. Smaller values update more often and can use more battery and airtime."
+    },
+    "meshtastic.ModuleConfig.TelemetryConfig.environment_measurement_enabled": {
+      "summary": "Enables collection of environment sensor readings such as temperature, humidity, pressure, or similar supported sensors.",
+      "whenToUse": "Use when an environment sensor is installed and its readings should be sent through the mesh.",
+      "defaultBehavior": "Disable when there is no sensor or the network should not carry environment telemetry.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.ModuleConfig.TelemetryConfig.environment_screen_enabled": {
+      "summary": "Shows environment telemetry on the device screen when the hardware has a display.",
+      "whenToUse": "Use when local users need to see sensor readings directly on the node.",
+      "defaultBehavior": "Disable to keep the screen simpler or hide sensor pages.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.ModuleConfig.TelemetryConfig.environment_display_fahrenheit": {
+      "summary": "Displays environment temperature in Fahrenheit on the device screen. Sensors are still read internally in Celsius.",
+      "whenToUse": "Use for users who expect Fahrenheit readings.",
+      "defaultBehavior": "Disable for Celsius display.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.ModuleConfig.TelemetryConfig.air_quality_enabled": {
+      "summary": "Enables collection and transmission of air-quality metrics.",
+      "whenToUse": "Use when an air-quality sensor is installed and other mesh users need the readings.",
+      "defaultBehavior": "Disable when no air-quality sensor is present or the readings should stay local.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.ModuleConfig.TelemetryConfig.air_quality_interval": {
+      "summary": "air quality interval controls how often Telemetry sends, updates, or repeats its data. Telemetry sends device, environment, air-quality, power, or health readings over the mesh.",
+      "whenToUse": "Increase it to reduce battery use and airtime; decrease it only when fresher or more noticeable updates are important.",
+      "defaultBehavior": "Default intervals are usually a safe balance between freshness and channel load.",
+      "valueHint": "Enter time in seconds. Smaller values update more often and can use more battery and airtime."
+    },
+    "meshtastic.ModuleConfig.TelemetryConfig.power_measurement_enabled": {
+      "summary": "Enables collection and transmission of external power-measurement metrics.",
+      "whenToUse": "Use when power-monitoring hardware is installed and battery/voltage/current data should be shared.",
+      "defaultBehavior": "Disable when the hardware does not support these measurements.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.ModuleConfig.TelemetryConfig.power_update_interval": {
+      "summary": "power update interval controls how often Telemetry sends, updates, or repeats its data. Telemetry sends device, environment, air-quality, power, or health readings over the mesh.",
+      "whenToUse": "Increase it to reduce battery use and airtime; decrease it only when fresher or more noticeable updates are important.",
+      "defaultBehavior": "Default intervals are usually a safe balance between freshness and channel load.",
+      "valueHint": "Enter time in seconds. Smaller values update more often and can use more battery and airtime."
+    },
+    "meshtastic.ModuleConfig.TelemetryConfig.power_screen_enabled": {
+      "summary": "Shows power telemetry on the device screen.",
+      "whenToUse": "Use when local users need to see battery or power readings on the node.",
+      "defaultBehavior": "Disable to hide the power telemetry page.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.ModuleConfig.TelemetryConfig.health_measurement_enabled": {
+      "summary": "Enables health telemetry collection, such as device or sensor health information supported by the firmware.",
+      "whenToUse": "Use when health metrics are useful for monitoring deployed nodes.",
+      "defaultBehavior": "Disable to reduce telemetry traffic when health data is not needed.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.ModuleConfig.TelemetryConfig.health_update_interval": {
+      "summary": "health update interval controls how often Telemetry sends, updates, or repeats its data. Telemetry sends device, environment, air-quality, power, or health readings over the mesh.",
+      "whenToUse": "Increase it to reduce battery use and airtime; decrease it only when fresher or more noticeable updates are important.",
+      "defaultBehavior": "Default intervals are usually a safe balance between freshness and channel load.",
+      "valueHint": "Enter time in seconds. Smaller values update more often and can use more battery and airtime."
+    },
+    "meshtastic.ModuleConfig.TelemetryConfig.health_screen_enabled": {
+      "summary": "Shows health telemetry on the device screen.",
+      "whenToUse": "Use when local users should see health status without the phone app.",
+      "defaultBehavior": "Disable to keep the screen simpler.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.ModuleConfig.TelemetryConfig.device_telemetry_enabled": {
+      "summary": "Allows the device telemetry module to send device metrics to the mesh.",
+      "whenToUse": "Use when other users or dashboards need battery, voltage, uptime, or similar device status from this node.",
+      "defaultBehavior": "The phone/client API may still receive local telemetry even when mesh sending is disabled.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.ModuleConfig.TelemetryConfig.air_quality_screen_enabled": {
+      "summary": "Shows air-quality telemetry on the device screen.",
+      "whenToUse": "Use when local users need to see air-quality readings directly on the node.",
+      "defaultBehavior": "Disable if the screen should not show IAQ data.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.ModuleConfig.CannedMessageConfig.rotary1_enabled": {
+      "summary": "Enables the first rotary encoder as an input device for canned messages.",
+      "whenToUse": "Use when the device has a rotary encoder wired to the configured A, B, and press pins.",
+      "defaultBehavior": "Disable on devices without the encoder to avoid false input.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.ModuleConfig.CannedMessageConfig.inputbroker_pin_a": {
+      "summary": "inputbroker pin a selects the hardware line used by Canned Message. This module lets local buttons or encoders send predefined messages without a phone.",
+      "whenToUse": "Set it according to your board or external module wiring.",
+      "defaultBehavior": "Board defaults are safest for built-in hardware; wrong pins can stop the feature or conflict with another function.",
+      "valueHint": "Enter the GPIO or hardware pin number from your board documentation. A wrong pin can stop the feature or affect the wrong circuit."
+    },
+    "meshtastic.ModuleConfig.CannedMessageConfig.inputbroker_pin_b": {
+      "summary": "inputbroker pin b selects the hardware line used by Canned Message. This module lets local buttons or encoders send predefined messages without a phone.",
+      "whenToUse": "Set it according to your board or external module wiring.",
+      "defaultBehavior": "Board defaults are safest for built-in hardware; wrong pins can stop the feature or conflict with another function.",
+      "valueHint": "Enter the GPIO or hardware pin number from your board documentation. A wrong pin can stop the feature or affect the wrong circuit."
+    },
+    "meshtastic.ModuleConfig.CannedMessageConfig.inputbroker_pin_press": {
+      "summary": "inputbroker pin press selects the hardware line used by Canned Message. This module lets local buttons or encoders send predefined messages without a phone.",
+      "whenToUse": "Set it according to your board or external module wiring.",
+      "defaultBehavior": "Board defaults are safest for built-in hardware; wrong pins can stop the feature or conflict with another function.",
+      "valueHint": "Enter the GPIO or hardware pin number from your board documentation. A wrong pin can stop the feature or affect the wrong circuit."
+    },
+    "meshtastic.ModuleConfig.CannedMessageConfig.inputbroker_event_cw": {
+      "summary": "Action generated when the rotary encoder turns clockwise.",
+      "whenToUse": "Map it to the navigation action the user should get while choosing canned messages.",
+      "defaultBehavior": "Wrong mapping makes the control feel reversed or confusing.",
+      "valueHint": "Choose one option from the list. The option descriptions explain what each value does.",
+      "values": {
+        "NONE": {
+          "title": "None",
+          "description": "No input event is generated."
+        },
+        "UP": {
+          "title": "Up",
+          "description": "Moves selection up."
+        },
+        "DOWN": {
+          "title": "Down",
+          "description": "Moves selection down."
+        },
+        "LEFT": {
+          "title": "Left",
+          "description": "Moves left or back depending on context."
+        },
+        "RIGHT": {
+          "title": "Right",
+          "description": "Moves right or forward depending on context."
+        },
+        "SELECT": {
+          "title": "Select",
+          "description": "Confirms the current selection."
+        },
+        "BACK": {
+          "title": "Back",
+          "description": "Returns to the previous screen."
+        },
+        "CANCEL": {
+          "title": "Cancel",
+          "description": "Cancels the current action."
+        }
+      }
+    },
+    "meshtastic.ModuleConfig.CannedMessageConfig.inputbroker_event_ccw": {
+      "summary": "Action generated when the rotary encoder turns counterclockwise.",
+      "whenToUse": "Map it to the opposite navigation action from clockwise rotation.",
+      "defaultBehavior": "Wrong mapping makes the control feel reversed or confusing.",
+      "valueHint": "Choose one option from the list. The option descriptions explain what each value does.",
+      "values": {
+        "NONE": {
+          "title": "None",
+          "description": "No input event is generated."
+        },
+        "UP": {
+          "title": "Up",
+          "description": "Moves selection up."
+        },
+        "DOWN": {
+          "title": "Down",
+          "description": "Moves selection down."
+        },
+        "LEFT": {
+          "title": "Left",
+          "description": "Moves left or back depending on context."
+        },
+        "RIGHT": {
+          "title": "Right",
+          "description": "Moves right or forward depending on context."
+        },
+        "SELECT": {
+          "title": "Select",
+          "description": "Confirms the current selection."
+        },
+        "BACK": {
+          "title": "Back",
+          "description": "Returns to the previous screen."
+        },
+        "CANCEL": {
+          "title": "Cancel",
+          "description": "Cancels the current action."
+        }
+      }
+    },
+    "meshtastic.ModuleConfig.CannedMessageConfig.inputbroker_event_press": {
+      "summary": "Action generated when the encoder button is pressed.",
+      "whenToUse": "Usually map this to select/confirm for choosing a canned message.",
+      "defaultBehavior": "Wrong mapping can prevent users from selecting messages from the device.",
+      "valueHint": "Choose one option from the list. The option descriptions explain what each value does.",
+      "values": {
+        "NONE": {
+          "title": "None",
+          "description": "No input event is generated."
+        },
+        "UP": {
+          "title": "Up",
+          "description": "Moves selection up."
+        },
+        "DOWN": {
+          "title": "Down",
+          "description": "Moves selection down."
+        },
+        "LEFT": {
+          "title": "Left",
+          "description": "Moves left or back depending on context."
+        },
+        "RIGHT": {
+          "title": "Right",
+          "description": "Moves right or forward depending on context."
+        },
+        "SELECT": {
+          "title": "Select",
+          "description": "Confirms the current selection."
+        },
+        "BACK": {
+          "title": "Back",
+          "description": "Returns to the previous screen."
+        },
+        "CANCEL": {
+          "title": "Cancel",
+          "description": "Cancels the current action."
+        }
+      }
+    },
+    "meshtastic.ModuleConfig.CannedMessageConfig.updown1_enabled": {
+      "summary": "Enables an Up/Down/Select input device, such as a RAK rotary encoder or three buttons, using the configured input pins.",
+      "whenToUse": "Use when the hardware has this local input device and users send canned messages without a phone.",
+      "defaultBehavior": "Disable when those pins are not connected to the expected input hardware.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.ModuleConfig.CannedMessageConfig.enabled": {
+      "summary": "Turns Canned Message on or off. This module lets local buttons or encoders send predefined messages without a phone.",
+      "whenToUse": "Enable it only when you use canned message; disable it to save resources and avoid extra traffic.",
+      "defaultBehavior": "Disabled is safest when the feature is not installed or not needed.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.ModuleConfig.CannedMessageConfig.allow_input_source": {
+      "summary": "Limits which input source may control the canned message module.",
+      "whenToUse": "Use when the device has several possible input devices and only one should send canned-message commands.",
+      "defaultBehavior": "Use _any only when all connected input sources are trusted.",
+      "valueHint": "Examples include rotEnc1, upDownEnc1, scanAndSelect, cardkb, serialkb, or _any."
+    },
+    "meshtastic.ModuleConfig.CannedMessageConfig.send_bell": {
+      "summary": "Adds an ASCII bell character to canned messages so the External Notification module can react to them.",
+      "whenToUse": "Use when canned messages should trigger a buzzer, vibration, or external alert on receiving devices.",
+      "defaultBehavior": "Disable when canned messages should behave like ordinary text without extra alert cues.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.ModuleConfig.AudioConfig.codec2_enabled": {
+      "summary": "Enables Codec2 voice audio support for the Audio module.",
+      "whenToUse": "Use only on hardware wired for supported audio/PTT operation.",
+      "defaultBehavior": "Disable when the device is used only for text/data mesh traffic.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.ModuleConfig.AudioConfig.ptt_pin": {
+      "summary": "ptt pin selects the hardware line used by Audio. The Audio module configures Codec2 voice, I2S pins, and push-to-talk hardware.",
+      "whenToUse": "Set it according to your board or external module wiring.",
+      "defaultBehavior": "Board defaults are safest for built-in hardware; wrong pins can stop the feature or conflict with another function.",
+      "valueHint": "Enter the GPIO or hardware pin number from your board documentation. A wrong pin can stop the feature or affect the wrong circuit."
+    },
+    "meshtastic.ModuleConfig.AudioConfig.bitrate": {
+      "summary": "Chooses the Codec2 voice bitrate used by the Audio module.",
+      "whenToUse": "Use a bitrate that matches the audio quality and airtime tradeoff needed by the deployment.",
+      "defaultBehavior": "Higher bitrate can sound better but uses more data; lower bitrate is more compact but less clear.",
+      "valueHint": "Choose one option from the list. The option descriptions explain what each value does.",
+      "values": {
+        "CODEC2_DEFAULT": {
+          "title": "Default",
+          "description": "Firmware chooses the default Codec2 voice bitrate."
+        },
+        "CODEC2_3200": {
+          "title": "Codec2 3200",
+          "description": "Codec2 voice mode 3200; lower values use less airtime and usually sound worse."
+        },
+        "CODEC2_2400": {
+          "title": "Codec2 2400",
+          "description": "Codec2 voice mode 2400; lower values use less airtime and usually sound worse."
+        },
+        "CODEC2_1600": {
+          "title": "Codec2 1600",
+          "description": "Codec2 voice mode 1600; lower values use less airtime and usually sound worse."
+        },
+        "CODEC2_1400": {
+          "title": "Codec2 1400",
+          "description": "Codec2 voice mode 1400; lower values use less airtime and usually sound worse."
+        },
+        "CODEC2_1300": {
+          "title": "Codec2 1300",
+          "description": "Codec2 voice mode 1300; lower values use less airtime and usually sound worse."
+        },
+        "CODEC2_1200": {
+          "title": "Codec2 1200",
+          "description": "Codec2 voice mode 1200; lower values use less airtime and usually sound worse."
+        },
+        "CODEC2_700": {
+          "title": "Codec2 700",
+          "description": "Codec2 voice mode 700; lower values use less airtime and usually sound worse."
+        },
+        "CODEC2_700B": {
+          "title": "Codec2 700B",
+          "description": "Codec2 voice mode 700B; lower values use less airtime and usually sound worse."
+        }
+      }
+    },
+    "meshtastic.ModuleConfig.AudioConfig.i2s_ws": {
+      "summary": "i2s ws selects the hardware line used by Audio. The Audio module configures Codec2 voice, I2S pins, and push-to-talk hardware.",
+      "whenToUse": "Set it according to your board or external module wiring.",
+      "defaultBehavior": "Board defaults are safest for built-in hardware; wrong pins can stop the feature or conflict with another function.",
+      "valueHint": "Enter the GPIO or hardware pin number from your board documentation. A wrong pin can stop the feature or affect the wrong circuit."
+    },
+    "meshtastic.ModuleConfig.AudioConfig.i2s_sd": {
+      "summary": "i2s sd selects the hardware line used by Audio. The Audio module configures Codec2 voice, I2S pins, and push-to-talk hardware.",
+      "whenToUse": "Set it according to your board or external module wiring.",
+      "defaultBehavior": "Board defaults are safest for built-in hardware; wrong pins can stop the feature or conflict with another function.",
+      "valueHint": "Enter the GPIO or hardware pin number from your board documentation. A wrong pin can stop the feature or affect the wrong circuit."
+    },
+    "meshtastic.ModuleConfig.AudioConfig.i2s_din": {
+      "summary": "i2s din selects the hardware line used by Audio. The Audio module configures Codec2 voice, I2S pins, and push-to-talk hardware.",
+      "whenToUse": "Set it according to your board or external module wiring.",
+      "defaultBehavior": "Board defaults are safest for built-in hardware; wrong pins can stop the feature or conflict with another function.",
+      "valueHint": "Enter the GPIO or hardware pin number from your board documentation. A wrong pin can stop the feature or affect the wrong circuit."
+    },
+    "meshtastic.ModuleConfig.AudioConfig.i2s_sck": {
+      "summary": "i2s sck selects the hardware line used by Audio. The Audio module configures Codec2 voice, I2S pins, and push-to-talk hardware.",
+      "whenToUse": "Set it according to your board or external module wiring.",
+      "defaultBehavior": "Board defaults are safest for built-in hardware; wrong pins can stop the feature or conflict with another function.",
+      "valueHint": "Enter the GPIO or hardware pin number from your board documentation. A wrong pin can stop the feature or affect the wrong circuit."
+    },
+    "meshtastic.ModuleConfig.RemoteHardwareConfig.enabled": {
+      "summary": "Turns Remote Hardware on or off. Remote Hardware exposes GPIO pins for trusted remote read/write over the mesh.",
+      "whenToUse": "Enable it only when you use remote hardware; disable it to save resources and avoid extra traffic.",
+      "defaultBehavior": "Disabled is safest when the feature is not installed or not needed.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.ModuleConfig.RemoteHardwareConfig.allow_undefined_pin_access": {
+      "summary": "allow undefined pin access selects the hardware line used by Remote Hardware. Remote Hardware exposes GPIO pins for trusted remote read/write over the mesh.",
+      "whenToUse": "Set it according to your board or external module wiring.",
+      "defaultBehavior": "Board defaults are safest for built-in hardware; wrong pins can stop the feature or conflict with another function.",
+      "valueHint": "Enter the GPIO or hardware pin number from your board documentation. A wrong pin can stop the feature or affect the wrong circuit."
+    },
+    "meshtastic.ModuleConfig.NeighborInfoConfig.enabled": {
+      "summary": "Turns Neighbor Info on or off. Neighbor Info reports which nearby nodes this node can hear.",
+      "whenToUse": "Enable it only when you use neighbor info; disable it to save resources and avoid extra traffic.",
+      "defaultBehavior": "Disabled is safest when the feature is not installed or not needed.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.ModuleConfig.NeighborInfoConfig.update_interval": {
+      "summary": "update interval controls how often Neighbor Info sends, updates, or repeats its data. Neighbor Info reports which nearby nodes this node can hear.",
+      "whenToUse": "Increase it to reduce battery use and airtime; decrease it only when fresher or more noticeable updates are important.",
+      "defaultBehavior": "Default intervals are usually a safe balance between freshness and channel load.",
+      "valueHint": "Enter time in seconds. Smaller values update more often and can use more battery and airtime."
+    },
+    "meshtastic.ModuleConfig.NeighborInfoConfig.transmit_over_lora": {
+      "summary": "Sends Neighbor Info over LoRa in addition to MQTT and Phone API where allowed.",
+      "whenToUse": "Use when other LoRa nodes need to learn which neighbors this node hears.",
+      "defaultBehavior": "Not available on channels with default key and name; it also uses LoRa airtime.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.ModuleConfig.AmbientLightingConfig.led_state": {
+      "summary": "Turns the supported RGB ambient lighting LED on or off.",
+      "whenToUse": "Use to enable the onboard or attached RGB lighting module.",
+      "defaultBehavior": "Disable when the lighting is not needed or should stay dark.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.ModuleConfig.AmbientLightingConfig.current": {
+      "summary": "Sets the drive current for the RGB LED output.",
+      "whenToUse": "Increase only when the LED module supports it and more brightness is needed.",
+      "defaultBehavior": "Too high a current can waste power or stress the LED module.",
+      "valueHint": "Enter a number in the unit described above. Use 0 only when the description says that 0 means default or disabled."
+    },
+    "meshtastic.ModuleConfig.AmbientLightingConfig.red": {
+      "summary": "Brightness level for the red color channel of the RGB LED.",
+      "whenToUse": "Adjust it to mix the desired color.",
+      "defaultBehavior": "Use 0 to turn this color off and 255 for maximum brightness.",
+      "valueHint": "Enter 0 to 255."
+    },
+    "meshtastic.ModuleConfig.AmbientLightingConfig.green": {
+      "summary": "Brightness level for the green color channel of the RGB LED.",
+      "whenToUse": "Adjust it to mix the desired color.",
+      "defaultBehavior": "Use 0 to turn this color off and 255 for maximum brightness.",
+      "valueHint": "Enter 0 to 255."
+    },
+    "meshtastic.ModuleConfig.AmbientLightingConfig.blue": {
+      "summary": "Brightness level for the blue color channel of the RGB LED.",
+      "whenToUse": "Adjust it to mix the desired color.",
+      "defaultBehavior": "Use 0 to turn this color off and 255 for maximum brightness.",
+      "valueHint": "Enter 0 to 255."
+    },
+    "meshtastic.ModuleConfig.DetectionSensorConfig.enabled": {
+      "summary": "Turns Detection Sensor on or off. Detection Sensor watches a GPIO input and sends an alert when the configured trigger occurs.",
+      "whenToUse": "Enable it only when you use detection sensor; disable it to save resources and avoid extra traffic.",
+      "defaultBehavior": "Disabled is safest when the feature is not installed or not needed.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.ModuleConfig.DetectionSensorConfig.minimum_broadcast_secs": {
+      "summary": "minimum broadcast secs controls how often Detection Sensor sends, updates, or repeats its data. Detection Sensor watches a GPIO input and sends an alert when the configured trigger occurs.",
+      "whenToUse": "Increase it to reduce battery use and airtime; decrease it only when fresher or more noticeable updates are important.",
+      "defaultBehavior": "Default intervals are usually a safe balance between freshness and channel load.",
+      "valueHint": "Enter time in seconds. Smaller values update more often and can use more battery and airtime."
+    },
+    "meshtastic.ModuleConfig.DetectionSensorConfig.state_broadcast_secs": {
+      "summary": "state broadcast secs controls how often Detection Sensor sends, updates, or repeats its data. Detection Sensor watches a GPIO input and sends an alert when the configured trigger occurs.",
+      "whenToUse": "Increase it to reduce battery use and airtime; decrease it only when fresher or more noticeable updates are important.",
+      "defaultBehavior": "Default intervals are usually a safe balance between freshness and channel load.",
+      "valueHint": "Enter time in seconds. Smaller values update more often and can use more battery and airtime."
+    },
+    "meshtastic.ModuleConfig.DetectionSensorConfig.send_bell": {
+      "summary": "Adds a bell character to detection alert messages.",
+      "whenToUse": "Use when receiving devices should trigger External Notification behavior for detection alerts.",
+      "defaultBehavior": "Disable if detection alerts should remain normal text alerts only.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.ModuleConfig.DetectionSensorConfig.name": {
+      "summary": "Friendly name inserted into detection messages, such as “Motion” for “Motion detected”.",
+      "whenToUse": "Set it so users understand which sensor triggered.",
+      "defaultBehavior": "Keep it short and clear; long names make alerts harder to read.",
+      "valueHint": "Enter up to 20 characters."
+    },
+    "meshtastic.ModuleConfig.DetectionSensorConfig.monitor_pin": {
+      "summary": "monitor pin selects the hardware line used by Detection Sensor. Detection Sensor watches a GPIO input and sends an alert when the configured trigger occurs.",
+      "whenToUse": "Set it according to your board or external module wiring.",
+      "defaultBehavior": "Board defaults are safest for built-in hardware; wrong pins can stop the feature or conflict with another function.",
+      "valueHint": "Enter the GPIO or hardware pin number from your board documentation. A wrong pin can stop the feature or affect the wrong circuit."
+    },
+    "meshtastic.ModuleConfig.DetectionSensorConfig.detection_trigger_type": {
+      "summary": "Chooses the electrical event on the monitored GPIO pin that counts as detection: low level, high level, rising edge, falling edge, or any change.",
+      "whenToUse": "Set it to match how the connected sensor signals an event. Motion sensors, switches, and alarms can use different active levels.",
+      "defaultBehavior": "Wrong trigger type can cause no alerts or constant false alerts.",
+      "valueHint": "Choose one option from the list. The option descriptions explain what each value does.",
+      "values": {
+        "LOGIC_LOW": {
+          "title": "Logic low",
+          "description": "Alert while the pin is LOW."
+        },
+        "LOGIC_HIGH": {
+          "title": "Logic high",
+          "description": "Alert while the pin is HIGH."
+        },
+        "FALLING_EDGE": {
+          "title": "Falling edge",
+          "description": "Alert when the pin changes from HIGH to LOW."
+        },
+        "RISING_EDGE": {
+          "title": "Rising edge",
+          "description": "Alert when the pin changes from LOW to HIGH."
+        },
+        "EITHER_EDGE_ACTIVE_LOW": {
+          "title": "Either edge, low active",
+          "description": "Alert on any change; LOW is treated as active."
+        },
+        "EITHER_EDGE_ACTIVE_HIGH": {
+          "title": "Either edge, high active",
+          "description": "Alert on any change; HIGH is treated as active."
+        }
+      }
+    },
+    "meshtastic.ModuleConfig.DetectionSensorConfig.use_pullup": {
+      "summary": "Uses the GPIO input pull-up mode for the monitored detection pin.",
+      "whenToUse": "Enable when the connected sensor or switch is wired for active-low operation and needs a pull-up resistor.",
+      "defaultBehavior": "Wrong pull-up setting can cause false triggers or no triggers.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.ModuleConfig.PaxcounterConfig.enabled": {
+      "summary": "Turns Paxcounter on or off. Paxcounter estimates nearby Wi-Fi and BLE devices from signal strength.",
+      "whenToUse": "Enable it only when you use paxcounter; disable it to save resources and avoid extra traffic.",
+      "defaultBehavior": "Disabled is safest when the feature is not installed or not needed.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.ModuleConfig.PaxcounterConfig.paxcounter_update_interval": {
+      "summary": "paxcounter update interval controls how often Paxcounter sends, updates, or repeats its data. Paxcounter estimates nearby Wi-Fi and BLE devices from signal strength.",
+      "whenToUse": "Increase it to reduce battery use and airtime; decrease it only when fresher or more noticeable updates are important.",
+      "defaultBehavior": "Default intervals are usually a safe balance between freshness and channel load.",
+      "valueHint": "Enter time in seconds. Smaller values update more often and can use more battery and airtime."
+    },
+    "meshtastic.ModuleConfig.PaxcounterConfig.wifi_threshold": {
+      "summary": "Wi-Fi RSSI threshold for counting nearby devices; weaker signals are ignored.",
+      "whenToUse": "Raise it to count only closer devices; lower it to include weaker, farther signals.",
+      "defaultBehavior": "Defaults around -80 dBm are a common starting point.",
+      "valueHint": "Enter RSSI in dBm, usually a negative number such as -80."
+    },
+    "meshtastic.ModuleConfig.PaxcounterConfig.ble_threshold": {
+      "summary": "BLE RSSI threshold for counting nearby devices; weaker signals are ignored.",
+      "whenToUse": "Raise it to count only closer devices; lower it to include weaker, farther signals.",
+      "defaultBehavior": "Defaults around -80 dBm are a common starting point.",
+      "valueHint": "Enter RSSI in dBm, usually a negative number such as -80."
+    },
+    "meshtastic.ModuleConfig.StatusMessageConfig.node_status": {
+      "summary": "Text status that this node periodically rebroadcasts.",
+      "whenToUse": "Use to show a short human-readable state such as location role, availability, or operational note.",
+      "defaultBehavior": "Keep it short and non-sensitive because other mesh users may see it.",
+      "valueHint": "Enter text in the format expected by the firmware. If unsure, keep the existing value."
+    },
+    "meshtastic.ModuleConfig.TrafficManagementConfig.enabled": {
+      "summary": "Turns Traffic Management on or off. Traffic Management reduces channel load by dropping duplicates and limiting noisy traffic.",
+      "whenToUse": "Enable it only when you use traffic management; disable it to save resources and avoid extra traffic.",
+      "defaultBehavior": "Disabled is safest when the feature is not installed or not needed.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.ModuleConfig.TrafficManagementConfig.position_dedup_enabled": {
+      "summary": "position dedup enabled controls how position broadcasts are deduplicated or limited.",
+      "whenToUse": "Use to reduce repeated tracker/location traffic on busy channels.",
+      "defaultBehavior": "Too much filtering can make moving nodes look stale.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.ModuleConfig.TrafficManagementConfig.position_precision_bits": {
+      "summary": "position precision bits controls how position broadcasts are deduplicated or limited.",
+      "whenToUse": "Use to reduce repeated tracker/location traffic on busy channels.",
+      "defaultBehavior": "Too much filtering can make moving nodes look stale.",
+      "valueHint": "Use the format expected by the firmware. If unsure, keep the existing value."
+    },
+    "meshtastic.ModuleConfig.TrafficManagementConfig.position_min_interval_secs": {
+      "summary": "position min interval secs controls how often Traffic Management sends, updates, or repeats its data. Traffic Management reduces channel load by dropping duplicates and limiting noisy traffic.",
+      "whenToUse": "Increase it to reduce battery use and airtime; decrease it only when fresher or more noticeable updates are important.",
+      "defaultBehavior": "Default intervals are usually a safe balance between freshness and channel load.",
+      "valueHint": "Enter time in seconds. Smaller values update more often and can use more battery and airtime."
+    },
+    "meshtastic.ModuleConfig.TrafficManagementConfig.nodeinfo_direct_response": {
+      "summary": "Allows the node to answer NodeInfo requests from its local cache instead of forcing more network traffic.",
+      "whenToUse": "Use to reduce repeated NodeInfo traffic on busy meshes.",
+      "defaultBehavior": "Disable if direct cached responses are not wanted for your deployment.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.ModuleConfig.TrafficManagementConfig.nodeinfo_direct_response_max_hops": {
+      "summary": "Minimum hop distance from the requester before this node sends a direct NodeInfo response.",
+      "whenToUse": "Tune when direct responses should help distant requesters but avoid answering nearby ones unnecessarily.",
+      "defaultBehavior": "Too low can create extra responses; too high can make the feature ineffective.",
+      "valueHint": "Enter a number in the unit described above. Use 0 only when the description says that 0 means default or disabled."
+    },
+    "meshtastic.ModuleConfig.TrafficManagementConfig.rate_limit_enabled": {
+      "summary": "rate limit enabled controls per-node rate limiting for chatty devices.",
+      "whenToUse": "Use on busy meshes where one node can consume too much airtime.",
+      "defaultBehavior": "Too strict limits can block legitimate traffic.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.ModuleConfig.TrafficManagementConfig.rate_limit_window_secs": {
+      "summary": "rate limit window secs controls how often Traffic Management sends, updates, or repeats its data. Traffic Management reduces channel load by dropping duplicates and limiting noisy traffic.",
+      "whenToUse": "Increase it to reduce battery use and airtime; decrease it only when fresher or more noticeable updates are important.",
+      "defaultBehavior": "Default intervals are usually a safe balance between freshness and channel load.",
+      "valueHint": "Enter time in seconds. Smaller values update more often and can use more battery and airtime."
+    },
+    "meshtastic.ModuleConfig.TrafficManagementConfig.rate_limit_max_packets": {
+      "summary": "rate limit max packets controls per-node rate limiting for chatty devices.",
+      "whenToUse": "Use on busy meshes where one node can consume too much airtime.",
+      "defaultBehavior": "Too strict limits can block legitimate traffic.",
+      "valueHint": "Use the format expected by the firmware. If unsure, keep the existing value."
+    },
+    "meshtastic.ModuleConfig.TrafficManagementConfig.drop_unknown_enabled": {
+      "summary": "Drops unknown or undecryptable packets after the configured threshold within the rate-limit window.",
+      "whenToUse": "Use on busy meshes to reduce repeated traffic that this node cannot understand.",
+      "defaultBehavior": "Too aggressive settings can drop useful packets from misconfigured or newly joined nodes.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.ModuleConfig.TrafficManagementConfig.unknown_packet_threshold": {
+      "summary": "Number of unknown packets allowed from a node before dropping starts.",
+      "whenToUse": "Lower it to protect airtime from noisy unknown traffic; raise it if valid nodes are being dropped too quickly.",
+      "defaultBehavior": "This works with the rate-limit window.",
+      "valueHint": "Enter a number in the unit described above. Use 0 only when the description says that 0 means default or disabled."
+    },
+    "meshtastic.ModuleConfig.TrafficManagementConfig.exhaust_hop_telemetry": {
+      "summary": "Sets hop_limit to 0 for relayed telemetry broadcasts, while leaving this node own packets unaffected.",
+      "whenToUse": "Use to keep telemetry from being relayed farther across a busy mesh.",
+      "defaultBehavior": "Can reduce coverage of telemetry data beyond the first relay.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.ModuleConfig.TrafficManagementConfig.exhaust_hop_position": {
+      "summary": "Sets hop_limit to 0 for relayed position broadcasts, while leaving this node own packets unaffected.",
+      "whenToUse": "Use to keep position traffic local on a busy mesh.",
+      "defaultBehavior": "Can reduce how far position updates propagate.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.ModuleConfig.TrafficManagementConfig.router_preserve_hops": {
+      "summary": "Preserves hop_limit for router-to-router traffic.",
+      "whenToUse": "Use when router links should keep forwarding budget across infrastructure nodes.",
+      "defaultBehavior": "Wrong use can change how far traffic travels through router paths.",
+      "valueHint": "Only two values are possible: enabled or disabled."
+    },
+    "meshtastic.ModuleConfig.TAKConfig.team": {
+      "summary": "TAK team color reported for TAK/ATAK integrations.",
+      "whenToUse": "Choose the color that matches the user team in TAK workflows.",
+      "defaultBehavior": "If left unspecified, firmware uses its default team color.",
+      "valueHint": "Choose one option from the list. The option descriptions explain what each value does.",
+      "values": {
+        "Unspecifed_Color": {
+          "title": "Unspecified",
+          "description": "TAK team color: Unspecified."
+        },
+        "White": {
+          "title": "White",
+          "description": "TAK team color: White."
+        },
+        "Yellow": {
+          "title": "Yellow",
+          "description": "TAK team color: Yellow."
+        },
+        "Orange": {
+          "title": "Orange",
+          "description": "TAK team color: Orange."
+        },
+        "Magenta": {
+          "title": "Magenta",
+          "description": "TAK team color: Magenta."
+        },
+        "Red": {
+          "title": "Red",
+          "description": "TAK team color: Red."
+        },
+        "Maroon": {
+          "title": "Maroon",
+          "description": "TAK team color: Maroon."
+        },
+        "Purple": {
+          "title": "Purple",
+          "description": "TAK team color: Purple."
+        },
+        "Dark_Blue": {
+          "title": "Dark blue",
+          "description": "TAK team color: Dark blue."
+        },
+        "Blue": {
+          "title": "Blue",
+          "description": "TAK team color: Blue."
+        },
+        "Cyan": {
+          "title": "Cyan",
+          "description": "TAK team color: Cyan."
+        },
+        "Teal": {
+          "title": "Teal",
+          "description": "TAK team color: Teal."
+        },
+        "Green": {
+          "title": "Green",
+          "description": "TAK team color: Green."
+        },
+        "Dark_Green": {
+          "title": "Dark green",
+          "description": "TAK team color: Dark green."
+        },
+        "Brown": {
+          "title": "Brown",
+          "description": "TAK team color: Brown."
+        }
+      }
+    },
+    "meshtastic.ModuleConfig.TAKConfig.role": {
+      "summary": "TAK member role reported for TAK/ATAK integrations.",
+      "whenToUse": "Choose the operational role that best describes this user or device in TAK.",
+      "defaultBehavior": "If left unspecified, firmware uses its default team member role.",
+      "valueHint": "Choose one option from the list. The option descriptions explain what each value does.",
+      "values": {
+        "Unspecifed": {
+          "title": "Unspecified",
+          "description": "TAK operational role: Unspecified."
+        },
+        "TeamMember": {
+          "title": "Team member",
+          "description": "TAK operational role: Team member."
+        },
+        "TeamLead": {
+          "title": "Team lead",
+          "description": "TAK operational role: Team lead."
+        },
+        "HQ": {
+          "title": "HQ",
+          "description": "TAK operational role: HQ."
+        },
+        "Sniper": {
+          "title": "Sniper",
+          "description": "TAK operational role: Sniper."
+        },
+        "Medic": {
+          "title": "Medic",
+          "description": "TAK operational role: Medic."
+        },
+        "ForwardObserver": {
+          "title": "Forward observer",
+          "description": "TAK operational role: Forward observer."
+        },
+        "RTO": {
+          "title": "RTO",
+          "description": "TAK operational role: RTO."
+        },
+        "K9": {
+          "title": "K9",
+          "description": "TAK operational role: K9."
+        }
+      }
+    }
+  }
+}

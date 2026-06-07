@@ -80,7 +80,8 @@ public final class ProtobufTreeBuilder {
             int variantNumber = oneofField.getNumber();
 
             String displayName = sectionDisplayName(sectionName);
-            ConfigTreeItem sectionData = new ConfigTreeItem(displayName, "config", variantNumber);
+            ConfigTreeItem sectionData = new ConfigTreeItem(
+                    displayName, sectionName, oneofField, "config", variantNumber);
             TreeItem<ConfigTreeItem> sectionItem = new TreeItem<>(sectionData);
 
             addFieldsToTree(sectionItem, sectionMsg, "config", variantNumber);
@@ -110,7 +111,8 @@ public final class ProtobufTreeBuilder {
             int variantNumber = oneofField.getNumber();
 
             String displayName = sectionDisplayName(sectionName);
-            ConfigTreeItem sectionData = new ConfigTreeItem(displayName, "module_config", variantNumber);
+            ConfigTreeItem sectionData = new ConfigTreeItem(
+                    displayName, sectionName, oneofField, "module_config", variantNumber);
             TreeItem<ConfigTreeItem> sectionItem = new TreeItem<>(sectionData);
 
             addFieldsToTree(sectionItem, sectionMsg, "module_config", variantNumber);
