@@ -4,6 +4,7 @@ import com.meshtastic.client.TestEnvironmentSupport;
 import com.meshtastic.client.connection.ConnectionException;
 import com.meshtastic.client.connection.ConnectionListener;
 import com.meshtastic.client.connection.MeshtasticConnection;
+import com.meshtastic.client.forms.settings.ConfigSavePolicy;
 import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.model.ConfigTreeItem;
 import com.meshtastic.client.model.ConnectionEntry;
@@ -29,6 +30,8 @@ import org.junit.jupiter.api.io.TempDir;
 import org.meshtastic.proto.ConfigProtos;
 import org.meshtastic.proto.MeshProtos;
 import org.meshtastic.proto.ModuleConfigProtos;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
@@ -56,6 +59,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 class FormSettingTest {
+
+    private static final Logger log = LoggerFactory.getLogger(
+        FormSettingTest.class
+    );
 
     @TempDir
     Path tempHome;
@@ -91,7 +98,7 @@ class FormSettingTest {
                 .setMqtt(ModuleConfigProtos.ModuleConfig.MQTTConfig.newBuilder().setEnabled(false).build())
                 .build();
 
-        assertTrue(FormSetting.shouldUseImplicitBleModuleSave(
+        assertTrue(ConfigSavePolicy.shouldUseImplicitBleModuleSave(
                 ConnectionType.BLE, false, false, List.of(), List.of(mqttConfig)));
     }
 
@@ -104,13 +111,13 @@ class FormSettingTest {
                 .setDevice(ConfigProtos.Config.DeviceConfig.newBuilder().build())
                 .build();
 
-        assertFalse(FormSetting.shouldUseImplicitBleModuleSave(
+        assertFalse(ConfigSavePolicy.shouldUseImplicitBleModuleSave(
                 ConnectionType.TCP, false, false, List.of(), List.of(serialConfig)));
-        assertFalse(FormSetting.shouldUseImplicitBleModuleSave(
+        assertFalse(ConfigSavePolicy.shouldUseImplicitBleModuleSave(
                 ConnectionType.BLE, true, false, List.of(), List.of(serialConfig)));
-        assertFalse(FormSetting.shouldUseImplicitBleModuleSave(
+        assertFalse(ConfigSavePolicy.shouldUseImplicitBleModuleSave(
                 ConnectionType.BLE, false, false, List.of(deviceConfig), List.of()));
-        assertFalse(FormSetting.shouldUseImplicitBleModuleSave(
+        assertFalse(ConfigSavePolicy.shouldUseImplicitBleModuleSave(
                 ConnectionType.BLE, false, false, List.of(), List.of(serialConfig)));
     }
 
@@ -123,10 +130,10 @@ class FormSettingTest {
                 .setSerial(ModuleConfigProtos.ModuleConfig.SerialConfig.newBuilder().setEnabled(true).build())
                 .build();
 
-        assertTrue(FormSetting.requiresConfigSaveReconnect(true, List.of(), List.of()));
-        assertTrue(FormSetting.requiresConfigSaveReconnect(false, List.of(deviceConfig), List.of()));
-        assertTrue(FormSetting.requiresConfigSaveReconnect(false, List.of(), List.of(serialConfig)));
-        assertFalse(FormSetting.requiresConfigSaveReconnect(false, List.of(), List.of()));
+        assertTrue(ConfigSavePolicy.requiresReconnect(true, List.of(), List.of()));
+        assertTrue(ConfigSavePolicy.requiresReconnect(false, List.of(deviceConfig), List.of()));
+        assertTrue(ConfigSavePolicy.requiresReconnect(false, List.of(), List.of(serialConfig)));
+        assertFalse(ConfigSavePolicy.requiresReconnect(false, List.of(), List.of()));
     }
 
     @Test
@@ -141,18 +148,10 @@ class FormSettingTest {
 
     @Test
     void shouldAddExtraSettleDelayBeforeCommitForAllTransports() {
-        FormSetting form = onFxThread(FormSetting::new);
-
-        long tcpDelay = onFxThread(() -> (Long) invokeReturning(
-                form,
-                "getConfigSaveInterTaskDelayMs",
-                new Class<?>[] { ConnectionType.class, int.class, int.class },
-                ConnectionType.TCP, 0, 2));
-        long bleDelay = onFxThread(() -> (Long) invokeReturning(
-                form,
-                "getConfigSaveInterTaskDelayMs",
-                new Class<?>[] { ConnectionType.class, int.class, int.class },
-                ConnectionType.BLE, 0, 2));
+        long tcpDelay = ConfigSavePolicy.interTaskDelayMs(
+                ConnectionType.TCP, 0, 2);
+        long bleDelay = ConfigSavePolicy.interTaskDelayMs(
+                ConnectionType.BLE, 0, 2);
 
         assertEquals(1_200L, tcpDelay);
         assertEquals(1_350L, bleDelay);
@@ -160,23 +159,12 @@ class FormSettingTest {
 
     @Test
     void tcpConfigSaveWaitsForNaturalRebootDisconnectBeforeFallbackHandoff() {
-        FormSetting form = onFxThread(FormSetting::new);
-
-        long tcpDelay = onFxThread(() -> (Long) invokeReturning(
-                form,
-                "getConfigSaveRebootHandoffDelayMs",
-                new Class<?>[] { ConnectionType.class },
-                ConnectionType.TCP));
-        long bleDelay = onFxThread(() -> (Long) invokeReturning(
-                form,
-                "getConfigSaveRebootHandoffDelayMs",
-                new Class<?>[] { ConnectionType.class },
-                ConnectionType.BLE));
-        long tcpPowerDelay = onFxThread(() -> (Long) invokeReturning(
-                form,
-                "getDevicePowerActionHandoffDelayMs",
-                new Class<?>[] { ConnectionType.class },
-                ConnectionType.TCP));
+        long tcpDelay = ConfigSavePolicy.configSaveRebootHandoffDelayMs(
+                ConnectionType.TCP);
+        long bleDelay = ConfigSavePolicy.configSaveRebootHandoffDelayMs(
+                ConnectionType.BLE);
+        long tcpPowerDelay = ConfigSavePolicy.devicePowerActionHandoffDelayMs(
+                ConnectionType.TCP);
 
         assertEquals(60_000L, tcpDelay);
         assertEquals(4_000L, bleDelay);
@@ -185,73 +173,49 @@ class FormSettingTest {
 
     @Test
     void shouldTreatCommitAckTimeoutAsExpectedReboot() {
-        FormSetting form = onFxThread(FormSetting::new);
         CompletableFuture<MeshProtos.Routing.Error> ackFuture = new CompletableFuture<>();
         ackFuture.completeExceptionally(new TimeoutException("commit timed out"));
 
-        assertDoesNotThrow(() -> invokeReturning(
-                form,
-                "waitForCommitConfigSaveAckOrExpectedReboot",
-                new Class<?>[] { CompletableFuture.class, String.class },
-                ackFuture, "commitEditSettings"));
+        assertDoesNotThrow(() -> ConfigSavePolicy.waitForCommitAckOrExpectedReboot(
+                ackFuture, "commitEditSettings", log));
     }
 
     @Test
     void shouldTreatCommitAckDisconnectCleanupAsExpectedReboot() {
-        FormSetting form = onFxThread(FormSetting::new);
         CompletableFuture<MeshProtos.Routing.Error> ackFuture = new CompletableFuture<>();
         ackFuture.completeExceptionally(new IllegalStateException("Packet ACK waiter aborted: DISCONNECTED"));
 
-        assertDoesNotThrow(() -> invokeReturning(
-                form,
-                "waitForCommitConfigSaveAckOrExpectedReboot",
-                new Class<?>[] { CompletableFuture.class, String.class },
-                ackFuture, "commitEditSettings"));
+        assertDoesNotThrow(() -> ConfigSavePolicy.waitForCommitAckOrExpectedReboot(
+                ackFuture, "commitEditSettings", log));
     }
 
     @Test
     void shouldStillFailCommitOnExplicitRoutingError() {
-        FormSetting form = onFxThread(FormSetting::new);
         CompletableFuture<MeshProtos.Routing.Error> ackFuture =
                 CompletableFuture.completedFuture(MeshProtos.Routing.Error.BAD_REQUEST);
 
-        AssertionError error = assertThrows(AssertionError.class, () -> invokeReturning(
-                form,
-                "waitForCommitConfigSaveAckOrExpectedReboot",
-                new Class<?>[] { CompletableFuture.class, String.class },
-                ackFuture, "commitEditSettings"));
-
-        assertTrue(error.getCause() instanceof java.lang.reflect.InvocationTargetException);
-        assertTrue(error.getCause().getCause() instanceof IllegalStateException);
+        assertThrows(IllegalStateException.class, () ->
+                ConfigSavePolicy.waitForCommitAckOrExpectedReboot(
+                        ackFuture, "commitEditSettings", log));
     }
 
     @Test
     void shouldNotRequireConfigSaveAckForSerialTransport() {
-        FormSetting form = onFxThread(FormSetting::new);
         CompletableFuture<MeshProtos.Routing.Error> ackFuture = new CompletableFuture<>();
 
-        assertDoesNotThrow(() -> invokeReturning(
-                form,
-                "waitForTransportRequiredConfigSaveAck",
-                new Class<?>[] { ConnectionType.class, CompletableFuture.class, String.class },
-                ConnectionType.SERIAL, ackFuture, "beginEditSettings"));
+        assertDoesNotThrow(() -> ConfigSavePolicy.waitForTransportRequiredAck(
+                ConnectionType.SERIAL, ackFuture, "beginEditSettings", log));
         assertFalse(ackFuture.isDone());
     }
 
     @Test
     void shouldRequireConfigSaveAckForBleTransport() {
-        FormSetting form = onFxThread(FormSetting::new);
         CompletableFuture<MeshProtos.Routing.Error> ackFuture =
                 CompletableFuture.completedFuture(MeshProtos.Routing.Error.BAD_REQUEST);
 
-        AssertionError error = assertThrows(AssertionError.class, () -> invokeReturning(
-                form,
-                "waitForTransportRequiredConfigSaveAck",
-                new Class<?>[] { ConnectionType.class, CompletableFuture.class, String.class },
-                ConnectionType.BLE, ackFuture, "beginEditSettings"));
-
-        assertTrue(error.getCause() instanceof java.lang.reflect.InvocationTargetException);
-        assertTrue(error.getCause().getCause() instanceof IllegalStateException);
+        assertThrows(IllegalStateException.class, () ->
+                ConfigSavePolicy.waitForTransportRequiredAck(
+                        ConnectionType.BLE, ackFuture, "beginEditSettings", log));
     }
 
     @Test
