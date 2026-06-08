@@ -12,6 +12,7 @@ import com.meshtastic.client.forms.settings.DatabaseResetConfirmationPanelFactor
 import com.meshtastic.client.forms.settings.DatabaseResetController;
 import com.meshtastic.client.forms.settings.DevicePowerActionController;
 import com.meshtastic.client.forms.settings.DeviceTimeSyncController;
+import com.meshtastic.client.forms.settings.FirmwareUpdateController;
 import com.meshtastic.client.forms.settings.MeshCoreSettingsTreeBuilder;
 import com.meshtastic.client.forms.settings.MeshtasticConfigTreeBuilder;
 import com.meshtastic.client.forms.settings.NodeCacheSettingsController;
@@ -78,10 +79,13 @@ public class FormSetting extends Form {
         new DeviceTimeSyncController(new TimeSyncHost());
     private final RingtoneSettingsController ringtoneController =
         new RingtoneSettingsController(new RingtoneHost());
+    private final FirmwareUpdateController firmwareUpdateController =
+        new FirmwareUpdateController();
     private final Runnable connectionListener = () ->
         Platform.runLater(() -> {
             reloadConfigTree();
             timeSyncController.maybeResumeDeferredTimeOnlySync();
+            firmwareUpdateController.reload();
         });
 
     // Cache tab
@@ -90,6 +94,7 @@ public class FormSetting extends Form {
 
     private Tab cacheTab;
     private Tab appearanceTab;
+    private Tab firmwareTab;
 
     // Config tab
     private TreeTableView<ConfigTreeItem> configTree;
@@ -139,12 +144,16 @@ public class FormSetting extends Form {
             cacheController.createPanel()
         );
         configTab = new Tab(I18n.t("settings.tab.config"), createConfigPanel());
+        firmwareTab = new Tab(
+            I18n.t("settings.tab.firmware"),
+            firmwareUpdateController.createPanel()
+        );
         appearanceTab = new Tab(
             I18n.t("settings.tab.app"),
             ApplicationSettingsPanelFactory.create()
         );
 
-        tabPane.getTabs().addAll(configTab, cacheTab, appearanceTab);
+        tabPane.getTabs().addAll(configTab, firmwareTab, cacheTab, appearanceTab);
         tabPane
             .getSelectionModel()
             .selectedItemProperty()
@@ -153,6 +162,8 @@ public class FormSetting extends Form {
                     cacheController.reload();
                 } else if (newTab == configTab) {
                     reloadConfigTree();
+                } else if (newTab == firmwareTab) {
+                    firmwareUpdateController.reload();
                 }
             });
 
@@ -164,11 +175,13 @@ public class FormSetting extends Form {
     @Override
     public void formOpen() {
         reloadConfigTree();
+        firmwareUpdateController.reload();
     }
 
     @Override
     public void formRefresh() {
         reloadConfigTree();
+        firmwareUpdateController.reload();
     }
 
     /**

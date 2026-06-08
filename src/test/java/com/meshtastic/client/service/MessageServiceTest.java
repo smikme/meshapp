@@ -159,6 +159,49 @@ class MessageServiceTest {
     }
 
     @Test
+    void requestOtaModeUsesRoutingAckAndSendsHash() throws Exception {
+        RecordingConnection connection = new RecordingConnection();
+        ProtocolHandler handler = track(new ProtocolHandler(connection));
+        DeviceState state = new DeviceState();
+        state.setMyNodeNum(0x04c5b420);
+        state.setSessionPasskey(ByteString.copyFromUtf8("passkey"));
+        byte[] hash = new byte[32];
+        for (int i = 0; i < hash.length; i++) {
+            hash[i] = (byte) i;
+        }
+
+        MessageService.requestOtaMode(handler, state, AdminProtos.OTAMode.OTA_BLE, hash);
+
+        MeshProtos.ToRadio sent = parseLastToRadio(connection);
+        assertFalse(sent.getPacket().getDecoded().getWantResponse());
+        AdminProtos.AdminMessage admin =
+                AdminProtos.AdminMessage.parseFrom(sent.getPacket().getDecoded().getPayload());
+        assertTrue(admin.hasOtaRequest());
+        assertEquals(AdminProtos.OTAMode.OTA_BLE, admin.getOtaRequest().getRebootOtaMode());
+        assertEquals(ByteString.copyFrom(hash), admin.getOtaRequest().getOtaHash());
+        assertFalse(admin.getSessionPasskey().isEmpty());
+    }
+
+    @Test
+    void enterDfuModeUsesRoutingAckWithoutAdminResponse() throws Exception {
+        RecordingConnection connection = new RecordingConnection();
+        ProtocolHandler handler = track(new ProtocolHandler(connection));
+        DeviceState state = new DeviceState();
+        state.setMyNodeNum(0x04c5b420);
+        state.setSessionPasskey(ByteString.copyFromUtf8("passkey"));
+
+        MessageService.enterDfuMode(handler, state);
+
+        MeshProtos.ToRadio sent = parseLastToRadio(connection);
+        assertFalse(sent.getPacket().getDecoded().getWantResponse());
+        AdminProtos.AdminMessage admin =
+                AdminProtos.AdminMessage.parseFrom(sent.getPacket().getDecoded().getPayload());
+        assertTrue(admin.hasEnterDfuModeRequest());
+        assertTrue(admin.getEnterDfuModeRequest());
+        assertFalse(admin.getSessionPasskey().isEmpty());
+    }
+
+    @Test
     void sendPhoneTimePositionUsesLocalPositionAppPacket() throws Exception {
         RecordingConnection connection = new RecordingConnection();
         ProtocolHandler handler = track(new ProtocolHandler(connection));
