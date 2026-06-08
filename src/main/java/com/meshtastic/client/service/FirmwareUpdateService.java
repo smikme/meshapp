@@ -24,8 +24,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Coordinates the safe first phase of firmware update: local image validation,
- * admin authorization, bootloader command dispatch, and reconnect handoff.
+ * Coordinates firmware update validation and supported one-click upload flows.
+ * ESP32 Wi-Fi OTA is handled end-to-end through the Meshtastic Unified OTA TCP
+ * bootloader protocol.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -37,6 +38,8 @@ public final class FirmwareUpdateService {
     private static final long SESSION_KEY_WAIT_MS = 5_000;
     private static final long COMMAND_ACK_WAIT_MS = 15_000;
     private static final long REBOOT_HANDOFF_DELAY_MS = 1_800;
+    private static final long OTA_CONNECT_RETRY_DELAY_MS = 2_000;
+    private static final int OTA_WIFI_CONNECT_ATTEMPTS = 10;
     private static final long MAX_FIRMWARE_IMAGE_BYTES = 128L * 1024L * 1024L;
 
     private final AtomicBoolean running = new AtomicBoolean(false);
@@ -52,7 +55,7 @@ public final class FirmwareUpdateService {
 
     /**
      * Validates the selected image and current connection before the user is
-     * allowed to send an OTA/DFU bootloader command.
+     * allowed to run a complete one-click firmware update.
      *
      * @param path selected local firmware file
      * @param mode requested firmware update mode
@@ -92,7 +95,8 @@ public final class FirmwareUpdateService {
 
     /**
      * Resolves {@link FirmwareUpdateMode#AUTO} to a concrete bootloader mode.
-     * The decision uses image type first and then active transport/device metadata.
+     * The decision uses image type first and then active transport. Wi-Fi OTA
+     * requires a TCP profile because the OTA bootloader is reached by host/IP.
      *
      * @param image analyzed firmware image
      * @param requestedMode user-selected mode
@@ -131,22 +135,13 @@ public final class FirmwareUpdateService {
         ) {
             return FirmwareUpdateMode.OTA_WIFI;
         }
-        MeshProtos.DeviceMetadata metadata = state != null
-            ? state.getDeviceMetadata()
-            : null;
-        if (metadata != null && metadata.getHasWifi()) {
-            return FirmwareUpdateMode.OTA_WIFI;
-        }
         return FirmwareUpdateMode.OTA_BLE;
     }
 
     /**
-     * Starts the safe first phase of firmware update: validates the image,
-     * requests a session key when needed, sends the OTA/DFU admin command, and
-     * hands the connection to the expected reboot/reconnect flow.
-     * <p>
-     * This method does not upload firmware bytes. The actual image transfer is
-     * performed by the device bootloader and its matching OTA/DFU tool.
+     * Starts a one-click firmware update for supported transports. ESP32 Wi-Fi
+     * OTA is handled end-to-end: trigger reboot, connect to the Unified OTA TCP
+     * loader, stream bytes, and wait for verification.
      *
      * @param request firmware update preparation request
      * @param progressConsumer callback for UI progress updates; may be {@code null}
@@ -219,7 +214,7 @@ public final class FirmwareUpdateService {
         );
         try {
             waitForSessionKey(validatedRequest, progressConsumer);
-            return sendBootloaderCommand(
+            return runFirmwareUpdate(
                 validatedRequest,
                 mode,
                 progressConsumer
@@ -291,7 +286,7 @@ public final class FirmwareUpdateService {
         ready.get(SESSION_KEY_WAIT_MS + 1_000, TimeUnit.MILLISECONDS);
     }
 
-    private FirmwareUpdateResult sendBootloaderCommand(
+    private FirmwareUpdateResult runFirmwareUpdate(
         FirmwareUpdateRequest request,
         FirmwareUpdateMode mode,
         Consumer<FirmwareUpdateProgress> progressConsumer
@@ -310,21 +305,17 @@ public final class FirmwareUpdateService {
         );
         CompletableFuture<MeshProtos.Routing.Error> ackFuture =
             switch (mode) {
-                case OTA_BLE -> MessageService.requestOtaMode(
-                    request.handler(),
-                    request.state(),
-                    AdminProtos.OTAMode.OTA_BLE,
-                    request.image().sha256()
-                );
                 case OTA_WIFI -> MessageService.requestOtaMode(
                     request.handler(),
                     request.state(),
                     AdminProtos.OTAMode.OTA_WIFI,
                     request.image().sha256()
                 );
-                case DFU -> MessageService.enterDfuMode(
-                    request.handler(),
-                    request.state()
+                case OTA_BLE -> throw new IllegalStateException(
+                    I18n.t("settings.firmware.validation.bleUploadUnsupported")
+                );
+                case DFU -> throw new IllegalStateException(
+                    I18n.t("settings.firmware.validation.dfuUploadUnsupported")
                 );
                 case AUTO -> throw new IllegalStateException(
                     "Unresolved firmware update mode"
@@ -343,11 +334,10 @@ public final class FirmwareUpdateService {
             connectionId,
             generation
         );
-        String message = I18n.t(
-            mode == FirmwareUpdateMode.DFU
-                ? "settings.firmware.status.dfuStarted"
-                : "settings.firmware.status.otaStarted"
-        );
+        if (mode == FirmwareUpdateMode.OTA_WIFI) {
+            uploadWifiOta(request, progressConsumer);
+        }
+        String message = I18n.t("settings.firmware.status.otaWifiComplete");
         emit(
             progressConsumer,
             FirmwareUpdateStage.COMPLETE,
@@ -362,6 +352,48 @@ public final class FirmwareUpdateService {
             MeshProtos.Routing.Error.NONE,
             message
         );
+    }
+
+    private void uploadWifiOta(
+        FirmwareUpdateRequest request,
+        Consumer<FirmwareUpdateProgress> progressConsumer
+    ) throws Exception {
+        FirmwareOtaTcpUploader uploader = new FirmwareOtaTcpUploader(
+            request.connectionEntry().getHost(),
+            FirmwareOtaTcpUploader.DEFAULT_PORT
+        );
+        Exception lastError = null;
+        for (int attempt = 1; attempt <= OTA_WIFI_CONNECT_ATTEMPTS; attempt++) {
+            emit(
+                progressConsumer,
+                FirmwareUpdateStage.CONNECTING_UPLOADER,
+                0.52,
+                I18n.t(
+                    "settings.firmware.status.connectingOta",
+                    attempt,
+                    OTA_WIFI_CONNECT_ATTEMPTS
+                )
+            );
+            try {
+                uploader.upload(request.image(), progressConsumer);
+                return;
+            } catch (Exception e) {
+                lastError = e;
+                if (attempt >= OTA_WIFI_CONNECT_ATTEMPTS) {
+                    break;
+                }
+                log.info(
+                    "Wi-Fi OTA upload attempt {}/{} failed: {}",
+                    attempt,
+                    OTA_WIFI_CONNECT_ATTEMPTS,
+                    e.getMessage()
+                );
+                Thread.sleep(OTA_CONNECT_RETRY_DELAY_MS);
+            }
+        }
+        throw lastError != null
+            ? lastError
+            : new IOException(I18n.t("settings.firmware.status.otaConnectFailed"));
     }
 
     private boolean waitForCommandAck(
@@ -471,6 +503,22 @@ public final class FirmwareUpdateService {
             if (image.type() != FirmwareImageType.ESP32_BIN) {
                 errors.add(I18n.t("settings.firmware.validation.otaNeedsBin"));
             }
+            if (resolved == FirmwareUpdateMode.OTA_BLE) {
+                errors.add(
+                    I18n.t(
+                        "settings.firmware.validation.bleUploadUnsupported"
+                    )
+                );
+                return;
+            }
+            if (
+                entry == null ||
+                entry.getEffectiveType() != ConnectionType.TCP ||
+                entry.getHost() == null ||
+                entry.getHost().isBlank()
+            ) {
+                errors.add(I18n.t("settings.firmware.validation.wifiNeedsTcp"));
+            }
             if (
                 resolved == FirmwareUpdateMode.OTA_WIFI &&
                 state != null &&
@@ -496,13 +544,9 @@ public final class FirmwareUpdateService {
             return;
         }
         if (resolved == FirmwareUpdateMode.DFU) {
-            if (
-                image.type() != FirmwareImageType.UF2 &&
-                image.type() != FirmwareImageType.ZIP
-            ) {
-                errors.add(I18n.t("settings.firmware.validation.dfuNeedsUf2"));
-            }
-            warnings.add(I18n.t("settings.firmware.validation.dfuExternal"));
+            errors.add(
+                I18n.t("settings.firmware.validation.dfuUploadUnsupported")
+            );
         }
     }
 

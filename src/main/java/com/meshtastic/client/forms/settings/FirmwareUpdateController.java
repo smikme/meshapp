@@ -293,7 +293,9 @@ public final class FirmwareUpdateController {
                 )
             );
         }
-        warnings.add(I18n.t("settings.firmware.confirm.externalLoader"));
+        if (resolvedMode == FirmwareUpdateMode.OTA_WIFI) {
+            warnings.add(I18n.t("settings.firmware.confirm.oneClickWifi"));
+        }
         return warnings;
     }
 

@@ -2,6 +2,7 @@ package com.meshtastic.client.service;
 
 import com.meshtastic.client.TestEnvironmentSupport;
 import com.meshtastic.client.model.ConnectionEntry;
+import com.meshtastic.client.model.ConnectionType;
 import com.meshtastic.client.model.DeviceState;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -36,7 +37,7 @@ class FirmwareUpdateServiceTest {
     }
 
     @Test
-    void validateAcceptsBinForOtaMode() throws Exception {
+    void validateAcceptsBinForWifiOtaMode() throws Exception {
         FirmwareUpdateService service = new FirmwareUpdateService();
         DeviceState state = connectedState();
         try {
@@ -45,7 +46,7 @@ class FirmwareUpdateServiceTest {
 
             FirmwareValidationResult result = service.validate(
                 firmware,
-                FirmwareUpdateMode.OTA_BLE,
+                FirmwareUpdateMode.OTA_WIFI,
                 connectedEntry(),
                 state
             );
@@ -81,7 +82,29 @@ class FirmwareUpdateServiceTest {
     }
 
     @Test
-    void validateAllowsZipForDfuModeAndReadsEntries() throws Exception {
+    void validateRejectsBleOtaUntilOneClickUploaderExists() throws Exception {
+        FirmwareUpdateService service = new FirmwareUpdateService();
+        DeviceState state = connectedState();
+        try {
+            Path firmware = tempHome.resolve("firmware.bin");
+            Files.write(firmware, new byte[] { 1, 2, 3, 4 });
+
+            FirmwareValidationResult result = service.validate(
+                firmware,
+                FirmwareUpdateMode.OTA_BLE,
+                connectedBleEntry(),
+                state
+            );
+
+            assertFalse(result.valid());
+            assertFalse(result.errors().isEmpty());
+        } finally {
+            state.shutdown();
+        }
+    }
+
+    @Test
+    void validateRejectsDfuModeUntilOneClickUploaderExists() throws Exception {
         FirmwareUpdateService service = new FirmwareUpdateService();
         DeviceState state = connectedState();
         try {
@@ -99,10 +122,10 @@ class FirmwareUpdateServiceTest {
                 state
             );
 
-            assertTrue(result.valid());
+            assertFalse(result.valid());
             assertEquals(FirmwareImageType.ZIP, result.image().type());
             assertTrue(result.image().zipContainsUf2());
-            assertFalse(result.warnings().isEmpty());
+            assertFalse(result.errors().isEmpty());
         } finally {
             state.shutdown();
         }
@@ -110,6 +133,17 @@ class FirmwareUpdateServiceTest {
 
     private static ConnectionEntry connectedEntry() {
         ConnectionEntry entry = new ConnectionEntry("test", "localhost", 4403);
+        entry.setConnected(true);
+        return entry;
+    }
+
+    private static ConnectionEntry connectedBleEntry() {
+        ConnectionEntry entry = new ConnectionEntry(
+            "test-ble",
+            "00:11:22:33:44:55",
+            "test"
+        );
+        entry.setType(ConnectionType.BLE);
         entry.setConnected(true);
         return entry;
     }

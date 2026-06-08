@@ -32,6 +32,21 @@ public enum FirmwareUpdateStage {
     WAITING_FOR_REBOOT,
 
     /**
+     * The app is connecting to the bootloader transport.
+     */
+    CONNECTING_UPLOADER,
+
+    /**
+     * Firmware bytes are being uploaded to the bootloader.
+     */
+    UPLOADING,
+
+    /**
+     * The bootloader is verifying the uploaded image.
+     */
+    VERIFYING,
+
+    /**
      * The bootloader command flow completed.
      */
     COMPLETE,
