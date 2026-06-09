@@ -205,6 +205,21 @@
     -fx-cursor: default;
 }
 
+.remote-admin-command-button {
+    -fx-min-width: -1;
+    -fx-pref-width: -1;
+    -fx-max-width: Infinity;
+    -fx-padding: 0 12 0 10;
+    -fx-content-display: left;
+    -fx-graphic-text-gap: 8;
+    -fx-text-fill: rgba(255, 255, 255, 0.86);
+    -fx-font-size: 0.9231em;
+}
+
+.light-theme .remote-admin-command-button {
+    -fx-text-fill: rgba(0, 0, 0, 0.82);
+}
+
 .light-theme .config-toolbar-button .svg-icon,
 .light-theme .logs-toolbar-button .svg-icon,
 .light-theme .connection-toolbar-button .svg-icon,

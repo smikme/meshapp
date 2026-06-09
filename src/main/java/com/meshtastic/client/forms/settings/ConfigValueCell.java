@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.function.Consumer;
 import java.util.stream.IntStream;
+import javafx.scene.control.Button;
 import javafx.scene.control.CheckBox;
 import javafx.scene.control.CheckMenuItem;
 import javafx.scene.control.ComboBox;
@@ -47,6 +48,10 @@ public final class ConfigValueCell
         if (empty || item == null || item.isCategory()) {
             return;
         }
+        if (item.hasAction()) {
+            setGraphic(createActionButton(item));
+            return;
+        }
         if (!item.isEditable()) {
             setText(ConfigValueFormatter.formatValue(item));
             return;
@@ -64,6 +69,17 @@ public final class ConfigValueCell
         } else {
             setText(ConfigValueFormatter.formatValue(item));
         }
+    }
+
+    private Button createActionButton(ConfigTreeItem item) {
+        Button button = new Button(item.getActionLabel());
+        button.setMaxWidth(Double.MAX_VALUE);
+        button.setOnAction(e -> {
+            if (item.getAction() != null) {
+                item.getAction().run();
+            }
+        });
+        return button;
     }
 
     private CheckBox createBooleanEditor(ConfigTreeItem item) {
