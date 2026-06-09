@@ -105,6 +105,25 @@ public class NodeDetailContent extends HBox {
         tracerouteBtn.setOnAction(e ->
                 NodeTracerouteWindow.showWindow(this.state, node, protocolHandler));
 
+        SVGPath remoteAdminIcon = SvgIconLoader.load("/drawer/icon/setting.svg", 22);
+        Button remoteAdminBtn = new Button();
+        remoteAdminBtn.setGraphic(remoteAdminIcon);
+        remoteAdminBtn.setContentDisplay(ContentDisplay.GRAPHIC_ONLY);
+        remoteAdminBtn.getStyleClass().add("drawer-toolbar-button");
+        boolean isLocalNode = state != null && nodeNum == state.getMyNodeNum();
+        boolean canRemoteAdmin = handler != null
+                && state != null
+                && nodeNum != 0
+                && !isLocalNode
+                && hasPublicKey;
+        String remoteAdminTooltip = !hasPublicKey
+                ? I18n.t("node.action.remoteAdminNoPublicKey")
+                : I18n.t("node.action.remoteAdmin");
+        remoteAdminBtn.setTooltip(new Tooltip(remoteAdminTooltip));
+        remoteAdminBtn.setDisable(!canRemoteAdmin);
+        remoteAdminBtn.setOnAction(e ->
+                RemoteAdminPanel.showForNode(this.state, node, protocolHandler));
+
         // Refresh node information over radio and exchange User payloads.
         SVGPath refreshIcon = SvgIconLoader.load("/drawer/icon/refresh-node.svg", 22);
         Button refreshBtn = new Button();
@@ -201,7 +220,7 @@ public class NodeDetailContent extends HBox {
             ignoredBtn.getTooltip().setText(ignoredTooltip(nowIgn));
         });
 
-        actionToolbar.getItems().addAll(privateChatBtn, tracerouteBtn, favoriteBtn, ignoredBtn, refreshBtn, deleteBtn);
+        actionToolbar.getItems().addAll(privateChatBtn, tracerouteBtn, remoteAdminBtn, favoriteBtn, ignoredBtn, refreshBtn, deleteBtn);
 
         VBox toolbarContainer = new VBox(actionToolbar);
         toolbarContainer.setAlignment(Pos.TOP_CENTER);

@@ -58,7 +58,8 @@ public final class ProtobufTreeBuilder {
             Map.entry("detection_sensor", "settings.config.section.detection_sensor"),
             Map.entry("paxcounter", "settings.config.section.paxcounter"),
             Map.entry("statusmessage", "settings.config.section.statusmessage"),
-            Map.entry("traffic_management", "settings.config.section.traffic_management")
+            Map.entry("traffic_management", "settings.config.section.traffic_management"),
+            Map.entry("tak", "settings.config.section.tak")
     );
 
     private ProtobufTreeBuilder() {}
@@ -336,7 +337,13 @@ public final class ProtobufTreeBuilder {
         return result.substring(0, 1).toUpperCase(Locale.ROOT) + result.substring(1);
     }
 
-    private static String sectionDisplayName(String sectionName) {
+    /**
+     * Returns the localized display label for a protobuf config section name.
+     *
+     * @param sectionName protobuf oneof field name
+     * @return localized or humanized section label
+     */
+    public static String sectionDisplayName(String sectionName) {
         String key = SECTION_NAME_KEYS.get(sectionName);
         return key != null ? I18n.t(key) : humanize(sectionName);
     }

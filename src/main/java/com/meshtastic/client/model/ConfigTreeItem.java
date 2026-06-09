@@ -20,6 +20,8 @@ public class ConfigTreeItem {
     private final List<?> enumValues;       // Allowed enum values, or null for non-enum fields.
     private final boolean editable;         // true for fields, false for categories.
     private final boolean category;         // Root category such as device, position, or mqtt.
+    private final String actionLabel;       // Button label for action rows.
+    private final Runnable action;          // Action invoked by value-column button.
 
     // Used when writing values back into protobuf.
     private final Descriptors.FieldDescriptor fieldDescriptor;   // null for categories.
@@ -30,7 +32,7 @@ public class ConfigTreeItem {
      * Constructor for a category section.
      */
     public ConfigTreeItem(String name, String configType, int configVariantNumber) {
-        this(name, null, null, configType, configVariantNumber);
+        this(name, null, (Descriptors.FieldDescriptor) null, configType, configVariantNumber);
     }
 
     /**
@@ -46,6 +48,8 @@ public class ConfigTreeItem {
         this.enumValues = null;
         this.editable = false;
         this.category = true;
+        this.actionLabel = null;
+        this.action = null;
         this.fieldDescriptor = fieldDescriptor;
         this.configType = configType;
         this.configVariantNumber = configVariantNumber;
@@ -65,7 +69,29 @@ public class ConfigTreeItem {
         this.enumValues = enumValues;
         this.editable = true;
         this.category = false;
+        this.actionLabel = null;
+        this.action = null;
         this.fieldDescriptor = fieldDescriptor;
+        this.configType = configType;
+        this.configVariantNumber = configVariantNumber;
+    }
+
+    /**
+     * Constructor for a non-editable row that exposes a value-column action.
+     */
+    public ConfigTreeItem(String name, String actionLabel, Runnable action,
+                          String configType, int configVariantNumber) {
+        this.name = name;
+        this.fieldName = null;
+        this.value = null;
+        this.originalValue = null;
+        this.valueType = null;
+        this.enumValues = null;
+        this.editable = false;
+        this.category = false;
+        this.actionLabel = actionLabel;
+        this.action = action;
+        this.fieldDescriptor = null;
         this.configType = configType;
         this.configVariantNumber = configVariantNumber;
     }
@@ -83,6 +109,9 @@ public class ConfigTreeItem {
     public List<?> getEnumValues() { return enumValues; }
     public boolean isEditable() { return editable; }
     public boolean isCategory() { return category; }
+    public boolean hasAction() { return action != null; }
+    public String getActionLabel() { return actionLabel; }
+    public Runnable getAction() { return action; }
 
     public Descriptors.FieldDescriptor getFieldDescriptor() { return fieldDescriptor; }
 

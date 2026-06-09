@@ -126,6 +126,34 @@ public final class ConfigProtobufSupport {
     }
 
     /**
+     * Finds a device config oneof field descriptor by variant field number.
+     *
+     * @param variantNumber protobuf oneof field number
+     * @return matching field descriptor, if present
+     */
+    public static Optional<FieldDescriptor> configFieldByVariantNumber(
+        int variantNumber
+    ) {
+        return payloadVariantFields(ConfigProtos.Config.getDescriptor())
+            .filter(field -> field.getNumber() == variantNumber)
+            .findFirst();
+    }
+
+    /**
+     * Finds a module config oneof field descriptor by variant field number.
+     *
+     * @param variantNumber protobuf oneof field number
+     * @return matching field descriptor, if present
+     */
+    public static Optional<FieldDescriptor> moduleConfigFieldByVariantNumber(
+        int variantNumber
+    ) {
+        return payloadVariantFields(ModuleConfigProtos.ModuleConfig.getDescriptor())
+            .filter(field -> field.getNumber() == variantNumber)
+            .findFirst();
+    }
+
+    /**
      * Finds a channel by index.
      *
      * @param channels channel list
@@ -164,5 +192,17 @@ public final class ConfigProtobufSupport {
             .flatMap(value -> value.getDescriptorForType().getOneofs().stream())
             .filter(oneof -> PAYLOAD_VARIANT_ONEOF.equals(oneof.getName()))
             .findFirst();
+    }
+
+    private static java.util.stream.Stream<FieldDescriptor> payloadVariantFields(
+        com.google.protobuf.Descriptors.Descriptor descriptor
+    ) {
+        return descriptor
+            .getOneofs()
+            .stream()
+            .filter(oneof -> PAYLOAD_VARIANT_ONEOF.equals(oneof.getName()))
+            .findFirst()
+            .stream()
+            .flatMap(oneof -> oneof.getFields().stream());
     }
 }

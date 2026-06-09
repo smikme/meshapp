@@ -91,7 +91,15 @@ public final class ConfigPanelFactory {
         );
     }
 
-    private static TreeTableView<ConfigTreeItem> createConfigTree(
+    /**
+     * Creates the shared protobuf configuration tree used by both local and
+     * remote configuration editors.
+     *
+     * @param helpPopupController controller used to show field help popups
+     * @param repeatedEditSynchronizer callback invoked after repeated-field edits
+     * @return editable configuration tree table
+     */
+    public static TreeTableView<ConfigTreeItem> createConfigTree(
         ConfigHelpPopupController helpPopupController,
         Consumer<ConfigTreeItem> repeatedEditSynchronizer
     ) {
