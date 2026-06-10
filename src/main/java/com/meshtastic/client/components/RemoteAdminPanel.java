@@ -4,7 +4,6 @@ import static com.meshtastic.client.forms.settings.ConfigEditorConstants.CONFIG_
 import static com.meshtastic.client.forms.settings.ConfigEditorConstants.MODULE_CONFIG_ROOT_TYPE;
 
 import com.google.protobuf.Descriptors.FieldDescriptor;
-import com.meshtastic.client.MeshApp;
 import com.meshtastic.client.forms.settings.ConfigChangeCollector;
 import com.meshtastic.client.forms.settings.ConfigChangeSet;
 import com.meshtastic.client.forms.settings.ConfigHelpPopupController;
@@ -14,14 +13,13 @@ import com.meshtastic.client.forms.settings.ConfigSnapshotEditor;
 import com.meshtastic.client.forms.settings.ConfigTreeItemSupport;
 import com.meshtastic.client.forms.settings.MeshtasticConfigTreeBuilder;
 import com.meshtastic.client.i18n.I18n;
+import com.meshtastic.client.modal.ModalPane;
 import com.meshtastic.client.model.ConfigTreeItem;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.protocol.ProtocolHandler;
 import com.meshtastic.client.service.RemoteAdminService;
 import com.meshtastic.client.service.RemoteAdminSession;
-import com.meshtastic.client.themes.ThemeManager;
-import com.meshtastic.client.utils.AppPreferences;
 import com.meshtastic.client.utils.ProtobufTreeBuilder;
 import com.meshtastic.client.utils.SvgIconLoader;
 import com.meshtastic.client.utils.UnicodeTextUtils;
@@ -37,7 +35,6 @@ import java.util.function.Supplier;
 import javafx.application.Platform;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
-import javafx.scene.Scene;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
 import javafx.scene.control.ButtonBar;
@@ -50,7 +47,6 @@ import javafx.scene.control.ScrollPane;
 import javafx.scene.control.Separator;
 import javafx.scene.control.Tab;
 import javafx.scene.control.TabPane;
-import javafx.scene.control.TextArea;
 import javafx.scene.control.TextField;
 import javafx.scene.control.ToolBar;
 import javafx.scene.control.Tooltip;
@@ -60,9 +56,7 @@ import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
 import javafx.scene.shape.SVGPath;
-import javafx.stage.Modality;
-import javafx.stage.Stage;
-import javafx.stage.StageStyle;
+import javafx.stage.Window;
 import org.meshtastic.proto.AdminProtos;
 import org.meshtastic.proto.ChannelProtos;
 import org.meshtastic.proto.ConfigProtos;
@@ -87,7 +81,6 @@ public final class RemoteAdminPanel extends VBox implements AutoCloseable {
     private final Label queryStatusLabel = new Label();
     private final Label commandStatusLabel = new Label();
     private final ProgressBar loadProgressBar = new ProgressBar(0);
-    private final TextArea cannedMessagesArea = new TextArea();
     private final List<Button> commandButtons = new ArrayList<>();
     private final TreeTableView<ConfigTreeItem> configTree;
     private final Button refreshButton;
@@ -100,7 +93,7 @@ public final class RemoteAdminPanel extends VBox implements AutoCloseable {
     private List<ModuleConfigProtos.ModuleConfig> originalModuleConfigs = new ArrayList<>();
     private List<ChannelProtos.Channel> originalChannels = new ArrayList<>();
     private List<ChannelProtos.Channel> workingChannels = new ArrayList<>();
-    private Stage modalStage;
+    private ModalPane modalPane;
     private boolean adminKeyConfirmed;
 
     /**
@@ -116,7 +109,7 @@ public final class RemoteAdminPanel extends VBox implements AutoCloseable {
         setPrefSize(WINDOW_WIDTH, WINDOW_HEIGHT);
         setMinSize(MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT);
         setMaxHeight(Double.MAX_VALUE);
-        getStyleClass().add("packet-monitor-root");
+        getStyleClass().addAll("packet-monitor-root", "modal-side-panel");
 
         this.remoteAdminService = new RemoteAdminService(handler, localState, targetNode);
         this.configTree = ConfigPanelFactory.createConfigTree(
@@ -193,10 +186,6 @@ public final class RemoteAdminPanel extends VBox implements AutoCloseable {
         commandStatusLabel.setWrapText(true);
         commandStatusLabel.setText(I18n.t("remoteAdmin.status.commandsLoadFirst"));
 
-        cannedMessagesArea.setPromptText(I18n.t("remoteAdmin.cannedMessages.placeholder"));
-        cannedMessagesArea.setPrefRowCount(8);
-        cannedMessagesArea.setWrapText(true);
-
         VBox content = new VBox(12,
                 commandStatusLabel,
                 commandGroup(I18n.t("remoteAdmin.section.quickCommands"),
@@ -244,7 +233,6 @@ public final class RemoteAdminPanel extends VBox implements AutoCloseable {
                                 () -> confirmAndRun(I18n.t("remoteAdmin.command.removeBackupSd"),
                                         () -> remoteAdminService.removeBackupPreferences(
                                                 AdminProtos.AdminMessage.BackupLocation.SD), true))),
-                cannedMessagesGroup(),
                 commandGroup(I18n.t("remoteAdmin.section.danger"),
                         commandButton(I18n.t("remoteAdmin.command.resetNodeDb"), "/icons/database.svg",
                                 () -> confirmAndRun(I18n.t("remoteAdmin.command.resetNodeDb"),
@@ -265,22 +253,6 @@ public final class RemoteAdminPanel extends VBox implements AutoCloseable {
         scrollPane.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
         scrollPane.setVbarPolicy(ScrollPane.ScrollBarPolicy.AS_NEEDED);
         return scrollPane;
-    }
-
-    private VBox cannedMessagesGroup() {
-        Button saveCannedMessages = commandButton(
-                I18n.t("remoteAdmin.command.saveCannedMessages"),
-                "/icons/save-text.svg",
-                () -> confirmAndRun(I18n.t("remoteAdmin.command.saveCannedMessages"),
-                        () -> remoteAdminService.setCannedMessages(cannedMessagesArea.getText()), false));
-        ToolBar toolbar = new ToolBar(saveCannedMessages);
-        toolbar.getStyleClass().add("config-toolbar");
-        VBox group = new VBox(8,
-                new Label(I18n.t("remoteAdmin.section.cannedMessages")),
-                cannedMessagesArea,
-                toolbar,
-                new Separator());
-        return group;
     }
 
     private static Tab contentTab(String title, javafx.scene.Node content) {
@@ -304,7 +276,11 @@ public final class RemoteAdminPanel extends VBox implements AutoCloseable {
         if (localState == null || node == null || handler == null) {
             return;
         }
-        Stage owner = MeshApp.getPrimaryStage();
+        ModalPane modal = ModalPane.getInstance();
+        if (modal == null) {
+            return;
+        }
+        Window owner = modal.getScene() != null ? modal.getScene().getWindow() : null;
         String displayName = resolveDisplayName(node);
         if (!confirmAdminKeyConfigured(displayName, owner)) {
             return;
@@ -312,45 +288,10 @@ public final class RemoteAdminPanel extends VBox implements AutoCloseable {
 
         RemoteAdminPanel panel = new RemoteAdminPanel(localState, node, handler);
         panel.adminKeyConfirmed = true;
-        Stage stage = new Stage();
-        panel.modalStage = stage;
-        stage.initStyle(StageStyle.DECORATED);
-        stage.initModality(Modality.APPLICATION_MODAL);
-        stage.setTitle(I18n.t("remoteAdmin.title", displayName));
-        stage.setResizable(true);
-        stage.setMinWidth(MIN_WINDOW_WIDTH);
-        stage.setMinHeight(MIN_WINDOW_HEIGHT);
-
-        if (owner != null) {
-            stage.initOwner(owner);
-            if (!owner.getIcons().isEmpty()) {
-                stage.getIcons().setAll(owner.getIcons());
-            }
-        }
-
-        Scene scene = new Scene(panel, WINDOW_WIDTH, WINDOW_HEIGHT);
-        ThemeManager.applyTheme(scene, AppPreferences.isDarkMode());
-        EmojiRenderingSupport.install(scene);
-        stage.setScene(scene);
-        stage.setOnHidden(event -> {
-            panel.close();
-            ThemeManager.unregisterScene(scene);
-        });
-        stage.setOnShown(event -> centerRelativeToOwner(stage, owner));
-        stage.show();
+        panel.modalPane = modal;
+        modal.show(panel, false, false);
+        modal.setOnHidden(panel::close);
         Platform.runLater(panel::loadSnapshot);
-    }
-
-    private static void centerRelativeToOwner(Stage stage, Stage owner) {
-        if (stage == null) {
-            return;
-        }
-        if (owner == null || !owner.isShowing()) {
-            stage.centerOnScreen();
-            return;
-        }
-        stage.setX(owner.getX() + (owner.getWidth() - stage.getWidth()) / 2.0);
-        stage.setY(owner.getY() + (owner.getHeight() - stage.getHeight()) / 2.0);
     }
 
     /**
@@ -362,13 +303,11 @@ public final class RemoteAdminPanel extends VBox implements AutoCloseable {
     }
 
     private void closeAndHide() {
-        close();
-        Stage stage = modalStage;
-        if (stage == null && getScene() != null && getScene().getWindow() instanceof Stage sceneStage) {
-            stage = sceneStage;
-        }
-        if (stage != null) {
-            stage.hide();
+        ModalPane pane = modalPane != null ? modalPane : ModalPane.getInstance();
+        if (pane != null) {
+            pane.hide();
+        } else {
+            close();
         }
     }
 
@@ -388,14 +327,11 @@ public final class RemoteAdminPanel extends VBox implements AutoCloseable {
     }
 
     private boolean confirmAdminKeyConfigured() {
-        Stage owner = modalStage;
-        if (owner == null && getScene() != null && getScene().getWindow() instanceof Stage sceneStage) {
-            owner = sceneStage;
-        }
+        Window owner = getScene() != null ? getScene().getWindow() : null;
         return confirmAdminKeyConfigured(targetDisplayName, owner);
     }
 
-    private static boolean confirmAdminKeyConfigured(String targetDisplayName, Stage owner) {
+    private static boolean confirmAdminKeyConfigured(String targetDisplayName, Window owner) {
         ButtonType cancelButton = new ButtonType(I18n.t("common.cancel"), ButtonBar.ButtonData.CANCEL_CLOSE);
         ButtonType loadButton = new ButtonType(I18n.t("remoteAdmin.action.loadConfig"),
                 ButtonBar.ButtonData.OK_DONE);
@@ -935,17 +871,12 @@ public final class RemoteAdminPanel extends VBox implements AutoCloseable {
         if (alert == null) {
             return;
         }
-        if (modalStage != null) {
-            alert.initOwner(modalStage);
-        } else if (getScene() != null) {
+        if (getScene() != null) {
             alert.initOwner(getScene().getWindow());
         }
     }
 
     private void updateCommandState(RemoteAdminSession session) {
-        if (session.isCannedMessagesLoaded()) {
-            cannedMessagesArea.setText(session.getCannedMessages());
-        }
         commandStatusLabel.setText(I18n.t(
                 "remoteAdmin.status.connectionStatus",
                 describeConnectionStatus(session.getConnectionStatus())));

@@ -220,7 +220,14 @@ public class NodeDetailContent extends HBox {
             ignoredBtn.getTooltip().setText(ignoredTooltip(nowIgn));
         });
 
-        actionToolbar.getItems().addAll(privateChatBtn, tracerouteBtn, remoteAdminBtn, favoriteBtn, ignoredBtn, refreshBtn, deleteBtn);
+        actionToolbar.getItems().addAll(
+                privateChatBtn,
+                tracerouteBtn,
+                favoriteBtn,
+                ignoredBtn,
+                refreshBtn,
+                remoteAdminBtn,
+                deleteBtn);
 
         VBox toolbarContainer = new VBox(actionToolbar);
         toolbarContainer.setAlignment(Pos.TOP_CENTER);
