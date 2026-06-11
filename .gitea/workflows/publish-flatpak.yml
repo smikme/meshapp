@@ -1,0 +1,78 @@
+name: Publish Flatpak Repository
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Release tag to publish to Flatpak repo, for example v2.1.13'
+        required: true
+
+jobs:
+  publish-flatpak:
+    runs-on: ubuntu
+    steps:
+      - name: Resolve release tag
+        shell: bash
+        run: |
+          TAG="$(jq -r '.inputs.release_tag // empty' "${GITHUB_EVENT_PATH}" 2>/dev/null || true)"
+
+          if [ -z "${TAG}" ] || [ "${TAG}" = "null" ]; then
+            echo "::error::Set the release_tag input, for example v2.1.13"
+            exit 1
+          fi
+
+          case "${TAG}" in
+            refs/tags/*)
+              TAG="${TAG#refs/tags/}"
+              ;;
+          esac
+
+          printf 'RELEASE_TAG=%s\n' "${TAG}" >> "${GITHUB_ENV}"
+          echo "Flatpak repo will be published from tag ${TAG}"
+
+      - name: Checkout selected tag
+        shell: bash
+        run: |
+          git clone "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git" .
+          PUBLISH_SCRIPT="${RUNNER_TEMP:-/tmp}/publish-flatpak-repo.sh"
+          cp .gitea/scripts/publish-flatpak-repo.sh "${PUBLISH_SCRIPT}"
+          chmod +x "${PUBLISH_SCRIPT}"
+          printf 'PUBLISH_FLATPAK_SCRIPT=%s\n' "${PUBLISH_SCRIPT}" >> "${GITHUB_ENV}"
+
+          git fetch --tags --force
+
+          if ! git rev-parse -q --verify "refs/tags/${RELEASE_TAG}" >/dev/null; then
+            echo "::error::Tag ${RELEASE_TAG} does not exist in Gitea repository"
+            exit 1
+          fi
+
+          git checkout "refs/tags/${RELEASE_TAG}"
+
+      - name: Check Flatpak toolchain
+        shell: bash
+        run: |
+          command -v flatpak >/dev/null 2>&1 || { echo "flatpak is required on the runner" >&2; exit 1; }
+          command -v flatpak-builder >/dev/null 2>&1 || { echo "flatpak-builder is required on the runner" >&2; exit 1; }
+          flatpak --user remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+          flatpak --user install -y flathub org.freedesktop.Platform//25.08 org.freedesktop.Sdk//25.08
+
+      - name: Publish selected tag to Flatpak repo
+        env:
+          FLATPAK_GPG_KEY_ID: ${{ secrets.FLATPAK_GPG_KEY_ID }}
+          FLATPAK_GPG_PRIVATE_KEY_BASE64: ${{ secrets.FLATPAK_GPG_PRIVATE_KEY_BASE64 }}
+          FLATPAK_DEPLOY_HOST: ${{ secrets.FLATPAK_DEPLOY_HOST }}
+          FLATPAK_DEPLOY_USER: ${{ secrets.FLATPAK_DEPLOY_USER }}
+          FLATPAK_DEPLOY_PATH: ${{ secrets.FLATPAK_DEPLOY_PATH }}
+          FLATPAK_DEPLOY_SSH_KEY: ${{ secrets.FLATPAK_DEPLOY_SSH_KEY }}
+          FLATPAK_DEPLOY_SSH_PORT: ${{ secrets.FLATPAK_DEPLOY_SSH_PORT }}
+          FLATPAK_PUBLIC_BASE_URL: ${{ secrets.FLATPAK_PUBLIC_BASE_URL }}
+        shell: bash
+        run: |
+          if [ -z "${FLATPAK_PUBLIC_BASE_URL:-}" ]; then
+            FLATPAK_PUBLIC_BASE_URL="https://flatpak.privatepractice.app"
+            export FLATPAK_PUBLIC_BASE_URL
+          fi
+
+          bash "${PUBLISH_FLATPAK_SCRIPT}" import-key
+          ./gradlew flatpak -PflatpakGpgSign="${FLATPAK_GPG_KEY_ID}" --no-daemon
+          bash "${PUBLISH_FLATPAK_SCRIPT}" publish

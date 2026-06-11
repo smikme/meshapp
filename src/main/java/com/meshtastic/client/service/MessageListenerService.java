@@ -790,6 +790,13 @@ public class MessageListenerService implements FromRadioListener {
 
     @SuppressWarnings("PMD.UnusedFormalParameter") // consistent handler signature
     private void handleAdminResponse(MeshProtos.MeshPacket packet, MeshProtos.Data data) {
+        if (packet.getFrom() != 0
+                && deviceState.getMyNodeNum() != 0
+                && packet.getFrom() != deviceState.getMyNodeNum()) {
+            log.debug("Ignoring remote ADMIN_APP response from !{} in local message listener",
+                    Integer.toHexString(packet.getFrom()));
+            return;
+        }
         try {
             AdminProtos.AdminMessage adminMsg = AdminProtos.AdminMessage.parseFrom(data.getPayload());
             boolean hasSessionPasskey = !adminMsg.getSessionPasskey().isEmpty();

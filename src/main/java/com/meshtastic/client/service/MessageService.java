@@ -792,6 +792,56 @@ public final class MessageService {
     }
 
     /**
+     * Asks ESP32 firmware to reboot into the OTA loader.
+     * The hash must match the exact binary that the OTA loader will receive.
+     *
+     * @param mode   BLE or Wi-Fi OTA loader mode
+     * @param sha256 32-byte SHA-256 of the firmware binary
+     * @return future with routing ACK/NAK for the sent admin packet
+     */
+    public static CompletableFuture<MeshProtos.Routing.Error> requestOtaMode(ProtocolHandler handler,
+                                                                              DeviceState state,
+                                                                              AdminProtos.OTAMode mode,
+                                                                              byte[] sha256) {
+        if (mode == null || mode == AdminProtos.OTAMode.NO_REBOOT_OTA) {
+            throw new IllegalArgumentException("OTA reboot mode is required");
+        }
+        if (sha256 == null || sha256.length != 32) {
+            throw new IllegalArgumentException("OTA firmware hash must be 32 bytes");
+        }
+        AdminProtos.AdminMessage.OTAEvent otaEvent =
+                AdminProtos.AdminMessage.OTAEvent.newBuilder()
+                        .setRebootOtaMode(mode)
+                        .setOtaHash(ByteString.copyFrom(sha256))
+                        .build();
+        AdminProtos.AdminMessage.Builder adminBuilder = AdminProtos.AdminMessage.newBuilder()
+                .setOtaRequest(otaEvent);
+        ByteString passkey = state.getSessionPasskey();
+        if (passkey != null) {
+            adminBuilder.setSessionPasskey(passkey);
+        }
+
+        return sendAdminMessage(handler, state, adminBuilder.build());
+    }
+
+    /**
+     * Asks UF2-capable firmware to reboot into DFU mode.
+     *
+     * @return future with routing ACK/NAK for the sent admin packet
+     */
+    public static CompletableFuture<MeshProtos.Routing.Error> enterDfuMode(ProtocolHandler handler,
+                                                                           DeviceState state) {
+        AdminProtos.AdminMessage.Builder adminBuilder = AdminProtos.AdminMessage.newBuilder()
+                .setEnterDfuModeRequest(true);
+        ByteString passkey = state.getSessionPasskey();
+        if (passkey != null) {
+            adminBuilder.setSessionPasskey(passkey);
+        }
+
+        return sendAdminMessage(handler, state, adminBuilder.build());
+    }
+
+    /**
      * Sets a fixed position on the device.
      * Sends AdminMessage.set_fixed_position with coordinates. Firmware sets
      * position.fixed_position = true automatically.
