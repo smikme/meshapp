@@ -1840,6 +1840,7 @@ tasks.register('flatpak') {
 		def flatpakRuntimeVersion = (findProperty('flatpakRuntimeVersion') ?: '25.08').toString().trim()
 		def flatpakSdk = (findProperty('flatpakSdk') ?: 'org.freedesktop.Sdk').toString().trim()
 		def flatpakBranch = (findProperty('flatpakBranch') ?: 'stable').toString().trim()
+		def flatpakGpgSign = (findProperty('flatpakGpgSign') ?: '').toString().trim()
 		def flatpakBuilder = resolveCommandExecutable('flatpakBuilder', 'FLATPAK_BUILDER', 'flatpak-builder', 'flatpak')
 		def flatpakBin = resolveCommandExecutable('flatpakBin', 'FLATPAK_BIN', 'flatpak', 'flatpak')
 
@@ -1850,16 +1851,20 @@ tasks.register('flatpak') {
 
 		def repoDir = new File(workDir, 'repo')
 		def buildDir = new File(workDir, 'builder')
+		def flatpakBuilderArgs = [
+			flatpakBuilder.absolutePath,
+			"--arch=${resolveLinuxAppImageArch()}",
+			'--force-clean',
+			"--repo=${repoDir.absolutePath}",
+			"--default-branch=${flatpakBranch}",
+			buildDir.absolutePath,
+			manifestFile.absolutePath
+		]
+		if (flatpakGpgSign) {
+			flatpakBuilderArgs.add(1, "--gpg-sign=${flatpakGpgSign}")
+		}
 		executePackagingCommand(
-			[
-				flatpakBuilder.absolutePath,
-				"--arch=${resolveLinuxAppImageArch()}",
-				'--force-clean',
-				"--repo=${repoDir.absolutePath}",
-				"--default-branch=${flatpakBranch}",
-				buildDir.absolutePath,
-				manifestFile.absolutePath
-			],
+			flatpakBuilderArgs,
 			'flatpak: flatpak-builder failed'
 		)
 
@@ -1869,16 +1874,21 @@ tasks.register('flatpak') {
 			bundleFile.delete()
 		}
 
+		def flatpakBundleArgs = [
+			flatpakBin.absolutePath,
+			'build-bundle',
+			"--arch=${resolveLinuxAppImageArch()}",
+			repoDir.absolutePath,
+			bundleFile.absolutePath,
+			flatpakAppId,
+			flatpakBranch
+		]
+		if (flatpakGpgSign) {
+			flatpakBundleArgs.add(2, "--gpg-sign=${flatpakGpgSign}")
+		}
+
 		executePackagingCommand(
-			[
-				flatpakBin.absolutePath,
-				'build-bundle',
-				"--arch=${resolveLinuxAppImageArch()}",
-				repoDir.absolutePath,
-				bundleFile.absolutePath,
-				flatpakAppId,
-				flatpakBranch
-			],
+			flatpakBundleArgs,
 			'flatpak: flatpak build-bundle failed'
 		)
 
