@@ -64,6 +64,45 @@ import_gpg_key() {
   fi
 }
 
+resolve_flatpak_arch() {
+  if [ -n "${FLATPAK_ARCH:-}" ]; then
+    printf '%s\n' "${FLATPAK_ARCH}"
+    return
+  fi
+
+  flatpak --default-arch
+}
+
+sign_repo_refs() {
+  require_env FLATPAK_GPG_KEY_ID
+
+  if [ ! -d "${REPO_DIR}" ]; then
+    echo "::error::Flatpak repository directory not found: ${REPO_DIR}"
+    exit 1
+  fi
+
+  local arch debug_id
+  arch="$(resolve_flatpak_arch)"
+  debug_id="${APP_ID}.Debug"
+
+  flatpak build-sign \
+    --gpg-sign="${FLATPAK_GPG_KEY_ID}" \
+    --arch="${arch}" \
+    "${REPO_DIR}" \
+    "${APP_ID}" \
+    "${BRANCH}"
+
+  if [ -f "${REPO_DIR}/refs/heads/runtime/${debug_id}/${arch}/${BRANCH}" ]; then
+    flatpak build-sign \
+      --runtime \
+      --gpg-sign="${FLATPAK_GPG_KEY_ID}" \
+      --arch="${arch}" \
+      "${REPO_DIR}" \
+      "${debug_id}" \
+      "${BRANCH}"
+  fi
+}
+
 write_flatpakref() {
   require_env FLATPAK_GPG_KEY_ID
 
@@ -112,6 +151,21 @@ setup_ssh() {
   require_env FLATPAK_DEPLOY_SSH_KEY
   require_env FLATPAK_DEPLOY_HOST
 
+  if ! command -v ssh >/dev/null 2>&1; then
+    echo "::error::ssh is required for Flatpak repository publishing"
+    exit 1
+  fi
+
+  if ! command -v ssh-keyscan >/dev/null 2>&1; then
+    echo "::error::ssh-keyscan is required for Flatpak repository publishing"
+    exit 1
+  fi
+
+  if ! command -v rsync >/dev/null 2>&1; then
+    echo "::error::rsync is required on the Gitea runner for Flatpak repository publishing"
+    exit 1
+  fi
+
   mkdir -p "${HOME}/.ssh"
   chmod 700 "${HOME}/.ssh"
 
@@ -122,12 +176,23 @@ setup_ssh() {
   ssh-keyscan -p "${DEPLOY_SSH_PORT}" -H "${FLATPAK_DEPLOY_HOST}" >> "${HOME}/.ssh/known_hosts"
 }
 
+check_remote_rsync() {
+  local remote="$1"
+
+  if ! ssh -i "${SSH_KEY_FILE}" -p "${DEPLOY_SSH_PORT}" -o StrictHostKeyChecking=yes "${remote}" \
+      'command -v rsync >/dev/null 2>&1'; then
+    echo "::error::rsync is required on ${FLATPAK_DEPLOY_HOST}. Install it on the Flatpak repository server."
+    exit 1
+  fi
+}
+
 publish_repo() {
   require_env FLATPAK_DEPLOY_HOST
   require_env FLATPAK_DEPLOY_USER
   require_env FLATPAK_DEPLOY_PATH
 
   import_gpg_key
+  sign_repo_refs
   update_repo_summary
   write_flatpakref
   setup_ssh
@@ -137,6 +202,8 @@ publish_repo() {
   deploy_path="${FLATPAK_DEPLOY_PATH%/}"
   remote_repo="${deploy_path}/repo"
   remote_shell="ssh -i ${SSH_KEY_FILE} -p ${DEPLOY_SSH_PORT} -o StrictHostKeyChecking=yes"
+
+  check_remote_rsync "${remote}"
 
   ssh -i "${SSH_KEY_FILE}" -p "${DEPLOY_SSH_PORT}" -o StrictHostKeyChecking=yes "${remote}" \
     "mkdir -p $(shell_quote "${remote_repo}")"
@@ -160,11 +227,15 @@ case "${command}" in
   import-key)
     import_gpg_key
     ;;
+  sign)
+    import_gpg_key
+    sign_repo_refs
+    ;;
   publish)
     publish_repo
     ;;
   *)
-    echo "usage: $0 [import-key|publish]"
+    echo "usage: $0 [import-key|sign|publish]"
     exit 2
     ;;
 esac

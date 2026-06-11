@@ -74,5 +74,5 @@ jobs:
           fi
 
           bash "${PUBLISH_FLATPAK_SCRIPT}" import-key
-          ./gradlew flatpak -PflatpakGpgSign="${FLATPAK_GPG_KEY_ID}" --no-daemon
+          ./gradlew flatpak --no-daemon
           bash "${PUBLISH_FLATPAK_SCRIPT}" publish
