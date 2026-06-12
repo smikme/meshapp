@@ -279,7 +279,7 @@ public final class ConfigSnapshotEditor {
             .ofNullable(section.getValue())
             .map(ConfigTreeItem::getConfigVariantNumber)
             .flatMap(variant ->
-                ConfigProtobufSupport.findOriginalConfig(
+                ConfigProtobufSupport.findOrCreateConfig(
                     originalConfigs,
                     variant
                 )
@@ -295,7 +295,7 @@ public final class ConfigSnapshotEditor {
             .ofNullable(section.getValue())
             .map(ConfigTreeItem::getConfigVariantNumber)
             .flatMap(variant ->
-                ConfigProtobufSupport.findOriginalModuleConfig(
+                ConfigProtobufSupport.findOrCreateModuleConfig(
                     originalModuleConfigs,
                     variant
                 )

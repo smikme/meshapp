@@ -788,6 +788,14 @@ public class MessageListenerService implements FromRadioListener {
         }
     }
 
+    @Override
+    public void onDeviceMetadata(MeshProtos.DeviceMetadata metadata) {
+        deviceState.setDeviceMetadata(metadata);
+        deviceState.fireDeviceMetadataListeners();
+        log.debug("Received device metadata: firmwareVersion='{}', role={}, excludedModules={}",
+                metadata.getFirmwareVersion(), metadata.getRole(), metadata.getExcludedModules());
+    }
+
     @SuppressWarnings("PMD.UnusedFormalParameter") // consistent handler signature
     private void handleAdminResponse(MeshProtos.MeshPacket packet, MeshProtos.Data data) {
         if (packet.getFrom() != 0

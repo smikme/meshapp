@@ -237,6 +237,25 @@ public final class ConfigSavePolicy {
     }
 
     /**
+     * Handles mutating settings-step ACKs according to transport semantics.
+     * BLE still requires strict ACK ordering; TCP/Serial can lose routing ACK
+     * waiters while the local admin command is still accepted by firmware.
+     *
+     * @param transport active transport
+     * @param ackFuture ACK future
+     * @param stepName  diagnostic step name
+     * @param log       logger for optional ACK diagnostics
+     */
+    public static void waitForMutatingStepAck(
+        ConnectionType transport,
+        CompletableFuture<MeshProtos.Routing.Error> ackFuture,
+        String stepName,
+        Logger log
+    ) {
+        waitForTransportRequiredAck(transport, ackFuture, stepName, log);
+    }
+
+    /**
      * Handles commit ACK without failing when expected reboot causes timeout or
      * disconnect before the ACK reaches the client.
      *
@@ -299,10 +318,6 @@ public final class ConfigSavePolicy {
         String stepName,
         Logger log
     ) {
-        if (transport != ConnectionType.BLE) {
-            observeOptionalAck(ackFuture, stepName, log);
-            return;
-        }
         observeDeferredAck(ackFuture, stepName, log);
         waitForCommitAckOrExpectedReboot(ackFuture, stepName, log);
     }

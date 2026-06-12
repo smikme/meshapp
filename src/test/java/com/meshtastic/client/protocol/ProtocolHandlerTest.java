@@ -137,6 +137,10 @@ class ProtocolHandlerTest {
         ModuleConfigProtos.ModuleConfig moduleConfig = ModuleConfigProtos.ModuleConfig.newBuilder()
                 .setMqtt(ModuleConfigProtos.ModuleConfig.MQTTConfig.newBuilder().build())
                 .build();
+        MeshProtos.DeviceMetadata metadata = MeshProtos.DeviceMetadata.newBuilder()
+                .setFirmwareVersion("2.7.0")
+                .setExcludedModules(MeshProtos.ExcludedModules.STOREFORWARD_CONFIG_VALUE)
+                .build();
         ChannelProtos.Channel channel = ChannelProtos.Channel.newBuilder().setIndex(3).build();
         MeshProtos.MeshPacket packet = MeshProtos.MeshPacket.newBuilder()
                 .setFrom(1)
@@ -149,6 +153,7 @@ class ProtocolHandlerTest {
         connection.emit(MeshProtos.FromRadio.newBuilder().setNodeInfo(nodeInfo).build().toByteArray());
         connection.emit(MeshProtos.FromRadio.newBuilder().setConfig(config).build().toByteArray());
         connection.emit(MeshProtos.FromRadio.newBuilder().setModuleConfig(moduleConfig).build().toByteArray());
+        connection.emit(MeshProtos.FromRadio.newBuilder().setMetadata(metadata).build().toByteArray());
         connection.emit(MeshProtos.FromRadio.newBuilder().setChannel(channel).build().toByteArray());
         connection.emit(MeshProtos.FromRadio.newBuilder().setConfigCompleteId(99).build().toByteArray());
         connection.emit(MeshProtos.FromRadio.newBuilder().setRebooted(true).build().toByteArray());
@@ -156,11 +161,12 @@ class ProtocolHandlerTest {
         connection.emit(MeshProtos.FromRadio.newBuilder().setLogRecord(logRecord).build().toByteArray());
         connection.emit(MeshProtos.FromRadio.newBuilder().setQueueStatus(queueStatus).build().toByteArray());
 
-        assertTrue(listener.awaitEvents(10));
+        assertTrue(listener.awaitEvents(11));
         assertEquals(0x12345678, listener.myNodeNum.get());
         assertEquals(0xCAFEBABE, listener.nodeNum.get());
         assertEquals(ConfigProtos.Config.PayloadVariantCase.DEVICE, listener.configType);
         assertEquals(ModuleConfigProtos.ModuleConfig.PayloadVariantCase.MQTT, listener.moduleConfigType);
+        assertEquals(MeshProtos.ExcludedModules.STOREFORWARD_CONFIG_VALUE, listener.metadataExcludedModules.get());
         assertEquals(3, listener.channelIndex.get());
         assertEquals(99, listener.configCompleteId.get());
         assertTrue(listener.rebooted.get());
@@ -563,10 +569,11 @@ class ProtocolHandlerTest {
         private final AtomicInteger nodeNum = new AtomicInteger();
         private final AtomicInteger channelIndex = new AtomicInteger();
         private final AtomicInteger configCompleteId = new AtomicInteger();
+        private final AtomicInteger metadataExcludedModules = new AtomicInteger();
         private final AtomicInteger packetFrom = new AtomicInteger();
         private final AtomicInteger queuePacketId = new AtomicInteger();
         private final AtomicBoolean rebooted = new AtomicBoolean(false);
-        private final CountDownLatch eventLatch = new CountDownLatch(10);
+        private final CountDownLatch eventLatch = new CountDownLatch(11);
         private volatile ConfigProtos.Config.PayloadVariantCase configType;
         private volatile ModuleConfigProtos.ModuleConfig.PayloadVariantCase moduleConfigType;
         private volatile String logMessage;
@@ -592,6 +599,12 @@ class ProtocolHandlerTest {
         @Override
         public void onModuleConfig(ModuleConfigProtos.ModuleConfig moduleConfig) {
             moduleConfigType = moduleConfig.getPayloadVariantCase();
+            seen();
+        }
+
+        @Override
+        public void onDeviceMetadata(MeshProtos.DeviceMetadata metadata) {
+            metadataExcludedModules.set(metadata.getExcludedModules());
             seen();
         }
 

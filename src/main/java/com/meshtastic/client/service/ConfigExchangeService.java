@@ -338,6 +338,18 @@ public class ConfigExchangeService implements FromRadioListener {
     }
 
     @Override
+    public void onDeviceMetadata(MeshProtos.DeviceMetadata metadata) {
+        if (aborted.get()) {
+            return;
+        }
+        markReceivedAnyResponse();
+        deviceState.setDeviceMetadata(metadata);
+        deviceState.fireDeviceMetadataListeners();
+        log.debug("onDeviceMetadata firmwareVersion='{}', excludedModules={}",
+                metadata.getFirmwareVersion(), metadata.getExcludedModules());
+    }
+
+    @Override
     public void onChannel(ChannelProtos.Channel channel) {
         if (aborted.get()) {
             return;

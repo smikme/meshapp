@@ -105,6 +105,21 @@ public final class ConfigProtobufSupport {
     }
 
     /**
+     * Finds an original device config, or creates an empty config for the variant.
+     *
+     * @param configs       original configs
+     * @param variantNumber active variant field number
+     * @return matching or default config, if the variant is known
+     */
+    public static Optional<ConfigProtos.Config> findOrCreateConfig(
+        List<ConfigProtos.Config> configs,
+        int variantNumber
+    ) {
+        return findOriginalConfig(configs, variantNumber)
+            .or(() -> defaultConfig(variantNumber));
+    }
+
+    /**
      * Finds an original module config by active variant field number.
      *
      * @param configs       original module configs
@@ -126,6 +141,21 @@ public final class ConfigProtobufSupport {
     }
 
     /**
+     * Finds an original module config, or creates an empty config for the variant.
+     *
+     * @param configs       original module configs
+     * @param variantNumber active variant field number
+     * @return matching or default module config, if the variant is known
+     */
+    public static Optional<ModuleConfigProtos.ModuleConfig> findOrCreateModuleConfig(
+        List<ModuleConfigProtos.ModuleConfig> configs,
+        int variantNumber
+    ) {
+        return findOriginalModuleConfig(configs, variantNumber)
+            .or(() -> defaultModuleConfig(variantNumber));
+    }
+
+    /**
      * Finds a device config oneof field descriptor by variant field number.
      *
      * @param variantNumber protobuf oneof field number
@@ -137,6 +167,18 @@ public final class ConfigProtobufSupport {
         return payloadVariantFields(ConfigProtos.Config.getDescriptor())
             .filter(field -> field.getNumber() == variantNumber)
             .findFirst();
+    }
+
+    private static Optional<ConfigProtos.Config> defaultConfig(
+        int variantNumber
+    ) {
+        return configFieldByVariantNumber(variantNumber)
+            .filter(ConfigProtobufSupport::isMessageField)
+            .map(field -> {
+                ConfigProtos.Config.Builder builder = ConfigProtos.Config.newBuilder();
+                builder.setField(field, builder.newBuilderForField(field).build());
+                return builder.build();
+            });
     }
 
     /**
@@ -151,6 +193,19 @@ public final class ConfigProtobufSupport {
         return payloadVariantFields(ModuleConfigProtos.ModuleConfig.getDescriptor())
             .filter(field -> field.getNumber() == variantNumber)
             .findFirst();
+    }
+
+    private static Optional<ModuleConfigProtos.ModuleConfig> defaultModuleConfig(
+        int variantNumber
+    ) {
+        return moduleConfigFieldByVariantNumber(variantNumber)
+            .filter(ConfigProtobufSupport::isMessageField)
+            .map(field -> {
+                ModuleConfigProtos.ModuleConfig.Builder builder =
+                    ModuleConfigProtos.ModuleConfig.newBuilder();
+                builder.setField(field, builder.newBuilderForField(field).build());
+                return builder.build();
+            });
     }
 
     /**
@@ -192,6 +247,11 @@ public final class ConfigProtobufSupport {
             .flatMap(value -> value.getDescriptorForType().getOneofs().stream())
             .filter(oneof -> PAYLOAD_VARIANT_ONEOF.equals(oneof.getName()))
             .findFirst();
+    }
+
+    private static boolean isMessageField(FieldDescriptor field) {
+        return field != null &&
+            field.getType() == FieldDescriptor.Type.MESSAGE;
     }
 
     private static java.util.stream.Stream<FieldDescriptor> payloadVariantFields(

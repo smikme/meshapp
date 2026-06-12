@@ -27,6 +27,9 @@ public interface FromRadioListener {
     /** Receives a module configuration section such as MQTT, Serial, or Telemetry. */
     default void onModuleConfig(ModuleConfigProtos.ModuleConfig moduleConfig) {}
 
+    /** Receives device metadata advertised by the connected radio. */
+    default void onDeviceMetadata(MeshProtos.DeviceMetadata metadata) {}
+
     /** Receives a PRIMARY or SECONDARY channel. */
     default void onChannel(ChannelProtos.Channel channel) {}
 

@@ -17,6 +17,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.meshtastic.proto.AdminProtos;
+import org.meshtastic.proto.ConfigProtos;
 import org.meshtastic.proto.MeshProtos;
 import org.meshtastic.proto.ModuleConfigProtos;
 import org.meshtastic.proto.Portnums;
@@ -119,6 +120,66 @@ class MessageServiceTest {
     }
 
     @Test
+    void setStoreForwardModuleConfigSendsEnabledValue() throws Exception {
+        RecordingConnection connection = new RecordingConnection();
+        ProtocolHandler handler = track(new ProtocolHandler(connection));
+        DeviceState state = new DeviceState();
+        state.setMyNodeNum(0x04c5b420);
+        state.setSessionPasskey(ByteString.copyFromUtf8("passkey"));
+
+        ModuleConfigProtos.ModuleConfig storeForwardConfig =
+                ModuleConfigProtos.ModuleConfig.newBuilder()
+                        .setStoreForward(ModuleConfigProtos.ModuleConfig.StoreForwardConfig.newBuilder()
+                                .setEnabled(true)
+                                .setIsServer(true)
+                                .build())
+                        .build();
+
+        MessageService.setModuleConfig(handler, state, storeForwardConfig);
+
+        MeshProtos.ToRadio sent = parseLastToRadio(connection);
+        assertEquals(0x04c5b420, sent.getPacket().getFrom());
+        assertEquals(0x04c5b420, sent.getPacket().getTo());
+        assertEquals(0, sent.getPacket().getChannel());
+        assertTrue(sent.getPacket().getWantAck());
+        assertEquals(MeshProtos.MeshPacket.Priority.RELIABLE, sent.getPacket().getPriority());
+        assertEquals(3, sent.getPacket().getHopLimit());
+        assertEquals(3, sent.getPacket().getHopStart());
+        AdminProtos.AdminMessage admin =
+                AdminProtos.AdminMessage.parseFrom(sent.getPacket().getDecoded().getPayload());
+        assertTrue(admin.hasSetModuleConfig());
+        assertTrue(admin.getSetModuleConfig().hasStoreForward());
+        assertTrue(admin.getSetModuleConfig().getStoreForward().getEnabled());
+        assertTrue(admin.getSetModuleConfig().getStoreForward().getIsServer());
+    }
+
+    @Test
+    void setModuleConfigUsesConfiguredLoraHopLimitForAdminPacket() throws Exception {
+        RecordingConnection connection = new RecordingConnection();
+        ProtocolHandler handler = track(new ProtocolHandler(connection));
+        DeviceState state = new DeviceState();
+        state.setMyNodeNum(0x04c5b420);
+        state.addConfig(ConfigProtos.Config.newBuilder()
+                .setLora(ConfigProtos.Config.LoRaConfig.newBuilder()
+                        .setHopLimit(5)
+                        .build())
+                .build());
+
+        ModuleConfigProtos.ModuleConfig storeForwardConfig =
+                ModuleConfigProtos.ModuleConfig.newBuilder()
+                        .setStoreForward(ModuleConfigProtos.ModuleConfig.StoreForwardConfig.newBuilder()
+                                .setEnabled(true)
+                                .build())
+                        .build();
+
+        MessageService.setModuleConfig(handler, state, storeForwardConfig);
+
+        MeshProtos.MeshPacket packet = parseLastToRadio(connection).getPacket();
+        assertEquals(5, packet.getHopLimit());
+        assertEquals(5, packet.getHopStart());
+    }
+
+    @Test
     void setRingtoneUsesRoutingAckWithoutAdminResponse() throws Exception {
         RecordingConnection connection = new RecordingConnection();
         ProtocolHandler handler = track(new ProtocolHandler(connection));
@@ -148,7 +209,7 @@ class MessageServiceTest {
         MessageService.setTimeOnly(handler, state, 1_775_000_123L);
 
         MeshProtos.ToRadio sent = parseLastToRadio(connection);
-        assertEquals(0, sent.getPacket().getFrom());
+        assertEquals(0x04c5b420, sent.getPacket().getFrom());
         assertEquals(0x04c5b420, sent.getPacket().getTo());
         assertFalse(sent.getPacket().getDecoded().getWantResponse());
         AdminProtos.AdminMessage admin =
