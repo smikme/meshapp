@@ -4,6 +4,7 @@ import com.meshtastic.client.logging.JfrDiagnosticSupport;
 import com.meshtastic.client.logging.JavaFxCssWarningGuard;
 import com.meshtastic.client.logging.SessionCrashLogManager;
 import com.meshtastic.client.terminal.TerminalApp;
+import com.meshtastic.client.update.SelfUpdateLauncher;
 import com.meshtastic.client.utils.AppPreferences;
 
 /**
@@ -17,6 +18,9 @@ public final class MeshAppLauncher {
     private MeshAppLauncher() {}
 
     public static void main(String[] args) {
+        if (SelfUpdateLauncher.launchPayloadIfNeeded(args)) {
+            return;
+        }
         if (isTerminalMode(args)) {
             System.exit(TerminalApp.run(args));
             return;

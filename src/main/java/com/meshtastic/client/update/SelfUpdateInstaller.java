@@ -14,7 +14,7 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
 /**
- * Applies a downloaded full-archive update after the main application exits.
+ * Applies a downloaded payload update after the main application exits.
  */
 final class SelfUpdateInstaller {
 
@@ -25,7 +25,8 @@ final class SelfUpdateInstaller {
                    String targetVersion,
                    String expectedSha256,
                    long parentPid,
-                   String launcher) {}
+                   String launcher,
+                   SelfUpdateEnvironment.Layout layout) {}
 
     void apply(Request request) throws Exception {
         validateRequest(request);
@@ -36,18 +37,20 @@ final class SelfUpdateInstaller {
             throw new IOException("Archive checksum mismatch");
         }
 
+        applyManagedLayout(request);
+    }
+
+    private void applyManagedLayout(Request request) throws Exception {
         Files.createDirectories(request.root());
         Files.createDirectories(request.root().resolve("versions"));
-        Files.createDirectories(request.root().resolve("staging"));
+        Files.createDirectories(stagingRoot(request));
 
-        Path extractDir = request.root()
-                .resolve("staging")
+        Path extractDir = stagingRoot(request)
                 .resolve("extract-" + request.targetVersion());
         Path targetDir = request.root()
                 .resolve("versions")
                 .resolve(request.targetVersion());
-        Path backupDir = request.root()
-                .resolve("staging")
+        Path backupDir = stagingRoot(request)
                 .resolve("replace-" + request.targetVersion());
 
         deleteTree(extractDir);
@@ -129,7 +132,8 @@ final class SelfUpdateInstaller {
                 || request.targetVersion() == null
                 || request.targetVersion().isBlank()
                 || request.expectedSha256() == null
-                || request.expectedSha256().isBlank()) {
+                || request.expectedSha256().isBlank()
+                || request.layout() == null) {
             throw new IllegalArgumentException("Incomplete self-update request");
         }
         if (request.targetVersion().contains("/")
@@ -170,6 +174,10 @@ final class SelfUpdateInstaller {
 
     private static void relaunch(String launcher) throws IOException {
         String lower = launcher.toLowerCase(java.util.Locale.ROOT);
+        if (lower.endsWith(".app")) {
+            new ProcessBuilder("open", "-n", launcher).start();
+            return;
+        }
         if (lower.endsWith(".bat") || lower.endsWith(".cmd")) {
             new ProcessBuilder("cmd.exe", "/c", "start", "", launcher).start();
             return;
@@ -189,4 +197,13 @@ final class SelfUpdateInstaller {
             output.toFile().setExecutable(true, false);
         }
     }
+
+    private static Path stagingRoot(Request request) {
+        Path archiveParent = request.archive().getParent();
+        if (archiveParent != null) {
+            return archiveParent;
+        }
+        return request.root().resolve("staging");
+    }
+
 }

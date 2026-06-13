@@ -1575,15 +1575,16 @@ call "%APP_HOME%\\versions\\%CURRENT%\\bin\\MeshApp.bat" %*
 	}
 }
 
-tasks.register('selfUpdateArchive', Zip) {
+tasks.register('selfUpdateArchive') {
+	def os = org.gradle.internal.os.OperatingSystem.current()
+	def artifactName = "MeshApp-${sanitizeArtifactVersion(applicationVersion)}-${resolveSelfUpdatePlatform()}-selfupdate.zip"
 	dependsOn installDist
 	group = 'distribution'
-	description = 'Собрать full zip archive для self-update manifest'
-	destinationDirectory = layout.buildDirectory.dir('jpackage')
-	archiveFileName = "MeshApp-${sanitizeArtifactVersion(applicationVersion)}-${resolveSelfUpdatePlatform()}-selfupdate.zip"
-	from(layout.buildDirectory.dir("install/${applicationName}"))
-	doFirst {
-		def outputDir = destinationDirectory.get().asFile
+	description = 'Собрать managed payload zip archive для self-update manifest'
+	outputs.file(layout.buildDirectory.file("jpackage/${artifactName}"))
+	doLast {
+		def outputDir = layout.buildDirectory.dir('jpackage').get().asFile
+		outputDir.mkdirs()
 		if (outputDir.isDirectory()) {
 			outputDir.listFiles()?.findAll { file ->
 				file.isFile() && file.name.endsWith('-selfupdate.zip')
@@ -1592,6 +1593,16 @@ tasks.register('selfUpdateArchive', Zip) {
 					throw new GradleException("Unable to delete stale self-update artifact: ${file}")
 				}
 			}
+		}
+		def archiveFile = new File(outputDir, artifactName)
+		def installDir = layout.buildDirectory.dir("install/${applicationName}").get().asFile
+		if (!installDir.isDirectory()) {
+			throw new GradleException("selfUpdateArchive: installDist directory not found: ${installDir}")
+		}
+		def payloadInputDir = layout.buildDirectory.dir("self-update/payload-input").get().asFile
+		def payloadLibDir = preparePackagingLibDir(os, installDir, payloadInputDir)
+		ant.zip(destfile: archiveFile.absolutePath) {
+			zipfileset(dir: payloadLibDir.absolutePath, prefix: 'lib')
 		}
 	}
 }

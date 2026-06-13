@@ -37,7 +37,8 @@ class SelfUpdateInstallerTest {
                 "2147",
                 SelfUpdateInstaller.sha256(archive),
                 0,
-                null
+                null,
+                SelfUpdateEnvironment.Layout.MANAGED
         ));
 
         assertTrue(Files.isRegularFile(root.resolve("versions/2147/bin/MeshApp")));
@@ -78,4 +79,5 @@ class SelfUpdateInstallerTest {
             }
         }
     }
+
 }

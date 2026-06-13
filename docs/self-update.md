@@ -1,17 +1,34 @@
 # MeshApp Self-Update Manifest
 
-MeshApp supports a non-privileged full-archive self-update path when it is
-started from the managed layout produced by `./gradlew selfUpdateImage`.
+MeshApp uses a non-privileged launcher/payload self-update layout. The native
+package installs a stable signed launcher bundle. On startup, that launcher
+bootstraps and starts the actual application payload from a user-writable
+version directory. Updates replace only that payload and switch `current`; they
+do not modify the signed native launcher bundle.
 
 The legacy `downloads` manifest still works. The self-update path is enabled
 only when all of these are true:
 
-- the launcher provides `MESHAPP_UPDATE_ROOT` and `MESHAPP_UPDATE_VERSION`
+- the application is running from a managed payload process where the launcher
+  provides `MESHAPP_UPDATE_ROOT` and `MESHAPP_UPDATE_VERSION`
 - the current package format is not Flatpak
 - the manifest contains a matching `selfUpdate` artifact
-- the artifact is a `full-archive` `zip`
+- the artifact is a full payload `zip`
 - the artifact hash matches
 - the artifact signature is trusted, or unsigned dev mode is explicitly enabled
+
+Native DMG/MSI/DEB packages are still the delivery mechanism for the stable
+launcher. The first run of the launcher copies its packaged application payload
+to the managed root:
+
+- macOS: `~/Library/Application Support/MeshApp/versions/<version>/`
+- Windows: `%LOCALAPPDATA%\MeshApp\versions\<version>\`
+- Linux: `~/.local/share/meshapp/versions/<version>/`
+
+Payload archives include the application jars, JavaFX modules, and platform
+native libraries required by that build. For example, Windows payloads include
+the packaged `meshapp-ble.dll`, Linux payloads include `libmeshapp-ble.so`, and
+macOS native resources are carried by the application jar.
 
 The generated manifest keeps the legacy `downloads` map for existing clients:
 `windows`, `macos`, `linux`, plus package-specific keys such as `windows-msi`,
@@ -61,6 +78,8 @@ Release artifacts and the update manifest are separate CI/CD steps:
 1. Tag pushes run `.gitea/workflows/release.yml`. Linux, Windows, and macOS
    jobs build native packages plus
    `MeshApp-{version}-{os}-{arch}-selfupdate.zip`.
+   This zip contains the managed application payload, not the signed native
+   package or macOS `.app` bundle.
    This creates and publishes the Gitea release, but does not publish it to the
    update system.
 2. A manual `.gitea/workflows/publish-update-manifest.yml` run selects which
@@ -81,9 +100,10 @@ The manifest generator is `.gitea/scripts/generate-update-manifest.sh`.
 CI variables and secrets:
 
 - `RELEASE_TOKEN`: required; used to read selected Gitea release assets
-- `MESHAPP_UPDATE_ED25519_PUBLIC_KEY`: optional at build time; bundled into
+- `MESHAPP_UPDATE_ED25519_PUBLIC_KEY`: required for release builds; bundled into
   `/update/ed25519-public-key.txt` so the client trusts signed artifacts
-- `MESHAPP_UPDATE_ED25519_PRIVATE_KEY`: optional; signs self-update artifacts
+- `MESHAPP_UPDATE_ED25519_PRIVATE_KEY`: required when publishing a manifest with
+  self-update artifacts; signs self-update artifacts
 - `MESHAPP_UPDATE_ASSET_BASE_URL`: optional; overrides generated asset URLs
 - `MESHAPP_VERSION`: optional; overrides manifest `version`
 - `MESHAPP_VERSION_CODE`: optional; overrides manifest `versionCode`
@@ -104,11 +124,9 @@ Manual update publication inputs:
 The Gitea release body is generated from commit history during the tag release.
 The manual release notes inputs are used only by the update manifest.
 
-If `MESHAPP_UPDATE_ED25519_PRIVATE_KEY` is absent, the manifest is still
-generated, but self-update signatures are omitted. If
-`MESHAPP_UPDATE_ED25519_PUBLIC_KEY` is absent during the app build, production
-clients will not trust signed self-update artifacts unless the public key is
-provided later through a JVM property or environment variable.
+If `MESHAPP_UPDATE_ED25519_PRIVATE_KEY` is absent while self-update artifacts are
+present, manifest publication fails. If `MESHAPP_UPDATE_ED25519_PUBLIC_KEY` is
+absent during a release build, package builds fail.
 
 The Ed25519 signature signs this UTF-8 payload:
 

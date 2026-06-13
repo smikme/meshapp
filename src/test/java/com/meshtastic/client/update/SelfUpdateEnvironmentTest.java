@@ -1,14 +1,21 @@
 package com.meshtastic.client.update;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Map;
 import java.util.Properties;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class SelfUpdateEnvironmentTest {
+
+    @TempDir
+    Path tempDir;
 
     @Test
     void readsManagedLayoutFromEnvironment() {
@@ -27,6 +34,7 @@ class SelfUpdateEnvironmentTest {
         assertEquals("MeshAppRoot", env.get().root().toString());
         assertEquals("2147", env.get().version());
         assertEquals("MeshApp/bin/MeshApp", env.get().launcher());
+        assertEquals(SelfUpdateEnvironment.Layout.MANAGED, env.get().layout());
     }
 
     @Test
@@ -46,5 +54,23 @@ class SelfUpdateEnvironmentTest {
         assertTrue(env.isPresent());
         assertEquals("PropMeshApp", env.get().root().toString());
         assertEquals("prop-version", env.get().version());
+    }
+
+    @Test
+    void doesNotTreatMacAppBundleAsSelfUpdateLayout() throws Exception {
+        Path app = tempDir.resolve("MeshApp.app");
+        Path jar = app.resolve("Contents/app/lib/MeshApp.jar");
+        Files.createDirectories(jar.getParent());
+        Files.writeString(jar, "jar");
+
+        Properties properties = new Properties();
+        properties.setProperty("os.name", "Mac OS X");
+        properties.setProperty("user.home", tempDir.resolve("home").toString());
+        properties.setProperty("java.class.path", jar.toString());
+        properties.setProperty("jpackage.app-version", "2.1.20");
+
+        var env = SelfUpdateEnvironment.from(Map.of(), properties);
+
+        assertFalse(env.isPresent());
     }
 }

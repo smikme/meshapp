@@ -20,7 +20,7 @@
     <img src="https://img.shields.io/badge/Telegram-@MeshAppClient-blue?logo=telegram" alt="Telegram">
   </a>
 </p>
-
+ 
 <p align="center">
   Основная площадка разработки:
   <a href="https://git.privatepractice.app/covox/meshapp">git.privatepractice.app/covox/meshapp</a>
