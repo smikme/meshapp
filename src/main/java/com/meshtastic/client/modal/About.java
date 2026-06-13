@@ -2,8 +2,11 @@ package com.meshtastic.client.modal;
 
 import com.meshtastic.client.MeshApp;
 import com.meshtastic.client.components.CrashReportFlow;
+import com.meshtastic.client.components.MemoryBar;
 import com.meshtastic.client.i18n.I18n;
+import com.meshtastic.client.service.UpdateCheckService;
 import com.meshtastic.client.utils.ExternalUrlLauncher;
+import javafx.application.Platform;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Group;
@@ -13,6 +16,7 @@ import javafx.scene.control.Label;
 import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
 import javafx.scene.layout.HBox;
+import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
@@ -20,7 +24,7 @@ import javafx.scene.shape.Circle;
 import javafx.scene.shape.Line;
 import javafx.stage.Window;
 
-import com.meshtastic.client.components.MemoryBar;
+import java.util.concurrent.CompletionException;
 
 /**
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
@@ -33,7 +37,8 @@ public class About extends VBox {
     public About() {
         setSpacing(10);
         setPadding(new Insets(20, 30, 20, 30));
-        setPrefWidth(400);
+        setPrefWidth(520);
+        setMaxWidth(520);
 
         Label title = new Label(I18n.t("about.title"));
         title.getStyleClass().add("hero-title");
@@ -113,11 +118,22 @@ public class About extends VBox {
         Label sysBuild = new Label(I18n.t("about.system.build", build));
         Label sysJava = new Label(I18n.t("about.system.java", java));
         Label sysOs = new Label(I18n.t("about.system.os", system));
+        Button checkUpdatesButton = new Button(I18n.t("about.update.check"));
+        Label updateStatus = new Label();
+        updateStatus.getStyleClass().add("muted-note-label");
+        updateStatus.setWrapText(true);
+        setUpdateStatus(updateStatus, null);
+        checkUpdatesButton.setOnAction(event -> checkForUpdates(checkUpdatesButton, updateStatus));
+
+        Region versionSpacer = new Region();
+        HBox.setHgrow(versionSpacer, Priority.ALWAYS);
+        HBox versionRow = new HBox(8, sysVersion, versionSpacer, checkUpdatesButton);
+        versionRow.setAlignment(Pos.CENTER_LEFT);
 
         Label memTitle = new Label(I18n.t("about.memory.title"));
         MemoryBar memoryBar = new MemoryBar();
 
-        sysInfo.getChildren().addAll(sysTitle, sysVersion, sysBuild, sysJava, sysOs, memTitle, memoryBar);
+        sysInfo.getChildren().addAll(sysTitle, versionRow, updateStatus, sysBuild, sysJava, sysOs, memTitle, memoryBar);
 
         VBox reportBox = new VBox(8);
         reportBox.setPadding(new Insets(10));
@@ -217,5 +233,41 @@ public class About extends VBox {
         }
 
         openFlow.run();
+    }
+
+    private void checkForUpdates(Button checkUpdatesButton, Label updateStatus) {
+        checkUpdatesButton.setDisable(true);
+        setUpdateStatus(updateStatus, I18n.t("about.update.checking"));
+        UpdateCheckService.checkForUpdateAsync()
+                .whenComplete((update, error) -> Platform.runLater(() -> {
+                    checkUpdatesButton.setDisable(false);
+                    if (error != null) {
+                        setUpdateStatus(updateStatus, I18n.t("about.update.failed", errorMessage(error)));
+                        return;
+                    }
+                    if (update.isPresent()) {
+                        setUpdateStatus(updateStatus, null);
+                        ModalPane.showUpdateAvailable(update.get());
+                        return;
+                    }
+                    setUpdateStatus(updateStatus, I18n.t("about.update.none"));
+                }));
+    }
+
+    private static void setUpdateStatus(Label updateStatus, String text) {
+        boolean visible = text != null && !text.isBlank();
+        updateStatus.setText(visible ? text : "");
+        updateStatus.setVisible(visible);
+        updateStatus.setManaged(visible);
+    }
+
+    private static String errorMessage(Throwable error) {
+        Throwable cause = error instanceof CompletionException && error.getCause() != null
+                ? error.getCause()
+                : error;
+        String message = cause.getMessage();
+        return message != null && !message.isBlank()
+                ? message
+                : cause.getClass().getSimpleName();
     }
 }

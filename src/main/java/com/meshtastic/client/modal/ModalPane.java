@@ -27,8 +27,14 @@ import com.meshtastic.client.MeshApp;
 import com.meshtastic.client.components.EmojiTextFlow;
 import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.model.UpdateInfo;
+import com.meshtastic.client.platform.OsDetect;
+import com.meshtastic.client.platform.OsDetect.PackageFormat;
+import com.meshtastic.client.tray.AppTrayManager;
+import com.meshtastic.client.update.SelfUpdateService;
 import com.meshtastic.client.utils.ExternalUrlLauncher;
+import java.util.Optional;
 import java.util.function.Consumer;
+import javafx.application.Platform;
 
 /**
  * In-scene modal panel: a translucent overlay with right-side content.
@@ -337,35 +343,76 @@ public class ModalPane extends StackPane {
         lblNew.setStyle("-fx-font-weight: bold;");
 
         VBox versionBox = new VBox(4, lblCurrent, lblNew);
+        String releaseNotes = info.getReleaseNotes(I18n.locale().getLanguage());
 
-        Button btnDownload = new Button(I18n.t("common.download"));
+        Optional<SelfUpdateService.UpdatePlan> selfUpdatePlan =
+                SelfUpdateService.getInstance().plan(info);
+        Label statusLabel = new Label();
+        statusLabel.getStyleClass().add("muted-note-label");
+        statusLabel.setWrapText(true);
+        boolean flatpakUpdate = OsDetect.currentPackageFormat() == PackageFormat.FLATPAK;
+        if (flatpakUpdate) {
+            statusLabel.setText(I18n.t("modal.update.flatpakInstruction"));
+        }
+
+        Button btnDownload = new Button(selfUpdatePlan.isPresent()
+                ? I18n.t("modal.update.installAndRestart")
+                : I18n.t("common.download"));
         btnDownload.getStyleClass().add("accent");
-        btnDownload.setOnAction(e -> {
-            pane.hide();
-            String url = info.getDownloadUrl();
-            if (url != null) {
-                ExternalUrlLauncher.open(url);
-            }
-        });
+        if (selfUpdatePlan.isPresent()) {
+            btnDownload.setOnAction(e -> {
+                btnDownload.setDisable(true);
+                statusLabel.setText(I18n.t("modal.update.status.download"));
+                SelfUpdateService.getInstance().installAndRestartAsync(
+                        info,
+                        status -> Platform.runLater(() -> {
+                            switch (status) {
+                                case "download" -> statusLabel.setText(I18n.t("modal.update.status.download"));
+                                case "handoff" -> statusLabel.setText(I18n.t("modal.update.status.prepare"));
+                                case "restart" -> {
+                                    statusLabel.setText(I18n.t("modal.update.status.restart"));
+                                    pane.hide();
+                                    AppTrayManager.getInstance().exitApplication();
+                                }
+                                default -> statusLabel.setText(status);
+                            }
+                        }),
+                        error -> Platform.runLater(() -> {
+                            statusLabel.setText(I18n.t("modal.update.status.failed", error.getMessage()));
+                            btnDownload.setDisable(false);
+                        })
+                );
+            });
+        } else {
+            btnDownload.setOnAction(e -> {
+                pane.hide();
+                String url = info.getDownloadUrl();
+                if (url != null) {
+                    ExternalUrlLauncher.open(url);
+                }
+            });
+        }
 
         Button btnLater = new Button(I18n.t("common.later"));
         btnLater.setOnAction(e -> pane.hide());
 
-        HBox btnRow = new HBox(10, btnLater, btnDownload);
+        HBox btnRow = flatpakUpdate
+                ? new HBox(10, btnLater)
+                : new HBox(10, btnLater, btnDownload);
         btnRow.setAlignment(Pos.CENTER_RIGHT);
         btnRow.setPadding(new Insets(10, 0, 0, 0));
 
-        if (info.getReleaseNotes() != null && !info.getReleaseNotes().isBlank()) {
-            EmojiTextFlow notesFlow = new EmojiTextFlow(info.getReleaseNotes(), 16);
+        if (releaseNotes != null && !releaseNotes.isBlank()) {
+            EmojiTextFlow notesFlow = new EmojiTextFlow(releaseNotes, 16);
             notesFlow.setMinHeight(Region.USE_PREF_SIZE);
             ScrollPane notesScroll = new ScrollPane(notesFlow);
             notesScroll.setFitToWidth(true);
             notesScroll.setMaxHeight(300);
             notesScroll.getStyleClass().add("edge-to-edge");
             VBox.setVgrow(notesScroll, Priority.ALWAYS);
-            panel.getChildren().addAll(lblTitle, new Separator(), versionBox, notesScroll, btnRow);
+            panel.getChildren().addAll(lblTitle, new Separator(), versionBox, notesScroll, statusLabel, btnRow);
         } else {
-            panel.getChildren().addAll(lblTitle, new Separator(), versionBox, btnRow);
+            panel.getChildren().addAll(lblTitle, new Separator(), versionBox, statusLabel, btnRow);
         }
 
         pane.show(panel);
