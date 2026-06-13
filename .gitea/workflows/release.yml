@@ -96,9 +96,9 @@ jobs:
             exit 1
           fi
           if [ "${APPIMAGE_ENABLED}" = "true" ]; then
-            APPIMAGE_EXTRACT_AND_RUN=1 ./gradlew jpackage appImage flatpak selfUpdateArchive -Pappimagetool="${APPIMAGETOOL_PATH}" --no-daemon
+            APPIMAGE_EXTRACT_AND_RUN=1 ./gradlew jpackage appImage flatpak selfUpdateArchive verifySelfUpdatePackage -Pappimagetool="${APPIMAGETOOL_PATH}" --no-daemon
           else
-            ./gradlew jpackage flatpak selfUpdateArchive --no-daemon
+            ./gradlew jpackage flatpak selfUpdateArchive verifySelfUpdatePackage --no-daemon
           fi
 
       - name: Upload to Gitea Release
@@ -138,7 +138,7 @@ jobs:
             echo "::error::MESHAPP_UPDATE_ED25519_PUBLIC_KEY is required for release builds"
             exit 1
           fi
-          ./gradlew.bat jpackage selfUpdateArchive --no-daemon
+          ./gradlew.bat jpackage selfUpdateArchive verifySelfUpdatePackage --no-daemon
 
       - name: Upload to Gitea Release
         shell: bash
@@ -311,7 +311,7 @@ jobs:
             echo "::error::MESHAPP_UPDATE_ED25519_PUBLIC_KEY is required for release builds"
             exit 1
           fi
-          ./gradlew jpackage selfUpdateArchive --no-daemon
+          ./gradlew jpackage selfUpdateArchive verifySelfUpdatePackage --no-daemon
 
       - name: Verify macOS artifact
         run: |

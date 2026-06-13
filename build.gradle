@@ -656,7 +656,6 @@ def buildPackagingJvmArgs = {
 
 def buildPackagingJlinkOptions = {
 	[
-		'--strip-native-commands',
 		'--strip-debug',
 		'--no-man-pages',
 		'--no-header-files',
@@ -1000,6 +999,15 @@ def assertMacBundleSelfContained = { File appDir, String taskName ->
 		throw new GradleException("""${taskName}: macOS bundle contains external native dependencies outside the app bundle.
 ${details}
 Use a self-contained JDK for packaging via -PpackagingJavaHome=/path/to/jdk or PACKAGING_JAVA_HOME=/path/to/jdk.""")
+	}
+}
+
+def assertMacRuntimeJavaLauncher = { File appDir, String taskName ->
+	def javaLauncher = new File(appDir, 'Contents/runtime/Contents/Home/bin/java')
+	if (!javaLauncher.isFile()) {
+		throw new GradleException(
+			"${taskName}: bundled runtime must contain bin/java for payload self-update launcher: ${javaLauncher}"
+		)
 	}
 }
 
@@ -1579,6 +1587,7 @@ tasks.register('selfUpdateArchive') {
 	def os = org.gradle.internal.os.OperatingSystem.current()
 	def artifactName = "MeshApp-${sanitizeArtifactVersion(applicationVersion)}-${resolveSelfUpdatePlatform()}-selfupdate.zip"
 	dependsOn installDist
+	mustRunAfter tasks.named('jpackage')
 	group = 'distribution'
 	description = 'Собрать managed payload zip archive для self-update manifest'
 	outputs.file(layout.buildDirectory.file("jpackage/${artifactName}"))
@@ -1604,6 +1613,198 @@ tasks.register('selfUpdateArchive') {
 		ant.zip(destfile: archiveFile.absolutePath) {
 			zipfileset(dir: payloadLibDir.absolutePath, prefix: 'lib')
 		}
+	}
+}
+
+def selfUpdateRequiredJarEntries = [
+	'com/meshtastic/client/update/SelfUpdateLauncher.class',
+	'com/meshtastic/client/update/SelfUpdateEnvironment.class',
+	'com/meshtastic/client/update/SelfUpdateService.class',
+	'com/meshtastic/client/update/UpdateSignatureVerifier.class',
+	'update/ed25519-public-key.txt',
+	'version.properties'
+]
+
+def requireSelfUpdateCondition = { boolean condition, String message ->
+	if (!condition) {
+		throw new GradleException("verifySelfUpdatePackage: ${message}")
+	}
+}
+
+def isValidEd25519PublicKey = { String keyText ->
+	try {
+		def normalized = keyText
+			.replace('-----BEGIN PUBLIC KEY-----', '')
+			.replace('-----END PUBLIC KEY-----', '')
+			.replaceAll('\\s+', '')
+		def encoded = java.util.Base64.decoder.decode(normalized)
+		java.security.KeyFactory.getInstance('Ed25519')
+			.generatePublic(new java.security.spec.X509EncodedKeySpec(encoded))
+		return true
+	} catch (Exception ignored) {
+		return false
+	}
+}
+
+def zipEntryNames = { File zipFile ->
+	def names = []
+	new java.util.zip.ZipFile(zipFile).withCloseable { zip ->
+		names = zip.entries().collect { it.name }
+	}
+	return names
+}
+
+def jarContainsEntry = { File jarFile, String entryName ->
+	def found = false
+	new java.util.jar.JarFile(jarFile).withCloseable { jar ->
+		found = jar.getEntry(entryName) != null
+	}
+	return found
+}
+
+def zipJarContainsEntry = { File zipFile, String zipJarEntryName, String jarEntryName ->
+	def found = false
+	new java.util.zip.ZipFile(zipFile).withCloseable { zip ->
+		def zipEntry = zip.getEntry(zipJarEntryName)
+		if (zipEntry == null) {
+			return
+		}
+		zip.getInputStream(zipEntry).withCloseable { input ->
+			new java.util.jar.JarInputStream(input).withCloseable { jar ->
+				java.util.jar.JarEntry entry
+				while (!found && (entry = jar.nextJarEntry) != null) {
+					if (entry.name == jarEntryName) {
+						found = true
+					}
+				}
+			}
+		}
+	}
+	return found
+}
+
+def findJarFileWithEntry = { File libDir, String entryName ->
+	def jars = libDir.listFiles()?.findAll { it.isFile() && it.name.endsWith('.jar') }?.sort { it.name } ?: []
+	return jars.find { jarContainsEntry(it, entryName) }
+}
+
+def findZipJarEntryWithEntry = { File zipFile, Collection<String> entries, String entryName ->
+	return entries.find { name ->
+		name.startsWith('lib/')
+			&& name.endsWith('.jar')
+			&& !name.startsWith('lib/fx/')
+			&& zipJarContainsEntry(zipFile, name, entryName)
+	}
+}
+
+def verifyJarSelfUpdateEntries = { File jarFile ->
+	selfUpdateRequiredJarEntries.each { entry ->
+		requireSelfUpdateCondition(
+			jarContainsEntry(jarFile, entry),
+			"${jarFile} is missing ${entry}"
+		)
+	}
+}
+
+def verifyZipJarSelfUpdateEntries = { File zipFile, String zipJarEntry ->
+	selfUpdateRequiredJarEntries.each { entry ->
+		requireSelfUpdateCondition(
+			zipJarContainsEntry(zipFile, zipJarEntry, entry),
+			"${zipFile}!/${zipJarEntry} is missing ${entry}"
+		)
+	}
+}
+
+tasks.register('verifySelfUpdatePackage') {
+	dependsOn tasks.named('jpackage'), tasks.named('selfUpdateArchive')
+	group = 'verification'
+	description = 'Проверить native package и self-update payload до публикации релиза'
+
+	doLast {
+		def os = org.gradle.internal.os.OperatingSystem.current()
+		def outputDir = layout.buildDirectory.dir('jpackage').get().asFile
+		def installDir = layout.buildDirectory.dir("install/${applicationName}").get().asFile
+		def installLibDir = new File(installDir, 'lib')
+		def updatePublicKeyText = updatePublicKey.get()
+		requireSelfUpdateCondition(updatePublicKeyText != null && !updatePublicKeyText.isBlank(),
+			"MESHAPP_UPDATE_ED25519_PUBLIC_KEY or -PmeshappUpdateEd25519PublicKey is required")
+		requireSelfUpdateCondition(isValidEd25519PublicKey(updatePublicKeyText),
+			"MESHAPP_UPDATE_ED25519_PUBLIC_KEY must be an Ed25519 X.509 public key")
+		requireSelfUpdateCondition(installLibDir.isDirectory(), "installDist lib directory not found: ${installLibDir}")
+
+		def selfUpdateArchives = outputDir.listFiles()?.findAll {
+			it.isFile() && it.name.endsWith('-selfupdate.zip')
+		}?.sort { it.name } ?: []
+		requireSelfUpdateCondition(selfUpdateArchives.size() == 1,
+			"expected exactly one self-update zip in ${outputDir}, found ${selfUpdateArchives.size()}")
+		def selfUpdateZip = selfUpdateArchives[0]
+		def entries = zipEntryNames(selfUpdateZip)
+
+		requireSelfUpdateCondition(!entries.any { it.contains('.app/') || it.endsWith('.app') },
+			"${selfUpdateZip.name} must contain payload files, not an app bundle")
+		requireSelfUpdateCondition(entries.any { it == 'lib/' || it.startsWith('lib/') },
+			"${selfUpdateZip.name} does not contain lib/ payload")
+		requireSelfUpdateCondition(entries.any { it.startsWith('lib/fx/javafx-') && it.endsWith('.jar') },
+			"${selfUpdateZip.name} does not contain JavaFX platform jars under lib/fx/")
+		requireSelfUpdateCondition(entries.any { it == 'lib/jSerialComm.dll' || it ==~ /lib\/jSerialComm-[0-9].*\.jar/ },
+			"${selfUpdateZip.name} does not contain jSerialComm payload")
+
+		def payloadJarEntry = findZipJarEntryWithEntry(
+			selfUpdateZip,
+			entries,
+			'com/meshtastic/client/update/SelfUpdateLauncher.class'
+		)
+		requireSelfUpdateCondition(payloadJarEntry != null,
+			"${selfUpdateZip.name} does not contain the MeshApp payload jar")
+		verifyZipJarSelfUpdateEntries(selfUpdateZip, payloadJarEntry)
+
+		def installAppJar = findJarFileWithEntry(
+			installLibDir,
+			'com/meshtastic/client/update/SelfUpdateLauncher.class'
+		)
+		requireSelfUpdateCondition(installAppJar != null,
+			"installDist payload jar with SelfUpdateLauncher not found in ${installLibDir}")
+		verifyJarSelfUpdateEntries(installAppJar)
+
+		if (os.isMacOsX()) {
+			def appDir = new File(outputDir, 'MeshApp.app')
+			def appLibDir = new File(appDir, 'Contents/app')
+			def runtimeJava = new File(appDir, 'Contents/runtime/Contents/Home/bin/java')
+			requireSelfUpdateCondition(appDir.isDirectory(), "macOS app image not found: ${appDir}")
+			requireSelfUpdateCondition(runtimeJava.isFile() && runtimeJava.canExecute(),
+				"macOS runtime must contain executable bin/java for payload handoff: ${runtimeJava}")
+			def packagedJar = findJarFileWithEntry(
+				appLibDir,
+				'com/meshtastic/client/update/SelfUpdateLauncher.class'
+			)
+			requireSelfUpdateCondition(packagedJar != null,
+				"macOS app payload jar with SelfUpdateLauncher not found in ${appLibDir}")
+			verifyJarSelfUpdateEntries(packagedJar)
+			requireSelfUpdateCondition(jarContainsEntry(packagedJar, "${macOsJnaResourcePrefix()}/libmeshapp-serial.dylib"),
+				"${packagedJar} is missing macOS serial native library resource")
+			requireSelfUpdateCondition(jarContainsEntry(packagedJar, "${macOsJnaResourcePrefix()}/libmeshapp-tray.dylib"),
+				"${packagedJar} is missing macOS tray native library resource")
+			requireSelfUpdateCondition(outputDir.listFiles()?.any { it.isFile() && it.name.endsWith('.dmg') },
+				"macOS DMG was not produced in ${outputDir}")
+			executePackagingCommand(
+				['codesign', '--verify', '--deep', '--strict', appDir.absolutePath],
+				"verifySelfUpdatePackage: codesign verification failed for ${appDir.name}"
+			)
+		} else if (os.isLinux()) {
+			requireSelfUpdateCondition(outputDir.listFiles()?.any { it.isFile() && it.name.endsWith('.deb') },
+				"Linux DEB was not produced in ${outputDir}")
+			requireSelfUpdateCondition(entries.contains('lib/libmeshapp-ble.so'),
+				"${selfUpdateZip.name} is missing Linux BLE native library")
+		} else if (os.isWindows()) {
+			requireSelfUpdateCondition(outputDir.listFiles()?.any { it.isFile() && it.name.endsWith('.msi') },
+				"Windows MSI was not produced in ${outputDir}")
+			requireSelfUpdateCondition(entries.contains('lib/meshapp-ble.dll'),
+				"${selfUpdateZip.name} is missing Windows BLE native library")
+			requireSelfUpdateCondition(entries.contains('lib/jSerialComm.dll'),
+				"${selfUpdateZip.name} is missing extracted Windows jSerialComm.dll")
+		}
+
+		logger.lifecycle("verifySelfUpdatePackage: verified ${selfUpdateZip.name}")
 	}
 }
 
@@ -1755,6 +1956,7 @@ tasks.register('jpackage') {
 			// The release bundle must be self-contained: allow only @rpath/@loader_path
 			// and Apple system libraries. Any /opt/homebrew, /usr/local, $HOME, etc. paths are forbidden.
 			assertMacBundleSelfContained(appDir, 'jpackage')
+			assertMacRuntimeJavaLauncher(appDir, 'jpackage')
 
 			def entitlements = file('src/main/resources/macos/entitlements.plist')
 			def macSigningConfig = resolveMacSigningConfig()
