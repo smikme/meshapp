@@ -30,6 +30,24 @@ native libraries required by that build. For example, Windows payloads include
 the packaged `meshapp-ble.dll`, Linux payloads include `libmeshapp-ble.so`, and
 macOS native resources are carried by the application jar.
 
+The packaged runtime must keep its native `bin/java` launcher. The stable
+launcher starts the payload as a separate Java process; stripping native runtime
+commands breaks that handoff and forces the application back to manual download
+mode.
+
+Before publishing release assets, run:
+
+```sh
+./gradlew verifySelfUpdatePackage
+```
+
+The task builds and verifies the native package plus self-update payload. It
+fails when the packaged runtime cannot start the payload, the payload zip
+contains an app bundle instead of `lib/`, the app jar lacks the update trust
+key, or platform native libraries are missing from the payload.
+For local smoke tests, pass `-PmeshappUpdateEd25519PublicKey=...` or set
+`MESHAPP_UPDATE_ED25519_PUBLIC_KEY`; release CI already requires this secret.
+
 The generated manifest keeps the legacy `downloads` map for existing clients:
 `windows`, `macos`, `linux`, plus package-specific keys such as `windows-msi`,
 `macos-dmg`, `linux-deb`, `linux-appimage`, and `linux-flatpak`. The new
@@ -80,6 +98,8 @@ Release artifacts and the update manifest are separate CI/CD steps:
    `MeshApp-{version}-{os}-{arch}-selfupdate.zip`.
    This zip contains the managed application payload, not the signed native
    package or macOS `.app` bundle.
+   Each release build also runs `verifySelfUpdatePackage` before uploading
+   artifacts to Gitea.
    This creates and publishes the Gitea release, but does not publish it to the
    update system.
 2. A manual `.gitea/workflows/publish-update-manifest.yml` run selects which
