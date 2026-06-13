@@ -234,13 +234,24 @@ if [ -z "${release_notes}" ] && [ -s "${metadata_file}" ]; then
 fi
 release_notes_ru="${MESHAPP_RELEASE_NOTES_RU:-${release_notes}}"
 
+self_update_assets=0
+for file in "${assets_dir}"/*selfupdate.zip; do
+  [ -f "${file}" ] || continue
+  self_update_assets=1
+  break
+done
+
 private_key_file="${work_dir}/ed25519-private.pem"
 signing_enabled=false
 if write_update_private_key "${private_key_file}"; then
   signing_enabled=true
   echo "Self-update signatures enabled"
 else
-  echo "::warning::MESHAPP_UPDATE_ED25519_PRIVATE_KEY is not set; selfUpdate signatures will be omitted"
+  if [ "${self_update_assets}" -eq 1 ]; then
+    echo "::error::MESHAPP_UPDATE_ED25519_PRIVATE_KEY is required to publish self-update artifacts" >&2
+    exit 1
+  fi
+  echo "::warning::MESHAPP_UPDATE_ED25519_PRIVATE_KEY is not set; no self-update artifacts will be signed"
 fi
 
 manifest="$(jq -n \

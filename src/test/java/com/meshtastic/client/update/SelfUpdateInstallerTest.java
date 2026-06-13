@@ -37,12 +37,43 @@ class SelfUpdateInstallerTest {
                 "2147",
                 SelfUpdateInstaller.sha256(archive),
                 0,
-                null
+                null,
+                SelfUpdateEnvironment.Layout.MANAGED
         ));
 
         assertTrue(Files.isRegularFile(root.resolve("versions/2147/bin/MeshApp")));
         assertEquals("jar", Files.readString(root.resolve("versions/2147/lib/MeshApp.jar")));
         assertEquals("2147", Files.readString(root.resolve("current")).trim());
+    }
+
+    @Test
+    void replacesMacAppBundleArchive() throws Exception {
+        Path targetApp = tempDir.resolve("Applications/MeshApp.app");
+        Files.createDirectories(targetApp.resolve("Contents/app/lib"));
+        Files.writeString(targetApp.resolve("Contents/app/lib/old.jar"), "old");
+
+        Path sourceApp = tempDir.resolve("source/MeshApp.app");
+        Files.createDirectories(sourceApp.resolve("Contents/MacOS"));
+        Files.createDirectories(sourceApp.resolve("Contents/app/lib"));
+        Files.writeString(sourceApp.resolve("Contents/MacOS/MeshApp"), "launcher");
+        Files.writeString(sourceApp.resolve("Contents/app/lib/new.jar"), "new");
+
+        Path archive = tempDir.resolve("update-app.zip");
+        writeZipFromDirectory(archive, sourceApp.getParent());
+
+        new SelfUpdateInstaller().apply(new SelfUpdateInstaller.Request(
+                targetApp,
+                archive,
+                "2148",
+                SelfUpdateInstaller.sha256(archive),
+                0,
+                null,
+                SelfUpdateEnvironment.Layout.MAC_APP_BUNDLE
+        ));
+
+        assertTrue(Files.isRegularFile(targetApp.resolve("Contents/MacOS/MeshApp")));
+        assertEquals("new", Files.readString(targetApp.resolve("Contents/app/lib/new.jar")));
+        assertTrue(Files.notExists(targetApp.resolve("Contents/app/lib/old.jar")));
     }
 
     @Test
@@ -74,6 +105,21 @@ class SelfUpdateInstallerTest {
             for (Map.Entry<String, String> entry : entries.entrySet()) {
                 zip.putNextEntry(new ZipEntry(entry.getKey()));
                 zip.write(entry.getValue().getBytes(StandardCharsets.UTF_8));
+                zip.closeEntry();
+            }
+        }
+    }
+
+    private static void writeZipFromDirectory(Path archive, Path sourceDir) throws IOException {
+        try (ZipOutputStream zip = new ZipOutputStream(Files.newOutputStream(archive));
+             var stream = Files.walk(sourceDir)) {
+            for (Path path : stream.toList()) {
+                if (Files.isDirectory(path)) {
+                    continue;
+                }
+                String name = sourceDir.relativize(path).toString().replace('\\', '/');
+                zip.putNextEntry(new ZipEntry(name));
+                zip.write(Files.readAllBytes(path));
                 zip.closeEntry();
             }
         }

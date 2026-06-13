@@ -145,6 +145,8 @@ public final class SelfUpdateService {
         command.add(plan.artifact().getSha256());
         command.add("--parent-pid");
         command.add(Long.toString(ProcessHandle.current().pid()));
+        command.add("--layout");
+        command.add(plan.environment().layout().id());
         if (plan.environment().launcher() != null && !plan.environment().launcher().isBlank()) {
             command.add("--launcher");
             command.add(plan.environment().launcher());

@@ -1575,15 +1575,20 @@ call "%APP_HOME%\\versions\\%CURRENT%\\bin\\MeshApp.bat" %*
 	}
 }
 
-tasks.register('selfUpdateArchive', Zip) {
-	dependsOn installDist
+tasks.register('selfUpdateArchive') {
+	def os = org.gradle.internal.os.OperatingSystem.current()
+	def artifactName = "MeshApp-${sanitizeArtifactVersion(applicationVersion)}-${resolveSelfUpdatePlatform()}-selfupdate.zip"
+	if (os.isMacOsX()) {
+		dependsOn tasks.named('jpackage')
+	} else {
+		dependsOn installDist
+	}
 	group = 'distribution'
 	description = 'Собрать full zip archive для self-update manifest'
-	destinationDirectory = layout.buildDirectory.dir('jpackage')
-	archiveFileName = "MeshApp-${sanitizeArtifactVersion(applicationVersion)}-${resolveSelfUpdatePlatform()}-selfupdate.zip"
-	from(layout.buildDirectory.dir("install/${applicationName}"))
-	doFirst {
-		def outputDir = destinationDirectory.get().asFile
+	outputs.file(layout.buildDirectory.file("jpackage/${artifactName}"))
+	doLast {
+		def outputDir = layout.buildDirectory.dir('jpackage').get().asFile
+		outputDir.mkdirs()
 		if (outputDir.isDirectory()) {
 			outputDir.listFiles()?.findAll { file ->
 				file.isFile() && file.name.endsWith('-selfupdate.zip')
@@ -1591,6 +1596,25 @@ tasks.register('selfUpdateArchive', Zip) {
 				if (!file.delete()) {
 					throw new GradleException("Unable to delete stale self-update artifact: ${file}")
 				}
+			}
+		}
+		def archiveFile = new File(outputDir, artifactName)
+		if (os.isMacOsX()) {
+			def appDir = new File(outputDir, 'MeshApp.app')
+			if (!appDir.isDirectory()) {
+				throw new GradleException("selfUpdateArchive: macOS app bundle not found: ${appDir}")
+			}
+			executePackagingCommand(
+				['/usr/bin/ditto', '-c', '-k', '--sequesterRsrc', '--keepParent', appDir.absolutePath, archiveFile.absolutePath],
+				'selfUpdateArchive: failed to create macOS app bundle archive'
+			)
+		} else {
+			def installDir = layout.buildDirectory.dir("install/${applicationName}").get().asFile
+			if (!installDir.isDirectory()) {
+				throw new GradleException("selfUpdateArchive: installDist directory not found: ${installDir}")
+			}
+			ant.zip(destfile: archiveFile.absolutePath) {
+				fileset(dir: installDir.absolutePath)
 			}
 		}
 	}

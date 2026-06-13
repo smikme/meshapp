@@ -1,12 +1,16 @@
 # MeshApp Self-Update Manifest
 
-MeshApp supports a non-privileged full-archive self-update path when it is
-started from the managed layout produced by `./gradlew selfUpdateImage`.
+MeshApp supports a non-privileged full-archive self-update path. macOS DMG
+installations update by replacing the signed `MeshApp.app` bundle after the
+running application exits. The older managed layout produced by
+`./gradlew selfUpdateImage` is still supported for development and portable
+launches.
 
 The legacy `downloads` manifest still works. The self-update path is enabled
 only when all of these are true:
 
-- the launcher provides `MESHAPP_UPDATE_ROOT` and `MESHAPP_UPDATE_VERSION`
+- the application can resolve a supported update layout: macOS `.app` bundle or
+  a launcher that provides `MESHAPP_UPDATE_ROOT` and `MESHAPP_UPDATE_VERSION`
 - the current package format is not Flatpak
 - the manifest contains a matching `selfUpdate` artifact
 - the artifact is a `full-archive` `zip`
@@ -61,6 +65,8 @@ Release artifacts and the update manifest are separate CI/CD steps:
 1. Tag pushes run `.gitea/workflows/release.yml`. Linux, Windows, and macOS
    jobs build native packages plus
    `MeshApp-{version}-{os}-{arch}-selfupdate.zip`.
+   On macOS this zip contains the signed `MeshApp.app` bundle and is produced
+   after `jpackage` signs/notarizes the app image.
    This creates and publishes the Gitea release, but does not publish it to the
    update system.
 2. A manual `.gitea/workflows/publish-update-manifest.yml` run selects which
@@ -81,9 +87,10 @@ The manifest generator is `.gitea/scripts/generate-update-manifest.sh`.
 CI variables and secrets:
 
 - `RELEASE_TOKEN`: required; used to read selected Gitea release assets
-- `MESHAPP_UPDATE_ED25519_PUBLIC_KEY`: optional at build time; bundled into
+- `MESHAPP_UPDATE_ED25519_PUBLIC_KEY`: required for release builds; bundled into
   `/update/ed25519-public-key.txt` so the client trusts signed artifacts
-- `MESHAPP_UPDATE_ED25519_PRIVATE_KEY`: optional; signs self-update artifacts
+- `MESHAPP_UPDATE_ED25519_PRIVATE_KEY`: required when publishing a manifest with
+  self-update artifacts; signs self-update artifacts
 - `MESHAPP_UPDATE_ASSET_BASE_URL`: optional; overrides generated asset URLs
 - `MESHAPP_VERSION`: optional; overrides manifest `version`
 - `MESHAPP_VERSION_CODE`: optional; overrides manifest `versionCode`
@@ -104,11 +111,9 @@ Manual update publication inputs:
 The Gitea release body is generated from commit history during the tag release.
 The manual release notes inputs are used only by the update manifest.
 
-If `MESHAPP_UPDATE_ED25519_PRIVATE_KEY` is absent, the manifest is still
-generated, but self-update signatures are omitted. If
-`MESHAPP_UPDATE_ED25519_PUBLIC_KEY` is absent during the app build, production
-clients will not trust signed self-update artifacts unless the public key is
-provided later through a JVM property or environment variable.
+If `MESHAPP_UPDATE_ED25519_PRIVATE_KEY` is absent while self-update artifacts are
+present, manifest publication fails. If `MESHAPP_UPDATE_ED25519_PUBLIC_KEY` is
+absent during a release build, package builds fail.
 
 The Ed25519 signature signs this UTF-8 payload:
 

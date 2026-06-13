@@ -26,6 +26,7 @@ public final class SelfUpdateInstallerMain {
         String sha256 = null;
         long parentPid = 0;
         String launcher = null;
+        SelfUpdateEnvironment.Layout layout = SelfUpdateEnvironment.Layout.MANAGED;
 
         for (int i = 0; args != null && i < args.length; i++) {
             String arg = args[i];
@@ -35,6 +36,7 @@ public final class SelfUpdateInstallerMain {
                 case "--target-version" -> targetVersion = next(args, ++i, arg);
                 case "--sha256" -> sha256 = next(args, ++i, arg);
                 case "--parent-pid" -> parentPid = Long.parseLong(next(args, ++i, arg));
+                case "--layout" -> layout = SelfUpdateEnvironment.Layout.fromId(next(args, ++i, arg));
                 case "--launcher" -> launcher = next(args, ++i, arg);
                 default -> throw new IllegalArgumentException("Unknown argument: " + arg);
             }
@@ -46,7 +48,8 @@ public final class SelfUpdateInstallerMain {
                 targetVersion,
                 sha256,
                 parentPid,
-                launcher
+                launcher,
+                layout
         );
     }
 

@@ -91,6 +91,10 @@ jobs:
         env:
           MESHAPP_UPDATE_ED25519_PUBLIC_KEY: ${{ secrets.MESHAPP_UPDATE_ED25519_PUBLIC_KEY }}
         run: |
+          if [ -z "${MESHAPP_UPDATE_ED25519_PUBLIC_KEY:-}" ]; then
+            echo "::error::MESHAPP_UPDATE_ED25519_PUBLIC_KEY is required for release builds"
+            exit 1
+          fi
           if [ "${APPIMAGE_ENABLED}" = "true" ]; then
             APPIMAGE_EXTRACT_AND_RUN=1 ./gradlew jpackage appImage flatpak selfUpdateArchive -Pappimagetool="${APPIMAGETOOL_PATH}" --no-daemon
           else
@@ -126,9 +130,15 @@ jobs:
           git checkout "${GITHUB_SHA}"
 
       - name: Build Windows artifacts
+        shell: bash
         env:
           MESHAPP_UPDATE_ED25519_PUBLIC_KEY: ${{ secrets.MESHAPP_UPDATE_ED25519_PUBLIC_KEY }}
-        run: .\gradlew.bat jpackage selfUpdateArchive --no-daemon
+        run: |
+          if [ -z "${MESHAPP_UPDATE_ED25519_PUBLIC_KEY:-}" ]; then
+            echo "::error::MESHAPP_UPDATE_ED25519_PUBLIC_KEY is required for release builds"
+            exit 1
+          fi
+          ./gradlew.bat jpackage selfUpdateArchive --no-daemon
 
       - name: Upload to Gitea Release
         shell: bash
@@ -296,7 +306,12 @@ jobs:
           fi
 
       - name: Build macOS artifact
-        run: ./gradlew jpackage selfUpdateArchive --no-daemon
+        run: |
+          if [ -z "${MESHAPP_UPDATE_ED25519_PUBLIC_KEY:-}" ]; then
+            echo "::error::MESHAPP_UPDATE_ED25519_PUBLIC_KEY is required for release builds"
+            exit 1
+          fi
+          ./gradlew jpackage selfUpdateArchive --no-daemon
 
       - name: Verify macOS artifact
         run: |
