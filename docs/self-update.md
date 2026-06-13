@@ -64,12 +64,10 @@ Release artifacts and the update manifest are separate CI/CD steps:
    This creates and publishes the Gitea release, but does not publish it to the
    update system.
 2. A manual `.gitea/workflows/publish-update-manifest.yml` run selects which
-   existing Gitea release is visible to users by the `release_tag` input. Keep
-   the Gitea "Use workflow from" selector on the current workflow branch; that
-   selector chooses the workflow definition, not the release to publish. The job
-   downloads the selected release assets, computes SHA-256 and file sizes, adds
-   `downloads`, adds matching `selfUpdate` entries, and deploys `meshapp.json`
-   to the Flatpak server at `${FLATPAK_DEPLOY_PATH}/meshapp.json`,
+   existing Gitea release is visible to users by the tag chosen in Gitea
+   "Use workflow from". The job downloads the selected release assets, computes
+   SHA-256 and file sizes, adds `downloads`, adds matching `selfUpdate` entries,
+   and deploys `meshapp.json` to the Flatpak server at `${FLATPAK_DEPLOY_PATH}/meshapp.json`,
    which is publicly available as `https://flatpak.privatepractice.app/meshapp.json`.
    nginx for `meshapp.privatepractice.app` should reverse-proxy
    `/meshapp.json` to that Flatpak URL.
@@ -99,7 +97,7 @@ CI variables and secrets:
 
 Manual update publication inputs:
 
-- `release_tag`: required; existing Gitea release tag, for example `v2.1.20`
+- "Use workflow from": required; choose an existing release tag, for example `v2.1.20`
 - `release_notes`: required; exported as `MESHAPP_RELEASE_NOTES` for `meshapp.json`
 - `release_notes_ru`: required; exported as `MESHAPP_RELEASE_NOTES_RU` for `meshapp.json`
 

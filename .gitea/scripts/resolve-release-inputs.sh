@@ -35,13 +35,13 @@ selected_release_ref() {
       return
       ;;
     refs/heads/*|refs/pull/*)
-      echo "::error::Set workflow_dispatch input 'release_tag', for example v2.1.20. The selected workflow ref '${ref}' is only the workflow source." >&2
+      echo "::error::Select a release tag in 'Use workflow from'; selected ref is '${ref}'." >&2
       exit 1
       ;;
   esac
 
   if [ -n "${ref_type}" ] && [ "${ref_type}" != "tag" ]; then
-    echo "::error::Set workflow_dispatch input 'release_tag', for example v2.1.20. The selected workflow ref type '${ref_type}' is only the workflow source." >&2
+    echo "::error::Select a release tag in 'Use workflow from'; selected ref type is '${ref_type}'." >&2
     exit 1
   fi
 
@@ -72,18 +72,12 @@ write_env_multiline() {
   } >> "${GITHUB_ENV}"
 }
 
-version="$(event_input release_tag)"
-if [ -z "${version}" ]; then
-  version="$(event_input version)"
-fi
-if [ -z "${version}" ]; then
-  version="$(selected_release_ref)"
-fi
+version="$(selected_release_ref)"
 release_notes="$(event_input release_notes)"
 release_notes_ru="$(event_input release_notes_ru)"
 
 if [ -z "${version}" ]; then
-  echo "::error::Set workflow_dispatch input 'release_tag', for example v2.1.20" >&2
+  echo "::error::Select a release tag in 'Use workflow from', for example v2.1.20" >&2
   exit 1
 fi
 
@@ -92,7 +86,7 @@ case "${version}" in
     version="${version#refs/tags/}"
     ;;
   refs/heads/*|refs/pull/*)
-    echo "::error::Set workflow_dispatch input 'release_tag', for example v2.1.20. The selected workflow ref '${version}' is only the workflow source." >&2
+    echo "::error::Select a release tag in 'Use workflow from'; selected ref is '${version}'." >&2
     exit 1
     ;;
 esac
