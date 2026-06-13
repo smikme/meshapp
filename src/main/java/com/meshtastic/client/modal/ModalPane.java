@@ -11,6 +11,7 @@ import javafx.geometry.Pos;
 import javafx.scene.Node;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
+import javafx.scene.control.ProgressBar;
 import javafx.scene.control.Separator;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyEvent;
@@ -350,55 +351,100 @@ public class ModalPane extends StackPane {
         Label statusLabel = new Label();
         statusLabel.getStyleClass().add("muted-note-label");
         statusLabel.setWrapText(true);
+        Label downloadProgressLabel = new Label(I18n.t("modal.update.progress.download"));
+        ProgressBar downloadProgressBar = new ProgressBar(0);
+        downloadProgressBar.setMaxWidth(Double.MAX_VALUE);
+        Label installProgressLabel = new Label(I18n.t("modal.update.progress.install"));
+        ProgressBar installProgressBar = new ProgressBar(0);
+        installProgressBar.setMaxWidth(Double.MAX_VALUE);
+        VBox progressBox = new VBox(
+                4,
+                downloadProgressLabel,
+                downloadProgressBar,
+                installProgressLabel,
+                installProgressBar
+        );
+        progressBox.setPadding(new Insets(4, 0, 4, 0));
+        VBox.setVgrow(downloadProgressBar, Priority.NEVER);
+        VBox.setVgrow(installProgressBar, Priority.NEVER);
+        setVisibleManaged(progressBox, false);
         boolean flatpakUpdate = OsDetect.currentPackageFormat() == PackageFormat.FLATPAK;
         if (flatpakUpdate) {
             statusLabel.setText(I18n.t("modal.update.flatpakInstruction"));
         }
+        String manualDownloadUrl = info.getDownloadUrl();
 
         Button btnDownload = new Button(selfUpdatePlan.isPresent()
                 ? I18n.t("modal.update.installAndRestart")
                 : I18n.t("common.download"));
         btnDownload.getStyleClass().add("accent");
+        Button btnFallback = new Button(I18n.t("modal.update.manualDownload"));
+        btnFallback.setOnAction(e -> {
+            pane.hide();
+            openManualDownload(manualDownloadUrl);
+        });
+        setVisibleManaged(btnFallback, false);
+        Button btnLater = new Button(I18n.t("common.later"));
+        btnLater.setOnAction(e -> pane.hide());
         if (selfUpdatePlan.isPresent()) {
             btnDownload.setOnAction(e -> {
+                btnDownload.setText(I18n.t("modal.update.installAndRestart"));
                 btnDownload.setDisable(true);
+                btnLater.setDisable(true);
+                btnFallback.setDisable(true);
+                setVisibleManaged(progressBox, true);
+                setVisibleManaged(btnFallback, false);
+                downloadProgressBar.setProgress(0);
+                installProgressBar.setProgress(0);
                 statusLabel.setText(I18n.t("modal.update.status.download"));
                 SelfUpdateService.getInstance().installAndRestartAsync(
                         info,
-                        status -> Platform.runLater(() -> {
-                            switch (status) {
-                                case "download" -> statusLabel.setText(I18n.t("modal.update.status.download"));
-                                case "handoff" -> statusLabel.setText(I18n.t("modal.update.status.prepare"));
-                                case "restart" -> {
+                        progress -> Platform.runLater(() -> {
+                            switch (progress.phase()) {
+                                case DOWNLOAD -> {
+                                    statusLabel.setText(I18n.t("modal.update.status.download"));
+                                    updateProgressBar(downloadProgressBar, progress);
+                                }
+                                case INSTALL -> {
+                                    statusLabel.setText(I18n.t("modal.update.status.prepare"));
+                                    downloadProgressBar.setProgress(1);
+                                    updateProgressBar(installProgressBar, progress);
+                                }
+                                case RESTART -> {
+                                    downloadProgressBar.setProgress(1);
+                                    installProgressBar.setProgress(1);
                                     statusLabel.setText(I18n.t("modal.update.status.restart"));
                                     pane.hide();
                                     AppTrayManager.getInstance().exitApplication();
                                 }
-                                default -> statusLabel.setText(status);
                             }
                         }),
                         error -> Platform.runLater(() -> {
-                            statusLabel.setText(I18n.t("modal.update.status.failed", error.getMessage()));
+                            boolean hasManualFallback = manualDownloadUrl != null && !manualDownloadUrl.isBlank();
+                            statusLabel.setText(I18n.t(
+                                    hasManualFallback
+                                            ? "modal.update.status.failedWithFallback"
+                                            : "modal.update.status.failedNoFallback",
+                                    errorMessage(error)
+                            ));
+                            btnDownload.setText(I18n.t("modal.update.retry"));
                             btnDownload.setDisable(false);
+                            btnLater.setDisable(false);
+                            btnFallback.setDisable(false);
+                            setVisibleManaged(btnFallback, hasManualFallback);
                         })
                 );
             });
         } else {
             btnDownload.setOnAction(e -> {
                 pane.hide();
-                String url = info.getDownloadUrl();
-                if (url != null) {
-                    ExternalUrlLauncher.open(url);
-                }
+                openManualDownload(manualDownloadUrl);
             });
         }
 
-        Button btnLater = new Button(I18n.t("common.later"));
-        btnLater.setOnAction(e -> pane.hide());
-
         HBox btnRow = flatpakUpdate
                 ? new HBox(10, btnLater)
-                : new HBox(10, btnLater, btnDownload);
+                : new HBox(10, btnLater, btnFallback, btnDownload);
         btnRow.setAlignment(Pos.CENTER_RIGHT);
         btnRow.setPadding(new Insets(10, 0, 0, 0));
 
@@ -410,12 +456,44 @@ public class ModalPane extends StackPane {
             notesScroll.setMaxHeight(300);
             notesScroll.getStyleClass().add("edge-to-edge");
             VBox.setVgrow(notesScroll, Priority.ALWAYS);
-            panel.getChildren().addAll(lblTitle, new Separator(), versionBox, notesScroll, statusLabel, btnRow);
+            panel.getChildren().addAll(lblTitle, new Separator(), versionBox, notesScroll, progressBox, statusLabel, btnRow);
         } else {
-            panel.getChildren().addAll(lblTitle, new Separator(), versionBox, statusLabel, btnRow);
+            panel.getChildren().addAll(lblTitle, new Separator(), versionBox, progressBox, statusLabel, btnRow);
         }
 
         pane.show(panel);
+    }
+
+    private static void updateProgressBar(ProgressBar progressBar,
+                                          SelfUpdateService.UpdateProgress progress) {
+        if (progress.isDeterminate()) {
+            progressBar.setProgress(Math.max(0, Math.min(1, progress.progress())));
+        } else {
+            progressBar.setProgress(ProgressBar.INDETERMINATE_PROGRESS);
+        }
+    }
+
+    private static void setVisibleManaged(Node node, boolean visible) {
+        node.setVisible(visible);
+        node.setManaged(visible);
+    }
+
+    private static void openManualDownload(String url) {
+        if (url != null && !url.isBlank()) {
+            ExternalUrlLauncher.open(url);
+        }
+    }
+
+    private static String errorMessage(Throwable error) {
+        if (error == null || error.getMessage() == null || error.getMessage().isBlank()) {
+            return I18n.t("modal.update.error.unknown");
+        }
+        String message = error.getMessage().trim();
+        int maxLength = 700;
+        if (message.length() <= maxLength) {
+            return message;
+        }
+        return message.substring(0, maxLength).trim() + "...";
     }
 
     // Panel construction
