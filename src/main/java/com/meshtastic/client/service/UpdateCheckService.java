@@ -29,7 +29,7 @@ import java.util.function.Consumer;
 public final class UpdateCheckService {
 
     private static final Logger log = LoggerFactory.getLogger(UpdateCheckService.class);
-    private static final String UPDATE_URL = "https://meshapp.privatepractice.app/meshapp.json";
+    private static final String UPDATE_URL = "https://flatpak.privatepractice.app/meshapp.json";
     private static final Duration TIMEOUT = Duration.ofSeconds(10);
 
     private UpdateCheckService() {}

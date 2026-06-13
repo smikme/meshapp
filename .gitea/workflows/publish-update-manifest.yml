@@ -1,0 +1,95 @@
+name: Publish Update Manifest
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Existing Gitea release tag to publish to update system, for example v2.1.20'
+        required: true
+      release_notes:
+        description: 'MESHAPP_RELEASE_NOTES for meshapp.json'
+        required: true
+      release_notes_ru:
+        description: 'MESHAPP_RELEASE_NOTES_RU for meshapp.json releaseNotes_ru'
+        required: true
+
+jobs:
+  publish-update-manifest:
+    runs-on: ubuntu
+    steps:
+      - name: Resolve selected release
+        run: |
+          git clone "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git" .
+          git fetch --tags --force
+
+          RESOLVE_SCRIPT="${RUNNER_TEMP:-/tmp}/resolve-release-inputs.sh"
+          MANIFEST_SCRIPT="${RUNNER_TEMP:-/tmp}/generate-update-manifest.sh"
+          PUBLISH_FLATPAK_SCRIPT="${RUNNER_TEMP:-/tmp}/publish-flatpak-repo.sh"
+          cp .gitea/scripts/resolve-release-inputs.sh "${RESOLVE_SCRIPT}"
+          cp .gitea/scripts/generate-update-manifest.sh "${MANIFEST_SCRIPT}"
+          cp .gitea/scripts/publish-flatpak-repo.sh "${PUBLISH_FLATPAK_SCRIPT}"
+          chmod +x "${RESOLVE_SCRIPT}" "${MANIFEST_SCRIPT}" "${PUBLISH_FLATPAK_SCRIPT}"
+
+          "${RESOLVE_SCRIPT}"
+          printf 'GENERATE_UPDATE_MANIFEST_SCRIPT=%s\n' "${MANIFEST_SCRIPT}" >> "${GITHUB_ENV}"
+          printf 'PUBLISH_FLATPAK_SCRIPT=%s\n' "${PUBLISH_FLATPAK_SCRIPT}" >> "${GITHUB_ENV}"
+
+      - name: Checkout selected release tag
+        run: |
+          if ! git rev-parse -q --verify "refs/tags/${RELEASE_TAG}" >/dev/null; then
+            echo "::error::Tag ${RELEASE_TAG} does not exist in Gitea repository"
+            exit 1
+          fi
+
+          git checkout "refs/tags/${RELEASE_TAG}"
+
+      - name: Generate meshapp.json
+        env:
+          GITEA_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          MESHAPP_UPDATE_ED25519_PRIVATE_KEY: ${{ secrets.MESHAPP_UPDATE_ED25519_PRIVATE_KEY }}
+          MESHAPP_UPDATE_ASSET_BASE_URL: ${{ secrets.MESHAPP_UPDATE_ASSET_BASE_URL }}
+        run: |
+          if [ -z "${MESHAPP_RELEASE_NOTES:-}" ] || [ -z "${MESHAPP_RELEASE_NOTES_RU:-}" ]; then
+            echo "::error::release_notes and release_notes_ru inputs are required"
+            exit 1
+          fi
+
+          "${GENERATE_UPDATE_MANIFEST_SCRIPT}" "${RELEASE_TAG}" build/update/meshapp.json
+          jq . build/update/meshapp.json
+
+      - name: Upload meshapp.json to Gitea Release
+        env:
+          GITEA_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: |
+          API="${GITHUB_SERVER_URL}/api/v1/repos/${GITHUB_REPOSITORY}"
+          RELEASE_ID=$(curl -sf \
+            -H "Authorization: token ${GITEA_TOKEN}" \
+            "${API}/releases/tags/${RELEASE_TAG}" | jq -r '.id')
+
+          EXISTING_ASSET_ID=$(curl -sf \
+            -H "Authorization: token ${GITEA_TOKEN}" \
+            "${API}/releases/${RELEASE_ID}/assets?limit=100" \
+            | jq -r 'first(.[] | select(.name == "meshapp.json") | .id) // empty')
+
+          if [ -n "${EXISTING_ASSET_ID}" ]; then
+            curl -sf -X DELETE \
+              -H "Authorization: token ${GITEA_TOKEN}" \
+              "${API}/releases/assets/${EXISTING_ASSET_ID}"
+          fi
+
+          curl -sf -X POST \
+            -H "Authorization: token ${GITEA_TOKEN}" \
+            -H "Content-Type: application/json" \
+            --data-binary "@build/update/meshapp.json" \
+            "${API}/releases/${RELEASE_ID}/assets?name=meshapp.json"
+
+      - name: Deploy meshapp.json to update endpoint
+        env:
+          FLATPAK_DEPLOY_HOST: ${{ secrets.FLATPAK_DEPLOY_HOST }}
+          FLATPAK_DEPLOY_USER: ${{ secrets.FLATPAK_DEPLOY_USER }}
+          FLATPAK_DEPLOY_PATH: ${{ secrets.FLATPAK_DEPLOY_PATH }}
+          FLATPAK_DEPLOY_SSH_KEY: ${{ secrets.FLATPAK_DEPLOY_SSH_KEY }}
+          FLATPAK_DEPLOY_SSH_PORT: ${{ secrets.FLATPAK_DEPLOY_SSH_PORT }}
+        run: |
+          MESHAPP_UPDATE_MANIFEST_PATH=build/update/meshapp.json \
+            bash "${PUBLISH_FLATPAK_SCRIPT}" publish-update-manifest

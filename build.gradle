@@ -129,7 +129,12 @@ javafx {
 }
 
 group = 'com.meshtastic'
-version = {
+def configuredApplicationVersion = providers.gradleProperty('meshappVersion')
+		.orElse(providers.environmentVariable('MESHAPP_VERSION'))
+		.map { it.toString().trim() }
+		.orElse('')
+		.get()
+version = configuredApplicationVersion ?: {
 	try {
 		return 'git describe --tags --always --dirty'.execute().text.trim() ?: 'dev'
 	} catch (ignored) {
@@ -281,7 +286,31 @@ tasks.register('generateVersionProperties') {
 }
 
 sourceSets.main.resources.srcDir(generatedResourcesDir)
-tasks.named('processResources') { dependsOn 'generateVersionProperties' }
+
+def updatePublicKey = providers.gradleProperty('meshappUpdateEd25519PublicKey')
+		.orElse(providers.environmentVariable('MESHAPP_UPDATE_ED25519_PUBLIC_KEY'))
+		.map { it.toString().trim() }
+		.orElse('')
+
+tasks.register('generateUpdateTrustResources') {
+	def publicKeyFile = generatedResourcesDir.map { it.file('update/ed25519-public-key.txt') }
+	inputs.property('meshappUpdateEd25519PublicKey', updatePublicKey)
+	outputs.file(publicKeyFile)
+	doLast {
+		def keyText = updatePublicKey.get()
+		def file = publicKeyFile.get().asFile
+		if (keyText) {
+			file.parentFile.mkdirs()
+			file.text = keyText + '\n'
+		} else if (file.exists() && !file.delete()) {
+			throw new GradleException("Unable to delete stale update public key resource: ${file}")
+		}
+	}
+}
+
+tasks.named('processResources') {
+	dependsOn 'generateVersionProperties', 'generateUpdateTrustResources'
+}
 
 def macOsJnaResourcePrefix = {
 	def arch = System.getProperty('os.arch').toLowerCase(java.util.Locale.ROOT)
@@ -1134,13 +1163,7 @@ def sanitizeArtifactVersion = { value ->
 	value.replaceAll(/[^A-Za-z0-9._-]+/, '_')
 }
 
-def flatpakAppId = 'app.privatepractice.meshapp'
-def flatpakMetadataDir = file('src/flatpak')
-def flatpakDesktopFileName = "${flatpakAppId}.desktop"
-def flatpakMetainfoFileName = "${flatpakAppId}.metainfo.xml"
-def flatpakLauncherFileName = 'MeshApp'
-
-def resolveLinuxAppImageArch = {
+def normalizeArtifactArch = {
 	def arch = System.getProperty('os.arch').toLowerCase(java.util.Locale.ROOT)
 	switch (arch) {
 		case ['amd64', 'x86_64']:
@@ -1150,6 +1173,22 @@ def resolveLinuxAppImageArch = {
 		default:
 			return sanitizeArtifactVersion(arch)
 	}
+}
+
+def resolveSelfUpdatePlatform = {
+	def os = org.gradle.internal.os.OperatingSystem.current()
+	def osName = os.isWindows() ? 'windows' : (os.isMacOsX() ? 'macos' : (os.isLinux() ? 'linux' : 'unknown'))
+	return "${osName}-${normalizeArtifactArch()}"
+}
+
+def flatpakAppId = 'app.privatepractice.meshapp'
+def flatpakMetadataDir = file('src/flatpak')
+def flatpakDesktopFileName = "${flatpakAppId}.desktop"
+def flatpakMetainfoFileName = "${flatpakAppId}.metainfo.xml"
+def flatpakLauncherFileName = 'MeshApp'
+
+def resolveLinuxAppImageArch = {
+	return normalizeArtifactArch()
 }
 
 def resolveAppImageTool = {
@@ -1486,6 +1525,74 @@ tasks.named('installDist') {
 		relocateJavaFxJars(new File(installDir, 'lib'))
 		patchUnixStartScriptForJavaFx(new File(installDir, "bin/${applicationName}"))
 		patchWindowsStartScriptForJavaFx(new File(installDir, "bin/${applicationName}.bat"))
+	}
+}
+
+tasks.register('selfUpdateImage') {
+	dependsOn installDist
+	group = 'distribution'
+	description = 'Собрать user-writable MeshApp layout для non-privileged self-update'
+
+	doLast {
+		def installDir = layout.buildDirectory.dir("install/${applicationName}").get().asFile
+		def versionName = sanitizeArtifactVersion(applicationVersion)
+		def rootDir = layout.buildDirectory.dir("self-update/MeshApp").get().asFile
+		if (rootDir.exists()) {
+			rootDir.deleteDir()
+		}
+		rootDir.mkdirs()
+
+		def versionDir = new File(rootDir, "versions/${versionName}")
+		copyDirectory(installDir, versionDir)
+
+		new File(rootDir, 'current').text = versionName + '\n'
+		def binDir = new File(rootDir, 'bin')
+		binDir.mkdirs()
+
+		def unixLauncher = new File(binDir, 'MeshApp')
+		unixLauncher.text = '''\
+#!/bin/sh
+set -eu
+APP_HOME="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+CURRENT="$(tr -d '\\r\\n' < "$APP_HOME/current")"
+export MESHAPP_UPDATE_ROOT="$APP_HOME"
+export MESHAPP_UPDATE_VERSION="$CURRENT"
+export MESHAPP_UPDATE_LAUNCHER="$APP_HOME/bin/MeshApp"
+exec "$APP_HOME/versions/$CURRENT/bin/MeshApp" "$@"
+'''
+		unixLauncher.setExecutable(true, false)
+
+		def windowsLauncher = new File(binDir, 'MeshApp.bat')
+		windowsLauncher.text = '''\
+@echo off
+set "APP_HOME=%~dp0.."
+set /p CURRENT=<"%APP_HOME%\\current"
+set "MESHAPP_UPDATE_ROOT=%APP_HOME%"
+set "MESHAPP_UPDATE_VERSION=%CURRENT%"
+set "MESHAPP_UPDATE_LAUNCHER=%APP_HOME%\\bin\\MeshApp.bat"
+call "%APP_HOME%\\versions\\%CURRENT%\\bin\\MeshApp.bat" %*
+'''
+	}
+}
+
+tasks.register('selfUpdateArchive', Zip) {
+	dependsOn installDist
+	group = 'distribution'
+	description = 'Собрать full zip archive для self-update manifest'
+	destinationDirectory = layout.buildDirectory.dir('jpackage')
+	archiveFileName = "MeshApp-${sanitizeArtifactVersion(applicationVersion)}-${resolveSelfUpdatePlatform()}-selfupdate.zip"
+	from(layout.buildDirectory.dir("install/${applicationName}"))
+	doFirst {
+		def outputDir = destinationDirectory.get().asFile
+		if (outputDir.isDirectory()) {
+			outputDir.listFiles()?.findAll { file ->
+				file.isFile() && file.name.endsWith('-selfupdate.zip')
+			}?.each { file ->
+				if (!file.delete()) {
+					throw new GradleException("Unable to delete stale self-update artifact: ${file}")
+				}
+			}
+		}
 	}
 }
 

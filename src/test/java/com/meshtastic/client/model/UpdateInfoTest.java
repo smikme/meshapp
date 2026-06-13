@@ -165,6 +165,101 @@ class UpdateInfoTest {
         assertNull(info.getDownloadUrl(OsType.MACOS, false));
     }
 
+    @Test
+    void russianReleaseNotesPreferLocalizedField() {
+        UpdateInfo info = parse("""
+                {
+                  "releaseNotes": "English notes",
+                  "releaseNotes_ru": "Русские заметки"
+                }
+                """);
+
+        assertEquals("Русские заметки", info.getReleaseNotes("ru"));
+        assertEquals("Русские заметки", info.getReleaseNotes("ru-RU"));
+    }
+
+    @Test
+    void releaseNotesFallbackToDefaultForNonRussianLanguage() {
+        UpdateInfo info = parse("""
+                {
+                  "releaseNotes": "English notes",
+                  "releaseNotes_ru": "Русские заметки"
+                }
+                """);
+
+        assertEquals("English notes", info.getReleaseNotes("en"));
+    }
+
+    @Test
+    void releaseNotesFallbackToDefaultWhenRussianFieldIsBlank() {
+        UpdateInfo info = parse("""
+                {
+                  "releaseNotes": "English notes",
+                  "releaseNotes_ru": " "
+                }
+                """);
+
+        assertEquals("English notes", info.getReleaseNotes("ru"));
+    }
+
+    @Test
+    void selfUpdatePrefersPackageAndArchSpecificArtifact() {
+        UpdateInfo info = parse("""
+                {
+                  "selfUpdate": {
+                    "linux": {
+                      "url": "https://example.invalid/generic.zip",
+                      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                    },
+                    "linux-deb-x86_64": {
+                      "url": "https://example.invalid/linux-x64.zip",
+                      "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+                    }
+                  }
+                }
+                """);
+
+        assertEquals(
+                "https://example.invalid/linux-x64.zip",
+                info.getSelfUpdateArtifact(OsType.LINUX, PackageFormat.DEB, "x86_64").getUrl()
+        );
+    }
+
+    @Test
+    void selfUpdateSkipsIncompleteArtifact() {
+        UpdateInfo info = parse("""
+                {
+                  "selfUpdate": {
+                    "linux-x86_64": {
+                      "url": "https://example.invalid/linux-x64.zip"
+                    }
+                  }
+                }
+                """);
+
+        assertNull(info.getSelfUpdateArtifact(OsType.LINUX, PackageFormat.DEB, "x86_64"));
+    }
+
+    @Test
+    void selfUpdateIsUnavailableForFlatpak() {
+        UpdateInfo info = parse("""
+                {
+                  "selfUpdate": {
+                    "linux-flatpak-x86_64": {
+                      "url": "https://example.invalid/flatpak-selfupdate.zip",
+                      "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+                    },
+                    "linux-x86_64": {
+                      "url": "https://example.invalid/linux-selfupdate.zip",
+                      "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+                    }
+                  }
+                }
+                """);
+
+        assertNull(info.getSelfUpdateArtifact(OsType.LINUX, PackageFormat.FLATPAK, "x86_64"));
+    }
+
     private UpdateInfo parse(String json) {
         return gson.fromJson(json, UpdateInfo.class);
     }
