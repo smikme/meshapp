@@ -64,10 +64,10 @@ Release artifacts and the update manifest are separate CI/CD steps:
    This creates and publishes the Gitea release, but does not publish it to the
    update system.
 2. A manual `.gitea/workflows/publish-update-manifest.yml` run selects which
-   existing Gitea release is visible to users. It downloads the selected release
-   assets, computes SHA-256 and file sizes, adds `downloads`, adds matching
-   `selfUpdate` entries, uploads `meshapp.json` back to the Gitea release, and
-   deploys it to the Flatpak server at `${FLATPAK_DEPLOY_PATH}/meshapp.json`,
+   existing Gitea release is visible to users by the tag chosen in the Gitea
+   workflow ref menu. It downloads the selected release assets, computes SHA-256
+   and file sizes, adds `downloads`, adds matching `selfUpdate` entries, and
+   deploys `meshapp.json` to the Flatpak server at `${FLATPAK_DEPLOY_PATH}/meshapp.json`,
    which is publicly available as `https://flatpak.privatepractice.app/meshapp.json`.
    nginx for `meshapp.privatepractice.app` should reverse-proxy
    `/meshapp.json` to that Flatpak URL.
@@ -80,7 +80,7 @@ The manifest generator is `.gitea/scripts/generate-update-manifest.sh`.
 
 CI variables and secrets:
 
-- `RELEASE_TOKEN`: required; used to read and upload Gitea release assets
+- `RELEASE_TOKEN`: required; used to read selected Gitea release assets
 - `MESHAPP_UPDATE_ED25519_PUBLIC_KEY`: optional at build time; bundled into
   `/update/ed25519-public-key.txt` so the client trusts signed artifacts
 - `MESHAPP_UPDATE_ED25519_PRIVATE_KEY`: optional; signs self-update artifacts
@@ -97,7 +97,7 @@ CI variables and secrets:
 
 Manual update publication inputs:
 
-- `release_tag`: required; existing Gitea release tag, for example `v2.1.20`
+- selected workflow ref: required; choose an existing release tag, for example `v2.1.20`
 - `release_notes`: required; exported as `MESHAPP_RELEASE_NOTES` for `meshapp.json`
 - `release_notes_ru`: required; exported as `MESHAPP_RELEASE_NOTES_RU` for `meshapp.json`
 

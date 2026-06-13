@@ -7,7 +7,52 @@ trim() {
 
 event_input() {
   local name="$1"
-  jq -r --arg name "${name}" '.inputs[$name] // empty' "${GITHUB_EVENT_PATH}" 2>/dev/null | trim
+  jq -r --arg name "${name}" '.inputs[$name] // empty' "${GITHUB_EVENT_PATH:-/dev/null}" 2>/dev/null | trim || true
+}
+
+event_value() {
+  local name="$1"
+  jq -r --arg name "${name}" '.[$name] // empty' "${GITHUB_EVENT_PATH:-/dev/null}" 2>/dev/null | trim || true
+}
+
+selected_release_ref() {
+  local ref="${GITHUB_REF:-}"
+  local ref_name="${GITHUB_REF_NAME:-}"
+  local ref_type="${GITHUB_REF_TYPE:-}"
+
+  if [ -z "${ref}" ]; then
+    ref="$(event_value ref)"
+  fi
+
+  if [ "${ref_type}" = "tag" ] && [ -n "${ref_name}" ]; then
+    printf '%s\n' "${ref_name}"
+    return
+  fi
+
+  case "${ref}" in
+    refs/tags/*)
+      printf '%s\n' "${ref#refs/tags/}"
+      return
+      ;;
+    refs/heads/*|refs/pull/*)
+      echo "::error::Select a release tag in the Gitea workflow ref menu; selected ref is '${ref}'." >&2
+      exit 1
+      ;;
+  esac
+
+  if [ -n "${ref_type}" ] && [ "${ref_type}" != "tag" ]; then
+    echo "::error::Select a release tag in the Gitea workflow ref menu; selected ref type is '${ref_type}'." >&2
+    exit 1
+  fi
+
+  if [ -n "${ref}" ]; then
+    printf '%s\n' "${ref}"
+    return
+  fi
+
+  if [ -n "${ref_name}" ]; then
+    printf '%s\n' "${ref_name}"
+  fi
 }
 
 write_env_value() {
@@ -31,17 +76,24 @@ version="$(event_input release_tag)"
 if [ -z "${version}" ]; then
   version="$(event_input version)"
 fi
+if [ -z "${version}" ]; then
+  version="$(selected_release_ref)"
+fi
 release_notes="$(event_input release_notes)"
 release_notes_ru="$(event_input release_notes_ru)"
 
 if [ -z "${version}" ]; then
-  echo "::error::Set workflow_dispatch input 'release_tag', for example v2.1.20" >&2
+  echo "::error::Select a release tag in the Gitea workflow ref menu, for example v2.1.20" >&2
   exit 1
 fi
 
 case "${version}" in
   refs/tags/*)
     version="${version#refs/tags/}"
+    ;;
+  refs/heads/*|refs/pull/*)
+    echo "::error::Select a release tag in the Gitea workflow ref menu; selected ref is '${version}'." >&2
+    exit 1
     ;;
 esac
 
@@ -60,6 +112,11 @@ case "${release_tag}" in
     exit 1
     ;;
 esac
+
+if ! git rev-parse -q --verify "refs/tags/${release_tag}" >/dev/null 2>&1; then
+  echo "::error::Selected workflow ref must be an existing release tag. Resolved '${release_tag}' from '${version}'." >&2
+  exit 1
+fi
 
 write_env_value RELEASE_TAG "${release_tag}"
 write_env_value MESHAPP_VERSION "${release_tag}"
