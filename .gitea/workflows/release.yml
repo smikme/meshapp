@@ -95,6 +95,15 @@ jobs:
             echo "::error::MESHAPP_UPDATE_ED25519_PUBLIC_KEY is required for release builds"
             exit 1
           fi
+          TAG="${GITHUB_REF_NAME:-${GITHUB_REF##refs/tags/}}"
+          case "${TAG}" in
+            v*.*.*) ;;
+            *)
+              echo "::error::Release build must run from a version tag, got '${TAG}'"
+              exit 1
+              ;;
+          esac
+          export MESHAPP_VERSION="${TAG}"
           if [ "${APPIMAGE_ENABLED}" = "true" ]; then
             APPIMAGE_EXTRACT_AND_RUN=1 ./gradlew jpackage appImage flatpak selfUpdateArchive verifySelfUpdatePackage -Pappimagetool="${APPIMAGETOOL_PATH}" --no-daemon
           else
@@ -138,6 +147,15 @@ jobs:
             echo "::error::MESHAPP_UPDATE_ED25519_PUBLIC_KEY is required for release builds"
             exit 1
           fi
+          TAG="${GITHUB_REF_NAME:-${GITHUB_REF##refs/tags/}}"
+          case "${TAG}" in
+            v*.*.*) ;;
+            *)
+              echo "::error::Release build must run from a version tag, got '${TAG}'"
+              exit 1
+              ;;
+          esac
+          export MESHAPP_VERSION="${TAG}"
           ./gradlew.bat jpackage selfUpdateArchive verifySelfUpdatePackage --no-daemon
 
       - name: Upload to Gitea Release
@@ -311,6 +329,15 @@ jobs:
             echo "::error::MESHAPP_UPDATE_ED25519_PUBLIC_KEY is required for release builds"
             exit 1
           fi
+          TAG="${GITHUB_REF_NAME:-${GITHUB_REF##refs/tags/}}"
+          case "${TAG}" in
+            v*.*.*) ;;
+            *)
+              echo "::error::Release build must run from a version tag, got '${TAG}'"
+              exit 1
+              ;;
+          esac
+          export MESHAPP_VERSION="${TAG}"
           ./gradlew jpackage selfUpdateArchive verifySelfUpdatePackage --no-daemon
 
       - name: Verify macOS artifact
