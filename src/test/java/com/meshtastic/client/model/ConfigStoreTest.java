@@ -86,6 +86,31 @@ class ConfigStoreTest {
     }
 
     @Test
+    void addModuleConfigReplacesExistingVariant() {
+        ConfigStore store = new ConfigStore();
+
+        ModuleConfigProtos.ModuleConfig disabled =
+                ModuleConfigProtos.ModuleConfig.newBuilder()
+                        .setStoreForward(ModuleConfigProtos.ModuleConfig.StoreForwardConfig.newBuilder()
+                                .setEnabled(false)
+                                .build())
+                        .build();
+        ModuleConfigProtos.ModuleConfig enabled =
+                ModuleConfigProtos.ModuleConfig.newBuilder()
+                        .setStoreForward(ModuleConfigProtos.ModuleConfig.StoreForwardConfig.newBuilder()
+                                .setEnabled(true)
+                                .build())
+                        .build();
+
+        store.addModuleConfig(disabled);
+        store.addModuleConfig(enabled);
+
+        List<ModuleConfigProtos.ModuleConfig> configs = store.getModuleConfigs();
+        assertEquals(1, configs.size());
+        assertTrue(configs.getFirst().getStoreForward().getEnabled());
+    }
+
+    @Test
     void clearRemovesAllConfigsAndModuleConfigs() {
         ConfigStore store = new ConfigStore();
         

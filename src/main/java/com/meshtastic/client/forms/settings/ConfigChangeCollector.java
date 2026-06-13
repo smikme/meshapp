@@ -177,7 +177,7 @@ public final class ConfigChangeCollector {
         return Optional
             .ofNullable(section.getValue())
             .flatMap(sectionData ->
-                ConfigProtobufSupport.findOriginalConfig(
+                ConfigProtobufSupport.findOrCreateConfig(
                     originalConfigs,
                     sectionData.getConfigVariantNumber()
                 )
@@ -193,7 +193,7 @@ public final class ConfigChangeCollector {
         return Optional
             .ofNullable(section.getValue())
             .flatMap(sectionData ->
-                ConfigProtobufSupport.findOriginalModuleConfig(
+                ConfigProtobufSupport.findOrCreateModuleConfig(
                     originalModuleConfigs,
                     sectionData.getConfigVariantNumber()
                 )

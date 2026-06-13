@@ -88,11 +88,13 @@ jobs:
           echo "APPIMAGETOOL_PATH=${APPIMAGETOOL_PATH}" >> "$GITHUB_ENV"
 
       - name: Build Linux artifacts
+        env:
+          MESHAPP_UPDATE_ED25519_PUBLIC_KEY: ${{ secrets.MESHAPP_UPDATE_ED25519_PUBLIC_KEY }}
         run: |
           if [ "${APPIMAGE_ENABLED}" = "true" ]; then
-            APPIMAGE_EXTRACT_AND_RUN=1 ./gradlew jpackage appImage flatpak -Pappimagetool="${APPIMAGETOOL_PATH}" --no-daemon
+            APPIMAGE_EXTRACT_AND_RUN=1 ./gradlew jpackage appImage flatpak selfUpdateArchive -Pappimagetool="${APPIMAGETOOL_PATH}" --no-daemon
           else
-            ./gradlew jpackage flatpak --no-daemon
+            ./gradlew jpackage flatpak selfUpdateArchive --no-daemon
           fi
 
       - name: Upload to Gitea Release
@@ -104,7 +106,7 @@ jobs:
           RELEASE_ID=$(curl -sf \
             -H "Authorization: token ${GITEA_TOKEN}" \
             "${API}/releases/tags/${TAG}" | jq -r '.id')
-          for file in build/jpackage/*.deb build/jpackage/*.AppImage build/jpackage/*.flatpak; do
+          for file in build/jpackage/*.deb build/jpackage/*.AppImage build/jpackage/*.flatpak build/jpackage/*selfupdate.zip; do
             [ -f "$file" ] || continue
             echo "Uploading $(basename "$file")..."
             curl -sf -X POST \
@@ -123,7 +125,10 @@ jobs:
           git clone "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git" .
           git checkout "${GITHUB_SHA}"
 
-      - run: .\gradlew.bat jpackage --no-daemon
+      - name: Build Windows artifacts
+        env:
+          MESHAPP_UPDATE_ED25519_PUBLIC_KEY: ${{ secrets.MESHAPP_UPDATE_ED25519_PUBLIC_KEY }}
+        run: .\gradlew.bat jpackage selfUpdateArchive --no-daemon
 
       - name: Upload to Gitea Release
         shell: bash
@@ -135,7 +140,7 @@ jobs:
           RELEASE_ID=$(curl -sf \
             -H "Authorization: token ${GITEA_TOKEN}" \
             "${API}/releases/tags/${TAG}" | jq -r '.id')
-          for file in build/jpackage/*.msi; do
+          for file in build/jpackage/*.msi build/jpackage/*selfupdate.zip; do
             [ -f "$file" ] || continue
             echo "Uploading $(basename "$file")..."
             curl -sf -X POST \
@@ -163,6 +168,7 @@ jobs:
       MAC_NOTARY_KEY_FILE_BASE64: ${{ secrets.MAC_NOTARY_KEY_FILE_BASE64 }}
       MAC_NOTARY_KEY_ID: ${{ secrets.MAC_NOTARY_KEY_ID }}
       MAC_NOTARY_ISSUER: ${{ secrets.MAC_NOTARY_ISSUER }}
+      MESHAPP_UPDATE_ED25519_PUBLIC_KEY: ${{ secrets.MESHAPP_UPDATE_ED25519_PUBLIC_KEY }}
     steps:
       - run: |
           git clone "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git" .
@@ -290,7 +296,7 @@ jobs:
           fi
 
       - name: Build macOS artifact
-        run: ./gradlew jpackage --no-daemon
+        run: ./gradlew jpackage selfUpdateArchive --no-daemon
 
       - name: Verify macOS artifact
         run: |
@@ -315,7 +321,7 @@ jobs:
           RELEASE_ID=$(curl -sf \
             -H "Authorization: token ${GITEA_TOKEN}" \
             "${API}/releases/tags/${TAG}" | jq -r '.id')
-          for file in build/jpackage/*.dmg; do
+          for file in build/jpackage/*.dmg build/jpackage/*selfupdate.zip; do
             [ -f "$file" ] || continue
             echo "Uploading $(basename "$file")..."
             curl -sf -X POST \

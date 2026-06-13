@@ -37,11 +37,12 @@ import java.util.concurrent.ConcurrentHashMap;
 public final class NodeCacheService {
 
     private static final Logger log = LoggerFactory.getLogger(NodeCacheService.class);
+    private static final int MAX_MISSING_NODE_IDS = 10_000;
 
     private static NodeCacheService instance;
 
     private final ConcurrentHashMap<String, NodeData> cache = new ConcurrentHashMap<>();
-    private final Set<String> missingNodeIds = ConcurrentHashMap.newKeySet();
+    private final Set<String> missingNodeIds = newBoundedMissingNodeSet();
     private Connection dbConnection;
     private PreparedStatement mergeStmt;
     private PreparedStatement insertTelemetryStmt;
@@ -65,6 +66,17 @@ public final class NodeCacheService {
         if (instance != null) {
             instance.close();
         }
+    }
+
+    private static Set<String> newBoundedMissingNodeSet() {
+        int capacity = (int) (MAX_MISSING_NODE_IDS / 0.75f) + 1;
+        return Collections.synchronizedSet(Collections.newSetFromMap(
+                new LinkedHashMap<String, Boolean>(capacity, 0.75f) {
+                    @Override
+                    protected boolean removeEldestEntry(Map.Entry<String, Boolean> eldest) {
+                        return size() > MAX_MISSING_NODE_IDS;
+                    }
+                }));
     }
 
     // ═══════════════════════════════════════════════════════════

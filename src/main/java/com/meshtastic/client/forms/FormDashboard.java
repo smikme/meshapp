@@ -12,12 +12,12 @@ import com.meshtastic.client.system.Form;
 import com.meshtastic.client.utils.BatteryLevelEstimator;
 import com.meshtastic.client.utils.SystemForm;
 import javafx.application.Platform;
+import javafx.beans.value.ChangeListener;
 import javafx.beans.property.ReadOnlyStringWrapper;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import javafx.geometry.Insets;
 import javafx.geometry.Orientation;
-import javafx.scene.Node;
 import javafx.scene.control.Label;
 import javafx.scene.control.ScrollBar;
 import javafx.scene.control.Tab;
@@ -54,6 +54,7 @@ public class FormDashboard extends Form {
     private TelemetryChartPanel chartPanel;
     private Label logCountLabel;
     private TableView<TelemetryLogRow> logTable;
+    private ScrollBar logTableVerticalScrollBar;
     private final ObservableList<TelemetryLogRow> logData = FXCollections.observableArrayList();
 
     /** Full entry list, newest first, used for paged loading. */
@@ -62,8 +63,19 @@ public class FormDashboard extends Form {
     private int loadedCount;
 
     private DeviceState state;
+    private boolean formVisible;
 
-    private final Runnable connectionListener = () -> Platform.runLater(this::rebindState);
+    private final ChangeListener<Number> logTableScrollListener = (obs, oldValue, newValue) -> {
+        if (newValue.doubleValue() >= 0.95 && loadedCount < allEntries.size()) {
+            loadNextPage();
+        }
+    };
+
+    private final Runnable connectionListener = () -> Platform.runLater(() -> {
+        if (formVisible) {
+            rebindState();
+        }
+    });
 
     public FormDashboard() {
         init();
@@ -112,17 +124,27 @@ public class FormDashboard extends Form {
     @Override
     public void formInit() {
         ConnectionManager.getInstance().addListener(connectionListener);
-        rebindState();
     }
 
     @Override
     public void formOpen() {
+        formVisible = true;
         rebindState();
     }
 
     @Override
+    public void formClose() {
+        formVisible = false;
+        state = null;
+        chartPanel.unbind();
+        clearLogData();
+    }
+
+    @Override
     public void formRefresh() {
-        refresh();
+        if (formVisible) {
+            refresh();
+        }
     }
 
     // ==================== DeviceState Binding ====================
@@ -144,8 +166,7 @@ public class FormDashboard extends Form {
         // No connection: do not show stale data.
         if (state == null || state.getMyNodeNum() == 0) {
             chartPanel.unbind();
-            logData.clear();
-            logCountLabel.setText(formatLogCount(0, 0));
+            clearLogData();
             return;
         }
 
@@ -153,6 +174,13 @@ public class FormDashboard extends Form {
         NodeData myNode = state.getNodeDb().get(state.getMyNodeNum());
         String myNodeId = myNode != null ? myNode.getNodeId() : String.format("!%08x", state.getMyNodeNum());
         chartPanel.bind(state, myNodeId);
+    }
+
+    private void clearLogData() {
+        allEntries = Collections.emptyList();
+        loadedCount = 0;
+        logData.clear();
+        logCountLabel.setText(formatLogCount(0, 0));
     }
 
     /** Called by TelemetryChartPanel after chart data is refreshed. */
@@ -244,20 +272,45 @@ public class FormDashboard extends Form {
 
         // Lazy loading: load the next page when scrolling near the bottom.
         table.skinProperty().addListener((obs, oldSkin, newSkin) -> {
-            if (newSkin == null) return;
-            for (Node node : table.lookupAll(".scroll-bar")) {
-                if (node instanceof ScrollBar sb && sb.getOrientation() == Orientation.VERTICAL) {
-                    sb.valueProperty().addListener((v, oldVal, newVal) -> {
-                        if (newVal.doubleValue() >= 0.95 && loadedCount < allEntries.size()) {
-                            loadNextPage();
-                        }
-                    });
-                    break;
-                }
+            if (newSkin == null) {
+                detachLogTableScrollListener();
+            } else {
+                Platform.runLater(() -> attachLogTableScrollListener(table));
             }
         });
 
         return table;
+    }
+
+    private void attachLogTableScrollListener(TableView<TelemetryLogRow> table) {
+        if (table.getSkin() == null) {
+            detachLogTableScrollListener();
+            return;
+        }
+
+        ScrollBar newScrollBar = table.lookupAll(".scroll-bar").stream()
+                .filter(ScrollBar.class::isInstance)
+                .map(ScrollBar.class::cast)
+                .filter(scrollBar -> scrollBar.getOrientation() == Orientation.VERTICAL)
+                .findFirst()
+                .orElse(null);
+
+        if (logTableVerticalScrollBar == newScrollBar) {
+            return;
+        }
+        detachLogTableScrollListener();
+
+        logTableVerticalScrollBar = newScrollBar;
+        if (logTableVerticalScrollBar != null) {
+            logTableVerticalScrollBar.valueProperty().addListener(logTableScrollListener);
+        }
+    }
+
+    private void detachLogTableScrollListener() {
+        if (logTableVerticalScrollBar != null) {
+            logTableVerticalScrollBar.valueProperty().removeListener(logTableScrollListener);
+            logTableVerticalScrollBar = null;
+        }
     }
 
     private void updateLogTable(List<TelemetryEntry> entries) {

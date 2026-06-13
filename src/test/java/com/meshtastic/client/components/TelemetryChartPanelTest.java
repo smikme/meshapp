@@ -7,6 +7,7 @@ import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.model.TelemetryEntry;
 import javafx.application.Platform;
+import javafx.collections.ListChangeListener;
 import javafx.scene.chart.AreaChart;
 import javafx.scene.chart.NumberAxis;
 import javafx.scene.chart.XYChart;
@@ -22,11 +23,14 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
@@ -237,6 +241,56 @@ class TelemetryChartPanelTest {
     }
 
     @Test
+    void coalescesQueuedTelemetryRefreshesBeforeFxThreadRuns() {
+        TelemetryChartPanel panel = onFxThread(() -> new TelemetryChartPanel(true));
+        AreaChart<Number, Number> basicChart = chartField(panel, "chart");
+        AtomicInteger chartDataChanges = new AtomicInteger();
+        basicChart.getData().addListener((ListChangeListener<XYChart.Series<Number, Number>>) change ->
+                chartDataChanges.incrementAndGet());
+
+        CountDownLatch fxBlocked = new CountDownLatch(1);
+        CountDownLatch releaseFx = new CountDownLatch(1);
+        Platform.runLater(() -> {
+            fxBlocked.countDown();
+            try {
+                if (!releaseFx.await(5, TimeUnit.SECONDS)) {
+                    throw new AssertionError("Timed out waiting to release FX thread");
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new AssertionError("Interrupted while blocking FX thread", e);
+            }
+        });
+        await(fxBlocked);
+
+        Runnable listener = telemetryListener(panel);
+        for (int i = 0; i < 10; i++) {
+            listener.run();
+        }
+        assertTrue(refreshQueued(panel).get());
+
+        releaseFx.countDown();
+        onFxThread(() -> null);
+
+        assertEquals(1, chartDataChanges.get());
+        assertFalse(refreshQueued(panel).get());
+    }
+
+    @Test
+    void dashboardCloseUnbindsTelemetryChart() {
+        FormDashboard dashboard = onFxThread(FormDashboard::new);
+        TrackingTelemetryChartPanel replacement = onFxThread(TrackingTelemetryChartPanel::new);
+        replaceChartPanel(dashboard, replacement);
+
+        onFxThread(() -> {
+            dashboard.formClose();
+            return null;
+        });
+
+        assertEquals(1, replacement.unbindCount.get());
+    }
+
+    @Test
     void derivesRateAndTxSeriesFromCounterDeltasIncludingCounterReset() {
         TelemetryChartPanel panel = onFxThread(() -> new TelemetryChartPanel(false));
 
@@ -358,6 +412,26 @@ class TelemetryChartPanelTest {
         }
     }
 
+    private static Runnable telemetryListener(TelemetryChartPanel panel) {
+        try {
+            Field field = TelemetryChartPanel.class.getDeclaredField("telemetryListener");
+            field.setAccessible(true);
+            return (Runnable) field.get(panel);
+        } catch (ReflectiveOperationException e) {
+            throw new AssertionError("Failed to read telemetry listener", e);
+        }
+    }
+
+    private static AtomicBoolean refreshQueued(TelemetryChartPanel panel) {
+        try {
+            Field field = TelemetryChartPanel.class.getDeclaredField("refreshQueued");
+            field.setAccessible(true);
+            return (AtomicBoolean) field.get(panel);
+        } catch (ReflectiveOperationException e) {
+            throw new AssertionError("Failed to read refresh queue flag", e);
+        }
+    }
+
     @SuppressWarnings("unchecked")
     private static AreaChart<Number, Number> chartField(TelemetryChartPanel panel, String fieldName) {
         try {
@@ -366,6 +440,16 @@ class TelemetryChartPanelTest {
             return (AreaChart<Number, Number>) field.get(panel);
         } catch (ReflectiveOperationException e) {
             throw new AssertionError("Failed to read chart field " + fieldName, e);
+        }
+    }
+
+    private static void replaceChartPanel(FormDashboard dashboard, TelemetryChartPanel panel) {
+        try {
+            Field field = FormDashboard.class.getDeclaredField("chartPanel");
+            field.setAccessible(true);
+            field.set(dashboard, panel);
+        } catch (ReflectiveOperationException e) {
+            throw new AssertionError("Failed to replace dashboard chart panel", e);
         }
     }
 
@@ -432,5 +516,18 @@ class TelemetryChartPanelTest {
     @FunctionalInterface
     private interface FxSupplier<T> {
         T get() throws Exception;
+    }
+
+    private static final class TrackingTelemetryChartPanel extends TelemetryChartPanel {
+        private final AtomicInteger unbindCount = new AtomicInteger();
+
+        private TrackingTelemetryChartPanel() {
+            super(true);
+        }
+
+        @Override
+        public void unbind() {
+            unbindCount.incrementAndGet();
+        }
     }
 }

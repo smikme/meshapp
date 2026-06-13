@@ -408,7 +408,7 @@ class ConfigExchangeServiceTest {
         assertTrue(sentPositionTime >= beforeSeconds && sentPositionTime <= afterSeconds);
 
         MeshProtos.MeshPacket timeSyncPacket = connection.awaitPacket(Portnums.PortNum.ADMIN_APP);
-        assertEquals(0, timeSyncPacket.getFrom());
+        assertEquals(0x12345678, timeSyncPacket.getFrom());
         assertEquals(0x12345678, timeSyncPacket.getTo());
         assertFalse(timeSyncPacket.getDecoded().getWantResponse());
 

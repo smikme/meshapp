@@ -43,6 +43,7 @@ public final class MessageService {
     private static final String BROADCAST_NODE_ID = "!ffffffff";
     private static final long OWNER_INFO_EXCHANGE_WAIT_MS = 2_500;
     private static final long PKI_PREP_ACK_WAIT_MS = 10_000;
+    private static final int DEFAULT_HOP_LIMIT = 3;
 
     private MessageService() {}
 
@@ -983,14 +984,17 @@ public final class MessageService {
 
         int packetId = ThreadLocalRandom.current().nextInt(1, Integer.MAX_VALUE);
 
-        // PhoneAPI treats from=0 as a local client command; from=myNodeNum is
-        // handled by firmware as remote admin and requires admin-channel/PKI auth.
+        int hopLimit = adminHopLimit(state);
+        int fromNodeNum = state.getMyNodeNum();
         MeshProtos.MeshPacket packet = MeshProtos.MeshPacket.newBuilder()
-                .setFrom(0)
+                .setFrom(fromNodeNum)
                 .setTo(state.getMyNodeNum())
                 .setDecoded(data)
                 .setId(packetId)
                 .setWantAck(true)
+                .setHopLimit(hopLimit)
+                .setHopStart(hopLimit)
+                .setPriority(MeshProtos.MeshPacket.Priority.RELIABLE)
                 .build();
 
         MeshProtos.ToRadio toRadio = MeshProtos.ToRadio.newBuilder()
@@ -1000,6 +1004,24 @@ public final class MessageService {
         CompletableFuture<MeshProtos.Routing.Error> ackFuture = state.registerPendingPacketAck(packetId);
         handler.sendToRadio(toRadio);
         return ackFuture;
+    }
+
+    private static int adminHopLimit(DeviceState state) {
+        if (state == null) {
+            return DEFAULT_HOP_LIMIT;
+        }
+        List<ConfigProtos.Config> configs = state.getConfigs();
+        synchronized (configs) {
+            for (ConfigProtos.Config config : configs) {
+                if (config.getPayloadVariantCase() == ConfigProtos.Config.PayloadVariantCase.LORA) {
+                    int hopLimit = config.getLora().getHopLimit();
+                    if (hopLimit > 0) {
+                        return hopLimit;
+                    }
+                }
+            }
+        }
+        return DEFAULT_HOP_LIMIT;
     }
 
     private static void requestOwnerInfoThenExchange(ProtocolHandler handler, DeviceState state, int targetNodeNum) {

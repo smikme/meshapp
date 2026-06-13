@@ -219,6 +219,61 @@ class FormSettingTest {
     }
 
     @Test
+    void shouldRequireMutatingConfigSaveAckForBleTransport() {
+        CompletableFuture<MeshProtos.Routing.Error> okFuture =
+                CompletableFuture.completedFuture(MeshProtos.Routing.Error.NONE);
+        CompletableFuture<MeshProtos.Routing.Error> badFuture =
+                CompletableFuture.completedFuture(MeshProtos.Routing.Error.BAD_REQUEST);
+
+        assertDoesNotThrow(() ->
+                ConfigSavePolicy.waitForMutatingStepAck(
+                        ConnectionType.BLE,
+                        okFuture,
+                        "setModuleConfig/STORE_FORWARD",
+                        log));
+        assertThrows(IllegalStateException.class, () ->
+                ConfigSavePolicy.waitForMutatingStepAck(
+                        ConnectionType.BLE,
+                        badFuture,
+                        "setModuleConfig/STORE_FORWARD",
+                        log));
+    }
+
+    @Test
+    void shouldNotBlockTcpSerialMutatingSaveWhenAckIsNotObserved() {
+        CompletableFuture<MeshProtos.Routing.Error> tcpAckFuture = new CompletableFuture<>();
+        CompletableFuture<MeshProtos.Routing.Error> serialAckFuture = new CompletableFuture<>();
+
+        assertDoesNotThrow(() ->
+                ConfigSavePolicy.waitForMutatingStepAck(
+                        ConnectionType.TCP,
+                        tcpAckFuture,
+                        "setModuleConfig/STORE_FORWARD",
+                        log));
+        assertDoesNotThrow(() ->
+                ConfigSavePolicy.waitForMutatingStepAck(
+                        ConnectionType.SERIAL,
+                        serialAckFuture,
+                        "setModuleConfig/STORE_FORWARD",
+                        log));
+        assertFalse(tcpAckFuture.isDone());
+        assertFalse(serialAckFuture.isDone());
+    }
+
+    @Test
+    void shouldFailTcpCommitOnExplicitRoutingError() {
+        CompletableFuture<MeshProtos.Routing.Error> ackFuture =
+                CompletableFuture.completedFuture(MeshProtos.Routing.Error.BAD_REQUEST);
+
+        assertThrows(IllegalStateException.class, () ->
+                ConfigSavePolicy.handleCommitAck(
+                        ConnectionType.TCP,
+                        ackFuture,
+                        "commitEditSettings",
+                        log));
+    }
+
+    @Test
     void clearsLoadedConfigWhenConnectionIsDisconnected() throws Exception {
         ConnectionManager manager = ConnectionManager.getInstance();
         ConnectionEntry entry = new ConnectionEntry("Test radio", "localhost", 4403);

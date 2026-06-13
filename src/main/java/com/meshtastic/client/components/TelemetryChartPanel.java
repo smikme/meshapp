@@ -5,6 +5,7 @@ import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.TelemetryEntry;
 import com.meshtastic.client.service.NodeCacheService;
 import javafx.application.Platform;
+import javafx.event.EventHandler;
 import javafx.geometry.Bounds;
 import javafx.geometry.Insets;
 import javafx.geometry.Point2D;
@@ -31,6 +32,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -46,6 +48,7 @@ import java.util.stream.Stream;
 public class TelemetryChartPanel extends VBox {
 
     private static final DateTimeFormatter AXIS_FMT = DateTimeFormatter.ofPattern("dd.MM HH:mm");
+    private static final Object CROSSHAIR_FILTERS_KEY = new Object();
 
     private static final long PERIOD_1H = 3600;
     private static final long PERIOD_6H = 6L * 3600;
@@ -77,7 +80,8 @@ public class TelemetryChartPanel extends VBox {
 
     private long selectedPeriodSeconds = PERIOD_6H;
     private BindingState bindingState = Unbound.INSTANCE;
-    private final Runnable telemetryListener = () -> Platform.runLater(this::refresh);
+    private final AtomicBoolean refreshQueued = new AtomicBoolean(false);
+    private final Runnable telemetryListener = this::queueRefresh;
 
     /** Callback invoked after data refresh, used to synchronize the log table. */
     private Runnable onDataRefreshed = () -> {};
@@ -90,6 +94,15 @@ public class TelemetryChartPanel extends VBox {
     private record ChartBinding(TelemetryChartDataBuilder.ChartKind kind, AreaChart<Number, Number> chart) {}
 
     private record InteractiveNodes(Region plotArea, Node chartContent) {}
+
+    private record CrosshairFilters(Node chartContent,
+                                    EventHandler<MouseEvent> clickHandler,
+                                    EventHandler<MouseEvent> moveHandler) {
+        private void detach() {
+            chartContent.removeEventFilter(MouseEvent.MOUSE_CLICKED, clickHandler);
+            chartContent.removeEventFilter(MouseEvent.MOUSE_MOVED, moveHandler);
+        }
+    }
 
     private sealed interface BindingState permits Bound, Unbound {}
 
@@ -198,6 +211,20 @@ public class TelemetryChartPanel extends VBox {
                 filteredEntries = List.of();
                 updateChart(List.of(), List.of());
             }
+        }
+    }
+
+    private void queueRefresh() {
+        if (!refreshQueued.compareAndSet(false, true)) {
+            return;
+        }
+        try {
+            Platform.runLater(() -> {
+                refreshQueued.set(false);
+                refresh();
+            });
+        } catch (IllegalStateException e) {
+            refreshQueued.set(false);
         }
     }
 
@@ -391,10 +418,19 @@ public class TelemetryChartPanel extends VBox {
                                   Line crosshair,
                                   Label valueLabel,
                                   StackPane wrapper) {
-        areaChart.sceneProperty().addListener((obs, oldScene, newScene) ->
-                Optional.ofNullable(newScene).ifPresent(scene -> Platform.runLater(() ->
-                        resolveInteractiveNodes(areaChart)
-                                .ifPresent(nodes -> installCrosshairHandlers(areaChart, crosshair, valueLabel, wrapper, nodes)))));
+        areaChart.sceneProperty().addListener((obs, oldScene, newScene) -> {
+            if (newScene == null) {
+                clearCrosshairHandlers(areaChart);
+                return;
+            }
+            Platform.runLater(() -> {
+                if (areaChart.getScene() != newScene) {
+                    return;
+                }
+                resolveInteractiveNodes(areaChart)
+                        .ifPresent(nodes -> installCrosshairHandlers(areaChart, crosshair, valueLabel, wrapper, nodes));
+            });
+        });
     }
 
     private Optional<InteractiveNodes> resolveInteractiveNodes(AreaChart<Number, Number> areaChart) {
@@ -417,20 +453,34 @@ public class TelemetryChartPanel extends VBox {
                                           Label valueLabel,
                                           StackPane wrapper,
                                           InteractiveNodes nodes) {
-        nodes.chartContent().addEventFilter(MouseEvent.MOUSE_CLICKED, event -> {
+        clearCrosshairHandlers(areaChart);
+
+        EventHandler<MouseEvent> clickHandler = event -> {
             Point2D local = nodes.plotArea().sceneToLocal(event.getSceneX(), event.getSceneY());
             if (nodes.plotArea().contains(local)) {
                 showCrosshair(local.getX(), areaChart, crosshair, valueLabel, wrapper, nodes.plotArea());
             }
-        });
+        };
 
-        nodes.chartContent().addEventFilter(MouseEvent.MOUSE_MOVED, event -> {
+        EventHandler<MouseEvent> moveHandler = event -> {
             Point2D local = nodes.plotArea().sceneToLocal(event.getSceneX(), event.getSceneY());
             if (!nodes.plotArea().contains(local)) {
                 crosshair.setVisible(false);
                 valueLabel.setVisible(false);
             }
-        });
+        };
+
+        nodes.chartContent().addEventFilter(MouseEvent.MOUSE_CLICKED, clickHandler);
+        nodes.chartContent().addEventFilter(MouseEvent.MOUSE_MOVED, moveHandler);
+        areaChart.getProperties().put(CROSSHAIR_FILTERS_KEY,
+                new CrosshairFilters(nodes.chartContent(), clickHandler, moveHandler));
+    }
+
+    private static void clearCrosshairHandlers(AreaChart<Number, Number> areaChart) {
+        Object previous = areaChart.getProperties().remove(CROSSHAIR_FILTERS_KEY);
+        if (previous instanceof CrosshairFilters filters) {
+            filters.detach();
+        }
     }
 
     private void showCrosshair(double localX,

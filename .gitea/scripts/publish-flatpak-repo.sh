@@ -221,6 +221,35 @@ publish_repo() {
   echo "Flatpak ref published to ${PUBLIC_BASE_URL%/}/${APP_ID}.flatpakref"
 }
 
+publish_update_manifest() {
+  require_env FLATPAK_DEPLOY_HOST
+  require_env FLATPAK_DEPLOY_USER
+  require_env FLATPAK_DEPLOY_PATH
+
+  local manifest_path remote deploy_path remote_shell
+  manifest_path="${MESHAPP_UPDATE_MANIFEST_PATH:-build/update/meshapp.json}"
+  if [ ! -f "${manifest_path}" ]; then
+    echo "::error::Update manifest not found: ${manifest_path}"
+    exit 1
+  fi
+
+  setup_ssh
+
+  remote="${FLATPAK_DEPLOY_USER}@${FLATPAK_DEPLOY_HOST}"
+  deploy_path="${FLATPAK_DEPLOY_PATH%/}"
+  remote_shell="ssh -i ${SSH_KEY_FILE} -p ${DEPLOY_SSH_PORT} -o StrictHostKeyChecking=yes"
+
+  check_remote_rsync "${remote}"
+
+  ssh -i "${SSH_KEY_FILE}" -p "${DEPLOY_SSH_PORT}" -o StrictHostKeyChecking=yes "${remote}" \
+    "mkdir -p $(shell_quote "${deploy_path}")"
+
+  rsync -az \
+    -e "${remote_shell}" "${manifest_path}" "${remote}:${deploy_path}/meshapp.json"
+
+  echo "Update manifest published to ${deploy_path}/meshapp.json on ${FLATPAK_DEPLOY_HOST}"
+}
+
 command="${1:-publish}"
 
 case "${command}" in
@@ -234,8 +263,11 @@ case "${command}" in
   publish)
     publish_repo
     ;;
+  publish-update-manifest)
+    publish_update_manifest
+    ;;
   *)
-    echo "usage: $0 [import-key|sign|publish]"
+    echo "usage: $0 [import-key|sign|publish|publish-update-manifest]"
     exit 2
     ;;
 esac

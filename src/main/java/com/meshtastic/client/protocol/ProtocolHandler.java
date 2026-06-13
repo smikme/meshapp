@@ -296,6 +296,12 @@ public class ProtocolHandler {
                 log.debug("Received ModuleConfig: {}", fromRadio.getModuleConfig().getPayloadVariantCase());
                 notifyListeners(l -> l.onModuleConfig(fromRadio.getModuleConfig()));
             }
+            case METADATA -> {
+                MeshProtos.DeviceMetadata metadata = fromRadio.getMetadata();
+                log.debug("Received DeviceMetadata: firmwareVersion='{}', excludedModules={}",
+                        metadata.getFirmwareVersion(), metadata.getExcludedModules());
+                notifyListeners(l -> l.onDeviceMetadata(metadata));
+            }
             case CHANNEL -> {
                 log.debug("Received Channel: index={}", fromRadio.getChannel().getIndex());
                 notifyListeners(l -> l.onChannel(fromRadio.getChannel()));

@@ -10,9 +10,11 @@ import com.meshtastic.client.protocol.ProtocolHandler;
 import com.meshtastic.client.service.ConnectionManager;
 import com.meshtastic.client.service.MessageService;
 import com.meshtastic.client.system.FormManager;
+import com.meshtastic.client.utils.ProtobufTreeBuilder;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.IntStream;
@@ -88,6 +90,18 @@ public final class ConfigSaveController {
 
         if (!changes.hasChanges()) {
             host.setStatus(I18n.t("settings.config.status.noChanges"));
+            return;
+        }
+
+        Optional<String> excludedModuleName = firstExcludedModuleName(
+            actionState.getDeviceMetadata(),
+            changes.moduleConfigs()
+        );
+        if (excludedModuleName.isPresent()) {
+            host.setStatus(I18n.t(
+                "settings.config.status.moduleUnavailable",
+                excludedModuleName.get()
+            ));
             return;
         }
 
@@ -212,6 +226,76 @@ public final class ConfigSaveController {
         } else {
             completeSaveWithoutReconnect(changes.totalChanges());
         }
+    }
+
+    static Optional<String> firstExcludedModuleName(
+        MeshProtos.DeviceMetadata metadata,
+        List<ModuleConfigProtos.ModuleConfig> moduleConfigs
+    ) {
+        int excludedModules = metadata != null ? metadata.getExcludedModules() : 0;
+        if (excludedModules == 0 || moduleConfigs == null || moduleConfigs.isEmpty()) {
+            return Optional.empty();
+        }
+
+        return moduleConfigs
+            .stream()
+            .filter(moduleConfig ->
+                isExcludedModule(
+                    excludedModules,
+                    moduleConfig.getPayloadVariantCase()
+                )
+            )
+            .findFirst()
+            .map(ConfigSaveController::moduleDisplayName);
+    }
+
+    private static boolean isExcludedModule(
+        int excludedModules,
+        ModuleConfigProtos.ModuleConfig.PayloadVariantCase variant
+    ) {
+        int bit = excludedModuleBit(variant);
+        return bit != 0 && (excludedModules & bit) != 0;
+    }
+
+    private static int excludedModuleBit(
+        ModuleConfigProtos.ModuleConfig.PayloadVariantCase variant
+    ) {
+        return switch (variant) {
+            case MQTT -> MeshProtos.ExcludedModules.MQTT_CONFIG_VALUE;
+            case SERIAL -> MeshProtos.ExcludedModules.SERIAL_CONFIG_VALUE;
+            case EXTERNAL_NOTIFICATION ->
+                MeshProtos.ExcludedModules.EXTNOTIF_CONFIG_VALUE;
+            case STORE_FORWARD ->
+                MeshProtos.ExcludedModules.STOREFORWARD_CONFIG_VALUE;
+            case RANGE_TEST -> MeshProtos.ExcludedModules.RANGETEST_CONFIG_VALUE;
+            case TELEMETRY -> MeshProtos.ExcludedModules.TELEMETRY_CONFIG_VALUE;
+            case CANNED_MESSAGE ->
+                MeshProtos.ExcludedModules.CANNEDMSG_CONFIG_VALUE;
+            case AUDIO -> MeshProtos.ExcludedModules.AUDIO_CONFIG_VALUE;
+            case REMOTE_HARDWARE ->
+                MeshProtos.ExcludedModules.REMOTEHARDWARE_CONFIG_VALUE;
+            case NEIGHBOR_INFO ->
+                MeshProtos.ExcludedModules.NEIGHBORINFO_CONFIG_VALUE;
+            case AMBIENT_LIGHTING ->
+                MeshProtos.ExcludedModules.AMBIENTLIGHTING_CONFIG_VALUE;
+            case DETECTION_SENSOR ->
+                MeshProtos.ExcludedModules.DETECTIONSENSOR_CONFIG_VALUE;
+            case PAXCOUNTER -> MeshProtos.ExcludedModules.PAXCOUNTER_CONFIG_VALUE;
+            case STATUSMESSAGE, TRAFFIC_MANAGEMENT, TAK,
+                 PAYLOADVARIANT_NOT_SET -> 0;
+        };
+    }
+
+    private static String moduleDisplayName(
+        ModuleConfigProtos.ModuleConfig moduleConfig
+    ) {
+        int variantNumber = ConfigProtobufSupport.activeModuleOneofFieldNumber(
+            moduleConfig
+        );
+        return ConfigProtobufSupport
+            .moduleConfigFieldByVariantNumber(variantNumber)
+            .map(field -> ProtobufTreeBuilder.sectionDisplayName(field.getName()))
+            .orElse(moduleConfig.getPayloadVariantCase().name());
     }
 
     private ReconnectHandoff prepareReconnectHandoff(SaveRequest request) {
@@ -428,6 +512,7 @@ public final class ConfigSaveController {
             return;
         }
 
+        applySavedPacketConfigs(request.state(), request.changes());
         saveCompletionAnnounced.set(true);
         if (request.changes().requiresReconnect()) {
             markNavigationBlockAwaitingReconnect(request.activeEntry());
@@ -439,6 +524,18 @@ public final class ConfigSaveController {
                 request.changes().requiresReconnect()
             )
         );
+    }
+
+    private void applySavedPacketConfigs(
+        DeviceState actionState,
+        ConfigChangeSet changes
+    ) {
+        for (ConfigProtos.Config config : changes.configs()) {
+            actionState.addConfig(config);
+        }
+        for (ModuleConfigProtos.ModuleConfig moduleConfig : changes.moduleConfigs()) {
+            actionState.addModuleConfig(moduleConfig);
+        }
     }
 
     private void handleFailedSaveTask(
@@ -651,26 +748,21 @@ public final class ConfigSaveController {
                 .toList()
         );
 
-        boolean useImplicitBleModuleSave =
-            ConfigSavePolicy.shouldUseImplicitBleModuleSave(
-                activeTransport,
-                ownerModified,
-                positionModified,
-                configs,
+        boolean useDirectModuleSave =
+            configs.isEmpty() && !moduleConfigs.isEmpty();
+        if (useDirectModuleSave) {
+            tasks.addAll(
                 moduleConfigs
-            ) && channels.isEmpty();
-        if (useImplicitBleModuleSave) {
-            moduleConfigs
-                .stream()
-                .findFirst()
-                .map(moduleConfig ->
-                    implicitBleModuleSaveTask(
-                        actionHandler,
-                        actionState,
-                        moduleConfig
+                    .stream()
+                    .map(moduleConfig ->
+                        directModuleSaveTask(
+                            actionHandler,
+                            actionState,
+                            moduleConfig
+                        )
                     )
-                )
-                .ifPresent(tasks::add);
+                    .toList()
+            );
         } else if (requiresReconnect) {
             tasks.add(
                 beginEditSettingsTask(
@@ -679,7 +771,6 @@ public final class ConfigSaveController {
                     actionState
                 )
             );
-            int totalMutatingSteps = configs.size() + moduleConfigs.size();
             tasks.addAll(
                 Stream
                     .concat(
@@ -690,8 +781,7 @@ public final class ConfigSaveController {
                                     activeTransport,
                                     actionHandler,
                                     actionState,
-                                    configs.get(index),
-                                    index + 1 < totalMutatingSteps
+                                    configs.get(index)
                                 )
                             ),
                         IntStream
@@ -701,9 +791,7 @@ public final class ConfigSaveController {
                                     activeTransport,
                                     actionHandler,
                                     actionState,
-                                    moduleConfigs.get(index),
-                                    configs.size() + index + 1 <
-                                    totalMutatingSteps
+                                    moduleConfigs.get(index)
                                 )
                             )
                     )
@@ -748,25 +836,25 @@ public final class ConfigSaveController {
         };
     }
 
-    private Runnable implicitBleModuleSaveTask(
+    private Runnable directModuleSaveTask(
         ProtocolHandler actionHandler,
         DeviceState actionState,
-        ModuleConfigProtos.ModuleConfig mqttConfig
+        ModuleConfigProtos.ModuleConfig moduleConfig
     ) {
         return () -> {
             String stepName =
-                "setModuleConfig/" + mqttConfig.getPayloadVariantCase();
+                "setModuleConfig/" + moduleConfig.getPayloadVariantCase();
             log.info(
-                "Config save: implicit BLE {} variant={} size={}",
+                "Config save: direct {} variant={} size={}",
                 stepName,
-                mqttConfig.getPayloadVariantCase(),
-                mqttConfig.getSerializedSize()
+                moduleConfig.getPayloadVariantCase(),
+                moduleConfig.getSerializedSize()
             );
             CompletableFuture<MeshProtos.Routing.Error> ackFuture =
                 MessageService.setModuleConfig(
                     actionHandler,
                     actionState,
-                    mqttConfig
+                    moduleConfig
                 );
             ConfigSavePolicy.observeDeferredAck(ackFuture, stepName, log);
         };
@@ -792,8 +880,7 @@ public final class ConfigSaveController {
         ConnectionType activeTransport,
         ProtocolHandler actionHandler,
         DeviceState actionState,
-        ConfigProtos.Config config,
-        boolean waitForAckBeforeCommit
+        ConfigProtos.Config config
     ) {
         return () -> {
             String stepName = "setConfig/" + config.getPayloadVariantCase();
@@ -804,12 +891,7 @@ public final class ConfigSaveController {
             );
             CompletableFuture<MeshProtos.Routing.Error> ackFuture =
                 MessageService.setConfig(actionHandler, actionState, config);
-            observeOrWaitForMutatingStepAck(
-                activeTransport,
-                ackFuture,
-                stepName,
-                waitForAckBeforeCommit
-            );
+            waitForMutatingStepAck(activeTransport, ackFuture, stepName);
         };
     }
 
@@ -817,8 +899,7 @@ public final class ConfigSaveController {
         ConnectionType activeTransport,
         ProtocolHandler actionHandler,
         DeviceState actionState,
-        ModuleConfigProtos.ModuleConfig moduleConfig,
-        boolean waitForAckBeforeCommit
+        ModuleConfigProtos.ModuleConfig moduleConfig
     ) {
         return () -> {
             String stepName =
@@ -834,12 +915,7 @@ public final class ConfigSaveController {
                     actionState,
                     moduleConfig
                 );
-            observeOrWaitForMutatingStepAck(
-                activeTransport,
-                ackFuture,
-                stepName,
-                waitForAckBeforeCommit
-            );
+            waitForMutatingStepAck(activeTransport, ackFuture, stepName);
         };
     }
 
@@ -862,22 +938,17 @@ public final class ConfigSaveController {
         };
     }
 
-    private void observeOrWaitForMutatingStepAck(
+    private void waitForMutatingStepAck(
         ConnectionType activeTransport,
         CompletableFuture<MeshProtos.Routing.Error> ackFuture,
-        String stepName,
-        boolean waitForAckBeforeCommit
+        String stepName
     ) {
-        if (waitForAckBeforeCommit) {
-            ConfigSavePolicy.waitForTransportRequiredAck(
-                activeTransport,
-                ackFuture,
-                stepName,
-                log
-            );
-            return;
-        }
-        ConfigSavePolicy.observeDeferredAck(ackFuture, stepName, log);
+        ConfigSavePolicy.waitForMutatingStepAck(
+            activeTransport,
+            ackFuture,
+            stepName,
+            log
+        );
     }
 
     private void beginNavigationBlock(ConnectionEntry activeEntry) {
