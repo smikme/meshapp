@@ -14,7 +14,7 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
 /**
- * Applies a downloaded full-archive update after the main application exits.
+ * Applies a downloaded payload update after the main application exits.
  */
 final class SelfUpdateInstaller {
 
@@ -37,11 +37,7 @@ final class SelfUpdateInstaller {
             throw new IOException("Archive checksum mismatch");
         }
 
-        if (request.layout() == SelfUpdateEnvironment.Layout.MAC_APP_BUNDLE) {
-            applyMacAppBundle(request);
-        } else {
-            applyManagedLayout(request);
-        }
+        applyManagedLayout(request);
     }
 
     private void applyManagedLayout(Request request) throws Exception {
@@ -59,7 +55,7 @@ final class SelfUpdateInstaller {
 
         deleteTree(extractDir);
         Files.createDirectories(extractDir);
-        extractArchive(request, extractDir);
+        extractZip(request.archive(), extractDir);
 
         if (Files.exists(targetDir)) {
             deleteTree(backupDir);
@@ -67,32 +63,6 @@ final class SelfUpdateInstaller {
         }
         move(extractDir, targetDir);
         writeCurrent(request.root().resolve("current"), request.targetVersion());
-
-        if (request.launcher() != null && !request.launcher().isBlank()) {
-            relaunch(request.launcher());
-        }
-    }
-
-    private void applyMacAppBundle(Request request) throws Exception {
-        Files.createDirectories(stagingRoot(request));
-
-        Path extractDir = stagingRoot(request)
-                .resolve("extract-" + request.targetVersion());
-        Path backupRoot = stagingRoot(request)
-                .resolve("replace-" + request.targetVersion());
-        Path backupApp = backupRoot.resolve(request.root().getFileName());
-
-        deleteTree(extractDir);
-        Files.createDirectories(extractDir);
-        extractArchive(request, extractDir);
-
-        Path extractedApp = extractedAppBundle(extractDir, request.root().getFileName().toString());
-        if (Files.exists(request.root())) {
-            deleteTree(backupRoot);
-            Files.createDirectories(backupRoot);
-            move(request.root(), backupApp);
-        }
-        move(extractedApp, request.root());
 
         if (request.launcher() != null && !request.launcher().isBlank()) {
             relaunch(request.launcher());
@@ -135,36 +105,6 @@ final class SelfUpdateInstaller {
                 zip.closeEntry();
             }
         }
-    }
-
-    private static void extractArchive(Request request, Path targetDir) throws IOException {
-        if (request.layout() == SelfUpdateEnvironment.Layout.MAC_APP_BUNDLE
-                && isMac()
-                && Files.isExecutable(Path.of("/usr/bin/ditto"))) {
-            Process process = new ProcessBuilder(
-                    "/usr/bin/ditto",
-                    "-x",
-                    "-k",
-                    request.archive().toAbsolutePath().toString(),
-                    targetDir.toAbsolutePath().toString()
-            ).redirectErrorStream(true).start();
-            String output;
-            try (InputStream input = process.getInputStream()) {
-                output = new String(input.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
-            }
-            try {
-                int exit = process.waitFor();
-                if (exit != 0) {
-                    throw new IOException("ditto failed with exit code " + exit + ": " + output.trim());
-                }
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                throw new IOException("Interrupted while extracting update archive", e);
-            }
-            return;
-        }
-
-        extractZip(request.archive(), targetDir);
     }
 
     static void writeCurrent(Path currentFile, String targetVersion) throws IOException {
@@ -266,26 +206,4 @@ final class SelfUpdateInstaller {
         return request.root().resolve("staging");
     }
 
-    private static Path extractedAppBundle(Path extractDir, String appName) throws IOException {
-        Path expected = extractDir.resolve(appName);
-        if (Files.isDirectory(expected.resolve("Contents"))) {
-            return expected;
-        }
-        if (Files.isDirectory(extractDir.resolve("Contents"))) {
-            return extractDir;
-        }
-        try (var stream = Files.list(extractDir)) {
-            return stream
-                    .filter(path -> path.getFileName().toString().endsWith(".app"))
-                    .filter(path -> Files.isDirectory(path.resolve("Contents")))
-                    .findFirst()
-                    .orElseThrow(() -> new IOException("Update archive does not contain an app bundle"));
-        }
-    }
-
-    private static boolean isMac() {
-        return System.getProperty("os.name", "")
-                .toLowerCase(java.util.Locale.ROOT)
-                .contains("mac");
-    }
 }

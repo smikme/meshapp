@@ -3,7 +3,7 @@ package com.meshtastic.client.model;
 import java.nio.charset.StandardCharsets;
 
 /**
- * Full-archive artifact used by the non-privileged self-update flow.
+ * Full payload artifact used by the non-privileged self-update flow.
  */
 public class SelfUpdateArtifact {
 

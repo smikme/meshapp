@@ -1,6 +1,5 @@
 package com.meshtastic.client.update;
 
-import java.io.File;
 import java.nio.file.Path;
 import java.util.Map;
 import java.util.Optional;
@@ -69,7 +68,7 @@ public final class SelfUpdateEnvironment {
             ));
         }
 
-        return inferMacAppBundle(properties);
+        return Optional.empty();
     }
 
     public Path root() { return root; }
@@ -82,8 +81,7 @@ public final class SelfUpdateEnvironment {
     public Path currentFile() { return root.resolve("current"); }
 
     public enum Layout {
-        MANAGED("managed"),
-        MAC_APP_BUNDLE("mac-app-bundle");
+        MANAGED("managed");
 
         private final String id;
 
@@ -106,64 +104,6 @@ public final class SelfUpdateEnvironment {
             }
             throw new IllegalArgumentException("Unknown self-update layout: " + id);
         }
-    }
-
-    private static Optional<SelfUpdateEnvironment> inferMacAppBundle(java.util.Properties properties) {
-        String osName = properties.getProperty("os.name", "");
-        if (!osName.toLowerCase(java.util.Locale.ROOT).contains("mac")) {
-            return Optional.empty();
-        }
-
-        String classPath = properties.getProperty("java.class.path", "");
-        for (String entry : classPath.split(java.util.regex.Pattern.quote(File.pathSeparator))) {
-            Optional<Path> appBundle = appBundleFromClasspathEntry(entry);
-            if (appBundle.isPresent()) {
-                Path app = appBundle.get();
-                return Optional.of(new SelfUpdateEnvironment(
-                        app,
-                        firstNonBlank(
-                                properties.getProperty(PROP_VERSION),
-                                properties.getProperty("jpackage.app-version"),
-                                "current"
-                        ),
-                        app.toString(),
-                        macStagingDir(properties),
-                        Layout.MAC_APP_BUNDLE
-                ));
-            }
-        }
-
-        return Optional.empty();
-    }
-
-    private static Optional<Path> appBundleFromClasspathEntry(String entry) {
-        if (entry == null || entry.isBlank() || !entry.contains(".app")) {
-            return Optional.empty();
-        }
-        try {
-            Path path = Path.of(entry).toAbsolutePath().normalize();
-            Path root = path.getRoot();
-            Path current = root == null ? Path.of("") : root;
-            for (int i = 0; i < path.getNameCount(); i++) {
-                current = current.resolve(path.getName(i).toString());
-                if (current.getFileName() != null
-                        && current.getFileName().toString().endsWith(".app")) {
-                    Path contentsApp = current.resolve("Contents").resolve("app");
-                    if (path.startsWith(contentsApp)) {
-                        return Optional.of(current);
-                    }
-                }
-            }
-        } catch (Exception ignored) {}
-        return Optional.empty();
-    }
-
-    private static Path macStagingDir(java.util.Properties properties) {
-        String home = properties.getProperty("user.home", "");
-        if (home == null || home.isBlank()) {
-            return Path.of(System.getProperty("java.io.tmpdir"), "MeshApp", "self-update");
-        }
-        return Path.of(home, "Library", "Caches", "MeshApp", "self-update");
     }
 
     private static String firstNonBlank(String... candidates) {
