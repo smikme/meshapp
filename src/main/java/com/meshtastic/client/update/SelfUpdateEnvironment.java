@@ -39,8 +39,8 @@ public final class SelfUpdateEnvironment {
         return from(System.getenv(), System.getProperties());
     }
 
-    static Optional<SelfUpdateEnvironment> from(Map<String, String> env,
-                                               java.util.Properties properties) {
+    public static Optional<SelfUpdateEnvironment> from(Map<String, String> env,
+                                                      java.util.Properties properties) {
         String root = firstNonBlank(
                 properties.getProperty(PROP_ROOT),
                 env.get(ENV_ROOT)

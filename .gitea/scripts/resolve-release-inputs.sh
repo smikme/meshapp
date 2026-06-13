@@ -75,6 +75,7 @@ write_env_multiline() {
 version="$(selected_release_ref)"
 release_notes="$(event_input release_notes)"
 release_notes_ru="$(event_input release_notes_ru)"
+version_code="$(event_input version_code)"
 
 if [ -z "${version}" ]; then
   echo "::error::Select a release tag in 'Use workflow from', for example v2.1.20" >&2
@@ -115,6 +116,20 @@ fi
 write_env_value RELEASE_TAG "${release_tag}"
 write_env_value MESHAPP_VERSION "${release_tag}"
 
+if [ -n "${version_code}" ]; then
+  case "${version_code}" in
+    *[!0-9]*)
+      echo "::error::version_code must be a positive integer" >&2
+      exit 1
+      ;;
+    0)
+      echo "::error::version_code must be a positive integer" >&2
+      exit 1
+      ;;
+  esac
+  write_env_value MESHAPP_VERSION_CODE "${version_code}"
+fi
+
 if [ -n "${release_notes}" ]; then
   write_env_multiline MESHAPP_RELEASE_NOTES "${release_notes}"
 fi
@@ -124,3 +139,6 @@ if [ -n "${release_notes_ru}" ]; then
 fi
 
 echo "Release version: ${release_tag}"
+if [ -n "${version_code}" ]; then
+  echo "Manifest versionCode override: ${version_code}"
+fi
