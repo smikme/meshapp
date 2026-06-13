@@ -1629,6 +1629,8 @@ tasks.register('selfUpdateArchive') {
 def selfUpdateRequiredJarEntries = [
 	'com/meshtastic/client/update/SelfUpdateLauncher.class',
 	'com/meshtastic/client/update/SelfUpdateEnvironment.class',
+	'com/meshtastic/client/update/SelfUpdateInstaller.class',
+	'com/meshtastic/client/update/SelfUpdateInstallerMain.class',
 	'com/meshtastic/client/update/SelfUpdateService.class',
 	'com/meshtastic/client/update/UpdateSignatureVerifier.class',
 	'update/ed25519-public-key.txt',

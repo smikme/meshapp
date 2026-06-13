@@ -8,10 +8,15 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HexFormat;
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.zip.ZipEntry;
-import java.util.zip.ZipInputStream;
+import java.util.zip.ZipFile;
+import java.util.stream.Stream;
 
 /**
  * Applies a downloaded payload update after the main application exits.
@@ -19,6 +24,7 @@ import java.util.zip.ZipInputStream;
 final class SelfUpdateInstaller {
 
     private static final Duration PARENT_WAIT_TIMEOUT = Duration.ofSeconds(30);
+    private static final String MAIN_CLASS = "com.meshtastic.client.MeshAppLauncher";
 
     record Request(Path root,
                    Path archive,
@@ -29,18 +35,30 @@ final class SelfUpdateInstaller {
                    SelfUpdateEnvironment.Layout layout) {}
 
     void apply(Request request) throws Exception {
+        apply(request, ProgressListener.noop());
+    }
+
+    void apply(Request request, ProgressListener progress) throws Exception {
         validateRequest(request);
-        waitForParent(request.parentPid());
+        ProgressListener listener = progress != null ? progress : ProgressListener.noop();
+        listener.onInstallProgress(0, 0, 0);
 
         String actualSha256 = sha256(request.archive());
         if (!actualSha256.equalsIgnoreCase(request.expectedSha256())) {
             throw new IOException("Archive checksum mismatch");
         }
+        listener.onInstallProgress(0.05, 0, 0);
 
-        applyManagedLayout(request);
+        Path targetDir = applyManagedLayout(request, listener);
+        listener.onInstallProgress(1, 1, 1);
+        listener.onReadyToRestart();
+        if (request.launcher() != null && !request.launcher().isBlank()) {
+            waitForParent(request.parentPid());
+            relaunchManagedPayload(request, targetDir);
+        }
     }
 
-    private void applyManagedLayout(Request request) throws Exception {
+    private Path applyManagedLayout(Request request, ProgressListener progress) throws Exception {
         Files.createDirectories(request.root());
         Files.createDirectories(request.root().resolve("versions"));
         Files.createDirectories(stagingRoot(request));
@@ -55,18 +73,17 @@ final class SelfUpdateInstaller {
 
         deleteTree(extractDir);
         Files.createDirectories(extractDir);
-        extractZip(request.archive(), extractDir);
+        extractZip(request.archive(), extractDir, progress, 0.05, 0.85);
 
         if (Files.exists(targetDir)) {
             deleteTree(backupDir);
             move(targetDir, backupDir);
         }
         move(extractDir, targetDir);
+        progress.onInstallProgress(0.95, 0, 0);
         writeCurrent(request.root().resolve("current"), request.targetVersion());
 
-        if (request.launcher() != null && !request.launcher().isBlank()) {
-            relaunch(request.launcher());
-        }
+        return targetDir;
     }
 
     static String sha256(Path file) throws Exception {
@@ -84,10 +101,23 @@ final class SelfUpdateInstaller {
     }
 
     static void extractZip(Path archive, Path targetDir) throws IOException {
+        extractZip(archive, targetDir, ProgressListener.noop(), 0, 1);
+    }
+
+    private static void extractZip(Path archive,
+                                   Path targetDir,
+                                   ProgressListener progress,
+                                   double startProgress,
+                                   double endProgress) throws IOException {
         Path normalizedTarget = targetDir.toAbsolutePath().normalize();
-        try (ZipInputStream zip = new ZipInputStream(Files.newInputStream(archive))) {
-            ZipEntry entry;
-            while ((entry = zip.getNextEntry()) != null) {
+        long totalBytes = zipUncompressedSize(archive);
+        long[] completedBytes = {0};
+        ProgressListener listener = progress != null ? progress : ProgressListener.noop();
+        listener.onInstallProgress(startProgress, 0, totalBytes);
+
+        try (ZipFile zip = new ZipFile(archive.toFile())) {
+            List<? extends ZipEntry> entries = Collections.list(zip.entries());
+            for (ZipEntry entry : entries) {
                 Path output = normalizedTarget.resolve(entry.getName()).normalize();
                 if (!output.startsWith(normalizedTarget)) {
                     throw new IOException("Unsafe archive entry: " + entry.getName());
@@ -99,10 +129,57 @@ final class SelfUpdateInstaller {
                     if (parent != null) {
                         Files.createDirectories(parent);
                     }
-                    Files.copy(zip, output, StandardCopyOption.REPLACE_EXISTING);
+                    copyZipEntry(zip, entry, output, completedBytes, totalBytes, listener, startProgress, endProgress);
                     restoreExecutableBit(entry.getName(), output);
                 }
-                zip.closeEntry();
+            }
+        }
+        listener.onInstallProgress(endProgress, totalBytes, totalBytes);
+    }
+
+    private static long zipUncompressedSize(Path archive) throws IOException {
+        long total = 0;
+        try (ZipFile zip = new ZipFile(archive.toFile())) {
+            for (ZipEntry entry : Collections.list(zip.entries())) {
+                if (entry.isDirectory()) {
+                    continue;
+                }
+                long size = entry.getSize();
+                if (size < 0) {
+                    return -1;
+                }
+                total += size;
+            }
+        }
+        return total;
+    }
+
+    private static void copyZipEntry(ZipFile zip,
+                                     ZipEntry entry,
+                                     Path output,
+                                     long[] completedBytes,
+                                     long totalBytes,
+                                     ProgressListener progress,
+                                     double startProgress,
+                                     double endProgress) throws IOException {
+        try (InputStream input = zip.getInputStream(entry);
+             var outputStream = Files.newOutputStream(output)) {
+            byte[] buffer = new byte[1024 * 128];
+            int read;
+            while ((read = input.read(buffer)) >= 0) {
+                if (read <= 0) {
+                    continue;
+                }
+                outputStream.write(buffer, 0, read);
+                if (totalBytes > 0) {
+                    completedBytes[0] += read;
+                    double fraction = Math.min(1, (double) completedBytes[0] / totalBytes);
+                    progress.onInstallProgress(
+                            startProgress + ((endProgress - startProgress) * fraction),
+                            completedBytes[0],
+                            totalBytes
+                    );
+                }
             }
         }
     }
@@ -172,17 +249,92 @@ final class SelfUpdateInstaller {
         }
     }
 
-    private static void relaunch(String launcher) throws IOException {
-        String lower = launcher.toLowerCase(java.util.Locale.ROOT);
-        if (lower.endsWith(".app")) {
-            new ProcessBuilder("open", "-n", launcher).start();
-            return;
+    static List<String> managedPayloadCommand(Request request, Path targetDir) throws IOException {
+        Path libDir = payloadLibDir(targetDir);
+        Path fxDir = Files.isDirectory(libDir.resolve("fx"))
+                ? libDir.resolve("fx")
+                : targetDir.resolve("fx");
+        String classPath = payloadClassPath(libDir);
+        if (classPath.isBlank()) {
+            throw new IOException("Payload classpath is empty: " + libDir);
         }
-        if (lower.endsWith(".bat") || lower.endsWith(".cmd")) {
-            new ProcessBuilder("cmd.exe", "/c", "start", "", launcher).start();
-            return;
+
+        List<String> command = new ArrayList<>();
+        command.add(javaExecutable().toString());
+        command.addAll(payloadJvmArgs());
+        if (Files.isDirectory(fxDir)) {
+            command.add("--module-path");
+            command.add(fxDir.toAbsolutePath().toString());
+            command.add("--add-modules");
+            command.add("javafx.controls");
         }
-        new ProcessBuilder(launcher).start();
+        command.add("-D" + SelfUpdateEnvironment.PROP_STAGING_DIR + "="
+                + stagingRoot(request).toAbsolutePath());
+        command.add("-DjSerialComm.library.path=" + libDir.toAbsolutePath());
+        command.add("-cp");
+        command.add(classPath);
+        command.add(MAIN_CLASS);
+        return command;
+    }
+
+    private static void relaunchManagedPayload(Request request, Path targetDir) throws IOException {
+        ProcessBuilder builder = new ProcessBuilder(managedPayloadCommand(request, targetDir));
+        builder.directory(targetDir.toFile());
+        Map<String, String> env = builder.environment();
+        env.put(SelfUpdateLauncher.ENV_PAYLOAD_ACTIVE, "true");
+        env.put(SelfUpdateEnvironment.ENV_ROOT, request.root().toAbsolutePath().toString());
+        env.put(SelfUpdateEnvironment.ENV_VERSION, request.targetVersion());
+        if (request.launcher() != null && !request.launcher().isBlank()) {
+            env.put(SelfUpdateEnvironment.ENV_LAUNCHER, request.launcher());
+        }
+        builder.start();
+    }
+
+    private static Path payloadLibDir(Path versionDir) {
+        Path lib = versionDir.resolve("lib");
+        return Files.isDirectory(lib) ? lib : versionDir;
+    }
+
+    private static String payloadClassPath(Path libDir) throws IOException {
+        try (Stream<Path> stream = Files.list(libDir)) {
+            return stream
+                    .filter(path -> Files.isRegularFile(path) && path.getFileName().toString().endsWith(".jar"))
+                    .sorted()
+                    .map(path -> path.toAbsolutePath().toString())
+                    .reduce((left, right) -> left + java.io.File.pathSeparator + right)
+                    .orElse("");
+        }
+    }
+
+    private static Path javaExecutable() {
+        String bin = System.getProperty("os.name", "")
+                .toLowerCase(java.util.Locale.ROOT)
+                .contains("win") ? "java.exe" : "java";
+        return Path.of(System.getProperty("java.home"), "bin", bin);
+    }
+
+    private static List<String> payloadJvmArgs() {
+        List<String> args = new ArrayList<>(List.of(
+                "-Xmx512m",
+                "-Xms128m",
+                "-XX:+IgnoreUnrecognizedVMOptions",
+                "--sun-misc-unsafe-memory-access=allow",
+                "-XX:ErrorFile=%h/.meshapp/logs/diagnostics/active/hs_err_pid%p.log",
+                "--add-opens", "javafx.graphics/javafx.stage=ALL-UNNAMED",
+                "--add-exports", "javafx.graphics/com.sun.javafx.scene=ALL-UNNAMED",
+                "--add-opens", "javafx.graphics/com.sun.javafx.tk=ALL-UNNAMED",
+                "--add-opens", "javafx.graphics/com.sun.javafx.tk.quantum=ALL-UNNAMED",
+                "--add-opens", "javafx.graphics/com.sun.glass.ui=ALL-UNNAMED"
+        ));
+        String osName = System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT);
+        if (osName.contains("win")) {
+            args.add("--add-opens");
+            args.add("javafx.graphics/com.sun.glass.ui.win=ALL-UNNAMED");
+        } else if (osName.contains("mac")) {
+            args.add("--add-opens");
+            args.add("javafx.graphics/com.sun.glass.ui.mac=ALL-UNNAMED");
+        }
+        return args;
     }
 
     private static void restoreExecutableBit(String entryName, Path output) {
@@ -204,6 +356,19 @@ final class SelfUpdateInstaller {
             return archiveParent;
         }
         return request.root().resolve("staging");
+    }
+
+    interface ProgressListener {
+        void onInstallProgress(double progress, long completedBytes, long totalBytes);
+
+        default void onReadyToRestart() {}
+
+        static ProgressListener noop() {
+            return new ProgressListener() {
+                @Override
+                public void onInstallProgress(double progress, long completedBytes, long totalBytes) {}
+            };
+        }
     }
 
 }
