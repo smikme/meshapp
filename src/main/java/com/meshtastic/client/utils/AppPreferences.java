@@ -32,6 +32,7 @@ public class AppPreferences {
     public static final String KEY_MINIMIZE_TO_TRAY = "minimizeToTray";
     public static final String KEY_JFR_DIAGNOSTICS = "jfrDiagnostics";
     public static final String KEY_LANGUAGE = "language";
+    public static final String KEY_MEMORY_LIMIT_MB = "memoryLimitMb";
     public static final String KEY_APP_FONT_SIZE = "appFontSize";
     public static final String KEY_CHAT_FONT_SIZE = "chatFontSize";
     public static final String KEY_PACKET_MONITOR_WINDOW_X = "packetMonitorWindowX";
@@ -56,6 +57,10 @@ public class AppPreferences {
     public static final String KEY_MAP_OFFLINE_MODE = "mapOfflineMode";
     public static final String KEY_MAP_NIGHT_MODE = "mapNightMode";
     public static final String KEY_MAP_TILE_DIRECTORY = "mapTileDirectory";
+
+    public static final int DEFAULT_MEMORY_LIMIT_MB = 512;
+    public static final int MIN_MEMORY_LIMIT_MB = 128;
+    public static final int MAX_MEMORY_LIMIT_MB = 65536;
 
     private static Preferences state;
 
@@ -156,6 +161,24 @@ public class AppPreferences {
 
     public static void setLanguageTag(String value) {
         state().put(KEY_LANGUAGE, value == null || value.isBlank() ? "system" : value.trim());
+    }
+
+    public static int getMemoryLimitMb() {
+        return clampMemoryLimitMb(
+            state().getInt(KEY_MEMORY_LIMIT_MB, DEFAULT_MEMORY_LIMIT_MB)
+        );
+    }
+
+    public static void setMemoryLimitMb(int value) {
+        state().putInt(KEY_MEMORY_LIMIT_MB, clampMemoryLimitMb(value));
+        flushState();
+    }
+
+    public static int clampMemoryLimitMb(int value) {
+        return Math.max(
+            MIN_MEMORY_LIMIT_MB,
+            Math.min(MAX_MEMORY_LIMIT_MB, value)
+        );
     }
 
     public static int getAppFontSize() {

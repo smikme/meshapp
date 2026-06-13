@@ -15,6 +15,8 @@ import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
 import javafx.scene.control.Separator;
 import javafx.scene.control.Slider;
+import javafx.scene.control.TextField;
+import javafx.scene.control.TextFormatter;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
 
@@ -116,6 +118,15 @@ public final class ApplicationSettingsPanelFactory {
             restartNote
         );
 
+        Label runtimeHeader = new Label(I18n.t("settings.runtime.title"));
+        runtimeHeader.getStyleClass().add("section-title");
+
+        VBox runtimeGroup = new VBox(
+            8,
+            runtimeHeader,
+            createMemoryLimitSettingRow()
+        );
+
         Label integrationsHeader = new Label(
             I18n.t("settings.integrations.title")
         );
@@ -157,8 +168,68 @@ public final class ApplicationSettingsPanelFactory {
 
         panel
             .getChildren()
-            .addAll(appearanceGroup, new Separator(), integrationsGroup);
+            .addAll(
+                appearanceGroup,
+                new Separator(),
+                runtimeGroup,
+                new Separator(),
+                integrationsGroup
+            );
         return panel;
+    }
+
+    private static VBox createMemoryLimitSettingRow() {
+        Label titleLabel = new Label(I18n.t("settings.memoryLimit.title"));
+        titleLabel.getStyleClass().add("item-title");
+
+        Label descriptionLabel = new Label(
+            I18n.t("settings.memoryLimit.description")
+        );
+        descriptionLabel.getStyleClass().add("muted-note-label");
+        descriptionLabel.setWrapText(true);
+
+        TextField valueField = new TextField(
+            Integer.toString(AppPreferences.getMemoryLimitMb())
+        );
+        valueField.setPrefColumnCount(6);
+        valueField.setMaxWidth(100);
+        valueField.setTextFormatter(new TextFormatter<>(change -> {
+            String text = change.getControlNewText();
+            return text.matches("\\d{0,5}") ? change : null;
+        }));
+        valueField
+            .textProperty()
+            .addListener((obs, oldValue, newValue) ->
+                saveMemoryLimitIfComplete(newValue)
+            );
+        valueField.setOnAction(event -> normalizeMemoryLimitField(valueField));
+        valueField
+            .focusedProperty()
+            .addListener((obs, oldValue, focused) -> {
+                if (!focused) {
+                    normalizeMemoryLimitField(valueField);
+                }
+            });
+
+        Label unitLabel = new Label(I18n.t("settings.memoryLimit.unit"));
+
+        Button resetButton = new Button(I18n.t("common.reset"));
+        resetButton.setOnAction(event ->
+            valueField.setText(
+                Integer.toString(AppPreferences.DEFAULT_MEMORY_LIMIT_MB)
+            )
+        );
+
+        HBox inputRow = new HBox(8, valueField, unitLabel, resetButton);
+        inputRow.setAlignment(Pos.CENTER_LEFT);
+
+        Label restartLabel = new Label(
+            I18n.t("settings.memoryLimit.restartRequired")
+        );
+        restartLabel.getStyleClass().add("muted-note-label");
+        restartLabel.setWrapText(true);
+
+        return new VBox(6, titleLabel, descriptionLabel, inputRow, restartLabel);
     }
 
     private static VBox createLanguageSettingRow() {
@@ -273,5 +344,36 @@ public final class ApplicationSettingsPanelFactory {
 
     private static String formatFontSizeLabel(int value) {
         return value + " px";
+    }
+
+    private static void saveMemoryLimitIfComplete(String value) {
+        if (value == null || value.isBlank()) {
+            return;
+        }
+        try {
+            int parsed = Integer.parseInt(value);
+            if (
+                parsed >= AppPreferences.MIN_MEMORY_LIMIT_MB &&
+                parsed <= AppPreferences.MAX_MEMORY_LIMIT_MB
+            ) {
+                AppPreferences.setMemoryLimitMb(parsed);
+            }
+        } catch (NumberFormatException ignored) {
+            // The text formatter keeps non-numeric values out.
+        }
+    }
+
+    private static void normalizeMemoryLimitField(TextField field) {
+        int value = AppPreferences.getMemoryLimitMb();
+        String text = field.getText();
+        if (text != null && !text.isBlank()) {
+            try {
+                value = AppPreferences.clampMemoryLimitMb(
+                    Integer.parseInt(text)
+                );
+            } catch (NumberFormatException ignored) {}
+        }
+        field.setText(Integer.toString(value));
+        AppPreferences.setMemoryLimitMb(value);
     }
 }
