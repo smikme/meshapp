@@ -149,6 +149,22 @@ class NodeCacheServiceTest {
         assertEquals("RCVD", reloadedLiveNode.getShortName());
     }
 
+    @Test
+    void missingNodeIdNegativeCacheIsBounded() throws Exception {
+        Set<String> missingNodeIds = readMissingNodeIds(service);
+        int maxMissingNodeIds = maxMissingNodeIdCount();
+
+        for (int i = 0; i < maxMissingNodeIds + 3; i++) {
+            missingNodeIds.add(String.format("!%08x", i));
+        }
+
+        assertEquals(maxMissingNodeIds, missingNodeIds.size());
+        assertFalse(missingNodeIds.contains("!00000000"));
+        assertFalse(missingNodeIds.contains("!00000001"));
+        assertFalse(missingNodeIds.contains("!00000002"));
+        assertTrue(missingNodeIds.contains(String.format("!%08x", maxMissingNodeIds + 2)));
+    }
+
     @SuppressWarnings("unchecked")
     private static Map<String, NodeData> readCache(NodeCacheService service) throws Exception {
         Field field = NodeCacheService.class.getDeclaredField("cache");
@@ -161,5 +177,11 @@ class NodeCacheServiceTest {
         Field field = NodeCacheService.class.getDeclaredField("missingNodeIds");
         field.setAccessible(true);
         return (Set<String>) field.get(service);
+    }
+
+    private static int maxMissingNodeIdCount() throws Exception {
+        Field field = NodeCacheService.class.getDeclaredField("MAX_MISSING_NODE_IDS");
+        field.setAccessible(true);
+        return field.getInt(null);
     }
 }
