@@ -3,14 +3,11 @@ name: Publish Update Manifest
 on:
   workflow_dispatch:
     inputs:
-      release_tag:
-        description: 'Existing Gitea release tag to publish to update system, for example v2.1.20'
-        required: true
       release_notes:
-        description: 'MESHAPP_RELEASE_NOTES for meshapp.json'
+        description: 'MESHAPP_RELEASE_NOTES for selected tag'
         required: true
       release_notes_ru:
-        description: 'MESHAPP_RELEASE_NOTES_RU for meshapp.json releaseNotes_ru'
+        description: 'MESHAPP_RELEASE_NOTES_RU for selected tag'
         required: true
 
 jobs:
