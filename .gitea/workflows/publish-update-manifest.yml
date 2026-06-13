@@ -57,32 +57,6 @@ jobs:
           "${GENERATE_UPDATE_MANIFEST_SCRIPT}" "${RELEASE_TAG}" build/update/meshapp.json
           jq . build/update/meshapp.json
 
-      - name: Upload meshapp.json to Gitea Release
-        env:
-          GITEA_TOKEN: ${{ secrets.RELEASE_TOKEN }}
-        run: |
-          API="${GITHUB_SERVER_URL}/api/v1/repos/${GITHUB_REPOSITORY}"
-          RELEASE_ID=$(curl -sf \
-            -H "Authorization: token ${GITEA_TOKEN}" \
-            "${API}/releases/tags/${RELEASE_TAG}" | jq -r '.id')
-
-          EXISTING_ASSET_ID=$(curl -sf \
-            -H "Authorization: token ${GITEA_TOKEN}" \
-            "${API}/releases/${RELEASE_ID}/assets?limit=100" \
-            | jq -r 'first(.[] | select(.name == "meshapp.json") | .id) // empty')
-
-          if [ -n "${EXISTING_ASSET_ID}" ]; then
-            curl -sf -X DELETE \
-              -H "Authorization: token ${GITEA_TOKEN}" \
-              "${API}/releases/assets/${EXISTING_ASSET_ID}"
-          fi
-
-          curl -sf -X POST \
-            -H "Authorization: token ${GITEA_TOKEN}" \
-            -H "Content-Type: application/json" \
-            --data-binary "@build/update/meshapp.json" \
-            "${API}/releases/${RELEASE_ID}/assets?name=meshapp.json"
-
       - name: Deploy meshapp.json to update endpoint
         env:
           FLATPAK_DEPLOY_HOST: ${{ secrets.FLATPAK_DEPLOY_HOST }}
