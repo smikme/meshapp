@@ -30,6 +30,7 @@ public final class ConfigHelpPopupController {
     private static final double SCREEN_MARGIN = 8;
     private static final double ANCHOR_GAP = 6;
     private static final double HIDE_DELAY_MS = 220;
+    private static final String LIGHT_THEME_CLASS = "light-theme";
 
     private Popup popup;
     private PauseTransition hideDelay;
@@ -48,7 +49,10 @@ public final class ConfigHelpPopupController {
         cancelHide();
         hide();
 
-        VBox popupContent = createPopupContent(helpContent);
+        VBox popupContent = createPopupContent(
+            helpContent,
+            isLightTheme(anchor)
+        );
         popupContent.setOnMouseEntered(e -> cancelHide());
         popupContent.setOnMouseExited(e -> scheduleHide());
 
@@ -100,9 +104,15 @@ public final class ConfigHelpPopupController {
             anchor.getScene().getWindow() != null;
     }
 
-    private VBox createPopupContent(ConfigHelpContent helpContent) {
+    private VBox createPopupContent(
+        ConfigHelpContent helpContent,
+        boolean lightTheme
+    ) {
         VBox wrapper = new VBox(8);
         wrapper.getStyleClass().add("config-help-popup");
+        if (lightTheme) {
+            wrapper.getStyleClass().add(LIGHT_THEME_CLASS);
+        }
         wrapper.setPrefWidth(POPUP_WIDTH);
         wrapper.setMaxWidth(POPUP_WIDTH);
         wrapper.setPrefHeight(POPUP_HEIGHT);
@@ -160,6 +170,17 @@ public final class ConfigHelpPopupController {
 
         wrapper.getChildren().addAll(title, path, scrollPane);
         return wrapper;
+    }
+
+    private static boolean isLightTheme(Node node) {
+        return node != null &&
+            node.getScene() != null &&
+            node.getScene().getRoot() != null &&
+            node
+                .getScene()
+                .getRoot()
+                .getStyleClass()
+                .contains(LIGHT_THEME_CLASS);
     }
 
     private void addBlock(VBox body, String header, String text) {
