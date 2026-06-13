@@ -26,6 +26,10 @@
   <a href="https://git.privatepractice.app/covox/meshapp">git.privatepractice.app/covox/meshapp</a>
 </p>
 
+<p align="center">
+  <a href="#installation">Installation</a>
+</p>
+
 <div align="right">
 
 <strong>English</strong> | <a href="README.ru.md">Русский</a>
@@ -48,6 +52,37 @@ New connection profiles use Meshtastic by default. For MeshCore, select the oper
 The connection type and protocol are selected separately. For example, you can connect over TCP to a Meshtastic device, over USB to a MeshCore KISS modem, or over BLE to a device with MeshCore Companion.
 
 ![MeshApp architecture](docs/meshapp-architecture.jpg)
+
+---
+
+## Installation
+
+Ready-made packages are published on the [Gitea releases page](https://git.privatepractice.app/covox/meshapp/releases).
+
+- macOS: download the `.dmg`, open it, and move MeshApp to Applications.
+- Windows: download and run the `.msi` installer.
+- Debian / Ubuntu: download the `.deb` package and install it with `apt` or your package manager.
+- Linux AppImage: download the `.AppImage`, make it executable, and run it.
+
+Flatpak users can install MeshApp from the project repository:
+
+```bash
+flatpak remote-add --user --if-not-exists meshapp https://flatpak.privatepractice.app/repo/
+flatpak install --user meshapp app.privatepractice.meshapp
+flatpak run app.privatepractice.meshapp
+```
+
+Alternatively, install through the published Flatpak ref:
+
+```bash
+flatpak install --user https://flatpak.privatepractice.app/app.privatepractice.meshapp.flatpakref
+```
+
+To update the Flatpak installation:
+
+```bash
+flatpak update app.privatepractice.meshapp
+```
 
 ---
 

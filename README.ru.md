@@ -26,6 +26,10 @@
   <a href="https://git.privatepractice.app/covox/meshapp">git.privatepractice.app/covox/meshapp</a>
 </p>
 
+<p align="center">
+  <a href="#установка">Установка</a>
+</p>
+
 <div align="right">
 
 <strong>Русский</strong> | <a href="README.md">English</a>
@@ -48,6 +52,37 @@ MeshApp — настольное приложение для устройств 
 Тип подключения и протокол выбираются отдельно. Например, можно подключиться по TCP к Meshtastic-устройству, по USB к модему MeshCore KISS или по BLE к устройству с MeshCore Companion.
 
 ![Архитектура MeshApp](docs/meshapp-architecture.jpg)
+
+---
+
+## Установка
+
+Готовые пакеты публикуются на [странице релизов Gitea](https://git.privatepractice.app/covox/meshapp/releases).
+
+- macOS: скачайте `.dmg`, откройте его и перенесите MeshApp в Applications.
+- Windows: скачайте и запустите `.msi`-инсталлятор.
+- Debian / Ubuntu: скачайте `.deb`-пакет и установите его через `apt` или пакетный менеджер.
+- Linux AppImage: скачайте `.AppImage`, сделайте файл исполняемым и запустите его.
+
+Пользователи Flatpak могут установить MeshApp из репозитория проекта:
+
+```bash
+flatpak remote-add --user --if-not-exists meshapp https://flatpak.privatepractice.app/repo/
+flatpak install --user meshapp app.privatepractice.meshapp
+flatpak run app.privatepractice.meshapp
+```
+
+Также можно установить приложение через опубликованный Flatpak ref:
+
+```bash
+flatpak install --user https://flatpak.privatepractice.app/app.privatepractice.meshapp.flatpakref
+```
+
+Обновление Flatpak-установки:
+
+```bash
+flatpak update app.privatepractice.meshapp
+```
 
 ---
 
