@@ -15,6 +15,8 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
 
 /**
@@ -29,6 +31,7 @@ import java.util.function.Consumer;
 public final class UpdateCheckService {
 
     private static final Logger log = LoggerFactory.getLogger(UpdateCheckService.class);
+    private static final Gson GSON = new Gson();
     private static final String UPDATE_URL = "https://flatpak.privatepractice.app/meshapp.json";
     private static final Duration TIMEOUT = Duration.ofSeconds(10);
 
@@ -44,6 +47,20 @@ public final class UpdateCheckService {
             return;
         }
 
+        checkForUpdateAsync()
+                .thenAccept(update -> update.ifPresent(info ->
+                        Platform.runLater(() -> onUpdateAvailable.accept(info))))
+                .exceptionally(ex -> {
+                    log.debug("Update check failed: {}", ex.getMessage());
+                    return null;
+                });
+    }
+
+    /**
+     * Checks for updates asynchronously and completes with update information when
+     * the remote manifest contains a newer version.
+     */
+    public static CompletableFuture<Optional<UpdateInfo>> checkForUpdateAsync() {
         HttpClient client = HttpClient.newBuilder()
                 .connectTimeout(TIMEOUT)
                 .followRedirects(HttpClient.Redirect.NORMAL)
@@ -58,31 +75,27 @@ public final class UpdateCheckService {
                 MeshApp.VERSION_CODE
         );
 
-        client.sendAsync(request, HttpResponse.BodyHandlers.ofString())
-                .thenAccept(response -> {
+        return client.sendAsync(request, HttpResponse.BodyHandlers.ofString())
+                .thenApply(response -> {
                     if (response.statusCode() != 200) {
                         log.warn("Update check: HTTP {}", response.statusCode());
-                        return;
+                        throw new IllegalStateException("HTTP " + response.statusCode());
                     }
-                    try {
-                        UpdateInfo info = new Gson().fromJson(response.body(), UpdateInfo.class);
-                        if (info != null && info.getVersionCode() > MeshApp.VERSION_CODE) {
-                            log.info("Update available: {} (code {}), current code {}",
-                                    info.getVersion(), info.getVersionCode(), MeshApp.VERSION_CODE);
-                            Platform.runLater(() -> onUpdateAvailable.accept(info));
-                        } else {
-                            log.debug("No update available (server={}, local={})",
-                                    info != null ? info.getVersionCode() : "null",
-                                    MeshApp.VERSION_CODE);
-                        }
-                    } catch (Exception e) {
-                        log.warn("Update check: failed to parse response", e);
-                    }
-                })
-                .exceptionally(ex -> {
-                    log.debug("Update check failed: {}", ex.getMessage());
-                    return null;
+                    return availableUpdate(response.body(), MeshApp.VERSION_CODE);
                 });
+    }
+
+    static Optional<UpdateInfo> availableUpdate(String body, int localVersionCode) {
+        UpdateInfo info = GSON.fromJson(body, UpdateInfo.class);
+        if (info != null && info.getVersionCode() > localVersionCode) {
+            log.info("Update available: {} (code {}), current code {}",
+                    info.getVersion(), info.getVersionCode(), localVersionCode);
+            return Optional.of(info);
+        }
+        log.debug("No update available (server={}, local={})",
+                info != null ? info.getVersionCode() : "null",
+                localVersionCode);
+        return Optional.empty();
     }
 
     static HttpRequest buildRequest(URI uri,
