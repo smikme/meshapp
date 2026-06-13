@@ -74,5 +74,6 @@ jobs:
           fi
 
           bash "${PUBLISH_FLATPAK_SCRIPT}" import-key
+          export MESHAPP_VERSION="${RELEASE_TAG}"
           ./gradlew flatpak --no-daemon
           bash "${PUBLISH_FLATPAK_SCRIPT}" publish

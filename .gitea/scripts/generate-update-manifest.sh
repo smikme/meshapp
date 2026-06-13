@@ -110,6 +110,81 @@ detect_self_update_key() {
   esac
 }
 
+normalize_release_version() {
+  local value="$1"
+  value="${value#v}"
+  printf '%s' "${value}"
+}
+
+detect_asset_version() {
+  local name="$1"
+  local stem
+
+  case "${name}" in
+    meshapp_*_*.deb)
+      stem="${name#meshapp_}"
+      printf '%s' "${stem%%_*}"
+      ;;
+    MeshApp-*.dmg)
+      stem="${name#MeshApp-}"
+      printf '%s' "${stem%.dmg}"
+      ;;
+    MeshApp-*.msi)
+      stem="${name#MeshApp-}"
+      printf '%s' "${stem%.msi}"
+      ;;
+    MeshApp-*.AppImage)
+      stem="${name#MeshApp-}"
+      stem="${stem%.AppImage}"
+      case "${stem}" in
+        *-x86_64) printf '%s' "${stem%-x86_64}" ;;
+        *-aarch64) printf '%s' "${stem%-aarch64}" ;;
+        *) printf '' ;;
+      esac
+      ;;
+    MeshApp-*.flatpak)
+      stem="${name#MeshApp-}"
+      stem="${stem%.flatpak}"
+      case "${stem}" in
+        *-x86_64) printf '%s' "${stem%-x86_64}" ;;
+        *-aarch64) printf '%s' "${stem%-aarch64}" ;;
+        *) printf '' ;;
+      esac
+      ;;
+    MeshApp-*-selfupdate.zip)
+      stem="${name#MeshApp-}"
+      stem="${stem%-selfupdate.zip}"
+      case "${stem}" in
+        *-windows-x86_64) printf '%s' "${stem%-windows-x86_64}" ;;
+        *-windows-aarch64) printf '%s' "${stem%-windows-aarch64}" ;;
+        *-macos-x86_64) printf '%s' "${stem%-macos-x86_64}" ;;
+        *-macos-aarch64) printf '%s' "${stem%-macos-aarch64}" ;;
+        *-linux-x86_64) printf '%s' "${stem%-linux-x86_64}" ;;
+        *-linux-aarch64) printf '%s' "${stem%-linux-aarch64}" ;;
+        *) printf '' ;;
+      esac
+      ;;
+    *)
+      printf ''
+      ;;
+  esac
+}
+
+assert_asset_version_matches_release() {
+  local name="$1"
+  local release_version="$2"
+  local asset_version
+
+  asset_version="$(detect_asset_version "${name}")"
+  if [ -z "${asset_version}" ]; then
+    return
+  fi
+  if [ "$(normalize_release_version "${asset_version}")" != "$(normalize_release_version "${release_version}")" ]; then
+    echo "::error::Asset ${name} belongs to version ${asset_version}, but selected release version is ${release_version}" >&2
+    exit 1
+  fi
+}
+
 add_download_url() {
   local manifest="$1"
   local key="$2"
@@ -280,6 +355,7 @@ for file in "${assets_dir}"/*; do
       continue
       ;;
   esac
+  assert_asset_version_matches_release "${name}" "${version}"
 
   url="$(asset_url "${name}" "$(metadata_url_for "${metadata_file}" "${name}")")"
   case "${name}" in
