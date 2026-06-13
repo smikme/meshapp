@@ -21,7 +21,7 @@ import java.util.Optional;
 import java.util.function.Consumer;
 
 /**
- * Downloads and stages non-privileged full-archive self-updates.
+ * Downloads and stages non-privileged application payload self-updates.
  */
 public final class SelfUpdateService {
 

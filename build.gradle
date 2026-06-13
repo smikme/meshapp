@@ -1578,13 +1578,9 @@ call "%APP_HOME%\\versions\\%CURRENT%\\bin\\MeshApp.bat" %*
 tasks.register('selfUpdateArchive') {
 	def os = org.gradle.internal.os.OperatingSystem.current()
 	def artifactName = "MeshApp-${sanitizeArtifactVersion(applicationVersion)}-${resolveSelfUpdatePlatform()}-selfupdate.zip"
-	if (os.isMacOsX()) {
-		dependsOn tasks.named('jpackage')
-	} else {
-		dependsOn installDist
-	}
+	dependsOn installDist
 	group = 'distribution'
-	description = 'Собрать full zip archive для self-update manifest'
+	description = 'Собрать managed payload zip archive для self-update manifest'
 	outputs.file(layout.buildDirectory.file("jpackage/${artifactName}"))
 	doLast {
 		def outputDir = layout.buildDirectory.dir('jpackage').get().asFile
@@ -1599,23 +1595,14 @@ tasks.register('selfUpdateArchive') {
 			}
 		}
 		def archiveFile = new File(outputDir, artifactName)
-		if (os.isMacOsX()) {
-			def appDir = new File(outputDir, 'MeshApp.app')
-			if (!appDir.isDirectory()) {
-				throw new GradleException("selfUpdateArchive: macOS app bundle not found: ${appDir}")
-			}
-			executePackagingCommand(
-				['/usr/bin/ditto', '-c', '-k', '--sequesterRsrc', '--keepParent', appDir.absolutePath, archiveFile.absolutePath],
-				'selfUpdateArchive: failed to create macOS app bundle archive'
-			)
-		} else {
-			def installDir = layout.buildDirectory.dir("install/${applicationName}").get().asFile
-			if (!installDir.isDirectory()) {
-				throw new GradleException("selfUpdateArchive: installDist directory not found: ${installDir}")
-			}
-			ant.zip(destfile: archiveFile.absolutePath) {
-				fileset(dir: installDir.absolutePath)
-			}
+		def installDir = layout.buildDirectory.dir("install/${applicationName}").get().asFile
+		if (!installDir.isDirectory()) {
+			throw new GradleException("selfUpdateArchive: installDist directory not found: ${installDir}")
+		}
+		def payloadInputDir = layout.buildDirectory.dir("self-update/payload-input").get().asFile
+		def payloadLibDir = preparePackagingLibDir(os, installDir, payloadInputDir)
+		ant.zip(destfile: archiveFile.absolutePath) {
+			zipfileset(dir: payloadLibDir.absolutePath, prefix: 'lib')
 		}
 	}
 }

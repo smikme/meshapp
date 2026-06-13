@@ -9,6 +9,7 @@ import java.util.Map;
 import java.util.Properties;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class SelfUpdateEnvironmentTest {
@@ -56,7 +57,7 @@ class SelfUpdateEnvironmentTest {
     }
 
     @Test
-    void infersMacAppBundleFromClasspath() throws Exception {
+    void doesNotTreatMacAppBundleAsSelfUpdateLayout() throws Exception {
         Path app = tempDir.resolve("MeshApp.app");
         Path jar = app.resolve("Contents/app/lib/MeshApp.jar");
         Files.createDirectories(jar.getParent());
@@ -70,14 +71,6 @@ class SelfUpdateEnvironmentTest {
 
         var env = SelfUpdateEnvironment.from(Map.of(), properties);
 
-        assertTrue(env.isPresent());
-        assertEquals(app, env.get().root());
-        assertEquals("2.1.20", env.get().version());
-        assertEquals(app.toString(), env.get().launcher());
-        assertEquals(SelfUpdateEnvironment.Layout.MAC_APP_BUNDLE, env.get().layout());
-        assertEquals(
-                tempDir.resolve("home/Library/Caches/MeshApp/self-update"),
-                env.get().stagingDir()
-        );
+        assertFalse(env.isPresent());
     }
 }

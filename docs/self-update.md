@@ -1,21 +1,34 @@
 # MeshApp Self-Update Manifest
 
-MeshApp supports a non-privileged full-archive self-update path. macOS DMG
-installations update by replacing the signed `MeshApp.app` bundle after the
-running application exits. The older managed layout produced by
-`./gradlew selfUpdateImage` is still supported for development and portable
-launches.
+MeshApp uses a non-privileged launcher/payload self-update layout. The native
+package installs a stable signed launcher bundle. On startup, that launcher
+bootstraps and starts the actual application payload from a user-writable
+version directory. Updates replace only that payload and switch `current`; they
+do not modify the signed native launcher bundle.
 
 The legacy `downloads` manifest still works. The self-update path is enabled
 only when all of these are true:
 
-- the application can resolve a supported update layout: macOS `.app` bundle or
-  a launcher that provides `MESHAPP_UPDATE_ROOT` and `MESHAPP_UPDATE_VERSION`
+- the application is running from a managed payload process where the launcher
+  provides `MESHAPP_UPDATE_ROOT` and `MESHAPP_UPDATE_VERSION`
 - the current package format is not Flatpak
 - the manifest contains a matching `selfUpdate` artifact
-- the artifact is a `full-archive` `zip`
+- the artifact is a full payload `zip`
 - the artifact hash matches
 - the artifact signature is trusted, or unsigned dev mode is explicitly enabled
+
+Native DMG/MSI/DEB packages are still the delivery mechanism for the stable
+launcher. The first run of the launcher copies its packaged application payload
+to the managed root:
+
+- macOS: `~/Library/Application Support/MeshApp/versions/<version>/`
+- Windows: `%LOCALAPPDATA%\MeshApp\versions\<version>\`
+- Linux: `~/.local/share/meshapp/versions/<version>/`
+
+Payload archives include the application jars, JavaFX modules, and platform
+native libraries required by that build. For example, Windows payloads include
+the packaged `meshapp-ble.dll`, Linux payloads include `libmeshapp-ble.so`, and
+macOS native resources are carried by the application jar.
 
 The generated manifest keeps the legacy `downloads` map for existing clients:
 `windows`, `macos`, `linux`, plus package-specific keys such as `windows-msi`,
@@ -65,8 +78,8 @@ Release artifacts and the update manifest are separate CI/CD steps:
 1. Tag pushes run `.gitea/workflows/release.yml`. Linux, Windows, and macOS
    jobs build native packages plus
    `MeshApp-{version}-{os}-{arch}-selfupdate.zip`.
-   On macOS this zip contains the signed `MeshApp.app` bundle and is produced
-   after `jpackage` signs/notarizes the app image.
+   This zip contains the managed application payload, not the signed native
+   package or macOS `.app` bundle.
    This creates and publishes the Gitea release, but does not publish it to the
    update system.
 2. A manual `.gitea/workflows/publish-update-manifest.yml` run selects which
