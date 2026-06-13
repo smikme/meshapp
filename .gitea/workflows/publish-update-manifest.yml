@@ -9,6 +9,9 @@ on:
       release_notes_ru:
         description: 'Release notes RU'
         required: true
+      version_code:
+        description: 'Optional manifest versionCode override'
+        required: false
 
 jobs:
   publish-update-manifest:

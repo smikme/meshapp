@@ -302,6 +302,12 @@ if [ -z "${version_code}" ]; then
   echo "::error::Unable to resolve versionCode. Set MESHAPP_VERSION_CODE." >&2
   exit 1
 fi
+case "${version_code}" in
+  *[!0-9]*|0)
+    echo "::error::versionCode must be a positive integer" >&2
+    exit 1
+    ;;
+esac
 
 release_notes="${MESHAPP_RELEASE_NOTES:-}"
 if [ -z "${release_notes}" ] && [ -s "${metadata_file}" ]; then
