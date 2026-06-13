@@ -135,6 +135,9 @@ class SelfUpdateInstallerTest {
         assertTrue(command.getFirst().endsWith("java") || command.getFirst().endsWith("java.exe"));
         assertTrue(command.contains("--module-path"));
         assertTrue(command.contains(target.resolve("lib/fx").toAbsolutePath().toString()));
+        assertTrue(command.contains("-Dmeshapp.update.root=" + root.toAbsolutePath()));
+        assertTrue(command.contains("-Dmeshapp.update.version=v2.1.20"));
+        assertTrue(command.contains("-Dmeshapp.update.launcher=/Applications/MeshApp.app"));
         assertTrue(command.contains("-DjSerialComm.library.path=" + target.resolve("lib").toAbsolutePath()));
         assertTrue(command.contains(target.resolve("lib/MeshApp-v2.1.20.jar").toAbsolutePath().toString()));
         assertEquals("com.meshtastic.client.MeshAppLauncher", command.get(command.size() - 1));

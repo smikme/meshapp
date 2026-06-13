@@ -143,8 +143,16 @@ public final class SelfUpdateLauncher {
             command.add("--add-modules");
             command.add("javafx.controls");
         }
+        command.add("-D" + SelfUpdateEnvironment.PROP_ROOT + "="
+                + plan.root().toAbsolutePath());
+        command.add("-D" + SelfUpdateEnvironment.PROP_VERSION + "="
+                + currentVersion);
         command.add("-D" + SelfUpdateEnvironment.PROP_STAGING_DIR + "="
                 + plan.stagingDir().toAbsolutePath());
+        if (plan.launcher() != null && !plan.launcher().isBlank()) {
+            command.add("-D" + SelfUpdateEnvironment.PROP_LAUNCHER + "="
+                    + plan.launcher());
+        }
         command.add("-DjSerialComm.library.path=" + libDir.toAbsolutePath());
         command.add("-cp");
         command.add(classPath);

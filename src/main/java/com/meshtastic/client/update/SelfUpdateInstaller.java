@@ -268,8 +268,16 @@ final class SelfUpdateInstaller {
             command.add("--add-modules");
             command.add("javafx.controls");
         }
+        command.add("-D" + SelfUpdateEnvironment.PROP_ROOT + "="
+                + request.root().toAbsolutePath());
+        command.add("-D" + SelfUpdateEnvironment.PROP_VERSION + "="
+                + request.targetVersion());
         command.add("-D" + SelfUpdateEnvironment.PROP_STAGING_DIR + "="
                 + stagingRoot(request).toAbsolutePath());
+        if (request.launcher() != null && !request.launcher().isBlank()) {
+            command.add("-D" + SelfUpdateEnvironment.PROP_LAUNCHER + "="
+                    + request.launcher());
+        }
         command.add("-DjSerialComm.library.path=" + libDir.toAbsolutePath());
         command.add("-cp");
         command.add(classPath);
