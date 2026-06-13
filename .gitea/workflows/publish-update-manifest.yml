@@ -3,11 +3,14 @@ name: Publish Update Manifest
 on:
   workflow_dispatch:
     inputs:
+      release_tag:
+        description: 'Target Gitea release tag to publish, for example v2.1.20. Keep "Use workflow from" on the current workflow branch.'
+        required: true
       release_notes:
-        description: 'MESHAPP_RELEASE_NOTES for selected tag'
+        description: 'MESHAPP_RELEASE_NOTES for meshapp.json'
         required: true
       release_notes_ru:
-        description: 'MESHAPP_RELEASE_NOTES_RU for selected tag'
+        description: 'MESHAPP_RELEASE_NOTES_RU for meshapp.json releaseNotes_ru'
         required: true
 
 jobs:
