@@ -128,13 +128,81 @@ javafx {
 	}
 }
 
+def parseReleaseVersionInfo = { rawTag ->
+	if (rawTag == null) {
+		return null
+	}
+	def tag = rawTag.trim()
+	if (tag.startsWith('refs/tags/')) {
+		tag = tag.substring('refs/tags/'.length())
+	}
+	def matcher = tag =~ /^v?(\d+)\.(\d+)\.(\d+)$/
+	if (!matcher.matches()) {
+		return null
+	}
+	def packageVersion = "${matcher[0][1]}.${matcher[0][2]}.${matcher[0][3]}"
+	return [
+		tag: tag.startsWith('v') ? tag : "v${packageVersion}",
+		packageVersion: packageVersion
+	]
+}
+
+def resolveReleaseVersionInfo = {
+	def candidates = [
+		findProperty('releaseTag')?.toString(),
+		findProperty('meshappVersion')?.toString(),
+		System.getenv('MESHAPP_VERSION'),
+		System.getenv('GITHUB_REF_NAME'),
+		System.getenv('GITHUB_REF')
+	]
+	for (def candidate : candidates) {
+		def versionInfo = parseReleaseVersionInfo(candidate)
+		if (versionInfo != null) {
+			return versionInfo
+		}
+	}
+
+	try {
+		def tags = 'git tag --points-at HEAD'.execute().text.readLines()
+			.collect { it.trim() }
+			.findAll { !it.isEmpty() }
+			.collect { tag ->
+				def versionInfo = parseReleaseVersionInfo(tag)
+				versionInfo == null ? null : [tag: tag, versionInfo: versionInfo]
+			}
+			.findAll { it != null }
+			.sort { a, b ->
+				def left = a.versionInfo.packageVersion.tokenize('.').collect { it.toInteger() }
+				def right = b.versionInfo.packageVersion.tokenize('.').collect { it.toInteger() }
+				for (int i = 0; i < 3; i++) {
+					def cmp = right[i] <=> left[i]
+					if (cmp != 0) {
+						return cmp
+					}
+				}
+				return a.tag <=> b.tag
+			}
+		if (!tags.isEmpty()) {
+			return tags[0].versionInfo
+		}
+	} catch (ignored) {
+		return null
+	}
+
+	return null
+}
+
 group = 'com.meshtastic'
 def configuredApplicationVersion = providers.gradleProperty('meshappVersion')
 		.orElse(providers.environmentVariable('MESHAPP_VERSION'))
 		.map { it.toString().trim() }
 		.orElse('')
 		.get()
+def releaseVersionInfo = resolveReleaseVersionInfo()
 version = configuredApplicationVersion ?: {
+	if (releaseVersionInfo != null) {
+		return releaseVersionInfo.tag
+	}
 	try {
 		return 'git describe --tags --always --dirty'.execute().text.trim() ?: 'dev'
 	} catch (ignored) {
@@ -539,66 +607,8 @@ tasks.named('test') {
 	}
 }
 
-def parseReleasePackageVersion = { rawTag ->
-	if (rawTag == null) {
-		return null
-	}
-	def matcher = rawTag.trim() =~ /^v?(\d+)\.(\d+)\.(\d+)$/
-	if (!matcher.matches()) {
-		return null
-	}
-	return "${matcher[0][1]}.${matcher[0][2]}.${matcher[0][3]}"
-}
-
 def resolveReleasePackageVersion = {
-	def explicitTag = findProperty('releaseTag')?.toString()
-	def packageVersion = parseReleasePackageVersion(explicitTag)
-	if (packageVersion != null) {
-		return packageVersion
-	}
-
-	def envTag = System.getenv('GITHUB_REF_NAME')
-	packageVersion = parseReleasePackageVersion(envTag)
-	if (packageVersion != null) {
-		return packageVersion
-	}
-
-	def envRef = System.getenv('GITHUB_REF')
-	if (envRef?.startsWith('refs/tags/')) {
-		packageVersion = parseReleasePackageVersion(envRef.substring('refs/tags/'.length()))
-		if (packageVersion != null) {
-			return packageVersion
-		}
-	}
-
-	try {
-		def tags = 'git tag --points-at HEAD'.execute().text.readLines()
-			.collect { it.trim() }
-			.findAll { !it.isEmpty() }
-			.collect { tag ->
-				def version = parseReleasePackageVersion(tag)
-				version == null ? null : [tag: tag, version: version]
-			}
-			.findAll { it != null }
-			.sort { a, b ->
-				def left = a.version.tokenize('.').collect { it.toInteger() }
-				def right = b.version.tokenize('.').collect { it.toInteger() }
-				for (int i = 0; i < 3; i++) {
-					def cmp = right[i] <=> left[i]
-					if (cmp != 0) {
-						return cmp
-					}
-				}
-				return a.tag <=> b.tag
-			}
-		if (!tags.isEmpty()) {
-			return tags[0].version
-		}
-	} catch (ignored) {
-		return null
-	}
-
-	return null
+	return resolveReleaseVersionInfo()?.packageVersion
 }
 
 def resolvePackageVersion = { os ->
@@ -1731,6 +1741,11 @@ tasks.register('verifySelfUpdatePackage') {
 		requireSelfUpdateCondition(isValidEd25519PublicKey(updatePublicKeyText),
 			"MESHAPP_UPDATE_ED25519_PUBLIC_KEY must be an Ed25519 X.509 public key")
 		requireSelfUpdateCondition(installLibDir.isDirectory(), "installDist lib directory not found: ${installLibDir}")
+		def selectedReleaseVersionInfo = resolveReleaseVersionInfo()
+		if (selectedReleaseVersionInfo != null) {
+			requireSelfUpdateCondition(applicationVersion == selectedReleaseVersionInfo.tag,
+				"applicationVersion ${applicationVersion} does not match selected release tag ${selectedReleaseVersionInfo.tag}")
+		}
 
 		def selfUpdateArchives = outputDir.listFiles()?.findAll {
 			it.isFile() && it.name.endsWith('-selfupdate.zip')
@@ -1738,6 +1753,10 @@ tasks.register('verifySelfUpdatePackage') {
 		requireSelfUpdateCondition(selfUpdateArchives.size() == 1,
 			"expected exactly one self-update zip in ${outputDir}, found ${selfUpdateArchives.size()}")
 		def selfUpdateZip = selfUpdateArchives[0]
+		def expectedSelfUpdateName =
+			"MeshApp-${sanitizeArtifactVersion(applicationVersion)}-${resolveSelfUpdatePlatform()}-selfupdate.zip"
+		requireSelfUpdateCondition(selfUpdateZip.name == expectedSelfUpdateName,
+			"expected self-update archive ${expectedSelfUpdateName}, found ${selfUpdateZip.name}")
 		def entries = zipEntryNames(selfUpdateZip)
 
 		requireSelfUpdateCondition(!entries.any { it.contains('.app/') || it.endsWith('.app') },
@@ -1793,6 +1812,15 @@ tasks.register('verifySelfUpdatePackage') {
 		} else if (os.isLinux()) {
 			requireSelfUpdateCondition(outputDir.listFiles()?.any { it.isFile() && it.name.endsWith('.deb') },
 				"Linux DEB was not produced in ${outputDir}")
+			def flatpakFiles = outputDir.listFiles()?.findAll {
+				it.isFile() && it.name.endsWith('.flatpak')
+			}?.sort { it.name } ?: []
+			if (!flatpakFiles.isEmpty()) {
+				def expectedFlatpakName =
+					"MeshApp-${sanitizeArtifactVersion(applicationVersion)}-${resolveLinuxAppImageArch()}.flatpak"
+				requireSelfUpdateCondition(flatpakFiles.any { it.name == expectedFlatpakName },
+					"expected Flatpak bundle ${expectedFlatpakName}, found ${flatpakFiles*.name}")
+			}
 			requireSelfUpdateCondition(entries.contains('lib/libmeshapp-ble.so'),
 				"${selfUpdateZip.name} is missing Linux BLE native library")
 		} else if (os.isWindows()) {
