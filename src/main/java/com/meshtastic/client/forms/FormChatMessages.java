@@ -20,6 +20,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.IntStream;
 
 import org.meshtastic.proto.MeshProtos;
 import org.slf4j.Logger;
@@ -676,16 +677,18 @@ abstract class FormChatMessages extends FormChatUi {
             return;
         }
 
-        boolean selectionChanged = false;
-        for (int i = 0; i < excess; i++) {
-            MeshMessage removed = trimFromTop ? loadedMessages.removeFirst() : loadedMessages.removeLast();
-            HBox row = loadedMessageRows.remove(removed.getDbId());
-            loadedRenderedMessageRows.remove(removed.getDbId());
-            selectionChanged |= selectedMessageDbIds.remove(removed.getDbId());
-            if (row != null) {
-                messageContainer.getChildren().remove(row);
-            }
-        }
+        boolean selectionChanged = IntStream.range(0, excess)
+                .mapToObj(ignored -> trimFromTop ? loadedMessages.removeFirst() : loadedMessages.removeLast())
+                .map(MeshMessage::getDbId)
+                .map(dbId -> {
+                    HBox row = loadedMessageRows.remove(dbId);
+                    loadedRenderedMessageRows.remove(dbId);
+                    if (row != null) {
+                        messageContainer.getChildren().remove(row);
+                    }
+                    return selectedMessageDbIds.remove(dbId);
+                })
+                .reduce(false, Boolean::logicalOr);
         if (selectionChanged) {
             updateMessageSelectionBar();
         }

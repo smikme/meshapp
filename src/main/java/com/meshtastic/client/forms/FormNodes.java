@@ -38,6 +38,7 @@ import javafx.scene.text.FontWeight;
 
 import java.util.*;
 import java.util.function.IntConsumer;
+import java.util.stream.Collectors;
 
 /**
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
@@ -645,50 +646,50 @@ public class FormNodes extends Form {
     }
 
     private List<NodeData> contextActionNodes(NodeData contextNode) {
-        if (contextNode == null) { return List.of(); }
-
-        List<NodeData> selected = selectedNodes();
-        if (selected.size() > 1 && containsNode(selected, contextNode)) {
-            return selected;
-        }
-        return List.of(contextNode);
+        return Optional.ofNullable(contextNode)
+                .map(node -> {
+                    List<NodeData> selected = selectedNodes();
+                    return selected.size() > 1 && containsNode(selected, node)
+                            ? selected
+                            : List.of(node);
+                })
+                .orElseGet(List::of);
     }
 
     private static List<NodeData> normalizedNodes(Collection<NodeData> nodes) {
-        if (nodes == null || nodes.isEmpty()) { return List.of(); }
-
-        Map<Integer, NodeData> byNodeNum = new LinkedHashMap<>();
-        for (NodeData node : nodes) {
-            if (node != null) {
-                byNodeNum.putIfAbsent(node.getNodeNum(), node);
-            }
-        }
-        return List.copyOf(byNodeNum.values());
+        return Optional.ofNullable(nodes).stream()
+                .flatMap(Collection::stream)
+                .filter(Objects::nonNull)
+                .collect(Collectors.collectingAndThen(
+                        Collectors.toMap(
+                                NodeData::getNodeNum,
+                                node -> node,
+                                (first, ignored) -> first,
+                                LinkedHashMap::new),
+                        byNodeNum -> List.copyOf(byNodeNum.values())));
     }
 
     private static boolean containsNode(Collection<NodeData> nodes, NodeData target) {
-        if (nodes == null || target == null) { return false; }
-        for (NodeData node : nodes) {
-            if (node != null && node.getNodeNum() == target.getNodeNum()) {
-                return true;
-            }
-        }
-        return false;
+        return target != null
+                && Optional.ofNullable(nodes).stream()
+                .flatMap(Collection::stream)
+                .filter(Objects::nonNull)
+                .anyMatch(node -> node.getNodeNum() == target.getNodeNum());
     }
 
     private void addFavorites(Collection<NodeData> nodes) {
         FavoriteNodeService service = FavoriteNodeService.getInstance();
-        for (NodeData node : normalizedNodes(nodes)) {
-            service.addFavorite(node.getNodeId());
-        }
+        normalizedNodes(nodes).stream()
+                .map(NodeData::getNodeId)
+                .forEach(service::addFavorite);
         nodeListView.refresh();
     }
 
     private void addIgnored(Collection<NodeData> nodes) {
         IgnoredNodeService service = IgnoredNodeService.getInstance();
-        for (NodeData node : normalizedNodes(nodes)) {
-            service.addIgnored(node.getNodeId());
-        }
+        normalizedNodes(nodes).stream()
+                .map(NodeData::getNodeId)
+                .forEach(service::addIgnored);
         nodeListView.refresh();
     }
 
@@ -717,17 +718,17 @@ public class FormNodes extends Form {
         List<NodeData> normalizedTargets = normalizedNodes(targets);
         if (normalizedTargets.isEmpty()) { return; }
 
-        Set<Integer> deletedNodeNums = new HashSet<>();
+        Set<Integer> deletedNodeNums = normalizedTargets.stream()
+                .map(NodeData::getNodeNum)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
         Set<Integer> remainingSelection = selectedNodeNums();
-        for (NodeData node : normalizedTargets) {
-            int nodeNum = node.getNodeNum();
-            deletedNodeNums.add(nodeNum);
-            remainingSelection.remove(nodeNum);
-            if (state != null) {
-                state.removeNode(nodeNum);
-            }
-            NodeCacheService.getInstance().deleteNode(node.getNodeId());
-        }
+        remainingSelection.removeAll(deletedNodeNums);
+        Optional.ofNullable(state).ifPresent(currentState ->
+                deletedNodeNums.forEach(currentState::removeNode));
+        NodeCacheService nodeCache = NodeCacheService.getInstance();
+        normalizedTargets.stream()
+                .map(NodeData::getNodeId)
+                .forEach(nodeCache::deleteNode);
 
         boolean removedCurrentDetail = deletedNodeNums.contains(currentDetailNodeNum);
         nodeData.removeIf(node -> deletedNodeNums.contains(node.getNodeNum()));
@@ -740,24 +741,20 @@ public class FormNodes extends Form {
     }
 
     private Set<Integer> selectedNodeNums() {
-        Set<Integer> nums = new LinkedHashSet<>();
-        for (NodeData node : selectedNodes()) {
-            nums.add(node.getNodeNum());
-        }
-        return nums;
+        return selectedNodes().stream()
+                .map(NodeData::getNodeNum)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
     }
 
     private void restoreSelection(Set<Integer> nodeNums) {
         suppressSelectionListener = true;
         try {
             nodeListView.getSelectionModel().clearSelection();
-            if (nodeNums != null && !nodeNums.isEmpty()) {
-                for (NodeData node : nodeListView.getItems()) {
-                    if (nodeNums.contains(node.getNodeNum())) {
-                        nodeListView.getSelectionModel().select(node);
-                    }
-                }
-            }
+            Optional.ofNullable(nodeNums)
+                    .filter(nums -> !nums.isEmpty())
+                    .ifPresent(nums -> nodeListView.getItems().stream()
+                            .filter(node -> nums.contains(node.getNodeNum()))
+                            .forEach(nodeListView.getSelectionModel()::select));
         } finally {
             suppressSelectionListener = false;
         }

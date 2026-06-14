@@ -33,7 +33,9 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 import org.meshtastic.proto.ChannelProtos;
 
@@ -428,14 +430,9 @@ abstract class FormChatData extends FormChatRequests {
         }
 
         long dbId = msg.getDbId();
-        boolean selected;
-        if (selectedMessageDbIds.contains(dbId)) {
-            selectedMessageDbIds.remove(dbId);
-            selected = false;
-        } else {
-            selectedMessageDbIds.add(dbId);
-            selected = true;
-        }
+        boolean selected = selectedMessageDbIds.remove(dbId)
+                ? false
+                : selectedMessageDbIds.add(dbId);
         setMessageRowSelected(row, selected);
         updateMessageSelectionBar();
     }
@@ -456,9 +453,9 @@ abstract class FormChatData extends FormChatRequests {
             updateMessageSelectionBar();
             return;
         }
-        for (Long dbId : List.copyOf(selectedMessageDbIds)) {
-            setMessageRowSelected(loadedMessageRows.get(dbId), false);
-        }
+        selectedMessageDbIds.stream()
+                .map(loadedMessageRows::get)
+                .forEach(row -> setMessageRowSelected(row, false));
         selectedMessageDbIds.clear();
         updateMessageSelectionBar();
     }
@@ -483,13 +480,10 @@ abstract class FormChatData extends FormChatRequests {
     }
 
     private List<Long> selectedLoadedMessageDbIds() {
-        Set<Long> loadedDbIds = new LinkedHashSet<>();
-        for (MeshMessage loaded : loadedMessages) {
-            if (selectedMessageDbIds.contains(loaded.getDbId())) {
-                loadedDbIds.add(loaded.getDbId());
-            }
-        }
-        return List.copyOf(loadedDbIds);
+        return loadedMessages.stream()
+                .map(MeshMessage::getDbId)
+                .filter(selectedMessageDbIds::contains)
+                .toList();
     }
 
     private void deleteMessagesFromCurrentChat(Collection<Long> dbIds) {
@@ -497,23 +491,24 @@ abstract class FormChatData extends FormChatRequests {
             return;
         }
 
-        Set<Long> targetDbIds = new LinkedHashSet<>(dbIds);
-        MessageDbService db = MessageDbService.getInstance();
-        for (Long dbId : targetDbIds) {
-            if (dbId != null && dbId > 0) {
-                db.deleteMessage(dbId);
-            }
+        Set<Long> targetDbIds = dbIds.stream()
+                .filter(Objects::nonNull)
+                .filter(dbId -> dbId > 0)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        if (targetDbIds.isEmpty()) {
+            return;
         }
 
+        MessageDbService db = MessageDbService.getInstance();
+        targetDbIds.forEach(db::deleteMessage);
+
         loadedMessages.removeIf(loaded -> targetDbIds.contains(loaded.getDbId()));
-        for (Long dbId : targetDbIds) {
-            HBox row = loadedMessageRows.remove(dbId);
-            loadedRenderedMessageRows.remove(dbId);
-            selectedMessageDbIds.remove(dbId);
-            if (row != null) {
-                messageContainer.getChildren().remove(row);
-            }
-        }
+        targetDbIds.forEach(loadedRenderedMessageRows::remove);
+        targetDbIds.forEach(selectedMessageDbIds::remove);
+        targetDbIds.stream()
+                .map(loadedMessageRows::remove)
+                .filter(Objects::nonNull)
+                .forEach(messageContainer.getChildren()::remove);
 
         recalcLoadedBounds();
         updateMessageSelectionBar();
@@ -522,14 +517,15 @@ abstract class FormChatData extends FormChatRequests {
     }
 
     protected void setMessageRowSelected(HBox row, boolean selected) {
-        if (row == null) { return; }
-        if (selected) {
-            if (!row.getStyleClass().contains(MESSAGE_ROW_SELECTED_STYLE_CLASS)) {
-                row.getStyleClass().add(MESSAGE_ROW_SELECTED_STYLE_CLASS);
+        Optional.ofNullable(row).ifPresent(target -> {
+            if (selected && !target.getStyleClass().contains(MESSAGE_ROW_SELECTED_STYLE_CLASS)) {
+                target.getStyleClass().add(MESSAGE_ROW_SELECTED_STYLE_CLASS);
+                return;
             }
-            return;
-        }
-        row.getStyleClass().remove(MESSAGE_ROW_SELECTED_STYLE_CLASS);
+            if (!selected) {
+                target.getStyleClass().remove(MESSAGE_ROW_SELECTED_STYLE_CLASS);
+            }
+        });
     }
 
     protected void markAsRead(ChatItem item) {
