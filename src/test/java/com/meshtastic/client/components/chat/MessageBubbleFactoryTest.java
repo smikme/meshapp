@@ -43,7 +43,7 @@ class MessageBubbleFactoryTest {
     }
 
     @Test
-    void outgoingBubbleDoesNotStartReplyOnDoubleClick() {
+    void outgoingBubbleHasPrimaryClickHandlerForSelectionMode() {
         onFxThread(() -> {
             MessageBubbleFactory factory = new MessageBubbleFactory(
                     null,
@@ -56,7 +56,7 @@ class MessageBubbleFactoryTest {
             VBox content = findNodeWithStyle(row, "chat-bubble-outgoing", VBox.class).orElse(null);
 
             assertNotNull(content);
-            assertNull(content.getOnMouseClicked());
+            assertNotNull(content.getOnMouseClicked());
             return null;
         });
     }
@@ -251,6 +251,9 @@ class MessageBubbleFactoryTest {
         @Override public void startReply(MeshMessage msg) {}
         @Override public void sendReaction(MeshMessage msg, String emoji) {}
         @Override public void confirmDeleteMessage(MeshMessage msg, HBox bubbleRow) {}
+        @Override public void toggleMessageSelection(MeshMessage msg, HBox bubbleRow) {}
+        @Override public boolean isMessageSelected(MeshMessage msg) { return false; }
+        @Override public boolean isMessageSelectionModeActive() { return false; }
         @Override public boolean retryMessage(MeshMessage msg) { return false; }
     }
 }

@@ -202,6 +202,7 @@ abstract class FormChatUi extends FormChatBase {
     protected void buildRightPanelComponents() {
         placeholderBox = createPlaceholderBox();
         buildHeader();
+        messageSelectionBar = createMessageSelectionBar();
         messageContainer = createMessageContainer();
         nameResolver = new ChatNameResolver(state);
         tracerouteView = createTracerouteView();
@@ -374,6 +375,15 @@ abstract class FormChatUi extends FormChatBase {
                     }
                     @Override public void confirmDeleteMessage(MeshMessage msg, HBox row) {
                         FormChatUi.this.confirmDeleteMessage(msg, row);
+                    }
+                    @Override public void toggleMessageSelection(MeshMessage msg, HBox row) {
+                        FormChatUi.this.toggleMessageSelection(msg, row);
+                    }
+                    @Override public boolean isMessageSelected(MeshMessage msg) {
+                        return FormChatUi.this.isMessageSelected(msg);
+                    }
+                    @Override public boolean isMessageSelectionModeActive() {
+                        return FormChatUi.this.isMessageSelectionModeActive();
                     }
                     @Override public boolean retryMessage(MeshMessage msg) { return FormChatUi.this.retryMessage(msg); }
                 },
@@ -683,7 +693,7 @@ abstract class FormChatUi extends FormChatBase {
             // Show header, messages, and input controls.
             detailPane.getChildren().clear();
             detailPane.getChildren().addAll(
-                    chatHeader, headerSep, messageArea,
+                    chatHeader, headerSep, messageSelectionBar, messageArea,
                     chatInputBar.getInputSeparator(), chatInputBar);
 
             // Leaving a chat also leaves reply mode.
@@ -733,6 +743,51 @@ abstract class FormChatUi extends FormChatBase {
                 && chatItemMatches(selectedChat, chat)
                 && detailPane != null
                 && detailPane.getChildren().contains(messageArea);
+    }
+
+    private HBox createMessageSelectionBar() {
+        messageSelectionLabel = new Label();
+        messageSelectionLabel.getStyleClass().add("chat-message-selection-label");
+        HBox.setHgrow(messageSelectionLabel, Priority.ALWAYS);
+
+        deleteSelectedMessagesBtn = FormChatUiSupport.createHeaderIconButton(
+                "/drawer/icon/delete-node.svg",
+                I18n.t("chat.selection.delete"),
+                "×");
+        deleteSelectedMessagesBtn.getStyleClass().add("chat-message-selection-delete-btn");
+        deleteSelectedMessagesBtn.setOnAction(event -> deleteSelectedMessagesWithConfirmation());
+
+        clearSelectedMessagesBtn = FormChatUiSupport.createHeaderIconButton(
+                "/icons/close.svg",
+                I18n.t("chat.selection.clear"),
+                "×");
+        clearSelectedMessagesBtn.setOnAction(event -> clearSelectedMessages());
+
+        HBox bar = new HBox(8, messageSelectionLabel, deleteSelectedMessagesBtn, clearSelectedMessagesBtn);
+        bar.setAlignment(Pos.CENTER_LEFT);
+        bar.setPadding(new Insets(8, 15, 8, 15));
+        bar.getStyleClass().add("chat-message-selection-bar");
+        FormChatUiSupport.setVisibleManaged(bar, false);
+        return bar;
+    }
+
+    protected void updateMessageSelectionBar() {
+        int selectedCount = selectedMessageDbIds.size();
+        boolean visible = selectedChat != null && selectedCount > 0;
+        FormChatUiSupport.setVisibleManaged(messageSelectionBar, visible);
+        if (messageSelectionLabel != null) {
+            messageSelectionLabel.setText(messageSelectionCountText(selectedCount));
+        }
+        if (deleteSelectedMessagesBtn != null) {
+            deleteSelectedMessagesBtn.setDisable(selectedCount == 0);
+        }
+        if (clearSelectedMessagesBtn != null) {
+            clearSelectedMessagesBtn.setDisable(selectedCount == 0);
+        }
+    }
+
+    private static String messageSelectionCountText(int count) {
+        return I18n.t("chat.selection.selected." + I18n.pluralCategory(count), count);
     }
 
     // Messages: paged database loading.

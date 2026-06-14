@@ -28,6 +28,7 @@ import javafx.scene.control.MenuItem;
 import javafx.scene.layout.HBox;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -46,6 +47,8 @@ import org.meshtastic.proto.ChannelProtos;
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 abstract class FormChatData extends FormChatRequests {
+
+    private static final String MESSAGE_ROW_SELECTED_STYLE_CLASS = "chat-message-row-selected";
 
     private record ActiveConnection(DeviceState state,
                                     ProtocolHandler handler,
@@ -407,13 +410,126 @@ abstract class FormChatData extends FormChatRequests {
 
     private void deleteMessageFromCurrentChat(MeshMessage msg, HBox bubbleRow) {
         MessageDbService.getInstance().deleteMessage(msg.getDbId());
+        selectedMessageDbIds.remove(msg.getDbId());
         loadedMessages.removeIf(loaded -> loaded.getDbId() == msg.getDbId());
         loadedMessageRows.remove(msg.getDbId());
         loadedRenderedMessageRows.remove(msg.getDbId());
         recalcLoadedBounds();
         messageContainer.getChildren().remove(bubbleRow);
+        updateMessageSelectionBar();
         refreshMessageSearchResults(false);
         reloadChatList();
+    }
+
+    @Override
+    protected void toggleMessageSelection(MeshMessage msg, HBox row) {
+        if (msg == null || msg.getDbId() <= 0) {
+            return;
+        }
+
+        long dbId = msg.getDbId();
+        boolean selected;
+        if (selectedMessageDbIds.contains(dbId)) {
+            selectedMessageDbIds.remove(dbId);
+            selected = false;
+        } else {
+            selectedMessageDbIds.add(dbId);
+            selected = true;
+        }
+        setMessageRowSelected(row, selected);
+        updateMessageSelectionBar();
+    }
+
+    @Override
+    protected boolean isMessageSelected(MeshMessage msg) {
+        return msg != null && selectedMessageDbIds.contains(msg.getDbId());
+    }
+
+    @Override
+    protected boolean isMessageSelectionModeActive() {
+        return !selectedMessageDbIds.isEmpty();
+    }
+
+    @Override
+    protected void clearSelectedMessages() {
+        if (selectedMessageDbIds.isEmpty()) {
+            updateMessageSelectionBar();
+            return;
+        }
+        for (Long dbId : List.copyOf(selectedMessageDbIds)) {
+            setMessageRowSelected(loadedMessageRows.get(dbId), false);
+        }
+        selectedMessageDbIds.clear();
+        updateMessageSelectionBar();
+    }
+
+    @Override
+    protected void deleteSelectedMessagesWithConfirmation() {
+        List<Long> targetDbIds = selectedLoadedMessageDbIds();
+        if (targetDbIds.isEmpty()) {
+            clearSelectedMessages();
+            return;
+        }
+
+        ModalPane.showConfirm(
+                I18n.t("chat.confirm.deleteMessages.title"),
+                I18n.t("chat.confirm.deleteMessages.message", targetDbIds.size()),
+                confirmed -> {
+                    if (confirmed) {
+                        deleteMessagesFromCurrentChat(targetDbIds);
+                    }
+                }
+        );
+    }
+
+    private List<Long> selectedLoadedMessageDbIds() {
+        Set<Long> loadedDbIds = new LinkedHashSet<>();
+        for (MeshMessage loaded : loadedMessages) {
+            if (selectedMessageDbIds.contains(loaded.getDbId())) {
+                loadedDbIds.add(loaded.getDbId());
+            }
+        }
+        return List.copyOf(loadedDbIds);
+    }
+
+    private void deleteMessagesFromCurrentChat(Collection<Long> dbIds) {
+        if (dbIds == null || dbIds.isEmpty()) {
+            return;
+        }
+
+        Set<Long> targetDbIds = new LinkedHashSet<>(dbIds);
+        MessageDbService db = MessageDbService.getInstance();
+        for (Long dbId : targetDbIds) {
+            if (dbId != null && dbId > 0) {
+                db.deleteMessage(dbId);
+            }
+        }
+
+        loadedMessages.removeIf(loaded -> targetDbIds.contains(loaded.getDbId()));
+        for (Long dbId : targetDbIds) {
+            HBox row = loadedMessageRows.remove(dbId);
+            loadedRenderedMessageRows.remove(dbId);
+            selectedMessageDbIds.remove(dbId);
+            if (row != null) {
+                messageContainer.getChildren().remove(row);
+            }
+        }
+
+        recalcLoadedBounds();
+        updateMessageSelectionBar();
+        refreshMessageSearchResults(false);
+        reloadChatList();
+    }
+
+    protected void setMessageRowSelected(HBox row, boolean selected) {
+        if (row == null) { return; }
+        if (selected) {
+            if (!row.getStyleClass().contains(MESSAGE_ROW_SELECTED_STYLE_CLASS)) {
+                row.getStyleClass().add(MESSAGE_ROW_SELECTED_STYLE_CLASS);
+            }
+            return;
+        }
+        row.getStyleClass().remove(MESSAGE_ROW_SELECTED_STYLE_CLASS);
     }
 
     protected void markAsRead(ChatItem item) {

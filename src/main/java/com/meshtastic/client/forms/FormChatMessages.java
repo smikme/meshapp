@@ -613,6 +613,8 @@ abstract class FormChatMessages extends FormChatUi {
     }
 
     protected void clearLoadedMessageState() {
+        selectedMessageDbIds.clear();
+        updateMessageSelectionBar();
         loadedMessages.clear();
         loadedMessageRows.clear();
         loadedRenderedMessageRows.clear();
@@ -674,13 +676,18 @@ abstract class FormChatMessages extends FormChatUi {
             return;
         }
 
+        boolean selectionChanged = false;
         for (int i = 0; i < excess; i++) {
             MeshMessage removed = trimFromTop ? loadedMessages.removeFirst() : loadedMessages.removeLast();
             HBox row = loadedMessageRows.remove(removed.getDbId());
             loadedRenderedMessageRows.remove(removed.getDbId());
+            selectionChanged |= selectedMessageDbIds.remove(removed.getDbId());
             if (row != null) {
                 messageContainer.getChildren().remove(row);
             }
+        }
+        if (selectionChanged) {
+            updateMessageSelectionBar();
         }
 
         if (trimFromTop) {

@@ -120,6 +120,15 @@ public class MessageBubbleFactory {
         /** Confirms and deletes a message. */
         void confirmDeleteMessage(MeshMessage msg, HBox bubbleRow);
 
+        /** Toggles message selection for bulk actions. */
+        void toggleMessageSelection(MeshMessage msg, HBox bubbleRow);
+
+        /** Returns whether the message is currently selected. */
+        boolean isMessageSelected(MeshMessage msg);
+
+        /** Returns whether message selection mode is currently active. */
+        boolean isMessageSelectionModeActive();
+
         /** Resends an undelivered message. */
         boolean retryMessage(MeshMessage msg);
     }
@@ -400,8 +409,9 @@ public class MessageBubbleFactory {
 
         MqttBubble mqttBubble = wrapWithMqttBadge(content, msg);
         HBox row = createMessageRow(Pos.BOTTOM_LEFT, "chat-message-row-incoming", avatar, mqttBubble.wrapper());
-        attachReplyOnDoubleClick(content, msg);
+        attachMessagePrimaryClickHandler(content, msg, row, true);
         attachIncomingContextMenu(content, msg, row);
+        applyMessageSelectionState(row, msg);
         return new RenderedMessageRow(
                 row,
                 content,
@@ -440,7 +450,9 @@ public class MessageBubbleFactory {
 
         MqttBubble mqttBubble = wrapWithMqttBadge(content, msg);
         HBox row = createMessageRow(Pos.BOTTOM_RIGHT, "chat-message-row-outgoing", spacer, mqttBubble.wrapper(), avatar);
+        attachMessagePrimaryClickHandler(content, msg, row, false);
         attachCopyDeleteMenu(content, msg, row);
+        applyMessageSelectionState(row, msg);
         return new RenderedMessageRow(
                 row,
                 content,
@@ -477,7 +489,9 @@ public class MessageBubbleFactory {
         ));
 
         HBox row = createMessageRow(Pos.BOTTOM_LEFT, "chat-message-row-system", botAvatar, content);
+        attachMessagePrimaryClickHandler(content, msg, row, false);
         attachCopyDeleteMenu(content, msg, row);
+        applyMessageSelectionState(row, msg);
         return new RenderedMessageRow(
                 row,
                 content,
@@ -504,18 +518,22 @@ public class MessageBubbleFactory {
                         .filter(text -> text.startsWith(TracerouteView.TRACEROUTE_PREFIX))
                         .isPresent())
                 .map(view -> view.tryBuildFromText(msg))
-                .map(row -> new RenderedMessageRow(
-                        row,
-                        null,
-                        null,
-                        null,
-                        null,
-                        null,
-                        null,
-                        null,
-                        SYSTEM_BUBBLE_WIDTH_RATIO,
-                        false,
-                        false));
+                .map(row -> {
+                    attachMessagePrimaryClickHandler(row, msg, row, false);
+                    applyMessageSelectionState(row, msg);
+                    return new RenderedMessageRow(
+                            row,
+                            null,
+                            null,
+                            null,
+                            null,
+                            null,
+                            null,
+                            null,
+                            SYSTEM_BUBBLE_WIDTH_RATIO,
+                            false,
+                            false);
+                });
     }
 
     /**
@@ -768,19 +786,26 @@ public class MessageBubbleFactory {
         return footer;
     }
 
-    /**
-     * Installs a double-click handler for quick reply.
-     *
-     * @param content bubble content
-     * @param msg message that will be replied to
-     */
-    private void attachReplyOnDoubleClick(VBox content, MeshMessage msg) {
-        content.setOnMouseClicked(e -> {
-            if (e.getClickCount() != DOUBLE_CLICK_COUNT) {
+    private void attachMessagePrimaryClickHandler(Node clickTarget,
+                                                  MeshMessage msg,
+                                                  HBox row,
+                                                  boolean allowDoubleClickReply) {
+        clickTarget.setOnMouseClicked(e -> {
+            if (e.getButton() != MouseButton.PRIMARY) {
                 return;
             }
-            actions.startReply(msg);
-            e.consume();
+            if (actions.isMessageSelectionModeActive()) {
+                if (e.getClickCount() == 1) {
+                    actions.toggleMessageSelection(msg, row);
+                    applyMessageSelectionState(row, msg);
+                }
+                e.consume();
+                return;
+            }
+            if (allowDoubleClickReply && e.getClickCount() == DOUBLE_CLICK_COUNT) {
+                actions.startReply(msg);
+                e.consume();
+            }
         });
     }
 
@@ -1469,8 +1494,9 @@ public class MessageBubbleFactory {
      * @param row chat row
      */
     private void attachIncomingContextMenu(VBox content, MeshMessage msg, HBox row) {
-        installContextMenu(content, () -> new ContextMenu(
+        installContextMenu(content, () -> createContextMenu(
                 createMenuItem(I18n.t("common.copy"), () -> copyText(msg.getText())),
+                createSelectionMenuItem(msg, row),
                 createMenuItem(I18n.t("chat.bubble.reply"), () -> actions.startReply(msg)),
                 new SeparatorMenuItem(),
                 createMenuItem(I18n.t("common.delete"), () -> actions.confirmDeleteMessage(msg, row))
@@ -1485,11 +1511,29 @@ public class MessageBubbleFactory {
      * @param row chat row
      */
     private void attachCopyDeleteMenu(VBox content, MeshMessage msg, HBox row) {
-        installContextMenu(content, () -> new ContextMenu(
+        installContextMenu(content, () -> createContextMenu(
                 createMenuItem(I18n.t("common.copy"), () -> copyText(msg.getText())),
+                createSelectionMenuItem(msg, row),
                 new SeparatorMenuItem(),
                 createMenuItem(I18n.t("common.delete"), () -> actions.confirmDeleteMessage(msg, row))
         ));
+    }
+
+    private ContextMenu createContextMenu(MenuItem... items) {
+        return new ContextMenu(Arrays.stream(items)
+                .filter(Objects::nonNull)
+                .toArray(MenuItem[]::new));
+    }
+
+    private MenuItem createSelectionMenuItem(MeshMessage msg, HBox row) {
+        if (msg == null || msg.getDbId() <= 0) {
+            return null;
+        }
+        String key = actions.isMessageSelected(msg) ? "chat.bubble.unselect" : "chat.bubble.select";
+        return createMenuItem(I18n.t(key), () -> {
+            actions.toggleMessageSelection(msg, row);
+            applyMessageSelectionState(row, msg);
+        });
     }
 
     /**
@@ -1514,11 +1558,16 @@ public class MessageBubbleFactory {
     private static void installContextMenu(VBox content, Supplier<ContextMenu> menuSupplier) {
         AtomicReference<ContextMenu> menuRef = new AtomicReference<>();
         content.setOnContextMenuRequested(ev -> {
-            ContextMenu menu = menuRef.updateAndGet(existing ->
-                    existing != null ? existing : menuSupplier.get());
+            Optional.ofNullable(menuRef.get()).ifPresent(ContextMenu::hide);
+            ContextMenu menu = menuSupplier.get();
+            menuRef.set(menu);
             menu.show(content, ev.getScreenX(), ev.getScreenY());
             ev.consume();
         });
+    }
+
+    private void applyMessageSelectionState(HBox row, MeshMessage msg) {
+        setStyleClassPresence(row, "chat-message-row-selected", actions.isMessageSelected(msg));
     }
 
     /**
