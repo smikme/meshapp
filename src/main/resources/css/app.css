@@ -1163,6 +1163,19 @@
     -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.25), 15, 0, -4, 0);
 }
 
+.connection-field-error {
+    -fx-border-color: #E53935;
+    -fx-border-width: 1;
+    -fx-border-radius: 6;
+    -fx-background-radius: 6;
+}
+
+.connection-validation-error {
+    -fx-text-fill: #E53935;
+    -fx-font-size: 0.8462em;
+    -fx-padding: -4 0 0 0;
+}
+
 .form-title {
     -fx-font-size: 1.2308em;
     -fx-font-weight: bold;
@@ -1438,6 +1451,40 @@
 .light-theme .node-count-badge {
     -fx-background-color: rgba(0, 0, 0, 0.45);
     -fx-text-fill: white;
+}
+
+.node-bulk-action-bar {
+    -fx-background-color: rgba(255, 255, 255, 0.06);
+    -fx-background-radius: 8;
+}
+
+.light-theme .node-bulk-action-bar {
+    -fx-background-color: rgba(0, 0, 0, 0.04);
+}
+
+.node-bulk-selection-label {
+    -fx-text-fill: rgba(255, 255, 255, 0.72);
+    -fx-font-size: 0.9231em;
+}
+
+.light-theme .node-bulk-selection-label {
+    -fx-text-fill: rgba(0, 0, 0, 0.62);
+}
+
+.chat-new-btn.node-bulk-delete-btn .svg-icon {
+    -fx-fill: #FF6B6B;
+}
+
+.chat-new-btn.node-bulk-delete-btn:hover .svg-icon {
+    -fx-fill: #FF5252;
+}
+
+.light-theme .chat-new-btn.node-bulk-delete-btn .svg-icon {
+    -fx-fill: #E53935;
+}
+
+.light-theme .chat-new-btn.node-bulk-delete-btn:hover .svg-icon {
+    -fx-fill: #C62828;
 }
 
 /* Форма нод и SplitPane — прозрачные, vibrancy просвечивает слева */
@@ -1857,6 +1904,43 @@
     -fx-fill: rgba(0, 0, 0, 0.86);
 }
 
+.chat-message-selection-bar {
+    -fx-background-color: rgba(88, 166, 255, 0.08);
+    -fx-border-color: rgba(88, 166, 255, 0.20);
+    -fx-border-width: 0 0 1 0;
+}
+
+.light-theme .chat-message-selection-bar {
+    -fx-background-color: rgba(9, 105, 218, 0.08);
+    -fx-border-color: rgba(9, 105, 218, 0.18);
+}
+
+.chat-message-selection-label {
+    -fx-text-fill: rgba(255, 255, 255, 0.78);
+    -fx-font-size: 0.9231em;
+    -fx-font-weight: bold;
+}
+
+.light-theme .chat-message-selection-label {
+    -fx-text-fill: rgba(0, 0, 0, 0.68);
+}
+
+.chat-header-icon-btn.chat-message-selection-delete-btn .svg-icon {
+    -fx-fill: #FF6B6B;
+}
+
+.chat-header-icon-btn.chat-message-selection-delete-btn:hover .svg-icon {
+    -fx-fill: #FF5252;
+}
+
+.light-theme .chat-header-icon-btn.chat-message-selection-delete-btn .svg-icon {
+    -fx-fill: #E53935;
+}
+
+.light-theme .chat-header-icon-btn.chat-message-selection-delete-btn:hover .svg-icon {
+    -fx-fill: #C62828;
+}
+
 .chat-message-search-controls {
     -fx-alignment: center-left;
 }
@@ -1899,6 +1983,15 @@
 
 .light-theme .chat-message-search-hit {
     -fx-background-color: rgba(255, 194, 38, 0.22);
+}
+
+.chat-message-row-selected {
+    -fx-background-color: rgba(88, 166, 255, 0.12);
+    -fx-background-radius: 10;
+}
+
+.light-theme .chat-message-row-selected {
+    -fx-background-color: rgba(9, 105, 218, 0.12);
 }
 
 /* Область сообщений */

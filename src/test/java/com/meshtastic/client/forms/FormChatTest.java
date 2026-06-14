@@ -5,6 +5,7 @@ import com.meshtastic.client.model.ConnectionEntry;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.ChatItem;
 import com.meshtastic.client.model.MeshMessage;
+import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.service.ConnectionManager;
 import com.meshtastic.client.service.MessageDbService;
 import javafx.application.Platform;
@@ -178,6 +179,40 @@ class FormChatTest {
                 assertFalse(form.selectedChatsByConnectionId.containsKey("connection-1"));
                 assertTrue(form.detailPane.getChildren().contains(form.placeholderBox));
                 assertFalse(form.detailPane.getChildren().contains(form.messageArea));
+            } finally {
+                state.shutdown();
+            }
+            return null;
+        });
+        waitForFxEvents();
+        waitForFxEvents();
+    }
+
+    @Test
+    void openDirectChatKeepsEmptyThreadAfterReload() {
+        onFxThread(() -> {
+            DeviceState state = new DeviceState();
+            try {
+                state.setMyNodeNum(0x12345678);
+                state.addChannel(channelProto(0));
+                NodeData peer = new NodeData(0x00000002);
+                peer.setLongName("Peer Two");
+                peer.setShortName("P2");
+
+                FormChat form = new FormChat();
+                form.state = state;
+                form.boundConnectionId = "connection-1";
+
+                form.openDirectChat(peer.getNodeId(), peer);
+                form.reloadChatList();
+
+                assertTrue(state.getAllDirectMessages().containsKey(peer.getNodeId()));
+                assertNotNull(form.selectedChat);
+                assertEquals(ChatItem.ChatType.DIRECT_MESSAGE, form.selectedChat.getType());
+                assertEquals(peer.getNodeId(), form.selectedChat.getPeerNodeId());
+                assertTrue(form.chatListView.getItems().stream()
+                        .anyMatch(item -> item.getType() == ChatItem.ChatType.DIRECT_MESSAGE
+                                && peer.getNodeId().equals(item.getPeerNodeId())));
             } finally {
                 state.shutdown();
             }

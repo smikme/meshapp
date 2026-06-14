@@ -2,6 +2,7 @@ package com.meshtastic.client.forms;
 
 import com.meshtastic.client.components.NodeDetailContent;
 import com.meshtastic.client.i18n.I18n;
+import com.meshtastic.client.modal.ModalPane;
 import com.meshtastic.client.model.ConnectionEntry;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.NodeData;
@@ -20,6 +21,7 @@ import com.meshtastic.client.utils.SystemForm;
 import com.meshtastic.client.utils.UnicodeTextUtils;
 import javafx.application.Platform;
 import javafx.collections.FXCollections;
+import javafx.collections.ListChangeListener;
 import javafx.collections.ObservableList;
 import javafx.collections.transformation.FilteredList;
 import javafx.collections.transformation.SortedList;
@@ -36,6 +38,7 @@ import javafx.scene.text.FontWeight;
 
 import java.util.*;
 import java.util.function.IntConsumer;
+import java.util.stream.Collectors;
 
 /**
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
@@ -50,6 +53,9 @@ public class FormNodes extends Form {
     private FilteredList<NodeData> filteredNodes;
     private TextField searchField;
     private Label countBadge;
+    private HBox bulkActionBar;
+    private Label bulkSelectionLabel;
+    private Button bulkDeleteBtn;
 
     private VBox detailPane;
     private Label detailPlaceholder;
@@ -329,6 +335,8 @@ public class FormNodes extends Form {
         searchBox.setAlignment(Pos.CENTER_LEFT);
         HBox.setHgrow(searchField, Priority.ALWAYS);
 
+        bulkActionBar = createBulkActionBar();
+
         filteredNodes = new FilteredList<>(nodeData, n -> true);
         searchField.textProperty().addListener((obs, oldVal, newVal) -> updateFilterPredicate());
 
@@ -341,11 +349,14 @@ public class FormNodes extends Form {
         if (OsDetect.isWindows() && !AppPreferences.isDisableEffectsEffective()) {
             nodeListView.setStyle(WINDOWS_HIT_TEST_BACKGROUND);
         }
+        nodeListView.getSelectionModel().setSelectionMode(SelectionMode.MULTIPLE);
         nodeListView.setCellFactory(lv -> new NodeListCell());
         nodeListView.getSelectionModel().selectedItemProperty().addListener(
                 (obs, oldNode, newNode) -> {
                     if (!suppressSelectionListener) { showDetail(newNode); }
                 });
+        nodeListView.getSelectionModel().getSelectedItems().addListener(
+                (ListChangeListener<NodeData>) change -> updateBulkActionBarState());
 
         // Node-count badge.
         countBadge = new Label("0");
@@ -360,7 +371,7 @@ public class FormNodes extends Form {
         filteredNodes.addListener((javafx.collections.ListChangeListener<NodeData>) change ->
                 countBadge.setText(String.valueOf(filteredNodes.size())));
 
-        leftPane.getChildren().addAll(searchBox, listWrapper);
+        leftPane.getChildren().addAll(searchBox, bulkActionBar, listWrapper);
 
         // --- Right Panel: Details ---
         detailPane = new VBox();
@@ -390,6 +401,58 @@ public class FormNodes extends Form {
 
         // Apply filters on startup.
         updateFilterPredicate();
+        updateBulkActionBarState();
+    }
+
+    private HBox createBulkActionBar() {
+        bulkSelectionLabel = new Label();
+        bulkSelectionLabel.getStyleClass().add("node-bulk-selection-label");
+        HBox.setHgrow(bulkSelectionLabel, Priority.ALWAYS);
+
+        Button addFavoriteBtn = createBulkActionButton(
+                "/icons/favorite.svg",
+                I18n.t("node.bulk.addFavorite")
+        );
+        addFavoriteBtn.getStyleClass().add("favorite-btn-active");
+        addFavoriteBtn.setOnAction(e -> addFavorites(selectedNodes()));
+
+        Button addIgnoredBtn = createBulkActionButton(
+                "/icons/eye-off.svg",
+                I18n.t("node.bulk.addIgnored")
+        );
+        addIgnoredBtn.getStyleClass().add("ignored-btn-active");
+        addIgnoredBtn.setOnAction(e -> addIgnored(selectedNodes()));
+
+        bulkDeleteBtn = createBulkActionButton(
+                "/drawer/icon/delete-node.svg",
+                I18n.t("node.bulk.delete")
+        );
+        bulkDeleteBtn.getStyleClass().add("node-bulk-delete-btn");
+        bulkDeleteBtn.setOnAction(e -> deleteNodesWithConfirmation(selectedNodes()));
+
+        Button clearSelectionBtn = createBulkActionButton(
+                "/icons/close.svg",
+                I18n.t("node.bulk.clearSelection")
+        );
+        clearSelectionBtn.setOnAction(e -> nodeListView.getSelectionModel().clearSelection());
+
+        HBox bar = new HBox(8, bulkSelectionLabel, addFavoriteBtn, addIgnoredBtn, bulkDeleteBtn, clearSelectionBtn);
+        bar.setPadding(new Insets(0, 8, 8, 8));
+        bar.setAlignment(Pos.CENTER_LEFT);
+        bar.getStyleClass().add("node-bulk-action-bar");
+        bar.setVisible(false);
+        bar.setManaged(false);
+        return bar;
+    }
+
+    private Button createBulkActionButton(String iconResource, String tooltipText) {
+        SVGPath icon = SvgIconLoader.load(iconResource, 16);
+        Button button = new Button();
+        button.setGraphic(icon);
+        button.setContentDisplay(ContentDisplay.GRAPHIC_ONLY);
+        button.getStyleClass().add("chat-new-btn");
+        button.setTooltip(new Tooltip(tooltipText));
+        return button;
     }
 
     /** Returns the comparator for a string sort key. */
@@ -562,6 +625,153 @@ public class FormNodes extends Form {
                 || containsIgnoreCase(node.getHwModel(), normalized);
     }
 
+    // ==================== Bulk actions ====================
+
+    private void updateBulkActionBarState() {
+        if (bulkActionBar == null || bulkSelectionLabel == null) { return; }
+
+        int selectedCount = selectedNodes().size();
+        boolean showBulkActions = selectedCount > 1;
+        bulkActionBar.setVisible(showBulkActions);
+        bulkActionBar.setManaged(showBulkActions);
+        bulkSelectionLabel.setText(selectionCountText(selectedCount));
+        if (bulkDeleteBtn != null) {
+            bulkDeleteBtn.setDisable(state == null || selectedCount == 0);
+        }
+    }
+
+    private List<NodeData> selectedNodes() {
+        if (nodeListView == null) { return List.of(); }
+        return normalizedNodes(nodeListView.getSelectionModel().getSelectedItems());
+    }
+
+    private List<NodeData> contextActionNodes(NodeData contextNode) {
+        return Optional.ofNullable(contextNode)
+                .map(node -> {
+                    List<NodeData> selected = selectedNodes();
+                    return selected.size() > 1 && containsNode(selected, node)
+                            ? selected
+                            : List.of(node);
+                })
+                .orElseGet(List::of);
+    }
+
+    private static List<NodeData> normalizedNodes(Collection<NodeData> nodes) {
+        return Optional.ofNullable(nodes).stream()
+                .flatMap(Collection::stream)
+                .filter(Objects::nonNull)
+                .collect(Collectors.collectingAndThen(
+                        Collectors.toMap(
+                                NodeData::getNodeNum,
+                                node -> node,
+                                (first, ignored) -> first,
+                                LinkedHashMap::new),
+                        byNodeNum -> List.copyOf(byNodeNum.values())));
+    }
+
+    private static boolean containsNode(Collection<NodeData> nodes, NodeData target) {
+        return target != null
+                && Optional.ofNullable(nodes).stream()
+                .flatMap(Collection::stream)
+                .filter(Objects::nonNull)
+                .anyMatch(node -> node.getNodeNum() == target.getNodeNum());
+    }
+
+    private void addFavorites(Collection<NodeData> nodes) {
+        FavoriteNodeService service = FavoriteNodeService.getInstance();
+        normalizedNodes(nodes).stream()
+                .map(NodeData::getNodeId)
+                .forEach(service::addFavorite);
+        nodeListView.refresh();
+    }
+
+    private void addIgnored(Collection<NodeData> nodes) {
+        IgnoredNodeService service = IgnoredNodeService.getInstance();
+        normalizedNodes(nodes).stream()
+                .map(NodeData::getNodeId)
+                .forEach(service::addIgnored);
+        nodeListView.refresh();
+    }
+
+    private void deleteNodesWithConfirmation(Collection<NodeData> nodes) {
+        List<NodeData> targets = normalizedNodes(nodes);
+        if (targets.isEmpty() || state == null) { return; }
+
+        String title;
+        String message;
+        if (targets.size() == 1) {
+            title = I18n.t("node.confirm.delete.title");
+            message = I18n.t("node.confirm.delete.message", displayName(targets.getFirst()));
+        } else {
+            title = I18n.t("node.confirm.deleteMany.title");
+            message = I18n.t("node.confirm.deleteMany.message", targets.size());
+        }
+
+        ModalPane.showConfirm(title, message, confirmed -> {
+            if (confirmed) {
+                deleteNodes(targets);
+            }
+        });
+    }
+
+    private void deleteNodes(Collection<NodeData> targets) {
+        List<NodeData> normalizedTargets = normalizedNodes(targets);
+        if (normalizedTargets.isEmpty()) { return; }
+
+        Set<Integer> deletedNodeNums = normalizedTargets.stream()
+                .map(NodeData::getNodeNum)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        Set<Integer> remainingSelection = selectedNodeNums();
+        remainingSelection.removeAll(deletedNodeNums);
+        Optional.ofNullable(state).ifPresent(currentState ->
+                deletedNodeNums.forEach(currentState::removeNode));
+        NodeCacheService nodeCache = NodeCacheService.getInstance();
+        normalizedTargets.stream()
+                .map(NodeData::getNodeId)
+                .forEach(nodeCache::deleteNode);
+
+        boolean removedCurrentDetail = deletedNodeNums.contains(currentDetailNodeNum);
+        nodeData.removeIf(node -> deletedNodeNums.contains(node.getNodeNum()));
+        restoreSelection(remainingSelection);
+        if (removedCurrentDetail) {
+            showDetail(nodeListView.getSelectionModel().getSelectedItem());
+        }
+        updateFilterPredicate();
+        updateBulkActionBarState();
+    }
+
+    private Set<Integer> selectedNodeNums() {
+        return selectedNodes().stream()
+                .map(NodeData::getNodeNum)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+    }
+
+    private void restoreSelection(Set<Integer> nodeNums) {
+        suppressSelectionListener = true;
+        try {
+            nodeListView.getSelectionModel().clearSelection();
+            Optional.ofNullable(nodeNums)
+                    .filter(nums -> !nums.isEmpty())
+                    .ifPresent(nums -> nodeListView.getItems().stream()
+                            .filter(node -> nums.contains(node.getNodeNum()))
+                            .forEach(nodeListView.getSelectionModel()::select));
+        } finally {
+            suppressSelectionListener = false;
+        }
+    }
+
+    private static String selectionCountText(int count) {
+        return I18n.t("node.bulk.selected." + I18n.pluralCategory(count), count);
+    }
+
+    private static String displayName(NodeData node) {
+        if (node == null) { return "?"; }
+        String value = node.getLongName() != null && !node.getLongName().isEmpty()
+                ? node.getLongName()
+                : node.getNodeId() != null ? node.getNodeId() : "?";
+        return UnicodeTextUtils.sanitizeForJavaFxDisplay(value);
+    }
+
     // ==================== Node list cell ====================
 
     private class NodeListCell extends ListCell<NodeData> {
@@ -612,23 +822,36 @@ public class FormNodes extends Form {
             MenuItem removeFavItem = new MenuItem(I18n.t("node.menu.removeFavorite"));
             MenuItem addIgnItem = new MenuItem(I18n.t("node.menu.addIgnored"));
             MenuItem removeIgnItem = new MenuItem(I18n.t("node.menu.removeIgnored"));
+            MenuItem deleteItem = new MenuItem(I18n.t("node.action.delete"));
+            SeparatorMenuItem favoriteSeparator = new SeparatorMenuItem();
+            SeparatorMenuItem deleteSeparator = new SeparatorMenuItem();
             ContextMenu ctxMenu = new ContextMenu(addFavItem, removeFavItem,
-                    new SeparatorMenuItem(), addIgnItem, removeIgnItem);
+                    favoriteSeparator, addIgnItem, removeIgnItem, deleteSeparator, deleteItem);
             setContextMenu(ctxMenu);
 
             ctxMenu.setOnShowing(ev -> {
                 NodeData nd = getItem();
+                List<NodeData> targets = contextActionNodes(nd);
+                boolean bulk = targets.size() > 1;
                 boolean fav = nd != null && FavoriteNodeService.getInstance().isFavorite(nd.getNodeId());
-                addFavItem.setVisible(!fav);
-                removeFavItem.setVisible(fav);
                 boolean ign = nd != null && IgnoredNodeService.getInstance().isIgnored(nd.getNodeId());
-                addIgnItem.setVisible(!ign);
-                removeIgnItem.setVisible(ign);
+
+                addFavItem.setText(I18n.t(bulk ? "node.menu.addSelectedFavorite" : "node.menu.addFavorite"));
+                addIgnItem.setText(I18n.t(bulk ? "node.menu.addSelectedIgnored" : "node.menu.addIgnored"));
+                deleteItem.setText(I18n.t(bulk ? "node.menu.deleteSelected" : "node.action.delete"));
+
+                addFavItem.setVisible(bulk || !fav);
+                removeFavItem.setVisible(!bulk && fav);
+                addIgnItem.setVisible(bulk || !ign);
+                removeIgnItem.setVisible(!bulk && ign);
+                deleteItem.setVisible(!targets.isEmpty() && state != null);
+                favoriteSeparator.setVisible(addIgnItem.isVisible() || removeIgnItem.isVisible());
+                deleteSeparator.setVisible(deleteItem.isVisible());
             });
 
             addFavItem.setOnAction(ev -> {
                 NodeData nd = getItem();
-                if (nd != null) { FavoriteNodeService.getInstance().addFavorite(nd.getNodeId()); }
+                addFavorites(contextActionNodes(nd));
             });
 
             removeFavItem.setOnAction(ev -> {
@@ -638,12 +861,17 @@ public class FormNodes extends Form {
 
             addIgnItem.setOnAction(ev -> {
                 NodeData nd = getItem();
-                if (nd != null) { IgnoredNodeService.getInstance().addIgnored(nd.getNodeId()); }
+                addIgnored(contextActionNodes(nd));
             });
 
             removeIgnItem.setOnAction(ev -> {
                 NodeData nd = getItem();
                 if (nd != null) { IgnoredNodeService.getInstance().removeIgnored(nd.getNodeId()); }
+            });
+
+            deleteItem.setOnAction(ev -> {
+                NodeData nd = getItem();
+                deleteNodesWithConfirmation(contextActionNodes(nd));
             });
         }
 
@@ -811,9 +1039,7 @@ public class FormNodes extends Form {
     }
 
     private void reloadList() {
-        // Remember the selected node.
-        NodeData selected = nodeListView.getSelectionModel().getSelectedItem();
-        int selectedNodeNum = selected != null ? selected.getNodeNum() : 0;
+        Set<Integer> selectedNodeNums = selectedNodeNums();
 
         // Suppress the listener so setAll() -> null selection does not close details.
         suppressSelectionListener = true;
@@ -824,17 +1050,17 @@ public class FormNodes extends Form {
                 nodeData.clear();
             }
 
-        // Restore selection.
-            if (selectedNodeNum != 0) {
+            nodeListView.getSelectionModel().clearSelection();
+            if (!selectedNodeNums.isEmpty()) {
                 for (NodeData node : nodeListView.getItems()) {
-                    if (node.getNodeNum() == selectedNodeNum) {
+                    if (selectedNodeNums.contains(node.getNodeNum())) {
                         nodeListView.getSelectionModel().select(node);
-                        break;
                     }
                 }
             }
         } finally {
             suppressSelectionListener = false;
+            updateBulkActionBarState();
         }
     }
 
