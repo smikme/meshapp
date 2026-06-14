@@ -64,17 +64,17 @@ MeshApp — настольное приложение для устройств 
 - Debian / Ubuntu: скачайте `.deb`-пакет и установите его через `apt` или пакетный менеджер.
 - Linux AppImage: скачайте `.AppImage`, сделайте файл исполняемым и запустите его.
 
-Пользователи Flatpak могут установить MeshApp из репозитория проекта:
+Пользователи Flatpak могут установить MeshApp через опубликованный Flatpak ref:
 
 ```bash
-flatpak remote-add --user --if-not-exists meshapp https://flatpak.privatepractice.app/repo/
-flatpak install --user meshapp app.privatepractice.meshapp
+flatpak install --user https://flatpak.privatepractice.app/app.privatepractice.meshapp.flatpakref
 flatpak run app.privatepractice.meshapp
 ```
 
-Также можно установить приложение через опубликованный Flatpak ref:
+Если репозиторий `meshapp` был добавлен старой командой напрямую на `/repo/` и Flatpak сообщает `public key not found`, удалите старый remote и добавьте его заново:
 
 ```bash
+flatpak remote-delete --user --force meshapp
 flatpak install --user https://flatpak.privatepractice.app/app.privatepractice.meshapp.flatpakref
 ```
 
