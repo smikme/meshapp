@@ -17,9 +17,11 @@ import javafx.geometry.Pos;
 import javafx.scene.control.Button;
 import javafx.scene.control.CheckBox;
 import javafx.scene.control.ComboBox;
+import javafx.scene.control.Control;
 import javafx.scene.control.Label;
 import javafx.scene.control.Separator;
 import javafx.scene.control.TextField;
+import javafx.scene.control.TextInputControl;
 import javafx.scene.control.Tooltip;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
@@ -27,11 +29,23 @@ import javafx.scene.layout.VBox;
 
 import java.util.List;
 import java.util.function.Consumer;
+import java.util.regex.Pattern;
 
 /**
+ * Side-panel form for creating and editing saved connection profiles.
+ * <p>
+ * The form owns only profile validation and object construction. Opening,
+ * storing, and connecting profiles is handled by the parent connections screen.
+ *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class SimpleConnectionForm extends VBox {
+
+    private static final String FIELD_ERROR_STYLE_CLASS = "connection-field-error";
+    private static final Pattern BLE_MAC_ADDRESS_PATTERN =
+            Pattern.compile("(?i)^[0-9a-f]{2}(:[0-9a-f]{2}){5}$");
+    private static final Pattern BLE_UUID_PATTERN =
+            Pattern.compile("(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$");
 
     private static final List<ConnectionType> BASE_CONNECTION_TYPES = List.of(ConnectionType.TCP, ConnectionType.SERIAL);
     private static final List<ProtocolType> STREAM_PROTOCOLS = List.of(
@@ -52,23 +66,29 @@ public class SimpleConnectionForm extends VBox {
     private final ComboBox<String> cmbType;
     private final ComboBox<String> cmbProtocol;
     private final TextField txtName;
+    private final ValidationField nameValidation;
     private final CheckBox chkAutoconnect;
 
     // TCP fields
     private final VBox tcpFields;
     private final TextField txtHost;
+    private final ValidationField hostValidation;
     private final TextField txtPort;
+    private final ValidationField tcpPortValidation;
 
     // Serial fields
     private final VBox serialFields;
     private final ComboBox<String> cmbPort;
+    private final ValidationField serialPortValidation;
     private final Label lblSerialStatus;
     private final TextField txtBaudRate;
+    private final ValidationField baudRateValidation;
     private final ComboBox<String> cmbSerialModemLines;
 
     // BLE fields
     private final VBox bleFields;
     private final ComboBox<String> cmbBleDevice;
+    private final ValidationField bleDeviceValidation;
     private final Label lblBleStatus;
 
     private Consumer<ConnectionEntry> onSave;
@@ -126,6 +146,7 @@ public class SimpleConnectionForm extends VBox {
         // Display name.
         txtName = new TextField();
         txtName.setPromptText(I18n.t("connection.form.namePrompt"));
+        nameValidation = createValidationField(txtName);
 
         chkAutoconnect = new CheckBox(I18n.t("connection.form.autoconnect"));
         chkAutoconnect.setTooltip(new Tooltip(I18n.t("connection.form.autoconnect.tooltip")));
@@ -133,13 +154,15 @@ public class SimpleConnectionForm extends VBox {
         // --- TCP fields ---
         txtHost = new TextField();
         txtHost.setPromptText("192.168.1.1");
+        hostValidation = createValidationField(txtHost);
 
         txtPort = new TextField("4403");
+        tcpPortValidation = createValidationField(txtPort);
 
         tcpFields = new VBox(8);
         tcpFields.getChildren().addAll(
-                new Label(I18n.t("connection.form.host")), txtHost,
-                new Label(I18n.t("connection.form.port")), txtPort
+                new Label(I18n.t("connection.form.host")), txtHost, hostValidation.label(),
+                new Label(I18n.t("connection.form.port")), txtPort, tcpPortValidation.label()
         );
 
         // --- Serial fields ---
@@ -157,6 +180,8 @@ public class SimpleConnectionForm extends VBox {
         HBox portRow = new HBox(6, cmbPort, btnRefresh);
         portRow.setAlignment(Pos.CENTER_LEFT);
 
+        serialPortValidation = createValidationField(cmbPort);
+
         lblSerialStatus = new Label();
         lblSerialStatus.getStyleClass().add("text-muted");
         lblSerialStatus.setWrapText(true);
@@ -164,6 +189,7 @@ public class SimpleConnectionForm extends VBox {
         lblSerialStatus.setManaged(false);
 
         txtBaudRate = new TextField("115200");
+        baudRateValidation = createValidationField(txtBaudRate);
 
         cmbSerialModemLines = new ComboBox<>();
         cmbSerialModemLines.getItems().addAll(SERIAL_MODE_OPTIONS.stream()
@@ -175,8 +201,9 @@ public class SimpleConnectionForm extends VBox {
         serialFields = new VBox(8);
         serialFields.getChildren().addAll(
                 new Label(I18n.t("connection.form.devicePort")), portRow,
+                serialPortValidation.label(),
                 lblSerialStatus,
-                new Label(I18n.t("connection.form.baudRate")), txtBaudRate,
+                new Label(I18n.t("connection.form.baudRate")), txtBaudRate, baudRateValidation.label(),
                 new Label(I18n.t("connection.form.serialLines")), cmbSerialModemLines
         );
         serialFields.setVisible(false);
@@ -196,12 +223,15 @@ public class SimpleConnectionForm extends VBox {
         HBox bleDeviceRow = new HBox(6, cmbBleDevice, btnBleScan);
         bleDeviceRow.setAlignment(Pos.CENTER_LEFT);
 
+        bleDeviceValidation = createValidationField(cmbBleDevice);
+
         lblBleStatus = new Label();
         lblBleStatus.getStyleClass().add("text-muted");
 
         bleFields = new VBox(8);
         bleFields.getChildren().addAll(
                 new Label(I18n.t("connection.form.bleDevice")), bleDeviceRow,
+                bleDeviceValidation.label(),
                 lblBleStatus
         );
         bleFields.setVisible(false);
@@ -223,7 +253,7 @@ public class SimpleConnectionForm extends VBox {
                 title, new Separator(),
                 new Label(I18n.t("connection.form.connectionType")), cmbType,
                 new Label(I18n.t("connection.form.protocol")), cmbProtocol,
-                new Label(I18n.t("connection.form.connectionName")), txtName,
+                new Label(I18n.t("connection.form.connectionName")), txtName, nameValidation.label(),
                 chkAutoconnect,
                 tcpFields,
                 serialFields,
@@ -231,6 +261,7 @@ public class SimpleConnectionForm extends VBox {
                 buttons
         );
 
+        setupValidationClearing();
         populateFromEntry(editingEntry);
     }
 
@@ -253,64 +284,327 @@ public class SimpleConnectionForm extends VBox {
         }
     }
 
+    /**
+     * Builds a validated {@link ConnectionEntry} from the current form state.
+     * <p>
+     * On validation failure this method updates the visible field errors,
+     * focuses the first invalid control, and returns {@code null} to preserve
+     * the existing save-flow contract used by {@link #doSave()}.
+     *
+     * @return a fully configured connection profile, or {@code null} when the form is invalid
+     */
     public ConnectionEntry getConnectionEntry() {
-        String name = txtName.getText().trim();
-        if (name.isEmpty()) {
+        clearValidationErrors();
+
+        var validation = new ValidationState();
+        var name = requiredText(
+                validation,
+                txtName,
+                nameValidation,
+                "connection.form.validation.nameRequired");
+        var entry = switch (selectedConnectionType()) {
+            case TCP -> buildTcpConnectionEntry(validation, name);
+            case SERIAL -> buildSerialConnectionEntry(validation, name);
+            case BLE -> buildBleConnectionEntry(validation, name);
+        };
+
+        if (validation.hasErrors()) {
+            validation.focusFirstInvalid();
+            return null;
+        }
+        return entry;
+    }
+
+    /**
+     * Reads and validates the TCP-specific fields.
+     */
+    private ConnectionEntry buildTcpConnectionEntry(ValidationState validation, String name) {
+        var host = requiredText(
+                validation,
+                txtHost,
+                hostValidation,
+                "connection.form.validation.hostRequired");
+        var port = boundedInt(
+                validation,
+                txtPort,
+                tcpPortValidation,
+                "connection.form.validation.tcpPortRequired",
+                "connection.form.validation.tcpPortInvalid",
+                "connection.form.validation.tcpPortRange",
+                1,
+                65_535);
+
+        return validation.hasErrors()
+                ? null
+                : configureCommonFields(new ConnectionEntry(name, host, port));
+    }
+
+    /**
+     * Reads and validates the Serial/USB-specific fields.
+     */
+    private ConnectionEntry buildSerialConnectionEntry(ValidationState validation, String name) {
+        var selectedPort = requiredComboText(
+                validation,
+                cmbPort,
+                serialPortValidation,
+                "connection.form.validation.serialPortRequired");
+        var portName = selectedPort.isBlank()
+                ? ""
+                : extractSystemPortName(selectedPort).trim();
+        if (!selectedPort.isBlank() && portName.isBlank()) {
+            validation.reject(serialPortValidation, I18n.t("connection.form.validation.serialPortRequired"));
+        }
+
+        var baudRate = boundedInt(
+                validation,
+                txtBaudRate,
+                baudRateValidation,
+                "connection.form.validation.baudRateRequired",
+                "connection.form.validation.baudRateInvalid",
+                "connection.form.validation.baudRateRange",
+                1,
+                Integer.MAX_VALUE);
+
+        if (validation.hasErrors()) {
             return null;
         }
 
-        if (isBleMode()) {
-            String selectedDevice = cmbBleDevice.getValue();
-            if (selectedDevice == null || selectedDevice.isEmpty()) {
-                return null;
+        var entry = configureCommonFields(new ConnectionEntry(name, portName, baudRate, ConnectionType.SERIAL));
+        entry.setSerialModemLineMode(selectedSerialModemLineMode());
+        return entry;
+    }
+
+    /**
+     * Reads and validates the BLE-specific fields.
+     */
+    private ConnectionEntry buildBleConnectionEntry(ValidationState validation, String name) {
+        var selectedDevice = requiredComboText(
+                validation,
+                cmbBleDevice,
+                bleDeviceValidation,
+                "connection.form.validation.bleDeviceRequired");
+        if (selectedDevice.isBlank()) {
+            return null;
+        }
+
+        var discoveredDevice = findBleDeviceByLabel(selectedDevice);
+        if (discoveredDevice != null) {
+            return configureCommonFields(
+                    new ConnectionEntry(name, discoveredDevice.address(), discoveredDevice.displayName()),
+                    selectedProtocolForDevice(discoveredDevice));
+        }
+
+        var address = extractBleAddress(selectedDevice);
+        if (!isBleAddressCandidate(address)) {
+            validation.reject(bleDeviceValidation, I18n.t("connection.form.validation.bleDeviceInvalid"));
+            return null;
+        }
+
+        return configureCommonFields(new ConnectionEntry(name, address, extractBleDeviceName(selectedDevice)));
+    }
+
+    /**
+     * Applies form-level options that are common to every transport type.
+     */
+    private ConnectionEntry configureCommonFields(ConnectionEntry entry) {
+        return configureCommonFields(entry, selectedProtocolType());
+    }
+
+    /**
+     * Applies common profile options while allowing BLE discovery to choose a protocol.
+     */
+    private ConnectionEntry configureCommonFields(ConnectionEntry entry, ProtocolType protocolType) {
+        entry.setProtocol(protocolType);
+        entry.setAutoconnect(chkAutoconnect.isSelected());
+        return withEditingMetadata(entry);
+    }
+
+    /**
+     * Creates the field binding used for visual validation feedback.
+     */
+    private static ValidationField createValidationField(Control control) {
+        var label = new Label();
+        label.getStyleClass().add("connection-validation-error");
+        label.setWrapText(true);
+        label.setVisible(false);
+        label.setManaged(false);
+        return new ValidationField(control, label);
+    }
+
+    private void setupValidationClearing() {
+        clearOnTextChange(txtName, nameValidation);
+        clearOnTextChange(txtHost, hostValidation);
+        clearOnTextChange(txtPort, tcpPortValidation);
+        clearOnTextChange(txtBaudRate, baudRateValidation);
+        clearOnComboChange(cmbPort, serialPortValidation);
+        clearOnComboChange(cmbBleDevice, bleDeviceValidation);
+        cmbType.valueProperty().addListener((obs, oldValue, newValue) -> clearValidationErrors());
+    }
+
+    private static void clearOnTextChange(TextInputControl control, ValidationField validationField) {
+        control.textProperty().addListener((obs, oldValue, newValue) -> validationField.clear());
+    }
+
+    private static void clearOnComboChange(ComboBox<String> comboBox, ValidationField validationField) {
+        comboBox.valueProperty().addListener((obs, oldValue, newValue) -> validationField.clear());
+        if (comboBox.getEditor() != null) {
+            comboBox.getEditor().textProperty().addListener((obs, oldValue, newValue) ->
+                    validationField.clear());
+        }
+    }
+
+    private void clearValidationErrors() {
+        validationFields().forEach(ValidationField::clear);
+    }
+
+    /**
+     * Returns every field that can display a validation error.
+     */
+    private List<ValidationField> validationFields() {
+        return List.of(
+                nameValidation,
+                hostValidation,
+                tcpPortValidation,
+                serialPortValidation,
+                baudRateValidation,
+                bleDeviceValidation);
+    }
+
+    /**
+     * Reads text from a text input and records a validation error when it is blank.
+     *
+     * @return trimmed text; the value may be blank when validation has rejected the field
+     */
+    private static String requiredText(
+            ValidationState validation,
+            TextInputControl control,
+            ValidationField validationField,
+            String messageKey) {
+        var value = control.getText().trim();
+        if (value.isBlank()) {
+            validation.reject(validationField, I18n.t(messageKey));
+        }
+        return value;
+    }
+
+    /**
+     * Reads text from an editable combo box or its selected value and requires it to be non-blank.
+     *
+     * @return trimmed combo-box text; the value may be blank when validation has rejected the field
+     */
+    private static String requiredComboText(
+            ValidationState validation,
+            ComboBox<String> comboBox,
+            ValidationField validationField,
+            String messageKey) {
+        var value = comboText(comboBox);
+        if (value.isBlank()) {
+            validation.reject(validationField, I18n.t(messageKey));
+        }
+        return value;
+    }
+
+    /**
+     * Parses an integer field and checks an inclusive range.
+     *
+     * @return parsed integer, or {@code 0} when validation has rejected the field
+     */
+    private static int boundedInt(
+            ValidationState validation,
+            TextInputControl control,
+            ValidationField validationField,
+            String requiredMessageKey,
+            String invalidMessageKey,
+            String rangeMessageKey,
+            int min,
+            int max) {
+        var value = control.getText().trim();
+        if (value.isBlank()) {
+            validation.reject(validationField, I18n.t(requiredMessageKey));
+            return 0;
+        }
+
+        try {
+            var parsed = Integer.parseInt(value);
+            if (parsed < min || parsed > max) {
+                validation.reject(validationField, I18n.t(rangeMessageKey));
+                return 0;
             }
-            BleDevice device = findBleDeviceByLabel(selectedDevice);
-            if (device == null) {
-                String address = extractBleAddress(selectedDevice);
-                if (address == null || address.isBlank()) {
-                    return null;
-                }
-                ConnectionEntry entry = new ConnectionEntry(name, address, extractBleDeviceName(selectedDevice));
-                entry.setProtocol(selectedProtocolType());
-                entry.setAutoconnect(chkAutoconnect.isSelected());
-                return withEditingMetadata(entry);
+            return parsed;
+        } catch (NumberFormatException e) {
+            validation.reject(validationField, I18n.t(invalidMessageKey));
+            return 0;
+        }
+    }
+
+    /**
+     * Gets the effective text of a combo box, using the editor for editable boxes.
+     */
+    private static String comboText(ComboBox<String> comboBox) {
+        if (comboBox.isEditable() && comboBox.getEditor() != null) {
+            return comboBox.getEditor().getText().trim();
+        }
+        var value = comboBox.getValue();
+        return value == null ? "" : value.trim();
+    }
+
+    /**
+     * Checks BLE address formats accepted by MeshApp profiles.
+     */
+    private static boolean isBleAddressCandidate(String address) {
+        return address != null
+                && (BLE_MAC_ADDRESS_PATTERN.matcher(address).matches()
+                || BLE_UUID_PATTERN.matcher(address).matches());
+    }
+
+    /**
+     * Pair of a form control and the validation label displayed directly below it.
+     */
+    private record ValidationField(Control control, Label label) {
+
+        private void show(String message) {
+            if (!control.getStyleClass().contains(FIELD_ERROR_STYLE_CLASS)) {
+                control.getStyleClass().add(FIELD_ERROR_STYLE_CLASS);
             }
-            ConnectionEntry entry = new ConnectionEntry(name, device.address(), device.displayName());
-            entry.setProtocol(selectedProtocolForDevice(device));
-            entry.setAutoconnect(chkAutoconnect.isSelected());
-            return withEditingMetadata(entry);
-        } else if (isSerialMode()) {
-            String selectedPort = cmbPort.getValue();
-            if (selectedPort == null || selectedPort.isEmpty()) {
-                return null;
+            label.setText(message);
+            label.setVisible(true);
+            label.setManaged(true);
+        }
+
+        private void clear() {
+            control.getStyleClass().remove(FIELD_ERROR_STYLE_CLASS);
+            label.setText("");
+            label.setVisible(false);
+            label.setManaged(false);
+        }
+    }
+
+    /**
+     * Tracks validation errors for one save attempt and focuses the first invalid control.
+     */
+    private static final class ValidationState {
+        private Control firstInvalid;
+
+        private void reject(ValidationField field, String message) {
+            field.show(message);
+            firstInvalid = firstInvalid == null ? field.control() : firstInvalid;
+        }
+
+        private boolean hasErrors() {
+            return firstInvalid != null;
+        }
+
+        private void focusFirstInvalid() {
+            firstInvalid.requestFocus();
+            if (firstInvalid instanceof TextInputControl textInputControl) {
+                textInputControl.selectAll();
+                return;
             }
-            String portName = extractSystemPortName(selectedPort);
-            int baudRate;
-            try {
-                baudRate = Integer.parseInt(txtBaudRate.getText().trim());
-            } catch (NumberFormatException e) {
-                return null;
+            if (firstInvalid instanceof ComboBox<?> comboBox
+                    && comboBox.isEditable()
+                    && comboBox.getEditor() != null) {
+                comboBox.getEditor().selectAll();
             }
-            ConnectionEntry entry = new ConnectionEntry(name, portName, baudRate, ConnectionType.SERIAL);
-            entry.setProtocol(selectedProtocolType());
-            entry.setSerialModemLineMode(selectedSerialModemLineMode());
-            entry.setAutoconnect(chkAutoconnect.isSelected());
-            return withEditingMetadata(entry);
-        } else {
-            String host = txtHost.getText().trim();
-            if (host.isEmpty()) {
-                return null;
-            }
-            int port;
-            try {
-                port = Integer.parseInt(txtPort.getText().trim());
-            } catch (NumberFormatException e) {
-                return null;
-            }
-            ConnectionEntry entry = new ConnectionEntry(name, host, port);
-            entry.setProtocol(selectedProtocolType());
-            entry.setAutoconnect(chkAutoconnect.isSelected());
-            return withEditingMetadata(entry);
         }
     }
 
