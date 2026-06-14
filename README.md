@@ -64,17 +64,17 @@ Ready-made packages are published on the [Gitea releases page](https://git.priva
 - Debian / Ubuntu: download the `.deb` package and install it with `apt` or your package manager.
 - Linux AppImage: download the `.AppImage`, make it executable, and run it.
 
-Flatpak users can install MeshApp from the project repository:
+Flatpak users can install MeshApp through the published Flatpak ref:
 
 ```bash
-flatpak remote-add --user --if-not-exists meshapp https://flatpak.privatepractice.app/repo/
-flatpak install --user meshapp app.privatepractice.meshapp
+flatpak install --user https://flatpak.privatepractice.app/app.privatepractice.meshapp.flatpakref
 flatpak run app.privatepractice.meshapp
 ```
 
-Alternatively, install through the published Flatpak ref:
+If the `meshapp` repository was previously added with the old direct `/repo/` command and Flatpak reports `public key not found`, remove the old remote and add it again:
 
 ```bash
+flatpak remote-delete --user --force meshapp
 flatpak install --user https://flatpak.privatepractice.app/app.privatepractice.meshapp.flatpakref
 ```
 
