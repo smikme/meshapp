@@ -64,6 +64,7 @@ public class FormChat extends FormChatData {
     @Override
     public void formClose() {
         saveCurrentChatScrollState();
+        clearSelectedMessages();
         scrollOperationGeneration++;
         formVisible = false;
         if (bubbleFactory != null) {

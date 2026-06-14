@@ -32,11 +32,13 @@ import javafx.scene.layout.VBox;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Queue;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.function.Consumer;
@@ -87,6 +89,10 @@ abstract class FormChatBase extends Form {
     protected Button scrollDownBtn;
     protected Label scrollDownBadge;
     protected int newMessageWhileScrolled = 0;
+    protected HBox messageSelectionBar;
+    protected Label messageSelectionLabel;
+    protected Button deleteSelectedMessagesBtn;
+    protected Button clearSelectedMessagesBtn;
 
     // Input bar
     protected ChatInputBar chatInputBar;
@@ -121,6 +127,7 @@ abstract class FormChatBase extends Form {
     protected final List<MeshMessage> loadedMessages = new ArrayList<>();
     protected final Map<Long, HBox> loadedMessageRows = new HashMap<>();
     protected final Map<Long, MessageBubbleFactory.RenderedMessageRow> loadedRenderedMessageRows = new HashMap<>();
+    protected final Set<Long> selectedMessageDbIds = new LinkedHashSet<>();
     protected String loadedChatScrollCacheKey;
     protected int openingChatUnreadCount = 0;
     protected final Map<String, ChatScrollState> savedChatScrollStates = new HashMap<>();
@@ -265,6 +272,11 @@ abstract class FormChatBase extends Form {
     protected abstract void startReply(MeshMessage msg);
     protected abstract void sendReaction(MeshMessage msg, String emoji);
     protected abstract void confirmDeleteMessage(MeshMessage msg, HBox row);
+    protected abstract void toggleMessageSelection(MeshMessage msg, HBox row);
+    protected abstract boolean isMessageSelected(MeshMessage msg);
+    protected abstract boolean isMessageSelectionModeActive();
+    protected abstract void clearSelectedMessages();
+    protected abstract void deleteSelectedMessagesWithConfirmation();
     protected abstract boolean retryMessage(MeshMessage msg);
     protected abstract void refreshCurrentChatAfterLocalSend();
     protected abstract boolean handleBotCommand(ChatBotCommandHelper.ParsedBotCommand command);
