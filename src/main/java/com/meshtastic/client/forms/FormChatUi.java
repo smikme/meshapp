@@ -640,6 +640,9 @@ abstract class FormChatUi extends FormChatBase {
      */
     public void openDirectChat(String peerNodeId, NodeData peerNode) {
         saveCurrentChatScrollState();
+        if (state != null) {
+            state.ensureDirectMessageThread(peerNodeId);
+        }
         ChatItem dm = ChatItem.fromDirectMessage(
                 peerNodeId,
                 peerNode,
