@@ -1,5 +1,10 @@
 import groovy.io.FileType
 import groovy.json.JsonOutput
+import groovy.xml.XmlNodePrinter
+import groovy.xml.XmlParser
+
+import java.time.LocalDate
+import java.time.ZoneOffset
 
 plugins {
 	id 'java'
@@ -630,6 +635,22 @@ def resolvePackageVersion = { os ->
 	} catch (ignored) {
 		return os.isMacOsX() ? '2.0.0' : '2.0.0.0'
 	}
+}
+
+def resolveFlatpakReleaseDate = {
+	def configuredDate = (
+		findProperty('flatpakReleaseDate')
+			?: System.getenv('FLATPAK_RELEASE_DATE')
+			?: System.getenv('MESHAPP_RELEASE_DATE')
+	)?.toString()?.trim()
+	if (configuredDate) {
+		if (!(configuredDate ==~ /\d{4}-\d{2}-\d{2}/)) {
+			throw new GradleException(
+				"flatpak release date must use YYYY-MM-DD format, got '${configuredDate}'")
+		}
+		return configuredDate
+	}
+	return LocalDate.now(ZoneOffset.UTC).toString()
 }
 
 def resolvePackagingJavaHome = {
@@ -1324,10 +1345,40 @@ def buildLinuxAppImage = { File installDir, File workDir, String taskName ->
 		throw new GradleException("${taskName}: jpackage image not found: ${jpackageImageDir}")
 	}
 
-	return [imageDir: jpackageImageDir, iconFile: iconSource]
+	return [imageDir: jpackageImageDir, iconFile: iconSource, appVersion: appVersion]
 }
 
-def prepareFlatpakSources = { File workDir, File appImageDir, File iconSource ->
+def writeFlatpakMetainfo = { File sourceFile, File targetFile, String appVersion ->
+	def parser = new XmlParser(false, false)
+	def component = parser.parse(sourceFile)
+	def releases = component.releases ? component.releases[0] : component.appendNode('releases')
+	def release = releases.release ? releases.release[0] : releases.appendNode('release')
+	release.attributes()['version'] = appVersion
+	release.attributes()['date'] = resolveFlatpakReleaseDate()
+
+	def releaseTag = parseReleaseVersionInfo(appVersion)?.tag
+	if (releaseTag) {
+		component.depthFirst()
+			.findAll { it.name() == 'image' }
+			.each { image ->
+				def current = image.text()
+				def updated = current.replaceAll(/\/raw\/tag\/v?\d+\.\d+\.\d+\//, "/raw/tag/${releaseTag}/")
+				if (updated != current) {
+					image.setValue(updated)
+				}
+			}
+	}
+
+	targetFile.parentFile.mkdirs()
+	def writer = new StringWriter()
+	writer.write('<?xml version="1.0" encoding="UTF-8"?>\n')
+	def printer = new XmlNodePrinter(new PrintWriter(writer), '  ')
+	printer.preserveWhitespace = true
+	printer.print(component)
+	targetFile.setText(writer.toString(), 'UTF-8')
+}
+
+def prepareFlatpakSources = { File workDir, File appImageDir, File iconSource, String appVersion ->
 	def sourceDir = new File(workDir, 'sources')
 	if (sourceDir.exists()) {
 		sourceDir.deleteDir()
@@ -1348,10 +1399,10 @@ def prepareFlatpakSources = { File workDir, File appImageDir, File iconSource ->
 		new File(resourcesDir, flatpakDesktopFileName).toPath(),
 		java.nio.file.StandardCopyOption.REPLACE_EXISTING
 	)
-	java.nio.file.Files.copy(
-		metainfoSource.toPath(),
-		new File(resourcesDir, flatpakMetainfoFileName).toPath(),
-		java.nio.file.StandardCopyOption.REPLACE_EXISTING
+	writeFlatpakMetainfo(
+		metainfoSource,
+		new File(resourcesDir, flatpakMetainfoFileName),
+		appVersion
 	)
 	java.nio.file.Files.copy(
 		launcherSource.toPath(),
@@ -2196,7 +2247,7 @@ tasks.register('flatpak') {
 		def flatpakBin = resolveCommandExecutable('flatpakBin', 'FLATPAK_BIN', 'flatpak', 'flatpak')
 
 		def appImage = buildLinuxAppImage(installDir, new File(workDir, 'app-image'), 'flatpak')
-		def sourceDir = prepareFlatpakSources(workDir, appImage.imageDir, appImage.iconFile)
+		def sourceDir = prepareFlatpakSources(workDir, appImage.imageDir, appImage.iconFile, appImage.appVersion)
 		def manifestFile = new File(workDir, "${flatpakAppId}.json")
 		writeFlatpakManifest(manifestFile, sourceDir, flatpakRuntime, flatpakRuntimeVersion, flatpakSdk)
 
