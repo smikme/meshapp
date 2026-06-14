@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: 'Release tag to publish to Flatpak repo, for example v2.1.13'
+        description: 'Release tag to publish to Flatpak repo, for example v2.2.0'
         required: true
 
 jobs:
@@ -17,7 +17,7 @@ jobs:
           TAG="$(jq -r '.inputs.release_tag // empty' "${GITHUB_EVENT_PATH}" 2>/dev/null || true)"
 
           if [ -z "${TAG}" ] || [ "${TAG}" = "null" ]; then
-            echo "::error::Set the release_tag input, for example v2.1.13"
+            echo "::error::Set the release_tag input, for example v2.2.0"
             exit 1
           fi
 
@@ -75,5 +75,6 @@ jobs:
 
           bash "${PUBLISH_FLATPAK_SCRIPT}" import-key
           export MESHAPP_VERSION="${RELEASE_TAG}"
+          export FLATPAK_RELEASE_DATE="$(git log -1 --format=%cs HEAD)"
           ./gradlew flatpak --no-daemon
           bash "${PUBLISH_FLATPAK_SCRIPT}" publish
