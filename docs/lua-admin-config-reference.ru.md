@@ -2,26 +2,26 @@
 
 Этот справочник перечисляет параметры, которые возвращаются в `event.snapshot` после `mesh.admin.load_config` / `request_config` / `request_module_config` и которые можно передавать в `mesh.admin.save_config`.
 
-Имена полей в Lua совпадают с protobuf `snake_case`. Enum-значения передаются строками. `bytes` можно передавать как hex, `hex:...`, `base64:...` или Base64. Repeated-поля передаются Lua-списками. По умолчанию `save_config` сливает patch с уже загруженной секцией; сначала вызовите `load_config`, `request_config` или `request_module_config`, либо используйте `{ replace = true, confirm = true }` для осознанной замены из default-значений.
+Имена полей в Lua совпадают с protobuf `snake_case`. Enum-значения передаются строками. `bytes` можно передавать как hex, `hex:...`, `base64:...` или Base64. Повторяющиеся поля передаются Lua-списками. По умолчанию `save_config` сливает патч с уже загруженной секцией; сначала вызовите `load_config`, `request_config` или `request_module_config`, либо используйте `{ replace = true, confirm = true }` для осознанной замены из значений по умолчанию.
 
 ## `event.snapshot`
 
 | Поле | Тип Lua | Описание |
 | --- | --- | --- |
-| `target_node_num` | number | Числовой ID целевой ноды |
-| `target_node_id` | string | Node ID целевой ноды в виде `!abcdef12` |
-| `node` | table | Текущая запись целевой ноды |
-| `owner` | table или `nil` | Owner/user payload, загруженный с удаленной ноды |
-| `device_metadata` | table или `nil` | Device metadata, загруженная с удаленной ноды |
-| `ringtone` | string | Текущий RTTTL ringtone text |
-| `canned_messages` | string | Текущий payload canned messages module |
-| `canned_messages_loaded` | boolean | Были ли загружены canned messages |
-| `connection_status` | table или `nil` | Статус соединений удаленного устройства |
-| `configs` | table | Core config sections; поля совпадают с `changes.configs` ниже |
-| `module_configs` | table | Module config sections; поля совпадают с `changes.module_configs` ниже |
-| `channels` | list of table | Загруженные channels; поля совпадают с `changes.channels` ниже |
-| `query_statuses` | list of table | Статусы загрузки блоков: `key`, `state`, `detail` |
-| `query_summary` | table | Summary загрузки: `total`, `received`, `failed` |
+| `target_node_num` | number | Числовой ID целевой ноды. |
+| `target_node_id` | string | ID целевой ноды в виде `!abcdef12`. |
+| `node` | table | Текущая запись целевой ноды. |
+| `owner` | table или `nil` | Данные владельца/пользователя, загруженные с удаленной ноды. |
+| `device_metadata` | table или `nil` | Метаданные устройства, загруженные с удаленной ноды. |
+| `ringtone` | string | Текущий RTTTL-текст рингтона. |
+| `canned_messages` | string | Текущее содержимое модуля canned messages. |
+| `canned_messages_loaded` | boolean | Признак, что canned messages были загружены. |
+| `connection_status` | table или `nil` | Статус соединений удаленного устройства. |
+| `configs` | table | Основные секции конфигурации; поля совпадают с `changes.configs` ниже. |
+| `module_configs` | table | Секции конфигурации модулей; поля совпадают с `changes.module_configs` ниже. |
+| `channels` | список table | Загруженные каналы; поля совпадают с `changes.channels` ниже. |
+| `query_statuses` | список table | Статусы загрузки блоков: `key`, `state`, `detail`. |
+| `query_summary` | table | Итог загрузки: `total`, `received`, `failed`. |
 
 ## Верхний уровень `save_config`
 
@@ -29,22 +29,22 @@
 | --- | --- | --- | --- |
 | `owner.long_name` | string |  | Длинное имя ноды. |
 | `owner.short_name` | string |  | Короткое имя ноды. |
-| `owner.licensed` | boolean |  | Флаг licensed operator. |
-| `position.latitude` | number |  | Широта в градусах; отправляется как manual fixed position. |
-| `position.longitude` | number |  | Долгота в градусах; отправляется как manual fixed position. |
+| `owner.licensed` | boolean |  | Флаг лицензированного оператора. |
+| `position.latitude` | number |  | Широта в градусах; отправляется как ручная фиксированная позиция. |
+| `position.longitude` | number |  | Долгота в градусах; отправляется как ручная фиксированная позиция. |
 | `position.altitude` | number |  | Высота в метрах. |
-| `remove_position` | boolean |  | `true` очищает manual fixed position. |
-| `ringtone` | string |  | RTTTL ringtone text. |
-| `canned_messages` | string |  | Текст payload для canned messages module. |
-| `configs` | table |  | Core config sections ниже. |
-| `module_configs` | table |  | Module config sections ниже. |
-| `channels` | list of table |  | Список channel patches. |
+| `remove_position` | boolean |  | `true` очищает ручную фиксированную позицию. |
+| `ringtone` | string |  | RTTTL-текст рингтона. |
+| `canned_messages` | string |  | Текстовое содержимое модуля canned messages. |
+| `configs` | table |  | Основные секции конфигурации ниже. |
+| `module_configs` | table |  | Секции конфигурации модулей ниже. |
+| `channels` | список table |  | Список патчей каналов. |
 
-## Core Config: `changes.configs`
+## Основная конфигурация: `changes.configs`
 
 Доступные секции:
 
-| Секция | Lua patch | Поля верхнего уровня |
+| Секция | Lua-патч | Поля верхнего уровня |
 | --- | --- | --- |
 | `device` | `configs.device` | `role`, `serial_enabled`, `button_gpio`, `buzzer_gpio`, `rebroadcast_mode`, `node_info_broadcast_secs`, `double_tap_as_button_press`, `is_managed`, `disable_triple_click`, `tzdef`, `led_heartbeat_disabled`, `buzzer_mode` |
 | `position` | `configs.position` | `position_broadcast_secs`, `position_broadcast_smart_enabled`, `fixed_position`, `gps_enabled`, `gps_update_interval`, `gps_attempt_time`, `position_flags`, `rx_gpio`, `tx_gpio`, `broadcast_smart_minimum_distance`, `broadcast_smart_minimum_interval_secs`, `gps_en_gpio`, `gps_mode` |
@@ -60,181 +60,181 @@
 
 | Поле | Тип Lua | Enum-значения | Описание/заметки |
 | --- | --- | --- | --- |
-| `role` | enum string | `CLIENT`, `CLIENT_MUTE`, `ROUTER`, `ROUTER_CLIENT` deprecated, `REPEATER` deprecated, `TRACKER`, `SENSOR`, `TAK`, `CLIENT_HIDDEN`, `LOST_AND_FOUND`, `TAK_TRACKER`, `ROUTER_LATE`, `CLIENT_BASE` | Sets the role of node |
-| `serial_enabled` | boolean |  | deprecated Disabling this will disable the SerialConsole by not initilizing the StreamAPI Moved to SecurityConfig |
-| `button_gpio` | number |  | For boards without a hard wired button, this is the pin number that will be used Boards that have more than one button can swap the function with this one. defaults to BUTTON_PIN if defined. |
-| `buzzer_gpio` | number |  | For boards without a PWM buzzer, this is the pin number that will be used Defaults to PIN_BUZZER if defined. |
-| `rebroadcast_mode` | enum string | `ALL`, `ALL_SKIP_DECODING`, `LOCAL_ONLY`, `KNOWN_ONLY`, `NONE`, `CORE_PORTNUMS_ONLY` | Sets the role of node |
-| `node_info_broadcast_secs` | number |  | Send our nodeinfo this often Defaults to 900 Seconds (15 minutes) |
-| `double_tap_as_button_press` | boolean |  | Treat double tap interrupt on supported accelerometers as a button press if set to true |
-| `is_managed` | boolean |  | deprecated If true, device is considered to be "managed" by a mesh administrator Clients should then limit available configuration and administrative options inside the user interface Moved to SecurityConfig |
-| `disable_triple_click` | boolean |  | Disables the triple-press of user button to enable or disable GPS |
-| `tzdef` | string |  | POSIX Timezone definition string from https://github.com/nayarsystems/posix_tz_db/blob/master/zones.csv. |
-| `led_heartbeat_disabled` | boolean |  | If true, disable the default blinking LED (LED_PIN) behavior on the device |
-| `buzzer_mode` | enum string | `ALL_ENABLED`, `DISABLED`, `NOTIFICATIONS_ONLY`, `SYSTEM_ONLY`, `DIRECT_MSG_ONLY` | Controls buzzer behavior for audio feedback Defaults to ENABLED |
+| `role` | enum string | `CLIENT`, `CLIENT_MUTE`, `ROUTER`, `ROUTER_CLIENT` устарело, `REPEATER` устарело, `TRACKER`, `SENSOR`, `TAK`, `CLIENT_HIDDEN`, `LOST_AND_FOUND`, `TAK_TRACKER`, `ROUTER_LATE`, `CLIENT_BASE` | Роль устройства в mesh-сети. |
+| `serial_enabled` | boolean |  | Устарело. Включение serial console перенесено в `security.serial_enabled`. |
+| `button_gpio` | number |  | GPIO кнопки для плат без аппаратной кнопки; на платах с несколькими кнопками может переопределять назначение. |
+| `buzzer_gpio` | number |  | GPIO пищалки для плат без PWM buzzer. |
+| `rebroadcast_mode` | enum string | `ALL`, `ALL_SKIP_DECODING`, `LOCAL_ONLY`, `KNOWN_ONLY`, `NONE`, `CORE_PORTNUMS_ONLY` | Режим ретрансляции пакетов. |
+| `node_info_broadcast_secs` | number |  | Как часто отправлять NodeInfo; по умолчанию 900 секунд. |
+| `double_tap_as_button_press` | boolean |  | Считать двойной тап акселерометра нажатием кнопки. |
+| `is_managed` | boolean |  | Устарело. Флаг управляемого устройства перенесен в `security.is_managed`. |
+| `disable_triple_click` | boolean |  | Отключает тройное нажатие кнопки для включения/выключения GPS. |
+| `tzdef` | string |  | POSIX-строка таймзоны. |
+| `led_heartbeat_disabled` | boolean |  | Отключает стандартное мигание индикатора heartbeat. |
+| `buzzer_mode` | enum string | `ALL_ENABLED`, `DISABLED`, `NOTIFICATIONS_ONLY`, `SYSTEM_ONLY`, `DIRECT_MSG_ONLY` | Режим звуковой обратной связи. |
 
 ### `position`
 
 | Поле | Тип Lua | Enum-значения | Описание/заметки |
 | --- | --- | --- | --- |
-| `position_broadcast_secs` | number |  | We should send our position this often (but only if it has changed significantly) Defaults to 15 minutes |
-| `position_broadcast_smart_enabled` | boolean |  | Adaptive position braoadcast, which is now the default. |
-| `fixed_position` | boolean |  | If set, this node is at a fixed position. We will generate GPS position updates at the regular interval, but use whatever the last lat/lon/alt we have for the node. The lat/lon/alt can be set by an internal GPS or with the help of the app. |
-| `gps_enabled` | boolean |  | deprecated Is GPS enabled for this node? |
-| `gps_update_interval` | number |  | How often should we try to get GPS position (in seconds) or zero for the default of once every 30 seconds or a very large value (maxint) to update only once at boot. |
-| `gps_attempt_time` | number |  | Deprecated in favor of using smart / regular broadcast intervals as implicit attempt time |
-| `position_flags` | number |  | Bit field of boolean configuration options for POSITION messages (bitwise OR of PositionFlags) |
-| `rx_gpio` | number |  | (Re)define GPS_RX_PIN for your board. |
-| `tx_gpio` | number |  | (Re)define GPS_TX_PIN for your board. |
-| `broadcast_smart_minimum_distance` | number |  | The minimum distance in meters traveled (since the last send) before we can send a position to the mesh if position_broadcast_smart_enabled |
-| `broadcast_smart_minimum_interval_secs` | number |  | The minimum number of seconds (since the last send) before we can send a position to the mesh if position_broadcast_smart_enabled |
-| `gps_en_gpio` | number |  | (Re)define PIN_GPS_EN for your board. |
-| `gps_mode` | enum string | `DISABLED`, `ENABLED`, `NOT_PRESENT` | Set where GPS is enabled, disabled, or not present |
+| `position_broadcast_secs` | number |  | Как часто отправлять позицию, если она существенно изменилась. |
+| `position_broadcast_smart_enabled` | boolean |  | Включает адаптивную отправку позиции. |
+| `fixed_position` | boolean |  | Фиксированная позиция ноды; устройство будет публиковать последние заданные широту, долготу и высоту. |
+| `gps_enabled` | boolean |  | Устарело. Используйте `gps_mode`. |
+| `gps_update_interval` | number |  | Интервал попыток получения GPS-позиции в секундах; `0` означает значение по умолчанию. |
+| `gps_attempt_time` | number |  | Устарело. Время попытки теперь выводится из интервалов отправки. |
+| `position_flags` | number |  | Битовая маска дополнительных полей POSITION. |
+| `rx_gpio` | number |  | GPIO RX для GPS. |
+| `tx_gpio` | number |  | GPIO TX для GPS. |
+| `broadcast_smart_minimum_distance` | number |  | Минимальная дистанция в метрах для smart-отправки позиции. |
+| `broadcast_smart_minimum_interval_secs` | number |  | Минимальный интервал в секундах для smart-отправки позиции. |
+| `gps_en_gpio` | number |  | GPIO включения GPS. |
+| `gps_mode` | enum string | `DISABLED`, `ENABLED`, `NOT_PRESENT` | Состояние GPS: включен, выключен или отсутствует. |
 
 ### `power`
 
 | Поле | Тип Lua | Enum-значения | Описание/заметки |
 | --- | --- | --- | --- |
-| `is_power_saving` | boolean |  | Description: Will sleep everything as much as possible, for the tracker and sensor role this will also include the lora radio. Don't use this setting if you want to use your device with the phone apps or are using a device without a user button. Technical Details: Works for ESP32 devices and NRF52 devices in the Sensor or Tracker roles |
-| `on_battery_shutdown_after_secs` | number |  | Description: If non-zero, the device will fully power off this many seconds after external power is removed. |
-| `adc_multiplier_override` | number |  | Ratio of voltage divider for battery pin eg. 3.20 (R1=100k, R2=220k) Overrides the ADC_MULTIPLIER defined in variant for battery voltage calculation. https://meshtastic.org/docs/configuration/radio/power/#adc-multiplier-override Should be set to floating point value between 2 and 6 |
-| `wait_bluetooth_secs` | number |  | Description: The number of seconds for to wait before turning off BLE in No Bluetooth states Technical Details: ESP32 Only 0 for default of 1 minute |
-| `sds_secs` | number |  | Super Deep Sleep Seconds While in Light Sleep if mesh_sds_timeout_secs is exceeded we will lower into super deep sleep for this value (default 1 year) or a button press 0 for default of one year |
-| `ls_secs` | number |  | Description: In light sleep the CPU is suspended, LoRa radio is on, BLE is off an GPS is on Technical Details: ESP32 Only 0 for default of 300 |
-| `min_wake_secs` | number |  | Description: While in light sleep when we receive packets on the LoRa radio we will wake and handle them and stay awake in no BLE mode for this value Technical Details: ESP32 Only 0 for default of 10 seconds |
-| `device_battery_ina_address` | number |  | I2C address of INA_2XX to use for reading device battery voltage |
-| `powermon_enables` | number |  | If non-zero, we want powermon log outputs. With the particular (bitfield) sources enabled. Note: we picked an ID of 32 so that lower more efficient IDs can be used for more frequently used options. |
+| `is_power_saving` | boolean |  | Максимально агрессивный режим энергосбережения; полезен для ролей tracker/sensor, но может мешать работе с приложением. |
+| `on_battery_shutdown_after_secs` | number |  | Если не `0`, устройство полностью выключится через это число секунд после отключения внешнего питания. |
+| `adc_multiplier_override` | number |  | Коэффициент делителя напряжения батареи; обычно 2-6. |
+| `wait_bluetooth_secs` | number |  | Сколько секунд ждать перед выключением BLE в режимах без Bluetooth. |
+| `sds_secs` | number |  | Длительность super deep sleep; `0` означает значение по умолчанию. |
+| `ls_secs` | number |  | Длительность light sleep; `0` означает значение по умолчанию. |
+| `min_wake_secs` | number |  | Минимальное время бодрствования после приема LoRa-пакета в light sleep. |
+| `device_battery_ina_address` | number |  | I2C-адрес INA_2XX для измерения напряжения батареи. |
+| `powermon_enables` | number |  | Битовая маска источников powermon-логов. |
 
 ### `network`
 
 | Поле | Тип Lua | Enum-значения | Описание/заметки |
 | --- | --- | --- | --- |
-| `wifi_enabled` | boolean |  | Enable WiFi (disables Bluetooth) |
-| `wifi_ssid` | string |  | If set, this node will try to join the specified wifi network and acquire an address via DHCP |
-| `wifi_psk` | string |  | If set, will be use to authenticate to the named wifi |
-| `ntp_server` | string |  | NTP server to use if WiFi is conneced, defaults to `meshtastic.pool.ntp.org` |
-| `eth_enabled` | boolean |  | Enable Ethernet |
-| `address_mode` | enum string | `DHCP`, `STATIC` | acquire an address via DHCP or assign static |
-| `ipv4_config` | table |  | struct to keep static address |
-| `ipv4_config.ip` | number |  | Static IP address |
-| `ipv4_config.gateway` | number |  | Static gateway address |
-| `ipv4_config.subnet` | number |  | Static subnet mask |
-| `ipv4_config.dns` | number |  | Static DNS server address |
-| `rsyslog_server` | string |  | rsyslog Server and Port |
-| `enabled_protocols` | number |  | Flags for enabling/disabling network protocols |
-| `ipv6_enabled` | boolean |  | Enable/Disable ipv6 support |
+| `wifi_enabled` | boolean |  | Включает Wi-Fi и отключает Bluetooth. |
+| `wifi_ssid` | string |  | SSID Wi-Fi сети. |
+| `wifi_psk` | string |  | Пароль Wi-Fi сети. |
+| `ntp_server` | string |  | NTP-сервер при подключенном Wi-Fi. |
+| `eth_enabled` | boolean |  | Включает Ethernet. |
+| `address_mode` | enum string | `DHCP`, `STATIC` | Получать IP по DHCP или использовать статический адрес. |
+| `ipv4_config` | table |  | Настройки статического IPv4. |
+| `ipv4_config.ip` | number |  | Статический IP-адрес. |
+| `ipv4_config.gateway` | number |  | Статический gateway. |
+| `ipv4_config.subnet` | number |  | Маска подсети. |
+| `ipv4_config.dns` | number |  | DNS-сервер. |
+| `rsyslog_server` | string |  | Сервер и порт rsyslog. |
+| `enabled_protocols` | number |  | Битовая маска включенных сетевых протоколов. |
+| `ipv6_enabled` | boolean |  | Включает IPv6. |
 
 ### `display`
 
 | Поле | Тип Lua | Enum-значения | Описание/заметки |
 | --- | --- | --- | --- |
-| `screen_on_secs` | number |  | Number of seconds the screen stays on after pressing the user button or receiving a message 0 for default of one minute MAXUINT for always on |
-| `gps_format` | enum string | `UNUSED` | Deprecated in 2.7.4: Unused How the GPS coordinates are formatted on the OLED screen. |
-| `auto_screen_carousel_secs` | number |  | Automatically toggles to the next page on the screen like a carousel, based the specified interval in seconds. Potentially useful for devices without user buttons. |
-| `compass_north_top` | boolean |  | deprecated If this is set, the displayed compass will always point north. if unset, the old behaviour (top of display is heading direction) is used. |
-| `flip_screen` | boolean |  | Flip screen vertically, for cases that mount the screen upside down |
-| `units` | enum string | `METRIC`, `IMPERIAL` | Perferred display units |
-| `oled` | enum string | `OLED_AUTO`, `OLED_SSD1306`, `OLED_SH1106`, `OLED_SH1107`, `OLED_SH1107_128_128`, `OLED_SH1107_ROTATED` | Override auto-detect in screen |
-| `displaymode` | enum string | `DEFAULT`, `TWOCOLOR`, `INVERTED`, `COLOR` | Display Mode |
-| `heading_bold` | boolean |  | Print first line in pseudo-bold? FALSE is original style, TRUE is bold |
-| `wake_on_tap_or_motion` | boolean |  | Should we wake the screen up on accelerometer detected motion or tap |
-| `compass_orientation` | enum string | `DEGREES_0`, `DEGREES_90`, `DEGREES_180`, `DEGREES_270`, `DEGREES_0_INVERTED`, `DEGREES_90_INVERTED`, `DEGREES_180_INVERTED`, `DEGREES_270_INVERTED` | Indicates how to rotate or invert the compass output to accurate display on the display. |
-| `use_12h_clock` | boolean |  | If false (default), the device will display the time in 24-hour format on screen. If true, the device will display the time in 12-hour format on screen. |
-| `use_long_node_name` | boolean |  | If false (default), the device will use short names for various display screens. If true, node names will show in long format |
-| `enable_message_bubbles` | boolean |  | If true, the device will display message bubbles on screen. |
+| `screen_on_secs` | number |  | Сколько секунд держать экран включенным после кнопки или сообщения; `0` означает значение по умолчанию. |
+| `gps_format` | enum string | `UNUSED` | Устарело. Формат координат на экране больше не используется в этой секции. |
+| `auto_screen_carousel_secs` | number |  | Интервал автоматического переключения экранов. |
+| `compass_north_top` | boolean |  | Устарело. Фиксирует север сверху компаса. |
+| `flip_screen` | boolean |  | Переворачивает экран по вертикали. |
+| `units` | enum string | `METRIC`, `IMPERIAL` | Единицы отображения: метрические или имперские. |
+| `oled` | enum string | `OLED_AUTO`, `OLED_SSD1306`, `OLED_SH1106`, `OLED_SH1107`, `OLED_SH1107_128_128`, `OLED_SH1107_ROTATED` | Тип OLED-дисплея при необходимости переопределить автоопределение. |
+| `displaymode` | enum string | `DEFAULT`, `TWOCOLOR`, `INVERTED`, `COLOR` | Режим отображения экрана. |
+| `heading_bold` | boolean |  | Показывать первую строку псевдожирным стилем. |
+| `wake_on_tap_or_motion` | boolean |  | Будить экран по тапу или движению. |
+| `compass_orientation` | enum string | `DEGREES_0`, `DEGREES_90`, `DEGREES_180`, `DEGREES_270`, `DEGREES_0_INVERTED`, `DEGREES_90_INVERTED`, `DEGREES_180_INVERTED`, `DEGREES_270_INVERTED` | Поворот или инверсия компаса для корректной ориентации на устройстве. |
+| `use_12h_clock` | boolean |  | Использовать 12-часовой формат времени вместо 24-часового. |
+| `use_long_node_name` | boolean |  | Показывать длинные имена нод вместо коротких. |
+| `enable_message_bubbles` | boolean |  | Показывать сообщения на экране в виде пузырьков. |
 
 ### `lora`
 
 | Поле | Тип Lua | Enum-значения | Описание/заметки |
 | --- | --- | --- | --- |
-| `use_preset` | boolean |  | When enabled, the `modem_preset` fields will be adhered to, else the `bandwidth`/`spread_factor`/`coding_rate` will be taked from their respective manually defined fields |
-| `modem_preset` | enum string | `LONG_FAST`, `LONG_SLOW` deprecated, `VERY_LONG_SLOW` deprecated, `MEDIUM_SLOW`, `MEDIUM_FAST`, `SHORT_SLOW`, `SHORT_FAST`, `LONG_MODERATE`, `SHORT_TURBO`, `LONG_TURBO`, `LITE_FAST`, `LITE_SLOW`, `NARROW_FAST`, `NARROW_SLOW` | Either modem_config or bandwidth/spreading/coding will be specified - NOT BOTH. As a heuristic: If bandwidth is specified, do not use modem_config. Because protobufs take ZERO space when the value is zero this works out nicely. This value is replaced by bandwidth/spread_factor/coding_rate. If you'd like to experiment with other options add them to MeshRadio.cpp in the device code. |
-| `bandwidth` | number |  | Bandwidth in MHz Certain bandwidth numbers are 'special' and will be converted to the appropriate floating point value: 31 -> 31.25MHz |
-| `spread_factor` | number |  | A number from 7 to 12. Indicates number of chirps per symbol as 1<<spread_factor. |
-| `coding_rate` | number |  | The denominator of the coding rate. ie for 4/5, the value is 5. 4/8 the value is 8. |
-| `frequency_offset` | number |  | This parameter is for advanced users with advanced test equipment, we do not recommend most users use it. A frequency offset that is added to to the calculated band center frequency. Used to correct for crystal calibration errors. |
-| `region` | enum string | `UNSET`, `US`, `EU_433`, `EU_868`, `CN`, `JP`, `ANZ`, `KR`, `TW`, `RU`, `IN`, `NZ_865`, `TH`, `LORA_24`, `UA_433`, `UA_868`, `MY_433`, `MY_919`, `SG_923`, `PH_433`, `PH_868`, `PH_915`, `ANZ_433`, `KZ_433`, `KZ_863`, `NP_865`, `BR_902`, `ITU1_2M`, `ITU23_2M`, `EU_866`, `EU_874`, `EU_917`, `EU_N_868` | The region code for the radio (US, CN, EU433, etc...) |
-| `hop_limit` | number |  | Maximum number of hops. This can't be greater than 7. Default of 3 Attempting to set a value > 7 results in the default |
-| `tx_enabled` | boolean |  | Disable TX from the LoRa radio. Useful for hot-swapping antennas and other tests. Defaults to false |
-| `tx_power` | number |  | If zero, then use default max legal continuous power (ie. something that won't burn out the radio hardware) In most cases you should use zero here. Units are in dBm. |
-| `channel_num` | number |  | This controls the actual hardware frequency the radio transmits on. Most users should never need to be exposed to this field/concept. A channel number between 1 and NUM_CHANNELS (whatever the max is in the current region). If ZERO then the rule is "use the old channel name hash based algorithm to derive the channel number") If using the hash algorithm the channel number will be: hash(channel_name) % NUM_CHANNELS (Where num channels depends on the regulatory region). |
-| `override_duty_cycle` | boolean |  | If true, duty cycle limits will be exceeded and thus you're possibly not following the local regulations if you're not a HAM. Has no effect if the duty cycle of the used region is 100%. |
-| `sx126x_rx_boosted_gain` | boolean |  | If true, sets RX boosted gain mode on SX126X based radios |
-| `override_frequency` | number |  | This parameter is for advanced users and licensed HAM radio operators. Ignore Channel Calculation and use this frequency instead. The frequency_offset will still be applied. This will allow you to use out-of-band frequencies. Please respect your local laws and regulations. If you are a HAM, make sure you enable HAM mode and turn off encryption. |
-| `pa_fan_disabled` | boolean |  | If true, disable the build-in PA FAN using pin define in RF95_FAN_EN. |
-| `ignore_incoming` | list of number |  | For testing it is useful sometimes to force a node to never listen to particular other nodes (simulating radio out of range). All nodenums listed in ignore_incoming will have packets they send dropped on receive (by router.cpp) |
-| `ignore_mqtt` | boolean |  | If true, the device will not process any packets received via LoRa that passed via MQTT anywhere on the path towards it. |
-| `config_ok_to_mqtt` | boolean |  | Sets the ok_to_mqtt bit on outgoing packets |
-| `fem_lna_mode` | enum string | `DISABLED`, `ENABLED`, `NOT_PRESENT` | Set where LORA FEM is enabled, disabled, or not present |
-| `serial_hal_only` | boolean |  | Don't use radiolib to initialize the radio, instead listen for a serialHal connection |
+| `use_preset` | boolean |  | Использовать `modem_preset`; если выключено, применяются ручные `bandwidth`, `spread_factor`, `coding_rate`. |
+| `modem_preset` | enum string | `LONG_FAST`, `LONG_SLOW` устарело, `VERY_LONG_SLOW` устарело, `MEDIUM_SLOW`, `MEDIUM_FAST`, `SHORT_SLOW`, `SHORT_FAST`, `LONG_MODERATE`, `SHORT_TURBO`, `LONG_TURBO`, `LITE_FAST`, `LITE_SLOW`, `NARROW_FAST`, `NARROW_SLOW` | Преднастроенный режим модема LoRa. |
+| `bandwidth` | number |  | Ширина полосы; обычно используется только при ручной настройке LoRa. |
+| `spread_factor` | number |  | Коэффициент расширения спектра от 7 до 12. |
+| `coding_rate` | number |  | Знаменатель coding rate, например `5` для 4/5. |
+| `frequency_offset` | number |  | Частотная поправка для калибровки; поле для опытных пользователей. |
+| `region` | enum string | `UNSET`, `US`, `EU_433`, `EU_868`, `CN`, `JP`, `ANZ`, `KR`, `TW`, `RU`, `IN`, `NZ_865`, `TH`, `LORA_24`, `UA_433`, `UA_868`, `MY_433`, `MY_919`, `SG_923`, `PH_433`, `PH_868`, `PH_915`, `ANZ_433`, `KZ_433`, `KZ_863`, `NP_865`, `BR_902`, `ITU1_2M`, `ITU23_2M`, `EU_866`, `EU_874`, `EU_917`, `EU_N_868` | Регион радиомодуля. |
+| `hop_limit` | number |  | Максимальное число hops; прошивка не допускает значение больше 7. |
+| `tx_enabled` | boolean |  | Разрешает передачу LoRa; выключение полезно для тестов и смены антенны. |
+| `tx_power` | number |  | Мощность передачи в dBm; `0` означает безопасное значение по умолчанию. |
+| `channel_num` | number |  | Номер радиоканала в регионе; `0` использует расчет по имени канала. |
+| `override_duty_cycle` | boolean |  | Разрешает превышение лимита duty cycle; использовать только при понимании местных правил. |
+| `sx126x_rx_boosted_gain` | boolean |  | Включает RX boosted gain для SX126X. |
+| `override_frequency` | number |  | Ручная частота вместо расчета канала; поле для опытных пользователей и лицензированных HAM-операторов. |
+| `pa_fan_disabled` | boolean |  | Отключает встроенный вентилятор PA. |
+| `ignore_incoming` | список number |  | Список node_num, пакеты от которых будут игнорироваться при приеме. |
+| `ignore_mqtt` | boolean |  | Игнорировать LoRa-пакеты, которые проходили через MQTT. |
+| `config_ok_to_mqtt` | boolean |  | Выставлять флаг `ok_to_mqtt` на исходящих пакетах. |
+| `fem_lna_mode` | enum string | `DISABLED`, `ENABLED`, `NOT_PRESENT` | Состояние FEM/LNA: включен, выключен или отсутствует. |
+| `serial_hal_only` | boolean |  | Не инициализировать радиомодуль через RadioLib, а ждать serial HAL. |
 
 ### `bluetooth`
 
 | Поле | Тип Lua | Enum-значения | Описание/заметки |
 | --- | --- | --- | --- |
-| `enabled` | boolean |  | Enable Bluetooth on the device |
-| `mode` | enum string | `RANDOM_PIN`, `FIXED_PIN`, `NO_PIN` | Determines the pairing strategy for the device |
-| `fixed_pin` | number |  | Specified PIN for PairingMode.FixedPin |
+| `enabled` | boolean |  | Включает Bluetooth. |
+| `mode` | enum string | `RANDOM_PIN`, `FIXED_PIN`, `NO_PIN` | Режим сопряжения. |
+| `fixed_pin` | number |  | Фиксированный PIN для режима `FIXED_PIN`. |
 
 ### `security`
 
 | Поле | Тип Lua | Enum-значения | Описание/заметки |
 | --- | --- | --- | --- |
-| `public_key` | string (hex/base64) |  | The public key of the user's device. Sent out to other nodes on the mesh to allow them to compute a shared secret key. |
-| `private_key` | string (hex/base64) |  | The private key of the device. Used to create a shared key with a remote device. |
-| `admin_key` | list of string (hex/base64) |  | The public key authorized to send admin messages to this node. |
-| `is_managed` | boolean |  | If true, device is considered to be "managed" by a mesh administrator via admin messages Device is managed by a mesh administrator. |
-| `serial_enabled` | boolean |  | Serial Console over the Stream API." |
-| `debug_log_api_enabled` | boolean |  | By default we turn off logging as soon as an API client connects (to keep shared serial link quiet). Output live debug logging over serial or bluetooth is set to true. |
-| `admin_channel_enabled` | boolean |  | Allow incoming device control over the insecure legacy admin channel. |
+| `public_key` | string (hex/base64) |  | Публичный ключ устройства для вычисления общего секрета с другими нодами. |
+| `private_key` | string (hex/base64) |  | Приватный ключ устройства. |
+| `admin_key` | список string (hex/base64) |  | Публичные ключи клиентов, которым разрешены admin-команды на эту ноду. |
+| `is_managed` | boolean |  | Помечает устройство как управляемое администратором. |
+| `serial_enabled` | boolean |  | Включает serial-консоль через Stream API. |
+| `debug_log_api_enabled` | boolean |  | Разрешает live debug logging через serial или Bluetooth после подключения API-клиента. |
+| `admin_channel_enabled` | boolean |  | Разрешает входящее управление через небезопасный legacy admin channel. |
 
 ### `device_ui`
 
 | Поле | Тип Lua | Enum-значения | Описание/заметки |
 | --- | --- | --- | --- |
-| `version` | number |  | A version integer used to invalidate saved files when we make incompatible changes. |
-| `screen_brightness` | number |  | TFT display brightness 1..255 |
-| `screen_timeout` | number |  | Screen timeout 0..900 |
-| `screen_lock` | boolean |  | Screen/Settings lock enabled |
-| `settings_lock` | boolean |  |  |
-| `pin_code` | number |  |  |
-| `theme` | enum string | `DARK`, `LIGHT`, `RED` | Color theme |
-| `alert_enabled` | boolean |  | Audible message, banner and ring tone |
-| `banner_enabled` | boolean |  |  |
-| `ring_tone_id` | number |  |  |
-| `language` | enum string | `ENGLISH`, `FRENCH`, `GERMAN`, `ITALIAN`, `PORTUGUESE`, `SPANISH`, `SWEDISH`, `FINNISH`, `POLISH`, `TURKISH`, `SERBIAN`, `RUSSIAN`, `DUTCH`, `GREEK`, `NORWEGIAN`, `SLOVENIAN`, `UKRAINIAN`, `BULGARIAN`, `CZECH`, `DANISH`, `SIMPLIFIED_CHINESE`, `TRADITIONAL_CHINESE` | Localization |
-| `node_filter` | table |  | Node list filter |
-| `node_filter.unknown_switch` | boolean |  | Filter unknown nodes |
-| `node_filter.offline_switch` | boolean |  | Filter offline nodes |
-| `node_filter.public_key_switch` | boolean |  | Filter nodes w/o public key |
-| `node_filter.hops_away` | number |  | Filter based on hops away |
-| `node_filter.position_switch` | boolean |  | Filter nodes w/o position |
-| `node_filter.node_name` | string |  | Filter nodes by matching name string |
-| `node_filter.channel` | number |  | Filter based on channel |
-| `node_highlight` | table |  | Node list highlightening |
-| `node_highlight.chat_switch` | boolean |  | Hightlight nodes w/ active chat |
-| `node_highlight.position_switch` | boolean |  | Highlight nodes w/ position |
-| `node_highlight.telemetry_switch` | boolean |  | Highlight nodes w/ telemetry data |
-| `node_highlight.iaq_switch` | boolean |  | Highlight nodes w/ iaq data |
-| `node_highlight.node_name` | string |  | Highlight nodes by matching name string |
-| `calibration_data` | string (hex/base64) |  | 8 integers for screen calibration data |
-| `map_data` | table |  | Map related data |
-| `map_data.home` | table |  | Home coordinates |
-| `map_data.home.zoom` | number |  | Zoom level |
-| `map_data.home.latitude` | number |  | Coordinate: latitude |
-| `map_data.home.longitude` | number |  | Coordinate: longitude |
-| `map_data.style` | string |  | Map tile style |
-| `map_data.follow_gps` | boolean |  | Map scroll follows GPS |
-| `compass_mode` | enum string | `DYNAMIC`, `FIXED_RING`, `FREEZE_HEADING` | Compass mode |
-| `screen_rgb_color` | number |  | RGB color for BaseUI 0xRRGGBB format, e.g. 0xFF0000 for red |
-| `is_clockface_analog` | boolean |  | Clockface analog style true for analog clockface, false for digital clockface |
-| `gps_format` | enum string | `DEC`, `DMS`, `UTM`, `MGRS`, `OLC`, `OSGR`, `MLS` | How the GPS coordinates are formatted on the OLED screen. |
+| `version` | number |  | Версия структуры UI-настроек для инвалидирования несовместимых сохраненных данных. |
+| `screen_brightness` | number |  | Яркость TFT-дисплея, 1-255. |
+| `screen_timeout` | number |  | Таймаут экрана, 0-900 секунд. |
+| `screen_lock` | boolean |  | Включает блокировку экрана/настроек. |
+| `settings_lock` | boolean |  | Блокировка настроек. |
+| `pin_code` | number |  | PIN-код. |
+| `theme` | enum string | `DARK`, `LIGHT`, `RED` | Цветовая тема. |
+| `alert_enabled` | boolean |  | Включает звуковые уведомления, banner и ringtone. |
+| `banner_enabled` | boolean |  | Включает banner-уведомления. |
+| `ring_tone_id` | number |  | ID рингтона. |
+| `language` | enum string | `ENGLISH`, `FRENCH`, `GERMAN`, `ITALIAN`, `PORTUGUESE`, `SPANISH`, `SWEDISH`, `FINNISH`, `POLISH`, `TURKISH`, `SERBIAN`, `RUSSIAN`, `DUTCH`, `GREEK`, `NORWEGIAN`, `SLOVENIAN`, `UKRAINIAN`, `BULGARIAN`, `CZECH`, `DANISH`, `SIMPLIFIED_CHINESE`, `TRADITIONAL_CHINESE` | Язык интерфейса. |
+| `node_filter` | table |  | Фильтр списка нод. |
+| `node_filter.unknown_switch` | boolean |  | Фильтровать неизвестные ноды. |
+| `node_filter.offline_switch` | boolean |  | Фильтровать ноды вне сети. |
+| `node_filter.public_key_switch` | boolean |  | Фильтровать ноды без публичного ключа. |
+| `node_filter.hops_away` | number |  | Фильтр по удаленности в hops. |
+| `node_filter.position_switch` | boolean |  | Фильтровать ноды без позиции. |
+| `node_filter.node_name` | string |  | Фильтр нод по совпадению имени. |
+| `node_filter.channel` | number |  | Фильтр по каналу. |
+| `node_highlight` | table |  | Подсветка нод в списке. |
+| `node_highlight.chat_switch` | boolean |  | Подсвечивать ноды с активным чатом. |
+| `node_highlight.position_switch` | boolean |  | Подсвечивать ноды с позицией. |
+| `node_highlight.telemetry_switch` | boolean |  | Подсвечивать ноды с телеметрией. |
+| `node_highlight.iaq_switch` | boolean |  | Подсвечивать ноды с IAQ-данными. |
+| `node_highlight.node_name` | string |  | Подсвечивать ноды по совпадению имени. |
+| `calibration_data` | string (hex/base64) |  | Данные калибровки экрана. |
+| `map_data` | table |  | Данные карты. |
+| `map_data.home` | table |  | Домашние координаты карты. |
+| `map_data.home.zoom` | number |  | Уровень масштаба. |
+| `map_data.home.latitude` | number |  | Широта домашней точки. |
+| `map_data.home.longitude` | number |  | Долгота домашней точки. |
+| `map_data.style` | string |  | Стиль тайлов карты. |
+| `map_data.follow_gps` | boolean |  | Прокручивать карту вслед за GPS. |
+| `compass_mode` | enum string | `DYNAMIC`, `FIXED_RING`, `FREEZE_HEADING` | Режим компаса. |
+| `screen_rgb_color` | number |  | RGB-цвет экрана в формате `0xRRGGBB`. |
+| `is_clockface_analog` | boolean |  | Аналоговый clockface при `true`, цифровой при `false`. |
+| `gps_format` | enum string | `DEC`, `DMS`, `UTM`, `MGRS`, `OLC`, `OSGR`, `MLS` | Формат отображения GPS-координат. |
 
-## Module Config: `changes.module_configs`
+## Конфигурация модулей: `changes.module_configs`
 
 Доступные секции:
 
-| Секция | Lua patch | Поля верхнего уровня |
+| Секция | Lua-патч | Поля верхнего уровня |
 | --- | --- | --- |
 | `mqtt` | `module_configs.mqtt` | `enabled`, `address`, `username`, `password`, `encryption_enabled`, `json_enabled`, `tls_enabled`, `root`, `proxy_to_client_enabled`, `map_reporting_enabled`, `map_report_settings`, `map_report_settings.publish_interval_secs`, `map_report_settings.position_precision`, `map_report_settings.should_report_location` |
 | `serial` | `module_configs.serial` | `enabled`, `echo`, `rxd`, `txd`, `baud`, `timeout`, `mode`, `override_console_serial_port` |
@@ -257,223 +257,223 @@
 
 | Поле | Тип Lua | Enum-значения | Описание/заметки |
 | --- | --- | --- | --- |
-| `enabled` | boolean |  | If a meshtastic node is able to reach the internet it will normally attempt to gateway any channels that are marked as is_uplink_enabled or is_downlink_enabled. |
-| `address` | string |  | The server to use for our MQTT global message gateway feature. If not set, the default server will be used |
-| `username` | string |  | MQTT username to use (most useful for a custom MQTT server). If using a custom server, this will be honoured even if empty. If using the default server, this will only be honoured if set, otherwise the device will use the default username |
-| `password` | string |  | MQTT password to use (most useful for a custom MQTT server). If using a custom server, this will be honoured even if empty. If using the default server, this will only be honoured if set, otherwise the device will use the default password |
-| `encryption_enabled` | boolean |  | Whether to send encrypted or decrypted packets to MQTT. This parameter is only honoured if you also set server (the default official mqtt.meshtastic.org server can handle encrypted packets) Decrypted packets may be useful for external systems that want to consume meshtastic packets |
-| `json_enabled` | boolean |  | Deprecated: JSON packet support on MQTT was removed, and this field is ignored. |
-| `tls_enabled` | boolean |  | If true, we attempt to establish a secure connection using TLS |
-| `root` | string |  | The root topic to use for MQTT messages. Default is "msh". This is useful if you want to use a single MQTT server for multiple meshtastic networks and separate them via ACLs |
-| `proxy_to_client_enabled` | boolean |  | If true, we can use the connected phone / client to proxy messages to MQTT instead of a direct connection |
-| `map_reporting_enabled` | boolean |  | If true, we will periodically report unencrypted information about our node to a map via MQTT |
-| `map_report_settings` | table |  | Settings for reporting information about our node to a map via MQTT |
-| `map_report_settings.publish_interval_secs` | number |  | How often we should report our info to the map (in seconds) |
-| `map_report_settings.position_precision` | number |  | Bits of precision for the location sent (default of 32 is full precision). |
-| `map_report_settings.should_report_location` | boolean |  | Whether we have opted-in to report our location to the map |
+| `enabled` | boolean |  | Включает MQTT gateway для каналов с uplink/downlink. |
+| `address` | string |  | Адрес MQTT-сервера; пустое значение использует сервер по умолчанию. |
+| `username` | string |  | Имя пользователя MQTT. |
+| `password` | string |  | Пароль MQTT. |
+| `encryption_enabled` | boolean |  | Отправлять в MQTT зашифрованные или расшифрованные пакеты. |
+| `json_enabled` | boolean |  | Устарело. JSON packet support в MQTT удален и поле игнорируется. |
+| `tls_enabled` | boolean |  | Включает TLS для MQTT. |
+| `root` | string |  | Корневой topic для MQTT-сообщений, по умолчанию `msh`. |
+| `proxy_to_client_enabled` | boolean |  | Разрешает использовать подключенный клиент как MQTT proxy. |
+| `map_reporting_enabled` | boolean |  | Периодически отправлять незашифрованную информацию о ноде на карту через MQTT. |
+| `map_report_settings` | table |  | Настройки отправки данных на карту. |
+| `map_report_settings.publish_interval_secs` | number |  | Интервал публикации на карту в секундах. |
+| `map_report_settings.position_precision` | number |  | Точность позиции в битах. |
+| `map_report_settings.should_report_location` | boolean |  | Согласие отправлять позицию на карту. |
 
 ### `serial`
 
 | Поле | Тип Lua | Enum-значения | Описание/заметки |
 | --- | --- | --- | --- |
-| `enabled` | boolean |  | Preferences for the SerialModule |
-| `echo` | boolean |  |  |
-| `rxd` | number |  | RX pin (should match Arduino gpio pin number) |
-| `txd` | number |  | TX pin (should match Arduino gpio pin number) |
-| `baud` | enum string | `BAUD_DEFAULT`, `BAUD_110`, `BAUD_300`, `BAUD_600`, `BAUD_1200`, `BAUD_2400`, `BAUD_4800`, `BAUD_9600`, `BAUD_19200`, `BAUD_38400`, `BAUD_57600`, `BAUD_115200`, `BAUD_230400`, `BAUD_460800`, `BAUD_576000`, `BAUD_921600` | Serial baud rate |
-| `timeout` | number |  |  |
-| `mode` | enum string | `DEFAULT`, `SIMPLE`, `PROTO`, `TEXTMSG`, `NMEA`, `CALTOPO`, `WS85`, `VE_DIRECT`, `MS_CONFIG`, `LOG`, `LOGTEXT` | Mode for serial module operation |
-| `override_console_serial_port` | boolean |  | Overrides the platform's defacto Serial port instance to use with Serial module config settings This is currently only usable in output modes like NMEA / CalTopo and may behave strangely or not work at all in other modes Existing logging over the Serial Console will still be present |
+| `enabled` | boolean |  | Включает модуль Serial. |
+| `echo` | boolean |  | Включает echo для модуля Serial. |
+| `rxd` | number |  | GPIO RX для модуля Serial. |
+| `txd` | number |  | GPIO TX для модуля Serial. |
+| `baud` | enum string | `BAUD_DEFAULT`, `BAUD_110`, `BAUD_300`, `BAUD_600`, `BAUD_1200`, `BAUD_2400`, `BAUD_4800`, `BAUD_9600`, `BAUD_19200`, `BAUD_38400`, `BAUD_57600`, `BAUD_115200`, `BAUD_230400`, `BAUD_460800`, `BAUD_576000`, `BAUD_921600` | Скорость serial. |
+| `timeout` | number |  | Таймаут serial. |
+| `mode` | enum string | `DEFAULT`, `SIMPLE`, `PROTO`, `TEXTMSG`, `NMEA`, `CALTOPO`, `WS85`, `VE_DIRECT`, `MS_CONFIG`, `LOG`, `LOGTEXT` | Режим работы модуля Serial. |
+| `override_console_serial_port` | boolean |  | Переопределяет serial port платформы для модуля Serial; применимо в основном к режимам вывода. |
 
 ### `external_notification`
 
 | Поле | Тип Lua | Enum-значения | Описание/заметки |
 | --- | --- | --- | --- |
-| `enabled` | boolean |  | Enable the ExternalNotificationModule |
-| `output_ms` | number |  | When using in On/Off mode, keep the output on for this many milliseconds. Default 1000ms (1 second). |
-| `output` | number |  | Define the output pin GPIO setting Defaults to EXT_NOTIFY_OUT if set for the board. In standalone devices this pin should drive the LED to match the UI. |
-| `output_vibra` | number |  | Optional: Define a secondary output pin for a vibra motor This is used in standalone devices to match the UI. |
-| `output_buzzer` | number |  | Optional: Define a tertiary output pin for an active buzzer This is used in standalone devices to to match the UI. |
-| `active` | boolean |  | IF this is true, the 'output' Pin will be pulled active high, false means active low. |
-| `alert_message` | boolean |  | True: Alert when a text message arrives (output) |
-| `alert_message_vibra` | boolean |  | True: Alert when a text message arrives (output_vibra) |
-| `alert_message_buzzer` | boolean |  | True: Alert when a text message arrives (output_buzzer) |
-| `alert_bell` | boolean |  | True: Alert when the bell character is received (output) |
-| `alert_bell_vibra` | boolean |  | True: Alert when the bell character is received (output_vibra) |
-| `alert_bell_buzzer` | boolean |  | True: Alert when the bell character is received (output_buzzer) |
-| `use_pwm` | boolean |  | use a PWM output instead of a simple on/off output. This will ignore the 'output', 'output_ms' and 'active' settings and use the device.buzzer_gpio instead. |
-| `nag_timeout` | number |  | The notification will toggle with 'output_ms' for this time of seconds. Default is 0 which means don't repeat at all. 60 would mean blink and/or beep for 60 seconds |
-| `use_i2s_as_buzzer` | boolean |  | When true, enables devices with native I2S audio output to use the RTTTL over speaker like a buzzer T-Watch S3 and T-Deck for example have this capability |
+| `enabled` | boolean |  | Включает модуль ExternalNotification. |
+| `output_ms` | number |  | Сколько миллисекунд держать основной выход включенным. |
+| `output` | number |  | GPIO основного выхода. |
+| `output_vibra` | number |  | GPIO дополнительного vibra-выхода. |
+| `output_buzzer` | number |  | GPIO дополнительного buzzer-выхода. |
+| `active` | boolean |  | `true` означает active high, `false` означает active low. |
+| `alert_message` | boolean |  | Срабатывать при текстовом сообщении на основном выходе. |
+| `alert_message_vibra` | boolean |  | Срабатывать при текстовом сообщении на vibra-выходе. |
+| `alert_message_buzzer` | boolean |  | Срабатывать при текстовом сообщении на buzzer-выходе. |
+| `alert_bell` | boolean |  | Срабатывать при получении bell character на основном выходе. |
+| `alert_bell_vibra` | boolean |  | Срабатывать при bell character на vibra-выходе. |
+| `alert_bell_buzzer` | boolean |  | Срабатывать при bell character на buzzer-выходе. |
+| `use_pwm` | boolean |  | Использовать PWM-выход вместо обычного on/off выхода. |
+| `nag_timeout` | number |  | Сколько секунд повторять уведомление; `0` отключает повтор. |
+| `use_i2s_as_buzzer` | boolean |  | Использовать native I2S-аудиовыход как buzzer, если устройство это поддерживает. |
 
 ### `store_forward`
 
 | Поле | Тип Lua | Enum-значения | Описание/заметки |
 | --- | --- | --- | --- |
-| `enabled` | boolean |  | Enable the Store and Forward Module |
-| `heartbeat` | boolean |  |  |
-| `records` | number |  |  |
-| `history_return_max` | number |  |  |
-| `history_return_window` | number |  |  |
-| `is_server` | boolean |  | Set to true to let this node act as a server that stores received messages and resends them upon request. |
+| `enabled` | boolean |  | Включает модуль Store and Forward. |
+| `heartbeat` | boolean |  | Включает heartbeat Store and Forward. |
+| `records` | number |  | Количество записей, сохраняемых модулем. |
+| `history_return_max` | number |  | Максимальное количество сообщений, возвращаемых из истории. |
+| `history_return_window` | number |  | Окно истории для возврата сообщений. |
+| `is_server` | boolean |  | Разрешает ноде быть сервером Store and Forward. |
 
 ### `range_test`
 
 | Поле | Тип Lua | Enum-значения | Описание/заметки |
 | --- | --- | --- | --- |
-| `enabled` | boolean |  | Enable the Range Test Module |
-| `sender` | number |  | Send out range test messages from this node |
-| `save` | boolean |  | Bool value indicating that this node should save a RangeTest.csv file. ESP32 Only |
-| `clear_on_reboot` | boolean |  | Bool indicating that the node should cleanup / destroy it's RangeTest.csv file. ESP32 Only |
+| `enabled` | boolean |  | Включает модуль Range Test. |
+| `sender` | number |  | Отправлять сообщения range test с этой ноды. |
+| `save` | boolean |  | Сохранять `RangeTest.csv` на ESP32. |
+| `clear_on_reboot` | boolean |  | Очищать `RangeTest.csv` при перезагрузке. |
 
 ### `telemetry`
 
 | Поле | Тип Lua | Enum-значения | Описание/заметки |
 | --- | --- | --- | --- |
-| `device_update_interval` | number |  | Interval in seconds of how often we should try to send our device metrics to the mesh |
-| `environment_update_interval` | number |  | Interval in seconds of how often we should try to send our environment measurements to the mesh |
-| `environment_measurement_enabled` | boolean |  | Preferences for the Telemetry Module (Environment) Enable/Disable the telemetry measurement module measurement collection |
-| `environment_screen_enabled` | boolean |  | Enable/Disable the telemetry measurement module on-device display |
-| `environment_display_fahrenheit` | boolean |  | We'll always read the sensor in Celsius, but sometimes we might want to display the results in Fahrenheit as a "user preference". |
-| `air_quality_enabled` | boolean |  | Enable/Disable the air quality metrics |
-| `air_quality_interval` | number |  | Interval in seconds of how often we should try to send our air quality metrics to the mesh |
-| `power_measurement_enabled` | boolean |  | Enable/disable Power metrics |
-| `power_update_interval` | number |  | Interval in seconds of how often we should try to send our power metrics to the mesh |
-| `power_screen_enabled` | boolean |  | Enable/Disable the power measurement module on-device display |
-| `health_measurement_enabled` | boolean |  | Preferences for the (Health) Telemetry Module Enable/Disable the telemetry measurement module measurement collection |
-| `health_update_interval` | number |  | Interval in seconds of how often we should try to send our health metrics to the mesh |
-| `health_screen_enabled` | boolean |  | Enable/Disable the health telemetry module on-device display |
-| `device_telemetry_enabled` | boolean |  | Enable/Disable the device telemetry module to send metrics to the mesh Note: We will still send telemtry to the connected phone / client every minute over the API |
-| `air_quality_screen_enabled` | boolean |  | Enable/Disable the air quality telemetry measurement module on-device display |
+| `device_update_interval` | number |  | Интервал отправки метрик устройства в mesh. |
+| `environment_update_interval` | number |  | Интервал отправки показаний окружения в mesh. |
+| `environment_measurement_enabled` | boolean |  | Включает сбор телеметрии окружения. |
+| `environment_screen_enabled` | boolean |  | Показывать телеметрию окружения на экране устройства. |
+| `environment_display_fahrenheit` | boolean |  | Показывать температуру в Fahrenheit. |
+| `air_quality_enabled` | boolean |  | Включает метрики качества воздуха. |
+| `air_quality_interval` | number |  | Интервал отправки метрик качества воздуха. |
+| `power_measurement_enabled` | boolean |  | Включает метрики питания. |
+| `power_update_interval` | number |  | Интервал отправки метрик питания. |
+| `power_screen_enabled` | boolean |  | Показывать метрики питания на экране устройства. |
+| `health_measurement_enabled` | boolean |  | Включает health-телеметрию. |
+| `health_update_interval` | number |  | Интервал отправки health-метрик. |
+| `health_screen_enabled` | boolean |  | Показывать health-телеметрию на экране устройства. |
+| `device_telemetry_enabled` | boolean |  | Включает отправку телеметрии устройства в mesh. |
+| `air_quality_screen_enabled` | boolean |  | Показывать телеметрию качества воздуха на экране устройства. |
 
 ### `canned_message`
 
 | Поле | Тип Lua | Enum-значения | Описание/заметки |
 | --- | --- | --- | --- |
-| `rotary1_enabled` | boolean |  | Enable the rotary encoder #1. This is a 'dumb' encoder sending pulses on both A and B pins while rotating. |
-| `inputbroker_pin_a` | number |  | GPIO pin for rotary encoder A port. |
-| `inputbroker_pin_b` | number |  | GPIO pin for rotary encoder B port. |
-| `inputbroker_pin_press` | number |  | GPIO pin for rotary encoder Press port. |
-| `inputbroker_event_cw` | enum string | `NONE`, `UP`, `DOWN`, `LEFT`, `RIGHT`, `SELECT`, `BACK`, `CANCEL` | Generate input event on CW of this kind. |
-| `inputbroker_event_ccw` | enum string | `NONE`, `UP`, `DOWN`, `LEFT`, `RIGHT`, `SELECT`, `BACK`, `CANCEL` | Generate input event on CCW of this kind. |
-| `inputbroker_event_press` | enum string | `NONE`, `UP`, `DOWN`, `LEFT`, `RIGHT`, `SELECT`, `BACK`, `CANCEL` | Generate input event on Press of this kind. |
-| `updown1_enabled` | boolean |  | Enable the Up/Down/Select input device. Can be RAK rotary encoder or 3 buttons. Uses the a/b/press definitions from inputbroker. |
-| `enabled` | boolean |  | deprecated Enable/disable CannedMessageModule. |
-| `allow_input_source` | string |  | deprecated Input event origin accepted by the canned message module. Can be e.g. "rotEnc1", "upDownEnc1", "scanAndSelect", "cardkb", "serialkb", or keyword "_any" |
-| `send_bell` | boolean |  | CannedMessageModule also sends a bell character with the messages. ExternalNotificationModule can benefit from this feature. |
+| `rotary1_enabled` | boolean |  | Включает поворотный энкодер #1. |
+| `inputbroker_pin_a` | number |  | GPIO A поворотного энкодера. |
+| `inputbroker_pin_b` | number |  | GPIO B поворотного энкодера. |
+| `inputbroker_pin_press` | number |  | GPIO кнопки поворотного энкодера. |
+| `inputbroker_event_cw` | enum string | `NONE`, `UP`, `DOWN`, `LEFT`, `RIGHT`, `SELECT`, `BACK`, `CANCEL` | Событие input broker при вращении по часовой стрелке. |
+| `inputbroker_event_ccw` | enum string | `NONE`, `UP`, `DOWN`, `LEFT`, `RIGHT`, `SELECT`, `BACK`, `CANCEL` | Событие input broker при вращении против часовой стрелки. |
+| `inputbroker_event_press` | enum string | `NONE`, `UP`, `DOWN`, `LEFT`, `RIGHT`, `SELECT`, `BACK`, `CANCEL` | Событие input broker при нажатии. |
+| `updown1_enabled` | boolean |  | Включает устройство ввода Up/Down/Select. |
+| `enabled` | boolean |  | Устарело. Включение/выключение модуля CannedMessage. |
+| `allow_input_source` | string |  | Устарело. Разрешенный источник input events для canned messages. |
+| `send_bell` | boolean |  | Добавлять bell character к canned messages. |
 
 ### `audio`
 
 | Поле | Тип Lua | Enum-значения | Описание/заметки |
 | --- | --- | --- | --- |
-| `codec2_enabled` | boolean |  | Whether Audio is enabled |
-| `ptt_pin` | number |  | PTT Pin |
-| `bitrate` | enum string | `CODEC2_DEFAULT`, `CODEC2_3200`, `CODEC2_2400`, `CODEC2_1600`, `CODEC2_1400`, `CODEC2_1300`, `CODEC2_1200`, `CODEC2_700`, `CODEC2_700B` | The audio sample rate to use for codec2 |
-| `i2s_ws` | number |  | I2S Word Select |
-| `i2s_sd` | number |  | I2S Data IN |
-| `i2s_din` | number |  | I2S Data OUT |
-| `i2s_sck` | number |  | I2S Clock |
+| `codec2_enabled` | boolean |  | Включает audio/codec2. |
+| `ptt_pin` | number |  | GPIO PTT. |
+| `bitrate` | enum string | `CODEC2_DEFAULT`, `CODEC2_3200`, `CODEC2_2400`, `CODEC2_1600`, `CODEC2_1400`, `CODEC2_1300`, `CODEC2_1200`, `CODEC2_700`, `CODEC2_700B` | Частота аудиосэмплов для codec2. |
+| `i2s_ws` | number |  | I2S Word Select. |
+| `i2s_sd` | number |  | I2S Data IN. |
+| `i2s_din` | number |  | I2S Data OUT. |
+| `i2s_sck` | number |  | I2S Clock. |
 
 ### `remote_hardware`
 
 | Поле | Тип Lua | Enum-значения | Описание/заметки |
 | --- | --- | --- | --- |
-| `enabled` | boolean |  | Whether the Module is enabled |
-| `allow_undefined_pin_access` | boolean |  | Whether the Module allows consumers to read / write to pins not defined in available_pins |
-| `available_pins[]` | list of table |  | Exposes the available pins to the mesh for reading and writing |
-| `available_pins[].gpio_pin` | number |  | GPIO Pin number (must match Arduino) |
-| `available_pins[].name` | string |  | Name for the GPIO pin (i.e. Front gate, mailbox, etc) |
-| `available_pins[].type` | enum string | `UNKNOWN`, `DIGITAL_READ`, `DIGITAL_WRITE` | Type of GPIO access available to consumers on the mesh |
+| `enabled` | boolean |  | Включает модуль RemoteHardware. |
+| `allow_undefined_pin_access` | boolean |  | Разрешает читать/писать GPIO, не перечисленные в `available_pins`. |
+| `available_pins[]` | список table |  | GPIO, доступные другим участникам mesh. |
+| `available_pins[].gpio_pin` | number |  | Номер GPIO pin. |
+| `available_pins[].name` | string |  | Человекочитаемое имя GPIO pin. |
+| `available_pins[].type` | enum string | `UNKNOWN`, `DIGITAL_READ`, `DIGITAL_WRITE` | Тип доступа к GPIO. |
 
 ### `neighbor_info`
 
 | Поле | Тип Lua | Enum-значения | Описание/заметки |
 | --- | --- | --- | --- |
-| `enabled` | boolean |  | Whether the Module is enabled |
-| `update_interval` | number |  | Interval in seconds of how often we should try to send our Neighbor Info (minimum is 14400, i.e., 4 hours) |
-| `transmit_over_lora` | boolean |  | Whether in addition to sending it to MQTT and the PhoneAPI, our NeighborInfo should be transmitted over LoRa. Note that this is not available on a channel with default key and name. |
+| `enabled` | boolean |  | Включает модуль NeighborInfo. |
+| `update_interval` | number |  | Интервал отправки Neighbor Info; минимум 14400 секунд. |
+| `transmit_over_lora` | boolean |  | Отправлять NeighborInfo также через LoRa. |
 
 ### `ambient_lighting`
 
 | Поле | Тип Lua | Enum-значения | Описание/заметки |
 | --- | --- | --- | --- |
-| `led_state` | boolean |  | Sets LED to on or off. |
-| `current` | number |  | Sets the current for the LED output. Default is 10. |
-| `red` | number |  | Sets the red LED level. Values are 0-255. |
-| `green` | number |  | Sets the green LED level. Values are 0-255. |
-| `blue` | number |  | Sets the blue LED level. Values are 0-255. |
+| `led_state` | boolean |  | Включает или выключает LED. |
+| `current` | number |  | Ток LED-выхода. |
+| `red` | number |  | Уровень красного канала, 0-255. |
+| `green` | number |  | Уровень зеленого канала, 0-255. |
+| `blue` | number |  | Уровень синего канала, 0-255. |
 
 ### `detection_sensor`
 
 | Поле | Тип Lua | Enum-значения | Описание/заметки |
 | --- | --- | --- | --- |
-| `enabled` | boolean |  | Whether the Module is enabled |
-| `minimum_broadcast_secs` | number |  | Interval in seconds of how often we can send a message to the mesh when a trigger event is detected |
-| `state_broadcast_secs` | number |  | Interval in seconds of how often we should send a message to the mesh with the current state regardless of trigger events When set to 0, only trigger events will be broadcasted Works as a sort of status heartbeat for peace of mind |
-| `send_bell` | boolean |  | Send ASCII bell with alert message Useful for triggering ext. notification on bell |
-| `name` | string |  | Friendly name used to format message sent to mesh Example: A name "Motion" would result in a message "Motion detected" Maximum length of 20 characters |
-| `monitor_pin` | number |  | GPIO pin to monitor for state changes |
-| `detection_trigger_type` | enum string | `LOGIC_LOW`, `LOGIC_HIGH`, `FALLING_EDGE`, `RISING_EDGE`, `EITHER_EDGE_ACTIVE_LOW`, `EITHER_EDGE_ACTIVE_HIGH` | The type of trigger event to be used |
-| `use_pullup` | boolean |  | Whether or not use INPUT_PULLUP mode for GPIO pin Only applicable if the board uses pull-up resistors on the pin |
+| `enabled` | boolean |  | Включает модуль Detection Sensor. |
+| `minimum_broadcast_secs` | number |  | Минимальный интервал отправки сообщения при событии срабатывания. |
+| `state_broadcast_secs` | number |  | Интервал heartbeat-сообщения с текущим состоянием; `0` оставляет только события срабатывания. |
+| `send_bell` | boolean |  | Добавлять ASCII bell к alert-сообщению. |
+| `name` | string |  | Имя датчика для текста сообщения. |
+| `monitor_pin` | number |  | GPIO pin для мониторинга. |
+| `detection_trigger_type` | enum string | `LOGIC_LOW`, `LOGIC_HIGH`, `FALLING_EDGE`, `RISING_EDGE`, `EITHER_EDGE_ACTIVE_LOW`, `EITHER_EDGE_ACTIVE_HIGH` | Тип события срабатывания. |
+| `use_pullup` | boolean |  | Использовать `INPUT_PULLUP`, если плата поддерживает pull-up на pin. |
 
 ### `paxcounter`
 
 | Поле | Тип Lua | Enum-значения | Описание/заметки |
 | --- | --- | --- | --- |
-| `enabled` | boolean |  | Enable the Paxcounter Module |
-| `paxcounter_update_interval` | number |  | Interval in seconds of how often we should try to send our metrics to the mesh |
-| `wifi_threshold` | number |  | WiFi RSSI threshold. Defaults to -80 |
-| `ble_threshold` | number |  | BLE RSSI threshold. Defaults to -80 |
+| `enabled` | boolean |  | Включает модуль Paxcounter. |
+| `paxcounter_update_interval` | number |  | Интервал отправки метрик paxcounter. |
+| `wifi_threshold` | number |  | Порог Wi-Fi RSSI, по умолчанию -80. |
+| `ble_threshold` | number |  | Порог BLE RSSI, по умолчанию -80. |
 
 ### `statusmessage`
 
 | Поле | Тип Lua | Enum-значения | Описание/заметки |
 | --- | --- | --- | --- |
-| `node_status` | string |  | The actual status string |
+| `node_status` | string |  | Текст статуса ноды. |
 
 ### `traffic_management`
 
 | Поле | Тип Lua | Enum-значения | Описание/заметки |
 | --- | --- | --- | --- |
-| `enabled` | boolean |  | Master enable for traffic management module |
-| `position_dedup_enabled` | boolean |  | Enable position deduplication to drop redundant position broadcasts |
-| `position_precision_bits` | number |  | Number of bits of precision for position deduplication (0-32) |
-| `position_min_interval_secs` | number |  | Minimum interval in seconds between position updates from the same node |
-| `nodeinfo_direct_response` | boolean |  | Enable direct response to NodeInfo requests from local cache |
-| `nodeinfo_direct_response_max_hops` | number |  | Minimum hop distance from requestor before responding to NodeInfo requests |
-| `rate_limit_enabled` | boolean |  | Enable per-node rate limiting to throttle chatty nodes |
-| `rate_limit_window_secs` | number |  | Time window in seconds for rate limiting calculations |
-| `rate_limit_max_packets` | number |  | Maximum packets allowed per node within the rate limit window |
-| `drop_unknown_enabled` | boolean |  | Enable dropping of unknown/undecryptable packets per rate_limit_window_secs |
-| `unknown_packet_threshold` | number |  | Number of unknown packets before dropping from a node |
-| `exhaust_hop_telemetry` | boolean |  | Set hop_limit to 0 for relayed telemetry broadcasts (own packets unaffected) |
-| `exhaust_hop_position` | boolean |  | Set hop_limit to 0 for relayed position broadcasts (own packets unaffected) |
-| `router_preserve_hops` | boolean |  | Preserve hop_limit for router-to-router traffic |
+| `enabled` | boolean |  | Главный переключатель модуля Traffic Management. |
+| `position_dedup_enabled` | boolean |  | Включает дедупликацию position-пакетов. |
+| `position_precision_bits` | number |  | Точность дедупликации позиции в битах, 0-32. |
+| `position_min_interval_secs` | number |  | Минимальный интервал между обновлениями позиции от одной ноды. |
+| `nodeinfo_direct_response` | boolean |  | Отвечать на запросы NodeInfo из локального кеша. |
+| `nodeinfo_direct_response_max_hops` | number |  | Минимальная дистанция в hops до отправителя запроса для прямого ответа. |
+| `rate_limit_enabled` | boolean |  | Включает ограничение частоты по каждой ноде. |
+| `rate_limit_window_secs` | number |  | Окно ограничения частоты в секундах. |
+| `rate_limit_max_packets` | number |  | Максимум пакетов от одной ноды в окне ограничения частоты. |
+| `drop_unknown_enabled` | boolean |  | Включает сброс неизвестных или нерасшифровываемых пакетов. |
+| `unknown_packet_threshold` | number |  | Количество неизвестных пакетов до сброса. |
+| `exhaust_hop_telemetry` | boolean |  | Ставить `hop_limit = 0` для ретранслируемой телеметрии. |
+| `exhaust_hop_position` | boolean |  | Ставить `hop_limit = 0` для ретранслируемой позиции. |
+| `router_preserve_hops` | boolean |  | Сохранять hop_limit для трафика router-to-router. |
 
 ### `tak`
 
 | Поле | Тип Lua | Enum-значения | Описание/заметки |
 | --- | --- | --- | --- |
-| `team` | enum string | `Unspecifed_Color`, `White`, `Yellow`, `Orange`, `Magenta`, `Red`, `Maroon`, `Purple`, `Dark_Blue`, `Blue`, `Cyan`, `Teal`, `Green`, `Dark_Green`, `Brown` | Team color. Default Unspecifed_Color -> firmware uses Cyan |
-| `role` | enum string | `Unspecifed`, `TeamMember`, `TeamLead`, `HQ`, `Sniper`, `Medic`, `ForwardObserver`, `RTO`, `K9` | Member role. Default Unspecifed -> firmware uses TeamMember |
+| `team` | enum string | `Unspecifed_Color`, `White`, `Yellow`, `Orange`, `Magenta`, `Red`, `Maroon`, `Purple`, `Dark_Blue`, `Blue`, `Cyan`, `Teal`, `Green`, `Dark_Green`, `Brown` | Цвет команды TAK. |
+| `role` | enum string | `Unspecifed`, `TeamMember`, `TeamLead`, `HQ`, `Sniper`, `Medic`, `ForwardObserver`, `RTO`, `K9` | Роль участника TAK. |
 
-## Channels: `changes.channels`
+## Каналы: `changes.channels`
 
 Каждый элемент `channels` должен содержать `index`; без `{ replace = true }` существующий channel сначала должен быть загружен через `load_config`.
 
 | Поле | Тип Lua | Enum-значения | Описание/заметки |
 | --- | --- | --- | --- |
-| `index` | number |  | The index of this channel in the channel table (from 0 to MAX_NUM_CHANNELS-1) (Someday - not currently implemented) An index of -1 could be used to mean "set by name", in which case the target node will find and set the channel by settings.name. |
-| `settings` | table |  | The new settings, or NULL to disable that channel |
-| `settings.channel_num` | number |  | Deprecated in favor of LoraConfig.channel_num |
-| `settings.psk` | string (hex/base64) |  | A simple pre-shared key for now for crypto. Must be either 0 bytes (no crypto), 16 bytes (AES128), or 32 bytes (AES256). A special shorthand is used for 1 byte long psks. These psks should be treated as only minimally secure, because they are listed in this source code. Those bytes are mapped using the following scheme: `0` = No crypto `1` = The special "default" channel key: {0xd4, 0xf1, 0xbb, 0x3a, 0x20, 0x29, 0x07, 0x59, 0xf0, 0xbc, 0xff, 0xab, 0xcf, 0x4e, 0x69, 0x01} `2` through 10 = The default channel key, except with 1 through 9 added to the last byte. Shown to user as simple1 through 10 |
-| `settings.name` | string |  | A SHORT name that will be packed into the URL. Less than 12 bytes. Something for end users to call the channel If this is the empty string it is assumed that this channel is the special (minimally secure) "Default"channel. In user interfaces it should be rendered as a local language translation of "X". For channel_num hashing empty string will be treated as "X". Where "X" is selected based on the English words listed above for ModemPreset |
-| `settings.id` | number |  | Used to construct a globally unique channel ID. The full globally unique ID will be: "name.id" where ID is shown as base36. Assuming that the number of meshtastic users is below 20K (true for a long time) the chance of this 64 bit random number colliding with anyone else is super low. And the penalty for collision is low as well, it just means that anyone trying to decrypt channel messages might need to try multiple candidate channels. Any time a non wire compatible change is made to a channel, this field should be regenerated. There are a small number of 'special' globally known (and fairly) insecure standard channels. Those channels do not have a numeric id included in the settings, but instead it is pulled from a table of well known IDs. (see Well Known Channels FIXME) |
-| `settings.uplink_enabled` | boolean |  | If true, messages on the mesh will be sent to the *public* internet by any gateway ndoe |
-| `settings.downlink_enabled` | boolean |  | If true, messages seen on the internet will be forwarded to the local mesh. |
-| `settings.module_settings` | table |  | Per-channel module settings. |
-| `settings.module_settings.position_precision` | number |  | Bits of precision for the location sent in position packets. |
-| `settings.module_settings.is_muted` | boolean |  | Controls whether or not the client / device should mute the current channel Useful for noisy public channels you don't necessarily want to disable |
-| `role` | enum string | `DISABLED`, `PRIMARY`, `SECONDARY` |  |
+| `index` | number |  | Индекс канала в таблице каналов, обычно 0..MAX_NUM_CHANNELS-1. |
+| `settings` | table |  | Настройки канала; `nil` отключает канал. |
+| `settings.channel_num` | number |  | Устарело. Используйте `configs.lora.channel_num`. |
+| `settings.psk` | string (hex/base64) |  | Предварительный общий ключ канала: 0 байт без шифрования, 16 байт AES128 или 32 байта AES256. |
+| `settings.name` | string |  | Короткое имя канала, обычно меньше 12 байт. |
+| `settings.id` | number |  | Случайный ID канала для формирования глобально уникального ID канала. |
+| `settings.uplink_enabled` | boolean |  | Разрешает gateway-ноды отправлять сообщения канала в публичный интернет. |
+| `settings.downlink_enabled` | boolean |  | Разрешает пересылать сообщения из интернета в локальный mesh. |
+| `settings.module_settings` | table |  | Настройки модулей для конкретного канала. |
+| `settings.module_settings.position_precision` | number |  | Точность позиции в position-пакетах. |
+| `settings.module_settings.is_muted` | boolean |  | Отключает уведомления текущего канала на клиенте/устройстве. |
+| `role` | enum string | `DISABLED`, `PRIMARY`, `SECONDARY` | Роль канала: выключен, primary или secondary. |
 
 ## Пример
 
