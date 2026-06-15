@@ -191,6 +191,7 @@ end
 | `on_node_selected(event)` | After selecting or cancelling node selection through `mesh.ui.pick_node(...)` |
 | `on_traceroute(event)` | After `mesh.traceroute.request(...)` produces a result |
 | `on_node_info(event)` | After `mesh.nodeinfo.request(...)` produces a result |
+| `on_admin(event)` | After `mesh.admin.*` remote administration requests produce progress or a result |
 | `on_canvas_event(event)` | After an event in a floating Canvas window: mouse, keyboard, resize, open/close |
 | `on_canvas_frame(event)` | On the Canvas window timer, if `fps` is set or `mesh.canvas.set_fps(...)` was called |
 
@@ -437,6 +438,86 @@ Color can be passed as a JavaFX/CSS string (`"#ffcc00"`, `"rgba(255,0,0,0.5)"`, 
 | `chat_type` | string | Chat context from the original `options` |
 | `chat_key` | string | Chat key from the original `options` |
 | `node` | `node` or `nil` | Node table; `nil` when no node data is available |
+
+## `mesh.admin`
+
+Remote admin works only for Meshtastic connections. The local client's public key must be listed in the target node's Admin Key. All functions are asynchronous: they return `request_id` and later call `on_admin(event)`.
+
+`target` can be a node ID string (`"!abcdef12"`), numeric `node_num`, or a node table with `node_num`, `node_id`, `long_name`, `short_name`.
+
+| Function | Return | Purpose |
+|----------|--------|---------|
+| `mesh.admin.load_config(target[, options])` | `request_id` | Loads a remote snapshot: owner, metadata, configs, module configs, channels, status |
+| `mesh.admin.request_config(target, type[, options])` | `request_id` | Loads one core config section, for example `POWER_CONFIG` or `power` |
+| `mesh.admin.request_module_config(target, type[, options])` | `request_id` | Loads one module config section, for example `MQTT_CONFIG` or `mqtt` |
+| `mesh.admin.save_config(target, changes, options)` | `request_id` | Saves owner/position/text/config/channel changes; requires `options.confirm = true` |
+| `mesh.admin.refresh_status(target[, options])` | `request_id` | Reloads device connection status |
+| `mesh.admin.reboot(target[, delay_seconds[, options]])` | `request_id` | Requests delayed reboot; `0` cancels pending reboot |
+| `mesh.admin.shutdown(target[, delay_seconds[, options]])` | `request_id` | Requests delayed shutdown; `0` cancels pending shutdown |
+| `mesh.admin.sync_time(target[, epoch_seconds[, options]])` | `request_id` | Sets remote node time; defaults to current app time |
+| `mesh.admin.backup(target[, location[, options]])` | `request_id` | Backs up preferences to `FLASH` or `SD` |
+| `mesh.admin.restore(target[, location], options)` | `request_id` | Restores preferences; requires `options.confirm = true` |
+| `mesh.admin.remove_backup(target[, location], options)` | `request_id` | Removes stored backup; requires `options.confirm = true` |
+| `mesh.admin.reset_nodedb(target[, preserve_favorites], options)` | `request_id` | Resets remote NodeDB; requires `options.confirm = true` |
+| `mesh.admin.factory_reset_config(target, options)` | `request_id` | Factory-resets remote config; requires `options.confirm = true` |
+| `mesh.admin.factory_reset_device(target, options)` | `request_id` | Factory-resets the remote device; requires `options.confirm = true` |
+| `mesh.admin.enter_dfu_mode(target, options)` | `request_id` | Requests DFU mode; requires `options.confirm = true` |
+| `mesh.admin.set_owner(target, owner[, options])` | `request_id` | Updates `{ long_name, short_name, licensed }` |
+| `mesh.admin.set_fixed_position(target, position[, options])` | `request_id` | Sets `{ latitude, longitude, altitude }` as a manual position |
+| `mesh.admin.remove_fixed_position(target[, options])` | `request_id` | Clears manual fixed position |
+| `mesh.admin.set_ringtone(target, text[, options])` | `request_id` | Updates RTTTL ringtone text |
+| `mesh.admin.set_canned_messages(target, text[, options])` | `request_id` | Updates canned message module text |
+
+`save_config` patch example:
+
+```lua
+local target = "!abcdef12"
+
+mesh.admin.request_config(target, "POWER_CONFIG")
+
+function on_admin(event)
+    if event.action == "request_config" and event.ok then
+        mesh.admin.save_config(target, {
+            owner = { long_name = "Remote Node", short_name = "RMT", licensed = true },
+            configs = {
+                power = { ls_secs = 300, min_wake_secs = 10 }
+            },
+            module_configs = {
+                mqtt = { enabled = true, address = "mqtt.example.com" }
+            },
+            channels = {
+                { index = 0, role = "PRIMARY", settings = { name = "LongFast" } }
+            }
+        }, { confirm = true })
+    end
+end
+```
+
+Config, module config and channel patches use protobuf `snake_case` field names. Enum values are strings such as `"PRIMARY"` or `"CLIENT"`. Repeated fields are Lua lists. Bytes are accepted as hex strings, `hex:...`, `base64:...`, or Base64 strings. By default patches are merged with the section loaded by `load_config` or `request_config`; if a section was not loaded, `save_config` fails. Pass `{ replace = true, confirm = true }` only when intentionally sending a replacement built from defaults.
+
+Full list of readable and writable config fields: [lua-admin-config-reference.md](lua-admin-config-reference.md).
+
+`on_admin(event)` fields:
+
+| Field | Type | Purpose / returned value |
+|-------|------|--------------------------|
+| `type` | string | `admin_progress` or `admin_result` |
+| `source` | string | API source, for example `mesh.admin.save_config` |
+| `name` | string | Original request name from `options.name` |
+| `request_id` | string | Request ID returned by `mesh.admin.*` |
+| `action` | string | Action name, for example `load_config`, `save_config`, `reboot` |
+| `status` | string | `ok`, `timeout`, `error`, or progress state `sent`/`received`/`failed` |
+| `ok` | boolean | `true` for successful terminal results |
+| `timeout` | boolean | `true` when the terminal result timed out |
+| `error` | string or `nil` | Failure detail |
+| `target_node_num` | number | Numeric target node ID (`uint32`) |
+| `target_node_id` | string | Target node ID in `!abcdef12` form |
+| `snapshot` | table or `nil` | Remote snapshot on terminal results |
+| `progress_key` | string or `nil` | Snapshot block key for progress events |
+| `completed` | number or `nil` | Completed snapshot blocks for progress events |
+| `total` | number or `nil` | Total snapshot blocks for progress events |
+
+`event.snapshot` includes `node`, `owner`, `device_metadata`, `ringtone`, `canned_messages`, `connection_status`, `configs`, `module_configs`, `channels`, `query_statuses`, and `query_summary`.
 
 ## Object Fields
 

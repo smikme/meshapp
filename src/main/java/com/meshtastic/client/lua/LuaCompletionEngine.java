@@ -60,6 +60,7 @@ public final class LuaCompletionEngine {
         mesh.member("canvas", "canvas.", "object", "mesh.canvas");
         mesh.member("traceroute", "traceroute.", "object", "mesh.traceroute");
         mesh.member("nodeinfo", "nodeinfo.", "object", "mesh.nodeinfo");
+        mesh.member("admin", "admin.", "object", "mesh.admin");
         mesh.member("command()", "command()", "function", "command");
 
         TypeDef chat = new TypeDef();
@@ -120,6 +121,31 @@ public final class LuaCompletionEngine {
         TypeDef nodeinfo = new TypeDef();
         nodeinfo.member("request(target, options)", "request(", "function", "string");
 
+        TypeDef admin = new TypeDef();
+        for (String member : List.of(
+                "load_config(target, options)",
+                "request_config(target, type, options)",
+                "request_module_config(target, type, options)",
+                "save_config(target, changes, options)",
+                "refresh_status(target, options)",
+                "reboot(target, delay_seconds, options)",
+                "shutdown(target, delay_seconds, options)",
+                "sync_time(target, epoch_seconds, options)",
+                "backup(target, location, options)",
+                "restore(target, location, options)",
+                "remove_backup(target, location, options)",
+                "reset_nodedb(target, preserve_favorites, options)",
+                "factory_reset_config(target, options)",
+                "factory_reset_device(target, options)",
+                "enter_dfu_mode(target, options)",
+                "set_owner(target, owner, options)",
+                "set_fixed_position(target, position, options)",
+                "remove_fixed_position(target, options)",
+                "set_ringtone(target, text, options)",
+                "set_canned_messages(target, text, options)")) {
+            admin.member(member, member.substring(0, member.indexOf('(') + 1), "function", "string");
+        }
+
         TypeDef command = new TypeDef();
         for (String field : List.of("type", "source", "name", "request_id",
                 "chat_type", "chat_key", "handle", "text", "arguments", "argument_tokens")) {
@@ -147,6 +173,21 @@ public final class LuaCompletionEngine {
             nodeInfoEvent.member(field, field, "field", null);
         }
         nodeInfoEvent.member("node", "node", "field", "node");
+
+        TypeDef adminEvent = new TypeDef();
+        for (String field : List.of("type", "source", "name", "request_id", "action", "status", "ok", "timeout",
+                "error", "target_node_num", "target_node_id", "target_name", "progress_key", "completed", "total")) {
+            adminEvent.member(field, field, "field", null);
+        }
+        adminEvent.member("snapshot", "snapshot", "field", "admin.snapshot");
+
+        TypeDef adminSnapshot = new TypeDef();
+        for (String field : List.of("target_node_num", "target_node_id", "owner", "device_metadata", "ringtone",
+                "canned_messages", "canned_messages_loaded", "connection_status", "configs", "module_configs",
+                "channels", "query_statuses", "query_summary")) {
+            adminSnapshot.member(field, field, "field", null);
+        }
+        adminSnapshot.member("node", "node", "field", "node");
 
         TypeDef canvasEvent = new TypeDef();
         for (String field : List.of("type", "source", "x", "y", "screen_x", "screen_y", "button",
@@ -245,11 +286,14 @@ public final class LuaCompletionEngine {
         defs.put("mesh.canvas", canvas);
         defs.put("mesh.traceroute", traceroute);
         defs.put("mesh.nodeinfo", nodeinfo);
+        defs.put("mesh.admin", admin);
         defs.put("curl.response", curlResponse);
         defs.put("command", command);
         defs.put("node.selection", nodeSelection);
         defs.put("traceroute.event", tracerouteEvent);
         defs.put("nodeinfo.event", nodeInfoEvent);
+        defs.put("admin.event", adminEvent);
+        defs.put("admin.snapshot", adminSnapshot);
         defs.put("canvas.event", canvasEvent);
         defs.put("canvas.mouse", canvasMouse);
         defs.put("canvas.keys", canvasKeys);
@@ -278,6 +322,7 @@ public final class LuaCompletionEngine {
                 new CompletionItem("on_node_selected(event)", "function on_node_selected(event)\n    \nend", "snippet"),
                 new CompletionItem("on_traceroute(event)", "function on_traceroute(event)\n    \nend", "snippet"),
                 new CompletionItem("on_node_info(event)", "function on_node_info(event)\n    \nend", "snippet"),
+                new CompletionItem("on_admin(event)", "function on_admin(event)\n    \nend", "snippet"),
                 new CompletionItem("on_canvas_event(event)", "function on_canvas_event(event)\n    \nend", "snippet"),
                 new CompletionItem("on_canvas_frame(event)", "function on_canvas_frame(event)\n    \nend", "snippet"),
                 new CompletionItem("mesh", "mesh", "object"),
@@ -418,6 +463,11 @@ public final class LuaCompletionEngine {
                 List<String> params = splitNames(functionMatcher.group(2));
                 if (!params.isEmpty()) {
                     symbols.put(params.getFirst(), "nodeinfo.event");
+                }
+            } else if ("on_admin".equals(name)) {
+                List<String> params = splitNames(functionMatcher.group(2));
+                if (!params.isEmpty()) {
+                    symbols.put(params.getFirst(), "admin.event");
                 }
             } else if ("on_canvas_event".equals(name) || "on_canvas_frame".equals(name)) {
                 List<String> params = splitNames(functionMatcher.group(2));
@@ -632,6 +682,9 @@ public final class LuaCompletionEngine {
         }
         if (value.startsWith("mesh.nodeinfo")) {
             return Optional.of("mesh.nodeinfo");
+        }
+        if (value.startsWith("mesh.admin")) {
+            return Optional.of("mesh.admin");
         }
         if (value.startsWith("mesh")) {
             return Optional.of("mesh");

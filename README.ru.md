@@ -307,7 +307,7 @@ MeshApp IDE — встроенная среда для Lua-скриптов и �
 
 - `on_message(msg)` — реакция на новое сообщение
 - `on_command(command)` — обработка команды
-- `on_node_selected(event)`, `on_traceroute(event)`, `on_node_info(event)` — обработчики асинхронных событий
+- `on_node_selected(event)`, `on_traceroute(event)`, `on_node_info(event)`, `on_admin(event)` — обработчики асинхронных событий
 
 Документация API: [docs/lua-api.ru.md](docs/lua-api.ru.md).
 
