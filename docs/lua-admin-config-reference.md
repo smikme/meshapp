@@ -493,3 +493,408 @@ mesh.admin.save_config(target, {
     }
 }, { confirm = true })
 ```
+
+## Full `save_config` Template
+
+This copyable template includes every section accepted by `mesh.admin.save_config`. Do not send it as-is without review: delete fields and sections you do not want to change. For normal patches, load the current remote state first with `mesh.admin.load_config(target)` or targeted `request_config` / `request_module_config`, so `save_config` can merge your changes into the loaded values.
+
+```lua
+local target = "!abcdef12"
+
+local changes = {
+    owner = {
+        long_name = "Remote Node",
+        short_name = "RMT",
+        licensed = true
+    },
+
+    position = {
+        latitude = 55.7558,
+        longitude = 37.6173,
+        altitude = 180
+    },
+
+    -- remove_position = true,
+    ringtone = "beep:d=4,o=5,b=120:c6",
+    canned_messages = "OK|On my way|Need help",
+
+    configs = {
+        device = {
+            role = "CLIENT",
+            serial_enabled = false, -- deprecated; prefer security.serial_enabled
+            button_gpio = 0,
+            buzzer_gpio = 0,
+            rebroadcast_mode = "ALL",
+            node_info_broadcast_secs = 900,
+            double_tap_as_button_press = false,
+            is_managed = false, -- deprecated; prefer security.is_managed
+            disable_triple_click = false,
+            tzdef = "UTC0",
+            led_heartbeat_disabled = false,
+            buzzer_mode = "ALL_ENABLED"
+        },
+
+        position = {
+            position_broadcast_secs = 900,
+            position_broadcast_smart_enabled = true,
+            fixed_position = false,
+            gps_enabled = true, -- deprecated; prefer gps_mode
+            gps_update_interval = 30,
+            gps_attempt_time = 0, -- deprecated
+            position_flags = 0,
+            rx_gpio = 0,
+            tx_gpio = 0,
+            broadcast_smart_minimum_distance = 100,
+            broadcast_smart_minimum_interval_secs = 30,
+            gps_en_gpio = 0,
+            gps_mode = "ENABLED"
+        },
+
+        power = {
+            is_power_saving = false,
+            on_battery_shutdown_after_secs = 0,
+            adc_multiplier_override = 0,
+            wait_bluetooth_secs = 0,
+            sds_secs = 0,
+            ls_secs = 300,
+            min_wake_secs = 10,
+            device_battery_ina_address = 0,
+            powermon_enables = 0
+        },
+
+        network = {
+            wifi_enabled = false,
+            wifi_ssid = "",
+            wifi_psk = "",
+            ntp_server = "meshtastic.pool.ntp.org",
+            eth_enabled = false,
+            address_mode = "DHCP",
+            ipv4_config = {
+                ip = 0,
+                gateway = 0,
+                subnet = 0,
+                dns = 0
+            },
+            rsyslog_server = "",
+            enabled_protocols = 0,
+            ipv6_enabled = false
+        },
+
+        display = {
+            screen_on_secs = 60,
+            gps_format = "UNUSED", -- deprecated in this section
+            auto_screen_carousel_secs = 0,
+            compass_north_top = false, -- deprecated
+            flip_screen = false,
+            units = "METRIC",
+            oled = "OLED_AUTO",
+            displaymode = "DEFAULT",
+            heading_bold = false,
+            wake_on_tap_or_motion = false,
+            compass_orientation = "DEGREES_0",
+            use_12h_clock = false,
+            use_long_node_name = false,
+            enable_message_bubbles = true
+        },
+
+        lora = {
+            use_preset = true,
+            modem_preset = "LONG_FAST",
+            bandwidth = 0,
+            spread_factor = 0,
+            coding_rate = 0,
+            frequency_offset = 0,
+            region = "UNSET",
+            hop_limit = 3,
+            tx_enabled = true,
+            tx_power = 0,
+            channel_num = 0,
+            override_duty_cycle = false,
+            sx126x_rx_boosted_gain = false,
+            override_frequency = 0,
+            pa_fan_disabled = false,
+            ignore_incoming = {},
+            ignore_mqtt = false,
+            config_ok_to_mqtt = false,
+            fem_lna_mode = "NOT_PRESENT",
+            serial_hal_only = false
+        },
+
+        bluetooth = {
+            enabled = true,
+            mode = "RANDOM_PIN",
+            fixed_pin = 123456
+        },
+
+        security = {
+            -- Do not change keys unless necessary: you can lose remote-admin access.
+            public_key = "",
+            private_key = "",
+            admin_key = {},
+            is_managed = false,
+            serial_enabled = false,
+            debug_log_api_enabled = false,
+            admin_channel_enabled = false
+        },
+
+        device_ui = {
+            version = 0,
+            screen_brightness = 128,
+            screen_timeout = 60,
+            screen_lock = false,
+            settings_lock = false,
+            pin_code = 0,
+            theme = "DARK",
+            alert_enabled = true,
+            banner_enabled = true,
+            ring_tone_id = 0,
+            language = "ENGLISH",
+            node_filter = {
+                unknown_switch = false,
+                offline_switch = false,
+                public_key_switch = false,
+                hops_away = 0,
+                position_switch = false,
+                node_name = "",
+                channel = 0
+            },
+            node_highlight = {
+                chat_switch = true,
+                position_switch = true,
+                telemetry_switch = true,
+                iaq_switch = true,
+                node_name = ""
+            },
+            calibration_data = "",
+            map_data = {
+                home = {
+                    zoom = 10,
+                    latitude = 55.7558,
+                    longitude = 37.6173
+                },
+                style = "",
+                follow_gps = true
+            },
+            compass_mode = "DYNAMIC",
+            screen_rgb_color = 16777215,
+            is_clockface_analog = false,
+            gps_format = "DEC"
+        }
+    },
+
+    module_configs = {
+        mqtt = {
+            enabled = false,
+            address = "",
+            username = "",
+            password = "",
+            encryption_enabled = true,
+            json_enabled = false, -- deprecated
+            tls_enabled = true,
+            root = "msh",
+            proxy_to_client_enabled = false,
+            map_reporting_enabled = false,
+            map_report_settings = {
+                publish_interval_secs = 900,
+                position_precision = 32,
+                should_report_location = false
+            }
+        },
+
+        serial = {
+            enabled = false,
+            echo = false,
+            rxd = 0,
+            txd = 0,
+            baud = "BAUD_115200",
+            timeout = 0,
+            mode = "DEFAULT",
+            override_console_serial_port = false
+        },
+
+        external_notification = {
+            enabled = false,
+            output_ms = 1000,
+            output = 0,
+            output_vibra = 0,
+            output_buzzer = 0,
+            active = true,
+            alert_message = true,
+            alert_message_vibra = false,
+            alert_message_buzzer = false,
+            alert_bell = true,
+            alert_bell_vibra = false,
+            alert_bell_buzzer = false,
+            use_pwm = false,
+            nag_timeout = 0,
+            use_i2s_as_buzzer = false
+        },
+
+        store_forward = {
+            enabled = false,
+            heartbeat = false,
+            records = 0,
+            history_return_max = 0,
+            history_return_window = 0,
+            is_server = false
+        },
+
+        range_test = {
+            enabled = false,
+            sender = 0,
+            save = false,
+            clear_on_reboot = false
+        },
+
+        telemetry = {
+            device_update_interval = 900,
+            environment_update_interval = 900,
+            environment_measurement_enabled = false,
+            environment_screen_enabled = false,
+            environment_display_fahrenheit = false,
+            air_quality_enabled = false,
+            air_quality_interval = 900,
+            power_measurement_enabled = false,
+            power_update_interval = 900,
+            power_screen_enabled = false,
+            health_measurement_enabled = false,
+            health_update_interval = 900,
+            health_screen_enabled = false,
+            device_telemetry_enabled = true,
+            air_quality_screen_enabled = false
+        },
+
+        canned_message = {
+            rotary1_enabled = false,
+            inputbroker_pin_a = 0,
+            inputbroker_pin_b = 0,
+            inputbroker_pin_press = 0,
+            inputbroker_event_cw = "NONE",
+            inputbroker_event_ccw = "NONE",
+            inputbroker_event_press = "NONE",
+            updown1_enabled = false,
+            enabled = false, -- deprecated
+            allow_input_source = "", -- deprecated
+            send_bell = false
+        },
+
+        audio = {
+            codec2_enabled = false,
+            ptt_pin = 0,
+            bitrate = "CODEC2_DEFAULT",
+            i2s_ws = 0,
+            i2s_sd = 0,
+            i2s_din = 0,
+            i2s_sck = 0
+        },
+
+        remote_hardware = {
+            enabled = false,
+            allow_undefined_pin_access = false,
+            available_pins = {
+                { gpio_pin = 0, name = "pin0", type = "DIGITAL_READ" }
+            }
+        },
+
+        neighbor_info = {
+            enabled = false,
+            update_interval = 14400,
+            transmit_over_lora = false
+        },
+
+        ambient_lighting = {
+            led_state = false,
+            current = 10,
+            red = 0,
+            green = 0,
+            blue = 0
+        },
+
+        detection_sensor = {
+            enabled = false,
+            minimum_broadcast_secs = 45,
+            state_broadcast_secs = 0,
+            send_bell = false,
+            name = "Sensor",
+            monitor_pin = 0,
+            detection_trigger_type = "LOGIC_HIGH",
+            use_pullup = false
+        },
+
+        paxcounter = {
+            enabled = false,
+            paxcounter_update_interval = 900,
+            wifi_threshold = -80,
+            ble_threshold = -80
+        },
+
+        statusmessage = {
+            node_status = ""
+        },
+
+        traffic_management = {
+            enabled = false,
+            position_dedup_enabled = false,
+            position_precision_bits = 32,
+            position_min_interval_secs = 0,
+            nodeinfo_direct_response = false,
+            nodeinfo_direct_response_max_hops = 0,
+            rate_limit_enabled = false,
+            rate_limit_window_secs = 60,
+            rate_limit_max_packets = 0,
+            drop_unknown_enabled = false,
+            unknown_packet_threshold = 0,
+            exhaust_hop_telemetry = false,
+            exhaust_hop_position = false,
+            router_preserve_hops = false
+        },
+
+        tak = {
+            team = "Unspecifed_Color",
+            role = "Unspecifed"
+        }
+    },
+
+    channels = {
+        {
+            index = 0,
+            role = "PRIMARY",
+            settings = {
+                channel_num = 0, -- deprecated; prefer configs.lora.channel_num
+                psk = "AQ==",
+                name = "LongFast",
+                id = 0,
+                uplink_enabled = false,
+                downlink_enabled = false,
+                module_settings = {
+                    position_precision = 32,
+                    is_muted = false
+                }
+            }
+        },
+        {
+            index = 1,
+            role = "SECONDARY",
+            settings = {
+                psk = "AQ==",
+                name = "Secondary",
+                id = 0,
+                uplink_enabled = false,
+                downlink_enabled = false,
+                module_settings = {
+                    position_precision = 32,
+                    is_muted = false
+                }
+            }
+        }
+    }
+}
+
+mesh.admin.load_config(target)
+
+function on_admin(event)
+    if event.action == "load_config" and event.ok then
+        mesh.admin.save_config(target, changes, { confirm = true })
+    end
+end
+```
