@@ -495,6 +495,8 @@ end
 
 Config, module config и channel patches используют protobuf-имена полей в `snake_case`. Enum-значения передаются строками, например `"PRIMARY"` или `"CLIENT"`. Repeated-поля передаются Lua-списками. Bytes принимаются как hex strings, `hex:...`, `base64:...` или Base64 strings. По умолчанию patch сливается с секцией, загруженной через `load_config` или `request_config`; если секция не была загружена, `save_config` завершается ошибкой. Используйте `{ replace = true, confirm = true }` только если намеренно отправляете replacement из default-значений.
 
+Полный список читаемых и сохраняемых полей конфигурации: [lua-admin-config-reference.ru.md](lua-admin-config-reference.ru.md).
+
 Поля `on_admin(event)`:
 
 | Поле | Тип | Назначение / возвращаемое значение |

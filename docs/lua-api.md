@@ -495,6 +495,8 @@ end
 
 Config, module config and channel patches use protobuf `snake_case` field names. Enum values are strings such as `"PRIMARY"` or `"CLIENT"`. Repeated fields are Lua lists. Bytes are accepted as hex strings, `hex:...`, `base64:...`, or Base64 strings. By default patches are merged with the section loaded by `load_config` or `request_config`; if a section was not loaded, `save_config` fails. Pass `{ replace = true, confirm = true }` only when intentionally sending a replacement built from defaults.
 
+Full list of readable and writable config fields: [lua-admin-config-reference.md](lua-admin-config-reference.md).
+
 `on_admin(event)` fields:
 
 | Field | Type | Purpose / returned value |
