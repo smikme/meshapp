@@ -15,7 +15,8 @@ import org.luaj.vm2.lib.ZeroArgFunction;
  * Creates the {@code mesh} namespace and attaches the available extension
  * modules:
  * {@code mesh.chat}, {@code mesh.kv}, {@code mesh.curl}, {@code mesh.ui},
- * {@code mesh.canvas}, {@code mesh.traceroute}, {@code mesh.nodeinfo}, plus the
+ * {@code mesh.canvas}, {@code mesh.traceroute}, {@code mesh.nodeinfo},
+ * {@code mesh.admin}, plus the
  * core functions {@code mesh.log}, {@code mesh.now}, {@code mesh.owner}, and
  * {@code mesh.sleep}.
  *
@@ -91,6 +92,7 @@ public final class LuaSandboxApi {
         mesh.set("canvas", new LuaCanvasApi(context).create());
         mesh.set("traceroute", new LuaTracerouteApi(context).create());
         mesh.set("nodeinfo", new LuaNodeInfoApi(context).create());
+        mesh.set("admin", new LuaRemoteAdminApi(context).create());
         mesh.set("command", new ZeroArgFunction() {
             @Override
             public LuaValue call() {

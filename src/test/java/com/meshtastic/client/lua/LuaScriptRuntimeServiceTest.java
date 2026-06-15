@@ -9,7 +9,11 @@ import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.protocol.ProtocolHandler;
 import com.meshtastic.client.service.MessageDbService;
 import com.meshtastic.client.service.MessageListenerService;
+import com.google.protobuf.ByteString;
+import org.meshtastic.proto.AdminProtos;
+import org.meshtastic.proto.ConfigProtos;
 import org.meshtastic.proto.MeshProtos;
+import org.meshtastic.proto.Portnums;
 import org.meshtastic.proto.TelemetryProtos;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -682,6 +686,192 @@ class LuaScriptRuntimeServiceTest {
     }
 
     @Test
+    void remoteAdminRequestConfigDeliversSnapshotToLuaCallback() throws Exception {
+        LuaScript automation = scriptService.createScript(
+                "automation-remote-admin-request",
+                """
+                local target = { node_num = 572662306, node_id = '!22222222', long_name = 'Remote' }
+
+                function on_command(command)
+                    mesh.admin.request_config(target, 'POWER_CONFIG', { name = 'power_request' })
+                end
+
+                function on_admin(event)
+                    mesh.kv.set('admin_type', event.type)
+                    mesh.kv.set('admin_source', event.source)
+                    mesh.kv.set('admin_name', event.name)
+                    mesh.kv.set('admin_action', event.action)
+                    mesh.kv.set('admin_status', event.status)
+                    mesh.kv.set('admin_ok', tostring(event.ok))
+                    mesh.kv.set('admin_target', tostring(event.target_node_num))
+                    mesh.kv.set('power_ls', tostring(event.snapshot.configs.power.ls_secs or ''))
+                    mesh.kv.set('query_state', event.snapshot.query_statuses[1].state)
+                end
+                """,
+                true,
+                "",
+                LuaScript.BotType.AUTOMATION_BOT,
+                "@adminbot");
+        DeviceState state = new DeviceState();
+        state.setMyNodeNum(0x11111111);
+        FakeTransportConnection transport = new FakeTransportConnection();
+        ProtocolHandler handler = new ProtocolHandler(transport);
+        AtomicBoolean closed = new AtomicBoolean(false);
+        LuaRuntimeSession session = new LuaRuntimeSession(
+                automation,
+                new LuaScriptRuntimeService.RuntimeTarget("test", state, handler, null, "!11111111"),
+                scriptService,
+                Set.of(),
+                false,
+                new LuaAutomationCommand("channel", "0", "@adminbot", "@adminbot", "", List.of(), "admin-command"),
+                events::add,
+                request -> fail("Node picker must not be requested"),
+                () -> closed.set(true));
+
+        try {
+            session.start();
+            MeshProtos.ToRadio sent = transport.awaitToRadio();
+            AdminProtos.AdminMessage request =
+                    AdminProtos.AdminMessage.parseFrom(sent.getPacket().getDecoded().getPayload());
+            assertTrue(request.hasGetConfigRequest());
+            assertEquals(AdminProtos.AdminMessage.ConfigType.POWER_CONFIG, request.getGetConfigRequest());
+            assertEquals(0x22222222, sent.getPacket().getTo());
+            assertTrue(sent.getPacket().getPkiEncrypted());
+
+            assertTrue(state.completePendingPacketAck(sent.getPacket().getId(), MeshProtos.Routing.Error.NONE));
+            transport.emitFromRadio(MeshProtos.FromRadio.newBuilder()
+                    .setPacket(remoteAdminResponse(
+                            0x22222222,
+                            0x11111111,
+                            sent.getPacket().getId(),
+                            AdminProtos.AdminMessage.newBuilder()
+                                    .setSessionPasskey(ByteString.copyFromUtf8("remote-passkey"))
+                                    .setGetConfigResponse(ConfigProtos.Config.newBuilder()
+                                            .setPower(ConfigProtos.Config.PowerConfig.newBuilder()
+                                                    .setLsSecs(300)))
+                                    .build()))
+                    .build());
+
+            awaitCondition(closed::get, "Remote admin request automation did not finish");
+
+            assertEquals("admin_result", scriptService.getKv(automation.getId(), "admin_type"));
+            assertEquals("mesh.admin.request_config", scriptService.getKv(automation.getId(), "admin_source"));
+            assertEquals("power_request", scriptService.getKv(automation.getId(), "admin_name"));
+            assertEquals("request_config", scriptService.getKv(automation.getId(), "admin_action"));
+            assertEquals("ok", scriptService.getKv(automation.getId(), "admin_status"));
+            assertEquals("true", scriptService.getKv(automation.getId(), "admin_ok"));
+            assertEquals("572662306", scriptService.getKv(automation.getId(), "admin_target"));
+            assertEquals("300", scriptService.getKv(automation.getId(), "power_ls"));
+            assertEquals("received", scriptService.getKv(automation.getId(), "query_state"));
+            assertFalse(events.stream().anyMatch(event -> event.type() == LuaScriptEvent.Type.ERROR));
+        } finally {
+            session.stop();
+            handler.shutdown();
+            state.shutdown();
+        }
+    }
+
+    @Test
+    void remoteAdminSaveConfigMergesLoadedSectionBeforeSending() throws Exception {
+        LuaScript automation = scriptService.createScript(
+                "automation-remote-admin-save",
+                """
+                local target = { node_num = 572662306, node_id = '!22222222', long_name = 'Remote' }
+
+                function on_command(command)
+                    mesh.admin.request_config(target, 'POWER_CONFIG')
+                end
+
+                function on_admin(event)
+                    mesh.kv.set('last_action', event.action or '')
+                    mesh.kv.set('last_status', event.status or '')
+                    if event.action == 'request_config' then
+                        mesh.admin.save_config(target, {
+                            configs = {
+                                power = {
+                                    ls_secs = 600
+                                }
+                            }
+                        }, { confirm = true })
+                    elseif event.action == 'save_config' then
+                        mesh.kv.set('save_status', event.status)
+                        mesh.kv.set('save_ok', tostring(event.ok))
+                    end
+                end
+                """,
+                true,
+                "",
+                LuaScript.BotType.AUTOMATION_BOT,
+                "@adminbot");
+        DeviceState state = new DeviceState();
+        state.setMyNodeNum(0x11111111);
+        FakeTransportConnection transport = new FakeTransportConnection();
+        ProtocolHandler handler = new ProtocolHandler(transport);
+        AtomicBoolean closed = new AtomicBoolean(false);
+        LuaRuntimeSession session = new LuaRuntimeSession(
+                automation,
+                new LuaScriptRuntimeService.RuntimeTarget("test", state, handler, null, "!11111111"),
+                scriptService,
+                Set.of(),
+                false,
+                new LuaAutomationCommand("channel", "0", "@adminbot", "@adminbot", "", List.of(), "admin-command"),
+                events::add,
+                request -> fail("Node picker must not be requested"),
+                () -> closed.set(true));
+
+        try {
+            session.start();
+            MeshProtos.ToRadio requestConfig = transport.awaitToRadio();
+            assertTrue(state.completePendingPacketAck(requestConfig.getPacket().getId(), MeshProtos.Routing.Error.NONE));
+            transport.emitFromRadio(MeshProtos.FromRadio.newBuilder()
+                    .setPacket(remoteAdminResponse(
+                            0x22222222,
+                            0x11111111,
+                            requestConfig.getPacket().getId(),
+                            AdminProtos.AdminMessage.newBuilder()
+                                    .setSessionPasskey(ByteString.copyFromUtf8("remote-passkey"))
+                                    .setGetConfigResponse(ConfigProtos.Config.newBuilder()
+                                            .setPower(ConfigProtos.Config.PowerConfig.newBuilder()
+                                                    .setLsSecs(300)
+                                                    .setMinWakeSecs(30)))
+                                    .build()))
+                    .build());
+
+            MeshProtos.ToRadio begin = transport.awaitToRadio();
+            assertTrue(AdminProtos.AdminMessage.parseFrom(begin.getPacket().getDecoded().getPayload())
+                    .hasBeginEditSettings());
+            assertTrue(state.completePendingPacketAck(begin.getPacket().getId(), MeshProtos.Routing.Error.NONE));
+
+            MeshProtos.ToRadio setConfig = transport.awaitToRadio();
+            AdminProtos.AdminMessage setConfigAdmin =
+                    AdminProtos.AdminMessage.parseFrom(setConfig.getPacket().getDecoded().getPayload());
+            assertTrue(setConfigAdmin.hasSetConfig());
+            assertEquals(600, setConfigAdmin.getSetConfig().getPower().getLsSecs());
+            assertEquals(30, setConfigAdmin.getSetConfig().getPower().getMinWakeSecs());
+            assertEquals("remote-passkey", setConfigAdmin.getSessionPasskey().toStringUtf8());
+            assertEquals(Portnums.PortNum.ADMIN_APP, setConfig.getPacket().getDecoded().getPortnum());
+            assertTrue(state.completePendingPacketAck(setConfig.getPacket().getId(), MeshProtos.Routing.Error.NONE));
+
+            MeshProtos.ToRadio commit = transport.awaitToRadio();
+            assertTrue(AdminProtos.AdminMessage.parseFrom(commit.getPacket().getDecoded().getPayload())
+                    .hasCommitEditSettings());
+            assertTrue(state.completePendingPacketAck(commit.getPacket().getId(), MeshProtos.Routing.Error.NONE));
+
+            awaitCondition(closed::get, "Remote admin save automation did not finish");
+
+            assertEquals("save_config", scriptService.getKv(automation.getId(), "last_action"));
+            assertEquals("ok", scriptService.getKv(automation.getId(), "last_status"));
+            assertEquals("ok", scriptService.getKv(automation.getId(), "save_status"));
+            assertEquals("true", scriptService.getKv(automation.getId(), "save_ok"));
+            assertFalse(events.stream().anyMatch(event -> event.type() == LuaScriptEvent.Type.ERROR));
+        } finally {
+            session.stop();
+            handler.shutdown();
+            state.shutdown();
+        }
+    }
+
+    @Test
     void scriptSettingsArePersisted() {
         LuaScript script = scriptService.createScript("settings", "mesh.log('ok')");
         String description = """
@@ -881,6 +1071,29 @@ class LuaScriptRuntimeServiceTest {
         assertEquals(guid, UUID.fromString(guid).toString());
     }
 
+    private static MeshProtos.MeshPacket remoteAdminResponse(int from,
+                                                             int to,
+                                                             int requestId,
+                                                             AdminProtos.AdminMessage adminMessage) {
+        MeshProtos.Data data = MeshProtos.Data.newBuilder()
+                .setPortnum(Portnums.PortNum.ADMIN_APP)
+                .setPayload(adminMessage.toByteString())
+                .setRequestId(requestId)
+                .build();
+        return MeshProtos.MeshPacket.newBuilder()
+                .setFrom(from)
+                .setTo(to)
+                .setDecoded(data)
+                .build();
+    }
+
+    private static MeshProtos.ToRadio parseToRadio(byte[] frame) throws Exception {
+        int payloadLength = ((frame[2] & 0xFF) << 8) | (frame[3] & 0xFF);
+        byte[] payload = new byte[payloadLength];
+        System.arraycopy(frame, 4, payload, 0, payloadLength);
+        return MeshProtos.ToRadio.parseFrom(payload);
+    }
+
     private static final class FakeTransportConnection implements TransportConnection {
         private final BlockingQueue<byte[]> writes = new LinkedBlockingQueue<>();
         private volatile Consumer<byte[]> dataListener;
@@ -925,6 +1138,22 @@ class LuaScriptRuntimeServiceTest {
 
         int writeCount() {
             return writes.size();
+        }
+
+        MeshProtos.ToRadio awaitToRadio() throws Exception {
+            byte[] frame = writes.poll(1, TimeUnit.SECONDS);
+            if (frame == null) {
+                throw new AssertionError("Timed out waiting for outbound frame");
+            }
+            return parseToRadio(frame);
+        }
+
+        void emitFromRadio(MeshProtos.FromRadio fromRadio) {
+            Consumer<byte[]> listener = dataListener;
+            if (listener == null) {
+                throw new AssertionError("No data listener registered");
+            }
+            listener.accept(fromRadio.toByteArray());
         }
     }
 }

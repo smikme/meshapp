@@ -4,12 +4,15 @@ import com.meshtastic.client.components.LuaCanvasWindow;
 import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.lua.api.LuaSandboxApi;
 import com.meshtastic.client.lua.api.LuaSandboxContext;
+import com.meshtastic.client.lua.api.LuaProtobufMapper;
 import com.meshtastic.client.lua.api.LuaValueMapper;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.service.MessageDbService;
 import com.meshtastic.client.service.MessageService;
+import com.meshtastic.client.service.RemoteAdminService;
+import com.meshtastic.client.service.RemoteAdminSession;
 import org.luaj.vm2.Globals;
 import org.luaj.vm2.LuaError;
 import org.luaj.vm2.LuaTable;
@@ -18,9 +21,14 @@ import org.luaj.vm2.Varargs;
 import org.luaj.vm2.lib.DebugLib;
 import org.luaj.vm2.lib.TwoArgFunction;
 import org.meshtastic.proto.ChannelProtos;
+import org.meshtastic.proto.ConfigProtos;
+import org.meshtastic.proto.ModuleConfigProtos;
 import org.meshtastic.proto.MeshProtos;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -50,7 +58,8 @@ import java.util.function.IntConsumer;
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
-final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNodeInfoBridge, LuaCanvasBridge {
+final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNodeInfoBridge,
+        LuaRemoteAdminBridge, LuaCanvasBridge {
 
     private static final long RUN_TIMEOUT_MS = 3_000;
     private static final long CALLBACK_TIMEOUT_MS = 1_500;
@@ -71,6 +80,7 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
     private final LuaScriptRuntimeService.RuntimeTarget target;
     private final LuaScriptService scriptService;
     private final MessageDbService messageDbService = MessageDbService.getInstance();
+    private final LuaProtobufMapper protobufMapper = new LuaProtobufMapper();
     private final Consumer<LuaScriptEvent> eventSink;
     private final Consumer<LuaUiNodePickRequest> uiNodePickSink;
     private final Runnable onClosed;
@@ -85,10 +95,13 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
     private final Set<String> pendingUiRequests = java.util.concurrent.ConcurrentHashMap.newKeySet();
     private final Map<String, PendingTraceroute> pendingTraceroutes = new java.util.concurrent.ConcurrentHashMap<>();
     private final Map<String, PendingNodeInfo> pendingNodeInfos = new java.util.concurrent.ConcurrentHashMap<>();
+    private final Map<String, PendingRemoteAdmin> pendingRemoteAdmins = new java.util.concurrent.ConcurrentHashMap<>();
+    private final Map<Integer, RemoteAdminService> remoteAdminServices = new java.util.concurrent.ConcurrentHashMap<>();
     private final AtomicBoolean canvasOpen = new AtomicBoolean(false);
     private final AtomicLong uiRequestCounter = new AtomicLong();
     private final AtomicLong tracerouteRequestCounter = new AtomicLong();
     private final AtomicLong nodeInfoRequestCounter = new AtomicLong();
+    private final AtomicLong remoteAdminRequestCounter = new AtomicLong();
     private final Runnable deviceMessageListener = this::onDeviceMessagesChanged;
 
     private SandboxDebugLib debugLib;
@@ -287,6 +300,236 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
     }
 
     @Override
+    public boolean isRemoteAdminAvailable() {
+        return target.state() != null && target.handler() != null;
+    }
+
+    @Override
+    public String nextRemoteAdminRequestId() {
+        return script.getId() + ":admin:" + remoteAdminRequestCounter.incrementAndGet();
+    }
+
+    @Override
+    public void requestRemoteAdmin(LuaRemoteAdminRequest request) {
+        if (request == null || target.state() == null || target.handler() == null) {
+            throw new LuaError("Remote admin is not available");
+        }
+        if (request.targetNodeNum() == 0) {
+            throw new LuaError("target node_num is required");
+        }
+        PendingRemoteAdmin pending = new PendingRemoteAdmin(request);
+        pendingRemoteAdmins.put(request.requestId(), pending);
+        scriptService.updateRunState(script.getId(), "RUNNING", null);
+        CompletableFuture<RemoteAdminSession> future;
+        try {
+            future = startRemoteAdminOperation(request);
+        } catch (Throwable error) {
+            completeRemoteAdmin(request.requestId(), "error", error, remoteAdminSession(request.targetNodeNum()));
+            return;
+        }
+        future.whenComplete((session, error) -> completeRemoteAdmin(
+                request.requestId(),
+                error == null ? "ok" : statusForError(error),
+                error,
+                session != null ? session : remoteAdminSession(request.targetNodeNum())));
+    }
+
+    private CompletableFuture<RemoteAdminSession> startRemoteAdminOperation(LuaRemoteAdminRequest request) {
+        RemoteAdminService service = remoteAdminService(request);
+        return switch (request.action()) {
+            case LOAD_CONFIG -> service.loadSnapshot(progress -> callRemoteAdminProgress(request, progress));
+            case REQUEST_CONFIG -> service.requestConfigSection(request.configType()).thenApply(ignored -> service.session());
+            case REQUEST_MODULE_CONFIG -> service.requestModuleConfigSection(request.moduleConfigType())
+                    .thenApply(ignored -> service.session());
+            case SAVE_CONFIG -> saveRemoteConfig(service, request).thenApply(ignored -> service.session());
+            case REFRESH_STATUS -> service.refreshConnectionStatus().thenApply(ignored -> service.session());
+            case REBOOT -> service.reboot(request.delaySeconds()).thenApply(ignored -> service.session());
+            case SHUTDOWN -> service.shutdown(request.delaySeconds()).thenApply(ignored -> service.session());
+            case SYNC_TIME -> service.syncTime(request.epochSeconds()).thenApply(ignored -> service.session());
+            case BACKUP -> service.backupPreferences(request.backupLocation()).thenApply(ignored -> service.session());
+            case RESTORE -> service.restorePreferences(request.backupLocation()).thenApply(ignored -> service.session());
+            case REMOVE_BACKUP -> service.removeBackupPreferences(request.backupLocation()).thenApply(ignored -> service.session());
+            case RESET_NODEDB -> service.resetNodeDb(request.preserveFavorites()).thenApply(ignored -> service.session());
+            case FACTORY_RESET_CONFIG -> service.factoryResetConfig().thenApply(ignored -> service.session());
+            case FACTORY_RESET_DEVICE -> service.factoryResetDevice().thenApply(ignored -> service.session());
+            case ENTER_DFU_MODE -> service.enterDfuMode().thenApply(ignored -> service.session());
+            case SET_OWNER -> service.saveOwner(request.longName(), request.shortName(), request.licensed())
+                    .thenApply(ignored -> service.session());
+            case SET_FIXED_POSITION -> service.setFixedPosition(
+                    request.latitude(),
+                    request.longitude(),
+                    request.altitude()).thenApply(ignored -> service.session());
+            case REMOVE_FIXED_POSITION -> service.removeFixedPosition().thenApply(ignored -> service.session());
+            case SET_RINGTONE -> service.setRingtone(request.ringtone()).thenApply(ignored -> service.session());
+            case SET_CANNED_MESSAGES -> service.setCannedMessages(request.cannedMessages())
+                    .thenApply(ignored -> service.session());
+        };
+    }
+
+    private CompletableFuture<Void> saveRemoteConfig(RemoteAdminService service, LuaRemoteAdminRequest request) {
+        List<ConfigProtos.Config> configs = buildConfigs(service.session(), request);
+        List<ModuleConfigProtos.ModuleConfig> moduleConfigs = buildModuleConfigs(service.session(), request);
+        List<ChannelProtos.Channel> channels = buildChannels(service.session(), request);
+
+        CompletableFuture<Void> future = CompletableFuture.completedFuture(null);
+        if (request.ownerSet()) {
+            future = future.thenCompose(ignored -> service.saveOwner(
+                    request.longName(),
+                    request.shortName(),
+                    request.licensed()));
+        }
+        if (request.removePosition()) {
+            future = future.thenCompose(ignored -> service.removeFixedPosition());
+        } else if (request.positionSet()) {
+            future = future.thenCompose(ignored -> service.setFixedPosition(
+                    request.latitude(),
+                    request.longitude(),
+                    request.altitude()));
+        }
+        if (request.ringtoneSet()) {
+            future = future.thenCompose(ignored -> service.setRingtone(request.ringtone()));
+        }
+        if (request.cannedMessagesSet()) {
+            future = future.thenCompose(ignored -> service.setCannedMessages(request.cannedMessages()));
+        }
+        if (!configs.isEmpty() || !moduleConfigs.isEmpty() || !channels.isEmpty()) {
+            future = future.thenCompose(ignored -> service.saveConfigChanges(configs, moduleConfigs, channels));
+        }
+        return future;
+    }
+
+    private List<ConfigProtos.Config> buildConfigs(RemoteAdminSession session, LuaRemoteAdminRequest request) {
+        if (request.configs() == null || request.configs().isEmpty()) {
+            return List.of();
+        }
+        List<ConfigProtos.Config> configs = new ArrayList<>();
+        for (LuaRemoteAdminRequest.MessagePatch patch : request.configs()) {
+            configs.add(protobufMapper.buildConfig(
+                    patch.section(),
+                    patch.values(),
+                    findConfig(session, patch.section()),
+                    request.replace()));
+        }
+        return configs;
+    }
+
+    private List<ModuleConfigProtos.ModuleConfig> buildModuleConfigs(RemoteAdminSession session,
+                                                                     LuaRemoteAdminRequest request) {
+        if (request.moduleConfigs() == null || request.moduleConfigs().isEmpty()) {
+            return List.of();
+        }
+        List<ModuleConfigProtos.ModuleConfig> moduleConfigs = new ArrayList<>();
+        for (LuaRemoteAdminRequest.MessagePatch patch : request.moduleConfigs()) {
+            moduleConfigs.add(protobufMapper.buildModuleConfig(
+                    patch.section(),
+                    patch.values(),
+                    findModuleConfig(session, patch.section()),
+                    request.replace()));
+        }
+        return moduleConfigs;
+    }
+
+    private List<ChannelProtos.Channel> buildChannels(RemoteAdminSession session, LuaRemoteAdminRequest request) {
+        if (request.channels() == null || request.channels().isEmpty()) {
+            return List.of();
+        }
+        List<ChannelProtos.Channel> channels = new ArrayList<>();
+        for (LuaRemoteAdminRequest.MessagePatch patch : request.channels()) {
+            Object index = patch.values().get("index");
+            ChannelProtos.Channel existing = index != null
+                    ? session.remoteState().getChannelStore().getChannelByIndex(intValue(index))
+                    : null;
+            channels.add(protobufMapper.buildChannel(patch.values(), existing, request.replace()));
+        }
+        return channels;
+    }
+
+    private ConfigProtos.Config findConfig(RemoteAdminSession session, String section) {
+        for (ConfigProtos.Config config : snapshot(session.remoteState().getConfigs())) {
+            LuaTable table = protobufMapper.configToTable(config);
+            if (matchesSection(table.get("section").tojstring(), section)) {
+                return config;
+            }
+        }
+        return null;
+    }
+
+    private ModuleConfigProtos.ModuleConfig findModuleConfig(RemoteAdminSession session, String section) {
+        for (ModuleConfigProtos.ModuleConfig moduleConfig : snapshot(session.remoteState().getModuleConfigs())) {
+            LuaTable table = protobufMapper.moduleConfigToTable(moduleConfig);
+            if (matchesSection(table.get("section").tojstring(), section)) {
+                return moduleConfig;
+            }
+        }
+        return null;
+    }
+
+    private static <T> List<T> snapshot(List<T> values) {
+        synchronized (values) {
+            return new ArrayList<>(values);
+        }
+    }
+
+    private static boolean matchesSection(String actual, String requested) {
+        if (actual == null || requested == null) {
+            return false;
+        }
+        String a = actual.toLowerCase(Locale.ROOT).replace("_", "");
+        String r = requested.toLowerCase(Locale.ROOT)
+                .replace("_config", "")
+                .replace("config", "")
+                .replace("_", "");
+        return a.equals(r);
+    }
+
+    private RemoteAdminService remoteAdminService(LuaRemoteAdminRequest request) {
+        return remoteAdminServices.computeIfAbsent(request.targetNodeNum(), ignored -> {
+            NodeData node = target.state().getNodeDb().get(request.targetNodeNum());
+            if (node == null) {
+                node = new NodeData(request.targetNodeNum());
+                node.setNodeId(request.targetNodeId());
+                node.setLongName(request.targetName());
+            }
+            return new RemoteAdminService(target.handler(), target.state(), node);
+        });
+    }
+
+    private RemoteAdminSession remoteAdminSession(int nodeNum) {
+        RemoteAdminService service = remoteAdminServices.get(nodeNum);
+        return service != null ? service.session() : null;
+    }
+
+    private void callRemoteAdminProgress(LuaRemoteAdminRequest request, RemoteAdminService.QueryProgress progress) {
+        try {
+            executor.execute(() -> callAdminEvent(remoteAdminProgressToTable(request, progress), false));
+        } catch (RejectedExecutionException ignored) {
+            // Session is stopping.
+        }
+    }
+
+    private void completeRemoteAdmin(String requestId,
+                                     String status,
+                                     Throwable error,
+                                     RemoteAdminSession session) {
+        PendingRemoteAdmin pending = pendingRemoteAdmins.get(requestId);
+        if (pending == null || !pending.completed.compareAndSet(false, true)) {
+            return;
+        }
+        try {
+            executor.execute(() -> {
+                try {
+                    callAdminEvent(remoteAdminResultToTable(pending.request, status, rootMessage(error), session), true);
+                } finally {
+                    pendingRemoteAdmins.remove(requestId, pending);
+                    finishIfIdle();
+                }
+            });
+        } catch (RejectedExecutionException ignored) {
+            // Session is stopping.
+        }
+    }
+
+    @Override
     public void openCanvas(LuaCanvasOptions options) {
         try {
             LuaCanvasWindow.showWindow(script.getId(), script.getName(), script.getIcon(), options, this::handleCanvasEvent);
@@ -346,6 +589,7 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
         unregisterListener();
         cleanupTraceroutes();
         cleanupNodeInfos();
+        cleanupRemoteAdmins();
         cleanupCanvas();
         Future<?> future = activeFuture;
         if (future != null) {
@@ -664,6 +908,140 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
         return table;
     }
 
+    private LuaValue remoteAdminProgressToTable(LuaRemoteAdminRequest request,
+                                                RemoteAdminService.QueryProgress progress) {
+        LuaTable table = remoteAdminBaseTable(request, "admin_progress");
+        table.set("status", LuaValue.valueOf(progress.state().name().toLowerCase(Locale.ROOT)));
+        table.set("ok", LuaValue.FALSE);
+        table.set("timeout", LuaValue.FALSE);
+        table.set("progress_key", LuaValue.valueOf(progress.key()));
+        table.set("completed", LuaValue.valueOf(progress.completed()));
+        table.set("total", LuaValue.valueOf(progress.total()));
+        return table;
+    }
+
+    private LuaValue remoteAdminResultToTable(LuaRemoteAdminRequest request,
+                                              String status,
+                                              String error,
+                                              RemoteAdminSession session) {
+        LuaTable table = remoteAdminBaseTable(request, "admin_result");
+        table.set("status", LuaValue.valueOf(status != null ? status : ""));
+        table.set("ok", LuaValue.valueOf("ok".equals(status)));
+        table.set("timeout", LuaValue.valueOf("timeout".equals(status)));
+        table.set("error", error != null ? LuaValue.valueOf(error) : LuaValue.NIL);
+        table.set("snapshot", session != null ? remoteAdminSnapshotToTable(session) : LuaValue.NIL);
+        return table;
+    }
+
+    private LuaTable remoteAdminBaseTable(LuaRemoteAdminRequest request, String type) {
+        LuaTable table = new LuaTable();
+        table.set("type", LuaValue.valueOf(type));
+        table.set("source", LuaValue.valueOf(request.source() != null ? request.source() : "mesh.admin"));
+        table.set("name", LuaValue.valueOf(request.name() != null ? request.name() : ""));
+        table.set("request_id", LuaValue.valueOf(request.requestId()));
+        table.set("action", LuaValue.valueOf(request.action().name().toLowerCase(Locale.ROOT)));
+        table.set("target_node_num", LuaValueMapper.uint32ToLuaValue(request.targetNodeNum()));
+        table.set("target_node_id", LuaValue.valueOf(request.targetNodeId() != null
+                ? request.targetNodeId()
+                : nodeIdFromNum(request.targetNodeNum())));
+        table.set("target_name", LuaValue.valueOf(request.targetName() != null ? request.targetName() : ""));
+        return table;
+    }
+
+    private LuaTable remoteAdminSnapshotToTable(RemoteAdminSession session) {
+        LuaTable table = new LuaTable();
+        DeviceState remoteState = session.remoteState();
+        table.set("target_node_num", LuaValueMapper.uint32ToLuaValue(session.targetNodeNum()));
+        table.set("target_node_id", LuaValue.valueOf(nodeIdFromNum(session.targetNodeNum())));
+        table.set("node", sandboxApi.mapper().nodeToTable(session.targetNode()));
+        table.set("owner", remoteState.getOwnerInfo() != null
+                ? protobufMapper.messageToTable(remoteState.getOwnerInfo())
+                : LuaValue.NIL);
+        table.set("device_metadata", remoteState.getDeviceMetadata() != null
+                ? protobufMapper.messageToTable(remoteState.getDeviceMetadata())
+                : LuaValue.NIL);
+        table.set("ringtone", LuaValue.valueOf(remoteState.getRingtone()));
+        table.set("canned_messages", LuaValue.valueOf(session.getCannedMessages()));
+        table.set("canned_messages_loaded", LuaValue.valueOf(session.isCannedMessagesLoaded()));
+        table.set("connection_status", session.getConnectionStatus() != null
+                ? protobufMapper.messageToTable(session.getConnectionStatus())
+                : LuaValue.NIL);
+        table.set("configs", configsToTable(snapshot(remoteState.getConfigs())));
+        table.set("module_configs", moduleConfigsToTable(snapshot(remoteState.getModuleConfigs())));
+        table.set("channels", channelsToTable(snapshot(remoteState.getChannels())));
+        table.set("query_statuses", queryStatusesToTable(session));
+        RemoteAdminSession.QuerySummary summary = session.querySummary();
+        LuaTable summaryTable = new LuaTable();
+        summaryTable.set("total", LuaValue.valueOf(summary.total()));
+        summaryTable.set("received", LuaValue.valueOf(summary.received()));
+        summaryTable.set("failed", LuaValue.valueOf(summary.failed()));
+        table.set("query_summary", summaryTable);
+        return table;
+    }
+
+    private LuaTable configsToTable(List<ConfigProtos.Config> configs) {
+        LuaTable table = new LuaTable();
+        for (ConfigProtos.Config config : configs) {
+            LuaTable item = protobufMapper.configToTable(config);
+            String section = item.get("section").tojstring();
+            LuaValue values = item.get("values");
+            table.set(section, values);
+        }
+        return table;
+    }
+
+    private LuaTable moduleConfigsToTable(List<ModuleConfigProtos.ModuleConfig> moduleConfigs) {
+        LuaTable table = new LuaTable();
+        for (ModuleConfigProtos.ModuleConfig moduleConfig : moduleConfigs) {
+            LuaTable item = protobufMapper.moduleConfigToTable(moduleConfig);
+            String section = item.get("section").tojstring();
+            LuaValue values = item.get("values");
+            table.set(section, values);
+        }
+        return table;
+    }
+
+    private LuaTable channelsToTable(List<ChannelProtos.Channel> channels) {
+        LuaTable table = new LuaTable();
+        channels.sort(Comparator.comparingInt(ChannelProtos.Channel::getIndex));
+        for (int i = 0; i < channels.size(); i++) {
+            table.set(i + 1, protobufMapper.messageToTable(channels.get(i)));
+        }
+        return table;
+    }
+
+    private LuaTable queryStatusesToTable(RemoteAdminSession session) {
+        LuaTable table = new LuaTable();
+        List<RemoteAdminSession.QueryStatus> statuses = session.queryStatuses();
+        for (int i = 0; i < statuses.size(); i++) {
+            RemoteAdminSession.QueryStatus status = statuses.get(i);
+            LuaTable item = new LuaTable();
+            item.set("key", LuaValue.valueOf(status.key()));
+            item.set("state", LuaValue.valueOf(status.state().name().toLowerCase(Locale.ROOT)));
+            item.set("detail", status.detail() != null ? LuaValue.valueOf(status.detail()) : LuaValue.NIL);
+            table.set(i + 1, item);
+        }
+        return table;
+    }
+
+    private void callAdminEvent(LuaValue event, boolean terminal) {
+        if (!running.get() || globals == null) {
+            return;
+        }
+        LuaValue callback = globals.get("on_admin");
+        try {
+            if (callback.isfunction()) {
+                debugLib.begin(CALLBACK_TIMEOUT_MS);
+                callback.call(event);
+            } else if (terminal) {
+                emit(LuaScriptEvent.warning(script.getId(), "Remote admin result received, but on_admin(event) is missing"));
+            }
+        } catch (Throwable callbackError) {
+            fail(callbackError);
+            finishWithoutInterruptingExecutor();
+        }
+    }
+
     private LuaValue routeToTable(MeshProtos.RouteDiscovery route) {
         LuaTable table = new LuaTable();
         table.set("route", intListToTable(route.getRouteList()));
@@ -699,6 +1077,38 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
         return String.format(Locale.ROOT, "!%08x", nodeNum);
     }
 
+    private static int intValue(Object value) {
+        if (value instanceof Number number) {
+            return (int) ((long) number.doubleValue() & 0xffff_ffffL);
+        }
+        String text = value != null ? value.toString().trim() : "0";
+        if (text.startsWith("!")) {
+            return (int) Long.parseUnsignedLong(text.substring(1), 16);
+        }
+        return (int) (Long.parseUnsignedLong(text) & 0xffff_ffffL);
+    }
+
+    private static String statusForError(Throwable error) {
+        String message = rootMessage(error);
+        return message != null && message.toLowerCase(Locale.ROOT).contains("timed out")
+                ? "timeout"
+                : "error";
+    }
+
+    private static String rootMessage(Throwable throwable) {
+        if (throwable == null) {
+            return null;
+        }
+        Throwable current = throwable;
+        while (current instanceof CompletionException && current.getCause() != null) {
+            current = current.getCause();
+        }
+        while (current.getCause() != null) {
+            current = current.getCause();
+        }
+        return current.getMessage() != null ? current.getMessage() : current.getClass().getSimpleName();
+    }
+
     private LuaTable snrListToTable(List<Integer> values) {
         LuaTable table = new LuaTable();
         if (values != null) {
@@ -713,6 +1123,7 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
         return !pendingUiRequests.isEmpty()
                 || !pendingTraceroutes.isEmpty()
                 || !pendingNodeInfos.isEmpty()
+                || !pendingRemoteAdmins.isEmpty()
                 || canvasOpen.get();
     }
 
@@ -739,6 +1150,7 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
                     scriptService,
                     this::emitOutput,
                     command,
+                    this,
                     this,
                     this,
                     this,
@@ -1111,6 +1523,7 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
         unregisterListener();
         cleanupTraceroutes();
         cleanupNodeInfos();
+        cleanupRemoteAdmins();
         cleanupCanvas();
         running.set(false);
         executor.shutdown();
@@ -1147,6 +1560,18 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
             }
         });
         pendingNodeInfos.clear();
+    }
+
+    private void cleanupRemoteAdmins() {
+        pendingRemoteAdmins.clear();
+        remoteAdminServices.forEach((ignored, service) -> {
+            try {
+                service.close();
+            } catch (RuntimeException ignoredError) {
+                // Session is already stopping.
+            }
+        });
+        remoteAdminServices.clear();
     }
 
     private void cleanupCanvas() {
@@ -1201,6 +1626,15 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
         private volatile ScheduledFuture<?> timeoutFuture;
 
         private PendingNodeInfo(LuaNodeInfoRequest request) {
+            this.request = request;
+        }
+    }
+
+    private static final class PendingRemoteAdmin {
+        private final LuaRemoteAdminRequest request;
+        private final AtomicBoolean completed = new AtomicBoolean(false);
+
+        private PendingRemoteAdmin(LuaRemoteAdminRequest request) {
             this.request = request;
         }
     }

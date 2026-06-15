@@ -191,6 +191,7 @@ end
 | `on_node_selected(event)` | После выбора или отмены выбора ноды через `mesh.ui.pick_node(...)` |
 | `on_traceroute(event)` | После результата `mesh.traceroute.request(...)` |
 | `on_node_info(event)` | После результата `mesh.nodeinfo.request(...)` |
+| `on_admin(event)` | После progress/result событий remote administration из `mesh.admin.*` |
 | `on_canvas_event(event)` | После события плавающего Canvas-окна: мышь, клавиатура, resize, open/close |
 | `on_canvas_frame(event)` | По таймеру Canvas-окна, если задан `fps` или вызван `mesh.canvas.set_fps(...)` |
 
@@ -437,6 +438,84 @@ HTTP(S)-запросы выполняются встроенным Java HTTP-к�
 | `chat_type` | string | Контекст чата из исходных `options` |
 | `chat_key` | string | Ключ чата из исходных `options` |
 | `node` | `node` или `nil` | Таблица ноды; `nil`, если данных о ноде нет |
+
+## `mesh.admin`
+
+Remote admin доступен только для Meshtastic-подключений. Публичный ключ локального клиента должен быть добавлен в Admin Key целевой ноды. Все функции асинхронные: они возвращают `request_id`, а позже вызывают `on_admin(event)`.
+
+`target` может быть node ID строкой (`"!abcdef12"`), числовым `node_num` или таблицей ноды с полями `node_num`, `node_id`, `long_name`, `short_name`.
+
+| Функция | Возврат | Назначение |
+|---------|---------|------------|
+| `mesh.admin.load_config(target[, options])` | `request_id` | Загружает remote snapshot: owner, metadata, configs, module configs, channels, status |
+| `mesh.admin.request_config(target, type[, options])` | `request_id` | Загружает одну core config секцию, например `POWER_CONFIG` или `power` |
+| `mesh.admin.request_module_config(target, type[, options])` | `request_id` | Загружает одну module config секцию, например `MQTT_CONFIG` или `mqtt` |
+| `mesh.admin.save_config(target, changes, options)` | `request_id` | Сохраняет owner/position/text/config/channel изменения; требует `options.confirm = true` |
+| `mesh.admin.refresh_status(target[, options])` | `request_id` | Перезагружает статус соединений устройства |
+| `mesh.admin.reboot(target[, delay_seconds[, options]])` | `request_id` | Запрашивает отложенную перезагрузку; `0` отменяет pending reboot |
+| `mesh.admin.shutdown(target[, delay_seconds[, options]])` | `request_id` | Запрашивает отложенное выключение; `0` отменяет pending shutdown |
+| `mesh.admin.sync_time(target[, epoch_seconds[, options]])` | `request_id` | Устанавливает время удалённой ноды; по умолчанию текущее время приложения |
+| `mesh.admin.backup(target[, location[, options]])` | `request_id` | Делает backup preferences в `FLASH` или `SD` |
+| `mesh.admin.restore(target[, location], options)` | `request_id` | Восстанавливает preferences; требует `options.confirm = true` |
+| `mesh.admin.remove_backup(target[, location], options)` | `request_id` | Удаляет сохранённый backup; требует `options.confirm = true` |
+| `mesh.admin.reset_nodedb(target[, preserve_favorites], options)` | `request_id` | Сбрасывает remote NodeDB; требует `options.confirm = true` |
+| `mesh.admin.factory_reset_config(target, options)` | `request_id` | Делает factory reset config; требует `options.confirm = true` |
+| `mesh.admin.factory_reset_device(target, options)` | `request_id` | Делает factory reset устройства; требует `options.confirm = true` |
+| `mesh.admin.enter_dfu_mode(target, options)` | `request_id` | Запрашивает DFU mode; требует `options.confirm = true` |
+| `mesh.admin.set_owner(target, owner[, options])` | `request_id` | Обновляет `{ long_name, short_name, licensed }` |
+| `mesh.admin.set_fixed_position(target, position[, options])` | `request_id` | Устанавливает `{ latitude, longitude, altitude }` как manual position |
+| `mesh.admin.remove_fixed_position(target[, options])` | `request_id` | Очищает manual fixed position |
+| `mesh.admin.set_ringtone(target, text[, options])` | `request_id` | Обновляет RTTTL ringtone text |
+| `mesh.admin.set_canned_messages(target, text[, options])` | `request_id` | Обновляет текст canned message module |
+
+Пример patch для `save_config`:
+
+```lua
+local target = "!abcdef12"
+
+mesh.admin.request_config(target, "POWER_CONFIG")
+
+function on_admin(event)
+    if event.action == "request_config" and event.ok then
+        mesh.admin.save_config(target, {
+            owner = { long_name = "Remote Node", short_name = "RMT", licensed = true },
+            configs = {
+                power = { ls_secs = 300, min_wake_secs = 10 }
+            },
+            module_configs = {
+                mqtt = { enabled = true, address = "mqtt.example.com" }
+            },
+            channels = {
+                { index = 0, role = "PRIMARY", settings = { name = "LongFast" } }
+            }
+        }, { confirm = true })
+    end
+end
+```
+
+Config, module config и channel patches используют protobuf-имена полей в `snake_case`. Enum-значения передаются строками, например `"PRIMARY"` или `"CLIENT"`. Repeated-поля передаются Lua-списками. Bytes принимаются как hex strings, `hex:...`, `base64:...` или Base64 strings. По умолчанию patch сливается с секцией, загруженной через `load_config` или `request_config`; если секция не была загружена, `save_config` завершается ошибкой. Используйте `{ replace = true, confirm = true }` только если намеренно отправляете replacement из default-значений.
+
+Поля `on_admin(event)`:
+
+| Поле | Тип | Назначение / возвращаемое значение |
+|------|-----|------------------------------------|
+| `type` | string | `admin_progress` или `admin_result` |
+| `source` | string | API-источник, например `mesh.admin.save_config` |
+| `name` | string | Имя исходного запроса из `options.name` |
+| `request_id` | string | ID запроса, который вернул `mesh.admin.*` |
+| `action` | string | Имя действия, например `load_config`, `save_config`, `reboot` |
+| `status` | string | `ok`, `timeout`, `error` или progress state `sent`/`received`/`failed` |
+| `ok` | boolean | `true` для успешного terminal result |
+| `timeout` | boolean | `true`, если terminal result истёк по timeout |
+| `error` | string или `nil` | Детали ошибки |
+| `target_node_num` | number | Числовой ID целевой ноды (`uint32`) |
+| `target_node_id` | string | Node ID целевой ноды в виде `!abcdef12` |
+| `snapshot` | table или `nil` | Remote snapshot для terminal results |
+| `progress_key` | string или `nil` | Ключ snapshot-блока для progress events |
+| `completed` | number или `nil` | Количество завершённых snapshot-блоков для progress events |
+| `total` | number или `nil` | Общее количество snapshot-блоков для progress events |
+
+`event.snapshot` включает `node`, `owner`, `device_metadata`, `ringtone`, `canned_messages`, `connection_status`, `configs`, `module_configs`, `channels`, `query_statuses` и `query_summary`.
 
 ## Поля объектов
 
