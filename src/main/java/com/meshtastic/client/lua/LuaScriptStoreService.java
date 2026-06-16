@@ -6,6 +6,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
 import com.google.gson.JsonParser;
+import com.meshtastic.client.i18n.I18n;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -19,6 +20,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
 import java.util.UUID;
 
 /**
@@ -29,14 +31,16 @@ public final class LuaScriptStoreService {
     private static final Logger log = LoggerFactory.getLogger(LuaScriptStoreService.class);
     private static final Gson JSON = new Gson();
     private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(15);
-    private static final String DEFAULT_DIRECTORY_API_URL =
-            "https://git.privatepractice.app/api/v1/repos/covox/meshappstore/contents/scripts?ref=main";
+    private static final String DIRECTORY_API_URL_TEMPLATE =
+            "https://git.privatepractice.app/api/v1/repos/covox/meshappstore/contents/scripts?ref=%s";
+    private static final String STORE_BRANCH_RU = "ru";
+    private static final String STORE_BRANCH_EN = "en";
 
     private final HttpClient httpClient;
     private final URI directoryApiUri;
 
     public LuaScriptStoreService() {
-        this(URI.create(DEFAULT_DIRECTORY_API_URL), HttpClient.newBuilder()
+        this(directoryApiUri(I18n.locale()), HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(10))
                 .followRedirects(HttpClient.Redirect.NORMAL)
                 .build());
@@ -45,6 +49,17 @@ public final class LuaScriptStoreService {
     LuaScriptStoreService(URI directoryApiUri, HttpClient httpClient) {
         this.directoryApiUri = directoryApiUri;
         this.httpClient = httpClient;
+    }
+
+    static URI directoryApiUri(Locale locale) {
+        return URI.create(DIRECTORY_API_URL_TEMPLATE.formatted(storeBranch(locale)));
+    }
+
+    static String storeBranch(Locale locale) {
+        if (locale != null && I18n.LANGUAGE_RU.equals(locale.getLanguage())) {
+            return STORE_BRANCH_RU;
+        }
+        return STORE_BRANCH_EN;
     }
 
     public List<StoreScript> fetchScripts() throws IOException, InterruptedException {

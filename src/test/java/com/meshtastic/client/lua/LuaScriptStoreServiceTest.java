@@ -11,6 +11,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Locale;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -26,6 +27,28 @@ class LuaScriptStoreServiceTest {
         if (server != null) {
             server.stop(0);
         }
+    }
+
+    @Test
+    void directoryApiUriUsesRussianBranchForRussianLocale() {
+        URI uri = LuaScriptStoreService.directoryApiUri(Locale.forLanguageTag("ru-RU"));
+
+        assertEquals(
+                "https://git.privatepractice.app/api/v1/repos/covox/meshappstore/contents/scripts?ref=ru",
+                uri.toString());
+    }
+
+    @Test
+    void directoryApiUriUsesEnglishBranchForEnglishAndFallbackLocales() {
+        assertEquals(
+                "https://git.privatepractice.app/api/v1/repos/covox/meshappstore/contents/scripts?ref=en",
+                LuaScriptStoreService.directoryApiUri(Locale.ENGLISH).toString());
+        assertEquals(
+                "https://git.privatepractice.app/api/v1/repos/covox/meshappstore/contents/scripts?ref=en",
+                LuaScriptStoreService.directoryApiUri(Locale.forLanguageTag("de-DE")).toString());
+        assertEquals(
+                "https://git.privatepractice.app/api/v1/repos/covox/meshappstore/contents/scripts?ref=en",
+                LuaScriptStoreService.directoryApiUri(null).toString());
     }
 
     @Test
