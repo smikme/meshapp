@@ -26,6 +26,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.UUID;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
  * Stores MeshApp Lua scripts and their isolated key-value data.
@@ -58,6 +59,7 @@ public final class LuaScriptService {
     private static LuaScriptService instance;
 
     private final Connection dbConnection;
+    private final List<Runnable> scriptChangeListeners = new CopyOnWriteArrayList<>();
 
     private LuaScriptService() {
         this.dbConnection = DatabaseProvider.getConnection();
@@ -69,6 +71,16 @@ public final class LuaScriptService {
             instance = new LuaScriptService();
         }
         return instance;
+    }
+
+    public void addScriptChangeListener(Runnable listener) {
+        if (listener != null) {
+            scriptChangeListeners.add(listener);
+        }
+    }
+
+    public void removeScriptChangeListener(Runnable listener) {
+        scriptChangeListeners.remove(listener);
     }
 
     private void initDb() {
@@ -346,7 +358,9 @@ public final class LuaScriptService {
             ps.executeUpdate();
             try (ResultSet keys = ps.getGeneratedKeys()) {
                 if (keys.next()) {
-                    return findScript(keys.getLong(1)).orElseThrow();
+                    LuaScript created = findScript(keys.getLong(1)).orElseThrow();
+                    notifyScriptsChanged();
+                    return created;
                 }
             }
         } catch (SQLException e) {
@@ -596,7 +610,9 @@ public final class LuaScriptService {
             if (ps.executeUpdate() == 0) {
                 throw new IllegalStateException(I18n.t("meshIde.service.scriptNotFound", Long.toString(scriptId)));
             }
-            return findScript(scriptId).orElseThrow();
+            LuaScript saved = findScript(scriptId).orElseThrow();
+            notifyScriptsChanged();
+            return saved;
         } catch (SQLException e) {
             throw new IllegalStateException(I18n.t("meshIde.service.saveFailed"), e);
         }
@@ -669,6 +685,7 @@ public final class LuaScriptService {
                 """)) {
             ps.setLong(1, scriptId);
             ps.executeUpdate();
+            notifyScriptsChanged();
         } catch (SQLException e) {
             log.error("Failed to delete Lua script {}", scriptId, e);
         }
@@ -924,7 +941,8 @@ public final class LuaScriptService {
     }
 
     private static String normalizeNodeId(LuaScript.BotType botType, String nodeId) {
-        if (botType == LuaScript.BotType.AUTOMATION_BOT) {
+        LuaScript.BotType type = botType != null ? botType : LuaScript.BotType.AIR_BOT;
+        if (!type.requiresNodeBinding()) {
             return "";
         }
         return normalizeNodeId(nodeId);
@@ -932,7 +950,8 @@ public final class LuaScriptService {
 
     private static String normalizeAutomationName(LuaScript.BotType botType, String automationName) {
         String value = automationName == null ? "" : automationName.trim();
-        if (botType != LuaScript.BotType.AUTOMATION_BOT) {
+        LuaScript.BotType type = botType != null ? botType : LuaScript.BotType.AIR_BOT;
+        if (!type.requiresAutomationName()) {
             return "";
         }
         if (value.isEmpty()) {
@@ -950,6 +969,16 @@ public final class LuaScriptService {
             throw new IllegalArgumentException(I18n.t("meshIde.service.kvKeyRequired"));
         }
         return value.length() > 200 ? value.substring(0, 200) : value;
+    }
+
+    private void notifyScriptsChanged() {
+        for (Runnable listener : scriptChangeListeners) {
+            try {
+                listener.run();
+            } catch (RuntimeException e) {
+                log.warn("Lua script change listener failed", e);
+            }
+        }
     }
 
     private static long nowSeconds() {

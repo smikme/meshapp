@@ -59,7 +59,7 @@ import java.util.function.IntConsumer;
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNodeInfoBridge,
-        LuaRemoteAdminBridge, LuaCanvasBridge {
+        LuaRemoteAdminBridge, LuaCanvasBridge, LuaFormBridge {
 
     private static final long RUN_TIMEOUT_MS = 3_000;
     private static final long CALLBACK_TIMEOUT_MS = 1_500;
@@ -83,6 +83,7 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
     private final LuaProtobufMapper protobufMapper = new LuaProtobufMapper();
     private final Consumer<LuaScriptEvent> eventSink;
     private final Consumer<LuaUiNodePickRequest> uiNodePickSink;
+    private final LuaFormBridge formBridge;
     private final Runnable onClosed;
     private final Set<Integer> breakpoints;
     private final LuaAutomationCommand command;
@@ -125,6 +126,7 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
                       LuaAutomationCommand command,
                       Consumer<LuaScriptEvent> eventSink,
                       Consumer<LuaUiNodePickRequest> uiNodePickSink,
+                      LuaFormBridge formBridge,
                       Runnable onClosed) {
         this.script = script;
         this.target = target;
@@ -135,6 +137,7 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
         this.command = command;
         this.eventSink = eventSink;
         this.uiNodePickSink = uiNodePickSink;
+        this.formBridge = formBridge;
         this.onClosed = onClosed;
         this.executor = Executors.newSingleThreadExecutor(r -> {
             Thread thread = new Thread(r, "lua-script-" + script.getId());
@@ -182,6 +185,17 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
         }
         try {
             executor.execute(() -> callNodeSelected(selection));
+        } catch (RejectedExecutionException ignored) {
+            // Session is stopping.
+        }
+    }
+
+    void deliverFormEvent(LuaFormEvent event) {
+        if (event == null || !running.get()) {
+            return;
+        }
+        try {
+            executor.execute(() -> callFormEvent(event));
         } catch (RejectedExecutionException ignored) {
             // Session is stopping.
         }
@@ -581,6 +595,72 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
         return LuaCanvasWindow.size(script.getId());
     }
 
+    @Override
+    public boolean isFormAvailable() {
+        return formBridge != null && formBridge.isFormAvailable();
+    }
+
+    @Override
+    public boolean isFormOpen() {
+        return formBridge != null && formBridge.isFormOpen();
+    }
+
+    @Override
+    public void showForm() {
+        if (formBridge == null) {
+            throw new LuaError("No active extension form");
+        }
+        formBridge.showForm();
+    }
+
+    @Override
+    public void setFormTitle(String title) {
+        if (formBridge == null) {
+            throw new LuaError("No active extension form");
+        }
+        formBridge.setFormTitle(title);
+    }
+
+    @Override
+    public void clearForm() {
+        if (formBridge == null) {
+            throw new LuaError("No active extension form");
+        }
+        formBridge.clearForm();
+    }
+
+    @Override
+    public String addFormComponent(LuaFormComponentSpec spec) {
+        if (formBridge == null) {
+            throw new LuaError("No active extension form");
+        }
+        return formBridge.addFormComponent(spec);
+    }
+
+    @Override
+    public void updateFormComponent(String id, LuaFormComponentSpec spec) {
+        if (formBridge == null) {
+            throw new LuaError("No active extension form");
+        }
+        formBridge.updateFormComponent(id, spec);
+    }
+
+    @Override
+    public void removeFormComponent(String id) {
+        if (formBridge == null) {
+            throw new LuaError("No active extension form");
+        }
+        formBridge.removeFormComponent(id);
+    }
+
+    @Override
+    public Object formComponentValue(String id) {
+        if (formBridge == null) {
+            throw new LuaError("No active extension form");
+        }
+        return formBridge.formComponentValue(id);
+    }
+
     void stop() {
         if (!running.getAndSet(false)) {
             return;
@@ -806,6 +886,23 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
         }
     }
 
+    private void callFormEvent(LuaFormEvent event) {
+        if (!running.get() || globals == null) {
+            return;
+        }
+        LuaValue callback = globals.get("on_form_event");
+        try {
+            if (callback.isfunction()) {
+                debugLib.begin(CALLBACK_TIMEOUT_MS);
+                callback.call(formEventToTable(event));
+            }
+            finishIfIdle();
+        } catch (Throwable error) {
+            fail(error);
+            finishWithoutInterruptingExecutor();
+        }
+    }
+
     private LuaValue nodeSelectionToTable(LuaUiNodeSelection selection) {
         LuaTable table = new LuaTable();
         table.set("type", LuaValue.valueOf("ui_result"));
@@ -850,6 +947,37 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
         table.set("time", LuaValue.valueOf(event.timeSeconds()));
         table.set("dt", LuaValue.valueOf(event.deltaSeconds()));
         return table;
+    }
+
+    private LuaValue formEventToTable(LuaFormEvent event) {
+        LuaTable table = new LuaTable();
+        table.set("type", LuaValue.valueOf(event.type() != null ? event.type() : ""));
+        table.set("source", LuaValue.valueOf("mesh.form"));
+        table.set("component_id", LuaValue.valueOf(event.componentId() != null ? event.componentId() : ""));
+        table.set("id", LuaValue.valueOf(event.componentId() != null ? event.componentId() : ""));
+        table.set("value", objectToLua(event.value()));
+        table.set("text", event.text() != null ? LuaValue.valueOf(event.text()) : LuaValue.NIL);
+        return table;
+    }
+
+    private LuaValue objectToLua(Object value) {
+        if (value == null) {
+            return LuaValue.NIL;
+        }
+        if (value instanceof Boolean booleanValue) {
+            return LuaValue.valueOf(booleanValue);
+        }
+        if (value instanceof Number number) {
+            return LuaValue.valueOf(number.doubleValue());
+        }
+        if (value instanceof List<?> list) {
+            LuaTable table = new LuaTable();
+            for (int i = 0; i < list.size(); i++) {
+                table.set(i + 1, objectToLua(list.get(i)));
+            }
+            return table;
+        }
+        return LuaValue.valueOf(value.toString());
     }
 
     private LuaValue tracerouteEventToTable(LuaTracerouteRequest request,
@@ -1124,7 +1252,8 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
                 || !pendingTraceroutes.isEmpty()
                 || !pendingNodeInfos.isEmpty()
                 || !pendingRemoteAdmins.isEmpty()
-                || canvasOpen.get();
+                || canvasOpen.get()
+                || isFormOpen();
     }
 
     private void finishIfIdle() {
@@ -1155,11 +1284,17 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
                     this,
                     this,
                     this,
+                    this,
                     this::deferExecutionDeadline));
             sandboxApi.install(globals);
 
             debugLib.begin(RUN_TIMEOUT_MS);
             globals.load(script.getCode() != null ? script.getCode() : "", script.getName()).call();
+
+            if (formBridge != null) {
+                formBridge.showForm();
+                deliverExtensionOpen();
+            }
 
             if (command != null) {
                 deliverAutomationCommand();
@@ -1169,7 +1304,7 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
             if (onMessage.isfunction()) {
                 keepListening = attachMessageListener();
             } else {
-                if (command == null) {
+                if (command == null && formBridge == null) {
                     emit(LuaScriptEvent.info(script.getId(), I18n.t("meshIde.runtime.noOnMessage")));
                 }
                 if (!hasPendingAsyncWork()) {
@@ -1183,6 +1318,20 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
                 finishWithoutInterruptingExecutor();
             }
         }
+    }
+
+    private void deliverExtensionOpen() {
+        LuaValue onExtensionOpen = globals.get("on_extension_open");
+        if (!onExtensionOpen.isfunction()) {
+            return;
+        }
+        debugLib.begin(CALLBACK_TIMEOUT_MS);
+        LuaTable event = new LuaTable();
+        event.set("type", LuaValue.valueOf("extension_open"));
+        event.set("source", LuaValue.valueOf("mesh.extension"));
+        event.set("script_id", LuaValue.valueOf(script.getId()));
+        event.set("name", LuaValue.valueOf(script.getName() != null ? script.getName() : ""));
+        onExtensionOpen.call(event);
     }
 
     private void deliverAutomationCommand() {

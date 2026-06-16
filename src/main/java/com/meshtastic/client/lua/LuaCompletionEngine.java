@@ -58,6 +58,7 @@ public final class LuaCompletionEngine {
         mesh.member("curl", "curl.", "object", "mesh.curl");
         mesh.member("ui", "ui.", "object", "mesh.ui");
         mesh.member("canvas", "canvas.", "object", "mesh.canvas");
+        mesh.member("form", "form.", "object", "mesh.form");
         mesh.member("traceroute", "traceroute.", "object", "mesh.traceroute");
         mesh.member("nodeinfo", "nodeinfo.", "object", "mesh.nodeinfo");
         mesh.member("admin", "admin.", "object", "mesh.admin");
@@ -92,6 +93,12 @@ public final class LuaCompletionEngine {
 
         TypeDef ui = new TypeDef();
         ui.member("pick_node(options)", "pick_node(", "function", "string");
+
+        TypeDef form = new TypeDef();
+        for (String member : List.of("show(options)", "set_title(title)", "clear()", "add(options)",
+                "set(id, options)", "remove(id)", "value(id)")) {
+            form.member(member, member.substring(0, member.indexOf('(') + 1), "function", null);
+        }
 
         TypeDef canvas = new TypeDef();
         canvas.member("open(options)", "open(", "function", "boolean");
@@ -284,6 +291,7 @@ public final class LuaCompletionEngine {
         defs.put("mesh.curl", curl);
         defs.put("mesh.ui", ui);
         defs.put("mesh.canvas", canvas);
+        defs.put("mesh.form", form);
         defs.put("mesh.traceroute", traceroute);
         defs.put("mesh.nodeinfo", nodeinfo);
         defs.put("mesh.admin", admin);
@@ -325,6 +333,7 @@ public final class LuaCompletionEngine {
                 new CompletionItem("on_admin(event)", "function on_admin(event)\n    \nend", "snippet"),
                 new CompletionItem("on_canvas_event(event)", "function on_canvas_event(event)\n    \nend", "snippet"),
                 new CompletionItem("on_canvas_frame(event)", "function on_canvas_frame(event)\n    \nend", "snippet"),
+                new CompletionItem("on_form_event(event)", "function on_form_event(event)\n    \nend", "snippet"),
                 new CompletionItem("mesh", "mesh", "object"),
                 new CompletionItem("string", "string", "object"),
                 new CompletionItem("table", "table", "object"),
@@ -676,6 +685,9 @@ public final class LuaCompletionEngine {
         }
         if (value.startsWith("mesh.canvas")) {
             return Optional.of("mesh.canvas");
+        }
+        if (value.startsWith("mesh.form")) {
+            return Optional.of("mesh.form");
         }
         if (value.startsWith("mesh.traceroute")) {
             return Optional.of("mesh.traceroute");

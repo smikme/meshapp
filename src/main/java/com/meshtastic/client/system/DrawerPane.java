@@ -9,13 +9,21 @@ import javafx.scene.control.ScrollPane;
 import javafx.scene.control.Separator;
 import javafx.scene.control.ToolBar;
 import javafx.scene.control.Tooltip;
+import javafx.scene.image.Image;
+import javafx.scene.image.ImageView;
+import javafx.scene.image.PixelReader;
+import javafx.scene.image.PixelWriter;
+import javafx.scene.image.WritableImage;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
+import javafx.scene.paint.Color;
 import javafx.scene.shape.Circle;
 import javafx.scene.shape.SVGPath;
+import javafx.scene.text.Text;
 
 import com.meshtastic.client.MeshApp;
+import com.meshtastic.client.components.EmojiImageCache;
 import com.meshtastic.client.forms.FormChat;
 import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.menu.MyDrawerBuilder;
@@ -23,10 +31,14 @@ import com.meshtastic.client.platform.OsDetect;
 import com.meshtastic.client.themes.ThemeManager;
 import com.meshtastic.client.utils.AppPreferences;
 import com.meshtastic.client.utils.SvgIconLoader;
+import com.meshtastic.client.utils.UnicodeTextUtils;
 
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
@@ -36,14 +48,18 @@ public class DrawerPane extends StackPane {
     public static final double TOOLBAR_WIDTH = 56;
     private static final String WINDOWS_HIT_TEST_BACKGROUND = "-fx-background-color: rgba(0,0,0,0.004);";
     private static final String ORIGINAL_TOOLTIP_KEY = "drawer.originalTooltip";
+    private static final String FORM_CLASS_KEY = "drawer.formClass";
+    private static final String MONOCHROME_ICON_SOURCE_KEY = "drawer.monochromeIconSource";
     private static final String NOTIFICATION_ON_ICON = "/drawer/icon/bell.svg";
     private static final String NOTIFICATION_OFF_ICON = "/drawer/icon/bell-off.svg";
+    private static final double EXTENSION_ICON_SIZE = 22.0;
+    private static final Map<String, Image> MONOCHROME_EMOJI_CACHE = new ConcurrentHashMap<>();
 
     private final ToolBar toolBar;
     private final Button themeButton;
     private final Button notifButton;
     private final Set<Class<?>> navigationBlockedItemClasses = new HashSet<>();
-    private Class<?> selectedItemClass;
+    private Object selectedItemKey;
     private Circle chatBadgeDot;
 
     public DrawerPane() {
@@ -129,15 +145,29 @@ public class DrawerPane extends StackPane {
                 btn = new Button("?");
             }
         } else {
-            // Text icon used for chats and channels.
-            btn = new Button(item.iconText() != null ? item.iconText() : "?");
+            if (item.monochromeTextIcon()) {
+                // Extension script icons are user emoji; draw them as a graphic
+                // so the global emoji renderer does not install a color image.
+                btn = new Button();
+                btn.setGraphic(createMonochromeTextIcon(item.iconText()));
+                btn.setContentDisplay(ContentDisplay.GRAPHIC_ONLY);
+                btn.hoverProperty().addListener((obs, wasHover, isHover) -> updateMonochromeIconColor(btn));
+            } else {
+                // Plain text icon fallback for non-extension dynamic entries.
+                btn = new Button(item.iconText() != null ? item.iconText() : "?");
+            }
         }
         btn.getStyleClass().add("drawer-toolbar-button");
         btn.setTooltip(new Tooltip(item.name()));
         btn.getProperties().put(ORIGINAL_TOOLTIP_KEY, item.name());
         if (item.formClass() != null) {
-            btn.setUserData(item.formClass());
+            btn.getProperties().put(FORM_CLASS_KEY, item.formClass());
         }
+        Object selectionKey = item.selectionKey() != null ? item.selectionKey() : item.formClass();
+        if (selectionKey != null) {
+            btn.setUserData(selectionKey);
+        }
+        updateMonochromeIconColor(btn);
         updateNavigationBlockState(btn);
         btn.setOnAction(e -> {
             if (item.action() != null) {
@@ -158,6 +188,122 @@ public class DrawerPane extends StackPane {
         return btn;
     }
 
+    private Node createMonochromeTextIcon(String text) {
+        String iconText = UnicodeTextUtils.sanitizeForJavaFxDisplay(text).trim();
+        if (iconText.isEmpty()) {
+            iconText = "?";
+        }
+
+        Image monochromeImage = monochromeEmojiImage(iconText, toolbarIconColor(false, false));
+        if (monochromeImage != null) {
+            ImageView imageIcon = new ImageView(monochromeImage);
+            imageIcon.getProperties().put(MONOCHROME_ICON_SOURCE_KEY, iconText);
+            imageIcon.setFitWidth(EXTENSION_ICON_SIZE);
+            imageIcon.setFitHeight(EXTENSION_ICON_SIZE);
+            imageIcon.setPreserveRatio(true);
+            imageIcon.setSmooth(true);
+            imageIcon.getStyleClass().add("drawer-toolbar-emoji-icon");
+            imageIcon.setMouseTransparent(true);
+            return imageIcon;
+        }
+
+        Text textIcon = new Text(iconText);
+        textIcon.getStyleClass().add("drawer-toolbar-text-icon");
+        textIcon.setMouseTransparent(true);
+        return textIcon;
+    }
+
+    private void updateMonochromeIconColor(Button button) {
+        if (button == null || !(button.getGraphic() instanceof ImageView imageView)) {
+            return;
+        }
+        Object source = imageView.getProperties().get(MONOCHROME_ICON_SOURCE_KEY);
+        if (!(source instanceof String iconText) || iconText.isBlank()) {
+            return;
+        }
+        boolean selected = button.getStyleClass().contains("drawer-toolbar-button-selected");
+        Color color = toolbarIconColor(selected, button.isHover());
+        Image image = monochromeEmojiImage(iconText, color);
+        if (image != null && imageView.getImage() != image) {
+            imageView.setImage(image);
+        }
+    }
+
+    private void updateMonochromeIconColors() {
+        for (Node node : toolBar.getItems()) {
+            if (node instanceof Button button) {
+                updateMonochromeIconColor(button);
+            }
+        }
+    }
+
+    private static Color toolbarIconColor(boolean selected, boolean hover) {
+        boolean light = !AppPreferences.isDarkMode();
+        if (light) {
+            if (selected) {
+                return Color.rgb(0, 0, 0, 0.9);
+            }
+            return hover ? Color.rgb(0, 0, 0, 0.85) : Color.rgb(0, 0, 0, 0.6);
+        }
+        if (selected) {
+            return Color.WHITE;
+        }
+        return hover ? Color.rgb(255, 255, 255, 0.9) : Color.rgb(255, 255, 255, 0.7);
+    }
+
+    private static Image monochromeEmojiImage(String emoji, Color color) {
+        Image source = EmojiImageCache.getImage(emoji);
+        if (source == null || source.getPixelReader() == null) {
+            return null;
+        }
+        String cacheKey = emoji + "|" + colorKey(color);
+        return MONOCHROME_EMOJI_CACHE.computeIfAbsent(cacheKey, ignored -> renderMonochromeEmoji(source, color));
+    }
+
+    private static Image renderMonochromeEmoji(Image source, Color color) {
+        int width = Math.max(1, (int) Math.ceil(source.getWidth()));
+        int height = Math.max(1, (int) Math.ceil(source.getHeight()));
+        PixelReader reader = source.getPixelReader();
+        WritableImage result = new WritableImage(width, height);
+        PixelWriter writer = result.getPixelWriter();
+
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                Color sourceColor = reader.getColor(x, y);
+                double alpha = monochromeAlpha(sourceColor, color);
+                writer.setColor(x, y, alpha <= 0.0
+                        ? Color.TRANSPARENT
+                        : new Color(color.getRed(), color.getGreen(), color.getBlue(), alpha));
+            }
+        }
+        return result;
+    }
+
+    private static double monochromeAlpha(Color sourceColor, Color targetColor) {
+        double sourceAlpha = sourceColor.getOpacity();
+        if (sourceAlpha <= 0.0) {
+            return 0.0;
+        }
+        double luminance = 0.2126 * sourceColor.getRed()
+                + 0.7152 * sourceColor.getGreen()
+                + 0.0722 * sourceColor.getBlue();
+
+        // Preserve emoji interior detail: bright source pixels become stronger
+        // monochrome pixels, dark strokes become transparent cuts in the mask.
+        double detailMask = Math.pow(Math.max(0.0, Math.min(1.0, luminance)), 0.85);
+        return sourceAlpha * targetColor.getOpacity() * detailMask;
+    }
+
+    private static String colorKey(Color color) {
+        return Math.round(color.getRed() * 255)
+                + ","
+                + Math.round(color.getGreen() * 255)
+                + ","
+                + Math.round(color.getBlue() * 255)
+                + ","
+                + Math.round(color.getOpacity() * 255);
+    }
+
     private Button createThemeButton() {
         Button btn = new Button();
         btn.getStyleClass().add("drawer-toolbar-button");
@@ -170,6 +316,7 @@ public class DrawerPane extends StackPane {
                 ThemeManager.applyTheme(MeshApp.getPrimaryStage().getScene(), newDark);
             }
             updateThemeIcon(btn, newDark);
+            updateMonochromeIconColors();
         });
         return btn;
     }
@@ -217,9 +364,13 @@ public class DrawerPane extends StackPane {
     }
 
     public void setSelectedItemClass(Class<?> cls) {
-        this.selectedItemClass = cls;
+        setSelectedItemKey(cls);
+    }
+
+    public void setSelectedItemKey(Object key) {
+        this.selectedItemKey = key;
         updateSelection();
-        if (cls == FormChat.class && chatBadgeDot != null) {
+        if (key == FormChat.class && chatBadgeDot != null) {
             chatBadgeDot.setVisible(false);
         }
     }
@@ -227,8 +378,8 @@ public class DrawerPane extends StackPane {
     private void updateSelection() {
         for (Node node : toolBar.getItems()) {
             if (node instanceof Button btn) {
-                boolean selected = selectedItemClass != null
-                        && selectedItemClass.equals(btn.getUserData());
+                boolean selected = selectedItemKey != null
+                        && Objects.equals(selectedItemKey, btn.getUserData());
                 if (selected) {
                     if (!btn.getStyleClass().contains("drawer-toolbar-button-selected")) {
                         btn.getStyleClass().add("drawer-toolbar-button-selected");
@@ -236,6 +387,7 @@ public class DrawerPane extends StackPane {
                 } else {
                     btn.getStyleClass().remove("drawer-toolbar-button-selected");
                 }
+                updateMonochromeIconColor(btn);
             }
         }
     }
@@ -257,8 +409,8 @@ public class DrawerPane extends StackPane {
     }
 
     private void updateNavigationBlockState(Button btn) {
-        Object userData = btn.getUserData();
-        boolean blocked = userData instanceof Class<?> formClass
+        Object formClassValue = btn.getProperties().get(FORM_CLASS_KEY);
+        boolean blocked = formClassValue instanceof Class<?> formClass
                 && navigationBlockedItemClasses.contains(formClass);
         btn.setDisable(blocked);
 
@@ -271,7 +423,7 @@ public class DrawerPane extends StackPane {
 
     public void setChatUnreadDot(boolean visible) {
         if (chatBadgeDot != null) {
-            chatBadgeDot.setVisible(visible && selectedItemClass != FormChat.class);
+            chatBadgeDot.setVisible(visible && selectedItemKey != FormChat.class);
         }
     }
 
@@ -287,8 +439,10 @@ public class DrawerPane extends StackPane {
             String name,
             String iconText,
             String iconPath,
+            boolean monochromeTextIcon,
             Type type,
             Class<?> formClass,
+            Object selectionKey,
             Runnable action
     ) {
         public enum Type { ITEM, LABEL, SEPARATOR }

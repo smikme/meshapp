@@ -166,4 +166,32 @@ class LuaScriptImportExportTest {
         assertFalse(result.script().isAutostart());
         assertEquals("", result.script().getNodeId());
     }
+
+    @Test
+    void exportAndImportPreservesExtensionType() throws Exception {
+        LuaScript script = scriptService.createScript(
+                "extension",
+                "mesh.form.add({ type = 'label', text = 'Hello' })",
+                true,
+                "🧩",
+                "!abcdef12",
+                LuaScript.BotType.EXTENSION,
+                "");
+        Path exportFile = tempHome.resolve("extension.json");
+
+        scriptService.exportScript(script.getId(), exportFile);
+
+        String json = Files.readString(exportFile);
+        assertTrue(json.contains("\"botType\": \"EXTENSION\""));
+        assertFalse(json.contains("\"nodeId\": \"!abcdef12\""));
+
+        scriptService.deleteScript(script.getId());
+        LuaScriptService.ScriptImportResult result = scriptService.importScript(exportFile);
+
+        assertFalse(result.updated());
+        assertEquals(LuaScript.BotType.EXTENSION, result.script().getBotType());
+        assertFalse(result.script().isEnabled());
+        assertEquals("", result.script().getNodeId());
+        assertEquals("", result.script().getAutomationName());
+    }
 }

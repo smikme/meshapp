@@ -228,15 +228,22 @@ public final class LuaScriptSettingsForm extends VBox {
     }
 
     private void updateAutomationVisibility() {
-        boolean automation = botTypeCombo.getValue() == LuaScript.BotType.AUTOMATION_BOT;
+        LuaScript.BotType type = botTypeCombo.getValue() != null
+                ? botTypeCombo.getValue()
+                : LuaScript.BotType.AIR_BOT;
+        boolean automation = type.requiresAutomationName();
+        boolean nodeBound = type.requiresNodeBinding();
+        autostartCheck.setText(I18n.t(type == LuaScript.BotType.EXTENSION
+                ? "meshIde.settings.extensionEnabled"
+                : "meshIde.settings.autostart"));
         automationNameLabel.setVisible(automation);
         automationNameLabel.setManaged(automation);
         automationNameField.setVisible(automation);
         automationNameField.setManaged(automation);
-        nodeLabel.setVisible(!automation);
-        nodeLabel.setManaged(!automation);
-        nodeCombo.setVisible(!automation);
-        nodeCombo.setManaged(!automation);
+        nodeLabel.setVisible(nodeBound);
+        nodeLabel.setManaged(nodeBound);
+        nodeCombo.setVisible(nodeBound);
+        nodeCombo.setManaged(nodeBound);
     }
 
     private void save() {
@@ -333,7 +340,7 @@ public final class LuaScriptSettingsForm extends VBox {
                 : LuaScript.BotType.AIR_BOT;
         NodeChoice nodeChoice = nodeCombo.getValue();
         String nodeId = "";
-        if (botType != LuaScript.BotType.AUTOMATION_BOT) {
+        if (botType.requiresNodeBinding()) {
             if (nodeChoice == null || isBlank(nodeChoice.nodeId())) {
                 statusLabel.setText(I18n.t("meshIde.settings.validation.nodeRequired"));
                 return null;
@@ -343,7 +350,7 @@ public final class LuaScriptSettingsForm extends VBox {
         String automationName = automationNameField.getText() != null
                 ? automationNameField.getText().trim()
                 : "";
-        if (botType == LuaScript.BotType.AUTOMATION_BOT
+        if (botType.requiresAutomationName()
                 && !automationName.matches("@[\\p{L}\\p{N}_]+")) {
             statusLabel.setText(I18n.t("meshIde.settings.validation.automationNameFormat"));
             return null;

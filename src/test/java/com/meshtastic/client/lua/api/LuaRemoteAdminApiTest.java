@@ -39,6 +39,7 @@ class LuaRemoteAdminApiTest {
                 null,
                 bridge,
                 null,
+                null,
                 null)).create();
     }
 

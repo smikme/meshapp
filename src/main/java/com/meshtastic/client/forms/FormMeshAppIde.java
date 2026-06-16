@@ -5,6 +5,7 @@ import com.meshtastic.client.components.LuaKvEditorWindow;
 import com.meshtastic.client.components.LuaScriptSettingsForm;
 import com.meshtastic.client.components.LuaScriptStoreForm;
 import com.meshtastic.client.i18n.I18n;
+import com.meshtastic.client.lua.LuaExtensionManager;
 import com.meshtastic.client.lua.LuaScript;
 import com.meshtastic.client.lua.LuaScriptEvent;
 import com.meshtastic.client.lua.LuaScriptRuntimeService;
@@ -226,10 +227,18 @@ public class FormMeshAppIde extends Form {
                 });
 
         Button autostartButton = createToolbarButton(
-                script.isAutostart()
+                script.getBotType() == LuaScript.BotType.EXTENSION
+                        ? I18n.t(script.isEnabled()
+                                ? "meshIde.action.disableExtension"
+                                : "meshIde.action.enableExtension")
+                        : script.isAutostart()
                         ? I18n.t("meshIde.action.disableAutostart")
                         : I18n.t("meshIde.action.enableAutostart"),
-                script.isAutostart()
+                script.getBotType() == LuaScript.BotType.EXTENSION
+                        ? I18n.t(script.isEnabled()
+                                ? "meshIde.tooltip.disableExtension"
+                                : "meshIde.tooltip.enableExtension")
+                        : script.isAutostart()
                         ? I18n.t("meshIde.tooltip.disableAutostart")
                         : I18n.t("meshIde.tooltip.enableAutostart"),
                 "/icons/autoplay.svg",
@@ -435,6 +444,11 @@ public class FormMeshAppIde extends Form {
     }
 
     private void runScript(LuaScript script) {
+        if (script.getBotType() == LuaScript.BotType.EXTENSION) {
+            LuaExtensionManager.getInstance().runExtension(script.getId(), this::handleRuntimeEvent);
+            rebuildCards();
+            return;
+        }
         runtimeService.runScript(script, this::handleRuntimeEvent);
         rebuildCards();
         Toast.show(Toast.Type.INFO, I18n.t("meshIde.toast.run", script.getName()));
@@ -477,9 +491,15 @@ public class FormMeshAppIde extends Form {
         if (!author.isBlank()) {
             parts.add(author);
         }
-        parts.add(I18n.t(script.isAutostart()
-                ? "meshIde.summary.autostartOn"
-                : "meshIde.summary.autostartOff"));
+        if (script.getBotType() == LuaScript.BotType.EXTENSION) {
+            parts.add(I18n.t(script.isEnabled()
+                    ? "meshIde.summary.extensionEnabled"
+                    : "meshIde.summary.extensionDisabled"));
+        } else {
+            parts.add(I18n.t(script.isAutostart()
+                    ? "meshIde.summary.autostartOn"
+                    : "meshIde.summary.autostartOff"));
+        }
         parts.add(script.getBotType().getDisplayName());
         String automation = automationSummary(script);
         if (!automation.isBlank()) {
@@ -544,6 +564,9 @@ public class FormMeshAppIde extends Form {
     private String nodeSummary(LuaScript script) {
         if (script.getBotType() == LuaScript.BotType.AUTOMATION_BOT) {
             return I18n.t("meshIde.summary.connectionCurrent");
+        }
+        if (script.getBotType() == LuaScript.BotType.EXTENSION) {
+            return I18n.t("meshIde.summary.extensionToolbar");
         }
         String nodeId = script.getNodeId();
         if (nodeId == null || nodeId.isBlank()) {

@@ -350,9 +350,11 @@ public final class LuaScriptStoreForm extends VBox {
     }
 
     private static String scriptTypeText(LuaScript.BotType botType) {
-        return botType == LuaScript.BotType.AUTOMATION_BOT
-                ? I18n.t("meshIde.scriptType.automation")
-                : I18n.t("meshIde.scriptType.bot");
+        return switch (botType) {
+            case AUTOMATION_BOT -> I18n.t("meshIde.scriptType.automation");
+            case EXTENSION -> I18n.t("meshIde.scriptType.extension");
+            case AIR_BOT -> I18n.t("meshIde.scriptType.bot");
+        };
     }
 
     private static String authorText(String author) {
@@ -409,7 +411,8 @@ public final class LuaScriptStoreForm extends VBox {
     private enum ScriptTypeFilter {
         ALL("meshIde.store.filter.allTypes", null),
         BOT("meshIde.scriptType.bot", LuaScript.BotType.AIR_BOT),
-        AUTOMATION("meshIde.scriptType.automation", LuaScript.BotType.AUTOMATION_BOT);
+        AUTOMATION("meshIde.scriptType.automation", LuaScript.BotType.AUTOMATION_BOT),
+        EXTENSION("meshIde.scriptType.extension", LuaScript.BotType.EXTENSION);
 
         private final String labelKey;
         private final LuaScript.BotType botType;
