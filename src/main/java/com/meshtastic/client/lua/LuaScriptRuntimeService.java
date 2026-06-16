@@ -75,6 +75,63 @@ public final class LuaScriptRuntimeService {
                     }
                 },
                 null,
+                null,
+                () -> sessions.remove(script.getId())
+        );
+        sessions.put(script.getId(), session);
+        session.start();
+    }
+
+    public void runExtension(LuaScript script, LuaFormBridge formBridge, Consumer<LuaScriptEvent> sink) {
+        if (script == null || formBridge == null) {
+            return;
+        }
+        stopScript(script.getId(), sink);
+        RuntimeTarget target = resolveSelectedTarget();
+        LuaRuntimeSession session = new LuaRuntimeSession(
+                script,
+                target,
+                LuaScriptService.getInstance(),
+                Set.of(),
+                false,
+                null,
+                event -> {
+                    if (sink != null) {
+                        sink.accept(event);
+                    }
+                },
+                null,
+                formBridge,
+                () -> sessions.remove(script.getId())
+        );
+        sessions.put(script.getId(), session);
+        session.start();
+    }
+
+    public void debugExtension(LuaScript script,
+                               LuaFormBridge formBridge,
+                               Set<Integer> breakpoints,
+                               Consumer<LuaScriptEvent> sink) {
+        if (script == null || formBridge == null) {
+            return;
+        }
+        stopScript(script.getId(), sink);
+        RuntimeTarget target = resolveSelectedTarget();
+        Set<Integer> breakpointSet = breakpoints != null ? Set.copyOf(breakpoints) : Set.of();
+        LuaRuntimeSession session = new LuaRuntimeSession(
+                script,
+                target,
+                LuaScriptService.getInstance(),
+                breakpointSet,
+                breakpointSet.isEmpty(),
+                null,
+                event -> {
+                    if (sink != null) {
+                        sink.accept(event);
+                    }
+                },
+                null,
+                formBridge,
                 () -> sessions.remove(script.getId())
         );
         sessions.put(script.getId(), session);
@@ -103,6 +160,7 @@ public final class LuaScriptRuntimeService {
                     }
                 },
                 uiNodePickSink,
+                null,
                 () -> sessions.remove(script.getId())
         );
         sessions.put(script.getId(), session);
@@ -125,7 +183,7 @@ public final class LuaScriptRuntimeService {
         }
         List<LuaScript> scripts = LuaScriptService.getInstance().listScripts().stream()
                 .filter(LuaScript::isAutostart)
-                .filter(script -> script.getBotType() != LuaScript.BotType.AUTOMATION_BOT)
+                .filter(script -> script.getBotType() == LuaScript.BotType.AIR_BOT)
                 .filter(script -> normalizedNodeId.equals(normalizeNodeId(script.getNodeId())))
                 .toList();
         for (LuaScript script : scripts) {
@@ -154,6 +212,7 @@ public final class LuaScriptRuntimeService {
                     }
                 },
                 null,
+                null,
                 () -> sessions.remove(script.getId())
         );
         sessions.put(script.getId(), session);
@@ -164,6 +223,13 @@ public final class LuaScriptRuntimeService {
         LuaRuntimeSession session = sessions.get(scriptId);
         if (session != null) {
             session.deliverNodeSelection(selection);
+        }
+    }
+
+    public void deliverFormEvent(long scriptId, LuaFormEvent event) {
+        LuaRuntimeSession session = sessions.get(scriptId);
+        if (session != null) {
+            session.deliverFormEvent(event);
         }
     }
 

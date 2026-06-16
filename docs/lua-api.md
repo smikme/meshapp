@@ -188,6 +188,8 @@ end
 |----------|-------------------|
 | `on_message(msg)` | For every new incoming or outgoing message while the script is running |
 | `on_command(command)` | When an automation bot is started from chat |
+| `on_extension_open(event)` | When an extension script is opened from the left toolbar |
+| `on_form_event(event)` | After an action or value change from a component created through `mesh.form.*` |
 | `on_node_selected(event)` | After selecting or cancelling node selection through `mesh.ui.pick_node(...)` |
 | `on_traceroute(event)` | After `mesh.traceroute.request(...)` produces a result |
 | `on_node_info(event)` | After `mesh.nodeinfo.request(...)` produces a result |
@@ -285,6 +287,135 @@ HTTP(S) requests are executed by the built-in Java HTTP client. Access to local,
 | `chat_type` | string | Chat context from the original `options` |
 | `chat_key` | string | Chat key from the original `options` |
 | `node` | `node` or `nil` | Selected node; `nil` if the picker was cancelled |
+
+## `mesh.form`
+
+`mesh.form` is available only to scripts of type “Extension”. An extension script adds a button to the left application toolbar and controls an embedded MeshApp section, not a separate window.
+
+Form components do not return Lua objects with their own methods. A script creates a component with `mesh.form.add(...)`, receives or assigns its `id`, and then controls it through `mesh.form.set(id, ...)`, `mesh.form.value(id)`, and `mesh.form.remove(id)`.
+
+| Function | Return | Purpose |
+|----------|--------|---------|
+| `mesh.form.show([options])` | `true` | Shows the embedded extension section; if `options.text` is passed, changes the title |
+| `mesh.form.set_title(title)` | `true` | Changes the section title; an empty title falls back to the script name |
+| `mesh.form.clear()` | `true` | Removes all created components |
+| `mesh.form.add(options)` | `component_id` | Adds a component and returns its id; a string type can be passed instead of a table, for example `"separator"` |
+| `mesh.form.set(id, options)` | `true` | Updates component properties; an existing component's type, id, and parent are not changed |
+| `mesh.form.remove(id)` | `true` | Removes a component |
+| `mesh.form.value(id)` | value or `nil` | Returns the current component value |
+
+### Common `options` Fields
+
+`options.type` is required for `mesh.form.add(...)`. Fields unsupported by a component are ignored.
+
+| Field | Type | Purpose |
+|-------|------|---------|
+| `type` | string | Component type to create: `label`, `button`, `text_field`, `password_field`, `text_area`, `checkbox`, `toggle_switch`, `combo_box`, `segmented_control`, `list_view`, `slider`, `progress_bar`, `ring_progress`, `separator`, `spacer`, `message`, `tile`, `card`, `vbox`, `hbox`, `split_pane`, `scroll_pane` |
+| `id` | string | Stable component id. If omitted, MeshApp creates one and returns it from `add(...)` |
+| `parent` | string | Id of a `card`, `vbox`, `hbox`, `split_pane`, or `scroll_pane` container. If omitted, the component is added to the form root |
+| `text` | string | Label or title for `label`, `button`, `checkbox`, `toggle_switch`, `message`, or `tile` |
+| `prompt` | string | Placeholder for `text_field`, `password_field`, and `text_area`; for `combo_box`, it is used as the empty value prompt |
+| `value` | string/number/boolean | Current component value. `progress_bar` and `ring_progress` use `0..1`; `slider` is clamped to `min..max`; `message` and `tile` use it as the description |
+| `selected` | boolean | Alias for `checkbox` and `toggle_switch` `value` when `value` is omitted |
+| `items` | array<string> | Options for `combo_box`, `segmented_control`, and `list_view` |
+| `min`, `max` | number | `slider` range; defaults to `0..100` |
+| `orientation` | string | `horizontal` or `vertical` for `separator`, `spacer`, and `split_pane` |
+| `width`, `height` | number | Preferred component size in pixels |
+| `min_width`, `min_height` | number | Minimum component size in pixels |
+| `max_width`, `max_height` | number | Maximum component size in pixels |
+| `grow` | string/boolean | Layout growth: `always`, `sometimes`, `never`, `true`/`false`. Applies in `vbox`, `hbox`, and to `split_pane` children |
+| `rows` | number | Visible row count for `text_area` |
+| `wrap` | boolean | Text wrapping for `label` and `text_area` |
+| `read_only` | boolean | Makes `text_field`, `password_field`, and `text_area` non-editable while keeping selection/copy available |
+| `monospace` | boolean | Enables a monospace font for text components; `style = "monospace"` is also accepted |
+| `disabled` | boolean | Disables or enables the component |
+| `visible` | boolean | Shows or hides the component; a hidden component does not take layout space |
+| `style` | string | `button` supports `accent` when created; text components support `monospace` |
+
+`mesh.form.set(id, options)` can update supported properties such as `text`, `prompt`, `value`, `items`, `min`, `max`, sizes, `grow`, `read_only`, `wrap`, `monospace`, `disabled`, and `visible`. `type`, `id`, and `parent` are creation-time fields; remove and recreate a component to change them.
+
+### Component Types
+
+| `options.type` | Creates | Main properties | `mesh.form.value(id)` | Events |
+|----------------|---------|-----------------|------------------------|--------|
+| `label` | Wrapped text label | `id`, `parent`, `text`, `value`, `disabled`, `visible` | Current text | None |
+| `button` | Button | `id`, `parent`, `text`, `style="accent"`, `disabled`, `visible` | `nil` | `action` on click |
+| `text_field` | Single-line text input | `id`, `parent`, `value`, `prompt`, `read_only`, `monospace`, `disabled`, `visible` | String | `change` when text changes, `action` on Enter |
+| `password_field` | Password input | `id`, `parent`, `value`, `prompt`, `read_only`, `disabled`, `visible` | String | `change` when text changes, `action` on Enter |
+| `text_area` | Multi-line text input | `id`, `parent`, `value`, `prompt`, `rows`, `wrap`, `read_only`, `monospace`, `disabled`, `visible` | String | `change` when text changes |
+| `checkbox` | Checkbox with text | `id`, `parent`, `text`, `value`/`selected`, `disabled`, `visible` | Boolean | `change` when toggled |
+| `toggle_switch` | AtlantaFX toggle switch | `id`, `parent`, `text`, `value`/`selected`, `disabled`, `visible` | Boolean | `change` when toggled |
+| `combo_box` | Drop-down selection | `id`, `parent`, `items`, `value`, `prompt`, `disabled`, `visible` | Selected string or `nil` | `change` when selected |
+| `segmented_control` | AtlantaFX segmented button group | `id`, `parent`, `items`, `value`, `disabled`, `visible` | Selected string or `nil` | `change` when selected |
+| `list_view` | String list | `id`, `parent`, `items`, `value`, `disabled`, `visible` | Selected string or `nil` | `change` when selected |
+| `slider` | Numeric slider | `id`, `parent`, `min`, `max`, `value`, `disabled`, `visible` | Number | `change` when moved |
+| `progress_bar` | Progress indicator | `id`, `parent`, `value`, `disabled`, `visible` | Number `0..1` | None |
+| `ring_progress` | AtlantaFX ring progress indicator | `id`, `parent`, `value`, `width`, `height`, `disabled`, `visible` | Number `0..1` | None |
+| `separator` | Separator | `id`, `parent`, `orientation`, `disabled`, `visible` | `nil` | None |
+| `spacer` | AtlantaFX empty spacer | `id`, `parent`, `orientation`, `value`, `grow`, `disabled`, `visible` | `nil` | None |
+| `message` | AtlantaFX message with title and description | `id`, `parent`, `text`, `value`, `disabled`, `visible` | Description | `action`, `close` |
+| `tile` | AtlantaFX tile with title and description | `id`, `parent`, `text`, `value`, `disabled`, `visible` | Description | `action` |
+| `card` | App-styled card container | `id`, `parent`, `disabled`, `visible` | `nil` | None |
+| `vbox` | Vertical container | `id`, `parent`, `grow`, `disabled`, `visible` | `nil` | None |
+| `hbox` | Horizontal container | `id`, `parent`, `grow`, `disabled`, `visible` | `nil` | None |
+| `split_pane` | Split view with multiple child panes | `id`, `parent`, `orientation`, `grow`, `disabled`, `visible` | `nil` | None |
+| `scroll_pane` | Scrollable container | `id`, `parent`, `grow`, `disabled`, `visible` | `nil` | None |
+
+`card`, `vbox`, `hbox`, `split_pane`, and `scroll_pane` are layout containers. To place a component inside a container, set `parent = "container_id"` or use the id returned by `mesh.form.add(...)`. For `split_pane`, every child becomes a separate split-view area; for `scroll_pane`, usually add one child `vbox` or `hbox` container.
+
+`on_extension_open(event)` fields:
+
+| Field | Type | Purpose |
+|-------|------|---------|
+| `type` | string | Always `extension_open` |
+| `source` | string | Always `mesh.extension` |
+| `script_id` | number | Current script id |
+| `name` | string | Current script name |
+
+`on_form_event(event)` fields:
+
+| Field | Type | Purpose |
+|-------|------|---------|
+| `type` | string | `action` for buttons/Enter in a field, `change` for value changes, `close` when a `message` is closed |
+| `source` | string | Always `mesh.form` |
+| `component_id`, `id` | string | Component id |
+| `value` | string/number/boolean/nil | Current component value |
+| `text` | string or `nil` | Text representation of the value |
+
+Extension form example:
+
+```lua
+function on_extension_open(event)
+    mesh.form.set_title("Diagnostics")
+    mesh.form.clear()
+
+    local card = mesh.form.add({ type = "card", id = "main" })
+    mesh.form.add({ type = "label", id = "status", parent = card, text = "Ready" })
+    mesh.form.add({ type = "text_field", id = "node", parent = card, prompt = "Node ID" })
+    mesh.form.add({
+        type = "combo_box",
+        id = "mode",
+        parent = card,
+        items = { "status", "trace", "admin" },
+        value = "status"
+    })
+    mesh.form.add({ type = "checkbox", id = "verbose", parent = card, text = "Verbose", value = true })
+    mesh.form.add({ type = "button", id = "run", parent = card, text = "Run", style = "accent" })
+end
+
+function on_form_event(event)
+    if event.id == "run" and event.type == "action" then
+        local node = mesh.form.value("node")
+        local mode = mesh.form.value("mode")
+        local verbose = mesh.form.value("verbose")
+        mesh.form.set("status", {
+            text = "Run: " .. tostring(mode) .. " / " .. tostring(node) .. " / verbose=" .. tostring(verbose)
+        })
+    elseif event.id == "mode" and event.type == "change" then
+        mesh.form.set("status", { text = "Mode: " .. tostring(event.value) })
+    end
+end
+```
 
 ## `mesh.canvas`
 

@@ -190,6 +190,28 @@ class LuaScriptSettingsFormTest {
     }
 
     @Test
+    void extensionDoesNotRequireNodeOrAutomationName() {
+        onFxThread(() -> {
+            LuaScriptSettingsForm form = new LuaScriptSettingsForm(
+                    script("!04c5b420", LuaScript.BotType.EXTENSION, ""));
+            try {
+                ComboBox<?> combo = nodeCombo(form);
+                assertFalse(combo.isVisible());
+                assertFalse(combo.isManaged());
+
+                Object draft = buildDraft(form);
+
+                assertNotNull(draft);
+                assertEquals("", draftNodeId(draft));
+                assertEquals(LuaScript.BotType.EXTENSION, draftBotType(draft));
+            } finally {
+                form.dispose();
+            }
+            return null;
+        });
+    }
+
+    @Test
     void showsGuidAsReadOnlyProperty() {
         String guid = "123e4567-e89b-12d3-a456-426614174000";
 
@@ -460,6 +482,16 @@ class LuaScriptSettingsFormTest {
             return (String) method.invoke(draft);
         } catch (ReflectiveOperationException e) {
             throw new AssertionError("Failed to read draft icon", e);
+        }
+    }
+
+    private static LuaScript.BotType draftBotType(Object draft) {
+        try {
+            Method method = draft.getClass().getDeclaredMethod("botType");
+            method.setAccessible(true);
+            return (LuaScript.BotType) method.invoke(draft);
+        } catch (ReflectiveOperationException e) {
+            throw new AssertionError("Failed to read draft bot type", e);
         }
     }
 

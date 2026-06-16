@@ -74,20 +74,48 @@ public class MenuManager {
             }
 
             drawerItems.add(new DrawerPane.DrawerMenuItem(
-                    item.name(), item.iconText(), item.iconPath(), type, item.formClass(), action));
+                    item.name(),
+                    item.iconText(),
+                    item.iconPath(),
+                    item.monochromeTextIcon(),
+                    type,
+                    item.formClass(),
+                    item.selectionKey(),
+                    action));
         }
 
         drawerPane.rebuildMenu(drawerItems);
     }
 
-    public record MenuItem(String id, String name, String iconText, String iconPath, Type type, Class<?> formClass) {
+    public record MenuItem(String id,
+                           String name,
+                           String iconText,
+                           String iconPath,
+                           boolean monochromeTextIcon,
+                           Type type,
+                           Class<?> formClass,
+                           Object selectionKey) {
+        public MenuItem(String id, String name, String iconText, String iconPath, Type type, Class<?> formClass) {
+            this(id, name, iconText, iconPath, false, type, formClass, null);
+        }
+
+        public MenuItem(String id,
+                        String name,
+                        String iconText,
+                        String iconPath,
+                        Type type,
+                        Class<?> formClass,
+                        Object selectionKey) {
+            this(id, name, iconText, iconPath, false, type, formClass, selectionKey);
+        }
+
         public MenuItem(String name, String iconText, String iconPath, Type type, Class<?> formClass) {
-            this(name, name, iconText, iconPath, type, formClass);
+            this(name, name, iconText, iconPath, false, type, formClass, null);
         }
 
         /** Constructor without {@code iconPath}, kept for backward compatibility. */
         public MenuItem(String name, String iconText, Type type, Class<?> formClass) {
-            this(name, name, iconText, null, type, formClass);
+            this(name, name, iconText, null, false, type, formClass, null);
         }
         public enum Type { ITEM, LABEL, SEPARATOR }
     }

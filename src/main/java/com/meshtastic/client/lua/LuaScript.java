@@ -167,7 +167,8 @@ public class LuaScript {
     /** Script type that determines how MeshApp uses it. */
     public enum BotType {
         AIR_BOT("AIR_BOT", "meshIde.botType.air"),
-        AUTOMATION_BOT("AUTOMATION_BOT", "meshIde.botType.automation");
+        AUTOMATION_BOT("AUTOMATION_BOT", "meshIde.botType.automation"),
+        EXTENSION("EXTENSION", "meshIde.botType.extension");
 
         private final String storageValue;
         private final String displayKey;
@@ -179,6 +180,8 @@ public class LuaScript {
 
         public String getStorageValue() { return storageValue; }
         public String getDisplayName() { return I18n.t(displayKey); }
+        public boolean requiresNodeBinding() { return this == AIR_BOT; }
+        public boolean requiresAutomationName() { return this == AUTOMATION_BOT; }
 
         public static BotType fromStorage(String value) {
             if (value != null) {

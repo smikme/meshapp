@@ -87,6 +87,10 @@ public final class NodeCacheService {
         try {
             closeStatements();
             dbConnection = DatabaseProvider.getConnection();
+            if (dbConnection == null) {
+                log.error("Node cache DB initialization skipped because database connection is unavailable");
+                return;
+            }
 
             try (Statement stmt = dbConnection.createStatement()) {
                 stmt.execute("""

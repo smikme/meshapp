@@ -120,6 +120,10 @@ public final class TestEnvironmentSupport {
             Class<?> databaseProvider = Class.forName("com.meshtastic.client.service.DatabaseProvider");
             databaseProvider.getMethod("close").invoke(null);
             writeStaticField(databaseProvider, "connection", null);
+            Class<?> recoveryExecutor = Class.forName(
+                    "com.meshtastic.client.service.DatabaseProvider$RecoveryExecutor");
+            databaseProvider.getMethod("setRecoveryExecutor", recoveryExecutor)
+                    .invoke(null, new Object[]{null});
 
             Class<?> configHelpRepository = Class.forName("com.meshtastic.client.utils.ConfigHelpRepository");
             Object configHelpInstance = configHelpRepository.getMethod("getInstance").invoke(null);

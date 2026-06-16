@@ -27,6 +27,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
@@ -220,6 +221,24 @@ class LuaScriptRuntimeServiceTest {
     }
 
     @Test
+    void autostartScriptsForNodeIgnoresExtensions() {
+        LuaScript extension = scriptService.createScript(
+                "extension-autostart",
+                "mesh.kv.set('started_node', 'extension')",
+                true,
+                "",
+                LuaScript.BotType.EXTENSION,
+                "");
+
+        runtimeService.autostartScriptsForNode("!abcdef12", events::add);
+
+        assertEquals("", extension.getNodeId());
+        assertNull(scriptService.getKv(extension.getId(), "started_node"));
+        assertFalse(events.stream().anyMatch(event ->
+                event.type() == LuaScriptEvent.Type.STARTED && event.scriptId() == extension.getId()));
+    }
+
+    @Test
     void automationCommandDeliversCommandContextAndFinishes() {
         LuaScript automation = scriptService.createScript(
                 "automation-command",
@@ -258,6 +277,129 @@ class LuaScriptRuntimeServiceTest {
         assertEquals("@auto", scriptService.getKv(automation.getId(), "handle"));
         assertEquals("Alpha", scriptService.getKv(automation.getId(), "arguments"));
         assertEquals("Alpha", scriptService.getKv(automation.getId(), "first_arg"));
+        assertFalse(events.stream().anyMatch(event -> event.type() == LuaScriptEvent.Type.ERROR));
+    }
+
+    @Test
+    void extensionRuntimeControlsEmbeddedFormAndReceivesEvents() {
+        LuaScript extension = scriptService.createScript(
+                "extension-form",
+                """
+                function on_extension_open(event)
+                    mesh.kv.set('opened', event.type)
+                    mesh.form.set_title('Extension Title')
+                    local card = mesh.form.add({ type = 'card', id = 'main' })
+                    mesh.form.add({ type = 'button', id = 'run', parent = card, text = 'Run' })
+                end
+
+                function on_form_event(event)
+                    mesh.kv.set('form_event', event.type .. ':' .. event.id .. ':' .. tostring(event.value))
+                    mesh.form.set('run', { text = 'Done' })
+                end
+                """,
+                true,
+                "",
+                LuaScript.BotType.EXTENSION,
+                "");
+        FakeFormBridge formBridge = new FakeFormBridge();
+
+        runtimeService.runExtension(extension, formBridge, events::add);
+
+        awaitCondition(() -> formBridge.components.containsKey("run"),
+                "Extension did not create form controls");
+
+        assertEquals("extension_open", scriptService.getKv(extension.getId(), "opened"));
+        assertEquals("Extension Title", formBridge.title);
+        assertTrue(runtimeService.isRunning(extension.getId()));
+
+        runtimeService.deliverFormEvent(extension.getId(),
+                new LuaFormEvent(extension.getId(), "run", "action", "clicked", "Run"));
+
+        awaitCondition(() -> "action:run:clicked".equals(scriptService.getKv(extension.getId(), "form_event")),
+                "Extension did not receive form event");
+
+        assertEquals("Done", formBridge.components.get("run").text());
+        assertFalse(events.stream().anyMatch(event -> event.type() == LuaScriptEvent.Type.ERROR));
+    }
+
+    @Test
+    void extensionFormAcceptsExtendedAtlantaFxComponentOptions() {
+        LuaScript extension = scriptService.createScript(
+                "extension-form-components",
+                """
+                function on_extension_open(event)
+                    mesh.form.clear()
+                    local shell = mesh.form.add({
+                        type = 'split_pane',
+                        id = 'shell',
+                        orientation = 'horizontal',
+                        grow = 'always'
+                    })
+                    mesh.form.add({
+                        type = 'list_view',
+                        id = 'channels',
+                        parent = shell,
+                        items = { '#mesh', '#ops' },
+                        value = '#ops',
+                        width = 180,
+                        min_width = 120,
+                        grow = 'never'
+                    })
+                    mesh.form.add({
+                        type = 'text_area',
+                        id = 'log',
+                        parent = shell,
+                        value = '[12:00] <node> hello',
+                        read_only = true,
+                        monospace = true,
+                        rows = 12,
+                        wrap = false,
+                        grow = 'always'
+                    })
+                    mesh.form.add({ type = 'toggle_switch', id = 'online', text = 'Online', selected = true })
+                    mesh.form.add({
+                        type = 'segmented_control',
+                        id = 'mode',
+                        items = { 'IRC', 'DM' },
+                        value = 'IRC'
+                    })
+                    mesh.form.add({ type = 'ring_progress', id = 'sync', value = 0.5, width = 48, height = 48 })
+                end
+                """,
+                true,
+                "",
+                LuaScript.BotType.EXTENSION,
+                "");
+        FakeFormBridge formBridge = new FakeFormBridge();
+
+        runtimeService.runExtension(extension, formBridge, events::add);
+
+        awaitCondition(() -> formBridge.components.containsKey("sync"),
+                "Extension did not create extended form controls");
+
+        LuaFormComponentSpec shell = formBridge.components.get("shell").spec();
+        assertEquals("split_pane", shell.type());
+        assertEquals("horizontal", shell.orientation());
+        assertEquals("always", shell.grow());
+
+        LuaFormComponentSpec channels = formBridge.components.get("channels").spec();
+        assertEquals("list_view", channels.type());
+        assertEquals("shell", channels.parentId());
+        assertEquals(List.of("#mesh", "#ops"), channels.items());
+        assertEquals("#ops", channels.value());
+        assertEquals(180.0, channels.width());
+        assertEquals(120.0, channels.minWidth());
+        assertEquals("never", channels.grow());
+
+        LuaFormComponentSpec log = formBridge.components.get("log").spec();
+        assertEquals(Boolean.TRUE, log.readOnly());
+        assertEquals(Boolean.TRUE, log.monospace());
+        assertEquals(Boolean.FALSE, log.wrap());
+        assertEquals(12, log.rows());
+
+        assertEquals(Boolean.TRUE, formBridge.components.get("online").value());
+        assertEquals("IRC", formBridge.components.get("mode").value());
+        assertEquals(0.5, formBridge.components.get("sync").value());
         assertFalse(events.stream().anyMatch(event -> event.type() == LuaScriptEvent.Type.ERROR));
     }
 
@@ -450,6 +592,7 @@ class LuaScriptRuntimeServiceTest {
                 new LuaAutomationCommand("channel", "0", "@tracebot", "@tracebot Alpha", "Alpha", List.of("Alpha"), "trace-command"),
                 events::add,
                 request -> fail("Node picker must not be requested"),
+                null,
                 () -> closed.set(true));
 
         try {
@@ -561,6 +704,7 @@ class LuaScriptRuntimeServiceTest {
                 new LuaAutomationCommand("channel", "0", "@infobot", "@infobot Alpha", "Alpha", List.of("Alpha"), "info-command"),
                 events::add,
                 request -> fail("Node picker must not be requested"),
+                null,
                 () -> closed.set(true));
 
         try {
@@ -665,6 +809,7 @@ class LuaScriptRuntimeServiceTest {
                 new LuaAutomationCommand("channel", "0", "@infobot", "@infobot Alpha", "Alpha", List.of("Alpha"), "info-command"),
                 events::add,
                 request -> fail("Node picker must not be requested"),
+                null,
                 () -> closed.set(true));
 
         try {
@@ -726,6 +871,7 @@ class LuaScriptRuntimeServiceTest {
                 new LuaAutomationCommand("channel", "0", "@adminbot", "@adminbot", "", List.of(), "admin-command"),
                 events::add,
                 request -> fail("Node picker must not be requested"),
+                null,
                 () -> closed.set(true));
 
         try {
@@ -817,6 +963,7 @@ class LuaScriptRuntimeServiceTest {
                 new LuaAutomationCommand("channel", "0", "@adminbot", "@adminbot", "", List.of(), "admin-command"),
                 events::add,
                 request -> fail("Node picker must not be requested"),
+                null,
                 () -> closed.set(true));
 
         try {
@@ -1050,6 +1197,49 @@ class LuaScriptRuntimeServiceTest {
         assertFalse(events.stream().anyMatch(event -> event.type() == LuaScriptEvent.Type.ERROR));
     }
 
+    @Test
+    void debugExtensionRunsWithEmbeddedFormContext() {
+        LuaScript extension = scriptService.createScript(
+                "debug-extension",
+                String.join("\n",
+                        "function on_extension_open(event)",
+                        "    mesh.form.set_title('Debug Extension')",
+                        "    local count = 1",
+                        "    count = count + 1",
+                        "    mesh.kv.set('count', tostring(count))",
+                        "    mesh.form.add({ type = 'label', id = 'status', text = tostring(count) })",
+                        "end"),
+                true,
+                "",
+                LuaScript.BotType.EXTENSION,
+                "");
+        FakeFormBridge formBridge = new FakeFormBridge();
+
+        runtimeService.debugExtension(extension, formBridge, Set.of(4), events::add);
+
+        awaitCondition(() -> runtimeService.isPaused(extension.getId())
+                        && runtimeService.debugSnapshot(extension.getId())
+                        .map(snapshot -> snapshot.line() == 4)
+                        .orElse(false),
+                "Extension debugger did not pause inside on_extension_open");
+
+        LuaDebugSnapshot pause = runtimeService.debugSnapshot(extension.getId()).orElseThrow();
+        assertTrue(pause.variables().stream().anyMatch(variable ->
+                "local".equals(variable.scope())
+                        && "count".equals(variable.name())
+                        && "1".equals(variable.value())));
+
+        runtimeService.debugContinue(extension.getId());
+
+        awaitCondition(() -> "2".equals(scriptService.getKv(extension.getId(), "count")),
+                "Extension debugger did not continue after breakpoint");
+
+        assertEquals("Debug Extension", formBridge.title);
+        assertEquals("2", formBridge.components.get("status").text());
+        assertTrue(runtimeService.isRunning(extension.getId()));
+        assertFalse(events.stream().anyMatch(event -> event.type() == LuaScriptEvent.Type.ERROR));
+    }
+
     private static void awaitCondition(BooleanSupplier condition, String timeoutMessage) {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(4);
         while (System.nanoTime() < deadline) {
@@ -1093,6 +1283,73 @@ class LuaScriptRuntimeServiceTest {
         System.arraycopy(frame, 4, payload, 0, payloadLength);
         return MeshProtos.ToRadio.parseFrom(payload);
     }
+
+    private static final class FakeFormBridge implements LuaFormBridge {
+        private final Map<String, FakeComponent> components = new ConcurrentHashMap<>();
+        private volatile String title = "";
+        private volatile boolean open = true;
+
+        @Override
+        public boolean isFormAvailable() {
+            return open;
+        }
+
+        @Override
+        public boolean isFormOpen() {
+            return open;
+        }
+
+        @Override
+        public void showForm() {
+            open = true;
+        }
+
+        @Override
+        public void setFormTitle(String title) {
+            this.title = title;
+        }
+
+        @Override
+        public void clearForm() {
+            components.clear();
+        }
+
+        @Override
+        public String addFormComponent(LuaFormComponentSpec spec) {
+            String id = spec.id() != null && !spec.id().isBlank()
+                    ? spec.id()
+                    : "component_" + (components.size() + 1);
+            components.put(id, new FakeComponent(
+                    spec.type(),
+                    spec.text(),
+                    spec.value(),
+                    spec));
+            return id;
+        }
+
+        @Override
+        public void updateFormComponent(String id, LuaFormComponentSpec spec) {
+            FakeComponent existing = components.get(id);
+            components.put(id, new FakeComponent(
+                    spec.type() != null ? spec.type() : existing != null ? existing.type() : "",
+                    spec.text() != null ? spec.text() : existing != null ? existing.text() : "",
+                    spec.value() != null ? spec.value() : existing != null ? existing.value() : null,
+                    spec));
+        }
+
+        @Override
+        public void removeFormComponent(String id) {
+            components.remove(id);
+        }
+
+        @Override
+        public Object formComponentValue(String id) {
+            FakeComponent component = components.get(id);
+            return component != null ? component.value() : null;
+        }
+    }
+
+    private record FakeComponent(String type, String text, Object value, LuaFormComponentSpec spec) {}
 
     private static final class FakeTransportConnection implements TransportConnection {
         private final BlockingQueue<byte[]> writes = new LinkedBlockingQueue<>();
