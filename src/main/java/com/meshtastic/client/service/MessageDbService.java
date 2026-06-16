@@ -80,6 +80,10 @@ public final class MessageDbService {
         try {
             closeStatements();
             dbConnection = DatabaseProvider.getConnection();
+            if (dbConnection == null) {
+                log.error("Message DB initialization skipped because database connection is unavailable");
+                return;
+            }
 
             try (Statement stmt = dbConnection.createStatement()) {
                 stmt.execute("""

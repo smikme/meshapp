@@ -1218,6 +1218,19 @@
     -fx-font-weight: bold;
 }
 
+.database-recovery-dialog {
+    -fx-background-color: -color-bg-default;
+}
+
+.database-recovery-status {
+    -fx-font-weight: bold;
+}
+
+.database-recovery-path {
+    -fx-text-fill: -color-fg-muted;
+    -fx-font-size: 0.8462em;
+}
+
 .hero-title {
     -fx-font-size: 1.3846em;
     -fx-font-weight: bold;
