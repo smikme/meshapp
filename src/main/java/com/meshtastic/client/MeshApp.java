@@ -1,6 +1,7 @@
 package com.meshtastic.client;
 
 import com.meshtastic.client.components.CrashReportFlow;
+import com.meshtastic.client.components.DatabaseRecoveryDialog;
 import com.meshtastic.client.components.EmojiImageCache;
 import com.meshtastic.client.components.EmojiRenderingSupport;
 import com.meshtastic.client.components.LuaDevWindow;
@@ -108,6 +109,8 @@ public class MeshApp extends Application {
 
         AppPreferences.init();
         I18n.initFromPreferences();
+        DatabaseProvider.setRecoveryExecutor((dbFile, task) ->
+                DatabaseRecoveryDialog.run(stage, dbFile, task));
 
         // Preload common emoji to make first rendering faster.
         EmojiImageCache.preloadCommonEmojis();

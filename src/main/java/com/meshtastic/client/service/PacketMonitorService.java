@@ -679,6 +679,10 @@ public final class PacketMonitorService {
         try {
             closeStatements();
             dbConnection = DatabaseProvider.getConnection();
+            if (dbConnection == null) {
+                log.error("Packet monitor DB initialization skipped because database connection is unavailable");
+                return;
+            }
             try (Statement stmt = dbConnection.createStatement()) {
                 stmt.execute("""
                         CREATE TABLE IF NOT EXISTS lora_packet_logs (

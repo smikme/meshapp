@@ -98,8 +98,8 @@ public final class RemoteAdminPanel extends VBox implements AutoCloseable {
 
     /**
      * Creates a side panel for administering one remote Meshtastic node.
-     * The constructor opens an idle panel; loading starts only after the user
-     * confirms that their public key is configured on the target node.
+     * The constructor builds the section catalog locally. Network requests are
+     * sent only after the user explicitly requests a section or command.
      *
      * @param localState state of the locally connected node
      * @param targetNode remote node selected in the node detail view
@@ -128,7 +128,7 @@ public final class RemoteAdminPanel extends VBox implements AutoCloseable {
         refreshButton = toolbarButton(
                 I18n.t("remoteAdmin.action.refresh"),
                 "/icons/refresh.svg",
-                this::confirmAdminKeyAndLoadSnapshot);
+                this::showSectionCatalog);
         saveButton = toolbarButton(
                 I18n.t("remoteAdmin.action.save"),
                 "/icons/save-radio.svg",
@@ -153,9 +153,7 @@ public final class RemoteAdminPanel extends VBox implements AutoCloseable {
         setSpacing(10);
         getChildren().addAll(header, tabs);
 
-        statusLabel.setText(I18n.t("remoteAdmin.status.confirmRequired"));
-        queryStatusLabel.setText("");
-        setBusy(false);
+        showSectionCatalog();
     }
 
     private VBox createConfigTabContent() {
@@ -280,18 +278,10 @@ public final class RemoteAdminPanel extends VBox implements AutoCloseable {
         if (modal == null) {
             return;
         }
-        Window owner = modal.getScene() != null ? modal.getScene().getWindow() : null;
-        String displayName = resolveDisplayName(node);
-        if (!confirmAdminKeyConfigured(displayName, owner)) {
-            return;
-        }
-
         RemoteAdminPanel panel = new RemoteAdminPanel(localState, node, handler);
-        panel.adminKeyConfirmed = true;
         panel.modalPane = modal;
         modal.show(panel, false, false);
         modal.setOnHidden(panel::close);
-        Platform.runLater(panel::loadSnapshot);
     }
 
     /**
@@ -311,21 +301,6 @@ public final class RemoteAdminPanel extends VBox implements AutoCloseable {
         }
     }
 
-    private void confirmAdminKeyAndLoadSnapshot() {
-        if (adminKeyConfirmed) {
-            loadSnapshot();
-            return;
-        }
-        if (confirmAdminKeyConfigured()) {
-            adminKeyConfirmed = true;
-            loadSnapshot();
-            return;
-        }
-        statusLabel.setText(I18n.t("remoteAdmin.status.confirmCancelled"));
-        queryStatusLabel.setText("");
-        setBusy(false);
-    }
-
     private boolean confirmAdminKeyConfigured() {
         Window owner = getScene() != null ? getScene().getWindow() : null;
         return confirmAdminKeyConfigured(targetDisplayName, owner);
@@ -333,7 +308,7 @@ public final class RemoteAdminPanel extends VBox implements AutoCloseable {
 
     private static boolean confirmAdminKeyConfigured(String targetDisplayName, Window owner) {
         ButtonType cancelButton = new ButtonType(I18n.t("common.cancel"), ButtonBar.ButtonData.CANCEL_CLOSE);
-        ButtonType loadButton = new ButtonType(I18n.t("remoteAdmin.action.loadConfig"),
+        ButtonType loadButton = new ButtonType(I18n.t("remoteAdmin.action.confirmAccess"),
                 ButtonBar.ButtonData.OK_DONE);
         Alert alert = new Alert(Alert.AlertType.CONFIRMATION);
         alert.setTitle(I18n.t("remoteAdmin.access.title"));
@@ -346,28 +321,33 @@ public final class RemoteAdminPanel extends VBox implements AutoCloseable {
         return alert.showAndWait().orElse(cancelButton) == loadButton;
     }
 
-    private void loadSnapshot() {
-        setBusy(true);
-        startProgress(0);
-        statusLabel.setText(I18n.t("remoteAdmin.status.loading"));
-        queryStatusLabel.setText("");
-        remoteAdminService.loadSnapshot(this::handleSnapshotProgress).whenComplete((session, error) ->
-                Platform.runLater(() -> {
-                    if (error != null) {
-                        finishProgress(false);
-                        setBusy(false);
-                        statusLabel.setText(I18n.t("remoteAdmin.status.loadError", errorDetail(error)));
-                        return;
-                    }
-                    loadedSession = session;
-                    rebuildTree(session);
-                    updateCommandState(session);
-                    finishProgress(true);
-                    setBusy(false);
-                }));
+    private boolean ensureAdminKeyConfirmed(Label targetStatusLabel) {
+        if (adminKeyConfirmed) {
+            return true;
+        }
+        if (confirmAdminKeyConfigured()) {
+            adminKeyConfirmed = true;
+            return true;
+        }
+        targetStatusLabel.setText(I18n.t("remoteAdmin.status.confirmCancelled"));
+        return false;
+    }
+
+    private void showSectionCatalog() {
+        loadedSession = remoteAdminService.session();
+        rebuildTree(loadedSession, false);
+        statusLabel.setText(I18n.t("remoteAdmin.status.sectionsReady"));
+        queryStatusLabel.setText(I18n.t("remoteAdmin.status.noSectionsRequested"));
+        updateCommandState(loadedSession);
+        finishProgress(true);
+        setBusy(false);
     }
 
     private void rebuildTree(RemoteAdminSession session) {
+        rebuildTree(session, true);
+    }
+
+    private void rebuildTree(RemoteAdminSession session, boolean updateStatus) {
         DeviceState remoteState = session.remoteState();
         synchronized (remoteState.getConfigs()) {
             originalConfigs = new ArrayList<>(remoteState.getConfigs());
@@ -388,6 +368,9 @@ public final class RemoteAdminPanel extends VBox implements AutoCloseable {
         configTree.setRoot(fullConfigRoot);
         searchField.clear();
 
+        if (!updateStatus) {
+            return;
+        }
         int loadedSections = originalConfigs.size() + originalModuleConfigs.size();
         int totalFields = ConfigTreeItemSupport.countEditableFields(fullConfigRoot);
         RemoteAdminSession.QuerySummary summary = session.querySummary();
@@ -414,6 +397,9 @@ public final class RemoteAdminPanel extends VBox implements AutoCloseable {
                 loadedSession.targetNode());
         if (!changes.hasChanges()) {
             statusLabel.setText(I18n.t("settings.config.status.noChanges"));
+            return;
+        }
+        if (!ensureAdminKeyConfirmed(statusLabel)) {
             return;
         }
 
@@ -571,6 +557,9 @@ public final class RemoteAdminPanel extends VBox implements AutoCloseable {
     private void requestMissingSection(String displayName, Supplier<CompletableFuture<Void>> request) {
         if (loadedSession == null) {
             statusLabel.setText(I18n.t("remoteAdmin.status.loadFirst"));
+            return;
+        }
+        if (!ensureAdminKeyConfirmed(statusLabel)) {
             return;
         }
         setBusy(true);
@@ -759,6 +748,9 @@ public final class RemoteAdminPanel extends VBox implements AutoCloseable {
             commandStatusLabel.setText(I18n.t("remoteAdmin.status.commandsLoadFirst"));
             return;
         }
+        if (!ensureAdminKeyConfirmed(commandStatusLabel)) {
+            return;
+        }
         setBusy(true);
         commandStatusLabel.setText(I18n.t(
                 "remoteAdmin.status.commandSending",
@@ -781,6 +773,9 @@ public final class RemoteAdminPanel extends VBox implements AutoCloseable {
     private void runCommand(String commandName, Supplier<CompletableFuture<Void>> action) {
         if (loadedSession == null) {
             commandStatusLabel.setText(I18n.t("remoteAdmin.status.commandsLoadFirst"));
+            return;
+        }
+        if (!ensureAdminKeyConfirmed(commandStatusLabel)) {
             return;
         }
         setBusy(true);
@@ -807,6 +802,10 @@ public final class RemoteAdminPanel extends VBox implements AutoCloseable {
                 commandStatusLabel.setText(I18n.t("remoteAdmin.status.commandsLoadFirst"));
             }
             onComplete.accept(new IllegalStateException(I18n.t("remoteAdmin.status.commandsLoadFirst")));
+            return;
+        }
+        if (!ensureAdminKeyConfirmed(commandStatusLabel)) {
+            onComplete.accept(new IllegalStateException(I18n.t("remoteAdmin.status.confirmCancelled")));
             return;
         }
 
@@ -880,39 +879,6 @@ public final class RemoteAdminPanel extends VBox implements AutoCloseable {
         commandStatusLabel.setText(I18n.t(
                 "remoteAdmin.status.connectionStatus",
                 describeConnectionStatus(session.getConnectionStatus())));
-    }
-
-    private void handleSnapshotProgress(RemoteAdminService.QueryProgress progress) {
-        Platform.runLater(() -> {
-            double value = progress.total() <= 0
-                    ? ProgressIndicator.INDETERMINATE_PROGRESS
-                    : (double) progress.completed() / (double) progress.total();
-            loadProgressBar.setProgress(value);
-            String block = displayQueryKey(progress.key());
-            if (progress.state() == RemoteAdminSession.QueryState.SENT) {
-                statusLabel.setText(I18n.t(
-                        "remoteAdmin.status.blockRequested",
-                        block,
-                        progress.completed(),
-                        progress.total()));
-            } else if (progress.state() == RemoteAdminSession.QueryState.RECEIVED) {
-                statusLabel.setText(I18n.t(
-                        "remoteAdmin.status.blockReceived",
-                        block,
-                        progress.completed(),
-                        progress.total()));
-            } else {
-                statusLabel.setText(I18n.t(
-                        "remoteAdmin.status.blockFailed",
-                        block,
-                        progress.completed(),
-                        progress.total()));
-            }
-            queryStatusLabel.setText(I18n.t(
-                    "remoteAdmin.status.progress",
-                    progress.completed(),
-                    progress.total()));
-        });
     }
 
     private void startProgress(double progress) {

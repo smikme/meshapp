@@ -188,9 +188,12 @@ end
 |----------|-------------------|
 | `on_message(msg)` | For every new incoming or outgoing message while the script is running |
 | `on_command(command)` | When an automation bot is started from chat |
+| `on_extension_open(event)` | When an extension script is opened from the left toolbar |
+| `on_form_event(event)` | After an action or value change from a component created through `mesh.form.*` |
 | `on_node_selected(event)` | After selecting or cancelling node selection through `mesh.ui.pick_node(...)` |
 | `on_traceroute(event)` | After `mesh.traceroute.request(...)` produces a result |
 | `on_node_info(event)` | After `mesh.nodeinfo.request(...)` produces a result |
+| `on_admin(event)` | After `mesh.admin.*` remote administration requests produce progress or a result |
 | `on_canvas_event(event)` | After an event in a floating Canvas window: mouse, keyboard, resize, open/close |
 | `on_canvas_frame(event)` | On the Canvas window timer, if `fps` is set or `mesh.canvas.set_fps(...)` was called |
 
@@ -284,6 +287,135 @@ HTTP(S) requests are executed by the built-in Java HTTP client. Access to local,
 | `chat_type` | string | Chat context from the original `options` |
 | `chat_key` | string | Chat key from the original `options` |
 | `node` | `node` or `nil` | Selected node; `nil` if the picker was cancelled |
+
+## `mesh.form`
+
+`mesh.form` is available only to scripts of type “Extension”. An extension script adds a button to the left application toolbar and controls an embedded MeshApp section, not a separate window.
+
+Form components do not return Lua objects with their own methods. A script creates a component with `mesh.form.add(...)`, receives or assigns its `id`, and then controls it through `mesh.form.set(id, ...)`, `mesh.form.value(id)`, and `mesh.form.remove(id)`.
+
+| Function | Return | Purpose |
+|----------|--------|---------|
+| `mesh.form.show([options])` | `true` | Shows the embedded extension section; if `options.text` is passed, changes the title |
+| `mesh.form.set_title(title)` | `true` | Changes the section title; an empty title falls back to the script name |
+| `mesh.form.clear()` | `true` | Removes all created components |
+| `mesh.form.add(options)` | `component_id` | Adds a component and returns its id; a string type can be passed instead of a table, for example `"separator"` |
+| `mesh.form.set(id, options)` | `true` | Updates component properties; an existing component's type, id, and parent are not changed |
+| `mesh.form.remove(id)` | `true` | Removes a component |
+| `mesh.form.value(id)` | value or `nil` | Returns the current component value |
+
+### Common `options` Fields
+
+`options.type` is required for `mesh.form.add(...)`. Fields unsupported by a component are ignored.
+
+| Field | Type | Purpose |
+|-------|------|---------|
+| `type` | string | Component type to create: `label`, `button`, `text_field`, `password_field`, `text_area`, `checkbox`, `toggle_switch`, `combo_box`, `segmented_control`, `list_view`, `slider`, `progress_bar`, `ring_progress`, `separator`, `spacer`, `message`, `tile`, `card`, `vbox`, `hbox`, `split_pane`, `scroll_pane` |
+| `id` | string | Stable component id. If omitted, MeshApp creates one and returns it from `add(...)` |
+| `parent` | string | Id of a `card`, `vbox`, `hbox`, `split_pane`, or `scroll_pane` container. If omitted, the component is added to the form root |
+| `text` | string | Label or title for `label`, `button`, `checkbox`, `toggle_switch`, `message`, or `tile` |
+| `prompt` | string | Placeholder for `text_field`, `password_field`, and `text_area`; for `combo_box`, it is used as the empty value prompt |
+| `value` | string/number/boolean | Current component value. `progress_bar` and `ring_progress` use `0..1`; `slider` is clamped to `min..max`; `message` and `tile` use it as the description |
+| `selected` | boolean | Alias for `checkbox` and `toggle_switch` `value` when `value` is omitted |
+| `items` | array<string> | Options for `combo_box`, `segmented_control`, and `list_view` |
+| `min`, `max` | number | `slider` range; defaults to `0..100` |
+| `orientation` | string | `horizontal` or `vertical` for `separator`, `spacer`, and `split_pane` |
+| `width`, `height` | number | Preferred component size in pixels |
+| `min_width`, `min_height` | number | Minimum component size in pixels |
+| `max_width`, `max_height` | number | Maximum component size in pixels |
+| `grow` | string/boolean | Layout growth: `always`, `sometimes`, `never`, `true`/`false`. Applies in `vbox`, `hbox`, and to `split_pane` children |
+| `rows` | number | Visible row count for `text_area` |
+| `wrap` | boolean | Text wrapping for `label` and `text_area` |
+| `read_only` | boolean | Makes `text_field`, `password_field`, and `text_area` non-editable while keeping selection/copy available |
+| `monospace` | boolean | Enables a monospace font for text components; `style = "monospace"` is also accepted |
+| `disabled` | boolean | Disables or enables the component |
+| `visible` | boolean | Shows or hides the component; a hidden component does not take layout space |
+| `style` | string | `button` supports `accent` when created; text components support `monospace` |
+
+`mesh.form.set(id, options)` can update supported properties such as `text`, `prompt`, `value`, `items`, `min`, `max`, sizes, `grow`, `read_only`, `wrap`, `monospace`, `disabled`, and `visible`. `type`, `id`, and `parent` are creation-time fields; remove and recreate a component to change them.
+
+### Component Types
+
+| `options.type` | Creates | Main properties | `mesh.form.value(id)` | Events |
+|----------------|---------|-----------------|------------------------|--------|
+| `label` | Wrapped text label | `id`, `parent`, `text`, `value`, `disabled`, `visible` | Current text | None |
+| `button` | Button | `id`, `parent`, `text`, `style="accent"`, `disabled`, `visible` | `nil` | `action` on click |
+| `text_field` | Single-line text input | `id`, `parent`, `value`, `prompt`, `read_only`, `monospace`, `disabled`, `visible` | String | `change` when text changes, `action` on Enter |
+| `password_field` | Password input | `id`, `parent`, `value`, `prompt`, `read_only`, `disabled`, `visible` | String | `change` when text changes, `action` on Enter |
+| `text_area` | Multi-line text input | `id`, `parent`, `value`, `prompt`, `rows`, `wrap`, `read_only`, `monospace`, `disabled`, `visible` | String | `change` when text changes |
+| `checkbox` | Checkbox with text | `id`, `parent`, `text`, `value`/`selected`, `disabled`, `visible` | Boolean | `change` when toggled |
+| `toggle_switch` | AtlantaFX toggle switch | `id`, `parent`, `text`, `value`/`selected`, `disabled`, `visible` | Boolean | `change` when toggled |
+| `combo_box` | Drop-down selection | `id`, `parent`, `items`, `value`, `prompt`, `disabled`, `visible` | Selected string or `nil` | `change` when selected |
+| `segmented_control` | AtlantaFX segmented button group | `id`, `parent`, `items`, `value`, `disabled`, `visible` | Selected string or `nil` | `change` when selected |
+| `list_view` | String list | `id`, `parent`, `items`, `value`, `disabled`, `visible` | Selected string or `nil` | `change` when selected |
+| `slider` | Numeric slider | `id`, `parent`, `min`, `max`, `value`, `disabled`, `visible` | Number | `change` when moved |
+| `progress_bar` | Progress indicator | `id`, `parent`, `value`, `disabled`, `visible` | Number `0..1` | None |
+| `ring_progress` | AtlantaFX ring progress indicator | `id`, `parent`, `value`, `width`, `height`, `disabled`, `visible` | Number `0..1` | None |
+| `separator` | Separator | `id`, `parent`, `orientation`, `disabled`, `visible` | `nil` | None |
+| `spacer` | AtlantaFX empty spacer | `id`, `parent`, `orientation`, `value`, `grow`, `disabled`, `visible` | `nil` | None |
+| `message` | AtlantaFX message with title and description | `id`, `parent`, `text`, `value`, `disabled`, `visible` | Description | `action`, `close` |
+| `tile` | AtlantaFX tile with title and description | `id`, `parent`, `text`, `value`, `disabled`, `visible` | Description | `action` |
+| `card` | App-styled card container | `id`, `parent`, `disabled`, `visible` | `nil` | None |
+| `vbox` | Vertical container | `id`, `parent`, `grow`, `disabled`, `visible` | `nil` | None |
+| `hbox` | Horizontal container | `id`, `parent`, `grow`, `disabled`, `visible` | `nil` | None |
+| `split_pane` | Split view with multiple child panes | `id`, `parent`, `orientation`, `grow`, `disabled`, `visible` | `nil` | None |
+| `scroll_pane` | Scrollable container | `id`, `parent`, `grow`, `disabled`, `visible` | `nil` | None |
+
+`card`, `vbox`, `hbox`, `split_pane`, and `scroll_pane` are layout containers. To place a component inside a container, set `parent = "container_id"` or use the id returned by `mesh.form.add(...)`. For `split_pane`, every child becomes a separate split-view area; for `scroll_pane`, usually add one child `vbox` or `hbox` container.
+
+`on_extension_open(event)` fields:
+
+| Field | Type | Purpose |
+|-------|------|---------|
+| `type` | string | Always `extension_open` |
+| `source` | string | Always `mesh.extension` |
+| `script_id` | number | Current script id |
+| `name` | string | Current script name |
+
+`on_form_event(event)` fields:
+
+| Field | Type | Purpose |
+|-------|------|---------|
+| `type` | string | `action` for buttons/Enter in a field, `change` for value changes, `close` when a `message` is closed |
+| `source` | string | Always `mesh.form` |
+| `component_id`, `id` | string | Component id |
+| `value` | string/number/boolean/nil | Current component value |
+| `text` | string or `nil` | Text representation of the value |
+
+Extension form example:
+
+```lua
+function on_extension_open(event)
+    mesh.form.set_title("Diagnostics")
+    mesh.form.clear()
+
+    local card = mesh.form.add({ type = "card", id = "main" })
+    mesh.form.add({ type = "label", id = "status", parent = card, text = "Ready" })
+    mesh.form.add({ type = "text_field", id = "node", parent = card, prompt = "Node ID" })
+    mesh.form.add({
+        type = "combo_box",
+        id = "mode",
+        parent = card,
+        items = { "status", "trace", "admin" },
+        value = "status"
+    })
+    mesh.form.add({ type = "checkbox", id = "verbose", parent = card, text = "Verbose", value = true })
+    mesh.form.add({ type = "button", id = "run", parent = card, text = "Run", style = "accent" })
+end
+
+function on_form_event(event)
+    if event.id == "run" and event.type == "action" then
+        local node = mesh.form.value("node")
+        local mode = mesh.form.value("mode")
+        local verbose = mesh.form.value("verbose")
+        mesh.form.set("status", {
+            text = "Run: " .. tostring(mode) .. " / " .. tostring(node) .. " / verbose=" .. tostring(verbose)
+        })
+    elseif event.id == "mode" and event.type == "change" then
+        mesh.form.set("status", { text = "Mode: " .. tostring(event.value) })
+    end
+end
+```
 
 ## `mesh.canvas`
 
@@ -437,6 +569,86 @@ Color can be passed as a JavaFX/CSS string (`"#ffcc00"`, `"rgba(255,0,0,0.5)"`, 
 | `chat_type` | string | Chat context from the original `options` |
 | `chat_key` | string | Chat key from the original `options` |
 | `node` | `node` or `nil` | Node table; `nil` when no node data is available |
+
+## `mesh.admin`
+
+Remote admin works only for Meshtastic connections. The local client's public key must be listed in the target node's Admin Key. All functions are asynchronous: they return `request_id` and later call `on_admin(event)`.
+
+`target` can be a node ID string (`"!abcdef12"`), numeric `node_num`, or a node table with `node_num`, `node_id`, `long_name`, `short_name`.
+
+| Function | Return | Purpose |
+|----------|--------|---------|
+| `mesh.admin.load_config(target[, options])` | `request_id` | Loads a remote snapshot: owner, metadata, configs, module configs, channels, status |
+| `mesh.admin.request_config(target, type[, options])` | `request_id` | Loads one core config section, for example `POWER_CONFIG` or `power` |
+| `mesh.admin.request_module_config(target, type[, options])` | `request_id` | Loads one module config section, for example `MQTT_CONFIG` or `mqtt` |
+| `mesh.admin.save_config(target, changes, options)` | `request_id` | Saves owner/position/text/config/channel changes; requires `options.confirm = true` |
+| `mesh.admin.refresh_status(target[, options])` | `request_id` | Reloads device connection status |
+| `mesh.admin.reboot(target[, delay_seconds[, options]])` | `request_id` | Requests delayed reboot; `0` cancels pending reboot |
+| `mesh.admin.shutdown(target[, delay_seconds[, options]])` | `request_id` | Requests delayed shutdown; `0` cancels pending shutdown |
+| `mesh.admin.sync_time(target[, epoch_seconds[, options]])` | `request_id` | Sets remote node time; defaults to current app time |
+| `mesh.admin.backup(target[, location[, options]])` | `request_id` | Backs up preferences to `FLASH` or `SD` |
+| `mesh.admin.restore(target[, location], options)` | `request_id` | Restores preferences; requires `options.confirm = true` |
+| `mesh.admin.remove_backup(target[, location], options)` | `request_id` | Removes stored backup; requires `options.confirm = true` |
+| `mesh.admin.reset_nodedb(target[, preserve_favorites], options)` | `request_id` | Resets remote NodeDB; requires `options.confirm = true` |
+| `mesh.admin.factory_reset_config(target, options)` | `request_id` | Factory-resets remote config; requires `options.confirm = true` |
+| `mesh.admin.factory_reset_device(target, options)` | `request_id` | Factory-resets the remote device; requires `options.confirm = true` |
+| `mesh.admin.enter_dfu_mode(target, options)` | `request_id` | Requests DFU mode; requires `options.confirm = true` |
+| `mesh.admin.set_owner(target, owner[, options])` | `request_id` | Updates `{ long_name, short_name, licensed }` |
+| `mesh.admin.set_fixed_position(target, position[, options])` | `request_id` | Sets `{ latitude, longitude, altitude }` as a manual position |
+| `mesh.admin.remove_fixed_position(target[, options])` | `request_id` | Clears manual fixed position |
+| `mesh.admin.set_ringtone(target, text[, options])` | `request_id` | Updates RTTTL ringtone text |
+| `mesh.admin.set_canned_messages(target, text[, options])` | `request_id` | Updates canned message module text |
+
+`save_config` patch example:
+
+```lua
+local target = "!abcdef12"
+
+mesh.admin.request_config(target, "POWER_CONFIG")
+
+function on_admin(event)
+    if event.action == "request_config" and event.ok then
+        mesh.admin.save_config(target, {
+            owner = { long_name = "Remote Node", short_name = "RMT", licensed = true },
+            configs = {
+                power = { ls_secs = 300, min_wake_secs = 10 }
+            },
+            module_configs = {
+                mqtt = { enabled = true, address = "mqtt.example.com" }
+            },
+            channels = {
+                { index = 0, role = "PRIMARY", settings = { name = "LongFast" } }
+            }
+        }, { confirm = true })
+    end
+end
+```
+
+Config, module config and channel patches use protobuf `snake_case` field names. Enum values are strings such as `"PRIMARY"` or `"CLIENT"`. Repeated fields are Lua lists. Bytes are accepted as hex strings, `hex:...`, `base64:...`, or Base64 strings. By default patches are merged with the section loaded by `load_config` or `request_config`; if a section was not loaded, `save_config` fails. Pass `{ replace = true, confirm = true }` only when intentionally sending a replacement built from defaults.
+
+Full list of readable and writable config fields: [lua-admin-config-reference.md](lua-admin-config-reference.md).
+
+`on_admin(event)` fields:
+
+| Field | Type | Purpose / returned value |
+|-------|------|--------------------------|
+| `type` | string | `admin_progress` or `admin_result` |
+| `source` | string | API source, for example `mesh.admin.save_config` |
+| `name` | string | Original request name from `options.name` |
+| `request_id` | string | Request ID returned by `mesh.admin.*` |
+| `action` | string | Action name, for example `load_config`, `save_config`, `reboot` |
+| `status` | string | `ok`, `timeout`, `error`, or progress state `sent`/`received`/`failed` |
+| `ok` | boolean | `true` for successful terminal results |
+| `timeout` | boolean | `true` when the terminal result timed out |
+| `error` | string or `nil` | Failure detail |
+| `target_node_num` | number | Numeric target node ID (`uint32`) |
+| `target_node_id` | string | Target node ID in `!abcdef12` form |
+| `snapshot` | table or `nil` | Remote snapshot on terminal results |
+| `progress_key` | string or `nil` | Snapshot block key for progress events |
+| `completed` | number or `nil` | Completed snapshot blocks for progress events |
+| `total` | number or `nil` | Total snapshot blocks for progress events |
+
+`event.snapshot` includes `node`, `owner`, `device_metadata`, `ringtone`, `canned_messages`, `connection_status`, `configs`, `module_configs`, `channels`, `query_statuses`, and `query_summary`.
 
 ## Object Fields
 

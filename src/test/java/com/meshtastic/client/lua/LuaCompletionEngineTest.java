@@ -241,6 +241,34 @@ class LuaCompletionEngineTest {
     }
 
     @Test
+    void completesRemoteAdminApiAndCallbackEvent() {
+        LuaCompletionEngine.CompletionResult apiResult = complete("""
+                mesh.admin.|
+                """);
+        assertItemsContain(apiResult, "load_config(target, options)");
+        assertItemsContain(apiResult, "save_config(target, changes, options)");
+        assertItemsContain(apiResult, "factory_reset_device(target, options)");
+
+        LuaCompletionEngine.CompletionResult eventResult = complete("""
+                function on_admin(event)
+                    event.|
+                end
+                """);
+        assertItemsContain(eventResult, "action");
+        assertItemsContain(eventResult, "target_node_num");
+        assertItemsContain(eventResult, "snapshot");
+
+        LuaCompletionEngine.CompletionResult snapshotResult = complete("""
+                function on_admin(event)
+                    event.snapshot.|
+                end
+                """);
+        assertItemsContain(snapshotResult, "configs");
+        assertItemsContain(snapshotResult, "module_configs");
+        assertItemsContain(snapshotResult, "query_statuses");
+    }
+
+    @Test
     void completesCurlApiAndResponseFields() {
         LuaCompletionEngine.CompletionResult curlResult = complete("""
                 local curl = mesh.curl

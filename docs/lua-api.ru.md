@@ -188,9 +188,12 @@ end
 |----------|------------------|
 | `on_message(msg)` | Для каждого нового входящего или исходящего сообщения, пока скрипт запущен |
 | `on_command(command)` | При запуске automation-бота из чата |
+| `on_extension_open(event)` | При открытии встроенного раздела extension-скрипта из левого тулбара |
+| `on_form_event(event)` | После действия или изменения компонента, созданного через `mesh.form.*` |
 | `on_node_selected(event)` | После выбора или отмены выбора ноды через `mesh.ui.pick_node(...)` |
 | `on_traceroute(event)` | После результата `mesh.traceroute.request(...)` |
 | `on_node_info(event)` | После результата `mesh.nodeinfo.request(...)` |
+| `on_admin(event)` | После progress/result событий remote administration из `mesh.admin.*` |
 | `on_canvas_event(event)` | После события плавающего Canvas-окна: мышь, клавиатура, resize, open/close |
 | `on_canvas_frame(event)` | По таймеру Canvas-окна, если задан `fps` или вызван `mesh.canvas.set_fps(...)` |
 
@@ -284,6 +287,135 @@ HTTP(S)-запросы выполняются встроенным Java HTTP-к�
 | `chat_type` | string | Контекст чата из исходных `options` |
 | `chat_key` | string | Ключ чата из исходных `options` |
 | `node` | `node` или `nil` | Выбранная нода; `nil`, если выбор отменён |
+
+## `mesh.form`
+
+`mesh.form` доступен только для скриптов типа “Расширение”. Такой скрипт добавляет кнопку в левый тулбар приложения и управляет встроенным разделом MeshApp, а не отдельным окном.
+
+Компоненты формы не возвращают Lua-объекты со своими методами. Скрипт создаёт компонент через `mesh.form.add(...)`, получает или задаёт его `id`, а затем управляет им через методы `mesh.form.set(id, ...)`, `mesh.form.value(id)` и `mesh.form.remove(id)`.
+
+| Функция | Возврат | Назначение |
+|---------|---------|------------|
+| `mesh.form.show([options])` | `true` | Показывает встроенный раздел расширения; если передан `options.text`, меняет заголовок |
+| `mesh.form.set_title(title)` | `true` | Меняет заголовок раздела; пустой заголовок сбрасывается к имени скрипта |
+| `mesh.form.clear()` | `true` | Удаляет все созданные компоненты |
+| `mesh.form.add(options)` | `component_id` | Добавляет компонент и возвращает его id; вместо таблицы можно передать строку с типом, например `"separator"` |
+| `mesh.form.set(id, options)` | `true` | Обновляет свойства компонента; тип, id и parent существующего компонента не меняются |
+| `mesh.form.remove(id)` | `true` | Удаляет компонент |
+| `mesh.form.value(id)` | значение или `nil` | Возвращает текущее значение компонента |
+
+### Общие поля `options`
+
+`options.type` обязателен для `mesh.form.add(...)`. Поля, которые компонент не поддерживает, игнорируются.
+
+| Поле | Тип | Назначение |
+|------|-----|------------|
+| `type` | string | Тип создаваемого компонента: `label`, `button`, `text_field`, `password_field`, `text_area`, `checkbox`, `toggle_switch`, `combo_box`, `segmented_control`, `list_view`, `slider`, `progress_bar`, `ring_progress`, `separator`, `spacer`, `message`, `tile`, `card`, `vbox`, `hbox`, `split_pane`, `scroll_pane` |
+| `id` | string | Стабильный id компонента. Если не задан, MeshApp создаёт id автоматически и возвращает его из `add(...)` |
+| `parent` | string | Id контейнера `card`, `vbox`, `hbox`, `split_pane` или `scroll_pane`. Если не задан, компонент добавляется в корень формы |
+| `text` | string | Надпись или заголовок компонента: `label`, `button`, `checkbox`, `toggle_switch`, `message`, `tile` |
+| `prompt` | string | Placeholder для `text_field`, `password_field`, `text_area`; для `combo_box` применяется как пустое значение |
+| `value` | string/number/boolean | Текущее значение компонента. Для `progress_bar` и `ring_progress` используется диапазон `0..1`, для `slider` значение ограничивается `min..max`; для `message` и `tile` это описание |
+| `selected` | boolean | Алиас `value` для `checkbox` и `toggle_switch`, если `value` не задан |
+| `items` | array<string> | Список вариантов `combo_box`, `segmented_control` и `list_view` |
+| `min`, `max` | number | Диапазон `slider`; по умолчанию `0..100` |
+| `orientation` | string | Направление `horizontal` или `vertical` для `separator`, `spacer`, `split_pane` |
+| `width`, `height` | number | Предпочитаемый размер компонента в пикселях |
+| `min_width`, `min_height` | number | Минимальный размер компонента в пикселях |
+| `max_width`, `max_height` | number | Максимальный размер компонента в пикселях |
+| `grow` | string/boolean | Поведение в контейнере: `always`, `sometimes`, `never`, `true`/`false`. Работает для `vbox`, `hbox` и дочерних элементов `split_pane` |
+| `rows` | number | Количество видимых строк `text_area` |
+| `wrap` | boolean | Перенос строк для `label` и `text_area` |
+| `read_only` | boolean | Запрещает редактирование `text_field`, `password_field` и `text_area`, но компонент остаётся доступным для выделения/копирования |
+| `monospace` | boolean | Включает моноширинный шрифт для текстовых компонентов; также можно указать `style = "monospace"` |
+| `disabled` | boolean | Отключает или включает компонент |
+| `visible` | boolean | Показывает или скрывает компонент; скрытый компонент не занимает место в layout |
+| `style` | string | Для `button` при создании поддерживается `accent`; для текстовых компонентов поддерживается `monospace` |
+
+Через `mesh.form.set(id, options)` можно менять поддерживаемые свойства вроде `text`, `prompt`, `value`, `items`, `min`, `max`, размеров, `grow`, `read_only`, `wrap`, `monospace`, `disabled` и `visible`. Поля `type`, `id` и `parent` применяются только при создании компонента; чтобы изменить их, удалите компонент и создайте новый.
+
+### Типы компонентов
+
+| `options.type` | Что создаёт | Основные свойства | `mesh.form.value(id)` | События |
+|----------------|-------------|-------------------|------------------------|---------|
+| `label` | Текстовая строка с переносом длинного текста | `id`, `parent`, `text`, `value`, `disabled`, `visible` | Текущий текст | Нет |
+| `button` | Кнопка | `id`, `parent`, `text`, `style="accent"`, `disabled`, `visible` | `nil` | `action` при нажатии |
+| `text_field` | Однострочное поле ввода | `id`, `parent`, `value`, `prompt`, `read_only`, `monospace`, `disabled`, `visible` | Строка | `change` при изменении текста, `action` при Enter |
+| `password_field` | Поле ввода пароля | `id`, `parent`, `value`, `prompt`, `read_only`, `disabled`, `visible` | Строка | `change` при изменении текста, `action` при Enter |
+| `text_area` | Многострочное поле ввода | `id`, `parent`, `value`, `prompt`, `rows`, `wrap`, `read_only`, `monospace`, `disabled`, `visible` | Строка | `change` при изменении текста |
+| `checkbox` | Чекбокс с подписью | `id`, `parent`, `text`, `value`/`selected`, `disabled`, `visible` | Boolean | `change` при переключении |
+| `toggle_switch` | Переключатель AtlantaFX | `id`, `parent`, `text`, `value`/`selected`, `disabled`, `visible` | Boolean | `change` при переключении |
+| `combo_box` | Выпадающий список | `id`, `parent`, `items`, `value`, `prompt`, `disabled`, `visible` | Выбранная строка или `nil` | `change` при выборе |
+| `segmented_control` | Группа сегментированных кнопок AtlantaFX | `id`, `parent`, `items`, `value`, `disabled`, `visible` | Выбранная строка или `nil` | `change` при выборе |
+| `list_view` | Список строк | `id`, `parent`, `items`, `value`, `disabled`, `visible` | Выбранная строка или `nil` | `change` при выборе |
+| `slider` | Ползунок с числовым значением | `id`, `parent`, `min`, `max`, `value`, `disabled`, `visible` | Number | `change` при перемещении |
+| `progress_bar` | Индикатор прогресса | `id`, `parent`, `value`, `disabled`, `visible` | Number `0..1` | Нет |
+| `ring_progress` | Кольцевой индикатор прогресса AtlantaFX | `id`, `parent`, `value`, `width`, `height`, `disabled`, `visible` | Number `0..1` | Нет |
+| `separator` | Разделитель | `id`, `parent`, `orientation`, `disabled`, `visible` | `nil` | Нет |
+| `spacer` | Пустое пространство AtlantaFX | `id`, `parent`, `orientation`, `value`, `grow`, `disabled`, `visible` | `nil` | Нет |
+| `message` | Сообщение AtlantaFX с заголовком и описанием | `id`, `parent`, `text`, `value`, `disabled`, `visible` | Описание | `action`, `close` |
+| `tile` | Плитка AtlantaFX с заголовком и описанием | `id`, `parent`, `text`, `value`, `disabled`, `visible` | Описание | `action` |
+| `card` | Контейнер-карточка в стиле приложения | `id`, `parent`, `disabled`, `visible` | `nil` | Нет |
+| `vbox` | Вертикальный контейнер | `id`, `parent`, `grow`, `disabled`, `visible` | `nil` | Нет |
+| `hbox` | Горизонтальный контейнер | `id`, `parent`, `grow`, `disabled`, `visible` | `nil` | Нет |
+| `split_pane` | Разделяемая область с несколькими дочерними панелями | `id`, `parent`, `orientation`, `grow`, `disabled`, `visible` | `nil` | Нет |
+| `scroll_pane` | Прокручиваемый контейнер | `id`, `parent`, `grow`, `disabled`, `visible` | `nil` | Нет |
+
+`card`, `vbox`, `hbox`, `split_pane` и `scroll_pane` нужны для layout. Чтобы вложить компонент внутрь контейнера, укажите `parent = "id_контейнера"` или используйте id, который вернул `mesh.form.add(...)`. Для `split_pane` каждый дочерний компонент становится отдельной областью split-view; для `scroll_pane` обычно добавляют один дочерний контейнер `vbox` или `hbox`.
+
+Поля `on_extension_open(event)`:
+
+| Поле | Тип | Назначение |
+|------|-----|------------|
+| `type` | string | Всегда `extension_open` |
+| `source` | string | Всегда `mesh.extension` |
+| `script_id` | number | Id текущего скрипта |
+| `name` | string | Имя текущего скрипта |
+
+Поля `on_form_event(event)`:
+
+| Поле | Тип | Назначение |
+|------|-----|------------|
+| `type` | string | `action` для кнопок/Enter в поле, `change` для изменения значения, `close` для закрытия `message` |
+| `source` | string | Всегда `mesh.form` |
+| `component_id`, `id` | string | Id компонента |
+| `value` | string/number/boolean/nil | Текущее значение компонента |
+| `text` | string или `nil` | Текстовое представление значения |
+
+Пример формы расширения:
+
+```lua
+function on_extension_open(event)
+    mesh.form.set_title("Диагностика")
+    mesh.form.clear()
+
+    local card = mesh.form.add({ type = "card", id = "main" })
+    mesh.form.add({ type = "label", id = "status", parent = card, text = "Готово" })
+    mesh.form.add({ type = "text_field", id = "node", parent = card, prompt = "Node ID" })
+    mesh.form.add({
+        type = "combo_box",
+        id = "mode",
+        parent = card,
+        items = { "status", "trace", "admin" },
+        value = "status"
+    })
+    mesh.form.add({ type = "checkbox", id = "verbose", parent = card, text = "Подробно", value = true })
+    mesh.form.add({ type = "button", id = "run", parent = card, text = "Запустить", style = "accent" })
+end
+
+function on_form_event(event)
+    if event.id == "run" and event.type == "action" then
+        local node = mesh.form.value("node")
+        local mode = mesh.form.value("mode")
+        local verbose = mesh.form.value("verbose")
+        mesh.form.set("status", {
+            text = "Запуск: " .. tostring(mode) .. " / " .. tostring(node) .. " / verbose=" .. tostring(verbose)
+        })
+    elseif event.id == "mode" and event.type == "change" then
+        mesh.form.set("status", { text = "Режим: " .. tostring(event.value) })
+    end
+end
+```
 
 ## `mesh.canvas`
 
@@ -437,6 +569,86 @@ HTTP(S)-запросы выполняются встроенным Java HTTP-к�
 | `chat_type` | string | Контекст чата из исходных `options` |
 | `chat_key` | string | Ключ чата из исходных `options` |
 | `node` | `node` или `nil` | Таблица ноды; `nil`, если данных о ноде нет |
+
+## `mesh.admin`
+
+Remote admin доступен только для Meshtastic-подключений. Публичный ключ локального клиента должен быть добавлен в Admin Key целевой ноды. Все функции асинхронные: они возвращают `request_id`, а позже вызывают `on_admin(event)`.
+
+`target` может быть node ID строкой (`"!abcdef12"`), числовым `node_num` или таблицей ноды с полями `node_num`, `node_id`, `long_name`, `short_name`.
+
+| Функция | Возврат | Назначение |
+|---------|---------|------------|
+| `mesh.admin.load_config(target[, options])` | `request_id` | Загружает remote snapshot: owner, metadata, configs, module configs, channels, status |
+| `mesh.admin.request_config(target, type[, options])` | `request_id` | Загружает одну core config секцию, например `POWER_CONFIG` или `power` |
+| `mesh.admin.request_module_config(target, type[, options])` | `request_id` | Загружает одну module config секцию, например `MQTT_CONFIG` или `mqtt` |
+| `mesh.admin.save_config(target, changes, options)` | `request_id` | Сохраняет owner/position/text/config/channel изменения; требует `options.confirm = true` |
+| `mesh.admin.refresh_status(target[, options])` | `request_id` | Перезагружает статус соединений устройства |
+| `mesh.admin.reboot(target[, delay_seconds[, options]])` | `request_id` | Запрашивает отложенную перезагрузку; `0` отменяет pending reboot |
+| `mesh.admin.shutdown(target[, delay_seconds[, options]])` | `request_id` | Запрашивает отложенное выключение; `0` отменяет pending shutdown |
+| `mesh.admin.sync_time(target[, epoch_seconds[, options]])` | `request_id` | Устанавливает время удалённой ноды; по умолчанию текущее время приложения |
+| `mesh.admin.backup(target[, location[, options]])` | `request_id` | Делает backup preferences в `FLASH` или `SD` |
+| `mesh.admin.restore(target[, location], options)` | `request_id` | Восстанавливает preferences; требует `options.confirm = true` |
+| `mesh.admin.remove_backup(target[, location], options)` | `request_id` | Удаляет сохранённый backup; требует `options.confirm = true` |
+| `mesh.admin.reset_nodedb(target[, preserve_favorites], options)` | `request_id` | Сбрасывает remote NodeDB; требует `options.confirm = true` |
+| `mesh.admin.factory_reset_config(target, options)` | `request_id` | Делает factory reset config; требует `options.confirm = true` |
+| `mesh.admin.factory_reset_device(target, options)` | `request_id` | Делает factory reset устройства; требует `options.confirm = true` |
+| `mesh.admin.enter_dfu_mode(target, options)` | `request_id` | Запрашивает DFU mode; требует `options.confirm = true` |
+| `mesh.admin.set_owner(target, owner[, options])` | `request_id` | Обновляет `{ long_name, short_name, licensed }` |
+| `mesh.admin.set_fixed_position(target, position[, options])` | `request_id` | Устанавливает `{ latitude, longitude, altitude }` как manual position |
+| `mesh.admin.remove_fixed_position(target[, options])` | `request_id` | Очищает manual fixed position |
+| `mesh.admin.set_ringtone(target, text[, options])` | `request_id` | Обновляет RTTTL ringtone text |
+| `mesh.admin.set_canned_messages(target, text[, options])` | `request_id` | Обновляет текст canned message module |
+
+Пример patch для `save_config`:
+
+```lua
+local target = "!abcdef12"
+
+mesh.admin.request_config(target, "POWER_CONFIG")
+
+function on_admin(event)
+    if event.action == "request_config" and event.ok then
+        mesh.admin.save_config(target, {
+            owner = { long_name = "Remote Node", short_name = "RMT", licensed = true },
+            configs = {
+                power = { ls_secs = 300, min_wake_secs = 10 }
+            },
+            module_configs = {
+                mqtt = { enabled = true, address = "mqtt.example.com" }
+            },
+            channels = {
+                { index = 0, role = "PRIMARY", settings = { name = "LongFast" } }
+            }
+        }, { confirm = true })
+    end
+end
+```
+
+Config, module config и channel patches используют protobuf-имена полей в `snake_case`. Enum-значения передаются строками, например `"PRIMARY"` или `"CLIENT"`. Repeated-поля передаются Lua-списками. Bytes принимаются как hex strings, `hex:...`, `base64:...` или Base64 strings. По умолчанию patch сливается с секцией, загруженной через `load_config` или `request_config`; если секция не была загружена, `save_config` завершается ошибкой. Используйте `{ replace = true, confirm = true }` только если намеренно отправляете replacement из default-значений.
+
+Полный список читаемых и сохраняемых полей конфигурации: [lua-admin-config-reference.ru.md](lua-admin-config-reference.ru.md).
+
+Поля `on_admin(event)`:
+
+| Поле | Тип | Назначение / возвращаемое значение |
+|------|-----|------------------------------------|
+| `type` | string | `admin_progress` или `admin_result` |
+| `source` | string | API-источник, например `mesh.admin.save_config` |
+| `name` | string | Имя исходного запроса из `options.name` |
+| `request_id` | string | ID запроса, который вернул `mesh.admin.*` |
+| `action` | string | Имя действия, например `load_config`, `save_config`, `reboot` |
+| `status` | string | `ok`, `timeout`, `error` или progress state `sent`/`received`/`failed` |
+| `ok` | boolean | `true` для успешного terminal result |
+| `timeout` | boolean | `true`, если terminal result истёк по timeout |
+| `error` | string или `nil` | Детали ошибки |
+| `target_node_num` | number | Числовой ID целевой ноды (`uint32`) |
+| `target_node_id` | string | Node ID целевой ноды в виде `!abcdef12` |
+| `snapshot` | table или `nil` | Remote snapshot для terminal results |
+| `progress_key` | string или `nil` | Ключ snapshot-блока для progress events |
+| `completed` | number или `nil` | Количество завершённых snapshot-блоков для progress events |
+| `total` | number или `nil` | Общее количество snapshot-блоков для progress events |
+
+`event.snapshot` включает `node`, `owner`, `device_metadata`, `ringtone`, `canned_messages`, `connection_status`, `configs`, `module_configs`, `channels`, `query_statuses` и `query_summary`.
 
 ## Поля объектов
 

@@ -307,7 +307,7 @@ Entry points:
 
 - `on_message(msg)` - reaction to a new message
 - `on_command(command)` - command handling
-- `on_node_selected(event)`, `on_traceroute(event)`, `on_node_info(event)` - asynchronous event handlers
+- `on_node_selected(event)`, `on_traceroute(event)`, `on_node_info(event)`, `on_admin(event)` - asynchronous event handlers
 
 API documentation: [docs/lua-api.md](docs/lua-api.md).
 

@@ -3,7 +3,9 @@ package com.meshtastic.client.lua.api;
 import com.meshtastic.client.lua.LuaScriptService;
 import com.meshtastic.client.lua.LuaAutomationCommand;
 import com.meshtastic.client.lua.LuaCanvasBridge;
+import com.meshtastic.client.lua.LuaFormBridge;
 import com.meshtastic.client.lua.LuaNodeInfoBridge;
+import com.meshtastic.client.lua.LuaRemoteAdminBridge;
 import com.meshtastic.client.lua.LuaTracerouteBridge;
 import com.meshtastic.client.lua.LuaUiBridge;
 import com.meshtastic.client.model.DeviceState;
@@ -32,7 +34,9 @@ public record LuaSandboxContext(long scriptId,
                                 LuaUiBridge uiBridge,
                                 LuaTracerouteBridge tracerouteBridge,
                                 LuaNodeInfoBridge nodeInfoBridge,
+                                LuaRemoteAdminBridge remoteAdminBridge,
                                 LuaCanvasBridge canvasBridge,
+                                LuaFormBridge formBridge,
                                 Runnable executionDeadlineDeferrer) {
 
     /**

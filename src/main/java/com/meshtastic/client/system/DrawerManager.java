@@ -25,6 +25,12 @@ public class DrawerManager {
         }
     }
 
+    public static void setSelectedItemKey(Object key) {
+        if (drawerPane != null) {
+            drawerPane.setSelectedItemKey(key);
+        }
+    }
+
     public static void setChatUnreadDot(boolean visible) {
         if (drawerPane != null) {
             drawerPane.setChatUnreadDot(visible);

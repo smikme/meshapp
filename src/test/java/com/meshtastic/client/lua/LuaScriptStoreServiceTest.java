@@ -11,6 +11,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Locale;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -26,6 +27,28 @@ class LuaScriptStoreServiceTest {
         if (server != null) {
             server.stop(0);
         }
+    }
+
+    @Test
+    void directoryApiUriUsesRussianBranchForRussianLocale() {
+        URI uri = LuaScriptStoreService.directoryApiUri(Locale.forLanguageTag("ru-RU"));
+
+        assertEquals(
+                "https://git.privatepractice.app/api/v1/repos/covox/meshappstore/contents/scripts?ref=ru",
+                uri.toString());
+    }
+
+    @Test
+    void directoryApiUriUsesEnglishBranchForEnglishAndFallbackLocales() {
+        assertEquals(
+                "https://git.privatepractice.app/api/v1/repos/covox/meshappstore/contents/scripts?ref=en",
+                LuaScriptStoreService.directoryApiUri(Locale.ENGLISH).toString());
+        assertEquals(
+                "https://git.privatepractice.app/api/v1/repos/covox/meshappstore/contents/scripts?ref=en",
+                LuaScriptStoreService.directoryApiUri(Locale.forLanguageTag("de-DE")).toString());
+        assertEquals(
+                "https://git.privatepractice.app/api/v1/repos/covox/meshappstore/contents/scripts?ref=en",
+                LuaScriptStoreService.directoryApiUri(null).toString());
     }
 
     @Test
@@ -45,12 +68,17 @@ class LuaScriptStoreServiceTest {
                     "download_url": "%s/raw/Automation.meshapp-script.json"
                   },
                   {
+                    "name": "Extension.meshapp-script.json",
+                    "type": "file",
+                    "download_url": "%s/raw/Extension.meshapp-script.json"
+                  },
+                  {
                     "name": "README.md",
                     "type": "file",
                     "download_url": "%s/raw/README.md"
                   }
                 ]
-                """.formatted(baseUrl, baseUrl, baseUrl)));
+                """.formatted(baseUrl, baseUrl, baseUrl, baseUrl)));
         server.createContext("/raw/Ping-Bot.meshapp-script.json", exchange -> sendJson(exchange, """
                 {
                   "format": "meshapp-lua-script",
@@ -85,6 +113,23 @@ class LuaScriptStoreServiceTest {
                   "automationName": "@auto"
                 }
                 """));
+        server.createContext("/raw/Extension.meshapp-script.json", exchange -> sendJson(exchange, """
+                {
+                  "format": "meshapp-lua-script",
+                  "version": 1,
+                  "scriptVersion": 3,
+                  "guid": "8cf89d6f-6603-443d-b81f-56886869d9f6",
+                  "icon": "🧩",
+                  "name": "Extension",
+                  "description": "Adds an application section",
+                  "author": "MeshApp Team",
+                  "codeLines": [
+                    "mesh.form.add({ type = 'label', text = 'Hello' })"
+                  ],
+                  "botType": "EXTENSION",
+                  "automationName": ""
+                }
+                """));
         server.start();
 
         LuaScriptStoreService service = new LuaScriptStoreService(
@@ -93,7 +138,7 @@ class LuaScriptStoreServiceTest {
 
         List<LuaScriptStoreService.StoreScript> scripts = service.fetchScripts();
 
-        assertEquals(2, scripts.size());
+        assertEquals(3, scripts.size());
         LuaScriptStoreService.StoreScript automation = scripts.getFirst();
         assertEquals("d23f4f14-20e4-47db-baf9-6f698120ff04", automation.guid());
         assertEquals("⚙️", automation.icon());
@@ -102,7 +147,14 @@ class LuaScriptStoreServiceTest {
         assertEquals(LuaScript.BotType.AUTOMATION_BOT, automation.botType());
         assertEquals("MeshApp Team", automation.author());
 
-        LuaScriptStoreService.StoreScript script = scripts.get(1);
+        LuaScriptStoreService.StoreScript extension = scripts.get(1);
+        assertEquals("8cf89d6f-6603-443d-b81f-56886869d9f6", extension.guid());
+        assertEquals("🧩", extension.icon());
+        assertEquals("Extension", extension.name());
+        assertEquals(3L, extension.version());
+        assertEquals(LuaScript.BotType.EXTENSION, extension.botType());
+
+        LuaScriptStoreService.StoreScript script = scripts.get(2);
         assertEquals("96c3f915-87c6-435e-a6c5-c7ffe6f94d1b", script.guid());
         assertEquals("🤖", script.icon());
         assertEquals("Ping Bot", script.name());

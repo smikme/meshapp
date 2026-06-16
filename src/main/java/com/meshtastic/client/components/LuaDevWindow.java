@@ -11,6 +11,7 @@ import com.meshtastic.client.lua.LuaDebugSnapshot;
 import com.meshtastic.client.lua.LuaDebugVariable;
 import com.meshtastic.client.lua.LuaCompletionEngine;
 import com.meshtastic.client.lua.LuaEditorIndentation;
+import com.meshtastic.client.lua.LuaExtensionManager;
 import com.meshtastic.client.lua.LuaScript;
 import com.meshtastic.client.lua.LuaScriptEvent;
 import com.meshtastic.client.lua.LuaScriptRuntimeService;
@@ -1660,7 +1661,11 @@ public final class LuaDevWindow {
         consoleArea.clear();
         clearDebugState();
         appendConsole(I18n.t("meshIde.dev.status.run", currentScript.getName()));
-        runtimeService.runScript(currentScript, this::handleRuntimeEvent);
+        if (currentScript.getBotType() == LuaScript.BotType.EXTENSION) {
+            LuaExtensionManager.getInstance().runExtension(currentScript.getId(), this::handleRuntimeEvent);
+        } else {
+            runtimeService.runScript(currentScript, this::handleRuntimeEvent);
+        }
         updateButtons();
     }
 
@@ -1672,7 +1677,14 @@ public final class LuaDevWindow {
         consoleArea.clear();
         clearDebugState();
         appendConsole(I18n.t("meshIde.dev.status.debug", currentScript.getName()));
-        runtimeService.debugScript(currentScript, new HashSet<>(currentBreakpoints), this::handleRuntimeEvent);
+        if (currentScript.getBotType() == LuaScript.BotType.EXTENSION) {
+            LuaExtensionManager.getInstance().debugExtension(
+                    currentScript.getId(),
+                    new HashSet<>(currentBreakpoints),
+                    this::handleRuntimeEvent);
+        } else {
+            runtimeService.debugScript(currentScript, new HashSet<>(currentBreakpoints), this::handleRuntimeEvent);
+        }
         updateButtons();
     }
 

@@ -53,10 +53,18 @@ public class FormManager {
     }
 
     public static void showForm(Form form) {
-        showForm(form, true);
+        showForm(form, true, form != null ? form.getClass() : null);
     }
 
     private static void showForm(Form form, boolean rememberForConnection) {
+        showForm(form, rememberForConnection, form != null ? form.getClass() : null);
+    }
+
+    public static void showDynamicForm(Form form, Object navigationKey) {
+        showForm(form, false, navigationKey);
+    }
+
+    private static void showForm(Form form, boolean rememberForConnection, Object navigationKey) {
         // Do not navigate away while a modal dialog is active.
         ModalPane modal = ModalPane.getInstance();
         if (modal != null && modal.isVisible()) {
@@ -73,10 +81,14 @@ public class FormManager {
         mainForm.setForm(form);
         currentForm = form;
         form.formOpen();
-        DrawerManager.setSelectedItemClass(form.getClass());
+        DrawerManager.setSelectedItemKey(navigationKey != null ? navigationKey : form.getClass());
         if (rememberForConnection) {
             rememberFormForSelectedConnection(form.getClass());
         }
+    }
+
+    public static Form getCurrentForm() {
+        return currentForm;
     }
 
     /**
