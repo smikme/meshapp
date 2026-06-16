@@ -46,30 +46,88 @@ public final class DatabaseProvider {
 
     private DatabaseProvider() {}
 
+    /**
+     * High-level phases reported while a corrupted H2 database is being recovered.
+     * <p>
+     * The application UI maps these values to localized status text for the
+     * startup recovery dialog. The phases are intentionally coarse because the H2
+     * recovery tool does not expose row-level progress.
+     */
     public enum RecoveryStep {
+        /** H2 refused to open the database and recovery is about to start. */
         DETECTED,
+        /** The original {@code nodedb.mv.db} file is being moved into a recovery folder. */
         MOVING_CORRUPT_DATABASE,
+        /** H2 {@link Recover} is extracting readable pages into a SQL script. */
         EXPORTING_SQL,
+        /** The generated SQL script is being imported into a new database file. */
         IMPORTING_SQL,
+        /** Recovery import was not possible, so a fresh empty database will be created. */
         CREATING_FRESH_DATABASE,
+        /** Recovery work is complete and normal startup can continue. */
         COMPLETE
     }
 
+    /**
+     * Receives progress updates from the automatic database recovery routine.
+     * <p>
+     * Implementations may be invoked from a worker thread, depending on the
+     * installed {@link RecoveryExecutor}. UI implementations must marshal updates
+     * back to the JavaFX application thread.
+     */
     @FunctionalInterface
     public interface RecoveryProgress {
+        /**
+         * Reports a coarse recovery step.
+         *
+         * @param step current recovery step
+         * @param path database, recovery directory, or script path related to the step
+         */
         void update(RecoveryStep step, Path path);
     }
 
+    /**
+     * Encapsulates the recovery work that can be wrapped by a UI or test runner.
+     */
     @FunctionalInterface
     public interface RecoveryTask {
+        /**
+         * Runs database recovery and reports coarse progress to the supplied callback.
+         *
+         * @param progress callback for recovery status updates
+         * @throws Exception when the recovery attempt fails before a replacement
+         *                   database can be prepared
+         */
         void run(RecoveryProgress progress) throws Exception;
     }
 
+    /**
+     * Runs a recovery task after H2 reports that the database file is corrupted.
+     * <p>
+     * The default executor runs synchronously and ignores progress. The JavaFX
+     * application installs an executor that shows a startup recovery dialog while
+     * the task runs on a worker thread.
+     */
     @FunctionalInterface
     public interface RecoveryExecutor {
+        /**
+         * Executes recovery for the failed database file.
+         *
+         * @param dbFile database file that failed to open
+         * @param task recovery task to execute
+         * @throws Exception when the task fails and normal startup cannot continue
+         */
         void run(Path dbFile, RecoveryTask task) throws Exception;
     }
 
+    /**
+     * Installs the executor used to wrap automatic database recovery.
+     * <p>
+     * Passing {@code null} restores the default synchronous executor. Tests use
+     * this method to observe recovery progress without creating JavaFX UI.
+     *
+     * @param executor executor to use for future recovery attempts, or {@code null}
+     */
     public static synchronized void setRecoveryExecutor(RecoveryExecutor executor) {
         recoveryExecutor = executor != null ? executor : DIRECT_RECOVERY_EXECUTOR;
     }

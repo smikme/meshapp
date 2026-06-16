@@ -29,6 +29,23 @@ public final class DatabaseRecoveryDialog {
 
     private DatabaseRecoveryDialog() {}
 
+    /**
+     * Shows a modal startup dialog and runs database recovery on a background
+     * virtual thread.
+     * <p>
+     * The dialog is intended for the first database open during application
+     * startup, before the main window is shown. It blocks the JavaFX application
+     * thread with {@link Stage#showAndWait()} while the worker thread performs
+     * the H2 recovery task and posts progress updates back to the UI thread.
+     * When called outside the JavaFX application thread, the task is executed
+     * directly without showing UI; this keeps service tests and non-UI callers
+     * independent from JavaFX.
+     *
+     * @param owner owner window for modality, usually the primary stage
+     * @param dbFile database file that failed to open
+     * @param recoveryTask recovery task supplied by {@link DatabaseProvider}
+     * @throws Exception when the recovery task fails before startup can continue
+     */
     public static void run(Window owner, Path dbFile, DatabaseProvider.RecoveryTask recoveryTask) throws Exception {
         if (!Platform.isFxApplicationThread()) {
             recoveryTask.run((step, path) -> {});
