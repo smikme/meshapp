@@ -340,6 +340,39 @@ class TelemetryChartPanelTest {
         assertSeriesValues(hopsChart, t("telemetry.chart.series.hopsAvg"), 2.0, 3.0);
     }
 
+    @Test
+    void qualityEntriesDoNotStretchPrimaryTelemetryAxes() {
+        TelemetryEntry ownEntry = new TelemetryEntry(1_700_000_000L, "!own");
+        ownEntry.setVoltage(4.0f);
+        TelemetryEntry remoteQualityEntry = hopEntry(1_700_086_400L, 7, 5);
+
+        TelemetryChartDataBuilder.PreparedCharts prepared = TelemetryChartDataBuilder.build(
+                false, List.of(ownEntry), List.of(remoteQualityEntry), 0);
+        TelemetryChartDataBuilder.AxisRange basicAxis = prepared.axisRange(TelemetryChartDataBuilder.ChartKind.BASIC);
+        TelemetryChartDataBuilder.AxisRange rxAxis = prepared.axisRange(TelemetryChartDataBuilder.ChartKind.RX);
+        TelemetryChartDataBuilder.AxisRange hopsAxis = prepared.axisRange(TelemetryChartDataBuilder.ChartKind.HOPS);
+
+        assertTrue(basicAxis.upperBound() < remoteQualityEntry.getTimestamp());
+        assertTrue(rxAxis.upperBound() < remoteQualityEntry.getTimestamp());
+        assertTrue(hopsAxis.lowerBound() > ownEntry.getTimestamp());
+    }
+
+    @Test
+    void selectedPeriodControlsAxisEvenWhenDataCoversShorterRange() {
+        long selectedPeriodSeconds = 48L * 3600;
+        long now = System.currentTimeMillis() / 1000;
+        TelemetryEntry recentEntry = new TelemetryEntry(now - 300, "!own");
+        recentEntry.setVoltage(4.0f);
+
+        TelemetryChartDataBuilder.PreparedCharts prepared = TelemetryChartDataBuilder.build(
+                true, List.of(recentEntry), List.of(), selectedPeriodSeconds);
+        TelemetryChartDataBuilder.AxisRange axis = prepared.axisRange(TelemetryChartDataBuilder.ChartKind.BASIC);
+
+        assertTrue(axis.lowerBound() <= now - selectedPeriodSeconds);
+        assertTrue(axis.upperBound() >= now);
+        assertTrue(axis.upperBound() - axis.lowerBound() > selectedPeriodSeconds);
+    }
+
     private static List<String> seriesNames(AreaChart<Number, Number> chart) {
         return chart.getData().stream()
                 .map(XYChart.Series::getName)

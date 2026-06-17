@@ -725,10 +725,11 @@ public class FormNodes extends Form {
         remainingSelection.removeAll(deletedNodeNums);
         Optional.ofNullable(state).ifPresent(currentState ->
                 deletedNodeNums.forEach(currentState::removeNode));
+        String ownerNodeId = state != null ? state.getOwnerNodeId() : null;
         NodeCacheService nodeCache = NodeCacheService.getInstance();
         normalizedTargets.stream()
                 .map(NodeData::getNodeId)
-                .forEach(nodeCache::deleteNode);
+                .forEach(nodeId -> nodeCache.deleteNode(nodeId, ownerNodeId));
 
         boolean removedCurrentDetail = deletedNodeNums.contains(currentDetailNodeNum);
         nodeData.removeIf(node -> deletedNodeNums.contains(node.getNodeNum()));

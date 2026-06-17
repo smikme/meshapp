@@ -161,8 +161,9 @@ public class NodeDetailContent extends HBox {
                         I18n.t("node.confirm.delete.message", displayName),
                         confirmed -> {
                             if (confirmed) {
+                                String ownerNodeId = this.state.getOwnerNodeId();
                                 this.state.removeNode(nodeNum);
-                                NodeCacheService.getInstance().deleteNode(nodeId);
+                                NodeCacheService.getInstance().deleteNode(nodeId, ownerNodeId);
                                 if (onBeforeNavigate != null) {
                                     onBeforeNavigate.run();
                                 }

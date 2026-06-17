@@ -419,19 +419,24 @@ public final class NodeCacheService {
         }
     }
 
-    /** Deletes a specific node and its telemetry from cache and database. */
-    public synchronized void deleteNode(String nodeId) {
+    /**
+     * Deletes a specific node from the shared node cache and removes telemetry
+     * for that node only within the current owner scope.
+     */
+    public synchronized void deleteNode(String nodeId, String ownerNodeId) {
         if (nodeId == null) { return; }
         cache.remove(nodeId);
         missingNodeIds.add(nodeId);
         if (dbConnection == null) { return; }
-        try (PreparedStatement ps1 = dbConnection.prepareStatement("DELETE FROM telemetry_history WHERE node_id = ?");
+        try (PreparedStatement ps1 = dbConnection.prepareStatement(
+                "DELETE FROM telemetry_history WHERE owner_node_id = ? AND node_id = ?");
              PreparedStatement ps2 = dbConnection.prepareStatement("DELETE FROM nodes WHERE node_id = ?")) {
-            ps1.setString(1, nodeId);
+            ps1.setString(1, ownerNodeId != null ? ownerNodeId : "");
+            ps1.setString(2, nodeId);
             ps1.executeUpdate();
             ps2.setString(1, nodeId);
             ps2.executeUpdate();
-            log.info("Нода {} удалена из кэша", nodeId);
+            log.info("Нода {} удалена из кэша для owner {}", nodeId, ownerNodeId);
         } catch (SQLException e) {
             log.error("Ошибка удаления ноды {} из кэша", nodeId, e);
         }

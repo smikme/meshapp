@@ -77,7 +77,12 @@ final class TelemetryChartDataBuilder {
 
     record ChartPayload(String title, List<XYChart.Series<Number, Number>> series) {}
 
-    record PreparedCharts(AxisRange axisRange, Map<ChartKind, ChartPayload> payloads) {
+    record PreparedCharts(Map<ChartKind, AxisRange> axisRanges, Map<ChartKind, ChartPayload> payloads) {
+        AxisRange axisRange(ChartKind chartKind) {
+            return Optional.ofNullable(axisRanges.get(chartKind))
+                    .orElseThrow(() -> new IllegalArgumentException("Missing chart axis range: " + chartKind));
+        }
+
         ChartPayload payload(ChartKind chartKind) {
             return Optional.ofNullable(payloads.get(chartKind))
                     .orElseThrow(() -> new IllegalArgumentException("Missing chart payload: " + chartKind));
@@ -103,7 +108,10 @@ final class TelemetryChartDataBuilder {
                                 List<TelemetryEntry> entries,
                                 List<TelemetryEntry> qualityEntries,
                                 long selectedPeriodSeconds) {
-        AxisRange axisRange = buildAxisRange(entries, qualityEntries, selectedPeriodSeconds);
+        AxisRange primaryAxisRange = buildAxisRange(entries, List.of(), selectedPeriodSeconds);
+        AxisRange qualityAxisRange = qualityEntries.isEmpty()
+                ? primaryAxisRange
+                : buildAxisRange(List.of(), qualityEntries, selectedPeriodSeconds);
 
         Map<ChartKind, ChartPayload> payloads = Stream.concat(
                 Stream.of(Map.entry(ChartKind.BASIC, buildBasicChart(entries))),
@@ -115,7 +123,17 @@ final class TelemetryChartDataBuilder {
                         LinkedHashMap::new
                 ));
 
-        return new PreparedCharts(axisRange, Map.copyOf(payloads));
+        Map<ChartKind, AxisRange> axisRanges = new LinkedHashMap<>();
+        axisRanges.put(ChartKind.BASIC, primaryAxisRange);
+        if (!basicOnly) {
+            axisRanges.put(ChartKind.RX, primaryAxisRange);
+            axisRanges.put(ChartKind.RATE, primaryAxisRange);
+            axisRanges.put(ChartKind.TX, primaryAxisRange);
+            axisRanges.put(ChartKind.QUALITY, qualityAxisRange);
+            axisRanges.put(ChartKind.HOPS, qualityAxisRange);
+        }
+
+        return new PreparedCharts(Map.copyOf(axisRanges), Map.copyOf(payloads));
     }
 
     private static Stream<Map.Entry<ChartKind, ChartPayload>> secondaryPayloads(List<TelemetryEntry> entries,
@@ -276,13 +294,17 @@ final class TelemetryChartDataBuilder {
     private static AxisRange buildAxisRange(List<TelemetryEntry> entries,
                                             List<TelemetryEntry> qualityEntries,
                                             long selectedPeriodSeconds) {
+        if (selectedPeriodSeconds > 0) {
+            return createPeriodAxisRange(selectedPeriodSeconds);
+        }
+
         LongSummaryStatistics stats = Stream.of(entries, qualityEntries)
                 .flatMap(List::stream)
                 .mapToLong(TelemetryEntry::getTimestamp)
                 .summaryStatistics();
 
         if (stats.getCount() == 0) {
-            return createPlaceholderAxisRange(selectedPeriodSeconds);
+            return createPeriodAxisRange(EMPTY_PERIOD_FALLBACK);
         }
 
         long range = Math.max(stats.getMax() - stats.getMin(), 1);
@@ -291,7 +313,7 @@ final class TelemetryChartDataBuilder {
         return new AxisRange(stats.getMin() - padding, stats.getMax() + padding, Math.max(totalRange / 8, 60));
     }
 
-    private static AxisRange createPlaceholderAxisRange(long selectedPeriodSeconds) {
+    private static AxisRange createPeriodAxisRange(long selectedPeriodSeconds) {
         long now = System.currentTimeMillis() / 1000;
         long visibleRange = selectedPeriodSeconds > 0 ? selectedPeriodSeconds : EMPTY_PERIOD_FALLBACK;
         long padding = Math.max(visibleRange / 20, 60);

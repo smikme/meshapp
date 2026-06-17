@@ -337,7 +337,7 @@ public class TelemetryChartPanel extends VBox {
         );
 
         chartBindings.forEach(binding ->
-                applyChart(binding.chart(), prepared.payload(binding.kind()), prepared.axisRange()));
+                applyChart(binding.chart(), prepared.payload(binding.kind()), prepared.axisRange(binding.kind())));
     }
 
     private void applyChart(AreaChart<Number, Number> areaChart,

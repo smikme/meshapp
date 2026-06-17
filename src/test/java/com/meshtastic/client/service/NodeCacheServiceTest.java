@@ -2,6 +2,7 @@ package com.meshtastic.client.service;
 
 import com.meshtastic.client.TestEnvironmentSupport;
 import com.meshtastic.client.model.NodeData;
+import com.meshtastic.client.model.TelemetryEntry;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -147,6 +148,26 @@ class NodeCacheServiceTest {
 
         assertEquals("Recovered", reloadedLiveNode.getLongName());
         assertEquals("RCVD", reloadedLiveNode.getShortName());
+    }
+
+    @Test
+    void deleteNodeRemovesTelemetryOnlyForOwnerScope() {
+        TelemetryEntry ownerAEntry = new TelemetryEntry(1_700_000_000L, "!bbbbbbbb");
+        ownerAEntry.setVoltage(4.0f);
+        TelemetryEntry ownerBEntry = new TelemetryEntry(1_700_000_060L, "!bbbbbbbb");
+        ownerBEntry.setVoltage(4.1f);
+        TelemetryEntry otherNodeOwnerAEntry = new TelemetryEntry(1_700_000_120L, "!cccccccc");
+        otherNodeOwnerAEntry.setVoltage(4.2f);
+
+        service.persistTelemetry(ownerAEntry, "!aaaaaaaa");
+        service.persistTelemetry(ownerBEntry, "!dddddddd");
+        service.persistTelemetry(otherNodeOwnerAEntry, "!aaaaaaaa");
+
+        service.deleteNode("!bbbbbbbb", "!aaaaaaaa");
+
+        assertEquals(0, service.loadTelemetryForNode("!bbbbbbbb", 0, Long.MAX_VALUE, "!aaaaaaaa").size());
+        assertEquals(1, service.loadTelemetryForNode("!bbbbbbbb", 0, Long.MAX_VALUE, "!dddddddd").size());
+        assertEquals(1, service.loadTelemetryForNode("!cccccccc", 0, Long.MAX_VALUE, "!aaaaaaaa").size());
     }
 
     @Test
