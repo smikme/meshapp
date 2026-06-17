@@ -847,6 +847,27 @@ class MessageListenerServiceTest {
     }
 
     @Test
+    void onToRadioSendFailedMarksPendingMessageFailed() {
+        MeshMessage pending = new MeshMessage("!12345678", "!ffffffff", 0, "pending", 1_700_000_000L, true);
+        pending.setPacketId(78);
+        pending.setStatus(MeshMessage.DeliveryStatus.SENDING);
+        state.addMessage(pending);
+        MessageDbService.getInstance().save(pending, "channel", "0", "!12345678");
+        state.registerPendingAck(78, pending);
+
+        service.onToRadioSendFailed(toRadioPacket(78), "QUEUE_STATUS_1");
+
+        assertEquals(MeshMessage.DeliveryStatus.FAILED, pending.getStatus());
+        assertEquals("QUEUE_STATUS_1", pending.getErrorReason());
+        assertNull(state.resolvePendingAck(78));
+
+        MeshMessage persisted = MessageDbService.getInstance().findByPacketId(78);
+        assertNotNull(persisted);
+        assertEquals(MeshMessage.DeliveryStatus.FAILED, persisted.getStatus());
+        assertEquals("QUEUE_STATUS_1", persisted.getErrorReason());
+    }
+
+    @Test
     void onMeshPacketUpdatesOutgoingReactionStatusWhenAckArrives() {
         MessageReaction reaction = new MessageReaction(42, "!12345678", "🎉", 1_700_000_000L, true);
         reaction.setPacketId(8080);
@@ -871,6 +892,22 @@ class MessageListenerServiceTest {
                 .loadReactionsByTargetPacketIds("channel", "0", "!12345678", List.of(42))
                 .get(42).getFirst();
         assertEquals(MeshMessage.DeliveryStatus.DELIVERED, stored.getStatus());
+    }
+
+    @Test
+    void onToRadioSendFailedMarksOutgoingReactionFailed() {
+        MessageReaction reaction = new MessageReaction(42, "!12345678", "🎉", 1_700_000_000L, true);
+        reaction.setPacketId(8081);
+        reaction.setStatus(MeshMessage.DeliveryStatus.SENDING);
+        MessageDbService.getInstance().saveReaction(reaction, "channel", "0", "!12345678");
+
+        service.onToRadioSendFailed(toRadioPacket(8081), "QUEUE_STATUS_1");
+
+        MessageReaction stored = MessageDbService.getInstance()
+                .loadReactionsByTargetPacketIds("channel", "0", "!12345678", List.of(42))
+                .get(42).getFirst();
+        assertEquals(MeshMessage.DeliveryStatus.FAILED, stored.getStatus());
+        assertEquals("QUEUE_STATUS_1", stored.getErrorReason());
     }
 
     @Test
@@ -951,6 +988,14 @@ class MessageListenerServiceTest {
         int payloadLength = ((frame[2] & 0xFF) << 8) | (frame[3] & 0xFF);
         byte[] payload = Arrays.copyOfRange(frame, 4, 4 + payloadLength);
         return MeshProtos.ToRadio.parseFrom(payload);
+    }
+
+    private static MeshProtos.ToRadio toRadioPacket(int packetId) {
+        return MeshProtos.ToRadio.newBuilder()
+                .setPacket(MeshProtos.MeshPacket.newBuilder()
+                        .setId(packetId)
+                        .build())
+                .build();
     }
 
     private static boolean waitUntil(BooleanSupplier condition, long timeoutMs) throws InterruptedException {

@@ -122,6 +122,49 @@ class ProtocolHandlerTest {
     }
 
     @Test
+    void queueStatusRejectionRetriesPacket() throws Exception {
+        FakeConnection connection = new FakeConnection();
+        ProtocolHandler handler = track(new ProtocolHandler(connection));
+        int packetId = 7001;
+
+        handler.sendToRadio(outboundTextPacket(packetId));
+
+        assertTrue(connection.awaitSendCountAtLeast(1));
+        connection.emit(queueStatus(packetId, 1, 0, 1));
+
+        assertTrue(connection.awaitSendCountAtLeast(2));
+        List<MeshProtos.ToRadio> sentMessages = connection.sentMessages();
+        assertEquals(packetId, sentMessages.get(0).getPacket().getId());
+        assertEquals(packetId, sentMessages.get(1).getPacket().getId());
+    }
+
+    @Test
+    void queueStatusFullDelaysNextPacket() throws Exception {
+        FakeConnection connection = new FakeConnection();
+        ProtocolHandler handler = track(new ProtocolHandler(connection));
+
+        handler.sendToRadio(outboundTextPacket(7101));
+        assertTrue(connection.awaitSendCountAtLeast(1));
+        CountDownLatch queueStatusSeen = new CountDownLatch(1);
+        handler.addListener(new FromRadioListener() {
+            @Override
+            public void onQueueStatus(MeshProtos.QueueStatus queueStatus) {
+                queueStatusSeen.countDown();
+            }
+        });
+        connection.emit(queueStatus(7101, 0, 0, 1));
+        assertTrue(queueStatusSeen.await(1, TimeUnit.SECONDS));
+
+        handler.sendToRadio(outboundTextPacket(7102));
+        Thread.sleep(100);
+
+        assertEquals(1, connection.sendCount.get());
+        assertTrue(connection.awaitSendCountAtLeast(2));
+        List<MeshProtos.ToRadio> sentMessages = connection.sentMessages();
+        assertEquals(7102, sentMessages.get(1).getPacket().getId());
+    }
+
+    @Test
     void dispatchesIncomingVariantsToRegisteredListener() throws Exception {
         FakeConnection connection = new FakeConnection();
         ProtocolHandler handler = track(new ProtocolHandler(connection));
@@ -391,6 +434,34 @@ class ProtocolHandlerTest {
 
     private static MeshProtos.FromRadio wrapPacket(MeshProtos.MeshPacket packet) {
         return MeshProtos.FromRadio.newBuilder().setPacket(packet).build();
+    }
+
+    private static MeshProtos.ToRadio outboundTextPacket(int packetId) {
+        return MeshProtos.ToRadio.newBuilder()
+                .setPacket(MeshProtos.MeshPacket.newBuilder()
+                        .setId(packetId)
+                        .setFrom(0x12345678)
+                        .setTo(0xFFFFFFFF)
+                        .setChannel(0)
+                        .setWantAck(true)
+                        .setDecoded(MeshProtos.Data.newBuilder()
+                                .setPortnum(Portnums.PortNum.TEXT_MESSAGE_APP)
+                                .setPayload(ByteString.copyFromUtf8("queued"))
+                                .build())
+                        .build())
+                .build();
+    }
+
+    private static byte[] queueStatus(int packetId, int result, int free, int maxlen) {
+        return MeshProtos.FromRadio.newBuilder()
+                .setQueueStatus(MeshProtos.QueueStatus.newBuilder()
+                        .setMeshPacketId(packetId)
+                        .setRes(result)
+                        .setFree(free)
+                        .setMaxlen(maxlen)
+                        .build())
+                .build()
+                .toByteArray();
     }
 
     private static MeshProtos.MeshPacket channelTextPacket(int sequence) {

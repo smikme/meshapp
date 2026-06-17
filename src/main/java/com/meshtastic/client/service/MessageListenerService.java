@@ -90,6 +90,44 @@ public class MessageListenerService implements FromRadioListener {
         onMeshPacket(packet, System.currentTimeMillis() / 1000);
     }
 
+    @Override
+    public void onToRadioSendFailed(MeshProtos.ToRadio toRadio, String reason) {
+        if (toRadio == null || !toRadio.hasPacket()) {
+            return;
+        }
+        int packetId = toRadio.getPacket().getId();
+        if (packetId == 0) {
+            return;
+        }
+
+        var pendingEntry = deviceState.getMessageStore().getPendingAcks().get(packetId);
+        MeshMessage pending = pendingEntry != null ? pendingEntry.message() : null;
+        if (pending != null) {
+            failPendingMessageSend(packetId, pending, reason);
+            return;
+        }
+
+        boolean completedPacketAck = deviceState.completePendingPacketAck(
+                packetId, MeshProtos.Routing.Error.MAX_RETRANSMIT);
+        MessageDbService db = MessageDbService.getInstance();
+        MessageDbService.ReactionScope reactionScope = db.findReactionScopeByPacketId(packetId);
+        boolean updatedReaction = db.updateReactionStatus(
+                packetId,
+                MeshMessage.DeliveryStatus.FAILED,
+                reason != null ? reason : MeshProtos.Routing.Error.MAX_RETRANSMIT.name());
+
+        if (updatedReaction) {
+            fireReactionChanged(reactionScope);
+            deviceState.fireMessageListeners();
+            log.warn("Local send failed for reaction packet {}: {}", packetId, reason);
+        } else if (completedPacketAck) {
+            log.warn("Local send failed for non-message packet {}: {}", packetId, reason);
+        } else {
+            log.debug("Local send failure for packet {} did not match pending message, ACK waiter, or reaction",
+                    packetId);
+        }
+    }
+
     private void onMeshPacket(MeshProtos.MeshPacket packet, long receivedAtSeconds) {
         if (!packet.hasDecoded()) { return; }
         if (deviceState.getMyNodeNum() == 0) {
@@ -478,6 +516,16 @@ public class MessageListenerService implements FromRadioListener {
             deviceState.resolvePendingAck(requestId);
             log.debug("ACK received for packet {}", requestId);
         }
+    }
+
+    private void failPendingMessageSend(int packetId, MeshMessage pending, String reason) {
+        deviceState.resolvePendingAck(packetId);
+        pending.setStatus(MeshMessage.DeliveryStatus.FAILED);
+        pending.setErrorReason(reason != null ? reason : MeshProtos.Routing.Error.MAX_RETRANSMIT.name());
+        MessageDbService.getInstance().updateStatus(packetId, pending.getStatus(), pending.getErrorReason());
+        fireMessageStatusChanged(pending);
+        deviceState.fireMessageListeners();
+        log.warn("Local send failed for packet {}: {}", packetId, pending.getErrorReason());
     }
 
     private static boolean nodeIdMatchesNodeNum(String nodeId, int nodeNum) {
