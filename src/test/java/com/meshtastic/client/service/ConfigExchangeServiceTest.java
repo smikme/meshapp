@@ -245,6 +245,31 @@ class ConfigExchangeServiceTest {
     }
 
     @Test
+    void onNodeInfoPersistsFavoriteFlagsBeforeConfigComplete() throws Exception {
+        FakeConnection connection = new FakeConnection();
+        ProtocolHandler handler = track(new ProtocolHandler(connection));
+        DeviceState state = new DeviceState();
+        ConfigExchangeService service = track(new ConfigExchangeService(handler, state));
+
+        service.startConfigExchange();
+        connection.awaitLastWantConfigId();
+
+        service.onMyNodeInfo(MeshProtos.MyNodeInfo.newBuilder().setMyNodeNum(0x12345678).build());
+        service.onNodeInfo(MeshProtos.NodeInfo.newBuilder()
+                .setNum(0xCAFEBABE)
+                .setIsFavorite(true)
+                .setUser(MeshProtos.User.newBuilder()
+                        .setId("!cafebabe")
+                        .setLongName("Alice")
+                        .build())
+                .build());
+
+        assertFalse(state.isChannelCatalogReady());
+        assertTrue(NodeCacheService.getInstance().isFavorite("!cafebabe", "!12345678"));
+        assertEquals("Alice", state.getOrCreateNode(0xCAFEBABE).getLongName());
+    }
+
+    @Test
     void onConfigCompleteWaitsForMyNodeInfoBeforeCompletingFuture() throws Exception {
         FakeConnection connection = new FakeConnection();
         ProtocolHandler handler = track(new ProtocolHandler(connection));
@@ -378,8 +403,8 @@ class ConfigExchangeServiceTest {
         NodeData cached = nodeCacheService.get("!cafebabe");
         assertNotNull(cached);
         assertEquals("Alice", cached.getLongName());
-        assertTrue(nodeCacheService.isFavorite("!cafebabe"));
-        assertTrue(nodeCacheService.isIgnored("!cafebabe"));
+        assertTrue(nodeCacheService.isFavorite("!cafebabe", "!12345678"));
+        assertTrue(nodeCacheService.isIgnored("!cafebabe", "!12345678"));
         assertEquals(1, state.getTelemetryHistory().size());
     }
 

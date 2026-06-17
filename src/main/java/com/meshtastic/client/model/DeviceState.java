@@ -612,7 +612,10 @@ public class DeviceState {
      */
     public String getOwnerNodeId() {
         if (ownerInfo != null) {
-            return ownerInfo.getId();
+            String ownerId = ownerInfo.getId();
+            if (ownerId != null && !ownerId.isBlank() && !"?".equals(ownerId)) {
+                return ownerId;
+            }
         }
         return myNodeNum != 0 ? String.format("!%08x", myNodeNum) : null;
     }

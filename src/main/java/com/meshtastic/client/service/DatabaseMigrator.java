@@ -37,7 +37,7 @@ public final class DatabaseMigrator {
     private static final Logger log = LoggerFactory.getLogger(DatabaseMigrator.class);
 
     /** Current schema version. Increment on every schema change. */
-    static final int CURRENT_VERSION = 20;
+    static final int CURRENT_VERSION = 21;
     private static final String LEGACY_TRACEROUTE_PREFIX = "\uD83D\uDD0D Traceroute → ";
     private static final Pattern CONNECTION_NODE_ID_PATTERN =
             Pattern.compile("\"nodeId\"\\s*:\\s*\"(![0-9a-fA-F]{8})\"");
@@ -45,6 +45,7 @@ public final class DatabaseMigrator {
             "MESSAGES",
             "CHAT_READ_COUNTS",
             "NODES",
+            "NODE_FLAGS",
             "TELEMETRY_HISTORY",
             "MESSAGE_REACTIONS",
             "TRACEROUTE_RESULTS",
@@ -116,6 +117,7 @@ public final class DatabaseMigrator {
             if (version < 18) { migrateToV18(connection); version = 18; }
             if (version < 19) { migrateToV19(connection); version = 19; }
             if (version < 20) { migrateToV20(connection); version = 20; }
+            if (version < 21) { migrateToV21(connection); version = 21; }
 
             setVersion(connection, CURRENT_VERSION);
             log.info("Database migration complete, schema version = {}", CURRENT_VERSION);
@@ -766,6 +768,53 @@ public final class DatabaseMigrator {
     private static void migrateToV20(Connection connection) throws SQLException {
         createConfigHelpTables(connection);
         log.info("Migration v20: created configuration help document tables");
+    }
+
+    /** v21: owner-scoped favorite and ignored node flags. */
+    private static void migrateToV21(Connection connection) throws SQLException {
+        createNodeFlagsTable(connection);
+        backfillNodeFlags(connection, inferOwnerNodeId());
+        log.info("Migration v21: created owner-scoped node flags");
+    }
+
+    private static void createNodeFlagsTable(Connection connection) throws SQLException {
+        try (Statement stmt = connection.createStatement()) {
+            stmt.execute("""
+                    CREATE TABLE IF NOT EXISTS node_flags (
+                        owner_node_id VARCHAR(20) NOT NULL DEFAULT '',
+                        node_id       VARCHAR(20) NOT NULL,
+                        favorite      BOOLEAN DEFAULT FALSE,
+                        ignored       BOOLEAN DEFAULT FALSE,
+                        PRIMARY KEY (owner_node_id, node_id)
+                    )
+                    """);
+            stmt.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_node_flags_node
+                    ON node_flags (node_id)
+                    """);
+        }
+    }
+
+    private static void backfillNodeFlags(Connection connection, String ownerNodeId) throws SQLException {
+        if (!tableExists(connection, "NODES")
+                || !columnExists(connection, "NODES", "NODE_ID")
+                || !columnExists(connection, "NODES", "FAVORITE")
+                || !columnExists(connection, "NODES", "IGNORED")) {
+            log.info("Migration v21: skipped node_flags backfill because nodes table is incomplete");
+            return;
+        }
+        try (PreparedStatement ps = connection.prepareStatement("""
+                MERGE INTO node_flags (owner_node_id, node_id, favorite, ignored)
+                SELECT ?, node_id, favorite, ignored
+                FROM nodes
+                WHERE COALESCE(favorite, FALSE) = TRUE OR COALESCE(ignored, FALSE) = TRUE
+                """)) {
+            ps.setString(1, ownerNodeId != null ? ownerNodeId : "");
+            int updated = ps.executeUpdate();
+            if (updated > 0) {
+                log.info("Migration v21: backfilled {} node flag rows for owner '{}'", updated, ownerNodeId);
+            }
+        }
     }
 
     /**

@@ -605,8 +605,8 @@ class MessageListenerServiceTest {
 
     @Test
     void onMeshPacketDropsIncomingChannelMessageFromIgnoredNode() {
-        NodeCacheService.getInstance().setIgnored("!11111111", true);
-        assertTrue(NodeCacheService.getInstance().isIgnored("!11111111"));
+        NodeCacheService.getInstance().setIgnored("!11111111", "!12345678", true);
+        assertTrue(NodeCacheService.getInstance().isIgnored("!11111111", "!12345678"));
 
         MeshProtos.MeshPacket packet = MeshProtos.MeshPacket.newBuilder()
                 .setFrom(0x11111111)
@@ -628,8 +628,8 @@ class MessageListenerServiceTest {
 
     @Test
     void onMeshPacketDropsIncomingReactionFromIgnoredNode() {
-        NodeCacheService.getInstance().setIgnored("!11111111", true);
-        assertTrue(NodeCacheService.getInstance().isIgnored("!11111111"));
+        NodeCacheService.getInstance().setIgnored("!11111111", "!12345678", true);
+        assertTrue(NodeCacheService.getInstance().isIgnored("!11111111", "!12345678"));
 
         MeshProtos.MeshPacket packet = MeshProtos.MeshPacket.newBuilder()
                 .setFrom(0x11111111)

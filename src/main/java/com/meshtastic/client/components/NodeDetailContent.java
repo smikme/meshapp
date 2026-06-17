@@ -181,14 +181,17 @@ public class NodeDetailContent extends HBox {
         favoriteBtn.getStyleClass().add("drawer-toolbar-button");
 
         FavoriteNodeService favService = FavoriteNodeService.getInstance();
-        boolean initFav = favService.isFavorite(nodeId);
+        String ownerNodeId = currentOwnerNodeId();
+        boolean initFav = !ownerNodeId.isBlank() && favService.isFavorite(nodeId, ownerNodeId);
         if (initFav) {
             favoriteBtn.getStyleClass().add("favorite-btn-active");
         }
         favoriteBtn.setTooltip(new Tooltip(favoriteTooltip(initFav)));
 
         favoriteBtn.setOnAction(e -> {
-            boolean nowFav = favService.toggleFavorite(nodeId);
+            String currentOwnerNodeId = currentOwnerNodeId();
+            if (currentOwnerNodeId.isBlank()) { return; }
+            boolean nowFav = favService.toggleFavorite(nodeId, currentOwnerNodeId);
             if (nowFav) {
                 favoriteBtn.getStyleClass().add("favorite-btn-active");
             } else {
@@ -205,14 +208,16 @@ public class NodeDetailContent extends HBox {
         ignoredBtn.getStyleClass().add("drawer-toolbar-button");
 
         IgnoredNodeService ignService = IgnoredNodeService.getInstance();
-        boolean initIgn = ignService.isIgnored(nodeId);
+        boolean initIgn = !ownerNodeId.isBlank() && ignService.isIgnored(nodeId, ownerNodeId);
         if (initIgn) {
             ignoredBtn.getStyleClass().add("ignored-btn-active");
         }
         ignoredBtn.setTooltip(new Tooltip(ignoredTooltip(initIgn)));
 
         ignoredBtn.setOnAction(e -> {
-            boolean nowIgn = ignService.toggleIgnored(nodeId);
+            String currentOwnerNodeId = currentOwnerNodeId();
+            if (currentOwnerNodeId.isBlank()) { return; }
+            boolean nowIgn = ignService.toggleIgnored(nodeId, currentOwnerNodeId);
             if (nowIgn) {
                 ignoredBtn.getStyleClass().add("ignored-btn-active");
             } else {
@@ -332,5 +337,9 @@ public class NodeDetailContent extends HBox {
 
     private static String ignoredTooltip(boolean ignored) {
         return I18n.t(ignored ? "node.menu.removeIgnored" : "node.menu.addIgnored");
+    }
+
+    private String currentOwnerNodeId() {
+        return state != null && state.getOwnerNodeId() != null ? state.getOwnerNodeId() : "";
     }
 }

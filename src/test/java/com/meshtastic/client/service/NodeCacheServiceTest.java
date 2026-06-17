@@ -56,6 +56,25 @@ class NodeCacheServiceTest {
     }
 
     @Test
+    void favoriteAndIgnoredFlagsAreScopedByOwnerNode() {
+        service.setFavorite("!cafebabe", "!11111111", true);
+        service.setIgnored("!cafebabe", "!22222222", true);
+
+        assertTrue(service.isFavorite("!cafebabe", "!11111111"));
+        assertFalse(service.isFavorite("!cafebabe", "!22222222"));
+        assertFalse(service.isFavorite("!cafebabe", "!33333333"));
+
+        assertFalse(service.isIgnored("!cafebabe", "!11111111"));
+        assertTrue(service.isIgnored("!cafebabe", "!22222222"));
+        assertFalse(service.isIgnored("!cafebabe", "!33333333"));
+
+        assertEquals(1, service.loadFavoriteNodes("!11111111").size());
+        assertEquals(0, service.loadFavoriteNodes("!22222222").size());
+        assertEquals(0, service.loadIgnoredNodes("!11111111").size());
+        assertEquals(1, service.loadIgnoredNodes("!22222222").size());
+    }
+
+    @Test
     void publicKeySurvivesNodeCacheRestart() {
         NodeData node = new NodeData(0xA0065360);
         node.setNodeId("!a0065360");

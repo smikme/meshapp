@@ -119,6 +119,16 @@ public final class NodeCacheService {
                     """);
 
                 stmt.execute("""
+                    CREATE TABLE IF NOT EXISTS node_flags (
+                        owner_node_id VARCHAR(20) NOT NULL DEFAULT '',
+                        node_id       VARCHAR(20) NOT NULL,
+                        favorite      BOOLEAN DEFAULT FALSE,
+                        ignored       BOOLEAN DEFAULT FALSE,
+                        PRIMARY KEY (owner_node_id, node_id)
+                    )
+                    """);
+
+                stmt.execute("""
                     CREATE TABLE IF NOT EXISTS telemetry_history (
                         id                  BIGINT AUTO_INCREMENT PRIMARY KEY,
                         ts                  BIGINT NOT NULL,
@@ -180,6 +190,10 @@ public final class NodeCacheService {
 
                 stmt.execute("""
                     CREATE INDEX IF NOT EXISTS idx_telemetry_node_ts ON telemetry_history (owner_node_id, node_id, ts)
+                    """);
+
+                stmt.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_node_flags_node ON node_flags (node_id)
                     """);
             }
 
@@ -412,6 +426,7 @@ public final class NodeCacheService {
         missingNodeIds.clear();
         if (dbConnection == null) { return; }
         try (Statement stmt = dbConnection.createStatement()) {
+            stmt.execute("DELETE FROM node_flags");
             stmt.execute("DELETE FROM nodes");
             log.info("Кэш нод полностью очищен");
         } catch (SQLException e) {
@@ -430,10 +445,14 @@ public final class NodeCacheService {
         if (dbConnection == null) { return; }
         try (PreparedStatement ps1 = dbConnection.prepareStatement(
                 "DELETE FROM telemetry_history WHERE owner_node_id = ? AND node_id = ?");
+             PreparedStatement psFlags = dbConnection.prepareStatement(
+                "DELETE FROM node_flags WHERE node_id = ?");
              PreparedStatement ps2 = dbConnection.prepareStatement("DELETE FROM nodes WHERE node_id = ?")) {
             ps1.setString(1, ownerNodeId != null ? ownerNodeId : "");
             ps1.setString(2, nodeId);
             ps1.executeUpdate();
+            psFlags.setString(1, nodeId);
+            psFlags.executeUpdate();
             ps2.setString(1, nodeId);
             ps2.executeUpdate();
             log.info("Нода {} удалена из кэша для owner {}", nodeId, ownerNodeId);
@@ -448,11 +467,23 @@ public final class NodeCacheService {
 
     /**
      * Sets the favorite flag for a node.
-     * If the node is absent from the database, no row is created.
+     * Legacy overload for callers that do not know the owner device yet.
      */
     public synchronized void setFavorite(String nodeId, boolean favorite) {
+        setFavorite(nodeId, "", favorite);
+    }
+
+    /**
+     * Sets the favorite flag for a node within one owner device scope.
+     */
+    public synchronized void setFavorite(String nodeId, String ownerNodeId, boolean favorite) {
         if (dbConnection == null || nodeId == null) { return; }
         ensureNodeRowExists(nodeId);
+        String owner = ownerScope(ownerNodeId);
+        if (!owner.isBlank()) {
+            setFlags(nodeId, owner, favorite, isIgnored(nodeId, owner));
+            return;
+        }
         try (PreparedStatement ps = dbConnection.prepareStatement(
                 "UPDATE nodes SET favorite = ? WHERE node_id = ?")) {
             ps.setBoolean(1, favorite);
@@ -465,9 +496,21 @@ public final class NodeCacheService {
 
     /**
      * Checks whether a node is marked as favorite.
+     * Legacy overload for callers that do not know the owner device yet.
      */
     public boolean isFavorite(String nodeId) {
+        return isFavorite(nodeId, "");
+    }
+
+    /**
+     * Checks whether a node is marked as favorite within one owner device scope.
+     */
+    public boolean isFavorite(String nodeId, String ownerNodeId) {
         if (dbConnection == null || nodeId == null) { return false; }
+        String owner = ownerScope(ownerNodeId);
+        if (!owner.isBlank()) {
+            return isScopedFlagSet(owner, nodeId, "favorite");
+        }
         try (PreparedStatement ps = dbConnection.prepareStatement(
                 "SELECT favorite FROM nodes WHERE node_id = ?")) {
             ps.setString(1, nodeId);
@@ -482,8 +525,20 @@ public final class NodeCacheService {
 
     /**
      * Loads all favorite nodes from the database.
+     * Legacy overload for callers that do not know the owner device yet.
      */
     public List<NodeData> loadFavoriteNodes() {
+        return loadFavoriteNodes("");
+    }
+
+    /**
+     * Loads all favorite nodes for one owner device.
+     */
+    public List<NodeData> loadFavoriteNodes(String ownerNodeId) {
+        String owner = ownerScope(ownerNodeId);
+        if (!owner.isBlank()) {
+            return loadScopedFlaggedNodes(owner, true);
+        }
         List<NodeData> favorites = new ArrayList<>();
         if (dbConnection == null) { return favorites; }
         try (PreparedStatement ps = dbConnection.prepareStatement(
@@ -505,10 +560,23 @@ public final class NodeCacheService {
 
     /**
      * Sets the ignored flag for a node.
+     * Legacy overload for callers that do not know the owner device yet.
      */
     public synchronized void setIgnored(String nodeId, boolean ignored) {
+        setIgnored(nodeId, "", ignored);
+    }
+
+    /**
+     * Sets the ignored flag for a node within one owner device scope.
+     */
+    public synchronized void setIgnored(String nodeId, String ownerNodeId, boolean ignored) {
         if (dbConnection == null || nodeId == null) { return; }
         ensureNodeRowExists(nodeId);
+        String owner = ownerScope(ownerNodeId);
+        if (!owner.isBlank()) {
+            setFlags(nodeId, owner, isFavorite(nodeId, owner), ignored);
+            return;
+        }
         try (PreparedStatement ps = dbConnection.prepareStatement(
                 "UPDATE nodes SET ignored = ? WHERE node_id = ?")) {
             ps.setBoolean(1, ignored);
@@ -521,9 +589,21 @@ public final class NodeCacheService {
 
     /**
      * Checks whether a node is ignored.
+     * Legacy overload for callers that do not know the owner device yet.
      */
     public boolean isIgnored(String nodeId) {
+        return isIgnored(nodeId, "");
+    }
+
+    /**
+     * Checks whether a node is ignored within one owner device scope.
+     */
+    public boolean isIgnored(String nodeId, String ownerNodeId) {
         if (dbConnection == null || nodeId == null) { return false; }
+        String owner = ownerScope(ownerNodeId);
+        if (!owner.isBlank()) {
+            return isScopedFlagSet(owner, nodeId, "ignored");
+        }
         try (PreparedStatement ps = dbConnection.prepareStatement(
                 "SELECT ignored FROM nodes WHERE node_id = ?")) {
             ps.setString(1, nodeId);
@@ -538,8 +618,20 @@ public final class NodeCacheService {
 
     /**
      * Loads all ignored nodes from the database.
+     * Legacy overload for callers that do not know the owner device yet.
      */
     public List<NodeData> loadIgnoredNodes() {
+        return loadIgnoredNodes("");
+    }
+
+    /**
+     * Loads all ignored nodes for one owner device.
+     */
+    public List<NodeData> loadIgnoredNodes(String ownerNodeId) {
+        String owner = ownerScope(ownerNodeId);
+        if (!owner.isBlank()) {
+            return loadScopedFlaggedNodes(owner, false);
+        }
         List<NodeData> ignored = new ArrayList<>();
         if (dbConnection == null) { return ignored; }
         try (PreparedStatement ps = dbConnection.prepareStatement(
@@ -553,6 +645,70 @@ public final class NodeCacheService {
             log.error("Failed to load ignored nodes from DB", e);
         }
         return ignored;
+    }
+
+    /**
+     * Writes both device-scoped node flags at once. Used while syncing NodeInfo
+     * from the device before the full node row is necessarily persisted.
+     */
+    public synchronized void setFlags(String nodeId,
+                                      String ownerNodeId,
+                                      boolean favorite,
+                                      boolean ignored) {
+        String owner = ownerScope(ownerNodeId);
+        if (dbConnection == null || owner.isBlank() || nodeId == null) { return; }
+        try (PreparedStatement ps = dbConnection.prepareStatement("""
+                MERGE INTO node_flags (owner_node_id, node_id, favorite, ignored)
+                VALUES (?, ?, ?, ?)
+                """)) {
+            ps.setString(1, owner);
+            ps.setString(2, nodeId);
+            ps.setBoolean(3, favorite);
+            ps.setBoolean(4, ignored);
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            log.error("Failed to set scoped flags for owner {} node {}", owner, nodeId, e);
+        }
+    }
+
+    private boolean isScopedFlagSet(String ownerNodeId, String nodeId, String columnName) {
+        if (!"favorite".equals(columnName) && !"ignored".equals(columnName)) {
+            return false;
+        }
+        try (PreparedStatement ps = dbConnection.prepareStatement(
+                "SELECT " + columnName + " FROM node_flags WHERE owner_node_id = ? AND node_id = ?")) {
+            ps.setString(1, ownerNodeId);
+            ps.setString(2, nodeId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) { return rs.getBoolean(columnName); }
+            }
+        } catch (SQLException e) {
+            log.error("Failed to check scoped {} flag for owner {} node {}", columnName, ownerNodeId, nodeId, e);
+        }
+        return false;
+    }
+
+    private List<NodeData> loadScopedFlaggedNodes(String ownerNodeId, boolean favorite) {
+        List<NodeData> nodes = new ArrayList<>();
+        if (dbConnection == null) { return nodes; }
+        String columnName = favorite ? "favorite" : "ignored";
+        String sql = """
+                SELECT n.*
+                FROM nodes n
+                JOIN node_flags f ON f.node_id = n.node_id
+                WHERE f.owner_node_id = ? AND f.%s = TRUE
+                """.formatted(columnName);
+        try (PreparedStatement ps = dbConnection.prepareStatement(sql)) {
+            ps.setString(1, ownerNodeId);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    nodes.add(readNode(rs));
+                }
+            }
+        } catch (SQLException e) {
+            log.error("Failed to load scoped {} nodes for owner {}", columnName, ownerNodeId, e);
+        }
+        return nodes;
     }
 
     /**
@@ -1209,6 +1365,10 @@ public final class NodeCacheService {
             throw new IllegalArgumentException("Invalid nodeId: " + nodeId);
         }
         return (int) Long.parseUnsignedLong(nodeId.substring(1), 16);
+    }
+
+    private static String ownerScope(String ownerNodeId) {
+        return ownerNodeId != null ? ownerNodeId.toLowerCase(Locale.ROOT) : "";
     }
 
     /**

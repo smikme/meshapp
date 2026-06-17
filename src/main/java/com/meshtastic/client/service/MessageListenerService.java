@@ -206,7 +206,8 @@ public class MessageListenerService implements FromRadioListener {
 
         NodeData fromNode = deviceState.getOrCreateNode(from);
         String fromNodeId = fromNode.getNodeId();
-        if (IgnoredNodeService.getInstance().isIgnored(fromNodeId)) {
+        String ignoredOwnerNodeId = deviceState.getOwnerNodeId();
+        if (ignoredOwnerNodeId != null && IgnoredNodeService.getInstance().isIgnored(fromNodeId, ignoredOwnerNodeId)) {
             log.info("Dropping incoming {} from ignored node {}",
                     isReactionPacket(data) ? "reaction" : "message", fromNodeId);
             return;

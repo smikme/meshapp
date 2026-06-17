@@ -419,6 +419,54 @@ class DatabaseMigratorTest {
     }
 
     @Test
+    void migrateFromV20BackfillsOwnerScopedNodeFlags() throws Exception {
+        Files.writeString(tempDir.resolve(".meshapp").resolve("connections.json"),
+                "[{\"nodeId\":\"!12345678\"}]");
+        try (Connection connection = openConnection("upgrade-v20-node-flags")) {
+            createSchemaVersion(connection, 20);
+
+            try (Statement stmt = connection.createStatement()) {
+                stmt.execute("""
+                        CREATE TABLE nodes (
+                            node_id VARCHAR(20) PRIMARY KEY,
+                            node_num INT,
+                            favorite BOOLEAN DEFAULT FALSE,
+                            ignored BOOLEAN DEFAULT FALSE
+                        )
+                        """);
+                stmt.execute("""
+                        INSERT INTO nodes (node_id, node_num, favorite, ignored)
+                        VALUES ('!cafebabe', -889275714, TRUE, FALSE)
+                        """);
+                stmt.execute("""
+                        INSERT INTO nodes (node_id, node_num, favorite, ignored)
+                        VALUES ('!11111111', 286331153, FALSE, TRUE)
+                        """);
+            }
+
+            DatabaseMigrator.migrate(connection);
+
+            assertEquals(DatabaseMigrator.CURRENT_VERSION, schemaVersion(connection));
+            assertTrue(tableExists(connection, "NODE_FLAGS"));
+            assertTrue(indexExists(connection, "IDX_NODE_FLAGS_NODE"));
+            assertEquals("1", stringValue(connection, """
+                    SELECT COUNT(*) FROM node_flags
+                    WHERE owner_node_id = '!12345678'
+                      AND node_id = '!cafebabe'
+                      AND favorite = TRUE
+                      AND ignored = FALSE
+                    """));
+            assertEquals("1", stringValue(connection, """
+                    SELECT COUNT(*) FROM node_flags
+                    WHERE owner_node_id = '!12345678'
+                      AND node_id = '!11111111'
+                      AND favorite = FALSE
+                      AND ignored = TRUE
+                    """));
+        }
+    }
+
+    @Test
     void migrateLegacyAppDatabaseWithoutSchemaVersionPreservesMessages() throws Exception {
         try (Connection connection = openConnection("legacy-app-preserve")) {
             try (Statement stmt = connection.createStatement()) {

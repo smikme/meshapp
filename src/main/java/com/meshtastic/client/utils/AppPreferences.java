@@ -420,6 +420,11 @@ public class AppPreferences {
     public static final String KEY_NODES_FILTER_FAVORITES = "nodesFilterFavorites";
     public static final String KEY_NODES_FILTER_DIRECT = "nodesFilterDirect";
     public static final String KEY_NODES_FILTER_IGNORED = "nodesFilterIgnored";
+    public static final String KEY_MAP_FILTER_UNKNOWN = "mapFilterUnknown";
+    public static final String KEY_MAP_FILTER_HIDE_OFFLINE = "mapFilterHideOffline";
+    public static final String KEY_MAP_FILTER_FAVORITES = "mapFilterFavorites";
+    public static final String KEY_MAP_FILTER_DIRECT = "mapFilterDirect";
+    public static final String KEY_MAP_FILTER_IGNORED = "mapFilterIgnored";
 
     public static String getNodesSort() { return state().get(KEY_NODES_SORT, "LAST_HEARD_NEW"); }
     public static void setNodesSort(String sort) { state().put(KEY_NODES_SORT, sort); }
@@ -441,6 +446,21 @@ public class AppPreferences {
 
     public static boolean isNodesFilterIgnored() { return state().getBoolean(KEY_NODES_FILTER_IGNORED, false); }
     public static void setNodesFilterIgnored(boolean v) { state().putBoolean(KEY_NODES_FILTER_IGNORED, v); }
+
+    public static boolean isMapFilterUnknown() { return state().getBoolean(KEY_MAP_FILTER_UNKNOWN, false); }
+    public static void setMapFilterUnknown(boolean v) { state().putBoolean(KEY_MAP_FILTER_UNKNOWN, v); }
+
+    public static boolean isMapFilterHideOffline() { return state().getBoolean(KEY_MAP_FILTER_HIDE_OFFLINE, false); }
+    public static void setMapFilterHideOffline(boolean v) { state().putBoolean(KEY_MAP_FILTER_HIDE_OFFLINE, v); }
+
+    public static boolean isMapFilterFavorites() { return state().getBoolean(KEY_MAP_FILTER_FAVORITES, false); }
+    public static void setMapFilterFavorites(boolean v) { state().putBoolean(KEY_MAP_FILTER_FAVORITES, v); }
+
+    public static boolean isMapFilterDirect() { return state().getBoolean(KEY_MAP_FILTER_DIRECT, false); }
+    public static void setMapFilterDirect(boolean v) { state().putBoolean(KEY_MAP_FILTER_DIRECT, v); }
+
+    public static boolean isMapFilterIgnored() { return state().getBoolean(KEY_MAP_FILTER_IGNORED, false); }
+    public static void setMapFilterIgnored(boolean v) { state().putBoolean(KEY_MAP_FILTER_IGNORED, v); }
 
     // ==================== SplitPane Divider Positions ====================
 
