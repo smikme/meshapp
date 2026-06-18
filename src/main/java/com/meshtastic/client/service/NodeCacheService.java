@@ -46,6 +46,209 @@ public final class NodeCacheService {
     private Connection dbConnection;
     private PreparedStatement mergeStmt;
     private PreparedStatement insertTelemetryStmt;
+    private PreparedStatement insertOneWireTelemetryStmt;
+
+    private static final String[] TELEMETRY_HISTORY_COLUMNS = {
+            "ts",
+            "node_id",
+            "owner_node_id",
+            "telemetry_variant",
+            "battery_level",
+            "externally_powered",
+            "voltage",
+            "channel_utilization",
+            "air_util_tx",
+            "device_uptime_seconds",
+            "temperature",
+            "relative_humidity",
+            "barometric_pressure",
+            "gas_resistance",
+            "environment_voltage",
+            "environment_current",
+            "iaq",
+            "distance",
+            "lux",
+            "white_lux",
+            "ir_lux",
+            "uv_lux",
+            "wind_direction",
+            "wind_speed",
+            "weight",
+            "wind_gust",
+            "wind_lull",
+            "radiation",
+            "rainfall_1h",
+            "rainfall_24h",
+            "soil_moisture",
+            "soil_temperature",
+            "pm10_standard",
+            "pm25_standard",
+            "pm100_standard",
+            "pm10_environmental",
+            "pm25_environmental",
+            "pm100_environmental",
+            "particles_03um",
+            "particles_05um",
+            "particles_10um",
+            "particles_25um",
+            "particles_50um",
+            "particles_100um",
+            "co2",
+            "co2_temperature",
+            "co2_humidity",
+            "form_formaldehyde",
+            "form_humidity",
+            "form_temperature",
+            "pm40_standard",
+            "particles_40um",
+            "pm_temperature",
+            "pm_humidity",
+            "pm_voc_idx",
+            "pm_nox_idx",
+            "particles_tps",
+            "ch1_voltage",
+            "ch1_current",
+            "ch2_voltage",
+            "ch2_current",
+            "ch3_voltage",
+            "ch3_current",
+            "ch4_voltage",
+            "ch4_current",
+            "ch5_voltage",
+            "ch5_current",
+            "ch6_voltage",
+            "ch6_current",
+            "ch7_voltage",
+            "ch7_current",
+            "ch8_voltage",
+            "ch8_current",
+            "num_packets_rx",
+            "num_packets_rx_bad",
+            "num_rx_dupe",
+            "num_packets_tx",
+            "num_tx_dropped",
+            "num_tx_relay",
+            "num_tx_relay_canceled",
+            "local_uptime_seconds",
+            "num_online_nodes",
+            "num_total_nodes",
+            "heap_total_bytes",
+            "heap_free_bytes",
+            "noise_floor",
+            "health_heart_bpm",
+            "health_spo2",
+            "health_temperature",
+            "host_uptime_seconds",
+            "host_freemem_bytes",
+            "host_diskfree1_bytes",
+            "host_diskfree2_bytes",
+            "host_diskfree3_bytes",
+            "host_load1",
+            "host_load5",
+            "host_load15",
+            "host_user_string",
+            "traffic_packets_inspected",
+            "traffic_position_dedup_drops",
+            "traffic_nodeinfo_cache_hits",
+            "traffic_rate_limit_drops",
+            "traffic_unknown_packet_drops",
+            "traffic_hop_exhausted_packets",
+            "traffic_router_hops_preserved",
+            "rx_snr",
+            "rx_rssi",
+            "hop_start",
+            "hop_limit"
+    };
+
+    private static final String[][] EXTENDED_TELEMETRY_COLUMNS = {
+            {"telemetry_variant", "telemetry_variant VARCHAR(40)"},
+            {"device_uptime_seconds", "device_uptime_seconds BIGINT"},
+            {"gas_resistance", "gas_resistance REAL"},
+            {"environment_voltage", "environment_voltage REAL"},
+            {"environment_current", "environment_current REAL"},
+            {"iaq", "iaq BIGINT"},
+            {"distance", "distance REAL"},
+            {"lux", "lux REAL"},
+            {"white_lux", "white_lux REAL"},
+            {"ir_lux", "ir_lux REAL"},
+            {"uv_lux", "uv_lux REAL"},
+            {"wind_direction", "wind_direction BIGINT"},
+            {"wind_speed", "wind_speed REAL"},
+            {"weight", "weight REAL"},
+            {"wind_gust", "wind_gust REAL"},
+            {"wind_lull", "wind_lull REAL"},
+            {"radiation", "radiation REAL"},
+            {"rainfall_1h", "rainfall_1h REAL"},
+            {"rainfall_24h", "rainfall_24h REAL"},
+            {"soil_moisture", "soil_moisture BIGINT"},
+            {"soil_temperature", "soil_temperature REAL"},
+            {"pm10_standard", "pm10_standard BIGINT"},
+            {"pm25_standard", "pm25_standard BIGINT"},
+            {"pm100_standard", "pm100_standard BIGINT"},
+            {"pm10_environmental", "pm10_environmental BIGINT"},
+            {"pm25_environmental", "pm25_environmental BIGINT"},
+            {"pm100_environmental", "pm100_environmental BIGINT"},
+            {"particles_03um", "particles_03um BIGINT"},
+            {"particles_05um", "particles_05um BIGINT"},
+            {"particles_10um", "particles_10um BIGINT"},
+            {"particles_25um", "particles_25um BIGINT"},
+            {"particles_50um", "particles_50um BIGINT"},
+            {"particles_100um", "particles_100um BIGINT"},
+            {"co2", "co2 BIGINT"},
+            {"co2_temperature", "co2_temperature REAL"},
+            {"co2_humidity", "co2_humidity REAL"},
+            {"form_formaldehyde", "form_formaldehyde REAL"},
+            {"form_humidity", "form_humidity REAL"},
+            {"form_temperature", "form_temperature REAL"},
+            {"pm40_standard", "pm40_standard BIGINT"},
+            {"particles_40um", "particles_40um BIGINT"},
+            {"pm_temperature", "pm_temperature REAL"},
+            {"pm_humidity", "pm_humidity REAL"},
+            {"pm_voc_idx", "pm_voc_idx REAL"},
+            {"pm_nox_idx", "pm_nox_idx REAL"},
+            {"particles_tps", "particles_tps REAL"},
+            {"ch1_voltage", "ch1_voltage REAL"},
+            {"ch1_current", "ch1_current REAL"},
+            {"ch2_voltage", "ch2_voltage REAL"},
+            {"ch2_current", "ch2_current REAL"},
+            {"ch3_voltage", "ch3_voltage REAL"},
+            {"ch3_current", "ch3_current REAL"},
+            {"ch4_voltage", "ch4_voltage REAL"},
+            {"ch4_current", "ch4_current REAL"},
+            {"ch5_voltage", "ch5_voltage REAL"},
+            {"ch5_current", "ch5_current REAL"},
+            {"ch6_voltage", "ch6_voltage REAL"},
+            {"ch6_current", "ch6_current REAL"},
+            {"ch7_voltage", "ch7_voltage REAL"},
+            {"ch7_current", "ch7_current REAL"},
+            {"ch8_voltage", "ch8_voltage REAL"},
+            {"ch8_current", "ch8_current REAL"},
+            {"local_uptime_seconds", "local_uptime_seconds BIGINT"},
+            {"num_online_nodes", "num_online_nodes BIGINT"},
+            {"num_total_nodes", "num_total_nodes BIGINT"},
+            {"heap_total_bytes", "heap_total_bytes BIGINT"},
+            {"heap_free_bytes", "heap_free_bytes BIGINT"},
+            {"noise_floor", "noise_floor INT"},
+            {"health_heart_bpm", "health_heart_bpm BIGINT"},
+            {"health_spo2", "health_spo2 BIGINT"},
+            {"health_temperature", "health_temperature REAL"},
+            {"host_uptime_seconds", "host_uptime_seconds BIGINT"},
+            {"host_freemem_bytes", "host_freemem_bytes BIGINT"},
+            {"host_diskfree1_bytes", "host_diskfree1_bytes BIGINT"},
+            {"host_diskfree2_bytes", "host_diskfree2_bytes BIGINT"},
+            {"host_diskfree3_bytes", "host_diskfree3_bytes BIGINT"},
+            {"host_load1", "host_load1 BIGINT"},
+            {"host_load5", "host_load5 BIGINT"},
+            {"host_load15", "host_load15 BIGINT"},
+            {"host_user_string", "host_user_string VARCHAR(512)"},
+            {"traffic_packets_inspected", "traffic_packets_inspected BIGINT"},
+            {"traffic_position_dedup_drops", "traffic_position_dedup_drops BIGINT"},
+            {"traffic_nodeinfo_cache_hits", "traffic_nodeinfo_cache_hits BIGINT"},
+            {"traffic_rate_limit_drops", "traffic_rate_limit_drops BIGINT"},
+            {"traffic_unknown_packet_drops", "traffic_unknown_packet_drops BIGINT"},
+            {"traffic_hop_exhausted_packets", "traffic_hop_exhausted_packets BIGINT"},
+            {"traffic_router_hops_preserved", "traffic_router_hops_preserved BIGINT"}
+    };
 
     private NodeCacheService() {
         initDb();
@@ -77,6 +280,25 @@ public final class NodeCacheService {
                         return size() > MAX_MISSING_NODE_IDS;
                     }
                 }));
+    }
+
+    private static String telemetryInsertSql() {
+        String placeholders = String.join(", ", Collections.nCopies(TELEMETRY_HISTORY_COLUMNS.length, "?"));
+        return "INSERT INTO telemetry_history ("
+                + String.join(", ", TELEMETRY_HISTORY_COLUMNS)
+                + ") VALUES ("
+                + placeholders
+                + ")";
+    }
+
+    private static void addExtendedTelemetryColumns(Statement stmt) {
+        for (String[] column : EXTENDED_TELEMETRY_COLUMNS) {
+            try {
+                stmt.execute("ALTER TABLE telemetry_history ADD COLUMN IF NOT EXISTS " + column[1]);
+            } catch (SQLException ignored) {
+                // Older H2 states can already contain a subset of these columns.
+            }
+        }
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -134,14 +356,76 @@ public final class NodeCacheService {
                         ts                  BIGINT NOT NULL,
                         node_id             VARCHAR(20) NOT NULL,
                         owner_node_id       VARCHAR(20) NOT NULL DEFAULT '',
+                        telemetry_variant   VARCHAR(40),
                         battery_level       INT,
                         externally_powered  BOOLEAN DEFAULT FALSE,
                         voltage             REAL,
                         channel_utilization REAL,
                         air_util_tx         REAL,
+                        device_uptime_seconds BIGINT,
                         temperature         REAL,
                         relative_humidity   REAL,
                         barometric_pressure REAL,
+                        gas_resistance      REAL,
+                        environment_voltage REAL,
+                        environment_current REAL,
+                        iaq                 BIGINT,
+                        distance            REAL,
+                        lux                 REAL,
+                        white_lux           REAL,
+                        ir_lux              REAL,
+                        uv_lux              REAL,
+                        wind_direction      BIGINT,
+                        wind_speed          REAL,
+                        weight              REAL,
+                        wind_gust           REAL,
+                        wind_lull           REAL,
+                        radiation           REAL,
+                        rainfall_1h         REAL,
+                        rainfall_24h        REAL,
+                        soil_moisture       BIGINT,
+                        soil_temperature    REAL,
+                        pm10_standard       BIGINT,
+                        pm25_standard       BIGINT,
+                        pm100_standard      BIGINT,
+                        pm10_environmental  BIGINT,
+                        pm25_environmental  BIGINT,
+                        pm100_environmental BIGINT,
+                        particles_03um      BIGINT,
+                        particles_05um      BIGINT,
+                        particles_10um      BIGINT,
+                        particles_25um      BIGINT,
+                        particles_50um      BIGINT,
+                        particles_100um     BIGINT,
+                        co2                 BIGINT,
+                        co2_temperature     REAL,
+                        co2_humidity        REAL,
+                        form_formaldehyde   REAL,
+                        form_humidity       REAL,
+                        form_temperature    REAL,
+                        pm40_standard       BIGINT,
+                        particles_40um      BIGINT,
+                        pm_temperature      REAL,
+                        pm_humidity         REAL,
+                        pm_voc_idx          REAL,
+                        pm_nox_idx          REAL,
+                        particles_tps       REAL,
+                        ch1_voltage         REAL,
+                        ch1_current         REAL,
+                        ch2_voltage         REAL,
+                        ch2_current         REAL,
+                        ch3_voltage         REAL,
+                        ch3_current         REAL,
+                        ch4_voltage         REAL,
+                        ch4_current         REAL,
+                        ch5_voltage         REAL,
+                        ch5_current         REAL,
+                        ch6_voltage         REAL,
+                        ch6_current         REAL,
+                        ch7_voltage         REAL,
+                        ch7_current         REAL,
+                        ch8_voltage         REAL,
+                        ch8_current         REAL,
                         num_packets_rx      INT DEFAULT 0,
                         num_packets_rx_bad  INT DEFAULT 0,
                         num_rx_dupe         INT DEFAULT 0,
@@ -149,10 +433,47 @@ public final class NodeCacheService {
                         num_tx_dropped      INT DEFAULT 0,
                         num_tx_relay        INT DEFAULT 0,
                         num_tx_relay_canceled INT DEFAULT 0,
+                        local_uptime_seconds BIGINT,
+                        num_online_nodes    BIGINT,
+                        num_total_nodes     BIGINT,
+                        heap_total_bytes    BIGINT,
+                        heap_free_bytes     BIGINT,
+                        noise_floor         INT,
+                        health_heart_bpm    BIGINT,
+                        health_spo2         BIGINT,
+                        health_temperature  REAL,
+                        host_uptime_seconds BIGINT,
+                        host_freemem_bytes  BIGINT,
+                        host_diskfree1_bytes BIGINT,
+                        host_diskfree2_bytes BIGINT,
+                        host_diskfree3_bytes BIGINT,
+                        host_load1          BIGINT,
+                        host_load5          BIGINT,
+                        host_load15         BIGINT,
+                        host_user_string    VARCHAR(512),
+                        traffic_packets_inspected BIGINT,
+                        traffic_position_dedup_drops BIGINT,
+                        traffic_nodeinfo_cache_hits BIGINT,
+                        traffic_rate_limit_drops BIGINT,
+                        traffic_unknown_packet_drops BIGINT,
+                        traffic_hop_exhausted_packets BIGINT,
+                        traffic_router_hops_preserved BIGINT,
                         rx_snr              REAL DEFAULT 0,
                         rx_rssi             INT DEFAULT 0,
                         hop_start           INT DEFAULT 0,
                         hop_limit           INT DEFAULT 0
+                    )
+                    """);
+
+                stmt.execute("""
+                    CREATE TABLE IF NOT EXISTS telemetry_one_wire_temperature (
+                        telemetry_id BIGINT NOT NULL,
+                        sensor_index INT NOT NULL,
+                        temperature  REAL,
+                        PRIMARY KEY (telemetry_id, sensor_index),
+                        CONSTRAINT fk_telemetry_one_wire
+                            FOREIGN KEY (telemetry_id) REFERENCES telemetry_history(id)
+                            ON DELETE CASCADE
                     )
                     """);
 
@@ -173,6 +494,7 @@ public final class NodeCacheService {
                 // Migration: hop columns
                 try { stmt.execute("ALTER TABLE telemetry_history ADD COLUMN hop_start INT DEFAULT 0"); } catch (SQLException ignored) {}
                 try { stmt.execute("ALTER TABLE telemetry_history ADD COLUMN hop_limit INT DEFAULT 0"); } catch (SQLException ignored) {}
+                addExtendedTelemetryColumns(stmt);
                 // Migration: channel column in nodes table
                 try { stmt.execute("ALTER TABLE nodes ADD COLUMN channel INT DEFAULT 0"); } catch (SQLException ignored) {}
                 // Migration: public_key column in nodes table
@@ -193,6 +515,11 @@ public final class NodeCacheService {
                     """);
 
                 stmt.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_telemetry_one_wire_telemetry
+                    ON telemetry_one_wire_temperature (telemetry_id)
+                    """);
+
+                stmt.execute("""
                     CREATE INDEX IF NOT EXISTS idx_node_flags_node ON node_flags (node_id)
                     """);
             }
@@ -204,13 +531,10 @@ public final class NodeCacheService {
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """);
 
-            insertTelemetryStmt = dbConnection.prepareStatement("""
-                INSERT INTO telemetry_history (ts, node_id, battery_level, externally_powered, voltage,
-                    channel_utilization, air_util_tx, temperature, relative_humidity, barometric_pressure,
-                    num_packets_rx, num_packets_rx_bad, num_rx_dupe,
-                    num_packets_tx, num_tx_dropped, num_tx_relay, num_tx_relay_canceled,
-                    rx_snr, rx_rssi, hop_start, hop_limit, owner_node_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            insertTelemetryStmt = dbConnection.prepareStatement(telemetryInsertSql(), Statement.RETURN_GENERATED_KEYS);
+            insertOneWireTelemetryStmt = dbConnection.prepareStatement("""
+                INSERT INTO telemetry_one_wire_temperature (telemetry_id, sensor_index, temperature)
+                VALUES (?, ?, ?)
                 """);
 
             log.info("Node cache DB initialized");
@@ -745,29 +1069,12 @@ public final class NodeCacheService {
     public synchronized void persistTelemetry(TelemetryEntry entry, String ownerNodeId) {
         if (insertTelemetryStmt == null || entry == null) { return; }
         try {
-            insertTelemetryStmt.setLong(1, entry.getTimestamp());
-            insertTelemetryStmt.setString(2, entry.getNodeId());
-            insertTelemetryStmt.setInt(3, entry.getBatteryLevel());
-            insertTelemetryStmt.setBoolean(4, entry.isExternallyPowered());
-            insertTelemetryStmt.setFloat(5, entry.getVoltage());
-            insertTelemetryStmt.setFloat(6, entry.getChannelUtilization());
-            insertTelemetryStmt.setFloat(7, entry.getAirUtilTx());
-            insertTelemetryStmt.setFloat(8, entry.getTemperature());
-            insertTelemetryStmt.setFloat(9, entry.getRelativeHumidity());
-            insertTelemetryStmt.setFloat(10, entry.getBarometricPressure());
-            insertTelemetryStmt.setInt(11, entry.getNumPacketsRx());
-            insertTelemetryStmt.setInt(12, entry.getNumPacketsRxBad());
-            insertTelemetryStmt.setInt(13, entry.getNumRxDupe());
-            insertTelemetryStmt.setInt(14, entry.getNumPacketsTx());
-            insertTelemetryStmt.setInt(15, entry.getNumTxDropped());
-            insertTelemetryStmt.setInt(16, entry.getNumTxRelay());
-            insertTelemetryStmt.setInt(17, entry.getNumTxRelayCanceled());
-            insertTelemetryStmt.setFloat(18, entry.getRxSnr());
-            insertTelemetryStmt.setInt(19, entry.getRxRssi());
-            insertTelemetryStmt.setInt(20, entry.getHopStart());
-            insertTelemetryStmt.setInt(21, entry.getHopLimit());
-            insertTelemetryStmt.setString(22, ownerNodeId != null ? ownerNodeId : "");
+            bindTelemetry(insertTelemetryStmt, entry, ownerNodeId);
             insertTelemetryStmt.executeUpdate();
+            long telemetryId = generatedTelemetryId(insertTelemetryStmt);
+            if (telemetryId > 0) {
+                persistOneWireTemperatures(telemetryId, entry.getOneWireTemperatures());
+            }
         } catch (SQLException e) {
             log.error("Failed to persist telemetry entry", e);
         }
@@ -845,7 +1152,7 @@ public final class NodeCacheService {
             WHERE owner_node_id = ?
               AND node_id = ?
               AND ts <= ?
-              AND (battery_level <> 0 OR channel_utilization <> 0 OR air_util_tx <> 0 OR voltage <> 0 OR num_packets_rx <> 0 OR num_packets_tx <> 0 OR rx_snr <> 0 OR hop_start <> 0)
+              AND (telemetry_variant IS NOT NULL OR battery_level <> 0 OR channel_utilization <> 0 OR air_util_tx <> 0 OR voltage <> 0 OR num_packets_rx <> 0 OR num_packets_tx <> 0 OR rx_snr <> 0 OR hop_start <> 0)
             """ + (sinceEpoch > 0 ? "  AND ts >= ?\n" : "") + """
             ORDER BY ts ASC
             """;
@@ -864,6 +1171,73 @@ public final class NodeCacheService {
             }
         } catch (SQLException e) {
             log.error("Failed to load telemetry for node {} since {}", nodeId, sinceEpoch, e);
+        }
+        return result;
+    }
+
+    /**
+     * Loads telemetry entries with optional node, variant, and time-window filters.
+     *
+     * @param nodeId       optional node identifier
+     * @param variant      optional telemetry variant name
+     * @param sinceEpoch   inclusive lower timestamp bound; 0 means no lower bound
+     * @param untilEpoch   inclusive upper timestamp bound; 0 means no upper bound
+     * @param limit        maximum number of rows
+     * @param newestFirst  {@code true} for {@code ts DESC}, {@code false} for {@code ts ASC}
+     * @param ownerNodeId  owner-device scope
+     * @return matching telemetry entries
+     */
+    public List<TelemetryEntry> loadTelemetry(String nodeId,
+                                              String variant,
+                                              long sinceEpoch,
+                                              long untilEpoch,
+                                              int limit,
+                                              boolean newestFirst,
+                                              String ownerNodeId) {
+        List<TelemetryEntry> result = new ArrayList<>();
+        if (dbConnection == null) { return result; }
+
+        StringBuilder sql = new StringBuilder("""
+                SELECT * FROM telemetry_history
+                WHERE owner_node_id = ?
+                """);
+        List<SqlBinder> binders = new ArrayList<>();
+        binders.add((ps, index) -> ps.setString(index, ownerNodeId != null ? ownerNodeId : ""));
+
+        if (nodeId != null && !nodeId.isBlank()) {
+            sql.append("  AND node_id = ?\n");
+            binders.add((ps, index) -> ps.setString(index, nodeId));
+        }
+        if (variant != null && !variant.isBlank()) {
+            sql.append("  AND telemetry_variant = ?\n");
+            binders.add((ps, index) -> ps.setString(index, variant));
+        }
+        if (sinceEpoch > 0) {
+            sql.append("  AND ts >= ?\n");
+            binders.add((ps, index) -> ps.setLong(index, sinceEpoch));
+        }
+        if (untilEpoch > 0) {
+            sql.append("  AND ts <= ?\n");
+            binders.add((ps, index) -> ps.setLong(index, untilEpoch));
+        }
+
+        sql.append("ORDER BY ts ").append(newestFirst ? "DESC" : "ASC").append(", id ");
+        sql.append(newestFirst ? "DESC" : "ASC").append("\nLIMIT ?");
+        int safeLimit = Math.max(1, limit);
+        binders.add((ps, index) -> ps.setInt(index, safeLimit));
+
+        try (PreparedStatement ps = dbConnection.prepareStatement(sql.toString())) {
+            for (int i = 0; i < binders.size(); i++) {
+                binders.get(i).bind(ps, i + 1);
+            }
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    result.add(readTelemetryRow(rs));
+                }
+            }
+        } catch (SQLException e) {
+            log.error("Failed to load telemetry query node={}, variant={}, since={}, until={}",
+                    nodeId, variant, sinceEpoch, untilEpoch, e);
         }
         return result;
     }
@@ -918,16 +1292,79 @@ public final class NodeCacheService {
         return 0;
     }
 
-    private static TelemetryEntry readTelemetryRow(ResultSet rs) throws SQLException {
+    private TelemetryEntry readTelemetryRow(ResultSet rs) throws SQLException {
         TelemetryEntry e = new TelemetryEntry(rs.getLong("ts"), rs.getString("node_id"));
+        long telemetryId = rs.getLong("id");
+        e.setTelemetryVariant(rs.getString("telemetry_variant"));
         applyBatteryLevel(rs.getInt("battery_level"), e);
         e.setExternallyPowered(e.isExternallyPowered() || rs.getBoolean("externally_powered"));
         e.setVoltage(rs.getFloat("voltage"));
         e.setChannelUtilization(rs.getFloat("channel_utilization"));
         e.setAirUtilTx(rs.getFloat("air_util_tx"));
+        e.setDeviceUptimeSeconds(nullableLong(rs, "device_uptime_seconds"));
         e.setTemperature(rs.getFloat("temperature"));
         e.setRelativeHumidity(rs.getFloat("relative_humidity"));
         e.setBarometricPressure(rs.getFloat("barometric_pressure"));
+        e.setGasResistance(nullableFloat(rs, "gas_resistance"));
+        e.setEnvironmentVoltage(nullableFloat(rs, "environment_voltage"));
+        e.setEnvironmentCurrent(nullableFloat(rs, "environment_current"));
+        e.setIaq(nullableLong(rs, "iaq"));
+        e.setDistance(nullableFloat(rs, "distance"));
+        e.setLux(nullableFloat(rs, "lux"));
+        e.setWhiteLux(nullableFloat(rs, "white_lux"));
+        e.setIrLux(nullableFloat(rs, "ir_lux"));
+        e.setUvLux(nullableFloat(rs, "uv_lux"));
+        e.setWindDirection(nullableLong(rs, "wind_direction"));
+        e.setWindSpeed(nullableFloat(rs, "wind_speed"));
+        e.setWeight(nullableFloat(rs, "weight"));
+        e.setWindGust(nullableFloat(rs, "wind_gust"));
+        e.setWindLull(nullableFloat(rs, "wind_lull"));
+        e.setRadiation(nullableFloat(rs, "radiation"));
+        e.setRainfall1h(nullableFloat(rs, "rainfall_1h"));
+        e.setRainfall24h(nullableFloat(rs, "rainfall_24h"));
+        e.setSoilMoisture(nullableLong(rs, "soil_moisture"));
+        e.setSoilTemperature(nullableFloat(rs, "soil_temperature"));
+        e.setPm10Standard(nullableLong(rs, "pm10_standard"));
+        e.setPm25Standard(nullableLong(rs, "pm25_standard"));
+        e.setPm100Standard(nullableLong(rs, "pm100_standard"));
+        e.setPm10Environmental(nullableLong(rs, "pm10_environmental"));
+        e.setPm25Environmental(nullableLong(rs, "pm25_environmental"));
+        e.setPm100Environmental(nullableLong(rs, "pm100_environmental"));
+        e.setParticles03um(nullableLong(rs, "particles_03um"));
+        e.setParticles05um(nullableLong(rs, "particles_05um"));
+        e.setParticles10um(nullableLong(rs, "particles_10um"));
+        e.setParticles25um(nullableLong(rs, "particles_25um"));
+        e.setParticles50um(nullableLong(rs, "particles_50um"));
+        e.setParticles100um(nullableLong(rs, "particles_100um"));
+        e.setCo2(nullableLong(rs, "co2"));
+        e.setCo2Temperature(nullableFloat(rs, "co2_temperature"));
+        e.setCo2Humidity(nullableFloat(rs, "co2_humidity"));
+        e.setFormFormaldehyde(nullableFloat(rs, "form_formaldehyde"));
+        e.setFormHumidity(nullableFloat(rs, "form_humidity"));
+        e.setFormTemperature(nullableFloat(rs, "form_temperature"));
+        e.setPm40Standard(nullableLong(rs, "pm40_standard"));
+        e.setParticles40um(nullableLong(rs, "particles_40um"));
+        e.setPmTemperature(nullableFloat(rs, "pm_temperature"));
+        e.setPmHumidity(nullableFloat(rs, "pm_humidity"));
+        e.setPmVocIdx(nullableFloat(rs, "pm_voc_idx"));
+        e.setPmNoxIdx(nullableFloat(rs, "pm_nox_idx"));
+        e.setParticlesTps(nullableFloat(rs, "particles_tps"));
+        e.setCh1Voltage(nullableFloat(rs, "ch1_voltage"));
+        e.setCh1Current(nullableFloat(rs, "ch1_current"));
+        e.setCh2Voltage(nullableFloat(rs, "ch2_voltage"));
+        e.setCh2Current(nullableFloat(rs, "ch2_current"));
+        e.setCh3Voltage(nullableFloat(rs, "ch3_voltage"));
+        e.setCh3Current(nullableFloat(rs, "ch3_current"));
+        e.setCh4Voltage(nullableFloat(rs, "ch4_voltage"));
+        e.setCh4Current(nullableFloat(rs, "ch4_current"));
+        e.setCh5Voltage(nullableFloat(rs, "ch5_voltage"));
+        e.setCh5Current(nullableFloat(rs, "ch5_current"));
+        e.setCh6Voltage(nullableFloat(rs, "ch6_voltage"));
+        e.setCh6Current(nullableFloat(rs, "ch6_current"));
+        e.setCh7Voltage(nullableFloat(rs, "ch7_voltage"));
+        e.setCh7Current(nullableFloat(rs, "ch7_current"));
+        e.setCh8Voltage(nullableFloat(rs, "ch8_voltage"));
+        e.setCh8Current(nullableFloat(rs, "ch8_current"));
         e.setNumPacketsRx(rs.getInt("num_packets_rx"));
         e.setNumPacketsRxBad(rs.getInt("num_packets_rx_bad"));
         e.setNumRxDupe(rs.getInt("num_rx_dupe"));
@@ -935,10 +1372,36 @@ public final class NodeCacheService {
         e.setNumTxDropped(rs.getInt("num_tx_dropped"));
         e.setNumTxRelay(rs.getInt("num_tx_relay"));
         e.setNumTxRelayCanceled(rs.getInt("num_tx_relay_canceled"));
+        e.setLocalUptimeSeconds(nullableLong(rs, "local_uptime_seconds"));
+        e.setNumOnlineNodes(nullableLong(rs, "num_online_nodes"));
+        e.setNumTotalNodes(nullableLong(rs, "num_total_nodes"));
+        e.setHeapTotalBytes(nullableLong(rs, "heap_total_bytes"));
+        e.setHeapFreeBytes(nullableLong(rs, "heap_free_bytes"));
+        e.setNoiseFloor(nullableInteger(rs, "noise_floor"));
+        e.setHealthHeartBpm(nullableLong(rs, "health_heart_bpm"));
+        e.setHealthSpO2(nullableLong(rs, "health_spo2"));
+        e.setHealthTemperature(nullableFloat(rs, "health_temperature"));
+        e.setHostUptimeSeconds(nullableLong(rs, "host_uptime_seconds"));
+        e.setHostFreememBytes(nullableLong(rs, "host_freemem_bytes"));
+        e.setHostDiskfree1Bytes(nullableLong(rs, "host_diskfree1_bytes"));
+        e.setHostDiskfree2Bytes(nullableLong(rs, "host_diskfree2_bytes"));
+        e.setHostDiskfree3Bytes(nullableLong(rs, "host_diskfree3_bytes"));
+        e.setHostLoad1(nullableLong(rs, "host_load1"));
+        e.setHostLoad5(nullableLong(rs, "host_load5"));
+        e.setHostLoad15(nullableLong(rs, "host_load15"));
+        e.setHostUserString(rs.getString("host_user_string"));
+        e.setTrafficPacketsInspected(nullableLong(rs, "traffic_packets_inspected"));
+        e.setTrafficPositionDedupDrops(nullableLong(rs, "traffic_position_dedup_drops"));
+        e.setTrafficNodeinfoCacheHits(nullableLong(rs, "traffic_nodeinfo_cache_hits"));
+        e.setTrafficRateLimitDrops(nullableLong(rs, "traffic_rate_limit_drops"));
+        e.setTrafficUnknownPacketDrops(nullableLong(rs, "traffic_unknown_packet_drops"));
+        e.setTrafficHopExhaustedPackets(nullableLong(rs, "traffic_hop_exhausted_packets"));
+        e.setTrafficRouterHopsPreserved(nullableLong(rs, "traffic_router_hops_preserved"));
         e.setRxSnr(rs.getFloat("rx_snr"));
         e.setRxRssi(rs.getInt("rx_rssi"));
         e.setHopStart(rs.getInt("hop_start"));
         e.setHopLimit(rs.getInt("hop_limit"));
+        loadOneWireTemperatures(telemetryId, e);
         return e;
     }
 
@@ -1270,11 +1733,13 @@ public final class NodeCacheService {
         try {
             if (mergeStmt != null) { mergeStmt.close(); }
             if (insertTelemetryStmt != null) { insertTelemetryStmt.close(); }
+            if (insertOneWireTelemetryStmt != null) { insertOneWireTelemetryStmt.close(); }
         } catch (SQLException e) {
             log.error("Error closing node cache DB statements", e);
         } finally {
             mergeStmt = null;
             insertTelemetryStmt = null;
+            insertOneWireTelemetryStmt = null;
         }
     }
 
@@ -1322,6 +1787,11 @@ public final class NodeCacheService {
     // JDBC utilities.
     // ═══════════════════════════════════════════════════════════
 
+    @FunctionalInterface
+    private interface SqlBinder {
+        void bind(PreparedStatement ps, int index) throws SQLException;
+    }
+
     /**
      * Binds NodeData fields to PreparedStatement parameters.
      * Order: node_id, node_num, long_name, short_name, role, hw_model, ...
@@ -1358,6 +1828,212 @@ public final class NodeCacheService {
         } else {
             ps.setNull(18, Types.BOOLEAN);
         }
+    }
+
+    private static void bindTelemetry(PreparedStatement ps, TelemetryEntry entry, String ownerNodeId) throws SQLException {
+        int i = 1;
+        ps.setLong(i++, entry.getTimestamp());
+        ps.setString(i++, entry.getNodeId());
+        ps.setString(i++, ownerNodeId != null ? ownerNodeId : "");
+        setNullableString(ps, i++, entry.getTelemetryVariant(), 40);
+        ps.setInt(i++, entry.getBatteryLevel());
+        ps.setBoolean(i++, entry.isExternallyPowered());
+        ps.setFloat(i++, entry.getVoltage());
+        ps.setFloat(i++, entry.getChannelUtilization());
+        ps.setFloat(i++, entry.getAirUtilTx());
+        setNullableLong(ps, i++, entry.getDeviceUptimeSeconds());
+        ps.setFloat(i++, entry.getTemperature());
+        ps.setFloat(i++, entry.getRelativeHumidity());
+        ps.setFloat(i++, entry.getBarometricPressure());
+        setNullableFloat(ps, i++, entry.getGasResistance());
+        setNullableFloat(ps, i++, entry.getEnvironmentVoltage());
+        setNullableFloat(ps, i++, entry.getEnvironmentCurrent());
+        setNullableLong(ps, i++, entry.getIaq());
+        setNullableFloat(ps, i++, entry.getDistance());
+        setNullableFloat(ps, i++, entry.getLux());
+        setNullableFloat(ps, i++, entry.getWhiteLux());
+        setNullableFloat(ps, i++, entry.getIrLux());
+        setNullableFloat(ps, i++, entry.getUvLux());
+        setNullableLong(ps, i++, entry.getWindDirection());
+        setNullableFloat(ps, i++, entry.getWindSpeed());
+        setNullableFloat(ps, i++, entry.getWeight());
+        setNullableFloat(ps, i++, entry.getWindGust());
+        setNullableFloat(ps, i++, entry.getWindLull());
+        setNullableFloat(ps, i++, entry.getRadiation());
+        setNullableFloat(ps, i++, entry.getRainfall1h());
+        setNullableFloat(ps, i++, entry.getRainfall24h());
+        setNullableLong(ps, i++, entry.getSoilMoisture());
+        setNullableFloat(ps, i++, entry.getSoilTemperature());
+        setNullableLong(ps, i++, entry.getPm10Standard());
+        setNullableLong(ps, i++, entry.getPm25Standard());
+        setNullableLong(ps, i++, entry.getPm100Standard());
+        setNullableLong(ps, i++, entry.getPm10Environmental());
+        setNullableLong(ps, i++, entry.getPm25Environmental());
+        setNullableLong(ps, i++, entry.getPm100Environmental());
+        setNullableLong(ps, i++, entry.getParticles03um());
+        setNullableLong(ps, i++, entry.getParticles05um());
+        setNullableLong(ps, i++, entry.getParticles10um());
+        setNullableLong(ps, i++, entry.getParticles25um());
+        setNullableLong(ps, i++, entry.getParticles50um());
+        setNullableLong(ps, i++, entry.getParticles100um());
+        setNullableLong(ps, i++, entry.getCo2());
+        setNullableFloat(ps, i++, entry.getCo2Temperature());
+        setNullableFloat(ps, i++, entry.getCo2Humidity());
+        setNullableFloat(ps, i++, entry.getFormFormaldehyde());
+        setNullableFloat(ps, i++, entry.getFormHumidity());
+        setNullableFloat(ps, i++, entry.getFormTemperature());
+        setNullableLong(ps, i++, entry.getPm40Standard());
+        setNullableLong(ps, i++, entry.getParticles40um());
+        setNullableFloat(ps, i++, entry.getPmTemperature());
+        setNullableFloat(ps, i++, entry.getPmHumidity());
+        setNullableFloat(ps, i++, entry.getPmVocIdx());
+        setNullableFloat(ps, i++, entry.getPmNoxIdx());
+        setNullableFloat(ps, i++, entry.getParticlesTps());
+        setNullableFloat(ps, i++, entry.getCh1Voltage());
+        setNullableFloat(ps, i++, entry.getCh1Current());
+        setNullableFloat(ps, i++, entry.getCh2Voltage());
+        setNullableFloat(ps, i++, entry.getCh2Current());
+        setNullableFloat(ps, i++, entry.getCh3Voltage());
+        setNullableFloat(ps, i++, entry.getCh3Current());
+        setNullableFloat(ps, i++, entry.getCh4Voltage());
+        setNullableFloat(ps, i++, entry.getCh4Current());
+        setNullableFloat(ps, i++, entry.getCh5Voltage());
+        setNullableFloat(ps, i++, entry.getCh5Current());
+        setNullableFloat(ps, i++, entry.getCh6Voltage());
+        setNullableFloat(ps, i++, entry.getCh6Current());
+        setNullableFloat(ps, i++, entry.getCh7Voltage());
+        setNullableFloat(ps, i++, entry.getCh7Current());
+        setNullableFloat(ps, i++, entry.getCh8Voltage());
+        setNullableFloat(ps, i++, entry.getCh8Current());
+        ps.setInt(i++, entry.getNumPacketsRx());
+        ps.setInt(i++, entry.getNumPacketsRxBad());
+        ps.setInt(i++, entry.getNumRxDupe());
+        ps.setInt(i++, entry.getNumPacketsTx());
+        ps.setInt(i++, entry.getNumTxDropped());
+        ps.setInt(i++, entry.getNumTxRelay());
+        ps.setInt(i++, entry.getNumTxRelayCanceled());
+        setNullableLong(ps, i++, entry.getLocalUptimeSeconds());
+        setNullableLong(ps, i++, entry.getNumOnlineNodes());
+        setNullableLong(ps, i++, entry.getNumTotalNodes());
+        setNullableLong(ps, i++, entry.getHeapTotalBytes());
+        setNullableLong(ps, i++, entry.getHeapFreeBytes());
+        setNullableInteger(ps, i++, entry.getNoiseFloor());
+        setNullableLong(ps, i++, entry.getHealthHeartBpm());
+        setNullableLong(ps, i++, entry.getHealthSpO2());
+        setNullableFloat(ps, i++, entry.getHealthTemperature());
+        setNullableLong(ps, i++, entry.getHostUptimeSeconds());
+        setNullableLong(ps, i++, entry.getHostFreememBytes());
+        setNullableLong(ps, i++, entry.getHostDiskfree1Bytes());
+        setNullableLong(ps, i++, entry.getHostDiskfree2Bytes());
+        setNullableLong(ps, i++, entry.getHostDiskfree3Bytes());
+        setNullableLong(ps, i++, entry.getHostLoad1());
+        setNullableLong(ps, i++, entry.getHostLoad5());
+        setNullableLong(ps, i++, entry.getHostLoad15());
+        setNullableString(ps, i++, entry.getHostUserString(), 512);
+        setNullableLong(ps, i++, entry.getTrafficPacketsInspected());
+        setNullableLong(ps, i++, entry.getTrafficPositionDedupDrops());
+        setNullableLong(ps, i++, entry.getTrafficNodeinfoCacheHits());
+        setNullableLong(ps, i++, entry.getTrafficRateLimitDrops());
+        setNullableLong(ps, i++, entry.getTrafficUnknownPacketDrops());
+        setNullableLong(ps, i++, entry.getTrafficHopExhaustedPackets());
+        setNullableLong(ps, i++, entry.getTrafficRouterHopsPreserved());
+        ps.setFloat(i++, entry.getRxSnr());
+        ps.setInt(i++, entry.getRxRssi());
+        ps.setInt(i++, entry.getHopStart());
+        ps.setInt(i++, entry.getHopLimit());
+        if (i != TELEMETRY_HISTORY_COLUMNS.length + 1) {
+            throw new SQLException("Telemetry bind count mismatch: expected "
+                    + TELEMETRY_HISTORY_COLUMNS.length + ", bound " + (i - 1));
+        }
+    }
+
+    private static long generatedTelemetryId(PreparedStatement ps) throws SQLException {
+        try (ResultSet rs = ps.getGeneratedKeys()) {
+            return rs.next() ? rs.getLong(1) : 0;
+        }
+    }
+
+    private void persistOneWireTemperatures(long telemetryId, List<Float> temperatures) throws SQLException {
+        if (insertOneWireTelemetryStmt == null || temperatures == null || temperatures.isEmpty()) {
+            return;
+        }
+        int sensorIndex = 0;
+        for (Float temperature : temperatures) {
+            if (temperature == null) {
+                continue;
+            }
+            insertOneWireTelemetryStmt.setLong(1, telemetryId);
+            insertOneWireTelemetryStmt.setInt(2, sensorIndex++);
+            insertOneWireTelemetryStmt.setFloat(3, temperature);
+            insertOneWireTelemetryStmt.addBatch();
+        }
+        insertOneWireTelemetryStmt.executeBatch();
+    }
+
+    private void loadOneWireTemperatures(long telemetryId, TelemetryEntry entry) throws SQLException {
+        if (dbConnection == null || telemetryId <= 0 || entry == null) {
+            return;
+        }
+        try (PreparedStatement ps = dbConnection.prepareStatement("""
+                SELECT temperature
+                FROM telemetry_one_wire_temperature
+                WHERE telemetry_id = ?
+                ORDER BY sensor_index ASC
+                """)) {
+            ps.setLong(1, telemetryId);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    entry.addOneWireTemperature(rs.getFloat("temperature"));
+                }
+            }
+        }
+    }
+
+    private static void setNullableFloat(PreparedStatement ps, int index, Float value) throws SQLException {
+        if (value != null) {
+            ps.setFloat(index, value);
+        } else {
+            ps.setNull(index, Types.REAL);
+        }
+    }
+
+    private static void setNullableLong(PreparedStatement ps, int index, Long value) throws SQLException {
+        if (value != null) {
+            ps.setLong(index, value);
+        } else {
+            ps.setNull(index, Types.BIGINT);
+        }
+    }
+
+    private static void setNullableInteger(PreparedStatement ps, int index, Integer value) throws SQLException {
+        if (value != null) {
+            ps.setInt(index, value);
+        } else {
+            ps.setNull(index, Types.INTEGER);
+        }
+    }
+
+    private static void setNullableString(PreparedStatement ps, int index, String value, int maxLength) throws SQLException {
+        if (value != null) {
+            ps.setString(index, value.length() <= maxLength ? value : value.substring(0, maxLength));
+        } else {
+            ps.setNull(index, Types.VARCHAR);
+        }
+    }
+
+    private static Float nullableFloat(ResultSet rs, String columnName) throws SQLException {
+        float value = rs.getFloat(columnName);
+        return rs.wasNull() ? null : value;
+    }
+
+    private static Long nullableLong(ResultSet rs, String columnName) throws SQLException {
+        long value = rs.getLong(columnName);
+        return rs.wasNull() ? null : value;
+    }
+
+    private static Integer nullableInteger(ResultSet rs, String columnName) throws SQLException {
+        int value = rs.getInt(columnName);
+        return rs.wasNull() ? null : value;
     }
 
     private static int parseNodeNum(String nodeId) {

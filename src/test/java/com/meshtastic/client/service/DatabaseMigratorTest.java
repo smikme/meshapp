@@ -467,6 +467,130 @@ class DatabaseMigratorTest {
     }
 
     @Test
+    void migrateFromV21AddsExtendedTelemetryStorage() throws Exception {
+        try (Connection connection = openConnection("upgrade-v21-telemetry")) {
+            createSchemaVersion(connection, 21);
+
+            try (Statement stmt = connection.createStatement()) {
+                stmt.execute("""
+                        CREATE TABLE telemetry_history (
+                            id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                            ts BIGINT NOT NULL,
+                            node_id VARCHAR(20) NOT NULL,
+                            owner_node_id VARCHAR(20) NOT NULL DEFAULT ''
+                        )
+                        """);
+                stmt.execute("INSERT INTO telemetry_history (ts, node_id, owner_node_id) VALUES (100, '!abcdef12', '!12345678')");
+            }
+
+            DatabaseMigrator.migrate(connection);
+
+            assertEquals(DatabaseMigrator.CURRENT_VERSION, schemaVersion(connection));
+            assertTrue(tableExists(connection, "TELEMETRY_ONE_WIRE_TEMPERATURE"));
+            assertTrue(indexExists(connection, "IDX_TELEMETRY_ONE_WIRE_TELEMETRY"));
+            for (String column : new String[] {
+                    "TELEMETRY_VARIANT",
+                    "DEVICE_UPTIME_SECONDS",
+                    "GAS_RESISTANCE",
+                    "ENVIRONMENT_VOLTAGE",
+                    "ENVIRONMENT_CURRENT",
+                    "IAQ",
+                    "DISTANCE",
+                    "LUX",
+                    "WHITE_LUX",
+                    "IR_LUX",
+                    "UV_LUX",
+                    "WIND_DIRECTION",
+                    "WIND_SPEED",
+                    "WEIGHT",
+                    "WIND_GUST",
+                    "WIND_LULL",
+                    "RADIATION",
+                    "RAINFALL_1H",
+                    "RAINFALL_24H",
+                    "SOIL_MOISTURE",
+                    "SOIL_TEMPERATURE",
+                    "PM10_STANDARD",
+                    "PM25_STANDARD",
+                    "PM100_STANDARD",
+                    "PM10_ENVIRONMENTAL",
+                    "PM25_ENVIRONMENTAL",
+                    "PM100_ENVIRONMENTAL",
+                    "PARTICLES_03UM",
+                    "PARTICLES_05UM",
+                    "PARTICLES_10UM",
+                    "PARTICLES_25UM",
+                    "PARTICLES_50UM",
+                    "PARTICLES_100UM",
+                    "CO2",
+                    "CO2_TEMPERATURE",
+                    "CO2_HUMIDITY",
+                    "FORM_FORMALDEHYDE",
+                    "FORM_HUMIDITY",
+                    "FORM_TEMPERATURE",
+                    "PM40_STANDARD",
+                    "PARTICLES_40UM",
+                    "PM_TEMPERATURE",
+                    "PM_HUMIDITY",
+                    "PM_VOC_IDX",
+                    "PM_NOX_IDX",
+                    "PARTICLES_TPS",
+                    "CH1_VOLTAGE",
+                    "CH1_CURRENT",
+                    "CH2_VOLTAGE",
+                    "CH2_CURRENT",
+                    "CH3_VOLTAGE",
+                    "CH3_CURRENT",
+                    "CH4_VOLTAGE",
+                    "CH4_CURRENT",
+                    "CH5_VOLTAGE",
+                    "CH5_CURRENT",
+                    "CH6_VOLTAGE",
+                    "CH6_CURRENT",
+                    "CH7_VOLTAGE",
+                    "CH7_CURRENT",
+                    "CH8_VOLTAGE",
+                    "CH8_CURRENT",
+                    "LOCAL_UPTIME_SECONDS",
+                    "NUM_ONLINE_NODES",
+                    "NUM_TOTAL_NODES",
+                    "HEAP_TOTAL_BYTES",
+                    "HEAP_FREE_BYTES",
+                    "NOISE_FLOOR",
+                    "HEALTH_HEART_BPM",
+                    "HEALTH_SPO2",
+                    "HEALTH_TEMPERATURE",
+                    "HOST_UPTIME_SECONDS",
+                    "HOST_FREEMEM_BYTES",
+                    "HOST_DISKFREE1_BYTES",
+                    "HOST_DISKFREE2_BYTES",
+                    "HOST_DISKFREE3_BYTES",
+                    "HOST_LOAD1",
+                    "HOST_LOAD5",
+                    "HOST_LOAD15",
+                    "HOST_USER_STRING",
+                    "TRAFFIC_PACKETS_INSPECTED",
+                    "TRAFFIC_POSITION_DEDUP_DROPS",
+                    "TRAFFIC_NODEINFO_CACHE_HITS",
+                    "TRAFFIC_RATE_LIMIT_DROPS",
+                    "TRAFFIC_UNKNOWN_PACKET_DROPS",
+                    "TRAFFIC_HOP_EXHAUSTED_PACKETS",
+                    "TRAFFIC_ROUTER_HOPS_PRESERVED"
+            }) {
+                assertTrue(columnExists(connection, "TELEMETRY_HISTORY", column), column);
+            }
+
+            try (Statement stmt = connection.createStatement()) {
+                stmt.execute("""
+                        INSERT INTO telemetry_one_wire_temperature (telemetry_id, sensor_index, temperature)
+                        VALUES (1, 0, 21.5)
+                        """);
+            }
+            assertEquals("1", stringValue(connection, "SELECT COUNT(*) FROM telemetry_one_wire_temperature"));
+        }
+    }
+
+    @Test
     void migrateLegacyAppDatabaseWithoutSchemaVersionPreservesMessages() throws Exception {
         try (Connection connection = openConnection("legacy-app-preserve")) {
             try (Statement stmt = connection.createStatement()) {

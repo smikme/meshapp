@@ -16,7 +16,7 @@ import org.luaj.vm2.lib.ZeroArgFunction;
  * modules:
  * {@code mesh.chat}, {@code mesh.kv}, {@code mesh.curl}, {@code mesh.ui},
  * {@code mesh.canvas}, {@code mesh.form}, {@code mesh.traceroute},
- * {@code mesh.nodeinfo}, {@code mesh.admin}, plus the
+ * {@code mesh.nodeinfo}, {@code mesh.admin}, {@code mesh.telemetry}, plus the
  * core functions {@code mesh.log}, {@code mesh.now}, {@code mesh.owner}, and
  * {@code mesh.sleep}.
  *
@@ -94,6 +94,7 @@ public final class LuaSandboxApi {
         mesh.set("traceroute", new LuaTracerouteApi(context).create());
         mesh.set("nodeinfo", new LuaNodeInfoApi(context).create());
         mesh.set("admin", new LuaRemoteAdminApi(context).create());
+        mesh.set("telemetry", new LuaTelemetryApi(context, mapper).create());
         mesh.set("command", new ZeroArgFunction() {
             @Override
             public LuaValue call() {

@@ -269,6 +269,31 @@ class LuaCompletionEngineTest {
     }
 
     @Test
+    void completesTelemetryApiAndFields() {
+        LuaCompletionEngine.CompletionResult apiResult = complete("""
+                mesh.telemetry.|
+                """);
+        assertItemsContain(apiResult, "recent(options)");
+        assertItemsContain(apiResult, "for_node(node_id, options)");
+        assertItemsContain(apiResult, "query(options)");
+        assertItemsContain(apiResult, "latest(node_id)");
+
+        LuaCompletionEngine.CompletionResult fieldResult = complete("""
+                local rows = mesh.telemetry.query({ node_id = "!bbbbbbbb" })
+                for _, row in ipairs(rows) do
+                    row.gas_|
+                end
+                """);
+        assertItemsContain(fieldResult, "gas_resistance");
+
+        LuaCompletionEngine.CompletionResult radiationResult = complete("""
+                local latest = mesh.telemetry.latest("!bbbbbbbb")
+                latest.rad|
+                """);
+        assertItemsContain(radiationResult, "radiation");
+    }
+
+    @Test
     void completesCurlApiAndResponseFields() {
         LuaCompletionEngine.CompletionResult curlResult = complete("""
                 local curl = mesh.curl

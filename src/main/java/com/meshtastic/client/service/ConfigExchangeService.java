@@ -296,10 +296,14 @@ public class ConfigExchangeService implements FromRadioListener {
             if (dm.getBatteryLevel() != 0 || dm.getChannelUtilization() != 0 || dm.getAirUtilTx() != 0) {
                 long ts = nodeInfo.getLastHeard() > 0 ? nodeInfo.getLastHeard() : System.currentTimeMillis() / 1000;
                 TelemetryEntry entry = new TelemetryEntry(ts, node.getNodeId());
+                entry.setTelemetryVariant(TelemetryProtos.Telemetry.VariantCase.DEVICE_METRICS.name());
                 applyBatteryLevel(dm.getBatteryLevel(), node, entry);
                 entry.setVoltage(dm.getVoltage());
                 entry.setChannelUtilization(dm.getChannelUtilization());
                 entry.setAirUtilTx(dm.getAirUtilTx());
+                if (dm.hasUptimeSeconds()) {
+                    entry.setDeviceUptimeSeconds(Integer.toUnsignedLong(dm.getUptimeSeconds()));
+                }
                 deviceState.addTelemetryEntry(entry);
                 String ownerNodeId = String.format("!%08x", deviceState.getMyNodeNum());
                 NodeCacheService.getInstance().persistTelemetry(entry, ownerNodeId);
