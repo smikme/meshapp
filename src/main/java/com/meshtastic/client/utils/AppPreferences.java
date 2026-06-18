@@ -51,6 +51,9 @@ public class AppPreferences {
     public static final String KEY_LUA_DEV_WINDOW_WIDTH = "luaDevWindowWidth";
     public static final String KEY_LUA_DEV_WINDOW_HEIGHT = "luaDevWindowHeight";
     public static final String KEY_LUA_DEV_WINDOW_MAXIMIZED = "luaDevWindowMaximized";
+    public static final String KEY_LUA_DEV_FUNCTION_OUTLINE_VISIBLE = "luaDevFunctionOutlineVisible";
+    public static final String KEY_LUA_DEV_FUNCTION_OUTLINE_DIVIDER = "luaDevFunctionOutlineDividerPos";
+    public static final String KEY_LUA_DEV_FUNCTION_OUTLINE_WIDTH = "luaDevFunctionOutlineWidth";
     public static final String KEY_MAP_CENTER_LATITUDE = "mapCenterLatitude";
     public static final String KEY_MAP_CENTER_LONGITUDE = "mapCenterLongitude";
     public static final String KEY_MAP_ZOOM = "mapZoom";
@@ -516,12 +519,89 @@ public class AppPreferences {
     }
 
     /**
+     * @return whether the MeshApp IDE function outline pane should be restored as visible
+     */
+    public static boolean isLuaDevFunctionOutlineVisible() {
+        return state().getBoolean(KEY_LUA_DEV_FUNCTION_OUTLINE_VISIBLE, true);
+    }
+
+    /**
+     * Persists the visibility state of the MeshApp IDE function outline pane immediately.
+     *
+     * @param visible {@code true} to restore the function outline as expanded
+     */
+    public static void setLuaDevFunctionOutlineVisible(boolean visible) {
+        state().putBoolean(KEY_LUA_DEV_FUNCTION_OUTLINE_VISIBLE, visible);
+        flushState();
+    }
+
+    /**
+     * @return saved divider position between the MeshApp IDE function outline and code editor
+     */
+    public static double getLuaDevFunctionOutlineDividerPos() {
+        return state().getDouble(KEY_LUA_DEV_FUNCTION_OUTLINE_DIVIDER, 0.22);
+    }
+
+    /**
+     * Saves the divider position between the MeshApp IDE function outline and code editor.
+     *
+     * @param pos divider position in the {@code 0..1} range
+     */
+    public static void setLuaDevFunctionOutlineDividerPos(double pos) {
+        state().putDouble(KEY_LUA_DEV_FUNCTION_OUTLINE_DIVIDER, normalizeDividerPosition(pos, 0.22));
+    }
+
+    /**
+     * @return saved function outline pane width in pixels
+     */
+    public static double getLuaDevFunctionOutlineWidth() {
+        return state().getDouble(KEY_LUA_DEV_FUNCTION_OUTLINE_WIDTH, 230.0);
+    }
+
+    /**
+     * Saves the last measured function outline pane width.
+     *
+     * @param width pane width in pixels; non-finite and non-positive values are ignored
+     */
+    public static void setLuaDevFunctionOutlineWidth(double width) {
+        if (Double.isFinite(width) && width > 0) {
+            state().putDouble(KEY_LUA_DEV_FUNCTION_OUTLINE_WIDTH, width);
+        }
+    }
+
+    /**
      * Saves the MeshApp IDE SplitPane layout and flushes it to the backing store immediately.
+     *
+     * @param mainPos divider between editor area and right-side state panes
+     * @param editorPos divider between code editor and console
+     * @param infoPos divider between variables and selected-script KV
      */
     public static void saveLuaDevDividerPositions(double mainPos, double editorPos, double infoPos) {
         setLuaDevMainDividerPos(mainPos);
         setLuaDevEditorDividerPos(editorPos);
         setLuaDevInfoDividerPos(infoPos);
+        flushState();
+    }
+
+    /**
+     * Saves the complete MeshApp IDE layout, including the function outline pane.
+     *
+     * @param mainPos divider between editor area and right-side state panes
+     * @param editorPos divider between code editor and console
+     * @param infoPos divider between variables and selected-script KV
+     * @param functionOutlinePos divider between function outline and code editor
+     * @param functionOutlineWidth measured function outline pane width in pixels
+     * @param functionOutlineVisible whether the function outline pane is expanded
+     */
+    public static void saveLuaDevDividerPositions(double mainPos, double editorPos, double infoPos,
+                                                  double functionOutlinePos, double functionOutlineWidth,
+                                                  boolean functionOutlineVisible) {
+        setLuaDevMainDividerPos(mainPos);
+        setLuaDevEditorDividerPos(editorPos);
+        setLuaDevInfoDividerPos(infoPos);
+        setLuaDevFunctionOutlineDividerPos(functionOutlinePos);
+        setLuaDevFunctionOutlineWidth(functionOutlineWidth);
+        state().putBoolean(KEY_LUA_DEV_FUNCTION_OUTLINE_VISIBLE, functionOutlineVisible);
         flushState();
     }
 

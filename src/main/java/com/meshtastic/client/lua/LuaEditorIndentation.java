@@ -1,5 +1,6 @@
 package com.meshtastic.client.lua;
 
+import java.util.Optional;
 import java.util.regex.Pattern;
 
 /**
@@ -55,6 +56,41 @@ public final class LuaEditorIndentation {
 
         int selectionEndAfter = editStart + replacement.length();
         return new TextEdit(editStart, editEnd, replacement, editStart, selectionEndAfter);
+    }
+
+    /**
+     * Creates a smart Backspace edit for indentation-only line prefixes.
+     * <p>
+     * When the caret is inside leading spaces and there is no selection, Backspace removes
+     * up to one indentation level instead of a single character. Other Backspace cases return
+     * {@link Optional#empty()} so the editor can keep its default behavior.
+     *
+     * @param text editor text
+     * @param selectionStart current selection start
+     * @param selectionEnd current selection end
+     * @return indentation Backspace edit, or empty when default Backspace should run
+     */
+    public static Optional<TextEdit> backspaceEdit(String text, int selectionStart, int selectionEnd) {
+        String safeText = text != null ? text : "";
+        int start = clamp(Math.min(selectionStart, selectionEnd), safeText.length());
+        int end = clamp(Math.max(selectionStart, selectionEnd), safeText.length());
+        if (start != end || start == 0) {
+            return Optional.empty();
+        }
+
+        int lineStart = lineStart(safeText, start);
+        if (lineStart == start) {
+            return Optional.empty();
+        }
+
+        String lineBeforeCaret = safeText.substring(lineStart, start);
+        if (lineBeforeCaret.isEmpty() || !lineBeforeCaret.chars().allMatch(ch -> ch == ' ')) {
+            return Optional.empty();
+        }
+
+        int remove = Math.min(INDENT.length(), lineBeforeCaret.length());
+        int editStart = start - remove;
+        return Optional.of(new TextEdit(editStart, start, "", editStart, editStart));
     }
 
     public static String newLineIndent(String lineBeforeCaret) {

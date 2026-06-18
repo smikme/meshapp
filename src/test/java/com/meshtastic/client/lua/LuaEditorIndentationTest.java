@@ -3,6 +3,8 @@ package com.meshtastic.client.lua;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class LuaEditorIndentationTest {
 
@@ -63,5 +65,32 @@ class LuaEditorIndentationTest {
         assertEquals("mesh.log()", edit.replacement());
         assertEquals(2, edit.selectionStart());
         assertEquals(2, edit.selectionEnd());
+    }
+
+    @Test
+    void backspaceDeletesFourSpacesWhenCaretIsInsideLeadingSpaces() {
+        var edit = LuaEditorIndentation.backspaceEdit("        mesh.log()", 8, 8);
+
+        assertTrue(edit.isPresent());
+        assertEquals(4, edit.get().start());
+        assertEquals(8, edit.get().end());
+        assertEquals("", edit.get().replacement());
+        assertEquals(4, edit.get().selectionStart());
+        assertEquals(4, edit.get().selectionEnd());
+    }
+
+    @Test
+    void backspaceDeletesRemainingSpacesWhenLessThanOneIndentIsAvailable() {
+        var edit = LuaEditorIndentation.backspaceEdit("  mesh.log()", 2, 2);
+
+        assertTrue(edit.isPresent());
+        assertEquals(0, edit.get().start());
+        assertEquals(2, edit.get().end());
+    }
+
+    @Test
+    void backspaceKeepsDefaultBehaviorOutsideLeadingSpaces() {
+        assertFalse(LuaEditorIndentation.backspaceEdit("  mesh.log()", 6, 6).isPresent());
+        assertFalse(LuaEditorIndentation.backspaceEdit("    mesh.log()", 0, 4).isPresent());
     }
 }
