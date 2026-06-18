@@ -267,8 +267,15 @@ public class ConfigExchangeService implements FromRadioListener {
 
         // Remember favorite/ignored flags and apply them after nodes are written to the database.
         if (node.getNodeId() != null) {
-            favoriteFlags.put(node.getNodeId(), nodeInfo.getIsFavorite());
-            ignoredFlags.put(node.getNodeId(), nodeInfo.getIsIgnored());
+            boolean favorite = nodeInfo.getIsFavorite();
+            boolean ignored = nodeInfo.getIsIgnored();
+            favoriteFlags.put(node.getNodeId(), favorite);
+            ignoredFlags.put(node.getNodeId(), ignored);
+            String ownerNodeId = deviceState.getOwnerNodeId();
+            if (ownerNodeId != null && !ownerNodeId.isBlank()) {
+                FavoriteNodeService.getInstance().setFavoriteQuiet(node.getNodeId(), ownerNodeId, favorite);
+                IgnoredNodeService.getInstance().setIgnoredQuiet(node.getNodeId(), ownerNodeId, ignored);
+            }
         }
 
         if (nodeInfo.hasDeviceMetrics()) {
@@ -289,10 +296,14 @@ public class ConfigExchangeService implements FromRadioListener {
             if (dm.getBatteryLevel() != 0 || dm.getChannelUtilization() != 0 || dm.getAirUtilTx() != 0) {
                 long ts = nodeInfo.getLastHeard() > 0 ? nodeInfo.getLastHeard() : System.currentTimeMillis() / 1000;
                 TelemetryEntry entry = new TelemetryEntry(ts, node.getNodeId());
+                entry.setTelemetryVariant(TelemetryProtos.Telemetry.VariantCase.DEVICE_METRICS.name());
                 applyBatteryLevel(dm.getBatteryLevel(), node, entry);
                 entry.setVoltage(dm.getVoltage());
                 entry.setChannelUtilization(dm.getChannelUtilization());
                 entry.setAirUtilTx(dm.getAirUtilTx());
+                if (dm.hasUptimeSeconds()) {
+                    entry.setDeviceUptimeSeconds(Integer.toUnsignedLong(dm.getUptimeSeconds()));
+                }
                 deviceState.addTelemetryEntry(entry);
                 String ownerNodeId = String.format("!%08x", deviceState.getMyNodeNum());
                 NodeCacheService.getInstance().persistTelemetry(entry, ownerNodeId);
@@ -300,6 +311,7 @@ public class ConfigExchangeService implements FromRadioListener {
         }
 
         log.debug("Updated node: {}", node);
+        deviceState.fireNodeUpdateListeners(node.getNodeNum());
     }
 
     private static void applyBatteryLevel(int rawBatteryLevel, NodeData node, TelemetryEntry entry) {
@@ -449,18 +461,17 @@ public class ConfigExchangeService implements FromRadioListener {
         deviceState.setChannelCatalogReady(true);
         deviceState.clearPendingFixedPosition();
         NodeCacheService ncs = NodeCacheService.getInstance();
+        String ownerNodeId = String.format("!%08x", deviceState.getMyNodeNum());
         ncs.updateAll(deviceState.getNodeDb());
 
         // Apply favorite flags now that nodes exist in the database.
         for (Map.Entry<String, Boolean> e : favoriteFlags.entrySet()) {
-            ncs.setFavorite(e.getKey(), e.getValue());
+            FavoriteNodeService.getInstance().setFavoriteQuiet(e.getKey(), ownerNodeId, e.getValue());
         }
 
-        // Apply ignored flags; only true values matter because the default is already FALSE.
+        // Apply ignored flags now that nodes exist in the database.
         for (Map.Entry<String, Boolean> e : ignoredFlags.entrySet()) {
-            if (e.getValue()) {
-                ncs.setIgnored(e.getKey(), true);
-            }
+            IgnoredNodeService.getInstance().setIgnoredQuiet(e.getKey(), ownerNodeId, e.getValue());
         }
 
         // Enrich bare telemetry-only nodes with cached names from H2.
@@ -473,7 +484,6 @@ public class ConfigExchangeService implements FromRadioListener {
         IgnoredNodeService.getInstance().fireListeners();
 
         // Load archived telemetry from H2 and prune old records.
-        String ownerNodeId = String.format("!%08x", deviceState.getMyNodeNum());
         ncs.pruneTelemetryHistory(30, ownerNodeId);
         var archived = ncs.loadTelemetryHistory(200, ownerNodeId);
         deviceState.prependTelemetryHistory(archived);

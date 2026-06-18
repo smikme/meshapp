@@ -62,6 +62,7 @@ public final class LuaCompletionEngine {
         mesh.member("traceroute", "traceroute.", "object", "mesh.traceroute");
         mesh.member("nodeinfo", "nodeinfo.", "object", "mesh.nodeinfo");
         mesh.member("admin", "admin.", "object", "mesh.admin");
+        mesh.member("telemetry", "telemetry.", "object", "mesh.telemetry");
         mesh.member("command()", "command()", "function", "command");
 
         TypeDef chat = new TypeDef();
@@ -152,6 +153,13 @@ public final class LuaCompletionEngine {
                 "set_canned_messages(target, text, options)")) {
             admin.member(member, member.substring(0, member.indexOf('(') + 1), "function", "string");
         }
+
+        TypeDef telemetry = new TypeDef();
+        telemetry.member("recent(options)", "recent(", "function", "list:telemetry");
+        telemetry.member("for_node(node_id, options)", "for_node(", "function", "list:telemetry");
+        telemetry.member("query(options)", "query(", "function", "list:telemetry");
+        telemetry.member("latest(node_id)", "latest(", "function", "telemetry");
+        telemetry.member("fields()", "fields()", "function", "list:string");
 
         TypeDef command = new TypeDef();
         for (String field : List.of("type", "source", "name", "request_id",
@@ -246,6 +254,21 @@ public final class LuaCompletionEngine {
             node.member(field, field, "field", null);
         }
 
+        TypeDef telemetryEntry = new TypeDef();
+        for (String field : List.of("timestamp", "node_id", "variant", "battery_level", "externally_powered",
+                "voltage", "channel_utilization", "air_util_tx", "device_uptime_seconds",
+                "temperature", "relative_humidity", "barometric_pressure", "gas_resistance",
+                "environment_voltage", "environment_current", "iaq", "distance", "lux", "white_lux",
+                "ir_lux", "uv_lux", "wind_direction", "wind_speed", "weight", "wind_gust", "wind_lull",
+                "radiation", "rainfall_1h", "rainfall_24h", "soil_moisture", "soil_temperature",
+                "one_wire_temperature", "pm25_standard", "co2", "ch1_voltage", "ch1_current",
+                "num_packets_rx", "num_packets_tx", "local_uptime_seconds", "health_heart_bpm",
+                "health_spo2", "health_temperature", "host_uptime_seconds", "host_freemem_bytes",
+                "host_user_string", "traffic_packets_inspected", "rx_snr", "rx_rssi",
+                "hop_start", "hop_limit", "hops")) {
+            telemetryEntry.member(field, field, "field", null);
+        }
+
         TypeDef channel = new TypeDef();
         channel.member("index", "index", "field", null);
         channel.member("role", "role", "field", null);
@@ -295,6 +318,7 @@ public final class LuaCompletionEngine {
         defs.put("mesh.traceroute", traceroute);
         defs.put("mesh.nodeinfo", nodeinfo);
         defs.put("mesh.admin", admin);
+        defs.put("mesh.telemetry", telemetry);
         defs.put("curl.response", curlResponse);
         defs.put("command", command);
         defs.put("node.selection", nodeSelection);
@@ -310,6 +334,7 @@ public final class LuaCompletionEngine {
         defs.put("message", message);
         defs.put("owner", owner);
         defs.put("node", node);
+        defs.put("telemetry", telemetryEntry);
         defs.put("channel", channel);
         defs.put("string", string);
         defs.put("table", table);
@@ -595,6 +620,9 @@ public final class LuaCompletionEngine {
         if (trimmed.isEmpty()) {
             return Optional.empty();
         }
+        if (types.containsKey(trimmed)) {
+            return Optional.of(trimmed);
+        }
         Optional<String> direct = inferExpressionType(trimmed, analysis.symbols());
         if (direct.isPresent() && !"unknown".equals(direct.get())) {
             return direct;
@@ -643,6 +671,14 @@ public final class LuaCompletionEngine {
         }
         if (value.startsWith("mesh.chat.channels")) {
             return Optional.of("list:channel");
+        }
+        if (value.startsWith("mesh.telemetry.recent")
+                || value.startsWith("mesh.telemetry.for_node")
+                || value.startsWith("mesh.telemetry.query")) {
+            return Optional.of("list:telemetry");
+        }
+        if (value.startsWith("mesh.telemetry.latest")) {
+            return Optional.of("telemetry");
         }
         if (value.startsWith("mesh.chat.send_channel")
                 || value.startsWith("mesh.chat.send_dm")

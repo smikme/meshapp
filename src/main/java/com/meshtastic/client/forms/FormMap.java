@@ -404,7 +404,7 @@ public class FormMap extends Form {
         configureIconButton(favoriteFilterButton, "/icons/favorite.svg", I18n.t("node.filter.favoriteOnly"));
         favoriteFilterButton.setOnAction(event -> {
             showFavoritesOnly = !showFavoritesOnly;
-            AppPreferences.setNodesFilterFavorites(showFavoritesOnly);
+            AppPreferences.setMapFilterFavorites(showFavoritesOnly);
             if (filterFavorites != null) {
                 filterFavorites.setSelected(showFavoritesOnly);
             }
@@ -412,11 +412,11 @@ public class FormMap extends Form {
             reloadMarkers();
         });
 
-        includeUnknownNames = AppPreferences.isNodesFilterUnknown();
-        hideOffline = AppPreferences.isNodesFilterHideOffline();
-        showFavoritesOnly = AppPreferences.isNodesFilterFavorites();
-        showDirectOnly = AppPreferences.isNodesFilterDirect();
-        showIgnoredOnly = AppPreferences.isNodesFilterIgnored();
+        includeUnknownNames = AppPreferences.isMapFilterUnknown();
+        hideOffline = AppPreferences.isMapFilterHideOffline();
+        showFavoritesOnly = AppPreferences.isMapFilterFavorites();
+        showDirectOnly = AppPreferences.isMapFilterDirect();
+        showIgnoredOnly = AppPreferences.isMapFilterIgnored();
         syncFavoriteFilterButton();
     }
 
@@ -438,7 +438,7 @@ public class FormMap extends Form {
     }
 
     /**
-     * Creates the node-filter menu, synchronized with the Nodes form filters.
+     * Creates the map-specific node-filter menu.
      */
     private Button createFilterButton() {
         Button filterButton = new Button();
@@ -453,24 +453,24 @@ public class FormMap extends Form {
         Map<CheckMenuItem, Runnable> actions = new LinkedHashMap<>();
         actions.put(filterUnknown, () -> {
             includeUnknownNames = filterUnknown.isSelected();
-            AppPreferences.setNodesFilterUnknown(includeUnknownNames);
+            AppPreferences.setMapFilterUnknown(includeUnknownNames);
         });
         actions.put(filterHideOffline, () -> {
             hideOffline = filterHideOffline.isSelected();
-            AppPreferences.setNodesFilterHideOffline(hideOffline);
+            AppPreferences.setMapFilterHideOffline(hideOffline);
         });
         actions.put(filterFavorites, () -> {
             showFavoritesOnly = filterFavorites.isSelected();
-            AppPreferences.setNodesFilterFavorites(showFavoritesOnly);
+            AppPreferences.setMapFilterFavorites(showFavoritesOnly);
             syncFavoriteFilterButton();
         });
         actions.put(filterDirect, () -> {
             showDirectOnly = filterDirect.isSelected();
-            AppPreferences.setNodesFilterDirect(showDirectOnly);
+            AppPreferences.setMapFilterDirect(showDirectOnly);
         });
         actions.put(filterIgnored, () -> {
             showIgnoredOnly = filterIgnored.isSelected();
-            AppPreferences.setNodesFilterIgnored(showIgnoredOnly);
+            AppPreferences.setMapFilterIgnored(showIgnoredOnly);
         });
 
         filterUnknown.setSelected(includeUnknownNames);
@@ -1480,14 +1480,19 @@ public class FormMap extends Form {
         if (state != null) {
             state.getNodeDb().values().forEach(node -> nodes.put(node.getNodeNum(), node));
         }
+        String ownerNodeId = currentOwnerNodeId();
         if (showFavoritesOnly) {
-            for (NodeData node : NodeCacheService.getInstance().loadFavoriteNodes()) {
-                nodes.putIfAbsent(node.getNodeNum(), node);
+            if (!ownerNodeId.isBlank()) {
+                for (NodeData node : NodeCacheService.getInstance().loadFavoriteNodes(ownerNodeId)) {
+                    nodes.putIfAbsent(node.getNodeNum(), node);
+                }
             }
         }
         if (showIgnoredOnly) {
-            for (NodeData node : NodeCacheService.getInstance().loadIgnoredNodes()) {
-                nodes.putIfAbsent(node.getNodeNum(), node);
+            if (!ownerNodeId.isBlank()) {
+                for (NodeData node : NodeCacheService.getInstance().loadIgnoredNodes(ownerNodeId)) {
+                    nodes.putIfAbsent(node.getNodeNum(), node);
+                }
             }
         }
         return new ArrayList<>(nodes.values());
@@ -1511,13 +1516,16 @@ public class FormMap extends Form {
         if (hideOffline && node.getLastHeard() > 0 && (now - node.getLastHeard()) > 7200) {
             return false;
         }
-        if (showFavoritesOnly && !FavoriteNodeService.getInstance().isFavorite(node.getNodeId())) {
+        String ownerNodeId = currentOwnerNodeId();
+        if (showFavoritesOnly
+                && (ownerNodeId.isBlank() || !FavoriteNodeService.getInstance().isFavorite(node.getNodeId(), ownerNodeId))) {
             return false;
         }
         if (showDirectOnly && !node.isDirectNeighbor()) {
             return false;
         }
-        return !showIgnoredOnly || IgnoredNodeService.getInstance().isIgnored(node.getNodeId());
+        return !showIgnoredOnly
+                || (!ownerNodeId.isBlank() && IgnoredNodeService.getInstance().isIgnored(node.getNodeId(), ownerNodeId));
     }
 
     /**
@@ -1586,7 +1594,15 @@ public class FormMap extends Form {
      * Returns the owner nodeId of the current connection for message-history isolation.
      */
     private String currentOwnerNodeId() {
-        return state != null && state.getOwnerNodeId() != null ? state.getOwnerNodeId() : "";
+        if (state != null && state.getOwnerNodeId() != null) {
+            return state.getOwnerNodeId();
+        }
+        ConnectionEntry entry = ConnectionManager.getInstance().getSelectedConnectionEntry();
+        if (entry == null) {
+            return "";
+        }
+        String ownerNodeId = ConnectionManager.getInstance().getOwnerNodeId(entry.getId());
+        return ownerNodeId != null && !ownerNodeId.isBlank() && !"?".equals(ownerNodeId) ? ownerNodeId : "";
     }
 
     /**

@@ -7,6 +7,7 @@ import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.model.TelemetryEntry;
 import org.meshtastic.proto.ChannelProtos;
 import org.meshtastic.proto.MeshProtos;
+import org.meshtastic.proto.TelemetryProtos;
 
 import java.util.Arrays;
 import java.util.Map;
@@ -641,6 +642,7 @@ public class MeshCoreCompanionState {
             return;
         }
         TelemetryEntry entry = new TelemetryEntry(System.currentTimeMillis() / 1000, ownerId);
+        entry.setTelemetryVariant(TelemetryProtos.Telemetry.VariantCase.DEVICE_METRICS.name());
         entry.setVoltage(batteryMillivolts / 1000.0f);
         deviceState.addTelemetryEntry(entry);
     }

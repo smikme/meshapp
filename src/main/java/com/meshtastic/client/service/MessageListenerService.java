@@ -4,6 +4,7 @@ import org.meshtastic.proto.AdminProtos;
 import org.meshtastic.proto.ConfigProtos;
 import org.meshtastic.proto.MeshProtos;
 import org.meshtastic.proto.Portnums;
+import org.meshtastic.proto.TelemetryProtos;
 import com.google.protobuf.InvalidProtocolBufferException;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.MessageChangeEvent;
@@ -90,6 +91,44 @@ public class MessageListenerService implements FromRadioListener {
         onMeshPacket(packet, System.currentTimeMillis() / 1000);
     }
 
+    @Override
+    public void onToRadioSendFailed(MeshProtos.ToRadio toRadio, String reason) {
+        if (toRadio == null || !toRadio.hasPacket()) {
+            return;
+        }
+        int packetId = toRadio.getPacket().getId();
+        if (packetId == 0) {
+            return;
+        }
+
+        var pendingEntry = deviceState.getMessageStore().getPendingAcks().get(packetId);
+        MeshMessage pending = pendingEntry != null ? pendingEntry.message() : null;
+        if (pending != null) {
+            failPendingMessageSend(packetId, pending, reason);
+            return;
+        }
+
+        boolean completedPacketAck = deviceState.completePendingPacketAck(
+                packetId, MeshProtos.Routing.Error.MAX_RETRANSMIT);
+        MessageDbService db = MessageDbService.getInstance();
+        MessageDbService.ReactionScope reactionScope = db.findReactionScopeByPacketId(packetId);
+        boolean updatedReaction = db.updateReactionStatus(
+                packetId,
+                MeshMessage.DeliveryStatus.FAILED,
+                reason != null ? reason : MeshProtos.Routing.Error.MAX_RETRANSMIT.name());
+
+        if (updatedReaction) {
+            fireReactionChanged(reactionScope);
+            deviceState.fireMessageListeners();
+            log.warn("Local send failed for reaction packet {}: {}", packetId, reason);
+        } else if (completedPacketAck) {
+            log.warn("Local send failed for non-message packet {}: {}", packetId, reason);
+        } else {
+            log.debug("Local send failure for packet {} did not match pending message, ACK waiter, or reaction",
+                    packetId);
+        }
+    }
+
     private void onMeshPacket(MeshProtos.MeshPacket packet, long receivedAtSeconds) {
         if (!packet.hasDecoded()) { return; }
         if (deviceState.getMyNodeNum() == 0) {
@@ -168,7 +207,8 @@ public class MessageListenerService implements FromRadioListener {
 
         NodeData fromNode = deviceState.getOrCreateNode(from);
         String fromNodeId = fromNode.getNodeId();
-        if (IgnoredNodeService.getInstance().isIgnored(fromNodeId)) {
+        String ignoredOwnerNodeId = deviceState.getOwnerNodeId();
+        if (ignoredOwnerNodeId != null && IgnoredNodeService.getInstance().isIgnored(fromNodeId, ignoredOwnerNodeId)) {
             log.info("Dropping incoming {} from ignored node {}",
                     isReactionPacket(data) ? "reaction" : "message", fromNodeId);
             return;
@@ -480,6 +520,16 @@ public class MessageListenerService implements FromRadioListener {
         }
     }
 
+    private void failPendingMessageSend(int packetId, MeshMessage pending, String reason) {
+        deviceState.resolvePendingAck(packetId);
+        pending.setStatus(MeshMessage.DeliveryStatus.FAILED);
+        pending.setErrorReason(reason != null ? reason : MeshProtos.Routing.Error.MAX_RETRANSMIT.name());
+        MessageDbService.getInstance().updateStatus(packetId, pending.getStatus(), pending.getErrorReason());
+        fireMessageStatusChanged(pending);
+        deviceState.fireMessageListeners();
+        log.warn("Local send failed for packet {}: {}", packetId, pending.getErrorReason());
+    }
+
     private static boolean nodeIdMatchesNodeNum(String nodeId, int nodeNum) {
         if (nodeId == null || nodeId.length() != 9 || nodeId.charAt(0) != '!') {
             return false;
@@ -692,76 +742,68 @@ public class MessageListenerService implements FromRadioListener {
     private void handleTelemetryResponse(MeshProtos.MeshPacket packet, MeshProtos.Data data) {
         int fromNum = packet.getFrom();
         try {
-            org.meshtastic.proto.TelemetryProtos.Telemetry telemetry =
-                    org.meshtastic.proto.TelemetryProtos.Telemetry.parseFrom(data.getPayload());
+            TelemetryProtos.Telemetry telemetry = TelemetryProtos.Telemetry.parseFrom(data.getPayload());
 
             long ts = telemetry.getTime() > 0 ? telemetry.getTime()
                     : packet.getRxTime() > 0 ? packet.getRxTime() : System.currentTimeMillis() / 1000;
 
             NodeData node = deviceState.getOrCreateNode(fromNum);
             TelemetryEntry entry = new TelemetryEntry(ts, node.getNodeId());
+            TelemetryProtos.Telemetry.VariantCase variantCase = telemetry.getVariantCase();
+            entry.setTelemetryVariant(variantCase.name());
             if (!node.hasName()) {
                 NodeCacheService.getInstance().enrichFromCache(node);
             }
             node.setLastHeard((int) ts);
 
-            if (telemetry.hasDeviceMetrics()) {
-                org.meshtastic.proto.TelemetryProtos.DeviceMetrics dm = telemetry.getDeviceMetrics();
-                applyBatteryLevel(dm.getBatteryLevel(), node, entry);
-                node.setVoltage(dm.getVoltage());
-                node.setChannelUtilization(dm.getChannelUtilization());
-                node.setAirUtilTx(dm.getAirUtilTx());
-                node.setUptimeSeconds(dm.getUptimeSeconds());
-
-                entry.setVoltage(dm.getVoltage());
-                entry.setChannelUtilization(dm.getChannelUtilization());
-                entry.setAirUtilTx(dm.getAirUtilTx());
-
-                deviceState.fireNodeUpdateListeners(fromNum);
-                NodeCacheService.getInstance().update(node);
-                log.info("Received TELEMETRY_APP (device) from !{}", Integer.toHexString(fromNum));
+            boolean nodeChanged = false;
+            switch (variantCase) {
+                case DEVICE_METRICS -> {
+                    TelemetryProtos.DeviceMetrics dm = telemetry.getDeviceMetrics();
+                    applyDeviceMetrics(dm, node, entry);
+                    nodeChanged = true;
+                    log.info("Received TELEMETRY_APP (device) from !{}", Integer.toHexString(fromNum));
+                }
+                case ENVIRONMENT_METRICS -> {
+                    applyEnvironmentMetrics(telemetry.getEnvironmentMetrics(), node, entry);
+                    nodeChanged = true;
+                    log.info("Received TELEMETRY_APP (environment) from !{}", Integer.toHexString(fromNum));
+                }
+                case AIR_QUALITY_METRICS -> {
+                    applyAirQualityMetrics(telemetry.getAirQualityMetrics(), entry);
+                    log.info("Received TELEMETRY_APP (airQuality) from !{}", Integer.toHexString(fromNum));
+                }
+                case POWER_METRICS -> {
+                    applyPowerMetrics(telemetry.getPowerMetrics(), entry);
+                    log.info("Received TELEMETRY_APP (power) from !{}", Integer.toHexString(fromNum));
+                }
+                case LOCAL_STATS -> {
+                    TelemetryProtos.LocalStats ls = telemetry.getLocalStats();
+                    applyLocalStats(ls, node, entry);
+                    nodeChanged = true;
+                    log.info("Received TELEMETRY_APP (localStats) from !{}: rx={}, bad={}, dupe={}, tx={}, dropped={}, relay={}, relayCanceled={}, chUtil={}, airUtil={}",
+                            Integer.toHexString(fromNum), ls.getNumPacketsRx(), ls.getNumPacketsRxBad(), ls.getNumRxDupe(),
+                            ls.getNumPacketsTx(), ls.getNumTxDropped(), ls.getNumTxRelay(), ls.getNumTxRelayCanceled(),
+                            ls.getChannelUtilization(), ls.getAirUtilTx());
+                }
+                case HEALTH_METRICS -> {
+                    applyHealthMetrics(telemetry.getHealthMetrics(), entry);
+                    log.info("Received TELEMETRY_APP (health) from !{}", Integer.toHexString(fromNum));
+                }
+                case HOST_METRICS -> {
+                    applyHostMetrics(telemetry.getHostMetrics(), entry);
+                    log.info("Received TELEMETRY_APP (host) from !{}", Integer.toHexString(fromNum));
+                }
+                case TRAFFIC_MANAGEMENT_STATS -> {
+                    applyTrafficManagementStats(telemetry.getTrafficManagementStats(), entry);
+                    log.info("Received TELEMETRY_APP (trafficManagement) from !{}", Integer.toHexString(fromNum));
+                }
+                case VARIANT_NOT_SET -> log.debug("Received TELEMETRY_APP without variant from !{}", Integer.toHexString(fromNum));
             }
 
-            if (telemetry.hasEnvironmentMetrics()) {
-                org.meshtastic.proto.TelemetryProtos.EnvironmentMetrics em = telemetry.getEnvironmentMetrics();
-                if (em.getTemperature() != 0) { node.setTemperature(em.getTemperature()); }
-
-                if (em.getRelativeHumidity() != 0) { node.setRelativeHumidity(em.getRelativeHumidity()); }
-
-                if (em.getBarometricPressure() != 0) { node.setBarometricPressure(em.getBarometricPressure()); }
-
-
-                entry.setTemperature(em.getTemperature());
-                entry.setRelativeHumidity(em.getRelativeHumidity());
-                entry.setBarometricPressure(em.getBarometricPressure());
-
+            if (nodeChanged) {
                 deviceState.fireNodeUpdateListeners(fromNum);
                 NodeCacheService.getInstance().update(node);
-                log.info("Received TELEMETRY_APP (environment) from !{}", Integer.toHexString(fromNum));
-            }
-
-            if (telemetry.hasLocalStats()) {
-                org.meshtastic.proto.TelemetryProtos.LocalStats ls = telemetry.getLocalStats();
-                entry.setNumPacketsRx(ls.getNumPacketsRx());
-                entry.setNumPacketsRxBad(ls.getNumPacketsRxBad());
-                entry.setNumRxDupe(ls.getNumRxDupe());
-                entry.setNumPacketsTx(ls.getNumPacketsTx());
-                entry.setNumTxDropped(ls.getNumTxDropped());
-                entry.setNumTxRelay(ls.getNumTxRelay());
-                entry.setNumTxRelayCanceled(ls.getNumTxRelayCanceled());
-
-                // LocalStats also carries channel_utilization and air_util_tx
-                entry.setChannelUtilization(ls.getChannelUtilization());
-                entry.setAirUtilTx(ls.getAirUtilTx());
-                node.setChannelUtilization(ls.getChannelUtilization());
-                node.setAirUtilTx(ls.getAirUtilTx());
-
-                deviceState.fireNodeUpdateListeners(fromNum);
-                NodeCacheService.getInstance().update(node);
-                log.info("Received TELEMETRY_APP (localStats) from !{}: rx={}, bad={}, dupe={}, tx={}, dropped={}, relay={}, relayCanceled={}, chUtil={}, airUtil={}",
-                        Integer.toHexString(fromNum), ls.getNumPacketsRx(), ls.getNumPacketsRxBad(), ls.getNumRxDupe(),
-                        ls.getNumPacketsTx(), ls.getNumTxDropped(), ls.getNumTxRelay(), ls.getNumTxRelayCanceled(),
-                        ls.getChannelUtilization(), ls.getAirUtilTx());
             }
 
             entry.setRxSnr(packet.getRxSnr());
@@ -775,6 +817,164 @@ public class MessageListenerService implements FromRadioListener {
         } catch (InvalidProtocolBufferException e) {
             log.warn("Failed to parse Telemetry from TELEMETRY_APP packet from !{}", Integer.toHexString(fromNum), e);
         }
+    }
+
+    private static void applyDeviceMetrics(TelemetryProtos.DeviceMetrics dm, NodeData node, TelemetryEntry entry) {
+        if (dm.hasBatteryLevel()) {
+            applyBatteryLevel(dm.getBatteryLevel(), node, entry);
+        }
+        if (dm.hasVoltage()) {
+            node.setVoltage(dm.getVoltage());
+            entry.setVoltage(dm.getVoltage());
+        }
+        if (dm.hasChannelUtilization()) {
+            node.setChannelUtilization(dm.getChannelUtilization());
+            entry.setChannelUtilization(dm.getChannelUtilization());
+        }
+        if (dm.hasAirUtilTx()) {
+            node.setAirUtilTx(dm.getAirUtilTx());
+            entry.setAirUtilTx(dm.getAirUtilTx());
+        }
+        if (dm.hasUptimeSeconds()) {
+            node.setUptimeSeconds(dm.getUptimeSeconds());
+            entry.setDeviceUptimeSeconds(unsignedInt(dm.getUptimeSeconds()));
+        }
+    }
+
+    private static void applyEnvironmentMetrics(TelemetryProtos.EnvironmentMetrics em, NodeData node, TelemetryEntry entry) {
+        if (em.hasTemperature()) {
+            entry.setTemperature(em.getTemperature());
+            if (em.getTemperature() != 0) { node.setTemperature(em.getTemperature()); }
+        }
+        if (em.hasRelativeHumidity()) {
+            entry.setRelativeHumidity(em.getRelativeHumidity());
+            if (em.getRelativeHumidity() != 0) { node.setRelativeHumidity(em.getRelativeHumidity()); }
+        }
+        if (em.hasBarometricPressure()) {
+            entry.setBarometricPressure(em.getBarometricPressure());
+            if (em.getBarometricPressure() != 0) { node.setBarometricPressure(em.getBarometricPressure()); }
+        }
+        if (em.hasGasResistance()) { entry.setGasResistance(em.getGasResistance()); }
+        if (em.hasVoltage()) { entry.setEnvironmentVoltage(em.getVoltage()); }
+        if (em.hasCurrent()) { entry.setEnvironmentCurrent(em.getCurrent()); }
+        if (em.hasIaq()) { entry.setIaq(unsignedInt(em.getIaq())); }
+        if (em.hasDistance()) { entry.setDistance(em.getDistance()); }
+        if (em.hasLux()) { entry.setLux(em.getLux()); }
+        if (em.hasWhiteLux()) { entry.setWhiteLux(em.getWhiteLux()); }
+        if (em.hasIrLux()) { entry.setIrLux(em.getIrLux()); }
+        if (em.hasUvLux()) { entry.setUvLux(em.getUvLux()); }
+        if (em.hasWindDirection()) { entry.setWindDirection(unsignedInt(em.getWindDirection())); }
+        if (em.hasWindSpeed()) { entry.setWindSpeed(em.getWindSpeed()); }
+        if (em.hasWeight()) { entry.setWeight(em.getWeight()); }
+        if (em.hasWindGust()) { entry.setWindGust(em.getWindGust()); }
+        if (em.hasWindLull()) { entry.setWindLull(em.getWindLull()); }
+        if (em.hasRadiation()) { entry.setRadiation(em.getRadiation()); }
+        if (em.hasRainfall1H()) { entry.setRainfall1h(em.getRainfall1H()); }
+        if (em.hasRainfall24H()) { entry.setRainfall24h(em.getRainfall24H()); }
+        if (em.hasSoilMoisture()) { entry.setSoilMoisture(unsignedInt(em.getSoilMoisture())); }
+        if (em.hasSoilTemperature()) { entry.setSoilTemperature(em.getSoilTemperature()); }
+        for (Float oneWireTemperature : em.getOneWireTemperatureList()) {
+            entry.addOneWireTemperature(oneWireTemperature);
+        }
+    }
+
+    private static void applyAirQualityMetrics(TelemetryProtos.AirQualityMetrics aq, TelemetryEntry entry) {
+        if (aq.hasPm10Standard()) { entry.setPm10Standard(unsignedInt(aq.getPm10Standard())); }
+        if (aq.hasPm25Standard()) { entry.setPm25Standard(unsignedInt(aq.getPm25Standard())); }
+        if (aq.hasPm100Standard()) { entry.setPm100Standard(unsignedInt(aq.getPm100Standard())); }
+        if (aq.hasPm10Environmental()) { entry.setPm10Environmental(unsignedInt(aq.getPm10Environmental())); }
+        if (aq.hasPm25Environmental()) { entry.setPm25Environmental(unsignedInt(aq.getPm25Environmental())); }
+        if (aq.hasPm100Environmental()) { entry.setPm100Environmental(unsignedInt(aq.getPm100Environmental())); }
+        if (aq.hasParticles03Um()) { entry.setParticles03um(unsignedInt(aq.getParticles03Um())); }
+        if (aq.hasParticles05Um()) { entry.setParticles05um(unsignedInt(aq.getParticles05Um())); }
+        if (aq.hasParticles10Um()) { entry.setParticles10um(unsignedInt(aq.getParticles10Um())); }
+        if (aq.hasParticles25Um()) { entry.setParticles25um(unsignedInt(aq.getParticles25Um())); }
+        if (aq.hasParticles50Um()) { entry.setParticles50um(unsignedInt(aq.getParticles50Um())); }
+        if (aq.hasParticles100Um()) { entry.setParticles100um(unsignedInt(aq.getParticles100Um())); }
+        if (aq.hasCo2()) { entry.setCo2(unsignedInt(aq.getCo2())); }
+        if (aq.hasCo2Temperature()) { entry.setCo2Temperature(aq.getCo2Temperature()); }
+        if (aq.hasCo2Humidity()) { entry.setCo2Humidity(aq.getCo2Humidity()); }
+        if (aq.hasFormFormaldehyde()) { entry.setFormFormaldehyde(aq.getFormFormaldehyde()); }
+        if (aq.hasFormHumidity()) { entry.setFormHumidity(aq.getFormHumidity()); }
+        if (aq.hasFormTemperature()) { entry.setFormTemperature(aq.getFormTemperature()); }
+        if (aq.hasPm40Standard()) { entry.setPm40Standard(unsignedInt(aq.getPm40Standard())); }
+        if (aq.hasParticles40Um()) { entry.setParticles40um(unsignedInt(aq.getParticles40Um())); }
+        if (aq.hasPmTemperature()) { entry.setPmTemperature(aq.getPmTemperature()); }
+        if (aq.hasPmHumidity()) { entry.setPmHumidity(aq.getPmHumidity()); }
+        if (aq.hasPmVocIdx()) { entry.setPmVocIdx(aq.getPmVocIdx()); }
+        if (aq.hasPmNoxIdx()) { entry.setPmNoxIdx(aq.getPmNoxIdx()); }
+        if (aq.hasParticlesTps()) { entry.setParticlesTps(aq.getParticlesTps()); }
+    }
+
+    private static void applyPowerMetrics(TelemetryProtos.PowerMetrics pm, TelemetryEntry entry) {
+        if (pm.hasCh1Voltage()) { entry.setCh1Voltage(pm.getCh1Voltage()); }
+        if (pm.hasCh1Current()) { entry.setCh1Current(pm.getCh1Current()); }
+        if (pm.hasCh2Voltage()) { entry.setCh2Voltage(pm.getCh2Voltage()); }
+        if (pm.hasCh2Current()) { entry.setCh2Current(pm.getCh2Current()); }
+        if (pm.hasCh3Voltage()) { entry.setCh3Voltage(pm.getCh3Voltage()); }
+        if (pm.hasCh3Current()) { entry.setCh3Current(pm.getCh3Current()); }
+        if (pm.hasCh4Voltage()) { entry.setCh4Voltage(pm.getCh4Voltage()); }
+        if (pm.hasCh4Current()) { entry.setCh4Current(pm.getCh4Current()); }
+        if (pm.hasCh5Voltage()) { entry.setCh5Voltage(pm.getCh5Voltage()); }
+        if (pm.hasCh5Current()) { entry.setCh5Current(pm.getCh5Current()); }
+        if (pm.hasCh6Voltage()) { entry.setCh6Voltage(pm.getCh6Voltage()); }
+        if (pm.hasCh6Current()) { entry.setCh6Current(pm.getCh6Current()); }
+        if (pm.hasCh7Voltage()) { entry.setCh7Voltage(pm.getCh7Voltage()); }
+        if (pm.hasCh7Current()) { entry.setCh7Current(pm.getCh7Current()); }
+        if (pm.hasCh8Voltage()) { entry.setCh8Voltage(pm.getCh8Voltage()); }
+        if (pm.hasCh8Current()) { entry.setCh8Current(pm.getCh8Current()); }
+    }
+
+    private static void applyLocalStats(TelemetryProtos.LocalStats ls, NodeData node, TelemetryEntry entry) {
+        entry.setLocalUptimeSeconds(unsignedInt(ls.getUptimeSeconds()));
+        entry.setChannelUtilization(ls.getChannelUtilization());
+        entry.setAirUtilTx(ls.getAirUtilTx());
+        entry.setNumPacketsTx(ls.getNumPacketsTx());
+        entry.setNumPacketsRx(ls.getNumPacketsRx());
+        entry.setNumPacketsRxBad(ls.getNumPacketsRxBad());
+        entry.setNumOnlineNodes(unsignedInt(ls.getNumOnlineNodes()));
+        entry.setNumTotalNodes(unsignedInt(ls.getNumTotalNodes()));
+        entry.setNumRxDupe(ls.getNumRxDupe());
+        entry.setNumTxRelay(ls.getNumTxRelay());
+        entry.setNumTxRelayCanceled(ls.getNumTxRelayCanceled());
+        entry.setHeapTotalBytes(unsignedInt(ls.getHeapTotalBytes()));
+        entry.setHeapFreeBytes(unsignedInt(ls.getHeapFreeBytes()));
+        entry.setNumTxDropped(ls.getNumTxDropped());
+        entry.setNoiseFloor(ls.getNoiseFloor());
+        node.setChannelUtilization(ls.getChannelUtilization());
+        node.setAirUtilTx(ls.getAirUtilTx());
+    }
+
+    private static void applyHealthMetrics(TelemetryProtos.HealthMetrics hm, TelemetryEntry entry) {
+        if (hm.hasHeartBpm()) { entry.setHealthHeartBpm(unsignedInt(hm.getHeartBpm())); }
+        if (hm.hasSpO2()) { entry.setHealthSpO2(unsignedInt(hm.getSpO2())); }
+        if (hm.hasTemperature()) { entry.setHealthTemperature(hm.getTemperature()); }
+    }
+
+    private static void applyHostMetrics(TelemetryProtos.HostMetrics hm, TelemetryEntry entry) {
+        entry.setHostUptimeSeconds(unsignedInt(hm.getUptimeSeconds()));
+        entry.setHostFreememBytes(hm.getFreememBytes());
+        entry.setHostDiskfree1Bytes(hm.getDiskfree1Bytes());
+        if (hm.hasDiskfree2Bytes()) { entry.setHostDiskfree2Bytes(hm.getDiskfree2Bytes()); }
+        if (hm.hasDiskfree3Bytes()) { entry.setHostDiskfree3Bytes(hm.getDiskfree3Bytes()); }
+        entry.setHostLoad1(unsignedInt(hm.getLoad1()));
+        entry.setHostLoad5(unsignedInt(hm.getLoad5()));
+        entry.setHostLoad15(unsignedInt(hm.getLoad15()));
+        if (hm.hasUserString()) { entry.setHostUserString(hm.getUserString()); }
+    }
+
+    private static void applyTrafficManagementStats(TelemetryProtos.TrafficManagementStats stats, TelemetryEntry entry) {
+        entry.setTrafficPacketsInspected(unsignedInt(stats.getPacketsInspected()));
+        entry.setTrafficPositionDedupDrops(unsignedInt(stats.getPositionDedupDrops()));
+        entry.setTrafficNodeinfoCacheHits(unsignedInt(stats.getNodeinfoCacheHits()));
+        entry.setTrafficRateLimitDrops(unsignedInt(stats.getRateLimitDrops()));
+        entry.setTrafficUnknownPacketDrops(unsignedInt(stats.getUnknownPacketDrops()));
+        entry.setTrafficHopExhaustedPackets(unsignedInt(stats.getHopExhaustedPackets()));
+        entry.setTrafficRouterHopsPreserved(unsignedInt(stats.getRouterHopsPreserved()));
+    }
+
+    private static long unsignedInt(int value) {
+        return Integer.toUnsignedLong(value);
     }
 
     private static void applyBatteryLevel(int rawBatteryLevel, NodeData node, TelemetryEntry entry) {

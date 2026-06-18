@@ -12,6 +12,7 @@ import com.meshtastic.client.lua.LuaDebugVariable;
 import com.meshtastic.client.lua.LuaCompletionEngine;
 import com.meshtastic.client.lua.LuaEditorIndentation;
 import com.meshtastic.client.lua.LuaExtensionManager;
+import com.meshtastic.client.lua.LuaFunctionIndex;
 import com.meshtastic.client.lua.LuaScript;
 import com.meshtastic.client.lua.LuaScriptEvent;
 import com.meshtastic.client.lua.LuaScriptRuntimeService;
@@ -51,13 +52,18 @@ import javafx.scene.control.TableCell;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableView;
 import javafx.scene.control.TextArea;
+import javafx.scene.control.TextField;
 import javafx.scene.control.ToolBar;
 import javafx.scene.control.Tooltip;
+import javafx.scene.control.TreeCell;
+import javafx.scene.control.TreeItem;
+import javafx.scene.control.TreeView;
 import javafx.scene.image.ImageView;
 import javafx.scene.input.Clipboard;
 import javafx.scene.input.ClipboardContent;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyEvent;
+import javafx.scene.input.MouseButton;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Pane;
 import javafx.scene.layout.Priority;
@@ -89,7 +95,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
-import java.util.function.DoubleConsumer;
 import java.util.function.IntFunction;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -116,6 +121,10 @@ public final class LuaDevWindow {
     private static final double COMPLETION_VERTICAL_GAP = 2.0;
     private static final double COMPLETION_SCROLL_EDGE_PADDING = 4.0;
     private static final double COMPLETION_SCROLL_GUARD_ROWS = 1.0;
+    private static final double FUNCTION_OUTLINE_MIN_WIDTH = 170.0;
+    private static final double FUNCTION_OUTLINE_DEFAULT_WIDTH = 230.0;
+    private static final double FUNCTION_OUTLINE_MAX_WIDTH = 520.0;
+    private static final double FUNCTION_OUTLINE_RAIL_WIDTH = 34.0;
     private static final Gson PRETTY_GSON = new GsonBuilder().setPrettyPrinting().create();
     private static final DateTimeFormatter TIME_FORMAT =
             DateTimeFormatter.ofPattern("HH:mm:ss").withZone(ZoneId.systemDefault());
@@ -153,15 +162,29 @@ public final class LuaDevWindow {
     private SplitPane mainSplit;
     private SplitPane editorSplit;
     private SplitPane infoSplit;
+    private SplitPane functionOutlineSplit;
     private CodeArea codeArea;
     private StackPane editorStack;
+    private StackPane functionOutlineSlot;
+    private StackPane collapsedFunctionOutlineSlot;
+    private StackPane codeEditorSlot;
     private final Pane editorEmojiLayer = new Pane();
+    private HBox findReplaceBar;
+    private TextField findField;
+    private TextField replaceField;
+    private Label findStatusLabel;
     private TextArea consoleArea;
     private TableView<KvRow> kvTable;
     private TableView<DebugVarRow> debugTable;
+    private TreeView<LuaFunctionIndex.FunctionNode> functionTree;
     private Label scriptNameLabel;
     private Label statusLabel;
     private Button kvButton;
+    private Button kvRefreshButton;
+    private Button functionOutlineButton;
+    private Button searchButton;
+    private Button replaceCurrentButton;
+    private Button replaceAllButton;
     private Button runButton;
     private Button debugButton;
     private Button continueButton;
@@ -178,8 +201,9 @@ public final class LuaDevWindow {
     private boolean closingWindow;
     private boolean restoreMaximizedOnShow;
     private boolean restoringDividerPositions;
-    private boolean dividerPositionTrackingEnabled;
+    private boolean functionOutlineVisible = AppPreferences.isLuaDevFunctionOutlineVisible();
     private boolean editorEmojiOverlayUpdateQueued;
+    private int functionOutlineRestorePasses;
     private double normalWindowX = Double.NaN;
     private double normalWindowY = Double.NaN;
     private double normalWindowWidth = DEFAULT_WINDOW_WIDTH;
@@ -445,39 +469,203 @@ public final class LuaDevWindow {
                 maximized);
     }
 
+    /**
+     * Persists the current MeshApp IDE pane layout as one snapshot.
+     * <p>
+     * Saving all divider positions together avoids partially restored layouts when the window
+     * is closed immediately after the user resizes multiple panes.
+     */
     private void saveDividerPositions() {
+        double functionOutlinePos = functionOutlineVisible && functionOutlineSplit != null
+                && !functionOutlineSplit.getDividers().isEmpty()
+                ? dividerPosition(functionOutlineSplit, AppPreferences.getLuaDevFunctionOutlineDividerPos())
+                : AppPreferences.getLuaDevFunctionOutlineDividerPos();
+        double functionOutlineWidth = functionOutlineVisible
+                ? currentFunctionOutlineWidth()
+                : AppPreferences.getLuaDevFunctionOutlineWidth();
         AppPreferences.saveLuaDevDividerPositions(
                 dividerPosition(mainSplit, AppPreferences.getLuaDevMainDividerPos()),
                 dividerPosition(editorSplit, AppPreferences.getLuaDevEditorDividerPos()),
-                dividerPosition(infoSplit, AppPreferences.getLuaDevInfoDividerPos())
+                dividerPosition(infoSplit, AppPreferences.getLuaDevInfoDividerPos()),
+                functionOutlinePos,
+                functionOutlineWidth,
+                functionOutlineVisible
         );
     }
 
+    /**
+     * Defers divider restoration until JavaFX has calculated the initial scene layout.
+     */
     private void restoreDividerPositionsAfterFirstLayout() {
-        dividerPositionTrackingEnabled = false;
         Platform.runLater(() -> Platform.runLater(this::restoreDividerPositions));
     }
 
+    /**
+     * Restores saved divider positions for the main IDE panes.
+     */
     private void restoreDividerPositions() {
         restoringDividerPositions = true;
         try {
             applyDividerPosition(mainSplit, AppPreferences.getLuaDevMainDividerPos());
             applyDividerPosition(editorSplit, AppPreferences.getLuaDevEditorDividerPos());
             applyDividerPosition(infoSplit, AppPreferences.getLuaDevInfoDividerPos());
+            if (functionOutlineVisible) {
+                restoreFunctionOutlineWidthAfterLayout();
+            }
         } finally {
             restoringDividerPositions = false;
-            dividerPositionTrackingEnabled = true;
         }
     }
 
-    private void configurePersistentDivider(SplitPane splitPane, double position, DoubleConsumer saveAction) {
+    private void configureInitialDivider(SplitPane splitPane, double position) {
         applyDividerPosition(splitPane, position);
-        splitPane.getDividers().getFirst().positionProperty().addListener((obs, oldValue, newValue) -> {
-            if (!dividerPositionTrackingEnabled || restoringDividerPositions || stage == null || !stage.isShowing()) {
-                return;
+    }
+
+    /**
+     * Converts the saved function outline width into a SplitPane divider position for the current window width.
+     */
+    private void applyFunctionOutlineWidth() {
+        if (functionOutlineSplit == null || functionOutlineSlot == null || functionOutlineSplit.getDividers().isEmpty()) {
+            return;
+        }
+        double savedWidth = savedFunctionOutlineWidth();
+        functionOutlineSlot.setPrefWidth(savedWidth);
+        double splitWidth = functionOutlineSplit.getWidth();
+        if (!Double.isFinite(splitWidth) || splitWidth <= savedWidth) {
+            applyDividerPosition(functionOutlineSplit, AppPreferences.getLuaDevFunctionOutlineDividerPos());
+            return;
+        }
+        applyDividerPosition(functionOutlineSplit, savedWidth / splitWidth);
+    }
+
+    /**
+     * Restores the function outline width across several JavaFX layout pulses.
+     * <p>
+     * SplitPane may re-normalize divider positions while its children settle, so the outline
+     * width is temporarily pinned and then released once restoration has converged.
+     */
+    private void restoreFunctionOutlineWidthAfterLayout() {
+        if (!functionOutlineVisible || functionOutlineSplit == null || functionOutlineSlot == null) {
+            return;
+        }
+        functionOutlineRestorePasses = 0;
+        pinFunctionOutlineWidth(savedFunctionOutlineWidth());
+        restoreFunctionOutlineWidthPass();
+    }
+
+    private void restoreFunctionOutlineWidthPass() {
+        if (!functionOutlineVisible || functionOutlineSplit == null || functionOutlineSlot == null) {
+            return;
+        }
+        double savedWidth = savedFunctionOutlineWidth();
+        pinFunctionOutlineWidth(savedWidth);
+        applyFunctionOutlineWidth();
+        functionOutlineRestorePasses++;
+        if (functionOutlineRestorePasses < 8) {
+            Platform.runLater(this::restoreFunctionOutlineWidthPass);
+            return;
+        }
+        releaseFunctionOutlineWidth(savedWidth);
+    }
+
+    /**
+     * Temporarily fixes the outline pane width while SplitPane restores its divider.
+     *
+     * @param width requested pane width in pixels
+     */
+    private void pinFunctionOutlineWidth(double width) {
+        if (functionOutlineSlot == null) {
+            return;
+        }
+        double safeWidth = clamp(width, FUNCTION_OUTLINE_MIN_WIDTH, FUNCTION_OUTLINE_MAX_WIDTH);
+        functionOutlineSlot.setMinWidth(safeWidth);
+        functionOutlineSlot.setPrefWidth(safeWidth);
+        functionOutlineSlot.setMaxWidth(safeWidth);
+    }
+
+    /**
+     * Returns the outline pane to a resizable state after its saved width has been restored.
+     *
+     * @param width preferred pane width in pixels
+     */
+    private void releaseFunctionOutlineWidth(double width) {
+        if (functionOutlineSlot == null) {
+            return;
+        }
+        functionOutlineSlot.setMinWidth(FUNCTION_OUTLINE_MIN_WIDTH);
+        functionOutlineSlot.setPrefWidth(clamp(width, FUNCTION_OUTLINE_MIN_WIDTH, FUNCTION_OUTLINE_MAX_WIDTH));
+        functionOutlineSlot.setMaxWidth(FUNCTION_OUTLINE_MAX_WIDTH);
+    }
+
+    /**
+     * @return current function outline pane width clamped to supported UI bounds
+     */
+    private double currentFunctionOutlineWidth() {
+        double width = functionOutlineSlot != null ? functionOutlineSlot.getWidth() : Double.NaN;
+        if (!Double.isFinite(width) || width <= 0) {
+            width = AppPreferences.getLuaDevFunctionOutlineWidth();
+        }
+        return clamp(width, FUNCTION_OUTLINE_MIN_WIDTH, FUNCTION_OUTLINE_MAX_WIDTH);
+    }
+
+    private static double savedFunctionOutlineWidth() {
+        return clamp(
+                AppPreferences.getLuaDevFunctionOutlineWidth(),
+                FUNCTION_OUTLINE_MIN_WIDTH,
+                FUNCTION_OUTLINE_MAX_WIDTH);
+    }
+
+    private void toggleFunctionOutline() {
+        setFunctionOutlineVisible(!functionOutlineVisible, true);
+    }
+
+    /**
+     * Expands or collapses the function outline pane while preserving its last expanded size.
+     *
+     * @param visible {@code true} to show the function outline pane
+     * @param persist {@code true} to save the visibility state immediately
+     */
+    private void setFunctionOutlineVisible(boolean visible, boolean persist) {
+        boolean wasVisible = functionOutlineVisible;
+        if (wasVisible && !visible && functionOutlineSplit != null && !functionOutlineSplit.getDividers().isEmpty()) {
+            AppPreferences.setLuaDevFunctionOutlineDividerPos(
+                    dividerPosition(functionOutlineSplit, AppPreferences.getLuaDevFunctionOutlineDividerPos()));
+            AppPreferences.setLuaDevFunctionOutlineWidth(currentFunctionOutlineWidth());
+        }
+        functionOutlineVisible = visible;
+        if (persist) {
+            AppPreferences.setLuaDevFunctionOutlineVisible(visible);
+        }
+        updateFunctionOutlineButtonState();
+        if (functionOutlineSplit == null || functionOutlineSlot == null
+                || collapsedFunctionOutlineSlot == null || codeEditorSlot == null) {
+            return;
+        }
+
+        ObservableList<Node> items = functionOutlineSplit.getItems();
+        if (visible) {
+            items.setAll(functionOutlineSlot, codeEditorSlot);
+            SplitPane.setResizableWithParent(functionOutlineSlot, false);
+            Platform.runLater(() -> {
+                restoreFunctionOutlineWidthAfterLayout();
+            });
+        } else {
+            items.setAll(collapsedFunctionOutlineSlot, codeEditorSlot);
+            SplitPane.setResizableWithParent(collapsedFunctionOutlineSlot, false);
+        }
+    }
+
+    private void updateFunctionOutlineButtonState() {
+        if (functionOutlineButton == null) {
+            return;
+        }
+        if (functionOutlineVisible) {
+            if (!functionOutlineButton.getStyleClass().contains("drawer-toolbar-button-selected")) {
+                functionOutlineButton.getStyleClass().add("drawer-toolbar-button-selected");
             }
-            saveAction.accept(normalizeDividerPosition(newValue.doubleValue(), oldValue.doubleValue()));
-        });
+        } else {
+            functionOutlineButton.getStyleClass().remove("drawer-toolbar-button-selected");
+        }
     }
 
     private static void applyDividerPosition(SplitPane splitPane, double position) {
@@ -672,6 +860,10 @@ public final class LuaDevWindow {
 
         Button saveButton = createSideMenuButton(
                 I18n.t("meshIde.dev.tooltip.saveCode"), "/icons/ide-file-code.svg", this::saveCurrentScriptSafely);
+        functionOutlineButton = createSideMenuButton(
+                I18n.t("meshIde.dev.tooltip.functionOutline"), "/icons/menu.svg", this::toggleFunctionOutline);
+        searchButton = createSideMenuButton(
+                I18n.t("meshIde.dev.tooltip.searchCode"), "/icons/search.svg", () -> openFindReplaceBar(true));
         kvButton = createSideMenuButton(
                 I18n.t("meshIde.dev.tooltip.kvEditor"), "/icons/database.svg", this::openCurrentScriptKvEditor);
         Button checkButton = createSideMenuButton(
@@ -691,6 +883,8 @@ public final class LuaDevWindow {
 
         toolbar.getItems().addAll(
                 saveButton,
+                functionOutlineButton,
+                searchButton,
                 kvButton,
                 checkButton,
                 runButton,
@@ -706,14 +900,14 @@ public final class LuaDevWindow {
         menu.getStyleClass().add("lua-dev-side-menu");
         menu.setAlignment(Pos.TOP_CENTER);
         VBox.setVgrow(toolbar, Priority.ALWAYS);
+        updateFunctionOutlineButtonState();
         return menu;
     }
 
     private SplitPane createContent() {
         mainSplit = new SplitPane(createEditorPane(), createInfoPane());
         mainSplit.getStyleClass().add("lua-dev-split-pane");
-        configurePersistentDivider(mainSplit, AppPreferences.getLuaDevMainDividerPos(),
-                AppPreferences::setLuaDevMainDividerPos);
+        configureInitialDivider(mainSplit, AppPreferences.getLuaDevMainDividerPos());
         VBox.setVgrow(mainSplit, Priority.ALWAYS);
         return mainSplit;
     }
@@ -726,11 +920,13 @@ public final class LuaDevWindow {
                 .successionEnds(java.time.Duration.ofMillis(120))
                 .subscribe(ignore -> {
                     codeArea.setStyleSpans(0, computeHighlighting(codeArea.getText()));
+                    refreshFunctionTree();
                     scheduleEditorEmojiOverlayUpdate();
                 });
         codeArea.textProperty().addListener((obs, oldValue, newValue) -> {
             markDirty();
             showCompletion(false);
+            updateFindStatus();
             scheduleEditorEmojiOverlayUpdate();
         });
         codeArea.addEventFilter(KeyEvent.KEY_PRESSED, this::handleEditorKeyPressed);
@@ -750,20 +946,41 @@ public final class LuaDevWindow {
         editorStack.layoutBoundsProperty().addListener((obs, oldBounds, newBounds) -> scheduleEditorEmojiOverlayUpdate());
         StackPane.setAlignment(completionBox, Pos.TOP_LEFT);
 
-        VBox editorBox = createPanel(null, editorStack);
+        findReplaceBar = createFindReplaceBar();
+        VBox editorContent = new VBox(6, findReplaceBar, editorStack);
         VBox.setVgrow(editorStack, Priority.ALWAYS);
+
+        VBox editorBox = createPanel(null, editorContent);
+        VBox.setVgrow(editorStack, Priority.ALWAYS);
+
+        functionTree = createFunctionTree();
+        functionOutlineSlot = createSplitSlot(createFunctionOutlinePanel(), "lua-dev-outline-slot");
+        functionOutlineSlot.setMinWidth(FUNCTION_OUTLINE_MIN_WIDTH);
+        functionOutlineSlot.setPrefWidth(savedFunctionOutlineWidth());
+        functionOutlineSlot.setMaxWidth(FUNCTION_OUTLINE_MAX_WIDTH);
+        collapsedFunctionOutlineSlot = createSplitSlot(createCollapsedFunctionOutlineRail(), "lua-dev-outline-rail-slot");
+        collapsedFunctionOutlineSlot.setMinWidth(FUNCTION_OUTLINE_RAIL_WIDTH);
+        collapsedFunctionOutlineSlot.setPrefWidth(FUNCTION_OUTLINE_RAIL_WIDTH);
+        collapsedFunctionOutlineSlot.setMaxWidth(FUNCTION_OUTLINE_RAIL_WIDTH);
+        codeEditorSlot = createSplitSlot(editorBox, "lua-dev-code-editor-slot");
+
+        functionOutlineSplit = new SplitPane();
+        functionOutlineSplit.getStyleClass().add("lua-dev-split-pane");
+        functionOutlineSplit.setOrientation(Orientation.HORIZONTAL);
+        functionOutlineSplit.getItems().setAll(codeEditorSlot);
+        VBox.setVgrow(functionOutlineSplit, Priority.ALWAYS);
+        setFunctionOutlineVisible(functionOutlineVisible, false);
 
         VBox consoleBox = createPanel(I18n.t("meshIde.dev.panel.console"), consoleArea);
         VBox.setVgrow(consoleArea, Priority.ALWAYS);
 
-        StackPane editorSlot = createSplitSlot(editorBox, "lua-dev-code-slot");
+        StackPane editorSlot = createSplitSlot(functionOutlineSplit, "lua-dev-code-slot");
         StackPane consoleSlot = createSplitSlot(consoleBox, "lua-dev-console-slot");
 
         editorSplit = new SplitPane(editorSlot, consoleSlot);
         editorSplit.getStyleClass().add("lua-dev-split-pane");
         editorSplit.setOrientation(Orientation.VERTICAL);
-        configurePersistentDivider(editorSplit, AppPreferences.getLuaDevEditorDividerPos(),
-                AppPreferences::setLuaDevEditorDividerPos);
+        configureInitialDivider(editorSplit, AppPreferences.getLuaDevEditorDividerPos());
         VBox.setVgrow(editorSplit, Priority.ALWAYS);
 
         return new VBox(editorSplit);
@@ -783,7 +1000,12 @@ public final class LuaDevWindow {
         kvTable.getColumns().add(keyColumn);
         kvTable.getColumns().add(valueColumn);
 
-        VBox kvBox = createPanel(I18n.t("meshIde.dev.panel.kv"), kvTable);
+        kvRefreshButton = createPanelIconButton(
+                I18n.t("meshIde.action.refresh"),
+                I18n.t("meshIde.dev.tooltip.refreshKv"),
+                "/icons/refresh.svg",
+                this::refreshCurrentScriptKvRows);
+        VBox kvBox = createPanel(I18n.t("meshIde.dev.panel.kv"), kvTable, kvRefreshButton);
         VBox.setVgrow(kvTable, Priority.ALWAYS);
 
         debugTable = createDebugTable();
@@ -793,12 +1015,137 @@ public final class LuaDevWindow {
         infoSplit = new SplitPane(debugBox, kvBox);
         infoSplit.getStyleClass().add("lua-dev-split-pane");
         infoSplit.setOrientation(Orientation.VERTICAL);
-        configurePersistentDivider(infoSplit, AppPreferences.getLuaDevInfoDividerPos(),
-                AppPreferences::setLuaDevInfoDividerPos);
+        configureInitialDivider(infoSplit, AppPreferences.getLuaDevInfoDividerPos());
         VBox.setVgrow(infoSplit, Priority.ALWAYS);
         infoSplit.setMinWidth(260);
         infoSplit.setPrefWidth(300);
         return infoSplit;
+    }
+
+    /**
+     * Creates the editor-local find/replace bar used for code search navigation and replacements.
+     *
+     * @return hidden toolbar node that is shown by the search side-menu action or keyboard shortcuts
+     */
+    private HBox createFindReplaceBar() {
+        findField = new TextField();
+        findField.getStyleClass().add("lua-find-field");
+        findField.setPromptText(I18n.t("meshIde.dev.search.findPlaceholder"));
+        findField.textProperty().addListener((obs, oldValue, newValue) -> updateFindStatus());
+
+        replaceField = new TextField();
+        replaceField.getStyleClass().add("lua-find-field");
+        replaceField.setPromptText(I18n.t("meshIde.dev.search.replacePlaceholder"));
+
+        Button previousButton = createFindBarButton("<", I18n.t("meshIde.dev.search.previous"), this::findPreviousMatch);
+        Button nextButton = createFindBarButton(">", I18n.t("meshIde.dev.search.next"), this::findNextMatch);
+        replaceCurrentButton = createFindBarButton(
+                I18n.t("meshIde.dev.search.replace"),
+                I18n.t("meshIde.dev.search.replace"),
+                this::replaceCurrentMatch);
+        replaceAllButton = createFindBarButton(
+                I18n.t("meshIde.dev.search.replaceAll"),
+                I18n.t("meshIde.dev.search.replaceAll"),
+                this::replaceAllMatches);
+        Button closeButton = createFindBarButton("x", I18n.t("meshIde.dev.search.close"), this::closeFindReplaceBar);
+
+        findStatusLabel = new Label();
+        findStatusLabel.getStyleClass().add("lua-find-status");
+
+        Region spacer = new Region();
+        HBox.setHgrow(spacer, Priority.ALWAYS);
+
+        HBox bar = new HBox(6,
+                findField,
+                previousButton,
+                nextButton,
+                replaceField,
+                replaceCurrentButton,
+                replaceAllButton,
+                spacer,
+                findStatusLabel,
+                closeButton);
+        bar.getStyleClass().add("lua-find-replace-bar");
+        bar.setAlignment(Pos.CENTER_LEFT);
+        bar.setVisible(false);
+        bar.setManaged(false);
+
+        installFindFieldKeys(findField);
+        installFindFieldKeys(replaceField);
+        updateFindReplaceMode(false);
+        return bar;
+    }
+
+    /**
+     * Creates the function outline tree and wires double-click navigation to the editor.
+     *
+     * @return tree view populated by {@link #refreshFunctionTree()}
+     */
+    private TreeView<LuaFunctionIndex.FunctionNode> createFunctionTree() {
+        TreeView<LuaFunctionIndex.FunctionNode> tree = new TreeView<>();
+        tree.getStyleClass().add("lua-function-tree");
+        tree.setShowRoot(false);
+        tree.setRoot(new TreeItem<>());
+        tree.setCellFactory(ignored -> new TreeCell<>() {
+            @Override
+            protected void updateItem(LuaFunctionIndex.FunctionNode item, boolean empty) {
+                super.updateItem(item, empty);
+                setText(empty || item == null ? null : item.signature());
+                setGraphic(null);
+            }
+        });
+        tree.setOnMouseClicked(event -> {
+            if (event.getButton() != MouseButton.PRIMARY || event.getClickCount() != 2) {
+                return;
+            }
+            TreeItem<LuaFunctionIndex.FunctionNode> selected = tree.getSelectionModel().getSelectedItem();
+            if (selected != null && selected.getValue() != null) {
+                focusFunction(selected.getValue());
+                event.consume();
+            }
+        });
+        VBox.setVgrow(tree, Priority.ALWAYS);
+        return tree;
+    }
+
+    private VBox createFunctionOutlinePanel() {
+        Button collapseButton = createPanelTextButton("<", I18n.t("meshIde.dev.tooltip.hideFunctionOutline"),
+                this::toggleFunctionOutline);
+        return createPanel(I18n.t("meshIde.dev.panel.functions"), functionTree, collapseButton);
+    }
+
+    /**
+     * Creates the narrow collapsed rail that keeps the function outline title visible.
+     *
+     * @return rail node used when the function outline pane is collapsed
+     */
+    private VBox createCollapsedFunctionOutlineRail() {
+        VBox letters = new VBox();
+        letters.getStyleClass().add("lua-function-outline-rail-letters");
+        letters.setAlignment(Pos.CENTER);
+        I18n.t("meshIde.dev.panel.functions").codePoints()
+                .mapToObj(Character::toString)
+                .map(letter -> {
+                    Label label = new Label(letter);
+                    label.getStyleClass().add("lua-function-outline-rail-label");
+                    return label;
+                })
+                .forEach(letters.getChildren()::add);
+        letters.setMouseTransparent(true);
+
+        Button button = new Button();
+        button.getStyleClass().add("lua-function-outline-rail-button");
+        button.setTooltip(new Tooltip(I18n.t("meshIde.dev.tooltip.showFunctionOutline")));
+        button.setAccessibleText(I18n.t("meshIde.dev.tooltip.showFunctionOutline"));
+        button.setGraphic(letters);
+        button.setContentDisplay(ContentDisplay.GRAPHIC_ONLY);
+        button.setOnAction(event -> setFunctionOutlineVisible(true, true));
+
+        VBox rail = new VBox(button);
+        rail.getStyleClass().add("lua-function-outline-rail");
+        rail.setAlignment(Pos.TOP_CENTER);
+        VBox.setVgrow(button, Priority.NEVER);
+        return rail;
     }
 
     private TableView<DebugVarRow> createDebugTable() {
@@ -1051,10 +1398,25 @@ public final class LuaDevWindow {
     }
 
     private VBox createPanel(String title, Node content) {
+        return createPanel(title, content, new Node[0]);
+    }
+
+    private VBox createPanel(String title, Node content, Node... actions) {
         VBox panel = new VBox(6);
         panel.getStyleClass().add("lua-dev-panel");
         if (title != null && !title.isBlank()) {
-            panel.getChildren().add(sectionTitle(title));
+            if (actions != null && actions.length > 0) {
+                HBox header = new HBox(6);
+                header.setAlignment(Pos.CENTER_LEFT);
+                Label titleLabel = sectionTitle(title);
+                Region spacer = new Region();
+                HBox.setHgrow(spacer, Priority.ALWAYS);
+                header.getChildren().addAll(titleLabel, spacer);
+                header.getChildren().addAll(actions);
+                panel.getChildren().add(header);
+            } else {
+                panel.getChildren().add(sectionTitle(title));
+            }
         }
         panel.getChildren().add(content);
         VBox.setVgrow(content, Priority.ALWAYS);
@@ -1082,7 +1444,326 @@ public final class LuaDevWindow {
         return button;
     }
 
+    private Button createPanelIconButton(String title, String description, String iconPath, Runnable action) {
+        Button button = new Button();
+        button.getStyleClass().add("ide-toolbar-button");
+        button.setFocusTraversable(false);
+        button.setAccessibleText(title);
+        button.setTooltip(new Tooltip(title + "\n" + description));
+        SVGPath icon = SvgIconLoader.load(iconPath, 18);
+        if (icon != null) {
+            button.setGraphic(icon);
+            button.setContentDisplay(ContentDisplay.GRAPHIC_ONLY);
+        } else {
+            button.setText("R");
+        }
+        button.setOnAction(event -> action.run());
+        return button;
+    }
+
+    private Button createPanelTextButton(String text, String tooltip, Runnable action) {
+        Button button = new Button(text);
+        button.getStyleClass().add("ide-toolbar-button");
+        button.setFocusTraversable(false);
+        button.setAccessibleText(tooltip);
+        button.setTooltip(new Tooltip(tooltip));
+        button.setOnAction(event -> action.run());
+        return button;
+    }
+
+    /**
+     * Creates a compact text button whose width can fit localized find/replace captions.
+     *
+     * @param text visible button label
+     * @param tooltip accessible tooltip text
+     * @param action action to run when the button is clicked
+     * @return configured find/replace toolbar button
+     */
+    private Button createFindBarButton(String text, String tooltip, Runnable action) {
+        Button button = new Button(text);
+        button.getStyleClass().add("lua-find-button");
+        button.setFocusTraversable(false);
+        button.setAccessibleText(tooltip);
+        button.setTooltip(new Tooltip(tooltip));
+        button.setOnAction(event -> action.run());
+        return button;
+    }
+
+    /**
+     * Installs keyboard handling shared by find and replace text fields.
+     *
+     * @param field text field that should handle Enter, Shift+Enter, and Escape
+     */
+    private void installFindFieldKeys(TextField field) {
+        field.addEventFilter(KeyEvent.KEY_PRESSED, event -> {
+            if (event.getCode() == KeyCode.ESCAPE) {
+                closeFindReplaceBar();
+                event.consume();
+                return;
+            }
+            if (event.getCode() == KeyCode.ENTER) {
+                if (event.isShiftDown()) {
+                    findPreviousMatch();
+                } else {
+                    findNextMatch();
+                }
+                event.consume();
+            }
+        });
+    }
+
+    /**
+     * Shows the find/replace bar and focuses the search field.
+     * <p>
+     * When the editor has a short single-line selection, the selected text is copied into
+     * the find field to match common editor behavior.
+     *
+     * @param replaceMode {@code true} to show replacement controls, {@code false} for search only
+     */
+    private void openFindReplaceBar(boolean replaceMode) {
+        if (findReplaceBar == null || findField == null) {
+            return;
+        }
+        updateFindReplaceMode(replaceMode);
+        if (!findReplaceBar.isVisible()) {
+            IndexRange selection = codeArea != null ? codeArea.getSelection() : null;
+            if (selection != null && selection.getLength() > 0 && selection.getLength() <= 200) {
+                String selectedText = codeArea.getText().substring(selection.getStart(), selection.getEnd());
+                if (!selectedText.contains("\n")) {
+                    findField.setText(selectedText);
+                }
+            }
+        }
+        findReplaceBar.setManaged(true);
+        findReplaceBar.setVisible(true);
+        Platform.runLater(() -> {
+            findField.requestFocus();
+            findField.selectAll();
+            updateFindStatus();
+        });
+    }
+
+    /**
+     * Hides the find/replace bar and returns focus to the code editor.
+     */
+    private void closeFindReplaceBar() {
+        if (findReplaceBar == null) {
+            return;
+        }
+        findReplaceBar.setVisible(false);
+        findReplaceBar.setManaged(false);
+        if (codeArea != null) {
+            codeArea.requestFocus();
+        }
+    }
+
+    /**
+     * Switches the toolbar between search-only and search-with-replace modes.
+     *
+     * @param replaceMode {@code true} to display replacement controls
+     */
+    private void updateFindReplaceMode(boolean replaceMode) {
+        setVisibleAndManaged(replaceField, replaceMode);
+        setVisibleAndManaged(replaceCurrentButton, replaceMode);
+        setVisibleAndManaged(replaceAllButton, replaceMode);
+    }
+
+    private void findNextMatch() {
+        selectSearchMatch(true);
+    }
+
+    private void findPreviousMatch() {
+        selectSearchMatch(false);
+    }
+
+    /**
+     * Selects the next or previous occurrence of the current search text, wrapping around the file.
+     *
+     * @param forward {@code true} to search after the current selection, {@code false} to search before it
+     */
+    private void selectSearchMatch(boolean forward) {
+        if (codeArea == null || findField == null) {
+            return;
+        }
+        String query = findField.getText();
+        if (query == null || query.isEmpty()) {
+            updateFindStatus();
+            return;
+        }
+
+        String text = codeArea.getText();
+        IndexRange selection = codeArea.getSelection();
+        int start = forward
+                ? Math.max(selection.getEnd(), 0)
+                : Math.max(0, selection.getStart() - 1);
+        int match = forward ? text.indexOf(query, start) : text.lastIndexOf(query, start);
+        if (match < 0) {
+            match = forward ? text.indexOf(query) : text.lastIndexOf(query);
+        }
+        if (match < 0) {
+            updateFindStatus();
+            return;
+        }
+        selectSearchRange(match, match + query.length());
+        updateFindStatus();
+    }
+
+    /**
+     * Replaces the currently selected match or selects the next match when the selection does not match the query.
+     */
+    private void replaceCurrentMatch() {
+        if (codeArea == null || findField == null || replaceField == null) {
+            return;
+        }
+        String query = findField.getText();
+        if (query == null || query.isEmpty()) {
+            updateFindStatus();
+            return;
+        }
+        IndexRange selection = codeArea.getSelection();
+        String selectedText = selection.getLength() > 0
+                ? codeArea.getText().substring(selection.getStart(), selection.getEnd())
+                : "";
+        if (!query.equals(selectedText)) {
+            findNextMatch();
+            return;
+        }
+        String replacement = replaceField.getText() != null ? replaceField.getText() : "";
+        int replaceStart = selection.getStart();
+        codeArea.replaceText(selection.getStart(), selection.getEnd(), replacement);
+        codeArea.selectRange(replaceStart, replaceStart + replacement.length());
+        findNextMatch();
+    }
+
+    /**
+     * Replaces every non-overlapping occurrence of the search text in the current script.
+     */
+    private void replaceAllMatches() {
+        if (codeArea == null || findField == null || replaceField == null) {
+            return;
+        }
+        String query = findField.getText();
+        if (query == null || query.isEmpty()) {
+            updateFindStatus();
+            return;
+        }
+        String text = codeArea.getText();
+        int count = countOccurrences(text, query);
+        if (count == 0) {
+            updateFindStatus();
+            return;
+        }
+        String replacement = replaceField.getText() != null ? replaceField.getText() : "";
+        codeArea.replaceText(text.replace(query, replacement));
+        setStatus(I18n.t("meshIde.dev.search.replacedAll", Integer.toString(count)));
+        updateFindStatus();
+    }
+
+    /**
+     * Selects a source range in the editor and scrolls it into view.
+     *
+     * @param start inclusive source offset
+     * @param end exclusive source offset
+     */
+    private void selectSearchRange(int start, int end) {
+        int safeStart = Math.max(0, Math.min(start, codeArea.getLength()));
+        int safeEnd = Math.max(safeStart, Math.min(end, codeArea.getLength()));
+        int paragraph = codeArea.offsetToPosition(safeStart, org.fxmisc.richtext.model.TwoDimensional.Bias.Forward)
+                .getMajor();
+        codeArea.requestFocus();
+        codeArea.showParagraphAtCenter(paragraph);
+        codeArea.selectRange(safeStart, safeEnd);
+    }
+
+    /**
+     * Refreshes the search result counter shown in the find/replace bar.
+     */
+    private void updateFindStatus() {
+        if (findStatusLabel == null || findField == null || codeArea == null) {
+            return;
+        }
+        String query = findField.getText();
+        if (query == null || query.isEmpty()) {
+            findStatusLabel.setText("");
+            return;
+        }
+        String text = codeArea.getText();
+        int count = countOccurrences(text, query);
+        if (count == 0) {
+            findStatusLabel.setText(I18n.t("meshIde.dev.search.noMatches"));
+            return;
+        }
+        int current = currentMatchOrdinal(text, query, codeArea.getSelection().getStart());
+        findStatusLabel.setText(I18n.t("meshIde.dev.search.count",
+                Integer.toString(Math.max(1, current)),
+                Integer.toString(count)));
+    }
+
+    /**
+     * Counts non-overlapping occurrences of {@code query} in {@code text}.
+     *
+     * @param text source text to scan
+     * @param query search text
+     * @return number of non-overlapping matches
+     */
+    private static int countOccurrences(String text, String query) {
+        if (text == null || query == null || query.isEmpty()) {
+            return 0;
+        }
+        int count = 0;
+        int index = 0;
+        while ((index = text.indexOf(query, index)) >= 0) {
+            count++;
+            index += query.length();
+        }
+        return count;
+    }
+
+    /**
+     * Calculates the one-based ordinal of the match at or after the supplied selection offset.
+     *
+     * @param text source text to scan
+     * @param query search text
+     * @param selectionStart current editor selection start
+     * @return one-based match ordinal, or the last ordinal when the selection is after all matches
+     */
+    private static int currentMatchOrdinal(String text, String query, int selectionStart) {
+        int ordinal = 0;
+        int index = 0;
+        while ((index = text.indexOf(query, index)) >= 0) {
+            ordinal++;
+            if (index >= selectionStart) {
+                return ordinal;
+            }
+            index += query.length();
+        }
+        return ordinal;
+    }
+
+    private static void setVisibleAndManaged(Node node, boolean visible) {
+        if (node == null) {
+            return;
+        }
+        node.setVisible(visible);
+        node.setManaged(visible);
+    }
+
     private void handleEditorKeyPressed(KeyEvent event) {
+        if (event.isShortcutDown() && event.getCode() == KeyCode.F) {
+            openFindReplaceBar(false);
+            event.consume();
+            return;
+        }
+        if (event.isShortcutDown() && event.getCode() == KeyCode.H) {
+            openFindReplaceBar(true);
+            event.consume();
+            return;
+        }
+        if (event.getCode() == KeyCode.ESCAPE && findReplaceBar != null && findReplaceBar.isVisible()) {
+            closeFindReplaceBar();
+            event.consume();
+            return;
+        }
         if (isCompletionShowing()) {
             if (event.getCode() == KeyCode.DOWN) {
                 selectCompletionOffset(1);
@@ -1120,6 +1801,10 @@ public final class LuaDevWindow {
             event.consume();
             return;
         }
+        if (event.getCode() == KeyCode.BACK_SPACE && applySmartBackspace()) {
+            event.consume();
+            return;
+        }
         if (event.getCode() == KeyCode.TAB) {
             applyTabIndent(event.isShiftDown());
             event.consume();
@@ -1154,6 +1839,20 @@ public final class LuaDevWindow {
                 unindent
         ));
         hideCompletion();
+    }
+
+    private boolean applySmartBackspace() {
+        IndexRange selection = codeArea.getSelection();
+        Optional<LuaEditorIndentation.TextEdit> edit = LuaEditorIndentation.backspaceEdit(
+                codeArea.getText(),
+                selection.getStart(),
+                selection.getEnd()
+        );
+        edit.ifPresent(value -> {
+            applyEditorTextEdit(value);
+            hideCompletion();
+        });
+        return edit.isPresent();
     }
 
     private void applyEditorTextEdit(LuaEditorIndentation.TextEdit edit) {
@@ -1595,6 +2294,7 @@ public final class LuaDevWindow {
         updateScriptNameLabel();
         codeArea.replaceText(script.getCode() != null ? script.getCode() : "");
         codeArea.setStyleSpans(0, computeHighlighting(codeArea.getText()));
+        refreshFunctionTree();
         scheduleEditorEmojiOverlayUpdate();
         dirty = false;
         loadingScript = false;
@@ -1651,6 +2351,14 @@ public final class LuaDevWindow {
             return;
         }
         LuaKvEditorWindow.showWindow(currentScript);
+    }
+
+    /**
+     * Reloads the selected script KV table from storage and reports the refreshed row count.
+     */
+    private void refreshCurrentScriptKvRows() {
+        refreshKvRows();
+        setStatus(I18n.t("meshIde.dev.status.kvRefreshed", Integer.toString(kvRows.size())));
     }
 
     private void runCurrentScript() {
@@ -1758,6 +2466,54 @@ public final class LuaDevWindow {
                 .toList());
     }
 
+    /**
+     * Rebuilds the function outline from the current editor text.
+     */
+    private void refreshFunctionTree() {
+        if (functionTree == null || codeArea == null) {
+            return;
+        }
+        TreeItem<LuaFunctionIndex.FunctionNode> root = new TreeItem<>();
+        root.setExpanded(true);
+        LuaFunctionIndex.parse(codeArea.getText()).stream()
+                .map(this::createFunctionTreeItem)
+                .forEach(root.getChildren()::add);
+        functionTree.setRoot(root);
+    }
+
+    private TreeItem<LuaFunctionIndex.FunctionNode> createFunctionTreeItem(LuaFunctionIndex.FunctionNode function) {
+        TreeItem<LuaFunctionIndex.FunctionNode> item = new TreeItem<>(function);
+        item.setExpanded(true);
+        function.children().stream()
+                .map(this::createFunctionTreeItem)
+                .forEach(item.getChildren()::add);
+        return item;
+    }
+
+    /**
+     * Moves editor focus and selection to the supplied function declaration.
+     *
+     * @param function function outline entry selected by the user
+     */
+    private void focusFunction(LuaFunctionIndex.FunctionNode function) {
+        if (function == null || codeArea == null) {
+            return;
+        }
+        int paragraphCount = Math.max(1, codeArea.getParagraphs().size());
+        int paragraph = Math.max(0, Math.min(paragraphCount - 1, function.line() - 1));
+        int nameStart = Math.max(0, Math.min(function.nameStartOffset(), codeArea.getLength()));
+        int nameEnd = Math.max(nameStart, Math.min(function.nameEndOffset(), codeArea.getLength()));
+
+        stage.requestFocus();
+        codeArea.requestFocus();
+        codeArea.showParagraphAtCenter(paragraph);
+        if (nameEnd > nameStart) {
+            codeArea.selectRange(nameStart, nameEnd);
+        } else {
+            codeArea.moveTo(Math.max(0, Math.min(function.offset(), codeArea.getLength())));
+        }
+    }
+
     private void showDebugSnapshot(LuaDebugSnapshot snapshot) {
         currentDebugLine = snapshot.line();
         debugRows.setAll(snapshot.variables().stream()
@@ -1789,6 +2545,9 @@ public final class LuaDevWindow {
         boolean running = hasScript && runtimeService.isRunning(currentScript.getId());
         boolean paused = hasScript && runtimeService.isPaused(currentScript.getId());
         kvButton.setDisable(!hasScript);
+        if (kvRefreshButton != null) {
+            kvRefreshButton.setDisable(!hasScript);
+        }
         runButton.setDisable(!hasScript || running);
         debugButton.setDisable(!hasScript || running);
         continueButton.setDisable(!paused);

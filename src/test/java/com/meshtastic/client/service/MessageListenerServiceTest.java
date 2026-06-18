@@ -448,6 +448,110 @@ class MessageListenerServiceTest {
     }
 
     @Test
+    void onMeshPacketPersistsExtendedTelemetryVariants() {
+        service.onMeshPacket(telemetryPacket(7100, 1_700_000_100, TelemetryProtos.Telemetry.newBuilder()
+                .setEnvironmentMetrics(TelemetryProtos.EnvironmentMetrics.newBuilder()
+                        .setTemperature(21.5f)
+                        .setGasResistance(0.8f)
+                        .setIaq(101)
+                        .setRadiation(12.5f)
+                        .addOneWireTemperature(19.5f)
+                        .addOneWireTemperature(20.5f)
+                        .build())
+                .build()));
+        service.onMeshPacket(telemetryPacket(7101, 1_700_000_101, TelemetryProtos.Telemetry.newBuilder()
+                .setAirQualityMetrics(TelemetryProtos.AirQualityMetrics.newBuilder()
+                        .setPm25Standard(12)
+                        .setParticles03Um(99)
+                        .setCo2(420)
+                        .setPmVocIdx(1.5f)
+                        .build())
+                .build()));
+        service.onMeshPacket(telemetryPacket(7102, 1_700_000_102, TelemetryProtos.Telemetry.newBuilder()
+                .setPowerMetrics(TelemetryProtos.PowerMetrics.newBuilder()
+                        .setCh1Voltage(3.7f)
+                        .setCh8Current(0.8f)
+                        .build())
+                .build()));
+        service.onMeshPacket(telemetryPacket(7103, 1_700_000_103, TelemetryProtos.Telemetry.newBuilder()
+                .setHealthMetrics(TelemetryProtos.HealthMetrics.newBuilder()
+                        .setHeartBpm(72)
+                        .setSpO2(98)
+                        .setTemperature(36.6f)
+                        .build())
+                .build()));
+        service.onMeshPacket(telemetryPacket(7104, 1_700_000_104, TelemetryProtos.Telemetry.newBuilder()
+                .setHostMetrics(TelemetryProtos.HostMetrics.newBuilder()
+                        .setUptimeSeconds(1234)
+                        .setFreememBytes(2_000_000L)
+                        .setDiskfree1Bytes(3_000_000L)
+                        .setLoad1(10)
+                        .setLoad5(20)
+                        .setLoad15(30)
+                        .setUserString("host ok")
+                        .build())
+                .build()));
+        service.onMeshPacket(telemetryPacket(7105, 1_700_000_105, TelemetryProtos.Telemetry.newBuilder()
+                .setTrafficManagementStats(TelemetryProtos.TrafficManagementStats.newBuilder()
+                        .setPacketsInspected(11)
+                        .setPositionDedupDrops(12)
+                        .setNodeinfoCacheHits(13)
+                        .setRateLimitDrops(14)
+                        .setUnknownPacketDrops(15)
+                        .setHopExhaustedPackets(16)
+                        .setRouterHopsPreserved(17)
+                        .build())
+                .build()));
+
+        List<TelemetryEntry> persistedEntries = NodeCacheService.getInstance().loadTelemetrySince(0, "!12345678");
+        assertEquals(6, persistedEntries.size());
+
+        TelemetryEntry environment = persistedEntries.get(0);
+        assertEquals("ENVIRONMENT_METRICS", environment.getTelemetryVariant());
+        assertEquals(21.5f, environment.getTemperature(), 0.001f);
+        assertEquals(0.8f, environment.getGasResistance(), 0.001f);
+        assertEquals(101L, environment.getIaq());
+        assertEquals(12.5f, environment.getRadiation(), 0.001f);
+        assertEquals(List.of(19.5f, 20.5f), environment.getOneWireTemperatures());
+
+        TelemetryEntry airQuality = persistedEntries.get(1);
+        assertEquals("AIR_QUALITY_METRICS", airQuality.getTelemetryVariant());
+        assertEquals(12L, airQuality.getPm25Standard());
+        assertEquals(99L, airQuality.getParticles03um());
+        assertEquals(420L, airQuality.getCo2());
+        assertEquals(1.5f, airQuality.getPmVocIdx(), 0.001f);
+
+        TelemetryEntry power = persistedEntries.get(2);
+        assertEquals("POWER_METRICS", power.getTelemetryVariant());
+        assertEquals(3.7f, power.getCh1Voltage(), 0.001f);
+        assertEquals(0.8f, power.getCh8Current(), 0.001f);
+
+        TelemetryEntry health = persistedEntries.get(3);
+        assertEquals("HEALTH_METRICS", health.getTelemetryVariant());
+        assertEquals(72L, health.getHealthHeartBpm());
+        assertEquals(98L, health.getHealthSpO2());
+        assertEquals(36.6f, health.getHealthTemperature(), 0.001f);
+
+        TelemetryEntry host = persistedEntries.get(4);
+        assertEquals("HOST_METRICS", host.getTelemetryVariant());
+        assertEquals(1234L, host.getHostUptimeSeconds());
+        assertEquals(2_000_000L, host.getHostFreememBytes());
+        assertEquals(3_000_000L, host.getHostDiskfree1Bytes());
+        assertEquals(10L, host.getHostLoad1());
+        assertEquals("host ok", host.getHostUserString());
+
+        TelemetryEntry traffic = persistedEntries.get(5);
+        assertEquals("TRAFFIC_MANAGEMENT_STATS", traffic.getTelemetryVariant());
+        assertEquals(11L, traffic.getTrafficPacketsInspected());
+        assertEquals(12L, traffic.getTrafficPositionDedupDrops());
+        assertEquals(13L, traffic.getTrafficNodeinfoCacheHits());
+        assertEquals(14L, traffic.getTrafficRateLimitDrops());
+        assertEquals(15L, traffic.getTrafficUnknownPacketDrops());
+        assertEquals(16L, traffic.getTrafficHopExhaustedPackets());
+        assertEquals(17L, traffic.getTrafficRouterHopsPreserved());
+    }
+
+    @Test
     void onMeshPacketDefersBroadcastMessagesUntilChannelCatalogReady() {
         state.clear();
         state.setMyNodeNum(0x12345678);
@@ -605,8 +709,8 @@ class MessageListenerServiceTest {
 
     @Test
     void onMeshPacketDropsIncomingChannelMessageFromIgnoredNode() {
-        NodeCacheService.getInstance().setIgnored("!11111111", true);
-        assertTrue(NodeCacheService.getInstance().isIgnored("!11111111"));
+        NodeCacheService.getInstance().setIgnored("!11111111", "!12345678", true);
+        assertTrue(NodeCacheService.getInstance().isIgnored("!11111111", "!12345678"));
 
         MeshProtos.MeshPacket packet = MeshProtos.MeshPacket.newBuilder()
                 .setFrom(0x11111111)
@@ -628,8 +732,8 @@ class MessageListenerServiceTest {
 
     @Test
     void onMeshPacketDropsIncomingReactionFromIgnoredNode() {
-        NodeCacheService.getInstance().setIgnored("!11111111", true);
-        assertTrue(NodeCacheService.getInstance().isIgnored("!11111111"));
+        NodeCacheService.getInstance().setIgnored("!11111111", "!12345678", true);
+        assertTrue(NodeCacheService.getInstance().isIgnored("!11111111", "!12345678"));
 
         MeshProtos.MeshPacket packet = MeshProtos.MeshPacket.newBuilder()
                 .setFrom(0x11111111)
@@ -847,6 +951,27 @@ class MessageListenerServiceTest {
     }
 
     @Test
+    void onToRadioSendFailedMarksPendingMessageFailed() {
+        MeshMessage pending = new MeshMessage("!12345678", "!ffffffff", 0, "pending", 1_700_000_000L, true);
+        pending.setPacketId(78);
+        pending.setStatus(MeshMessage.DeliveryStatus.SENDING);
+        state.addMessage(pending);
+        MessageDbService.getInstance().save(pending, "channel", "0", "!12345678");
+        state.registerPendingAck(78, pending);
+
+        service.onToRadioSendFailed(toRadioPacket(78), "QUEUE_STATUS_1");
+
+        assertEquals(MeshMessage.DeliveryStatus.FAILED, pending.getStatus());
+        assertEquals("QUEUE_STATUS_1", pending.getErrorReason());
+        assertNull(state.resolvePendingAck(78));
+
+        MeshMessage persisted = MessageDbService.getInstance().findByPacketId(78);
+        assertNotNull(persisted);
+        assertEquals(MeshMessage.DeliveryStatus.FAILED, persisted.getStatus());
+        assertEquals("QUEUE_STATUS_1", persisted.getErrorReason());
+    }
+
+    @Test
     void onMeshPacketUpdatesOutgoingReactionStatusWhenAckArrives() {
         MessageReaction reaction = new MessageReaction(42, "!12345678", "🎉", 1_700_000_000L, true);
         reaction.setPacketId(8080);
@@ -871,6 +996,22 @@ class MessageListenerServiceTest {
                 .loadReactionsByTargetPacketIds("channel", "0", "!12345678", List.of(42))
                 .get(42).getFirst();
         assertEquals(MeshMessage.DeliveryStatus.DELIVERED, stored.getStatus());
+    }
+
+    @Test
+    void onToRadioSendFailedMarksOutgoingReactionFailed() {
+        MessageReaction reaction = new MessageReaction(42, "!12345678", "🎉", 1_700_000_000L, true);
+        reaction.setPacketId(8081);
+        reaction.setStatus(MeshMessage.DeliveryStatus.SENDING);
+        MessageDbService.getInstance().saveReaction(reaction, "channel", "0", "!12345678");
+
+        service.onToRadioSendFailed(toRadioPacket(8081), "QUEUE_STATUS_1");
+
+        MessageReaction stored = MessageDbService.getInstance()
+                .loadReactionsByTargetPacketIds("channel", "0", "!12345678", List.of(42))
+                .get(42).getFirst();
+        assertEquals(MeshMessage.DeliveryStatus.FAILED, stored.getStatus());
+        assertEquals("QUEUE_STATUS_1", stored.getErrorReason());
     }
 
     @Test
@@ -951,6 +1092,29 @@ class MessageListenerServiceTest {
         int payloadLength = ((frame[2] & 0xFF) << 8) | (frame[3] & 0xFF);
         byte[] payload = Arrays.copyOfRange(frame, 4, 4 + payloadLength);
         return MeshProtos.ToRadio.parseFrom(payload);
+    }
+
+    private static MeshProtos.ToRadio toRadioPacket(int packetId) {
+        return MeshProtos.ToRadio.newBuilder()
+                .setPacket(MeshProtos.MeshPacket.newBuilder()
+                        .setId(packetId)
+                        .build())
+                .build();
+    }
+
+    private static MeshProtos.MeshPacket telemetryPacket(int packetId,
+                                                         int rxTime,
+                                                         TelemetryProtos.Telemetry telemetry) {
+        return MeshProtos.MeshPacket.newBuilder()
+                .setFrom(0xCAFEBABE)
+                .setTo(0xFFFFFFFF)
+                .setId(packetId)
+                .setRxTime(rxTime)
+                .setDecoded(MeshProtos.Data.newBuilder()
+                        .setPortnum(Portnums.PortNum.TELEMETRY_APP)
+                        .setPayload(telemetry.toByteString())
+                        .build())
+                .build();
     }
 
     private static boolean waitUntil(BooleanSupplier condition, long timeoutMs) throws InterruptedException {

@@ -7,6 +7,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -44,20 +45,32 @@ public final class IgnoredNodeService {
         return nodeId != null && NodeCacheService.getInstance().isIgnored(nodeId);
     }
 
+    public boolean isIgnored(String nodeId, String ownerNodeId) {
+        return nodeId != null && NodeCacheService.getInstance().isIgnored(nodeId, ownerNodeId);
+    }
+
     public void addIgnored(String nodeId) {
+        addIgnored(nodeId, "");
+    }
+
+    public void addIgnored(String nodeId, String ownerNodeId) {
         if (nodeId == null) { return; }
-        pendingUnignores.remove(nodeId);
-        NodeCacheService.getInstance().setIgnored(nodeId, true);
-        sendToDevice(nodeId, true);
+        pendingUnignores.remove(pendingKey(ownerNodeId, nodeId));
+        NodeCacheService.getInstance().setIgnored(nodeId, ownerNodeId, true);
+        sendToDevice(nodeId, ownerNodeId, true);
         fireListeners();
     }
 
     public void removeIgnored(String nodeId) {
+        removeIgnored(nodeId, "");
+    }
+
+    public void removeIgnored(String nodeId, String ownerNodeId) {
         if (nodeId == null) { return; }
-        pendingUnignores.add(nodeId);
-        log.info("Added pending unignore for node {}", nodeId);
-        NodeCacheService.getInstance().setIgnored(nodeId, false);
-        sendToDevice(nodeId, false);
+        pendingUnignores.add(pendingKey(ownerNodeId, nodeId));
+        log.info("Added pending unignore for owner {} node {}", ownerNodeId, nodeId);
+        NodeCacheService.getInstance().setIgnored(nodeId, ownerNodeId, false);
+        sendToDevice(nodeId, ownerNodeId, false);
         fireListeners();
     }
 
@@ -72,26 +85,36 @@ public final class IgnoredNodeService {
      * again instead.
      */
     public void setIgnoredQuiet(String nodeId, boolean ignored) {
+        setIgnoredQuiet(nodeId, "", ignored);
+    }
+
+    public void setIgnoredQuiet(String nodeId, String ownerNodeId, boolean ignored) {
         if (nodeId == null) { return; }
-        if (ignored && pendingUnignores.contains(nodeId)) {
-            log.info("Skipping setIgnoredQuiet(true) for node {} — pending unignore, re-sending admin message", nodeId);
-            sendToDevice(nodeId, false);
+        String pendingKey = pendingKey(ownerNodeId, nodeId);
+        if (ignored && pendingUnignores.contains(pendingKey)) {
+            log.info("Skipping setIgnoredQuiet(true) for owner {} node {} — pending unignore, re-sending admin message",
+                    ownerNodeId, nodeId);
+            sendToDevice(nodeId, ownerNodeId, false);
             return;
         }
-        if (!ignored && pendingUnignores.contains(nodeId)) {
-            log.info("Device confirmed unignore for node {}, clearing pending state", nodeId);
-            pendingUnignores.remove(nodeId);
+        if (!ignored && pendingUnignores.contains(pendingKey)) {
+            log.info("Device confirmed unignore for owner {} node {}, clearing pending state", ownerNodeId, nodeId);
+            pendingUnignores.remove(pendingKey);
         }
-        NodeCacheService.getInstance().setIgnored(nodeId, ignored);
+        NodeCacheService.getInstance().setIgnored(nodeId, ownerNodeId, ignored);
     }
 
     public boolean toggleIgnored(String nodeId) {
+        return toggleIgnored(nodeId, "");
+    }
+
+    public boolean toggleIgnored(String nodeId, String ownerNodeId) {
         if (nodeId == null) { return false; }
-        boolean was = isIgnored(nodeId);
+        boolean was = isIgnored(nodeId, ownerNodeId);
         if (was) {
-            removeIgnored(nodeId);
+            removeIgnored(nodeId, ownerNodeId);
         } else {
-            addIgnored(nodeId);
+            addIgnored(nodeId, ownerNodeId);
         }
         return !was;
     }
@@ -105,12 +128,18 @@ public final class IgnoredNodeService {
         }
     }
 
-    private void sendToDevice(String nodeId, boolean ignored) {
+    private void sendToDevice(String nodeId, String ownerNodeId, boolean ignored) {
         try {
             ConnectionManager cm = ConnectionManager.getInstance();
+            String owner = ownerNodeId != null ? ownerNodeId.toLowerCase(Locale.ROOT) : "";
             boolean sent = false;
             for (ConnectionEntry entry : cm.getEntries()) {
                 if (!entry.isConnected()) { continue; }
+                String entryOwner = cm.getOwnerNodeId(entry.getId());
+                if (!owner.isBlank()
+                        && (entryOwner == null || !owner.equals(entryOwner.toLowerCase(Locale.ROOT)))) {
+                    continue;
+                }
                 ProtocolHandler handler = cm.getProtocolHandler(entry.getId());
                 DeviceState state = cm.getDeviceState(entry.getId());
                 if (handler == null || state == null) { continue; }
@@ -126,10 +155,14 @@ public final class IgnoredNodeService {
                 break; // Send the update only through the first active connection.
             }
             if (!sent) {
-                log.warn("No active connection found to send ignored change for node {}", nodeId);
+                log.warn("No active connection found to send ignored change for owner {} node {}", ownerNodeId, nodeId);
             }
         } catch (Exception e) {
-            log.warn("Failed to send ignored change to device for node {}", nodeId, e);
+            log.warn("Failed to send ignored change to device for owner {} node {}", ownerNodeId, nodeId, e);
         }
+    }
+
+    private static String pendingKey(String ownerNodeId, String nodeId) {
+        return (ownerNodeId != null ? ownerNodeId.toLowerCase(Locale.ROOT) : "") + "\u0000" + nodeId;
     }
 }

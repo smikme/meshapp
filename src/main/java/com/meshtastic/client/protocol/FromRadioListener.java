@@ -50,4 +50,7 @@ public interface FromRadioListener {
 
     /** Receives the device transmit queue status. */
     default void onQueueStatus(MeshProtos.QueueStatus queueStatus) {}
+
+    /** Receives a local send failure after the client could not enqueue a packet on the device. */
+    default void onToRadioSendFailed(MeshProtos.ToRadio toRadio, String reason) {}
 }
