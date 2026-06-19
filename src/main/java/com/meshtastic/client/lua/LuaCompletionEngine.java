@@ -51,12 +51,21 @@ public final class LuaCompletionEngine {
         TypeDef mesh = new TypeDef();
         mesh.member("log(text)", "log(", "function", null);
         mesh.member("now()", "now()", "function", "number");
+        mesh.member("localtime(epoch_seconds)", "localtime(", "function", "time");
+        mesh.member("date(epoch_seconds)", "date(", "function", "string");
+        mesh.member("time(epoch_seconds)", "time(", "function", "string");
+        mesh.member("datetime(epoch_seconds)", "datetime(", "function", "string");
+        mesh.member("iso_date(epoch_seconds)", "iso_date(", "function", "string");
+        mesh.member("iso_time(epoch_seconds)", "iso_time(", "function", "string");
+        mesh.member("iso_datetime(epoch_seconds)", "iso_datetime(", "function", "string");
         mesh.member("sleep(seconds)", "sleep(", "function", "boolean");
         mesh.member("owner()", "owner()", "function", "owner");
         mesh.member("chat", "chat.", "object", "mesh.chat");
         mesh.member("kv", "kv.", "object", "mesh.kv");
+        mesh.member("json", "json.", "object", "mesh.json");
         mesh.member("curl", "curl.", "object", "mesh.curl");
         mesh.member("ui", "ui.", "object", "mesh.ui");
+        mesh.member("timer", "timer.", "object", "mesh.timer");
         mesh.member("canvas", "canvas.", "object", "mesh.canvas");
         mesh.member("form", "form.", "object", "mesh.form");
         mesh.member("traceroute", "traceroute.", "object", "mesh.traceroute");
@@ -83,6 +92,15 @@ public final class LuaCompletionEngine {
         kv.member("list()", "list()", "function", "table");
         kv.member("clear()", "clear()", "function", "boolean");
 
+        TypeDef json = new TypeDef();
+        json.member("decode(text)", "decode(", "function", "table");
+        json.member("try_decode(text)", "try_decode(", "function", "table");
+        json.member("encode(value, options)", "encode(", "function", "string");
+        json.member("pretty(value)", "pretty(", "function", "string");
+        json.member("array(table)", "array(", "function", "table");
+        json.member("is_null(value)", "is_null(", "function", "boolean");
+        json.member("null", "null", "field", null);
+
         TypeDef curl = new TypeDef();
         curl.member("get(url, options)", "get(", "function", "curl.response");
         curl.member("request(options)", "request(", "function", "curl.response");
@@ -94,6 +112,12 @@ public final class LuaCompletionEngine {
 
         TypeDef ui = new TypeDef();
         ui.member("pick_node(options)", "pick_node(", "function", "string");
+
+        TypeDef timer = new TypeDef();
+        timer.member("after(seconds, options)", "after(", "function", "string");
+        timer.member("every(seconds, options)", "every(", "function", "string");
+        timer.member("cancel(timer_id)", "cancel(", "function", "boolean");
+        timer.member("cancel_all()", "cancel_all()", "function", "number");
 
         TypeDef form = new TypeDef();
         for (String member : List.of("show(options)", "set_title(title)", "clear()", "add(options)",
@@ -204,6 +228,13 @@ public final class LuaCompletionEngine {
         }
         adminSnapshot.member("node", "node", "field", "node");
 
+        TypeDef timerEvent = new TypeDef();
+        for (String field : List.of("type", "source", "id", "timer_id", "name", "interval_seconds", "seconds",
+                "repeating", "align", "count", "scheduled_epoch", "actual_epoch", "drift_seconds")) {
+            timerEvent.member(field, field, "field", null);
+        }
+        timerEvent.member("time", "time", "field", "time");
+
         TypeDef canvasEvent = new TypeDef();
         for (String field : List.of("type", "source", "x", "y", "screen_x", "screen_y", "button",
                 "click_count", "primary", "middle", "secondary", "wheel_delta_x", "wheel_delta_y",
@@ -244,6 +275,13 @@ public final class LuaCompletionEngine {
         owner.member("node_id", "node_id", "field", null);
         owner.member("node_num", "node_num", "field", null);
         owner.member("connection_id", "connection_id", "field", null);
+
+        TypeDef time = new TypeDef();
+        for (String field : List.of("year", "month", "day", "hour", "minute", "min", "second", "sec",
+                "weekday", "wday", "yearday", "yday", "timezone", "zone", "offset", "offset_seconds",
+                "epoch", "date", "time", "datetime", "iso_date", "iso_time", "iso_datetime", "iso")) {
+            time.member(field, field, "field", null);
+        }
 
         TypeDef node = new TypeDef();
         for (String field : List.of("node_num", "node_id", "long_name", "short_name", "last_heard",
@@ -311,8 +349,10 @@ public final class LuaCompletionEngine {
         defs.put("mesh", mesh);
         defs.put("mesh.chat", chat);
         defs.put("mesh.kv", kv);
+        defs.put("mesh.json", json);
         defs.put("mesh.curl", curl);
         defs.put("mesh.ui", ui);
+        defs.put("mesh.timer", timer);
         defs.put("mesh.canvas", canvas);
         defs.put("mesh.form", form);
         defs.put("mesh.traceroute", traceroute);
@@ -326,6 +366,7 @@ public final class LuaCompletionEngine {
         defs.put("nodeinfo.event", nodeInfoEvent);
         defs.put("admin.event", adminEvent);
         defs.put("admin.snapshot", adminSnapshot);
+        defs.put("timer.event", timerEvent);
         defs.put("canvas.event", canvasEvent);
         defs.put("canvas.mouse", canvasMouse);
         defs.put("canvas.keys", canvasKeys);
@@ -333,6 +374,7 @@ public final class LuaCompletionEngine {
         defs.put("route.discovery", routeDiscovery);
         defs.put("message", message);
         defs.put("owner", owner);
+        defs.put("time", time);
         defs.put("node", node);
         defs.put("telemetry", telemetryEntry);
         defs.put("channel", channel);
@@ -356,6 +398,7 @@ public final class LuaCompletionEngine {
                 new CompletionItem("on_traceroute(event)", "function on_traceroute(event)\n    \nend", "snippet"),
                 new CompletionItem("on_node_info(event)", "function on_node_info(event)\n    \nend", "snippet"),
                 new CompletionItem("on_admin(event)", "function on_admin(event)\n    \nend", "snippet"),
+                new CompletionItem("on_timer(event)", "function on_timer(event)\n    \nend", "snippet"),
                 new CompletionItem("on_canvas_event(event)", "function on_canvas_event(event)\n    \nend", "snippet"),
                 new CompletionItem("on_canvas_frame(event)", "function on_canvas_frame(event)\n    \nend", "snippet"),
                 new CompletionItem("on_form_event(event)", "function on_form_event(event)\n    \nend", "snippet"),
@@ -502,6 +545,11 @@ public final class LuaCompletionEngine {
                 List<String> params = splitNames(functionMatcher.group(2));
                 if (!params.isEmpty()) {
                     symbols.put(params.getFirst(), "admin.event");
+                }
+            } else if ("on_timer".equals(name)) {
+                List<String> params = splitNames(functionMatcher.group(2));
+                if (!params.isEmpty()) {
+                    symbols.put(params.getFirst(), "timer.event");
                 }
             } else if ("on_canvas_event".equals(name) || "on_canvas_frame".equals(name)) {
                 List<String> params = splitNames(functionMatcher.group(2));
@@ -689,6 +737,9 @@ public final class LuaCompletionEngine {
         if (value.startsWith("mesh.owner")) {
             return Optional.of("owner");
         }
+        if (value.startsWith("mesh.localtime")) {
+            return Optional.of("time");
+        }
         if (value.startsWith("mesh.command")) {
             return Optional.of("command");
         }
@@ -713,11 +764,17 @@ public final class LuaCompletionEngine {
         if (value.startsWith("mesh.kv")) {
             return Optional.of("mesh.kv");
         }
+        if (value.startsWith("mesh.json")) {
+            return Optional.of("mesh.json");
+        }
         if (value.startsWith("mesh.curl")) {
             return Optional.of("mesh.curl");
         }
         if (value.startsWith("mesh.ui")) {
             return Optional.of("mesh.ui");
+        }
+        if (value.startsWith("mesh.timer")) {
+            return Optional.of("mesh.timer");
         }
         if (value.startsWith("mesh.canvas")) {
             return Optional.of("mesh.canvas");

@@ -21,10 +21,17 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
+import java.time.format.FormatStyle;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.TimeZone;
 import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
@@ -428,6 +435,218 @@ class LuaScriptRuntimeServiceTest {
 
         assertEquals("done", scriptService.getKv(automation.getId(), "slept"));
         assertFalse(events.stream().anyMatch(event -> event.type() == LuaScriptEvent.Type.ERROR));
+    }
+
+    @Test
+    void timerAfterKeepsScriptAliveUntilCallback() {
+        LuaScript script = scriptService.createScript(
+                "timer-after",
+                """
+                function on_timer(event)
+                    mesh.kv.set('timer_type', event.type)
+                    mesh.kv.set('timer_source', event.source)
+                    mesh.kv.set('timer_name', event.name)
+                    mesh.kv.set('timer_count', tostring(event.count))
+                    mesh.kv.set('timer_repeating', tostring(event.repeating))
+                    mesh.kv.set('timer_time', event.time.iso_datetime)
+                    mesh.kv.set('timer_done', 'yes')
+                end
+
+                mesh.timer.after(0.1, { name = 'once' })
+                """);
+
+        runtimeService.runScript(script, events::add);
+
+        awaitCondition(() -> "yes".equals(scriptService.getKv(script.getId(), "timer_done")),
+                "One-shot timer did not fire");
+        awaitCondition(() -> !runtimeService.isRunning(script.getId()), "One-shot timer script did not finish");
+
+        assertEquals("timer", scriptService.getKv(script.getId(), "timer_type"));
+        assertEquals("mesh.timer.after", scriptService.getKv(script.getId(), "timer_source"));
+        assertEquals("once", scriptService.getKv(script.getId(), "timer_name"));
+        assertEquals("1", scriptService.getKv(script.getId(), "timer_count"));
+        assertEquals("false", scriptService.getKv(script.getId(), "timer_repeating"));
+        assertNotNull(scriptService.getKv(script.getId(), "timer_time"));
+        assertFalse(events.stream().anyMatch(event -> event.type() == LuaScriptEvent.Type.ERROR));
+    }
+
+    @Test
+    void timerEveryRepeatsAndCanCancelItself() {
+        LuaScript script = scriptService.createScript(
+                "timer-every",
+                """
+                function on_timer(event)
+                    mesh.kv.set('timer_id', event.id)
+                    mesh.kv.set('timer_name', event.name)
+                    mesh.kv.set('timer_count', tostring(event.count))
+                    mesh.kv.set('timer_align', event.align)
+                    mesh.kv.set('timer_repeating', tostring(event.repeating))
+                    mesh.kv.set('timer_has_time', tostring(event.time.year ~= nil))
+                    if event.count >= 2 then
+                        mesh.kv.set('timer_cancelled', tostring(mesh.timer.cancel(event.id)))
+                        mesh.kv.set('timer_done', 'yes')
+                    end
+                end
+
+                mesh.timer.every(0.1, { name = 'repeat', immediate = true })
+                """);
+
+        runtimeService.runScript(script, events::add);
+
+        awaitCondition(() -> "yes".equals(scriptService.getKv(script.getId(), "timer_done")),
+                "Repeating timer did not cancel itself");
+        awaitCondition(() -> !runtimeService.isRunning(script.getId()), "Repeating timer script did not finish");
+
+        assertTrue(scriptService.getKv(script.getId(), "timer_id").contains(":timer:"));
+        assertEquals("repeat", scriptService.getKv(script.getId(), "timer_name"));
+        assertEquals("2", scriptService.getKv(script.getId(), "timer_count"));
+        assertEquals("interval", scriptService.getKv(script.getId(), "timer_align"));
+        assertEquals("true", scriptService.getKv(script.getId(), "timer_repeating"));
+        assertEquals("true", scriptService.getKv(script.getId(), "timer_has_time"));
+        assertEquals("true", scriptService.getKv(script.getId(), "timer_cancelled"));
+        assertFalse(events.stream().anyMatch(event -> event.type() == LuaScriptEvent.Type.ERROR));
+    }
+
+    @Test
+    void jsonApiParsesEncodesNullsAndArrays() {
+        LuaScript script = scriptService.createScript(
+                "json-api",
+                """
+                local data = mesh.json.decode('{"name":"alpha","items":[1,true,null],"empty":[]}')
+                mesh.kv.set('name', data.name)
+                mesh.kv.set('item1', tostring(data.items[1]))
+                mesh.kv.set('item2', tostring(data.items[2]))
+                mesh.kv.set('item3_null', tostring(mesh.json.is_null(data.items[3])))
+                mesh.kv.set('decoded_empty_array', mesh.json.encode(data.empty))
+
+                local payload = {
+                    status = mesh.json.null,
+                    empty_object = {},
+                    empty_array = mesh.json.array({}),
+                    values = mesh.json.array({ "a", "b" })
+                }
+                local encoded = mesh.json.encode(payload)
+                local roundtrip = mesh.json.decode(encoded)
+                mesh.kv.set('roundtrip_null', tostring(mesh.json.is_null(roundtrip.status)))
+                mesh.kv.set('roundtrip_empty_object', mesh.json.encode(roundtrip.empty_object))
+                mesh.kv.set('roundtrip_empty_array', mesh.json.encode(roundtrip.empty_array))
+                mesh.kv.set('roundtrip_value2', roundtrip.values[2])
+                mesh.kv.set('pretty_has_newline', tostring(string.find(mesh.json.pretty(payload), "\\n") ~= nil))
+
+                local invalid, parse_error = mesh.json.try_decode('{bad')
+                mesh.kv.set('try_invalid_nil', tostring(invalid == nil))
+                mesh.kv.set('try_error_present', tostring(parse_error ~= nil and #parse_error > 0))
+
+                local mixed_ok = pcall(function()
+                    return mesh.json.encode({ [1] = "array", key = "object" })
+                end)
+                mesh.kv.set('mixed_ok', tostring(mixed_ok))
+                mesh.kv.set('done', 'yes')
+                """);
+
+        runtimeService.runScript(script, events::add);
+
+        awaitCondition(() -> "yes".equals(scriptService.getKv(script.getId(), "done")),
+                "JSON API script did not finish");
+
+        assertEquals("alpha", scriptService.getKv(script.getId(), "name"));
+        assertEquals("1", scriptService.getKv(script.getId(), "item1"));
+        assertEquals("true", scriptService.getKv(script.getId(), "item2"));
+        assertEquals("true", scriptService.getKv(script.getId(), "item3_null"));
+        assertEquals("[]", scriptService.getKv(script.getId(), "decoded_empty_array"));
+        assertEquals("true", scriptService.getKv(script.getId(), "roundtrip_null"));
+        assertEquals("{}", scriptService.getKv(script.getId(), "roundtrip_empty_object"));
+        assertEquals("[]", scriptService.getKv(script.getId(), "roundtrip_empty_array"));
+        assertEquals("b", scriptService.getKv(script.getId(), "roundtrip_value2"));
+        assertEquals("true", scriptService.getKv(script.getId(), "pretty_has_newline"));
+        assertEquals("true", scriptService.getKv(script.getId(), "try_invalid_nil"));
+        assertEquals("true", scriptService.getKv(script.getId(), "try_error_present"));
+        assertEquals("false", scriptService.getKv(script.getId(), "mixed_ok"));
+        assertFalse(events.stream().anyMatch(event -> event.type() == LuaScriptEvent.Type.ERROR));
+    }
+
+    @Test
+    void timeHelpersUseLocalTimezoneAndRegionalFormats() {
+        Locale previousLocale = Locale.getDefault(Locale.Category.FORMAT);
+        TimeZone previousTimeZone = TimeZone.getDefault();
+        ZoneId zone = ZoneId.of("Europe/Moscow");
+        ZonedDateTime localDateTime = LocalDateTime.of(2026, 6, 19, 14, 5, 9).atZone(zone);
+        long epoch = localDateTime.toEpochSecond();
+        try {
+            Locale.setDefault(Locale.Category.FORMAT, Locale.US);
+            TimeZone.setDefault(TimeZone.getTimeZone(zone));
+
+            LuaScript script = scriptService.createScript(
+                    "time-api",
+                    """
+                    local epoch = %d
+                    local t = mesh.localtime(epoch)
+                    mesh.kv.set('iso_date', mesh.iso_date(epoch))
+                    mesh.kv.set('iso_time', mesh.iso_time(epoch))
+                    mesh.kv.set('iso_datetime', mesh.iso_datetime(epoch))
+                    mesh.kv.set('date', mesh.date(epoch))
+                    mesh.kv.set('time', mesh.time(epoch))
+                    mesh.kv.set('datetime', mesh.datetime(epoch))
+                    mesh.kv.set('year', tostring(t.year))
+                    mesh.kv.set('month', tostring(t.month))
+                    mesh.kv.set('day', tostring(t.day))
+                    mesh.kv.set('hour', tostring(t.hour))
+                    mesh.kv.set('minute', tostring(t.minute))
+                    mesh.kv.set('second', tostring(t.second))
+                    mesh.kv.set('weekday', tostring(t.weekday))
+                    mesh.kv.set('wday', tostring(t.wday))
+                    mesh.kv.set('yearday', tostring(t.yearday))
+                    mesh.kv.set('timezone', t.timezone)
+                    mesh.kv.set('offset', t.offset)
+                    mesh.kv.set('offset_seconds', tostring(t.offset_seconds))
+                    mesh.kv.set('local_date', t.date)
+                    mesh.kv.set('local_time', t.time)
+                    mesh.kv.set('local_datetime', t.datetime)
+                    mesh.kv.set('local_iso', t.iso_datetime)
+                    """.formatted(epoch));
+
+            runtimeService.runScript(script, events::add);
+
+            awaitCondition(() -> "2026-06-19".equals(scriptService.getKv(script.getId(), "iso_date")),
+                    "Lua time API script did not finish");
+
+            String expectedDate = DateTimeFormatter.ofLocalizedDate(FormatStyle.SHORT)
+                    .withLocale(Locale.US)
+                    .format(localDateTime);
+            String expectedTime = DateTimeFormatter.ofLocalizedTime(FormatStyle.MEDIUM)
+                    .withLocale(Locale.US)
+                    .format(localDateTime);
+            String expectedDateTime = DateTimeFormatter.ofLocalizedDateTime(FormatStyle.SHORT, FormatStyle.MEDIUM)
+                    .withLocale(Locale.US)
+                    .format(localDateTime);
+
+            assertEquals("2026-06-19", scriptService.getKv(script.getId(), "iso_date"));
+            assertEquals("14:05:09", scriptService.getKv(script.getId(), "iso_time"));
+            assertEquals("2026-06-19 14:05:09", scriptService.getKv(script.getId(), "iso_datetime"));
+            assertEquals(expectedDate, scriptService.getKv(script.getId(), "date"));
+            assertEquals(expectedTime, scriptService.getKv(script.getId(), "time"));
+            assertEquals(expectedDateTime, scriptService.getKv(script.getId(), "datetime"));
+            assertEquals("2026", scriptService.getKv(script.getId(), "year"));
+            assertEquals("6", scriptService.getKv(script.getId(), "month"));
+            assertEquals("19", scriptService.getKv(script.getId(), "day"));
+            assertEquals("14", scriptService.getKv(script.getId(), "hour"));
+            assertEquals("5", scriptService.getKv(script.getId(), "minute"));
+            assertEquals("9", scriptService.getKv(script.getId(), "second"));
+            assertEquals("5", scriptService.getKv(script.getId(), "weekday"));
+            assertEquals("6", scriptService.getKv(script.getId(), "wday"));
+            assertEquals("170", scriptService.getKv(script.getId(), "yearday"));
+            assertEquals("Europe/Moscow", scriptService.getKv(script.getId(), "timezone"));
+            assertEquals("+03:00", scriptService.getKv(script.getId(), "offset"));
+            assertEquals("10800", scriptService.getKv(script.getId(), "offset_seconds"));
+            assertEquals(expectedDate, scriptService.getKv(script.getId(), "local_date"));
+            assertEquals(expectedTime, scriptService.getKv(script.getId(), "local_time"));
+            assertEquals(expectedDateTime, scriptService.getKv(script.getId(), "local_datetime"));
+            assertEquals("2026-06-19 14:05:09", scriptService.getKv(script.getId(), "local_iso"));
+            assertFalse(events.stream().anyMatch(event -> event.type() == LuaScriptEvent.Type.ERROR));
+        } finally {
+            Locale.setDefault(Locale.Category.FORMAT, previousLocale);
+            TimeZone.setDefault(previousTimeZone);
+        }
     }
 
     @Test

@@ -25,6 +25,8 @@ import org.meshtastic.proto.ConfigProtos;
 import org.meshtastic.proto.ModuleConfigProtos;
 import org.meshtastic.proto.MeshProtos;
 
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.concurrent.CompletableFuture;
@@ -59,7 +61,7 @@ import java.util.function.IntConsumer;
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNodeInfoBridge,
-        LuaRemoteAdminBridge, LuaCanvasBridge, LuaFormBridge {
+        LuaRemoteAdminBridge, LuaTimerBridge, LuaCanvasBridge, LuaFormBridge {
 
     private static final long RUN_TIMEOUT_MS = 3_000;
     private static final long CALLBACK_TIMEOUT_MS = 1_500;
@@ -68,6 +70,7 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
     private static final int MAX_MESSAGE_BATCH = 50;
     private static final int MAX_DEBUG_VARIABLES = 160;
     private static final int MAX_TABLE_PREVIEW_ITEMS = 8;
+    private static final int MAX_TIMERS = 32;
     private static final Set<String> HIDDEN_GLOBALS = Set.of(
             "_G", "_VERSION", "arg",
             "assert", "error", "getmetatable", "ipairs", "next", "pairs", "pcall", "rawequal",
@@ -97,12 +100,14 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
     private final Map<String, PendingTraceroute> pendingTraceroutes = new java.util.concurrent.ConcurrentHashMap<>();
     private final Map<String, PendingNodeInfo> pendingNodeInfos = new java.util.concurrent.ConcurrentHashMap<>();
     private final Map<String, PendingRemoteAdmin> pendingRemoteAdmins = new java.util.concurrent.ConcurrentHashMap<>();
+    private final Map<String, PendingTimer> pendingTimers = new java.util.concurrent.ConcurrentHashMap<>();
     private final Map<Integer, RemoteAdminService> remoteAdminServices = new java.util.concurrent.ConcurrentHashMap<>();
     private final AtomicBoolean canvasOpen = new AtomicBoolean(false);
     private final AtomicLong uiRequestCounter = new AtomicLong();
     private final AtomicLong tracerouteRequestCounter = new AtomicLong();
     private final AtomicLong nodeInfoRequestCounter = new AtomicLong();
     private final AtomicLong remoteAdminRequestCounter = new AtomicLong();
+    private final AtomicLong timerRequestCounter = new AtomicLong();
     private final Runnable deviceMessageListener = this::onDeviceMessagesChanged;
 
     private SandboxDebugLib debugLib;
@@ -544,6 +549,137 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
     }
 
     @Override
+    public String nextTimerId() {
+        return script.getId() + ":timer:" + timerRequestCounter.incrementAndGet();
+    }
+
+    @Override
+    public void scheduleTimer(LuaTimerRequest request) {
+        if (request == null) {
+            throw new LuaError("Timer request is required");
+        }
+        if (pendingTimers.size() >= MAX_TIMERS) {
+            throw new LuaError("Too many active timers; limit is " + MAX_TIMERS);
+        }
+        PendingTimer pending = new PendingTimer(request);
+        PendingTimer existing = pendingTimers.putIfAbsent(request.timerId(), pending);
+        if (existing != null) {
+            throw new LuaError("Timer id already exists");
+        }
+        scriptService.updateRunState(script.getId(), "RUNNING", null);
+        scheduleNextTimer(pending, request.immediate());
+    }
+
+    @Override
+    public boolean cancelTimer(String timerId) {
+        if (timerId == null || timerId.isBlank()) {
+            return false;
+        }
+        PendingTimer pending = pendingTimers.remove(timerId);
+        if (pending == null) {
+            return false;
+        }
+        if (pending.future != null) {
+            pending.future.cancel(false);
+        }
+        finishIfIdle();
+        return true;
+    }
+
+    @Override
+    public int cancelAllTimers() {
+        int count = pendingTimers.size();
+        cleanupTimers();
+        finishIfIdle();
+        return count;
+    }
+
+    private void scheduleNextTimer(PendingTimer pending, boolean immediate) {
+        if (!running.get() || pending == null || !pendingTimers.containsKey(pending.request.timerId())) {
+            return;
+        }
+        double delaySeconds = immediate ? 0.0 : nextTimerDelaySeconds(pending.request);
+        double scheduledEpochSeconds = nowSeconds() + delaySeconds;
+        long delayMillis = Math.max(0L, Math.round(delaySeconds * 1000.0));
+        pending.future = scheduler.schedule(
+                () -> fireTimer(pending.request.timerId(), scheduledEpochSeconds),
+                delayMillis,
+                TimeUnit.MILLISECONDS);
+    }
+
+    private double nextTimerDelaySeconds(LuaTimerRequest request) {
+        if (!request.repeating() || !"wall".equals(request.align())) {
+            return request.seconds();
+        }
+        double now = nowSeconds();
+        int offsetSeconds = ZonedDateTime.now(ZoneId.systemDefault())
+                .getOffset()
+                .getTotalSeconds();
+        double localEpoch = now + offsetSeconds;
+        double interval = request.seconds();
+        double nextLocalEpoch = Math.floor(localEpoch / interval + 1.0) * interval;
+        double delay = nextLocalEpoch - localEpoch;
+        if (delay <= 0.001) {
+            delay = interval;
+        }
+        return delay;
+    }
+
+    private void fireTimer(String timerId, double scheduledEpochSeconds) {
+        PendingTimer pending = pendingTimers.get(timerId);
+        if (pending == null || !running.get()) {
+            return;
+        }
+        if (pending.request.repeating()) {
+            scheduleNextTimer(pending, false);
+        }
+        if (!pending.callbackQueued.compareAndSet(false, true)) {
+            return;
+        }
+        double actualEpochSeconds = nowSeconds();
+        long count = pending.count.incrementAndGet();
+        try {
+            executor.execute(() -> callTimer(pending, scheduledEpochSeconds, actualEpochSeconds, count));
+        } catch (RejectedExecutionException ignored) {
+            pending.callbackQueued.set(false);
+            if (!pending.request.repeating()) {
+                pendingTimers.remove(timerId, pending);
+            }
+            // Session is stopping.
+        }
+    }
+
+    private void callTimer(PendingTimer pending,
+                           double scheduledEpochSeconds,
+                           double actualEpochSeconds,
+                           long count) {
+        if (!running.get()
+                || globals == null
+                || !pendingTimers.containsKey(pending.request.timerId())) {
+            pending.callbackQueued.set(false);
+            return;
+        }
+        LuaValue callback = globals.get("on_timer");
+        try {
+            if (callback.isfunction()) {
+                debugLib.begin(CALLBACK_TIMEOUT_MS);
+                callback.call(timerEventToTable(pending.request, scheduledEpochSeconds, actualEpochSeconds, count));
+            } else if (pending.missingCallbackReported.compareAndSet(false, true)) {
+                emit(LuaScriptEvent.warning(script.getId(), "Timer fired, but on_timer(event) is missing"));
+            }
+        } catch (Throwable callbackError) {
+            fail(callbackError);
+            finishWithoutInterruptingExecutor();
+        } finally {
+            pending.callbackQueued.set(false);
+            if (!pending.request.repeating()) {
+                pendingTimers.remove(pending.request.timerId(), pending);
+            }
+            finishIfIdle();
+        }
+    }
+
+    @Override
     public void openCanvas(LuaCanvasOptions options) {
         try {
             LuaCanvasWindow.showWindow(script.getId(), script.getName(), script.getIcon(), options, this::handleCanvasEvent);
@@ -670,6 +806,7 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
         cleanupTraceroutes();
         cleanupNodeInfos();
         cleanupRemoteAdmins();
+        cleanupTimers();
         cleanupCanvas();
         Future<?> future = activeFuture;
         if (future != null) {
@@ -960,6 +1097,28 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
         return table;
     }
 
+    private LuaValue timerEventToTable(LuaTimerRequest request,
+                                       double scheduledEpochSeconds,
+                                       double actualEpochSeconds,
+                                       long count) {
+        LuaTable table = new LuaTable();
+        table.set("type", LuaValue.valueOf("timer"));
+        table.set("source", LuaValue.valueOf(request.source() != null ? request.source() : "mesh.timer"));
+        table.set("id", LuaValue.valueOf(request.timerId()));
+        table.set("timer_id", LuaValue.valueOf(request.timerId()));
+        table.set("name", LuaValue.valueOf(request.name() != null ? request.name() : ""));
+        table.set("interval_seconds", LuaValue.valueOf(request.seconds()));
+        table.set("seconds", LuaValue.valueOf(request.seconds()));
+        table.set("repeating", LuaValue.valueOf(request.repeating()));
+        table.set("align", LuaValue.valueOf(request.align() != null ? request.align() : "interval"));
+        table.set("count", LuaValue.valueOf((double) count));
+        table.set("scheduled_epoch", LuaValue.valueOf(scheduledEpochSeconds));
+        table.set("actual_epoch", LuaValue.valueOf(actualEpochSeconds));
+        table.set("drift_seconds", LuaValue.valueOf(actualEpochSeconds - scheduledEpochSeconds));
+        table.set("time", sandboxApi.localTimeTable(actualEpochSeconds));
+        return table;
+    }
+
     private LuaValue objectToLua(Object value) {
         if (value == null) {
             return LuaValue.NIL;
@@ -1247,11 +1406,16 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
         return table;
     }
 
+    private static double nowSeconds() {
+        return System.currentTimeMillis() / 1000.0;
+    }
+
     private boolean hasPendingAsyncWork() {
         return !pendingUiRequests.isEmpty()
                 || !pendingTraceroutes.isEmpty()
                 || !pendingNodeInfos.isEmpty()
                 || !pendingRemoteAdmins.isEmpty()
+                || !pendingTimers.isEmpty()
                 || canvasOpen.get()
                 || isFormOpen();
     }
@@ -1279,6 +1443,7 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
                     scriptService,
                     this::emitOutput,
                     command,
+                    this,
                     this,
                     this,
                     this,
@@ -1673,6 +1838,7 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
         cleanupTraceroutes();
         cleanupNodeInfos();
         cleanupRemoteAdmins();
+        cleanupTimers();
         cleanupCanvas();
         running.set(false);
         executor.shutdown();
@@ -1721,6 +1887,15 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
             }
         });
         remoteAdminServices.clear();
+    }
+
+    private void cleanupTimers() {
+        pendingTimers.forEach((ignored, pending) -> {
+            if (pending.future != null) {
+                pending.future.cancel(false);
+            }
+        });
+        pendingTimers.clear();
     }
 
     private void cleanupCanvas() {
@@ -1784,6 +1959,18 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
         private final AtomicBoolean completed = new AtomicBoolean(false);
 
         private PendingRemoteAdmin(LuaRemoteAdminRequest request) {
+            this.request = request;
+        }
+    }
+
+    private static final class PendingTimer {
+        private final LuaTimerRequest request;
+        private final AtomicBoolean callbackQueued = new AtomicBoolean(false);
+        private final AtomicBoolean missingCallbackReported = new AtomicBoolean(false);
+        private final AtomicLong count = new AtomicLong();
+        private volatile ScheduledFuture<?> future;
+
+        private PendingTimer(LuaTimerRequest request) {
             this.request = request;
         }
     }

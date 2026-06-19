@@ -6,6 +6,7 @@ import com.meshtastic.client.lua.LuaCanvasBridge;
 import com.meshtastic.client.lua.LuaFormBridge;
 import com.meshtastic.client.lua.LuaNodeInfoBridge;
 import com.meshtastic.client.lua.LuaRemoteAdminBridge;
+import com.meshtastic.client.lua.LuaTimerBridge;
 import com.meshtastic.client.lua.LuaTracerouteBridge;
 import com.meshtastic.client.lua.LuaUiBridge;
 import com.meshtastic.client.model.DeviceState;
@@ -35,6 +36,7 @@ public record LuaSandboxContext(long scriptId,
                                 LuaTracerouteBridge tracerouteBridge,
                                 LuaNodeInfoBridge nodeInfoBridge,
                                 LuaRemoteAdminBridge remoteAdminBridge,
+                                LuaTimerBridge timerBridge,
                                 LuaCanvasBridge canvasBridge,
                                 LuaFormBridge formBridge,
                                 Runnable executionDeadlineDeferrer) {

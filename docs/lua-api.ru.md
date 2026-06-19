@@ -178,9 +178,53 @@ end
 | `print(...)` | Пишет строку в вывод скрипта; аргументы объединяются табуляцией |
 | `mesh.log(text)` | Пишет `text` в вывод скрипта |
 | `mesh.now()` | Возвращает Unix time в секундах |
+| `mesh.localtime([epoch_seconds])` | Возвращает таблицу локальных даты и времени для текущего момента или timestamp |
+| `mesh.date([epoch_seconds])` | Возвращает локальную дату в системном региональном формате |
+| `mesh.time([epoch_seconds])` | Возвращает локальное время в системном региональном формате |
+| `mesh.datetime([epoch_seconds])` | Возвращает локальные дату и время в системном региональном формате |
+| `mesh.iso_date([epoch_seconds])` | Возвращает стабильную локальную дату: `YYYY-MM-DD` |
+| `mesh.iso_time([epoch_seconds])` | Возвращает стабильное локальное время: `HH:MM:SS` |
+| `mesh.iso_datetime([epoch_seconds])` | Возвращает стабильные локальные дату и время: `YYYY-MM-DD HH:MM:SS` |
 | `mesh.sleep(seconds)` | Блокирующая пауза от `0` до `10` секунд |
+| `mesh.json.*` | Функции кодирования и разбора JSON |
+| `mesh.timer.*` | Таймеры приложения, которые вызывают `on_timer(event)` |
 | `mesh.owner()` | Возвращает таблицу `{ node_id, node_num, connection_id }` текущего узла |
 | `mesh.command()` | Возвращает текущую команду или пустую таблицу вне командного запуска |
+
+### Время и даты
+
+Все функции времени используют системный часовой пояс приложения. Короткие
+`mesh.date(...)`, `mesh.time(...)` и `mesh.datetime(...)` предназначены для
+текста, который видит пользователь, и используют системный региональный формат,
+включая 12/24-часовой формат времени и секунды. Для стабильных строк в ключах хранилища,
+сортировке, именах файлов и сравнениях используйте `mesh.iso_date(...)`,
+`mesh.iso_time(...)` или `mesh.iso_datetime(...)`.
+
+`mesh.localtime([epoch_seconds])` возвращает таблицу с числовыми полями и
+строками в локализованном и стабильном форматах:
+
+| Поле | Значение |
+|------|----------|
+| `year`, `month`, `day` | Локальная календарная дата |
+| `hour`, `minute`, `second` | Локальное время |
+| `min`, `sec` | Алиасы для `minute` и `second` |
+| `weekday` | ISO-день недели: понедельник `1`, воскресенье `7` |
+| `wday` | Lua-стиль дня недели: воскресенье `1`, суббота `7` |
+| `yearday`, `yday` | День года |
+| `timezone`, `zone` | ID системного часового пояса, например `Europe/Moscow` |
+| `offset`, `offset_seconds` | Смещение от UTC строкой и в секундах |
+| `epoch` | Unix time в секундах |
+| `date`, `time`, `datetime` | Локализованные строки для отображения |
+| `iso_date`, `iso_time`, `iso_datetime` | Стабильные локальные строки |
+| `iso` | ISO date/time со смещением от UTC |
+
+```lua
+local t = mesh.localtime()
+mesh.log(t.datetime .. " " .. t.timezone)
+
+local sent_at = mesh.datetime(msg.timestamp)
+local key = "daily:" .. mesh.iso_date()
+```
 
 ## Callback-функции
 
@@ -194,8 +238,65 @@ end
 | `on_traceroute(event)` | После результата `mesh.traceroute.request(...)` |
 | `on_node_info(event)` | После результата `mesh.nodeinfo.request(...)` |
 | `on_admin(event)` | После progress/result событий remote administration из `mesh.admin.*` |
+| `on_timer(event)` | После срабатывания таймера из `mesh.timer.*` |
 | `on_canvas_event(event)` | После события плавающего Canvas-окна: мышь, клавиатура, resize, open/close |
 | `on_canvas_frame(event)` | По таймеру Canvas-окна, если задан `fps` или вызван `mesh.canvas.set_fps(...)` |
+
+## `mesh.timer`
+
+Таймеры управляются MeshApp, а не Lua-циклом `while true`. Скрипт остаётся
+запущенным, пока у него есть активные таймеры. Callback-и таймера доставляются
+последовательно в Lua executor скрипта; если повторяющийся таймер сработал снова,
+пока предыдущий callback ещё стоит в очереди, MeshApp пропускает лишний tick,
+а не запускает callback-и параллельно и не догоняет их пачкой.
+
+| Функция | Возврат | Назначение |
+|---------|---------|------------|
+| `mesh.timer.after(seconds[, options])` | `timer_id` | Один раз вызывает `on_timer(event)` через `seconds` |
+| `mesh.timer.every(seconds[, options])` | `timer_id` | Вызывает `on_timer(event)` повторно |
+| `mesh.timer.cancel(timer_id)` | boolean | Отменяет один активный таймер |
+| `mesh.timer.cancel_all()` | number | Отменяет все таймеры и возвращает их количество |
+
+`seconds` должен быть от `0.1` до `604800` секунд. `options` может содержать:
+
+| Опция | Тип | Назначение |
+|-------|-----|------------|
+| `name` | string | Имя таймера, копируется в `event.name` |
+| `immediate` | boolean | Для `every`: сработать один раз сразу до первого интервала |
+| `align` | string | Для `every`: `interval` или `wall`, по умолчанию `interval` |
+
+`align = "interval"` запускает таймер каждые N секунд от предыдущего
+запланированного tick. `align = "wall"` привязывает запуск к локальным часам.
+Например, `600` секунд будет срабатывать в `HH:00`, `HH:10`, `HH:20` и далее.
+
+Поля события таймера:
+
+| Поле | Значение |
+|------|----------|
+| `type` | Всегда `timer` |
+| `source` | Источник API, например `mesh.timer.every` |
+| `id`, `timer_id` | ID таймера |
+| `name` | Имя из options или пустая строка |
+| `interval_seconds`, `seconds` | Интервал или задержка таймера |
+| `repeating` | Повторяется ли таймер |
+| `align` | `interval` или `wall` |
+| `count` | Количество доставленных callback-ов этого таймера |
+| `scheduled_epoch`, `actual_epoch` | Запланированное и фактическое Unix time в секундах |
+| `drift_seconds` | `actual_epoch - scheduled_epoch` |
+| `time` | Таблица `mesh.localtime(actual_epoch)` |
+
+```lua
+mesh.timer.every(600, {
+    name = "ten-minute-job",
+    align = "wall"
+})
+
+function on_timer(event)
+    if event.name == "ten-minute-job" then
+        mesh.log("tick at " .. event.time.iso_datetime)
+    end
+end
+```
 
 ## `mesh.chat`
 
@@ -224,6 +325,63 @@ KV-хранилище изолировано по скрипту и сохран
 | `mesh.kv.delete(key)` | boolean | Удаляет ключ |
 | `mesh.kv.list()` | table | Возвращает все ключи скрипта |
 | `mesh.kv.clear()` | `true` | Очищает KV-хранилище скрипта |
+
+## `mesh.json`
+
+Функции JSON преобразуют JSON-текст в обычные Lua-значения и обратно. Объекты
+становятся таблицами со строковыми ключами, массивы — таблицами с индексами от
+`1`. JSON `null` представлен значением `mesh.json.null`, потому что Lua `nil`
+удаляет поле из таблицы.
+
+| Функция | Возврат | Назначение |
+|---------|---------|------------|
+| `mesh.json.decode(text)` | value | Разбирает JSON-текст или бросает ошибку |
+| `mesh.json.try_decode(text)` | `value, nil` или `nil, error` | Разбирает JSON без остановки скрипта |
+| `mesh.json.encode(value[, options])` | string | Кодирует Lua-значение в компактный JSON |
+| `mesh.json.pretty(value)` | string | Кодирует Lua-значение в форматированный JSON |
+| `mesh.json.array(table)` | table | Помечает Lua-таблицу как JSON-массив, включая пустой массив |
+| `mesh.json.is_null(value)` | boolean | Возвращает `true` для `mesh.json.null` |
+| `mesh.json.null` | value | Sentinel-значение для JSON null |
+
+Преобразование значений:
+
+| JSON | Lua |
+|------|-----|
+| object | table со строковыми ключами |
+| array | table с индексами `1..n` |
+| string | string |
+| number | number |
+| boolean | boolean |
+| null | `mesh.json.null` |
+
+При кодировании таблица со сплошными целочисленными ключами `1..n` становится
+JSON-массивом. Таблица со строковыми ключами становится JSON-объектом.
+Смешанные таблицы или массивы с пропусками вызывают ошибку. Пустая таблица
+кодируется как `{}`, если она не создана или не помечена через
+`mesh.json.array({})`. `mesh.json.encode(value, true)` или
+`mesh.json.encode(value, { pretty = true })` создаёт форматированный JSON.
+
+Входной JSON ограничен 1 MB. Вложенность ограничена 64 уровнями, а один объект
+или массив может содержать до 50 000 элементов.
+
+```lua
+local response = mesh.curl.get("https://example.com/api/status")
+local data, err = mesh.json.try_decode(response.body)
+if not data then
+    mesh.log("bad JSON: " .. err)
+    return
+end
+
+if not mesh.json.is_null(data.status) then
+    mesh.log("status: " .. data.status)
+end
+
+local body = mesh.json.encode({
+    at = mesh.iso_datetime(),
+    values = mesh.json.array({ 1, 2, 3 }),
+    empty = mesh.json.array({})
+})
+```
 
 ## `mesh.curl`
 
