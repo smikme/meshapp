@@ -2,6 +2,7 @@ package com.meshtastic.client.lua;
 
 import com.meshtastic.client.model.ConnectionEntry;
 import com.meshtastic.client.model.DeviceState;
+import com.meshtastic.client.lua.api.LuaSandboxContext;
 import com.meshtastic.client.protocol.ProtocolHandler;
 import com.meshtastic.client.protocol.ProtocolRuntime;
 import com.meshtastic.client.protocol.meshcore.MeshCoreCompanionProtocolRuntime;
@@ -382,6 +383,15 @@ public final class LuaScriptRuntimeService {
 
         String ownerNodeIdOrEmpty() {
             return ownerNodeId != null ? ownerNodeId : "";
+        }
+
+        LuaSandboxContext.ConnectionSnapshot toSandboxSnapshot() {
+            return new LuaSandboxContext.ConnectionSnapshot(
+                    connectionId,
+                    state,
+                    handler,
+                    meshCoreRuntime,
+                    ownerNodeId);
         }
     }
 }

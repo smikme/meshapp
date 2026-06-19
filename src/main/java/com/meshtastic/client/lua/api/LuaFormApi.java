@@ -1,6 +1,8 @@
 package com.meshtastic.client.lua.api;
 
 import com.meshtastic.client.lua.LuaFormBridge;
+import com.meshtastic.client.lua.LuaFormChartPoint;
+import com.meshtastic.client.lua.LuaFormChartSeries;
 import com.meshtastic.client.lua.LuaFormComponentSpec;
 import org.luaj.vm2.LuaError;
 import org.luaj.vm2.LuaTable;
@@ -115,7 +117,8 @@ public final class LuaFormApi {
             String type = value.checkjstring();
             return new LuaFormComponentSpec(null, type, null, null, null, null, List.of(),
                     null, null, null, null, null, null, null, null, null, null, null,
-                    null, null, null, null, null, null);
+                    null, null, null, null, null, null, null, null, null, null, null,
+                    null, null);
         }
 
         LuaTable table = value.checktable();
@@ -151,13 +154,21 @@ public final class LuaFormApi {
                 optionalBoolean(table, "wrap"),
                 optionalBoolean(table, "monospace"),
                 optionalString(table, "grow"),
-                optionalInteger(table, "rows"));
+                optionalInteger(table, "rows"),
+                optionalString(table, "chart_type", "chartType", "kind"),
+                optionalString(table, "x_label", "xLabel"),
+                optionalString(table, "y_label", "yLabel"),
+                optionalString(table, "x_type", "xType"),
+                optionalBoolean(table, "legend", "legend_visible", "legendVisible"),
+                optionalBoolean(table, "symbols", "create_symbols", "createSymbols"),
+                chartSeries(table.get("series")));
     }
 
     private static LuaFormComponentSpec emptySpec() {
         return new LuaFormComponentSpec(null, null, null, null, null, null, List.of(),
                 null, null, null, null, null, null, null, null, null, null, null,
-                null, null, null, null, null, null);
+                null, null, null, null, null, null, null, null, null, null, null,
+                null, null);
     }
 
     private static Object javaValue(LuaValue value) {
@@ -196,6 +207,16 @@ public final class LuaFormApi {
     private static String optionalString(LuaTable table, String key) {
         LuaValue value = table.get(key);
         return value.isnil() ? null : value.checkjstring();
+    }
+
+    private static String optionalString(LuaTable table, String... keys) {
+        for (String key : keys) {
+            LuaValue value = table.get(key);
+            if (!value.isnil()) {
+                return value.checkjstring();
+            }
+        }
+        return null;
     }
 
     private static Double optionalDouble(LuaTable table, String key) {
@@ -247,5 +268,80 @@ public final class LuaFormApi {
             result.add(item.tojstring());
         }
         return List.copyOf(result);
+    }
+
+    private static List<LuaFormChartSeries> chartSeries(LuaValue value) {
+        if (value == null || value.isnil()) {
+            return null;
+        }
+        LuaTable table = value.checktable();
+        List<LuaFormChartSeries> result = new ArrayList<>();
+        for (int i = 1; i <= table.length(); i++) {
+            LuaValue seriesValue = table.get(i);
+            if (seriesValue.isnil()) {
+                continue;
+            }
+            LuaTable series = seriesValue.checktable();
+            String name = optionalString(series, "name");
+            if (name == null || name.isBlank()) {
+                name = "Series " + i;
+            }
+            result.add(new LuaFormChartSeries(
+                    name,
+                    optionalString(series, "color"),
+                    chartPoints(series.get("points"))));
+        }
+        return List.copyOf(result);
+    }
+
+    private static List<LuaFormChartPoint> chartPoints(LuaValue value) {
+        if (value == null || value.isnil()) {
+            return List.of();
+        }
+        LuaTable table = value.checktable();
+        List<LuaFormChartPoint> result = new ArrayList<>();
+        for (int i = 1; i <= table.length(); i++) {
+            LuaValue pointValue = table.get(i);
+            if (pointValue.isnil()) {
+                continue;
+            }
+            if (pointValue.isnumber()) {
+                result.add(new LuaFormChartPoint(i, finite(pointValue.checkdouble(), "chart point")));
+                continue;
+            }
+            LuaTable point = pointValue.checktable();
+            LuaValue xValue = firstPresent(point, "x", "timestamp", "time");
+            if (xValue.isnil()) {
+                xValue = point.get(1);
+            }
+            LuaValue yValue = firstPresent(point, "y", "value");
+            if (yValue.isnil()) {
+                yValue = point.get(2);
+            }
+            if (yValue.isnil()) {
+                continue;
+            }
+            double x = xValue.isnil() ? i : finite(xValue.checkdouble(), "chart point x");
+            double y = finite(yValue.checkdouble(), "chart point y");
+            result.add(new LuaFormChartPoint(x, y));
+        }
+        return List.copyOf(result);
+    }
+
+    private static LuaValue firstPresent(LuaTable table, String... keys) {
+        for (String key : keys) {
+            LuaValue value = table.get(key);
+            if (!value.isnil()) {
+                return value;
+            }
+        }
+        return LuaValue.NIL;
+    }
+
+    private static double finite(double value, String name) {
+        if (!Double.isFinite(value)) {
+            throw new LuaError("mesh.form: " + name + " must be finite");
+        }
+        return value;
     }
 }

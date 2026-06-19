@@ -10,15 +10,24 @@ import atlantafx.base.controls.ToggleLabel;
 import atlantafx.base.controls.ToggleSwitch;
 import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.lua.LuaFormBridge;
+import com.meshtastic.client.lua.LuaFormChartPoint;
+import com.meshtastic.client.lua.LuaFormChartSeries;
 import com.meshtastic.client.lua.LuaFormComponentSpec;
 import com.meshtastic.client.lua.LuaFormEvent;
 import com.meshtastic.client.lua.LuaScript;
 import com.meshtastic.client.system.Form;
 import javafx.application.Platform;
+import javafx.beans.value.ChangeListener;
 import javafx.geometry.Insets;
 import javafx.geometry.Orientation;
 import javafx.geometry.Pos;
 import javafx.scene.Node;
+import javafx.scene.chart.AreaChart;
+import javafx.scene.chart.BarChart;
+import javafx.scene.chart.CategoryAxis;
+import javafx.scene.chart.LineChart;
+import javafx.scene.chart.NumberAxis;
+import javafx.scene.chart.XYChart;
 import javafx.scene.control.Button;
 import javafx.scene.control.CheckBox;
 import javafx.scene.control.ComboBox;
@@ -30,18 +39,24 @@ import javafx.scene.control.ProgressBar;
 import javafx.scene.control.ProgressIndicator;
 import javafx.scene.control.ScrollPane;
 import javafx.scene.control.Separator;
+import javafx.scene.control.Skin;
 import javafx.scene.control.Slider;
 import javafx.scene.control.SplitPane;
 import javafx.scene.control.TextArea;
 import javafx.scene.control.TextField;
 import javafx.scene.control.TextInputControl;
 import javafx.scene.control.ToggleGroup;
+import javafx.scene.input.KeyEvent;
+import javafx.scene.input.MouseEvent;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Pane;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
 
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -59,6 +74,12 @@ public final class LuaExtensionForm extends Form implements LuaFormBridge {
 
     private static final long FX_WAIT_TIMEOUT_SECONDS = 2;
     private static final AtomicLong COMPONENT_COUNTER = new AtomicLong();
+    private static final DateTimeFormatter CHART_TIME_FORMAT = DateTimeFormatter.ofPattern("HH:mm");
+    private static final DateTimeFormatter CHART_BAR_TIME_FORMAT = DateTimeFormatter.ofPattern("MM-dd HH:mm");
+    private static final String SEGMENTED_CONTROL_INTERACTION_KEY =
+            LuaExtensionForm.class.getName() + ".segmentedControlInteraction";
+    private static final String SEGMENTED_CONTROL_KEY_FILTER_INSTALLED_KEY =
+            LuaExtensionForm.class.getName() + ".segmentedControlKeyFilterInstalled";
 
     private final long scriptId;
     private final Consumer<LuaFormEvent> eventSink;
@@ -252,6 +273,9 @@ public final class LuaExtensionForm extends Form implements LuaFormBridge {
             case "slider" -> createSlider(id, spec);
             case "progress_bar", "progress" -> createProgressBar(spec);
             case "ring_progress", "ring_progress_indicator", "ringprogress" -> createRingProgress(spec);
+            case "chart", "line_chart", "linechart" -> createChart("line", spec);
+            case "area_chart", "areachart" -> createChart("area", spec);
+            case "bar_chart", "barchart" -> createChart("bar", spec);
             case "message" -> createMessage(id, spec);
             case "tile" -> createTile(id, spec);
             case "spacer" -> createSpacer(spec);
@@ -416,6 +440,65 @@ public final class LuaExtensionForm extends Form implements LuaFormBridge {
         return progress;
     }
 
+    private Node createChart(String fallbackType, LuaFormComponentSpec spec) {
+        String chartType = chartType(spec, fallbackType);
+        if ("bar".equals(chartType)) {
+            return createBarChart(spec);
+        }
+        NumberAxis xAxis = createNumberAxis(spec != null ? spec.xLabel() : null, isTimeAxis(spec));
+        NumberAxis yAxis = createNumberAxis(spec != null ? spec.yLabel() : null, false);
+        XYChart<Number, Number> chart = "area".equals(chartType)
+                ? new AreaChart<>(xAxis, yAxis)
+                : new LineChart<>(xAxis, yAxis);
+        chart.setUserData(chartType);
+        chart.getStyleClass().add("lua-form-chart");
+        chart.setAnimated(false);
+        chart.setTitle(text(spec));
+        chart.setPrefHeight(spec != null && spec.height() != null ? spec.height() : 220);
+        chart.setMinHeight(140);
+        if (chart instanceof LineChart<?, ?> lineChart) {
+            lineChart.setCreateSymbols(Boolean.TRUE.equals(spec != null ? spec.symbols() : null));
+        } else if (chart instanceof AreaChart<?, ?> areaChart) {
+            areaChart.setCreateSymbols(Boolean.TRUE.equals(spec != null ? spec.symbols() : null));
+        }
+        applyNumberChartSpec(chart, spec, chartType, true);
+        return chart;
+    }
+
+    private BarChart<String, Number> createBarChart(LuaFormComponentSpec spec) {
+        CategoryAxis xAxis = new CategoryAxis();
+        xAxis.setLabel(spec != null ? safe(spec.xLabel()) : "");
+        NumberAxis yAxis = createNumberAxis(spec != null ? spec.yLabel() : null, false);
+        BarChart<String, Number> chart = new BarChart<>(xAxis, yAxis);
+        chart.setUserData("bar");
+        chart.getStyleClass().add("lua-form-chart");
+        chart.setAnimated(false);
+        chart.setTitle(text(spec));
+        chart.setLegendVisible(false);
+        chart.setPrefHeight(spec != null && spec.height() != null ? spec.height() : 220);
+        chart.setMinHeight(140);
+        applyBarChartSpec(chart, spec, true);
+        return chart;
+    }
+
+    private NumberAxis createNumberAxis(String label, boolean timeAxis) {
+        NumberAxis axis = new NumberAxis();
+        axis.setLabel(safe(label));
+        axis.setForceZeroInRange(false);
+        if (timeAxis) {
+            axis.setTickLabelFormatter(new NumberAxis.DefaultFormatter(axis) {
+                @Override
+                public String toString(Number object) {
+                    long epoch = object.longValue();
+                    return epoch <= 0
+                            ? ""
+                            : Instant.ofEpochSecond(epoch).atZone(ZoneId.systemDefault()).format(CHART_TIME_FORMAT);
+                }
+            });
+        }
+        return axis;
+    }
+
     private Message createMessage(String id, LuaFormComponentSpec spec) {
         Message message = new Message(text(spec), stringValue(spec.value()));
         message.setActionHandler(() -> emitComponentEvent(id, "action"));
@@ -493,6 +576,15 @@ public final class LuaExtensionForm extends Form implements LuaFormBridge {
             }
             if (spec.rows() != null && node instanceof TextArea area) {
                 area.setPrefRowCount(Math.max(1, spec.rows()));
+            }
+            if (node instanceof BarChart<?, ?> chart) {
+                @SuppressWarnings("unchecked")
+                BarChart<String, Number> barChart = (BarChart<String, Number>) chart;
+                applyBarChartSpec(barChart, spec, false);
+            } else if (node instanceof XYChart<?, ?> chart) {
+                @SuppressWarnings("unchecked")
+                XYChart<Number, Number> numberChart = (XYChart<Number, Number>) chart;
+                applyNumberChartSpec(numberChart, spec, chartType(numberChart), false);
             }
         } finally {
             updating = false;
@@ -608,6 +700,9 @@ public final class LuaExtensionForm extends Form implements LuaFormBridge {
         if (node instanceof Button) {
             return null;
         }
+        if (node instanceof XYChart<?, ?>) {
+            return null;
+        }
         if (node instanceof Labeled labeled) {
             return labeled.getText();
         }
@@ -658,37 +753,87 @@ public final class LuaExtensionForm extends Form implements LuaFormBridge {
 
     private void setSegments(SegmentedControl control, List<String> items, String selected, String id) {
         ToggleGroup group = new ToggleGroup();
+        control.getProperties().remove(SEGMENTED_CONTROL_INTERACTION_KEY);
         control.setToggleGroup(group);
         control.getSegments().clear();
+        ToggleLabel selectedLabel = null;
         for (String item : items != null ? items : List.<String>of()) {
             ToggleLabel label = new ToggleLabel(item);
             label.setToggleGroup(group);
+            label.addEventFilter(MouseEvent.MOUSE_PRESSED,
+                    event -> markSegmentInteraction(control));
             label.selectedProperty().addListener((obs, oldValue, newValue) -> {
-                if (newValue) {
+                if (newValue
+                        && Boolean.TRUE.equals(control.getProperties().get(SEGMENTED_CONTROL_INTERACTION_KEY))) {
+                    control.getProperties().remove(SEGMENTED_CONTROL_INTERACTION_KEY);
                     emitComponentEvent(id, "change");
                 }
             });
             control.getSegments().add(label);
             if (item.equals(selected)) {
-                label.setSelected(true);
+                selectedLabel = label;
             }
         }
+        if (selectedLabel != null) {
+            group.selectToggle(selectedLabel);
+        }
+        if (!Boolean.TRUE.equals(control.getProperties().get(SEGMENTED_CONTROL_KEY_FILTER_INSTALLED_KEY))) {
+            control.addEventFilter(KeyEvent.KEY_PRESSED, event -> markSegmentInteraction(control));
+            control.getProperties().put(SEGMENTED_CONTROL_KEY_FILTER_INSTALLED_KEY, Boolean.TRUE);
+        }
+        reselectSegmentAfterSkinReady(control, selected);
+    }
+
+    private static void markSegmentInteraction(SegmentedControl control) {
+        control.getProperties().put(SEGMENTED_CONTROL_INTERACTION_KEY, Boolean.TRUE);
+        Platform.runLater(() -> control.getProperties().remove(SEGMENTED_CONTROL_INTERACTION_KEY));
+    }
+
+    private static void reselectSegmentAfterSkinReady(SegmentedControl control, String selected) {
+        if (selected == null || selected.isBlank()) {
+            return;
+        }
+        Runnable reselect = () -> selectSegment(control, selected);
+        if (control.getSkin() != null) {
+            Platform.runLater(reselect);
+            return;
+        }
+        ChangeListener<Skin<?>> listener = new ChangeListener<>() {
+            @Override
+            public void changed(javafx.beans.value.ObservableValue<? extends Skin<?>> obs,
+                                Skin<?> oldSkin,
+                                Skin<?> newSkin) {
+                if (newSkin != null) {
+                    control.skinProperty().removeListener(this);
+                    Platform.runLater(reselect);
+                }
+            }
+        };
+        control.skinProperty().addListener(listener);
     }
 
     private static void selectSegment(SegmentedControl control, String value) {
+        ToggleGroup group = control.getToggleGroup();
         for (ToggleLabel segment : control.getSegments()) {
             if (segment.getText().equals(value)) {
-                segment.setSelected(true);
+                if (group != null) {
+                    group.selectToggle(segment);
+                } else {
+                    segment.setSelected(true);
+                }
                 return;
             }
         }
-        ToggleGroup group = control.getToggleGroup();
         if (group != null) {
             group.selectToggle(null);
         }
     }
 
     private static String selectedSegment(SegmentedControl control) {
+        ToggleGroup group = control.getToggleGroup();
+        if (group != null && group.getSelectedToggle() instanceof ToggleLabel label) {
+            return label.getText();
+        }
         for (ToggleLabel segment : control.getSegments()) {
             if (segment.isSelected()) {
                 return segment.getText();
@@ -708,6 +853,226 @@ public final class LuaExtensionForm extends Form implements LuaFormBridge {
         eventSink.accept(new LuaFormEvent(scriptId, id, type, valueFor(node), textFor(node)));
     }
 
+    private void applyNumberChartSpec(XYChart<Number, Number> chart,
+                                      LuaFormComponentSpec spec,
+                                      String chartType,
+                                      boolean creation) {
+        if (spec == null) {
+            chart.getData().clear();
+            chart.setLegendVisible(false);
+            return;
+        }
+        if (spec.text() != null || creation) {
+            chart.setTitle(text(spec));
+        }
+        if (spec.xLabel() != null && chart.getXAxis() instanceof NumberAxis xAxis) {
+            xAxis.setLabel(spec.xLabel());
+        }
+        if (spec.yLabel() != null && chart.getYAxis() instanceof NumberAxis yAxis) {
+            yAxis.setLabel(spec.yLabel());
+        }
+        if (spec.xType() != null && chart.getXAxis() instanceof NumberAxis xAxis) {
+            xAxis.setTickLabelFormatter(isTimeAxis(spec) ? new NumberAxis.DefaultFormatter(xAxis) {
+                @Override
+                public String toString(Number object) {
+                    long epoch = object.longValue();
+                    return epoch <= 0
+                            ? ""
+                            : Instant.ofEpochSecond(epoch).atZone(ZoneId.systemDefault()).format(CHART_TIME_FORMAT);
+                }
+            } : new NumberAxis.DefaultFormatter(xAxis));
+        }
+        if (chart.getYAxis() instanceof NumberAxis yAxis) {
+            applyYAxisRange(yAxis, spec);
+        }
+        if (chart instanceof LineChart<?, ?> lineChart && spec.symbols() != null) {
+            lineChart.setCreateSymbols(spec.symbols());
+        } else if (chart instanceof AreaChart<?, ?> areaChart && spec.symbols() != null) {
+            areaChart.setCreateSymbols(spec.symbols());
+        }
+        if (spec.series() != null) {
+            chart.getData().setAll(spec.series().stream()
+                    .map(LuaExtensionForm::toChartSeries)
+                    .toList());
+            applySeriesColors(chart, spec.series(), chartType);
+        }
+        boolean showLegend = spec.legend() != null
+                ? spec.legend()
+                : chart.getData().size() > 1;
+        chart.setLegendVisible(showLegend);
+    }
+
+    private void applyBarChartSpec(BarChart<String, Number> chart,
+                                   LuaFormComponentSpec spec,
+                                   boolean creation) {
+        if (spec == null) {
+            chart.getData().clear();
+            chart.setLegendVisible(false);
+            return;
+        }
+        if (spec.text() != null || creation) {
+            chart.setTitle(text(spec));
+        }
+        if (spec.xLabel() != null && chart.getXAxis() instanceof CategoryAxis xAxis) {
+            xAxis.setLabel(spec.xLabel());
+        }
+        if (spec.yLabel() != null && chart.getYAxis() instanceof NumberAxis yAxis) {
+            yAxis.setLabel(spec.yLabel());
+        }
+        if (chart.getYAxis() instanceof NumberAxis yAxis) {
+            applyYAxisRange(yAxis, spec);
+        }
+        if (spec.series() != null) {
+            chart.getData().setAll(spec.series().stream()
+                    .map(series -> toBarChartSeries(series, spec))
+                    .toList());
+            applyBarSeriesColors(chart, spec.series());
+        }
+        boolean showLegend = spec.legend() != null
+                ? spec.legend()
+                : chart.getData().size() > 1;
+        chart.setLegendVisible(showLegend);
+    }
+
+    private static XYChart.Series<Number, Number> toChartSeries(LuaFormChartSeries source) {
+        XYChart.Series<Number, Number> series = new XYChart.Series<>();
+        series.setName(source.name());
+        for (LuaFormChartPoint point : source.points()) {
+            series.getData().add(new XYChart.Data<>(point.x(), point.y()));
+        }
+        return series;
+    }
+
+    private static XYChart.Series<String, Number> toBarChartSeries(LuaFormChartSeries source,
+                                                                   LuaFormComponentSpec spec) {
+        XYChart.Series<String, Number> series = new XYChart.Series<>();
+        series.setName(source.name());
+        for (LuaFormChartPoint point : source.points()) {
+            series.getData().add(new XYChart.Data<>(barXLabel(point.x(), spec), point.y()));
+        }
+        return series;
+    }
+
+    private static void applyYAxisRange(NumberAxis yAxis, LuaFormComponentSpec spec) {
+        if (spec.min() == null && spec.max() == null) {
+            yAxis.setAutoRanging(true);
+            return;
+        }
+        if (spec.min() != null && spec.max() != null && spec.max() > spec.min()) {
+            yAxis.setAutoRanging(false);
+            yAxis.setLowerBound(spec.min());
+            yAxis.setUpperBound(spec.max());
+            yAxis.setTickUnit(Math.max((spec.max() - spec.min()) / 4.0, 1.0));
+        }
+    }
+
+    private static void applySeriesColors(XYChart<Number, Number> chart,
+                                          List<LuaFormChartSeries> specs,
+                                          String chartType) {
+        Platform.runLater(() -> {
+            int count = Math.min(specs.size(), chart.getData().size());
+            for (int i = 0; i < count; i++) {
+                String color = cssColor(specs.get(i).color());
+                if (color == null) {
+                    continue;
+                }
+                XYChart.Series<Number, Number> series = chart.getData().get(i);
+                applySeriesNodeColor(series.getNode(), color, chartType);
+                for (XYChart.Data<Number, Number> point : series.getData()) {
+                    if (point.getNode() != null) {
+                        point.getNode().setStyle("-fx-background-color: " + color + ";");
+                    }
+                }
+            }
+        });
+    }
+
+    private static void applyBarSeriesColors(BarChart<String, Number> chart,
+                                             List<LuaFormChartSeries> specs) {
+        Platform.runLater(() -> {
+            int count = Math.min(specs.size(), chart.getData().size());
+            for (int i = 0; i < count; i++) {
+                String color = cssColor(specs.get(i).color());
+                if (color == null) {
+                    continue;
+                }
+                XYChart.Series<String, Number> series = chart.getData().get(i);
+                for (XYChart.Data<String, Number> point : series.getData()) {
+                    if (point.getNode() != null) {
+                        point.getNode().setStyle("-fx-bar-fill: " + color + ";");
+                    }
+                }
+            }
+        });
+    }
+
+    private static void applySeriesNodeColor(Node node, String color, String chartType) {
+        if (node == null) {
+            return;
+        }
+        if ("area".equals(chartType)) {
+            Node line = node.lookup(".chart-series-area-line");
+            if (line != null) {
+                line.setStyle("-fx-stroke: " + color + "; -fx-stroke-width: 2;");
+            }
+            Node fill = node.lookup(".chart-series-area-fill");
+            if (fill != null) {
+                fill.setStyle("-fx-fill: " + color + "; -fx-opacity: 0.18;");
+            }
+            return;
+        }
+        Node line = node.lookup(".chart-series-line");
+        if (line != null) {
+            line.setStyle("-fx-stroke: " + color + "; -fx-stroke-width: 2;");
+        } else {
+            node.setStyle("-fx-stroke: " + color + "; -fx-background-color: " + color + ";");
+        }
+    }
+
+    private static String cssColor(String color) {
+        String value = safe(color).trim();
+        if (value.matches("#[0-9a-fA-F]{3,8}") || value.matches("[A-Za-z]+")) {
+            return value;
+        }
+        if (value.matches("rgba?\\([0-9.,%\\s]+\\)")) {
+            return value;
+        }
+        return null;
+    }
+
+    private static String chartType(LuaFormComponentSpec spec, String fallbackType) {
+        return chartType(spec != null ? spec.chartType() : null, fallbackType);
+    }
+
+    private static String chartType(XYChart<?, ?> chart) {
+        Object userData = chart.getUserData();
+        return userData instanceof String type ? type : "line";
+    }
+
+    private static String chartType(String rawType, String fallbackType) {
+        return switch (safe(rawType).trim().toLowerCase(Locale.ROOT)) {
+            case "area", "area_chart", "areachart" -> "area";
+            case "bar", "bar_chart", "barchart" -> "bar";
+            case "line", "line_chart", "linechart" -> "line";
+            default -> fallbackType;
+        };
+    }
+
+    private static boolean isTimeAxis(LuaFormComponentSpec spec) {
+        String value = spec != null ? safe(spec.xType()).trim().toLowerCase(Locale.ROOT) : "";
+        return "time".equals(value) || "timestamp".equals(value) || "epoch".equals(value);
+    }
+
+    private static String barXLabel(double x, LuaFormComponentSpec spec) {
+        if (isTimeAxis(spec) && x > 0) {
+            return Instant.ofEpochSecond((long) x).atZone(ZoneId.systemDefault()).format(CHART_BAR_TIME_FORMAT);
+        }
+        if (x == Math.rint(x)) {
+            return Long.toString((long) x);
+        }
+        return String.format(Locale.ROOT, "%.2f", x);
+    }
+
     private static boolean isContainerType(String type) {
         return "card".equals(type)
                 || "vbox".equals(type)
@@ -723,7 +1088,8 @@ public final class LuaExtensionForm extends Form implements LuaFormBridge {
     private static LuaFormComponentSpec emptySpec() {
         return new LuaFormComponentSpec(null, null, null, null, null, null, List.of(),
                 null, null, null, null, null, null, null, null, null, null, null,
-                null, null, null, null, null, null);
+                null, null, null, null, null, null, null, null, null, null, null,
+                null, null);
     }
 
     private static Orientation orientation(LuaFormComponentSpec spec, Orientation fallback) {

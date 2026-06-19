@@ -28,5 +28,12 @@ public record LuaFormComponentSpec(String id,
                                    Boolean wrap,
                                    Boolean monospace,
                                    String grow,
-                                   Integer rows) {
+                                   Integer rows,
+                                   String chartType,
+                                   String xLabel,
+                                   String yLabel,
+                                   String xType,
+                                   Boolean legend,
+                                   Boolean symbols,
+                                   List<LuaFormChartSeries> series) {
 }
