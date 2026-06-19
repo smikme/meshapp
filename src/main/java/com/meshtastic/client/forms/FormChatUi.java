@@ -5,6 +5,7 @@ import com.meshtastic.client.components.chat.ChatDbKey;
 import com.meshtastic.client.components.chat.ChatInputBar;
 import com.meshtastic.client.components.chat.ChatListCell;
 import com.meshtastic.client.components.chat.ChatNameResolver;
+import com.meshtastic.client.components.chat.MeshFilesImage;
 import com.meshtastic.client.components.chat.MessageBubbleFactory;
 import com.meshtastic.client.components.chat.TracerouteView;
 import com.meshtastic.client.i18n.I18n;
@@ -35,7 +36,14 @@ import javafx.scene.control.Separator;
 import javafx.scene.control.SplitPane;
 import javafx.scene.control.TextField;
 import javafx.scene.control.Tooltip;
+import javafx.scene.image.Image;
+import javafx.scene.image.ImageView;
+import javafx.scene.input.DragEvent;
+import javafx.scene.input.Dragboard;
+import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyEvent;
+import javafx.scene.input.MouseButton;
+import javafx.scene.input.TransferMode;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
@@ -66,6 +74,7 @@ abstract class FormChatUi extends FormChatBase {
     private Button quickScriptButton;
     private ContextMenu quickScriptMenu;
     private FormChatMessageSearchController messageSearchController;
+    private StackPane imageViewerOverlay;
 
     /**
      * Creates the split layout and reusable controls for the active chat.
@@ -182,6 +191,8 @@ abstract class FormChatUi extends FormChatBase {
         pane.getStyleClass().add("chat-detail-pane");
         pane.setMinWidth(300);
         pane.addEventFilter(KeyEvent.KEY_PRESSED, this::handleDetailPaneKeyPressed);
+        pane.addEventFilter(DragEvent.DRAG_OVER, this::handleChatImageDragOver);
+        pane.addEventFilter(DragEvent.DRAG_DROPPED, this::handleChatImageDragDropped);
         pane.getChildren().add(placeholderBox);
         return pane;
     }
@@ -386,6 +397,9 @@ abstract class FormChatUi extends FormChatBase {
                         return FormChatUi.this.isMessageSelectionModeActive();
                     }
                     @Override public boolean retryMessage(MeshMessage msg) { return FormChatUi.this.retryMessage(msg); }
+                    @Override public void openMeshFilesImage(MeshFilesImage image) {
+                        FormChatUi.this.showMeshFilesImage(image);
+                    }
                 },
                 pendingStatusLabels);
     }
@@ -505,6 +519,40 @@ abstract class FormChatUi extends FormChatBase {
                 .ifPresent(controller -> controller.handleDetailPaneKeyPressed(event));
     }
 
+    /**
+     * Accepts image drag-over gestures anywhere in the open chat detail pane.
+     *
+     * @param event JavaFX drag event
+     */
+    private void handleChatImageDragOver(DragEvent event) {
+        if (chatInputBar == null || !chatInputBar.canAcceptImageDrop()) {
+            return;
+        }
+        Dragboard dragboard = event.getDragboard();
+        if (dragboard.hasFiles()
+                && dragboard.getFiles().stream().anyMatch(ChatInputBar::isSupportedImageFile)) {
+            event.acceptTransferModes(TransferMode.COPY);
+            event.consume();
+        }
+    }
+
+    /**
+     * Delegates dropped image files from the chat detail pane to the input bar.
+     *
+     * @param event JavaFX drop event
+     */
+    private void handleChatImageDragDropped(DragEvent event) {
+        if (chatInputBar == null) {
+            return;
+        }
+        Dragboard dragboard = event.getDragboard();
+        boolean completed = dragboard.hasFiles() && chatInputBar.acceptDroppedImageFiles(dragboard.getFiles());
+        event.setDropCompleted(completed);
+        if (completed) {
+            event.consume();
+        }
+    }
+
     protected void closeMessageSearch(boolean focusInput) {
         Optional.ofNullable(messageSearchController)
                 .ifPresent(controller -> controller.close(focusInput));
@@ -530,8 +578,73 @@ abstract class FormChatUi extends FormChatBase {
                 this::sendChatMessage,
                 this::handleBotCommand,
                 this::suggestBotCommands,
-                query -> ChatBotCommandHelper.suggestNodes(listBotCommandNodes(), query, 8)
+                query -> ChatBotCommandHelper.suggestNodes(listBotCommandNodes(), query, 8),
+                this::showMeshFilesImage
         );
+    }
+
+    /**
+     * Shows a full-size MeshFiles image overlay scaled to the chat message area.
+     *
+     * @param image normalized MeshFiles image URLs
+     */
+    private void showMeshFilesImage(MeshFilesImage image) {
+        if (image == null || messageArea == null) {
+            return;
+        }
+
+        hideMeshFilesImage();
+
+        ImageView imageView = new ImageView(new Image(image.url(), true));
+        imageView.getStyleClass().add("chat-image-viewer-image");
+        imageView.setPreserveRatio(true);
+        imageView.setSmooth(true);
+        imageView.fitWidthProperty().bind(messageArea.widthProperty().subtract(48));
+        imageView.fitHeightProperty().bind(messageArea.heightProperty().subtract(48));
+
+        StackPane imageFrame = new StackPane(imageView);
+        imageFrame.getStyleClass().add("chat-image-viewer-frame");
+        imageFrame.setOnMouseClicked(event -> event.consume());
+
+        Button closeButton = new Button("✕");
+        closeButton.getStyleClass().add("chat-image-viewer-close");
+        closeButton.setTooltip(new Tooltip(I18n.t("common.close")));
+        closeButton.setOnAction(event -> hideMeshFilesImage());
+
+        StackPane overlay = new StackPane(imageFrame, closeButton);
+        overlay.getStyleClass().add("chat-image-viewer-overlay");
+        overlay.setFocusTraversable(true);
+        overlay.setOnMouseClicked(event -> {
+            if (event.getButton() == MouseButton.PRIMARY) {
+                hideMeshFilesImage();
+            }
+            event.consume();
+        });
+        overlay.setOnKeyPressed(event -> {
+            if (event.getCode() == KeyCode.ESCAPE) {
+                hideMeshFilesImage();
+                event.consume();
+            }
+        });
+        StackPane.setAlignment(closeButton, Pos.TOP_RIGHT);
+        StackPane.setMargin(closeButton, new Insets(12));
+
+        imageViewerOverlay = overlay;
+        messageArea.getChildren().add(overlay);
+        Platform.runLater(overlay::requestFocus);
+    }
+
+    /**
+     * Closes the active MeshFiles image overlay, if any.
+     */
+    private void hideMeshFilesImage() {
+        if (imageViewerOverlay == null) {
+            return;
+        }
+        if (messageArea != null) {
+            messageArea.getChildren().remove(imageViewerOverlay);
+        }
+        imageViewerOverlay = null;
     }
 
     private List<ChatBotCommandHelper.BotDefinition> suggestBotCommands(String query) {
@@ -679,6 +792,7 @@ abstract class FormChatUi extends FormChatBase {
         suspendScrollStateSync();
         try {
             closeMessageSearch(false);
+            hideMeshFilesImage();
             bubbleFactory.hideOpenReactionPopup();
             scrollOperationGeneration++;
             this.selectedChat = chat;
@@ -700,6 +814,7 @@ abstract class FormChatUi extends FormChatBase {
                     chatInputBar.getInputSeparator(), chatInputBar);
 
             // Leaving a chat also leaves reply mode.
+            chatInputBar.cancelPendingImageUpload();
             chatInputBar.cancelReply();
 
             // Load the latest messages from the database.
@@ -731,6 +846,8 @@ abstract class FormChatUi extends FormChatBase {
     protected void closeChat() {
         saveCurrentChatScrollState();
         closeMessageSearch(false);
+        hideMeshFilesImage();
+        chatInputBar.cancelPendingImageUpload();
         clearSelectedChatForBoundConnection();
         bubbleFactory.hideOpenReactionPopup();
         scrollOperationGeneration++;
