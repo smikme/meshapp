@@ -479,22 +479,21 @@ public class FormNodes extends Form {
         if (showFavoritesOnly) {
             favFilterBtn.getStyleClass().add("favorite-btn-active");
             favFilterBtn.getTooltip().setText(I18n.t("node.filter.showAll"));
-            injectOfflineFavorites();
         } else {
             favFilterBtn.getStyleClass().remove("favorite-btn-active");
             favFilterBtn.getTooltip().setText(I18n.t("node.filter.favoriteOnly"));
             removeOfflineNodes();
         }
+        injectOfflineFilteredNodes();
         updateFilterPredicate();
     }
 
     /** Synchronizes ignored-filter state and applies the filter. */
     private void syncIgnoredState() {
-        if (showIgnoredOnly) {
-            injectOfflineIgnored();
-        } else {
+        if (!showIgnoredOnly) {
             removeOfflineNodes();
         }
+        injectOfflineFilteredNodes();
         updateFilterPredicate();
     }
 
@@ -541,11 +540,13 @@ public class FormNodes extends Form {
 
     /** Loads favorite nodes from the database when they are absent from the live list. */
     private void injectOfflineFavorites() {
-        List<NodeData> dbFavorites = NodeCacheService.getInstance().loadFavoriteNodes();
+        String ownerNodeId = currentOwnerNodeId();
+        if (ownerNodeId.isBlank()) { return; }
+        List<NodeData> dbFavorites = NodeCacheService.getInstance().loadFavoriteNodes(ownerNodeId);
         Set<Integer> existingNums = new HashSet<>();
         for (NodeData n : nodeData) { existingNums.add(n.getNodeNum()); }
         for (NodeData dbNode : dbFavorites) {
-            if (!existingNums.contains(dbNode.getNodeNum())) {
+            if (existingNums.add(dbNode.getNodeNum())) {
                 nodeData.add(dbNode);
             }
         }
@@ -553,19 +554,34 @@ public class FormNodes extends Form {
 
     /** Loads ignored nodes from the database when they are absent from the live list. */
     private void injectOfflineIgnored() {
-        List<NodeData> dbIgnored = NodeCacheService.getInstance().loadIgnoredNodes();
+        String ownerNodeId = currentOwnerNodeId();
+        if (ownerNodeId.isBlank()) { return; }
+        List<NodeData> dbIgnored = NodeCacheService.getInstance().loadIgnoredNodes(ownerNodeId);
         Set<Integer> existingNums = new HashSet<>();
         for (NodeData n : nodeData) { existingNums.add(n.getNodeNum()); }
         for (NodeData dbNode : dbIgnored) {
-            if (!existingNums.contains(dbNode.getNodeNum())) {
+            if (existingNums.add(dbNode.getNodeNum())) {
                 nodeData.add(dbNode);
             }
         }
     }
 
+    /** Loads cached nodes needed by filters that can include nodes absent from DeviceState. */
+    private void injectOfflineFilteredNodes() {
+        if (showFavoritesOnly) {
+            injectOfflineFavorites();
+        }
+        if (showIgnoredOnly) {
+            injectOfflineIgnored();
+        }
+    }
+
     /** Removes nodes absent from DeviceState, typically nodes loaded from the database. */
     private void removeOfflineNodes() {
-        if (state == null) { return; }
+        if (state == null) {
+            nodeData.clear();
+            return;
+        }
         Set<Integer> liveNums = state.getNodeDb().keySet();
         nodeData.removeIf(n -> !liveNums.contains(n.getNodeNum()));
     }
@@ -575,6 +591,7 @@ public class FormNodes extends Form {
         boolean hasQuery = !query.isEmpty();
         FavoriteNodeService favService = FavoriteNodeService.getInstance();
         IgnoredNodeService ignService = IgnoredNodeService.getInstance();
+        String ownerNodeId = currentOwnerNodeId();
         long now = System.currentTimeMillis() / 1000;
         filteredNodes.setPredicate(node -> {
         // Apply text search first so unnamed nodes can still be found during search.
@@ -590,7 +607,8 @@ public class FormNodes extends Form {
                 return false;
             }
         // Favorites-only filter.
-            if (showFavoritesOnly && !favService.isFavorite(node.getNodeId())) {
+            if (showFavoritesOnly
+                    && (ownerNodeId.isBlank() || !favService.isFavorite(node.getNodeId(), ownerNodeId))) {
                 return false;
             }
         // Direct-only filter for 0-hop nodes.
@@ -598,7 +616,8 @@ public class FormNodes extends Form {
                 return false;
             }
         // Ignored-only filter.
-            if (showIgnoredOnly && !ignService.isIgnored(node.getNodeId())) {
+            if (showIgnoredOnly
+                    && (ownerNodeId.isBlank() || !ignService.isIgnored(node.getNodeId(), ownerNodeId))) {
                 return false;
             }
             return true;
@@ -678,18 +697,22 @@ public class FormNodes extends Form {
     }
 
     private void addFavorites(Collection<NodeData> nodes) {
+        String ownerNodeId = currentOwnerNodeId();
+        if (ownerNodeId.isBlank()) { return; }
         FavoriteNodeService service = FavoriteNodeService.getInstance();
         normalizedNodes(nodes).stream()
                 .map(NodeData::getNodeId)
-                .forEach(service::addFavorite);
+                .forEach(nodeId -> service.addFavorite(nodeId, ownerNodeId));
         nodeListView.refresh();
     }
 
     private void addIgnored(Collection<NodeData> nodes) {
+        String ownerNodeId = currentOwnerNodeId();
+        if (ownerNodeId.isBlank()) { return; }
         IgnoredNodeService service = IgnoredNodeService.getInstance();
         normalizedNodes(nodes).stream()
                 .map(NodeData::getNodeId)
-                .forEach(service::addIgnored);
+                .forEach(nodeId -> service.addIgnored(nodeId, ownerNodeId));
         nodeListView.refresh();
     }
 
@@ -725,10 +748,11 @@ public class FormNodes extends Form {
         remainingSelection.removeAll(deletedNodeNums);
         Optional.ofNullable(state).ifPresent(currentState ->
                 deletedNodeNums.forEach(currentState::removeNode));
+        String ownerNodeId = state != null ? state.getOwnerNodeId() : null;
         NodeCacheService nodeCache = NodeCacheService.getInstance();
         normalizedTargets.stream()
                 .map(NodeData::getNodeId)
-                .forEach(nodeCache::deleteNode);
+                .forEach(nodeId -> nodeCache.deleteNode(nodeId, ownerNodeId));
 
         boolean removedCurrentDetail = deletedNodeNums.contains(currentDetailNodeNum);
         nodeData.removeIf(node -> deletedNodeNums.contains(node.getNodeNum()));
@@ -770,6 +794,18 @@ public class FormNodes extends Form {
                 ? node.getLongName()
                 : node.getNodeId() != null ? node.getNodeId() : "?";
         return UnicodeTextUtils.sanitizeForJavaFxDisplay(value);
+    }
+
+    private String currentOwnerNodeId() {
+        if (state != null && state.getOwnerNodeId() != null) {
+            return state.getOwnerNodeId();
+        }
+        ConnectionEntry entry = ConnectionManager.getInstance().getSelectedConnectionEntry();
+        if (entry == null) {
+            return "";
+        }
+        String ownerNodeId = ConnectionManager.getInstance().getOwnerNodeId(entry.getId());
+        return ownerNodeId != null && !ownerNodeId.isBlank() && !"?".equals(ownerNodeId) ? ownerNodeId : "";
     }
 
     // ==================== Node list cell ====================
@@ -833,8 +869,13 @@ public class FormNodes extends Form {
                 NodeData nd = getItem();
                 List<NodeData> targets = contextActionNodes(nd);
                 boolean bulk = targets.size() > 1;
-                boolean fav = nd != null && FavoriteNodeService.getInstance().isFavorite(nd.getNodeId());
-                boolean ign = nd != null && IgnoredNodeService.getInstance().isIgnored(nd.getNodeId());
+                String ownerNodeId = currentOwnerNodeId();
+                boolean fav = nd != null
+                        && !ownerNodeId.isBlank()
+                        && FavoriteNodeService.getInstance().isFavorite(nd.getNodeId(), ownerNodeId);
+                boolean ign = nd != null
+                        && !ownerNodeId.isBlank()
+                        && IgnoredNodeService.getInstance().isIgnored(nd.getNodeId(), ownerNodeId);
 
                 addFavItem.setText(I18n.t(bulk ? "node.menu.addSelectedFavorite" : "node.menu.addFavorite"));
                 addIgnItem.setText(I18n.t(bulk ? "node.menu.addSelectedIgnored" : "node.menu.addIgnored"));
@@ -856,7 +897,10 @@ public class FormNodes extends Form {
 
             removeFavItem.setOnAction(ev -> {
                 NodeData nd = getItem();
-                if (nd != null) { FavoriteNodeService.getInstance().removeFavorite(nd.getNodeId()); }
+                String ownerNodeId = currentOwnerNodeId();
+                if (nd != null && !ownerNodeId.isBlank()) {
+                    FavoriteNodeService.getInstance().removeFavorite(nd.getNodeId(), ownerNodeId);
+                }
             });
 
             addIgnItem.setOnAction(ev -> {
@@ -866,7 +910,10 @@ public class FormNodes extends Form {
 
             removeIgnItem.setOnAction(ev -> {
                 NodeData nd = getItem();
-                if (nd != null) { IgnoredNodeService.getInstance().removeIgnored(nd.getNodeId()); }
+                String ownerNodeId = currentOwnerNodeId();
+                if (nd != null && !ownerNodeId.isBlank()) {
+                    IgnoredNodeService.getInstance().removeIgnored(nd.getNodeId(), ownerNodeId);
+                }
             });
 
             deleteItem.setOnAction(ev -> {
@@ -951,7 +998,9 @@ public class FormNodes extends Form {
             }
 
         // Favorite star.
-            boolean isFav = FavoriteNodeService.getInstance().isFavorite(node.getNodeId());
+            String ownerNodeId = currentOwnerNodeId();
+            boolean isFav = !ownerNodeId.isBlank()
+                    && FavoriteNodeService.getInstance().isFavorite(node.getNodeId(), ownerNodeId);
             starPane.setVisible(isFav);
             starPane.setManaged(isFav);
 
@@ -963,39 +1012,63 @@ public class FormNodes extends Form {
     // ==================== Detail panel ====================
 
     private void showDetail(NodeData node) {
-        if (node == null) {
-            if (currentDetailContent != null) {
-                currentDetailContent.getChartPanel().unbind();
-                currentDetailContent = null;
-            }
-            currentDetailNodeNum = 0;
-            detailPane.getChildren().clear();
-            detailPane.getChildren().add(detailPlaceholder);
-            return;
-        }
+        Optional.ofNullable(node).ifPresentOrElse(this::showNodeDetail, this::showDetailPlaceholder);
+    }
 
-            // Enrich a bare node with cached data before showing it.
+    private void showDetailPlaceholder() {
+        detachCurrentDetailContent();
+        currentDetailNodeNum = 0;
+        detailPane.getChildren().setAll(detailPlaceholder);
+    }
+
+    private void showNodeDetail(NodeData node) {
         if (!node.hasName()) {
             NodeCacheService.getInstance().enrichFromCache(node);
         }
 
-                // Same node: update only table data without recreating the UI.
-        if (node.getNodeNum() == currentDetailNodeNum && currentDetailContent != null) {
+        if (isCurrentDetailNode(node)) {
             currentDetailContent.updateTableData(node);
             return;
         }
 
-            // Detach the previous component.
-        if (currentDetailContent != null) {
-            currentDetailContent.getChartPanel().unbind();
-        }
-
+        detachCurrentDetailContent();
         currentDetailNodeNum = node.getNodeNum();
         currentDetailContent = new NodeDetailContent(state, node, protocolHandler);
         VBox.setVgrow(currentDetailContent, Priority.ALWAYS);
 
-        detailPane.getChildren().clear();
-        detailPane.getChildren().add(currentDetailContent);
+        detailPane.getChildren().setAll(createDetailScrollPane(currentDetailContent));
+    }
+
+    private boolean isCurrentDetailNode(NodeData node) {
+        return currentDetailContent != null && node.getNodeNum() == currentDetailNodeNum;
+    }
+
+    private ScrollPane createDetailScrollPane(NodeDetailContent content) {
+        ScrollPane scrollPane = new ScrollPane(content);
+        scrollPane.setFitToWidth(true);
+        scrollPane.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
+        scrollPane.setVbarPolicy(ScrollPane.ScrollBarPolicy.AS_NEEDED);
+        scrollPane.setPannable(true);
+        scrollPane.setMaxSize(Double.MAX_VALUE, Double.MAX_VALUE);
+        scrollPane.getStyleClass().addAll("node-detail-scroll-pane", "edge-to-edge");
+        if (content.minHeightProperty().isBound()) {
+            content.minHeightProperty().unbind();
+        }
+        content.minHeightProperty().bind(scrollPane.viewportBoundsProperty()
+                .map(bounds -> bounds.getHeight()));
+        VBox.setVgrow(scrollPane, Priority.ALWAYS);
+        return scrollPane;
+    }
+
+    private void detachCurrentDetailContent() {
+        if (currentDetailContent == null) {
+            return;
+        }
+        currentDetailContent.getChartPanel().unbind();
+        if (currentDetailContent.minHeightProperty().isBound()) {
+            currentDetailContent.minHeightProperty().unbind();
+        }
+        currentDetailContent = null;
     }
 
     /** Updates details when the selected node changes, preserving UI and chart filter state. */
@@ -1049,6 +1122,8 @@ public class FormNodes extends Form {
             } else {
                 nodeData.clear();
             }
+            injectOfflineFilteredNodes();
+            updateFilterPredicate();
 
             nodeListView.getSelectionModel().clearSelection();
             if (!selectedNodeNums.isEmpty()) {

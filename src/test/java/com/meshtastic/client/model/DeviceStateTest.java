@@ -175,6 +175,19 @@ class DeviceStateTest {
     }
 
     @Test
+    void ownerNodeIdFallsBackToMyNodeNumWhenOwnerInfoIdIsBlank() {
+        DeviceState state = new DeviceState();
+        state.setMyNodeNum(0x12345678);
+        state.setOwnerInfo(MeshProtos.User.newBuilder()
+                .setLongName("Owner")
+                .build());
+
+        assertEquals("!12345678", state.getOwnerNodeId());
+
+        state.shutdown();
+    }
+
+    @Test
     void addChannelReplacesExistingChannelWithSameIndex() {
         DeviceState state = createDeviceStateWithOwner();
 

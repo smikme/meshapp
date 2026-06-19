@@ -7,6 +7,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -42,20 +43,32 @@ public final class FavoriteNodeService {
         return nodeId != null && NodeCacheService.getInstance().isFavorite(nodeId);
     }
 
+    public boolean isFavorite(String nodeId, String ownerNodeId) {
+        return nodeId != null && NodeCacheService.getInstance().isFavorite(nodeId, ownerNodeId);
+    }
+
     public void addFavorite(String nodeId) {
+        addFavorite(nodeId, "");
+    }
+
+    public void addFavorite(String nodeId, String ownerNodeId) {
         if (nodeId == null) { return; }
-        pendingUnfavorites.remove(nodeId);
-        NodeCacheService.getInstance().setFavorite(nodeId, true);
-        sendToDevice(nodeId, true);
+        pendingUnfavorites.remove(pendingKey(ownerNodeId, nodeId));
+        NodeCacheService.getInstance().setFavorite(nodeId, ownerNodeId, true);
+        sendToDevice(nodeId, ownerNodeId, true);
         fireListeners();
     }
 
     public void removeFavorite(String nodeId) {
+        removeFavorite(nodeId, "");
+    }
+
+    public void removeFavorite(String nodeId, String ownerNodeId) {
         if (nodeId == null) { return; }
-        pendingUnfavorites.add(nodeId);
-        log.info("Added pending unfavorite for node {}", nodeId);
-        NodeCacheService.getInstance().setFavorite(nodeId, false);
-        sendToDevice(nodeId, false);
+        pendingUnfavorites.add(pendingKey(ownerNodeId, nodeId));
+        log.info("Added pending unfavorite for owner {} node {}", ownerNodeId, nodeId);
+        NodeCacheService.getInstance().setFavorite(nodeId, ownerNodeId, false);
+        sendToDevice(nodeId, ownerNodeId, false);
         fireListeners();
     }
 
@@ -67,27 +80,37 @@ public final class FavoriteNodeService {
      * the overwrite is skipped and {@code remove_favorite_node} is sent again.
      */
     public void setFavoriteQuiet(String nodeId, boolean favorite) {
+        setFavoriteQuiet(nodeId, "", favorite);
+    }
+
+    public void setFavoriteQuiet(String nodeId, String ownerNodeId, boolean favorite) {
         if (nodeId == null) { return; }
-        if (favorite && pendingUnfavorites.contains(nodeId)) {
-            log.info("Skipping setFavoriteQuiet(true) for node {} — pending unfavorite, re-sending admin message", nodeId);
-            sendToDevice(nodeId, false);
+        String pendingKey = pendingKey(ownerNodeId, nodeId);
+        if (favorite && pendingUnfavorites.contains(pendingKey)) {
+            log.info("Skipping setFavoriteQuiet(true) for owner {} node {} — pending unfavorite, re-sending admin message",
+                    ownerNodeId, nodeId);
+            sendToDevice(nodeId, ownerNodeId, false);
             return;
         }
-        if (!favorite && pendingUnfavorites.contains(nodeId)) {
+        if (!favorite && pendingUnfavorites.contains(pendingKey)) {
             // The device confirmed the unfavorite request; clear the pending marker.
-            log.info("Device confirmed unfavorite for node {}, clearing pending state", nodeId);
-            pendingUnfavorites.remove(nodeId);
+            log.info("Device confirmed unfavorite for owner {} node {}, clearing pending state", ownerNodeId, nodeId);
+            pendingUnfavorites.remove(pendingKey);
         }
-        NodeCacheService.getInstance().setFavorite(nodeId, favorite);
+        NodeCacheService.getInstance().setFavorite(nodeId, ownerNodeId, favorite);
     }
 
     public boolean toggleFavorite(String nodeId) {
+        return toggleFavorite(nodeId, "");
+    }
+
+    public boolean toggleFavorite(String nodeId, String ownerNodeId) {
         if (nodeId == null) { return false; }
-        boolean was = isFavorite(nodeId);
+        boolean was = isFavorite(nodeId, ownerNodeId);
         if (was) {
-            removeFavorite(nodeId);
+            removeFavorite(nodeId, ownerNodeId);
         } else {
-            addFavorite(nodeId);
+            addFavorite(nodeId, ownerNodeId);
         }
         return !was;
     }
@@ -101,12 +124,18 @@ public final class FavoriteNodeService {
         }
     }
 
-    private void sendToDevice(String nodeId, boolean favorite) {
+    private void sendToDevice(String nodeId, String ownerNodeId, boolean favorite) {
         try {
             ConnectionManager cm = ConnectionManager.getInstance();
+            String owner = ownerNodeId != null ? ownerNodeId.toLowerCase(Locale.ROOT) : "";
             boolean sent = false;
             for (ConnectionEntry entry : cm.getEntries()) {
                 if (!entry.isConnected()) { continue; }
+                String entryOwner = cm.getOwnerNodeId(entry.getId());
+                if (!owner.isBlank()
+                        && (entryOwner == null || !owner.equals(entryOwner.toLowerCase(Locale.ROOT)))) {
+                    continue;
+                }
                 ProtocolHandler handler = cm.getProtocolHandler(entry.getId());
                 DeviceState state = cm.getDeviceState(entry.getId());
                 if (handler == null || state == null) { continue; }
@@ -122,10 +151,14 @@ public final class FavoriteNodeService {
                 break; // Send through the first active connection only.
             }
             if (!sent) {
-                log.warn("No active connection found to send favorite change for node {}", nodeId);
+                log.warn("No active connection found to send favorite change for owner {} node {}", ownerNodeId, nodeId);
             }
         } catch (Exception e) {
-            log.warn("Failed to send favorite change to device for node {}", nodeId, e);
+            log.warn("Failed to send favorite change to device for owner {} node {}", ownerNodeId, nodeId, e);
         }
+    }
+
+    private static String pendingKey(String ownerNodeId, String nodeId) {
+        return (ownerNodeId != null ? ownerNodeId.toLowerCase(Locale.ROOT) : "") + "\u0000" + nodeId;
     }
 }

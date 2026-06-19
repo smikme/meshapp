@@ -1,0 +1,23 @@
+.telemetry-environment-pressure-overlay {
+    -fx-background-color: transparent;
+}
+
+.telemetry-environment-pressure-plot-layer {
+    -fx-background-color: transparent;
+}
+
+.telemetry-environment-pressure-area {
+    -fx-fill: rgba(171, 71, 188, 0.10);
+}
+
+.telemetry-environment-pressure-line {
+    -fx-stroke: #ab47bc;
+    -fx-stroke-width: 1.5;
+    -fx-fill: transparent;
+}
+
+.telemetry-environment-pressure-axis {
+    -fx-tick-label-fill: -color-fg-default;
+    -fx-tick-mark-visible: true;
+    -fx-minor-tick-visible: true;
+}

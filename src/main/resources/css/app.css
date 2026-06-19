@@ -1209,8 +1209,35 @@
 }
 
 .form-title {
+    -fx-font-family: "Roboto", "System";
     -fx-font-size: 1.2308em;
-    -fx-font-weight: bold;
+    -fx-font-weight: normal;
+}
+
+/* Lua extension form charts */
+.lua-form-chart {
+    -fx-background-color: transparent;
+    -fx-padding: 4 0 0 0;
+}
+
+.lua-form-chart .chart-plot-background {
+    -fx-background-color: transparent;
+}
+
+.lua-form-chart .chart-horizontal-grid-lines,
+.lua-form-chart .chart-vertical-grid-lines {
+    -fx-stroke: -color-border-default;
+    -fx-opacity: 0.45;
+}
+
+.lua-form-chart .axis {
+    -fx-tick-label-fill: -color-fg-muted;
+}
+
+.lua-form-chart .axis-label,
+.lua-form-chart .chart-title,
+.lua-form-chart .chart-legend-item {
+    -fx-text-fill: -color-fg-muted;
 }
 
 .dialog-title {
@@ -1369,6 +1396,198 @@
 .dashboard-log-count-label {
     -fx-opacity: 0.6;
     -fx-font-size: 0.9231em;
+}
+
+.telemetry-dock-shell {
+    -fx-background-color: transparent;
+}
+
+.telemetry-dock-root {
+    -fx-background-color: transparent;
+}
+
+.telemetry-dock-maximized-overlay {
+    -fx-background-color: -color-bg-default;
+}
+
+.telemetry-dock.container-branch,
+.telemetry-dock .container-branch {
+    -fx-background-color: transparent;
+    -fx-background-insets: 0;
+    -fx-padding: 0;
+}
+
+.telemetry-dock.container-branch > .split-pane-divider,
+.telemetry-dock .container-branch > .split-pane-divider {
+    -fx-background-color: transparent;
+    -fx-padding: 2;
+}
+
+.telemetry-dock.container-branch > .split-pane-divider:hover,
+.telemetry-dock .container-branch > .split-pane-divider:hover {
+    -fx-background-color: -color-accent-emphasis;
+}
+
+.telemetry-dock .container-leaf {
+    -fx-background-color: -color-border-default, -color-bg-default;
+    -fx-background-insets: 0, 1;
+}
+
+.telemetry-dock .header-pane {
+    -fx-background-color: -color-bg-default;
+    -fx-background-insets: 0;
+}
+
+.telemetry-dock .header-region {
+    -fx-background-color: transparent;
+}
+
+.telemetry-dock .button-bar {
+    -fx-spacing: -1;
+    -fx-padding: 0;
+    -fx-background-color: transparent;
+}
+
+.telemetry-dock .header {
+    -fx-background-color: -color-bg-subtle;
+    -fx-background-insets: 0;
+    -fx-cursor: hand;
+}
+
+.telemetry-dock .header:hover {
+    -fx-background-color: -color-bg-default;
+}
+
+.telemetry-dock .header-pane .header:selected {
+    -fx-background-color: -color-bg-subtle;
+    -fx-background-insets: 0;
+}
+
+.telemetry-dock .header:top {
+    -fx-background-insets: 0;
+}
+
+.telemetry-dock .header:bottom {
+    -fx-background-insets: 0;
+}
+
+.telemetry-dock .header:selected:top {
+    -fx-background-insets: 0;
+}
+
+.telemetry-dock .header:selected:bottom {
+    -fx-background-insets: 0;
+}
+
+.telemetry-dock .close-button,
+.telemetry-dock .corner-button {
+    -fx-effect: none;
+    -fx-background-insets: 0;
+    -fx-background-radius: 0;
+    -fx-border-width: 0;
+}
+
+.telemetry-dock .close-button {
+    -fx-opacity: 0.65;
+    -fx-background-color: transparent;
+    -fx-padding: 0 4 0 4;
+}
+
+.telemetry-dock .close-button:hover {
+    -fx-opacity: 1;
+    -fx-background-color: -color-bg-subtle;
+}
+
+.telemetry-dock .corner-button {
+    -fx-background-color: transparent;
+    -fx-background-insets: 0;
+}
+
+.telemetry-dock .container:collapsed .header,
+.telemetry-dock .container:collapsed .header-pane,
+.telemetry-dock .container:collapsed .header-region,
+.telemetry-dock .container:collapsed .corner-button {
+    -fx-background-color: -color-bg-subtle;
+}
+
+.telemetry-dock .dock-ghost-zone {
+    -fx-opacity: 0.3;
+}
+
+.telemetry-dock-minimized-bar {
+    -fx-padding: 4 0 0 0;
+    -fx-spacing: 4;
+    -fx-border-color: -color-border-default transparent transparent transparent;
+    -fx-border-width: 1 0 0 0;
+}
+
+.telemetry-dock-minimized-button {
+    -fx-background-color: -color-bg-subtle;
+    -fx-background-radius: 4;
+    -fx-border-color: -color-border-default;
+    -fx-border-radius: 4;
+    -fx-border-width: 1;
+    -fx-padding: 5 10;
+    -fx-cursor: hand;
+}
+
+.telemetry-dock-minimized-button:hover {
+    -fx-background-color: -color-bg-default;
+    -fx-border-color: -color-accent-emphasis;
+}
+
+.telemetry-period-bar {
+    -fx-padding: 0;
+}
+
+.telemetry-node-detail-chart-title {
+    -fx-alignment: center;
+    -fx-font-size: 20px;
+    -fx-text-fill: -color-fg-default;
+}
+
+.telemetry-node-detail-chart-legend {
+    -fx-alignment: center;
+    -fx-padding: 4 0;
+}
+
+.telemetry-node-detail-chart-legend-item {
+    -fx-alignment: center;
+}
+
+.telemetry-node-detail-chart-legend-symbol {
+    -fx-min-width: 10px;
+    -fx-min-height: 10px;
+    -fx-pref-width: 10px;
+    -fx-pref-height: 10px;
+    -fx-max-width: 10px;
+    -fx-max-height: 10px;
+    -fx-background-radius: 999px;
+}
+
+.telemetry-node-detail-chart-legend-label {
+    -fx-text-fill: -color-fg-default;
+    -fx-font-size: 12px;
+}
+
+.telemetry-period-buttons {
+    -fx-border-color: -color-border-default;
+    -fx-border-radius: 6;
+    -fx-background-radius: 6;
+}
+
+.telemetry-dock-reset-layout-button {
+    -fx-background-color: -color-bg-subtle;
+    -fx-background-radius: 6;
+    -fx-border-color: -color-border-default;
+    -fx-border-radius: 6;
+    -fx-border-width: 1;
+    -fx-cursor: hand;
+}
+
+.telemetry-dock-reset-layout-button:hover {
+    -fx-background-color: -color-bg-default;
+    -fx-border-color: -color-accent-emphasis;
 }
 
 /* Панель ошибки — красный акцент слева */
@@ -1552,6 +1771,25 @@
     -fx-background-color: -color-bg-default;
     -fx-border-color: rgba(255, 255, 255, 0.08);
     -fx-border-width: 0 0 0 1;
+}
+
+.node-detail-scroll-pane {
+    -fx-background-color: transparent;
+    -fx-background: transparent;
+    -fx-background-insets: 0;
+    -fx-padding: 0;
+}
+
+.node-detail-scroll-pane > .viewport {
+    -fx-background-color: transparent;
+}
+
+.node-detail-scroll-pane .scroll-bar:vertical {
+    -fx-pref-width: 6;
+}
+
+.node-detail-scroll-pane .scroll-bar:vertical .thumb {
+    -fx-background-radius: 3;
 }
 
 .light-theme .node-detail-pane {
@@ -2061,6 +2299,36 @@
     -fx-background-color: transparent;
 }
 
+.chat-image-viewer-overlay {
+    -fx-background-color: rgba(0, 0, 0, 0.72);
+    -fx-padding: 24;
+}
+
+.chat-image-viewer-frame {
+    -fx-alignment: center;
+}
+
+.chat-image-viewer-image {
+    -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.45), 24, 0, 0, 8);
+}
+
+.chat-image-viewer-close {
+    -fx-background-color: rgba(255, 255, 255, 0.12);
+    -fx-text-fill: rgba(255, 255, 255, 0.92);
+    -fx-font-size: 16px;
+    -fx-min-width: 36;
+    -fx-min-height: 36;
+    -fx-max-width: 36;
+    -fx-max-height: 36;
+    -fx-padding: 0;
+    -fx-background-radius: 18;
+    -fx-cursor: hand;
+}
+
+.chat-image-viewer-close:hover {
+    -fx-background-color: rgba(255, 255, 255, 0.20);
+}
+
 /* Кнопка «прокрутка вниз» — полупрозрачный круг поверх чата */
 .chat-scroll-down-btn {
     -fx-background-color: rgba(40, 40, 40, 0.55);
@@ -2231,6 +2499,33 @@
 
 .chat-bubble-footer {
     -fx-padding: 4 0 0 0;
+}
+
+.chat-bubble-image-list {
+    -fx-padding: 6 0 2 0;
+}
+
+.chat-bubble-image-preview {
+    -fx-background-color: rgba(255, 255, 255, 0.06);
+    -fx-background-radius: 8;
+    -fx-border-color: rgba(255, 255, 255, 0.10);
+    -fx-border-radius: 8;
+    -fx-padding: 4;
+}
+
+.light-theme .chat-bubble-image-preview {
+    -fx-background-color: rgba(0, 0, 0, 0.04);
+    -fx-border-color: rgba(0, 0, 0, 0.08);
+}
+
+.chat-bubble-image {
+    -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.20), 6, 0, 0, 1);
+}
+
+.chat-bubble-image-error {
+    -fx-text-fill: -color-fg-muted;
+    -fx-font-size: 0.9231em;
+    -fx-padding: 16 18;
 }
 
 .chat-bubble-reactions {
@@ -2540,6 +2835,59 @@
 
 .light-theme .chat-emoji-btn:hover {
     -fx-background-color: rgba(0, 0, 0, 0.08);
+}
+
+.chat-image-icon {
+    -fx-opacity: 0.9;
+}
+
+.chat-image-btn:hover .chat-image-icon {
+    -fx-opacity: 1.0;
+}
+
+.chat-image-btn:disabled .chat-image-icon {
+    -fx-opacity: 0.55;
+}
+
+.chat-image-icon-bg {
+    -fx-fill: #2F80ED;
+}
+
+.chat-image-icon-sun {
+    -fx-fill: #FFD166;
+}
+
+.chat-image-icon-mountain-back {
+    -fx-fill: #6FCF97;
+}
+
+.chat-image-icon-mountain-front {
+    -fx-fill: #27AE60;
+}
+
+.chat-image-icon-frame {
+    -fx-fill: transparent;
+    -fx-stroke: rgba(255, 255, 255, 0.86);
+    -fx-stroke-width: 1.4;
+}
+
+.chat-input-image-bar {
+    -fx-background-color: -color-bg-subtle;
+    -fx-border-color: rgba(255, 255, 255, 0.08);
+    -fx-border-width: 1 0 0 0;
+}
+
+.light-theme .chat-input-image-bar {
+    -fx-border-color: rgba(0, 0, 0, 0.1);
+}
+
+.chat-input-image-preview {
+    -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.28), 8, 0, 0, 2);
+}
+
+.chat-input-image-status {
+    -fx-text-fill: -color-fg-muted;
+    -fx-font-size: 0.9231em;
 }
 
 .chat-send-btn {
@@ -2992,9 +3340,135 @@
     -fx-padding: 0 0 6 0;
 }
 
+.lua-dev-outline-slot {
+    -fx-background-color: transparent;
+    -fx-padding: 0;
+}
+
+.lua-dev-outline-rail-slot {
+    -fx-background-color: transparent;
+    -fx-padding: 0;
+}
+
+.lua-dev-code-editor-slot {
+    -fx-background-color: transparent;
+}
+
 .lua-dev-console-slot {
     -fx-background-color: transparent;
     -fx-padding: 6 0 0 0;
+}
+
+.lua-find-replace-bar {
+    -fx-background-color: rgba(255, 255, 255, 0.05);
+    -fx-background-radius: 8;
+    -fx-border-color: rgba(255, 255, 255, 0.08);
+    -fx-border-radius: 8;
+    -fx-padding: 6;
+}
+
+.light-theme .lua-find-replace-bar {
+    -fx-background-color: rgba(0, 0, 0, 0.03);
+    -fx-border-color: rgba(0, 0, 0, 0.10);
+}
+
+.lua-find-field {
+    -fx-min-width: 170;
+    -fx-pref-width: 220;
+    -fx-max-width: 320;
+}
+
+.lua-find-button {
+    -fx-min-height: 28;
+    -fx-pref-height: 28;
+    -fx-padding: 0 10;
+    -fx-background-radius: 6;
+    -fx-border-radius: 6;
+    -fx-background-color: -color-bg-subtle;
+    -fx-border-color: -color-border-default;
+    -fx-text-fill: -color-fg-default;
+    -fx-font-size: 12px;
+}
+
+.lua-find-button:hover {
+    -fx-background-color: -color-bg-inset;
+}
+
+.lua-find-status {
+    -fx-text-fill: -color-fg-muted;
+    -fx-font-size: 12px;
+}
+
+.lua-function-tree,
+.lua-function-tree .virtual-flow,
+.lua-function-tree .clipped-container,
+.lua-function-tree .sheet,
+.lua-function-tree .tree-cell {
+    -fx-background-color: transparent;
+}
+
+.lua-function-tree {
+    -fx-padding: 2 0 0 0;
+}
+
+.lua-function-outline-rail {
+    -fx-background-color: -color-bg-subtle;
+    -fx-background-radius: 8;
+    -fx-border-color: -color-border-default;
+    -fx-border-radius: 8;
+    -fx-padding: 8 0 8 0;
+    -fx-min-width: 34;
+    -fx-pref-width: 34;
+    -fx-max-width: 34;
+}
+
+.lua-function-outline-rail-button {
+    -fx-background-color: transparent;
+    -fx-background-radius: 6;
+    -fx-border-color: transparent;
+    -fx-min-width: 28;
+    -fx-pref-width: 28;
+    -fx-max-width: 28;
+    -fx-min-height: 132;
+    -fx-pref-height: 132;
+    -fx-max-height: 132;
+    -fx-padding: 0;
+    -fx-cursor: hand;
+}
+
+.lua-function-outline-rail-button:hover {
+    -fx-background-color: rgba(255, 255, 255, 0.10);
+}
+
+.light-theme .lua-function-outline-rail-button:hover {
+    -fx-background-color: rgba(0, 0, 0, 0.08);
+}
+
+.lua-function-outline-rail-label {
+    -fx-text-fill: -color-fg-default;
+    -fx-font-size: 12px;
+    -fx-font-weight: bold;
+}
+
+.lua-function-outline-rail-letters {
+    -fx-alignment: center;
+    -fx-spacing: -1;
+}
+
+.lua-function-tree .tree-cell {
+    -fx-padding: 3 6 3 4;
+    -fx-text-fill: -color-fg-default;
+    -fx-font-family: "Menlo", "Consolas", "DejaVu Sans Mono", monospace;
+    -fx-font-size: 12px;
+}
+
+.lua-function-tree .tree-cell:selected {
+    -fx-background-color: rgba(255, 255, 255, 0.10);
+    -fx-background-radius: 4;
+}
+
+.light-theme .lua-function-tree .tree-cell:selected {
+    -fx-background-color: rgba(0, 0, 0, 0.08);
 }
 
 .lua-dev-table .column-header-background {

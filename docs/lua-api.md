@@ -1,6 +1,6 @@
 # MeshApp Script Lua API
 
-**Language:** [Русский](lua-api.ru.md) | English
+**Language:** [Русский](lua-api.ru.md) | English | [Deutsch](lua-api.de.md)
 
 MeshApp runs user Lua scripts in a LuaJ sandbox. Scripts can use the `mesh` namespace, core Lua functions, the `string`, `table`, `math`, `coroutine`, `bit32` libraries and functions such as `pairs`, `ipairs`, `pcall`, `tonumber` and `tostring`. Unsafe global APIs are disabled: `io`, `os`, `debug`, `package`, `require`, `dofile`, `loadfile`, `luajava`, `collectgarbage`, `module`.
 
@@ -178,9 +178,53 @@ end
 | `print(...)` | Writes a line to script output; arguments are joined with tabs |
 | `mesh.log(text)` | Writes `text` to script output |
 | `mesh.now()` | Returns Unix time in seconds |
+| `mesh.localtime([epoch_seconds])` | Returns a local date/time table for the current moment or timestamp |
+| `mesh.date([epoch_seconds])` | Returns the local date formatted by the system regional settings |
+| `mesh.time([epoch_seconds])` | Returns the local time formatted by the system regional settings |
+| `mesh.datetime([epoch_seconds])` | Returns the local date and time formatted by the system regional settings |
+| `mesh.iso_date([epoch_seconds])` | Returns a stable local date string: `YYYY-MM-DD` |
+| `mesh.iso_time([epoch_seconds])` | Returns a stable local time string: `HH:MM:SS` |
+| `mesh.iso_datetime([epoch_seconds])` | Returns a stable local date/time string: `YYYY-MM-DD HH:MM:SS` |
 | `mesh.sleep(seconds)` | Blocking pause from `0` to `10` seconds |
+| `mesh.json.*` | JSON encode/decode helpers |
+| `mesh.timer.*` | Host-managed timers that call `on_timer(event)` |
 | `mesh.owner()` | Returns `{ node_id, node_num, connection_id }` for the current node |
 | `mesh.command()` | Returns the current command or an empty table outside command launch |
+
+### Time and Dates
+
+All time helpers use the application's system time zone. The short helpers
+`mesh.date(...)`, `mesh.time(...)`, and `mesh.datetime(...)` are meant for
+human-facing text and follow the system regional format, including 12/24-hour
+time and seconds. Use `mesh.iso_date(...)`, `mesh.iso_time(...)`, or
+`mesh.iso_datetime(...)` when a script needs stable strings for sorting,
+storage keys, file names, or comparisons.
+
+`mesh.localtime([epoch_seconds])` returns a table with numeric fields and both
+localized and stable string forms:
+
+| Field | Meaning |
+|-------|---------|
+| `year`, `month`, `day` | Local calendar date |
+| `hour`, `minute`, `second` | Local clock time |
+| `min`, `sec` | Aliases for `minute` and `second` |
+| `weekday` | ISO weekday, Monday is `1`, Sunday is `7` |
+| `wday` | Lua-style weekday, Sunday is `1`, Saturday is `7` |
+| `yearday`, `yday` | Day of year |
+| `timezone`, `zone` | System time zone id, for example `Europe/Moscow` |
+| `offset`, `offset_seconds` | UTC offset as a string and seconds |
+| `epoch` | Unix time in seconds |
+| `date`, `time`, `datetime` | Localized display strings |
+| `iso_date`, `iso_time`, `iso_datetime` | Stable local strings |
+| `iso` | ISO offset date/time, including the UTC offset |
+
+```lua
+local t = mesh.localtime()
+mesh.log(t.datetime .. " " .. t.timezone)
+
+local sent_at = mesh.datetime(msg.timestamp)
+local key = "daily:" .. mesh.iso_date()
+```
 
 ## Callbacks
 
@@ -194,8 +238,65 @@ end
 | `on_traceroute(event)` | After `mesh.traceroute.request(...)` produces a result |
 | `on_node_info(event)` | After `mesh.nodeinfo.request(...)` produces a result |
 | `on_admin(event)` | After `mesh.admin.*` remote administration requests produce progress or a result |
+| `on_timer(event)` | After a host-managed timer from `mesh.timer.*` fires |
 | `on_canvas_event(event)` | After an event in a floating Canvas window: mouse, keyboard, resize, open/close |
 | `on_canvas_frame(event)` | On the Canvas window timer, if `fps` is set or `mesh.canvas.set_fps(...)` was called |
+
+## `mesh.timer`
+
+Timers are managed by MeshApp, not by a Lua `while true` loop. A script stays
+running while it has active timers. Timer callbacks are delivered serially on
+the script's Lua executor; if a repeating timer fires again while the previous
+callback is still queued, MeshApp skips the extra tick instead of running
+callbacks in parallel or catching up in a burst.
+
+| Function | Return | Purpose |
+|----------|--------|---------|
+| `mesh.timer.after(seconds[, options])` | `timer_id` | Calls `on_timer(event)` once after `seconds` |
+| `mesh.timer.every(seconds[, options])` | `timer_id` | Calls `on_timer(event)` repeatedly |
+| `mesh.timer.cancel(timer_id)` | boolean | Cancels one active timer |
+| `mesh.timer.cancel_all()` | number | Cancels all timers and returns the cancelled count |
+
+`seconds` must be from `0.1` to `604800` seconds. `options` can contain:
+
+| Option | Type | Purpose |
+|--------|------|---------|
+| `name` | string | Caller-defined timer name copied to `event.name` |
+| `immediate` | boolean | For `every`, fire once immediately before the first interval |
+| `align` | string | For `every`: `interval` or `wall`, default `interval` |
+
+`align = "interval"` runs every N seconds from the previous scheduled tick.
+`align = "wall"` aligns to local wall-clock boundaries. For example, `600`
+seconds runs at local `HH:00`, `HH:10`, `HH:20`, and so on.
+
+Timer event fields:
+
+| Field | Meaning |
+|-------|---------|
+| `type` | Always `timer` |
+| `source` | API source, such as `mesh.timer.every` |
+| `id`, `timer_id` | Timer id |
+| `name` | Name from options or an empty string |
+| `interval_seconds`, `seconds` | Timer interval or delay |
+| `repeating` | Whether the timer repeats |
+| `align` | `interval` or `wall` |
+| `count` | Delivered callback count for this timer |
+| `scheduled_epoch`, `actual_epoch` | Planned and actual Unix time in seconds |
+| `drift_seconds` | `actual_epoch - scheduled_epoch` |
+| `time` | `mesh.localtime(actual_epoch)` table |
+
+```lua
+mesh.timer.every(600, {
+    name = "ten-minute-job",
+    align = "wall"
+})
+
+function on_timer(event)
+    if event.name == "ten-minute-job" then
+        mesh.log("tick at " .. event.time.iso_datetime)
+    end
+end
+```
 
 ## `mesh.chat`
 
@@ -224,6 +325,61 @@ KV storage is isolated per script and persisted in the local application databas
 | `mesh.kv.delete(key)` | boolean | Deletes a key |
 | `mesh.kv.list()` | table | Returns all script keys |
 | `mesh.kv.clear()` | `true` | Clears the script KV storage |
+
+## `mesh.json`
+
+JSON helpers convert between JSON text and normal Lua values. Objects become
+tables with string keys; arrays become tables indexed from `1`. JSON `null` is
+represented by `mesh.json.null`, because Lua `nil` removes table fields.
+
+| Function | Return | Purpose |
+|----------|--------|---------|
+| `mesh.json.decode(text)` | value | Parses JSON text or raises an error |
+| `mesh.json.try_decode(text)` | `value, nil` or `nil, error` | Parses JSON without stopping the script |
+| `mesh.json.encode(value[, options])` | string | Encodes a Lua value to compact JSON |
+| `mesh.json.pretty(value)` | string | Encodes a Lua value to formatted JSON |
+| `mesh.json.array(table)` | table | Marks a Lua table as a JSON array, including an empty array |
+| `mesh.json.is_null(value)` | boolean | Returns `true` for `mesh.json.null` |
+| `mesh.json.null` | value | JSON null sentinel |
+
+Supported value mapping:
+
+| JSON | Lua |
+|------|-----|
+| object | table with string keys |
+| array | table with indexes `1..n` |
+| string | string |
+| number | number |
+| boolean | boolean |
+| null | `mesh.json.null` |
+
+When encoding, a table with contiguous integer keys `1..n` becomes a JSON
+array. A table with string keys becomes a JSON object. Mixed tables or arrays
+with holes raise an error. An empty table is encoded as `{}` unless it was
+created or marked with `mesh.json.array({})`. `mesh.json.encode(value, true)`
+or `mesh.json.encode(value, { pretty = true })` produces formatted JSON.
+
+Parsing input is limited to 1 MB. Nesting is limited to 64 levels, and one
+object or array can contain up to 50,000 items.
+
+```lua
+local response = mesh.curl.get("https://example.com/api/status")
+local data, err = mesh.json.try_decode(response.body)
+if not data then
+    mesh.log("bad JSON: " .. err)
+    return
+end
+
+if not mesh.json.is_null(data.status) then
+    mesh.log("status: " .. data.status)
+end
+
+local body = mesh.json.encode({
+    at = mesh.iso_datetime(),
+    values = mesh.json.array({ 1, 2, 3 }),
+    empty = mesh.json.array({})
+})
+```
 
 ## `mesh.curl`
 
@@ -310,7 +466,7 @@ Form components do not return Lua objects with their own methods. A script creat
 
 | Field | Type | Purpose |
 |-------|------|---------|
-| `type` | string | Component type to create: `label`, `button`, `text_field`, `password_field`, `text_area`, `checkbox`, `toggle_switch`, `combo_box`, `segmented_control`, `list_view`, `slider`, `progress_bar`, `ring_progress`, `separator`, `spacer`, `message`, `tile`, `card`, `vbox`, `hbox`, `split_pane`, `scroll_pane` |
+| `type` | string | Component type to create: `label`, `button`, `text_field`, `password_field`, `text_area`, `checkbox`, `toggle_switch`, `combo_box`, `segmented_control`, `list_view`, `slider`, `progress_bar`, `ring_progress`, `line_chart`, `area_chart`, `bar_chart`, `separator`, `spacer`, `message`, `tile`, `card`, `vbox`, `hbox`, `split_pane`, `scroll_pane` |
 | `id` | string | Stable component id. If omitted, MeshApp creates one and returns it from `add(...)` |
 | `parent` | string | Id of a `card`, `vbox`, `hbox`, `split_pane`, or `scroll_pane` container. If omitted, the component is added to the form root |
 | `text` | string | Label or title for `label`, `button`, `checkbox`, `toggle_switch`, `message`, or `tile` |
@@ -318,7 +474,13 @@ Form components do not return Lua objects with their own methods. A script creat
 | `value` | string/number/boolean | Current component value. `progress_bar` and `ring_progress` use `0..1`; `slider` is clamped to `min..max`; `message` and `tile` use it as the description |
 | `selected` | boolean | Alias for `checkbox` and `toggle_switch` `value` when `value` is omitted |
 | `items` | array<string> | Options for `combo_box`, `segmented_control`, and `list_view` |
-| `min`, `max` | number | `slider` range; defaults to `0..100` |
+| `min`, `max` | number | `slider` range; defaults to `0..100`. For charts, sets the Y-axis range when both values are present |
+| `series` | array<table> | Data series for `line_chart`, `area_chart`, and `bar_chart`; each series supports `name`, `color`, and `points` |
+| `x_label`, `y_label` | string | Axis labels for chart components |
+| `x_type` | string | Chart X-axis mode; use `time`, `timestamp`, or `epoch` to format Unix seconds as local time |
+| `chart_type` | string | For `type = "chart"`, selects `line`, `area`, or `bar` |
+| `legend` | boolean | Shows or hides a chart legend; by default legends are shown when a chart has more than one series |
+| `symbols` | boolean | Shows point symbols on `line_chart` and `area_chart`; defaults to `false` |
 | `orientation` | string | `horizontal` or `vertical` for `separator`, `spacer`, and `split_pane` |
 | `width`, `height` | number | Preferred component size in pixels |
 | `min_width`, `min_height` | number | Minimum component size in pixels |
@@ -333,6 +495,8 @@ Form components do not return Lua objects with their own methods. A script creat
 | `style` | string | `button` supports `accent` when created; text components support `monospace` |
 
 `mesh.form.set(id, options)` can update supported properties such as `text`, `prompt`, `value`, `items`, `min`, `max`, sizes, `grow`, `read_only`, `wrap`, `monospace`, `disabled`, and `visible`. `type`, `id`, and `parent` are creation-time fields; remove and recreate a component to change them.
+
+Chart `series` is a list of series tables. Each series has `name`, optional CSS `color`, and `points`. A point can be `{ x = 1700000000, y = 21.5 }`, `{ timestamp = 1700000000, value = 21.5 }`, `{ 1700000000, 21.5 }`, or a plain number where the X value becomes the point index.
 
 ### Component Types
 
@@ -351,6 +515,9 @@ Form components do not return Lua objects with their own methods. A script creat
 | `slider` | Numeric slider | `id`, `parent`, `min`, `max`, `value`, `disabled`, `visible` | Number | `change` when moved |
 | `progress_bar` | Progress indicator | `id`, `parent`, `value`, `disabled`, `visible` | Number `0..1` | None |
 | `ring_progress` | AtlantaFX ring progress indicator | `id`, `parent`, `value`, `width`, `height`, `disabled`, `visible` | Number `0..1` | None |
+| `line_chart` | Numeric line chart | `id`, `parent`, `text`, `series`, `x_label`, `y_label`, `x_type`, `min`, `max`, `legend`, `symbols`, sizes | `nil` | None |
+| `area_chart` | Numeric area chart | `id`, `parent`, `text`, `series`, `x_label`, `y_label`, `x_type`, `min`, `max`, `legend`, `symbols`, sizes | `nil` | None |
+| `bar_chart` | Numeric bar chart | `id`, `parent`, `text`, `series`, `x_label`, `y_label`, `x_type`, `min`, `max`, `legend`, sizes | `nil` | None |
 | `separator` | Separator | `id`, `parent`, `orientation`, `disabled`, `visible` | `nil` | None |
 | `spacer` | AtlantaFX empty spacer | `id`, `parent`, `orientation`, `value`, `grow`, `disabled`, `visible` | `nil` | None |
 | `message` | AtlantaFX message with title and description | `id`, `parent`, `text`, `value`, `disabled`, `visible` | Description | `action`, `close` |

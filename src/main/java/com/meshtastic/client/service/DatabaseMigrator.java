@@ -37,7 +37,7 @@ public final class DatabaseMigrator {
     private static final Logger log = LoggerFactory.getLogger(DatabaseMigrator.class);
 
     /** Current schema version. Increment on every schema change. */
-    static final int CURRENT_VERSION = 20;
+    static final int CURRENT_VERSION = 22;
     private static final String LEGACY_TRACEROUTE_PREFIX = "\uD83D\uDD0D Traceroute → ";
     private static final Pattern CONNECTION_NODE_ID_PATTERN =
             Pattern.compile("\"nodeId\"\\s*:\\s*\"(![0-9a-fA-F]{8})\"");
@@ -45,7 +45,9 @@ public final class DatabaseMigrator {
             "MESSAGES",
             "CHAT_READ_COUNTS",
             "NODES",
+            "NODE_FLAGS",
             "TELEMETRY_HISTORY",
+            "TELEMETRY_ONE_WIRE_TEMPERATURE",
             "MESSAGE_REACTIONS",
             "TRACEROUTE_RESULTS",
             "LORA_PACKET_LOGS",
@@ -54,6 +56,95 @@ public final class DatabaseMigrator {
             "CONFIG_HELP_DOCUMENTS",
             "CONFIG_HELP_ARTICLES"
     );
+    private static final String[][] TELEMETRY_V22_COLUMNS = {
+            {"TELEMETRY_VARIANT", "telemetry_variant VARCHAR(40)"},
+            {"DEVICE_UPTIME_SECONDS", "device_uptime_seconds BIGINT"},
+            {"GAS_RESISTANCE", "gas_resistance REAL"},
+            {"ENVIRONMENT_VOLTAGE", "environment_voltage REAL"},
+            {"ENVIRONMENT_CURRENT", "environment_current REAL"},
+            {"IAQ", "iaq BIGINT"},
+            {"DISTANCE", "distance REAL"},
+            {"LUX", "lux REAL"},
+            {"WHITE_LUX", "white_lux REAL"},
+            {"IR_LUX", "ir_lux REAL"},
+            {"UV_LUX", "uv_lux REAL"},
+            {"WIND_DIRECTION", "wind_direction BIGINT"},
+            {"WIND_SPEED", "wind_speed REAL"},
+            {"WEIGHT", "weight REAL"},
+            {"WIND_GUST", "wind_gust REAL"},
+            {"WIND_LULL", "wind_lull REAL"},
+            {"RADIATION", "radiation REAL"},
+            {"RAINFALL_1H", "rainfall_1h REAL"},
+            {"RAINFALL_24H", "rainfall_24h REAL"},
+            {"SOIL_MOISTURE", "soil_moisture BIGINT"},
+            {"SOIL_TEMPERATURE", "soil_temperature REAL"},
+            {"PM10_STANDARD", "pm10_standard BIGINT"},
+            {"PM25_STANDARD", "pm25_standard BIGINT"},
+            {"PM100_STANDARD", "pm100_standard BIGINT"},
+            {"PM10_ENVIRONMENTAL", "pm10_environmental BIGINT"},
+            {"PM25_ENVIRONMENTAL", "pm25_environmental BIGINT"},
+            {"PM100_ENVIRONMENTAL", "pm100_environmental BIGINT"},
+            {"PARTICLES_03UM", "particles_03um BIGINT"},
+            {"PARTICLES_05UM", "particles_05um BIGINT"},
+            {"PARTICLES_10UM", "particles_10um BIGINT"},
+            {"PARTICLES_25UM", "particles_25um BIGINT"},
+            {"PARTICLES_50UM", "particles_50um BIGINT"},
+            {"PARTICLES_100UM", "particles_100um BIGINT"},
+            {"CO2", "co2 BIGINT"},
+            {"CO2_TEMPERATURE", "co2_temperature REAL"},
+            {"CO2_HUMIDITY", "co2_humidity REAL"},
+            {"FORM_FORMALDEHYDE", "form_formaldehyde REAL"},
+            {"FORM_HUMIDITY", "form_humidity REAL"},
+            {"FORM_TEMPERATURE", "form_temperature REAL"},
+            {"PM40_STANDARD", "pm40_standard BIGINT"},
+            {"PARTICLES_40UM", "particles_40um BIGINT"},
+            {"PM_TEMPERATURE", "pm_temperature REAL"},
+            {"PM_HUMIDITY", "pm_humidity REAL"},
+            {"PM_VOC_IDX", "pm_voc_idx REAL"},
+            {"PM_NOX_IDX", "pm_nox_idx REAL"},
+            {"PARTICLES_TPS", "particles_tps REAL"},
+            {"CH1_VOLTAGE", "ch1_voltage REAL"},
+            {"CH1_CURRENT", "ch1_current REAL"},
+            {"CH2_VOLTAGE", "ch2_voltage REAL"},
+            {"CH2_CURRENT", "ch2_current REAL"},
+            {"CH3_VOLTAGE", "ch3_voltage REAL"},
+            {"CH3_CURRENT", "ch3_current REAL"},
+            {"CH4_VOLTAGE", "ch4_voltage REAL"},
+            {"CH4_CURRENT", "ch4_current REAL"},
+            {"CH5_VOLTAGE", "ch5_voltage REAL"},
+            {"CH5_CURRENT", "ch5_current REAL"},
+            {"CH6_VOLTAGE", "ch6_voltage REAL"},
+            {"CH6_CURRENT", "ch6_current REAL"},
+            {"CH7_VOLTAGE", "ch7_voltage REAL"},
+            {"CH7_CURRENT", "ch7_current REAL"},
+            {"CH8_VOLTAGE", "ch8_voltage REAL"},
+            {"CH8_CURRENT", "ch8_current REAL"},
+            {"LOCAL_UPTIME_SECONDS", "local_uptime_seconds BIGINT"},
+            {"NUM_ONLINE_NODES", "num_online_nodes BIGINT"},
+            {"NUM_TOTAL_NODES", "num_total_nodes BIGINT"},
+            {"HEAP_TOTAL_BYTES", "heap_total_bytes BIGINT"},
+            {"HEAP_FREE_BYTES", "heap_free_bytes BIGINT"},
+            {"NOISE_FLOOR", "noise_floor INT"},
+            {"HEALTH_HEART_BPM", "health_heart_bpm BIGINT"},
+            {"HEALTH_SPO2", "health_spo2 BIGINT"},
+            {"HEALTH_TEMPERATURE", "health_temperature REAL"},
+            {"HOST_UPTIME_SECONDS", "host_uptime_seconds BIGINT"},
+            {"HOST_FREEMEM_BYTES", "host_freemem_bytes BIGINT"},
+            {"HOST_DISKFREE1_BYTES", "host_diskfree1_bytes BIGINT"},
+            {"HOST_DISKFREE2_BYTES", "host_diskfree2_bytes BIGINT"},
+            {"HOST_DISKFREE3_BYTES", "host_diskfree3_bytes BIGINT"},
+            {"HOST_LOAD1", "host_load1 BIGINT"},
+            {"HOST_LOAD5", "host_load5 BIGINT"},
+            {"HOST_LOAD15", "host_load15 BIGINT"},
+            {"HOST_USER_STRING", "host_user_string VARCHAR(512)"},
+            {"TRAFFIC_PACKETS_INSPECTED", "traffic_packets_inspected BIGINT"},
+            {"TRAFFIC_POSITION_DEDUP_DROPS", "traffic_position_dedup_drops BIGINT"},
+            {"TRAFFIC_NODEINFO_CACHE_HITS", "traffic_nodeinfo_cache_hits BIGINT"},
+            {"TRAFFIC_RATE_LIMIT_DROPS", "traffic_rate_limit_drops BIGINT"},
+            {"TRAFFIC_UNKNOWN_PACKET_DROPS", "traffic_unknown_packet_drops BIGINT"},
+            {"TRAFFIC_HOP_EXHAUSTED_PACKETS", "traffic_hop_exhausted_packets BIGINT"},
+            {"TRAFFIC_ROUTER_HOPS_PRESERVED", "traffic_router_hops_preserved BIGINT"}
+    };
 
     private DatabaseMigrator() {}
 
@@ -116,6 +207,8 @@ public final class DatabaseMigrator {
             if (version < 18) { migrateToV18(connection); version = 18; }
             if (version < 19) { migrateToV19(connection); version = 19; }
             if (version < 20) { migrateToV20(connection); version = 20; }
+            if (version < 21) { migrateToV21(connection); version = 21; }
+            if (version < 22) { migrateToV22(connection); version = 22; }
 
             setVersion(connection, CURRENT_VERSION);
             log.info("Database migration complete, schema version = {}", CURRENT_VERSION);
@@ -766,6 +859,83 @@ public final class DatabaseMigrator {
     private static void migrateToV20(Connection connection) throws SQLException {
         createConfigHelpTables(connection);
         log.info("Migration v20: created configuration help document tables");
+    }
+
+    /** v21: owner-scoped favorite and ignored node flags. */
+    private static void migrateToV21(Connection connection) throws SQLException {
+        createNodeFlagsTable(connection);
+        backfillNodeFlags(connection, inferOwnerNodeId());
+        log.info("Migration v21: created owner-scoped node flags");
+    }
+
+    /** v22: typed storage for every Meshtastic telemetry variant. */
+    private static void migrateToV22(Connection connection) throws SQLException {
+        if (!tableExists(connection, "TELEMETRY_HISTORY")) {
+            log.info("Migration v22: skipped extended telemetry columns because telemetry_history is absent");
+            return;
+        }
+
+        try (Statement stmt = connection.createStatement()) {
+            for (String[] column : TELEMETRY_V22_COLUMNS) {
+                addColumnIfMissing(stmt, connection, "TELEMETRY_HISTORY", column[0], column[1]);
+            }
+            stmt.execute("""
+                    CREATE TABLE IF NOT EXISTS telemetry_one_wire_temperature (
+                        telemetry_id BIGINT NOT NULL,
+                        sensor_index INT NOT NULL,
+                        temperature  REAL,
+                        PRIMARY KEY (telemetry_id, sensor_index),
+                        CONSTRAINT fk_telemetry_one_wire
+                            FOREIGN KEY (telemetry_id) REFERENCES telemetry_history(id)
+                            ON DELETE CASCADE
+                    )
+                    """);
+            stmt.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_telemetry_one_wire_telemetry
+                    ON telemetry_one_wire_temperature (telemetry_id)
+                    """);
+        }
+        log.info("Migration v22: added typed telemetry columns and one-wire temperature table");
+    }
+
+    private static void createNodeFlagsTable(Connection connection) throws SQLException {
+        try (Statement stmt = connection.createStatement()) {
+            stmt.execute("""
+                    CREATE TABLE IF NOT EXISTS node_flags (
+                        owner_node_id VARCHAR(20) NOT NULL DEFAULT '',
+                        node_id       VARCHAR(20) NOT NULL,
+                        favorite      BOOLEAN DEFAULT FALSE,
+                        ignored       BOOLEAN DEFAULT FALSE,
+                        PRIMARY KEY (owner_node_id, node_id)
+                    )
+                    """);
+            stmt.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_node_flags_node
+                    ON node_flags (node_id)
+                    """);
+        }
+    }
+
+    private static void backfillNodeFlags(Connection connection, String ownerNodeId) throws SQLException {
+        if (!tableExists(connection, "NODES")
+                || !columnExists(connection, "NODES", "NODE_ID")
+                || !columnExists(connection, "NODES", "FAVORITE")
+                || !columnExists(connection, "NODES", "IGNORED")) {
+            log.info("Migration v21: skipped node_flags backfill because nodes table is incomplete");
+            return;
+        }
+        try (PreparedStatement ps = connection.prepareStatement("""
+                MERGE INTO node_flags (owner_node_id, node_id, favorite, ignored)
+                SELECT ?, node_id, favorite, ignored
+                FROM nodes
+                WHERE COALESCE(favorite, FALSE) = TRUE OR COALESCE(ignored, FALSE) = TRUE
+                """)) {
+            ps.setString(1, ownerNodeId != null ? ownerNodeId : "");
+            int updated = ps.executeUpdate();
+            if (updated > 0) {
+                log.info("Migration v21: backfilled {} node flag rows for owner '{}'", updated, ownerNodeId);
+            }
+        }
     }
 
     /**

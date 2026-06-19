@@ -1,6 +1,6 @@
 # Поддержка MeshCore
 
-**Язык:** Русский | [English](meshcore-support.md)
+**Язык:** Русский | [English](meshcore-support.md) | [Deutsch](meshcore-support.de.md)
 
 MeshApp поддерживает MeshCore-устройства через два разных протокольных режима:
 

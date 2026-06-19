@@ -151,6 +151,13 @@ class ConfigDescriptionResolverTest {
             )
         );
         assertTrue(
+            repository.hasArticleForTests(
+                I18n.LANGUAGE_DE,
+                "section",
+                "lora"
+            )
+        );
+        assertTrue(
             repository
                 .articleForTests(
                     I18n.LANGUAGE_EN,
@@ -169,6 +176,16 @@ class ConfigDescriptionResolverTest {
                 )
                 .summary()
                 .contains("Роль определяет")
+        );
+        assertTrue(
+            repository
+                .articleForTests(
+                    I18n.LANGUAGE_DE,
+                    "field",
+                    "meshtastic.Config.DeviceConfig.role"
+                )
+                .summary()
+                .contains("Die Rolle bestimmt")
         );
     }
 
@@ -201,6 +218,18 @@ class ConfigDescriptionResolverTest {
         assertTrue(
             repository
                 .helpFor(longName, "de")
+                .summary()
+                .contains("Vollständiger Gerätename")
+        );
+        assertTrue(
+            repository
+                .helpFor(longName, "de-DE")
+                .summary()
+                .contains("Vollständiger Gerätename")
+        );
+        assertTrue(
+            repository
+                .helpFor(longName, "it")
                 .summary()
                 .contains("Full device name")
         );
@@ -311,6 +340,11 @@ class ConfigDescriptionResolverTest {
             repository,
             I18n.LANGUAGE_EN
         );
+        assertHelpDatabaseCovers(
+            required,
+            repository,
+            I18n.LANGUAGE_DE
+        );
     }
 
     @Test
@@ -321,6 +355,13 @@ class ConfigDescriptionResolverTest {
             1,
             repository.documentVersionForTests(
                 I18n.LANGUAGE_EN,
+                "config/common"
+            )
+        );
+        assertEquals(
+            1,
+            repository.documentVersionForTests(
+                I18n.LANGUAGE_DE,
                 "config/common"
             )
         );

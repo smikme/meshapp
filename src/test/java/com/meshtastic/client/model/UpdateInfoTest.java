@@ -188,6 +188,7 @@ class UpdateInfoTest {
                 """);
 
         assertEquals("English notes", info.getReleaseNotes("en"));
+        assertEquals("English notes", info.getReleaseNotes("de-DE"));
     }
 
     @Test

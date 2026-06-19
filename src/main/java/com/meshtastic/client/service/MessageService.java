@@ -87,8 +87,6 @@ public final class MessageService {
                 .setPacket(packet)
                 .build();
 
-        handler.sendToRadio(toRadio);
-
         NodeData myNode = state.getNodeDb().get(state.getMyNodeNum());
         String myNodeId = myNode != null ? myNode.getNodeId() : null;
 
@@ -110,6 +108,7 @@ public final class MessageService {
         MessageDbService.getInstance().save(msg, chatType, chatKey, ownerNodeId);
         state.addMessage(msg);
         state.registerPendingAck(packetId, msg);
+        handler.sendToRadio(toRadio);
         return msg;
     }
 
@@ -292,8 +291,11 @@ public final class MessageService {
                 .setWantAck(true)
                 .build();
 
+        if (!saveOutgoingReaction(state, "channel", String.valueOf(channelIndex), targetMessage, emoji, now, packetId)) {
+            return false;
+        }
         handler.sendToRadio(MeshProtos.ToRadio.newBuilder().setPacket(packet).build());
-        return saveOutgoingReaction(state, "channel", String.valueOf(channelIndex), targetMessage, emoji, now, packetId);
+        return true;
     }
 
     /**
@@ -348,8 +350,11 @@ public final class MessageService {
         }
         MeshProtos.MeshPacket packet = packetBuilder.build();
 
+        if (!saveOutgoingReaction(state, "dm", peerNodeId, targetMessage, emoji, now, packetId)) {
+            return false;
+        }
         handler.sendToRadio(MeshProtos.ToRadio.newBuilder().setPacket(packet).build());
-        return saveOutgoingReaction(state, "dm", peerNodeId, targetMessage, emoji, now, packetId);
+        return true;
     }
 
     private static boolean retryChannelMessage(ProtocolHandler handler,
@@ -371,8 +376,8 @@ public final class MessageService {
                 .setWantAck(true)
                 .build();
 
-        handler.sendToRadio(MeshProtos.ToRadio.newBuilder().setPacket(packet).build());
         state.registerPendingAck(packetId, message);
+        handler.sendToRadio(MeshProtos.ToRadio.newBuilder().setPacket(packet).build());
         return true;
     }
 
@@ -1392,8 +1397,8 @@ public final class MessageService {
         }
         log.debug("Sending DM to {} (nodeNum={}) via {} transport, channel={}",
                 peerNodeId, Integer.toUnsignedString(peerNodeNum), usePkiTransport ? "PKI" : "legacy", directChannel);
-        handler.sendToRadio(MeshProtos.ToRadio.newBuilder().setPacket(packetBuilder.build()).build());
         state.registerPendingAck(packetId, msg);
+        handler.sendToRadio(MeshProtos.ToRadio.newBuilder().setPacket(packetBuilder.build()).build());
     }
 
     private static boolean prepareMessageForRetry(MeshMessage message, int newPacketId) {

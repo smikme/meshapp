@@ -1,6 +1,6 @@
 # Lua API для скриптов MeshApp
 
-**Язык:** Русский | [English](lua-api.md)
+**Язык:** Русский | [English](lua-api.md) | [Deutsch](lua-api.de.md)
 
 MeshApp выполняет пользовательские Lua-скрипты в sandbox-среде LuaJ. Скриптам доступен namespace `mesh`, базовые функции Lua, библиотеки `string`, `table`, `math`, `coroutine`, `bit32` и функции вроде `pairs`, `ipairs`, `pcall`, `tonumber`, `tostring`. Небезопасные глобальные API отключены: `io`, `os`, `debug`, `package`, `require`, `dofile`, `loadfile`, `luajava`, `collectgarbage`, `module`.
 
@@ -178,9 +178,53 @@ end
 | `print(...)` | Пишет строку в вывод скрипта; аргументы объединяются табуляцией |
 | `mesh.log(text)` | Пишет `text` в вывод скрипта |
 | `mesh.now()` | Возвращает Unix time в секундах |
+| `mesh.localtime([epoch_seconds])` | Возвращает таблицу локальных даты и времени для текущего момента или timestamp |
+| `mesh.date([epoch_seconds])` | Возвращает локальную дату в системном региональном формате |
+| `mesh.time([epoch_seconds])` | Возвращает локальное время в системном региональном формате |
+| `mesh.datetime([epoch_seconds])` | Возвращает локальные дату и время в системном региональном формате |
+| `mesh.iso_date([epoch_seconds])` | Возвращает стабильную локальную дату: `YYYY-MM-DD` |
+| `mesh.iso_time([epoch_seconds])` | Возвращает стабильное локальное время: `HH:MM:SS` |
+| `mesh.iso_datetime([epoch_seconds])` | Возвращает стабильные локальные дату и время: `YYYY-MM-DD HH:MM:SS` |
 | `mesh.sleep(seconds)` | Блокирующая пауза от `0` до `10` секунд |
+| `mesh.json.*` | Функции кодирования и разбора JSON |
+| `mesh.timer.*` | Таймеры приложения, которые вызывают `on_timer(event)` |
 | `mesh.owner()` | Возвращает таблицу `{ node_id, node_num, connection_id }` текущего узла |
 | `mesh.command()` | Возвращает текущую команду или пустую таблицу вне командного запуска |
+
+### Время и даты
+
+Все функции времени используют системный часовой пояс приложения. Короткие
+`mesh.date(...)`, `mesh.time(...)` и `mesh.datetime(...)` предназначены для
+текста, который видит пользователь, и используют системный региональный формат,
+включая 12/24-часовой формат времени и секунды. Для стабильных строк в ключах хранилища,
+сортировке, именах файлов и сравнениях используйте `mesh.iso_date(...)`,
+`mesh.iso_time(...)` или `mesh.iso_datetime(...)`.
+
+`mesh.localtime([epoch_seconds])` возвращает таблицу с числовыми полями и
+строками в локализованном и стабильном форматах:
+
+| Поле | Значение |
+|------|----------|
+| `year`, `month`, `day` | Локальная календарная дата |
+| `hour`, `minute`, `second` | Локальное время |
+| `min`, `sec` | Алиасы для `minute` и `second` |
+| `weekday` | ISO-день недели: понедельник `1`, воскресенье `7` |
+| `wday` | Lua-стиль дня недели: воскресенье `1`, суббота `7` |
+| `yearday`, `yday` | День года |
+| `timezone`, `zone` | ID системного часового пояса, например `Europe/Moscow` |
+| `offset`, `offset_seconds` | Смещение от UTC строкой и в секундах |
+| `epoch` | Unix time в секундах |
+| `date`, `time`, `datetime` | Локализованные строки для отображения |
+| `iso_date`, `iso_time`, `iso_datetime` | Стабильные локальные строки |
+| `iso` | ISO date/time со смещением от UTC |
+
+```lua
+local t = mesh.localtime()
+mesh.log(t.datetime .. " " .. t.timezone)
+
+local sent_at = mesh.datetime(msg.timestamp)
+local key = "daily:" .. mesh.iso_date()
+```
 
 ## Callback-функции
 
@@ -194,8 +238,65 @@ end
 | `on_traceroute(event)` | После результата `mesh.traceroute.request(...)` |
 | `on_node_info(event)` | После результата `mesh.nodeinfo.request(...)` |
 | `on_admin(event)` | После progress/result событий remote administration из `mesh.admin.*` |
+| `on_timer(event)` | После срабатывания таймера из `mesh.timer.*` |
 | `on_canvas_event(event)` | После события плавающего Canvas-окна: мышь, клавиатура, resize, open/close |
 | `on_canvas_frame(event)` | По таймеру Canvas-окна, если задан `fps` или вызван `mesh.canvas.set_fps(...)` |
+
+## `mesh.timer`
+
+Таймеры управляются MeshApp, а не Lua-циклом `while true`. Скрипт остаётся
+запущенным, пока у него есть активные таймеры. Callback-и таймера доставляются
+последовательно в Lua executor скрипта; если повторяющийся таймер сработал снова,
+пока предыдущий callback ещё стоит в очереди, MeshApp пропускает лишний tick,
+а не запускает callback-и параллельно и не догоняет их пачкой.
+
+| Функция | Возврат | Назначение |
+|---------|---------|------------|
+| `mesh.timer.after(seconds[, options])` | `timer_id` | Один раз вызывает `on_timer(event)` через `seconds` |
+| `mesh.timer.every(seconds[, options])` | `timer_id` | Вызывает `on_timer(event)` повторно |
+| `mesh.timer.cancel(timer_id)` | boolean | Отменяет один активный таймер |
+| `mesh.timer.cancel_all()` | number | Отменяет все таймеры и возвращает их количество |
+
+`seconds` должен быть от `0.1` до `604800` секунд. `options` может содержать:
+
+| Опция | Тип | Назначение |
+|-------|-----|------------|
+| `name` | string | Имя таймера, копируется в `event.name` |
+| `immediate` | boolean | Для `every`: сработать один раз сразу до первого интервала |
+| `align` | string | Для `every`: `interval` или `wall`, по умолчанию `interval` |
+
+`align = "interval"` запускает таймер каждые N секунд от предыдущего
+запланированного tick. `align = "wall"` привязывает запуск к локальным часам.
+Например, `600` секунд будет срабатывать в `HH:00`, `HH:10`, `HH:20` и далее.
+
+Поля события таймера:
+
+| Поле | Значение |
+|------|----------|
+| `type` | Всегда `timer` |
+| `source` | Источник API, например `mesh.timer.every` |
+| `id`, `timer_id` | ID таймера |
+| `name` | Имя из options или пустая строка |
+| `interval_seconds`, `seconds` | Интервал или задержка таймера |
+| `repeating` | Повторяется ли таймер |
+| `align` | `interval` или `wall` |
+| `count` | Количество доставленных callback-ов этого таймера |
+| `scheduled_epoch`, `actual_epoch` | Запланированное и фактическое Unix time в секундах |
+| `drift_seconds` | `actual_epoch - scheduled_epoch` |
+| `time` | Таблица `mesh.localtime(actual_epoch)` |
+
+```lua
+mesh.timer.every(600, {
+    name = "ten-minute-job",
+    align = "wall"
+})
+
+function on_timer(event)
+    if event.name == "ten-minute-job" then
+        mesh.log("tick at " .. event.time.iso_datetime)
+    end
+end
+```
 
 ## `mesh.chat`
 
@@ -224,6 +325,63 @@ KV-хранилище изолировано по скрипту и сохран
 | `mesh.kv.delete(key)` | boolean | Удаляет ключ |
 | `mesh.kv.list()` | table | Возвращает все ключи скрипта |
 | `mesh.kv.clear()` | `true` | Очищает KV-хранилище скрипта |
+
+## `mesh.json`
+
+Функции JSON преобразуют JSON-текст в обычные Lua-значения и обратно. Объекты
+становятся таблицами со строковыми ключами, массивы — таблицами с индексами от
+`1`. JSON `null` представлен значением `mesh.json.null`, потому что Lua `nil`
+удаляет поле из таблицы.
+
+| Функция | Возврат | Назначение |
+|---------|---------|------------|
+| `mesh.json.decode(text)` | value | Разбирает JSON-текст или бросает ошибку |
+| `mesh.json.try_decode(text)` | `value, nil` или `nil, error` | Разбирает JSON без остановки скрипта |
+| `mesh.json.encode(value[, options])` | string | Кодирует Lua-значение в компактный JSON |
+| `mesh.json.pretty(value)` | string | Кодирует Lua-значение в форматированный JSON |
+| `mesh.json.array(table)` | table | Помечает Lua-таблицу как JSON-массив, включая пустой массив |
+| `mesh.json.is_null(value)` | boolean | Возвращает `true` для `mesh.json.null` |
+| `mesh.json.null` | value | Sentinel-значение для JSON null |
+
+Преобразование значений:
+
+| JSON | Lua |
+|------|-----|
+| object | table со строковыми ключами |
+| array | table с индексами `1..n` |
+| string | string |
+| number | number |
+| boolean | boolean |
+| null | `mesh.json.null` |
+
+При кодировании таблица со сплошными целочисленными ключами `1..n` становится
+JSON-массивом. Таблица со строковыми ключами становится JSON-объектом.
+Смешанные таблицы или массивы с пропусками вызывают ошибку. Пустая таблица
+кодируется как `{}`, если она не создана или не помечена через
+`mesh.json.array({})`. `mesh.json.encode(value, true)` или
+`mesh.json.encode(value, { pretty = true })` создаёт форматированный JSON.
+
+Входной JSON ограничен 1 MB. Вложенность ограничена 64 уровнями, а один объект
+или массив может содержать до 50 000 элементов.
+
+```lua
+local response = mesh.curl.get("https://example.com/api/status")
+local data, err = mesh.json.try_decode(response.body)
+if not data then
+    mesh.log("bad JSON: " .. err)
+    return
+end
+
+if not mesh.json.is_null(data.status) then
+    mesh.log("status: " .. data.status)
+end
+
+local body = mesh.json.encode({
+    at = mesh.iso_datetime(),
+    values = mesh.json.array({ 1, 2, 3 }),
+    empty = mesh.json.array({})
+})
+```
 
 ## `mesh.curl`
 
@@ -310,7 +468,7 @@ HTTP(S)-запросы выполняются встроенным Java HTTP-к�
 
 | Поле | Тип | Назначение |
 |------|-----|------------|
-| `type` | string | Тип создаваемого компонента: `label`, `button`, `text_field`, `password_field`, `text_area`, `checkbox`, `toggle_switch`, `combo_box`, `segmented_control`, `list_view`, `slider`, `progress_bar`, `ring_progress`, `separator`, `spacer`, `message`, `tile`, `card`, `vbox`, `hbox`, `split_pane`, `scroll_pane` |
+| `type` | string | Тип создаваемого компонента: `label`, `button`, `text_field`, `password_field`, `text_area`, `checkbox`, `toggle_switch`, `combo_box`, `segmented_control`, `list_view`, `slider`, `progress_bar`, `ring_progress`, `line_chart`, `area_chart`, `bar_chart`, `separator`, `spacer`, `message`, `tile`, `card`, `vbox`, `hbox`, `split_pane`, `scroll_pane` |
 | `id` | string | Стабильный id компонента. Если не задан, MeshApp создаёт id автоматически и возвращает его из `add(...)` |
 | `parent` | string | Id контейнера `card`, `vbox`, `hbox`, `split_pane` или `scroll_pane`. Если не задан, компонент добавляется в корень формы |
 | `text` | string | Надпись или заголовок компонента: `label`, `button`, `checkbox`, `toggle_switch`, `message`, `tile` |
@@ -318,7 +476,13 @@ HTTP(S)-запросы выполняются встроенным Java HTTP-к�
 | `value` | string/number/boolean | Текущее значение компонента. Для `progress_bar` и `ring_progress` используется диапазон `0..1`, для `slider` значение ограничивается `min..max`; для `message` и `tile` это описание |
 | `selected` | boolean | Алиас `value` для `checkbox` и `toggle_switch`, если `value` не задан |
 | `items` | array<string> | Список вариантов `combo_box`, `segmented_control` и `list_view` |
-| `min`, `max` | number | Диапазон `slider`; по умолчанию `0..100` |
+| `min`, `max` | number | Диапазон `slider`; по умолчанию `0..100`. Для графиков задаёт диапазон Y-оси, если указаны оба значения |
+| `series` | array<table> | Ряды данных для `line_chart`, `area_chart` и `bar_chart`; каждый ряд поддерживает `name`, `color` и `points` |
+| `x_label`, `y_label` | string | Подписи осей для chart-компонентов |
+| `x_type` | string | Режим X-оси графика; `time`, `timestamp` или `epoch` форматируют Unix seconds как локальное время |
+| `chart_type` | string | Для `type = "chart"` выбирает `line`, `area` или `bar` |
+| `legend` | boolean | Показывает или скрывает легенду графика; по умолчанию легенда видна, если рядов больше одного |
+| `symbols` | boolean | Показывает точки на `line_chart` и `area_chart`; по умолчанию `false` |
 | `orientation` | string | Направление `horizontal` или `vertical` для `separator`, `spacer`, `split_pane` |
 | `width`, `height` | number | Предпочитаемый размер компонента в пикселях |
 | `min_width`, `min_height` | number | Минимальный размер компонента в пикселях |
@@ -333,6 +497,8 @@ HTTP(S)-запросы выполняются встроенным Java HTTP-к�
 | `style` | string | Для `button` при создании поддерживается `accent`; для текстовых компонентов поддерживается `monospace` |
 
 Через `mesh.form.set(id, options)` можно менять поддерживаемые свойства вроде `text`, `prompt`, `value`, `items`, `min`, `max`, размеров, `grow`, `read_only`, `wrap`, `monospace`, `disabled` и `visible`. Поля `type`, `id` и `parent` применяются только при создании компонента; чтобы изменить их, удалите компонент и создайте новый.
+
+Chart `series` — список таблиц рядов. У каждого ряда есть `name`, необязательный CSS-цвет `color` и `points`. Точка может быть `{ x = 1700000000, y = 21.5 }`, `{ timestamp = 1700000000, value = 21.5 }`, `{ 1700000000, 21.5 }` или просто числом; тогда X-значением станет индекс точки.
 
 ### Типы компонентов
 
@@ -351,6 +517,9 @@ HTTP(S)-запросы выполняются встроенным Java HTTP-к�
 | `slider` | Ползунок с числовым значением | `id`, `parent`, `min`, `max`, `value`, `disabled`, `visible` | Number | `change` при перемещении |
 | `progress_bar` | Индикатор прогресса | `id`, `parent`, `value`, `disabled`, `visible` | Number `0..1` | Нет |
 | `ring_progress` | Кольцевой индикатор прогресса AtlantaFX | `id`, `parent`, `value`, `width`, `height`, `disabled`, `visible` | Number `0..1` | Нет |
+| `line_chart` | Числовой линейный график | `id`, `parent`, `text`, `series`, `x_label`, `y_label`, `x_type`, `min`, `max`, `legend`, `symbols`, размеры | `nil` | Нет |
+| `area_chart` | Числовой график с заливкой | `id`, `parent`, `text`, `series`, `x_label`, `y_label`, `x_type`, `min`, `max`, `legend`, `symbols`, размеры | `nil` | Нет |
+| `bar_chart` | Числовой столбчатый график | `id`, `parent`, `text`, `series`, `x_label`, `y_label`, `x_type`, `min`, `max`, `legend`, размеры | `nil` | Нет |
 | `separator` | Разделитель | `id`, `parent`, `orientation`, `disabled`, `visible` | `nil` | Нет |
 | `spacer` | Пустое пространство AtlantaFX | `id`, `parent`, `orientation`, `value`, `grow`, `disabled`, `visible` | `nil` | Нет |
 | `message` | Сообщение AtlantaFX с заголовком и описанием | `id`, `parent`, `text`, `value`, `disabled`, `visible` | Описание | `action`, `close` |

@@ -9,6 +9,7 @@ import org.slf4j.LoggerFactory;
 
 import java.util.List;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -44,6 +45,11 @@ public class ProtocolHandler {
     private static final int OUTBOUND_PRIORITY_DEFAULT = 0;
     private static final int OUTBOUND_PRIORITY_HEARTBEAT = 1;
     private static final int OUTBOUND_PRIORITY_MQTT_PROXY = 2;
+    private static final int DEVICE_QUEUE_MAX_RETRIES = 5;
+    private static final long DEVICE_QUEUE_RETRY_BASE_DELAY_MS = 400;
+    private static final long DEVICE_QUEUE_RETRY_MAX_DELAY_MS = 5_000;
+    private static final long DEVICE_QUEUE_FULL_BACKOFF_MS = 500;
+    private static final long DEVICE_QUEUE_STATUS_TIMEOUT_MS = 30_000;
 
     private final TransportConnection connection;
     private final String connectionId;
@@ -61,10 +67,18 @@ public class ProtocolHandler {
     private final AtomicBoolean shutdownRequested = new AtomicBoolean(false);
     private final AtomicInteger incomingQueueWarnBucket = new AtomicInteger(0);
     private final AtomicLong outboundSequence = new AtomicLong();
+    private final AtomicLong deviceQueueBackoffUntilNanos = new AtomicLong(0);
+    private final ConcurrentHashMap<Integer, OutboundFrame> pendingDeviceQueueStatus = new ConcurrentHashMap<>();
 
     private final ScheduledExecutorService heartbeatScheduler =
             Executors.newSingleThreadScheduledExecutor(r -> {
                 Thread t = new Thread(r, "heartbeat");
+                t.setDaemon(true);
+                return t;
+            });
+    private final ScheduledExecutorService outboundRetryScheduler =
+            Executors.newSingleThreadScheduledExecutor(r -> {
+                Thread t = new Thread(r, "proto-send-retry");
                 t.setDaemon(true);
                 return t;
             });
@@ -130,7 +144,8 @@ public class ProtocolHandler {
                 classifyOutboundPriority(toRadio),
                 outboundSequence.getAndIncrement(),
                 toRadio,
-                expectResponseAfterWrite
+                expectResponseAfterWrite,
+                0
         ));
     }
 
@@ -173,12 +188,14 @@ public class ProtocolHandler {
     public void shutdown() {
         stopHeartbeat();
         heartbeatScheduler.shutdownNow();
+        outboundRetryScheduler.shutdownNow();
         if (!shutdownRequested.compareAndSet(false, true)) {
             return;
         }
         connection.setDataListener(null);
         incomingQueue.clear();
         outgoingQueue.clear();
+        pendingDeviceQueueStatus.clear();
         senderThread.interrupt();
         incomingQueue.offer(SHUTDOWN_MARKER);
     }
@@ -260,6 +277,10 @@ public class ProtocolHandler {
     }
 
     private void sendOutboundFrame(OutboundFrame outbound) {
+        if (delayForDeviceQueueBackoff(outbound)) {
+            return;
+        }
+
         MeshProtos.ToRadio toRadio = outbound.toRadio();
         byte[] frame = PacketFramer.frame(toRadio);
         log.trace("Sending ToRadio: {} ({} bytes framed)", toRadio.getPayloadVariantCase(), frame.length);
@@ -267,7 +288,117 @@ public class ProtocolHandler {
         if (monitorService != null && toRadio.hasPacket()) {
             monitorService.recordOutgoing(connectionId, toRadio.getPacket());
         }
+        int packetId = outbound.packetId();
+        if (packetId != 0) {
+            trackPendingDeviceQueueStatus(packetId, outbound);
+        }
         connection.sendBytes(frame, outbound.expectResponseAfterWrite());
+    }
+
+    private void trackPendingDeviceQueueStatus(int packetId, OutboundFrame outbound) {
+        pendingDeviceQueueStatus.put(packetId, outbound);
+        try {
+            outboundRetryScheduler.schedule(
+                    () -> pendingDeviceQueueStatus.remove(packetId, outbound),
+                    DEVICE_QUEUE_STATUS_TIMEOUT_MS,
+                    TimeUnit.MILLISECONDS);
+        } catch (RuntimeException e) {
+            if (!shutdownRequested.get()) {
+                log.debug("Failed to schedule QueueStatus cleanup for packet {}",
+                        Integer.toUnsignedString(packetId), e);
+            }
+        }
+    }
+
+    private boolean delayForDeviceQueueBackoff(OutboundFrame outbound) {
+        if (!outbound.hasMeshPacket()) {
+            return false;
+        }
+        long now = System.nanoTime();
+        long until = deviceQueueBackoffUntilNanos.get();
+        if (until <= now) {
+            return false;
+        }
+        long delayMs = Math.max(1, TimeUnit.NANOSECONDS.toMillis(until - now));
+        scheduleOutboundRetry(outbound, delayMs, "device queue backoff");
+        return true;
+    }
+
+    private void handleQueueStatus(MeshProtos.QueueStatus queueStatus) {
+        int packetId = queueStatus.getMeshPacketId();
+        if (packetId == 0) {
+            return;
+        }
+
+        OutboundFrame outbound = pendingDeviceQueueStatus.remove(packetId);
+        if (outbound == null) {
+            return;
+        }
+
+        if (queueStatus.getRes() != 0) {
+            retryRejectedOutbound(outbound, queueStatus);
+            return;
+        }
+
+        if (queueStatus.getMaxlen() > 0 && queueStatus.getFree() == 0) {
+            extendDeviceQueueBackoff(DEVICE_QUEUE_FULL_BACKOFF_MS);
+            log.debug("Device transmit queue is full after packet {} (free=0/{})",
+                    Integer.toUnsignedString(packetId), queueStatus.getMaxlen());
+        }
+    }
+
+    private void retryRejectedOutbound(OutboundFrame outbound, MeshProtos.QueueStatus queueStatus) {
+        int packetId = outbound.packetId();
+        int nextAttempt = outbound.deviceQueueAttempts() + 1;
+        if (nextAttempt > DEVICE_QUEUE_MAX_RETRIES) {
+            String reason = "QUEUE_STATUS_" + queueStatus.getRes();
+            log.warn("Giving up on packet {} after {} device queue rejections (res={}, free={}/{})",
+                    Integer.toUnsignedString(packetId), outbound.deviceQueueAttempts(),
+                    queueStatus.getRes(), queueStatus.getFree(), queueStatus.getMaxlen());
+            notifyListeners(l -> l.onToRadioSendFailed(outbound.toRadio(), reason));
+            return;
+        }
+
+        long delayMs = deviceQueueRetryDelayMs(nextAttempt);
+        if (queueStatus.getMaxlen() > 0 && queueStatus.getFree() == 0) {
+            extendDeviceQueueBackoff(Math.max(delayMs, DEVICE_QUEUE_FULL_BACKOFF_MS));
+        }
+        log.debug("Device rejected packet {} with queue status res={} (free={}/{}); retry {}/{} in {} ms",
+                Integer.toUnsignedString(packetId), queueStatus.getRes(), queueStatus.getFree(),
+                queueStatus.getMaxlen(), nextAttempt, DEVICE_QUEUE_MAX_RETRIES, delayMs);
+        scheduleOutboundRetry(outbound.withDeviceQueueAttempts(nextAttempt), delayMs,
+                "device queue rejected packet " + Integer.toUnsignedString(packetId));
+    }
+
+    private void extendDeviceQueueBackoff(long delayMs) {
+        long until = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(Math.max(1, delayMs));
+        long previous = deviceQueueBackoffUntilNanos.get();
+        while (until > previous && !deviceQueueBackoffUntilNanos.compareAndSet(previous, until)) {
+            previous = deviceQueueBackoffUntilNanos.get();
+        }
+    }
+
+    private long deviceQueueRetryDelayMs(int attempt) {
+        long multiplier = 1L << Math.min(8, Math.max(0, attempt - 1));
+        return Math.min(DEVICE_QUEUE_RETRY_MAX_DELAY_MS, DEVICE_QUEUE_RETRY_BASE_DELAY_MS * multiplier);
+    }
+
+    private void scheduleOutboundRetry(OutboundFrame outbound, long delayMs, String reason) {
+        if (shutdownRequested.get()) {
+            return;
+        }
+        try {
+            outboundRetryScheduler.schedule(() -> {
+                if (!shutdownRequested.get()) {
+                    outgoingQueue.offer(outbound);
+                }
+            }, Math.max(1, delayMs), TimeUnit.MILLISECONDS);
+        } catch (RuntimeException e) {
+            if (!shutdownRequested.get()) {
+                log.warn("Failed to schedule outbound retry after {} ms ({})", delayMs, reason, e);
+                outgoingQueue.offer(outbound);
+            }
+        }
     }
 
     private static int classifyOutboundPriority(MeshProtos.ToRadio toRadio) {
@@ -349,6 +480,7 @@ public class ProtocolHandler {
                 var qs = fromRadio.getQueueStatus();
                 log.trace("QueueStatus: res={} free={}/{} meshPacketId={}",
                         qs.getRes(), qs.getFree(), qs.getMaxlen(), qs.getMeshPacketId());
+                handleQueueStatus(qs);
                 notifyListeners(l -> l.onQueueStatus(qs));
             }
             default -> log.debug("Unhandled FromRadio variant: {}", fromRadio.getPayloadVariantCase());
@@ -368,7 +500,20 @@ public class ProtocolHandler {
     private record OutboundFrame(int priority,
                                  long sequence,
                                  MeshProtos.ToRadio toRadio,
-                                 boolean expectResponseAfterWrite) implements Comparable<OutboundFrame> {
+                                 boolean expectResponseAfterWrite,
+                                 int deviceQueueAttempts) implements Comparable<OutboundFrame> {
+
+        private boolean hasMeshPacket() {
+            return toRadio != null && toRadio.hasPacket();
+        }
+
+        private int packetId() {
+            return hasMeshPacket() ? toRadio.getPacket().getId() : 0;
+        }
+
+        private OutboundFrame withDeviceQueueAttempts(int attempts) {
+            return new OutboundFrame(priority, sequence, toRadio, expectResponseAfterWrite, attempts);
+        }
 
         @Override
         public int compareTo(OutboundFrame other) {

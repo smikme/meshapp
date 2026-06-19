@@ -72,6 +72,74 @@ class LuaCompletionEngineTest {
     }
 
     @Test
+    void completesTimeHelpersAndLocaltimeFields() {
+        LuaCompletionEngine.CompletionResult meshResult = complete("mesh.iso_|");
+        assertItemsContain(meshResult, "iso_date(epoch_seconds)");
+        assertItemsContain(meshResult, "iso_time(epoch_seconds)");
+        assertItemsContain(meshResult, "iso_datetime(epoch_seconds)");
+
+        LuaCompletionEngine.CompletionResult localtimeResult = complete("""
+                local t = mesh.localtime()
+                t.|
+                """);
+        assertItemsContain(localtimeResult, "datetime");
+        assertItemsContain(localtimeResult, "iso_datetime");
+        assertItemsContain(localtimeResult, "offset_seconds");
+        assertItemsContain(localtimeResult, "timezone");
+        assertItemsContain(localtimeResult, "weekday");
+        assertItemsContain(localtimeResult, "wday");
+    }
+
+    @Test
+    void completesTimerApiAndCallbackEvent() {
+        LuaCompletionEngine.CompletionResult apiResult = complete("""
+                mesh.timer.|
+                """);
+        assertItemsContain(apiResult, "after(seconds, options)");
+        assertItemsContain(apiResult, "every(seconds, options)");
+        assertItemsContain(apiResult, "cancel(timer_id)");
+        assertItemsContain(apiResult, "cancel_all()");
+
+        LuaCompletionEngine.CompletionResult eventResult = complete("""
+                function on_timer(event)
+                    event.|
+                end
+                """);
+        assertItemsContain(eventResult, "actual_epoch");
+        assertItemsContain(eventResult, "drift_seconds");
+        assertItemsContain(eventResult, "repeating");
+        assertItemsContain(eventResult, "time");
+
+        LuaCompletionEngine.CompletionResult timeResult = complete("""
+                function on_timer(event)
+                    event.time.iso_|
+                end
+                """);
+        assertItemsContain(timeResult, "iso_datetime");
+    }
+
+    @Test
+    void completesJsonApi() {
+        LuaCompletionEngine.CompletionResult result = complete("""
+                mesh.json.|
+                """);
+
+        assertItemsContain(result, "decode(text)");
+        assertItemsContain(result, "try_decode(text)");
+        assertItemsContain(result, "encode(value, options)");
+        assertItemsContain(result, "pretty(value)");
+        assertItemsContain(result, "array(table)");
+        assertItemsContain(result, "is_null(value)");
+        assertItemsContain(result, "null");
+
+        LuaCompletionEngine.CompletionResult aliasResult = complete("""
+                local json = mesh.json
+                json.en|
+                """);
+        assertItemsContain(aliasResult, "encode(value, options)");
+    }
+
+    @Test
     void infersLoopItemTypeFromMeshNodesCall() {
         LuaCompletionEngine.CompletionResult result = complete("""
                 for _, node in ipairs(mesh.chat.nodes()) do
@@ -266,6 +334,31 @@ class LuaCompletionEngineTest {
         assertItemsContain(snapshotResult, "configs");
         assertItemsContain(snapshotResult, "module_configs");
         assertItemsContain(snapshotResult, "query_statuses");
+    }
+
+    @Test
+    void completesTelemetryApiAndFields() {
+        LuaCompletionEngine.CompletionResult apiResult = complete("""
+                mesh.telemetry.|
+                """);
+        assertItemsContain(apiResult, "recent(options)");
+        assertItemsContain(apiResult, "for_node(node_id, options)");
+        assertItemsContain(apiResult, "query(options)");
+        assertItemsContain(apiResult, "latest(node_id)");
+
+        LuaCompletionEngine.CompletionResult fieldResult = complete("""
+                local rows = mesh.telemetry.query({ node_id = "!bbbbbbbb" })
+                for _, row in ipairs(rows) do
+                    row.gas_|
+                end
+                """);
+        assertItemsContain(fieldResult, "gas_resistance");
+
+        LuaCompletionEngine.CompletionResult radiationResult = complete("""
+                local latest = mesh.telemetry.latest("!bbbbbbbb")
+                latest.rad|
+                """);
+        assertItemsContain(radiationResult, "radiation");
     }
 
     @Test

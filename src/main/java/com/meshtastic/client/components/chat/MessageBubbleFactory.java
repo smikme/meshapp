@@ -13,6 +13,7 @@ import com.meshtastic.client.utils.ExternalUrlLauncher;
 import com.meshtastic.client.utils.NodeUtils;
 import com.meshtastic.client.utils.SvgIconLoader;
 import com.meshtastic.client.utils.UnicodeTextUtils;
+import javafx.beans.binding.Bindings;
 import javafx.beans.property.ReadOnlyDoubleProperty;
 import javafx.geometry.Bounds;
 import javafx.geometry.Insets;
@@ -26,6 +27,7 @@ import javafx.scene.control.Label;
 import javafx.scene.control.MenuItem;
 import javafx.scene.control.SeparatorMenuItem;
 import javafx.scene.control.Tooltip;
+import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
 import javafx.scene.input.Clipboard;
 import javafx.scene.input.ClipboardContent;
@@ -88,6 +90,10 @@ public class MessageBubbleFactory {
     private static final double REACTION_CHIP_EMOJI_SIZE = 14;
     private static final double META_INDICATOR_EMOJI_SIZE = 12;
     private static final double BOT_AVATAR_EMOJI_SIZE = 20;
+    private static final double IMAGE_PREVIEW_SPACING = 6;
+    private static final double IMAGE_PREVIEW_WIDTH_RATIO = 0.62;
+    private static final double IMAGE_PREVIEW_MAX_WIDTH = 320;
+    private static final double IMAGE_PREVIEW_MAX_HEIGHT = 240;
     private static final double DEFAULT_BUBBLE_WIDTH_RATIO = 0.75;
     private static final double REACTION_BUBBLE_WIDTH_RATIO = 0.90;
     private static final double SYSTEM_BUBBLE_WIDTH_RATIO = 0.85;
@@ -131,6 +137,13 @@ public class MessageBubbleFactory {
 
         /** Resends an undelivered message. */
         boolean retryMessage(MeshMessage msg);
+
+        /** Opens a MeshFiles image preview in the chat image viewer. */
+        default void openMeshFilesImage(MeshFilesImage image) {
+            Optional.ofNullable(image)
+                    .map(MeshFilesImage::url)
+                    .ifPresent(ExternalUrlLauncher::open);
+        }
     }
 
     /**
@@ -404,6 +417,7 @@ public class MessageBubbleFactory {
                 createSenderNameLabel(senderPresentation.senderName()),
                 quoteSlot,
                 createTextNode(msg),
+                createMeshFilesPreviewNode(msg).orElse(null),
                 buildIncomingFooter(msg, reactionSlot, meta)
         ));
 
@@ -442,6 +456,7 @@ public class MessageBubbleFactory {
         content.getChildren().addAll(nodes(
                 quoteSlot,
                 createTextNode(msg),
+                createMeshFilesPreviewNode(msg).orElse(null),
                 buildOutgoingFooter(msg, reactionSlot, meta)
         ));
 
@@ -485,6 +500,7 @@ public class MessageBubbleFactory {
         content.setMinHeight(Region.USE_PREF_SIZE);
         content.getChildren().addAll(nodes(
                 createBubbleTextFlow(msg.getText(), MESSAGE_TEXT_EMOJI_SIZE, "chat-bubble-text-node", "chat-bubble-text"),
+                createMeshFilesPreviewNode(msg).orElse(null),
                 createTimeLabel(msg.getTimestamp())
         ));
 
@@ -916,6 +932,74 @@ public class MessageBubbleFactory {
      */
     private Node createTextNode(MeshMessage msg) {
         return createBubbleTextFlow(msg.getText(), MESSAGE_TEXT_EMOJI_SIZE, "chat-bubble-text-node", "chat-bubble-text");
+    }
+
+    /**
+     * Creates inline image previews for MeshFiles URLs found in a message.
+     *
+     * @param msg message whose text may contain MeshFiles links
+     * @return image preview list, or empty when the message has no MeshFiles images
+     */
+    private Optional<Node> createMeshFilesPreviewNode(MeshMessage msg) {
+        List<MeshFilesImage> images = ChatUrlParser.findMeshFilesImages(msg != null ? msg.getText() : "");
+        if (images.isEmpty()) {
+            return Optional.empty();
+        }
+
+        VBox imageList = new VBox(IMAGE_PREVIEW_SPACING);
+        imageList.getStyleClass().add("chat-bubble-image-list");
+        images.stream()
+                .map(this::createMeshFilesPreview)
+                .forEach(imageList.getChildren()::add);
+        return Optional.of(imageList);
+    }
+
+    /**
+     * Creates one clickable MeshFiles preview image for a message bubble.
+     *
+     * @param meshImage normalized MeshFiles image URLs
+     * @return preview node that opens the original image when clicked
+     */
+    private Node createMeshFilesPreview(MeshFilesImage meshImage) {
+        Image previewImage = new Image(meshImage.previewUrl(), true);
+
+        ImageView imageView = new ImageView(previewImage);
+        imageView.getStyleClass().add("chat-bubble-image");
+        imageView.setPreserveRatio(true);
+        imageView.setSmooth(true);
+        imageView.fitWidthProperty().bind(Bindings.min(
+                containerWidthProp.multiply(IMAGE_PREVIEW_WIDTH_RATIO),
+                TypographyManager.scaleChat(IMAGE_PREVIEW_MAX_WIDTH)));
+        imageView.setFitHeight(TypographyManager.scaleChat(IMAGE_PREVIEW_MAX_HEIGHT));
+
+        Label failedLabel = new Label(I18n.t("chat.image.previewFailed"));
+        failedLabel.getStyleClass().add("chat-bubble-image-error");
+        failedLabel.setVisible(false);
+        failedLabel.setManaged(false);
+
+        previewImage.errorProperty().addListener((obs, wasError, isError) -> {
+            if (!isError) {
+                return;
+            }
+            imageView.setVisible(false);
+            imageView.setManaged(false);
+            failedLabel.setVisible(true);
+            failedLabel.setManaged(true);
+        });
+
+        StackPane frame = new StackPane(imageView, failedLabel);
+        frame.getStyleClass().add("chat-bubble-image-preview");
+        frame.setCursor(Cursor.HAND);
+        frame.setOnMouseClicked(event -> {
+            if (event.getButton() != MouseButton.PRIMARY) {
+                return;
+            }
+            if (event.getClickCount() == 1) {
+                actions.openMeshFilesImage(meshImage);
+            }
+            event.consume();
+        });
+        return frame;
     }
 
     /**
