@@ -466,7 +466,7 @@ Form components do not return Lua objects with their own methods. A script creat
 
 | Field | Type | Purpose |
 |-------|------|---------|
-| `type` | string | Component type to create: `label`, `button`, `text_field`, `password_field`, `text_area`, `checkbox`, `toggle_switch`, `combo_box`, `segmented_control`, `list_view`, `slider`, `progress_bar`, `ring_progress`, `separator`, `spacer`, `message`, `tile`, `card`, `vbox`, `hbox`, `split_pane`, `scroll_pane` |
+| `type` | string | Component type to create: `label`, `button`, `text_field`, `password_field`, `text_area`, `checkbox`, `toggle_switch`, `combo_box`, `segmented_control`, `list_view`, `slider`, `progress_bar`, `ring_progress`, `line_chart`, `area_chart`, `bar_chart`, `separator`, `spacer`, `message`, `tile`, `card`, `vbox`, `hbox`, `split_pane`, `scroll_pane` |
 | `id` | string | Stable component id. If omitted, MeshApp creates one and returns it from `add(...)` |
 | `parent` | string | Id of a `card`, `vbox`, `hbox`, `split_pane`, or `scroll_pane` container. If omitted, the component is added to the form root |
 | `text` | string | Label or title for `label`, `button`, `checkbox`, `toggle_switch`, `message`, or `tile` |
@@ -474,7 +474,13 @@ Form components do not return Lua objects with their own methods. A script creat
 | `value` | string/number/boolean | Current component value. `progress_bar` and `ring_progress` use `0..1`; `slider` is clamped to `min..max`; `message` and `tile` use it as the description |
 | `selected` | boolean | Alias for `checkbox` and `toggle_switch` `value` when `value` is omitted |
 | `items` | array<string> | Options for `combo_box`, `segmented_control`, and `list_view` |
-| `min`, `max` | number | `slider` range; defaults to `0..100` |
+| `min`, `max` | number | `slider` range; defaults to `0..100`. For charts, sets the Y-axis range when both values are present |
+| `series` | array<table> | Data series for `line_chart`, `area_chart`, and `bar_chart`; each series supports `name`, `color`, and `points` |
+| `x_label`, `y_label` | string | Axis labels for chart components |
+| `x_type` | string | Chart X-axis mode; use `time`, `timestamp`, or `epoch` to format Unix seconds as local time |
+| `chart_type` | string | For `type = "chart"`, selects `line`, `area`, or `bar` |
+| `legend` | boolean | Shows or hides a chart legend; by default legends are shown when a chart has more than one series |
+| `symbols` | boolean | Shows point symbols on `line_chart` and `area_chart`; defaults to `false` |
 | `orientation` | string | `horizontal` or `vertical` for `separator`, `spacer`, and `split_pane` |
 | `width`, `height` | number | Preferred component size in pixels |
 | `min_width`, `min_height` | number | Minimum component size in pixels |
@@ -489,6 +495,8 @@ Form components do not return Lua objects with their own methods. A script creat
 | `style` | string | `button` supports `accent` when created; text components support `monospace` |
 
 `mesh.form.set(id, options)` can update supported properties such as `text`, `prompt`, `value`, `items`, `min`, `max`, sizes, `grow`, `read_only`, `wrap`, `monospace`, `disabled`, and `visible`. `type`, `id`, and `parent` are creation-time fields; remove and recreate a component to change them.
+
+Chart `series` is a list of series tables. Each series has `name`, optional CSS `color`, and `points`. A point can be `{ x = 1700000000, y = 21.5 }`, `{ timestamp = 1700000000, value = 21.5 }`, `{ 1700000000, 21.5 }`, or a plain number where the X value becomes the point index.
 
 ### Component Types
 
@@ -507,6 +515,9 @@ Form components do not return Lua objects with their own methods. A script creat
 | `slider` | Numeric slider | `id`, `parent`, `min`, `max`, `value`, `disabled`, `visible` | Number | `change` when moved |
 | `progress_bar` | Progress indicator | `id`, `parent`, `value`, `disabled`, `visible` | Number `0..1` | None |
 | `ring_progress` | AtlantaFX ring progress indicator | `id`, `parent`, `value`, `width`, `height`, `disabled`, `visible` | Number `0..1` | None |
+| `line_chart` | Numeric line chart | `id`, `parent`, `text`, `series`, `x_label`, `y_label`, `x_type`, `min`, `max`, `legend`, `symbols`, sizes | `nil` | None |
+| `area_chart` | Numeric area chart | `id`, `parent`, `text`, `series`, `x_label`, `y_label`, `x_type`, `min`, `max`, `legend`, `symbols`, sizes | `nil` | None |
+| `bar_chart` | Numeric bar chart | `id`, `parent`, `text`, `series`, `x_label`, `y_label`, `x_type`, `min`, `max`, `legend`, sizes | `nil` | None |
 | `separator` | Separator | `id`, `parent`, `orientation`, `disabled`, `visible` | `nil` | None |
 | `spacer` | AtlantaFX empty spacer | `id`, `parent`, `orientation`, `value`, `grow`, `disabled`, `visible` | `nil` | None |
 | `message` | AtlantaFX message with title and description | `id`, `parent`, `text`, `value`, `disabled`, `visible` | Description | `action`, `close` |

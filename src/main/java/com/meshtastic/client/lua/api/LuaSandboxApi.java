@@ -1,5 +1,6 @@
 package com.meshtastic.client.lua.api;
 
+import com.meshtastic.client.model.DeviceState;
 import org.luaj.vm2.Globals;
 import org.luaj.vm2.LuaError;
 import org.luaj.vm2.LuaTable;
@@ -43,7 +44,7 @@ public final class LuaSandboxApi {
 
     public LuaSandboxApi(LuaSandboxContext context) {
         this.context = context;
-        this.mapper = new LuaValueMapper(context.state());
+        this.mapper = new LuaValueMapper(context::currentState);
     }
 
     /**
@@ -264,11 +265,12 @@ public final class LuaSandboxApi {
 
     private LuaTable ownerTable() {
         LuaTable table = new LuaTable();
-        table.set("node_id", LuaValueMapper.stringOrNil(context.ownerNodeId()));
-        if (context.state() != null) {
-            table.set("node_num", LuaValueMapper.uint32ToLuaValue(context.state().getMyNodeNum()));
+        DeviceState state = context.currentState();
+        table.set("node_id", LuaValueMapper.stringOrNil(context.currentOwnerNodeId()));
+        if (state != null) {
+            table.set("node_num", LuaValueMapper.uint32ToLuaValue(state.getMyNodeNum()));
         }
-        table.set("connection_id", LuaValueMapper.stringOrNil(context.connectionId()));
+        table.set("connection_id", LuaValueMapper.stringOrNil(context.currentConnectionId()));
         return table;
     }
 

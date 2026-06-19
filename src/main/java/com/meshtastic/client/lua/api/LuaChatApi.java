@@ -4,6 +4,7 @@ import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.model.MessageChangeEvent;
 import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.lua.LuaUiBotNotice;
+import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.service.MessageDbService;
 import com.meshtastic.client.service.MessageService;
 import org.luaj.vm2.LuaError;
@@ -166,10 +167,11 @@ public final class LuaChatApi {
             @Override
             public LuaValue call() {
                 LuaTable table = new LuaTable();
-                if (context.state() == null) {
+                DeviceState state = context.currentState();
+                if (state == null) {
                     return table;
                 }
-                List<NodeData> nodes = new ArrayList<>(context.state().getNodeDb().values());
+                List<NodeData> nodes = new ArrayList<>(state.getNodeDb().values());
                 nodes.sort(Comparator.comparing(NodeData::getNodeId, Comparator.nullsLast(String::compareTo)));
                 for (int i = 0; i < nodes.size(); i++) {
                     table.set(i + 1, mapper.nodeToTable(nodes.get(i)));
@@ -181,10 +183,11 @@ public final class LuaChatApi {
             @Override
             public LuaValue call() {
                 LuaTable table = new LuaTable();
-                if (context.state() == null) {
+                DeviceState state = context.currentState();
+                if (state == null) {
                     return table;
                 }
-                List<ChannelProtos.Channel> channels = context.state().getChannels();
+                List<ChannelProtos.Channel> channels = state.getChannels();
                 for (int i = 0; i < channels.size(); i++) {
                     table.set(i + 1, mapper.channelToTable(channels.get(i)));
                 }
@@ -196,20 +199,22 @@ public final class LuaChatApi {
 
     private MeshMessage sendChannelMessage(int channel, String text, int replyId) {
         requireChatTransport();
-        return context.meshCoreRuntime() != null
-                ? context.meshCoreRuntime().sendChannelMessage(channel, text, replyId)
-                : MessageService.sendChannelMessage(context.handler(), context.state(), channel, text, replyId);
+        LuaSandboxContext.ConnectionSnapshot target = context.currentTarget();
+        return target.meshCoreRuntime() != null
+                ? target.meshCoreRuntime().sendChannelMessage(channel, text, replyId)
+                : MessageService.sendChannelMessage(target.handler(), target.state(), channel, text, replyId);
     }
 
     private MeshMessage sendDirectMessage(String peerNodeId, String text, int replyId) {
         requireChatTransport();
-        return context.meshCoreRuntime() != null
-                ? context.meshCoreRuntime().sendDirectMessage(peerNodeId, text, replyId)
-                : MessageService.sendDirectMessage(context.handler(), context.state(), peerNodeId, text, replyId);
+        LuaSandboxContext.ConnectionSnapshot target = context.currentTarget();
+        return target.meshCoreRuntime() != null
+                ? target.meshCoreRuntime().sendDirectMessage(peerNodeId, text, replyId)
+                : MessageService.sendDirectMessage(target.handler(), target.state(), peerNodeId, text, replyId);
     }
 
     private LuaTable createBotMessage(String chatType, String rawChatKey, String rawText, int replyId, String replyText) {
-        requireChatContext();
+        DeviceState state = requireChatContext();
         ChatScope scope = normalizeChatScope(chatType, rawChatKey);
         String text = normalizeBotText(rawText);
         String ownerNodeId = ownerNodeIdForMessages();
@@ -227,7 +232,7 @@ public final class LuaChatApi {
         }
 
         messageDbService.save(message, scope.chatType(), scope.chatKey(), ownerNodeId);
-        context.state().fireMessageChange(MessageChangeEvent.newMessage(
+        state.fireMessageChange(MessageChangeEvent.newMessage(
                 scope.chatType(),
                 scope.chatKey(),
                 ownerNodeId,
@@ -279,18 +284,21 @@ public final class LuaChatApi {
         return value.isnil() ? "" : value.checkjstring();
     }
 
-    private void requireChatContext() {
-        if (context.state() == null || ownerNodeIdForMessages().isBlank()) {
+    private DeviceState requireChatContext() {
+        DeviceState state = context.currentState();
+        if (state == null || ownerNodeIdForMessages().isBlank()) {
             throw new LuaError("No active chat context");
         }
+        return state;
     }
 
     private String ownerNodeIdForMessages() {
-        if (context.ownerNodeId() != null && !context.ownerNodeId().isBlank()) {
-            return context.ownerNodeId();
+        if (context.currentOwnerNodeId() != null && !context.currentOwnerNodeId().isBlank()) {
+            return context.currentOwnerNodeId();
         }
-        return context.state() != null && context.state().getOwnerNodeId() != null
-                ? context.state().getOwnerNodeId()
+        DeviceState state = context.currentState();
+        return state != null && state.getOwnerNodeId() != null
+                ? state.getOwnerNodeId()
                 : "";
     }
 

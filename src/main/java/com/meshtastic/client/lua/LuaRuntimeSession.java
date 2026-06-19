@@ -1410,6 +1410,10 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
         return System.currentTimeMillis() / 1000.0;
     }
 
+    private static LuaSandboxContext.ConnectionSnapshot resolveCurrentExtensionTarget() {
+        return LuaScriptRuntimeService.resolveSelectedTarget().toSandboxSnapshot();
+    }
+
     private boolean hasPendingAsyncWork() {
         return !pendingUiRequests.isEmpty()
                 || !pendingTraceroutes.isEmpty()
@@ -1450,7 +1454,8 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
                     this,
                     this,
                     this,
-                    this::deferExecutionDeadline));
+                    this::deferExecutionDeadline,
+                    formBridge != null ? LuaRuntimeSession::resolveCurrentExtensionTarget : null));
             sandboxApi.install(globals);
 
             debugLib.begin(RUN_TIMEOUT_MS);

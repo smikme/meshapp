@@ -5,6 +5,7 @@ import com.meshtastic.client.lua.LuaScriptService;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.model.MessageChangeEvent;
+import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.service.MessageDbService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -18,6 +19,7 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -100,6 +102,52 @@ class LuaChatApiTest {
         assertEquals(OWNER_NODE_ID, event.ownerNodeId());
         assertTrue(event.message().isSystemMessage());
         assertEquals(0, broadMessageListenerCalls.get());
+    }
+
+    @Test
+    void nodesUsesLiveTargetAfterContextStartedWithoutState() {
+        AtomicReference<DeviceState> liveState = new AtomicReference<>();
+        LuaTable liveChat = new LuaChatApi(
+                new LuaSandboxContext(
+                        1L,
+                        null,
+                        null,
+                        null,
+                        null,
+                        "",
+                        LuaScriptService.getInstance(),
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        () -> new LuaSandboxContext.ConnectionSnapshot(
+                                "live",
+                                liveState.get(),
+                                null,
+                                null,
+                                OWNER_NODE_ID)),
+                new LuaValueMapper(liveState::get))
+                .create();
+
+        assertEquals(0, liveChat.get("nodes").call().checktable().length());
+
+        DeviceState connectedState = new DeviceState();
+        NodeData node = connectedState.getOrCreateNode(0x10203040);
+        node.setNodeId("!10203040");
+        node.setLongName("Live Node");
+        liveState.set(connectedState);
+
+        LuaTable nodes = liveChat.get("nodes").call().checktable();
+
+        assertEquals(1, nodes.length());
+        assertEquals("!10203040", nodes.get(1).checktable().get("node_id").checkjstring());
+        assertEquals("Live Node", nodes.get(1).checktable().get("long_name").checkjstring());
     }
 
     @Test

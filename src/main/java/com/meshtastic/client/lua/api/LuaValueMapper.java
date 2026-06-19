@@ -9,6 +9,7 @@ import org.luaj.vm2.LuaValue;
 import org.meshtastic.proto.ChannelProtos;
 
 import java.util.List;
+import java.util.function.Supplier;
 
 /**
  * Maps MeshApp internal models to Lua tables exposed by the sandbox API.
@@ -133,10 +134,14 @@ public final class LuaValueMapper {
             "hops"
     );
 
-    private final DeviceState state;
+    private final Supplier<DeviceState> stateSupplier;
 
     public LuaValueMapper(DeviceState state) {
-        this.state = state;
+        this(() -> state);
+    }
+
+    public LuaValueMapper(Supplier<DeviceState> stateSupplier) {
+        this.stateSupplier = stateSupplier != null ? stateSupplier : () -> null;
     }
 
     /**
@@ -427,6 +432,7 @@ public final class LuaValueMapper {
     }
 
     private ChannelProtos.Channel findMessageChannel(int channelIndex) {
+        DeviceState state = stateSupplier.get();
         return state != null ? state.getChannelStore().getChannelByIndex(channelIndex) : null;
     }
 

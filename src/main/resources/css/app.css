@@ -1209,8 +1209,35 @@
 }
 
 .form-title {
+    -fx-font-family: "Roboto", "System";
     -fx-font-size: 1.2308em;
-    -fx-font-weight: bold;
+    -fx-font-weight: normal;
+}
+
+/* Lua extension form charts */
+.lua-form-chart {
+    -fx-background-color: transparent;
+    -fx-padding: 4 0 0 0;
+}
+
+.lua-form-chart .chart-plot-background {
+    -fx-background-color: transparent;
+}
+
+.lua-form-chart .chart-horizontal-grid-lines,
+.lua-form-chart .chart-vertical-grid-lines {
+    -fx-stroke: -color-border-default;
+    -fx-opacity: 0.45;
+}
+
+.lua-form-chart .axis {
+    -fx-tick-label-fill: -color-fg-muted;
+}
+
+.lua-form-chart .axis-label,
+.lua-form-chart .chart-title,
+.lua-form-chart .chart-legend-item {
+    -fx-text-fill: -color-fg-muted;
 }
 
 .dialog-title {

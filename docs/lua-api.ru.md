@@ -468,7 +468,7 @@ HTTP(S)-запросы выполняются встроенным Java HTTP-к�
 
 | Поле | Тип | Назначение |
 |------|-----|------------|
-| `type` | string | Тип создаваемого компонента: `label`, `button`, `text_field`, `password_field`, `text_area`, `checkbox`, `toggle_switch`, `combo_box`, `segmented_control`, `list_view`, `slider`, `progress_bar`, `ring_progress`, `separator`, `spacer`, `message`, `tile`, `card`, `vbox`, `hbox`, `split_pane`, `scroll_pane` |
+| `type` | string | Тип создаваемого компонента: `label`, `button`, `text_field`, `password_field`, `text_area`, `checkbox`, `toggle_switch`, `combo_box`, `segmented_control`, `list_view`, `slider`, `progress_bar`, `ring_progress`, `line_chart`, `area_chart`, `bar_chart`, `separator`, `spacer`, `message`, `tile`, `card`, `vbox`, `hbox`, `split_pane`, `scroll_pane` |
 | `id` | string | Стабильный id компонента. Если не задан, MeshApp создаёт id автоматически и возвращает его из `add(...)` |
 | `parent` | string | Id контейнера `card`, `vbox`, `hbox`, `split_pane` или `scroll_pane`. Если не задан, компонент добавляется в корень формы |
 | `text` | string | Надпись или заголовок компонента: `label`, `button`, `checkbox`, `toggle_switch`, `message`, `tile` |
@@ -476,7 +476,13 @@ HTTP(S)-запросы выполняются встроенным Java HTTP-к�
 | `value` | string/number/boolean | Текущее значение компонента. Для `progress_bar` и `ring_progress` используется диапазон `0..1`, для `slider` значение ограничивается `min..max`; для `message` и `tile` это описание |
 | `selected` | boolean | Алиас `value` для `checkbox` и `toggle_switch`, если `value` не задан |
 | `items` | array<string> | Список вариантов `combo_box`, `segmented_control` и `list_view` |
-| `min`, `max` | number | Диапазон `slider`; по умолчанию `0..100` |
+| `min`, `max` | number | Диапазон `slider`; по умолчанию `0..100`. Для графиков задаёт диапазон Y-оси, если указаны оба значения |
+| `series` | array<table> | Ряды данных для `line_chart`, `area_chart` и `bar_chart`; каждый ряд поддерживает `name`, `color` и `points` |
+| `x_label`, `y_label` | string | Подписи осей для chart-компонентов |
+| `x_type` | string | Режим X-оси графика; `time`, `timestamp` или `epoch` форматируют Unix seconds как локальное время |
+| `chart_type` | string | Для `type = "chart"` выбирает `line`, `area` или `bar` |
+| `legend` | boolean | Показывает или скрывает легенду графика; по умолчанию легенда видна, если рядов больше одного |
+| `symbols` | boolean | Показывает точки на `line_chart` и `area_chart`; по умолчанию `false` |
 | `orientation` | string | Направление `horizontal` или `vertical` для `separator`, `spacer`, `split_pane` |
 | `width`, `height` | number | Предпочитаемый размер компонента в пикселях |
 | `min_width`, `min_height` | number | Минимальный размер компонента в пикселях |
@@ -491,6 +497,8 @@ HTTP(S)-запросы выполняются встроенным Java HTTP-к�
 | `style` | string | Для `button` при создании поддерживается `accent`; для текстовых компонентов поддерживается `monospace` |
 
 Через `mesh.form.set(id, options)` можно менять поддерживаемые свойства вроде `text`, `prompt`, `value`, `items`, `min`, `max`, размеров, `grow`, `read_only`, `wrap`, `monospace`, `disabled` и `visible`. Поля `type`, `id` и `parent` применяются только при создании компонента; чтобы изменить их, удалите компонент и создайте новый.
+
+Chart `series` — список таблиц рядов. У каждого ряда есть `name`, необязательный CSS-цвет `color` и `points`. Точка может быть `{ x = 1700000000, y = 21.5 }`, `{ timestamp = 1700000000, value = 21.5 }`, `{ 1700000000, 21.5 }` или просто числом; тогда X-значением станет индекс точки.
 
 ### Типы компонентов
 
@@ -509,6 +517,9 @@ HTTP(S)-запросы выполняются встроенным Java HTTP-к�
 | `slider` | Ползунок с числовым значением | `id`, `parent`, `min`, `max`, `value`, `disabled`, `visible` | Number | `change` при перемещении |
 | `progress_bar` | Индикатор прогресса | `id`, `parent`, `value`, `disabled`, `visible` | Number `0..1` | Нет |
 | `ring_progress` | Кольцевой индикатор прогресса AtlantaFX | `id`, `parent`, `value`, `width`, `height`, `disabled`, `visible` | Number `0..1` | Нет |
+| `line_chart` | Числовой линейный график | `id`, `parent`, `text`, `series`, `x_label`, `y_label`, `x_type`, `min`, `max`, `legend`, `symbols`, размеры | `nil` | Нет |
+| `area_chart` | Числовой график с заливкой | `id`, `parent`, `text`, `series`, `x_label`, `y_label`, `x_type`, `min`, `max`, `legend`, `symbols`, размеры | `nil` | Нет |
+| `bar_chart` | Числовой столбчатый график | `id`, `parent`, `text`, `series`, `x_label`, `y_label`, `x_type`, `min`, `max`, `legend`, размеры | `nil` | Нет |
 | `separator` | Разделитель | `id`, `parent`, `orientation`, `disabled`, `visible` | `nil` | Нет |
 | `spacer` | Пустое пространство AtlantaFX | `id`, `parent`, `orientation`, `value`, `grow`, `disabled`, `visible` | `nil` | Нет |
 | `message` | Сообщение AtlantaFX с заголовком и описанием | `id`, `parent`, `text`, `value`, `disabled`, `visible` | Описание | `action`, `close` |

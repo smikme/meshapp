@@ -371,6 +371,25 @@ class LuaScriptRuntimeServiceTest {
                         value = 'IRC'
                     })
                     mesh.form.add({ type = 'ring_progress', id = 'sync', value = 0.5, width = 48, height = 48 })
+                    mesh.form.add({
+                        type = 'line_chart',
+                        id = 'tempChart',
+                        text = 'Temperature',
+                        y_label = 'C',
+                        x_type = 'time',
+                        legend = false,
+                        symbols = true,
+                        series = {
+                            {
+                                name = 'Node',
+                                color = '#38bdf8',
+                                points = {
+                                    { x = 1700000000, y = 20.5 },
+                                    { 1700000300, 21.25 }
+                                }
+                            }
+                        }
+                    })
                 end
                 """,
                 true,
@@ -407,6 +426,23 @@ class LuaScriptRuntimeServiceTest {
         assertEquals(Boolean.TRUE, formBridge.components.get("online").value());
         assertEquals("IRC", formBridge.components.get("mode").value());
         assertEquals(0.5, formBridge.components.get("sync").value());
+
+        LuaFormComponentSpec chart = formBridge.components.get("tempChart").spec();
+        assertEquals("line_chart", chart.type());
+        assertEquals("Temperature", chart.text());
+        assertEquals("C", chart.yLabel());
+        assertEquals("time", chart.xType());
+        assertEquals(Boolean.FALSE, chart.legend());
+        assertEquals(Boolean.TRUE, chart.symbols());
+        assertNotNull(chart.series());
+        assertEquals(1, chart.series().size());
+        assertEquals("Node", chart.series().getFirst().name());
+        assertEquals("#38bdf8", chart.series().getFirst().color());
+        assertEquals(2, chart.series().getFirst().points().size());
+        assertEquals(1_700_000_000.0, chart.series().getFirst().points().getFirst().x());
+        assertEquals(20.5, chart.series().getFirst().points().getFirst().y());
+        assertEquals(1_700_000_300.0, chart.series().getFirst().points().get(1).x());
+        assertEquals(21.25, chart.series().getFirst().points().get(1).y());
         assertFalse(events.stream().anyMatch(event -> event.type() == LuaScriptEvent.Type.ERROR));
     }
 
