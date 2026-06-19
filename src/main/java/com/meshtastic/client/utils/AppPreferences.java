@@ -60,6 +60,7 @@ public class AppPreferences {
     public static final String KEY_MAP_OFFLINE_MODE = "mapOfflineMode";
     public static final String KEY_MAP_NIGHT_MODE = "mapNightMode";
     public static final String KEY_MAP_TILE_DIRECTORY = "mapTileDirectory";
+    public static final String KEY_TELEMETRY_DOCK_LAYOUT = "telemetryDockLayout";
 
     public static final int DEFAULT_MEMORY_LIMIT_MB = 512;
     public static final int MIN_MEMORY_LIMIT_MB = 128;
@@ -400,6 +401,19 @@ public class AppPreferences {
             state().remove(KEY_MAP_TILE_DIRECTORY);
         } else {
             state().put(KEY_MAP_TILE_DIRECTORY, directory);
+        }
+        flushState();
+    }
+
+    public static String getTelemetryDockLayout() {
+        return state().get(KEY_TELEMETRY_DOCK_LAYOUT, "");
+    }
+
+    public static void saveTelemetryDockLayout(String layout) {
+        if (layout == null || layout.isBlank()) {
+            state().remove(KEY_TELEMETRY_DOCK_LAYOUT);
+        } else {
+            state().put(KEY_TELEMETRY_DOCK_LAYOUT, layout);
         }
         flushState();
     }

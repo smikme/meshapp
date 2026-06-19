@@ -838,5 +838,21 @@
     "dest": "./offline-repository/org/sonatype/oss/oss-parent/9",
     "dest-filename": "oss-parent-9.pom",
     "only-arches": ["aarch64"]
+  },
+  {
+    "type": "file",
+    "url": "https://repo.maven.apache.org/maven2/software/coley/bento-fx/0.15.1/bento-fx-0.15.1.jar",
+    "sha512": "c1c8d775913a6a514ccce4d9d12b87ee8e906f6cd43af2c2bee3478d5f653e7846dbeec85c05c6360660273ad0bc8268f1d28ea87436966f654985530fb0b9e9",
+    "dest": "./offline-repository/software/coley/bento-fx/0.15.1",
+    "dest-filename": "bento-fx-0.15.1.jar",
+    "only-arches": ["aarch64"]
+  },
+  {
+    "type": "file",
+    "url": "https://repo.maven.apache.org/maven2/software/coley/bento-fx/0.15.1/bento-fx-0.15.1.pom",
+    "sha512": "d8e6ce9b103b312ddd2090c84007b5a3523488748c255beb23d5e9fba0c432603b94650cb7c49ed40f80e6d41f3481c4f50c5d8026374fae5b85d7efda700529",
+    "dest": "./offline-repository/software/coley/bento-fx/0.15.1",
+    "dest-filename": "bento-fx-0.15.1.pom",
+    "only-arches": ["aarch64"]
   }
 ]

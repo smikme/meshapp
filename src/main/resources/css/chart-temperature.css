@@ -1,0 +1,4 @@
+/* Single-series environment chart. */
+.default-color0.chart-series-area-line { -fx-stroke: #ff7043; }
+.default-color0.chart-series-area-fill { -fx-fill: rgba(255, 112, 67, 0.2); }
+.default-color0.chart-legend-item-symbol { -fx-background-color: #ff7043; }
