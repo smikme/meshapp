@@ -29,7 +29,11 @@ final class TelemetryChartDataBuilder {
         RATE,
         TX,
         QUALITY,
-        HOPS
+        HOPS,
+        TEMPERATURE,
+        HUMIDITY,
+        PRESSURE,
+        RADIATION
     }
 
     private static final String TITLE_BASIC_KEY = "telemetry.chart.title.basic";
@@ -38,6 +42,11 @@ final class TelemetryChartDataBuilder {
     private static final String TITLE_TX_KEY = "telemetry.chart.title.tx";
     private static final String TITLE_QUALITY_KEY = "telemetry.chart.title.quality";
     private static final String TITLE_HOPS_KEY = "telemetry.chart.title.hops";
+    private static final String TITLE_ENVIRONMENT_KEY = "telemetry.chart.title.environment";
+    private static final String TITLE_TEMPERATURE_KEY = "telemetry.chart.title.temperature";
+    private static final String TITLE_HUMIDITY_KEY = "telemetry.chart.title.humidity";
+    private static final String TITLE_PRESSURE_KEY = "telemetry.chart.title.pressure";
+    private static final String TITLE_RADIATION_KEY = "telemetry.chart.title.radiation";
 
     private static final String SERIES_BATTERY_KEY = "telemetry.chart.series.battery";
     private static final String SERIES_VOLTAGE_KEY = "telemetry.chart.series.voltage";
@@ -58,6 +67,10 @@ final class TelemetryChartDataBuilder {
     private static final String SERIES_HOPS_MAX_KEY = "telemetry.chart.series.hopsMax";
     private static final String SERIES_HOPS_MIN_KEY = "telemetry.chart.series.hopsMin";
     private static final String SERIES_HOPS_AVG_KEY = "telemetry.chart.series.hopsAvg";
+    private static final String SERIES_TEMPERATURE_KEY = "telemetry.chart.series.temperature";
+    private static final String SERIES_HUMIDITY_KEY = "telemetry.chart.series.humidity";
+    private static final String SERIES_PRESSURE_KEY = "telemetry.chart.series.pressure";
+    private static final String SERIES_RADIATION_KEY = "telemetry.chart.series.radiation";
 
     private static final int MAX_CHART_POINTS = 60;
     private static final long EMPTY_PERIOD_FALLBACK = 24L * 3600;
@@ -69,6 +82,10 @@ final class TelemetryChartDataBuilder {
     private static final Predicate<TelemetryEntry> HAS_QUALITY =
             entry -> entry.getRxSnr() != 0 || entry.getRxRssi() != 0;
     private static final Predicate<TelemetryEntry> HAS_HOPS = TelemetryEntry::hasValidHopData;
+    private static final Predicate<TelemetryEntry> HAS_TEMPERATURE = entry -> entry.getTemperature() != 0;
+    private static final Predicate<TelemetryEntry> HAS_HUMIDITY = entry -> entry.getRelativeHumidity() != 0;
+    private static final Predicate<TelemetryEntry> HAS_PRESSURE = entry -> entry.getBarometricPressure() != 0;
+    private static final Predicate<TelemetryEntry> HAS_RADIATION = entry -> entry.getRadiation() != null;
 
     private TelemetryChartDataBuilder() {
     }
@@ -131,6 +148,10 @@ final class TelemetryChartDataBuilder {
             axisRanges.put(ChartKind.TX, primaryAxisRange);
             axisRanges.put(ChartKind.QUALITY, qualityAxisRange);
             axisRanges.put(ChartKind.HOPS, qualityAxisRange);
+            axisRanges.put(ChartKind.TEMPERATURE, primaryAxisRange);
+            axisRanges.put(ChartKind.HUMIDITY, primaryAxisRange);
+            axisRanges.put(ChartKind.PRESSURE, primaryAxisRange);
+            axisRanges.put(ChartKind.RADIATION, primaryAxisRange);
         }
 
         return new PreparedCharts(Map.copyOf(axisRanges), Map.copyOf(payloads));
@@ -147,7 +168,31 @@ final class TelemetryChartDataBuilder {
                 Map.entry(ChartKind.RATE, buildRateChart(rxMetrics)),
                 Map.entry(ChartKind.TX, buildTxChart(txMetrics)),
                 Map.entry(ChartKind.QUALITY, buildQualityChart(qualityEntries)),
-                Map.entry(ChartKind.HOPS, buildHopsChart(qualityEntries))
+                Map.entry(ChartKind.HOPS, buildHopsChart(qualityEntries)),
+                Map.entry(ChartKind.TEMPERATURE, buildEnvironmentChart(
+                        entries,
+                        TITLE_TEMPERATURE_KEY,
+                        SERIES_TEMPERATURE_KEY,
+                        HAS_TEMPERATURE,
+                        TelemetryEntry::getTemperature)),
+                Map.entry(ChartKind.HUMIDITY, buildEnvironmentChart(
+                        entries,
+                        TITLE_HUMIDITY_KEY,
+                        SERIES_HUMIDITY_KEY,
+                        HAS_HUMIDITY,
+                        TelemetryEntry::getRelativeHumidity)),
+                Map.entry(ChartKind.PRESSURE, buildEnvironmentChart(
+                        entries,
+                        TITLE_PRESSURE_KEY,
+                        SERIES_PRESSURE_KEY,
+                        HAS_PRESSURE,
+                        TelemetryEntry::getBarometricPressure)),
+                Map.entry(ChartKind.RADIATION, buildEnvironmentChart(
+                        entries,
+                        TITLE_RADIATION_KEY,
+                        SERIES_RADIATION_KEY,
+                        HAS_RADIATION,
+                        entry -> entry.getRadiation()))
         );
     }
 
@@ -246,6 +291,60 @@ final class TelemetryChartDataBuilder {
                         HopMetric::min, TelemetryChartDataBuilder::dataPoint)),
                 series(t(SERIES_HOPS_AVG_KEY), pointData(metrics, metric -> true, HopMetric::timestamp,
                         HopMetric::average, TelemetryChartDataBuilder::dataPoint))
+        ));
+    }
+
+    static ChartPayload buildEnvironmentMetricsChart(List<TelemetryEntry> entries) {
+        if (isBucketed(entries)) {
+            List<Bucket<TelemetryEntry>> buckets = bucketize(entries, TelemetryEntry::getTimestamp, MAX_CHART_POINTS);
+            return new ChartPayload(t(TITLE_ENVIRONMENT_KEY), List.of(
+                    series(t(SERIES_TEMPERATURE_KEY), averageData(buckets, HAS_TEMPERATURE,
+                            TelemetryEntry::getTemperature, TelemetryChartDataBuilder::dataPoint)),
+                    series(t(SERIES_HUMIDITY_KEY), averageData(buckets, HAS_HUMIDITY,
+                            TelemetryEntry::getRelativeHumidity, TelemetryChartDataBuilder::dataPoint)),
+                    series(t(SERIES_PRESSURE_KEY), List.of()),
+                    series(t(SERIES_RADIATION_KEY), averageData(buckets, HAS_RADIATION,
+                            entry -> entry.getRadiation(), TelemetryChartDataBuilder::dataPoint))
+            ));
+        }
+
+        return new ChartPayload(t(TITLE_ENVIRONMENT_KEY), List.of(
+                series(t(SERIES_TEMPERATURE_KEY), pointData(entries, HAS_TEMPERATURE, TelemetryEntry::getTimestamp,
+                        TelemetryEntry::getTemperature, TelemetryChartDataBuilder::dataPoint)),
+                series(t(SERIES_HUMIDITY_KEY), pointData(entries, HAS_HUMIDITY, TelemetryEntry::getTimestamp,
+                        TelemetryEntry::getRelativeHumidity, TelemetryChartDataBuilder::dataPoint)),
+                series(t(SERIES_PRESSURE_KEY), List.of()),
+                series(t(SERIES_RADIATION_KEY), pointData(entries, HAS_RADIATION, TelemetryEntry::getTimestamp,
+                        entry -> entry.getRadiation(), TelemetryChartDataBuilder::dataPoint))
+        ));
+    }
+
+    static ChartPayload buildEnvironmentPressureChart(List<TelemetryEntry> entries) {
+        return buildEnvironmentChart(
+                entries,
+                TITLE_ENVIRONMENT_KEY,
+                SERIES_PRESSURE_KEY,
+                HAS_PRESSURE,
+                TelemetryEntry::getBarometricPressure
+        );
+    }
+
+    private static ChartPayload buildEnvironmentChart(List<TelemetryEntry> entries,
+                                                      String titleKey,
+                                                      String seriesKey,
+                                                      Predicate<TelemetryEntry> filter,
+                                                      ToDoubleFunction<TelemetryEntry> valueExtractor) {
+        if (isBucketed(entries)) {
+            List<Bucket<TelemetryEntry>> buckets = bucketize(entries, TelemetryEntry::getTimestamp, MAX_CHART_POINTS);
+            return new ChartPayload(t(titleKey), List.of(
+                    series(t(seriesKey), averageData(buckets, filter, valueExtractor,
+                            TelemetryChartDataBuilder::dataPoint))
+            ));
+        }
+
+        return new ChartPayload(t(titleKey), List.of(
+                series(t(seriesKey), pointData(entries, filter, TelemetryEntry::getTimestamp, valueExtractor,
+                        TelemetryChartDataBuilder::dataPoint))
         ));
     }
 

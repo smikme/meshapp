@@ -1398,6 +1398,198 @@
     -fx-font-size: 0.9231em;
 }
 
+.telemetry-dock-shell {
+    -fx-background-color: transparent;
+}
+
+.telemetry-dock-root {
+    -fx-background-color: transparent;
+}
+
+.telemetry-dock-maximized-overlay {
+    -fx-background-color: -color-bg-default;
+}
+
+.telemetry-dock.container-branch,
+.telemetry-dock .container-branch {
+    -fx-background-color: transparent;
+    -fx-background-insets: 0;
+    -fx-padding: 0;
+}
+
+.telemetry-dock.container-branch > .split-pane-divider,
+.telemetry-dock .container-branch > .split-pane-divider {
+    -fx-background-color: transparent;
+    -fx-padding: 2;
+}
+
+.telemetry-dock.container-branch > .split-pane-divider:hover,
+.telemetry-dock .container-branch > .split-pane-divider:hover {
+    -fx-background-color: -color-accent-emphasis;
+}
+
+.telemetry-dock .container-leaf {
+    -fx-background-color: -color-border-default, -color-bg-default;
+    -fx-background-insets: 0, 1;
+}
+
+.telemetry-dock .header-pane {
+    -fx-background-color: -color-bg-default;
+    -fx-background-insets: 0;
+}
+
+.telemetry-dock .header-region {
+    -fx-background-color: transparent;
+}
+
+.telemetry-dock .button-bar {
+    -fx-spacing: -1;
+    -fx-padding: 0;
+    -fx-background-color: transparent;
+}
+
+.telemetry-dock .header {
+    -fx-background-color: -color-bg-subtle;
+    -fx-background-insets: 0;
+    -fx-cursor: hand;
+}
+
+.telemetry-dock .header:hover {
+    -fx-background-color: -color-bg-default;
+}
+
+.telemetry-dock .header-pane .header:selected {
+    -fx-background-color: -color-bg-subtle;
+    -fx-background-insets: 0;
+}
+
+.telemetry-dock .header:top {
+    -fx-background-insets: 0;
+}
+
+.telemetry-dock .header:bottom {
+    -fx-background-insets: 0;
+}
+
+.telemetry-dock .header:selected:top {
+    -fx-background-insets: 0;
+}
+
+.telemetry-dock .header:selected:bottom {
+    -fx-background-insets: 0;
+}
+
+.telemetry-dock .close-button,
+.telemetry-dock .corner-button {
+    -fx-effect: none;
+    -fx-background-insets: 0;
+    -fx-background-radius: 0;
+    -fx-border-width: 0;
+}
+
+.telemetry-dock .close-button {
+    -fx-opacity: 0.65;
+    -fx-background-color: transparent;
+    -fx-padding: 0 4 0 4;
+}
+
+.telemetry-dock .close-button:hover {
+    -fx-opacity: 1;
+    -fx-background-color: -color-bg-subtle;
+}
+
+.telemetry-dock .corner-button {
+    -fx-background-color: transparent;
+    -fx-background-insets: 0;
+}
+
+.telemetry-dock .container:collapsed .header,
+.telemetry-dock .container:collapsed .header-pane,
+.telemetry-dock .container:collapsed .header-region,
+.telemetry-dock .container:collapsed .corner-button {
+    -fx-background-color: -color-bg-subtle;
+}
+
+.telemetry-dock .dock-ghost-zone {
+    -fx-opacity: 0.3;
+}
+
+.telemetry-dock-minimized-bar {
+    -fx-padding: 4 0 0 0;
+    -fx-spacing: 4;
+    -fx-border-color: -color-border-default transparent transparent transparent;
+    -fx-border-width: 1 0 0 0;
+}
+
+.telemetry-dock-minimized-button {
+    -fx-background-color: -color-bg-subtle;
+    -fx-background-radius: 4;
+    -fx-border-color: -color-border-default;
+    -fx-border-radius: 4;
+    -fx-border-width: 1;
+    -fx-padding: 5 10;
+    -fx-cursor: hand;
+}
+
+.telemetry-dock-minimized-button:hover {
+    -fx-background-color: -color-bg-default;
+    -fx-border-color: -color-accent-emphasis;
+}
+
+.telemetry-period-bar {
+    -fx-padding: 0;
+}
+
+.telemetry-node-detail-chart-title {
+    -fx-alignment: center;
+    -fx-font-size: 20px;
+    -fx-text-fill: -color-fg-default;
+}
+
+.telemetry-node-detail-chart-legend {
+    -fx-alignment: center;
+    -fx-padding: 4 0;
+}
+
+.telemetry-node-detail-chart-legend-item {
+    -fx-alignment: center;
+}
+
+.telemetry-node-detail-chart-legend-symbol {
+    -fx-min-width: 10px;
+    -fx-min-height: 10px;
+    -fx-pref-width: 10px;
+    -fx-pref-height: 10px;
+    -fx-max-width: 10px;
+    -fx-max-height: 10px;
+    -fx-background-radius: 999px;
+}
+
+.telemetry-node-detail-chart-legend-label {
+    -fx-text-fill: -color-fg-default;
+    -fx-font-size: 12px;
+}
+
+.telemetry-period-buttons {
+    -fx-border-color: -color-border-default;
+    -fx-border-radius: 6;
+    -fx-background-radius: 6;
+}
+
+.telemetry-dock-reset-layout-button {
+    -fx-background-color: -color-bg-subtle;
+    -fx-background-radius: 6;
+    -fx-border-color: -color-border-default;
+    -fx-border-radius: 6;
+    -fx-border-width: 1;
+    -fx-cursor: hand;
+}
+
+.telemetry-dock-reset-layout-button:hover {
+    -fx-background-color: -color-bg-default;
+    -fx-border-color: -color-accent-emphasis;
+}
+
 /* Панель ошибки — красный акцент слева */
 .modal-dialog-error {
     -fx-border-color: #E53935;
@@ -1579,6 +1771,25 @@
     -fx-background-color: -color-bg-default;
     -fx-border-color: rgba(255, 255, 255, 0.08);
     -fx-border-width: 0 0 0 1;
+}
+
+.node-detail-scroll-pane {
+    -fx-background-color: transparent;
+    -fx-background: transparent;
+    -fx-background-insets: 0;
+    -fx-padding: 0;
+}
+
+.node-detail-scroll-pane > .viewport {
+    -fx-background-color: transparent;
+}
+
+.node-detail-scroll-pane .scroll-bar:vertical {
+    -fx-pref-width: 6;
+}
+
+.node-detail-scroll-pane .scroll-bar:vertical .thumb {
+    -fx-background-radius: 3;
 }
 
 .light-theme .node-detail-pane {

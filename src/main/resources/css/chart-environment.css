@@ -1,0 +1,15 @@
+/* Environment metrics: temperature, humidity, pressure, radiation. */
+.default-color0.chart-series-area-line { -fx-stroke: #ff7043; }
+.default-color1.chart-series-area-line { -fx-stroke: #29b6f6; }
+.default-color2.chart-series-area-line { -fx-stroke: #ab47bc; }
+.default-color3.chart-series-area-line { -fx-stroke: #c0ca33; }
+
+.default-color0.chart-series-area-fill { -fx-fill: rgba(255, 112, 67, 0.16); }
+.default-color1.chart-series-area-fill { -fx-fill: rgba(41, 182, 246, 0.16); }
+.default-color2.chart-series-area-fill { -fx-fill: rgba(171, 71, 188, 0.16); }
+.default-color3.chart-series-area-fill { -fx-fill: rgba(192, 202, 51, 0.16); }
+
+.default-color0.chart-legend-item-symbol { -fx-background-color: #ff7043; }
+.default-color1.chart-legend-item-symbol { -fx-background-color: #29b6f6; }
+.default-color2.chart-legend-item-symbol { -fx-background-color: #ab47bc; }
+.default-color3.chart-legend-item-symbol { -fx-background-color: #c0ca33; }

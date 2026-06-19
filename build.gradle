@@ -252,6 +252,7 @@ dependencies {
 	implementation 'com.h2database:h2:2.4.240'
 	implementation 'org.luaj:luaj-jse:3.0.1'
 	implementation 'org.fxmisc.richtext:richtextfx:0.11.7'
+	implementation 'software.coley:bento-fx:0.15.1'
 	implementation('io.github.mkpaz:atlantafx-base:2.1.0') {
 		// AtlantaFX publishes its own org.openjfx version, which can otherwise move
 		// the project to another JavaFX line through conflict resolution.
@@ -261,8 +262,6 @@ dependencies {
 	implementation 'net.java.dev.jna:jna-platform:5.16.0'
 	implementation 'org.eclipse.paho:org.eclipse.paho.client.mqttv3:1.2.5'
 	testImplementation 'org.junit.jupiter:junit-jupiter:5.11.4'
-	// TestFX Monocle does not have a 25.x artifact yet; org.openjfx modules are still pinned to javaFxVersion above.
-	testRuntimeOnly 'org.testfx:openjfx-monocle:21.0.2'
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 

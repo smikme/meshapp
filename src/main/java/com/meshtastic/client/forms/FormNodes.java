@@ -1012,39 +1012,63 @@ public class FormNodes extends Form {
     // ==================== Detail panel ====================
 
     private void showDetail(NodeData node) {
-        if (node == null) {
-            if (currentDetailContent != null) {
-                currentDetailContent.getChartPanel().unbind();
-                currentDetailContent = null;
-            }
-            currentDetailNodeNum = 0;
-            detailPane.getChildren().clear();
-            detailPane.getChildren().add(detailPlaceholder);
-            return;
-        }
+        Optional.ofNullable(node).ifPresentOrElse(this::showNodeDetail, this::showDetailPlaceholder);
+    }
 
-            // Enrich a bare node with cached data before showing it.
+    private void showDetailPlaceholder() {
+        detachCurrentDetailContent();
+        currentDetailNodeNum = 0;
+        detailPane.getChildren().setAll(detailPlaceholder);
+    }
+
+    private void showNodeDetail(NodeData node) {
         if (!node.hasName()) {
             NodeCacheService.getInstance().enrichFromCache(node);
         }
 
-                // Same node: update only table data without recreating the UI.
-        if (node.getNodeNum() == currentDetailNodeNum && currentDetailContent != null) {
+        if (isCurrentDetailNode(node)) {
             currentDetailContent.updateTableData(node);
             return;
         }
 
-            // Detach the previous component.
-        if (currentDetailContent != null) {
-            currentDetailContent.getChartPanel().unbind();
-        }
-
+        detachCurrentDetailContent();
         currentDetailNodeNum = node.getNodeNum();
         currentDetailContent = new NodeDetailContent(state, node, protocolHandler);
         VBox.setVgrow(currentDetailContent, Priority.ALWAYS);
 
-        detailPane.getChildren().clear();
-        detailPane.getChildren().add(currentDetailContent);
+        detailPane.getChildren().setAll(createDetailScrollPane(currentDetailContent));
+    }
+
+    private boolean isCurrentDetailNode(NodeData node) {
+        return currentDetailContent != null && node.getNodeNum() == currentDetailNodeNum;
+    }
+
+    private ScrollPane createDetailScrollPane(NodeDetailContent content) {
+        ScrollPane scrollPane = new ScrollPane(content);
+        scrollPane.setFitToWidth(true);
+        scrollPane.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
+        scrollPane.setVbarPolicy(ScrollPane.ScrollBarPolicy.AS_NEEDED);
+        scrollPane.setPannable(true);
+        scrollPane.setMaxSize(Double.MAX_VALUE, Double.MAX_VALUE);
+        scrollPane.getStyleClass().addAll("node-detail-scroll-pane", "edge-to-edge");
+        if (content.minHeightProperty().isBound()) {
+            content.minHeightProperty().unbind();
+        }
+        content.minHeightProperty().bind(scrollPane.viewportBoundsProperty()
+                .map(bounds -> bounds.getHeight()));
+        VBox.setVgrow(scrollPane, Priority.ALWAYS);
+        return scrollPane;
+    }
+
+    private void detachCurrentDetailContent() {
+        if (currentDetailContent == null) {
+            return;
+        }
+        currentDetailContent.getChartPanel().unbind();
+        if (currentDetailContent.minHeightProperty().isBound()) {
+            currentDetailContent.minHeightProperty().unbind();
+        }
+        currentDetailContent = null;
     }
 
     /** Updates details when the selected node changes, preserving UI and chart filter state. */
