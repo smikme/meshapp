@@ -1,5 +1,7 @@
 # `mesh.admin` Configuration Reference
 
+**Language:** [Русский](lua-admin-config-reference.ru.md) | English | [Deutsch](lua-admin-config-reference.de.md)
+
 This reference lists the parameters returned in `event.snapshot` after `mesh.admin.load_config` / `request_config` / `request_module_config` and accepted by `mesh.admin.save_config`.
 
 Lua field names match protobuf `snake_case`. Enum values are strings. `bytes` accept hex, `hex:...`, `base64:...`, or Base64. Repeated fields are Lua lists. By default `save_config` merges each patch with the already loaded section; call `load_config`, `request_config`, or `request_module_config` first, or pass `{ replace = true, confirm = true }` when intentionally replacing a section from defaults.

@@ -1,6 +1,6 @@
 # MeshApp Script Lua API
 
-**Language:** [Русский](lua-api.ru.md) | English
+**Language:** [Русский](lua-api.ru.md) | English | [Deutsch](lua-api.de.md)
 
 MeshApp runs user Lua scripts in a LuaJ sandbox. Scripts can use the `mesh` namespace, core Lua functions, the `string`, `table`, `math`, `coroutine`, `bit32` libraries and functions such as `pairs`, `ipairs`, `pcall`, `tonumber` and `tostring`. Unsafe global APIs are disabled: `io`, `os`, `debug`, `package`, `require`, `dofile`, `loadfile`, `luajava`, `collectgarbage`, `module`.
 

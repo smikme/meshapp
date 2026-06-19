@@ -32,7 +32,7 @@
 
 <div align="right">
 
-<strong>English</strong> | <a href="README.ru.md">Русский</a>
+<strong>English</strong> | <a href="README.ru.md">Русский</a> | <a href="README.de.md">Deutsch</a>
 
 </div>
 
