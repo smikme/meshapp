@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.Locale;
 import java.util.Properties;
 
@@ -37,6 +38,9 @@ class I18nTest {
         assertTrue(I18n.supportedLanguages().stream().anyMatch(option ->
                 option.tag().equals(I18n.LANGUAGE_EN) &&
                 option.displayKey().equals("language.en")));
+        assertTrue(I18n.supportedLanguages().stream().anyMatch(option ->
+                option.tag().equals(I18n.LANGUAGE_DE) &&
+                option.displayKey().equals("language.de")));
     }
 
     @Test
@@ -65,11 +69,40 @@ class I18nTest {
     }
 
     @Test
-    void systemLanguageFallsBackToEnglishForUnsupportedLocales() {
+    void regionalGermanLanguageTagsUseConfiguredBaseLanguage() {
+        String previous = I18n.getLanguageTag();
+        try {
+            I18n.setLanguageTagForTests("de-DE");
+
+            assertEquals(I18n.LANGUAGE_DE, I18n.getLanguageTag());
+            assertEquals("Schließen", I18n.t("common.close"));
+        } finally {
+            I18n.setLanguageTagForTests(previous);
+        }
+    }
+
+    @Test
+    void systemLanguageUsesGermanForSupportedGermanLocale() {
         String previousLanguage = I18n.getLanguageTag();
         Locale previousLocale = Locale.getDefault(Locale.Category.DISPLAY);
         try {
             Locale.setDefault(Locale.Category.DISPLAY, Locale.GERMAN);
+            I18n.setLanguageTagForTests(I18n.LANGUAGE_SYSTEM);
+
+            assertEquals(I18n.LANGUAGE_DE, I18n.locale().getLanguage());
+            assertEquals("Schließen", I18n.t("common.close"));
+        } finally {
+            Locale.setDefault(Locale.Category.DISPLAY, previousLocale);
+            I18n.setLanguageTagForTests(previousLanguage);
+        }
+    }
+
+    @Test
+    void systemLanguageFallsBackToEnglishForUnsupportedLocales() {
+        String previousLanguage = I18n.getLanguageTag();
+        Locale previousLocale = Locale.getDefault(Locale.Category.DISPLAY);
+        try {
+            Locale.setDefault(Locale.Category.DISPLAY, Locale.ITALIAN);
             I18n.setLanguageTagForTests(I18n.LANGUAGE_SYSTEM);
 
             assertEquals(Locale.ENGLISH.getLanguage(), I18n.locale().getLanguage());
@@ -99,11 +132,19 @@ class I18nTest {
     @Test
     void localizedBundlesContainAllFallbackKeys() throws IOException {
         Properties fallback = loadProperties("/i18n/messages.properties");
-        Properties russian = loadProperties("/i18n/messages_ru.properties");
-        Properties english = loadProperties("/i18n/messages_en.properties");
+        List<String> languages = I18n.supportedLanguages()
+                .stream()
+                .map(I18n.LanguageOption::tag)
+                .filter(tag -> !tag.equals(I18n.LANGUAGE_SYSTEM))
+                .toList();
 
-        assertTrue(russian.keySet().containsAll(fallback.keySet()));
-        assertTrue(english.keySet().containsAll(fallback.keySet()));
+        for (String language : languages) {
+            Properties localized = loadProperties(
+                    "/i18n/messages_" + language + ".properties");
+            assertTrue(
+                    localized.keySet().containsAll(fallback.keySet()),
+                    language + " bundle misses fallback keys");
+        }
     }
 
     private static Properties loadProperties(String resourcePath) throws IOException {

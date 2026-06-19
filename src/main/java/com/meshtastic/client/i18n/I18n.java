@@ -25,6 +25,7 @@ public final class I18n {
     public static final String LANGUAGE_SYSTEM = "system";
     public static final String LANGUAGE_RU = "ru";
     public static final String LANGUAGE_EN = "en";
+    public static final String LANGUAGE_DE = "de";
 
     private static final String BUNDLE_BASE_NAME = "i18n.messages";
     private static final String LANGUAGE_MANIFEST_RESOURCE =

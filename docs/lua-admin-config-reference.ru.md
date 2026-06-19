@@ -1,5 +1,7 @@
 # Справочник `mesh.admin` по конфигурации
 
+**Язык:** Русский | [English](lua-admin-config-reference.md) | [Deutsch](lua-admin-config-reference.de.md)
+
 Этот справочник перечисляет параметры, которые возвращаются в `event.snapshot` после `mesh.admin.load_config` / `request_config` / `request_module_config` и которые можно передавать в `mesh.admin.save_config`.
 
 Имена полей в Lua совпадают с protobuf `snake_case`. Enum-значения передаются строками. `bytes` можно передавать как hex, `hex:...`, `base64:...` или Base64. Повторяющиеся поля передаются Lua-списками. По умолчанию `save_config` сливает патч с уже загруженной секцией; сначала вызовите `load_config`, `request_config` или `request_module_config`, либо используйте `{ replace = true, confirm = true }` для осознанной замены из значений по умолчанию.

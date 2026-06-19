@@ -1,6 +1,6 @@
 # Lua API для скриптов MeshApp
 
-**Язык:** Русский | [English](lua-api.md)
+**Язык:** Русский | [English](lua-api.md) | [Deutsch](lua-api.de.md)
 
 MeshApp выполняет пользовательские Lua-скрипты в sandbox-среде LuaJ. Скриптам доступен namespace `mesh`, базовые функции Lua, библиотеки `string`, `table`, `math`, `coroutine`, `bit32` и функции вроде `pairs`, `ipairs`, `pcall`, `tonumber`, `tostring`. Небезопасные глобальные API отключены: `io`, `os`, `debug`, `package`, `require`, `dofile`, `loadfile`, `luajava`, `collectgarbage`, `module`.
 
