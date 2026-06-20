@@ -475,9 +475,9 @@ Form-Komponenten geben keine Lua-Objekte mit eigenen Methoden zurück. Ein Skrip
 | `prompt` | string | Platzhalter für `text_field`, `password_field` und `text_area`; bei `combo_box` dient er als Hinweis für den leeren Wert |
 | `value` | string/number/boolean | Aktueller Komponentenwert. `progress_bar` und `ring_progress` verwenden `0..1`; `slider` wird auf `min..max` begrenzt; `message` und `tile` verwenden ihn als Beschreibung |
 | `selected` | boolean | Alias für `value` von `checkbox` und `toggle_switch`, wenn `value` fehlt |
-| `items` | array<string> | Optionen für `combo_box`, `segmented_control` und `list_view` |
+| `items` | `array<string>` | Optionen für `combo_box`, `segmented_control` und `list_view` |
 | `min`, `max` | number | Bereich des `slider`; Standard `0..100`. Bei Diagrammen setzen beide Werte zusammen den Y-Achsenbereich |
-| `series` | array<table> | Datenreihen für `line_chart`, `area_chart` und `bar_chart`; jede Reihe unterstützt `name`, `color` und `points` |
+| `series` | `array<table>` | Datenreihen für `line_chart`, `area_chart` und `bar_chart`; jede Reihe unterstützt `name`, `color` und `points` |
 | `x_label`, `y_label` | string | Achsenbeschriftungen für Diagrammkomponenten |
 | `x_type` | string | X-Achsenmodus des Diagramms; verwenden Sie `time`, `timestamp` oder `epoch`, um Unix-Sekunden als lokale Zeit zu formatieren |
 | `chart_type` | string | Bei `type = "chart"` Auswahl von `line`, `area` oder `bar` |

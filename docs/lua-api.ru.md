@@ -475,9 +475,9 @@ HTTP(S)-запросы выполняются встроенным Java HTTP-к�
 | `prompt` | string | Placeholder для `text_field`, `password_field`, `text_area`; для `combo_box` применяется как пустое значение |
 | `value` | string/number/boolean | Текущее значение компонента. Для `progress_bar` и `ring_progress` используется диапазон `0..1`, для `slider` значение ограничивается `min..max`; для `message` и `tile` это описание |
 | `selected` | boolean | Алиас `value` для `checkbox` и `toggle_switch`, если `value` не задан |
-| `items` | array<string> | Список вариантов `combo_box`, `segmented_control` и `list_view` |
+| `items` | `array<string>` | Список вариантов `combo_box`, `segmented_control` и `list_view` |
 | `min`, `max` | number | Диапазон `slider`; по умолчанию `0..100`. Для графиков задаёт диапазон Y-оси, если указаны оба значения |
-| `series` | array<table> | Ряды данных для `line_chart`, `area_chart` и `bar_chart`; каждый ряд поддерживает `name`, `color` и `points` |
+| `series` | `array<table>` | Ряды данных для `line_chart`, `area_chart` и `bar_chart`; каждый ряд поддерживает `name`, `color` и `points` |
 | `x_label`, `y_label` | string | Подписи осей для chart-компонентов |
 | `x_type` | string | Режим X-оси графика; `time`, `timestamp` или `epoch` форматируют Unix seconds как локальное время |
 | `chart_type` | string | Для `type = "chart"` выбирает `line`, `area` или `bar` |
