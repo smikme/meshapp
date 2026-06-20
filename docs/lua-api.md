@@ -473,9 +473,9 @@ Form components do not return Lua objects with their own methods. A script creat
 | `prompt` | string | Placeholder for `text_field`, `password_field`, and `text_area`; for `combo_box`, it is used as the empty value prompt |
 | `value` | string/number/boolean | Current component value. `progress_bar` and `ring_progress` use `0..1`; `slider` is clamped to `min..max`; `message` and `tile` use it as the description |
 | `selected` | boolean | Alias for `checkbox` and `toggle_switch` `value` when `value` is omitted |
-| `items` | array<string> | Options for `combo_box`, `segmented_control`, and `list_view` |
+| `items` | `array<string>` | Options for `combo_box`, `segmented_control`, and `list_view` |
 | `min`, `max` | number | `slider` range; defaults to `0..100`. For charts, sets the Y-axis range when both values are present |
-| `series` | array<table> | Data series for `line_chart`, `area_chart`, and `bar_chart`; each series supports `name`, `color`, and `points` |
+| `series` | `array<table>` | Data series for `line_chart`, `area_chart`, and `bar_chart`; each series supports `name`, `color`, and `points` |
 | `x_label`, `y_label` | string | Axis labels for chart components |
 | `x_type` | string | Chart X-axis mode; use `time`, `timestamp`, or `epoch` to format Unix seconds as local time |
 | `chart_type` | string | For `type = "chart"`, selects `line`, `area`, or `bar` |
