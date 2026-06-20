@@ -39,8 +39,9 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Queue;
 import java.util.Set;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
 /**
@@ -61,6 +62,7 @@ abstract class FormChatBase extends Form {
     protected static final int PAGE_SIZE = 50;
     protected static final int MAX_WINDOW_PAGES = 3;
     protected static final int MAX_LOADED_MESSAGES = PAGE_SIZE * MAX_WINDOW_PAGES;
+    protected static final int MAX_PENDING_MESSAGE_CHANGE_EVENTS = 512;
     protected static final String WINDOWS_HIT_TEST_BACKGROUND = "-fx-background-color: rgba(0,0,0,0.004);";
 
     // === Left pane: chat list ===
@@ -186,6 +188,8 @@ abstract class FormChatBase extends Form {
     protected final AtomicBoolean messageRefreshQueued = new AtomicBoolean();
     protected final AtomicBoolean messageRefreshDirty = new AtomicBoolean();
     protected final Queue<MessageChangeEvent> pendingMessageChanges = new ConcurrentLinkedQueue<>();
+    protected final AtomicInteger pendingMessageChangeCount = new AtomicInteger();
+    protected final AtomicBoolean pendingMessageChangesOverflowed = new AtomicBoolean();
     protected final AtomicBoolean viewportLayoutQueued = new AtomicBoolean();
     protected final AtomicBoolean viewportLayoutDirty = new AtomicBoolean();
 
@@ -209,8 +213,25 @@ abstract class FormChatBase extends Form {
     }
 
     protected void scheduleMessageChangeRefresh(MessageChangeEvent event) {
-        pendingMessageChanges.add(event != null ? event : MessageChangeEvent.unknown());
+        enqueueMessageChangeEvent(event != null ? event : MessageChangeEvent.unknown());
         scheduleMessageRefresh();
+    }
+
+    private void enqueueMessageChangeEvent(MessageChangeEvent event) {
+        if (pendingMessageChangesOverflowed.get()) {
+            return;
+        }
+
+        int queued = pendingMessageChangeCount.incrementAndGet();
+        if (queued <= MAX_PENDING_MESSAGE_CHANGE_EVENTS) {
+            pendingMessageChanges.add(event);
+            return;
+        }
+
+        pendingMessageChangeCount.decrementAndGet();
+        pendingMessageChanges.clear();
+        pendingMessageChangeCount.set(0);
+        pendingMessageChangesOverflowed.set(true);
     }
 
     protected void flushQueuedMessageRefresh() {
@@ -232,7 +253,14 @@ abstract class FormChatBase extends Form {
         List<MessageChangeEvent> events = new ArrayList<>();
         MessageChangeEvent event;
         while ((event = pendingMessageChanges.poll()) != null) {
+            pendingMessageChangeCount.updateAndGet(value -> Math.max(0, value - 1));
             events.add(event);
+        }
+        if (pendingMessageChangesOverflowed.getAndSet(false)) {
+            pendingMessageChanges.clear();
+            pendingMessageChangeCount.set(0);
+            events.clear();
+            events.add(MessageChangeEvent.unknown());
         }
         return events;
     }

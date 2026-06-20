@@ -72,8 +72,12 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Queue;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Standalone monitor window for LoRa mesh packets.
@@ -113,6 +117,7 @@ public final class PacketMonitorWindow {
     private static final double PACKET_TABLE_COMPACT_COLUMN_MIN_WIDTH = 72;
     private static final double PACKET_TABLE_PAYLOAD_MIN_WIDTH = 260;
     private static final double PACKET_TABLE_PAYLOAD_RUNTIME_MIN_WIDTH = 140;
+    private static final int MAX_PENDING_LIVE_PACKET_EVENTS = 512;
     private static final DateTimeFormatter PACKET_EXPORT_FILE_TIME =
             DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss");
     private static final DateTimeFormatter PACKET_EXPORT_FILTER_DATE =
@@ -132,6 +137,10 @@ public final class PacketMonitorWindow {
     });
     private final ObservableList<PacketLogEntry> packetItems = FXCollections.observableArrayList();
     private final ObservableList<String> packetTypeFilters = FXCollections.observableArrayList(filterAllTypes());
+    private final Queue<PacketLogEntry> pendingLivePackets = new ConcurrentLinkedQueue<>();
+    private final AtomicInteger pendingLivePacketCount = new AtomicInteger();
+    private final AtomicBoolean livePacketFlushQueued = new AtomicBoolean();
+    private final AtomicBoolean livePacketQueueOverflowed = new AtomicBoolean();
     private final BooleanProperty suppressPacketTableTooltips = new SimpleBooleanProperty(false);
     private final ChangeListener<Number> packetTableScrollListener =
             (obs, oldValue, newValue) -> handlePacketTableScroll(
@@ -142,7 +151,7 @@ public final class PacketMonitorWindow {
     private final PacketMonitorService.Listener packetListener = new PacketMonitorService.Listener() {
         @Override
         public void onPacketLogged(PacketLogEntry entry) {
-            Platform.runLater(() -> handlePacketLogged(entry));
+            enqueueLivePacket(entry);
         }
 
         @Override
@@ -1181,6 +1190,72 @@ public final class PacketMonitorWindow {
         if (searchField != null) {
             searchField.setDisable(exportInProgress);
         }
+    }
+
+    private void enqueueLivePacket(PacketLogEntry entry) {
+        if (entry == null) {
+            return;
+        }
+        if (!livePacketQueueOverflowed.get()) {
+            int queued = pendingLivePacketCount.incrementAndGet();
+            if (queued <= MAX_PENDING_LIVE_PACKET_EVENTS) {
+                pendingLivePackets.add(entry);
+            } else {
+                pendingLivePacketCount.decrementAndGet();
+                pendingLivePackets.clear();
+                pendingLivePacketCount.set(0);
+                livePacketQueueOverflowed.set(true);
+            }
+        }
+        scheduleLivePacketFlush();
+    }
+
+    private void scheduleLivePacketFlush() {
+        if (livePacketFlushQueued.compareAndSet(false, true)) {
+            Platform.runLater(this::flushLivePacketEvents);
+        }
+    }
+
+    private void flushLivePacketEvents() {
+        try {
+            if (livePacketQueueOverflowed.getAndSet(false)) {
+                pendingLivePackets.clear();
+                pendingLivePacketCount.set(0);
+                reconcileLivePacketsFromStore();
+                return;
+            }
+
+            PacketLogEntry entry;
+            while ((entry = pendingLivePackets.poll()) != null) {
+                pendingLivePacketCount.updateAndGet(value -> Math.max(0, value - 1));
+                handlePacketLogged(entry);
+                if (livePacketQueueOverflowed.get()) {
+                    break;
+                }
+            }
+        } finally {
+            livePacketFlushQueued.set(false);
+            if ((pendingLivePacketCount.get() > 0 || livePacketQueueOverflowed.get())
+                    && livePacketFlushQueued.compareAndSet(false, true)) {
+                Platform.runLater(this::flushLivePacketEvents);
+            }
+        }
+    }
+
+    private void reconcileLivePacketsFromStore() {
+        refreshTypeFilters();
+        totalStoredPacketCount = packetMonitorService.countAllPackets();
+        matchingPacketCount = packetMonitorService.countMatchingPackets(buildCurrentQuery());
+
+        if (packetItems.isEmpty() || (isTableNearTop() && !currentPageHasNewer)) {
+            reloadCurrentFrame(true, false);
+            return;
+        }
+
+        latestFrameDirty = matchingPacketCount > packetItems.size();
+        currentPageHasNewer = latestFrameDirty;
+        currentPageHasOlder = matchingPacketCount > packetItems.size();
+        updateToolbarState();
     }
 
     /**

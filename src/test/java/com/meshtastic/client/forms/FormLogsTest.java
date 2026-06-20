@@ -26,8 +26,10 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Queue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -143,6 +145,37 @@ class FormLogsTest {
         }
     }
 
+    @Test
+    void shouldCoalesceLiveLogEntriesWhenFxQueueBacksUp() {
+        FormLogs form = onFxThread(() -> {
+            FormLogs created = new FormLogs();
+            created.formOpen();
+            return created;
+        });
+
+        try {
+            onFxThread(() -> {
+                for (int i = 0; i < 600; i++) {
+                    invoke(form, "handleLiveLogEntry", new LogEntry(i, "INFO", "line " + i));
+                }
+
+                AtomicBoolean overflowed = (AtomicBoolean) readField(form, "liveLogQueueOverflowed");
+                @SuppressWarnings("unchecked")
+                Queue<LogEntry> pending = (Queue<LogEntry>) readField(form, "pendingLiveLogEntries");
+
+                assertTrue(overflowed.get());
+                assertTrue(pending.size() <= 512);
+                return null;
+            });
+            waitForFxEvents();
+        } finally {
+            onFxThread(() -> {
+                form.formClose();
+                return null;
+            });
+        }
+    }
+
     private static void appendEvent(UiLogAppender appender, String message) {
         LoggerContext context = new LoggerContext();
         Logger logger = context.getLogger("form-logs-test");
@@ -182,6 +215,16 @@ class FormLogsTest {
             Method method = target.getClass().getDeclaredMethod(methodName);
             method.setAccessible(true);
             method.invoke(target);
+        } catch (ReflectiveOperationException e) {
+            throw new AssertionError("Failed to invoke method " + methodName, e);
+        }
+    }
+
+    private static void invoke(Object target, String methodName, LogEntry entry) {
+        try {
+            Method method = target.getClass().getDeclaredMethod(methodName, LogEntry.class);
+            method.setAccessible(true);
+            method.invoke(target, entry);
         } catch (ReflectiveOperationException e) {
             throw new AssertionError("Failed to invoke method " + methodName, e);
         }

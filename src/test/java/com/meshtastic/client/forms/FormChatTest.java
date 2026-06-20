@@ -4,6 +4,7 @@ import com.meshtastic.client.TestEnvironmentSupport;
 import com.meshtastic.client.model.ConnectionEntry;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.ChatItem;
+import com.meshtastic.client.model.MessageChangeEvent;
 import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.service.ConnectionManager;
@@ -267,6 +268,22 @@ class FormChatTest {
             }
             return null;
         });
+    }
+
+    @Test
+    void shouldCoalesceMessageChangeEventsWhenFxQueueBacksUp() {
+        onFxThread(() -> {
+            FormChat form = new FormChat();
+
+            for (int i = 0; i < FormChatBase.MAX_PENDING_MESSAGE_CHANGE_EVENTS + 10; i++) {
+                form.scheduleMessageChangeRefresh(MessageChangeEvent.unknown());
+            }
+
+            assertTrue(form.pendingMessageChangesOverflowed.get());
+            assertTrue(form.pendingMessageChanges.size() <= FormChatBase.MAX_PENDING_MESSAGE_CHANGE_EVENTS);
+            return null;
+        });
+        waitForFxEvents();
     }
 
     @Test
