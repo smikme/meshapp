@@ -1,6 +1,7 @@
 package com.meshtastic.client.notification;
 
 import com.meshtastic.client.connection.ble.macos.ObjCRuntime;
+import com.meshtastic.client.update.SelfUpdateEnvironment;
 import com.sun.jna.NativeLibrary;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -17,20 +18,25 @@ import org.slf4j.LoggerFactory;
 public class MacOsNotificationService implements NotificationService {
 
     private static final Logger log = LoggerFactory.getLogger(MacOsNotificationService.class);
+    private static final String APP_BUNDLE_IDENTIFIER = "com.meshtastic.meshapp";
+    private static final String CF_BUNDLE_IDENTIFIER_ENV = "__CFBundleIdentifier";
 
     private final boolean nativeAvailable;
 
     public MacOsNotificationService() {
         boolean ok = false;
         try {
-        // UNUserNotificationCenter requires an .app bundle. Without it,
-        // currentNotificationCenter can raise an ObjC exception and crash the JVM.
-        // A Homebrew JDK has a bundleIdentifier but is not an .app; jpackage bundles are safe.
-            long mainBundle = ObjCRuntime.msgSend(ObjCRuntime.cls("NSBundle"), "mainBundle");
-            long bundlePath = ObjCRuntime.msgSend(mainBundle, "bundlePath");
-            String path = ObjCRuntime.toJavaString(bundlePath);
-            if (path == null || !path.endsWith(".app")) {
-                log.info("Not an .app bundle ({}) — using osascript for notifications", path);
+            // UNUserNotificationCenter requires a real application identity.
+            // In the self-updating layout, jpackage starts a stable .app process
+            // which then launches the payload through Contents/runtime/.../bin/java.
+            // There NSBundle.mainBundle is the nested runtime directory, not the
+            // top-level .app, so checking only bundlePath.endsWith(".app") wrongly
+            // sends notifications through osascript.
+            MacOsNotificationContext context = detectNotificationContext();
+            String reason = context.nativeNotificationReason();
+            if (reason == null) {
+                log.info("Not a macOS app notification context ({}) — using osascript for notifications",
+                        context.describe());
             } else {
                 NativeLibrary.getInstance(
                         "/System/Library/Frameworks/UserNotifications.framework/UserNotifications");
@@ -41,14 +47,15 @@ public class MacOsNotificationService implements NotificationService {
                         && ObjCRuntime.cls("UNNotificationRequest") != 0;
 
                 if (ok) {
-            // Request alert and sound authorization: alert (4) | sound (2) = 6.
+                    // Request alert and sound authorization: alert (4) | sound (2) = 6.
                     long center = ObjCRuntime.msgSend(
                             ObjCRuntime.cls("UNUserNotificationCenter"), "currentNotificationCenter");
                     if (center != 0) {
                         ObjCRuntime.msgSend(center,
                                 "requestAuthorizationWithOptions:completionHandler:", 6L, 0L);
                     }
-                    log.info("macOS UNUserNotificationCenter initialized");
+                    log.info("macOS UNUserNotificationCenter initialized ({}, reason={})",
+                            context.describe(), reason);
                 }
             }
         } catch (Throwable t) {
@@ -152,5 +159,78 @@ public class MacOsNotificationService implements NotificationService {
     private static String escapeAppleScript(String s) {
         if (s == null) { return ""; }
         return s.replace("\\", "\\\\").replace("\"", "\\\"");
+    }
+
+    private static MacOsNotificationContext detectNotificationContext() {
+        long mainBundle = ObjCRuntime.msgSend(ObjCRuntime.cls("NSBundle"), "mainBundle");
+        String bundlePath = objcString(mainBundle, "bundlePath");
+        String bundleIdentifier = objcString(mainBundle, "bundleIdentifier");
+        String envBundleIdentifier = System.getenv(CF_BUNDLE_IDENTIFIER_ENV);
+        String launcher = SelfUpdateEnvironment.current()
+                .map(SelfUpdateEnvironment::launcher)
+                .orElse(null);
+        return new MacOsNotificationContext(
+                bundlePath,
+                bundleIdentifier,
+                envBundleIdentifier,
+                launcher
+        );
+    }
+
+    private static String objcString(long receiver, String selector) {
+        if (receiver == 0) {
+            return null;
+        }
+        return ObjCRuntime.toJavaString(ObjCRuntime.msgSend(receiver, selector));
+    }
+
+    static boolean hasAppBundleAncestor(String path) {
+        if (path == null || path.isBlank()) {
+            return false;
+        }
+        String normalized = path.replace('\\', '/');
+        if (normalized.endsWith(".app")) {
+            return true;
+        }
+        int searchFrom = 0;
+        int appIndex;
+        while ((appIndex = normalized.indexOf(".app/", searchFrom)) >= 0) {
+            String afterApp = normalized.substring(appIndex + ".app/".length());
+            if ("Contents".equals(afterApp) || afterApp.startsWith("Contents/")) {
+                return true;
+            }
+            searchFrom = appIndex + ".app/".length();
+        }
+        return false;
+    }
+
+    static boolean isMeshAppBundleIdentifier(String value) {
+        return APP_BUNDLE_IDENTIFIER.equals(value);
+    }
+
+    record MacOsNotificationContext(String bundlePath,
+                                    String bundleIdentifier,
+                                    String envBundleIdentifier,
+                                    String launcher) {
+        String nativeNotificationReason() {
+            if (hasAppBundleAncestor(bundlePath)) {
+                return "main-bundle-inside-app";
+            }
+            if (hasAppBundleAncestor(launcher)) {
+                return "self-update-launcher-app";
+            }
+            return null;
+        }
+
+        String describe() {
+            return "bundlePath=" + display(bundlePath)
+                    + ", bundleIdentifier=" + display(bundleIdentifier)
+                    + ", envBundleIdentifier=" + display(envBundleIdentifier)
+                    + ", launcher=" + display(launcher);
+        }
+
+        private static String display(String value) {
+            return value == null || value.isBlank() ? "<none>" : value;
+        }
     }
 }
