@@ -1678,6 +1678,9 @@ tasks.register('selfUpdateArchive') {
 
 def selfUpdateRequiredJarEntries = [
 	'com/meshtastic/client/AppVersion.class',
+	'com/meshtastic/client/notification/MacOsNotificationBroker.class',
+	'com/meshtastic/client/notification/MacOsNotificationService.class',
+	'com/meshtastic/client/notification/NotificationService.class',
 	'com/meshtastic/client/update/SelfUpdateLauncher.class',
 	'com/meshtastic/client/update/SelfUpdateEnvironment.class',
 	'com/meshtastic/client/update/SelfUpdateInstaller.class',

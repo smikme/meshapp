@@ -18,25 +18,30 @@ import org.slf4j.LoggerFactory;
 public class MacOsNotificationService implements NotificationService {
 
     private static final Logger log = LoggerFactory.getLogger(MacOsNotificationService.class);
-    private static final String APP_BUNDLE_IDENTIFIER = "com.meshtastic.meshapp";
     private static final String CF_BUNDLE_IDENTIFIER_ENV = "__CFBundleIdentifier";
 
     private final boolean nativeAvailable;
+    private final MacOsNotificationBroker.Client brokerClient;
 
     public MacOsNotificationService() {
         boolean ok = false;
+        MacOsNotificationBroker.Client broker = MacOsNotificationBroker.clientFromEnvironment()
+                .orElse(null);
         try {
-            // UNUserNotificationCenter requires a real application identity.
-            // In the self-updating layout, jpackage starts a stable .app process
-            // which then launches the payload through Contents/runtime/.../bin/java.
-            // There NSBundle.mainBundle is the nested runtime directory, not the
-            // top-level .app, so checking only bundlePath.endsWith(".app") wrongly
-            // sends notifications through osascript.
+            // UNUserNotificationCenter requires the current process to be a real
+            // app bundle. A self-updated payload launched as Contents/runtime/.../bin/java
+            // still has an .app ancestor, but calling currentNotificationCenter from
+            // that process raises an Objective-C exception and aborts the JVM.
             MacOsNotificationContext context = detectNotificationContext();
             String reason = context.nativeNotificationReason();
             if (reason == null) {
-                log.info("Not a macOS app notification context ({}) — using osascript for notifications",
-                        context.describe());
+                if (broker == null) {
+                    log.info("Not a macOS app notification context ({}) — using osascript for notifications",
+                            context.describe());
+                } else {
+                    log.info("Not a macOS app notification context ({}) — using launcher broker for notifications",
+                            context.describe());
+                }
             } else {
                 NativeLibrary.getInstance(
                         "/System/Library/Frameworks/UserNotifications.framework/UserNotifications");
@@ -59,23 +64,35 @@ public class MacOsNotificationService implements NotificationService {
                 }
             }
         } catch (Throwable t) {
-            log.warn("Native notifications unavailable, will use osascript", t);
+            log.warn("Native notifications unavailable, will use fallback notification path", t);
         }
         this.nativeAvailable = ok;
+        this.brokerClient = broker;
+    }
+
+    public boolean isNativeAvailable() {
+        return nativeAvailable;
     }
 
     @Override
     public void showNotification(String title, String message) {
         if (!nativeAvailable) {
-            showViaOsascript(title, message);
+            showViaFallback(title, message);
             return;
         }
         try {
             showViaNative(title, message);
         } catch (Throwable t) {
-            log.warn("Native notification failed, falling back to osascript", t);
-            showViaOsascript(title, message);
+            log.warn("Native notification failed, using fallback notification path", t);
+            showViaFallback(title, message);
         }
+    }
+
+    private void showViaFallback(String title, String message) {
+        if (brokerClient != null && brokerClient.showNotification(title, message)) {
+            return;
+        }
+        showViaOsascript(title, message);
     }
 
     private void showViaNative(String title, String message) {
@@ -184,28 +201,12 @@ public class MacOsNotificationService implements NotificationService {
         return ObjCRuntime.toJavaString(ObjCRuntime.msgSend(receiver, selector));
     }
 
-    static boolean hasAppBundleAncestor(String path) {
+    static boolean isTopLevelAppBundlePath(String path) {
         if (path == null || path.isBlank()) {
             return false;
         }
         String normalized = path.replace('\\', '/');
-        if (normalized.endsWith(".app")) {
-            return true;
-        }
-        int searchFrom = 0;
-        int appIndex;
-        while ((appIndex = normalized.indexOf(".app/", searchFrom)) >= 0) {
-            String afterApp = normalized.substring(appIndex + ".app/".length());
-            if ("Contents".equals(afterApp) || afterApp.startsWith("Contents/")) {
-                return true;
-            }
-            searchFrom = appIndex + ".app/".length();
-        }
-        return false;
-    }
-
-    static boolean isMeshAppBundleIdentifier(String value) {
-        return APP_BUNDLE_IDENTIFIER.equals(value);
+        return normalized.endsWith(".app");
     }
 
     record MacOsNotificationContext(String bundlePath,
@@ -213,11 +214,8 @@ public class MacOsNotificationService implements NotificationService {
                                     String envBundleIdentifier,
                                     String launcher) {
         String nativeNotificationReason() {
-            if (hasAppBundleAncestor(bundlePath)) {
-                return "main-bundle-inside-app";
-            }
-            if (hasAppBundleAncestor(launcher)) {
-                return "self-update-launcher-app";
+            if (isTopLevelAppBundlePath(bundlePath)) {
+                return "main-bundle-app";
             }
             return null;
         }

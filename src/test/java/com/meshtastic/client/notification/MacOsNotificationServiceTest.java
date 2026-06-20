@@ -2,7 +2,6 @@ package com.meshtastic.client.notification;
 
 import org.junit.jupiter.api.Test;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -11,23 +10,35 @@ class MacOsNotificationServiceTest {
 
     @Test
     void recognizesTopLevelAppBundlePath() {
-        assertTrue(MacOsNotificationService.hasAppBundleAncestor("/Applications/MeshApp.app"));
+        assertTrue(MacOsNotificationService.isTopLevelAppBundlePath("/Applications/MeshApp.app"));
     }
 
     @Test
-    void recognizesJpackageRuntimeInsideAppBundle() {
-        assertTrue(MacOsNotificationService.hasAppBundleAncestor(
+    void rejectsJpackageRuntimeInsideAppBundle() {
+        assertFalse(MacOsNotificationService.isTopLevelAppBundlePath(
                 "/Applications/MeshApp.app/Contents/runtime/Contents/Home/bin"));
     }
 
     @Test
     void rejectsBareJdkBundlePath() {
-        assertFalse(MacOsNotificationService.hasAppBundleAncestor(
+        assertFalse(MacOsNotificationService.isTopLevelAppBundlePath(
                 "/opt/homebrew/Cellar/openjdk/25/libexec/openjdk.jdk/Contents/Home/bin"));
     }
 
     @Test
-    void selfUpdateLauncherAllowsNativeNotifications() {
+    void topLevelAppBundleAllowsNativeNotifications() {
+        var context = new MacOsNotificationService.MacOsNotificationContext(
+                "/Applications/MeshApp.app",
+                null,
+                null,
+                null
+        );
+
+        assertTrue(context.nativeNotificationReason() != null);
+    }
+
+    @Test
+    void selfUpdateRuntimeFallsBackToOsascript() {
         var context = new MacOsNotificationService.MacOsNotificationContext(
                 "/Applications/MeshApp.app/Contents/runtime/Contents/Home/bin",
                 null,
@@ -35,11 +46,11 @@ class MacOsNotificationServiceTest {
                 "/Applications/MeshApp.app"
         );
 
-        assertEquals("main-bundle-inside-app", context.nativeNotificationReason());
+        assertNull(context.nativeNotificationReason());
     }
 
     @Test
-    void selfUpdateLauncherIsFallbackWhenMainBundleIsRawJava() {
+    void selfUpdateLauncherAloneDoesNotAllowNativeNotifications() {
         var context = new MacOsNotificationService.MacOsNotificationContext(
                 "/Users/ks/.sdkman/candidates/java/current/bin",
                 null,
@@ -47,7 +58,7 @@ class MacOsNotificationServiceTest {
                 "/Applications/MeshApp.app"
         );
 
-        assertEquals("self-update-launcher-app", context.nativeNotificationReason());
+        assertNull(context.nativeNotificationReason());
     }
 
     @Test
