@@ -13,6 +13,8 @@ import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.protocol.ProtocolHandler;
 import com.meshtastic.client.protocol.meshcore.MeshCoreCompanionProtocolRuntime;
+import com.meshtastic.client.protocol.rpc.RemoteRpcState;
+import com.meshtastic.client.rpc.RpcEventListener;
 import com.meshtastic.client.system.Form;
 
 import javafx.application.Platform;
@@ -63,6 +65,7 @@ abstract class FormChatBase extends Form {
     protected static final int MAX_WINDOW_PAGES = 3;
     protected static final int MAX_LOADED_MESSAGES = PAGE_SIZE * MAX_WINDOW_PAGES;
     protected static final int MAX_PENDING_MESSAGE_CHANGE_EVENTS = 512;
+    protected static final java.time.Duration REMOTE_RPC_TIMEOUT = java.time.Duration.ofSeconds(15);
     protected static final String WINDOWS_HIT_TEST_BACKGROUND = "-fx-background-color: rgba(0,0,0,0.004);";
 
     // === Left pane: chat list ===
@@ -110,11 +113,14 @@ abstract class FormChatBase extends Form {
     protected DeviceState state;
     protected ProtocolHandler protocolHandler;
     protected MeshCoreCompanionProtocolRuntime meshCoreCompanionRuntime;
+    protected RemoteRpcState remoteRpcState;
     /** Connection id currently bound to the chat form. */
     protected String boundConnectionId;
+    protected RpcEventListener remoteChatEventListener;
 
     // Unread tracking: keys such as "ch:INDEX" or "dm:NODEID" map to read-message counts.
     protected final Map<String, Integer> lastReadCounts = new HashMap<>();
+    protected final Set<String> pendingRemoteReadKeys = new LinkedHashSet<>();
     /** Last selected channel or DM for each connection. */
     protected final Map<String, ChatSelection> selectedChatsByConnectionId = new HashMap<>();
 
@@ -238,7 +244,9 @@ abstract class FormChatBase extends Form {
         messageRefreshDirty.getAndSet(false);
         List<MessageChangeEvent> events = drainPendingMessageChanges();
         if (events.isEmpty()) {
-            refreshCurrentChat();
+            if (remoteRpcState == null) {
+                refreshCurrentChat();
+            }
         } else {
             processMessageChangeEvents(events);
         }

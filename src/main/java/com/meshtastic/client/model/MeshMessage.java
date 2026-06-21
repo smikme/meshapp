@@ -53,6 +53,7 @@ public class MeshMessage {
     private boolean systemMessage;
     private long dbId;
     private List<MessageReaction> reactions = Collections.emptyList();
+    private boolean replyToOutgoing;
 
     /**
      * Creates a message with its core fields.
@@ -130,6 +131,9 @@ public class MeshMessage {
                 : List.copyOf(reactions);
     }
     public boolean hasReactions() { return !reactions.isEmpty(); }
+
+    public boolean isReplyToOutgoing() { return replyToOutgoing; }
+    public void setReplyToOutgoing(boolean replyToOutgoing) { this.replyToOutgoing = replyToOutgoing; }
 
     /**
      * Returns whether hop count can be calculated safely.

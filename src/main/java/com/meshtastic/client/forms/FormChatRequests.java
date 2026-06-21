@@ -125,6 +125,10 @@ abstract class FormChatRequests extends FormChatMessages {
 
     protected void sendReaction(MeshMessage msg, String emoji) {
         if (msg == null || emoji == null || emoji.isEmpty()) { return; }
+        if (remoteRpcState != null) {
+            Toast.show(Toast.Type.WARNING, I18n.t("chat.toast.remoteManagementUnavailable"));
+            return;
+        }
         if (selectedChat == null || state == null || (protocolHandler == null && meshCoreCompanionRuntime == null)) {
             Toast.show(Toast.Type.WARNING, I18n.t("chat.toast.radioNotConnected"));
             return;
@@ -156,6 +160,10 @@ abstract class FormChatRequests extends FormChatMessages {
 
     protected boolean retryMessage(MeshMessage msg) {
         if (msg == null || !msg.isOutgoing() || msg.getStatus() != MeshMessage.DeliveryStatus.FAILED) {
+            return false;
+        }
+        if (remoteRpcState != null) {
+            Toast.show(Toast.Type.WARNING, I18n.t("chat.toast.remoteManagementUnavailable"));
             return false;
         }
         if (state == null || (protocolHandler == null && meshCoreCompanionRuntime == null)) {
@@ -208,6 +216,10 @@ abstract class FormChatRequests extends FormChatMessages {
 
     protected boolean handleBotCommand(ChatBotCommandHelper.ParsedBotCommand command) {
         if (command == null || !command.isCommand()) {
+            return false;
+        }
+        if (remoteRpcState != null) {
+            Toast.show(Toast.Type.WARNING, I18n.t("chat.toast.remoteManagementUnavailable"));
             return false;
         }
         if (selectedChat == null || state == null || (protocolHandler == null && meshCoreCompanionRuntime == null)) {

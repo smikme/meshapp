@@ -1,5 +1,8 @@
 package com.meshtastic.client.forms;
 
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
 import com.meshtastic.client.connection.ConnectionException;
 import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.menu.MyDrawerBuilder;
@@ -11,6 +14,8 @@ import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.model.ProtocolType;
 import com.meshtastic.client.model.SerialModemLineMode;
+import com.meshtastic.client.protocol.ProtocolRuntime;
+import com.meshtastic.client.protocol.rpc.RemoteRpcState;
 import com.meshtastic.client.service.ConnectionManager;
 import com.meshtastic.client.service.SerialPortDiscoveryService;
 import com.meshtastic.client.simple.SimpleConnectionForm;
@@ -34,7 +39,13 @@ import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
 import javafx.scene.shape.SVGPath;
 
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -43,7 +54,12 @@ import java.util.concurrent.TimeUnit;
 @SystemForm(name = "Подключения", description = "Менеджер соединений", tags = {"connections", "options"})
 public class FormConnections extends Form {
 
+    private static final Duration REMOTE_RPC_TIMEOUT = Duration.ofSeconds(15);
+
     private VBox cardsBox;
+    private final Map<String, RemoteConnectionSnapshot> remoteConnectionSnapshots = new ConcurrentHashMap<>();
+    private final Set<String> remoteRefreshInProgress = ConcurrentHashMap.newKeySet();
+    private final Set<String> remoteActionInProgress = ConcurrentHashMap.newKeySet();
     private final Runnable changeListener = () -> Platform.runLater(this::rebuildCards);
 
     public FormConnections() {
@@ -152,7 +168,129 @@ public class FormConnections extends Form {
         lblAddress.setStyle("-fx-opacity: 0.6;");
 
         card.getChildren().addAll(topRow, lblAddress);
+        if (entry.getEffectiveType() == ConnectionType.REMOTE_RPC) {
+            if (connected) {
+                card.getChildren().add(createRemoteHostConnectionsSection(entry));
+            } else {
+                remoteConnectionSnapshots.remove(entry.getId());
+            }
+        }
         return card;
+    }
+
+    private VBox createRemoteHostConnectionsSection(ConnectionEntry rpcEntry) {
+        VBox section = new VBox(6);
+        section.setPadding(new Insets(8, 0, 0, 22));
+
+        HBox headerRow = new HBox(8);
+        headerRow.setAlignment(Pos.CENTER_LEFT);
+        Label title = new Label(I18n.t("connection.remote.title"));
+        title.getStyleClass().add("item-title");
+        Region spacer = new Region();
+        HBox.setHgrow(spacer, Priority.ALWAYS);
+        Button refreshButton = createToolbarButton(
+                I18n.t("connection.remote.action.refresh"),
+                I18n.t("connection.remote.action.refresh.tooltip"),
+                "/icons/refresh.svg",
+                () -> refreshRemoteConnections(rpcEntry, true));
+        refreshButton.setDisable(remoteRefreshInProgress.contains(rpcEntry.getId()));
+        headerRow.getChildren().addAll(title, spacer, refreshButton);
+
+        section.getChildren().addAll(new Separator(), headerRow);
+
+        RemoteRpcState state = remoteRpcState(rpcEntry);
+        if (state == null) {
+            Label waitingLabel = new Label(I18n.t("connection.remote.notReady"));
+            waitingLabel.setStyle("-fx-opacity: 0.65;");
+            section.getChildren().add(waitingLabel);
+            return section;
+        }
+
+        RemoteConnectionSnapshot snapshot = remoteConnectionSnapshots.get(rpcEntry.getId());
+        if (snapshot == null) {
+            refreshRemoteConnections(rpcEntry, false);
+            Label loadingLabel = new Label(I18n.t("connection.remote.loading"));
+            loadingLabel.setStyle("-fx-opacity: 0.65;");
+            section.getChildren().add(loadingLabel);
+            return section;
+        }
+        if (snapshot.error() != null && !snapshot.error().isBlank()) {
+            Label errorLabel = new Label(I18n.t("connection.remote.error", snapshot.error()));
+            errorLabel.setWrapText(true);
+            errorLabel.setStyle("-fx-text-fill: #B91C1C;");
+            section.getChildren().add(errorLabel);
+            return section;
+        }
+        if (snapshot.items().isEmpty()) {
+            Label emptyLabel = new Label(I18n.t("connection.remote.empty"));
+            emptyLabel.setStyle("-fx-opacity: 0.65;");
+            section.getChildren().add(emptyLabel);
+            return section;
+        }
+
+        for (RemoteConnectionItem item : snapshot.items()) {
+            section.getChildren().add(createRemoteConnectionRow(rpcEntry, item));
+        }
+        return section;
+    }
+
+    private HBox createRemoteConnectionRow(ConnectionEntry rpcEntry, RemoteConnectionItem item) {
+        HBox row = new HBox(8);
+        row.setAlignment(Pos.CENTER_LEFT);
+
+        String indicatorColor = item.connected()
+                ? "#1EA97C"
+                : item.reconnecting() ? "#F59E0B" : "#9CA3AF";
+        Label indicator = new Label("\u25CF");
+        indicator.setStyle("-fx-text-fill: " + indicatorColor + "; -fx-font-weight: bold;");
+
+        VBox textBox = new VBox(2);
+        Label name = new Label(item.name());
+        name.getStyleClass().add("connection-card-name");
+        String details = String.join(" · ",
+                item.type() + " " + item.address(),
+                I18n.t("connection.card.protocol", item.protocol()),
+                item.selected() ? I18n.t("connection.remote.selected") : "");
+        Label detail = new Label(details.replaceAll("( · )+$", ""));
+        detail.setStyle("-fx-opacity: 0.6;");
+        textBox.getChildren().addAll(name, detail);
+        HBox.setHgrow(textBox, Priority.ALWAYS);
+
+        ToolBar toolbar = createRemoteConnectionActionToolbar(rpcEntry, item);
+        row.getChildren().addAll(indicator, textBox, toolbar);
+        return row;
+    }
+
+    private ToolBar createRemoteConnectionActionToolbar(ConnectionEntry rpcEntry, RemoteConnectionItem item) {
+        ToolBar actionToolbar = new ToolBar();
+        actionToolbar.getStyleClass().add("connection-toolbar");
+
+        boolean busy = isRemoteActionBusy(rpcEntry.getId(), item.id());
+        Button connectButton = createToolbarButton(
+                item.connected() || item.reconnecting()
+                        ? I18n.t("connection.action.disconnect")
+                        : I18n.t("connection.action.connect"),
+                item.connected() || item.reconnecting()
+                        ? I18n.t("connection.remote.action.disconnect.tooltip")
+                        : I18n.t("connection.remote.action.connect.tooltip"),
+                item.connected() || item.reconnecting() ? "/icons/disconnect.svg" : "/icons/connect.svg",
+                () -> doRemoteConnectionAction(
+                        rpcEntry,
+                        item,
+                        item.connected() || item.reconnecting()
+                                ? "connection.disconnect"
+                                : "connection.connect"));
+        connectButton.setDisable(busy);
+
+        Button selectButton = createToolbarButton(
+                I18n.t("connection.remote.action.select"),
+                I18n.t("connection.remote.action.select.tooltip"),
+                "/icons/eye.svg",
+                () -> doRemoteConnectionAction(rpcEntry, item, "connection.select"));
+        selectButton.setDisable(busy || item.selected() || (!item.connected() && !item.reconnecting()));
+
+        actionToolbar.getItems().addAll(connectButton, new Separator(Orientation.VERTICAL), selectButton);
+        return actionToolbar;
     }
 
     private ToolBar createConnectionActionToolbar(ConnectionEntry entry, boolean connected, boolean reconnecting) {
@@ -271,6 +409,141 @@ public class FormConnections extends Form {
         worker.start();
     }
 
+    private void refreshRemoteConnections(ConnectionEntry rpcEntry, boolean force) {
+        RemoteRpcState state = remoteRpcState(rpcEntry);
+        if (state == null) {
+            return;
+        }
+        String rpcId = rpcEntry.getId();
+        if (!force && remoteConnectionSnapshots.containsKey(rpcId)) {
+            return;
+        }
+        if (!remoteRefreshInProgress.add(rpcId)) {
+            return;
+        }
+
+        state.client()
+                .call("connection.list", new JsonObject(), REMOTE_RPC_TIMEOUT)
+                .whenComplete((result, error) -> {
+                    if (error != null) {
+                        remoteConnectionSnapshots.put(
+                                rpcId,
+                                new RemoteConnectionSnapshot(List.of(), errorMessage(error)));
+                    } else {
+                        remoteConnectionSnapshots.put(rpcId, remoteSnapshot(result));
+                    }
+                    remoteRefreshInProgress.remove(rpcId);
+                    Platform.runLater(this::rebuildCards);
+                });
+    }
+
+    private void doRemoteConnectionAction(ConnectionEntry rpcEntry,
+                                          RemoteConnectionItem item,
+                                          String method) {
+        RemoteRpcState state = remoteRpcState(rpcEntry);
+        if (state == null) {
+            Toast.show(Toast.Type.ERROR, I18n.t("connection.remote.notReady"));
+            return;
+        }
+        String actionKey = remoteActionKey(rpcEntry.getId(), item.id());
+        if (!remoteActionInProgress.add(actionKey)) {
+            return;
+        }
+
+        JsonObject params = new JsonObject();
+        params.addProperty("id", item.id());
+        state.client()
+                .call(method, params, REMOTE_RPC_TIMEOUT)
+                .whenComplete((result, error) -> {
+                    if (error == null) {
+                        remoteConnectionSnapshots.put(rpcEntry.getId(), remoteSnapshot(result));
+                    }
+                    remoteActionInProgress.remove(actionKey);
+                    Platform.runLater(() -> {
+                        if (error != null) {
+                            Toast.show(Toast.Type.ERROR,
+                                    I18n.t("connection.remote.toast.actionError", errorMessage(error)));
+                        } else {
+                            Toast.show(Toast.Type.SUCCESS,
+                                    I18n.t("connection.remote.toast.actionSent", item.name()));
+                        }
+                        rebuildCards();
+                    });
+                });
+    }
+
+    private RemoteRpcState remoteRpcState(ConnectionEntry entry) {
+        ProtocolRuntime<?> runtime = ConnectionManager.getInstance().getProtocolRuntime(entry.getId());
+        return runtime != null && runtime.getState() instanceof RemoteRpcState state ? state : null;
+    }
+
+    private boolean isRemoteActionBusy(String rpcId, String remoteId) {
+        return remoteActionInProgress.contains(remoteActionKey(rpcId, remoteId));
+    }
+
+    private static String remoteActionKey(String rpcId, String remoteId) {
+        return rpcId + ":" + remoteId;
+    }
+
+    private static RemoteConnectionSnapshot remoteSnapshot(JsonElement result) {
+        JsonObject object = result != null && result.isJsonObject()
+                ? result.getAsJsonObject()
+                : new JsonObject();
+        JsonArray array = object.has("items") && object.get("items").isJsonArray()
+                ? object.getAsJsonArray("items")
+                : new JsonArray();
+        List<RemoteConnectionItem> items = new ArrayList<>();
+        for (JsonElement element : array) {
+            if (!element.isJsonObject()) {
+                continue;
+            }
+            JsonObject item = element.getAsJsonObject();
+            String id = stringField(item, "id");
+            if (id.isBlank()) {
+                continue;
+            }
+            items.add(new RemoteConnectionItem(
+                    id,
+                    firstText(stringField(item, "name"), id),
+                    stringField(item, "type"),
+                    stringField(item, "protocol"),
+                    stringField(item, "address"),
+                    booleanField(item, "connected"),
+                    booleanField(item, "reconnecting"),
+                    booleanField(item, "selected"),
+                    stringField(item, "nodeId")
+            ));
+        }
+        return new RemoteConnectionSnapshot(List.copyOf(items), null);
+    }
+
+    private static String stringField(JsonObject object, String field) {
+        JsonElement element = object.get(field);
+        if (element == null || element.isJsonNull() || !element.isJsonPrimitive()) {
+            return "";
+        }
+        return element.getAsString();
+    }
+
+    private static boolean booleanField(JsonObject object, String field) {
+        JsonElement element = object.get(field);
+        return element != null && element.isJsonPrimitive() && element.getAsBoolean();
+    }
+
+    private static String firstText(String value, String fallback) {
+        return value == null || value.isBlank() ? fallback : value.trim();
+    }
+
+    private static String errorMessage(Throwable error) {
+        Throwable current = error;
+        while ((current instanceof java.util.concurrent.CompletionException
+                || current instanceof java.util.concurrent.ExecutionException)
+                && current.getCause() != null) {
+            current = current.getCause();
+        }
+        return current.getMessage() != null ? current.getMessage() : current.toString();
+    }
+
     private void doDelete(ConnectionEntry entry) {
         ModalPane.showConfirm(
                 I18n.t("connection.confirm.delete.title"),
@@ -339,6 +612,20 @@ public class FormConnections extends Form {
         form.formOpen();
     }
 
+    private record RemoteConnectionSnapshot(List<RemoteConnectionItem> items, String error) {
+    }
+
+    private record RemoteConnectionItem(String id,
+                                        String name,
+                                        String type,
+                                        String protocol,
+                                        String address,
+                                        boolean connected,
+                                        boolean reconnecting,
+                                        boolean selected,
+                                        String nodeId) {
+    }
+
     private static String formatTransportAddress(ConnectionEntry entry) {
         return switch (entry.getEffectiveType()) {
             case BLE -> I18n.t("connection.card.address.ble",
@@ -349,6 +636,7 @@ public class FormConnections extends Form {
                     entry.getBaudRate(),
                     formatSerialModemLineMode(entry.getEffectiveSerialModemLineMode()));
             case TCP -> I18n.t("connection.card.address.tcp", entry.getHost(), entry.getPort());
+            case REMOTE_RPC -> I18n.t("connection.card.address.remoteRpc", entry.getHost(), entry.getPort());
         };
     }
 
@@ -360,6 +648,7 @@ public class FormConnections extends Form {
             case MESHTASTIC -> I18n.t("connection.protocol.meshtastic");
             case MESHCORE_KISS -> I18n.t("connection.protocol.meshcoreKiss");
             case MESHCORE_COMPANION -> I18n.t("connection.protocol.meshcoreCompanion");
+            case REMOTE_RPC -> I18n.t("connection.protocol.remoteRpc");
         };
     }
 

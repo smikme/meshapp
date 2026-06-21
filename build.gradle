@@ -2368,6 +2368,11 @@ if (org.gradle.internal.os.OperatingSystem.current().isMacOsX()) {
 
 			def jvmArgsList = application.applicationDefaultJvmArgs
 			def jvmArgsStr = jvmArgsList.collect { "    '${it}'" }.join(" \\\n")
+			def appArgsList = []
+			def gradleRunTask = tasks.findByName('run')
+			if (gradleRunTask != null && gradleRunTask.hasProperty('args')) {
+				appArgsList.addAll(gradleRunTask.args.collect { it.toString() })
+			}
 
 			def script = new File(macosDir, "run")
 			script.text = """\
@@ -2377,7 +2382,8 @@ ${jvmArgsStr} \\
     --module-path '${fxStr}' \\
     --add-modules javafx.controls \\
     -cp '${cpStr}' \\
-    ${application.mainClass.get()}
+    ${application.mainClass.get()} \\
+    "\$@"
 """
 			script.setExecutable(true)
 
@@ -2400,8 +2406,20 @@ ${jvmArgsStr} \\
 				throw new GradleException("runMac signature verification failed with exit code ${verifyProc.exitValue()}")
 			}
 
-			// Запустить .app через 'open -W' (ждём завершения)
-			def proc = ['open', '-W', appDir.absolutePath].execute()
+			// Запустить .app через 'open -W' (ждём завершения). Для отладочного
+			// multi-instance режима нужен '-n', иначе macOS активирует уже
+			// запущенный bundle и не передаст аргументы новому процессу.
+			def openArgs = ['open']
+			if (appArgsList.any { it == '--no-single-instance' || it == '--allow-multiple-instances' }) {
+				openArgs << '-n'
+			}
+			openArgs << '-W'
+			openArgs << appDir.absolutePath
+			if (!appArgsList.isEmpty()) {
+				openArgs << '--args'
+				openArgs.addAll(appArgsList)
+			}
+			def proc = new ProcessBuilder(openArgs).start()
 			proc.consumeProcessOutput(System.out, System.err)
 			proc.waitFor()
 		}

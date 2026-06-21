@@ -4,6 +4,7 @@ import com.meshtastic.client.model.ProtocolType;
 import com.meshtastic.client.protocol.meshcore.MeshCoreCompanionProtocol;
 import com.meshtastic.client.protocol.meshcore.MeshCoreKissProtocol;
 import com.meshtastic.client.protocol.meshtastic.MeshtasticProtocol;
+import com.meshtastic.client.protocol.rpc.RemoteRpcProtocol;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -34,6 +35,13 @@ class ProtocolRegistryTest {
         CommunicationProtocol<?> protocol = ProtocolRegistry.get(ProtocolType.MESHCORE_COMPANION);
 
         assertInstanceOf(MeshCoreCompanionProtocol.class, protocol);
+    }
+
+    @Test
+    void returnsRemoteRpcAdapterRegisteredByDefault() {
+        CommunicationProtocol<?> protocol = ProtocolRegistry.get(ProtocolType.REMOTE_RPC);
+
+        assertInstanceOf(RemoteRpcProtocol.class, protocol);
     }
 
     @Test

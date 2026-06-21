@@ -13,8 +13,10 @@ import com.meshtastic.client.lua.LuaScript;
 import com.meshtastic.client.lua.LuaScriptService;
 import com.meshtastic.client.modal.Toast;
 import com.meshtastic.client.model.ChatItem;
+import com.meshtastic.client.model.MessageChangeEvent;
 import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.model.NodeData;
+import com.meshtastic.client.protocol.rpc.RemoteChatJson;
 import com.meshtastic.client.service.MessageService;
 import com.meshtastic.client.themes.TypographyManager;
 import com.meshtastic.client.utils.AppPreferences;
@@ -677,6 +679,10 @@ abstract class FormChatUi extends FormChatBase {
     }
 
     private void sendChatMessage(ChatInputBar.SendRequest request) {
+        if (remoteRpcState != null) {
+            sendRemoteChatMessage(request);
+            return;
+        }
         if (Optional.ofNullable(selectedChat).isEmpty()
                 || Optional.ofNullable(state).isEmpty()
                 || (Optional.ofNullable(protocolHandler).isEmpty()
@@ -691,6 +697,42 @@ abstract class FormChatUi extends FormChatBase {
         if (sent) {
             refreshCurrentChatAfterLocalSend();
         }
+    }
+
+    private void sendRemoteChatMessage(ChatInputBar.SendRequest request) {
+        if (selectedChat == null || remoteRpcState == null || request == null) {
+            return;
+        }
+        var rpcState = remoteRpcState;
+        ChatItem requestChat = selectedChat;
+        String chatType = currentChatType();
+        String chatKey = currentChatKey();
+        String ownerNodeId = currentOwnerNodeId();
+        rpcState.client()
+                .call("chat.send",
+                        RemoteChatJson.sendParams(
+                                chatType,
+                                chatKey,
+                                request.text(),
+                                request.replyId()),
+                        REMOTE_RPC_TIMEOUT)
+                .whenComplete((result, error) -> Platform.runLater(() -> {
+                    if (rpcState != remoteRpcState
+                            || selectedChat == null
+                            || !chatItemMatches(selectedChat, requestChat)) {
+                        return;
+                    }
+                    if (error != null) {
+                        Toast.show(Toast.Type.ERROR, I18n.t("chat.remote.error", RemoteChatJson.errorMessage(error)));
+                        return;
+                    }
+                    MeshMessage sent = RemoteChatJson.parseResultMessage(result);
+                    if (sent == null) {
+                        reloadChatList();
+                        return;
+                    }
+                    scheduleMessageChangeRefresh(MessageChangeEvent.newMessage(chatType, chatKey, ownerNodeId, sent));
+                }));
     }
 
     private boolean sendChannelMessage(ChatInputBar.SendRequest request) {
@@ -932,6 +974,11 @@ abstract class FormChatUi extends FormChatBase {
     }
 
     protected String currentOwnerNodeId() {
+        if (remoteRpcState != null) {
+            return boundConnectionId == null || boundConnectionId.isBlank()
+                    ? "remote"
+                    : "remote:" + boundConnectionId;
+        }
         return Optional.ofNullable(state)
                 .map(deviceState -> deviceState.getOwnerNodeId())
                 .orElse("");

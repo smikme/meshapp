@@ -10,5 +10,6 @@ package com.meshtastic.client.model;
 public enum ConnectionType {
     TCP,
     SERIAL,
-    BLE
+    BLE,
+    REMOTE_RPC
 }

@@ -18,15 +18,15 @@ public final class MeshAppLauncher {
     private MeshAppLauncher() {}
 
     public static void main(String[] args) {
-        if (SelfUpdateLauncher.launchPayloadIfNeeded(args)) {
+        if (!MeshApp.isSingleInstanceGuardDisabled(args) && SelfUpdateLauncher.launchPayloadIfNeeded(args)) {
             return;
         }
         if (isTerminalMode(args)) {
-            System.exit(TerminalApp.run(args));
+            System.exit(TerminalApp.run(MeshApp.stripSingleInstanceArguments(args)));
             return;
         }
         AppPreferences.init();
-        if (!MeshApp.acquireSingleInstanceGuard()) {
+        if (!MeshApp.isSingleInstanceGuardDisabled(args) && !MeshApp.acquireSingleInstanceGuard()) {
             return;
         }
         SessionCrashLogManager.prepareForLaunch();

@@ -2,6 +2,8 @@ package com.meshtastic.client.forms.settings;
 
 import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.platform.OsDetect;
+import com.meshtastic.client.rpc.RpcAccessKey;
+import com.meshtastic.client.service.RemoteRpcHostService;
 import com.meshtastic.client.themes.TypographyManager;
 import com.meshtastic.client.utils.AppPreferences;
 import java.util.function.DoubleConsumer;
@@ -163,7 +165,8 @@ public final class ApplicationSettingsPanelFactory {
             integrationsHeader,
             checkUpdatesCb,
             jfrDiagnosticsCb,
-            diagnosticsNote
+            diagnosticsNote,
+            createRemoteRpcSettingRow()
         );
 
         panel
@@ -176,6 +179,93 @@ public final class ApplicationSettingsPanelFactory {
                 integrationsGroup
             );
         return panel;
+    }
+
+    private static VBox createRemoteRpcSettingRow() {
+        Label titleLabel = new Label(I18n.t("settings.remoteRpc.title"));
+        titleLabel.getStyleClass().add("item-title");
+
+        Label descriptionLabel = new Label(I18n.t("settings.remoteRpc.description"));
+        descriptionLabel.getStyleClass().add("muted-note-label");
+        descriptionLabel.setWrapText(true);
+
+        CheckBox enabledBox = new CheckBox(I18n.t("settings.remoteRpc.enabled"));
+        enabledBox.setSelected(AppPreferences.isRemoteRpcServerEnabled());
+
+        TextField bindField = new TextField(AppPreferences.getRemoteRpcServerBindAddress());
+        bindField.setPrefColumnCount(14);
+        TextField portField = new TextField(Integer.toString(AppPreferences.getRemoteRpcServerPort()));
+        portField.setPrefColumnCount(6);
+        portField.setMaxWidth(90);
+        portField.setTextFormatter(new TextFormatter<>(change -> {
+            String text = change.getControlNewText();
+            return text.matches("\\d{0,5}") ? change : null;
+        }));
+        TextField keyField = new TextField(AppPreferences.getRemoteRpcAccessKey());
+        keyField.setPrefColumnCount(30);
+
+        Button generateButton = new Button(I18n.t("settings.remoteRpc.generateKey"));
+        generateButton.setOnAction(event -> keyField.setText(RpcAccessKey.generate().value()));
+
+        Label statusLabel = new Label();
+        statusLabel.getStyleClass().add("muted-note-label");
+        statusLabel.setWrapText(true);
+        updateRemoteRpcStatusLabel(statusLabel);
+
+        Button applyButton = new Button(I18n.t("settings.remoteRpc.apply"));
+        applyButton.setOnAction(event -> {
+            int port = parsePortOrDefault(portField.getText());
+            portField.setText(Integer.toString(port));
+            AppPreferences.setRemoteRpcServerEnabled(enabledBox.isSelected());
+            AppPreferences.setRemoteRpcServerBindAddress(bindField.getText());
+            AppPreferences.setRemoteRpcServerPort(port);
+            AppPreferences.setRemoteRpcAccessKey(keyField.getText());
+            RemoteRpcHostService.getInstance().applyPreferences();
+            updateRemoteRpcStatusLabel(statusLabel);
+        });
+
+        HBox bindRow = new HBox(
+                8,
+                new Label(I18n.t("settings.remoteRpc.bindAddress")),
+                bindField,
+                new Label(I18n.t("settings.remoteRpc.port")),
+                portField
+        );
+        bindRow.setAlignment(Pos.CENTER_LEFT);
+
+        HBox keyRow = new HBox(
+                8,
+                new Label(I18n.t("settings.remoteRpc.key")),
+                keyField,
+                generateButton
+        );
+        keyRow.setAlignment(Pos.CENTER_LEFT);
+
+        HBox actionRow = new HBox(8, enabledBox, applyButton);
+        actionRow.setAlignment(Pos.CENTER_LEFT);
+
+        return new VBox(6, titleLabel, descriptionLabel, bindRow, keyRow, actionRow, statusLabel);
+    }
+
+    private static int parsePortOrDefault(String text) {
+        try {
+            int port = Integer.parseInt(text != null ? text.trim() : "");
+            return port >= 1 && port <= 65_535 ? port : AppPreferences.DEFAULT_REMOTE_RPC_SERVER_PORT;
+        } catch (NumberFormatException e) {
+            return AppPreferences.DEFAULT_REMOTE_RPC_SERVER_PORT;
+        }
+    }
+
+    private static void updateRemoteRpcStatusLabel(Label statusLabel) {
+        RemoteRpcHostService service = RemoteRpcHostService.getInstance();
+        if (service.isRunning()) {
+            statusLabel.setText(I18n.t("settings.remoteRpc.status.running", service.getPort()));
+            return;
+        }
+        String error = service.getLastError();
+        statusLabel.setText(error == null || error.isBlank()
+                ? I18n.t("settings.remoteRpc.status.stopped")
+                : I18n.t("settings.remoteRpc.status.error", error));
     }
 
     private static VBox createMemoryLimitSettingRow() {

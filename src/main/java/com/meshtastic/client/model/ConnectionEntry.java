@@ -26,6 +26,7 @@ public class ConnectionEntry {
     private SerialModemLineMode serialModemLineMode;
     private String bleAddress;
     private String bleDeviceName;
+    private String remoteAccessKey;
     private String nodeId;
     private boolean autoconnect;
     private transient boolean connected;
@@ -67,11 +68,28 @@ public class ConnectionEntry {
         this.bleDeviceName = bleDeviceName;
     }
 
+    /** Constructor for direct MeshApp RPC connections. */
+    public static ConnectionEntry remoteRpc(String name, String host, int port, String accessKey) {
+        ConnectionEntry entry = new ConnectionEntry();
+        entry.protocol = ProtocolType.REMOTE_RPC;
+        entry.type = ConnectionType.REMOTE_RPC;
+        entry.name = name;
+        entry.host = host;
+        entry.port = port;
+        entry.remoteAccessKey = accessKey;
+        return entry;
+    }
+
     /**
      * Returns the effective connection type.
      * Legacy entries with {@code type == null} are treated as TCP.
      */
     public ConnectionType getEffectiveType() {
+        if (type == ConnectionType.REMOTE_RPC
+                || protocol == ProtocolType.REMOTE_RPC
+                || (remoteAccessKey != null && !remoteAccessKey.isBlank())) {
+            return ConnectionType.REMOTE_RPC;
+        }
         return type != null ? type : ConnectionType.TCP;
     }
 
@@ -80,6 +98,9 @@ public class ConnectionEntry {
      * Legacy entries with {@code protocol == null} are treated as Meshtastic.
      */
     public ProtocolType getEffectiveProtocol() {
+        if (getEffectiveType() == ConnectionType.REMOTE_RPC) {
+            return ProtocolType.REMOTE_RPC;
+        }
         return protocol != null ? protocol : ProtocolType.MESHTASTIC;
     }
 
@@ -125,6 +146,11 @@ public class ConnectionEntry {
      * @param protocol protocol type to store in the connection profile
      */
     public void setProtocol(ProtocolType protocol) {
+        if (this.type == ConnectionType.REMOTE_RPC || protocol == ProtocolType.REMOTE_RPC) {
+            this.protocol = ProtocolType.REMOTE_RPC;
+            this.type = ConnectionType.REMOTE_RPC;
+            return;
+        }
         this.protocol = protocol;
     }
 
@@ -134,6 +160,9 @@ public class ConnectionEntry {
 
     public void setType(ConnectionType type) {
         this.type = type;
+        if (type == ConnectionType.REMOTE_RPC) {
+            this.protocol = ProtocolType.REMOTE_RPC;
+        }
     }
 
     public String getHost() {
@@ -195,6 +224,14 @@ public class ConnectionEntry {
 
     public void setBleDeviceName(String bleDeviceName) {
         this.bleDeviceName = bleDeviceName;
+    }
+
+    public String getRemoteAccessKey() {
+        return remoteAccessKey;
+    }
+
+    public void setRemoteAccessKey(String remoteAccessKey) {
+        this.remoteAccessKey = remoteAccessKey;
     }
 
     public String getNodeId() {

@@ -61,10 +61,15 @@ public class AppPreferences {
     public static final String KEY_MAP_NIGHT_MODE = "mapNightMode";
     public static final String KEY_MAP_TILE_DIRECTORY = "mapTileDirectory";
     public static final String KEY_TELEMETRY_DOCK_LAYOUT = "telemetryDockLayout";
+    public static final String KEY_REMOTE_RPC_SERVER_ENABLED = "remoteRpcServerEnabled";
+    public static final String KEY_REMOTE_RPC_SERVER_BIND_ADDRESS = "remoteRpcServerBindAddress";
+    public static final String KEY_REMOTE_RPC_SERVER_PORT = "remoteRpcServerPort";
+    public static final String KEY_REMOTE_RPC_ACCESS_KEY = "remoteRpcAccessKey";
 
     public static final int DEFAULT_MEMORY_LIMIT_MB = 512;
     public static final int MIN_MEMORY_LIMIT_MB = 128;
     public static final int MAX_MEMORY_LIMIT_MB = 65536;
+    public static final int DEFAULT_REMOTE_RPC_SERVER_PORT = 44030;
 
     private static Preferences state;
 
@@ -157,6 +162,49 @@ public class AppPreferences {
 
     public static void setJfrDiagnosticsEnabled(boolean value) {
         state().putBoolean(KEY_JFR_DIAGNOSTICS, value);
+    }
+
+    public static boolean isRemoteRpcServerEnabled() {
+        return state().getBoolean(KEY_REMOTE_RPC_SERVER_ENABLED, false);
+    }
+
+    public static void setRemoteRpcServerEnabled(boolean enabled) {
+        state().putBoolean(KEY_REMOTE_RPC_SERVER_ENABLED, enabled);
+        flushState();
+    }
+
+    public static String getRemoteRpcServerBindAddress() {
+        return state().get(KEY_REMOTE_RPC_SERVER_BIND_ADDRESS, "127.0.0.1");
+    }
+
+    public static void setRemoteRpcServerBindAddress(String value) {
+        state().put(KEY_REMOTE_RPC_SERVER_BIND_ADDRESS,
+                value == null || value.isBlank() ? "127.0.0.1" : value.trim());
+        flushState();
+    }
+
+    public static int getRemoteRpcServerPort() {
+        int port = state().getInt(KEY_REMOTE_RPC_SERVER_PORT, DEFAULT_REMOTE_RPC_SERVER_PORT);
+        return port >= 1 && port <= 65_535 ? port : DEFAULT_REMOTE_RPC_SERVER_PORT;
+    }
+
+    public static void setRemoteRpcServerPort(int port) {
+        state().putInt(KEY_REMOTE_RPC_SERVER_PORT,
+                port >= 1 && port <= 65_535 ? port : DEFAULT_REMOTE_RPC_SERVER_PORT);
+        flushState();
+    }
+
+    public static String getRemoteRpcAccessKey() {
+        return state().get(KEY_REMOTE_RPC_ACCESS_KEY, "");
+    }
+
+    public static void setRemoteRpcAccessKey(String value) {
+        if (value == null || value.isBlank()) {
+            state().remove(KEY_REMOTE_RPC_ACCESS_KEY);
+        } else {
+            state().put(KEY_REMOTE_RPC_ACCESS_KEY, value.trim());
+        }
+        flushState();
     }
 
     public static String getLanguageTag() {

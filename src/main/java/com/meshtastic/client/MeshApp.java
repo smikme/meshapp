@@ -18,6 +18,7 @@ import com.meshtastic.client.service.DatabaseProvider;
 import com.meshtastic.client.service.MessageDbService;
 import com.meshtastic.client.service.NodeCacheService;
 import com.meshtastic.client.service.PacketMonitorService;
+import com.meshtastic.client.service.RemoteRpcHostService;
 import com.meshtastic.client.service.UpdateCheckService;
 import com.meshtastic.client.system.AppUi;
 import com.meshtastic.client.system.FormManager;
@@ -30,6 +31,9 @@ import com.meshtastic.client.utils.AppPreferences;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.Executors;
@@ -59,6 +63,9 @@ public class MeshApp extends Application {
 
     public static final String APPLICATION_VERSION = APPLICATION_INFO.version();
     public static final int VERSION_CODE = APPLICATION_INFO.versionCode();
+    public static final String ARG_NO_SINGLE_INSTANCE = "--no-single-instance";
+    public static final String ARG_ALLOW_MULTIPLE_INSTANCES = "--allow-multiple-instances";
+    public static final String PROP_DISABLE_SINGLE_INSTANCE = "meshapp.singleInstance.disabled";
 
     private static void logStartupContext() {
         log.info(
@@ -215,6 +222,7 @@ public class MeshApp extends Application {
 
         startUiWatchdog();
         handlePendingCrashLog(stage);
+        RemoteRpcHostService.getInstance().applyPreferences();
         ConnectionManager.getInstance().connectAutoconnectEntries();
     }
 
@@ -376,6 +384,7 @@ public class MeshApp extends Application {
         stopUiWatchdog();
         AppTrayManager.getInstance().dispose();
         LuaScriptRuntimeService.getInstance().stopAll();
+        RemoteRpcHostService.getInstance().stop();
         ConnectionManager.getInstance().shutdownAll();
         BleDeviceDiscoveryService.getInstance().dispose();
         SessionCrashLogManager.markNormalShutdown();
@@ -389,8 +398,12 @@ public class MeshApp extends Application {
     }
 
     public static void main(String[] args) {
+        boolean singleInstanceDisabled = isSingleInstanceGuardDisabled(args);
+        String[] appArgs = stripSingleInstanceArguments(args);
         AppPreferences.init();
-        if (!acquireSingleInstanceGuard()) {
+        if (singleInstanceDisabled) {
+            log.info("Single-instance guard disabled by launch option");
+        } else if (!acquireSingleInstanceGuard()) {
             return;
         }
         if (
@@ -408,7 +421,50 @@ public class MeshApp extends Application {
             );
         });
         logStartupContext();
-        launch(args);
+        launch(appArgs);
+    }
+
+    static boolean isSingleInstanceGuardDisabled(String[] args) {
+        if (isEnabled(System.getProperty(PROP_DISABLE_SINGLE_INSTANCE))) {
+            return true;
+        }
+        if (args == null) {
+            return false;
+        }
+        for (String arg : args) {
+            if (isSingleInstanceBypassArgument(arg)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    static String[] stripSingleInstanceArguments(String[] args) {
+        if (args == null || args.length == 0) {
+            return new String[0];
+        }
+        List<String> filtered = new ArrayList<>(args.length);
+        for (String arg : args) {
+            if (!isSingleInstanceBypassArgument(arg)) {
+                filtered.add(arg);
+            }
+        }
+        return filtered.toArray(String[]::new);
+    }
+
+    private static boolean isSingleInstanceBypassArgument(String arg) {
+        return ARG_NO_SINGLE_INSTANCE.equals(arg)
+                || ARG_ALLOW_MULTIPLE_INSTANCES.equals(arg);
+    }
+
+    private static boolean isEnabled(String value) {
+        if (value == null || value.isBlank()) {
+            return false;
+        }
+        return switch (value.trim().toLowerCase(Locale.ROOT)) {
+            case "1", "true", "yes", "on" -> true;
+            default -> false;
+        };
     }
 
     /**

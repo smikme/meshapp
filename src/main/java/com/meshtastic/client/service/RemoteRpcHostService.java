@@ -1,0 +1,653 @@
+package com.meshtastic.client.service;
+
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonNull;
+import com.google.gson.JsonObject;
+import com.meshtastic.client.MeshApp;
+import com.meshtastic.client.model.ChatItem;
+import com.meshtastic.client.model.ConnectionEntry;
+import com.meshtastic.client.model.DeviceState;
+import com.meshtastic.client.model.MessageChangeEvent;
+import com.meshtastic.client.model.MessageReaction;
+import com.meshtastic.client.model.MeshMessage;
+import com.meshtastic.client.model.NodeData;
+import com.meshtastic.client.protocol.ProtocolHandler;
+import com.meshtastic.client.protocol.ProtocolRuntime;
+import com.meshtastic.client.protocol.meshcore.MeshCoreCompanionProtocolRuntime;
+import com.meshtastic.client.rpc.DirectRpcServer;
+import com.meshtastic.client.rpc.RpcAccessKey;
+import com.meshtastic.client.rpc.RpcMethodRegistry;
+import com.meshtastic.client.utils.AppPreferences;
+import com.meshtastic.client.utils.NodeUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.net.InetAddress;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ForkJoinPool;
+
+import org.meshtastic.proto.ChannelProtos;
+
+/**
+ * Owns the optional direct RPC server running inside MeshApp Host.
+ *
+ * @author Konstantin A. Smirnov (ks@privatepractice.app)
+ */
+public final class RemoteRpcHostService {
+
+    private static final Logger log = LoggerFactory.getLogger(RemoteRpcHostService.class);
+
+    private static RemoteRpcHostService instance;
+
+    private final Object lock = new Object();
+    private volatile DirectRpcServer server;
+    private volatile String lastError;
+
+    private RemoteRpcHostService() {
+    }
+
+    public static synchronized RemoteRpcHostService getInstance() {
+        if (instance == null) {
+            instance = new RemoteRpcHostService();
+        }
+        return instance;
+    }
+
+    /**
+     * Starts or stops the server according to saved preferences.
+     */
+    public void applyPreferences() {
+        if (!AppPreferences.isRemoteRpcServerEnabled()) {
+            stop();
+            return;
+        }
+        start(
+                AppPreferences.getRemoteRpcServerBindAddress(),
+                AppPreferences.getRemoteRpcServerPort(),
+                AppPreferences.getRemoteRpcAccessKey()
+        );
+    }
+
+    /**
+     * Starts the direct RPC server.
+     *
+     * @param bindAddress bind address, for example {@code 127.0.0.1} or {@code 0.0.0.0}
+     * @param port TCP port
+     * @param accessKey access key generated on the host
+     */
+    public void start(String bindAddress, int port, String accessKey) {
+        synchronized (lock) {
+            stopLocked();
+            lastError = null;
+            try {
+                RpcAccessKey parsedKey = RpcAccessKey.parse(accessKey);
+                server = DirectRpcServer.start(
+                        InetAddress.getByName(bindAddress),
+                        port,
+                        parsedKey,
+                        createRegistry(),
+                        ForkJoinPool.commonPool());
+                log.info("Remote RPC host server started on {}:{}", bindAddress, server.getPort());
+            } catch (Exception e) {
+                lastError = e.getMessage();
+                log.warn("Failed to start Remote RPC host server", e);
+            }
+        }
+    }
+
+    /**
+     * Stops the direct RPC server.
+     */
+    public void stop() {
+        synchronized (lock) {
+            stopLocked();
+        }
+    }
+
+    /**
+     * @return whether the direct server is currently running
+     */
+    public boolean isRunning() {
+        DirectRpcServer current = server;
+        return current != null;
+    }
+
+    /**
+     * @return actual local port, or {@code 0} when stopped
+     */
+    public int getPort() {
+        DirectRpcServer current = server;
+        return current != null ? current.getPort() : 0;
+    }
+
+    /**
+     * @return last startup error, if any
+     */
+    public String getLastError() {
+        return lastError;
+    }
+
+    private void stopLocked() {
+        DirectRpcServer current = server;
+        server = null;
+        if (current != null) {
+            current.close();
+            log.info("Remote RPC host server stopped");
+        }
+    }
+
+    private RpcMethodRegistry createRegistry() {
+        return new RpcMethodRegistry()
+                .register("system.ping", (params, context) -> {
+                    JsonObject result = new JsonObject();
+                    result.addProperty("app", "MeshApp");
+                    result.addProperty("version", MeshApp.APPLICATION_VERSION);
+                    result.addProperty("versionCode", MeshApp.VERSION_CODE);
+                    result.addProperty("remoteRpc", true);
+                    result.addProperty("activeConnections",
+                            ConnectionManager.getInstance().getActiveConnectionEntries().size());
+                    return CompletableFuture.completedFuture(result);
+                })
+                .register("connection.list", (params, context) ->
+                        CompletableFuture.completedFuture(connectionList()))
+                .register("connection.connect", (params, context) -> {
+                    String id = requiredId(params);
+                    ConnectionManager.getInstance().connect(id);
+                    ConnectionManager.getInstance().setSelectedConnectionId(id);
+                    return CompletableFuture.completedFuture(connectionActionResult(id));
+                })
+                .register("connection.disconnect", (params, context) -> {
+                    String id = requiredId(params);
+                    ConnectionManager.getInstance().disconnect(id);
+                    return CompletableFuture.completedFuture(connectionActionResult(id));
+                })
+                .register("connection.select", (params, context) -> {
+                    String id = requiredId(params);
+                    ConnectionManager.getInstance().setSelectedConnectionId(id);
+                    return CompletableFuture.completedFuture(connectionActionResult(id));
+                })
+                .register("chat.list", (params, context) ->
+                        CompletableFuture.completedFuture(chatList()))
+                .register("chat.messages", (params, context) ->
+                        CompletableFuture.completedFuture(chatMessages(params)))
+                .register("chat.markRead", (params, context) ->
+                        CompletableFuture.completedFuture(chatMarkRead(params)))
+                .register("chat.send", (params, context) ->
+                        CompletableFuture.completedFuture(chatSend(params)));
+    }
+
+    /**
+     * Publishes a host-side incoming-message event to the active remote client.
+     */
+    public void publishIncomingMessage(MeshMessage message, String chatType, String chatKey) {
+        DirectRpcServer current = server;
+        if (current == null || message == null) {
+            return;
+        }
+        JsonObject event = new JsonObject();
+        event.addProperty("chatType", firstText(chatType, ""));
+        event.addProperty("chatKey", firstText(chatKey, ""));
+        DeviceState state = activeHostStateOrNull();
+        String ownerId = state != null ? state.getOwnerNodeId() : "";
+        prepareMessagesForRemote(state, chatType, chatKey, ownerId, List.of(message));
+        event.add("message", messageToJson(message, state));
+        event.addProperty("title", firstText(resolveSenderName(state, message), message.getFromNodeId()));
+        event.addProperty("body", firstText(message.getText(), ""));
+        current.publishEvent("message.incoming", event);
+    }
+
+    /**
+     * Publishes a non-notification chat update, such as reaction or metadata changes.
+     */
+    public void publishChatChanged(String chatType, String chatKey, int targetPacketId) {
+        DirectRpcServer current = server;
+        if (current == null) {
+            return;
+        }
+        JsonObject event = new JsonObject();
+        event.addProperty("chatType", firstText(chatType, ""));
+        event.addProperty("chatKey", firstText(chatKey, ""));
+        event.addProperty("targetPacketId", targetPacketId);
+        DeviceState state = activeHostStateOrNull();
+        String ownerId = state != null ? state.getOwnerNodeId() : "";
+        MeshMessage message = MessageDbService.getInstance()
+                .findByPacketId(targetPacketId, chatType, chatKey, ownerId);
+        if (message != null) {
+            prepareMessagesForRemote(state, chatType, chatKey, ownerId, List.of(message));
+            event.add("message", messageToJson(message, state));
+        }
+        current.publishEvent("message.changed", event);
+    }
+
+    /**
+     * Publishes an outgoing-message delivery status update to the active remote client.
+     */
+    public void publishMessageStatusChanged(MessageChangeEvent change) {
+        DirectRpcServer current = server;
+        if (current == null
+                || change == null
+                || change.kind() != MessageChangeEvent.Kind.STATUS_CHANGED
+                || change.message() == null) {
+            return;
+        }
+        MeshMessage message = change.message();
+        JsonObject event = new JsonObject();
+        event.addProperty("chatType", firstText(change.chatType(), ""));
+        event.addProperty("chatKey", firstText(change.chatKey(), ""));
+        event.addProperty("packetId", message.getPacketId());
+        event.addProperty("status", message.getStatus() != null ? message.getStatus().name() : null);
+        event.addProperty("errorReason", message.getErrorReason());
+        DeviceState state = activeHostStateOrNull();
+        prepareMessagesForRemote(
+                state,
+                change.chatType(),
+                change.chatKey(),
+                firstText(change.ownerNodeId(), state != null ? state.getOwnerNodeId() : ""),
+                List.of(message));
+        event.add("message", messageToJson(message, state));
+        current.publishEvent("message.status", event);
+    }
+
+    private JsonObject connectionList() {
+        ConnectionManager manager = ConnectionManager.getInstance();
+        JsonArray items = new JsonArray();
+        for (ConnectionEntry entry : manager.getEntries()) {
+            items.add(connectionToJson(entry, manager));
+        }
+        JsonObject result = new JsonObject();
+        result.addProperty("selectedConnectionId", manager.getSelectedConnectionId());
+        result.add("items", items);
+        return result;
+    }
+
+    private JsonObject connectionActionResult(String id) {
+        ConnectionManager manager = ConnectionManager.getInstance();
+        ConnectionEntry entry = manager.findEntry(id);
+        JsonObject result = connectionList();
+        if (entry != null) {
+            result.add("connection", connectionToJson(entry, manager));
+        }
+        return result;
+    }
+
+    private static JsonObject connectionToJson(ConnectionEntry entry, ConnectionManager manager) {
+        JsonObject item = new JsonObject();
+        String selectedConnectionId = manager.getSelectedConnectionId();
+        item.addProperty("id", entry.getId());
+        item.addProperty("name", entry.getName());
+        item.addProperty("type", entry.getEffectiveType().name());
+        var protocolType = manager.getActiveProtocolType(entry.getId());
+        item.addProperty("protocol", protocolType != null ? protocolType.name() : entry.getEffectiveProtocol().name());
+        item.addProperty("connected", entry.isConnected());
+        item.addProperty("reconnecting", entry.isReconnecting());
+        item.addProperty("selected", entry.getId() != null && entry.getId().equals(selectedConnectionId));
+        item.addProperty("nodeId", entry.getNodeId());
+        item.addProperty("address", connectionAddress(entry));
+        return item;
+    }
+
+    private static String connectionAddress(ConnectionEntry entry) {
+        return switch (entry.getEffectiveType()) {
+            case BLE -> firstText(entry.getBleDeviceName(), "BLE") + " (" + firstText(entry.getBleAddress(), "?") + ")";
+            case SERIAL -> firstText(entry.getPortName(), "?") + " @" + entry.getBaudRate();
+            case TCP -> firstText(entry.getHost(), "?") + ":" + entry.getPort();
+            case REMOTE_RPC -> firstText(entry.getHost(), "?") + ":" + entry.getPort();
+        };
+    }
+
+    private static String requiredId(JsonObject params) {
+        if (params == null || !params.has("id") || params.get("id").isJsonNull()) {
+            throw new IllegalArgumentException("connection id is required");
+        }
+        String id = params.get("id").getAsString();
+        if (id == null || id.isBlank()) {
+            throw new IllegalArgumentException("connection id is required");
+        }
+        return id.trim();
+    }
+
+    private static String firstText(String value, String fallback) {
+        return value == null || value.isBlank() ? fallback : value.trim();
+    }
+
+    private JsonObject chatList() {
+        ActiveHostConnection active = activeHostConnection();
+        DeviceState state = active.state();
+        String ownerId = state.getOwnerNodeId();
+        MessageDbService db = MessageDbService.getInstance();
+        Map<String, MeshMessage> channelLastMessages = db.getLastMessagePerChat("channel", ownerId);
+        Map<String, MeshMessage> dmLastMessages = db.getLastMessagePerChat("dm", ownerId);
+        Map<String, Integer> readCounts = db.loadAllReadCounts(ownerId);
+
+        JsonArray items = new JsonArray();
+        for (ChannelProtos.Channel channel : state.getChannels()) {
+            if (channel.getRole() == ChannelProtos.Channel.Role.DISABLED) {
+                continue;
+            }
+            String chatKey = String.valueOf(channel.getIndex());
+            ChatItem item = ChatItem.fromChannel(
+                    channel,
+                    channelLastMessages.get(chatKey),
+                    unreadCount(db, readCounts, "channel", chatKey, ownerId),
+                    false);
+            items.add(chatItemToJson(item));
+        }
+
+        Set<String> dmPeers = new LinkedHashSet<>(db.getDistinctDmPeers(ownerId));
+        dmPeers.addAll(state.getAllDirectMessages().keySet());
+        for (String peerNodeId : dmPeers) {
+            ChatItem item = ChatItem.fromDirectMessage(
+                    peerNodeId,
+                    resolvePeerNode(state, peerNodeId),
+                    dmLastMessages.get(peerNodeId),
+                    unreadCount(db, readCounts, "dm", peerNodeId, ownerId),
+                    false);
+            items.add(chatItemToJson(item));
+        }
+
+        JsonObject result = new JsonObject();
+        result.addProperty("ownerNodeId", ownerId);
+        result.addProperty("connectionId", active.entry().getId());
+        result.add("items", items);
+        return result;
+    }
+
+    private JsonObject chatMarkRead(JsonObject params) {
+        ActiveHostConnection active = activeHostConnection();
+        String chatType = requiredText(params, "chatType");
+        String chatKey = requiredText(params, "chatKey");
+        String ownerId = active.state().getOwnerNodeId();
+        MessageDbService db = MessageDbService.getInstance();
+        int count = db.getUnreadEligibleMessageCount(chatType, chatKey, ownerId);
+        db.saveReadCount(chatType, chatKey, count, ownerId);
+        return chatList();
+    }
+
+    private JsonObject chatMessages(JsonObject params) {
+        ActiveHostConnection active = activeHostConnection();
+        String chatType = requiredText(params, "chatType");
+        String chatKey = requiredText(params, "chatKey");
+        int limit = boundedInt(params, "limit", 1, 200, 50);
+        long beforeDbId = longField(params, "beforeDbId");
+        long afterDbId = longField(params, "afterDbId");
+        String ownerId = active.state().getOwnerNodeId();
+        MessageDbService db = MessageDbService.getInstance();
+
+        List<MeshMessage> messages;
+        if (beforeDbId > 0) {
+            messages = db.loadBefore(chatType, chatKey, beforeDbId, limit, ownerId);
+        } else if (afterDbId > 0) {
+            messages = db.loadAfter(chatType, chatKey, afterDbId, limit, ownerId);
+        } else {
+            messages = db.loadLast(chatType, chatKey, limit, ownerId);
+        }
+
+        JsonArray items = new JsonArray();
+        prepareMessagesForRemote(active.state(), chatType, chatKey, ownerId, messages);
+        for (MeshMessage message : messages) {
+            items.add(messageToJson(message, active.state()));
+        }
+        JsonObject result = new JsonObject();
+        result.addProperty("ownerNodeId", ownerId);
+        result.add("items", items);
+        return result;
+    }
+
+    private JsonObject chatSend(JsonObject params) {
+        ActiveHostConnection active = activeHostConnection();
+        String chatType = requiredText(params, "chatType");
+        String chatKey = requiredText(params, "chatKey");
+        String text = requiredText(params, "text");
+        int replyId = boundedInt(params, "replyId", Integer.MIN_VALUE, Integer.MAX_VALUE, 0);
+
+        MeshMessage sent;
+        if (active.meshCoreRuntime() != null) {
+            sent = "channel".equals(chatType)
+                    ? active.meshCoreRuntime().sendChannelMessage(Integer.parseInt(chatKey), text, replyId)
+                    : active.meshCoreRuntime().sendDirectMessage(chatKey, text, replyId);
+        } else {
+            ProtocolHandler handler = active.handler();
+            if (handler == null) {
+                throw new IllegalStateException("selected host connection cannot send messages");
+            }
+            sent = "channel".equals(chatType)
+                    ? MessageService.sendChannelMessage(handler, active.state(), Integer.parseInt(chatKey), text, replyId)
+                    : MessageService.sendDirectMessage(handler, active.state(), chatKey, text, replyId);
+        }
+        if (sent == null) {
+            throw new IllegalStateException("message was not sent");
+        }
+        prepareMessagesForRemote(active.state(), chatType, chatKey, active.state().getOwnerNodeId(), List.of(sent));
+        JsonObject result = new JsonObject();
+        result.add("message", messageToJson(sent, active.state()));
+        result.add("chat", chatList());
+        return result;
+    }
+
+    private ActiveHostConnection activeHostConnection() {
+        ConnectionManager manager = ConnectionManager.getInstance();
+        ConnectionEntry entry = manager.getSelectedConnectionEntry();
+        if (entry == null || !entry.isConnected()) {
+            throw new IllegalStateException("no active host connection selected");
+        }
+        DeviceState state = manager.getDeviceState(entry.getId());
+        if (state == null) {
+            throw new IllegalStateException("active host connection has no device state yet");
+        }
+        ProtocolRuntime<?> runtime = manager.getProtocolRuntime(entry.getId());
+        MeshCoreCompanionProtocolRuntime meshCoreRuntime =
+                runtime instanceof MeshCoreCompanionProtocolRuntime companionRuntime ? companionRuntime : null;
+        return new ActiveHostConnection(
+                entry,
+                state,
+                manager.getProtocolHandler(entry.getId()),
+                meshCoreRuntime);
+    }
+
+    private DeviceState activeHostStateOrNull() {
+        ConnectionManager manager = ConnectionManager.getInstance();
+        ConnectionEntry entry = manager.getSelectedConnectionEntry();
+        return entry != null && entry.isConnected()
+                ? manager.getDeviceState(entry.getId())
+                : null;
+    }
+
+    private static NodeData resolvePeerNode(DeviceState state, String peerNodeId) {
+        if (state == null || peerNodeId == null) {
+            return null;
+        }
+        for (NodeData node : state.getNodeDb().values()) {
+            if (peerNodeId.equalsIgnoreCase(node.getNodeId())) {
+                return node;
+            }
+        }
+        return null;
+    }
+
+    private static JsonObject chatItemToJson(ChatItem item) {
+        JsonObject object = new JsonObject();
+        object.addProperty("type", item.getType().name());
+        object.addProperty("displayName", item.getDisplayName());
+        object.addProperty("avatarText", item.getAvatarText());
+        object.addProperty("avatarColor", item.getAvatarColor());
+        object.addProperty("lastMessageText", item.getLastMessageText());
+        object.addProperty("lastMessageTime", item.getLastMessageTime());
+        object.addProperty("unreadCount", item.getUnreadCount());
+        object.addProperty("channelIndex", item.getChannelIndex());
+        object.addProperty("peerNodeId", item.getPeerNodeId());
+        object.addProperty("muted", item.isMuted());
+        return object;
+    }
+
+    private static int unreadCount(MessageDbService db,
+                                   Map<String, Integer> readCounts,
+                                   String chatType,
+                                   String chatKey,
+                                   String ownerId) {
+        int total = db.getUnreadEligibleMessageCount(chatType, chatKey, ownerId);
+        int lastRead = readCounts != null ? readCounts.getOrDefault(readKey(chatType, chatKey), 0) : 0;
+        return Math.max(0, total - lastRead);
+    }
+
+    private static String readKey(String chatType, String chatKey) {
+        return "dm".equals(chatType) ? "dm:" + chatKey : "ch:" + chatKey;
+    }
+
+    private static JsonObject messageToJson(MeshMessage message, DeviceState state) {
+        JsonObject object = new JsonObject();
+        object.addProperty("fromNodeId", message.getFromNodeId());
+        object.addProperty("toNodeId", message.getToNodeId());
+        object.addProperty("channelIndex", message.getChannelIndex());
+        object.addProperty("text", message.getText());
+        object.addProperty("timestamp", message.getTimestamp());
+        object.addProperty("outgoing", message.isOutgoing());
+        object.addProperty("status", message.getStatus() != null ? message.getStatus().name() : null);
+        object.addProperty("packetId", message.getPacketId());
+        object.addProperty("errorReason", message.getErrorReason());
+        object.addProperty("replyId", message.getReplyId());
+        object.addProperty("replyText", message.getReplyText());
+        object.addProperty("replyToOutgoing", message.isReplyToOutgoing());
+        object.addProperty("hopStart", message.getHopStart());
+        object.addProperty("hopLimit", message.getHopLimit());
+        object.addProperty("rxRssi", message.getRxRssi());
+        object.addProperty("rxSnr", message.getRxSnr());
+        object.addProperty("senderName", resolveSenderName(state, message));
+        object.addProperty("viaMqtt", message.isViaMqtt());
+        object.addProperty("systemMessage", message.isSystemMessage());
+        object.addProperty("dbId", message.getDbId());
+        JsonArray reactions = new JsonArray();
+        for (MessageReaction reaction : message.getReactions()) {
+            reactions.add(reactionToJson(reaction, state));
+        }
+        object.add("reactions", reactions);
+        return object;
+    }
+
+    private static JsonObject reactionToJson(MessageReaction reaction, DeviceState state) {
+        JsonObject object = new JsonObject();
+        object.addProperty("targetPacketId", reaction.getTargetPacketId());
+        object.addProperty("fromNodeId", reaction.getFromNodeId());
+        object.addProperty("emoji", reaction.getEmoji());
+        object.addProperty("timestamp", reaction.getTimestamp());
+        object.addProperty("outgoing", reaction.isOutgoing());
+        object.addProperty("dbId", reaction.getDbId());
+        object.addProperty("packetId", reaction.getPacketId());
+        object.addProperty("status", reaction.getStatus() != null ? reaction.getStatus().name() : null);
+        object.addProperty("errorReason", reaction.getErrorReason());
+        object.addProperty("senderName", resolveReactionSenderName(state, reaction));
+        return object;
+    }
+
+    private static void prepareMessagesForRemote(DeviceState state,
+                                                 String chatType,
+                                                 String chatKey,
+                                                 String ownerId,
+                                                 List<MeshMessage> messages) {
+        if (messages == null || messages.isEmpty()) {
+            return;
+        }
+        MessageDbService db = MessageDbService.getInstance();
+        db.hydrateReplyTexts(messages, chatType, chatKey, ownerId);
+        markReplyTargets(messages, db, chatType, chatKey, ownerId);
+        Map<Integer, List<MessageReaction>> reactionsByTarget =
+                db.loadReactionsByTargetPacketIds(
+                        chatType,
+                        chatKey,
+                        ownerId,
+                        messages.stream().map(MeshMessage::getPacketId).toList());
+        for (MeshMessage message : messages) {
+            List<MessageReaction> reactions = reactionsByTarget.get(message.getPacketId());
+            if (reactions != null && !reactions.isEmpty()) {
+                reactions.forEach(reaction -> {
+                    if (reaction.getSenderName() == null || reaction.getSenderName().isBlank()) {
+                        reaction.setSenderName(resolveReactionSenderName(state, reaction));
+                    }
+                });
+                message.setReactions(reactions);
+            }
+        }
+    }
+
+    private static void markReplyTargets(List<MeshMessage> messages,
+                                         MessageDbService db,
+                                         String chatType,
+                                         String chatKey,
+                                         String ownerId) {
+        for (MeshMessage message : messages) {
+            if (message.getReplyId() == 0) {
+                message.setReplyToOutgoing(false);
+                continue;
+            }
+            MeshMessage original = db.findByPacketId(message.getReplyId(), chatType, chatKey, ownerId);
+            message.setReplyToOutgoing(original != null && original.isOutgoing());
+        }
+    }
+
+    private static String resolveSenderName(DeviceState state, MeshMessage message) {
+        if (message == null) {
+            return "";
+        }
+        String existing = message.getSenderName();
+        if (existing != null && !existing.isBlank()) {
+            return existing.trim();
+        }
+        NodeData node = NodeUtils.resolveNode(state, message.getFromNodeId());
+        return firstText(
+                node != null ? firstText(node.getLongName(), node.getShortName()) : null,
+                message.getFromNodeId());
+    }
+
+    private static String resolveReactionSenderName(DeviceState state, MessageReaction reaction) {
+        if (reaction == null) {
+            return "";
+        }
+        String existing = reaction.getSenderName();
+        if (existing != null && !existing.isBlank()) {
+            return existing.trim();
+        }
+        NodeData node = NodeUtils.resolveNode(state, reaction.getFromNodeId());
+        return firstText(
+                node != null ? firstText(node.getLongName(), node.getShortName()) : null,
+                reaction.getFromNodeId());
+    }
+
+    private static String requiredText(JsonObject params, String field) {
+        JsonElement element = params != null ? params.get(field) : null;
+        if (element == null || element == JsonNull.INSTANCE || !element.isJsonPrimitive()) {
+            throw new IllegalArgumentException(field + " is required");
+        }
+        String value = element.getAsString();
+        if (value == null || value.isBlank()) {
+            throw new IllegalArgumentException(field + " is required");
+        }
+        return value.trim();
+    }
+
+    private static int boundedInt(JsonObject params, String field, int min, int max, int fallback) {
+        JsonElement element = params != null ? params.get(field) : null;
+        if (element == null || element.isJsonNull()) {
+            return fallback;
+        }
+        int value = element.getAsInt();
+        if (value < min || value > max) {
+            throw new IllegalArgumentException(field + " is out of range");
+        }
+        return value;
+    }
+
+    private static long longField(JsonObject params, String field) {
+        JsonElement element = params != null ? params.get(field) : null;
+        return element != null && !element.isJsonNull() ? element.getAsLong() : 0L;
+    }
+
+    private record ActiveHostConnection(ConnectionEntry entry,
+                                        DeviceState state,
+                                        ProtocolHandler handler,
+                                        MeshCoreCompanionProtocolRuntime meshCoreRuntime) {
+    }
+}

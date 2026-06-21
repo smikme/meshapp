@@ -382,6 +382,7 @@ public class MessageBubbleFactory {
         if (rendered.quoteSlot != null) {
             setSlotContent(rendered.quoteSlot, createQuoteNode(msg).orElse(null));
         }
+        refreshMentionStyle(rendered, msg);
         if (rendered.incoming && rendered.routingMetaSlot != null) {
             setSlotContent(rendered.routingMetaSlot, createRoutingMetaNode(msg).orElse(null));
         }
@@ -410,9 +411,7 @@ public class MessageBubbleFactory {
         HBox routingMetaSlot = createRoutingMetaSlot(createRoutingMetaNode(msg).orElse(null));
         HBox meta = buildIncomingMeta(msg, routingMetaSlot);
         VBox content = createMessageContent("chat-bubble-incoming", reactionBar != null, DEFAULT_BUBBLE_WIDTH_RATIO);
-        Optional.of(msg)
-                .filter(this::isMentioningMe)
-                .ifPresent(ignored -> content.getStyleClass().add("chat-bubble-mentioned"));
+        applyMentionStyle(content, msg);
         content.getChildren().addAll(nodes(
                 createSenderNameLabel(senderPresentation.senderName()),
                 quoteSlot,
@@ -832,9 +831,10 @@ public class MessageBubbleFactory {
      * @return {@code true} when the text names the local node or replies to an outgoing message
      */
     private boolean isMentioningMe(MeshMessage msg) {
-        return Optional.ofNullable(state)
-                .map(ignored -> messageMentionsLocalUser(msg) || isReplyToOutgoingMessage(msg))
-                .orElse(false);
+        return isReplyToOutgoingMessage(msg)
+                || Optional.ofNullable(state)
+                        .map(ignored -> messageMentionsLocalUser(msg))
+                        .orElse(false);
     }
 
     /**
@@ -861,11 +861,28 @@ public class MessageBubbleFactory {
      * @return {@code true} if the reply target is found in the database and is outgoing
      */
     private boolean isReplyToOutgoingMessage(MeshMessage msg) {
+        if (msg.isReplyToOutgoing()) {
+            return true;
+        }
         return Optional.of(msg.getReplyId())
                 .filter(replyId -> replyId != ZERO_VALUE)
                 .map(replyId -> findReplyTargetInCurrentScope(replyId, msg))
                 .map(MeshMessage::isOutgoing)
                 .orElse(false);
+    }
+
+    private void refreshMentionStyle(RenderedMessageRow rendered, MeshMessage msg) {
+        if (rendered == null || msg == null || !rendered.incoming || rendered.content == null) {
+            return;
+        }
+        applyMentionStyle(rendered.content, msg);
+    }
+
+    private void applyMentionStyle(VBox content, MeshMessage msg) {
+        content.getStyleClass().remove("chat-bubble-mentioned");
+        if (isMentioningMe(msg)) {
+            content.getStyleClass().add("chat-bubble-mentioned");
+        }
     }
 
     private MeshMessage findReplyTargetInCurrentScope(int replyId, MeshMessage msg) {

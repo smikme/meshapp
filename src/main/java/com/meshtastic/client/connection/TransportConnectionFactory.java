@@ -3,6 +3,7 @@ package com.meshtastic.client.connection;
 import com.meshtastic.client.connection.ble.BleConnection;
 import com.meshtastic.client.connection.ble.BlePlatform;
 import com.meshtastic.client.connection.ble.BleProtocolProfile;
+import com.meshtastic.client.connection.rpc.DirectRpcTransportConnection;
 import com.meshtastic.client.model.ConnectionEntry;
 import com.meshtastic.client.model.ConnectionType;
 
@@ -44,13 +45,16 @@ public final class TransportConnectionFactory {
     public static TransportConnection create(ConnectionEntry entry,
                                              Supplier<BlePlatform> blePlatformSupplier,
                                              boolean disposeBlePlatformOnDisconnect) {
-        FrameFormat frameFormat = FrameFormat.forProtocol(entry.getEffectiveProtocol());
         return switch (entry.getEffectiveType()) {
-            case TCP -> new TcpConnection(entry.getHost(), entry.getPort(), frameFormat);
+            case TCP -> new TcpConnection(
+                    entry.getHost(),
+                    entry.getPort(),
+                    FrameFormat.forProtocol(entry.getEffectiveProtocol())
+            );
             case SERIAL -> new SerialConnection(
                     entry.getPortName(),
                     entry.getBaudRate() > 0 ? entry.getBaudRate() : SerialConnection.DEFAULT_BAUD_RATE,
-                    frameFormat,
+                    FrameFormat.forProtocol(entry.getEffectiveProtocol()),
                     entry.getEffectiveSerialModemLineMode()
             );
             case BLE -> new BleConnection(
@@ -58,6 +62,11 @@ public final class TransportConnectionFactory {
                     blePlatformSupplier.get(),
                     BleProtocolProfile.forProtocol(entry.getEffectiveProtocol()),
                     disposeBlePlatformOnDisconnect
+            );
+            case REMOTE_RPC -> new DirectRpcTransportConnection(
+                    entry.getHost(),
+                    entry.getPort(),
+                    entry.getRemoteAccessKey()
             );
         };
     }
@@ -78,6 +87,8 @@ public final class TransportConnectionFactory {
                     entry.getBaudRate() > 0 ? entry.getBaudRate() : SerialConnection.DEFAULT_BAUD_RATE);
             case BLE -> String.format("type=BLE, address=%s, deviceName=%s",
                     safeText(entry.getBleAddress()), safeText(entry.getBleDeviceName()));
+            case REMOTE_RPC -> String.format("type=REMOTE_RPC, host=%s, port=%d",
+                    safeText(entry.getHost()), entry.getPort());
         };
     }
 

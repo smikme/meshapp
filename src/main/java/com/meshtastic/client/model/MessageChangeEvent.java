@@ -82,6 +82,21 @@ public record MessageChangeEvent(Kind kind,
                 null);
     }
 
+    public static MessageChangeEvent metadataChanged(String chatType,
+                                                     String chatKey,
+                                                     String ownerNodeId,
+                                                     MeshMessage message) {
+        return new MessageChangeEvent(
+                Kind.METADATA_CHANGED,
+                chatType,
+                chatKey,
+                ownerNodeId,
+                message != null ? message.getPacketId() : 0,
+                0,
+                message != null ? message.getDbId() : 0,
+                message);
+    }
+
     public static MessageChangeEvent unknown() {
         return new MessageChangeEvent(Kind.UNKNOWN, null, null, null, 0, 0, 0, null);
     }

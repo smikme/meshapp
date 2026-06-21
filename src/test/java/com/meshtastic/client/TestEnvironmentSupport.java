@@ -117,6 +117,13 @@ public final class TestEnvironmentSupport {
             }
             writeStaticField(packetMonitorService, "instance", null);
 
+            Class<?> remoteRpcHostService = Class.forName("com.meshtastic.client.service.RemoteRpcHostService");
+            Object remoteRpcHostInstance = readStaticField(remoteRpcHostService, "instance");
+            if (remoteRpcHostInstance != null) {
+                remoteRpcHostService.getMethod("stop").invoke(remoteRpcHostInstance);
+            }
+            writeStaticField(remoteRpcHostService, "instance", null);
+
             Class<?> databaseProvider = Class.forName("com.meshtastic.client.service.DatabaseProvider");
             databaseProvider.getMethod("close").invoke(null);
             writeStaticField(databaseProvider, "connection", null);

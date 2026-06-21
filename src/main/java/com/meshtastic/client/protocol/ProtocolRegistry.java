@@ -4,6 +4,7 @@ import com.meshtastic.client.model.ProtocolType;
 import com.meshtastic.client.protocol.meshcore.MeshCoreCompanionProtocol;
 import com.meshtastic.client.protocol.meshcore.MeshCoreKissProtocol;
 import com.meshtastic.client.protocol.meshtastic.MeshtasticProtocol;
+import com.meshtastic.client.protocol.rpc.RemoteRpcProtocol;
 
 import java.util.EnumMap;
 import java.util.Map;
@@ -25,6 +26,7 @@ public final class ProtocolRegistry {
         register(new MeshtasticProtocol());
         register(new MeshCoreKissProtocol());
         register(new MeshCoreCompanionProtocol());
+        register(new RemoteRpcProtocol());
     }
 
     private ProtocolRegistry() {

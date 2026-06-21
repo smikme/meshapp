@@ -186,6 +186,26 @@ class MessageBubbleFactoryTest {
         }
     }
 
+    @Test
+    void remoteReplyToOutgoingHighlightsWithoutDeviceState() {
+        onFxThread(() -> {
+            MessageBubbleFactory factory = new MessageBubbleFactory(
+                    null,
+                    new SimpleDoubleProperty(600),
+                    new NoOpBubbleActions(),
+                    new HashMap<>());
+            MeshMessage incomingReply = new MeshMessage("!33333333", "!ffffffff", 0, "reply", 20, false);
+            incomingReply.setReplyId(9001);
+            incomingReply.setReplyToOutgoing(true);
+
+            HBox row = factory.build(incomingReply);
+            VBox content = findNodeWithStyle(row, "chat-bubble-incoming", VBox.class).orElseThrow();
+
+            assertTrue(content.getStyleClass().contains("chat-bubble-mentioned"));
+            return null;
+        });
+    }
+
     private static MessageBubbleFactory factoryFor(DeviceState state) {
         return new MessageBubbleFactory(
                 state,

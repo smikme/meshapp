@@ -360,9 +360,11 @@ class FormChatTest {
         updated.setHopLimit(2);
         updated.setRxRssi(-84);
         updated.setRxSnr(6.0f);
+        updated.setReplyToOutgoing(true);
 
         assertTrue(FormChat.copyLoadedMessageMetadata(loaded, updated));
         assertFalse(loaded.isViaMqtt());
+        assertTrue(loaded.isReplyToOutgoing());
         assertEquals(5, loaded.getHopStart());
         assertEquals(2, loaded.getHopLimit());
         assertEquals(-84, loaded.getRxRssi());
