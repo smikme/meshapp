@@ -32,6 +32,8 @@ import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
+import javafx.scene.input.MouseButton;
+import javafx.scene.input.MouseEvent;
 import javafx.scene.shape.SVGPath;
 import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
@@ -39,6 +41,7 @@ import javafx.scene.text.FontWeight;
 import java.util.*;
 import java.util.function.IntConsumer;
 import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 /**
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
@@ -63,6 +66,8 @@ public class FormNodes extends Form {
     private int currentDetailNodeNum;
 
     private boolean suppressSelectionListener;
+    private boolean allowMultipleSelectionChange;
+    private Integer selectionAnchorNodeNum;
     private boolean showFavoritesOnly;
     private boolean showDetails;
     private boolean hideOffline;
@@ -81,9 +86,12 @@ public class FormNodes extends Form {
         if (state == null) { return; }
         NodeData node = state.getNodeDb().get(num);
 
-            // The node was removed from nodeDb; remove it from the list and clear details.
+        // The node was removed from nodeDb; remove it from the list and clear details.
         if (node == null) {
+            Set<Integer> selectedBeforeRemoval = selectedNodeNums();
+            selectedBeforeRemoval.remove(num);
             nodeData.removeIf(n -> n.getNodeNum() == num);
+            restoreSelection(selectedBeforeRemoval);
             if (num == currentDetailNodeNum) {
                 showDetail(null);
             }
@@ -92,21 +100,17 @@ public class FormNodes extends Form {
 
         for (int i = 0; i < nodeData.size(); i++) {
             if (nodeData.get(i).getNodeNum() == num) {
+                Set<Integer> selectedBeforeUpdate = selectedNodeNums();
                 suppressSelectionListener = true;
                 try {
                     nodeData.set(i, node);
                 } finally {
                     suppressSelectionListener = false;
                 }
-            // Update the right panel only for the actually selected node.
-            // Frequent updates for other nodes would otherwise disturb the detail table during layout/render.
+                restoreSelection(selectedBeforeUpdate);
+                // Update the right panel only for the actually selected node.
+                // Frequent updates for other nodes would otherwise disturb the detail table during layout/render.
                 if (num == currentDetailNodeNum) {
-                    for (NodeData n : nodeListView.getItems()) {
-                        if (n.getNodeNum() == num) {
-                            nodeListView.getSelectionModel().select(n);
-                            break;
-                        }
-                    }
                     refreshDetail();
                 }
                 return;
@@ -356,7 +360,10 @@ public class FormNodes extends Form {
                     if (!suppressSelectionListener) { showDetail(newNode); }
                 });
         nodeListView.getSelectionModel().getSelectedItems().addListener(
-                (ListChangeListener<NodeData>) change -> updateBulkActionBarState());
+                (ListChangeListener<NodeData>) change -> {
+                    enforceExplicitBulkSelection();
+                    updateBulkActionBarState();
+                });
 
         // Node-count badge.
         countBadge = new Label("0");
@@ -434,7 +441,7 @@ public class FormNodes extends Form {
                 "/icons/close.svg",
                 I18n.t("node.bulk.clearSelection")
         );
-        clearSelectionBtn.setOnAction(e -> nodeListView.getSelectionModel().clearSelection());
+        clearSelectionBtn.setOnAction(e -> clearNodeSelection());
 
         HBox bar = new HBox(8, bulkSelectionLabel, addFavoriteBtn, addIgnoredBtn, bulkDeleteBtn, clearSelectionBtn);
         bar.setPadding(new Insets(0, 8, 8, 8));
@@ -664,6 +671,124 @@ public class FormNodes extends Form {
         return normalizedNodes(nodeListView.getSelectionModel().getSelectedItems());
     }
 
+    private void enforceExplicitBulkSelection() {
+        if (nodeListView == null) { return; }
+        List<NodeData> selected = selectedNodes();
+        if (allowMultipleSelectionChange || selected.size() <= 1) {
+            return;
+        }
+
+        NodeData selectedItem = nodeListView.getSelectionModel().getSelectedItem();
+        NodeData nodeToKeep = selectedItem != null ? selectedItem : selected.getLast();
+        int nodeIndex = nodeListView.getItems().indexOf(nodeToKeep);
+
+        allowMultipleSelectionChange = true;
+        try {
+            if (nodeIndex >= 0) {
+                selectionAnchorNodeNum = nodeToKeep.getNodeNum();
+                nodeListView.getSelectionModel().clearAndSelect(nodeIndex);
+                nodeListView.getFocusModel().focus(nodeIndex);
+            } else {
+                clearNodeSelection();
+            }
+        } finally {
+            allowMultipleSelectionChange = false;
+        }
+    }
+
+    private void clearNodeSelection() {
+        selectionAnchorNodeNum = null;
+        nodeListView.getSelectionModel().clearSelection();
+    }
+
+    private void handleNodeCellMousePressed(NodeListCell cell, MouseEvent event) {
+        if (event.getButton() != MouseButton.PRIMARY) { return; }
+
+        if (cell.isEmpty() || cell.getItem() == null) {
+            event.consume();
+            return;
+        }
+
+        selectNodeFromUserClick(cell.getItem(), event);
+        event.consume();
+    }
+
+    private void selectNodeFromUserClick(NodeData node, MouseEvent event) {
+        int nodeIndex = nodeListView.getItems().indexOf(node);
+        if (nodeIndex < 0) { return; }
+
+        if (event.isShiftDown()) {
+            selectNodeRange(nodeIndex);
+        } else if (isShortcutSelectionClick(event)) {
+            toggleNodeSelection(nodeIndex, node);
+        } else {
+            selectSingleNode(nodeIndex, node);
+        }
+    }
+
+    private static boolean isShortcutSelectionClick(MouseEvent event) {
+        return event.isShortcutDown() || event.isControlDown() || event.isMetaDown();
+    }
+
+    private void selectSingleNode(int nodeIndex, NodeData node) {
+        selectionAnchorNodeNum = node.getNodeNum();
+        nodeListView.getSelectionModel().clearAndSelect(nodeIndex);
+        nodeListView.getFocusModel().focus(nodeIndex);
+    }
+
+    private void toggleNodeSelection(int nodeIndex, NodeData node) {
+        selectionAnchorNodeNum = node.getNodeNum();
+        MultipleSelectionModel<NodeData> selectionModel = nodeListView.getSelectionModel();
+        allowMultipleSelectionChange = true;
+        try {
+            if (selectionModel.isSelected(nodeIndex)) {
+                selectionModel.clearSelection(nodeIndex);
+            } else {
+                selectionModel.select(nodeIndex);
+                nodeListView.getFocusModel().focus(nodeIndex);
+            }
+        } finally {
+            allowMultipleSelectionChange = false;
+        }
+    }
+
+    private void selectNodeRange(int clickedIndex) {
+        int anchorIndex = selectionAnchorIndex()
+                .orElseGet(() -> {
+                    int selectedIndex = nodeListView.getSelectionModel().getSelectedIndex();
+                    return selectedIndex >= 0 ? selectedIndex : clickedIndex;
+                });
+        if (selectionAnchorNodeNum == null) {
+            selectionAnchorNodeNum = nodeListView.getItems().get(anchorIndex).getNodeNum();
+        }
+
+        int from = Math.min(anchorIndex, clickedIndex);
+        int to = Math.max(anchorIndex, clickedIndex);
+        MultipleSelectionModel<NodeData> selectionModel = nodeListView.getSelectionModel();
+        allowMultipleSelectionChange = true;
+        suppressSelectionListener = true;
+        try {
+            selectionModel.clearSelection();
+            IntStream.rangeClosed(from, to)
+                    .filter(index -> index != clickedIndex)
+                    .forEach(selectionModel::select);
+            selectionModel.select(clickedIndex);
+            nodeListView.getFocusModel().focus(clickedIndex);
+        } finally {
+            suppressSelectionListener = false;
+            allowMultipleSelectionChange = false;
+        }
+        showDetail(nodeListView.getItems().get(clickedIndex));
+    }
+
+    private OptionalInt selectionAnchorIndex() {
+        if (selectionAnchorNodeNum == null) { return OptionalInt.empty(); }
+        ObservableList<NodeData> items = nodeListView.getItems();
+        return IntStream.range(0, items.size())
+                .filter(index -> items.get(index).getNodeNum() == selectionAnchorNodeNum)
+                .findFirst();
+    }
+
     private List<NodeData> contextActionNodes(NodeData contextNode) {
         return Optional.ofNullable(contextNode)
                 .map(node -> {
@@ -771,6 +896,7 @@ public class FormNodes extends Form {
     }
 
     private void restoreSelection(Set<Integer> nodeNums) {
+        allowMultipleSelectionChange = true;
         suppressSelectionListener = true;
         try {
             nodeListView.getSelectionModel().clearSelection();
@@ -779,8 +905,18 @@ public class FormNodes extends Form {
                     .ifPresent(nums -> nodeListView.getItems().stream()
                             .filter(node -> nums.contains(node.getNodeNum()))
                             .forEach(nodeListView.getSelectionModel()::select));
+            normalizeSelectionAnchor(selectedNodeNums());
         } finally {
             suppressSelectionListener = false;
+            allowMultipleSelectionChange = false;
+        }
+    }
+
+    private void normalizeSelectionAnchor(Set<Integer> selectedNodeNums) {
+        if (selectedNodeNums == null || selectedNodeNums.isEmpty()) {
+            selectionAnchorNodeNum = null;
+        } else if (selectionAnchorNodeNum == null || !selectedNodeNums.contains(selectionAnchorNodeNum)) {
+            selectionAnchorNodeNum = selectedNodeNums.iterator().next();
         }
     }
 
@@ -821,6 +957,13 @@ public class FormNodes extends Form {
         private final StackPane starPane = new StackPane();
 
         NodeListCell() {
+            addEventFilter(MouseEvent.MOUSE_PRESSED, event -> handleNodeCellMousePressed(this, event));
+            addEventFilter(MouseEvent.MOUSE_CLICKED, event -> {
+                if (event.getButton() == MouseButton.PRIMARY) {
+                    event.consume();
+                }
+            });
+
             root.setAlignment(Pos.CENTER_LEFT);
             root.setPadding(new Insets(6, 10, 6, 10));
             root.getStyleClass().add("node-list-cell-root");
@@ -1125,14 +1268,7 @@ public class FormNodes extends Form {
             injectOfflineFilteredNodes();
             updateFilterPredicate();
 
-            nodeListView.getSelectionModel().clearSelection();
-            if (!selectedNodeNums.isEmpty()) {
-                for (NodeData node : nodeListView.getItems()) {
-                    if (selectedNodeNums.contains(node.getNodeNum())) {
-                        nodeListView.getSelectionModel().select(node);
-                    }
-                }
-            }
+            restoreSelection(selectedNodeNums);
         } finally {
             suppressSelectionListener = false;
             updateBulkActionBarState();
