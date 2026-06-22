@@ -125,6 +125,13 @@ public final class DirectRpcClient implements AutoCloseable {
         return client;
     }
 
+    /**
+     * @return whether the underlying authenticated transport is still open
+     */
+    public boolean isOpen() {
+        return transport.isOpen();
+    }
+
     @Override
     public void close() {
         client.close();

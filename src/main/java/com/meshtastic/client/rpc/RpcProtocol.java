@@ -13,6 +13,7 @@ final class RpcProtocol {
 
     static final String ERROR_BAD_REQUEST = "BAD_REQUEST";
     static final String ERROR_METHOD_NOT_FOUND = "METHOD_NOT_FOUND";
+    static final String ERROR_CONNECTION_FAILED = "CONNECTION_FAILED";
     static final String ERROR_INTERNAL = "INTERNAL_ERROR";
     static final String ERROR_TIMEOUT = "TIMEOUT";
     static final String ERROR_TRANSPORT_CLOSED = "TRANSPORT_CLOSED";

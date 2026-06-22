@@ -79,7 +79,8 @@ public final class DirectRpcTransportConnection implements TransportConnection {
 
     @Override
     public boolean isConnected() {
-        return client != null;
+        DirectRpcClient current = client;
+        return current != null && current.isOpen();
     }
 
     @Override

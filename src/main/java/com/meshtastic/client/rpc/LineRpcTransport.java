@@ -115,8 +115,8 @@ public final class LineRpcTransport implements RpcTransport {
         }
         Objects.requireNonNull(message, "message");
         try {
-            String outbound = sessionCipher != null ? sessionCipher.encrypt(message) : message;
             synchronized (writer) {
+                String outbound = sessionCipher != null ? sessionCipher.encrypt(message) : message;
                 writer.write(outbound);
                 writer.newLine();
                 writer.flush();

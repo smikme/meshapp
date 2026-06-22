@@ -7,6 +7,7 @@ import com.google.gson.JsonNull;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
 import com.google.gson.JsonParser;
+import com.meshtastic.client.connection.ConnectionException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -141,11 +142,37 @@ public final class RpcServer implements AutoCloseable {
             sendError(requestId, rpcException.getCode(), rpcException.getMessage());
         } else if (cause instanceof IllegalArgumentException illegalArgumentException) {
             sendError(requestId, RpcProtocol.ERROR_BAD_REQUEST, illegalArgumentException.getMessage());
+        } else if (cause instanceof ConnectionException connectionException) {
+            String message = messageWithRootCause(connectionException);
+            log.warn("RPC connection method failed: {}", message);
+            sendError(requestId, RpcProtocol.ERROR_CONNECTION_FAILED, message);
         } else {
             log.warn("RPC method failed", cause);
-            sendError(requestId, RpcProtocol.ERROR_INTERNAL,
-                    cause.getMessage() != null ? cause.getMessage() : "RPC method failed");
+            sendError(requestId, RpcProtocol.ERROR_INTERNAL, messageWithRootCause(cause));
         }
+    }
+
+    private static String messageWithRootCause(Throwable error) {
+        String message = error != null && error.getMessage() != null && !error.getMessage().isBlank()
+                ? error.getMessage()
+                : "RPC method failed";
+        Throwable root = rootCause(error);
+        if (root != null
+                && root != error
+                && root.getMessage() != null
+                && !root.getMessage().isBlank()
+                && !message.contains(root.getMessage())) {
+            return message + ": " + root.getMessage();
+        }
+        return message;
+    }
+
+    private static Throwable rootCause(Throwable error) {
+        Throwable current = error;
+        while (current != null && current.getCause() != null && current.getCause() != current) {
+            current = current.getCause();
+        }
+        return current;
     }
 
     private void sendError(String requestId, String code, String message) {

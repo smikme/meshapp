@@ -3,6 +3,7 @@ package com.meshtastic.client;
 import com.meshtastic.client.logging.JfrDiagnosticSupport;
 import com.meshtastic.client.logging.JavaFxCssWarningGuard;
 import com.meshtastic.client.logging.SessionCrashLogManager;
+import com.meshtastic.client.server.RpcServerApp;
 import com.meshtastic.client.terminal.TerminalApp;
 import com.meshtastic.client.update.SelfUpdateLauncher;
 import com.meshtastic.client.utils.AppPreferences;
@@ -19,6 +20,11 @@ public final class MeshAppLauncher {
 
     public static void main(String[] args) {
         if (!MeshApp.isSingleInstanceGuardDisabled(args) && SelfUpdateLauncher.launchPayloadIfNeeded(args)) {
+            return;
+        }
+        if (RpcServerApp.isRpcServerMode(args)) {
+            System.exit(RpcServerApp.run(RpcServerApp.stripRpcServerFlag(
+                    MeshApp.stripSingleInstanceArguments(args))));
             return;
         }
         if (isTerminalMode(args)) {

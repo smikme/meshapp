@@ -1,6 +1,7 @@
 package com.meshtastic.client.rpc;
 
 import com.google.gson.JsonObject;
+import com.meshtastic.client.connection.ConnectionException;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
@@ -10,8 +11,11 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
@@ -67,6 +71,25 @@ class RpcClientServerTest {
         Throwable error = captureFutureError(future);
         RpcRemoteException remoteError = assertInstanceOf(RpcRemoteException.class, error);
         assertEquals("METHOD_NOT_FOUND", remoteError.getCode());
+    }
+
+    @Test
+    void connectionExceptionReturnsStructuredConnectionError() throws Exception {
+        RpcMethodRegistry registry = new RpcMethodRegistry()
+                .register("connection.connect", (params, context) -> {
+                    throw new ConnectionException(
+                            "Failed to connect to 192.168.99.35:4403",
+                            new java.net.NoRouteToHostException("No route to host"));
+                });
+        RpcClient client = createClientWithServer(registry);
+
+        CompletableFuture<?> future = client.call("connection.connect", new JsonObject());
+
+        Throwable error = captureFutureError(future);
+        RpcRemoteException remoteError = assertInstanceOf(RpcRemoteException.class, error);
+        assertEquals("CONNECTION_FAILED", remoteError.getCode());
+        assertTrue(remoteError.getMessage().contains("Failed to connect to 192.168.99.35:4403"));
+        assertTrue(remoteError.getMessage().contains("No route to host"));
     }
 
     @Test
@@ -131,6 +154,58 @@ class RpcClientServerTest {
         payload.addProperty("text", "direct");
         server.publishEvent("system.notice", payload);
         assertEquals("direct", eventFuture.get(1, TimeUnit.SECONDS));
+    }
+
+    @Test
+    void directEncryptedTransportKeepsConcurrentClientFramesOrdered() throws Exception {
+        RpcAccessKey accessKey = RpcAccessKey.generate();
+        RpcMethodRegistry registry = new RpcMethodRegistry()
+                .register("echo.index", (params, context) -> {
+                    JsonObject result = new JsonObject();
+                    result.addProperty("index", params.get("index").getAsInt());
+                    return CompletableFuture.completedFuture(result);
+                });
+        DirectRpcServer server = DirectRpcServer.start(
+                InetAddress.getLoopbackAddress(),
+                0,
+                accessKey,
+                registry,
+                ForkJoinPool.commonPool());
+        closeables.add(server);
+        DirectRpcClient client = DirectRpcClient.connect(
+                InetAddress.getLoopbackAddress().getHostAddress(),
+                server.getPort(),
+                accessKey,
+                Duration.ofSeconds(1));
+        closeables.add(client);
+
+        int calls = 100;
+        ExecutorService workers = Executors.newFixedThreadPool(8);
+        closeables.add(workers::shutdownNow);
+        CountDownLatch start = new CountDownLatch(1);
+        List<CompletableFuture<Integer>> futures = new ArrayList<>();
+        for (int i = 0; i < calls; i++) {
+            int index = i;
+            futures.add(CompletableFuture.supplyAsync(() -> {
+                awaitUnchecked(start);
+                JsonObject params = new JsonObject();
+                params.addProperty("index", index);
+                try {
+                    return client.call("echo.index", params, Duration.ofSeconds(3))
+                            .get(3, TimeUnit.SECONDS)
+                            .getAsJsonObject()
+                            .get("index")
+                            .getAsInt();
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
+            }, workers));
+        }
+
+        start.countDown();
+        for (int i = 0; i < calls; i++) {
+            assertEquals(i, futures.get(i).get(5, TimeUnit.SECONDS));
+        }
     }
 
     @Test
@@ -208,6 +283,15 @@ class RpcClientServerTest {
             throw new AssertionError("Future completed successfully");
         } catch (java.util.concurrent.ExecutionException e) {
             return e.getCause();
+        }
+    }
+
+    private static void awaitUnchecked(CountDownLatch latch) {
+        try {
+            latch.await();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException(e);
         }
     }
 }
