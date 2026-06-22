@@ -55,6 +55,17 @@ class RpcServerOptionsTest {
     }
 
     @Test
+    void acceptsInternalRunIdMarker() {
+        RpcServerOptions options = RpcServerOptions.parse(new String[] {
+                "--rpc-server",
+                "--rpc-run-id",
+                "debug-run"
+        });
+
+        assertTrue(options.autoconnect());
+    }
+
+    @Test
     void stripsRoutingFlag() {
         assertArrayEquals(
                 new String[] {"--rpc-bind", "127.0.0.1"},

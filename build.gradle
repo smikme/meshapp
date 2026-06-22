@@ -2324,7 +2324,7 @@ tasks.register('flatpak') {
 	}
 }
 
-def prepareMacDebugAppBundle = { File appDir ->
+def prepareMacDebugAppBundle = { File appDir, boolean agentApp = false ->
 	def contentsDir = new File(appDir, "Contents")
 	def macosDir = new File(contentsDir, "MacOS")
 	def resourcesDir = new File(contentsDir, "Resources")
@@ -2336,6 +2336,11 @@ def prepareMacDebugAppBundle = { File appDir ->
 	if (icnsSource.exists()) {
 		java.nio.file.Files.copy(icnsSource.toPath(), new File(resourcesDir, icnsSource.name).toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
 	}
+
+	def agentPlist = agentApp ? """\
+    <key>LSUIElement</key>
+    <true/>
+""" : ''
 
 	// Info.plist
 	new File(contentsDir, "Info.plist").text = """\
@@ -2354,6 +2359,7 @@ def prepareMacDebugAppBundle = { File appDir ->
     <string>run</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
+${agentPlist}\
     <key>CFBundleIconFile</key>
     <string>MeshApp</string>
     <key>NSHighResolutionCapable</key>
@@ -2390,6 +2396,10 @@ def prepareMacDebugAppBundle = { File appDir ->
 	def script = new File(macosDir, "run")
 	script.text = """\
 #!/bin/bash
+if [ -n "\${MESHAPP_RPC_LOG_FILE:-}" ]; then
+    mkdir -p "\$(dirname "\$MESHAPP_RPC_LOG_FILE")"
+    exec >> "\$MESHAPP_RPC_LOG_FILE" 2>&1
+fi
 exec '${javaPath}' \\
 ${jvmArgsStr} \\
     --module-path '${fxStr}' \\
@@ -2430,7 +2440,7 @@ if (org.gradle.internal.os.OperatingSystem.current().isMacOsX()) {
 
 		doLast {
 			def appDir = layout.buildDirectory.dir("tmp/MeshApp.app").get().asFile
-			prepareMacDebugAppBundle(appDir)
+			prepareMacDebugAppBundle(appDir, false)
 			def appArgsList = []
 			def gradleRunTask = tasks.findByName('run')
 			if (gradleRunTask != null && gradleRunTask.hasProperty('args')) {
@@ -2458,20 +2468,89 @@ if (org.gradle.internal.os.OperatingSystem.current().isMacOsX()) {
 
 	tasks.named('runRpcServer') {
 		doFirst {
-			def appDir = layout.buildDirectory.dir("tmp/MeshApp.app").get().asFile
-			def script = prepareMacDebugAppBundle(appDir)
+			def appDir = layout.buildDirectory.dir("tmp/MeshAppRpcServer.app").get().asFile
+			def script = prepareMacDebugAppBundle(appDir, true)
 			def appArgsList = args.collect { it.toString() }
 			if (!appArgsList.any { it == '--rpc-server' }) {
 				appArgsList.add(0, '--rpc-server')
 			}
+			def helpOnly = appArgsList.any { it == '--help' || it == '-h' }
+			def runId = java.util.UUID.randomUUID().toString()
+			if (!helpOnly) {
+				appArgsList.addAll(['--rpc-run-id', runId])
+			}
+			def logFile = null
+			def tailRunning = new java.util.concurrent.atomic.AtomicBoolean(false)
+			def tailThread = null
 
-			def command = [script.absolutePath]
-			command.addAll(appArgsList)
-			def proc = new ProcessBuilder(command)
+			def command = helpOnly
+				? [script.absolutePath] + appArgsList
+				: ['open', '-W', '-n', appDir.absolutePath, '--args'] + appArgsList
+			if (!helpOnly) {
+				logFile = layout.buildDirectory.file("tmp/runRpcServer-${runId}.log").get().asFile
+				logFile.parentFile.mkdirs()
+				logFile.text = ''
+				tailRunning.set(true)
+				tailThread = new Thread(() -> {
+					long position = 0L
+					while (tailRunning.get()) {
+						if (logFile.isFile()) {
+							def raf = new java.io.RandomAccessFile(logFile, 'r')
+							try {
+								if (raf.length() < position) {
+									position = 0L
+								}
+								raf.seek(position)
+								String line
+								while ((line = raf.readLine()) != null) {
+									System.out.println(new String(
+										line.getBytes(java.nio.charset.StandardCharsets.ISO_8859_1),
+										java.nio.charset.StandardCharsets.UTF_8))
+								}
+								position = raf.filePointer
+							} finally {
+								raf.close()
+							}
+						}
+						Thread.sleep(200)
+					}
+				}, 'runRpcServer-log-tail')
+				tailThread.daemon = true
+				tailThread.start()
+			}
+			def builder = new ProcessBuilder(command)
 				.directory(projectDir)
-				.start()
+			if (logFile != null) {
+				builder.environment().put('MESHAPP_RPC_LOG_FILE', logFile.absolutePath)
+			}
+			def proc = builder.start()
 			proc.consumeProcessOutput(System.out, System.err)
+			def stopRpcServerProcess = {
+				if (runId == null || runId.isBlank()) {
+					return
+				}
+				def matches = java.lang.ProcessHandle.allProcesses()
+					.filter { handle ->
+						handle.pid() != java.lang.ProcessHandle.current().pid()
+							&& handle.info().commandLine().orElse('').contains(runId)
+					}
+					.toList()
+				matches.each { handle ->
+					logger.lifecycle("runRpcServer: stopping MeshApp RPC server pid ${handle.pid()}")
+					handle.destroy()
+				}
+				matches.each { handle ->
+					try {
+						handle.onExit().get(5, java.util.concurrent.TimeUnit.SECONDS)
+					} catch (Exception ignored) {
+						if (handle.isAlive()) {
+							handle.destroyForcibly()
+						}
+					}
+				}
+			}
 			def cleanup = new Thread(() -> {
+				stopRpcServerProcess()
 				if (proc.isAlive()) {
 					proc.destroy()
 					if (!proc.waitFor(5, java.util.concurrent.TimeUnit.SECONDS)) {
@@ -2491,6 +2570,11 @@ if (org.gradle.internal.os.OperatingSystem.current().isMacOsX()) {
 				} catch (IllegalStateException ignored) {
 					// JVM shutdown is already in progress.
 				}
+				tailRunning.set(false)
+				if (tailThread != null) {
+					tailThread.join(1000)
+				}
+				stopRpcServerProcess()
 				if (proc.isAlive()) {
 					proc.destroy()
 				}

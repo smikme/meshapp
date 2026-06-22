@@ -52,6 +52,7 @@ final class RpcServerOptions {
                 case "--rpc-key", "--key" -> options.accessKey = requireValue(values, ++i, arg).trim();
                 case "--print-rpc-key" -> options.printAccessKey = true;
                 case "--no-autoconnect" -> options.autoconnect = false;
+                case "--rpc-run-id" -> requireValue(values, ++i, arg);
                 default -> throw new IllegalArgumentException("Unknown RPC server option: " + arg);
             }
         }
