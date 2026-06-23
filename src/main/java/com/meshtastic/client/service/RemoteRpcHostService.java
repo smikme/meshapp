@@ -15,6 +15,7 @@ import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.protocol.ProtocolHandler;
 import com.meshtastic.client.protocol.ProtocolRuntime;
 import com.meshtastic.client.protocol.meshcore.MeshCoreCompanionProtocolRuntime;
+import com.meshtastic.client.protocol.rpc.RemoteNodeJson;
 import com.meshtastic.client.rpc.DirectRpcServer;
 import com.meshtastic.client.rpc.RpcAccessKey;
 import com.meshtastic.client.rpc.RpcMethodRegistry;
@@ -178,7 +179,21 @@ public final class RemoteRpcHostService {
                 .register("chat.markRead", (params, context) ->
                         CompletableFuture.completedFuture(chatMarkRead(params)))
                 .register("chat.send", (params, context) ->
-                        CompletableFuture.completedFuture(chatSend(params)));
+                        CompletableFuture.completedFuture(chatSend(params)))
+                .register("chat.react", (params, context) ->
+                        CompletableFuture.completedFuture(chatReact(params)))
+                .register("node.list", (params, context) ->
+                        CompletableFuture.completedFuture(nodeList(params)))
+                .register("node.get", (params, context) ->
+                        CompletableFuture.completedFuture(nodeGet(params)))
+                .register("node.refresh", (params, context) ->
+                        CompletableFuture.completedFuture(nodeRefresh(params)))
+                .register("node.delete", (params, context) ->
+                        CompletableFuture.completedFuture(nodeDelete(params)))
+                .register("node.favorite", (params, context) ->
+                        CompletableFuture.completedFuture(nodeFavorite(params)))
+                .register("node.ignored", (params, context) ->
+                        CompletableFuture.completedFuture(nodeIgnored(params)));
     }
 
     /**
@@ -429,6 +444,167 @@ public final class RemoteRpcHostService {
         return result;
     }
 
+    private JsonObject chatReact(JsonObject params) {
+        ActiveHostConnection active = activeHostConnection();
+        String chatType = requiredText(params, "chatType");
+        String chatKey = requiredText(params, "chatKey");
+        int targetPacketId = boundedInt(params, "targetPacketId", Integer.MIN_VALUE, Integer.MAX_VALUE, 0);
+        String emoji = requiredText(params, "emoji");
+        if (targetPacketId == 0) {
+            throw new IllegalArgumentException("targetPacketId is required");
+        }
+        if (active.meshCoreRuntime() != null) {
+            throw new IllegalStateException("selected host connection cannot send reactions");
+        }
+
+        String ownerId = active.state().getOwnerNodeId();
+        MeshMessage target = MessageDbService.getInstance()
+                .findByPacketId(targetPacketId, chatType, chatKey, ownerId);
+        if (target == null) {
+            throw new IllegalArgumentException("reaction target message was not found");
+        }
+
+        ProtocolHandler handler = active.handler();
+        if (handler == null) {
+            throw new IllegalStateException("selected host connection cannot send reactions");
+        }
+
+        boolean sent = "channel".equals(chatType)
+                ? MessageService.sendChannelReaction(handler, active.state(), Integer.parseInt(chatKey), target, emoji)
+                : MessageService.sendDirectReaction(handler, active.state(), chatKey, target, emoji);
+        if (!sent) {
+            throw new IllegalStateException("reaction was not sent");
+        }
+
+        MeshMessage updated = MessageDbService.getInstance()
+                .findByPacketId(targetPacketId, chatType, chatKey, ownerId);
+        MeshMessage resultMessage = updated != null ? updated : target;
+        prepareMessagesForRemote(active.state(), chatType, chatKey, ownerId, List.of(resultMessage));
+        publishChatChanged(chatType, chatKey, targetPacketId);
+
+        JsonObject result = new JsonObject();
+        result.add("message", messageToJson(resultMessage, active.state()));
+        result.add("chat", chatList());
+        return result;
+    }
+
+    private JsonObject nodeList(JsonObject params) {
+        ActiveHostConnection active = activeHostConnection();
+        DeviceState state = active.state();
+        String ownerId = state.getOwnerNodeId();
+        boolean includeFavorites = booleanField(params, "includeFavorites");
+        boolean includeIgnored = booleanField(params, "includeIgnored");
+
+        JsonArray items = new JsonArray();
+        Set<String> addedNodeIds = new LinkedHashSet<>();
+        for (NodeData node : state.getNodeDb().values()) {
+            addNodeJson(items, addedNodeIds, node, ownerId, true);
+        }
+        if (includeFavorites) {
+            for (NodeData node : NodeCacheService.getInstance().loadFavoriteNodes(ownerId)) {
+                addNodeJson(items, addedNodeIds, node, ownerId, false);
+            }
+        }
+        if (includeIgnored) {
+            for (NodeData node : NodeCacheService.getInstance().loadIgnoredNodes(ownerId)) {
+                addNodeJson(items, addedNodeIds, node, ownerId, false);
+            }
+        }
+
+        JsonObject result = new JsonObject();
+        result.addProperty("ownerNodeId", ownerId);
+        result.add("items", items);
+        return result;
+    }
+
+    private JsonObject nodeGet(JsonObject params) {
+        ActiveHostConnection active = activeHostConnection();
+        String nodeId = requiredText(params, "nodeId");
+        String ownerId = active.state().getOwnerNodeId();
+        NodeData node = resolvePeerNode(active.state(), nodeId);
+        if (node == null) {
+            throw new IllegalArgumentException("node was not found: " + nodeId);
+        }
+
+        JsonArray items = new JsonArray();
+        addNodeJson(items, new LinkedHashSet<>(), node, ownerId, false);
+
+        JsonObject result = new JsonObject();
+        result.addProperty("ownerNodeId", ownerId);
+        result.add("items", items);
+        return result;
+    }
+
+    private JsonObject nodeRefresh(JsonObject params) {
+        ActiveHostConnection active = activeHostConnection();
+        ProtocolHandler handler = active.handler();
+        if (handler == null) {
+            throw new IllegalStateException("selected host connection cannot refresh node info");
+        }
+        int nodeNum = boundedInt(params, "nodeNum", Integer.MIN_VALUE, Integer.MAX_VALUE, 0);
+        if (nodeNum == 0) {
+            throw new IllegalArgumentException("nodeNum is required");
+        }
+        MessageService.exchangeNodeUserInfo(handler, active.state(), nodeNum);
+        return nodeList(params);
+    }
+
+    private JsonObject nodeDelete(JsonObject params) {
+        ActiveHostConnection active = activeHostConnection();
+        String nodeId = requiredText(params, "nodeId");
+        int nodeNum = boundedInt(params, "nodeNum", Integer.MIN_VALUE, Integer.MAX_VALUE, 0);
+        if (nodeNum != 0) {
+            active.state().removeNode(nodeNum);
+        }
+        NodeCacheService.getInstance().deleteNode(nodeId, active.state().getOwnerNodeId());
+        return nodeList(params);
+    }
+
+    private JsonObject nodeFavorite(JsonObject params) {
+        ActiveHostConnection active = activeHostConnection();
+        String nodeId = requiredText(params, "nodeId");
+        boolean enabled = booleanField(params, "enabled");
+        String ownerId = active.state().getOwnerNodeId();
+        if (enabled) {
+            FavoriteNodeService.getInstance().addFavorite(nodeId, ownerId);
+        } else {
+            FavoriteNodeService.getInstance().removeFavorite(nodeId, ownerId);
+        }
+        return nodeList(params);
+    }
+
+    private JsonObject nodeIgnored(JsonObject params) {
+        ActiveHostConnection active = activeHostConnection();
+        String nodeId = requiredText(params, "nodeId");
+        boolean enabled = booleanField(params, "enabled");
+        String ownerId = active.state().getOwnerNodeId();
+        if (enabled) {
+            IgnoredNodeService.getInstance().addIgnored(nodeId, ownerId);
+        } else {
+            IgnoredNodeService.getInstance().removeIgnored(nodeId, ownerId);
+        }
+        return nodeList(params);
+    }
+
+    private static void addNodeJson(JsonArray items,
+                                    Set<String> addedNodeIds,
+                                    NodeData node,
+                                    String ownerId,
+                                    boolean enrichFromCache) {
+        if (node == null || node.getNodeId() == null || node.getNodeId().isBlank()) {
+            return;
+        }
+        if (!addedNodeIds.add(node.getNodeId().trim().toLowerCase())) {
+            return;
+        }
+        if (enrichFromCache) {
+            NodeCacheService.getInstance().enrichFromCache(node);
+        }
+        boolean favorite = FavoriteNodeService.getInstance().isFavorite(node.getNodeId(), ownerId);
+        boolean ignored = IgnoredNodeService.getInstance().isIgnored(node.getNodeId(), ownerId);
+        items.add(RemoteNodeJson.nodeToJson(node, favorite, ignored));
+    }
+
     private ActiveHostConnection activeHostConnection() {
         ConnectionManager manager = ConnectionManager.getInstance();
         ConnectionEntry entry = manager.getSelectedConnectionEntry();
@@ -458,15 +634,30 @@ public final class RemoteRpcHostService {
     }
 
     private static NodeData resolvePeerNode(DeviceState state, String peerNodeId) {
-        if (state == null || peerNodeId == null) {
+        if (state == null || peerNodeId == null || peerNodeId.isEmpty()) {
             return null;
         }
-        for (NodeData node : state.getNodeDb().values()) {
-            if (peerNodeId.equalsIgnoreCase(node.getNodeId())) {
-                return node;
+
+        NodeData peerNode = state.getNodeByNodeId(peerNodeId);
+        if (peerNode != null) {
+            NodeCacheService.getInstance().enrichFromCache(peerNode);
+            return peerNode;
+        }
+
+        if (peerNodeId.length() > 1 && peerNodeId.charAt(0) == '!') {
+            try {
+                int peerNodeNum = (int) Long.parseUnsignedLong(peerNodeId.substring(1), 16);
+                NodeData resolvedByNum = state.getNodeDb().get(peerNodeNum);
+                if (resolvedByNum != null) {
+                    NodeCacheService.getInstance().enrichFromCache(resolvedByNum);
+                    return resolvedByNum;
+                }
+            } catch (NumberFormatException e) {
+                log.debug("Remote chat peer nodeId '{}' is not a valid hex node number", peerNodeId);
             }
         }
-        return null;
+
+        return NodeCacheService.getInstance().get(peerNodeId);
     }
 
     private static JsonObject chatItemToJson(ChatItem item) {
@@ -643,6 +834,12 @@ public final class RemoteRpcHostService {
     private static long longField(JsonObject params, String field) {
         JsonElement element = params != null ? params.get(field) : null;
         return element != null && !element.isJsonNull() ? element.getAsLong() : 0L;
+    }
+
+    private static boolean booleanField(JsonObject params, String field) {
+        JsonElement element = params != null ? params.get(field) : null;
+        return element != null && !element.isJsonNull() && element.isJsonPrimitive()
+                && element.getAsBoolean();
     }
 
     private record ActiveHostConnection(ConnectionEntry entry,

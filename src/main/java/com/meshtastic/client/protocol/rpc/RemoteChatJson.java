@@ -53,6 +53,15 @@ public final class RemoteChatJson {
         return params;
     }
 
+    public static JsonObject reactionParams(String chatType, String chatKey, int targetPacketId, String emoji) {
+        JsonObject params = new JsonObject();
+        params.addProperty("chatType", chatType);
+        params.addProperty("chatKey", chatKey);
+        params.addProperty("targetPacketId", targetPacketId);
+        params.addProperty("emoji", emoji);
+        return params;
+    }
+
     public static List<ChatItem> parseChatItems(JsonElement result) {
         JsonArray items = objectArray(result, "items");
         List<ChatItem> parsed = new ArrayList<>();

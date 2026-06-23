@@ -2,8 +2,10 @@ package com.meshtastic.client.components.chat;
 
 import com.meshtastic.client.components.EmojiImageCache;
 import com.meshtastic.client.components.EmojiTextFlow;
+import com.meshtastic.client.components.NodeDetailContent;
 import com.meshtastic.client.components.NodeDetailPanel;
 import com.meshtastic.client.i18n.I18n;
+import com.meshtastic.client.modal.Toast;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.model.NodeData;
@@ -13,6 +15,7 @@ import com.meshtastic.client.utils.ExternalUrlLauncher;
 import com.meshtastic.client.utils.NodeUtils;
 import com.meshtastic.client.utils.SvgIconLoader;
 import com.meshtastic.client.utils.UnicodeTextUtils;
+import javafx.application.Platform;
 import javafx.beans.binding.Bindings;
 import javafx.beans.property.ReadOnlyDoubleProperty;
 import javafx.geometry.Bounds;
@@ -51,7 +54,11 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
@@ -201,6 +208,8 @@ public class MessageBubbleFactory {
     private final Map<Integer, Label> pendingStatusLabels;
     private TracerouteView tracerouteView;
     private Popup openReactionPopup;
+    private Function<String, CompletableFuture<NodeData>> remoteNodeResolver;
+    private Supplier<NodeDetailContent.ActionDelegate> remoteNodeActionDelegateSupplier;
 
     /**
      * @param state current device state, or {@code null}
@@ -221,6 +230,12 @@ public class MessageBubbleFactory {
     /** Updates DeviceState after connection rebind. */
     public void setState(DeviceState state) {
         this.state = state;
+    }
+
+    public void setRemoteNodeDetailsProvider(Function<String, CompletableFuture<NodeData>> resolver,
+                                             Supplier<NodeDetailContent.ActionDelegate> actionDelegateSupplier) {
+        this.remoteNodeResolver = resolver;
+        this.remoteNodeActionDelegateSupplier = actionDelegateSupplier;
     }
 
     /** Sets the TracerouteView used to render traceroute bubbles. */
@@ -616,9 +631,52 @@ public class MessageBubbleFactory {
      * @param nodeId sender node identifier
      */
     private void showNodeDetails(String nodeId) {
-        Optional.ofNullable(state)
+        NodeData localNode = Optional.ofNullable(state)
                 .map(currentState -> ChatNodeDisplayHelper.resolveNodeForDetails(currentState, nodeId))
-                .ifPresent(node -> NodeDetailPanel.showForNode(state, node));
+                .orElse(null);
+        if (localNode != null) {
+            NodeDetailPanel.showForNode(state, localNode);
+            return;
+        }
+        if (remoteNodeResolver == null || nodeId == null || nodeId.isBlank()) {
+            return;
+        }
+
+        NodeDetailContent.ActionDelegate actionDelegate = remoteNodeActionDelegateSupplier != null
+                ? remoteNodeActionDelegateSupplier.get()
+                : null;
+        CompletableFuture<NodeData> nodeFuture;
+        try {
+            nodeFuture = remoteNodeResolver.apply(nodeId);
+        } catch (RuntimeException e) {
+            Toast.show(Toast.Type.ERROR, I18n.t("chat.remote.error", errorMessage(e)));
+            return;
+        }
+        if (nodeFuture == null) {
+            return;
+        }
+        nodeFuture.whenComplete((node, error) -> Platform.runLater(() -> {
+            if (error != null) {
+                Toast.show(Toast.Type.ERROR, I18n.t("chat.remote.error", errorMessage(error)));
+                return;
+            }
+            if (node != null) {
+                NodeDetailPanel.showForNode(null, node, actionDelegate);
+            }
+        }));
+    }
+
+    private static String errorMessage(Throwable error) {
+        Throwable current = error;
+        while (current instanceof CompletionException || current instanceof ExecutionException) {
+            Throwable cause = current.getCause();
+            if (cause == null) {
+                break;
+            }
+            current = cause;
+        }
+        String message = current != null ? current.getMessage() : null;
+        return message == null || message.isBlank() ? String.valueOf(error) : message;
     }
 
     /**

@@ -147,6 +147,8 @@ abstract class FormChatData extends FormChatRequests {
             remoteRpcState.client().removeEventListener(remoteChatEventListener);
             remoteChatEventListener = null;
         }
+        remoteNodeFavoriteFlags.clear();
+        remoteNodeIgnoredFlags.clear();
         pendingRemoteReadKeys.clear();
     }
 

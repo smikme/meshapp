@@ -93,4 +93,14 @@ class RemoteChatJsonTest {
 
         assertEquals(-123, params.get("replyId").getAsInt());
     }
+
+    @Test
+    void reactionParamsIncludeTargetPacketAndEmoji() {
+        JsonObject params = RemoteChatJson.reactionParams("dm", "!12345678", -123, "👍");
+
+        assertEquals("dm", params.get("chatType").getAsString());
+        assertEquals("!12345678", params.get("chatKey").getAsString());
+        assertEquals(-123, params.get("targetPacketId").getAsInt());
+        assertEquals("👍", params.get("emoji").getAsString());
+    }
 }

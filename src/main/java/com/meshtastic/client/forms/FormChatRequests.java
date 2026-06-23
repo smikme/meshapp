@@ -12,8 +12,11 @@ import com.meshtastic.client.lua.LuaUiBotNotice;
 import com.meshtastic.client.lua.LuaUiNodePickRequest;
 import com.meshtastic.client.lua.LuaUiNodeSelection;
 import com.meshtastic.client.modal.Toast;
+import com.meshtastic.client.model.ChatItem;
+import com.meshtastic.client.model.MessageChangeEvent;
 import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.model.NodeData;
+import com.meshtastic.client.protocol.rpc.RemoteChatJson;
 import com.meshtastic.client.service.MessageService;
 import com.meshtastic.client.service.NodeCacheService;
 import com.meshtastic.client.utils.NodeUtils;
@@ -126,7 +129,7 @@ abstract class FormChatRequests extends FormChatMessages {
     protected void sendReaction(MeshMessage msg, String emoji) {
         if (msg == null || emoji == null || emoji.isEmpty()) { return; }
         if (remoteRpcState != null) {
-            Toast.show(Toast.Type.WARNING, I18n.t("chat.toast.remoteManagementUnavailable"));
+            sendRemoteReaction(msg, emoji);
             return;
         }
         if (selectedChat == null || state == null || (protocolHandler == null && meshCoreCompanionRuntime == null)) {
@@ -147,6 +150,42 @@ abstract class FormChatRequests extends FormChatMessages {
             return;
         }
         refreshCurrentChatAfterLocalReaction();
+    }
+
+    private void sendRemoteReaction(MeshMessage msg, String emoji) {
+        if (selectedChat == null || remoteRpcState == null) {
+            return;
+        }
+        if (msg.getPacketId() == 0) {
+            Toast.show(Toast.Type.WARNING, I18n.t("chat.toast.reactionUnavailableNoPacket"));
+            return;
+        }
+
+        var rpcState = remoteRpcState;
+        ChatItem requestChat = selectedChat;
+        String chatType = currentChatType();
+        String chatKey = currentChatKey();
+        String ownerNodeId = currentOwnerNodeId();
+        rpcState.client()
+                .call("chat.react",
+                        RemoteChatJson.reactionParams(chatType, chatKey, msg.getPacketId(), emoji),
+                        REMOTE_RPC_TIMEOUT)
+                .whenComplete((result, error) -> Platform.runLater(() -> {
+                    if (rpcState != remoteRpcState
+                            || selectedChat == null
+                            || !chatItemMatches(selectedChat, requestChat)) {
+                        return;
+                    }
+                    if (error != null) {
+                        Toast.show(Toast.Type.ERROR, I18n.t("chat.remote.error", RemoteChatJson.errorMessage(error)));
+                        return;
+                    }
+                    MeshMessage updated = RemoteChatJson.parseResultMessage(result);
+                    if (updated != null) {
+                        scheduleMessageChangeRefresh(
+                                MessageChangeEvent.metadataChanged(chatType, chatKey, ownerNodeId, updated));
+                    }
+                }));
     }
 
     private boolean sendReactionToSelectedChat(MeshMessage msg, String emoji) {

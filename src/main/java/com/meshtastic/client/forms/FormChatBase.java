@@ -42,6 +42,7 @@ import java.util.Objects;
 import java.util.Queue;
 import java.util.Set;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
@@ -117,6 +118,8 @@ abstract class FormChatBase extends Form {
     /** Connection id currently bound to the chat form. */
     protected String boundConnectionId;
     protected RpcEventListener remoteChatEventListener;
+    protected final Map<String, Boolean> remoteNodeFavoriteFlags = new ConcurrentHashMap<>();
+    protected final Map<String, Boolean> remoteNodeIgnoredFlags = new ConcurrentHashMap<>();
 
     // Unread tracking: keys such as "ch:INDEX" or "dm:NODEID" map to read-message counts.
     protected final Map<String, Integer> lastReadCounts = new HashMap<>();
