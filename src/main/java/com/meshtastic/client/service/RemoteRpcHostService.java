@@ -5,6 +5,8 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonNull;
 import com.google.gson.JsonObject;
 import com.meshtastic.client.MeshApp;
+import com.meshtastic.client.components.chat.TracerouteView;
+import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.model.ChatItem;
 import com.meshtastic.client.model.ConnectionEntry;
 import com.meshtastic.client.model.DeviceState;
@@ -25,14 +27,23 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.net.InetAddress;
+import java.util.Base64;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ForkJoinPool;
+import java.util.concurrent.TimeUnit;
+import java.util.function.BiConsumer;
+import java.util.function.IntFunction;
 
 import org.meshtastic.proto.ChannelProtos;
+import org.meshtastic.proto.MeshProtos;
 
 /**
  * Owns the optional direct RPC server running inside MeshApp Host.
@@ -42,10 +53,12 @@ import org.meshtastic.proto.ChannelProtos;
 public final class RemoteRpcHostService {
 
     private static final Logger log = LoggerFactory.getLogger(RemoteRpcHostService.class);
+    private static final int TRACEROUTE_TIMEOUT_SECONDS = 360;
 
     private static RemoteRpcHostService instance;
 
     private final Object lock = new Object();
+    private final ConcurrentMap<String, PendingTraceroute> pendingTraceroutes = new ConcurrentHashMap<>();
     private volatile DirectRpcServer server;
     private volatile String lastError;
 
@@ -136,6 +149,7 @@ public final class RemoteRpcHostService {
     private void stopLocked() {
         DirectRpcServer current = server;
         server = null;
+        clearPendingTraceroutes();
         if (current != null) {
             current.close();
             log.info("Remote RPC host server stopped");
@@ -186,6 +200,8 @@ public final class RemoteRpcHostService {
                         CompletableFuture.completedFuture(nodeList(params)))
                 .register("node.get", (params, context) ->
                         CompletableFuture.completedFuture(nodeGet(params)))
+                .register("node.traceroute", (params, context) ->
+                        CompletableFuture.completedFuture(nodeTraceroute(params)))
                 .register("node.refresh", (params, context) ->
                         CompletableFuture.completedFuture(nodeRefresh(params)))
                 .register("node.delete", (params, context) ->
@@ -535,6 +551,146 @@ public final class RemoteRpcHostService {
         return result;
     }
 
+    private JsonObject nodeTraceroute(JsonObject params) {
+        ActiveHostConnection active = activeHostConnection();
+        ProtocolHandler handler = active.handler();
+        if (handler == null) {
+            throw new IllegalStateException("selected host connection cannot send traceroute");
+        }
+
+        DeviceState state = active.state();
+        String requestedNodeId = textField(params, "nodeId");
+        int requestedNodeNum = boundedInt(params, "nodeNum", Integer.MIN_VALUE, Integer.MAX_VALUE, 0);
+        NodeData node = !requestedNodeId.isBlank() ? resolvePeerNode(state, requestedNodeId) : null;
+        if (node == null && requestedNodeNum != 0) {
+            node = state.getNodeDb().get(requestedNodeNum);
+            if (node != null) {
+                NodeCacheService.getInstance().enrichFromCache(node);
+            }
+        }
+        int targetNodeNum = node != null ? node.getNodeNum() : requestedNodeNum;
+        if (targetNodeNum == 0) {
+            throw new IllegalArgumentException("nodeNum is required");
+        }
+
+        String targetNodeId = node != null && node.getNodeId() != null && !node.getNodeId().isBlank()
+                ? node.getNodeId()
+                : nodeIdFromNum(targetNodeNum);
+        String targetName = node != null ? nodeTitle(node) : targetNodeId;
+        String requestId = firstText(textField(params, "requestId"), UUID.randomUUID().toString());
+
+        BiConsumer<Integer, MeshProtos.RouteDiscovery> listener =
+                (fromNodeNum, route) -> publishRemoteTracerouteResult(
+                        requestId,
+                        state,
+                        targetNodeNum,
+                        targetNodeId,
+                        targetName,
+                        fromNodeNum,
+                        route);
+        cleanupPendingTraceroute(requestId);
+        pendingTraceroutes.put(requestId, new PendingTraceroute(state, listener));
+        state.addTracerouteListener(listener);
+        schedulePendingTracerouteCleanup(requestId);
+
+        try {
+            MessageService.requestTraceroute(handler, state, targetNodeNum);
+        } catch (Throwable error) {
+            cleanupPendingTraceroute(requestId);
+            throw error;
+        }
+
+        JsonObject result = new JsonObject();
+        result.addProperty("requestId", requestId);
+        result.addProperty("targetNodeNum", targetNodeNum);
+        result.addProperty("targetNodeId", targetNodeId);
+        result.addProperty("targetName", targetName);
+        result.add("nodeNames", nodeNamesJson(state, targetNodeNum, 0, MeshProtos.RouteDiscovery.newBuilder().build()));
+        return result;
+    }
+
+    private void publishRemoteTracerouteResult(String requestId,
+                                               DeviceState state,
+                                               int targetNodeNum,
+                                               String targetNodeId,
+                                               String targetName,
+                                               int fromNodeNum,
+                                               MeshProtos.RouteDiscovery route) {
+        if (!matchesPendingTracerouteResponse(targetNodeNum, fromNodeNum)) {
+            return;
+        }
+        PendingTraceroute pending = pendingTraceroutes.remove(requestId);
+        if (pending == null) {
+            return;
+        }
+        pending.state().removeTracerouteListener(pending.listener());
+
+        MeshProtos.RouteDiscovery safeRoute = route != null
+                ? route
+                : MeshProtos.RouteDiscovery.newBuilder().build();
+        long timestamp = System.currentTimeMillis() / 1000;
+        JsonObject nodeNames = nodeNamesJson(state, targetNodeNum, fromNodeNum, safeRoute);
+        String formattedText = formatTracerouteText(
+                targetName,
+                safeRoute,
+                nodeNum -> nodeNameFromJson(nodeNames, nodeNum));
+        MessageDbService.getInstance().saveTracerouteResult(
+                state.getOwnerNodeId() != null ? state.getOwnerNodeId() : "",
+                "",
+                "",
+                "rpc.node.traceroute",
+                requestId,
+                0,
+                Integer.toUnsignedLong(targetNodeNum),
+                targetNodeId,
+                targetName,
+                fromNodeNum != 0 ? Integer.toUnsignedLong(fromNodeNum) : 0,
+                fromNodeNum != 0 ? nodeIdFromNum(fromNodeNum) : null,
+                safeRoute.toByteArray(),
+                formattedText,
+                timestamp);
+
+        JsonObject event = new JsonObject();
+        event.addProperty("requestId", requestId);
+        event.addProperty("status", "ok");
+        event.addProperty("targetNodeNum", targetNodeNum);
+        event.addProperty("targetNodeId", targetNodeId);
+        event.addProperty("targetName", targetName);
+        event.addProperty("responseFromNodeNum", fromNodeNum);
+        event.addProperty("responseFromNodeId", fromNodeNum != 0 ? nodeIdFromNum(fromNodeNum) : "");
+        event.addProperty("routeData", Base64.getEncoder().encodeToString(safeRoute.toByteArray()));
+        event.addProperty("formattedText", formattedText);
+        event.addProperty("timestamp", timestamp);
+        event.add("nodeNames", nodeNames);
+
+        DirectRpcServer current = server;
+        if (current != null) {
+            current.publishEvent("node.traceroute.result", event);
+        }
+    }
+
+    private boolean matchesPendingTracerouteResponse(int targetNodeNum, int fromNodeNum) {
+        return fromNodeNum == targetNodeNum || pendingTraceroutes.size() == 1;
+    }
+
+    private void schedulePendingTracerouteCleanup(String requestId) {
+        CompletableFuture.delayedExecutor(TRACEROUTE_TIMEOUT_SECONDS + 5L, TimeUnit.SECONDS)
+                .execute(() -> cleanupPendingTraceroute(requestId));
+    }
+
+    private void cleanupPendingTraceroute(String requestId) {
+        PendingTraceroute pending = pendingTraceroutes.remove(requestId);
+        if (pending != null) {
+            pending.state().removeTracerouteListener(pending.listener());
+        }
+    }
+
+    private void clearPendingTraceroutes() {
+        pendingTraceroutes.forEach((requestId, pending) ->
+                pending.state().removeTracerouteListener(pending.listener()));
+        pendingTraceroutes.clear();
+    }
+
     private JsonObject nodeRefresh(JsonObject params) {
         ActiveHostConnection active = activeHostConnection();
         ProtocolHandler handler = active.handler();
@@ -603,6 +759,99 @@ public final class RemoteRpcHostService {
         boolean favorite = FavoriteNodeService.getInstance().isFavorite(node.getNodeId(), ownerId);
         boolean ignored = IgnoredNodeService.getInstance().isIgnored(node.getNodeId(), ownerId);
         items.add(RemoteNodeJson.nodeToJson(node, favorite, ignored));
+    }
+
+    private static JsonObject nodeNamesJson(DeviceState state,
+                                            int targetNodeNum,
+                                            int responseFromNodeNum,
+                                            MeshProtos.RouteDiscovery route) {
+        JsonObject names = new JsonObject();
+        if (state != null && state.getMyNodeNum() != 0) {
+            addNodeName(names, state, state.getMyNodeNum());
+        }
+        addNodeName(names, state, targetNodeNum);
+        addNodeName(names, state, responseFromNodeNum);
+        if (route != null) {
+            route.getRouteList().forEach(nodeNum -> addNodeName(names, state, nodeNum));
+            route.getRouteBackList().forEach(nodeNum -> addNodeName(names, state, nodeNum));
+        }
+        return names;
+    }
+
+    private static void addNodeName(JsonObject names, DeviceState state, int nodeNum) {
+        if (nodeNum == 0) {
+            return;
+        }
+        names.addProperty(unsignedNodeKey(nodeNum), resolveNodeName(state, nodeNum));
+    }
+
+    private static String resolveNodeName(DeviceState state, int nodeNum) {
+        NodeData node = NodeUtils.resolveNode(state, nodeNum);
+        return node != null ? nodeTitle(node) : nodeIdFromNum(nodeNum);
+    }
+
+    private static String nodeNameFromJson(JsonObject names, int nodeNum) {
+        JsonElement element = names != null ? names.get(unsignedNodeKey(nodeNum)) : null;
+        if (element != null && !element.isJsonNull() && element.isJsonPrimitive()) {
+            String value = element.getAsString();
+            if (value != null && !value.isBlank()) {
+                return value.trim();
+            }
+        }
+        return nodeIdFromNum(nodeNum);
+    }
+
+    private static String formatTracerouteText(String targetName,
+                                               MeshProtos.RouteDiscovery route,
+                                               IntFunction<String> nodeNameResolver) {
+        StringBuilder sb = new StringBuilder();
+        sb.append(TracerouteView.TRACEROUTE_PREFIX).append(targetName).append("\n");
+        sb.append(I18n.t("chat.self.avatar"));
+        List<Integer> hops = route.getRouteList();
+        int snrCount = route.getSnrTowardsCount();
+        for (int i = 0; i <= hops.size(); i++) {
+            if (i < snrCount) {
+                sb.append(String.format(Locale.US, " \u2192%.1fdB\u2192 ", route.getSnrTowards(i) / 4.0));
+            } else {
+                sb.append(" \u2192 ");
+            }
+            sb.append(i < hops.size() ? nodeNameResolver.apply(hops.get(i)) : targetName);
+        }
+        if (route.getRouteBackCount() > 0 || route.getSnrBackCount() > 0) {
+            sb.append("\n").append(targetName);
+            List<Integer> backHops = route.getRouteBackList();
+            int snrBackCount = route.getSnrBackCount();
+            for (int i = 0; i <= backHops.size(); i++) {
+                if (i < snrBackCount) {
+                    sb.append(String.format(Locale.US, " \u2192%.1fdB\u2192 ", route.getSnrBack(i) / 4.0));
+                } else {
+                    sb.append(" \u2192 ");
+                }
+                sb.append(i < backHops.size() ? nodeNameResolver.apply(backHops.get(i)) : I18n.t("chat.self.avatar"));
+            }
+        }
+        return sb.toString();
+    }
+
+    private static String nodeTitle(NodeData node) {
+        if (node.getLongName() != null && !node.getLongName().isBlank()) {
+            return node.getLongName().trim();
+        }
+        if (node.getShortName() != null && !node.getShortName().isBlank()) {
+            return node.getShortName().trim();
+        }
+        if (node.getNodeId() != null && !node.getNodeId().isBlank()) {
+            return node.getNodeId().trim();
+        }
+        return nodeIdFromNum(node.getNodeNum());
+    }
+
+    private static String unsignedNodeKey(int nodeNum) {
+        return Long.toUnsignedString(Integer.toUnsignedLong(nodeNum));
+    }
+
+    private static String nodeIdFromNum(int nodeNum) {
+        return String.format("!%08x", nodeNum);
     }
 
     private ActiveHostConnection activeHostConnection() {
@@ -819,6 +1068,15 @@ public final class RemoteRpcHostService {
         return value.trim();
     }
 
+    private static String textField(JsonObject params, String field) {
+        JsonElement element = params != null ? params.get(field) : null;
+        if (element == null || element.isJsonNull() || !element.isJsonPrimitive()) {
+            return "";
+        }
+        String value = element.getAsString();
+        return value == null ? "" : value.trim();
+    }
+
     private static int boundedInt(JsonObject params, String field, int min, int max, int fallback) {
         JsonElement element = params != null ? params.get(field) : null;
         if (element == null || element.isJsonNull()) {
@@ -846,5 +1104,9 @@ public final class RemoteRpcHostService {
                                         DeviceState state,
                                         ProtocolHandler handler,
                                         MeshCoreCompanionProtocolRuntime meshCoreRuntime) {
+    }
+
+    private record PendingTraceroute(DeviceState state,
+                                     BiConsumer<Integer, MeshProtos.RouteDiscovery> listener) {
     }
 }

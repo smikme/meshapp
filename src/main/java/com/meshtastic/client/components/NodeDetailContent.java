@@ -51,6 +51,8 @@ public class NodeDetailContent extends HBox {
         boolean isFavorite(String nodeId);
         boolean isIgnored(String nodeId);
         void openDirectChat(NodeData node);
+        boolean canTraceroute(NodeData node);
+        void tracerouteNode(NodeData node);
         void refreshNode(NodeData node);
         void deleteNode(NodeData node);
         void setFavorite(NodeData node, boolean favorite, Consumer<Boolean> callback);
@@ -127,9 +129,17 @@ public class NodeDetailContent extends HBox {
         tracerouteBtn.setContentDisplay(ContentDisplay.GRAPHIC_ONLY);
         tracerouteBtn.getStyleClass().add("drawer-toolbar-button");
         tracerouteBtn.setTooltip(new Tooltip(I18n.t("node.action.traceroute")));
-        tracerouteBtn.setDisable(actionDelegate != null || handler == null || state == null || nodeNum == 0);
-        tracerouteBtn.setOnAction(e ->
-                NodeTracerouteWindow.showWindow(this.state, node, protocolHandler));
+        boolean canTraceroute = actionDelegate == null
+                ? handler != null && state != null && nodeNum != 0
+                : actionDelegate.canTraceroute(node);
+        tracerouteBtn.setDisable(!canTraceroute);
+        tracerouteBtn.setOnAction(e -> {
+            if (actionDelegate != null) {
+                actionDelegate.tracerouteNode(node);
+            } else {
+                NodeTracerouteWindow.showWindow(this.state, node, protocolHandler);
+            }
+        });
 
         SVGPath remoteAdminIcon = SvgIconLoader.load("/drawer/icon/setting.svg", 22);
         Button remoteAdminBtn = new Button();

@@ -3,6 +3,7 @@ package com.meshtastic.client.forms;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.meshtastic.client.components.NodeDetailContent;
+import com.meshtastic.client.components.RemoteNodeTracerouteWindow;
 import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.modal.ModalPane;
 import com.meshtastic.client.modal.Toast;
@@ -1020,6 +1021,20 @@ public class FormNodes extends Form {
             @Override
             public void openDirectChat(NodeData node) {
                 openRemoteDirectChat(node);
+            }
+
+            @Override
+            public boolean canTraceroute(NodeData node) {
+                return remoteRpcState != null
+                        && remoteRpcState.client() != null
+                        && remoteRpcState.client().isOpen()
+                        && node != null
+                        && node.getNodeNum() != 0;
+            }
+
+            @Override
+            public void tracerouteNode(NodeData node) {
+                RemoteNodeTracerouteWindow.showWindow(remoteRpcState, node);
             }
 
             @Override

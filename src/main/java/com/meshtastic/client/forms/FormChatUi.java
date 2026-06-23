@@ -3,6 +3,7 @@ package com.meshtastic.client.forms;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.meshtastic.client.components.NodeDetailContent;
+import com.meshtastic.client.components.RemoteNodeTracerouteWindow;
 import com.meshtastic.client.components.chat.ChatBotCommandHelper;
 import com.meshtastic.client.components.chat.ChatDbKey;
 import com.meshtastic.client.components.chat.ChatInputBar;
@@ -450,6 +451,20 @@ abstract class FormChatUi extends FormChatBase {
                 if (node != null && node.getNodeId() != null && !node.getNodeId().isBlank()) {
                     FormChatUi.this.openDirectChat(node.getNodeId(), node);
                 }
+            }
+
+            @Override
+            public boolean canTraceroute(NodeData node) {
+                return rpcState != null
+                        && rpcState.client() != null
+                        && rpcState.client().isOpen()
+                        && node != null
+                        && node.getNodeNum() != 0;
+            }
+
+            @Override
+            public void tracerouteNode(NodeData node) {
+                RemoteNodeTracerouteWindow.showWindow(rpcState, node);
             }
 
             @Override
