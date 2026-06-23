@@ -3,6 +3,7 @@ package com.meshtastic.client.forms;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.meshtastic.client.components.NodeDetailContent;
+import com.meshtastic.client.components.RemoteAdminPanel;
 import com.meshtastic.client.components.RemoteNodeTracerouteWindow;
 import com.meshtastic.client.components.chat.ChatBotCommandHelper;
 import com.meshtastic.client.components.chat.ChatDbKey;
@@ -465,6 +466,22 @@ abstract class FormChatUi extends FormChatBase {
             @Override
             public void tracerouteNode(NodeData node) {
                 RemoteNodeTracerouteWindow.showWindow(rpcState, node);
+            }
+
+            @Override
+            public boolean canRemoteAdmin(NodeData node) {
+                return rpcState != null
+                        && rpcState.client() != null
+                        && rpcState.client().isOpen()
+                        && node != null
+                        && node.getNodeNum() != 0
+                        && node.getPublicKey() != null
+                        && node.getPublicKey().length > 0;
+            }
+
+            @Override
+            public void remoteAdminNode(NodeData node) {
+                RemoteAdminPanel.showForRemoteNode(rpcState, node);
             }
 
             @Override

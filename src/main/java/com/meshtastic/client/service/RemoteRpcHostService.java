@@ -17,6 +17,7 @@ import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.protocol.ProtocolHandler;
 import com.meshtastic.client.protocol.ProtocolRuntime;
 import com.meshtastic.client.protocol.meshcore.MeshCoreCompanionProtocolRuntime;
+import com.meshtastic.client.protocol.rpc.RemoteAdminRpcJson;
 import com.meshtastic.client.protocol.rpc.RemoteNodeJson;
 import com.meshtastic.client.rpc.DirectRpcServer;
 import com.meshtastic.client.rpc.RpcAccessKey;
@@ -43,7 +44,10 @@ import java.util.function.BiConsumer;
 import java.util.function.IntFunction;
 
 import org.meshtastic.proto.ChannelProtos;
+import org.meshtastic.proto.AdminProtos;
+import org.meshtastic.proto.ConfigProtos;
 import org.meshtastic.proto.MeshProtos;
+import org.meshtastic.proto.ModuleConfigProtos;
 
 /**
  * Owns the optional direct RPC server running inside MeshApp Host.
@@ -209,7 +213,29 @@ public final class RemoteRpcHostService {
                 .register("node.favorite", (params, context) ->
                         CompletableFuture.completedFuture(nodeFavorite(params)))
                 .register("node.ignored", (params, context) ->
-                        CompletableFuture.completedFuture(nodeIgnored(params)));
+                        CompletableFuture.completedFuture(nodeIgnored(params)))
+                .register("admin.load", (params, context) ->
+                        remoteAdminLoad(params))
+                .register("admin.requestConfig", (params, context) ->
+                        remoteAdminRequestConfig(params))
+                .register("admin.requestModuleConfig", (params, context) ->
+                        remoteAdminRequestModuleConfig(params))
+                .register("admin.saveOwner", (params, context) ->
+                        remoteAdminSaveOwner(params))
+                .register("admin.saveConfigChanges", (params, context) ->
+                        remoteAdminSaveConfigChanges(params))
+                .register("admin.setFixedPosition", (params, context) ->
+                        remoteAdminSetFixedPosition(params))
+                .register("admin.removeFixedPosition", (params, context) ->
+                        remoteAdminRemoveFixedPosition(params))
+                .register("admin.setRingtone", (params, context) ->
+                        remoteAdminSetRingtone(params))
+                .register("admin.setCannedMessages", (params, context) ->
+                        remoteAdminSetCannedMessages(params))
+                .register("admin.command", (params, context) ->
+                        remoteAdminCommand(params))
+                .register("admin.refreshConnectionStatus", (params, context) ->
+                        remoteAdminRefreshConnectionStatus(params));
     }
 
     /**
@@ -742,6 +768,200 @@ public final class RemoteRpcHostService {
         return nodeList(params);
     }
 
+    private CompletableFuture<JsonElement> remoteAdminLoad(JsonObject params) {
+        RemoteAdminService service = createRemoteAdminService(params);
+        return service.loadSnapshot()
+                .thenApply(session -> (JsonElement) RemoteAdminRpcJson.sessionToJson(session))
+                .whenComplete((ignored, error) -> service.close());
+    }
+
+    private CompletableFuture<JsonElement> remoteAdminRequestConfig(JsonObject params) {
+        AdminProtos.AdminMessage.ConfigType type = configType(params);
+        RemoteAdminService service = createRemoteAdminService(params);
+        return service.requestConfigSection(type)
+                .thenApply(ignored -> (JsonElement) RemoteAdminRpcJson.sessionToJson(service.session()))
+                .whenComplete((ignored, error) -> service.close());
+    }
+
+    private CompletableFuture<JsonElement> remoteAdminRequestModuleConfig(JsonObject params) {
+        AdminProtos.AdminMessage.ModuleConfigType type = moduleConfigType(params);
+        RemoteAdminService service = createRemoteAdminService(params);
+        return service.requestModuleConfigSection(type)
+                .thenApply(ignored -> (JsonElement) RemoteAdminRpcJson.sessionToJson(service.session()))
+                .whenComplete((ignored, error) -> service.close());
+    }
+
+    private CompletableFuture<JsonElement> remoteAdminSaveOwner(JsonObject params) {
+        String longName = rawTextField(params, "longName");
+        String shortName = rawTextField(params, "shortName");
+        boolean isLicensed = booleanField(params, "isLicensed");
+        RemoteAdminService service = createRemoteAdminService(params);
+        return service.saveOwner(longName, shortName, isLicensed)
+                .thenApply(ignored -> okResult())
+                .whenComplete((ignored, error) -> service.close());
+    }
+
+    private CompletableFuture<JsonElement> remoteAdminSaveConfigChanges(JsonObject params) {
+        List<ConfigProtos.Config> configs = RemoteAdminRpcJson.configsFromJson(params, "configs");
+        List<ModuleConfigProtos.ModuleConfig> moduleConfigs =
+                RemoteAdminRpcJson.moduleConfigsFromJson(params, "moduleConfigs");
+        List<ChannelProtos.Channel> channels = RemoteAdminRpcJson.channelsFromJson(params, "channels");
+        RemoteAdminService service = createRemoteAdminService(params);
+        return service.saveConfigChanges(configs, moduleConfigs, channels)
+                .thenApply(ignored -> okResult())
+                .whenComplete((ignored, error) -> service.close());
+    }
+
+    private CompletableFuture<JsonElement> remoteAdminSetFixedPosition(JsonObject params) {
+        double latDegrees = doubleField(params, "latDegrees");
+        double lonDegrees = doubleField(params, "lonDegrees");
+        int altMeters = boundedInt(params, "altMeters", Integer.MIN_VALUE, Integer.MAX_VALUE, 0);
+        RemoteAdminService service = createRemoteAdminService(params);
+        return service.setFixedPosition(latDegrees, lonDegrees, altMeters)
+                .thenApply(ignored -> okResult())
+                .whenComplete((ignored, error) -> service.close());
+    }
+
+    private CompletableFuture<JsonElement> remoteAdminRemoveFixedPosition(JsonObject params) {
+        RemoteAdminService service = createRemoteAdminService(params);
+        return service.removeFixedPosition()
+                .thenApply(ignored -> okResult())
+                .whenComplete((ignored, error) -> service.close());
+    }
+
+    private CompletableFuture<JsonElement> remoteAdminSetRingtone(JsonObject params) {
+        String ringtone = rawTextField(params, "ringtone");
+        RemoteAdminService service = createRemoteAdminService(params);
+        return service.setRingtone(ringtone)
+                .thenApply(ignored -> okResult())
+                .whenComplete((ignored, error) -> service.close());
+    }
+
+    private CompletableFuture<JsonElement> remoteAdminSetCannedMessages(JsonObject params) {
+        String messages = rawTextField(params, "messages");
+        RemoteAdminService service = createRemoteAdminService(params);
+        return service.setCannedMessages(messages)
+                .thenApply(ignored -> okResult())
+                .whenComplete((ignored, error) -> service.close());
+    }
+
+    private CompletableFuture<JsonElement> remoteAdminCommand(JsonObject params) {
+        String command = requiredText(params, "command");
+        RemoteAdminService service = createRemoteAdminService(params);
+        CompletableFuture<Void> future;
+        try {
+            future = switch (command) {
+                case "reboot" -> service.reboot(boundedInt(params, "delaySeconds", 0, Integer.MAX_VALUE, 0));
+                case "shutdown" -> service.shutdown(boundedInt(params, "delaySeconds", 0, Integer.MAX_VALUE, 0));
+                case "syncTime" -> service.syncTime(longField(params, "epochSeconds"));
+                case "backupPreferences" -> service.backupPreferences(backupLocation(params));
+                case "restorePreferences" -> service.restorePreferences(backupLocation(params));
+                case "removeBackupPreferences" -> service.removeBackupPreferences(backupLocation(params));
+                case "factoryResetConfig" -> service.factoryResetConfig();
+                case "factoryResetDevice" -> service.factoryResetDevice();
+                case "resetNodeDb" -> service.resetNodeDb(booleanField(params, "preserveFavorites"));
+                case "enterDfuMode" -> service.enterDfuMode();
+                default -> CompletableFuture.failedFuture(
+                        new IllegalArgumentException("Unsupported remote admin command: " + command));
+            };
+        } catch (RuntimeException e) {
+            service.close();
+            throw e;
+        }
+        return future.thenApply(ignored -> okResult())
+                .whenComplete((ignored, error) -> service.close());
+    }
+
+    private CompletableFuture<JsonElement> remoteAdminRefreshConnectionStatus(JsonObject params) {
+        RemoteAdminService service = createRemoteAdminService(params);
+        return service.refreshConnectionStatus()
+                .thenApply(adminMessage -> {
+                    JsonObject result = RemoteAdminRpcJson.sessionToJson(service.session());
+                    result.addProperty("adminMessage", RemoteAdminRpcJson.encodeAdminMessage(adminMessage));
+                    return (JsonElement) result;
+                })
+                .whenComplete((ignored, error) -> service.close());
+    }
+
+    private RemoteAdminService createRemoteAdminService(JsonObject params) {
+        ActiveHostConnection active = activeHostConnection();
+        ProtocolHandler handler = active.handler();
+        if (handler == null) {
+            throw new IllegalStateException("selected host connection cannot send remote admin packets");
+        }
+        NodeData node = resolveAdminNode(active.state(), params);
+        return new RemoteAdminService(handler, active.state(), node);
+    }
+
+    private NodeData resolveAdminNode(DeviceState state, JsonObject params) {
+        String requestedNodeId = textField(params, "nodeId");
+        int requestedNodeNum = boundedInt(params, "nodeNum", Integer.MIN_VALUE, Integer.MAX_VALUE, 0);
+        NodeData node = !requestedNodeId.isBlank() ? resolvePeerNode(state, requestedNodeId) : null;
+        if (node == null && requestedNodeNum != 0) {
+            node = state.getNodeDb().get(requestedNodeNum);
+            if (node != null) {
+                NodeCacheService.getInstance().enrichFromCache(node);
+            }
+        }
+        if (node == null) {
+            throw new IllegalArgumentException("node was not found");
+        }
+        if (state.getMyNodeNum() != 0 && node.getNodeNum() == state.getMyNodeNum()) {
+            throw new IllegalArgumentException("remote admin cannot target the local host node over RPC");
+        }
+        if (node.getPublicKey() == null || node.getPublicKey().length == 0) {
+            throw new IllegalArgumentException("remote admin requires the target node public key");
+        }
+        return node;
+    }
+
+    private static JsonElement okResult() {
+        JsonObject result = new JsonObject();
+        result.addProperty("ok", true);
+        return result;
+    }
+
+    private static AdminProtos.AdminMessage.ConfigType configType(JsonObject params) {
+        String value = requiredText(params, "type");
+        try {
+            AdminProtos.AdminMessage.ConfigType type = AdminProtos.AdminMessage.ConfigType.valueOf(value);
+            if (type == AdminProtos.AdminMessage.ConfigType.UNRECOGNIZED) {
+                throw new IllegalArgumentException("Unsupported remote admin config type: " + value);
+            }
+            return type;
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("Unsupported remote admin config type: " + value, e);
+        }
+    }
+
+    private static AdminProtos.AdminMessage.ModuleConfigType moduleConfigType(JsonObject params) {
+        String value = requiredText(params, "type");
+        try {
+            AdminProtos.AdminMessage.ModuleConfigType type =
+                    AdminProtos.AdminMessage.ModuleConfigType.valueOf(value);
+            if (type == AdminProtos.AdminMessage.ModuleConfigType.UNRECOGNIZED) {
+                throw new IllegalArgumentException("Unsupported remote admin module config type: " + value);
+            }
+            return type;
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("Unsupported remote admin module config type: " + value, e);
+        }
+    }
+
+    private static AdminProtos.AdminMessage.BackupLocation backupLocation(JsonObject params) {
+        String value = requiredText(params, "location");
+        try {
+            AdminProtos.AdminMessage.BackupLocation location =
+                    AdminProtos.AdminMessage.BackupLocation.valueOf(value);
+            if (location == AdminProtos.AdminMessage.BackupLocation.UNRECOGNIZED) {
+                throw new IllegalArgumentException("Unsupported backup location: " + value);
+            }
+            return location;
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("Unsupported backup location: " + value, e);
+        }
+    }
+
     private static void addNodeJson(JsonArray items,
                                     Set<String> addedNodeIds,
                                     NodeData node,
@@ -1069,12 +1289,17 @@ public final class RemoteRpcHostService {
     }
 
     private static String textField(JsonObject params, String field) {
+        String value = rawTextField(params, field);
+        return value == null ? "" : value.trim();
+    }
+
+    private static String rawTextField(JsonObject params, String field) {
         JsonElement element = params != null ? params.get(field) : null;
         if (element == null || element.isJsonNull() || !element.isJsonPrimitive()) {
             return "";
         }
         String value = element.getAsString();
-        return value == null ? "" : value.trim();
+        return value == null ? "" : value;
     }
 
     private static int boundedInt(JsonObject params, String field, int min, int max, int fallback) {
@@ -1092,6 +1317,11 @@ public final class RemoteRpcHostService {
     private static long longField(JsonObject params, String field) {
         JsonElement element = params != null ? params.get(field) : null;
         return element != null && !element.isJsonNull() ? element.getAsLong() : 0L;
+    }
+
+    private static double doubleField(JsonObject params, String field) {
+        JsonElement element = params != null ? params.get(field) : null;
+        return element != null && !element.isJsonNull() ? element.getAsDouble() : 0.0;
     }
 
     private static boolean booleanField(JsonObject params, String field) {

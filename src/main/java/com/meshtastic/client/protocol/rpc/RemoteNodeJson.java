@@ -92,7 +92,7 @@ public final class RemoteNodeJson {
         return flags;
     }
 
-    private static NodeData parseNode(JsonObject object) {
+    public static NodeData parseNode(JsonObject object) {
         NodeData node = new NodeData(intField(object, "nodeNum"));
         node.setNodeId(firstText(stringField(object, "nodeId"), node.getNodeId()));
         node.setLongName(stringField(object, "longName"));

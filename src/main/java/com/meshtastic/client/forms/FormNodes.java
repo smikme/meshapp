@@ -3,6 +3,7 @@ package com.meshtastic.client.forms;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.meshtastic.client.components.NodeDetailContent;
+import com.meshtastic.client.components.RemoteAdminPanel;
 import com.meshtastic.client.components.RemoteNodeTracerouteWindow;
 import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.modal.ModalPane;
@@ -1035,6 +1036,25 @@ public class FormNodes extends Form {
             @Override
             public void tracerouteNode(NodeData node) {
                 RemoteNodeTracerouteWindow.showWindow(remoteRpcState, node);
+            }
+
+            @Override
+            public boolean canRemoteAdmin(NodeData node) {
+                return remoteRpcState != null
+                        && remoteRpcState.client() != null
+                        && remoteRpcState.client().isOpen()
+                        && node != null
+                        && node.getNodeNum() != 0
+                        && node.getPublicKey() != null
+                        && node.getPublicKey().length > 0
+                        && (remoteOwnerNodeId == null
+                        || remoteOwnerNodeId.isBlank()
+                        || !remoteOwnerNodeId.equals(node.getNodeId()));
+            }
+
+            @Override
+            public void remoteAdminNode(NodeData node) {
+                RemoteAdminPanel.showForRemoteNode(remoteRpcState, node);
             }
 
             @Override

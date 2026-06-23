@@ -53,6 +53,8 @@ public class NodeDetailContent extends HBox {
         void openDirectChat(NodeData node);
         boolean canTraceroute(NodeData node);
         void tracerouteNode(NodeData node);
+        boolean canRemoteAdmin(NodeData node);
+        void remoteAdminNode(NodeData node);
         void refreshNode(NodeData node);
         void deleteNode(NodeData node);
         void setFavorite(NodeData node, boolean favorite, Consumer<Boolean> callback);
@@ -148,18 +150,24 @@ public class NodeDetailContent extends HBox {
         remoteAdminBtn.getStyleClass().add("drawer-toolbar-button");
         boolean isLocalNode = state != null && nodeNum == state.getMyNodeNum();
         boolean canRemoteAdmin = actionDelegate == null
-                && handler != null
+                ? handler != null
                 && state != null
                 && nodeNum != 0
                 && !isLocalNode
-                && hasPublicKey;
+                && hasPublicKey
+                : actionDelegate.canRemoteAdmin(node);
         String remoteAdminTooltip = !hasPublicKey
                 ? I18n.t("node.action.remoteAdminNoPublicKey")
                 : I18n.t("node.action.remoteAdmin");
         remoteAdminBtn.setTooltip(new Tooltip(remoteAdminTooltip));
         remoteAdminBtn.setDisable(!canRemoteAdmin);
-        remoteAdminBtn.setOnAction(e ->
-                RemoteAdminPanel.showForNode(this.state, node, protocolHandler));
+        remoteAdminBtn.setOnAction(e -> {
+            if (actionDelegate != null) {
+                actionDelegate.remoteAdminNode(node);
+            } else {
+                RemoteAdminPanel.showForNode(this.state, node, protocolHandler);
+            }
+        });
 
         // Refresh node information over radio and exchange User payloads.
         SVGPath refreshIcon = SvgIconLoader.load("/drawer/icon/refresh-node.svg", 22);
