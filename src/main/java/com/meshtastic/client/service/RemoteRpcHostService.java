@@ -14,12 +14,14 @@ import com.meshtastic.client.model.MessageChangeEvent;
 import com.meshtastic.client.model.MessageReaction;
 import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.model.NodeData;
+import com.meshtastic.client.model.PacketLogEntry;
 import com.meshtastic.client.model.TelemetryEntry;
 import com.meshtastic.client.protocol.ProtocolHandler;
 import com.meshtastic.client.protocol.ProtocolRuntime;
 import com.meshtastic.client.protocol.meshcore.MeshCoreCompanionProtocolRuntime;
 import com.meshtastic.client.protocol.rpc.RemoteAdminRpcJson;
 import com.meshtastic.client.protocol.rpc.RemoteNodeJson;
+import com.meshtastic.client.protocol.rpc.RemotePacketMonitorJson;
 import com.meshtastic.client.protocol.rpc.RemoteTelemetryJson;
 import com.meshtastic.client.rpc.DirectRpcServer;
 import com.meshtastic.client.rpc.RpcAccessKey;
@@ -65,6 +67,22 @@ public final class RemoteRpcHostService {
 
     private final Object lock = new Object();
     private final ConcurrentMap<String, PendingTraceroute> pendingTraceroutes = new ConcurrentHashMap<>();
+    private final PacketMonitorService.Listener packetMonitorListener = new PacketMonitorService.Listener() {
+        @Override
+        public void onPacketLogged(PacketLogEntry entry) {
+            publishPacketMonitorEvent("packet.monitor.logged", RemotePacketMonitorJson.entryEvent(entry));
+        }
+
+        @Override
+        public void onCaptureStateChanged(boolean captureEnabled) {
+            publishPacketMonitorEvent("packet.monitor.capture", RemotePacketMonitorJson.captureStateToJson(captureEnabled));
+        }
+
+        @Override
+        public void onCleared() {
+            publishPacketMonitorEvent("packet.monitor.cleared", new JsonObject());
+        }
+    };
     private volatile DirectRpcServer server;
     private volatile String lastError;
 
@@ -112,6 +130,7 @@ public final class RemoteRpcHostService {
                         parsedKey,
                         createRegistry(),
                         ForkJoinPool.commonPool());
+                PacketMonitorService.getInstance().addListener(packetMonitorListener);
                 log.info("Remote RPC host server started on {}:{}", bindAddress, server.getPort());
             } catch (Exception e) {
                 lastError = e.getMessage();
@@ -157,6 +176,10 @@ public final class RemoteRpcHostService {
         server = null;
         clearPendingTraceroutes();
         if (current != null) {
+            PacketMonitorService monitorService = PacketMonitorService.getIfInitialized();
+            if (monitorService != null) {
+                monitorService.removeListener(packetMonitorListener);
+            }
             current.close();
             log.info("Remote RPC host server stopped");
         }
@@ -218,6 +241,27 @@ public final class RemoteRpcHostService {
                         CompletableFuture.completedFuture(nodeIgnored(params)))
                 .register("telemetry.dashboard", (params, context) ->
                         CompletableFuture.completedFuture(telemetryDashboard(params)))
+                .register("packetMonitor.page", (params, context) ->
+                        CompletableFuture.completedFuture(packetMonitorPage(params)))
+                .register("packetMonitor.types", (params, context) ->
+                        CompletableFuture.completedFuture(packetMonitorTypes(params)))
+                .register("packetMonitor.counts", (params, context) ->
+                        CompletableFuture.completedFuture(packetMonitorCounts(params)))
+                .register("packetMonitor.captureState", (params, context) ->
+                        CompletableFuture.completedFuture(RemotePacketMonitorJson.captureStateToJson(
+                                PacketMonitorService.getInstance().isCaptureEnabled())))
+                .register("packetMonitor.start", (params, context) -> {
+                    PacketMonitorService.getInstance().startCapture();
+                    return CompletableFuture.completedFuture(RemotePacketMonitorJson.captureStateToJson(true));
+                })
+                .register("packetMonitor.stop", (params, context) -> {
+                    PacketMonitorService.getInstance().stopCapture();
+                    return CompletableFuture.completedFuture(RemotePacketMonitorJson.captureStateToJson(false));
+                })
+                .register("packetMonitor.clear", (params, context) -> {
+                    PacketMonitorService.getInstance().clear();
+                    return CompletableFuture.completedFuture(RemotePacketMonitorJson.countsToJson(0, 0));
+                })
                 .register("admin.load", (params, context) ->
                         remoteAdminLoad(params))
                 .register("admin.requestConfig", (params, context) ->
@@ -312,6 +356,13 @@ public final class RemoteRpcHostService {
                 List.of(message));
         event.add("message", messageToJson(message, state));
         current.publishEvent("message.status", event);
+    }
+
+    private void publishPacketMonitorEvent(String event, JsonObject payload) {
+        DirectRpcServer current = server;
+        if (current != null) {
+            current.publishEvent(event, payload != null ? payload : new JsonObject());
+        }
     }
 
     private JsonObject connectionList() {
@@ -796,6 +847,33 @@ public final class RemoteRpcHostService {
         List<TelemetryEntry> qualityEntries = NodeCacheService.getInstance()
                 .loadTelemetryQuality(sinceEpoch, maxFutureTs, ownerId);
         return RemoteTelemetryJson.dashboardResult(ownerId, nodeId, entries, qualityEntries);
+    }
+
+    private JsonObject packetMonitorPage(JsonObject params) {
+        PacketMonitorService monitorService = PacketMonitorService.getInstance();
+        PacketMonitorService.PacketQuery query = RemotePacketMonitorJson.parseQuery(params.get("query"));
+        PacketMonitorService.PageCursor cursor = RemotePacketMonitorJson.parseCursor(params.get("cursor"));
+        int limit = Math.max(1, boundedInt(params, "limit", 1, 10_000, 200));
+        String request = textField(params, "request");
+        PacketMonitorService.PacketPage page = switch (request) {
+            case "older" -> monitorService.loadOlderPage(query, cursor, limit);
+            case "newer" -> monitorService.loadNewerPage(query, cursor, limit);
+            default -> monitorService.loadLatestPage(query, limit);
+        };
+        return RemotePacketMonitorJson.pageToJson(page);
+    }
+
+    private JsonObject packetMonitorTypes(JsonObject params) {
+        PacketMonitorService.PacketQuery query = RemotePacketMonitorJson.parseQuery(params.get("query"));
+        return RemotePacketMonitorJson.typesToJson(PacketMonitorService.getInstance().loadPacketTypes(query));
+    }
+
+    private JsonObject packetMonitorCounts(JsonObject params) {
+        PacketMonitorService.PacketQuery query = RemotePacketMonitorJson.parseQuery(params.get("query"));
+        PacketMonitorService monitorService = PacketMonitorService.getInstance();
+        return RemotePacketMonitorJson.countsToJson(
+                monitorService.countMatchingPackets(query),
+                monitorService.countAllPackets());
     }
 
     private CompletableFuture<JsonElement> remoteAdminLoad(JsonObject params) {
