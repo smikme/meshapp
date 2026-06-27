@@ -5,11 +5,18 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
+import com.meshtastic.client.lua.LuaAutomationCommand;
 import com.meshtastic.client.lua.LuaDebugSnapshot;
+import com.meshtastic.client.lua.LuaFormComponentSpec;
+import com.meshtastic.client.lua.LuaFormEvent;
 import com.meshtastic.client.lua.LuaScript;
 import com.meshtastic.client.lua.LuaScriptEvent;
 import com.meshtastic.client.lua.LuaScriptRuntimeService;
 import com.meshtastic.client.lua.LuaScriptService;
+import com.meshtastic.client.lua.LuaUiBotNotice;
+import com.meshtastic.client.lua.LuaUiNodePickRequest;
+import com.meshtastic.client.lua.LuaUiNodeSelection;
+import com.meshtastic.client.model.NodeData;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -25,6 +32,15 @@ public final class RemoteLuaScriptJson {
     private static final Gson GSON = new Gson();
 
     private RemoteLuaScriptJson() {
+    }
+
+    public record FormCommand(long scriptId,
+                              String command,
+                              String requestId,
+                              String componentId,
+                              String title,
+                              LuaFormComponentSpec spec,
+                              LuaScript script) {
     }
 
     public static JsonObject scriptsToJson(List<LuaScript> scripts, LuaScriptRuntimeService runtimeService) {
@@ -257,6 +273,20 @@ public final class RemoteLuaScriptJson {
         return result;
     }
 
+    public static JsonObject automationCommandParams(long scriptId, LuaAutomationCommand command) {
+        JsonObject object = scriptIdParams(scriptId);
+        object.add("command", GSON.toJsonTree(command));
+        return object;
+    }
+
+    public static LuaAutomationCommand parseAutomationCommand(JsonElement element) {
+        JsonElement command = object(element).get("command");
+        if (command == null || !command.isJsonObject()) {
+            return null;
+        }
+        return GSON.fromJson(command, LuaAutomationCommand.class);
+    }
+
     public static JsonObject eventToJson(LuaScriptEvent event) {
         JsonObject object = new JsonObject();
         if (event == null) {
@@ -268,6 +298,9 @@ public final class RemoteLuaScriptJson {
         Throwable error = event.error();
         if (error != null && error.getMessage() != null) {
             object.addProperty("errorMessage", error.getMessage());
+        }
+        if (event.payload() instanceof LuaUiBotNotice notice) {
+            object.add("payload", GSON.toJsonTree(notice));
         }
         return object;
     }
@@ -282,7 +315,149 @@ public final class RemoteLuaScriptJson {
         }
         String errorMessage = stringField(object, "errorMessage");
         Throwable error = errorMessage.isBlank() ? null : new IllegalStateException(errorMessage);
-        return new LuaScriptEvent(type, longField(object, "scriptId"), stringField(object, "message"), error);
+        Object payload = null;
+        JsonElement payloadElement = object.get("payload");
+        if (type == LuaScriptEvent.Type.UI_BOT_NOTICE
+                && payloadElement != null
+                && payloadElement.isJsonObject()) {
+            payload = GSON.fromJson(payloadElement, LuaUiBotNotice.class);
+        }
+        return new LuaScriptEvent(type, longField(object, "scriptId"), stringField(object, "message"), error, payload);
+    }
+
+    public static JsonObject nodePickRequestToJson(LuaUiNodePickRequest request) {
+        JsonObject object = new JsonObject();
+        if (request != null) {
+            object.addProperty("scriptId", request.scriptId());
+            object.addProperty("requestId", request.requestId());
+            object.addProperty("source", request.source());
+            object.addProperty("name", request.name());
+            object.addProperty("prompt", request.prompt());
+            object.addProperty("query", request.query());
+            object.addProperty("chatType", request.chatType());
+            object.addProperty("chatKey", request.chatKey());
+        }
+        return object;
+    }
+
+    public static LuaUiNodePickRequest parseNodePickRequest(JsonElement element) {
+        JsonObject object = object(element);
+        return new LuaUiNodePickRequest(
+                longField(object, "scriptId"),
+                stringField(object, "requestId"),
+                stringField(object, "source"),
+                stringField(object, "name"),
+                stringField(object, "prompt"),
+                stringField(object, "query"),
+                stringField(object, "chatType"),
+                stringField(object, "chatKey"));
+    }
+
+    public static JsonObject nodeSelectionParams(long scriptId, LuaUiNodeSelection selection) {
+        JsonObject object = scriptIdParams(scriptId);
+        if (selection != null) {
+            object.addProperty("requestId", selection.requestId());
+            object.addProperty("source", selection.source());
+            object.addProperty("name", selection.name());
+            object.addProperty("selected", selection.selected());
+            object.addProperty("chatType", selection.chatType());
+            object.addProperty("chatKey", selection.chatKey());
+            if (selection.node() != null) {
+                object.add("node", RemoteNodeJson.nodeToJson(selection.node(), false, false));
+            }
+        }
+        return object;
+    }
+
+    public static LuaUiNodeSelection parseNodeSelection(JsonElement element) {
+        JsonObject object = object(element);
+        NodeData node = null;
+        JsonElement nodeElement = object.get("node");
+        if (nodeElement != null && nodeElement.isJsonObject()) {
+            node = RemoteNodeJson.parseNode(nodeElement.getAsJsonObject());
+        }
+        return new LuaUiNodeSelection(
+                stringField(object, "requestId"),
+                stringField(object, "source"),
+                stringField(object, "name"),
+                booleanField(object, "selected"),
+                node,
+                stringField(object, "chatType"),
+                stringField(object, "chatKey"));
+    }
+
+    public static JsonObject formCommandToJson(LuaScript script,
+                                               String command,
+                                               String requestId,
+                                               String componentId,
+                                               String title,
+                                               LuaFormComponentSpec spec) {
+        JsonObject object = new JsonObject();
+        object.addProperty("scriptId", script != null ? script.getId() : 0L);
+        object.addProperty("command", command != null ? command : "");
+        object.addProperty("requestId", requestId != null ? requestId : "");
+        object.addProperty("componentId", componentId != null ? componentId : "");
+        object.addProperty("title", title != null ? title : "");
+        object.add("script", scriptToJson(script, null));
+        if (spec != null) {
+            object.add("spec", GSON.toJsonTree(spec));
+        }
+        return object;
+    }
+
+    public static FormCommand parseFormCommand(JsonElement element) {
+        JsonObject object = object(element);
+        LuaFormComponentSpec spec = null;
+        JsonElement specElement = object.get("spec");
+        if (specElement != null && specElement.isJsonObject()) {
+            spec = GSON.fromJson(specElement, LuaFormComponentSpec.class);
+        }
+        return new FormCommand(
+                longField(object, "scriptId"),
+                stringField(object, "command"),
+                stringField(object, "requestId"),
+                stringField(object, "componentId"),
+                stringField(object, "title"),
+                spec,
+                parseScript(object.get("script")));
+    }
+
+    public static JsonObject formEventParams(LuaFormEvent event) {
+        JsonObject object = new JsonObject();
+        if (event != null) {
+            object.addProperty("scriptId", event.scriptId());
+            object.addProperty("componentId", event.componentId());
+            object.addProperty("type", event.type());
+            object.add("value", GSON.toJsonTree(event.value()));
+            object.addProperty("text", event.text());
+        }
+        return object;
+    }
+
+    public static LuaFormEvent parseFormEvent(JsonElement element) {
+        JsonObject object = object(element);
+        JsonElement valueElement = object.get("value");
+        Object value = valueElement != null && !valueElement.isJsonNull()
+                ? GSON.fromJson(valueElement, Object.class)
+                : null;
+        return new LuaFormEvent(
+                longField(object, "scriptId"),
+                stringField(object, "componentId"),
+                stringField(object, "type"),
+                value,
+                stringField(object, "text"));
+    }
+
+    public static JsonObject formValueResultParams(long scriptId, String requestId, Object value) {
+        JsonObject object = scriptIdParams(scriptId);
+        object.addProperty("requestId", requestId != null ? requestId : "");
+        object.add("value", GSON.toJsonTree(value));
+        return object;
+    }
+
+    public static Object parseFormValue(JsonElement element) {
+        JsonElement value = object(element).get("value");
+        return value != null && !value.isJsonNull() ? GSON.fromJson(value, Object.class) : null;
     }
 
     public static JsonObject debugSnapshotResult(LuaDebugSnapshot snapshot) {

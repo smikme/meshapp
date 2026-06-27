@@ -95,6 +95,7 @@ abstract class FormChatData extends FormChatRequests {
             saveCurrentChatScrollState();
             rememberSelectedChatForBoundConnection();
         }
+        closeLuaScriptDataSource();
         unbindPreviousState();
         this.state = newState;
         this.protocolHandler = activeConnection.handler();

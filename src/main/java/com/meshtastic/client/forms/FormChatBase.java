@@ -14,6 +14,8 @@ import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.protocol.ProtocolHandler;
 import com.meshtastic.client.protocol.meshcore.MeshCoreCompanionProtocolRuntime;
 import com.meshtastic.client.protocol.rpc.RemoteRpcState;
+import com.meshtastic.client.lua.LuaScriptDataSource;
+import com.meshtastic.client.lua.LuaScriptDataSources;
 import com.meshtastic.client.rpc.RpcEventListener;
 import com.meshtastic.client.system.Form;
 
@@ -117,6 +119,8 @@ abstract class FormChatBase extends Form {
     protected RemoteRpcState remoteRpcState;
     /** Connection id currently bound to the chat form. */
     protected String boundConnectionId;
+    protected LuaScriptDataSource luaScriptDataSource;
+    protected String luaScriptDataSourceKey;
     protected RpcEventListener remoteChatEventListener;
     protected final Map<String, Boolean> remoteNodeFavoriteFlags = new ConcurrentHashMap<>();
     protected final Map<String, Boolean> remoteNodeIgnoredFlags = new ConcurrentHashMap<>();
@@ -219,6 +223,29 @@ abstract class FormChatBase extends Form {
             return;
         }
         Platform.runLater(this::flushQueuedMessageRefresh);
+    }
+
+    protected LuaScriptDataSource luaScripts() {
+        String key = remoteRpcState != null
+                ? "rpc:" + (boundConnectionId != null ? boundConnectionId : "")
+                : "local";
+        if (luaScriptDataSource == null || !Objects.equals(luaScriptDataSourceKey, key)) {
+            closeLuaScriptDataSource();
+            luaScriptDataSource = LuaScriptDataSources.forCurrentConnection();
+            luaScriptDataSourceKey = key;
+        }
+        return luaScriptDataSource;
+    }
+
+    protected void closeLuaScriptDataSource() {
+        if (luaScriptDataSource != null) {
+            try {
+                luaScriptDataSource.close();
+            } catch (Exception ignored) {
+            }
+        }
+        luaScriptDataSource = null;
+        luaScriptDataSourceKey = null;
     }
 
     protected void scheduleMessageChangeRefresh(MessageChangeEvent event) {

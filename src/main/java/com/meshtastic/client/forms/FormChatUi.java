@@ -15,7 +15,6 @@ import com.meshtastic.client.components.chat.MessageBubbleFactory;
 import com.meshtastic.client.components.chat.TracerouteView;
 import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.lua.LuaScript;
-import com.meshtastic.client.lua.LuaScriptService;
 import com.meshtastic.client.modal.Toast;
 import com.meshtastic.client.model.ChatItem;
 import com.meshtastic.client.model.MessageChangeEvent;
@@ -332,14 +331,18 @@ abstract class FormChatUi extends FormChatBase {
     }
 
     private List<LuaScript> quickLaunchScripts() {
-        return LuaScriptService.getInstance().listScripts().stream()
-                .filter(LuaScript::isEnabled)
-                .filter(script -> script.getBotType() == LuaScript.BotType.AUTOMATION_BOT)
-                .filter(script -> hasText(script.getAutomationName()))
-                .sorted(Comparator
-                        .comparing(FormChatUi::quickScriptDisplayName, String.CASE_INSENSITIVE_ORDER)
-                        .thenComparing(script -> script.getAutomationName().trim(), String.CASE_INSENSITIVE_ORDER))
-                .toList();
+        try {
+            return luaScripts().listScripts().stream()
+                    .filter(LuaScript::isEnabled)
+                    .filter(script -> script.getBotType() == LuaScript.BotType.AUTOMATION_BOT)
+                    .filter(script -> hasText(script.getAutomationName()))
+                    .sorted(Comparator
+                            .comparing(FormChatUi::quickScriptDisplayName, String.CASE_INSENSITIVE_ORDER)
+                            .thenComparing(script -> script.getAutomationName().trim(), String.CASE_INSENSITIVE_ORDER))
+                    .toList();
+        } catch (RuntimeException e) {
+            return List.of();
+        }
     }
 
     private MenuItem createQuickScriptMenuItem(LuaScript script) {
@@ -812,16 +815,20 @@ abstract class FormChatUi extends FormChatBase {
     }
 
     private List<ChatBotCommandHelper.BotDefinition> automationBotDefinitions() {
-        return LuaScriptService.getInstance().listScripts().stream()
-                .filter(LuaScript::isEnabled)
-                .filter(script -> script.getBotType() == LuaScript.BotType.AUTOMATION_BOT)
-                .filter(script -> hasText(script.getAutomationName()))
-                .map(script -> new ChatBotCommandHelper.BotDefinition(
-                        script.getAutomationName().trim(),
-                        automationSuggestionDescription(script),
-                        ChatBotCommandHelper.BotAction.AUTOMATION,
-                        script.getId()))
-                .toList();
+        try {
+            return luaScripts().listScripts().stream()
+                    .filter(LuaScript::isEnabled)
+                    .filter(script -> script.getBotType() == LuaScript.BotType.AUTOMATION_BOT)
+                    .filter(script -> hasText(script.getAutomationName()))
+                    .map(script -> new ChatBotCommandHelper.BotDefinition(
+                            script.getAutomationName().trim(),
+                            automationSuggestionDescription(script),
+                            ChatBotCommandHelper.BotAction.AUTOMATION,
+                            script.getId()))
+                    .toList();
+        } catch (RuntimeException e) {
+            return List.of();
+        }
     }
 
     private static String automationSuggestionDescription(LuaScript script) {

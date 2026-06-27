@@ -6,8 +6,6 @@ import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.lua.LuaAutomationCommand;
 import com.meshtastic.client.lua.LuaScript;
 import com.meshtastic.client.lua.LuaScriptEvent;
-import com.meshtastic.client.lua.LuaScriptRuntimeService;
-import com.meshtastic.client.lua.LuaScriptService;
 import com.meshtastic.client.lua.LuaUiBotNotice;
 import com.meshtastic.client.lua.LuaUiNodePickRequest;
 import com.meshtastic.client.lua.LuaUiNodeSelection;
@@ -257,11 +255,9 @@ abstract class FormChatRequests extends FormChatMessages {
         if (command == null || !command.isCommand()) {
             return false;
         }
-        if (remoteRpcState != null) {
-            Toast.show(Toast.Type.WARNING, I18n.t("chat.toast.remoteManagementUnavailable"));
-            return false;
-        }
-        if (selectedChat == null || state == null || (protocolHandler == null && meshCoreCompanionRuntime == null)) {
+        if (selectedChat == null
+                || (remoteRpcState == null
+                && (state == null || (protocolHandler == null && meshCoreCompanionRuntime == null)))) {
             Toast.show(Toast.Type.WARNING, I18n.t("chat.toast.radioNotConnected"));
             return false;
         }
@@ -272,7 +268,13 @@ abstract class FormChatRequests extends FormChatMessages {
     }
 
     private boolean runLuaAutomationCommand(ChatBotCommandHelper.ParsedBotCommand command) {
-        Optional<LuaScript> script = LuaScriptService.getInstance().findScript(command.scriptId());
+        Optional<LuaScript> script;
+        try {
+            script = luaScripts().findScript(command.scriptId());
+        } catch (RuntimeException e) {
+            Toast.show(Toast.Type.ERROR, e.getMessage());
+            return false;
+        }
         if (script.isEmpty()
                 || !script.get().isEnabled()
                 || script.get().getBotType() != LuaScript.BotType.AUTOMATION_BOT) {
@@ -294,11 +296,16 @@ abstract class FormChatRequests extends FormChatMessages {
                 command.arguments(),
                 command.argumentTokens(),
                 script.get().getId() + ":command:" + System.nanoTime());
-        LuaScriptRuntimeService.getInstance().runAutomationCommand(
-                script.get(),
-                luaCommand,
-                event -> handleLuaAutomationEvent(chatType, chatKey, event),
-                this::handleLuaNodePickRequest);
+        try {
+            luaScripts().runAutomationCommand(
+                    script.get(),
+                    luaCommand,
+                    event -> handleLuaAutomationEvent(chatType, chatKey, event),
+                    this::handleLuaNodePickRequest);
+        } catch (RuntimeException e) {
+            Toast.show(Toast.Type.ERROR, e.getMessage());
+            return false;
+        }
         return true;
     }
 
@@ -344,7 +351,7 @@ abstract class FormChatRequests extends FormChatMessages {
     }
 
     private void deliverLuaNodeSelection(LuaUiNodePickRequest request, NodeData node) {
-        LuaScriptRuntimeService.getInstance().deliverNodeSelection(
+        luaScripts().deliverNodeSelection(
                 request.scriptId(),
                 node != null
                         ? LuaUiNodeSelection.selected(request, node)

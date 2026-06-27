@@ -7,11 +7,16 @@ import com.google.gson.JsonObject;
 import com.meshtastic.client.MeshApp;
 import com.meshtastic.client.components.chat.TracerouteView;
 import com.meshtastic.client.i18n.I18n;
-import com.meshtastic.client.lua.LuaExtensionManager;
+import com.meshtastic.client.lua.LuaAutomationCommand;
+import com.meshtastic.client.lua.LuaFormBridge;
+import com.meshtastic.client.lua.LuaFormComponentSpec;
+import com.meshtastic.client.lua.LuaFormEvent;
 import com.meshtastic.client.lua.LuaScript;
 import com.meshtastic.client.lua.LuaScriptEvent;
 import com.meshtastic.client.lua.LuaScriptRuntimeService;
 import com.meshtastic.client.lua.LuaScriptService;
+import com.meshtastic.client.lua.LuaUiNodePickRequest;
+import com.meshtastic.client.lua.LuaUiNodeSelection;
 import com.meshtastic.client.forms.settings.ConfigSavePolicy;
 import com.meshtastic.client.model.ChatItem;
 import com.meshtastic.client.model.ConnectionEntry;
@@ -52,6 +57,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BiConsumer;
 import java.util.function.IntFunction;
 import java.util.stream.Collectors;
@@ -76,6 +82,7 @@ public final class RemoteRpcHostService {
 
     private final Object lock = new Object();
     private final ConcurrentMap<String, PendingTraceroute> pendingTraceroutes = new ConcurrentHashMap<>();
+    private final ConcurrentMap<String, CompletableFuture<JsonElement>> pendingLuaFormValues = new ConcurrentHashMap<>();
     private final PacketMonitorService.Listener packetMonitorListener = new PacketMonitorService.Listener() {
         @Override
         public void onPacketLogged(PacketLogEntry entry) {
@@ -184,6 +191,7 @@ public final class RemoteRpcHostService {
         DirectRpcServer current = server;
         server = null;
         clearPendingTraceroutes();
+        clearPendingLuaFormValues();
         if (current != null) {
             PacketMonitorService monitorService = PacketMonitorService.getIfInitialized();
             if (monitorService != null) {
@@ -303,6 +311,14 @@ public final class RemoteRpcHostService {
                                 LuaScriptRuntimeService.getInstance())))
                 .register("lua.run", (params, context) ->
                         CompletableFuture.completedFuture(luaRun(params)))
+                .register("lua.automation.run", (params, context) ->
+                        CompletableFuture.completedFuture(luaAutomationRun(params)))
+                .register("lua.ui.nodeSelection", (params, context) ->
+                        CompletableFuture.completedFuture(luaUiNodeSelection(params)))
+                .register("lua.form.event", (params, context) ->
+                        CompletableFuture.completedFuture(luaFormEvent(params)))
+                .register("lua.form.valueResult", (params, context) ->
+                        CompletableFuture.completedFuture(luaFormValueResult(params)))
                 .register("lua.debug", (params, context) ->
                         CompletableFuture.completedFuture(luaDebug(params)))
                 .register("lua.stop", (params, context) ->
@@ -542,11 +558,52 @@ public final class RemoteRpcHostService {
         LuaScript script = LuaScriptService.getInstance().findScript(scriptId)
                 .orElseThrow(() -> new IllegalArgumentException("Lua script not found: " + scriptId));
         if (script.getBotType() == LuaScript.BotType.EXTENSION) {
-            LuaExtensionManager.getInstance().runExtension(scriptId, this::publishLuaRuntimeEvent);
+            LuaScriptRuntimeService.getInstance().runExtension(
+                    script,
+                    new RemoteLuaFormBridge(script),
+                    this::publishLuaRuntimeEvent);
         } else {
             LuaScriptRuntimeService.getInstance().runScript(script, this::publishLuaRuntimeEvent);
         }
         return RemoteLuaScriptJson.runningStateToJson(scriptId, LuaScriptRuntimeService.getInstance());
+    }
+
+    private JsonObject luaAutomationRun(JsonObject params) {
+        long scriptId = requiredScriptId(params);
+        LuaScript script = LuaScriptService.getInstance().findScript(scriptId)
+                .orElseThrow(() -> new IllegalArgumentException("Lua script not found: " + scriptId));
+        LuaAutomationCommand command = RemoteLuaScriptJson.parseAutomationCommand(params);
+        if (script.getBotType() != LuaScript.BotType.AUTOMATION_BOT || command == null) {
+            throw new IllegalArgumentException("Lua automation script or command not found: " + scriptId);
+        }
+        LuaScriptRuntimeService.getInstance().runAutomationCommand(
+                script,
+                command,
+                this::publishLuaRuntimeEvent,
+                this::publishLuaNodePickRequest);
+        return RemoteLuaScriptJson.runningStateToJson(scriptId, LuaScriptRuntimeService.getInstance());
+    }
+
+    private JsonObject luaUiNodeSelection(JsonObject params) {
+        long scriptId = requiredScriptId(params);
+        LuaUiNodeSelection selection = RemoteLuaScriptJson.parseNodeSelection(params);
+        LuaScriptRuntimeService.getInstance().deliverNodeSelection(scriptId, selection);
+        return RemoteLuaScriptJson.runningStateToJson(scriptId, LuaScriptRuntimeService.getInstance());
+    }
+
+    private JsonObject luaFormEvent(JsonObject params) {
+        LuaFormEvent event = RemoteLuaScriptJson.parseFormEvent(params);
+        LuaScriptRuntimeService.getInstance().deliverFormEvent(event.scriptId(), event);
+        return RemoteLuaScriptJson.runningStateToJson(event.scriptId(), LuaScriptRuntimeService.getInstance());
+    }
+
+    private JsonObject luaFormValueResult(JsonObject params) {
+        String requestId = rawTextField(params, "requestId");
+        CompletableFuture<JsonElement> pending = pendingLuaFormValues.remove(requestId);
+        if (pending != null) {
+            pending.complete(params);
+        }
+        return new JsonObject();
     }
 
     private JsonObject luaDebug(JsonObject params) {
@@ -556,7 +613,11 @@ public final class RemoteRpcHostService {
         Set<Integer> breakpoints = RemoteLuaScriptJson.parseBreakpoints(params).stream()
                 .collect(Collectors.toSet());
         if (script.getBotType() == LuaScript.BotType.EXTENSION) {
-            LuaExtensionManager.getInstance().debugExtension(scriptId, breakpoints, this::publishLuaRuntimeEvent);
+            LuaScriptRuntimeService.getInstance().debugExtension(
+                    script,
+                    new RemoteLuaFormBridge(script),
+                    breakpoints,
+                    this::publishLuaRuntimeEvent);
         } else {
             LuaScriptRuntimeService.getInstance().debugScript(script, breakpoints, this::publishLuaRuntimeEvent);
         }
@@ -574,6 +635,157 @@ public final class RemoteRpcHostService {
         if (current != null && event != null) {
             current.publishEvent("lua.runtime.event", RemoteLuaScriptJson.eventToJson(event));
         }
+    }
+
+    private void publishLuaNodePickRequest(LuaUiNodePickRequest request) {
+        DirectRpcServer current = server;
+        if (current != null && request != null) {
+            current.publishEvent("lua.ui.nodePick.request", RemoteLuaScriptJson.nodePickRequestToJson(request));
+        }
+    }
+
+    private void publishLuaFormCommand(LuaScript script,
+                                       String command,
+                                       String requestId,
+                                       String componentId,
+                                       String title,
+                                       LuaFormComponentSpec spec) {
+        DirectRpcServer current = server;
+        if (current != null) {
+            current.publishEvent("lua.form.command",
+                    RemoteLuaScriptJson.formCommandToJson(script, command, requestId, componentId, title, spec));
+        }
+    }
+
+    private Object waitForLuaFormValue(LuaScript script, String componentId) {
+        String requestId = UUID.randomUUID().toString();
+        CompletableFuture<JsonElement> future = new CompletableFuture<>();
+        pendingLuaFormValues.put(requestId, future);
+        publishLuaFormCommand(script, "value", requestId, componentId, "", null);
+        try {
+            return RemoteLuaScriptJson.parseFormValue(future.get(2, TimeUnit.SECONDS));
+        } catch (TimeoutException e) {
+            pendingLuaFormValues.remove(requestId);
+            throw new IllegalStateException("Timed out waiting for remote Lua form value: " + componentId, e);
+        } catch (Exception e) {
+            pendingLuaFormValues.remove(requestId);
+            throw new IllegalStateException("Failed to read remote Lua form value: " + componentId, e);
+        }
+    }
+
+    private void clearPendingLuaFormValues() {
+        for (CompletableFuture<JsonElement> future : pendingLuaFormValues.values()) {
+            future.completeExceptionally(new IllegalStateException("Remote RPC host stopped"));
+        }
+        pendingLuaFormValues.clear();
+    }
+
+    private final class RemoteLuaFormBridge implements LuaFormBridge {
+        private final LuaScript script;
+        private final AtomicLong componentCounter = new AtomicLong();
+        private volatile boolean open = true;
+
+        private RemoteLuaFormBridge(LuaScript script) {
+            this.script = script;
+        }
+
+        @Override
+        public boolean isFormAvailable() {
+            return open && server != null;
+        }
+
+        @Override
+        public boolean isFormOpen() {
+            return isFormAvailable();
+        }
+
+        @Override
+        public void showForm() {
+            publishLuaFormCommand(script, "show", "", "", "", null);
+        }
+
+        @Override
+        public void setFormTitle(String title) {
+            publishLuaFormCommand(script, "title", "", "", title, null);
+        }
+
+        @Override
+        public void clearForm() {
+            publishLuaFormCommand(script, "clear", "", "", "", null);
+        }
+
+        @Override
+        public String addFormComponent(LuaFormComponentSpec spec) {
+            LuaFormComponentSpec commandSpec = ensureComponentId(spec);
+            publishLuaFormCommand(script, "add", "", commandSpec.id(), "", commandSpec);
+            return commandSpec.id();
+        }
+
+        @Override
+        public void updateFormComponent(String id, LuaFormComponentSpec spec) {
+            publishLuaFormCommand(script, "update", "", normalizeLuaFormId(id), "", spec);
+        }
+
+        @Override
+        public void removeFormComponent(String id) {
+            publishLuaFormCommand(script, "remove", "", normalizeLuaFormId(id), "", null);
+        }
+
+        @Override
+        public Object formComponentValue(String id) {
+            return waitForLuaFormValue(script, normalizeLuaFormId(id));
+        }
+
+        private LuaFormComponentSpec ensureComponentId(LuaFormComponentSpec spec) {
+            LuaFormComponentSpec source = spec != null ? spec : emptyLuaFormSpec();
+            String id = normalizeLuaFormId(source.id());
+            if (id.isBlank()) {
+                id = "remote_component_" + componentCounter.incrementAndGet();
+            }
+            return new LuaFormComponentSpec(
+                    id,
+                    source.type(),
+                    source.parentId(),
+                    source.text(),
+                    source.prompt(),
+                    source.value(),
+                    source.items(),
+                    source.min(),
+                    source.max(),
+                    source.disabled(),
+                    source.visible(),
+                    source.style(),
+                    source.orientation(),
+                    source.width(),
+                    source.height(),
+                    source.minWidth(),
+                    source.minHeight(),
+                    source.maxWidth(),
+                    source.maxHeight(),
+                    source.readOnly(),
+                    source.wrap(),
+                    source.monospace(),
+                    source.grow(),
+                    source.rows(),
+                    source.chartType(),
+                    source.xLabel(),
+                    source.yLabel(),
+                    source.xType(),
+                    source.legend(),
+                    source.symbols(),
+                    source.series());
+        }
+    }
+
+    private static LuaFormComponentSpec emptyLuaFormSpec() {
+        return new LuaFormComponentSpec(null, null, null, null, null, null, List.of(),
+                null, null, null, null, null, null, null, null, null, null, null,
+                null, null, null, null, null, null, null, null, null, null, null,
+                null, null);
+    }
+
+    private static String normalizeLuaFormId(String id) {
+        return id != null ? id.trim() : "";
     }
 
     private JsonObject settingsSnapshot() {

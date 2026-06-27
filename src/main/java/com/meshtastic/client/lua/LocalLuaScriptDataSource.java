@@ -117,6 +117,19 @@ public final class LocalLuaScriptDataSource implements LuaScriptDataSource {
     }
 
     @Override
+    public void runAutomationCommand(LuaScript script,
+                                     LuaAutomationCommand command,
+                                     Consumer<LuaScriptEvent> sink,
+                                     Consumer<LuaUiNodePickRequest> uiNodePickSink) {
+        runtimeService.runAutomationCommand(script, command, sink, uiNodePickSink);
+    }
+
+    @Override
+    public void deliverNodeSelection(long scriptId, LuaUiNodeSelection selection) {
+        runtimeService.deliverNodeSelection(scriptId, selection);
+    }
+
+    @Override
     public void debugScript(LuaScript script, Set<Integer> breakpoints, Consumer<LuaScriptEvent> sink) {
         if (script != null && script.getBotType() == LuaScript.BotType.EXTENSION) {
             LuaExtensionManager.getInstance().debugExtension(script.getId(), breakpoints, sink);

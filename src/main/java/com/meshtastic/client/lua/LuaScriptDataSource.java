@@ -57,6 +57,13 @@ public interface LuaScriptDataSource extends AutoCloseable {
 
     void runScript(LuaScript script, Consumer<LuaScriptEvent> sink);
 
+    void runAutomationCommand(LuaScript script,
+                              LuaAutomationCommand command,
+                              Consumer<LuaScriptEvent> sink,
+                              Consumer<LuaUiNodePickRequest> uiNodePickSink);
+
+    void deliverNodeSelection(long scriptId, LuaUiNodeSelection selection);
+
     void debugScript(LuaScript script, Set<Integer> breakpoints, Consumer<LuaScriptEvent> sink);
 
     void stopScript(long scriptId, Consumer<LuaScriptEvent> sink);

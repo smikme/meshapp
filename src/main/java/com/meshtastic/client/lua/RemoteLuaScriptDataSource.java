@@ -2,10 +2,13 @@ package com.meshtastic.client.lua;
 
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import com.meshtastic.client.forms.LuaExtensionForm;
 import com.meshtastic.client.protocol.rpc.RemoteChatJson;
 import com.meshtastic.client.protocol.rpc.RemoteLuaScriptJson;
 import com.meshtastic.client.protocol.rpc.RemoteRpcState;
 import com.meshtastic.client.rpc.RpcEventListener;
+import com.meshtastic.client.system.FormManager;
+import javafx.application.Platform;
 
 import java.time.Duration;
 import java.util.List;
@@ -29,6 +32,8 @@ public final class RemoteLuaScriptDataSource implements LuaScriptDataSource {
     private final RemoteRpcState rpcState;
     private final RpcEventListener eventListener = this::handleRemoteEvent;
     private final ConcurrentMap<Long, Consumer<LuaScriptEvent>> sinksByScriptId = new ConcurrentHashMap<>();
+    private final ConcurrentMap<Long, Consumer<LuaUiNodePickRequest>> nodePickSinksByScriptId = new ConcurrentHashMap<>();
+    private final ConcurrentMap<Long, LuaExtensionForm> remoteExtensionForms = new ConcurrentHashMap<>();
 
     public RemoteLuaScriptDataSource(RemoteRpcState rpcState) {
         this.rpcState = rpcState;
@@ -135,6 +140,26 @@ public final class RemoteLuaScriptDataSource implements LuaScriptDataSource {
     }
 
     @Override
+    public void runAutomationCommand(LuaScript script,
+                                     LuaAutomationCommand command,
+                                     Consumer<LuaScriptEvent> sink,
+                                     Consumer<LuaUiNodePickRequest> uiNodePickSink) {
+        if (script == null || command == null) {
+            return;
+        }
+        rememberSink(script.getId(), sink);
+        if (uiNodePickSink != null) {
+            nodePickSinksByScriptId.put(script.getId(), uiNodePickSink);
+        }
+        call("lua.automation.run", RemoteLuaScriptJson.automationCommandParams(script.getId(), command));
+    }
+
+    @Override
+    public void deliverNodeSelection(long scriptId, LuaUiNodeSelection selection) {
+        call("lua.ui.nodeSelection", RemoteLuaScriptJson.nodeSelectionParams(scriptId, selection));
+    }
+
+    @Override
     public void debugScript(LuaScript script, Set<Integer> breakpoints, Consumer<LuaScriptEvent> sink) {
         if (script == null) {
             return;
@@ -189,6 +214,9 @@ public final class RemoteLuaScriptDataSource implements LuaScriptDataSource {
     public void close() {
         rpcState.client().removeEventListener(eventListener);
         sinksByScriptId.clear();
+        nodePickSinksByScriptId.clear();
+        remoteExtensionForms.values().forEach(LuaExtensionForm::dispose);
+        remoteExtensionForms.clear();
     }
 
     private void rememberSink(long scriptId, Consumer<LuaScriptEvent> sink) {
@@ -206,6 +234,14 @@ public final class RemoteLuaScriptDataSource implements LuaScriptDataSource {
     }
 
     private void handleRemoteEvent(String event, JsonElement payload) {
+        if ("lua.form.command".equals(event)) {
+            handleRemoteFormCommand(payload);
+            return;
+        }
+        if ("lua.ui.nodePick.request".equals(event)) {
+            handleRemoteNodePickRequest(payload);
+            return;
+        }
         if (!"lua.runtime.event".equals(event)) {
             return;
         }
@@ -215,7 +251,78 @@ public final class RemoteLuaScriptDataSource implements LuaScriptDataSource {
             sink.accept(scriptEvent);
         }
         if (scriptEvent.type() == LuaScriptEvent.Type.STOPPED) {
-            sinksByScriptId.remove(scriptEvent.scriptId(), sink);
+            if (sink != null) {
+                sinksByScriptId.remove(scriptEvent.scriptId(), sink);
+            } else {
+                sinksByScriptId.remove(scriptEvent.scriptId());
+            }
+            nodePickSinksByScriptId.remove(scriptEvent.scriptId());
+            closeRemoteExtensionForm(scriptEvent.scriptId());
         }
+    }
+
+    private void handleRemoteNodePickRequest(JsonElement payload) {
+        LuaUiNodePickRequest request = RemoteLuaScriptJson.parseNodePickRequest(payload);
+        Consumer<LuaUiNodePickRequest> sink = nodePickSinksByScriptId.get(request.scriptId());
+        if (sink != null) {
+            sink.accept(request);
+        }
+    }
+
+    private void handleRemoteFormCommand(JsonElement payload) {
+        RemoteLuaScriptJson.FormCommand command = RemoteLuaScriptJson.parseFormCommand(payload);
+        Platform.runLater(() -> applyRemoteFormCommand(command));
+    }
+
+    private void applyRemoteFormCommand(RemoteLuaScriptJson.FormCommand command) {
+        if (command == null || command.scriptId() <= 0) {
+            return;
+        }
+        if ("close".equals(command.command())) {
+            closeRemoteExtensionForm(command.scriptId());
+            return;
+        }
+        LuaExtensionForm form = remoteExtensionForms.computeIfAbsent(command.scriptId(), ignored ->
+                new LuaExtensionForm(command.script(), this::sendRemoteFormEvent));
+        if (command.script() != null) {
+            form.updateScript(command.script());
+        }
+        switch (command.command()) {
+            case "show" -> FormManager.showDynamicForm(form, LuaExtensionManager.navigationKey(command.scriptId()));
+            case "title" -> form.setFormTitle(command.title());
+            case "clear" -> form.clearForm();
+            case "add" -> form.addFormComponent(command.spec());
+            case "update" -> form.updateFormComponent(command.componentId(), command.spec());
+            case "remove" -> form.removeFormComponent(command.componentId());
+            case "value" -> sendRemoteFormValue(command.scriptId(), command.requestId(),
+                    form.formComponentValue(command.componentId()));
+            default -> {
+            }
+        }
+    }
+
+    private void sendRemoteFormEvent(LuaFormEvent event) {
+        callAsync("lua.form.event", RemoteLuaScriptJson.formEventParams(event));
+    }
+
+    private void sendRemoteFormValue(long scriptId, String requestId, Object value) {
+        callAsync("lua.form.valueResult", RemoteLuaScriptJson.formValueResultParams(scriptId, requestId, value));
+    }
+
+    private void closeRemoteExtensionForm(long scriptId) {
+        LuaExtensionForm form = remoteExtensionForms.remove(scriptId);
+        if (form != null) {
+            form.dispose();
+        }
+    }
+
+    private void callAsync(String method, JsonObject params) {
+        java.util.concurrent.CompletableFuture.runAsync(() -> {
+            try {
+                call(method, params);
+            } catch (RuntimeException ignored) {
+                // The runtime may already be stopped or the RPC connection may have closed.
+            }
+        });
     }
 }
