@@ -157,7 +157,7 @@ public final class NodeTracerouteWindow {
         }
 
         VBox root = new VBox(10);
-        root.getStyleClass().add("packet-monitor-root");
+        root.getStyleClass().addAll("packet-monitor-root", "traceroute-window-root");
         root.setPadding(new Insets(12));
 
         headerBar = createHeader();
