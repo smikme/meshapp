@@ -5,10 +5,10 @@ import com.meshtastic.client.components.LuaKvEditorWindow;
 import com.meshtastic.client.components.LuaScriptSettingsForm;
 import com.meshtastic.client.components.LuaScriptStoreForm;
 import com.meshtastic.client.i18n.I18n;
-import com.meshtastic.client.lua.LuaExtensionManager;
+import com.meshtastic.client.lua.LuaScriptDataSource;
+import com.meshtastic.client.lua.LuaScriptDataSources;
 import com.meshtastic.client.lua.LuaScript;
 import com.meshtastic.client.lua.LuaScriptEvent;
-import com.meshtastic.client.lua.LuaScriptRuntimeService;
 import com.meshtastic.client.lua.LuaScriptService;
 import com.meshtastic.client.modal.ModalPane;
 import com.meshtastic.client.modal.Toast;
@@ -38,6 +38,8 @@ import javafx.stage.Window;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
@@ -59,8 +61,7 @@ public class FormMeshAppIde extends Form {
     private static final DateTimeFormatter TIME_FORMAT =
             DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm").withZone(ZoneId.systemDefault());
 
-    private final LuaScriptService scriptService = LuaScriptService.getInstance();
-    private final LuaScriptRuntimeService runtimeService = LuaScriptRuntimeService.getInstance();
+    private LuaScriptDataSource scriptSource;
 
     private VBox cardsBox;
     private Label emptyLabel;
@@ -134,16 +135,43 @@ public class FormMeshAppIde extends Form {
 
     @Override
     public void formOpen() {
+        refreshScriptSource();
         rebuildCards();
     }
 
     @Override
+    public void formClose() {
+        closeScriptSource();
+    }
+
+    @Override
     public void formRefresh() {
+        refreshScriptSource();
         rebuildCards();
     }
 
+    private LuaScriptDataSource scriptSource() {
+        if (scriptSource == null) {
+            scriptSource = LuaScriptDataSources.forCurrentConnection();
+        }
+        return scriptSource;
+    }
+
+    private void refreshScriptSource() {
+        closeScriptSource();
+        scriptSource = LuaScriptDataSources.forCurrentConnection();
+    }
+
+    private void closeScriptSource() {
+        if (scriptSource != null) {
+            scriptSource.close();
+            scriptSource = null;
+        }
+    }
+
     private void rebuildCards() {
-        List<LuaScript> scripts = scriptService.listScripts();
+        LuaScriptDataSource source = scriptSource();
+        List<LuaScript> scripts = source.listScripts();
         cardsBox.getChildren().clear();
         if (scripts.isEmpty()) {
             VBox emptyCard = new VBox(emptyLabel);
@@ -158,7 +186,7 @@ public class FormMeshAppIde extends Form {
     }
 
     private VBox createScriptCard(LuaScript script) {
-        boolean running = runtimeService.isRunning(script.getId());
+        boolean running = scriptSource().isRunning(script.getId());
         VBox card = new VBox(8);
         card.setPadding(new Insets(15));
         card.getStyleClass().add("connection-card");
@@ -335,11 +363,11 @@ public class FormMeshAppIde extends Form {
         if (modalPane == null) {
             return;
         }
-        LuaScript draftScript = scriptService.createDraftScript();
+        LuaScript draftScript = scriptSource().createDraftScript();
         LuaScriptSettingsForm form = new LuaScriptSettingsForm(draftScript);
         form.setOnSave(draft -> {
             try {
-                LuaScript created = scriptService.createScript(
+                LuaScript created = scriptSource().createScript(
                         draft.name(),
                         draftScript.getCode(),
                         draft.autostart(),
@@ -377,7 +405,8 @@ public class FormMeshAppIde extends Form {
             return;
         }
         try {
-            LuaScriptService.ScriptImportResult result = scriptService.importScript(source.toPath());
+            String json = Files.readString(source.toPath(), StandardCharsets.UTF_8);
+            LuaScriptService.ScriptImportResult result = scriptSource().importScriptJson(json);
             rebuildCards();
             Toast.show(
                     Toast.Type.SUCCESS,
@@ -396,7 +425,7 @@ public class FormMeshAppIde extends Form {
         }
         File outputFile = ensureJsonExtension(target);
         try {
-            scriptService.exportScript(script.getId(), outputFile.toPath());
+            Files.writeString(outputFile.toPath(), scriptSource().exportScriptJson(script.getId()), StandardCharsets.UTF_8);
             Toast.show(Toast.Type.SUCCESS, I18n.t("meshIde.toast.exported", outputFile.getName()));
         } catch (IOException e) {
             Toast.show(Toast.Type.ERROR, I18n.t("meshIde.toast.exportFailed", userMessage(e)));
@@ -407,7 +436,7 @@ public class FormMeshAppIde extends Form {
 
     private void toggleAutostart(LuaScript script) {
         try {
-            scriptService.saveScript(script.getId(), script.getName(), script.getCode(), !script.isAutostart());
+            scriptSource().saveScript(script.getId(), script.getName(), script.getCode(), !script.isAutostart());
             rebuildCards();
         } catch (Exception e) {
             Toast.show(Toast.Type.ERROR, I18n.t("meshIde.toast.stateChangeFailed", userMessage(e)));
@@ -422,7 +451,7 @@ public class FormMeshAppIde extends Form {
         LuaScriptSettingsForm form = new LuaScriptSettingsForm(script);
         form.setOnSave(draft -> {
             try {
-                LuaScript saved = scriptService.saveScriptSettings(
+                LuaScript saved = scriptSource().saveScriptSettings(
                         script.getId(),
                         draft.name(),
                         draft.autostart(),
@@ -444,18 +473,13 @@ public class FormMeshAppIde extends Form {
     }
 
     private void runScript(LuaScript script) {
-        if (script.getBotType() == LuaScript.BotType.EXTENSION) {
-            LuaExtensionManager.getInstance().runExtension(script.getId(), this::handleRuntimeEvent);
-            rebuildCards();
-            return;
-        }
-        runtimeService.runScript(script, this::handleRuntimeEvent);
+        scriptSource().runScript(script, this::handleRuntimeEvent);
         rebuildCards();
         Toast.show(Toast.Type.INFO, I18n.t("meshIde.toast.run", script.getName()));
     }
 
     private void stopScript(LuaScript script) {
-        runtimeService.stopScript(script.getId(), this::handleRuntimeEvent);
+        scriptSource().stopScript(script.getId(), this::handleRuntimeEvent);
         rebuildCards();
         Toast.show(Toast.Type.INFO, I18n.t("meshIde.toast.stopped", script.getName()));
     }
@@ -468,8 +492,8 @@ public class FormMeshAppIde extends Form {
                     if (!confirmed) {
                         return;
                     }
-                    runtimeService.stopScript(script.getId(), this::handleRuntimeEvent);
-                    scriptService.deleteScript(script.getId());
+                    scriptSource().stopScript(script.getId(), this::handleRuntimeEvent);
+                    scriptSource().deleteScript(script.getId());
                     rebuildCards();
                     Toast.show(Toast.Type.SUCCESS, I18n.t("meshIde.toast.deleted", script.getName()));
                 });

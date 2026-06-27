@@ -7,6 +7,11 @@ import com.google.gson.JsonObject;
 import com.meshtastic.client.MeshApp;
 import com.meshtastic.client.components.chat.TracerouteView;
 import com.meshtastic.client.i18n.I18n;
+import com.meshtastic.client.lua.LuaExtensionManager;
+import com.meshtastic.client.lua.LuaScript;
+import com.meshtastic.client.lua.LuaScriptEvent;
+import com.meshtastic.client.lua.LuaScriptRuntimeService;
+import com.meshtastic.client.lua.LuaScriptService;
 import com.meshtastic.client.model.ChatItem;
 import com.meshtastic.client.model.ConnectionEntry;
 import com.meshtastic.client.model.DeviceState;
@@ -20,6 +25,7 @@ import com.meshtastic.client.protocol.ProtocolHandler;
 import com.meshtastic.client.protocol.ProtocolRuntime;
 import com.meshtastic.client.protocol.meshcore.MeshCoreCompanionProtocolRuntime;
 import com.meshtastic.client.protocol.rpc.RemoteAdminRpcJson;
+import com.meshtastic.client.protocol.rpc.RemoteLuaScriptJson;
 import com.meshtastic.client.protocol.rpc.RemoteNodeJson;
 import com.meshtastic.client.protocol.rpc.RemotePacketMonitorJson;
 import com.meshtastic.client.protocol.rpc.RemoteTelemetryJson;
@@ -46,6 +52,7 @@ import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
 import java.util.function.IntFunction;
+import java.util.stream.Collectors;
 
 import org.meshtastic.proto.ChannelProtos;
 import org.meshtastic.proto.AdminProtos;
@@ -262,6 +269,80 @@ public final class RemoteRpcHostService {
                     PacketMonitorService.getInstance().clear();
                     return CompletableFuture.completedFuture(RemotePacketMonitorJson.countsToJson(0, 0));
                 })
+                .register("lua.list", (params, context) ->
+                        CompletableFuture.completedFuture(luaList()))
+                .register("lua.get", (params, context) ->
+                        CompletableFuture.completedFuture(luaGet(params)))
+                .register("lua.draft", (params, context) ->
+                        CompletableFuture.completedFuture(RemoteLuaScriptJson.scriptResult(
+                                LuaScriptService.getInstance().createDraftScript(),
+                                LuaScriptRuntimeService.getInstance())))
+                .register("lua.createDefault", (params, context) ->
+                        CompletableFuture.completedFuture(RemoteLuaScriptJson.scriptResult(
+                                LuaScriptService.getInstance().createScript(),
+                                LuaScriptRuntimeService.getInstance())))
+                .register("lua.create", (params, context) ->
+                        CompletableFuture.completedFuture(luaCreate(params)))
+                .register("lua.save", (params, context) ->
+                        CompletableFuture.completedFuture(luaSave(params)))
+                .register("lua.saveSettings", (params, context) ->
+                        CompletableFuture.completedFuture(luaSaveSettings(params)))
+                .register("lua.delete", (params, context) ->
+                        CompletableFuture.completedFuture(luaDelete(params)))
+                .register("lua.importJson", (params, context) ->
+                        CompletableFuture.completedFuture(luaImportJson(params)))
+                .register("lua.importExport", (params, context) ->
+                        CompletableFuture.completedFuture(luaImportExport(params)))
+                .register("lua.export", (params, context) ->
+                        CompletableFuture.completedFuture(luaExport(params)))
+                .register("lua.runningState", (params, context) ->
+                        CompletableFuture.completedFuture(RemoteLuaScriptJson.runningStateToJson(
+                                requiredScriptId(params),
+                                LuaScriptRuntimeService.getInstance())))
+                .register("lua.run", (params, context) ->
+                        CompletableFuture.completedFuture(luaRun(params)))
+                .register("lua.debug", (params, context) ->
+                        CompletableFuture.completedFuture(luaDebug(params)))
+                .register("lua.stop", (params, context) ->
+                        CompletableFuture.completedFuture(luaStop(params)))
+                .register("lua.debugContinue", (params, context) -> {
+                    long scriptId = requiredScriptId(params);
+                    LuaScriptRuntimeService.getInstance().debugContinue(scriptId);
+                    return CompletableFuture.completedFuture(RemoteLuaScriptJson.runningStateToJson(
+                            scriptId,
+                            LuaScriptRuntimeService.getInstance()));
+                })
+                .register("lua.debugStep", (params, context) -> {
+                    long scriptId = requiredScriptId(params);
+                    LuaScriptRuntimeService.getInstance().debugStep(scriptId);
+                    return CompletableFuture.completedFuture(RemoteLuaScriptJson.runningStateToJson(
+                            scriptId,
+                            LuaScriptRuntimeService.getInstance()));
+                })
+                .register("lua.debugSnapshot", (params, context) ->
+                        CompletableFuture.completedFuture(RemoteLuaScriptJson.debugSnapshotResult(
+                                LuaScriptRuntimeService.getInstance()
+                                        .debugSnapshot(requiredScriptId(params))
+                                        .orElse(null))))
+                .register("lua.kv.list", (params, context) ->
+                        CompletableFuture.completedFuture(RemoteLuaScriptJson.kvToJson(
+                                LuaScriptService.getInstance().listKv(requiredScriptId(params)))))
+                .register("lua.kv.set", (params, context) -> {
+                    LuaScriptService.getInstance().setKv(
+                            requiredScriptId(params),
+                            requiredText(params, "key"),
+                            rawTextField(params, "value"));
+                    return CompletableFuture.completedFuture(new JsonObject());
+                })
+                .register("lua.kv.delete", (params, context) ->
+                        CompletableFuture.completedFuture(RemoteLuaScriptJson.deletedResult(
+                                LuaScriptService.getInstance().deleteKv(
+                                        requiredScriptId(params),
+                                        requiredText(params, "key")))))
+                .register("lua.kv.clear", (params, context) -> {
+                    LuaScriptService.getInstance().clearKv(requiredScriptId(params));
+                    return CompletableFuture.completedFuture(new JsonObject());
+                })
                 .register("admin.load", (params, context) ->
                         remoteAdminLoad(params))
                 .register("admin.requestConfig", (params, context) ->
@@ -362,6 +443,120 @@ public final class RemoteRpcHostService {
         DirectRpcServer current = server;
         if (current != null) {
             current.publishEvent(event, payload != null ? payload : new JsonObject());
+        }
+    }
+
+    private JsonObject luaList() {
+        return RemoteLuaScriptJson.scriptsToJson(
+                LuaScriptService.getInstance().listScripts(),
+                LuaScriptRuntimeService.getInstance());
+    }
+
+    private JsonObject luaGet(JsonObject params) {
+        long scriptId = requiredScriptId(params);
+        LuaScript script = LuaScriptService.getInstance().findScript(scriptId)
+                .orElseThrow(() -> new IllegalArgumentException("Lua script not found: " + scriptId));
+        return RemoteLuaScriptJson.scriptResult(script, LuaScriptRuntimeService.getInstance());
+    }
+
+    private JsonObject luaCreate(JsonObject params) {
+        LuaScript script = LuaScriptService.getInstance().createScript(
+                requiredText(params, "name"),
+                rawTextField(params, "code"),
+                booleanField(params, "enabled"),
+                rawTextField(params, "icon"),
+                rawTextField(params, "nodeId"),
+                LuaScript.BotType.fromStorage(rawTextField(params, "botType")),
+                rawTextField(params, "automationName"),
+                rawTextField(params, "description"),
+                rawTextField(params, "author"));
+        return RemoteLuaScriptJson.scriptResult(script, LuaScriptRuntimeService.getInstance());
+    }
+
+    private JsonObject luaSave(JsonObject params) {
+        LuaScript script = LuaScriptService.getInstance().saveScript(
+                requiredScriptId(params),
+                requiredText(params, "name"),
+                rawTextField(params, "code"),
+                booleanField(params, "enabled"));
+        return RemoteLuaScriptJson.scriptResult(script, LuaScriptRuntimeService.getInstance());
+    }
+
+    private JsonObject luaSaveSettings(JsonObject params) {
+        LuaScript script = LuaScriptService.getInstance().saveScriptSettings(
+                requiredScriptId(params),
+                requiredText(params, "name"),
+                booleanField(params, "enabled"),
+                rawTextField(params, "icon"),
+                rawTextField(params, "nodeId"),
+                LuaScript.BotType.fromStorage(rawTextField(params, "botType")),
+                rawTextField(params, "automationName"),
+                rawTextField(params, "description"),
+                rawTextField(params, "author"));
+        return RemoteLuaScriptJson.scriptResult(script, LuaScriptRuntimeService.getInstance());
+    }
+
+    private JsonObject luaDelete(JsonObject params) {
+        long scriptId = requiredScriptId(params);
+        LuaScriptRuntimeService.getInstance().stopScript(scriptId, this::publishLuaRuntimeEvent);
+        LuaScriptService.getInstance().deleteScript(scriptId);
+        return luaList();
+    }
+
+    private JsonObject luaImportJson(JsonObject params) {
+        LuaScriptService.ScriptImportResult result =
+                LuaScriptService.getInstance().importScriptJson(requiredText(params, "json"));
+        return RemoteLuaScriptJson.importResultToJson(result, LuaScriptRuntimeService.getInstance());
+    }
+
+    private JsonObject luaImportExport(JsonObject params) {
+        LuaScriptService.LuaScriptExportFile exportFile = RemoteLuaScriptJson.parseExportFile(params);
+        LuaScriptService.ScriptImportResult result =
+                LuaScriptService.getInstance().importScriptExport(exportFile);
+        return RemoteLuaScriptJson.importResultToJson(result, LuaScriptRuntimeService.getInstance());
+    }
+
+    private JsonObject luaExport(JsonObject params) {
+        return RemoteLuaScriptJson.exportJsonResult(
+                LuaScriptService.getInstance().exportScriptJson(requiredScriptId(params)));
+    }
+
+    private JsonObject luaRun(JsonObject params) {
+        long scriptId = requiredScriptId(params);
+        LuaScript script = LuaScriptService.getInstance().findScript(scriptId)
+                .orElseThrow(() -> new IllegalArgumentException("Lua script not found: " + scriptId));
+        if (script.getBotType() == LuaScript.BotType.EXTENSION) {
+            LuaExtensionManager.getInstance().runExtension(scriptId, this::publishLuaRuntimeEvent);
+        } else {
+            LuaScriptRuntimeService.getInstance().runScript(script, this::publishLuaRuntimeEvent);
+        }
+        return RemoteLuaScriptJson.runningStateToJson(scriptId, LuaScriptRuntimeService.getInstance());
+    }
+
+    private JsonObject luaDebug(JsonObject params) {
+        long scriptId = requiredScriptId(params);
+        LuaScript script = LuaScriptService.getInstance().findScript(scriptId)
+                .orElseThrow(() -> new IllegalArgumentException("Lua script not found: " + scriptId));
+        Set<Integer> breakpoints = RemoteLuaScriptJson.parseBreakpoints(params).stream()
+                .collect(Collectors.toSet());
+        if (script.getBotType() == LuaScript.BotType.EXTENSION) {
+            LuaExtensionManager.getInstance().debugExtension(scriptId, breakpoints, this::publishLuaRuntimeEvent);
+        } else {
+            LuaScriptRuntimeService.getInstance().debugScript(script, breakpoints, this::publishLuaRuntimeEvent);
+        }
+        return RemoteLuaScriptJson.runningStateToJson(scriptId, LuaScriptRuntimeService.getInstance());
+    }
+
+    private JsonObject luaStop(JsonObject params) {
+        long scriptId = requiredScriptId(params);
+        LuaScriptRuntimeService.getInstance().stopScript(scriptId, this::publishLuaRuntimeEvent);
+        return RemoteLuaScriptJson.runningStateToJson(scriptId, LuaScriptRuntimeService.getInstance());
+    }
+
+    private void publishLuaRuntimeEvent(LuaScriptEvent event) {
+        DirectRpcServer current = server;
+        if (current != null && event != null) {
+            current.publishEvent("lua.runtime.event", RemoteLuaScriptJson.eventToJson(event));
         }
     }
 
@@ -1399,6 +1594,14 @@ public final class RemoteRpcHostService {
         return firstText(
                 node != null ? firstText(node.getLongName(), node.getShortName()) : null,
                 reaction.getFromNodeId());
+    }
+
+    private static long requiredScriptId(JsonObject params) {
+        long scriptId = longField(params, "scriptId");
+        if (scriptId <= 0) {
+            throw new IllegalArgumentException("scriptId is required");
+        }
+        return scriptId;
     }
 
     private static String requiredText(JsonObject params, String field) {

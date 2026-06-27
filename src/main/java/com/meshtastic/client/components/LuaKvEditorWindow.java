@@ -3,7 +3,8 @@ package com.meshtastic.client.components;
 import com.meshtastic.client.MeshApp;
 import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.lua.LuaScript;
-import com.meshtastic.client.lua.LuaScriptService;
+import com.meshtastic.client.lua.LuaScriptDataSource;
+import com.meshtastic.client.lua.LuaScriptDataSources;
 import com.meshtastic.client.themes.ThemeManager;
 import com.meshtastic.client.utils.AppPreferences;
 import com.meshtastic.client.utils.SvgIconLoader;
@@ -62,7 +63,7 @@ public final class LuaKvEditorWindow {
     private static final int MAX_KEY_LENGTH = 200;
     private static final Map<Long, LuaKvEditorWindow> OPEN_WINDOWS = new HashMap<>();
 
-    private final LuaScriptService scriptService = LuaScriptService.getInstance();
+    private final LuaScriptDataSource scriptSource;
     private final long scriptId;
     private final ObservableList<KvEntryRow> rows = FXCollections.observableArrayList();
     private final FilteredList<KvEntryRow> filteredRows = new FilteredList<>(rows, row -> true);
@@ -78,6 +79,7 @@ public final class LuaKvEditorWindow {
     private Button deleteButton;
 
     private LuaKvEditorWindow(LuaScript script) {
+        this.scriptSource = LuaScriptDataSources.forCurrentConnection();
         this.scriptId = script.getId();
         this.scriptName = displayScriptName(script);
         createStage();
@@ -161,6 +163,7 @@ public final class LuaKvEditorWindow {
         stage.setScene(scene);
         stage.setOnHidden(event -> {
             OPEN_WINDOWS.remove(scriptId, this);
+            scriptSource.close();
             ThemeManager.unregisterScene(scene);
         });
         updateTitle();
@@ -350,7 +353,7 @@ public final class LuaKvEditorWindow {
     }
 
     private void refreshRows(String selectKey) {
-        rows.setAll(scriptService.listKv(scriptId).entrySet().stream()
+        rows.setAll(scriptSource.listKv(scriptId).entrySet().stream()
                 .map(entry -> new KvEntryRow(entry.getKey(), entry.getValue()))
                 .toList());
         applyFilter();
@@ -426,9 +429,9 @@ public final class LuaKvEditorWindow {
         String value = valueArea.getText() != null ? valueArea.getText() : "";
         try {
             if (keyChanged) {
-                scriptService.deleteKv(scriptId, originalKey);
+                scriptSource.deleteKv(scriptId, originalKey);
             }
-            scriptService.setKv(scriptId, key, value);
+            scriptSource.setKv(scriptId, key, value);
             refreshRows(key);
             setStatus(I18n.t("meshIde.kv.status.saved", key));
         } catch (Exception e) {
@@ -445,7 +448,7 @@ public final class LuaKvEditorWindow {
         if (!confirmDelete(selected.key())) {
             return;
         }
-        boolean deleted = scriptService.deleteKv(scriptId, selected.key());
+        boolean deleted = scriptSource.deleteKv(scriptId, selected.key());
         refreshRows(null);
         beginNewEntry();
         setStatus(I18n.t(deleted ? "meshIde.kv.status.deleted" : "meshIde.kv.status.notFound", selected.key()));
