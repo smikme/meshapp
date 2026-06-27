@@ -16,6 +16,7 @@ import com.meshtastic.client.service.ConnectionManager;
 import com.meshtastic.client.service.NodeCacheService;
 import com.meshtastic.client.system.Form;
 import com.meshtastic.client.utils.BatteryLevelEstimator;
+import com.meshtastic.client.utils.RxQualityCalculator;
 import com.meshtastic.client.utils.SystemForm;
 import javafx.application.Platform;
 import javafx.beans.value.ChangeListener;
@@ -462,10 +463,14 @@ public class FormDashboard extends Form {
             this.airUtil = String.format("%.1f%%", e.getAirUtilTx());
 
             if (e.getNumPacketsRx() > 0) {
-                double total = e.getNumPacketsRx();
-                this.goodRx = String.format("%.1f%%", (total - e.getNumPacketsRxBad() - e.getNumRxDupe()) / total * 100.0);
-                this.badRx = String.format("%.1f%%", e.getNumPacketsRxBad() / total * 100.0);
-                this.dupeRx = String.format("%.1f%%", e.getNumRxDupe() / total * 100.0);
+                RxQualityCalculator.Percentages percentages = RxQualityCalculator.percentages(
+                        e.getNumPacketsRx(),
+                        e.getNumPacketsRxBad(),
+                        e.getNumRxDupe()
+                );
+                this.goodRx = String.format("%.1f%%", percentages.good());
+                this.badRx = String.format("%.1f%%", percentages.bad());
+                this.dupeRx = String.format("%.1f%%", percentages.duplicate());
             } else {
                 this.goodRx = "—";
                 this.badRx = "—";
