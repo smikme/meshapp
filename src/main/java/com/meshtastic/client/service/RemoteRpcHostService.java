@@ -12,6 +12,7 @@ import com.meshtastic.client.lua.LuaScript;
 import com.meshtastic.client.lua.LuaScriptEvent;
 import com.meshtastic.client.lua.LuaScriptRuntimeService;
 import com.meshtastic.client.lua.LuaScriptService;
+import com.meshtastic.client.forms.settings.ConfigSavePolicy;
 import com.meshtastic.client.model.ChatItem;
 import com.meshtastic.client.model.ConnectionEntry;
 import com.meshtastic.client.model.DeviceState;
@@ -50,6 +51,7 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.function.BiConsumer;
 import java.util.function.IntFunction;
 import java.util.stream.Collectors;
@@ -343,6 +345,20 @@ public final class RemoteRpcHostService {
                     LuaScriptService.getInstance().clearKv(requiredScriptId(params));
                     return CompletableFuture.completedFuture(new JsonObject());
                 })
+                .register("settings.snapshot", (params, context) ->
+                        CompletableFuture.completedFuture(settingsSnapshot()))
+                .register("settings.saveOwner", (params, context) ->
+                        settingsSaveOwner(params))
+                .register("settings.saveConfigChanges", (params, context) ->
+                        settingsSaveConfigChanges(params))
+                .register("settings.setFixedPosition", (params, context) ->
+                        settingsSetFixedPosition(params))
+                .register("settings.removeFixedPosition", (params, context) ->
+                        settingsRemoveFixedPosition())
+                .register("settings.setRingtone", (params, context) ->
+                        settingsSetRingtone(params))
+                .register("settings.command", (params, context) ->
+                        settingsCommand(params))
                 .register("admin.load", (params, context) ->
                         remoteAdminLoad(params))
                 .register("admin.requestConfig", (params, context) ->
@@ -557,6 +573,216 @@ public final class RemoteRpcHostService {
         DirectRpcServer current = server;
         if (current != null && event != null) {
             current.publishEvent("lua.runtime.event", RemoteLuaScriptJson.eventToJson(event));
+        }
+    }
+
+    private JsonObject settingsSnapshot() {
+        ActiveHostConnection active = activeHostConnection();
+        return settingsSnapshot(active.state());
+    }
+
+    private JsonObject settingsSnapshot(DeviceState state) {
+        NodeData node = state.getNodeDb().get(state.getMyNodeNum());
+        if (node == null) {
+            node = state.getOrCreateNode(state.getMyNodeNum());
+        }
+        NodeCacheService.getInstance().enrichFromCache(node);
+        RemoteAdminSession session = new RemoteAdminSession(state.getMyNodeNum(), node);
+        DeviceState snapshotState = session.remoteState();
+        snapshotState.setOwnerInfo(state.getOwnerInfo());
+        snapshotState.setDeviceMetadata(state.getDeviceMetadata());
+        synchronized (state.getConfigs()) {
+            for (ConfigProtos.Config config : state.getConfigs()) {
+                snapshotState.addConfig(config);
+            }
+        }
+        synchronized (state.getModuleConfigs()) {
+            for (ModuleConfigProtos.ModuleConfig moduleConfig : state.getModuleConfigs()) {
+                snapshotState.addModuleConfig(moduleConfig);
+            }
+        }
+        synchronized (state.getChannels()) {
+            for (ChannelProtos.Channel channel : state.getChannels()) {
+                snapshotState.updateChannel(channel);
+            }
+        }
+        snapshotState.setChannelCatalogReady(state.isChannelCatalogReady());
+        snapshotState.setRingtone(state.getRingtone());
+        return RemoteAdminRpcJson.sessionToJson(session);
+    }
+
+    private CompletableFuture<JsonElement> settingsSaveOwner(JsonObject params) {
+        return CompletableFuture.supplyAsync(() -> {
+            ActiveHostConnection active = activeHostConnection();
+            ensureSessionPasskey(active.handler(), active.state());
+            MessageService.setOwnerInfo(
+                    active.handler(),
+                    active.state(),
+                    rawTextField(params, "longName"),
+                    rawTextField(params, "shortName"),
+                    booleanField(params, "isLicensed"),
+                    active.state().getSessionPasskey());
+            MeshProtos.User owner = MeshProtos.User.newBuilder()
+                    .setLongName(rawTextField(params, "longName"))
+                    .setShortName(rawTextField(params, "shortName"))
+                    .setIsLicensed(booleanField(params, "isLicensed"))
+                    .build();
+            active.state().setOwnerInfo(owner);
+            NodeData node = active.state().getNodeDb().get(active.state().getMyNodeNum());
+            if (node != null) {
+                node.setLongName(owner.getLongName());
+                node.setShortName(owner.getShortName());
+                node.setLicensed(owner.getIsLicensed());
+                active.state().fireNodeUpdateListeners(active.state().getMyNodeNum());
+            }
+            return (JsonElement) settingsSnapshot(active.state());
+        });
+    }
+
+    private CompletableFuture<JsonElement> settingsSaveConfigChanges(JsonObject params) {
+        return CompletableFuture.supplyAsync(() -> {
+            ActiveHostConnection active = activeHostConnection();
+            DeviceState state = active.state();
+            ProtocolHandler handler = active.handler();
+            ensureSessionPasskey(handler, state);
+            List<ConfigProtos.Config> configs = RemoteAdminRpcJson.configsFromJson(params, "configs");
+            List<ModuleConfigProtos.ModuleConfig> moduleConfigs =
+                    RemoteAdminRpcJson.moduleConfigsFromJson(params, "moduleConfigs");
+            List<ChannelProtos.Channel> channels = RemoteAdminRpcJson.channelsFromJson(params, "channels");
+            for (ChannelProtos.Channel channel : channels) {
+                ConfigSavePolicy.waitForTransportRequiredAck(
+                        active.entry().getEffectiveType(),
+                        MessageService.setChannel(handler, state, channel, state.getSessionPasskey()),
+                        "setChannel/" + channel.getIndex(),
+                        log);
+                state.updateChannel(channel);
+            }
+            if (!configs.isEmpty() || !moduleConfigs.isEmpty()) {
+                ConfigSavePolicy.waitForTransportRequiredAck(
+                        active.entry().getEffectiveType(),
+                        MessageService.beginEditSettings(handler, state),
+                        "beginEditSettings",
+                        log);
+                for (ConfigProtos.Config config : configs) {
+                    ConfigSavePolicy.waitForMutatingStepAck(
+                            active.entry().getEffectiveType(),
+                            MessageService.setConfig(handler, state, config),
+                            "setConfig/" + config.getPayloadVariantCase(),
+                            log);
+                    state.addConfig(config);
+                }
+                for (ModuleConfigProtos.ModuleConfig moduleConfig : moduleConfigs) {
+                    ConfigSavePolicy.waitForMutatingStepAck(
+                            active.entry().getEffectiveType(),
+                            MessageService.setModuleConfig(handler, state, moduleConfig),
+                            "setModuleConfig/" + moduleConfig.getPayloadVariantCase(),
+                            log);
+                    state.addModuleConfig(moduleConfig);
+                }
+                ConfigSavePolicy.handleCommitAck(
+                        active.entry().getEffectiveType(),
+                        MessageService.commitEditSettings(handler, state),
+                        "commitEditSettings",
+                        log);
+            }
+            return (JsonElement) settingsSnapshot(state);
+        });
+    }
+
+    private CompletableFuture<JsonElement> settingsSetFixedPosition(JsonObject params) {
+        return CompletableFuture.supplyAsync(() -> {
+            ActiveHostConnection active = activeHostConnection();
+            ensureSessionPasskey(active.handler(), active.state());
+            double latitude = doubleField(params, "latDegrees");
+            double longitude = doubleField(params, "lonDegrees");
+            int altitude = boundedInt(params, "altMeters", Integer.MIN_VALUE, Integer.MAX_VALUE, 0);
+            MessageService.setFixedPosition(active.handler(), active.state(), latitude, longitude, altitude);
+            active.state().setPendingFixedPosition(latitude, longitude, altitude);
+            NodeData node = active.state().getNodeDb().get(active.state().getMyNodeNum());
+            if (node != null) {
+                node.setLatitude(Math.round(latitude * 1e7) * 1e-7);
+                node.setLongitude(Math.round(longitude * 1e7) * 1e-7);
+                node.setAltitude(altitude);
+                active.state().fireNodeUpdateListeners(active.state().getMyNodeNum());
+            }
+            return (JsonElement) settingsSnapshot(active.state());
+        });
+    }
+
+    private CompletableFuture<JsonElement> settingsRemoveFixedPosition() {
+        return CompletableFuture.supplyAsync(() -> {
+            ActiveHostConnection active = activeHostConnection();
+            ensureSessionPasskey(active.handler(), active.state());
+            MessageService.removeFixedPosition(active.handler(), active.state());
+            return (JsonElement) settingsSnapshot(active.state());
+        });
+    }
+
+    private CompletableFuture<JsonElement> settingsSetRingtone(JsonObject params) {
+        return CompletableFuture.supplyAsync(() -> {
+            ActiveHostConnection active = activeHostConnection();
+            ensureSessionPasskey(active.handler(), active.state());
+            String ringtone = rawTextField(params, "ringtone");
+            ConfigSavePolicy.waitForMutatingStepAck(
+                    active.entry().getEffectiveType(),
+                    MessageService.setRingtone(active.handler(), active.state(), ringtone),
+                    "setRingtone",
+                    log);
+            active.state().setRingtone(ringtone);
+            return (JsonElement) settingsSnapshot(active.state());
+        });
+    }
+
+    private CompletableFuture<JsonElement> settingsCommand(JsonObject params) {
+        return CompletableFuture.supplyAsync(() -> {
+            ActiveHostConnection active = activeHostConnection();
+            String command = requiredText(params, "command");
+            ensureSessionPasskey(active.handler(), active.state());
+            switch (command) {
+                case "reboot" -> ConfigSavePolicy.observeOptionalAck(
+                        MessageService.rebootDevice(
+                                active.handler(),
+                                active.state(),
+                                boundedInt(params, "delaySeconds", 0, Integer.MAX_VALUE, 0)),
+                        "reboot",
+                        log);
+                case "shutdown" -> ConfigSavePolicy.observeOptionalAck(
+                        MessageService.shutdownDevice(
+                                active.handler(),
+                                active.state(),
+                                boundedInt(params, "delaySeconds", 0, Integer.MAX_VALUE, 0)),
+                        "shutdown",
+                        log);
+                case "syncTime" -> ConfigSavePolicy.observeOptionalAck(
+                        MessageService.setTimeOnly(active.handler(), active.state(), longField(params, "epochSeconds")),
+                        "syncTime",
+                        log);
+                case "enterDfuMode" -> ConfigSavePolicy.observeOptionalAck(
+                        MessageService.enterDfuMode(active.handler(), active.state()),
+                        "enterDfuMode",
+                        log);
+                default -> throw new IllegalArgumentException("Unsupported settings command: " + command);
+            }
+            return (JsonElement) settingsSnapshot(active.state());
+        });
+    }
+
+    private void ensureSessionPasskey(ProtocolHandler handler, DeviceState state) {
+        if (handler == null || state == null || state.getSessionPasskey() != null) {
+            return;
+        }
+        CompletableFuture<Void> passkeyFuture = new CompletableFuture<>();
+        Runnable listener = () -> passkeyFuture.complete(null);
+        state.addOwnerInfoListener(listener);
+        try {
+            MessageService.requestSessionPasskey(handler, state);
+            passkeyFuture.get(5, TimeUnit.SECONDS);
+        } catch (TimeoutException e) {
+            log.debug("Settings RPC: session passkey was not received before timeout");
+        } catch (Exception e) {
+            log.debug("Settings RPC: session passkey request failed: {}", e.getMessage());
+        } finally {
+            state.removeOwnerInfoListener(listener);
         }
     }
 

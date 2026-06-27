@@ -228,7 +228,7 @@ public final class ConfigSaveController {
         }
     }
 
-    static Optional<String> firstExcludedModuleName(
+    public static Optional<String> firstExcludedModuleName(
         MeshProtos.DeviceMetadata metadata,
         List<ModuleConfigProtos.ModuleConfig> moduleConfigs
     ) {

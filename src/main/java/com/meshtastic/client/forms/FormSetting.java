@@ -1,6 +1,8 @@
 package com.meshtastic.client.forms;
 
 import com.meshtastic.client.forms.settings.ApplicationSettingsPanelFactory;
+import com.meshtastic.client.forms.settings.ConfigChangeCollector;
+import com.meshtastic.client.forms.settings.ConfigChangeSet;
 import com.meshtastic.client.forms.settings.ConfigHelpPopupController;
 import com.meshtastic.client.forms.settings.ConfigPanelFactory;
 import com.meshtastic.client.forms.settings.ConfigProtobufSupport;
@@ -18,14 +20,20 @@ import com.meshtastic.client.forms.settings.MeshtasticConfigTreeBuilder;
 import com.meshtastic.client.forms.settings.NodeCacheSettingsController;
 import com.meshtastic.client.forms.settings.RingtoneSettingsController;
 import com.meshtastic.client.i18n.I18n;
+import com.meshtastic.client.modal.ModalPane;
 import com.meshtastic.client.model.ConfigTreeItem;
 import com.meshtastic.client.model.ConnectionEntry;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.protocol.ProtocolHandler;
+import com.meshtastic.client.protocol.ProtocolRuntime;
 import com.meshtastic.client.protocol.meshcore.MeshCoreCompanionState;
+import com.meshtastic.client.protocol.rpc.RemoteRpcState;
 import com.meshtastic.client.service.ConfigSnapshotService;
 import com.meshtastic.client.service.ConnectionManager;
+import com.meshtastic.client.service.RemoteAdminBackend;
+import com.meshtastic.client.service.RemoteAdminSession;
+import com.meshtastic.client.service.RpcHostSettingsBackend;
 import com.meshtastic.client.system.Form;
 import com.meshtastic.client.utils.ProtobufTreeBuilder;
 import com.meshtastic.client.utils.SystemForm;
@@ -33,6 +41,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import javafx.application.Platform;
 import javafx.geometry.Insets;
 import javafx.scene.control.Button;
@@ -67,6 +76,11 @@ public class FormSetting extends Form {
     private DeviceState state;
     private ProtocolHandler handler;
     private MeshCoreCompanionState meshCoreCompanionState;
+    private RemoteRpcState remoteRpcState;
+    private RemoteAdminBackend remoteSettingsBackend;
+    private RemoteAdminSession remoteSettingsSession;
+    private CompletableFuture<RemoteAdminSession> remoteSettingsLoadFuture;
+    private boolean remoteSettingsLoaded;
     private final ConfigSaveController configSaveController =
         new ConfigSaveController(new ConfigSaveHost());
     private final ConfigSnapshotController configSnapshotController =
@@ -179,7 +193,13 @@ public class FormSetting extends Form {
     }
 
     @Override
+    public void formClose() {
+        closeRemoteSettingsBackend();
+    }
+
+    @Override
     public void formRefresh() {
+        remoteSettingsLoaded = false;
         reloadConfigTree();
         firmwareUpdateController.reload();
     }
@@ -192,6 +212,28 @@ public class FormSetting extends Form {
         Optional<ConnectionEntry> entry = Optional
             .ofNullable(mgr.getSelectedConnectionEntry())
             .filter(ConnectionEntry::isConnected);
+        ProtocolRuntime<?> runtime = entry
+            .map(ConnectionEntry::getId)
+            .map(mgr::getProtocolRuntime)
+            .orElse(null);
+        if (runtime != null && runtime.getState() instanceof RemoteRpcState rpcState) {
+            if (remoteRpcState != rpcState) {
+                closeRemoteSettingsBackend();
+                remoteRpcState = rpcState;
+                remoteSettingsBackend = new RpcHostSettingsBackend(rpcState);
+                remoteSettingsSession = remoteSettingsBackend.session();
+                remoteSettingsLoaded = false;
+            }
+            state = remoteSettingsLoaded && remoteSettingsSession != null
+                ? remoteSettingsSession.remoteState()
+                : null;
+            handler = null;
+            meshCoreCompanionState = null;
+            ringtoneController.observe(state);
+            return;
+        }
+
+        closeRemoteSettingsBackend();
         DeviceState newState = entry
             .map(ConnectionEntry::getId)
             .map(mgr::getDeviceState)
@@ -208,6 +250,17 @@ public class FormSetting extends Form {
         this.handler = newHandler;
         this.meshCoreCompanionState = newMeshCoreState;
         ringtoneController.observe(newState);
+    }
+
+    private void closeRemoteSettingsBackend() {
+        if (remoteSettingsBackend != null) {
+            remoteSettingsBackend.close();
+        }
+        remoteRpcState = null;
+        remoteSettingsBackend = null;
+        remoteSettingsSession = null;
+        remoteSettingsLoadFuture = null;
+        remoteSettingsLoaded = false;
     }
 
     /**
@@ -303,7 +356,7 @@ public class FormSetting extends Form {
     private VBox createConfigPanel() {
         ConfigPanelFactory.Controls controls = ConfigPanelFactory.create(
             new ConfigPanelFactory.ToolbarActions(
-                this::reloadConfigTree,
+                this::onRefreshConfigTree,
                 this::onSyncDateTimeWithPc,
                 this::onSaveConfig,
                 this::onRestartHardware,
@@ -330,6 +383,13 @@ public class FormSetting extends Form {
         return controls.panel();
     }
 
+    private void onRefreshConfigTree() {
+        if (remoteSettingsBackend != null) {
+            remoteSettingsLoaded = false;
+        }
+        reloadConfigTree();
+    }
+
     private void onResetDatabaseRequested() {
         databaseResetController.requestReset();
     }
@@ -354,6 +414,24 @@ public class FormSetting extends Form {
     }
 
     private void onSyncDateTimeWithPc() {
+        if (remoteSettingsBackend != null) {
+            setSyncDateTimeButtonDisabled(true);
+            configStatusLabel.setText(I18n.t("settings.config.status.sendingSettings"));
+            remoteSettingsBackend.syncTime(System.currentTimeMillis() / 1000)
+                .whenComplete((ignored, error) -> Platform.runLater(() -> {
+                    setSyncDateTimeButtonDisabled(false);
+                    if (error != null) {
+                        configStatusLabel.setText(
+                            I18n.t("settings.config.status.saveError", userMessage(error))
+                        );
+                        return;
+                    }
+                    remoteSettingsLoaded = false;
+                    configStatusLabel.setText(I18n.t("settings.config.status.sentSections", "1"));
+                    reloadConfigTree();
+                }));
+            return;
+        }
         timeSyncController.syncWithPc();
     }
 
@@ -366,10 +444,18 @@ public class FormSetting extends Form {
     }
 
     private void onRestartHardware() {
+        if (remoteSettingsBackend != null) {
+            runRemotePowerCommand(true);
+            return;
+        }
         devicePowerActionController.restart();
     }
 
     private void onShutdownHardware() {
+        if (remoteSettingsBackend != null) {
+            runRemotePowerCommand(false);
+            return;
+        }
         devicePowerActionController.shutdown();
     }
 
@@ -468,6 +554,11 @@ public class FormSetting extends Form {
     private void reloadConfigTree() {
         refreshConnection();
 
+        if (remoteSettingsBackend != null) {
+            reloadRemoteSettingsTree();
+            return;
+        }
+
         boolean meshtasticConnected = state != null && handler != null;
         boolean meshCoreConnected =
             state != null && meshCoreCompanionState != null;
@@ -558,6 +649,94 @@ public class FormSetting extends Form {
         }
     }
 
+    private void reloadRemoteSettingsTree() {
+        setDevicePowerButtonsDisabled(true);
+        setSyncDateTimeButtonDisabled(true);
+        saveConfigBtn.setDisable(true);
+
+        if (!remoteSettingsLoaded) {
+            loadRemoteSettingsSnapshot();
+            return;
+        }
+
+        state = remoteSettingsSession != null ? remoteSettingsSession.remoteState() : null;
+        if (state == null) {
+            configStatusLabel.setText(I18n.t("settings.status.noRadio"));
+            return;
+        }
+
+        NodeData myNode = remoteSettingsSession.targetNode();
+        synchronized (state.getConfigs()) {
+            originalConfigs = new ArrayList<>(state.getConfigs());
+        }
+        synchronized (state.getModuleConfigs()) {
+            originalModuleConfigs = new ArrayList<>(state.getModuleConfigs());
+        }
+        synchronized (state.getChannels()) {
+            originalChannels = new ArrayList<>(state.getChannels());
+        }
+        workingChannels = new ArrayList<>(originalChannels);
+
+        TreeItem<ConfigTreeItem> root = MeshtasticConfigTreeBuilder.build(
+            state,
+            myNode,
+            originalConfigs,
+            originalModuleConfigs
+        );
+
+        fullConfigRoot = root;
+        configTree.setRoot(root);
+        configSearchField.clear();
+        setDevicePowerButtonsDisabled(false);
+
+        if (originalConfigs.isEmpty() && originalModuleConfigs.isEmpty()) {
+            configStatusLabel.setText(I18n.t("settings.config.status.notReceived"));
+            saveConfigBtn.setDisable(true);
+            setSyncDateTimeButtonDisabled(true);
+            return;
+        }
+
+        saveConfigBtn.setDisable(false);
+        setSyncDateTimeButtonDisabled(findLoadedDeviceConfig() == null);
+        int totalFields = countFields(root);
+        configStatusLabel.setText(
+            I18n.t(
+                "settings.config.status.loaded",
+                originalConfigs.size() + originalModuleConfigs.size(),
+                totalFields
+            )
+        );
+    }
+
+    private void loadRemoteSettingsSnapshot() {
+        if (remoteSettingsLoadFuture != null && !remoteSettingsLoadFuture.isDone()) {
+            configStatusLabel.setText(I18n.t("settings.config.status.loadingDevice"));
+            return;
+        }
+        configTree.setRoot(null);
+        configSearchField.clear();
+        configStatusLabel.setText(I18n.t("settings.config.status.loadingDevice"));
+        RemoteAdminBackend backend = remoteSettingsBackend;
+        remoteSettingsLoadFuture = backend.loadSnapshot(null);
+        remoteSettingsLoadFuture.whenComplete((session, error) ->
+            Platform.runLater(() -> {
+                if (backend != remoteSettingsBackend) {
+                    return;
+                }
+                remoteSettingsLoadFuture = null;
+                if (error != null) {
+                    configStatusLabel.setText(
+                        I18n.t("settings.config.status.saveError", userMessage(error))
+                    );
+                    return;
+                }
+                remoteSettingsSession = session;
+                remoteSettingsLoaded = true;
+                reloadConfigTree();
+            })
+        );
+    }
+
     /**
      * Builds the read-only settings tree for MeshCore Companion Protocol.
      * <p>
@@ -639,7 +818,178 @@ public class FormSetting extends Form {
      * Uses begin_edit_settings / commit_edit_settings for batched delivery.
      */
     private void onSaveConfig() {
+        if (remoteSettingsBackend != null) {
+            saveRemoteConfig();
+            return;
+        }
         configSaveController.save();
+    }
+
+    private void saveRemoteConfig() {
+        if (state == null || remoteSettingsBackend == null) {
+            configStatusLabel.setText(I18n.t("settings.status.noRadio"));
+            return;
+        }
+        TreeItem<ConfigTreeItem> root = currentEditorRoot();
+        if (root == null) {
+            return;
+        }
+        ConfigChangeSet changes = ConfigChangeCollector.collect(
+            root,
+            originalConfigs,
+            originalModuleConfigs,
+            collectModifiedChannels(),
+            state.getOwnerInfo(),
+            state.getNodeDb().get(state.getMyNodeNum())
+        );
+        if (!changes.hasChanges()) {
+            configStatusLabel.setText(I18n.t("settings.config.status.noChanges"));
+            return;
+        }
+        Optional<String> excludedModuleName = ConfigSaveController.firstExcludedModuleName(
+            state.getDeviceMetadata(),
+            changes.moduleConfigs()
+        );
+        if (excludedModuleName.isPresent()) {
+            configStatusLabel.setText(I18n.t(
+                "settings.config.status.moduleUnavailable",
+                excludedModuleName.get()
+            ));
+            return;
+        }
+
+        saveConfigBtn.setDisable(true);
+        configStatusLabel.setText(I18n.t("settings.config.status.sendingSettings"));
+        CompletableFuture<Void> saveFuture = CompletableFuture.completedFuture(null);
+        if (changes.ownerModified()) {
+            saveFuture = saveFuture.thenCompose(ignored -> remoteSettingsBackend.saveOwner(
+                changes.longName(),
+                changes.shortName(),
+                changes.isLicensed()
+            ));
+        }
+        if (changes.positionModified()) {
+            if (changes.latitude() == 0 && changes.longitude() == 0 && changes.altitude() == 0) {
+                saveFuture = saveFuture.thenCompose(ignored -> remoteSettingsBackend.removeFixedPosition());
+            } else {
+                saveFuture = saveFuture.thenCompose(ignored -> remoteSettingsBackend.setFixedPosition(
+                    changes.latitude(),
+                    changes.longitude(),
+                    changes.altitude()
+                ));
+            }
+        }
+        if (changes.ringtoneModified()) {
+            saveFuture = saveFuture.thenCompose(ignored -> remoteSettingsBackend.setRingtone(changes.ringtone()));
+        }
+        if (changes.hasPacketConfigChanges()) {
+            saveFuture = saveFuture.thenCompose(ignored -> remoteSettingsBackend.saveConfigChanges(
+                changes.configs(),
+                changes.moduleConfigs(),
+                changes.channels()
+            ));
+        }
+
+        saveFuture.whenComplete((ignored, error) -> Platform.runLater(() -> {
+            saveConfigBtn.setDisable(false);
+            if (error != null) {
+                configStatusLabel.setText(
+                    I18n.t("settings.config.status.saveError", userMessage(error))
+                );
+                return;
+            }
+            if (remoteSettingsSession != null) {
+                state = remoteSettingsSession.remoteState();
+            }
+            resetModifiedFlags(fullConfigRoot);
+            originalConfigs = mergeSavedConfigs(originalConfigs, changes.configs());
+            originalModuleConfigs = mergeSavedModuleConfigs(originalModuleConfigs, changes.moduleConfigs());
+            originalChannels = getWorkingChannelsSnapshot();
+            workingChannels = new ArrayList<>(originalChannels);
+            configTree.refresh();
+            configStatusLabel.setText(
+                I18n.t("settings.config.status.sentSections", changes.totalChanges())
+            );
+        }));
+    }
+
+    private void runRemotePowerCommand(boolean restart) {
+        String title = restart
+            ? I18n.t("settings.devicePower.restart.title")
+            : I18n.t("settings.devicePower.shutdown.title");
+        String message = restart
+            ? I18n.t("settings.devicePower.restart.confirm")
+            : I18n.t("settings.devicePower.shutdown.confirm");
+        ModalPane.showConfirm(title, message, confirmed -> {
+            if (!confirmed || remoteSettingsBackend == null) {
+                return;
+            }
+            setDevicePowerButtonsDisabled(true);
+            String actionLabel = restart
+                ? I18n.t("settings.devicePower.action.restart")
+                : I18n.t("settings.devicePower.action.shutdown");
+            configStatusLabel.setText(I18n.t("settings.devicePower.sending", actionLabel));
+            CompletableFuture<Void> future = restart
+                ? remoteSettingsBackend.reboot(1)
+                : remoteSettingsBackend.shutdown(1);
+            future.whenComplete((ignored, error) -> Platform.runLater(() -> {
+                setDevicePowerButtonsDisabled(false);
+                if (error != null) {
+                    configStatusLabel.setText(
+                        I18n.t("settings.devicePower.sendErrorDetails", actionLabel, userMessage(error))
+                    );
+                    return;
+                }
+                configStatusLabel.setText(restart
+                    ? I18n.t("settings.devicePower.restartSent")
+                    : I18n.t("settings.devicePower.shutdownSent"));
+            }));
+        });
+    }
+
+    private static List<ConfigProtos.Config> mergeSavedConfigs(
+        List<ConfigProtos.Config> original,
+        List<ConfigProtos.Config> saved
+    ) {
+        List<ConfigProtos.Config> result = new ArrayList<>(original != null ? original : List.of());
+        if (saved == null) {
+            return result;
+        }
+        for (ConfigProtos.Config config : saved) {
+            result.removeIf(existing ->
+                ConfigProtobufSupport.activeOneofFieldNumber(existing) ==
+                    ConfigProtobufSupport.activeOneofFieldNumber(config)
+            );
+            result.add(config);
+        }
+        return result;
+    }
+
+    private static List<ModuleConfigProtos.ModuleConfig> mergeSavedModuleConfigs(
+        List<ModuleConfigProtos.ModuleConfig> original,
+        List<ModuleConfigProtos.ModuleConfig> saved
+    ) {
+        List<ModuleConfigProtos.ModuleConfig> result = new ArrayList<>(original != null ? original : List.of());
+        if (saved == null) {
+            return result;
+        }
+        for (ModuleConfigProtos.ModuleConfig moduleConfig : saved) {
+            result.removeIf(existing ->
+                ConfigProtobufSupport.activeModuleOneofFieldNumber(existing) ==
+                    ConfigProtobufSupport.activeModuleOneofFieldNumber(moduleConfig)
+            );
+            result.add(moduleConfig);
+        }
+        return result;
+    }
+
+    private static String userMessage(Throwable throwable) {
+        Throwable current = throwable;
+        while (current instanceof CompletionException && current.getCause() != null) {
+            current = current.getCause();
+        }
+        String message = current.getMessage();
+        return message == null || message.isBlank() ? I18n.t("settings.status.seeLog") : message;
     }
 
     /**
