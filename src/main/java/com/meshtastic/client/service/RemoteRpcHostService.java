@@ -14,11 +14,13 @@ import com.meshtastic.client.model.MessageChangeEvent;
 import com.meshtastic.client.model.MessageReaction;
 import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.model.NodeData;
+import com.meshtastic.client.model.TelemetryEntry;
 import com.meshtastic.client.protocol.ProtocolHandler;
 import com.meshtastic.client.protocol.ProtocolRuntime;
 import com.meshtastic.client.protocol.meshcore.MeshCoreCompanionProtocolRuntime;
 import com.meshtastic.client.protocol.rpc.RemoteAdminRpcJson;
 import com.meshtastic.client.protocol.rpc.RemoteNodeJson;
+import com.meshtastic.client.protocol.rpc.RemoteTelemetryJson;
 import com.meshtastic.client.rpc.DirectRpcServer;
 import com.meshtastic.client.rpc.RpcAccessKey;
 import com.meshtastic.client.rpc.RpcMethodRegistry;
@@ -214,6 +216,8 @@ public final class RemoteRpcHostService {
                         CompletableFuture.completedFuture(nodeFavorite(params)))
                 .register("node.ignored", (params, context) ->
                         CompletableFuture.completedFuture(nodeIgnored(params)))
+                .register("telemetry.dashboard", (params, context) ->
+                        CompletableFuture.completedFuture(telemetryDashboard(params)))
                 .register("admin.load", (params, context) ->
                         remoteAdminLoad(params))
                 .register("admin.requestConfig", (params, context) ->
@@ -768,6 +772,32 @@ public final class RemoteRpcHostService {
         return nodeList(params);
     }
 
+    private JsonObject telemetryDashboard(JsonObject params) {
+        ActiveHostConnection active = activeHostConnection();
+        DeviceState state = active.state();
+        String ownerId = state.getOwnerNodeId();
+        String nodeId = textField(params, "nodeId");
+        if (nodeId.isBlank()) {
+            nodeId = localNodeId(state);
+        }
+        if (nodeId.isBlank()) {
+            throw new IllegalStateException("active host connection has no local node id yet");
+        }
+
+        long now = System.currentTimeMillis() / 1000;
+        long sinceEpoch = Math.max(0, longField(params, "sinceEpoch"));
+        long maxFutureTs = longField(params, "maxFutureTs");
+        if (maxFutureTs <= 0) {
+            maxFutureTs = now + 300;
+        }
+
+        List<TelemetryEntry> entries = NodeCacheService.getInstance()
+                .loadTelemetryForNode(nodeId, sinceEpoch, maxFutureTs, ownerId);
+        List<TelemetryEntry> qualityEntries = NodeCacheService.getInstance()
+                .loadTelemetryQuality(sinceEpoch, maxFutureTs, ownerId);
+        return RemoteTelemetryJson.dashboardResult(ownerId, nodeId, entries, qualityEntries);
+    }
+
     private CompletableFuture<JsonElement> remoteAdminLoad(JsonObject params) {
         RemoteAdminService service = createRemoteAdminService(params);
         return service.loadSnapshot()
@@ -1064,6 +1094,23 @@ public final class RemoteRpcHostService {
             return node.getNodeId().trim();
         }
         return nodeIdFromNum(node.getNodeNum());
+    }
+
+    private static String localNodeId(DeviceState state) {
+        if (state == null) {
+            return "";
+        }
+        if (state.getMyNodeNum() != 0) {
+            NodeData localNode = state.getNodeDb().get(state.getMyNodeNum());
+            if (localNode != null && localNode.getNodeId() != null && !localNode.getNodeId().isBlank()) {
+                return localNode.getNodeId().trim();
+            }
+        }
+        String ownerNodeId = state.getOwnerNodeId();
+        if (ownerNodeId != null && !ownerNodeId.isBlank()) {
+            return ownerNodeId.trim();
+        }
+        return state.getMyNodeNum() != 0 ? nodeIdFromNum(state.getMyNodeNum()) : "";
     }
 
     private static String unsignedNodeKey(int nodeNum) {
