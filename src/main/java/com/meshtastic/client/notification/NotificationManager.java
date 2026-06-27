@@ -117,12 +117,45 @@ public class NotificationManager {
         service.dispose();
     }
 
+    /**
+     * Shows a notification for an event received through MeshApp RPC.
+     */
+    public static void showRemoteNotification(String title, String message) {
+        RemoteNotificationManagerHolder.INSTANCE.showRawNotification(title, message);
+    }
+
     // --- Private ---
 
     private boolean isChatActive(String chatType, String chatKey) {
         BiPredicate<String, String> checker = activeChatChecker;
         if (checker == null) { return false; }
         return checker.test(chatType, chatKey);
+    }
+
+    private void showRawNotification(String title, String message) {
+        if (!AppPreferences.isNotificationsEnabled()) {
+            return;
+        }
+
+        long now = System.currentTimeMillis();
+        long last = lastNotificationTime.get();
+        if (now - last < RATE_LIMIT_MS) {
+            log.debug("Remote notification rate-limited ({}ms since last)", now - last);
+            return;
+        }
+        if (!lastNotificationTime.compareAndSet(last, now)) {
+            return;
+        }
+
+        String safeTitle = title == null || title.isBlank() ? "MeshApp" : title.trim();
+        String safeBody = truncate(message);
+        AppUi.runLater(() -> {
+            try {
+                service.showNotification(safeTitle, safeBody);
+            } catch (Throwable t) {
+                log.error("Failed to show remote notification", t);
+            }
+        });
     }
 
     private String currentOwnerNodeId() {
@@ -179,6 +212,10 @@ public class NotificationManager {
     private void initFocusTracking() {
         windowFocused = AppUi.isPrimaryWindowFocused();
         AppUi.addPrimaryWindowFocusListener(focused -> windowFocused = focused);
+    }
+
+    private static final class RemoteNotificationManagerHolder {
+        private static final NotificationManager INSTANCE = new NotificationManager(null);
     }
 
     /** No-op fallback for unsupported platforms. */

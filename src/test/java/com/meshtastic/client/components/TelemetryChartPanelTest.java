@@ -40,6 +40,7 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -74,6 +75,21 @@ class TelemetryChartPanelTest {
             TelemetryChartDataBuilder.ChartKind.PRESSURE,
             TelemetryChartDataBuilder.ChartKind.RADIATION
     );
+    private static final long RX_NORMALIZATION_SAMPLE_TIME = 1_700_000_000L;
+    private static final long RX_NORMALIZATION_NEXT_SAMPLE_TIME = 1_700_000_060L;
+    private static final int LOG_RX_RECEIVED = 10;
+    private static final int LOG_RX_BAD = 15;
+    private static final int LOG_RX_DUPLICATE = 5;
+    private static final int CHART_RX_PREVIOUS_RECEIVED = 100;
+    private static final int CHART_RX_PREVIOUS_BAD = 20;
+    private static final int CHART_RX_PREVIOUS_DUPLICATE = 10;
+    private static final int CHART_RX_CURRENT_RECEIVED = 110;
+    private static final int CHART_RX_CURRENT_BAD = 35;
+    private static final int CHART_RX_CURRENT_DUPLICATE = 15;
+    private static final int NO_TX_COUNTER = 0;
+    private static final double ZERO_PERCENT = 0.0;
+    private static final double EXPECTED_RX_BAD_PERCENT = 75.0;
+    private static final double EXPECTED_RX_DUPLICATE_PERCENT = 25.0;
 
     private record NodeDetailLayout(Bounds basicPlot,
                                     Bounds environmentPlot,
@@ -670,6 +686,20 @@ class TelemetryChartPanelTest {
     }
 
     @Test
+    void telemetryLogRowNormalizesInconsistentRxCounters() {
+        TelemetryEntry entry = new TelemetryEntry(RX_NORMALIZATION_SAMPLE_TIME, "!1234abcd");
+        entry.setNumPacketsRx(LOG_RX_RECEIVED);
+        entry.setNumPacketsRxBad(LOG_RX_BAD);
+        entry.setNumRxDupe(LOG_RX_DUPLICATE);
+
+        FormDashboard.TelemetryLogRow row = new FormDashboard.TelemetryLogRow(entry, null);
+
+        assertEquals(formatPercent(ZERO_PERCENT), normalizePercent(row.getGoodRx()));
+        assertEquals(formatPercent(EXPECTED_RX_BAD_PERCENT), normalizePercent(row.getBadRx()));
+        assertEquals(formatPercent(EXPECTED_RX_DUPLICATE_PERCENT), normalizePercent(row.getDupeRx()));
+    }
+
+    @Test
     void telemetryLogNodeColumnUsesExplicitValueFactoryAfterRowsAreRebuilt() {
         FormDashboard dashboard = onFxThread(FormDashboard::new);
         TableColumn<FormDashboard.TelemetryLogRow, String> nodeColumn = telemetryNodeColumn(dashboard);
@@ -768,6 +798,39 @@ class TelemetryChartPanelTest {
         assertSeriesValues(txChart, t("telemetry.chart.series.dropped"), 3.0, 1.0);
         assertSeriesValues(txChart, t("telemetry.chart.series.relayed"), 4.0, 1.0);
         assertSeriesValues(txChart, t("telemetry.chart.series.relayCanceled"), 1.0, 0.0);
+    }
+
+    @Test
+    void normalizesRxPercentagesWhenBadAndDuplicateDeltasExceedReceivedDelta() {
+        TelemetryChartPanel panel = onFxThread(() -> new TelemetryChartPanel(false));
+
+        TelemetryEntry first = telemetryEntry(
+                RX_NORMALIZATION_SAMPLE_TIME,
+                CHART_RX_PREVIOUS_RECEIVED,
+                CHART_RX_PREVIOUS_BAD,
+                CHART_RX_PREVIOUS_DUPLICATE,
+                NO_TX_COUNTER, NO_TX_COUNTER, NO_TX_COUNTER, NO_TX_COUNTER);
+        TelemetryEntry second = telemetryEntry(
+                RX_NORMALIZATION_NEXT_SAMPLE_TIME,
+                CHART_RX_CURRENT_RECEIVED,
+                CHART_RX_CURRENT_BAD,
+                CHART_RX_CURRENT_DUPLICATE,
+                NO_TX_COUNTER, NO_TX_COUNTER, NO_TX_COUNTER, NO_TX_COUNTER);
+
+        onFxThread(() -> {
+            invokeUpdateChart(panel, List.of(first, second), List.of());
+            return null;
+        });
+
+        AreaChart<Number, Number> rxChart = chartField(panel, "rxChart");
+        AreaChart<Number, Number> rateChart = chartField(panel, "rateChart");
+
+        assertSeriesValues(rxChart, t("telemetry.chart.series.goodRx"), ZERO_PERCENT);
+        assertSeriesValues(rxChart, t("telemetry.chart.series.badRx"), EXPECTED_RX_BAD_PERCENT);
+        assertSeriesValues(rxChart, t("telemetry.chart.series.dupeRx"), EXPECTED_RX_DUPLICATE_PERCENT);
+        assertSeriesValues(rateChart, t("telemetry.chart.series.packetsReceived"), chartRxReceivedDelta());
+        assertSeriesValues(rateChart, t("telemetry.chart.series.badPackets"), chartRxBadDelta());
+        assertSeriesValues(rateChart, t("telemetry.chart.series.duplicates"), chartRxDuplicateDelta());
     }
 
     @Test
@@ -1100,6 +1163,26 @@ class TelemetryChartPanelTest {
                 false, false, false,
                 false, false, false,
                 null);
+    }
+
+    private static String normalizePercent(String value) {
+        return value.replace(',', '.');
+    }
+
+    private static String formatPercent(double value) {
+        return String.format(Locale.ROOT, "%.1f%%", value);
+    }
+
+    private static double chartRxReceivedDelta() {
+        return CHART_RX_CURRENT_RECEIVED - CHART_RX_PREVIOUS_RECEIVED;
+    }
+
+    private static double chartRxBadDelta() {
+        return CHART_RX_CURRENT_BAD - CHART_RX_PREVIOUS_BAD;
+    }
+
+    private static double chartRxDuplicateDelta() {
+        return CHART_RX_CURRENT_DUPLICATE - CHART_RX_PREVIOUS_DUPLICATE;
     }
 
     private static TelemetryEntry telemetryEntry(long timestamp,

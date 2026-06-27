@@ -5,16 +5,22 @@ import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.modal.ModalPane;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.NodeData;
+import com.meshtastic.client.model.TelemetryEntry;
 import com.meshtastic.client.protocol.ProtocolHandler;
+import com.meshtastic.client.protocol.rpc.RemoteChatJson;
+import com.meshtastic.client.protocol.rpc.RemoteRpcState;
+import com.meshtastic.client.protocol.rpc.RemoteTelemetryJson;
 import com.meshtastic.client.service.FavoriteNodeService;
 import com.meshtastic.client.service.IgnoredNodeService;
 import com.meshtastic.client.service.MessageService;
 import com.meshtastic.client.service.NodeCacheService;
+import com.meshtastic.client.modal.Toast;
 import com.meshtastic.client.system.AllForms;
 import com.meshtastic.client.system.FormManager;
 import com.meshtastic.client.utils.NodeUtils;
 import com.meshtastic.client.utils.SvgIconLoader;
 import com.meshtastic.client.utils.UnicodeTextUtils;
+import javafx.application.Platform;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import javafx.geometry.Insets;
@@ -25,6 +31,10 @@ import javafx.scene.layout.*;
 import javafx.scene.shape.SVGPath;
 import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
+
+import java.time.Duration;
+import java.util.List;
+import java.util.function.Consumer;
 
 /**
  * Unified node details component with a vertical action toolbar on the left and
@@ -37,12 +47,34 @@ import javafx.scene.text.FontWeight;
  */
 public class NodeDetailContent extends HBox {
 
+    private static final Duration REMOTE_RPC_TIMEOUT = Duration.ofSeconds(15);
+
     private final TelemetryChartPanel chartPanel;
     private final ObservableList<String[]> tableData;
     private final int nodeNum;     // Used by protocol operations such as requestNodeInfo and removeNode.
     private final String nodeId;   // Used by identity-based actions such as openDirectChat and deleteNode.
     private final ProtocolHandler protocolHandler;
     private final DeviceState state;
+    private final ActionDelegate actionDelegate;
+    private final RemoteRpcState remoteRpcState;
+
+    public interface ActionDelegate {
+        boolean isFavorite(String nodeId);
+        boolean isIgnored(String nodeId);
+        void openDirectChat(NodeData node);
+        boolean canTraceroute(NodeData node);
+        void tracerouteNode(NodeData node);
+        boolean canRemoteAdmin(NodeData node);
+        void remoteAdminNode(NodeData node);
+        void refreshNode(NodeData node);
+        void deleteNode(NodeData node);
+        void setFavorite(NodeData node, boolean favorite, Consumer<Boolean> callback);
+        void setIgnored(NodeData node, boolean ignored, Consumer<Boolean> callback);
+
+        default RemoteRpcState remoteRpcState() {
+            return null;
+        }
+    }
 
     /**
      * @param state current device state used for telemetry, or {@code null}
@@ -51,10 +83,29 @@ public class NodeDetailContent extends HBox {
      * @param onBeforeNavigate callback invoked before navigating to a direct chat, or {@code null}
      */
     public NodeDetailContent(DeviceState state, NodeData node, ProtocolHandler handler, Runnable onBeforeNavigate) {
+        this(state, node, handler, onBeforeNavigate, null);
+    }
+
+    public NodeDetailContent(DeviceState state,
+                             NodeData node,
+                             ProtocolHandler handler,
+                             Runnable onBeforeNavigate,
+                             ActionDelegate actionDelegate) {
+        this(state, node, handler, onBeforeNavigate, actionDelegate, null);
+    }
+
+    public NodeDetailContent(DeviceState state,
+                             NodeData node,
+                             ProtocolHandler handler,
+                             Runnable onBeforeNavigate,
+                             ActionDelegate actionDelegate,
+                             RemoteRpcState remoteRpcState) {
         this.nodeNum = node.getNodeNum();
         this.nodeId = node.getNodeId();
         this.protocolHandler = handler;
         this.state = state;
+        this.actionDelegate = actionDelegate;
+        this.remoteRpcState = remoteRpcState;
 
         String rawDisplayName = node.getLongName() != null && !node.getLongName().isEmpty()
                 ? node.getLongName() : node.getNodeId() != null ? node.getNodeId() : "?";
@@ -89,9 +140,13 @@ public class NodeDetailContent extends HBox {
             if (onBeforeNavigate != null) {
                 onBeforeNavigate.run();
             }
-            FormChat formChat = (FormChat) AllForms.getForm(FormChat.class);
-            FormManager.showForm(formChat);
-            formChat.openDirectChat(node.getNodeId(), node);
+            if (actionDelegate != null) {
+                actionDelegate.openDirectChat(node);
+            } else {
+                FormChat formChat = (FormChat) AllForms.getForm(FormChat.class);
+                FormManager.showForm(formChat);
+                formChat.openDirectChat(node.getNodeId(), node);
+            }
         });
 
         // Live traceroute to the selected node.
@@ -101,9 +156,17 @@ public class NodeDetailContent extends HBox {
         tracerouteBtn.setContentDisplay(ContentDisplay.GRAPHIC_ONLY);
         tracerouteBtn.getStyleClass().add("drawer-toolbar-button");
         tracerouteBtn.setTooltip(new Tooltip(I18n.t("node.action.traceroute")));
-        tracerouteBtn.setDisable(handler == null || state == null || nodeNum == 0);
-        tracerouteBtn.setOnAction(e ->
-                NodeTracerouteWindow.showWindow(this.state, node, protocolHandler));
+        boolean canTraceroute = actionDelegate == null
+                ? handler != null && state != null && nodeNum != 0
+                : actionDelegate.canTraceroute(node);
+        tracerouteBtn.setDisable(!canTraceroute);
+        tracerouteBtn.setOnAction(e -> {
+            if (actionDelegate != null) {
+                actionDelegate.tracerouteNode(node);
+            } else {
+                NodeTracerouteWindow.showWindow(this.state, node, protocolHandler);
+            }
+        });
 
         SVGPath remoteAdminIcon = SvgIconLoader.load("/drawer/icon/setting.svg", 22);
         Button remoteAdminBtn = new Button();
@@ -111,18 +174,25 @@ public class NodeDetailContent extends HBox {
         remoteAdminBtn.setContentDisplay(ContentDisplay.GRAPHIC_ONLY);
         remoteAdminBtn.getStyleClass().add("drawer-toolbar-button");
         boolean isLocalNode = state != null && nodeNum == state.getMyNodeNum();
-        boolean canRemoteAdmin = handler != null
+        boolean canRemoteAdmin = actionDelegate == null
+                ? handler != null
                 && state != null
                 && nodeNum != 0
                 && !isLocalNode
-                && hasPublicKey;
+                && hasPublicKey
+                : actionDelegate.canRemoteAdmin(node);
         String remoteAdminTooltip = !hasPublicKey
                 ? I18n.t("node.action.remoteAdminNoPublicKey")
                 : I18n.t("node.action.remoteAdmin");
         remoteAdminBtn.setTooltip(new Tooltip(remoteAdminTooltip));
         remoteAdminBtn.setDisable(!canRemoteAdmin);
-        remoteAdminBtn.setOnAction(e ->
-                RemoteAdminPanel.showForNode(this.state, node, protocolHandler));
+        remoteAdminBtn.setOnAction(e -> {
+            if (actionDelegate != null) {
+                actionDelegate.remoteAdminNode(node);
+            } else {
+                RemoteAdminPanel.showForNode(this.state, node, protocolHandler);
+            }
+        });
 
         // Refresh node information over radio and exchange User payloads.
         SVGPath refreshIcon = SvgIconLoader.load("/drawer/icon/refresh-node.svg", 22);
@@ -131,19 +201,23 @@ public class NodeDetailContent extends HBox {
         refreshBtn.setContentDisplay(ContentDisplay.GRAPHIC_ONLY);
         refreshBtn.getStyleClass().add("drawer-toolbar-button");
         refreshBtn.setTooltip(new Tooltip(I18n.t("node.action.refresh")));
-        refreshBtn.setDisable(handler == null || state == null);
+        refreshBtn.setDisable(actionDelegate == null
+                ? handler == null || state == null
+                : nodeNum == 0);
         refreshBtn.setOnAction(e -> {
-            if (protocolHandler != null && this.state != null) {
-                ModalPane.showConfirm(
-                        I18n.t("node.confirm.refresh.title"),
-                        I18n.t("node.confirm.refresh.message", displayName),
-                        confirmed -> {
-                            if (confirmed) {
+            ModalPane.showConfirm(
+                    I18n.t("node.confirm.refresh.title"),
+                    I18n.t("node.confirm.refresh.message", displayName),
+                    confirmed -> {
+                        if (confirmed) {
+                            if (actionDelegate != null) {
+                                actionDelegate.refreshNode(node);
+                            } else if (protocolHandler != null && this.state != null) {
                                 MessageService.exchangeNodeUserInfo(protocolHandler, this.state, nodeNum);
                             }
                         }
-                );
-            }
+                    }
+            );
         });
 
         // Delete the node from the current state and cache.
@@ -153,14 +227,18 @@ public class NodeDetailContent extends HBox {
         deleteBtn.setContentDisplay(ContentDisplay.GRAPHIC_ONLY);
         deleteBtn.getStyleClass().add("drawer-toolbar-button");
         deleteBtn.setTooltip(new Tooltip(I18n.t("node.action.delete")));
-        deleteBtn.setDisable(state == null);
+        deleteBtn.setDisable(actionDelegate == null
+                ? state == null
+                : nodeId == null || nodeId.isBlank());
         deleteBtn.setOnAction(e -> {
-            if (this.state != null) {
-                ModalPane.showConfirm(
-                        I18n.t("node.confirm.delete.title"),
-                        I18n.t("node.confirm.delete.message", displayName),
-                        confirmed -> {
-                            if (confirmed) {
+            ModalPane.showConfirm(
+                    I18n.t("node.confirm.delete.title"),
+                    I18n.t("node.confirm.delete.message", displayName),
+                    confirmed -> {
+                        if (confirmed) {
+                            if (actionDelegate != null) {
+                                actionDelegate.deleteNode(node);
+                            } else if (this.state != null) {
                                 String ownerNodeId = this.state.getOwnerNodeId();
                                 this.state.removeNode(nodeNum);
                                 NodeCacheService.getInstance().deleteNode(nodeId, ownerNodeId);
@@ -169,8 +247,8 @@ public class NodeDetailContent extends HBox {
                                 }
                             }
                         }
-                );
-            }
+                    }
+            );
         });
 
         // Toggle favorite state.
@@ -182,22 +260,25 @@ public class NodeDetailContent extends HBox {
 
         FavoriteNodeService favService = FavoriteNodeService.getInstance();
         String ownerNodeId = currentOwnerNodeId();
-        boolean initFav = !ownerNodeId.isBlank() && favService.isFavorite(nodeId, ownerNodeId);
+        boolean initFav = actionDelegate != null
+                ? actionDelegate.isFavorite(nodeId)
+                : !ownerNodeId.isBlank() && favService.isFavorite(nodeId, ownerNodeId);
         if (initFav) {
             favoriteBtn.getStyleClass().add("favorite-btn-active");
         }
         favoriteBtn.setTooltip(new Tooltip(favoriteTooltip(initFav)));
 
         favoriteBtn.setOnAction(e -> {
-            String currentOwnerNodeId = currentOwnerNodeId();
-            if (currentOwnerNodeId.isBlank()) { return; }
-            boolean nowFav = favService.toggleFavorite(nodeId, currentOwnerNodeId);
-            if (nowFav) {
-                favoriteBtn.getStyleClass().add("favorite-btn-active");
+            if (actionDelegate != null) {
+                boolean nextFav = !actionDelegate.isFavorite(nodeId);
+                actionDelegate.setFavorite(node, nextFav, nowFav ->
+                        updateToggleButton(favoriteBtn, "favorite-btn-active", favoriteTooltip(nowFav), nowFav));
             } else {
-                favoriteBtn.getStyleClass().remove("favorite-btn-active");
+                String currentOwnerNodeId = currentOwnerNodeId();
+                if (currentOwnerNodeId.isBlank()) { return; }
+                boolean nowFav = favService.toggleFavorite(nodeId, currentOwnerNodeId);
+                updateToggleButton(favoriteBtn, "favorite-btn-active", favoriteTooltip(nowFav), nowFav);
             }
-            favoriteBtn.getTooltip().setText(favoriteTooltip(nowFav));
         });
 
         // Toggle ignored state.
@@ -208,22 +289,25 @@ public class NodeDetailContent extends HBox {
         ignoredBtn.getStyleClass().add("drawer-toolbar-button");
 
         IgnoredNodeService ignService = IgnoredNodeService.getInstance();
-        boolean initIgn = !ownerNodeId.isBlank() && ignService.isIgnored(nodeId, ownerNodeId);
+        boolean initIgn = actionDelegate != null
+                ? actionDelegate.isIgnored(nodeId)
+                : !ownerNodeId.isBlank() && ignService.isIgnored(nodeId, ownerNodeId);
         if (initIgn) {
             ignoredBtn.getStyleClass().add("ignored-btn-active");
         }
         ignoredBtn.setTooltip(new Tooltip(ignoredTooltip(initIgn)));
 
         ignoredBtn.setOnAction(e -> {
-            String currentOwnerNodeId = currentOwnerNodeId();
-            if (currentOwnerNodeId.isBlank()) { return; }
-            boolean nowIgn = ignService.toggleIgnored(nodeId, currentOwnerNodeId);
-            if (nowIgn) {
-                ignoredBtn.getStyleClass().add("ignored-btn-active");
+            if (actionDelegate != null) {
+                boolean nextIgn = !actionDelegate.isIgnored(nodeId);
+                actionDelegate.setIgnored(node, nextIgn, nowIgn ->
+                        updateToggleButton(ignoredBtn, "ignored-btn-active", ignoredTooltip(nowIgn), nowIgn));
             } else {
-                ignoredBtn.getStyleClass().remove("ignored-btn-active");
+                String currentOwnerNodeId = currentOwnerNodeId();
+                if (currentOwnerNodeId.isBlank()) { return; }
+                boolean nowIgn = ignService.toggleIgnored(nodeId, currentOwnerNodeId);
+                updateToggleButton(ignoredBtn, "ignored-btn-active", ignoredTooltip(nowIgn), nowIgn);
             }
-            ignoredBtn.getTooltip().setText(ignoredTooltip(nowIgn));
         });
 
         actionToolbar.getItems().addAll(
@@ -287,6 +371,9 @@ public class NodeDetailContent extends HBox {
         VBox.setVgrow(chartPanel, Priority.ALWAYS);
         if (state != null) {
             chartPanel.bind(state, node.getNodeId());
+        } else if (remoteTelemetryState() != null) {
+            chartPanel.setOnPeriodChanged(() -> refreshRemoteTelemetry(node.getNodeId(), remoteTelemetryState()));
+            refreshRemoteTelemetry(node.getNodeId(), remoteTelemetryState());
         }
 
         VBox infoPane = new VBox(10, table, chartPanel);
@@ -331,12 +418,53 @@ public class NodeDetailContent extends HBox {
         return nodeNum;
     }
 
+    private void refreshRemoteTelemetry(String nodeId, RemoteRpcState rpcState) {
+        if (nodeId == null || nodeId.isBlank() || rpcState == null || rpcState.client() == null) {
+            chartPanel.showSnapshot(List.of(), List.of());
+            return;
+        }
+        long now = System.currentTimeMillis() / 1000;
+        long selectedPeriod = chartPanel.getSelectedPeriodSeconds();
+        long sinceEpoch = selectedPeriod > 0 ? now - selectedPeriod : 0;
+        long maxFutureTs = now + 300;
+        rpcState.client()
+                .call("telemetry.dashboard",
+                        RemoteTelemetryJson.dashboardParams(nodeId, sinceEpoch, maxFutureTs),
+                        REMOTE_RPC_TIMEOUT)
+                .whenComplete((result, error) -> Platform.runLater(() -> {
+                    if (error != null) {
+                        Toast.show(Toast.Type.ERROR, I18n.t("chat.remote.error", RemoteChatJson.errorMessage(error)));
+                        chartPanel.showSnapshot(List.of(), List.of());
+                        return;
+                    }
+                    List<TelemetryEntry> entries = RemoteTelemetryJson.parseEntries(result);
+                    List<TelemetryEntry> qualityEntries = RemoteTelemetryJson.parseQualityEntries(result);
+                    chartPanel.showSnapshot(entries, qualityEntries);
+                }));
+    }
+
+    private RemoteRpcState remoteTelemetryState() {
+        RemoteRpcState delegateState = actionDelegate != null ? actionDelegate.remoteRpcState() : null;
+        return delegateState != null ? delegateState : remoteRpcState;
+    }
+
     private static String favoriteTooltip(boolean favorite) {
         return I18n.t(favorite ? "node.menu.removeFavorite" : "node.menu.addFavorite");
     }
 
     private static String ignoredTooltip(boolean ignored) {
         return I18n.t(ignored ? "node.menu.removeIgnored" : "node.menu.addIgnored");
+    }
+
+    private static void updateToggleButton(Button button, String activeStyleClass, String tooltip, boolean active) {
+        if (active) {
+            if (!button.getStyleClass().contains(activeStyleClass)) {
+                button.getStyleClass().add(activeStyleClass);
+            }
+        } else {
+            button.getStyleClass().remove(activeStyleClass);
+        }
+        button.getTooltip().setText(tooltip);
     }
 
     private String currentOwnerNodeId() {

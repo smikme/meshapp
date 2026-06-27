@@ -33,6 +33,7 @@ import java.io.OutputStream;
 import java.lang.reflect.Field;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
@@ -373,6 +374,37 @@ class ConnectionManagerTest {
         ConnectionEntry loaded = ConnectionManager.getInstance().getEntries().getFirst();
 
         assertTrue(loaded.isAutoconnect());
+    }
+
+    @Test
+    void loadNormalizesRemoteRpcProfileProtocol() throws Exception {
+        Path configDir = tempHome.resolve(".meshapp");
+        Files.createDirectories(configDir);
+        Files.writeString(
+                configDir.resolve("connections.json"),
+                """
+                [
+                  {
+                    "id": "rpc-1",
+                    "name": "RPC",
+                    "protocol": "MESHTASTIC",
+                    "type": "REMOTE_RPC",
+                    "host": "127.0.0.1",
+                    "port": 44030,
+                    "remoteAccessKey": "mra1_test"
+                  }
+                ]
+                """,
+                StandardCharsets.UTF_8);
+
+        ConnectionEntry loaded = ConnectionManager.getInstance().getEntries().getFirst();
+
+        assertEquals(ConnectionType.REMOTE_RPC, loaded.getType());
+        assertEquals(ProtocolType.REMOTE_RPC, loaded.getProtocol());
+        assertEquals(ConnectionType.REMOTE_RPC, loaded.getEffectiveType());
+        assertEquals(ProtocolType.REMOTE_RPC, loaded.getEffectiveProtocol());
+        String savedJson = Files.readString(configDir.resolve("connections.json"), StandardCharsets.UTF_8);
+        assertTrue(savedJson.contains("\"protocol\": \"REMOTE_RPC\""));
     }
 
     @Test

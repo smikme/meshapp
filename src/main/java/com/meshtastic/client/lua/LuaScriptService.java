@@ -370,11 +370,15 @@ public final class LuaScriptService {
     }
 
     public synchronized void exportScript(long scriptId, Path targetPath) throws IOException {
+        Files.writeString(targetPath, exportScriptJson(scriptId), StandardCharsets.UTF_8);
+    }
+
+    public synchronized String exportScriptJson(long scriptId) {
         LuaScript script = findScript(scriptId)
                 .orElseThrow(() -> new IllegalStateException(
                         I18n.t("meshIde.service.scriptNotFound", Long.toString(scriptId))));
         LuaScriptExportFile exportFile = LuaScriptExportFile.from(script);
-        Files.writeString(targetPath, SCRIPT_JSON.toJson(exportFile), StandardCharsets.UTF_8);
+        return SCRIPT_JSON.toJson(exportFile);
     }
 
     public synchronized ScriptImportResult importScript(Path sourcePath) throws IOException {

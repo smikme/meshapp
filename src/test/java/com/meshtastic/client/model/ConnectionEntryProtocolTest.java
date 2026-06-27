@@ -49,4 +49,26 @@ class ConnectionEntryProtocolTest {
 
         assertTrue(entry.isAutoconnect());
     }
+
+    @Test
+    void remoteRpcEntryForcesRemoteRpcProtocol() {
+        ConnectionEntry entry = ConnectionEntry.remoteRpc("rpc", "127.0.0.1", 44030, "mra1_test");
+
+        entry.setProtocol(ProtocolType.MESHTASTIC);
+
+        assertEquals(ProtocolType.REMOTE_RPC, entry.getProtocol());
+        assertEquals(ConnectionType.REMOTE_RPC, entry.getEffectiveType());
+        assertEquals(ProtocolType.REMOTE_RPC, entry.getEffectiveProtocol());
+    }
+
+    @Test
+    void remoteRpcProtocolForcesRemoteRpcType() {
+        ConnectionEntry entry = new ConnectionEntry("rpc", "127.0.0.1", 44030);
+
+        entry.setProtocol(ProtocolType.REMOTE_RPC);
+
+        assertEquals(ConnectionType.REMOTE_RPC, entry.getType());
+        assertEquals(ConnectionType.REMOTE_RPC, entry.getEffectiveType());
+        assertEquals(ProtocolType.REMOTE_RPC, entry.getEffectiveProtocol());
+    }
 }

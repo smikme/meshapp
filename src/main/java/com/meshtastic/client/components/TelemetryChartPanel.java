@@ -164,6 +164,8 @@ public class TelemetryChartPanel extends VBox {
 
     /** Callback invoked after data refresh, used to synchronize the log table. */
     private Runnable onDataRefreshed = () -> {};
+    /** Callback invoked when a period button changes the selected time window. */
+    private Runnable onPeriodChanged = () -> {};
 
     /** Last filtered entries, reused by the log table. */
     private List<TelemetryEntry> filteredEntries = List.of();
@@ -263,6 +265,13 @@ public class TelemetryChartPanel extends VBox {
     }
 
     /**
+     * Sets the callback invoked after the user changes the selected period.
+     */
+    public void setOnPeriodChanged(Runnable callback) {
+        onPeriodChanged = Objects.requireNonNullElse(callback, () -> {});
+    }
+
+    /**
      * Binds the component to a device state and node id.
      * It subscribes to telemetry updates and loads data. If the same state and
      * node id are already bound, data is refreshed without resubscribing.
@@ -292,6 +301,24 @@ public class TelemetryChartPanel extends VBox {
         bindingState = Unbound.INSTANCE;
         filteredEntries = List.of();
         updateChart(List.of(), List.of());
+    }
+
+    /**
+     * Displays already loaded telemetry data, used by remote RPC forms.
+     */
+    public void showSnapshot(List<TelemetryEntry> entries, List<TelemetryEntry> qualityEntries) {
+        currentBinding().ifPresent(bound -> bound.state().removeTelemetryListener(telemetryListener));
+        bindingState = Unbound.INSTANCE;
+        filteredEntries = entries != null ? List.copyOf(entries) : List.of();
+        updateChart(filteredEntries, qualityEntries != null ? qualityEntries : List.of());
+        onDataRefreshed.run();
+    }
+
+    /**
+     * Returns the currently selected chart period in seconds; {@code 0} means all data.
+     */
+    public long getSelectedPeriodSeconds() {
+        return selectedPeriodSeconds;
     }
 
     /**
@@ -1607,7 +1634,10 @@ public class TelemetryChartPanel extends VBox {
         button.setStyle("-fx-background-radius: 0; -fx-font-size: 12px;");
         button.setOnAction(event -> {
             selectedPeriodSeconds = option.seconds();
-            refresh();
+            if (currentBinding().isPresent()) {
+                refresh();
+            }
+            onPeriodChanged.run();
         });
         return button;
     }

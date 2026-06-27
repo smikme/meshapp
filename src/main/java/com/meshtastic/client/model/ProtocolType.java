@@ -17,5 +17,8 @@ public enum ProtocolType {
     MESHCORE_KISS,
 
     /** MeshCore Companion Protocol over BLE RX/TX or a raw TCP/serial byte stream. */
-    MESHCORE_COMPANION
+    MESHCORE_COMPANION,
+
+    /** MeshApp host RPC over a direct TCP or router-backed RPC session. */
+    REMOTE_RPC
 }

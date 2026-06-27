@@ -1,18 +1,28 @@
 package com.meshtastic.client.forms;
 
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
 import com.meshtastic.client.components.NodeDetailContent;
+import com.meshtastic.client.components.RemoteAdminPanel;
+import com.meshtastic.client.components.RemoteNodeTracerouteWindow;
 import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.modal.ModalPane;
+import com.meshtastic.client.modal.Toast;
 import com.meshtastic.client.model.ConnectionEntry;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.platform.OsDetect;
 import com.meshtastic.client.protocol.ProtocolHandler;
+import com.meshtastic.client.protocol.ProtocolRuntime;
+import com.meshtastic.client.protocol.rpc.RemoteNodeJson;
+import com.meshtastic.client.protocol.rpc.RemoteRpcState;
 import com.meshtastic.client.service.ConnectionManager;
 import com.meshtastic.client.service.FavoriteNodeService;
 import com.meshtastic.client.service.IgnoredNodeService;
 import com.meshtastic.client.service.NodeCacheService;
+import com.meshtastic.client.system.AllForms;
 import com.meshtastic.client.system.Form;
+import com.meshtastic.client.system.FormManager;
 import com.meshtastic.client.utils.AppPreferences;
 import com.meshtastic.client.utils.BatteryLevelEstimator;
 import com.meshtastic.client.utils.NodeUtils;
@@ -32,13 +42,21 @@ import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
+import javafx.scene.input.MouseButton;
+import javafx.scene.input.MouseEvent;
 import javafx.scene.shape.SVGPath;
 import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
 
+import java.time.Duration;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ExecutionException;
 import java.util.function.IntConsumer;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 /**
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
@@ -47,6 +65,7 @@ import java.util.stream.Collectors;
 public class FormNodes extends Form {
 
     private static final String WINDOWS_HIT_TEST_BACKGROUND = "-fx-background-color: rgba(0,0,0,0.004);";
+    private static final Duration REMOTE_RPC_TIMEOUT = Duration.ofSeconds(15);
 
     private ListView<NodeData> nodeListView;
     private final ObservableList<NodeData> nodeData = FXCollections.observableArrayList();
@@ -63,6 +82,8 @@ public class FormNodes extends Form {
     private int currentDetailNodeNum;
 
     private boolean suppressSelectionListener;
+    private boolean allowMultipleSelectionChange;
+    private Integer selectionAnchorNodeNum;
     private boolean showFavoritesOnly;
     private boolean showDetails;
     private boolean hideOffline;
@@ -76,14 +97,21 @@ public class FormNodes extends Form {
 
     private DeviceState state;
     private ProtocolHandler protocolHandler;
+    private RemoteRpcState remoteRpcState;
+    private String remoteOwnerNodeId = "";
+    private final Map<String, Boolean> remoteFavoriteFlags = new HashMap<>();
+    private final Map<String, Boolean> remoteIgnoredFlags = new HashMap<>();
 
     private final IntConsumer nodeUpdateListener = num -> Platform.runLater(() -> {
         if (state == null) { return; }
         NodeData node = state.getNodeDb().get(num);
 
-            // The node was removed from nodeDb; remove it from the list and clear details.
+        // The node was removed from nodeDb; remove it from the list and clear details.
         if (node == null) {
+            Set<Integer> selectedBeforeRemoval = selectedNodeNums();
+            selectedBeforeRemoval.remove(num);
             nodeData.removeIf(n -> n.getNodeNum() == num);
+            restoreSelection(selectedBeforeRemoval);
             if (num == currentDetailNodeNum) {
                 showDetail(null);
             }
@@ -92,21 +120,17 @@ public class FormNodes extends Form {
 
         for (int i = 0; i < nodeData.size(); i++) {
             if (nodeData.get(i).getNodeNum() == num) {
+                Set<Integer> selectedBeforeUpdate = selectedNodeNums();
                 suppressSelectionListener = true;
                 try {
                     nodeData.set(i, node);
                 } finally {
                     suppressSelectionListener = false;
                 }
-            // Update the right panel only for the actually selected node.
-            // Frequent updates for other nodes would otherwise disturb the detail table during layout/render.
+                restoreSelection(selectedBeforeUpdate);
+                // Update the right panel only for the actually selected node.
+                // Frequent updates for other nodes would otherwise disturb the detail table during layout/render.
                 if (num == currentDetailNodeNum) {
-                    for (NodeData n : nodeListView.getItems()) {
-                        if (n.getNodeNum() == num) {
-                            nodeListView.getSelectionModel().select(n);
-                            break;
-                        }
-                    }
                     refreshDetail();
                 }
                 return;
@@ -356,7 +380,10 @@ public class FormNodes extends Form {
                     if (!suppressSelectionListener) { showDetail(newNode); }
                 });
         nodeListView.getSelectionModel().getSelectedItems().addListener(
-                (ListChangeListener<NodeData>) change -> updateBulkActionBarState());
+                (ListChangeListener<NodeData>) change -> {
+                    enforceExplicitBulkSelection();
+                    updateBulkActionBarState();
+                });
 
         // Node-count badge.
         countBadge = new Label("0");
@@ -434,7 +461,7 @@ public class FormNodes extends Form {
                 "/icons/close.svg",
                 I18n.t("node.bulk.clearSelection")
         );
-        clearSelectionBtn.setOnAction(e -> nodeListView.getSelectionModel().clearSelection());
+        clearSelectionBtn.setOnAction(e -> clearNodeSelection());
 
         HBox bar = new HBox(8, bulkSelectionLabel, addFavoriteBtn, addIgnoredBtn, bulkDeleteBtn, clearSelectionBtn);
         bar.setPadding(new Insets(0, 8, 8, 8));
@@ -482,19 +509,29 @@ public class FormNodes extends Form {
         } else {
             favFilterBtn.getStyleClass().remove("favorite-btn-active");
             favFilterBtn.getTooltip().setText(I18n.t("node.filter.favoriteOnly"));
-            removeOfflineNodes();
+            if (remoteRpcState == null) {
+                removeOfflineNodes();
+            }
         }
-        injectOfflineFilteredNodes();
-        updateFilterPredicate();
+        if (remoteRpcState != null) {
+            reloadList();
+        } else {
+            injectOfflineFilteredNodes();
+            updateFilterPredicate();
+        }
     }
 
     /** Synchronizes ignored-filter state and applies the filter. */
     private void syncIgnoredState() {
-        if (!showIgnoredOnly) {
+        if (!showIgnoredOnly && remoteRpcState == null) {
             removeOfflineNodes();
         }
-        injectOfflineFilteredNodes();
-        updateFilterPredicate();
+        if (remoteRpcState != null) {
+            reloadList();
+        } else {
+            injectOfflineFilteredNodes();
+            updateFilterPredicate();
+        }
     }
 
     // ==================== Distance ====================
@@ -607,8 +644,7 @@ public class FormNodes extends Form {
                 return false;
             }
         // Favorites-only filter.
-            if (showFavoritesOnly
-                    && (ownerNodeId.isBlank() || !favService.isFavorite(node.getNodeId(), ownerNodeId))) {
+            if (showFavoritesOnly && !isFavoriteNode(node, favService, ownerNodeId)) {
                 return false;
             }
         // Direct-only filter for 0-hop nodes.
@@ -616,13 +652,32 @@ public class FormNodes extends Form {
                 return false;
             }
         // Ignored-only filter.
-            if (showIgnoredOnly
-                    && (ownerNodeId.isBlank() || !ignService.isIgnored(node.getNodeId(), ownerNodeId))) {
+            if (showIgnoredOnly && !isIgnoredNode(node, ignService, ownerNodeId)) {
                 return false;
             }
             return true;
         });
         countBadge.setText(String.valueOf(filteredNodes.size()));
+    }
+
+    private boolean isFavoriteNode(NodeData node, FavoriteNodeService service, String ownerNodeId) {
+        if (node == null || node.getNodeId() == null) {
+            return false;
+        }
+        if (remoteRpcState != null) {
+            return remoteFavoriteFlags.getOrDefault(node.getNodeId(), false);
+        }
+        return !ownerNodeId.isBlank() && service.isFavorite(node.getNodeId(), ownerNodeId);
+    }
+
+    private boolean isIgnoredNode(NodeData node, IgnoredNodeService service, String ownerNodeId) {
+        if (node == null || node.getNodeId() == null) {
+            return false;
+        }
+        if (remoteRpcState != null) {
+            return remoteIgnoredFlags.getOrDefault(node.getNodeId(), false);
+        }
+        return !ownerNodeId.isBlank() && service.isIgnored(node.getNodeId(), ownerNodeId);
     }
 
     static boolean matchesSearchQuery(NodeData node, String query) {
@@ -655,13 +710,131 @@ public class FormNodes extends Form {
         bulkActionBar.setManaged(showBulkActions);
         bulkSelectionLabel.setText(selectionCountText(selectedCount));
         if (bulkDeleteBtn != null) {
-            bulkDeleteBtn.setDisable(state == null || selectedCount == 0);
+            bulkDeleteBtn.setDisable((state == null && remoteRpcState == null) || selectedCount == 0);
         }
     }
 
     private List<NodeData> selectedNodes() {
         if (nodeListView == null) { return List.of(); }
         return normalizedNodes(nodeListView.getSelectionModel().getSelectedItems());
+    }
+
+    private void enforceExplicitBulkSelection() {
+        if (nodeListView == null) { return; }
+        List<NodeData> selected = selectedNodes();
+        if (allowMultipleSelectionChange || selected.size() <= 1) {
+            return;
+        }
+
+        NodeData selectedItem = nodeListView.getSelectionModel().getSelectedItem();
+        NodeData nodeToKeep = selectedItem != null ? selectedItem : selected.getLast();
+        int nodeIndex = nodeListView.getItems().indexOf(nodeToKeep);
+
+        allowMultipleSelectionChange = true;
+        try {
+            if (nodeIndex >= 0) {
+                selectionAnchorNodeNum = nodeToKeep.getNodeNum();
+                nodeListView.getSelectionModel().clearAndSelect(nodeIndex);
+                nodeListView.getFocusModel().focus(nodeIndex);
+            } else {
+                clearNodeSelection();
+            }
+        } finally {
+            allowMultipleSelectionChange = false;
+        }
+    }
+
+    private void clearNodeSelection() {
+        selectionAnchorNodeNum = null;
+        nodeListView.getSelectionModel().clearSelection();
+    }
+
+    private void handleNodeCellMousePressed(NodeListCell cell, MouseEvent event) {
+        if (event.getButton() != MouseButton.PRIMARY) { return; }
+
+        if (cell.isEmpty() || cell.getItem() == null) {
+            event.consume();
+            return;
+        }
+
+        selectNodeFromUserClick(cell.getItem(), event);
+        event.consume();
+    }
+
+    private void selectNodeFromUserClick(NodeData node, MouseEvent event) {
+        int nodeIndex = nodeListView.getItems().indexOf(node);
+        if (nodeIndex < 0) { return; }
+
+        if (event.isShiftDown()) {
+            selectNodeRange(nodeIndex);
+        } else if (isShortcutSelectionClick(event)) {
+            toggleNodeSelection(nodeIndex, node);
+        } else {
+            selectSingleNode(nodeIndex, node);
+        }
+    }
+
+    private static boolean isShortcutSelectionClick(MouseEvent event) {
+        return event.isShortcutDown() || event.isControlDown() || event.isMetaDown();
+    }
+
+    private void selectSingleNode(int nodeIndex, NodeData node) {
+        selectionAnchorNodeNum = node.getNodeNum();
+        nodeListView.getSelectionModel().clearAndSelect(nodeIndex);
+        nodeListView.getFocusModel().focus(nodeIndex);
+    }
+
+    private void toggleNodeSelection(int nodeIndex, NodeData node) {
+        selectionAnchorNodeNum = node.getNodeNum();
+        MultipleSelectionModel<NodeData> selectionModel = nodeListView.getSelectionModel();
+        allowMultipleSelectionChange = true;
+        try {
+            if (selectionModel.isSelected(nodeIndex)) {
+                selectionModel.clearSelection(nodeIndex);
+            } else {
+                selectionModel.select(nodeIndex);
+                nodeListView.getFocusModel().focus(nodeIndex);
+            }
+        } finally {
+            allowMultipleSelectionChange = false;
+        }
+    }
+
+    private void selectNodeRange(int clickedIndex) {
+        int anchorIndex = selectionAnchorIndex()
+                .orElseGet(() -> {
+                    int selectedIndex = nodeListView.getSelectionModel().getSelectedIndex();
+                    return selectedIndex >= 0 ? selectedIndex : clickedIndex;
+                });
+        if (selectionAnchorNodeNum == null) {
+            selectionAnchorNodeNum = nodeListView.getItems().get(anchorIndex).getNodeNum();
+        }
+
+        int from = Math.min(anchorIndex, clickedIndex);
+        int to = Math.max(anchorIndex, clickedIndex);
+        MultipleSelectionModel<NodeData> selectionModel = nodeListView.getSelectionModel();
+        allowMultipleSelectionChange = true;
+        suppressSelectionListener = true;
+        try {
+            selectionModel.clearSelection();
+            IntStream.rangeClosed(from, to)
+                    .filter(index -> index != clickedIndex)
+                    .forEach(selectionModel::select);
+            selectionModel.select(clickedIndex);
+            nodeListView.getFocusModel().focus(clickedIndex);
+        } finally {
+            suppressSelectionListener = false;
+            allowMultipleSelectionChange = false;
+        }
+        showDetail(nodeListView.getItems().get(clickedIndex));
+    }
+
+    private OptionalInt selectionAnchorIndex() {
+        if (selectionAnchorNodeNum == null) { return OptionalInt.empty(); }
+        ObservableList<NodeData> items = nodeListView.getItems();
+        return IntStream.range(0, items.size())
+                .filter(index -> items.get(index).getNodeNum() == selectionAnchorNodeNum)
+                .findFirst();
     }
 
     private List<NodeData> contextActionNodes(NodeData contextNode) {
@@ -697,6 +870,10 @@ public class FormNodes extends Form {
     }
 
     private void addFavorites(Collection<NodeData> nodes) {
+        if (remoteRpcState != null) {
+            setRemoteFlags("node.favorite", normalizedNodes(nodes), true, ignored -> nodeListView.refresh());
+            return;
+        }
         String ownerNodeId = currentOwnerNodeId();
         if (ownerNodeId.isBlank()) { return; }
         FavoriteNodeService service = FavoriteNodeService.getInstance();
@@ -707,6 +884,10 @@ public class FormNodes extends Form {
     }
 
     private void addIgnored(Collection<NodeData> nodes) {
+        if (remoteRpcState != null) {
+            setRemoteFlags("node.ignored", normalizedNodes(nodes), true, ignored -> nodeListView.refresh());
+            return;
+        }
         String ownerNodeId = currentOwnerNodeId();
         if (ownerNodeId.isBlank()) { return; }
         IgnoredNodeService service = IgnoredNodeService.getInstance();
@@ -718,7 +899,7 @@ public class FormNodes extends Form {
 
     private void deleteNodesWithConfirmation(Collection<NodeData> nodes) {
         List<NodeData> targets = normalizedNodes(nodes);
-        if (targets.isEmpty() || state == null) { return; }
+        if (targets.isEmpty() || (state == null && remoteRpcState == null)) { return; }
 
         String title;
         String message;
@@ -740,6 +921,10 @@ public class FormNodes extends Form {
     private void deleteNodes(Collection<NodeData> targets) {
         List<NodeData> normalizedTargets = normalizedNodes(targets);
         if (normalizedTargets.isEmpty()) { return; }
+        if (remoteRpcState != null) {
+            deleteRemoteNodes(normalizedTargets);
+            return;
+        }
 
         Set<Integer> deletedNodeNums = normalizedTargets.stream()
                 .map(NodeData::getNodeNum)
@@ -771,6 +956,7 @@ public class FormNodes extends Form {
     }
 
     private void restoreSelection(Set<Integer> nodeNums) {
+        allowMultipleSelectionChange = true;
         suppressSelectionListener = true;
         try {
             nodeListView.getSelectionModel().clearSelection();
@@ -779,8 +965,18 @@ public class FormNodes extends Form {
                     .ifPresent(nums -> nodeListView.getItems().stream()
                             .filter(node -> nums.contains(node.getNodeNum()))
                             .forEach(nodeListView.getSelectionModel()::select));
+            normalizeSelectionAnchor(selectedNodeNums());
         } finally {
             suppressSelectionListener = false;
+            allowMultipleSelectionChange = false;
+        }
+    }
+
+    private void normalizeSelectionAnchor(Set<Integer> selectedNodeNums) {
+        if (selectedNodeNums == null || selectedNodeNums.isEmpty()) {
+            selectionAnchorNodeNum = null;
+        } else if (selectionAnchorNodeNum == null || !selectedNodeNums.contains(selectionAnchorNodeNum)) {
+            selectionAnchorNodeNum = selectedNodeNums.iterator().next();
         }
     }
 
@@ -797,6 +993,9 @@ public class FormNodes extends Form {
     }
 
     private String currentOwnerNodeId() {
+        if (remoteRpcState != null && remoteOwnerNodeId != null && !remoteOwnerNodeId.isBlank()) {
+            return remoteOwnerNodeId;
+        }
         if (state != null && state.getOwnerNodeId() != null) {
             return state.getOwnerNodeId();
         }
@@ -806,6 +1005,207 @@ public class FormNodes extends Form {
         }
         String ownerNodeId = ConnectionManager.getInstance().getOwnerNodeId(entry.getId());
         return ownerNodeId != null && !ownerNodeId.isBlank() && !"?".equals(ownerNodeId) ? ownerNodeId : "";
+    }
+
+    private NodeDetailContent.ActionDelegate remoteNodeActionDelegate() {
+        return new NodeDetailContent.ActionDelegate() {
+            @Override
+            public boolean isFavorite(String nodeId) {
+                return nodeId != null && remoteFavoriteFlags.getOrDefault(nodeId, false);
+            }
+
+            @Override
+            public boolean isIgnored(String nodeId) {
+                return nodeId != null && remoteIgnoredFlags.getOrDefault(nodeId, false);
+            }
+
+            @Override
+            public void openDirectChat(NodeData node) {
+                openRemoteDirectChat(node);
+            }
+
+            @Override
+            public boolean canTraceroute(NodeData node) {
+                return remoteRpcState != null
+                        && remoteRpcState.client() != null
+                        && remoteRpcState.client().isOpen()
+                        && node != null
+                        && node.getNodeNum() != 0;
+            }
+
+            @Override
+            public void tracerouteNode(NodeData node) {
+                RemoteNodeTracerouteWindow.showWindow(remoteRpcState, node);
+            }
+
+            @Override
+            public boolean canRemoteAdmin(NodeData node) {
+                return remoteRpcState != null
+                        && remoteRpcState.client() != null
+                        && remoteRpcState.client().isOpen()
+                        && node != null
+                        && node.getNodeNum() != 0
+                        && node.getPublicKey() != null
+                        && node.getPublicKey().length > 0
+                        && (remoteOwnerNodeId == null
+                        || remoteOwnerNodeId.isBlank()
+                        || !remoteOwnerNodeId.equals(node.getNodeId()));
+            }
+
+            @Override
+            public void remoteAdminNode(NodeData node) {
+                RemoteAdminPanel.showForRemoteNode(remoteRpcState, node);
+            }
+
+            @Override
+            public void refreshNode(NodeData node) {
+                callRemoteNodeAction("node.refresh", RemoteNodeJson.nodeParams(node), ignored -> reloadList());
+            }
+
+            @Override
+            public void deleteNode(NodeData node) {
+                deleteRemoteNodes(List.of(node));
+            }
+
+            @Override
+            public void setFavorite(NodeData node, boolean favorite, Consumer<Boolean> callback) {
+                setRemoteFlag("node.favorite", node, favorite, callback);
+            }
+
+            @Override
+            public void setIgnored(NodeData node, boolean ignored, Consumer<Boolean> callback) {
+                setRemoteFlag("node.ignored", node, ignored, callback);
+            }
+
+            @Override
+            public RemoteRpcState remoteRpcState() {
+                return FormNodes.this.remoteRpcState;
+            }
+        };
+    }
+
+    private void openRemoteDirectChat(NodeData node) {
+        if (node == null || node.getNodeId() == null || node.getNodeId().isBlank()) {
+            return;
+        }
+        FormChat formChat = (FormChat) AllForms.getForm(FormChat.class);
+        FormManager.showForm(formChat);
+        formChat.openDirectChat(node.getNodeId(), node);
+    }
+
+    private void setRemoteFlag(String method, NodeData node, boolean enabled, Consumer<Boolean> callback) {
+        if (node == null) {
+            return;
+        }
+        callRemoteNodeAction(method, RemoteNodeJson.flagParams(node, enabled), result -> {
+            updateRemoteFlagMap(method, node.getNodeId(), enabled);
+            Optional.ofNullable(callback).ifPresent(cb -> cb.accept(enabled));
+            reloadList();
+        });
+    }
+
+    private void setRemoteFlags(String method,
+                                Collection<NodeData> nodes,
+                                boolean enabled,
+                                Consumer<Boolean> callback) {
+        List<NodeData> targets = normalizedNodes(nodes);
+        if (targets.isEmpty() || remoteRpcState == null) {
+            return;
+        }
+        RemoteRpcState rpcState = remoteRpcState;
+        CompletableFuture<?>[] calls = targets.stream()
+                .map(node -> rpcState.client().call(method, RemoteNodeJson.flagParams(node, enabled), REMOTE_RPC_TIMEOUT))
+                .toArray(CompletableFuture[]::new);
+        CompletableFuture.allOf(calls).whenComplete((ignored, error) -> Platform.runLater(() -> {
+            if (rpcState != remoteRpcState) {
+                return;
+            }
+            if (error != null) {
+                Toast.show(Toast.Type.ERROR, I18n.t("chat.remote.error", errorMessage(error)));
+                return;
+            }
+            targets.forEach(node -> updateRemoteFlagMap(method, node.getNodeId(), enabled));
+            Optional.ofNullable(callback).ifPresent(cb -> cb.accept(enabled));
+            reloadList();
+        }));
+    }
+
+    private void updateRemoteFlagMap(String method, String nodeId, boolean enabled) {
+        if (nodeId == null || nodeId.isBlank()) {
+            return;
+        }
+        if ("node.favorite".equals(method)) {
+            remoteFavoriteFlags.put(nodeId, enabled);
+        } else if ("node.ignored".equals(method)) {
+            remoteIgnoredFlags.put(nodeId, enabled);
+        }
+    }
+
+    private void deleteRemoteNodes(Collection<NodeData> nodes) {
+        List<NodeData> targets = normalizedNodes(nodes);
+        if (targets.isEmpty() || remoteRpcState == null) {
+            return;
+        }
+        RemoteRpcState rpcState = remoteRpcState;
+        CompletableFuture<?>[] calls = targets.stream()
+                .map(node -> rpcState.client().call("node.delete", RemoteNodeJson.nodeParams(node), REMOTE_RPC_TIMEOUT))
+                .toArray(CompletableFuture[]::new);
+        CompletableFuture.allOf(calls).whenComplete((ignored, error) -> Platform.runLater(() -> {
+            if (rpcState != remoteRpcState) {
+                return;
+            }
+            if (error != null) {
+                Toast.show(Toast.Type.ERROR, I18n.t("chat.remote.error", errorMessage(error)));
+                return;
+            }
+            Set<Integer> deletedNodeNums = targets.stream()
+                    .map(NodeData::getNodeNum)
+                    .collect(Collectors.toCollection(LinkedHashSet::new));
+            nodeData.removeIf(node -> deletedNodeNums.contains(node.getNodeNum()));
+            remoteFavoriteFlags.keySet().removeIf(nodeId -> targets.stream()
+                    .anyMatch(node -> Objects.equals(node.getNodeId(), nodeId)));
+            remoteIgnoredFlags.keySet().removeIf(nodeId -> targets.stream()
+                    .anyMatch(node -> Objects.equals(node.getNodeId(), nodeId)));
+            if (deletedNodeNums.contains(currentDetailNodeNum)) {
+                showDetail(nodeListView.getSelectionModel().getSelectedItem());
+            }
+            updateFilterPredicate();
+            updateBulkActionBarState();
+            reloadList();
+        }));
+    }
+
+    private void callRemoteNodeAction(String method, JsonObject params, Consumer<JsonElement> onSuccess) {
+        RemoteRpcState rpcState = remoteRpcState;
+        if (rpcState == null) {
+            return;
+        }
+        rpcState.client().call(method, params, REMOTE_RPC_TIMEOUT)
+                .whenComplete((result, error) -> Platform.runLater(() -> {
+                    if (rpcState != remoteRpcState) {
+                        return;
+                    }
+                    if (error != null) {
+                        Toast.show(Toast.Type.ERROR, I18n.t("chat.remote.error", errorMessage(error)));
+                        return;
+                    }
+                    if (onSuccess != null) {
+                        onSuccess.accept(result);
+                    }
+                }));
+    }
+
+    private static String errorMessage(Throwable error) {
+        Throwable current = error;
+        while (current instanceof CompletionException || current instanceof ExecutionException) {
+            Throwable cause = current.getCause();
+            if (cause == null) {
+                break;
+            }
+            current = cause;
+        }
+        String message = current != null ? current.getMessage() : null;
+        return message == null || message.isBlank() ? String.valueOf(error) : message;
     }
 
     // ==================== Node list cell ====================
@@ -821,6 +1221,13 @@ public class FormNodes extends Form {
         private final StackPane starPane = new StackPane();
 
         NodeListCell() {
+            addEventFilter(MouseEvent.MOUSE_PRESSED, event -> handleNodeCellMousePressed(this, event));
+            addEventFilter(MouseEvent.MOUSE_CLICKED, event -> {
+                if (event.getButton() == MouseButton.PRIMARY) {
+                    event.consume();
+                }
+            });
+
             root.setAlignment(Pos.CENTER_LEFT);
             root.setPadding(new Insets(6, 10, 6, 10));
             root.getStyleClass().add("node-list-cell-root");
@@ -869,13 +1276,9 @@ public class FormNodes extends Form {
                 NodeData nd = getItem();
                 List<NodeData> targets = contextActionNodes(nd);
                 boolean bulk = targets.size() > 1;
-                String ownerNodeId = currentOwnerNodeId();
-                boolean fav = nd != null
-                        && !ownerNodeId.isBlank()
-                        && FavoriteNodeService.getInstance().isFavorite(nd.getNodeId(), ownerNodeId);
-                boolean ign = nd != null
-                        && !ownerNodeId.isBlank()
-                        && IgnoredNodeService.getInstance().isIgnored(nd.getNodeId(), ownerNodeId);
+	                String ownerNodeId = currentOwnerNodeId();
+	                boolean fav = isFavoriteNode(nd, FavoriteNodeService.getInstance(), ownerNodeId);
+	                boolean ign = isIgnoredNode(nd, IgnoredNodeService.getInstance(), ownerNodeId);
 
                 addFavItem.setText(I18n.t(bulk ? "node.menu.addSelectedFavorite" : "node.menu.addFavorite"));
                 addIgnItem.setText(I18n.t(bulk ? "node.menu.addSelectedIgnored" : "node.menu.addIgnored"));
@@ -885,7 +1288,7 @@ public class FormNodes extends Form {
                 removeFavItem.setVisible(!bulk && fav);
                 addIgnItem.setVisible(bulk || !ign);
                 removeIgnItem.setVisible(!bulk && ign);
-                deleteItem.setVisible(!targets.isEmpty() && state != null);
+	                deleteItem.setVisible(!targets.isEmpty() && (state != null || remoteRpcState != null));
                 favoriteSeparator.setVisible(addIgnItem.isVisible() || removeIgnItem.isVisible());
                 deleteSeparator.setVisible(deleteItem.isVisible());
             });
@@ -895,26 +1298,34 @@ public class FormNodes extends Form {
                 addFavorites(contextActionNodes(nd));
             });
 
-            removeFavItem.setOnAction(ev -> {
-                NodeData nd = getItem();
-                String ownerNodeId = currentOwnerNodeId();
-                if (nd != null && !ownerNodeId.isBlank()) {
-                    FavoriteNodeService.getInstance().removeFavorite(nd.getNodeId(), ownerNodeId);
-                }
-            });
+	            removeFavItem.setOnAction(ev -> {
+	                NodeData nd = getItem();
+	                if (remoteRpcState != null) {
+	                    setRemoteFlags("node.favorite", contextActionNodes(nd), false, ignored -> nodeListView.refresh());
+	                } else {
+	                    String ownerNodeId = currentOwnerNodeId();
+	                    if (nd != null && !ownerNodeId.isBlank()) {
+	                        FavoriteNodeService.getInstance().removeFavorite(nd.getNodeId(), ownerNodeId);
+	                    }
+	                }
+	            });
 
             addIgnItem.setOnAction(ev -> {
                 NodeData nd = getItem();
                 addIgnored(contextActionNodes(nd));
             });
 
-            removeIgnItem.setOnAction(ev -> {
-                NodeData nd = getItem();
-                String ownerNodeId = currentOwnerNodeId();
-                if (nd != null && !ownerNodeId.isBlank()) {
-                    IgnoredNodeService.getInstance().removeIgnored(nd.getNodeId(), ownerNodeId);
-                }
-            });
+	            removeIgnItem.setOnAction(ev -> {
+	                NodeData nd = getItem();
+	                if (remoteRpcState != null) {
+	                    setRemoteFlags("node.ignored", contextActionNodes(nd), false, ignored -> nodeListView.refresh());
+	                } else {
+	                    String ownerNodeId = currentOwnerNodeId();
+	                    if (nd != null && !ownerNodeId.isBlank()) {
+	                        IgnoredNodeService.getInstance().removeIgnored(nd.getNodeId(), ownerNodeId);
+	                    }
+	                }
+	            });
 
             deleteItem.setOnAction(ev -> {
                 NodeData nd = getItem();
@@ -999,9 +1410,8 @@ public class FormNodes extends Form {
 
         // Favorite star.
             String ownerNodeId = currentOwnerNodeId();
-            boolean isFav = !ownerNodeId.isBlank()
-                    && FavoriteNodeService.getInstance().isFavorite(node.getNodeId(), ownerNodeId);
-            starPane.setVisible(isFav);
+	            boolean isFav = isFavoriteNode(node, FavoriteNodeService.getInstance(), ownerNodeId);
+	            starPane.setVisible(isFav);
             starPane.setManaged(isFav);
 
             setGraphic(root);
@@ -1022,7 +1432,7 @@ public class FormNodes extends Form {
     }
 
     private void showNodeDetail(NodeData node) {
-        if (!node.hasName()) {
+        if (remoteRpcState == null && !node.hasName()) {
             NodeCacheService.getInstance().enrichFromCache(node);
         }
 
@@ -1033,7 +1443,12 @@ public class FormNodes extends Form {
 
         detachCurrentDetailContent();
         currentDetailNodeNum = node.getNodeNum();
-        currentDetailContent = new NodeDetailContent(state, node, protocolHandler);
+        currentDetailContent = new NodeDetailContent(
+                state,
+                node,
+                protocolHandler,
+                null,
+                remoteRpcState != null ? remoteNodeActionDelegate() : null);
         VBox.setVgrow(currentDetailContent, Priority.ALWAYS);
 
         detailPane.getChildren().setAll(createDetailScrollPane(currentDetailContent));
@@ -1085,14 +1500,20 @@ public class FormNodes extends Form {
         var mgr = ConnectionManager.getInstance();
         DeviceState newState = null;
         ProtocolHandler newHandler = null;
+        RemoteRpcState newRemoteRpcState = null;
 
         ConnectionEntry entry = mgr.getSelectedConnectionEntry();
         if (entry != null && entry.isConnected()) {
-            newState = mgr.getDeviceState(entry.getId());
-            newHandler = mgr.getProtocolHandler(entry.getId());
+            ProtocolRuntime<?> runtime = mgr.getProtocolRuntime(entry.getId());
+            if (runtime != null && runtime.getState() instanceof RemoteRpcState remoteState) {
+                newRemoteRpcState = remoteState;
+            } else {
+                newState = mgr.getDeviceState(entry.getId());
+                newHandler = mgr.getProtocolHandler(entry.getId());
+            }
         }
 
-        if (newState == this.state) {
+        if (newState == this.state && newRemoteRpcState == this.remoteRpcState) {
             reloadList();
             return;
         }
@@ -1103,6 +1524,10 @@ public class FormNodes extends Form {
 
         this.state = newState;
         this.protocolHandler = newHandler;
+        this.remoteRpcState = newRemoteRpcState;
+        this.remoteOwnerNodeId = "";
+        this.remoteFavoriteFlags.clear();
+        this.remoteIgnoredFlags.clear();
 
         if (this.state != null) {
             this.state.addNodeUpdateListener(nodeUpdateListener);
@@ -1113,6 +1538,10 @@ public class FormNodes extends Form {
 
     private void reloadList() {
         Set<Integer> selectedNodeNums = selectedNodeNums();
+        if (remoteRpcState != null) {
+            reloadRemoteList(selectedNodeNums);
+            return;
+        }
 
         // Suppress the listener so setAll() -> null selection does not close details.
         suppressSelectionListener = true;
@@ -1125,14 +1554,46 @@ public class FormNodes extends Form {
             injectOfflineFilteredNodes();
             updateFilterPredicate();
 
-            nodeListView.getSelectionModel().clearSelection();
-            if (!selectedNodeNums.isEmpty()) {
-                for (NodeData node : nodeListView.getItems()) {
-                    if (selectedNodeNums.contains(node.getNodeNum())) {
-                        nodeListView.getSelectionModel().select(node);
+            restoreSelection(selectedNodeNums);
+        } finally {
+            suppressSelectionListener = false;
+            updateBulkActionBarState();
+        }
+    }
+
+    private void reloadRemoteList(Set<Integer> selectedNodeNums) {
+        RemoteRpcState rpcState = remoteRpcState;
+        if (rpcState == null) {
+            return;
+        }
+        rpcState.client()
+                .call("node.list",
+                        RemoteNodeJson.listParams(showFavoritesOnly, showIgnoredOnly),
+                        REMOTE_RPC_TIMEOUT)
+                .whenComplete((result, error) -> Platform.runLater(() -> {
+                    if (rpcState != remoteRpcState) {
+                        return;
                     }
-                }
-            }
+                    if (error != null) {
+                        Toast.show(Toast.Type.ERROR, I18n.t("chat.remote.error", errorMessage(error)));
+                        return;
+                    }
+                    applyRemoteNodeSnapshot(result, selectedNodeNums);
+                }));
+    }
+
+    private void applyRemoteNodeSnapshot(JsonElement result, Set<Integer> selectedNodeNums) {
+        suppressSelectionListener = true;
+        try {
+            remoteOwnerNodeId = RemoteNodeJson.ownerNodeId(result);
+            remoteFavoriteFlags.clear();
+            remoteFavoriteFlags.putAll(RemoteNodeJson.parseFavoriteFlags(result));
+            remoteIgnoredFlags.clear();
+            remoteIgnoredFlags.putAll(RemoteNodeJson.parseIgnoredFlags(result));
+            nodeData.setAll(RemoteNodeJson.parseNodes(result));
+            updateFilterPredicate();
+            restoreSelection(selectedNodeNums);
+            refreshDetail();
         } finally {
             suppressSelectionListener = false;
             updateBulkActionBarState();

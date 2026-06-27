@@ -1,5 +1,10 @@
 package com.meshtastic.client.forms;
 
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.meshtastic.client.components.NodeDetailContent;
+import com.meshtastic.client.components.RemoteAdminPanel;
+import com.meshtastic.client.components.RemoteNodeTracerouteWindow;
 import com.meshtastic.client.components.chat.ChatBotCommandHelper;
 import com.meshtastic.client.components.chat.ChatDbKey;
 import com.meshtastic.client.components.chat.ChatInputBar;
@@ -10,11 +15,14 @@ import com.meshtastic.client.components.chat.MessageBubbleFactory;
 import com.meshtastic.client.components.chat.TracerouteView;
 import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.lua.LuaScript;
-import com.meshtastic.client.lua.LuaScriptService;
 import com.meshtastic.client.modal.Toast;
 import com.meshtastic.client.model.ChatItem;
+import com.meshtastic.client.model.MessageChangeEvent;
 import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.model.NodeData;
+import com.meshtastic.client.protocol.rpc.RemoteChatJson;
+import com.meshtastic.client.protocol.rpc.RemoteNodeJson;
+import com.meshtastic.client.protocol.rpc.RemoteRpcState;
 import com.meshtastic.client.service.MessageService;
 import com.meshtastic.client.themes.TypographyManager;
 import com.meshtastic.client.utils.AppPreferences;
@@ -58,6 +66,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.function.Consumer;
 
 /**
  * Builds and owns the JavaFX structure of the chat form.
@@ -321,14 +331,18 @@ abstract class FormChatUi extends FormChatBase {
     }
 
     private List<LuaScript> quickLaunchScripts() {
-        return LuaScriptService.getInstance().listScripts().stream()
-                .filter(LuaScript::isEnabled)
-                .filter(script -> script.getBotType() == LuaScript.BotType.AUTOMATION_BOT)
-                .filter(script -> hasText(script.getAutomationName()))
-                .sorted(Comparator
-                        .comparing(FormChatUi::quickScriptDisplayName, String.CASE_INSENSITIVE_ORDER)
-                        .thenComparing(script -> script.getAutomationName().trim(), String.CASE_INSENSITIVE_ORDER))
-                .toList();
+        try {
+            return luaScripts().listScripts().stream()
+                    .filter(LuaScript::isEnabled)
+                    .filter(script -> script.getBotType() == LuaScript.BotType.AUTOMATION_BOT)
+                    .filter(script -> hasText(script.getAutomationName()))
+                    .sorted(Comparator
+                            .comparing(FormChatUi::quickScriptDisplayName, String.CASE_INSENSITIVE_ORDER)
+                            .thenComparing(script -> script.getAutomationName().trim(), String.CASE_INSENSITIVE_ORDER))
+                    .toList();
+        } catch (RuntimeException e) {
+            return List.of();
+        }
     }
 
     private MenuItem createQuickScriptMenuItem(LuaScript script) {
@@ -376,7 +390,7 @@ abstract class FormChatUi extends FormChatBase {
     }
 
     private MessageBubbleFactory createBubbleFactory() {
-        return new MessageBubbleFactory(
+        MessageBubbleFactory factory = new MessageBubbleFactory(
                 state,
                 messageContainer.widthProperty(),
                 new MessageBubbleFactory.BubbleActions() {
@@ -402,6 +416,155 @@ abstract class FormChatUi extends FormChatBase {
                     }
                 },
                 pendingStatusLabels);
+        factory.setRemoteNodeDetailsProvider(this::resolveRemoteNodeForDetails, this::remoteNodeActionDelegate);
+        return factory;
+    }
+
+    private CompletableFuture<NodeData> resolveRemoteNodeForDetails(String nodeId) {
+        RemoteRpcState rpcState = remoteRpcState;
+        if (rpcState == null || nodeId == null || nodeId.isBlank()) {
+            return CompletableFuture.completedFuture(null);
+        }
+        return rpcState.client()
+                .call("node.get", RemoteNodeJson.nodeIdParams(nodeId), REMOTE_RPC_TIMEOUT)
+                .thenApply(result -> {
+                    if (rpcState != remoteRpcState) {
+                        return null;
+                    }
+                    updateRemoteNodeFlagCaches(result);
+                    List<NodeData> nodes = RemoteNodeJson.parseNodes(result);
+                    return nodes.isEmpty() ? null : nodes.getFirst();
+                });
+    }
+
+    private NodeDetailContent.ActionDelegate remoteNodeActionDelegate() {
+        RemoteRpcState rpcState = remoteRpcState;
+        return new NodeDetailContent.ActionDelegate() {
+            @Override
+            public boolean isFavorite(String nodeId) {
+                return nodeId != null && remoteNodeFavoriteFlags.getOrDefault(nodeId, false);
+            }
+
+            @Override
+            public boolean isIgnored(String nodeId) {
+                return nodeId != null && remoteNodeIgnoredFlags.getOrDefault(nodeId, false);
+            }
+
+            @Override
+            public void openDirectChat(NodeData node) {
+                if (node != null && node.getNodeId() != null && !node.getNodeId().isBlank()) {
+                    FormChatUi.this.openDirectChat(node.getNodeId(), node);
+                }
+            }
+
+            @Override
+            public boolean canTraceroute(NodeData node) {
+                return rpcState != null
+                        && rpcState.client() != null
+                        && rpcState.client().isOpen()
+                        && node != null
+                        && node.getNodeNum() != 0;
+            }
+
+            @Override
+            public void tracerouteNode(NodeData node) {
+                RemoteNodeTracerouteWindow.showWindow(rpcState, node);
+            }
+
+            @Override
+            public boolean canRemoteAdmin(NodeData node) {
+                return rpcState != null
+                        && rpcState.client() != null
+                        && rpcState.client().isOpen()
+                        && node != null
+                        && node.getNodeNum() != 0
+                        && node.getPublicKey() != null
+                        && node.getPublicKey().length > 0;
+            }
+
+            @Override
+            public void remoteAdminNode(NodeData node) {
+                RemoteAdminPanel.showForRemoteNode(rpcState, node);
+            }
+
+            @Override
+            public void refreshNode(NodeData node) {
+                callRemoteNodeAction(rpcState, "node.refresh", RemoteNodeJson.nodeParams(node), ignored -> { });
+            }
+
+            @Override
+            public void deleteNode(NodeData node) {
+                callRemoteNodeAction(rpcState, "node.delete", RemoteNodeJson.nodeParams(node), result -> {
+                    if (node != null && node.getNodeId() != null) {
+                        remoteNodeFavoriteFlags.remove(node.getNodeId());
+                        remoteNodeIgnoredFlags.remove(node.getNodeId());
+                    }
+                    reloadChatList();
+                });
+            }
+
+            @Override
+            public void setFavorite(NodeData node, boolean favorite, Consumer<Boolean> callback) {
+                callRemoteNodeAction(rpcState, "node.favorite", RemoteNodeJson.flagParams(node, favorite), result -> {
+                    updateRemoteNodeFlagMap("node.favorite", node != null ? node.getNodeId() : null, favorite);
+                    Optional.ofNullable(callback).ifPresent(cb -> cb.accept(favorite));
+                    reloadChatList();
+                });
+            }
+
+            @Override
+            public void setIgnored(NodeData node, boolean ignored, Consumer<Boolean> callback) {
+                callRemoteNodeAction(rpcState, "node.ignored", RemoteNodeJson.flagParams(node, ignored), result -> {
+                    updateRemoteNodeFlagMap("node.ignored", node != null ? node.getNodeId() : null, ignored);
+                    Optional.ofNullable(callback).ifPresent(cb -> cb.accept(ignored));
+                    reloadChatList();
+                });
+            }
+
+            @Override
+            public RemoteRpcState remoteRpcState() {
+                return rpcState;
+            }
+        };
+    }
+
+    private void callRemoteNodeAction(RemoteRpcState rpcState,
+                                      String method,
+                                      JsonObject params,
+                                      Consumer<JsonElement> onSuccess) {
+        if (rpcState == null) {
+            return;
+        }
+        rpcState.client().call(method, params, REMOTE_RPC_TIMEOUT)
+                .whenComplete((result, error) -> Platform.runLater(() -> {
+                    if (rpcState != remoteRpcState) {
+                        return;
+                    }
+                    if (error != null) {
+                        Toast.show(Toast.Type.ERROR, I18n.t("chat.remote.error", RemoteChatJson.errorMessage(error)));
+                        return;
+                    }
+                    updateRemoteNodeFlagCaches(result);
+                    if (onSuccess != null) {
+                        onSuccess.accept(result);
+                    }
+                }));
+    }
+
+    private void updateRemoteNodeFlagCaches(JsonElement result) {
+        remoteNodeFavoriteFlags.putAll(RemoteNodeJson.parseFavoriteFlags(result));
+        remoteNodeIgnoredFlags.putAll(RemoteNodeJson.parseIgnoredFlags(result));
+    }
+
+    private void updateRemoteNodeFlagMap(String method, String nodeId, boolean enabled) {
+        if (nodeId == null || nodeId.isBlank()) {
+            return;
+        }
+        if ("node.favorite".equals(method)) {
+            remoteNodeFavoriteFlags.put(nodeId, enabled);
+        } else if ("node.ignored".equals(method)) {
+            remoteNodeIgnoredFlags.put(nodeId, enabled);
+        }
     }
 
     private ScrollPane createMessageScrollPane() {
@@ -652,16 +815,20 @@ abstract class FormChatUi extends FormChatBase {
     }
 
     private List<ChatBotCommandHelper.BotDefinition> automationBotDefinitions() {
-        return LuaScriptService.getInstance().listScripts().stream()
-                .filter(LuaScript::isEnabled)
-                .filter(script -> script.getBotType() == LuaScript.BotType.AUTOMATION_BOT)
-                .filter(script -> hasText(script.getAutomationName()))
-                .map(script -> new ChatBotCommandHelper.BotDefinition(
-                        script.getAutomationName().trim(),
-                        automationSuggestionDescription(script),
-                        ChatBotCommandHelper.BotAction.AUTOMATION,
-                        script.getId()))
-                .toList();
+        try {
+            return luaScripts().listScripts().stream()
+                    .filter(LuaScript::isEnabled)
+                    .filter(script -> script.getBotType() == LuaScript.BotType.AUTOMATION_BOT)
+                    .filter(script -> hasText(script.getAutomationName()))
+                    .map(script -> new ChatBotCommandHelper.BotDefinition(
+                            script.getAutomationName().trim(),
+                            automationSuggestionDescription(script),
+                            ChatBotCommandHelper.BotAction.AUTOMATION,
+                            script.getId()))
+                    .toList();
+        } catch (RuntimeException e) {
+            return List.of();
+        }
     }
 
     private static String automationSuggestionDescription(LuaScript script) {
@@ -677,6 +844,10 @@ abstract class FormChatUi extends FormChatBase {
     }
 
     private void sendChatMessage(ChatInputBar.SendRequest request) {
+        if (remoteRpcState != null) {
+            sendRemoteChatMessage(request);
+            return;
+        }
         if (Optional.ofNullable(selectedChat).isEmpty()
                 || Optional.ofNullable(state).isEmpty()
                 || (Optional.ofNullable(protocolHandler).isEmpty()
@@ -691,6 +862,42 @@ abstract class FormChatUi extends FormChatBase {
         if (sent) {
             refreshCurrentChatAfterLocalSend();
         }
+    }
+
+    private void sendRemoteChatMessage(ChatInputBar.SendRequest request) {
+        if (selectedChat == null || remoteRpcState == null || request == null) {
+            return;
+        }
+        var rpcState = remoteRpcState;
+        ChatItem requestChat = selectedChat;
+        String chatType = currentChatType();
+        String chatKey = currentChatKey();
+        String ownerNodeId = currentOwnerNodeId();
+        rpcState.client()
+                .call("chat.send",
+                        RemoteChatJson.sendParams(
+                                chatType,
+                                chatKey,
+                                request.text(),
+                                request.replyId()),
+                        REMOTE_RPC_TIMEOUT)
+                .whenComplete((result, error) -> Platform.runLater(() -> {
+                    if (rpcState != remoteRpcState
+                            || selectedChat == null
+                            || !chatItemMatches(selectedChat, requestChat)) {
+                        return;
+                    }
+                    if (error != null) {
+                        Toast.show(Toast.Type.ERROR, I18n.t("chat.remote.error", RemoteChatJson.errorMessage(error)));
+                        return;
+                    }
+                    MeshMessage sent = RemoteChatJson.parseResultMessage(result);
+                    if (sent == null) {
+                        reloadChatList();
+                        return;
+                    }
+                    scheduleMessageChangeRefresh(MessageChangeEvent.newMessage(chatType, chatKey, ownerNodeId, sent));
+                }));
     }
 
     private boolean sendChannelMessage(ChatInputBar.SendRequest request) {
@@ -932,6 +1139,11 @@ abstract class FormChatUi extends FormChatBase {
     }
 
     protected String currentOwnerNodeId() {
+        if (remoteRpcState != null) {
+            return boundConnectionId == null || boundConnectionId.isBlank()
+                    ? "remote"
+                    : "remote:" + boundConnectionId;
+        }
         return Optional.ofNullable(state)
                 .map(deviceState -> deviceState.getOwnerNodeId())
                 .orElse("");
