@@ -1517,7 +1517,11 @@ public class FormMap extends Form {
         }
 
         NodeCacheService.getInstance().enrichFromCache(node);
-        NodeDetailPanel.showForNode(state, node);
+        if (remoteRpcState != null) {
+            NodeDetailPanel.showForRemoteNode(remoteRpcState, node);
+        } else {
+            NodeDetailPanel.showForNode(state, node);
+        }
         statusLabel.setText(I18n.t("map.marker.opened", nodeTitle(node)));
     }
 

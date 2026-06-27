@@ -1076,6 +1076,11 @@ public class FormNodes extends Form {
             public void setIgnored(NodeData node, boolean ignored, Consumer<Boolean> callback) {
                 setRemoteFlag("node.ignored", node, ignored, callback);
             }
+
+            @Override
+            public RemoteRpcState remoteRpcState() {
+                return FormNodes.this.remoteRpcState;
+            }
         };
     }
 

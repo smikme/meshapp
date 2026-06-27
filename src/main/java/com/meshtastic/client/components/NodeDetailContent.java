@@ -5,16 +5,22 @@ import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.modal.ModalPane;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.NodeData;
+import com.meshtastic.client.model.TelemetryEntry;
 import com.meshtastic.client.protocol.ProtocolHandler;
+import com.meshtastic.client.protocol.rpc.RemoteChatJson;
+import com.meshtastic.client.protocol.rpc.RemoteRpcState;
+import com.meshtastic.client.protocol.rpc.RemoteTelemetryJson;
 import com.meshtastic.client.service.FavoriteNodeService;
 import com.meshtastic.client.service.IgnoredNodeService;
 import com.meshtastic.client.service.MessageService;
 import com.meshtastic.client.service.NodeCacheService;
+import com.meshtastic.client.modal.Toast;
 import com.meshtastic.client.system.AllForms;
 import com.meshtastic.client.system.FormManager;
 import com.meshtastic.client.utils.NodeUtils;
 import com.meshtastic.client.utils.SvgIconLoader;
 import com.meshtastic.client.utils.UnicodeTextUtils;
+import javafx.application.Platform;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import javafx.geometry.Insets;
@@ -26,6 +32,8 @@ import javafx.scene.shape.SVGPath;
 import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
 
+import java.time.Duration;
+import java.util.List;
 import java.util.function.Consumer;
 
 /**
@@ -39,6 +47,8 @@ import java.util.function.Consumer;
  */
 public class NodeDetailContent extends HBox {
 
+    private static final Duration REMOTE_RPC_TIMEOUT = Duration.ofSeconds(15);
+
     private final TelemetryChartPanel chartPanel;
     private final ObservableList<String[]> tableData;
     private final int nodeNum;     // Used by protocol operations such as requestNodeInfo and removeNode.
@@ -46,6 +56,7 @@ public class NodeDetailContent extends HBox {
     private final ProtocolHandler protocolHandler;
     private final DeviceState state;
     private final ActionDelegate actionDelegate;
+    private final RemoteRpcState remoteRpcState;
 
     public interface ActionDelegate {
         boolean isFavorite(String nodeId);
@@ -59,6 +70,10 @@ public class NodeDetailContent extends HBox {
         void deleteNode(NodeData node);
         void setFavorite(NodeData node, boolean favorite, Consumer<Boolean> callback);
         void setIgnored(NodeData node, boolean ignored, Consumer<Boolean> callback);
+
+        default RemoteRpcState remoteRpcState() {
+            return null;
+        }
     }
 
     /**
@@ -76,11 +91,21 @@ public class NodeDetailContent extends HBox {
                              ProtocolHandler handler,
                              Runnable onBeforeNavigate,
                              ActionDelegate actionDelegate) {
+        this(state, node, handler, onBeforeNavigate, actionDelegate, null);
+    }
+
+    public NodeDetailContent(DeviceState state,
+                             NodeData node,
+                             ProtocolHandler handler,
+                             Runnable onBeforeNavigate,
+                             ActionDelegate actionDelegate,
+                             RemoteRpcState remoteRpcState) {
         this.nodeNum = node.getNodeNum();
         this.nodeId = node.getNodeId();
         this.protocolHandler = handler;
         this.state = state;
         this.actionDelegate = actionDelegate;
+        this.remoteRpcState = remoteRpcState;
 
         String rawDisplayName = node.getLongName() != null && !node.getLongName().isEmpty()
                 ? node.getLongName() : node.getNodeId() != null ? node.getNodeId() : "?";
@@ -346,6 +371,9 @@ public class NodeDetailContent extends HBox {
         VBox.setVgrow(chartPanel, Priority.ALWAYS);
         if (state != null) {
             chartPanel.bind(state, node.getNodeId());
+        } else if (remoteTelemetryState() != null) {
+            chartPanel.setOnPeriodChanged(() -> refreshRemoteTelemetry(node.getNodeId(), remoteTelemetryState()));
+            refreshRemoteTelemetry(node.getNodeId(), remoteTelemetryState());
         }
 
         VBox infoPane = new VBox(10, table, chartPanel);
@@ -388,6 +416,36 @@ public class NodeDetailContent extends HBox {
 
     public int getNodeNum() {
         return nodeNum;
+    }
+
+    private void refreshRemoteTelemetry(String nodeId, RemoteRpcState rpcState) {
+        if (nodeId == null || nodeId.isBlank() || rpcState == null || rpcState.client() == null) {
+            chartPanel.showSnapshot(List.of(), List.of());
+            return;
+        }
+        long now = System.currentTimeMillis() / 1000;
+        long selectedPeriod = chartPanel.getSelectedPeriodSeconds();
+        long sinceEpoch = selectedPeriod > 0 ? now - selectedPeriod : 0;
+        long maxFutureTs = now + 300;
+        rpcState.client()
+                .call("telemetry.dashboard",
+                        RemoteTelemetryJson.dashboardParams(nodeId, sinceEpoch, maxFutureTs),
+                        REMOTE_RPC_TIMEOUT)
+                .whenComplete((result, error) -> Platform.runLater(() -> {
+                    if (error != null) {
+                        Toast.show(Toast.Type.ERROR, I18n.t("chat.remote.error", RemoteChatJson.errorMessage(error)));
+                        chartPanel.showSnapshot(List.of(), List.of());
+                        return;
+                    }
+                    List<TelemetryEntry> entries = RemoteTelemetryJson.parseEntries(result);
+                    List<TelemetryEntry> qualityEntries = RemoteTelemetryJson.parseQualityEntries(result);
+                    chartPanel.showSnapshot(entries, qualityEntries);
+                }));
+    }
+
+    private RemoteRpcState remoteTelemetryState() {
+        RemoteRpcState delegateState = actionDelegate != null ? actionDelegate.remoteRpcState() : null;
+        return delegateState != null ? delegateState : remoteRpcState;
     }
 
     private static String favoriteTooltip(boolean favorite) {

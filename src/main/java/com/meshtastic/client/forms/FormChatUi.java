@@ -517,6 +517,11 @@ abstract class FormChatUi extends FormChatBase {
                     reloadChatList();
                 });
             }
+
+            @Override
+            public RemoteRpcState remoteRpcState() {
+                return rpcState;
+            }
         };
     }
 
