@@ -59,6 +59,17 @@ class ConnectionEntryProtocolTest {
         assertEquals(ProtocolType.REMOTE_RPC, entry.getProtocol());
         assertEquals(ConnectionType.REMOTE_RPC, entry.getEffectiveType());
         assertEquals(ProtocolType.REMOTE_RPC, entry.getEffectiveProtocol());
+        assertEquals(RemoteRpcConnectionMode.DIRECT, entry.getEffectiveRemoteRpcMode());
+    }
+
+    @Test
+    void remoteRpcRouterEntryKeepsRouterMode() {
+        ConnectionEntry entry = ConnectionEntry.remoteRpcRouter("rpc", "router.example.org", 8080, "mra1_test");
+
+        assertEquals(ProtocolType.REMOTE_RPC, entry.getProtocol());
+        assertEquals(ConnectionType.REMOTE_RPC, entry.getEffectiveType());
+        assertEquals(ProtocolType.REMOTE_RPC, entry.getEffectiveProtocol());
+        assertEquals(RemoteRpcConnectionMode.ROUTER, entry.getEffectiveRemoteRpcMode());
     }
 
     @Test

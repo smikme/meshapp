@@ -113,6 +113,11 @@ struct BleState {
     event_token connection_status_token{};
 };
 
+struct ReadFromRadioResult {
+    int status;
+    std::vector<uint8_t> data;
+};
+
 // All state heap-allocated — created in meshble_init, on the worker thread
 static BleState* g_ble = nullptr;
 
@@ -123,10 +128,10 @@ static std::atomic<bool> g_notifications_active{false};
 // Write option auto-detection: -1=unknown, 0=WriteWithResponse, 1=WriteWithoutResponse
 static std::atomic<int> g_write_option{-1};
 static std::atomic<int> g_profile{PROFILE_MESHTASTIC};
-static meshble_device_cb g_device_callback = nullptr;
-static meshble_data_cb g_data_callback = nullptr;
-static meshble_state_cb g_state_callback = nullptr;
-static meshble_passkey_request_cb g_passkey_request_callback = nullptr;
+static std::atomic<meshble_device_cb> g_device_callback{nullptr};
+static std::atomic<meshble_data_cb> g_data_callback{nullptr};
+static std::atomic<meshble_state_cb> g_state_callback{nullptr};
+static std::atomic<meshble_passkey_request_cb> g_passkey_request_callback{nullptr};
 
 static std::mutex g_pairing_mutex;
 static std::condition_variable g_pairing_cv;
@@ -177,7 +182,15 @@ static void worker_loop() {
             task = std::move(g_task_queue.front());
             g_task_queue.pop();
         }
-        if (task) task();
+        if (task) {
+            try {
+                task();
+            } catch (const std::exception& e) {
+                log_msg("[meshble] Worker task failed: %s", e.what());
+            } catch (...) {
+                log_msg("[meshble] Worker task failed: unknown");
+            }
+        }
     }
 
     winrt::uninit_apartment();
@@ -186,6 +199,9 @@ static void worker_loop() {
 template<typename F>
 auto run_on_worker(F&& func) -> decltype(func()) {
     using R = decltype(func());
+    if (!g_worker_running.load()) {
+        throw std::runtime_error("BLE worker is not running");
+    }
     auto promise = std::make_shared<std::promise<R>>();
     auto future = promise->get_future();
     {
@@ -207,6 +223,9 @@ auto run_on_worker(F&& func) -> decltype(func()) {
 }
 
 static void post_to_worker(std::function<void()> func) {
+    if (!g_worker_running.load()) {
+        return;
+    }
     {
         std::lock_guard<std::mutex> lock(g_queue_mutex);
         g_task_queue.push(std::move(func));
@@ -326,7 +345,7 @@ static bool await_user_passkey(std::string const& address, std::string& out_pin)
         std::lock_guard<std::mutex> lock(g_pairing_mutex);
         clear_pending_pairing_request_locked();
         g_pairing_request_active = true;
-        callback = g_passkey_request_callback;
+        callback = g_passkey_request_callback.load();
     }
 
     if (!callback) {
@@ -336,7 +355,17 @@ static bool await_user_passkey(std::string const& address, std::string& out_pin)
         return false;
     }
 
-    callback(address.c_str());
+    try {
+        callback(address.c_str());
+    } catch (const std::exception& e) {
+        log_msg("[meshble] Java passkey callback failed: %s", e.what());
+        cancel_pending_pairing_request();
+        return false;
+    } catch (...) {
+        log_msg("[meshble] Java passkey callback failed: unknown");
+        cancel_pending_pairing_request();
+        return false;
+    }
 
     std::unique_lock<std::mutex> lock(g_pairing_mutex);
     bool ready = g_pairing_cv.wait_for(lock, PASSKEY_RESPONSE_TIMEOUT, [] {
@@ -462,7 +491,10 @@ static void drain_from_radio() {
             if (result.Status() != GattCommunicationStatus::Success) break;
             auto data = buffer_to_bytes(result.Value());
             if (data.empty()) break;
-            if (g_data_callback) g_data_callback(data.data(), (int)data.size());
+            auto callback = g_data_callback.load();
+            if (callback) {
+                callback(data.data(), (int)data.size());
+            }
         } catch (...) { break; }
     }
 }
@@ -471,25 +503,52 @@ static void drain_from_radio() {
 
 static void on_from_radio_value_changed(
     GattCharacteristic const&, GattValueChangedEventArgs const& args) {
-    auto data = buffer_to_bytes(args.CharacteristicValue());
-    if (!data.empty() && g_data_callback)
-        g_data_callback(data.data(), (int)data.size());
+    try {
+        auto data = buffer_to_bytes(args.CharacteristicValue());
+        auto callback = g_data_callback.load();
+        if (!data.empty() && callback) {
+            callback(data.data(), (int)data.size());
+        }
+    } catch (const hresult_error& e) {
+        log_msg("[meshble] fromRadio notification failed: %ls", e.message().c_str());
+    } catch (const std::exception& e) {
+        log_msg("[meshble] fromRadio notification failed: %s", e.what());
+    } catch (...) {
+        log_msg("[meshble] fromRadio notification failed: unknown");
+    }
 }
 
 static void on_from_num_value_changed(
     GattCharacteristic const&, GattValueChangedEventArgs const&) {
-    if (!g_notifications_active.load()) {
-        return;
+    try {
+        if (!g_notifications_active.load()) {
+            return;
+        }
+        post_to_worker([] { drain_from_radio(); });
+    } catch (const std::exception& e) {
+        log_msg("[meshble] fromNum notification failed: %s", e.what());
+    } catch (...) {
+        log_msg("[meshble] fromNum notification failed: unknown");
     }
-    post_to_worker([] { drain_from_radio(); });
 }
 
 static void on_connection_status_changed(
     BluetoothLEDevice const& device, IInspectable const&) {
-    if (device.ConnectionStatus() == BluetoothConnectionStatus::Disconnected) {
-        g_connected = false;
-        log_msg("[meshble] Device disconnected");
-        if (g_state_callback) g_state_callback(1, nullptr);
+    try {
+        if (device.ConnectionStatus() == BluetoothConnectionStatus::Disconnected) {
+            g_connected = false;
+            log_msg("[meshble] Device disconnected");
+            auto callback = g_state_callback.load();
+            if (callback) {
+                callback(1, nullptr);
+            }
+        }
+    } catch (const hresult_error& e) {
+        log_msg("[meshble] ConnectionStatusChanged failed: %ls", e.message().c_str());
+    } catch (const std::exception& e) {
+        log_msg("[meshble] ConnectionStatusChanged failed: %s", e.what());
+    } catch (...) {
+        log_msg("[meshble] ConnectionStatusChanged failed: unknown");
     }
 }
 
@@ -506,7 +565,7 @@ static void do_stop_scan() {
             g_ble->watcher = nullptr;
         }
     } catch (...) {}
-    g_device_callback = nullptr;
+    g_device_callback.store(nullptr);
     log_msg("[meshble] Scan stopped");
 }
 
@@ -578,10 +637,10 @@ MESHBLE_API void meshble_cleanup(void) {
         });
     } catch (...) {}
 
-    g_device_callback = nullptr;
-    g_data_callback = nullptr;
-    g_state_callback = nullptr;
-    g_passkey_request_callback = nullptr;
+    g_device_callback.store(nullptr);
+    g_data_callback.store(nullptr);
+    g_state_callback.store(nullptr);
+    g_passkey_request_callback.store(nullptr);
 
     g_worker_running = false;
     g_queue_cv.notify_one();
@@ -626,7 +685,7 @@ MESHBLE_API int meshble_start_scan(meshble_device_cb callback) {
     try {
         return run_on_worker([callback]() -> int {
             do_stop_scan();
-            g_device_callback = callback;
+            g_device_callback.store(callback);
             try {
                 g_ble->watcher = BluetoothLEAdvertisementWatcher();
                 g_ble->watcher.ScanningMode(BluetoothLEScanningMode::Active);
@@ -640,20 +699,31 @@ MESHBLE_API int meshble_start_scan(meshble_device_cb callback) {
                 g_ble->watcher_received_token = g_ble->watcher.Received(
                     [](BluetoothLEAdvertisementWatcher const&,
                        BluetoothLEAdvertisementReceivedEventArgs const& args) {
-                        if (!g_device_callback) return;
-                        auto addr = mac_to_string(args.BluetoothAddress());
-                        auto name = args.Advertisement().LocalName();
-                        std::string nameStr;
-                        if (!name.empty()) nameStr = winrt::to_string(name);
-                        g_device_callback(addr.c_str(),
-                            nameStr.empty() ? nullptr : nameStr.c_str(),
-                            args.RawSignalStrengthInDBm());
+                        try {
+                            auto callback = g_device_callback.load();
+                            if (!callback) return;
+                            auto addr = mac_to_string(args.BluetoothAddress());
+                            auto name = args.Advertisement().LocalName();
+                            std::string nameStr;
+                            if (!name.empty()) nameStr = winrt::to_string(name);
+                            callback(addr.c_str(),
+                                nameStr.empty() ? nullptr : nameStr.c_str(),
+                                args.RawSignalStrengthInDBm());
+                        } catch (const hresult_error& e) {
+                            log_msg("[meshble] Advertisement callback failed: %ls", e.message().c_str());
+                        } catch (const std::exception& e) {
+                            log_msg("[meshble] Advertisement callback failed: %s", e.what());
+                        } catch (...) {
+                            log_msg("[meshble] Advertisement callback failed: unknown");
+                        }
                     });
 
                 g_ble->watcher_stopped_token = g_ble->watcher.Stopped(
                     [](BluetoothLEAdvertisementWatcher const&,
                        BluetoothLEAdvertisementWatcherStoppedEventArgs const& args) {
-                        log_msg("[meshble] Watcher stopped, error: %d", (int)args.Error());
+                        try {
+                            log_msg("[meshble] Watcher stopped, error: %d", (int)args.Error());
+                        } catch (...) {}
                     });
 
                 g_ble->watcher.Start();
@@ -768,7 +838,9 @@ MESHBLE_API int meshble_connect(const char* address, int timeout_ms) {
 
                 g_connected = true;
                 log_msg("[meshble] Connected (notifications=%s)", g_notifications_active.load() ? "yes" : "polling");
-                if (g_state_callback) g_state_callback(0, nullptr);
+                if (auto callback = g_state_callback.load()) {
+                    callback(0, nullptr);
+                }
                 return 0;
 
             } catch (const async_timeout_error& e) {
@@ -859,29 +931,37 @@ MESHBLE_API int meshble_write_to_radio(const unsigned char* data, int length) {
 }
 
 MESHBLE_API int meshble_read_from_radio(unsigned char* buffer, int buf_size, int* out_len) {
-    if (!g_connected || !buffer || !out_len) return -1;
+    if (!g_connected || !buffer || buf_size <= 0 || !out_len) return -1;
     *out_len = 0;
     try {
-        return run_on_worker([buffer, buf_size, out_len]() -> int {
-            if (!g_connected || !g_ble || g_ble->from_radio == nullptr) return -1;
+        auto read = run_on_worker([]() -> ReadFromRadioResult {
+            if (!g_connected || !g_ble || g_ble->from_radio == nullptr) return {-1, {}};
             try {
                 auto result = g_ble->from_radio.ReadValueAsync(BluetoothCacheMode::Uncached).get();
-                if (result.Status() != GattCommunicationStatus::Success) return -1;
+                if (result.Status() != GattCommunicationStatus::Success) return {-1, {}};
                 auto data = buffer_to_bytes(result.Value());
-                if (data.empty()) return 0;
-                int n = (int)data.size() < buf_size ? (int)data.size() : buf_size;
-                memcpy(buffer, data.data(), n);
-                *out_len = n;
-                return 0;
-            } catch (...) { return -1; }
+                return {0, std::move(data)};
+            } catch (...) { return {-1, {}}; }
         });
+
+        if (read.status != 0 || read.data.empty()) {
+            return read.status;
+        }
+
+        // JNA owns these output buffers for the duration of this native call.
+        // Keep raw writes on the original call thread; the WinRT worker returns
+        // an owned vector instead of touching Java/JNA memory cross-thread.
+        int n = (int)read.data.size() < buf_size ? (int)read.data.size() : buf_size;
+        memcpy(buffer, read.data.data(), n);
+        *out_len = n;
+        return 0;
     } catch (...) { return -1; }
 }
 
-MESHBLE_API void meshble_set_from_radio_listener(meshble_data_cb callback) { g_data_callback = callback; }
-MESHBLE_API void meshble_set_state_listener(meshble_state_cb callback) { g_state_callback = callback; }
+MESHBLE_API void meshble_set_from_radio_listener(meshble_data_cb callback) { g_data_callback.store(callback); }
+MESHBLE_API void meshble_set_state_listener(meshble_state_cb callback) { g_state_callback.store(callback); }
 MESHBLE_API void meshble_set_passkey_request_callback(meshble_passkey_request_cb callback) {
-    g_passkey_request_callback = callback;
+    g_passkey_request_callback.store(callback);
 }
 
 MESHBLE_API void meshble_respond_passkey(uint32_t passkey) {

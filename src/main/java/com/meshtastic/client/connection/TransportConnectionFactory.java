@@ -4,8 +4,10 @@ import com.meshtastic.client.connection.ble.BleConnection;
 import com.meshtastic.client.connection.ble.BlePlatform;
 import com.meshtastic.client.connection.ble.BleProtocolProfile;
 import com.meshtastic.client.connection.rpc.DirectRpcTransportConnection;
+import com.meshtastic.client.connection.rpc.ExternalRouterRpcTransportConnection;
 import com.meshtastic.client.model.ConnectionEntry;
 import com.meshtastic.client.model.ConnectionType;
+import com.meshtastic.client.model.RemoteRpcConnectionMode;
 
 import java.util.function.Supplier;
 
@@ -63,11 +65,15 @@ public final class TransportConnectionFactory {
                     BleProtocolProfile.forProtocol(entry.getEffectiveProtocol()),
                     disposeBlePlatformOnDisconnect
             );
-            case REMOTE_RPC -> new DirectRpcTransportConnection(
-                    entry.getHost(),
-                    entry.getPort(),
-                    entry.getRemoteAccessKey()
-            );
+            case REMOTE_RPC -> entry.getEffectiveRemoteRpcMode() == RemoteRpcConnectionMode.ROUTER
+                    ? new ExternalRouterRpcTransportConnection(
+                            entry.getHost(),
+                            entry.getPort(),
+                            entry.getRemoteAccessKey())
+                    : new DirectRpcTransportConnection(
+                            entry.getHost(),
+                            entry.getPort(),
+                            entry.getRemoteAccessKey());
         };
     }
 
@@ -87,8 +93,8 @@ public final class TransportConnectionFactory {
                     entry.getBaudRate() > 0 ? entry.getBaudRate() : SerialConnection.DEFAULT_BAUD_RATE);
             case BLE -> String.format("type=BLE, address=%s, deviceName=%s",
                     safeText(entry.getBleAddress()), safeText(entry.getBleDeviceName()));
-            case REMOTE_RPC -> String.format("type=REMOTE_RPC, host=%s, port=%d",
-                    safeText(entry.getHost()), entry.getPort());
+            case REMOTE_RPC -> String.format("type=REMOTE_RPC, mode=%s, host=%s, port=%d",
+                    entry.getEffectiveRemoteRpcMode(), safeText(entry.getHost()), entry.getPort());
         };
     }
 

@@ -19,7 +19,8 @@ public final class RpcAccessKey {
     private static final String PREFIX = "mra1_";
     private static final int KEY_BYTES = 32;
     private static final int NONCE_BYTES = 24;
-    private static final byte[] ROOM_ID_CONTEXT = "meshapp-rpc-room-id".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+    private static final String ROOM_ID_PREFIX = "erpc1_";
+    private static final byte[] ROOM_ID_CONTEXT = "ERPC-Router room id v1".getBytes(java.nio.charset.StandardCharsets.UTF_8);
     private static final byte[] CLIENT_PROOF_CONTEXT = "meshapp-rpc-client-auth-v2".getBytes(java.nio.charset.StandardCharsets.UTF_8);
     private static final byte[] SERVER_PROOF_CONTEXT = "meshapp-rpc-server-auth-v2".getBytes(java.nio.charset.StandardCharsets.UTF_8);
     private static final SecureRandom SECURE_RANDOM = new SecureRandom();
@@ -86,14 +87,14 @@ public final class RpcAccessKey {
     }
 
     /**
-     * Derives a stable room id from the key without revealing the key itself.
-     * This will be used by the external router later.
+     * Derives a stable external-router room id from the key without revealing
+     * the key itself.
      *
-     * @return base64url room id
+     * @return versioned base64url room id
      */
     public String roomId() {
         byte[] digest = hmac(ROOM_ID_CONTEXT);
-        return ENCODER.encodeToString(Arrays.copyOf(digest, 16));
+        return ROOM_ID_PREFIX + ENCODER.encodeToString(digest);
     }
 
     /**

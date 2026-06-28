@@ -36,6 +36,7 @@ import com.meshtastic.client.protocol.rpc.RemoteNodeJson;
 import com.meshtastic.client.protocol.rpc.RemotePacketMonitorJson;
 import com.meshtastic.client.protocol.rpc.RemoteTelemetryJson;
 import com.meshtastic.client.rpc.DirectRpcServer;
+import com.meshtastic.client.rpc.ExternalRouterRpcHostClient;
 import com.meshtastic.client.rpc.RpcAccessKey;
 import com.meshtastic.client.rpc.RpcMethodRegistry;
 import com.meshtastic.client.utils.AppPreferences;
@@ -54,6 +55,7 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -83,6 +85,7 @@ public final class RemoteRpcHostService {
     private final Object lock = new Object();
     private final ConcurrentMap<String, PendingTraceroute> pendingTraceroutes = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, CompletableFuture<JsonElement>> pendingLuaFormValues = new ConcurrentHashMap<>();
+    private final CopyOnWriteArrayList<Runnable> statusListeners = new CopyOnWriteArrayList<>();
     private final PacketMonitorService.Listener packetMonitorListener = new PacketMonitorService.Listener() {
         @Override
         public void onPacketLogged(PacketLogEntry entry) {
@@ -100,7 +103,10 @@ public final class RemoteRpcHostService {
         }
     };
     private volatile DirectRpcServer server;
+    private volatile ExternalRouterRpcHostClient routerClient;
     private volatile String lastError;
+    private volatile String lastRouterError;
+    private volatile boolean packetMonitorListenerRegistered;
 
     private RemoteRpcHostService() {
     }
@@ -116,15 +122,26 @@ public final class RemoteRpcHostService {
      * Starts or stops the server according to saved preferences.
      */
     public void applyPreferences() {
-        if (!AppPreferences.isRemoteRpcServerEnabled()) {
-            stop();
-            return;
+        synchronized (lock) {
+            if (AppPreferences.isRemoteRpcServerEnabled()) {
+                startDirectLocked(
+                        AppPreferences.getRemoteRpcServerBindAddress(),
+                        AppPreferences.getRemoteRpcServerPort(),
+                        AppPreferences.getRemoteRpcAccessKey());
+            } else {
+                stopDirectLocked();
+            }
+
+            if (AppPreferences.isRemoteRpcRouterEnabled()) {
+                startRouterLocked(
+                        AppPreferences.getRemoteRpcRouterServer(),
+                        AppPreferences.getRemoteRpcAccessKey());
+            } else {
+                stopRouterLocked();
+            }
+            updatePacketMonitorListenerLocked();
         }
-        start(
-                AppPreferences.getRemoteRpcServerBindAddress(),
-                AppPreferences.getRemoteRpcServerPort(),
-                AppPreferences.getRemoteRpcAccessKey()
-        );
+        fireStatusListeners();
     }
 
     /**
@@ -136,23 +153,10 @@ public final class RemoteRpcHostService {
      */
     public void start(String bindAddress, int port, String accessKey) {
         synchronized (lock) {
-            stopLocked();
-            lastError = null;
-            try {
-                RpcAccessKey parsedKey = RpcAccessKey.parse(accessKey);
-                server = DirectRpcServer.start(
-                        InetAddress.getByName(bindAddress),
-                        port,
-                        parsedKey,
-                        createRegistry(),
-                        ForkJoinPool.commonPool());
-                PacketMonitorService.getInstance().addListener(packetMonitorListener);
-                log.info("Remote RPC host server started on {}:{}", bindAddress, server.getPort());
-            } catch (Exception e) {
-                lastError = e.getMessage();
-                log.warn("Failed to start Remote RPC host server", e);
-            }
+            startDirectLocked(bindAddress, port, accessKey);
+            updatePacketMonitorListenerLocked();
         }
+        fireStatusListeners();
     }
 
     /**
@@ -160,8 +164,11 @@ public final class RemoteRpcHostService {
      */
     public void stop() {
         synchronized (lock) {
-            stopLocked();
+            stopDirectLocked();
+            stopRouterLocked();
+            updatePacketMonitorListenerLocked();
         }
+        fireStatusListeners();
     }
 
     /**
@@ -187,18 +194,122 @@ public final class RemoteRpcHostService {
         return lastError;
     }
 
-    private void stopLocked() {
+    /**
+     * @return whether the external router host channel is currently connected
+     */
+    public boolean isRouterConnected() {
+        ExternalRouterRpcHostClient current = routerClient;
+        return current != null && current.isConnected();
+    }
+
+    /**
+     * @return last external router error, if any
+     */
+    public String getLastRouterError() {
+        ExternalRouterRpcHostClient current = routerClient;
+        String runtimeError = current != null ? current.getLastError() : null;
+        return runtimeError != null && !runtimeError.isBlank() ? runtimeError : lastRouterError;
+    }
+
+    /**
+     * Adds a listener invoked when direct or router RPC host status may have changed.
+     *
+     * @param listener status listener
+     */
+    public void addStatusListener(Runnable listener) {
+        if (listener != null) {
+            statusListeners.addIfAbsent(listener);
+        }
+    }
+
+    /**
+     * Removes a previously registered status listener.
+     *
+     * @param listener status listener
+     */
+    public void removeStatusListener(Runnable listener) {
+        statusListeners.remove(listener);
+    }
+
+    private void startDirectLocked(String bindAddress, int port, String accessKey) {
+        stopDirectLocked();
+        lastError = null;
+        try {
+            RpcAccessKey parsedKey = RpcAccessKey.parse(accessKey);
+            server = DirectRpcServer.start(
+                    InetAddress.getByName(bindAddress),
+                    port,
+                    parsedKey,
+                    createRegistry(),
+                    ForkJoinPool.commonPool());
+            log.info("Remote RPC host server started on {}:{}", bindAddress, server.getPort());
+        } catch (Exception e) {
+            lastError = e.getMessage();
+            log.warn("Failed to start Remote RPC host server", e);
+        }
+    }
+
+    private void stopDirectLocked() {
         DirectRpcServer current = server;
         server = null;
-        clearPendingTraceroutes();
-        clearPendingLuaFormValues();
         if (current != null) {
+            current.close();
+            log.info("Remote RPC host server stopped");
+        }
+    }
+
+    private void startRouterLocked(String routerServer, String accessKey) {
+        stopRouterLocked();
+        lastRouterError = null;
+        try {
+            RpcAccessKey parsedKey = RpcAccessKey.parse(accessKey);
+            ExternalRouterRpcHostClient client = new ExternalRouterRpcHostClient(
+                    routerServer,
+                    parsedKey,
+                    createRegistry(),
+                    ForkJoinPool.commonPool(),
+                    this::fireStatusListeners);
+            routerClient = client;
+            client.start();
+            log.info("Remote RPC external router host connector started for {}", routerServer);
+        } catch (Exception e) {
+            lastRouterError = e.getMessage();
+            log.warn("Failed to start Remote RPC external router host connector", e);
+        }
+    }
+
+    private void stopRouterLocked() {
+        ExternalRouterRpcHostClient current = routerClient;
+        routerClient = null;
+        if (current != null) {
+            current.close();
+            log.info("Remote RPC external router host connector stopped");
+        }
+    }
+
+    private void updatePacketMonitorListenerLocked() {
+        boolean needed = server != null || routerClient != null;
+        if (needed && !packetMonitorListenerRegistered) {
+            PacketMonitorService.getInstance().addListener(packetMonitorListener);
+            packetMonitorListenerRegistered = true;
+        } else if (!needed && packetMonitorListenerRegistered) {
             PacketMonitorService monitorService = PacketMonitorService.getIfInitialized();
             if (monitorService != null) {
                 monitorService.removeListener(packetMonitorListener);
             }
-            current.close();
-            log.info("Remote RPC host server stopped");
+            packetMonitorListenerRegistered = false;
+            clearPendingTraceroutes();
+            clearPendingLuaFormValues();
+        }
+    }
+
+    private void fireStatusListeners() {
+        for (Runnable listener : statusListeners) {
+            try {
+                listener.run();
+            } catch (RuntimeException e) {
+                log.warn("Remote RPC status listener failed", e);
+            }
         }
     }
 
@@ -403,8 +514,7 @@ public final class RemoteRpcHostService {
      * Publishes a host-side incoming-message event to the active remote client.
      */
     public void publishIncomingMessage(MeshMessage message, String chatType, String chatKey) {
-        DirectRpcServer current = server;
-        if (current == null || message == null) {
+        if (!hasRemoteRpcEndpoint() || message == null) {
             return;
         }
         JsonObject event = new JsonObject();
@@ -416,15 +526,14 @@ public final class RemoteRpcHostService {
         event.add("message", messageToJson(message, state));
         event.addProperty("title", firstText(resolveSenderName(state, message), message.getFromNodeId()));
         event.addProperty("body", firstText(message.getText(), ""));
-        current.publishEvent("message.incoming", event);
+        publishRemoteEvent("message.incoming", event);
     }
 
     /**
      * Publishes a non-notification chat update, such as reaction or metadata changes.
      */
     public void publishChatChanged(String chatType, String chatKey, int targetPacketId) {
-        DirectRpcServer current = server;
-        if (current == null) {
+        if (!hasRemoteRpcEndpoint()) {
             return;
         }
         JsonObject event = new JsonObject();
@@ -439,15 +548,14 @@ public final class RemoteRpcHostService {
             prepareMessagesForRemote(state, chatType, chatKey, ownerId, List.of(message));
             event.add("message", messageToJson(message, state));
         }
-        current.publishEvent("message.changed", event);
+        publishRemoteEvent("message.changed", event);
     }
 
     /**
      * Publishes an outgoing-message delivery status update to the active remote client.
      */
     public void publishMessageStatusChanged(MessageChangeEvent change) {
-        DirectRpcServer current = server;
-        if (current == null
+        if (!hasRemoteRpcEndpoint()
                 || change == null
                 || change.kind() != MessageChangeEvent.Kind.STATUS_CHANGED
                 || change.message() == null) {
@@ -468,13 +576,25 @@ public final class RemoteRpcHostService {
                 firstText(change.ownerNodeId(), state != null ? state.getOwnerNodeId() : ""),
                 List.of(message));
         event.add("message", messageToJson(message, state));
-        current.publishEvent("message.status", event);
+        publishRemoteEvent("message.status", event);
     }
 
     private void publishPacketMonitorEvent(String event, JsonObject payload) {
-        DirectRpcServer current = server;
-        if (current != null) {
-            current.publishEvent(event, payload != null ? payload : new JsonObject());
+        publishRemoteEvent(event, payload != null ? payload : new JsonObject());
+    }
+
+    private boolean hasRemoteRpcEndpoint() {
+        return server != null || routerClient != null;
+    }
+
+    private void publishRemoteEvent(String event, JsonElement payload) {
+        DirectRpcServer currentServer = server;
+        if (currentServer != null) {
+            currentServer.publishEvent(event, payload);
+        }
+        ExternalRouterRpcHostClient currentRouter = routerClient;
+        if (currentRouter != null) {
+            currentRouter.publishEvent(event, payload);
         }
     }
 
@@ -631,16 +751,14 @@ public final class RemoteRpcHostService {
     }
 
     private void publishLuaRuntimeEvent(LuaScriptEvent event) {
-        DirectRpcServer current = server;
-        if (current != null && event != null) {
-            current.publishEvent("lua.runtime.event", RemoteLuaScriptJson.eventToJson(event));
+        if (event != null) {
+            publishRemoteEvent("lua.runtime.event", RemoteLuaScriptJson.eventToJson(event));
         }
     }
 
     private void publishLuaNodePickRequest(LuaUiNodePickRequest request) {
-        DirectRpcServer current = server;
-        if (current != null && request != null) {
-            current.publishEvent("lua.ui.nodePick.request", RemoteLuaScriptJson.nodePickRequestToJson(request));
+        if (request != null) {
+            publishRemoteEvent("lua.ui.nodePick.request", RemoteLuaScriptJson.nodePickRequestToJson(request));
         }
     }
 
@@ -650,11 +768,8 @@ public final class RemoteRpcHostService {
                                        String componentId,
                                        String title,
                                        LuaFormComponentSpec spec) {
-        DirectRpcServer current = server;
-        if (current != null) {
-            current.publishEvent("lua.form.command",
-                    RemoteLuaScriptJson.formCommandToJson(script, command, requestId, componentId, title, spec));
-        }
+        publishRemoteEvent("lua.form.command",
+                RemoteLuaScriptJson.formCommandToJson(script, command, requestId, componentId, title, spec));
     }
 
     private Object waitForLuaFormValue(LuaScript script, String componentId) {
@@ -1377,10 +1492,7 @@ public final class RemoteRpcHostService {
         event.addProperty("timestamp", timestamp);
         event.add("nodeNames", nodeNames);
 
-        DirectRpcServer current = server;
-        if (current != null) {
-            current.publishEvent("node.traceroute.result", event);
-        }
+        publishRemoteEvent("node.traceroute.result", event);
     }
 
     private boolean matchesPendingTracerouteResponse(int targetNodeNum, int fromNodeNum) {

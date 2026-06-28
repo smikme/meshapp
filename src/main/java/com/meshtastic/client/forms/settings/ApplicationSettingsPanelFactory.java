@@ -7,6 +7,7 @@ import com.meshtastic.client.service.RemoteRpcHostService;
 import com.meshtastic.client.themes.TypographyManager;
 import com.meshtastic.client.utils.AppPreferences;
 import java.util.function.DoubleConsumer;
+import javafx.application.Platform;
 import javafx.collections.FXCollections;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
@@ -191,6 +192,8 @@ public final class ApplicationSettingsPanelFactory {
 
         CheckBox enabledBox = new CheckBox(I18n.t("settings.remoteRpc.enabled"));
         enabledBox.setSelected(AppPreferences.isRemoteRpcServerEnabled());
+        CheckBox routerEnabledBox = new CheckBox(I18n.t("settings.remoteRpc.router.enabled"));
+        routerEnabledBox.setSelected(AppPreferences.isRemoteRpcRouterEnabled());
 
         TextField bindField = new TextField(AppPreferences.getRemoteRpcServerBindAddress());
         bindField.setPrefColumnCount(14);
@@ -203,6 +206,9 @@ public final class ApplicationSettingsPanelFactory {
         }));
         TextField keyField = new TextField(AppPreferences.getRemoteRpcAccessKey());
         keyField.setPrefColumnCount(30);
+        TextField routerServerField = new TextField(AppPreferences.getRemoteRpcRouterServer());
+        routerServerField.setPromptText("router.example.org:8080");
+        routerServerField.setPrefColumnCount(24);
 
         Button generateButton = new Button(I18n.t("settings.remoteRpc.generateKey"));
         generateButton.setOnAction(event -> keyField.setText(RpcAccessKey.generate().value()));
@@ -211,6 +217,7 @@ public final class ApplicationSettingsPanelFactory {
         statusLabel.getStyleClass().add("muted-note-label");
         statusLabel.setWrapText(true);
         updateRemoteRpcStatusLabel(statusLabel);
+        installRemoteRpcStatusListener(statusLabel);
 
         Button applyButton = new Button(I18n.t("settings.remoteRpc.apply"));
         applyButton.setOnAction(event -> {
@@ -220,6 +227,8 @@ public final class ApplicationSettingsPanelFactory {
             AppPreferences.setRemoteRpcServerBindAddress(bindField.getText());
             AppPreferences.setRemoteRpcServerPort(port);
             AppPreferences.setRemoteRpcAccessKey(keyField.getText());
+            AppPreferences.setRemoteRpcRouterEnabled(routerEnabledBox.isSelected());
+            AppPreferences.setRemoteRpcRouterServer(routerServerField.getText());
             RemoteRpcHostService.getInstance().applyPreferences();
             updateRemoteRpcStatusLabel(statusLabel);
         });
@@ -241,10 +250,18 @@ public final class ApplicationSettingsPanelFactory {
         );
         keyRow.setAlignment(Pos.CENTER_LEFT);
 
+        HBox routerRow = new HBox(
+                8,
+                routerEnabledBox,
+                new Label(I18n.t("settings.remoteRpc.router.server")),
+                routerServerField
+        );
+        routerRow.setAlignment(Pos.CENTER_LEFT);
+
         HBox actionRow = new HBox(8, enabledBox, applyButton);
         actionRow.setAlignment(Pos.CENTER_LEFT);
 
-        return new VBox(6, titleLabel, descriptionLabel, bindRow, keyRow, actionRow, statusLabel);
+        return new VBox(6, titleLabel, descriptionLabel, bindRow, keyRow, routerRow, actionRow, statusLabel);
     }
 
     private static int parsePortOrDefault(String text) {
@@ -259,13 +276,45 @@ public final class ApplicationSettingsPanelFactory {
     private static void updateRemoteRpcStatusLabel(Label statusLabel) {
         RemoteRpcHostService service = RemoteRpcHostService.getInstance();
         if (service.isRunning()) {
-            statusLabel.setText(I18n.t("settings.remoteRpc.status.running", service.getPort()));
+            String direct = I18n.t("settings.remoteRpc.status.running", service.getPort());
+            String router = routerStatusText(service);
+            statusLabel.setText(router.isBlank() ? direct : direct + "\n" + router);
             return;
         }
         String error = service.getLastError();
-        statusLabel.setText(error == null || error.isBlank()
+        String direct = error == null || error.isBlank()
                 ? I18n.t("settings.remoteRpc.status.stopped")
-                : I18n.t("settings.remoteRpc.status.error", error));
+                : I18n.t("settings.remoteRpc.status.error", error);
+        String router = routerStatusText(service);
+        statusLabel.setText(router.isBlank() ? direct : direct + "\n" + router);
+    }
+
+    private static String routerStatusText(RemoteRpcHostService service) {
+        if (!AppPreferences.isRemoteRpcRouterEnabled()) {
+            return I18n.t("settings.remoteRpc.router.status.disabled");
+        }
+        if (service.isRouterConnected()) {
+            return I18n.t("settings.remoteRpc.router.status.connected");
+        }
+        String error = service.getLastRouterError();
+        return error == null || error.isBlank()
+                ? I18n.t("settings.remoteRpc.router.status.connecting")
+                : I18n.t("settings.remoteRpc.router.status.error", error);
+    }
+
+    private static void installRemoteRpcStatusListener(Label statusLabel) {
+        RemoteRpcHostService service = RemoteRpcHostService.getInstance();
+        Runnable listener = () -> Platform.runLater(() -> {
+            if (statusLabel.getScene() != null) {
+                updateRemoteRpcStatusLabel(statusLabel);
+            }
+        });
+        service.addStatusListener(listener);
+        statusLabel.sceneProperty().addListener((obs, oldScene, newScene) -> {
+            if (oldScene != null && newScene == null) {
+                service.removeStatusListener(listener);
+            }
+        });
     }
 
     private static VBox createMemoryLimitSettingRow() {

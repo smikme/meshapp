@@ -65,6 +65,8 @@ public class AppPreferences {
     public static final String KEY_REMOTE_RPC_SERVER_BIND_ADDRESS = "remoteRpcServerBindAddress";
     public static final String KEY_REMOTE_RPC_SERVER_PORT = "remoteRpcServerPort";
     public static final String KEY_REMOTE_RPC_ACCESS_KEY = "remoteRpcAccessKey";
+    public static final String KEY_REMOTE_RPC_ROUTER_ENABLED = "remoteRpcRouterEnabled";
+    public static final String KEY_REMOTE_RPC_ROUTER_SERVER = "remoteRpcRouterServer";
 
     public static final int DEFAULT_MEMORY_LIMIT_MB = 512;
     public static final int MIN_MEMORY_LIMIT_MB = 128;
@@ -203,6 +205,28 @@ public class AppPreferences {
             state().remove(KEY_REMOTE_RPC_ACCESS_KEY);
         } else {
             state().put(KEY_REMOTE_RPC_ACCESS_KEY, value.trim());
+        }
+        flushState();
+    }
+
+    public static boolean isRemoteRpcRouterEnabled() {
+        return state().getBoolean(KEY_REMOTE_RPC_ROUTER_ENABLED, false);
+    }
+
+    public static void setRemoteRpcRouterEnabled(boolean enabled) {
+        state().putBoolean(KEY_REMOTE_RPC_ROUTER_ENABLED, enabled);
+        flushState();
+    }
+
+    public static String getRemoteRpcRouterServer() {
+        return state().get(KEY_REMOTE_RPC_ROUTER_SERVER, "");
+    }
+
+    public static void setRemoteRpcRouterServer(String value) {
+        if (value == null || value.isBlank()) {
+            state().remove(KEY_REMOTE_RPC_ROUTER_SERVER);
+        } else {
+            state().put(KEY_REMOTE_RPC_ROUTER_SERVER, value.trim());
         }
         flushState();
     }

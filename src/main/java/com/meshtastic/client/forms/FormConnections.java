@@ -13,6 +13,7 @@ import com.meshtastic.client.model.ConnectionType;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.model.ProtocolType;
+import com.meshtastic.client.model.RemoteRpcConnectionMode;
 import com.meshtastic.client.model.SerialModemLineMode;
 import com.meshtastic.client.protocol.ProtocolRuntime;
 import com.meshtastic.client.protocol.rpc.RemoteRpcState;
@@ -636,7 +637,9 @@ public class FormConnections extends Form {
                     entry.getBaudRate(),
                     formatSerialModemLineMode(entry.getEffectiveSerialModemLineMode()));
             case TCP -> I18n.t("connection.card.address.tcp", entry.getHost(), entry.getPort());
-            case REMOTE_RPC -> I18n.t("connection.card.address.remoteRpc", entry.getHost(), entry.getPort());
+            case REMOTE_RPC -> entry.getEffectiveRemoteRpcMode() == RemoteRpcConnectionMode.ROUTER
+                    ? I18n.t("connection.card.address.remoteRpcRouter", entry.getHost(), entry.getPort())
+                    : I18n.t("connection.card.address.remoteRpc", entry.getHost(), entry.getPort());
         };
     }
 
