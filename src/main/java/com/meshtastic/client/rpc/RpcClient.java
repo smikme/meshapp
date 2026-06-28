@@ -153,6 +153,13 @@ public final class RpcClient implements AutoCloseable {
         eventListeners.remove(listener);
     }
 
+    /**
+     * @return {@code true} when the client and its transport can still send RPC calls
+     */
+    public boolean isOpen() {
+        return !closed.get() && transport.isOpen();
+    }
+
     @Override
     public void close() {
         if (!closed.compareAndSet(false, true)) {

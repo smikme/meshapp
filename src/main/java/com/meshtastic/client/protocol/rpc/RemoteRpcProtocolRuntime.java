@@ -2,7 +2,7 @@ package com.meshtastic.client.protocol.rpc;
 
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
-import com.meshtastic.client.connection.rpc.DirectRpcTransportConnection;
+import com.meshtastic.client.connection.rpc.RemoteRpcTransportConnection;
 import com.meshtastic.client.model.ProtocolType;
 import com.meshtastic.client.notification.NotificationManager;
 import com.meshtastic.client.protocol.ProtocolRuntime;
@@ -46,12 +46,12 @@ public final class RemoteRpcProtocolRuntime implements ProtocolRuntime<RemoteRpc
 
     @Override
     public CompletableFuture<RemoteRpcState> start() {
-        if (!(context.transportConnection() instanceof DirectRpcTransportConnection rpcTransport)) {
+        if (!(context.transportConnection() instanceof RemoteRpcTransportConnection rpcTransport)) {
             readyFuture.completeExceptionally(new IllegalStateException("Remote RPC transport is required"));
             return readyFuture;
         }
 
-        rpcTransport.getClient()
+        rpcTransport.getRpcClient()
                 .call("system.ping", new JsonObject(), PING_TIMEOUT)
                 .whenComplete((result, error) -> {
                     if (error != null) {
@@ -61,8 +61,8 @@ public final class RemoteRpcProtocolRuntime implements ProtocolRuntime<RemoteRpc
                     JsonObject ping = result != null && result.isJsonObject()
                             ? result.getAsJsonObject()
                             : new JsonObject();
-                    rpcTransport.getClient().addEventListener(this::handleHostEvent);
-                    state = new RemoteRpcState(rpcTransport.getClient(), ping);
+                    rpcTransport.getRpcClient().addEventListener(this::handleHostEvent);
+                    state = new RemoteRpcState(rpcTransport.getRpcClient(), ping);
                     readyFuture.complete(state);
                 });
         return readyFuture;

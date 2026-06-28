@@ -253,6 +253,13 @@ class RpcClientServerTest {
     }
 
     @Test
+    void accessKeyDerivesExternalRouterRoomId() {
+        RpcAccessKey accessKey = RpcAccessKey.parse("mra1_AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8");
+
+        assertEquals("erpc1_MpmfGysDJIvccpcIQYIfh0aeET-OORKNPAXG-UoAyK0", accessKey.roomId());
+    }
+
+    @Test
     void clientCallTimesOutWhenServerDoesNotRespond() throws Exception {
         InMemoryRpcTransport.Pair pair = InMemoryRpcTransport.createPair(command -> {});
         ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();

@@ -2,9 +2,9 @@ package com.meshtastic.client.connection.rpc;
 
 import com.meshtastic.client.connection.ConnectionException;
 import com.meshtastic.client.connection.ConnectionListener;
-import com.meshtastic.client.connection.TransportConnection;
 import com.meshtastic.client.rpc.DirectRpcClient;
 import com.meshtastic.client.rpc.RpcAccessKey;
+import com.meshtastic.client.rpc.RpcClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -22,7 +22,7 @@ import java.util.function.Consumer;
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
-public final class DirectRpcTransportConnection implements TransportConnection {
+public final class DirectRpcTransportConnection implements RemoteRpcTransportConnection {
 
     private static final Logger log = LoggerFactory.getLogger(DirectRpcTransportConnection.class);
     private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(5);
@@ -107,5 +107,10 @@ public final class DirectRpcTransportConnection implements TransportConnection {
             throw new IllegalStateException("Direct RPC client is not connected");
         }
         return current;
+    }
+
+    @Override
+    public RpcClient getRpcClient() {
+        return getClient().rpcClient();
     }
 }

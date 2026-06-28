@@ -16,14 +16,40 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 class RemoteRpcHostServiceTest {
+
+    private static final int START_AND_STOP_STATUS_NOTIFICATION_COUNT = 2;
+
+    @Test
+    void notifiesStatusListenersWhenHostStatusChanges(@TempDir Path tempHome) {
+        TestEnvironmentSupport.setUserHome(tempHome);
+        TestEnvironmentSupport.resetSingletons();
+
+        RemoteRpcHostService host = RemoteRpcHostService.getInstance();
+        AtomicInteger notifications = new AtomicInteger();
+        Runnable listener = notifications::incrementAndGet;
+        try {
+            host.addStatusListener(listener);
+
+            host.start("127.0.0.1", 0, RpcAccessKey.generate().value());
+            host.stop();
+
+            assertTrue(notifications.get() >= START_AND_STOP_STATUS_NOTIFICATION_COUNT);
+        } finally {
+            host.removeStatusListener(listener);
+            host.stop();
+            TestEnvironmentSupport.resetSingletons();
+        }
+    }
 
     @Test
     void publishesMessageStatusEventsToRemoteClient(@TempDir Path tempHome) throws Exception {

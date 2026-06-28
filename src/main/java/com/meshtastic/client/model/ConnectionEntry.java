@@ -26,6 +26,7 @@ public class ConnectionEntry {
     private SerialModemLineMode serialModemLineMode;
     private String bleAddress;
     private String bleDeviceName;
+    private RemoteRpcConnectionMode remoteRpcMode;
     private String remoteAccessKey;
     private String nodeId;
     private boolean autoconnect;
@@ -70,6 +71,15 @@ public class ConnectionEntry {
 
     /** Constructor for direct MeshApp RPC connections. */
     public static ConnectionEntry remoteRpc(String name, String host, int port, String accessKey) {
+        return remoteRpc(name, host, port, accessKey, RemoteRpcConnectionMode.DIRECT);
+    }
+
+    /** Constructor for MeshApp RPC connections. */
+    public static ConnectionEntry remoteRpc(String name,
+                                            String host,
+                                            int port,
+                                            String accessKey,
+                                            RemoteRpcConnectionMode mode) {
         ConnectionEntry entry = new ConnectionEntry();
         entry.protocol = ProtocolType.REMOTE_RPC;
         entry.type = ConnectionType.REMOTE_RPC;
@@ -77,7 +87,13 @@ public class ConnectionEntry {
         entry.host = host;
         entry.port = port;
         entry.remoteAccessKey = accessKey;
+        entry.remoteRpcMode = mode != null ? mode : RemoteRpcConnectionMode.DIRECT;
         return entry;
+    }
+
+    /** Constructor for External RPC Router client connections. */
+    public static ConnectionEntry remoteRpcRouter(String name, String server, int port, String accessKey) {
+        return remoteRpc(name, server, port, accessKey, RemoteRpcConnectionMode.ROUTER);
     }
 
     /**
@@ -232,6 +248,18 @@ public class ConnectionEntry {
 
     public void setRemoteAccessKey(String remoteAccessKey) {
         this.remoteAccessKey = remoteAccessKey;
+    }
+
+    public RemoteRpcConnectionMode getRemoteRpcMode() {
+        return remoteRpcMode;
+    }
+
+    public void setRemoteRpcMode(RemoteRpcConnectionMode remoteRpcMode) {
+        this.remoteRpcMode = remoteRpcMode;
+    }
+
+    public RemoteRpcConnectionMode getEffectiveRemoteRpcMode() {
+        return remoteRpcMode != null ? remoteRpcMode : RemoteRpcConnectionMode.DIRECT;
     }
 
     public String getNodeId() {

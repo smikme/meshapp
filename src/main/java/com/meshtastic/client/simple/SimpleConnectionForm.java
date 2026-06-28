@@ -7,6 +7,7 @@ import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.model.ConnectionEntry;
 import com.meshtastic.client.model.ConnectionType;
 import com.meshtastic.client.model.ProtocolType;
+import com.meshtastic.client.model.RemoteRpcConnectionMode;
 import com.meshtastic.client.model.SerialModemLineMode;
 import com.meshtastic.client.rpc.RpcAccessKey;
 import com.meshtastic.client.service.BleDeviceDiscoveryService;
@@ -46,6 +47,7 @@ public class SimpleConnectionForm extends VBox {
     private static final String FIELD_ERROR_STYLE_CLASS = "connection-field-error";
     private static final int DEFAULT_TCP_PORT = 4403;
     private static final int DEFAULT_REMOTE_RPC_PORT = AppPreferences.DEFAULT_REMOTE_RPC_SERVER_PORT;
+    private static final int DEFAULT_REMOTE_RPC_ROUTER_PORT = 8080;
     private static final Pattern BLE_MAC_ADDRESS_PATTERN =
             Pattern.compile("(?i)^[0-9a-f]{2}(:[0-9a-f]{2}){5}$");
     private static final Pattern BLE_UUID_PATTERN =
@@ -83,6 +85,7 @@ public class SimpleConnectionForm extends VBox {
     private final TextField txtPort;
     private final ValidationField tcpPortValidation;
     private final VBox remoteRpcFields;
+    private final ComboBox<String> cmbRemoteRpcMode;
     private final TextField txtRemoteAccessKey;
     private final ValidationField remoteAccessKeyValidation;
 
@@ -182,8 +185,17 @@ public class SimpleConnectionForm extends VBox {
         txtRemoteAccessKey = new TextField();
         txtRemoteAccessKey.setPromptText("mra1_...");
         remoteAccessKeyValidation = createValidationField(txtRemoteAccessKey);
+        cmbRemoteRpcMode = new ComboBox<>();
+        cmbRemoteRpcMode.getItems().addAll(
+                labelForRemoteRpcMode(RemoteRpcConnectionMode.DIRECT),
+                labelForRemoteRpcMode(RemoteRpcConnectionMode.ROUTER));
+        cmbRemoteRpcMode.setValue(labelForRemoteRpcMode(RemoteRpcConnectionMode.DIRECT));
+        cmbRemoteRpcMode.setMaxWidth(Double.MAX_VALUE);
+        cmbRemoteRpcMode.setOnAction(e -> applyDefaultRemoteRpcPortForMode());
         remoteRpcFields = new VBox(8);
         remoteRpcFields.getChildren().addAll(
+                new Label(I18n.t("connection.form.remoteRpcMode")),
+                cmbRemoteRpcMode,
                 new Label(I18n.t("connection.form.remoteAccessKey")),
                 txtRemoteAccessKey,
                 remoteAccessKeyValidation.label()
@@ -376,15 +388,8 @@ public class SimpleConnectionForm extends VBox {
                 txtHost,
                 hostValidation,
                 "connection.form.validation.remoteHostRequired");
-        var port = boundedInt(
-                validation,
-                txtPort,
-                tcpPortValidation,
-                "connection.form.validation.remotePortRequired",
-                "connection.form.validation.remotePortInvalid",
-                "connection.form.validation.remotePortRange",
-                1,
-                65_535);
+        RemoteRpcConnectionMode mode = selectedRemoteRpcMode();
+        var port = remoteRpcPort(validation, mode);
         var accessKey = requiredText(
                 validation,
                 txtRemoteAccessKey,
@@ -399,11 +404,10 @@ public class SimpleConnectionForm extends VBox {
                         I18n.t("connection.form.validation.remoteAccessKeyInvalid"));
             }
         }
-
         return validation.hasErrors()
                 ? null
                 : configureCommonFields(
-                        ConnectionEntry.remoteRpc(name, host, port, accessKey),
+                        ConnectionEntry.remoteRpc(name, host, port, accessKey, mode),
                         ProtocolType.REMOTE_RPC);
     }
 
@@ -607,6 +611,22 @@ public class SimpleConnectionForm extends VBox {
         }
     }
 
+    private int remoteRpcPort(ValidationState validation, RemoteRpcConnectionMode mode) {
+        String value = txtPort.getText() == null ? "" : txtPort.getText().trim();
+        if (value.isBlank() && mode == RemoteRpcConnectionMode.ROUTER) {
+            return DEFAULT_REMOTE_RPC_ROUTER_PORT;
+        }
+        return boundedInt(
+                validation,
+                txtPort,
+                tcpPortValidation,
+                "connection.form.validation.remotePortRequired",
+                "connection.form.validation.remotePortInvalid",
+                "connection.form.validation.remotePortRange",
+                1,
+                65_535);
+    }
+
     /**
      * Gets the effective text of a combo box, using the editor for editable boxes.
      */
@@ -752,10 +772,11 @@ public class SimpleConnectionForm extends VBox {
                 txtPort.setText(String.valueOf(entry.getPort() > 0 ? entry.getPort() : DEFAULT_TCP_PORT));
             }
             case REMOTE_RPC -> {
+                cmbRemoteRpcMode.setValue(labelForRemoteRpcMode(entry.getEffectiveRemoteRpcMode()));
                 txtHost.setText(valueOrEmpty(entry.getHost()));
                 txtPort.setText(String.valueOf(entry.getPort() > 0
                         ? entry.getPort()
-                        : DEFAULT_REMOTE_RPC_PORT));
+                        : defaultRemoteRpcPort(entry.getEffectiveRemoteRpcMode())));
                 txtRemoteAccessKey.setText(valueOrEmpty(entry.getRemoteAccessKey()));
             }
             case SERIAL -> {
@@ -800,6 +821,21 @@ public class SimpleConnectionForm extends VBox {
         if ((nextType == ConnectionType.TCP || nextType == ConnectionType.SERIAL)
                 && Integer.toString(DEFAULT_REMOTE_RPC_PORT).equals(currentPort)) {
             txtPort.setText(Integer.toString(DEFAULT_TCP_PORT));
+        }
+    }
+
+    private void applyDefaultRemoteRpcPortForMode() {
+        if (txtPort == null || !isRemoteRpcMode()) {
+            return;
+        }
+        String currentPort = txtPort.getText() == null ? "" : txtPort.getText().trim();
+        RemoteRpcConnectionMode mode = selectedRemoteRpcMode();
+        if (mode == RemoteRpcConnectionMode.ROUTER
+                && Integer.toString(DEFAULT_REMOTE_RPC_PORT).equals(currentPort)) {
+            txtPort.setText(Integer.toString(DEFAULT_REMOTE_RPC_ROUTER_PORT));
+        } else if (mode == RemoteRpcConnectionMode.DIRECT
+                && Integer.toString(DEFAULT_REMOTE_RPC_ROUTER_PORT).equals(currentPort)) {
+            txtPort.setText(Integer.toString(DEFAULT_REMOTE_RPC_PORT));
         }
     }
 
@@ -1134,6 +1170,25 @@ public class SimpleConnectionForm extends VBox {
         return ConnectionType.TCP;
     }
 
+    private RemoteRpcConnectionMode selectedRemoteRpcMode() {
+        String value = cmbRemoteRpcMode == null ? null : cmbRemoteRpcMode.getValue();
+        if (value == null || value.isBlank()) {
+            return RemoteRpcConnectionMode.DIRECT;
+        }
+        for (RemoteRpcConnectionMode mode : RemoteRpcConnectionMode.values()) {
+            if (labelForRemoteRpcMode(mode).equals(value)) {
+                return mode;
+            }
+        }
+        return RemoteRpcConnectionMode.DIRECT;
+    }
+
+    private static int defaultRemoteRpcPort(RemoteRpcConnectionMode mode) {
+        return mode == RemoteRpcConnectionMode.ROUTER
+                ? DEFAULT_REMOTE_RPC_ROUTER_PORT
+                : DEFAULT_REMOTE_RPC_PORT;
+    }
+
     private static String labelForConnectionType(ConnectionType type) {
         if (type == null) {
             return I18n.t("connection.type.tcp");
@@ -1155,6 +1210,16 @@ public class SimpleConnectionForm extends VBox {
             case MESHCORE_KISS -> I18n.t("connection.protocol.meshcoreKiss");
             case MESHCORE_COMPANION -> I18n.t("connection.protocol.meshcoreCompanion");
             case REMOTE_RPC -> I18n.t("connection.protocol.remoteRpc");
+        };
+    }
+
+    private static String labelForRemoteRpcMode(RemoteRpcConnectionMode mode) {
+        if (mode == null) {
+            return I18n.t("connection.remoteRpcMode.direct");
+        }
+        return switch (mode) {
+            case DIRECT -> I18n.t("connection.remoteRpcMode.direct");
+            case ROUTER -> I18n.t("connection.remoteRpcMode.router");
         };
     }
 
