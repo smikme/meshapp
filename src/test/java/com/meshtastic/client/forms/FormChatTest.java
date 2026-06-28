@@ -9,6 +9,8 @@ import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.service.ConnectionManager;
 import com.meshtastic.client.service.MessageDbService;
+import com.meshtastic.client.system.DrawerManager;
+import com.meshtastic.client.system.DrawerPane;
 import com.meshtastic.client.system.MainForm;
 import com.meshtastic.client.system.RootPane;
 import com.meshtastic.client.utils.AppPreferences;
@@ -18,6 +20,7 @@ import javafx.scene.control.ListView;
 import javafx.scene.control.SplitPane;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
+import javafx.scene.shape.Circle;
 import javafx.stage.Stage;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
@@ -465,6 +468,82 @@ class FormChatTest {
 
             assertEquals(405.0, AppPreferences.getChatListWidth(0.0), 0.001);
             assertEquals(0.45, AppPreferences.getChatDividerPos(), 0.001);
+            return null;
+        });
+    }
+
+    @Test
+    void drawerChatUnreadDotClearsWhenChatNavigationItemIsSelected() {
+        onFxThread(() -> {
+            DrawerPane drawerPane = new DrawerPane();
+            drawerPane.setChatUnreadDot(true);
+
+            Circle dot = readField(drawerPane, "chatBadgeDot");
+            assertTrue(dot.isVisible());
+
+            drawerPane.setSelectedItemClass(FormChat.class);
+
+            assertFalse(dot.isVisible());
+
+            drawerPane.setChatUnreadDot(true);
+
+            assertFalse(dot.isVisible());
+            return null;
+        });
+    }
+
+    @Test
+    void hiddenChatFormReloadDoesNotClearDrawerUnreadDot() {
+        onFxThread(() -> {
+            DrawerPane drawerPane = new DrawerPane();
+            DrawerManager.setDrawerPane(drawerPane);
+            drawerPane.setChatUnreadDot(true);
+
+            DeviceState state = new DeviceState();
+            try {
+                state.setMyNodeNum(0x12345678);
+                state.addChannel(channelProto(0));
+
+                FormChat form = new FormChat();
+                form.state = state;
+                form.formVisible = false;
+
+                form.reloadChatList();
+
+                Circle dot = readField(drawerPane, "chatBadgeDot");
+                assertTrue(dot.isVisible());
+            } finally {
+                state.shutdown();
+            }
+            return null;
+        });
+    }
+
+    @Test
+    void hiddenChatFormReloadDoesNotShowDrawerUnreadDotForExistingUnread() {
+        onFxThread(() -> {
+            DrawerPane drawerPane = new DrawerPane();
+            DrawerManager.setDrawerPane(drawerPane);
+            drawerPane.setChatUnreadDot(false);
+
+            MessageDbService db = MessageDbService.getInstance();
+            DeviceState state = new DeviceState();
+            try {
+                state.setMyNodeNum(0x12345678);
+                state.addChannel(channelProto(0));
+                db.save(incoming("already unread"), "channel", "0", "!12345678");
+
+                FormChat form = new FormChat();
+                form.state = state;
+                form.formVisible = false;
+
+                form.reloadChatList();
+
+                Circle dot = readField(drawerPane, "chatBadgeDot");
+                assertFalse(dot.isVisible());
+            } finally {
+                state.shutdown();
+            }
             return null;
         });
     }

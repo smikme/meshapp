@@ -61,6 +61,7 @@ public class DrawerPane extends StackPane {
     private final Set<Class<?>> navigationBlockedItemClasses = new HashSet<>();
     private Object selectedItemKey;
     private Circle chatBadgeDot;
+    private boolean chatUnreadDotVisible;
 
     public DrawerPane() {
         getStyleClass().add("drawer-pane");
@@ -179,7 +180,7 @@ public class DrawerPane extends StackPane {
         if (item.formClass() == FormChat.class && btn.getGraphic() != null) {
             chatBadgeDot = new Circle(4);
             chatBadgeDot.getStyleClass().add("drawer-chat-badge-dot");
-            chatBadgeDot.setVisible(false);
+            chatBadgeDot.setVisible(chatUnreadDotVisible);
             StackPane wrapper = new StackPane(btn.getGraphic(), chatBadgeDot);
             StackPane.setAlignment(chatBadgeDot, Pos.TOP_RIGHT);
             btn.setGraphic(wrapper);
@@ -370,8 +371,8 @@ public class DrawerPane extends StackPane {
     public void setSelectedItemKey(Object key) {
         this.selectedItemKey = key;
         updateSelection();
-        if (key == FormChat.class && chatBadgeDot != null) {
-            chatBadgeDot.setVisible(false);
+        if (key == FormChat.class) {
+            setChatUnreadDot(false);
         }
     }
 
@@ -422,8 +423,9 @@ public class DrawerPane extends StackPane {
     }
 
     public void setChatUnreadDot(boolean visible) {
+        chatUnreadDotVisible = visible && selectedItemKey != FormChat.class;
         if (chatBadgeDot != null) {
-            chatBadgeDot.setVisible(visible && selectedItemKey != FormChat.class);
+            chatBadgeDot.setVisible(chatUnreadDotVisible);
         }
     }
 

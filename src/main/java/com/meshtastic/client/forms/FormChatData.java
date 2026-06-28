@@ -291,7 +291,7 @@ abstract class FormChatData extends FormChatRequests {
         items.addAll(loadDirectChatItems(db, ownerId));
 
         applyChatItemsPreservingSelection(items);
-        DrawerManager.setChatUnreadDot(chatItems.stream().anyMatch(chat -> chat.getUnreadCount() > 0));
+        clearChatUnreadDotIfFormVisible();
     }
 
     private void reloadRemoteChatList() {
@@ -311,7 +311,7 @@ abstract class FormChatData extends FormChatRequests {
                     }
                     List<ChatItem> items = RemoteChatJson.parseChatItems(result);
                     applyChatItemsPreservingSelection(items);
-                    DrawerManager.setChatUnreadDot(items.stream().anyMatch(chat -> chat.getUnreadCount() > 0));
+                    clearChatUnreadDotIfFormVisible();
                     reopenVisibleSelectedChatIfNeeded();
                 }));
     }
@@ -677,9 +677,15 @@ abstract class FormChatData extends FormChatRequests {
                     }
                     List<ChatItem> items = RemoteChatJson.parseChatItems(result);
                     applyChatItemsPreservingSelection(items);
-                    DrawerManager.setChatUnreadDot(items.stream().anyMatch(chat -> chat.getUnreadCount() > 0));
+                    clearChatUnreadDotIfFormVisible();
                     refreshUnreadTailIndicatorLater();
                 }));
+    }
+
+    private void clearChatUnreadDotIfFormVisible() {
+        if (formVisible) {
+            DrawerManager.setChatUnreadDot(false);
+        }
     }
 
     protected void showNewChatDialog() {
