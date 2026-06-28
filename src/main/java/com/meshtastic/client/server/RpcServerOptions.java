@@ -18,6 +18,8 @@ final class RpcServerOptions {
     private String bindAddress;
     private Integer port;
     private String accessKey;
+    private Boolean routerEnabled;
+    private String routerServer;
     private boolean autoconnect = true;
     private boolean printAccessKey;
     private boolean help;
@@ -50,6 +52,16 @@ final class RpcServerOptions {
                 case "--rpc-bind", "--bind" -> options.bindAddress = requireValue(values, ++i, arg);
                 case "--rpc-port", "--port" -> options.port = parsePort(requireValue(values, ++i, arg), arg);
                 case "--rpc-key", "--key" -> options.accessKey = requireValue(values, ++i, arg).trim();
+                case "--rpc-router", "--rpc-router-server" -> {
+                    options.routerEnabled = true;
+                    if (hasValue(values, i + 1)) {
+                        options.routerServer = values.get(++i).trim();
+                    }
+                }
+                case "--no-rpc-router" -> {
+                    options.routerEnabled = false;
+                    options.routerServer = null;
+                }
                 case "--print-rpc-key" -> options.printAccessKey = true;
                 case "--no-autoconnect" -> options.autoconnect = false;
                 case "--rpc-run-id" -> requireValue(values, ++i, arg);
@@ -75,6 +87,14 @@ final class RpcServerOptions {
         return accessKey;
     }
 
+    Boolean routerEnabledOverride() {
+        return routerEnabled;
+    }
+
+    String routerServerOverride() {
+        return routerServer;
+    }
+
     boolean autoconnect() {
         return autoconnect;
     }
@@ -94,6 +114,10 @@ final class RpcServerOptions {
                   --rpc-bind ADDRESS       Bind address, default saved value or 127.0.0.1
                   --rpc-port PORT          TCP port, default saved value or 44030
                   --rpc-key KEY            Access key; default saved key, or generate and save one
+                  --rpc-router [SERVER]    Connect this Host to External RPC Router
+                  --rpc-router-server [SERVER]
+                                           Alias for --rpc-router
+                  --no-rpc-router          Disable External RPC Router for this run
                   --print-rpc-key          Print the configured key to console logs
                   --no-autoconnect         Do not connect saved auto-connect profiles on startup
                   --help                   Show this help
@@ -102,7 +126,7 @@ final class RpcServerOptions {
                   MESHAPP_RPC_BIND, MESHAPP_RPC_PORT, MESHAPP_RPC_KEY
 
                 Example:
-                  meshapp --rpc-server --rpc-bind 0.0.0.0 --rpc-port 44030
+                  meshapp --rpc-server --rpc-bind 0.0.0.0 --rpc-port 44030 --rpc-router 127.0.0.1:8080
                 """;
     }
 
@@ -128,6 +152,10 @@ final class RpcServerOptions {
             throw new IllegalArgumentException(option + " requires a value");
         }
         return value;
+    }
+
+    private static boolean hasValue(List<String> args, int index) {
+        return index < args.size() && !args.get(index).startsWith("--");
     }
 
     private static int parsePort(String value, String option) {

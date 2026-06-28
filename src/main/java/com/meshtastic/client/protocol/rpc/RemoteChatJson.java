@@ -43,12 +43,23 @@ public final class RemoteChatJson {
     }
 
     public static JsonObject sendParams(String chatType, String chatKey, String text, int replyId) {
+        return sendParams(chatType, chatKey, text, replyId, "");
+    }
+
+    public static JsonObject sendParams(String chatType,
+                                        String chatKey,
+                                        String text,
+                                        int replyId,
+                                        String clientRequestId) {
         JsonObject params = new JsonObject();
         params.addProperty("chatType", chatType);
         params.addProperty("chatKey", chatKey);
         params.addProperty("text", text);
         if (replyId != 0) {
             params.addProperty("replyId", replyId);
+        }
+        if (clientRequestId != null && !clientRequestId.isBlank()) {
+            params.addProperty("clientRequestId", clientRequestId.trim());
         }
         return params;
     }
@@ -59,6 +70,19 @@ public final class RemoteChatJson {
         params.addProperty("chatKey", chatKey);
         params.addProperty("targetPacketId", targetPacketId);
         params.addProperty("emoji", emoji);
+        return params;
+    }
+
+    public static JsonObject retryParams(String chatType, String chatKey, long dbId, int packetId) {
+        JsonObject params = new JsonObject();
+        params.addProperty("chatType", chatType);
+        params.addProperty("chatKey", chatKey);
+        if (dbId > 0) {
+            params.addProperty("dbId", dbId);
+        }
+        if (packetId != 0) {
+            params.addProperty("packetId", packetId);
+        }
         return params;
     }
 

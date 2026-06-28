@@ -48,6 +48,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
@@ -61,7 +62,8 @@ public class FormConnections extends Form {
     private final Map<String, RemoteConnectionSnapshot> remoteConnectionSnapshots = new ConcurrentHashMap<>();
     private final Set<String> remoteRefreshInProgress = ConcurrentHashMap.newKeySet();
     private final Set<String> remoteActionInProgress = ConcurrentHashMap.newKeySet();
-    private final Runnable changeListener = () -> Platform.runLater(this::rebuildCards);
+    private final AtomicBoolean rebuildCardsQueued = new AtomicBoolean(false);
+    private final Runnable changeListener = this::queueRebuildCards;
 
     public FormConnections() {
         init();
@@ -118,6 +120,16 @@ public class FormConnections extends Form {
         for (ConnectionEntry entry : ConnectionManager.getInstance().getEntries()) {
             cardsBox.getChildren().add(createConnectionCard(entry));
         }
+    }
+
+    private void queueRebuildCards() {
+        if (!rebuildCardsQueued.compareAndSet(false, true)) {
+            return;
+        }
+        Platform.runLater(() -> {
+            rebuildCardsQueued.set(false);
+            rebuildCards();
+        });
     }
 
     private VBox createConnectionCard(ConnectionEntry entry) {
@@ -362,7 +374,7 @@ public class FormConnections extends Form {
     }
 
     private void doConnect(ConnectionEntry entry) {
-        new Thread(() -> {
+        Thread worker = new Thread(() -> {
             try {
                 ConnectionManager mgr = ConnectionManager.getInstance();
                 mgr.connect(entry.getId());
@@ -390,7 +402,9 @@ public class FormConnections extends Form {
                 Platform.runLater(() ->
                         Toast.show(Toast.Type.ERROR, I18n.t("connection.toast.error", ex.getMessage())));
             }
-        }, "connect-" + entry.getId()).start();
+        }, "connect-" + entry.getId());
+        worker.setDaemon(true);
+        worker.start();
     }
 
     private void doDisconnect(ConnectionEntry entry) {
@@ -638,7 +652,9 @@ public class FormConnections extends Form {
                     formatSerialModemLineMode(entry.getEffectiveSerialModemLineMode()));
             case TCP -> I18n.t("connection.card.address.tcp", entry.getHost(), entry.getPort());
             case REMOTE_RPC -> entry.getEffectiveRemoteRpcMode() == RemoteRpcConnectionMode.ROUTER
-                    ? I18n.t("connection.card.address.remoteRpcRouter", entry.getHost(), entry.getPort())
+                    ? I18n.t("connection.card.address.remoteRpcRouter",
+                            ConnectionEntry.CLOUD_RPC_ROUTER_DISPLAY_HOST,
+                            ConnectionEntry.CLOUD_RPC_ROUTER_PORT)
                     : I18n.t("connection.card.address.remoteRpc", entry.getHost(), entry.getPort());
         };
     }

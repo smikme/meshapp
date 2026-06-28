@@ -109,6 +109,7 @@ public class FormSetting extends Form {
     private Tab cacheTab;
     private Tab appearanceTab;
     private Tab firmwareTab;
+    private Tab remoteRpcTab;
 
     // Config tab
     private TreeTableView<ConfigTreeItem> configTree;
@@ -166,8 +167,12 @@ public class FormSetting extends Form {
             I18n.t("settings.tab.app"),
             ApplicationSettingsPanelFactory.create()
         );
+        remoteRpcTab = new Tab(
+            I18n.t("settings.tab.rpc"),
+            ApplicationSettingsPanelFactory.createRemoteRpcSettingsPanel()
+        );
 
-        tabPane.getTabs().addAll(configTab, firmwareTab, cacheTab, appearanceTab);
+        tabPane.getTabs().addAll(configTab, firmwareTab, cacheTab, remoteRpcTab, appearanceTab);
         tabPane
             .getSelectionModel()
             .selectedItemProperty()

@@ -12,7 +12,8 @@ import java.util.Locale;
  */
 final class ExternalRouterAddress {
 
-    private static final int DEFAULT_ROUTER_PORT = 8080;
+    private static final int DEFAULT_WS_ROUTER_PORT = 8080;
+    private static final int DEFAULT_WSS_ROUTER_PORT = 443;
     private static final String DEFAULT_PATH = "/rpc";
 
     private ExternalRouterAddress() {
@@ -38,7 +39,7 @@ final class ExternalRouterAddress {
      * @return host WebSocket endpoint URI
      */
     static URI hostUri(String server, RpcAccessKey accessKey) {
-        return uri(server, DEFAULT_ROUTER_PORT, accessKey.roomId(), "host");
+        return uri(server, 0, accessKey.roomId(), "host");
     }
 
     /**
@@ -64,7 +65,7 @@ final class ExternalRouterAddress {
         }
         int port = parsed.getPort() > 0
                 ? parsed.getPort()
-                : fallbackPort > 0 ? fallbackPort : DEFAULT_ROUTER_PORT;
+                : fallbackPort > 0 ? fallbackPort : defaultPort(scheme);
         String path = parsed.getPath() == null || parsed.getPath().isBlank() || "/".equals(parsed.getPath())
                 ? DEFAULT_PATH
                 : parsed.getPath();
@@ -75,6 +76,10 @@ final class ExternalRouterAddress {
     private static boolean hasScheme(String value) {
         int index = value.indexOf("://");
         return index > 0;
+    }
+
+    private static int defaultPort(String scheme) {
+        return "wss".equals(scheme) ? DEFAULT_WSS_ROUTER_PORT : DEFAULT_WS_ROUTER_PORT;
     }
 
     private static String requireServer(String server) {

@@ -121,6 +121,25 @@ class FormChatTest {
     }
 
     @Test
+    void copyLoadedMessageMetadataAcceptsRetryPacketIdChangeWhenDbIdMatches() {
+        MeshMessage loaded = outgoing("retry me");
+        loaded.setDbId(88);
+        loaded.setPacketId(100);
+        loaded.setStatus(MeshMessage.DeliveryStatus.FAILED);
+        loaded.setErrorReason("TIMEOUT");
+
+        MeshMessage updated = outgoing("retry me");
+        updated.setDbId(88);
+        updated.setPacketId(200);
+        updated.setStatus(MeshMessage.DeliveryStatus.SENDING);
+
+        assertTrue(FormChatMessages.copyLoadedMessageMetadata(loaded, updated));
+        assertEquals(200, loaded.getPacketId());
+        assertEquals(MeshMessage.DeliveryStatus.SENDING, loaded.getStatus());
+        assertEquals(null, loaded.getErrorReason());
+    }
+
+    @Test
     void formOpenReopensRestoredSelectionWhenDetailPaneIsPlaceholder() {
         onFxThread(() -> {
             ConnectionManager manager = ConnectionManager.getInstance();

@@ -95,6 +95,23 @@ class RemoteChatJsonTest {
     }
 
     @Test
+    void sendParamsIncludesClientRequestIdWhenPresent() {
+        JsonObject params = RemoteChatJson.sendParams("channel", "0", "hello", 0, " request-1 ");
+
+        assertEquals("request-1", params.get("clientRequestId").getAsString());
+    }
+
+    @Test
+    void retryParamsIncludeStableDbIdAndCurrentPacketId() {
+        JsonObject params = RemoteChatJson.retryParams("channel", "0", 55L, 123);
+
+        assertEquals("channel", params.get("chatType").getAsString());
+        assertEquals("0", params.get("chatKey").getAsString());
+        assertEquals(55L, params.get("dbId").getAsLong());
+        assertEquals(123, params.get("packetId").getAsInt());
+    }
+
+    @Test
     void reactionParamsIncludeTargetPacketAndEmoji() {
         JsonObject params = RemoteChatJson.reactionParams("dm", "!12345678", -123, "👍");
 

@@ -31,6 +31,7 @@ class RpcServerOptionsTest {
                 "--rpc-bind", "0.0.0.0",
                 "--rpc-port", "44031",
                 "--rpc-key", "mra1_test",
+                "--rpc-router", "127.0.0.1:8080",
                 "--print-rpc-key",
                 "--no-autoconnect"
         });
@@ -38,8 +39,43 @@ class RpcServerOptionsTest {
         assertEquals("0.0.0.0", options.bindAddressOverride());
         assertEquals(44031, options.portOverride());
         assertEquals("mra1_test", options.accessKeyOverride());
+        assertTrue(options.routerEnabledOverride());
+        assertEquals("127.0.0.1:8080", options.routerServerOverride());
         assertTrue(options.printAccessKey());
         assertFalse(options.autoconnect());
+    }
+
+    @Test
+    void parsesRouterAliasAndDisableOverride() {
+        RpcServerOptions enabled = RpcServerOptions.parse(new String[] {
+                "--rpc-server",
+                "--rpc-router-server",
+                "router.example.org:8080"
+        });
+
+        assertTrue(enabled.routerEnabledOverride());
+        assertEquals("router.example.org:8080", enabled.routerServerOverride());
+
+        RpcServerOptions disabled = RpcServerOptions.parse(new String[] {
+                "--rpc-server",
+                "--no-rpc-router"
+        });
+
+        assertFalse(disabled.routerEnabledOverride());
+        assertNull(disabled.routerServerOverride());
+    }
+
+    @Test
+    void acceptsRouterEnableWithoutServerOverride() {
+        RpcServerOptions options = RpcServerOptions.parse(new String[] {
+                "--rpc-server",
+                "--print-rpc-key",
+                "--rpc-router"
+        });
+
+        assertTrue(options.routerEnabledOverride());
+        assertNull(options.routerServerOverride());
+        assertTrue(options.printAccessKey());
     }
 
     @Test
@@ -51,6 +87,8 @@ class RpcServerOptionsTest {
         assertNull(options.bindAddressOverride());
         assertNull(options.portOverride());
         assertNull(options.accessKeyOverride());
+        assertNull(options.routerEnabledOverride());
+        assertNull(options.routerServerOverride());
         assertTrue(options.autoconnect());
     }
 

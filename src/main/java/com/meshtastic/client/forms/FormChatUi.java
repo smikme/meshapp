@@ -66,6 +66,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
 
@@ -879,7 +880,8 @@ abstract class FormChatUi extends FormChatBase {
                                 chatType,
                                 chatKey,
                                 request.text(),
-                                request.replyId()),
+                                request.replyId(),
+                                UUID.randomUUID().toString()),
                         REMOTE_RPC_TIMEOUT)
                 .whenComplete((result, error) -> Platform.runLater(() -> {
                     if (rpcState != remoteRpcState

@@ -67,8 +67,8 @@ public final class TransportConnectionFactory {
             );
             case REMOTE_RPC -> entry.getEffectiveRemoteRpcMode() == RemoteRpcConnectionMode.ROUTER
                     ? new ExternalRouterRpcTransportConnection(
-                            entry.getHost(),
-                            entry.getPort(),
+                            ConnectionEntry.CLOUD_RPC_ROUTER_SERVER,
+                            ConnectionEntry.CLOUD_RPC_ROUTER_PORT,
                             entry.getRemoteAccessKey())
                     : new DirectRpcTransportConnection(
                             entry.getHost(),
@@ -93,8 +93,13 @@ public final class TransportConnectionFactory {
                     entry.getBaudRate() > 0 ? entry.getBaudRate() : SerialConnection.DEFAULT_BAUD_RATE);
             case BLE -> String.format("type=BLE, address=%s, deviceName=%s",
                     safeText(entry.getBleAddress()), safeText(entry.getBleDeviceName()));
-            case REMOTE_RPC -> String.format("type=REMOTE_RPC, mode=%s, host=%s, port=%d",
-                    entry.getEffectiveRemoteRpcMode(), safeText(entry.getHost()), entry.getPort());
+            case REMOTE_RPC -> entry.getEffectiveRemoteRpcMode() == RemoteRpcConnectionMode.ROUTER
+                    ? String.format("type=REMOTE_RPC, mode=%s, host=%s, port=%d",
+                            entry.getEffectiveRemoteRpcMode(),
+                            ConnectionEntry.CLOUD_RPC_ROUTER_DISPLAY_HOST,
+                            ConnectionEntry.CLOUD_RPC_ROUTER_PORT)
+                    : String.format("type=REMOTE_RPC, mode=%s, host=%s, port=%d",
+                            entry.getEffectiveRemoteRpcMode(), safeText(entry.getHost()), entry.getPort());
         };
     }
 
