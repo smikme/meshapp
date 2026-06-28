@@ -9,7 +9,16 @@ import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.service.ConnectionManager;
 import com.meshtastic.client.service.MessageDbService;
+import com.meshtastic.client.system.MainForm;
+import com.meshtastic.client.system.RootPane;
+import com.meshtastic.client.utils.AppPreferences;
 import javafx.application.Platform;
+import javafx.scene.Scene;
+import javafx.scene.control.ListView;
+import javafx.scene.control.SplitPane;
+import javafx.scene.layout.StackPane;
+import javafx.scene.layout.VBox;
+import javafx.stage.Stage;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -121,6 +130,346 @@ class FormChatTest {
     }
 
     @Test
+    void responsiveChatListExpandsAfterCompactMode() {
+        onFxThread(() -> {
+            FormChat form = new FormChat();
+            form.selectedChat = channel(0);
+            form.resize(650, 800);
+
+            invokeNoArg(form, "updateResponsiveChatLayout");
+
+            VBox chatListPane = readField(form, "chatListPane");
+            ListView<?> chatListView = readField(form, "chatListView");
+            SplitPane splitPane = readField(form, "chatSplitPane");
+
+            assertEquals(64.0, chatListPane.getPrefWidth(), 0.01);
+            assertEquals(64.0, chatListPane.getMaxWidth(), 0.01);
+            assertEquals(64.0, chatListView.getPrefWidth(), 0.01);
+            assertTrue(chatListView.getPseudoClassStates().stream()
+                    .anyMatch(pseudoClass -> "compact".equals(pseudoClass.getPseudoClassName())));
+            assertEquals(64.0 / 650.0, splitPane.getDividers().getFirst().getPosition(), 0.02);
+
+            form.resize(820, 800);
+            invokeNoArg(form, "updateResponsiveChatLayout");
+
+            assertEquals(314.0, chatListPane.getPrefWidth(), 0.01);
+            assertEquals(314.0, chatListPane.getMinWidth(), 0.01);
+            assertEquals(314.0, chatListPane.getMaxWidth(), 0.01);
+            assertFalse(chatListView.getPseudoClassStates().stream()
+                    .anyMatch(pseudoClass -> "compact".equals(pseudoClass.getPseudoClassName())));
+            assertEquals(314.0 / 820.0, splitPane.getDividers().getFirst().getPosition(), 0.02);
+            return null;
+        });
+    }
+
+    @Test
+    void responsiveChatListCompactsWhenNoChatIsSelected() {
+        onFxThread(() -> {
+            FormChat form = new FormChat();
+            form.selectedChat = null;
+            form.resize(650, 800);
+
+            invokeNoArg(form, "updateResponsiveChatLayout");
+
+            VBox chatListPane = readField(form, "chatListPane");
+            ListView<?> chatListView = readField(form, "chatListView");
+            SplitPane splitPane = readField(form, "chatSplitPane");
+
+            assertTrue(splitPane.getItems().contains(chatListPane));
+            assertEquals(64.0, chatListPane.getPrefWidth(), 0.01);
+            assertEquals(64.0, chatListPane.getMinWidth(), 0.01);
+            assertEquals(64.0, chatListPane.getMaxWidth(), 0.01);
+            assertTrue(chatListView.getPseudoClassStates().stream()
+                    .anyMatch(pseudoClass -> "compact".equals(pseudoClass.getPseudoClassName())));
+            assertEquals(64.0 / 650.0, splitPane.getDividers().getFirst().getPosition(), 0.02);
+            return null;
+        });
+    }
+
+    @Test
+    void responsiveChatListUsesExpandedWidthWhenNoChatIsSelected() {
+        onFxThread(() -> {
+            FormChat form = new FormChat();
+            form.selectedChat = null;
+            form.resize(820, 800);
+
+            invokeNoArg(form, "updateResponsiveChatLayout");
+
+            VBox chatListPane = readField(form, "chatListPane");
+            ListView<?> chatListView = readField(form, "chatListView");
+            SplitPane splitPane = readField(form, "chatSplitPane");
+
+            assertTrue(splitPane.getItems().contains(chatListPane));
+            assertEquals(314.0, chatListPane.getPrefWidth(), 0.01);
+            assertEquals(314.0, chatListPane.getMinWidth(), 0.01);
+            assertEquals(314.0, chatListPane.getMaxWidth(), 0.01);
+            assertFalse(chatListView.getPseudoClassStates().stream()
+                    .anyMatch(pseudoClass -> "compact".equals(pseudoClass.getPseudoClassName())));
+            assertEquals(314.0 / 820.0, splitPane.getDividers().getFirst().getPosition(), 0.02);
+            return null;
+        });
+    }
+
+    @Test
+    void responsiveChatListDoesNotRestoreNarrowSavedWidthForOpenChat() {
+        onFxThread(() -> {
+            AppPreferences.setChatDividerPos(0.24);
+
+            FormChat form = new FormChat();
+            form.selectedChat = channel(0);
+            form.resize(820, 800);
+
+            invokeNoArg(form, "updateResponsiveChatLayout");
+
+            VBox chatListPane = readField(form, "chatListPane");
+            SplitPane splitPane = readField(form, "chatSplitPane");
+
+            assertEquals(314.0, chatListPane.getPrefWidth(), 0.01);
+            assertEquals(314.0, chatListPane.getMinWidth(), 0.01);
+            assertEquals(314.0 / 820.0, splitPane.getDividers().getFirst().getPosition(), 0.02);
+            return null;
+        });
+    }
+
+    @Test
+    void responsiveChatListUsesSceneWidthWhenFormWasCompressed() {
+        onFxThread(() -> {
+            FormChat form = new FormChat();
+            form.selectedChat = channel(0);
+            new Scene(new StackPane(form), 876, 800);
+            form.resize(489, 800);
+
+            invokeNoArg(form, "updateResponsiveChatLayout");
+
+            VBox chatListPane = readField(form, "chatListPane");
+            SplitPane splitPane = readField(form, "chatSplitPane");
+
+            assertTrue(splitPane.getItems().contains(chatListPane));
+            assertEquals(314.0, chatListPane.getPrefWidth(), 0.01);
+            assertEquals(314.0, chatListPane.getMinWidth(), 0.01);
+            Boolean hidden = readField(form, "chatListHiddenMode");
+            assertFalse(hidden);
+            return null;
+        });
+    }
+
+    @Test
+    void responsiveChatListUsesWindowWidthWhenFormAndSceneWereCompressed() {
+        onFxThread(() -> {
+            AppPreferences.setChatDividerPos(0.4);
+            AppPreferences.setChatListWidth(480.0);
+
+            Stage stage = new Stage();
+            try {
+                FormChat form = new FormChat();
+                form.selectedChat = channel(0);
+                new Scene(new StackPane(form), 650, 800);
+                stage.setScene(form.getScene());
+                stage.setWidth(1383);
+                form.resize(650, 800);
+
+                invokeNoArg(form, "updateResponsiveChatLayout");
+
+                VBox chatListPane = readField(form, "chatListPane");
+                SplitPane splitPane = readField(form, "chatSplitPane");
+
+                assertTrue(splitPane.getItems().contains(chatListPane));
+                assertEquals(480.0, chatListPane.getPrefWidth(), 0.01);
+                assertEquals(314.0, chatListPane.getMinWidth(), 0.01);
+                assertTrue(chatListPane.getMaxWidth() > 480.0);
+                assertTrue(splitPane.getDividers().getFirst().getPosition() < 0.4);
+            } finally {
+                stage.close();
+            }
+            return null;
+        });
+    }
+
+    @Test
+    void responsiveChatListKeepsPixelWidthWhenWindowExpandsQuickly() {
+        onFxThread(() -> {
+            AppPreferences.setChatDividerPos(0.35);
+            AppPreferences.setChatListWidth(314.0);
+
+            FormChat form = new FormChat();
+            form.selectedChat = channel(0);
+            form.resize(820, 800);
+            invokeNoArg(form, "updateResponsiveChatLayout");
+
+            SplitPane splitPane = readField(form, "chatSplitPane");
+            VBox chatListPane = readField(form, "chatListPane");
+            assertEquals(314.0 / 820.0, splitPane.getDividers().getFirst().getPosition(), 0.02);
+
+            splitPane.setDividerPositions(0.75);
+            form.resize(1383, 800);
+            invokeNoArg(form, "updateResponsiveChatLayout");
+
+            assertEquals(314.0, chatListPane.getPrefWidth(), 0.01);
+            assertEquals(314.0, AppPreferences.getChatListWidth(0.0), 0.01);
+            assertEquals(314.0 / 1383.0, splitPane.getDividers().getFirst().getPosition(), 0.02);
+            return null;
+        });
+    }
+
+    @Test
+    void responsiveChatListRestoresMissingListPaneWhenModeSaysVisible() {
+        onFxThread(() -> {
+            FormChat form = new FormChat();
+            form.selectedChat = channel(0);
+            form.resize(820, 800);
+
+            VBox chatListPane = readField(form, "chatListPane");
+            VBox detailPane = readField(form, "detailPane");
+            SplitPane splitPane = readField(form, "chatSplitPane");
+            splitPane.getItems().setAll(detailPane);
+
+            invokeNoArg(form, "updateResponsiveChatLayout");
+
+            assertTrue(splitPane.getItems().contains(chatListPane));
+            assertEquals(314.0, chatListPane.getPrefWidth(), 0.01);
+            assertEquals(314.0, chatListPane.getMinWidth(), 0.01);
+            Boolean hidden = readField(form, "chatListHiddenMode");
+            assertFalse(hidden);
+            return null;
+        });
+    }
+
+    @Test
+    void mainFormStretchesChatFormBeforeResponsiveDecision() {
+        onFxThread(() -> {
+            AppPreferences.setChatDividerPos(0.4);
+            AppPreferences.setChatListWidth(360.0);
+
+            MainForm mainForm = new MainForm();
+            FormChat form = new FormChat();
+            form.selectedChat = channel(0);
+            mainForm.setForm(form);
+
+            StackPane root = new StackPane(mainForm);
+            new Scene(root, 900, 800);
+            root.resize(900, 800);
+            root.applyCss();
+            root.layout();
+
+            invokeNoArg(form, "updateResponsiveChatLayout");
+
+            VBox chatListPane = readField(form, "chatListPane");
+            SplitPane splitPane = readField(form, "chatSplitPane");
+
+            assertTrue(mainForm.getWidth() >= 890.0);
+            assertTrue(form.getWidth() >= 890.0);
+            assertTrue(splitPane.getItems().contains(chatListPane));
+            assertEquals(360.0, chatListPane.getPrefWidth(), 0.01);
+            assertTrue(chatListPane.getMaxWidth() > 360.0);
+            assertEquals(0.4, splitPane.getDividers().getFirst().getPosition(), 0.02);
+            return null;
+        });
+    }
+
+    @Test
+    void rootPaneStretchesChatFormBeforeResponsiveDecision() {
+        onFxThread(() -> {
+            AppPreferences.setChatDividerPos(0.4);
+            AppPreferences.setChatListWidth(500.0);
+
+            RootPane rootPane = new RootPane();
+            FormChat form = new FormChat();
+            form.selectedChat = channel(0);
+            rootPane.getMainForm().setForm(form);
+
+            new Scene(rootPane, 1383, 900);
+            rootPane.resize(1383, 900);
+            rootPane.applyCss();
+            rootPane.layout();
+
+            invokeNoArg(form, "updateResponsiveChatLayout");
+
+            VBox chatListPane = readField(form, "chatListPane");
+            SplitPane splitPane = readField(form, "chatSplitPane");
+
+            assertTrue(rootPane.getMainForm().getWidth() >= 1300.0);
+            assertTrue(form.getWidth() >= 1300.0);
+            assertTrue(splitPane.getItems().contains(chatListPane));
+            assertEquals(500.0, chatListPane.getPrefWidth(), 0.01);
+            assertTrue(chatListPane.getMaxWidth() > 500.0);
+            assertTrue(splitPane.getDividers().getFirst().getPosition() < 0.4);
+            return null;
+        });
+    }
+
+    @Test
+    void responsiveChatListRestoresSavedSplitterOnceDialogHasRoom() {
+        onFxThread(() -> {
+            AppPreferences.setChatDividerPos(0.4);
+            AppPreferences.setChatListWidth(360.0);
+
+            FormChat form = new FormChat();
+            form.selectedChat = channel(0);
+            form.resize(900, 800);
+
+            invokeNoArg(form, "updateResponsiveChatLayout");
+
+            SplitPane splitPane = readField(form, "chatSplitPane");
+
+            assertEquals(0.4, splitPane.getDividers().getFirst().getPosition(), 0.02);
+            return null;
+        });
+    }
+
+    @Test
+    void responsiveChatListRestoresSavedSplitterWhenNoChatIsSelected() {
+        onFxThread(() -> {
+            AppPreferences.setChatDividerPos(0.4);
+            AppPreferences.setChatListWidth(360.0);
+
+            FormChat form = new FormChat();
+            form.selectedChat = null;
+            form.resize(900, 800);
+
+            invokeNoArg(form, "updateResponsiveChatLayout");
+
+            VBox chatListPane = readField(form, "chatListPane");
+            SplitPane splitPane = readField(form, "chatSplitPane");
+
+            assertTrue(splitPane.getItems().contains(chatListPane));
+            assertEquals(360.0, chatListPane.getPrefWidth(), 0.01);
+            assertTrue(chatListPane.getMaxWidth() > 360.0);
+            assertEquals(0.4, splitPane.getDividers().getFirst().getPosition(), 0.02);
+            return null;
+        });
+    }
+
+    @Test
+    void responsiveChatListSavesSplitterOnceDialogHasRoom() {
+        onFxThread(() -> {
+            AppPreferences.setChatDividerPos(0.4);
+            AppPreferences.setChatListWidth(360.0);
+
+            FormChat form = new FormChat();
+            form.selectedChat = channel(0);
+            form.resize(820, 800);
+
+            invokeNoArg(form, "updateResponsiveChatLayout");
+            invokeNoArg(form, "ensureChatDividerListener");
+
+            SplitPane splitPane = readField(form, "chatSplitPane");
+            splitPane.setDividerPositions(0.25);
+            invokeNoArg(form, "saveUserChatListWidth");
+
+            assertEquals(360.0, AppPreferences.getChatListWidth(0.0), 0.001);
+
+            form.resize(900, 800);
+            invokeNoArg(form, "updateResponsiveChatLayout");
+            splitPane.setDividerPositions(0.45);
+            invokeNoArg(form, "saveUserChatListWidth");
+
+            assertEquals(405.0, AppPreferences.getChatListWidth(0.0), 0.001);
+            assertEquals(0.45, AppPreferences.getChatDividerPos(), 0.001);
+            return null;
+        });
+    }
+
+    @Test
     void copyLoadedMessageMetadataAcceptsRetryPacketIdChangeWhenDbIdMatches() {
         MeshMessage loaded = outgoing("retry me");
         loaded.setDbId(88);
@@ -176,8 +525,11 @@ class FormChatTest {
     }
 
     @Test
-    void reloadChatListClearsSelectionWhenRestoredChatNoLongerExists() {
+    void reloadChatListRestoresPersistedSelectionWhenNoChatIsSelected() {
         onFxThread(() -> {
+            String connectionId = "connection-persisted-selection";
+            AppPreferences.saveSelectedChat(connectionId, "channel:0");
+
             DeviceState state = new DeviceState();
             try {
                 state.setMyNodeNum(0x12345678);
@@ -185,10 +537,65 @@ class FormChatTest {
 
                 FormChat form = new FormChat();
                 form.state = state;
-                form.boundConnectionId = "connection-1";
+                form.boundConnectionId = connectionId;
+                form.selectedChat = null;
+                form.detailPane.getChildren().setAll(form.placeholderBox);
+
+                form.reloadChatList();
+                form.reopenSelectedChatIfPossible();
+
+                assertNotNull(form.selectedChat);
+                assertEquals(ChatItem.ChatType.CHANNEL, form.selectedChat.getType());
+                assertEquals(0, form.selectedChat.getChannelIndex());
+                assertTrue(form.isChatDetailOpenFor(form.selectedChat));
+                assertEquals("channel:0", AppPreferences.loadSelectedChat(connectionId));
+            } finally {
+                state.shutdown();
+            }
+            return null;
+        });
+        waitForFxEvents();
+        waitForFxEvents();
+    }
+
+    @Test
+    void closeChatKeepsLastSelectionForNextFormOpen() {
+        onFxThread(() -> {
+            String connectionId = "connection-close-keeps-selection";
+            AppPreferences.removeSelectedChat(connectionId);
+
+            FormChat form = new FormChat();
+            form.boundConnectionId = connectionId;
+            form.selectedChat = channel(0);
+            form.rememberSelectedChatForBoundConnection();
+
+            form.closeChat();
+
+            assertEquals(null, form.selectedChat);
+            assertTrue(form.selectedChatsByConnectionId.containsKey(connectionId));
+            assertEquals("channel:0", AppPreferences.loadSelectedChat(connectionId));
+            assertTrue(form.detailPane.getChildren().contains(form.placeholderBox));
+            return null;
+        });
+    }
+
+    @Test
+    void reloadChatListClearsSelectionWhenRestoredChatNoLongerExists() {
+        onFxThread(() -> {
+            String connectionId = "connection-missing-selection";
+            AppPreferences.saveSelectedChat(connectionId, "channel:1");
+
+            DeviceState state = new DeviceState();
+            try {
+                state.setMyNodeNum(0x12345678);
+                state.addChannel(channelProto(0));
+
+                FormChat form = new FormChat();
+                form.state = state;
+                form.boundConnectionId = connectionId;
                 form.selectedChat = channel(1);
                 form.selectedChatsByConnectionId.put(
-                        "connection-1",
+                        connectionId,
                         FormChatBase.ChatSelection.from(channel(1)));
                 form.detailPane.getChildren().setAll(form.messageArea);
 
@@ -196,7 +603,8 @@ class FormChatTest {
 
                 assertEquals(null, form.selectedChat);
                 assertTrue(form.chatListView.getSelectionModel().isEmpty());
-                assertFalse(form.selectedChatsByConnectionId.containsKey("connection-1"));
+                assertFalse(form.selectedChatsByConnectionId.containsKey(connectionId));
+                assertEquals(null, AppPreferences.loadSelectedChat(connectionId));
                 assertTrue(form.detailPane.getChildren().contains(form.placeholderBox));
                 assertFalse(form.detailPane.getChildren().contains(form.messageArea));
             } finally {
@@ -425,14 +833,45 @@ class FormChatTest {
         return (Map<String, DeviceState>) readField(manager, "deviceStates");
     }
 
-    private static Object readField(Object target, String fieldName) {
+    @SuppressWarnings("unchecked")
+    private static <T> T readField(Object target, String fieldName) {
+        Field field = findField(target.getClass(), fieldName);
         try {
-            Field field = target.getClass().getDeclaredField(fieldName);
-            field.setAccessible(true);
-            return field.get(target);
-        } catch (ReflectiveOperationException e) {
+            return (T) field.get(target);
+        } catch (IllegalAccessException e) {
             throw new AssertionError("Failed to read field " + fieldName, e);
         }
+    }
+
+    private static Field findField(Class<?> type, String fieldName) {
+        Class<?> current = type;
+        while (current != null) {
+            try {
+                Field field = current.getDeclaredField(fieldName);
+                field.setAccessible(true);
+                return field;
+            } catch (NoSuchFieldException ignored) {
+                current = current.getSuperclass();
+            }
+        }
+        throw new AssertionError("Failed to find field " + fieldName);
+    }
+
+    private static void invokeNoArg(Object target, String methodName) {
+        Class<?> current = target.getClass();
+        while (current != null) {
+            try {
+                java.lang.reflect.Method method = current.getDeclaredMethod(methodName);
+                method.setAccessible(true);
+                method.invoke(target);
+                return;
+            } catch (NoSuchMethodException ignored) {
+                current = current.getSuperclass();
+            } catch (ReflectiveOperationException e) {
+                throw new AssertionError("Failed to invoke method " + methodName, e);
+            }
+        }
+        throw new AssertionError("Failed to find method " + methodName);
     }
 
     private static <T> T onFxThread(FxSupplier<T> supplier) {

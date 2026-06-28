@@ -18,6 +18,7 @@ import com.meshtastic.client.lua.LuaScriptDataSource;
 import com.meshtastic.client.lua.LuaScriptDataSources;
 import com.meshtastic.client.rpc.RpcEventListener;
 import com.meshtastic.client.system.Form;
+import com.meshtastic.client.utils.AppPreferences;
 
 import javafx.application.Platform;
 import javafx.beans.value.ChangeListener;
@@ -192,6 +193,33 @@ abstract class FormChatBase extends Form {
         static ChatSelection from(ChatItem item) {
             return new ChatSelection(item.getType(), item.getChannelIndex(), item.getPeerNodeId());
         }
+
+        static ChatSelection fromPreference(String value) {
+            if (value == null || value.isBlank()) {
+                return null;
+            }
+            String[] parts = value.trim().split(":", 2);
+            if (parts.length != 2 || parts[1].isBlank()) {
+                return null;
+            }
+            if ("channel".equals(parts[0])) {
+                try {
+                    return new ChatSelection(ChatItem.ChatType.CHANNEL, Integer.parseInt(parts[1]), null);
+                } catch (NumberFormatException ignored) {
+                    return null;
+                }
+            }
+            if ("dm".equals(parts[0])) {
+                return new ChatSelection(ChatItem.ChatType.DIRECT_MESSAGE, -1, parts[1]);
+            }
+            return null;
+        }
+
+        String toPreference() {
+            return type == ChatItem.ChatType.CHANNEL
+                    ? "channel:" + channelIndex
+                    : "dm:" + (peerNodeId != null ? peerNodeId : "");
+        }
     }
 
     protected boolean suppressSelectionListener;
@@ -363,7 +391,9 @@ abstract class FormChatBase extends Form {
      */
     protected void rememberSelectedChatForBoundConnection() {
         if (boundConnectionId != null && selectedChat != null) {
-            selectedChatsByConnectionId.put(boundConnectionId, ChatSelection.from(selectedChat));
+            ChatSelection selection = ChatSelection.from(selectedChat);
+            selectedChatsByConnectionId.put(boundConnectionId, selection);
+            AppPreferences.saveSelectedChat(boundConnectionId, selection.toPreference());
         }
     }
 
@@ -373,6 +403,7 @@ abstract class FormChatBase extends Form {
     protected void clearSelectedChatForBoundConnection() {
         if (boundConnectionId != null) {
             selectedChatsByConnectionId.remove(boundConnectionId);
+            AppPreferences.removeSelectedChat(boundConnectionId);
         }
     }
 
@@ -380,7 +411,18 @@ abstract class FormChatBase extends Form {
      * Returns the saved selected chat for the current connection.
      */
     protected ChatSelection selectedChatForBoundConnection() {
-        return boundConnectionId != null ? selectedChatsByConnectionId.get(boundConnectionId) : null;
+        if (boundConnectionId == null) {
+            return null;
+        }
+        ChatSelection selection = selectedChatsByConnectionId.get(boundConnectionId);
+        if (selection != null) {
+            return selection;
+        }
+        selection = ChatSelection.fromPreference(AppPreferences.loadSelectedChat(boundConnectionId));
+        if (selection != null) {
+            selectedChatsByConnectionId.put(boundConnectionId, selection);
+        }
+        return selection;
     }
 
     /**

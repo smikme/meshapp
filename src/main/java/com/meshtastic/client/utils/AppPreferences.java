@@ -555,6 +555,7 @@ public class AppPreferences {
     // ==================== SplitPane Divider Positions ====================
 
     public static final String KEY_CHAT_DIVIDER = "chatDividerPos";
+    public static final String KEY_CHAT_LIST_WIDTH = "chatListWidth";
     public static final String KEY_NODES_DIVIDER = "nodesDividerPos";
     public static final String KEY_PACKET_MONITOR_DIVIDER = "packetMonitorDividerPos";
     public static final String KEY_LUA_DEV_MAIN_DIVIDER = "luaDevMainDividerPos";
@@ -562,9 +563,21 @@ public class AppPreferences {
     public static final String KEY_LUA_DEV_INFO_DIVIDER = "luaDevInfoDividerPos";
     private static final String NODE_CHAT_SCROLL = "chatScroll";
     private static final String NODE_CHAT_NOTIFICATIONS = "chatNotifications";
+    private static final String NODE_CHAT_SELECTION = "chatSelection";
 
     public static double getChatDividerPos() { return state().getDouble(KEY_CHAT_DIVIDER, 0.35); }
     public static void setChatDividerPos(double pos) { state().putDouble(KEY_CHAT_DIVIDER, pos); }
+
+    public static double getChatListWidth(double fallback) {
+        double width = state().getDouble(KEY_CHAT_LIST_WIDTH, fallback);
+        return Double.isFinite(width) && width > 0 ? width : fallback;
+    }
+
+    public static void setChatListWidth(double width) {
+        if (Double.isFinite(width) && width > 0) {
+            state().putDouble(KEY_CHAT_LIST_WIDTH, width);
+        }
+    }
 
     public static double getNodesDividerPos() { return state().getDouble(KEY_NODES_DIVIDER, 0.38); }
     public static void setNodesDividerPos(double pos) { state().putDouble(KEY_NODES_DIVIDER, pos); }
@@ -768,6 +781,33 @@ public class AppPreferences {
         chatScrollNode().remove(composeChatScrollKey(ownerId, chatId));
     }
 
+    public static void saveSelectedChat(String connectionId, String selectionId) {
+        if (connectionId == null || connectionId.isBlank()) {
+            return;
+        }
+        if (selectionId == null || selectionId.isBlank()) {
+            removeSelectedChat(connectionId);
+            return;
+        }
+        chatSelectionNode().put(connectionId, selectionId.trim());
+        flushState();
+    }
+
+    public static String loadSelectedChat(String connectionId) {
+        if (connectionId == null || connectionId.isBlank()) {
+            return null;
+        }
+        String value = chatSelectionNode().get(connectionId, null);
+        return value == null || value.isBlank() ? null : value.trim();
+    }
+
+    public static void removeSelectedChat(String connectionId) {
+        if (connectionId != null && !connectionId.isBlank()) {
+            chatSelectionNode().remove(connectionId);
+            flushState();
+        }
+    }
+
     public static boolean isChatMuted(String ownerId, String chatId) {
         return chatNotificationsNode().getBoolean(composeChatScrollKey(ownerId, chatId), false);
     }
@@ -800,6 +840,10 @@ public class AppPreferences {
 
     private static Preferences chatNotificationsNode() {
         return state().node(NODE_CHAT_NOTIFICATIONS);
+    }
+
+    private static Preferences chatSelectionNode() {
+        return state().node(NODE_CHAT_SELECTION);
     }
 
     private static String composeChatScrollKey(String ownerId, String chatId) {

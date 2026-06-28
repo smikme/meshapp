@@ -240,7 +240,7 @@ abstract class FormChatData extends FormChatRequests {
             return;
         }
 
-        if (selectedChat == null) {
+        if (selectedChat == null && selectedChatForBoundConnection() == null) {
             clearLoadedMessageState();
             detailPane.getChildren().clear();
             detailPane.getChildren().add(placeholderBox);
@@ -248,13 +248,18 @@ abstract class FormChatData extends FormChatRequests {
             return;
         }
 
+        ChatSelection savedSelection = selectedChatForBoundConnection();
+        ChatItem currentSelection = selectedChat;
         ChatItem matched = chatListView.getItems().stream()
-                .filter(item -> chatItemMatches(item, selectedChat))
+                .filter(item -> currentSelection != null
+                        ? chatItemMatches(item, currentSelection)
+                        : chatItemMatchesSelection(item, savedSelection))
                 .findFirst()
                 .orElse(null);
 
         if (matched == null) {
             closeChat();
+            clearSelectedChatForBoundConnection();
             return;
         }
 
@@ -381,6 +386,7 @@ abstract class FormChatData extends FormChatRequests {
     private void clearUnavailableChatSelection() {
         if (selectedChat != null) {
             closeChat();
+            clearSelectedChatForBoundConnection();
         } else {
             clearSelectedChatForBoundConnection();
             clearLoadedMessageState();

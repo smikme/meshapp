@@ -24,12 +24,15 @@ import com.meshtastic.client.protocol.rpc.RemoteChatJson;
 import com.meshtastic.client.protocol.rpc.RemoteNodeJson;
 import com.meshtastic.client.protocol.rpc.RemoteRpcState;
 import com.meshtastic.client.service.MessageService;
+import com.meshtastic.client.system.DrawerPane;
 import com.meshtastic.client.themes.TypographyManager;
 import com.meshtastic.client.utils.AppPreferences;
 import com.meshtastic.client.utils.NodeUtils;
 import com.meshtastic.client.utils.UnicodeTextUtils;
 
 import javafx.application.Platform;
+import javafx.beans.value.ChangeListener;
+import javafx.css.PseudoClass;
 import javafx.collections.transformation.FilteredList;
 import javafx.collections.transformation.SortedList;
 import javafx.geometry.Insets;
@@ -44,6 +47,7 @@ import javafx.scene.control.Separator;
 import javafx.scene.control.SplitPane;
 import javafx.scene.control.TextField;
 import javafx.scene.control.Tooltip;
+import javafx.scene.Node;
 import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
 import javafx.scene.input.DragEvent;
@@ -51,6 +55,7 @@ import javafx.scene.input.Dragboard;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyEvent;
 import javafx.scene.input.MouseButton;
+import javafx.scene.input.MouseEvent;
 import javafx.scene.input.TransferMode;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
@@ -60,6 +65,7 @@ import javafx.scene.layout.VBox;
 import javafx.scene.paint.Color;
 import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
+import javafx.stage.Window;
 
 import java.util.Comparator;
 import java.util.List;
@@ -81,6 +87,43 @@ import java.util.function.Consumer;
  */
 abstract class FormChatUi extends FormChatBase {
 
+    private static final double CHAT_LIST_COMPACT_WIDTH = 64;
+    private static final double CHAT_LIST_MIN_WIDTH = 220;
+    private static final double CHAT_LIST_EXPANDED_WIDTH = 314;
+    private static final double CHAT_DETAIL_MIN_WIDTH = 300;
+    private static final double CHAT_LIST_COMPACT_THRESHOLD = 760;
+    private static final double CHAT_LIST_HIDDEN_THRESHOLD = 520;
+    private static final double CHAT_LIST_SAVED_SPLIT_THRESHOLD = 880;
+    private static final double DEFAULT_CHAT_DIVIDER_POSITION = 0.35;
+    private static final PseudoClass COMPACT_PSEUDO_CLASS = PseudoClass.getPseudoClass("compact");
+
+    private enum ChatListLayoutMode {
+        HIDDEN,
+        COMPACT,
+        EXPANDED,
+        SAVED_SPLIT
+    }
+
+    private SplitPane chatSplitPane;
+    private VBox chatListPane;
+    private HBox chatSearchBox;
+    private StackPane chatListWrapper;
+    private SplitPane.Divider observedChatDivider;
+    private Window observedWindow;
+    private final ChangeListener<Number> sceneWidthListener = (obs, oldWidth, newWidth) -> handleResponsiveWidthChanged();
+    private final ChangeListener<Number> windowWidthListener = (obs, oldWidth, newWidth) -> handleResponsiveWidthChanged();
+    private final ChangeListener<Window> sceneWindowListener = (obs, oldWindow, newWindow) -> {
+        detachObservedWindow();
+        attachObservedWindow(newWindow);
+        Platform.runLater(this::updateResponsiveChatLayout);
+    };
+    private boolean applyingResponsiveLayout;
+    private boolean chatListCompactMode;
+    private boolean chatListHiddenMode;
+    private boolean narrowListForcedVisible;
+    private boolean chatDividerGestureTrackingInstalled;
+    private boolean userDraggingChatDivider;
+    private Button chatListToggleButton;
     private Region headerSpacer;
     private Button quickScriptButton;
     private ContextMenu quickScriptMenu;
@@ -94,28 +137,67 @@ abstract class FormChatUi extends FormChatBase {
      */
     protected void initComponents() {
         getStyleClass().add("chat-form");
+        setMaxSize(Double.MAX_VALUE, Double.MAX_VALUE);
 
-        VBox leftPane = buildLeftPane();
+        chatListPane = buildLeftPane();
         buildRightPanelComponents();
         detailPane = buildDetailPane();
 
-        SplitPane splitPane = buildSplitPane(leftPane, detailPane);
-        getChildren().add(splitPane);
-        splitPane.prefWidthProperty().bind(widthProperty());
-        splitPane.prefHeightProperty().bind(heightProperty());
+        chatSplitPane = buildSplitPane(chatListPane, detailPane);
+        chatSplitPane.setMaxSize(Double.MAX_VALUE, Double.MAX_VALUE);
+        getChildren().add(chatSplitPane);
+        chatSplitPane.prefWidthProperty().bind(widthProperty());
+        chatSplitPane.prefHeightProperty().bind(heightProperty());
+        widthProperty().addListener((obs, oldWidth, newWidth) -> handleResponsiveWidthChanged());
+        sceneProperty().addListener((obs, oldScene, newScene) -> {
+            if (oldScene != null) {
+                oldScene.widthProperty().removeListener(sceneWidthListener);
+                oldScene.windowProperty().removeListener(sceneWindowListener);
+                detachObservedWindow();
+            }
+            if (newScene != null) {
+                newScene.widthProperty().addListener(sceneWidthListener);
+                newScene.windowProperty().addListener(sceneWindowListener);
+                attachObservedWindow(newScene.getWindow());
+                Platform.runLater(this::updateResponsiveChatLayout);
+            }
+        });
+        Platform.runLater(this::updateResponsiveChatLayout);
+    }
+
+    private void attachObservedWindow(Window window) {
+        if (window == null || window == observedWindow) {
+            return;
+        }
+        observedWindow = window;
+        observedWindow.widthProperty().addListener(windowWidthListener);
+    }
+
+    private void detachObservedWindow() {
+        if (observedWindow != null) {
+            observedWindow.widthProperty().removeListener(windowWidthListener);
+            observedWindow = null;
+        }
+    }
+
+    private void handleResponsiveWidthChanged() {
+        userDraggingChatDivider = false;
+        updateResponsiveChatLayout();
     }
 
     private VBox buildLeftPane() {
         VBox leftPane = new VBox();
         leftPane.getStyleClass().add("chat-list-pane");
+        leftPane.setMinWidth(CHAT_LIST_MIN_WIDTH);
         FormChatUiSupport.applyWindowsHitTestBackground(leftPane);
 
         TextField searchField = createSearchField();
         newChatBtn = createNewChatButton();
         configureChatFilter(searchField);
         chatListView = createChatListView();
-        StackPane listWrapper = wrapChatList(chatListView);
-        leftPane.getChildren().addAll(createSearchBox(searchField), listWrapper);
+        chatListWrapper = wrapChatList(chatListView);
+        chatSearchBox = createSearchBox(searchField);
+        leftPane.getChildren().addAll(chatSearchBox, chatListWrapper);
         return leftPane;
     }
 
@@ -166,14 +248,19 @@ abstract class FormChatUi extends FormChatBase {
         ListView<ChatItem> listView = new ListView<>(sortedChats);
         listView.getStyleClass().add("chat-list-view");
         FormChatUiSupport.applyWindowsHitTestBackground(listView);
-        listView.setCellFactory(view -> new ChatListCell(
-                this::deleteChat,
-                this::showChannelProperties,
-                this::toggleChatMute));
+        configureChatListCellFactory(listView, false);
         listView.getSelectionModel().selectedItemProperty().addListener(
                 (obs, oldItem, newItem) -> handleChatSelection(newItem));
 
         return listView;
+    }
+
+    private void configureChatListCellFactory(ListView<ChatItem> listView, boolean compact) {
+        listView.setCellFactory(view -> new ChatListCell(
+                this::deleteChat,
+                this::showChannelProperties,
+                this::toggleChatMute,
+                compact));
     }
 
     private StackPane wrapChatList(ListView<ChatItem> listView) {
@@ -195,12 +282,14 @@ abstract class FormChatUi extends FormChatBase {
         rememberSelectedChatForBoundConnection();
         openingChatUnreadCount = chat.getUnreadCount();
         openChat(chat);
+        narrowListForcedVisible = false;
+        updateResponsiveChatLayout();
     }
 
     private VBox buildDetailPane() {
         VBox pane = new VBox();
         pane.getStyleClass().add("chat-detail-pane");
-        pane.setMinWidth(300);
+        pane.setMinWidth(CHAT_DETAIL_MIN_WIDTH);
         pane.addEventFilter(KeyEvent.KEY_PRESSED, this::handleDetailPaneKeyPressed);
         pane.addEventFilter(DragEvent.DRAG_OVER, this::handleChatImageDragOver);
         pane.addEventFilter(DragEvent.DRAG_DROPPED, this::handleChatImageDragDropped);
@@ -210,12 +299,298 @@ abstract class FormChatUi extends FormChatBase {
 
     private SplitPane buildSplitPane(VBox leftPane, VBox rightPane) {
         SplitPane splitPane = new SplitPane(leftPane, rightPane);
-        splitPane.setDividerPositions(AppPreferences.getChatDividerPos());
+        splitPane.setDividerPositions(DEFAULT_CHAT_DIVIDER_POSITION);
         splitPane.getStyleClass().add("chat-split-pane");
         SplitPane.setResizableWithParent(leftPane, false);
-        splitPane.getDividers().get(0).positionProperty().addListener((obs, oldVal, newVal) ->
-                AppPreferences.setChatDividerPos(newVal.doubleValue()));
+        Platform.runLater(this::ensureChatDividerListener);
         return splitPane;
+    }
+
+    private void ensureChatDividerListener() {
+        if (chatSplitPane == null || chatSplitPane.getDividers().isEmpty()) {
+            observedChatDivider = null;
+            return;
+        }
+        SplitPane.Divider divider = chatSplitPane.getDividers().getFirst();
+        if (divider == observedChatDivider) {
+            return;
+        }
+        observedChatDivider = divider;
+        divider.positionProperty().addListener((obs, oldVal, newVal) -> {
+            if (!applyingResponsiveLayout
+                    && userDraggingChatDivider
+                    && currentChatListLayoutMode() == ChatListLayoutMode.SAVED_SPLIT) {
+                saveUserChatListWidth();
+            }
+        });
+        installChatDividerGestureTracking();
+        applyResponsiveDividerPosition();
+    }
+
+    private void installChatDividerGestureTracking() {
+        if (chatSplitPane == null || chatDividerGestureTrackingInstalled) {
+            return;
+        }
+        chatDividerGestureTrackingInstalled = true;
+        chatSplitPane.addEventFilter(MouseEvent.MOUSE_PRESSED, event -> {
+            if (isChatDividerEvent(event)) {
+                userDraggingChatDivider = true;
+            }
+        });
+        chatSplitPane.addEventFilter(MouseEvent.MOUSE_DRAGGED, event -> {
+            if (userDraggingChatDivider) {
+                saveUserChatListWidth();
+            }
+        });
+        chatSplitPane.addEventFilter(MouseEvent.MOUSE_RELEASED, event -> {
+            if (userDraggingChatDivider) {
+                saveUserChatListWidth();
+                userDraggingChatDivider = false;
+            }
+        });
+    }
+
+    private boolean isChatDividerEvent(MouseEvent event) {
+        Object target = event.getTarget();
+        while (target instanceof Node node) {
+            if (node.getStyleClass().contains("split-pane-divider")) {
+                return true;
+            }
+            target = node.getParent();
+        }
+        return false;
+    }
+
+    private void saveUserChatListWidth() {
+        if (chatSplitPane == null
+                || chatSplitPane.getDividers().isEmpty()
+                || currentChatListLayoutMode() != ChatListLayoutMode.SAVED_SPLIT) {
+            return;
+        }
+        double formWidth = responsiveLayoutWidth();
+        double listWidth = formWidth > 0
+                ? chatSplitPane.getDividers().getFirst().getPosition() * formWidth
+                : chatListPane.getWidth();
+        double savedWidth = clampChatListWidth(listWidth, formWidth);
+        AppPreferences.setChatListWidth(savedWidth);
+        AppPreferences.setChatDividerPos(dividerPositionForListWidth(savedWidth, formWidth));
+    }
+
+    private void updateResponsiveChatLayout() {
+        if (chatSplitPane == null || chatListPane == null || detailPane == null || chatListView == null) {
+            return;
+        }
+
+        double formWidth = responsiveLayoutWidth();
+        ChatListLayoutMode layoutMode = chatListLayoutMode(formWidth);
+        if (formWidth >= CHAT_LIST_HIDDEN_THRESHOLD) {
+            narrowListForcedVisible = false;
+        }
+        boolean hidden = layoutMode == ChatListLayoutMode.HIDDEN;
+        boolean compact = layoutMode == ChatListLayoutMode.COMPACT;
+
+        applyingResponsiveLayout = true;
+        try {
+            applyChatListVisibility(hidden);
+            applyChatListCompactMode(compact);
+            if (!hidden) {
+                setChatListWidths(layoutMode);
+                applyResponsiveDividerPosition();
+                Platform.runLater(this::applyResponsiveDividerPosition);
+            }
+        } finally {
+            applyingResponsiveLayout = false;
+        }
+    }
+
+    private void applyChatListVisibility(boolean hidden) {
+        if (hidden == chatListHiddenMode) {
+            if (hidden) {
+                if (chatSplitPane.getItems().contains(chatListPane)) {
+                    chatSplitPane.getItems().setAll(detailPane);
+                }
+            } else {
+                ensureChatListVisible();
+            }
+            FormChatUiSupport.setVisibleManaged(chatListToggleButton, hidden);
+            return;
+        }
+
+        chatListHiddenMode = hidden;
+        if (hidden) {
+            chatSplitPane.getItems().setAll(detailPane);
+            FormChatUiSupport.setVisibleManaged(chatListToggleButton, true);
+            return;
+        }
+
+        ensureChatListVisible();
+        FormChatUiSupport.setVisibleManaged(chatListToggleButton, false);
+        Platform.runLater(() -> {
+            ensureChatDividerListener();
+            applyResponsiveDividerPosition();
+        });
+    }
+
+    private void ensureChatListVisible() {
+        if (!chatSplitPane.getItems().contains(chatListPane)) {
+            chatSplitPane.getItems().setAll(chatListPane, detailPane);
+            Platform.runLater(() -> {
+                ensureChatDividerListener();
+                applyResponsiveDividerPosition();
+            });
+        }
+    }
+
+    private void applyChatListCompactMode(boolean compact) {
+        if (compact == chatListCompactMode) {
+            return;
+        }
+
+        chatListCompactMode = compact;
+        chatListPane.pseudoClassStateChanged(COMPACT_PSEUDO_CLASS, compact);
+        chatListView.pseudoClassStateChanged(COMPACT_PSEUDO_CLASS, compact);
+        FormChatUiSupport.setVisibleManaged(chatSearchBox, !compact);
+        configureChatListCellFactory(chatListView, compact);
+        chatListView.refresh();
+        applyResponsiveDividerPosition();
+    }
+
+    private void setChatListWidths(ChatListLayoutMode layoutMode) {
+        double width;
+        double minWidth;
+        double maxWidth;
+        switch (layoutMode) {
+            case COMPACT -> {
+                width = CHAT_LIST_COMPACT_WIDTH;
+                minWidth = CHAT_LIST_COMPACT_WIDTH;
+                maxWidth = CHAT_LIST_COMPACT_WIDTH;
+            }
+            case EXPANDED -> {
+                width = CHAT_LIST_EXPANDED_WIDTH;
+                minWidth = CHAT_LIST_EXPANDED_WIDTH;
+                maxWidth = CHAT_LIST_EXPANDED_WIDTH;
+            }
+            case SAVED_SPLIT -> {
+                double formWidth = responsiveLayoutWidth();
+                width = savedChatListWidth(formWidth);
+                minWidth = CHAT_LIST_EXPANDED_WIDTH;
+                maxWidth = Math.max(CHAT_LIST_EXPANDED_WIDTH, formWidth - CHAT_DETAIL_MIN_WIDTH);
+            }
+            case HIDDEN -> {
+                return;
+            }
+            default -> throw new IllegalStateException("Unexpected chat list layout mode: " + layoutMode);
+        }
+
+        chatListPane.setMinWidth(minWidth);
+        chatListPane.setPrefWidth(width);
+        chatListPane.setMaxWidth(maxWidth);
+        chatListView.setMinWidth(minWidth);
+        chatListView.setPrefWidth(width);
+        chatListView.setMaxWidth(maxWidth);
+        if (chatListWrapper != null) {
+            chatListWrapper.setMinWidth(minWidth);
+            chatListWrapper.setPrefWidth(width);
+            chatListWrapper.setMaxWidth(maxWidth);
+        }
+    }
+
+    private void applyResponsiveDividerPosition() {
+        if (chatListHiddenMode) {
+            return;
+        }
+        if (chatSplitPane == null || chatSplitPane.getDividers().isEmpty()) {
+            if (chatSplitPane != null && chatSplitPane.getItems().size() > 1) {
+                Platform.runLater(this::applyResponsiveDividerPosition);
+            }
+            return;
+        }
+        double formWidth = responsiveLayoutWidth();
+        applyingResponsiveLayout = true;
+        try {
+            switch (chatListLayoutMode(formWidth)) {
+                case COMPACT ->
+                        chatSplitPane.setDividerPositions(dividerPositionForListWidth(CHAT_LIST_COMPACT_WIDTH, formWidth));
+                case EXPANDED ->
+                        chatSplitPane.setDividerPositions(dividerPositionForListWidth(CHAT_LIST_EXPANDED_WIDTH, formWidth));
+                case SAVED_SPLIT ->
+                        chatSplitPane.setDividerPositions(savedChatDividerPosition(formWidth));
+                case HIDDEN -> {
+                    return;
+                }
+            }
+        } finally {
+            applyingResponsiveLayout = false;
+        }
+    }
+
+    private ChatListLayoutMode currentChatListLayoutMode() {
+        return chatListLayoutMode(responsiveLayoutWidth());
+    }
+
+    private double responsiveLayoutWidth() {
+        double formWidth = getWidth();
+        if (getScene() == null || getScene().getWidth() <= 0) {
+            return formWidth;
+        }
+        double sceneContentWidth = getScene().getWidth() - DrawerPane.TOOLBAR_WIDTH;
+        double width = Math.max(formWidth, sceneContentWidth);
+        Window window = getScene().getWindow();
+        if (window != null && window.getWidth() > 0) {
+            width = Math.max(width, window.getWidth() - DrawerPane.TOOLBAR_WIDTH);
+        }
+        return width;
+    }
+
+    private ChatListLayoutMode chatListLayoutMode(double formWidth) {
+        if (formWidth <= 0) {
+            return ChatListLayoutMode.SAVED_SPLIT;
+        }
+        if (formWidth < CHAT_LIST_HIDDEN_THRESHOLD && !narrowListForcedVisible) {
+            return ChatListLayoutMode.HIDDEN;
+        }
+        if (formWidth < CHAT_LIST_COMPACT_THRESHOLD) {
+            return ChatListLayoutMode.COMPACT;
+        }
+        if (formWidth < CHAT_LIST_SAVED_SPLIT_THRESHOLD) {
+            return ChatListLayoutMode.EXPANDED;
+        }
+        return ChatListLayoutMode.SAVED_SPLIT;
+    }
+
+    private double dividerPositionForListWidth(double listWidth, double formWidth) {
+        if (formWidth <= 0) {
+            return DEFAULT_CHAT_DIVIDER_POSITION;
+        }
+        double maxListWidth = Math.max(0.0, formWidth - CHAT_DETAIL_MIN_WIDTH);
+        double targetWidth = Math.min(listWidth, maxListWidth);
+        return targetWidth / formWidth;
+    }
+
+    private double savedChatListWidth(double formWidth) {
+        double savedWidth = AppPreferences.getChatListWidth(CHAT_LIST_EXPANDED_WIDTH);
+        return clampChatListWidth(savedWidth, formWidth);
+    }
+
+    private double clampChatListWidth(double listWidth, double formWidth) {
+        double fallback = CHAT_LIST_EXPANDED_WIDTH;
+        double width = Double.isFinite(listWidth) && listWidth > 0 ? listWidth : fallback;
+        double maxListWidth = formWidth > 0
+                ? Math.max(CHAT_LIST_EXPANDED_WIDTH, formWidth - CHAT_DETAIL_MIN_WIDTH)
+                : Double.MAX_VALUE;
+        return Math.max(CHAT_LIST_EXPANDED_WIDTH, Math.min(width, maxListWidth));
+    }
+
+    private double savedChatDividerPosition(double formWidth) {
+        if (formWidth <= 0) {
+            return DEFAULT_CHAT_DIVIDER_POSITION;
+        }
+        return dividerPositionForListWidth(savedChatListWidth(formWidth), formWidth);
+    }
+
+    protected void refreshResponsiveChatLayout() {
+        updateResponsiveChatLayout();
+        Platform.runLater(this::updateResponsiveChatLayout);
     }
 
     /**
@@ -251,6 +626,16 @@ abstract class FormChatUi extends FormChatBase {
     }
 
     private void buildHeader() {
+        chatListToggleButton = FormChatUiSupport.createHeaderIconButton(
+                "/icons/menu.svg",
+                I18n.t("chat.list.show"),
+                "☰");
+        chatListToggleButton.setOnAction(event -> {
+            narrowListForcedVisible = true;
+            updateResponsiveChatLayout();
+        });
+        FormChatUiSupport.setVisibleManaged(chatListToggleButton, false);
+
         headerAvatarPane = new StackPane();
         headerAvatarPane.setMinSize(36, 36);
         headerAvatarPane.setPrefSize(36, 36);
@@ -269,6 +654,7 @@ abstract class FormChatUi extends FormChatBase {
         messageSearchController = createMessageSearchController();
 
         chatHeader = new HBox(10,
+                chatListToggleButton,
                 headerAvatarPane,
                 headerNameLabel,
                 headerSpacer,
@@ -1032,6 +1418,7 @@ abstract class FormChatUi extends FormChatBase {
             restorePendingCountdowns();
 
             updateInputEnabled();
+            updateResponsiveChatLayout();
             chatInputBar.focusInput();
         } finally {
             resumeScrollStateSyncLater();
@@ -1057,13 +1444,14 @@ abstract class FormChatUi extends FormChatBase {
         closeMessageSearch(false);
         hideMeshFilesImage();
         chatInputBar.cancelPendingImageUpload();
-        clearSelectedChatForBoundConnection();
         bubbleFactory.hideOpenReactionPopup();
         scrollOperationGeneration++;
         this.selectedChat = null;
         clearLoadedMessageState();
         detailPane.getChildren().clear();
         detailPane.getChildren().add(placeholderBox);
+        narrowListForcedVisible = false;
+        updateResponsiveChatLayout();
     }
 
     protected boolean isChatDetailOpenFor(ChatItem chat) {

@@ -10,6 +10,7 @@ import javafx.scene.layout.VBox;
 public class MainForm extends VBox {
 
     private StackPane mainPanel;
+    private Form currentForm;
 
     public MainForm() {
         init();
@@ -17,17 +18,27 @@ public class MainForm extends VBox {
 
     private void init() {
         setFillWidth(true);
+        setMaxSize(Double.MAX_VALUE, Double.MAX_VALUE);
         getChildren().add(createMain());
     }
 
     private StackPane createMain() {
         mainPanel = new StackPane();
         mainPanel.getStyleClass().add("content-area");
+        mainPanel.setMaxSize(Double.MAX_VALUE, Double.MAX_VALUE);
         VBox.setVgrow(mainPanel, Priority.ALWAYS);
         return mainPanel;
     }
 
     public void setForm(Form form) {
+        if (currentForm != null) {
+            currentForm.prefWidthProperty().unbind();
+            currentForm.prefHeightProperty().unbind();
+        }
+        currentForm = form;
+        form.setMaxSize(Double.MAX_VALUE, Double.MAX_VALUE);
+        form.prefWidthProperty().bind(mainPanel.widthProperty());
+        form.prefHeightProperty().bind(mainPanel.heightProperty());
         mainPanel.getChildren().setAll(form);
 
         // Transparent forms, such as nodes and chat, let vibrancy or the backdrop

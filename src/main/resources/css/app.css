@@ -2003,6 +2003,10 @@
     -fx-border-width: 0 0 1 0;
 }
 
+.chat-list-view:compact .virtual-flow .clipped-container .sheet .list-cell {
+    -fx-alignment: center;
+}
+
 .light-theme .chat-list-view .virtual-flow .clipped-container .sheet .list-cell {
     -fx-border-color: rgba(0, 0, 0, 0.08);
 }
@@ -2054,6 +2058,10 @@
     -fx-text-fill: rgba(255, 255, 255, 0.9);
     -fx-font-size: 1.0769em;
     -fx-font-weight: bold;
+}
+
+.chat-list-cell-root-compact {
+    -fx-alignment: center;
 }
 
 .light-theme .chat-name-label {

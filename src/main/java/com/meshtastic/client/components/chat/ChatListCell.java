@@ -44,8 +44,13 @@ public class ChatListCell extends ListCell<ChatItem> {
     private static final double MUTE_ICON_SIZE = 12;
     private static final double PREVIEW_FONT_SIZE = 12;
     private static final double PREVIEW_TWO_LINE_HEIGHT = 30;
+    private static final double COMPACT_BADGE_TRANSLATE_X = 8;
+    private static final double COMPACT_BADGE_TRANSLATE_Y = -5;
+    private static final Insets REGULAR_CELL_PADDING = new Insets(8, 10, 8, 10);
+    private static final Insets COMPACT_CELL_PADDING = new Insets(8, 6, 8, 6);
     private static final String ELLIPSIS = "...";
 
+    private final boolean compact;
     private final HBox root = new HBox(10);
     private final StackPane avatarPane = new StackPane();
     private final Label avatarLabel = new Label();
@@ -70,9 +75,26 @@ public class ChatListCell extends ListCell<ChatItem> {
     public ChatListCell(Consumer<ChatItem> onDeleteChat,
                         Consumer<ChatItem> onShowProperties,
                         Consumer<ChatItem> onToggleMute) {
-        root.setAlignment(Pos.CENTER_LEFT);
-        root.setPadding(new Insets(8, 10, 8, 10));
+        this(onDeleteChat, onShowProperties, onToggleMute, false);
+    }
+
+    /**
+     * @param onDeleteChat callback used by the context menu to delete or disable a chat
+     * @param onShowProperties callback used by the context menu to open channel properties
+     * @param onToggleMute callback used to toggle chat notifications
+     * @param compact whether the cell should show only avatar and unread count
+     */
+    public ChatListCell(Consumer<ChatItem> onDeleteChat,
+                        Consumer<ChatItem> onShowProperties,
+                        Consumer<ChatItem> onToggleMute,
+                        boolean compact) {
+        this.compact = compact;
+        root.setAlignment(compact ? Pos.CENTER : Pos.CENTER_LEFT);
+        root.setPadding(compact ? COMPACT_CELL_PADDING : REGULAR_CELL_PADDING);
         root.getStyleClass().add("chat-list-cell-root");
+        if (compact) {
+            root.getStyleClass().add("chat-list-cell-root-compact");
+        }
         root.setMinWidth(0);
         root.prefWidthProperty().bind(widthProperty());
         root.maxWidthProperty().bind(widthProperty());
@@ -131,9 +153,20 @@ public class ChatListCell extends ListCell<ChatItem> {
 
         metaBox.setAlignment(Pos.TOP_RIGHT);
         metaBox.setMinWidth(Region.USE_PREF_SIZE);
-        metaBox.getChildren().addAll(timeBox, unreadBadge);
+        if (compact) {
+            StackPane.setAlignment(unreadBadge, Pos.TOP_RIGHT);
+            unreadBadge.setTranslateX(COMPACT_BADGE_TRANSLATE_X);
+            unreadBadge.setTranslateY(COMPACT_BADGE_TRANSLATE_Y);
+            avatarPane.getChildren().add(unreadBadge);
+        } else {
+            metaBox.getChildren().addAll(timeBox, unreadBadge);
+        }
 
-        root.getChildren().addAll(avatarPane, textBox, metaBox);
+        if (compact) {
+            root.getChildren().add(avatarPane);
+        } else {
+            root.getChildren().addAll(avatarPane, textBox, metaBox);
+        }
 
         // Context menu opened by right click.
         MenuItem propertiesItem = new MenuItem(I18n.t("chat.menu.properties"));
@@ -203,6 +236,7 @@ public class ChatListCell extends ListCell<ChatItem> {
             setGraphic(null);
             setText(null);
             setContextMenu(null);
+            setTooltip(null);
             return;
         }
 
@@ -214,6 +248,7 @@ public class ChatListCell extends ListCell<ChatItem> {
                 + "; -fx-background-radius: 20;");
 
         nameLabel.setText(UnicodeTextUtils.sanitizeForJavaFxDisplay(item.getDisplayName()));
+        setTooltip(compact ? new Tooltip(nameLabel.getText()) : null);
         muteIconLabel.setText(null);
         muteIconLabel.setGraphic(createMuteIcon(item.isMuted()));
         muteIconTooltip.setText(item.isMuted()
@@ -224,7 +259,7 @@ public class ChatListCell extends ListCell<ChatItem> {
         applyFixedPreviewHeight();
         updatePreviewTextForWidth();
 
-        if (item.getLastMessageTime() > 0) {
+        if (!compact && item.getLastMessageTime() > 0) {
             timeLabel.setText(
                     ChatTimeFormatter.formatChatTime(item.getLastMessageTime()));
             timeLabel.setVisible(true);
