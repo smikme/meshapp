@@ -44,8 +44,10 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import javafx.application.Platform;
 import javafx.geometry.Insets;
+import javafx.scene.Node;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
+import javafx.scene.control.ScrollPane;
 import javafx.scene.control.Tab;
 import javafx.scene.control.TabPane;
 import javafx.scene.control.TextField;
@@ -156,20 +158,20 @@ public class FormSetting extends Form {
 
         cacheTab = new Tab(
             I18n.t("settings.tab.cache"),
-            cacheController.createPanel()
+            createScrollableSettingsPanel(cacheController.createPanel())
         );
         configTab = new Tab(I18n.t("settings.tab.config"), createConfigPanel());
         firmwareTab = new Tab(
             I18n.t("settings.tab.firmware"),
-            firmwareUpdateController.createPanel()
+            createScrollableSettingsPanel(firmwareUpdateController.createPanel())
         );
         appearanceTab = new Tab(
             I18n.t("settings.tab.app"),
-            ApplicationSettingsPanelFactory.create()
+            createScrollableSettingsPanel(ApplicationSettingsPanelFactory.create())
         );
         remoteRpcTab = new Tab(
             I18n.t("settings.tab.rpc"),
-            ApplicationSettingsPanelFactory.createRemoteRpcSettingsPanel()
+            createScrollableSettingsPanel(ApplicationSettingsPanelFactory.createRemoteRpcSettingsPanel())
         );
 
         tabPane.getTabs().addAll(configTab, firmwareTab, cacheTab, remoteRpcTab, appearanceTab);
@@ -189,6 +191,16 @@ public class FormSetting extends Form {
         VBox.setVgrow(tabPane, Priority.ALWAYS);
         content.getChildren().addAll(title, tabPane);
         getChildren().add(content);
+    }
+
+    private static ScrollPane createScrollableSettingsPanel(Node content) {
+        ScrollPane scrollPane = new ScrollPane(content);
+        scrollPane.setFitToWidth(true);
+        scrollPane.setFitToHeight(true);
+        scrollPane.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
+        scrollPane.setVbarPolicy(ScrollPane.ScrollBarPolicy.AS_NEEDED);
+        scrollPane.getStyleClass().add("settings-tab-scroll-pane");
+        return scrollPane;
     }
 
     @Override

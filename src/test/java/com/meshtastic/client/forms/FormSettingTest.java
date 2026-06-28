@@ -19,6 +19,9 @@ import javafx.scene.Parent;
 import javafx.scene.control.Button;
 import javafx.scene.control.CheckBox;
 import javafx.scene.control.Label;
+import javafx.scene.control.ScrollPane;
+import javafx.scene.control.TabPane;
+import javafx.scene.control.TableView;
 import javafx.scene.control.TreeItem;
 import javafx.scene.control.TreeTableView;
 import javafx.scene.layout.VBox;
@@ -344,6 +347,38 @@ class FormSettingTest {
         assertNotNull(licensedItem);
         assertEquals(Boolean.class, licensedItem.getValueType());
         assertEquals(Boolean.TRUE, licensedItem.getValue());
+    }
+
+    @Test
+    void wrapsNonConfigSettingsTabsInVerticalScrollPane() {
+        FormSetting form = onFxThread(FormSetting::new);
+
+        TabPane tabPane = onFxThread(() -> findFirst(form, TabPane.class));
+
+        assertNotNull(tabPane);
+        assertFalse(onFxThread(() -> tabPane.getTabs().get(0).getContent() instanceof ScrollPane));
+        assertTrue(onFxThread(() -> tabPane.getTabs().get(1).getContent() instanceof ScrollPane));
+        assertTrue(onFxThread(() -> tabPane.getTabs().get(2).getContent() instanceof ScrollPane));
+        assertTrue(onFxThread(() -> tabPane.getTabs().get(3).getContent() instanceof ScrollPane));
+        assertTrue(onFxThread(() -> tabPane.getTabs().get(4).getContent() instanceof ScrollPane));
+        ScrollPane rpcScrollPane = onFxThread(() -> (ScrollPane) tabPane.getTabs().get(3).getContent());
+        assertEquals(ScrollPane.ScrollBarPolicy.NEVER, rpcScrollPane.getHbarPolicy());
+        assertEquals(ScrollPane.ScrollBarPolicy.AS_NEEDED, rpcScrollPane.getVbarPolicy());
+        assertTrue(rpcScrollPane.isFitToWidth());
+        assertTrue(rpcScrollPane.isFitToHeight());
+    }
+
+    @Test
+    void cacheSettingsTableCanGrowWithSettingsFormHeight() {
+        FormSetting form = onFxThread(FormSetting::new);
+
+        TabPane tabPane = onFxThread(() -> findFirst(form, TabPane.class));
+        ScrollPane cacheScrollPane = onFxThread(() -> (ScrollPane) tabPane.getTabs().get(2).getContent());
+        TableView<?> cacheTable = onFxThread(() -> findFirst((Parent) cacheScrollPane.getContent(), TableView.class));
+
+        assertNotNull(cacheTable);
+        assertTrue(onFxThread(cacheScrollPane::isFitToHeight));
+        assertEquals(Double.MAX_VALUE, onFxThread(cacheTable::getMaxHeight));
     }
 
     @Test
