@@ -7,6 +7,7 @@ import com.meshtastic.client.lua.api.LuaSandboxContext;
 import com.meshtastic.client.lua.api.LuaProtobufMapper;
 import com.meshtastic.client.lua.api.LuaValueMapper;
 import com.meshtastic.client.model.DeviceState;
+import com.meshtastic.client.model.MessageReaction;
 import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.service.MessageDbService;
@@ -96,6 +97,7 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
     private final ScheduledExecutorService scheduler;
     private final AtomicBoolean running = new AtomicBoolean(false);
     private final Map<String, Long> lastSeenDbIds = new java.util.concurrent.ConcurrentHashMap<>();
+    private final Map<String, Long> lastSeenReactionDbIds = new java.util.concurrent.ConcurrentHashMap<>();
     private final Set<String> pendingUiRequests = java.util.concurrent.ConcurrentHashMap.newKeySet();
     private final Map<String, PendingTraceroute> pendingTraceroutes = new java.util.concurrent.ConcurrentHashMap<>();
     private final Map<String, PendingNodeInfo> pendingNodeInfos = new java.util.concurrent.ConcurrentHashMap<>();
@@ -1470,9 +1472,10 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
                 deliverAutomationCommand();
             }
 
-            LuaValue onMessage = globals.get("on_message");
-            if (onMessage.isfunction()) {
-                keepListening = attachMessageListener();
+            boolean hasMessageCallback = globals.get("on_message").isfunction();
+            boolean hasReactionCallback = globals.get("on_reaction").isfunction();
+            if (hasMessageCallback || hasReactionCallback) {
+                keepListening = attachChatListener();
             } else {
                 if (command == null && formBridge == null) {
                     emit(LuaScriptEvent.info(script.getId(), I18n.t("meshIde.runtime.noOnMessage")));
@@ -1514,14 +1517,14 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
         onCommand.call(sandboxApi.commandToTable());
     }
 
-    private boolean attachMessageListener() {
+    private boolean attachChatListener() {
         if (target.state() == null) {
             emit(LuaScriptEvent.warning(script.getId(), I18n.t("meshIde.runtime.noActiveConnection")));
             scriptService.updateRunState(script.getId(), "FINISHED",
                     I18n.t("meshIde.runtime.noActiveConnectionStatus"));
             return false;
         }
-        initializeMessageCursors();
+        initializeChatCursors();
         target.state().addMessageListener(deviceMessageListener);
         listenerRegistered = true;
         scriptService.updateRunState(script.getId(), "RUNNING", null);
@@ -1534,40 +1537,66 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
             return;
         }
         try {
-            executor.execute(this::deliverNewMessages);
+            executor.execute(this::deliverNewChatEvents);
         } catch (RejectedExecutionException ignored) {
             // Session is stopping.
         }
     }
 
-    private void deliverNewMessages() {
+    private void deliverNewChatEvents() {
         if (!running.get() || globals == null) {
             return;
         }
         LuaValue onMessage = globals.get("on_message");
-        if (!onMessage.isfunction()) {
-            return;
-        }
+        LuaValue onReaction = globals.get("on_reaction");
         try {
-            for (ChatScope scope : knownChatScopes()) {
-                long lastSeen = lastSeenDbIds.getOrDefault(scope.key(), 0L);
-                List<MeshMessage> messages = messageDbService.loadAfter(
-                        scope.chatType(),
-                        scope.chatKey(),
-                        lastSeen,
-                        MAX_MESSAGE_BATCH,
-                        target.ownerNodeIdOrEmpty());
-                for (MeshMessage message : messages) {
-                    if (message.getDbId() > 0) {
-                        lastSeenDbIds.put(scope.key(), message.getDbId());
-                    }
-                    debugLib.begin(CALLBACK_TIMEOUT_MS);
-                    onMessage.call(sandboxApi.mapper().messageToTable(message, scope.chatType(), scope.chatKey()));
-                }
+            if (onMessage.isfunction()) {
+                deliverNewMessages(onMessage);
+            }
+            if (onReaction.isfunction()) {
+                deliverNewReactions(onReaction);
             }
         } catch (Throwable error) {
             fail(error);
             finishWithoutInterruptingExecutor();
+        }
+    }
+
+    private void deliverNewMessages(LuaValue onMessage) {
+        for (ChatScope scope : knownChatScopes()) {
+            long lastSeen = lastSeenDbIds.getOrDefault(scope.key(), 0L);
+            List<MeshMessage> messages = messageDbService.loadAfter(
+                    scope.chatType(),
+                    scope.chatKey(),
+                    lastSeen,
+                    MAX_MESSAGE_BATCH,
+                    target.ownerNodeIdOrEmpty());
+            for (MeshMessage message : messages) {
+                if (message.getDbId() > 0) {
+                    lastSeenDbIds.put(scope.key(), message.getDbId());
+                }
+                debugLib.begin(CALLBACK_TIMEOUT_MS);
+                onMessage.call(sandboxApi.mapper().messageToTable(message, scope.chatType(), scope.chatKey()));
+            }
+        }
+    }
+
+    private void deliverNewReactions(LuaValue onReaction) {
+        for (ChatScope scope : knownChatScopes()) {
+            long lastSeen = lastSeenReactionDbIds.getOrDefault(scope.key(), 0L);
+            List<MessageReaction> reactions = messageDbService.loadReactionsAfter(
+                    scope.chatType(),
+                    scope.chatKey(),
+                    lastSeen,
+                    MAX_MESSAGE_BATCH,
+                    target.ownerNodeIdOrEmpty());
+            for (MessageReaction reaction : reactions) {
+                if (reaction.getDbId() > 0) {
+                    lastSeenReactionDbIds.put(scope.key(), reaction.getDbId());
+                }
+                debugLib.begin(CALLBACK_TIMEOUT_MS);
+                onReaction.call(sandboxApi.mapper().reactionToTable(reaction, scope.chatType(), scope.chatKey()));
+            }
         }
     }
 
@@ -1784,7 +1813,7 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
         return value.substring(0, Math.max(0, maxLength - 1)) + "…";
     }
 
-    private void initializeMessageCursors() {
+    private void initializeChatCursors() {
         for (ChatScope scope : knownChatScopes()) {
             List<MeshMessage> latest = messageDbService.loadLast(
                     scope.chatType(),
@@ -1793,6 +1822,12 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
                     target.ownerNodeIdOrEmpty());
             long lastId = latest.isEmpty() ? 0 : latest.getLast().getDbId();
             lastSeenDbIds.put(scope.key(), lastId);
+            lastSeenReactionDbIds.put(
+                    scope.key(),
+                    messageDbService.latestReactionDbId(
+                            scope.chatType(),
+                            scope.chatKey(),
+                            target.ownerNodeIdOrEmpty()));
         }
     }
 

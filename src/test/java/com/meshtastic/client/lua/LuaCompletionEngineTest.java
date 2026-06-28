@@ -48,6 +48,24 @@ class LuaCompletionEngineTest {
     }
 
     @Test
+    void completesReactionCallbackFields() {
+        LuaCompletionEngine.CompletionResult result = complete("""
+                function on_reaction(reaction)
+                    reaction.target_|
+                end
+                """);
+
+        assertItemsContain(result, "target_packet_id");
+    }
+
+    @Test
+    void completesChatReactFunction() {
+        LuaCompletionEngine.CompletionResult result = complete("mesh.chat.re|");
+
+        assertItemsContain(result, "react(msg, emoji)");
+    }
+
+    @Test
     void completesMessageHopFields() {
         LuaCompletionEngine.CompletionResult result = complete("""
                 function on_message(msg)

@@ -1,11 +1,16 @@
 package com.meshtastic.client.lua.api;
 
 import com.meshtastic.client.TestEnvironmentSupport;
+import com.meshtastic.client.connection.ConnectionException;
+import com.meshtastic.client.connection.ConnectionListener;
+import com.meshtastic.client.connection.TransportConnection;
 import com.meshtastic.client.lua.LuaScriptService;
 import com.meshtastic.client.model.DeviceState;
+import com.meshtastic.client.model.MessageReaction;
 import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.model.MessageChangeEvent;
 import com.meshtastic.client.model.NodeData;
+import com.meshtastic.client.protocol.ProtocolHandler;
 import com.meshtastic.client.service.MessageDbService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -20,6 +25,7 @@ import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -183,6 +189,65 @@ class LuaChatApiTest {
     }
 
     @Test
+    void reactSendsMessageReactionAndPublishesReactionChange() {
+        FakeTransportConnection transport = new FakeTransportConnection();
+        ProtocolHandler handler = new ProtocolHandler(transport);
+        try {
+            LuaTable liveChat = new LuaChatApi(
+                    new LuaSandboxContext(
+                            1L,
+                            "test",
+                            state,
+                            handler,
+                            null,
+                            OWNER_NODE_ID,
+                            LuaScriptService.getInstance(),
+                            null,
+                            null,
+                            null,
+                            null,
+                            null,
+                            null,
+                            null,
+                            null,
+                            null,
+                            null),
+                    new LuaValueMapper(state))
+                    .create();
+
+            MeshMessage target = new MeshMessage("!00000002", "!ffffffff", 0, "hello", 1234, false);
+            target.setPacketId(42);
+            MessageDbService.getInstance().save(target, "channel", "0", OWNER_NODE_ID);
+
+            LuaValue result = liveChat.get("react")
+                    .invoke(LuaValue.varargsOf(
+                            new LuaValue[] {
+                                    new LuaValueMapper(state).messageToTable(target, "channel", "0"),
+                                    LuaValue.valueOf("👍")
+                            }))
+                    .arg1();
+
+            assertTrue(result.checkboolean());
+            List<MessageReaction> reactions = MessageDbService.getInstance()
+                    .loadReactionsByTargetPacketIds("channel", "0", OWNER_NODE_ID, List.of(42))
+                    .get(42);
+            assertEquals(1, reactions.size());
+            assertEquals("👍", reactions.getFirst().getEmoji());
+            assertEquals(42, reactions.getFirst().getTargetPacketId());
+            assertTrue(reactions.getFirst().isOutgoing());
+
+            assertTrue(messageChanges.stream().anyMatch(event ->
+                    event.kind() == MessageChangeEvent.Kind.REACTION_CHANGED
+                            && "channel".equals(event.chatType())
+                            && "0".equals(event.chatKey())
+                            && event.targetPacketId() == 42));
+            assertEquals(1, broadMessageListenerCalls.get());
+        } finally {
+            handler.shutdown();
+        }
+    }
+
+    @Test
     void botMessageRejectsInvalidScopeAndText() {
         assertThrows(LuaError.class, () -> botMessage("unknown", "0", "text"));
         assertThrows(LuaError.class, () -> botMessage("channel", "abc", "text"));
@@ -202,5 +267,46 @@ class LuaChatApiTest {
                 }))
                 .arg1()
                 .checktable();
+    }
+
+    private static final class FakeTransportConnection implements TransportConnection {
+        private volatile Consumer<byte[]> dataListener;
+        private volatile ConnectionListener connectionListener;
+        private volatile boolean connected = true;
+
+        @Override
+        public void connect() throws ConnectionException {
+            connected = true;
+            if (connectionListener != null) {
+                connectionListener.onConnected();
+            }
+        }
+
+        @Override
+        public void disconnect() {
+            connected = false;
+            if (connectionListener != null) {
+                connectionListener.onDisconnected();
+            }
+        }
+
+        @Override
+        public boolean isConnected() {
+            return connected;
+        }
+
+        @Override
+        public void sendBytes(byte[] data) {
+        }
+
+        @Override
+        public void setDataListener(Consumer<byte[]> listener) {
+            dataListener = listener;
+        }
+
+        @Override
+        public void setConnectionListener(ConnectionListener listener) {
+            connectionListener = listener;
+        }
     }
 }

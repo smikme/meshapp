@@ -27,6 +27,8 @@ public final class LuaCompletionEngine {
     private static final int MAX_COMPLETIONS = 32;
     private static final Pattern ON_MESSAGE_PATTERN =
             Pattern.compile("\\bfunction\\s+on_message\\s*\\(\\s*([A-Za-z_][A-Za-z0-9_]*)");
+    private static final Pattern ON_REACTION_PATTERN =
+            Pattern.compile("\\bfunction\\s+on_reaction\\s*\\(\\s*([A-Za-z_][A-Za-z0-9_]*)");
     private static final Pattern FUNCTION_PATTERN =
             Pattern.compile("\\b(?:local\\s+)?function\\s+([A-Za-z_][A-Za-z0-9_:.]*)\\s*\\(([^)]*)\\)");
     private static final Pattern FUNCTION_ASSIGN_PATTERN =
@@ -78,6 +80,7 @@ public final class LuaCompletionEngine {
         chat.member("send_channel(channel, text, reply_id)", "send_channel(", "function", "message");
         chat.member("send_dm(node_id, text, reply_id)", "send_dm(", "function", "message");
         chat.member("reply(msg, text)", "reply(", "function", "message");
+        chat.member("react(msg, emoji)", "react(", "function", "boolean");
         chat.member("bot_message(chat_type, chat_key, text)", "bot_message(", "function", "message");
         chat.member("bot_reply(msg, text)", "bot_reply(", "function", "message");
         chat.member("bot_notice(chat_type, chat_key, text, options)", "bot_notice(", "function", "boolean");
@@ -271,6 +274,12 @@ public final class LuaCompletionEngine {
             message.member(field, field, "field", null);
         }
 
+        TypeDef reaction = new TypeDef();
+        for (String field : List.of("db_id", "packet_id", "target_packet_id", "chat_type", "chat_key", "from",
+                "emoji", "timestamp", "outgoing", "status", "error_reason", "sender_name")) {
+            reaction.member(field, field, "field", null);
+        }
+
         TypeDef owner = new TypeDef();
         owner.member("node_id", "node_id", "field", null);
         owner.member("node_num", "node_num", "field", null);
@@ -373,6 +382,7 @@ public final class LuaCompletionEngine {
         defs.put("canvas.size", canvasSize);
         defs.put("route.discovery", routeDiscovery);
         defs.put("message", message);
+        defs.put("reaction", reaction);
         defs.put("owner", owner);
         defs.put("time", time);
         defs.put("node", node);
@@ -393,6 +403,7 @@ public final class LuaCompletionEngine {
                 new CompletionItem("while condition do", "while condition do\n    \nend", "snippet"),
                 new CompletionItem("repeat until condition", "repeat\n    \nuntil condition", "snippet"),
                 new CompletionItem("on_message(msg)", "function on_message(msg)\n    \nend", "snippet"),
+                new CompletionItem("on_reaction(reaction)", "function on_reaction(reaction)\n    \nend", "snippet"),
                 new CompletionItem("on_command(command)", "function on_command(command)\n    \nend", "snippet"),
                 new CompletionItem("on_node_selected(event)", "function on_node_selected(event)\n    \nend", "snippet"),
                 new CompletionItem("on_traceroute(event)", "function on_traceroute(event)\n    \nend", "snippet"),
@@ -508,6 +519,10 @@ public final class LuaCompletionEngine {
         if (onMessageMatcher.find()) {
             symbols.put(onMessageMatcher.group(1), "message");
         }
+        Matcher onReactionMatcher = ON_REACTION_PATTERN.matcher(beforeCaret);
+        if (onReactionMatcher.find()) {
+            symbols.put(onReactionMatcher.group(1), "reaction");
+        }
 
         Matcher functionMatcher = FUNCTION_PATTERN.matcher(beforeCaret);
         while (functionMatcher.find()) {
@@ -520,6 +535,11 @@ public final class LuaCompletionEngine {
                 List<String> params = splitNames(functionMatcher.group(2));
                 if (!params.isEmpty()) {
                     symbols.put(params.getFirst(), "message");
+                }
+            } else if ("on_reaction".equals(name)) {
+                List<String> params = splitNames(functionMatcher.group(2));
+                if (!params.isEmpty()) {
+                    symbols.put(params.getFirst(), "reaction");
                 }
             } else if ("on_command".equals(name)) {
                 List<String> params = splitNames(functionMatcher.group(2));

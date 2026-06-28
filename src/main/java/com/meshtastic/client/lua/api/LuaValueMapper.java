@@ -1,6 +1,7 @@
 package com.meshtastic.client.lua.api;
 
 import com.meshtastic.client.model.DeviceState;
+import com.meshtastic.client.model.MessageReaction;
 import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.model.TelemetryEntry;
@@ -177,6 +178,31 @@ public final class LuaValueMapper {
         table.set("sender_name", stringOrNil(message.getSenderName()));
         table.set("rx_rssi", LuaValue.valueOf(message.getRxRssi()));
         table.set("rx_snr", LuaValue.valueOf(message.getRxSnr()));
+        return table;
+    }
+
+    /**
+     * Converts a chat reaction to a Lua table.
+     *
+     * @param reaction MeshApp reaction
+     * @param chatType chat type
+     * @param chatKey chat key
+     * @return Lua reaction table
+     */
+    public LuaTable reactionToTable(MessageReaction reaction, String chatType, String chatKey) {
+        LuaTable table = new LuaTable();
+        table.set("db_id", LuaValue.valueOf(reaction.getDbId()));
+        table.set("packet_id", LuaValue.valueOf(reaction.getPacketId()));
+        table.set("target_packet_id", LuaValue.valueOf(reaction.getTargetPacketId()));
+        table.set("chat_type", stringOrNil(chatType));
+        table.set("chat_key", stringOrNil(chatKey));
+        table.set("from", stringOrNil(reaction.getFromNodeId()));
+        table.set("emoji", stringOrNil(reaction.getEmoji()));
+        table.set("timestamp", LuaValue.valueOf(reaction.getTimestamp()));
+        table.set("outgoing", LuaValue.valueOf(reaction.isOutgoing()));
+        table.set("status", stringOrNil(reaction.getStatus() != null ? reaction.getStatus().name() : null));
+        table.set("error_reason", stringOrNil(reaction.getErrorReason()));
+        table.set("sender_name", stringOrNil(reaction.getSenderName()));
         return table;
     }
 
@@ -368,6 +394,32 @@ public final class LuaValueMapper {
     public static int tableInt(LuaTable table, String key, int defaultValue) {
         LuaValue value = table.get(key);
         return value.isnil() ? defaultValue : value.checkint();
+    }
+
+    /**
+     * Safely reads a long field from a Lua table.
+     *
+     * @param table Lua table
+     * @param key field name
+     * @param defaultValue fallback value
+     * @return field value or fallback
+     */
+    public static long tableLong(LuaTable table, String key, long defaultValue) {
+        LuaValue value = table.get(key);
+        return value.isnil() ? defaultValue : value.checklong();
+    }
+
+    /**
+     * Safely reads a boolean field from a Lua table.
+     *
+     * @param table Lua table
+     * @param key field name
+     * @param defaultValue fallback value
+     * @return field value or fallback
+     */
+    public static boolean tableBoolean(LuaTable table, String key, boolean defaultValue) {
+        LuaValue value = table.get(key);
+        return value.isnil() ? defaultValue : value.checkboolean();
     }
 
     /**

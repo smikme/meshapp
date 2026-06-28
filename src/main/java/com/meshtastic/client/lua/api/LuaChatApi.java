@@ -95,6 +95,14 @@ public final class LuaChatApi {
                 throw new LuaError("Cannot reply: unsupported msg.chat_type " + chatType);
             }
         });
+        chat.set("react", new VarArgFunction() {
+            @Override
+            public Varargs invoke(Varargs args) {
+                LuaTable message = args.checktable(1);
+                String emoji = args.checkjstring(2);
+                return sendReaction(message, emoji) ? LuaValue.TRUE : LuaValue.NIL;
+            }
+        });
         chat.set("bot_message", new VarArgFunction() {
             @Override
             public Varargs invoke(Varargs args) {
@@ -213,6 +221,87 @@ public final class LuaChatApi {
                 : MessageService.sendDirectMessage(target.handler(), target.state(), peerNodeId, text, replyId);
     }
 
+    private boolean sendReaction(LuaTable message, String rawEmoji) {
+        LuaSandboxContext.ConnectionSnapshot target = requireReactionTransport();
+        String emoji = normalizeReactionEmoji(rawEmoji);
+        String chatType = normalizeChatType(LuaValueMapper.tableString(message, "chat_type"));
+        int packetId = LuaValueMapper.tableInt(message, "packet_id", 0);
+        if (packetId == 0) {
+            throw new LuaError("Cannot react: msg.packet_id is missing");
+        }
+
+        String chatKey;
+        boolean sent;
+        if ("channel".equals(chatType)) {
+            int channel = messageChannelIndex(message, "react");
+            chatKey = String.valueOf(channel);
+            sent = MessageService.sendChannelReaction(
+                    target.handler(),
+                    target.state(),
+                    channel,
+                    reactionTarget(message, chatType, chatKey, packetId),
+                    emoji);
+        } else if ("dm".equals(chatType)) {
+            chatKey = messageDirectPeer(message, "react");
+            sent = MessageService.sendDirectReaction(
+                    target.handler(),
+                    target.state(),
+                    chatKey,
+                    reactionTarget(message, chatType, chatKey, packetId),
+                    emoji);
+        } else {
+            throw new LuaError("Cannot react: unsupported msg.chat_type " + chatType);
+        }
+
+        if (sent) {
+            String ownerNodeId = ownerNodeIdForMessages();
+            target.state().fireMessageChange(MessageChangeEvent.reactionChanged(chatType, chatKey, ownerNodeId, packetId));
+            target.state().fireMessageListeners();
+        }
+        return sent;
+    }
+
+    private LuaSandboxContext.ConnectionSnapshot requireReactionTransport() {
+        LuaSandboxContext.ConnectionSnapshot target = context.currentTarget();
+        if (target.state() == null || target.handler() == null) {
+            throw new LuaError("No active reaction-capable chat connection");
+        }
+        if (target.meshCoreRuntime() != null) {
+            throw new LuaError("Reactions are not available for MeshCore connections");
+        }
+        return target;
+    }
+
+    private MeshMessage reactionTarget(LuaTable message, String chatType, String chatKey, int packetId) {
+        MeshMessage target = messageDbService.findByPacketId(
+                packetId,
+                chatType,
+                chatKey,
+                ownerNodeIdForMessages());
+        if (target != null) {
+            return target;
+        }
+
+        MeshMessage fallback = new MeshMessage(
+                LuaValueMapper.tableString(message, "from"),
+                LuaValueMapper.tableString(message, "to"),
+                "channel".equals(chatType) ? messageChannelIndex(message, "react") : 0,
+                LuaValueMapper.tableString(message, "text"),
+                LuaValueMapper.tableLong(message, "timestamp", System.currentTimeMillis() / 1000),
+                LuaValueMapper.tableBoolean(message, "outgoing", false));
+        fallback.setDbId(LuaValueMapper.tableLong(message, "db_id", 0));
+        fallback.setPacketId(packetId);
+        return fallback;
+    }
+
+    private String normalizeReactionEmoji(String rawEmoji) {
+        String emoji = rawEmoji != null ? rawEmoji.trim() : "";
+        if (emoji.isEmpty()) {
+            throw new LuaError("reaction emoji must not be empty");
+        }
+        return emoji;
+    }
+
     private LuaTable createBotMessage(String chatType, String rawChatKey, String rawText, int replyId, String replyText) {
         DeviceState state = requireChatContext();
         ChatScope scope = normalizeChatScope(chatType, rawChatKey);
@@ -303,6 +392,10 @@ public final class LuaChatApi {
     }
 
     private int messageChannelIndex(LuaTable message) {
+        return messageChannelIndex(message, "reply");
+    }
+
+    private int messageChannelIndex(LuaTable message, String action) {
         LuaValue channel = message.get("channel");
         if (!channel.isnil()) {
             return channel.checkint();
@@ -315,10 +408,14 @@ public final class LuaChatApi {
                 // Fall through to a Lua-facing error.
             }
         }
-        throw new LuaError("Cannot reply: channel index is missing");
+        throw new LuaError("Cannot " + action + ": channel index is missing");
     }
 
     private String messageDirectPeer(LuaTable message) {
+        return messageDirectPeer(message, "reply");
+    }
+
+    private String messageDirectPeer(LuaTable message, String action) {
         String chatKey = LuaValueMapper.tableString(message, "chat_key");
         if (chatKey != null && !chatKey.isBlank()) {
             return chatKey;
@@ -333,7 +430,7 @@ public final class LuaChatApi {
         if (to != null && !to.isBlank() && !to.equalsIgnoreCase(owner)) {
             return to;
         }
-        throw new LuaError("Cannot reply: DM peer is missing");
+        throw new LuaError("Cannot " + action + ": DM peer is missing");
     }
 
     private void requireChatTransport() {

@@ -5,6 +5,7 @@ import com.meshtastic.client.connection.ConnectionException;
 import com.meshtastic.client.connection.ConnectionListener;
 import com.meshtastic.client.connection.TransportConnection;
 import com.meshtastic.client.model.DeviceState;
+import com.meshtastic.client.model.MessageReaction;
 import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.protocol.ProtocolHandler;
 import com.meshtastic.client.service.MessageDbService;
@@ -540,6 +541,53 @@ class LuaScriptRuntimeServiceTest {
         assertEquals("true", scriptService.getKv(script.getId(), "timer_repeating"));
         assertEquals("true", scriptService.getKv(script.getId(), "timer_has_time"));
         assertEquals("true", scriptService.getKv(script.getId(), "timer_cancelled"));
+        assertFalse(events.stream().anyMatch(event -> event.type() == LuaScriptEvent.Type.ERROR));
+    }
+
+    @Test
+    void onReactionReceivesNewMessageReaction() {
+        LuaScript script = scriptService.createScript(
+                "reaction-listener",
+                """
+                function on_reaction(reaction)
+                    mesh.kv.set('reaction_emoji', reaction.emoji)
+                    mesh.kv.set('reaction_target', tostring(reaction.target_packet_id))
+                    mesh.kv.set('reaction_chat', reaction.chat_type .. ':' .. reaction.chat_key)
+                    mesh.kv.set('reaction_sender', reaction.from)
+                end
+                """);
+        DeviceState state = new DeviceState();
+        state.setMyNodeNum(0x12345678);
+        AtomicBoolean closed = new AtomicBoolean(false);
+        LuaRuntimeSession session = new LuaRuntimeSession(
+                script,
+                new LuaScriptRuntimeService.RuntimeTarget("test", state, null, null, "!12345678"),
+                scriptService,
+                Set.of(),
+                false,
+                null,
+                events::add,
+                request -> fail("Node picker must not be requested"),
+                null,
+                () -> closed.set(true));
+
+        session.start();
+        awaitCondition(() -> events.stream().anyMatch(event -> event.type() == LuaScriptEvent.Type.INFO),
+                "Reaction listener did not start");
+
+        MessageReaction reaction = new MessageReaction(42, "!00000002", "🔥", 1_700_000_000L, false);
+        reaction.setPacketId(1001);
+        MessageDbService.getInstance().saveReaction(reaction, "channel", "0", "!12345678");
+        state.fireMessageListeners();
+
+        awaitCondition(() -> "🔥".equals(scriptService.getKv(script.getId(), "reaction_emoji")),
+                "Lua on_reaction did not receive reaction");
+
+        assertEquals("42", scriptService.getKv(script.getId(), "reaction_target"));
+        assertEquals("channel:0", scriptService.getKv(script.getId(), "reaction_chat"));
+        assertEquals("!00000002", scriptService.getKv(script.getId(), "reaction_sender"));
+        assertFalse(closed.get());
+        session.stop();
         assertFalse(events.stream().anyMatch(event -> event.type() == LuaScriptEvent.Type.ERROR));
     }
 
