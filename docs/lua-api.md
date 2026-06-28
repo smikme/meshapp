@@ -4,7 +4,7 @@
 
 MeshApp runs user Lua scripts in a LuaJ sandbox. Scripts can use the `mesh` namespace, core Lua functions, the `string`, `table`, `math`, `coroutine`, `bit32` libraries and functions such as `pairs`, `ipairs`, `pcall`, `tonumber` and `tostring`. Unsafe global APIs are disabled: `io`, `os`, `debug`, `package`, `require`, `dofile`, `loadfile`, `luajava`, `collectgarbage`, `module`.
 
-A regular script runs once and exits unless it declares `on_message(msg)` or has pending asynchronous operations. If `on_message(msg)` is declared, the script stays active and receives new messages. Command bots use `on_command(command)`, and UI/request results arrive in separate callback functions.
+A regular script runs once and exits unless it declares `on_message(msg)`, `on_reaction(reaction)`, or has pending asynchronous operations. If `on_message(msg)` or `on_reaction(reaction)` is declared, the script stays active and receives new chat events. Command bots use `on_command(command)`, and UI/request results arrive in separate callback functions.
 
 Execution limits:
 
@@ -231,6 +231,7 @@ local key = "daily:" .. mesh.iso_date()
 | Callback | When it is called |
 |----------|-------------------|
 | `on_message(msg)` | For every new incoming or outgoing message while the script is running |
+| `on_reaction(reaction)` | For every new incoming or outgoing message reaction while the script is running |
 | `on_command(command)` | When an automation bot is started from chat |
 | `on_extension_open(event)` | When an extension script is opened from the left toolbar |
 | `on_form_event(event)` | After an action or value change from a component created through `mesh.form.*` |
@@ -307,12 +308,17 @@ end
 | `mesh.chat.send_channel(channel, text[, reply_id])` | `message` or `nil` | Sends a radio message to a channel |
 | `mesh.chat.send_dm(node_id, text[, reply_id])` | `message` or `nil` | Sends a radio direct message |
 | `mesh.chat.reply(msg, text)` | `message` or `nil` | Sends a reply to the same chat where `msg` arrived |
+| `mesh.chat.react(msg, emoji)` | `true` or `nil` | Sends a Meshtastic reaction to `msg` |
 | `mesh.chat.bot_message(chat_type, chat_key, text)` | `message` | Adds a local bot message to history without sending it over radio |
 | `mesh.chat.bot_reply(msg, text)` | `message` | Adds a local bot reply to a message |
 | `mesh.chat.bot_notice(chat_type, chat_key, text[, options])` | `true` | Shows a temporary bot UI message without writing it to history |
 | `mesh.chat.recent(chat_type, chat_key[, limit])` | list of `message` | Returns recent messages, `limit` from 1 to 200, default 20 |
 | `mesh.chat.nodes()` | list of `node` | Returns known nodes for the current connection |
 | `mesh.chat.channels()` | list of `channel` | Returns known channels for the current connection |
+
+`mesh.chat.react(msg, emoji)` requires a message table with `packet_id` and a
+supported `chat_type` (`channel` or `dm`). Reactions are sent through the active
+Meshtastic connection and are not available for MeshCore connections.
 
 ## `mesh.kv`
 
@@ -860,6 +866,25 @@ Returned by `on_message(msg)`, `mesh.chat.recent(...)`, and send/bot-message fun
 | `rx_rssi` | number | Received packet RSSI |
 | `rx_snr` | number | Received packet SNR in dB |
 
+### `reaction`
+
+Returned by `on_reaction(reaction)`.
+
+| Field | Type | Purpose / returned value |
+|-------|------|--------------------------|
+| `db_id` | number | Local MeshApp database ID |
+| `packet_id` | number | Mesh packet ID of the reaction packet |
+| `target_packet_id` | number | `packet_id` of the message being reacted to |
+| `chat_type` | string or `nil` | Chat type: `channel` or `dm` |
+| `chat_key` | string or `nil` | Chat key: channel index as a string or peer node ID |
+| `from` | string or `nil` | Sender node ID |
+| `emoji` | string or `nil` | Reaction emoji |
+| `timestamp` | number | Reaction Unix time in seconds |
+| `outgoing` | boolean | `true` when the reaction was sent by the current node/client |
+| `status` | string or `nil` | Delivery status such as `SENDING`, `DELIVERED`, `CONFIRMED`, or `FAILED` |
+| `error_reason` | string or `nil` | Failure reason when known |
+| `sender_name` | string or `nil` | Sender display name |
+
 ### `node`
 
 Returned by `mesh.chat.nodes()`, `mesh.ui.pick_node(...)`, `mesh.nodeinfo.request(...)`, and accepted as a `target` for requests.
@@ -990,6 +1015,25 @@ function on_message(msg)
     if string.lower(msg.text) == "hello" then
         mesh.chat.reply(msg, "hello from " .. tostring(mesh.owner().node_id))
     end
+end
+```
+
+### React to messages and log reactions
+
+```lua
+function on_message(msg)
+    if msg.outgoing or msg.system or not msg.text then
+        return
+    end
+
+    if string.lower(msg.text) == "ok" then
+        mesh.chat.react(msg, "👍")
+    end
+end
+
+function on_reaction(reaction)
+    mesh.log("reaction " .. tostring(reaction.emoji)
+        .. " to packet " .. tostring(reaction.target_packet_id))
 end
 ```
 

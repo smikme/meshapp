@@ -306,6 +306,7 @@ MeshApp IDE — встроенная среда для Lua-скриптов и �
 Точки входа:
 
 - `on_message(msg)` — реакция на новое сообщение
+- `on_reaction(reaction)` — обработка реакций к сообщениям
 - `on_command(command)` — обработка команды
 - `on_node_selected(event)`, `on_traceroute(event)`, `on_node_info(event)`, `on_admin(event)` — обработчики асинхронных событий
 

@@ -306,6 +306,7 @@ Skripte laufen in einer isolierten LuaJ-Umgebung. Gefährliche APIs sind deaktiv
 Einstiegspunkte:
 
 - `on_message(msg)` - Reaktion auf eine neue Nachricht
+- `on_reaction(reaction)` - Verarbeitung von Nachrichtenreaktionen
 - `on_command(command)` - Befehlsverarbeitung
 - `on_node_selected(event)`, `on_traceroute(event)`, `on_node_info(event)`, `on_admin(event)` - asynchrone Event-Handler
 
