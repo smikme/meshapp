@@ -200,8 +200,7 @@ abstract class FormChatRequests extends FormChatMessages {
             return false;
         }
         if (remoteRpcState != null) {
-            Toast.show(Toast.Type.WARNING, I18n.t("chat.toast.remoteManagementUnavailable"));
-            return false;
+            return retryRemoteMessage(msg);
         }
         if (state == null || (protocolHandler == null && meshCoreCompanionRuntime == null)) {
             Toast.show(Toast.Type.WARNING, I18n.t("chat.toast.radioNotConnected"));
@@ -226,6 +225,60 @@ abstract class FormChatRequests extends FormChatMessages {
 
         reloadChatList();
         return true;
+    }
+
+    private boolean retryRemoteMessage(MeshMessage msg) {
+        if (selectedChat == null || remoteRpcState == null) {
+            return false;
+        }
+        var rpcState = remoteRpcState;
+        String chatType = currentChatType();
+        String chatKey = currentChatKey();
+        String ownerNodeId = currentOwnerNodeId();
+        int previousPacketId = msg.getPacketId();
+        MeshMessage.DeliveryStatus previousStatus = msg.getStatus();
+        String previousErrorReason = msg.getErrorReason();
+
+        msg.setStatus(MeshMessage.DeliveryStatus.SENDING);
+        msg.setErrorReason(null);
+
+        rpcState.client()
+                .call("chat.retry",
+                        RemoteChatJson.retryParams(chatType, chatKey, msg.getDbId(), previousPacketId),
+                        REMOTE_RPC_TIMEOUT)
+                .whenComplete((result, error) -> Platform.runLater(() -> {
+                    if (rpcState != remoteRpcState) {
+                        return;
+                    }
+                    if (error != null) {
+                        msg.setPacketId(previousPacketId);
+                        msg.setStatus(previousStatus);
+                        msg.setErrorReason(previousErrorReason);
+                        refreshRetriedRemoteMessage(chatType, chatKey, ownerNodeId, msg);
+                        Toast.show(Toast.Type.ERROR, I18n.t("chat.remote.error", RemoteChatJson.errorMessage(error)));
+                        return;
+                    }
+                    MeshMessage retried = RemoteChatJson.parseResultMessage(result);
+                    if (retried == null) {
+                        reloadChatList();
+                        return;
+                    }
+                    refreshRetriedRemoteMessage(chatType, chatKey, ownerNodeId, retried);
+                    reloadChatList();
+                }));
+        return true;
+    }
+
+    private void refreshRetriedRemoteMessage(String chatType,
+                                             String chatKey,
+                                             String ownerNodeId,
+                                             MeshMessage message) {
+        if (selectedChat == null
+                || !Objects.equals(chatType, currentChatType())
+                || !Objects.equals(chatKey, currentChatKey())) {
+            return;
+        }
+        scheduleMessageChangeRefresh(MessageChangeEvent.statusChanged(chatType, chatKey, ownerNodeId, message));
     }
 
     private boolean canRetryTarget(MeshMessage msg) {

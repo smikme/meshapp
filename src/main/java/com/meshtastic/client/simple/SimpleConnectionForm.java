@@ -47,7 +47,7 @@ public class SimpleConnectionForm extends VBox {
     private static final String FIELD_ERROR_STYLE_CLASS = "connection-field-error";
     private static final int DEFAULT_TCP_PORT = 4403;
     private static final int DEFAULT_REMOTE_RPC_PORT = AppPreferences.DEFAULT_REMOTE_RPC_SERVER_PORT;
-    private static final int DEFAULT_REMOTE_RPC_ROUTER_PORT = 8080;
+    private static final int DEFAULT_REMOTE_RPC_ROUTER_PORT = ConnectionEntry.CLOUD_RPC_ROUTER_PORT;
     private static final Pattern BLE_MAC_ADDRESS_PATTERN =
             Pattern.compile("(?i)^[0-9a-f]{2}(:[0-9a-f]{2}){5}$");
     private static final Pattern BLE_UUID_PATTERN =
@@ -383,13 +383,16 @@ public class SimpleConnectionForm extends VBox {
      * Reads and validates direct MeshApp RPC fields.
      */
     private ConnectionEntry buildRemoteRpcConnectionEntry(ValidationState validation, String name) {
-        var host = requiredText(
-                validation,
-                txtHost,
-                hostValidation,
-                "connection.form.validation.remoteHostRequired");
         RemoteRpcConnectionMode mode = selectedRemoteRpcMode();
-        var port = remoteRpcPort(validation, mode);
+        boolean routerMode = mode == RemoteRpcConnectionMode.ROUTER;
+        var host = routerMode
+                ? ConnectionEntry.CLOUD_RPC_ROUTER_SERVER
+                : requiredText(
+                        validation,
+                        txtHost,
+                        hostValidation,
+                        "connection.form.validation.remoteHostRequired");
+        var port = routerMode ? ConnectionEntry.CLOUD_RPC_ROUTER_PORT : remoteRpcPort(validation, mode);
         var accessKey = requiredText(
                 validation,
                 txtRemoteAccessKey,
@@ -742,6 +745,13 @@ public class SimpleConnectionForm extends VBox {
         if (remoteRpc) {
             cmbProtocol.setValue(labelForProtocol(ProtocolType.REMOTE_RPC));
         }
+        boolean routerMode = remoteRpc && selectedRemoteRpcMode() == RemoteRpcConnectionMode.ROUTER;
+        txtHost.setDisable(routerMode);
+        txtPort.setDisable(routerMode);
+        if (routerMode) {
+            txtHost.setText(ConnectionEntry.CLOUD_RPC_ROUTER_DISPLAY_HOST);
+            txtPort.setText(Integer.toString(ConnectionEntry.CLOUD_RPC_ROUTER_PORT));
+        }
 
         if (serial) {
             refreshPorts();
@@ -773,10 +783,15 @@ public class SimpleConnectionForm extends VBox {
             }
             case REMOTE_RPC -> {
                 cmbRemoteRpcMode.setValue(labelForRemoteRpcMode(entry.getEffectiveRemoteRpcMode()));
-                txtHost.setText(valueOrEmpty(entry.getHost()));
-                txtPort.setText(String.valueOf(entry.getPort() > 0
-                        ? entry.getPort()
-                        : defaultRemoteRpcPort(entry.getEffectiveRemoteRpcMode())));
+                if (entry.getEffectiveRemoteRpcMode() == RemoteRpcConnectionMode.ROUTER) {
+                    txtHost.setText(ConnectionEntry.CLOUD_RPC_ROUTER_DISPLAY_HOST);
+                    txtPort.setText(Integer.toString(ConnectionEntry.CLOUD_RPC_ROUTER_PORT));
+                } else {
+                    txtHost.setText(valueOrEmpty(entry.getHost()));
+                    txtPort.setText(String.valueOf(entry.getPort() > 0
+                            ? entry.getPort()
+                            : defaultRemoteRpcPort(entry.getEffectiveRemoteRpcMode())));
+                }
                 txtRemoteAccessKey.setText(valueOrEmpty(entry.getRemoteAccessKey()));
             }
             case SERIAL -> {
@@ -830,8 +845,8 @@ public class SimpleConnectionForm extends VBox {
         }
         String currentPort = txtPort.getText() == null ? "" : txtPort.getText().trim();
         RemoteRpcConnectionMode mode = selectedRemoteRpcMode();
-        if (mode == RemoteRpcConnectionMode.ROUTER
-                && Integer.toString(DEFAULT_REMOTE_RPC_PORT).equals(currentPort)) {
+        if (mode == RemoteRpcConnectionMode.ROUTER) {
+            txtHost.setText(ConnectionEntry.CLOUD_RPC_ROUTER_DISPLAY_HOST);
             txtPort.setText(Integer.toString(DEFAULT_REMOTE_RPC_ROUTER_PORT));
         } else if (mode == RemoteRpcConnectionMode.DIRECT
                 && Integer.toString(DEFAULT_REMOTE_RPC_ROUTER_PORT).equals(currentPort)) {

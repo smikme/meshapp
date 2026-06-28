@@ -832,11 +832,15 @@ abstract class FormChatMessages extends FormChatUi {
     }
 
     static boolean copyLoadedMessageMetadata(MeshMessage loaded, MeshMessage updated) {
-        if (loaded == null || updated == null || loaded.getPacketId() != updated.getPacketId()) {
+        if (loaded == null || updated == null || !isSameLoadedMessage(loaded, updated)) {
             return false;
         }
 
         boolean changed = false;
+        if (loaded.getPacketId() != updated.getPacketId()) {
+            loaded.setPacketId(updated.getPacketId());
+            changed = true;
+        }
         if (loaded.getStatus() != updated.getStatus()) {
             loaded.setStatus(updated.getStatus());
             changed = true;
@@ -882,6 +886,13 @@ abstract class FormChatMessages extends FormChatUi {
             changed = true;
         }
         return changed;
+    }
+
+    private static boolean isSameLoadedMessage(MeshMessage loaded, MeshMessage updated) {
+        if (loaded.getDbId() > 0 && updated.getDbId() > 0) {
+            return loaded.getDbId() == updated.getDbId();
+        }
+        return loaded.getPacketId() != 0 && loaded.getPacketId() == updated.getPacketId();
     }
 
     /**

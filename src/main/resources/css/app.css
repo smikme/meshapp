@@ -1144,6 +1144,35 @@
     -fx-padding: 15;
 }
 
+.remote-rpc-status-row {
+    -fx-padding: 4 0 0 0;
+}
+
+.remote-rpc-status-dot {
+    -fx-font-size: 1.0769em;
+    -fx-font-weight: bold;
+}
+
+.remote-rpc-status-connected {
+    -fx-text-fill: #1EA97C;
+}
+
+.remote-rpc-status-connecting {
+    -fx-text-fill: #F59E0B;
+}
+
+.remote-rpc-status-error {
+    -fx-text-fill: #B91C1C;
+}
+
+.remote-rpc-status-disabled {
+    -fx-text-fill: #9CA3AF;
+}
+
+.remote-rpc-status-text {
+    -fx-opacity: 0.78;
+}
+
 /* Tables */
 .table-view {
     -fx-fixed-cell-size: 28;

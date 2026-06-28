@@ -50,6 +50,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -79,12 +80,15 @@ public final class RemoteRpcHostService {
 
     private static final Logger log = LoggerFactory.getLogger(RemoteRpcHostService.class);
     private static final int TRACEROUTE_TIMEOUT_SECONDS = 360;
+    private static final long CHAT_SEND_DEDUP_TTL_MS = TimeUnit.MINUTES.toMillis(5);
+    private static final int CHAT_SEND_DEDUP_MAX_ENTRIES = 512;
 
     private static RemoteRpcHostService instance;
 
     private final Object lock = new Object();
     private final ConcurrentMap<String, PendingTraceroute> pendingTraceroutes = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, CompletableFuture<JsonElement>> pendingLuaFormValues = new ConcurrentHashMap<>();
+    private final ConcurrentMap<String, CachedChatSend> chatSendDedup = new ConcurrentHashMap<>();
     private final CopyOnWriteArrayList<Runnable> statusListeners = new CopyOnWriteArrayList<>();
     private final PacketMonitorService.Listener packetMonitorListener = new PacketMonitorService.Listener() {
         @Override
@@ -154,6 +158,32 @@ public final class RemoteRpcHostService {
     public void start(String bindAddress, int port, String accessKey) {
         synchronized (lock) {
             startDirectLocked(bindAddress, port, accessKey);
+            updatePacketMonitorListenerLocked();
+        }
+        fireStatusListeners();
+    }
+
+    /**
+     * Starts the direct RPC server and optionally connects it to an External RPC Router.
+     *
+     * @param bindAddress bind address, for example {@code 127.0.0.1} or {@code 0.0.0.0}
+     * @param port TCP port
+     * @param accessKey access key generated on the host
+     * @param routerEnabled whether the External RPC Router connector should be started
+     * @param routerServer router server address
+     */
+    public void start(String bindAddress,
+                      int port,
+                      String accessKey,
+                      boolean routerEnabled,
+                      String routerServer) {
+        synchronized (lock) {
+            startDirectLocked(bindAddress, port, accessKey);
+            if (routerEnabled) {
+                startRouterLocked(routerServer, accessKey);
+            } else {
+                stopRouterLocked();
+            }
             updatePacketMonitorListenerLocked();
         }
         fireStatusListeners();
@@ -351,6 +381,8 @@ public final class RemoteRpcHostService {
                         CompletableFuture.completedFuture(chatMarkRead(params)))
                 .register("chat.send", (params, context) ->
                         CompletableFuture.completedFuture(chatSend(params)))
+                .register("chat.retry", (params, context) ->
+                        CompletableFuture.completedFuture(chatRetry(params)))
                 .register("chat.react", (params, context) ->
                         CompletableFuture.completedFuture(chatReact(params)))
                 .register("node.list", (params, context) ->
@@ -1264,6 +1296,14 @@ public final class RemoteRpcHostService {
         String chatKey = requiredText(params, "chatKey");
         String text = requiredText(params, "text");
         int replyId = boundedInt(params, "replyId", Integer.MIN_VALUE, Integer.MAX_VALUE, 0);
+        String ownerId = active.state().getOwnerNodeId();
+        String clientRequestId = firstText(textField(params, "clientRequestId"), "");
+        long now = System.currentTimeMillis();
+        cleanupChatSendDedup(now);
+        MeshMessage cached = cachedChatSend(clientRequestId, ownerId, chatType, chatKey, active.state());
+        if (cached != null) {
+            return chatSendResult(active, chatType, chatKey, cached);
+        }
 
         MeshMessage sent;
         if (active.meshCoreRuntime() != null) {
@@ -1282,11 +1322,96 @@ public final class RemoteRpcHostService {
         if (sent == null) {
             throw new IllegalStateException("message was not sent");
         }
+        if (!clientRequestId.isBlank()) {
+            chatSendDedup.put(
+                    chatSendDedupKey(ownerId, clientRequestId),
+                    new CachedChatSend(now, chatType, chatKey, sent.getPacketId()));
+        }
+        return chatSendResult(active, chatType, chatKey, sent);
+    }
+
+    private JsonObject chatSendResult(ActiveHostConnection active, String chatType, String chatKey, MeshMessage sent) {
         prepareMessagesForRemote(active.state(), chatType, chatKey, active.state().getOwnerNodeId(), List.of(sent));
         JsonObject result = new JsonObject();
         result.add("message", messageToJson(sent, active.state()));
         result.add("chat", chatList());
         return result;
+    }
+
+    private JsonObject chatRetry(JsonObject params) {
+        ActiveHostConnection active = activeHostConnection();
+        if (active.meshCoreRuntime() != null) {
+            throw new IllegalStateException("selected host connection cannot retry messages");
+        }
+
+        ProtocolHandler handler = active.handler();
+        if (handler == null) {
+            throw new IllegalStateException("selected host connection cannot retry messages");
+        }
+
+        String chatType = requiredText(params, "chatType");
+        String chatKey = requiredText(params, "chatKey");
+        long dbId = longField(params, "dbId");
+        int packetId = boundedInt(params, "packetId", Integer.MIN_VALUE, Integer.MAX_VALUE, 0);
+        if (dbId <= 0 && packetId == 0) {
+            throw new IllegalArgumentException("dbId or packetId is required");
+        }
+
+        String ownerId = active.state().getOwnerNodeId();
+        MessageDbService db = MessageDbService.getInstance();
+        MeshMessage message = dbId > 0
+                ? db.findByDbId(chatType, chatKey, dbId, ownerId)
+                : db.findByPacketId(packetId, chatType, chatKey, ownerId);
+        if (message == null) {
+            throw new IllegalArgumentException("message was not found");
+        }
+        if (!message.isOutgoing() || message.getStatus() != MeshMessage.DeliveryStatus.FAILED) {
+            throw new IllegalArgumentException("only failed outgoing messages can be retried");
+        }
+        if (!MessageService.retryMessage(handler, active.state(), message)) {
+            throw new IllegalStateException("message retry was not started");
+        }
+
+        prepareMessagesForRemote(active.state(), chatType, chatKey, ownerId, List.of(message));
+        publishMessageStatusChanged(MessageChangeEvent.statusChanged(chatType, chatKey, ownerId, message));
+        return chatSendResult(active, chatType, chatKey, message);
+    }
+
+    private MeshMessage cachedChatSend(String clientRequestId,
+                                       String ownerId,
+                                       String chatType,
+                                       String chatKey,
+                                       DeviceState state) {
+        if (clientRequestId.isBlank()) {
+            return null;
+        }
+        String key = chatSendDedupKey(ownerId, clientRequestId);
+        CachedChatSend cached = chatSendDedup.get(key);
+        if (cached == null || !cached.matches(chatType, chatKey)) {
+            return null;
+        }
+        MeshMessage message = MessageDbService.getInstance()
+                .findByPacketId(cached.packetId(), chatType, chatKey, ownerId);
+        if (message == null) {
+            chatSendDedup.remove(key, cached);
+            return null;
+        }
+        prepareMessagesForRemote(state, chatType, chatKey, ownerId, List.of(message));
+        return message;
+    }
+
+    private void cleanupChatSendDedup(long now) {
+        chatSendDedup.forEach((key, value) -> {
+            boolean expired = now - value.createdAtMillis() > CHAT_SEND_DEDUP_TTL_MS;
+            boolean overLimit = chatSendDedup.size() > CHAT_SEND_DEDUP_MAX_ENTRIES;
+            if (expired || overLimit) {
+                chatSendDedup.remove(key, value);
+            }
+        });
+    }
+
+    private static String chatSendDedupKey(String ownerId, String clientRequestId) {
+        return firstText(ownerId, "") + "|" + clientRequestId.trim();
     }
 
     private JsonObject chatReact(JsonObject params) {
@@ -2216,5 +2341,11 @@ public final class RemoteRpcHostService {
 
     private record PendingTraceroute(DeviceState state,
                                      BiConsumer<Integer, MeshProtos.RouteDiscovery> listener) {
+    }
+
+    private record CachedChatSend(long createdAtMillis, String chatType, String chatKey, int packetId) {
+        private boolean matches(String type, String key) {
+            return Objects.equals(chatType, type) && Objects.equals(chatKey, key);
+        }
     }
 }

@@ -347,6 +347,7 @@ public final class ExternalRouterRpcHostClient implements AutoCloseable {
     private final class RouterRemoteSession {
         private final String clientSessionId;
         private final String serverNonce = RpcAccessKey.newNonce();
+        private final Object outboundLock = new Object();
         private volatile RpcSessionCipher cipher;
         private volatile boolean authenticated;
 
@@ -416,10 +417,13 @@ public final class ExternalRouterRpcHostClient implements AutoCloseable {
         }
 
         private void sendRpcEnvelope(JsonObject envelope) {
-            if (!authenticated || cipher == null) {
-                return;
+            synchronized (outboundLock) {
+                RpcSessionCipher currentCipher = cipher;
+                if (!authenticated || currentCipher == null) {
+                    return;
+                }
+                sendFrame(currentCipher.encrypt(RpcDispatcher.toJson(envelope)));
             }
-            sendFrame(cipher.encrypt(RpcDispatcher.toJson(envelope)));
         }
 
         private void sendFrame(String frame) {

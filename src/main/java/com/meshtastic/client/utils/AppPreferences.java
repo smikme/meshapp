@@ -1,5 +1,6 @@
 package com.meshtastic.client.utils;
 
+import com.meshtastic.client.model.ConnectionEntry;
 import com.meshtastic.client.platform.OsDetect;
 
 import java.util.Collections;
@@ -219,7 +220,7 @@ public class AppPreferences {
     }
 
     public static String getRemoteRpcRouterServer() {
-        return state().get(KEY_REMOTE_RPC_ROUTER_SERVER, "");
+        return state().get(KEY_REMOTE_RPC_ROUTER_SERVER, ConnectionEntry.CLOUD_RPC_ROUTER_SERVER);
     }
 
     public static void setRemoteRpcRouterServer(String value) {

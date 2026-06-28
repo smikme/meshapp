@@ -1,6 +1,7 @@
 package com.meshtastic.client.forms.settings;
 
 import com.meshtastic.client.i18n.I18n;
+import com.meshtastic.client.model.ConnectionEntry;
 import com.meshtastic.client.platform.OsDetect;
 import com.meshtastic.client.rpc.RpcAccessKey;
 import com.meshtastic.client.service.RemoteRpcHostService;
@@ -31,6 +32,11 @@ import javafx.scene.layout.VBox;
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public final class ApplicationSettingsPanelFactory {
+
+    private static final String STATUS_CONNECTED_CLASS = "remote-rpc-status-connected";
+    private static final String STATUS_CONNECTING_CLASS = "remote-rpc-status-connecting";
+    private static final String STATUS_ERROR_CLASS = "remote-rpc-status-error";
+    private static final String STATUS_DISABLED_CLASS = "remote-rpc-status-disabled";
 
     private ApplicationSettingsPanelFactory() {}
 
@@ -166,8 +172,7 @@ public final class ApplicationSettingsPanelFactory {
             integrationsHeader,
             checkUpdatesCb,
             jfrDiagnosticsCb,
-            diagnosticsNote,
-            createRemoteRpcSettingRow()
+            diagnosticsNote
         );
 
         panel
@@ -179,6 +184,17 @@ public final class ApplicationSettingsPanelFactory {
                 new Separator(),
                 integrationsGroup
             );
+        return panel;
+    }
+
+    /**
+     * Creates the Remote RPC settings panel.
+     *
+     * @return JavaFX panel for MeshApp Host RPC and External RPC Router settings
+     */
+    public static VBox createRemoteRpcSettingsPanel() {
+        VBox panel = createRemoteRpcSettingRow();
+        panel.setPadding(new Insets(15));
         return panel;
     }
 
@@ -206,31 +222,49 @@ public final class ApplicationSettingsPanelFactory {
         }));
         TextField keyField = new TextField(AppPreferences.getRemoteRpcAccessKey());
         keyField.setPrefColumnCount(30);
-        TextField routerServerField = new TextField(AppPreferences.getRemoteRpcRouterServer());
-        routerServerField.setPromptText("router.example.org:8080");
-        routerServerField.setPrefColumnCount(24);
+        Label routerServerLabel = new Label(ConnectionEntry.CLOUD_RPC_ROUTER_DISPLAY_HOST + ":"
+                + ConnectionEntry.CLOUD_RPC_ROUTER_PORT);
+        routerServerLabel.getStyleClass().add("muted-note-label");
 
         Button generateButton = new Button(I18n.t("settings.remoteRpc.generateKey"));
         generateButton.setOnAction(event -> keyField.setText(RpcAccessKey.generate().value()));
 
         Label statusLabel = new Label();
-        statusLabel.getStyleClass().add("muted-note-label");
+        statusLabel.getStyleClass().add("remote-rpc-status-text");
         statusLabel.setWrapText(true);
-        updateRemoteRpcStatusLabel(statusLabel);
-        installRemoteRpcStatusListener(statusLabel);
+
+        Label statusIndicator = new Label("\u25CF");
+        statusIndicator.getStyleClass().add("remote-rpc-status-dot");
+        RemoteRpcStatusControls statusControls = new RemoteRpcStatusControls(
+                statusIndicator,
+                statusLabel
+        );
+        updateRemoteRpcStatus(statusControls);
+        installRemoteRpcStatusListener(statusControls);
 
         Button applyButton = new Button(I18n.t("settings.remoteRpc.apply"));
         applyButton.setOnAction(event -> {
             int port = parsePortOrDefault(portField.getText());
             portField.setText(Integer.toString(port));
+            applyButton.setDisable(true);
             AppPreferences.setRemoteRpcServerEnabled(enabledBox.isSelected());
             AppPreferences.setRemoteRpcServerBindAddress(bindField.getText());
             AppPreferences.setRemoteRpcServerPort(port);
             AppPreferences.setRemoteRpcAccessKey(keyField.getText());
             AppPreferences.setRemoteRpcRouterEnabled(routerEnabledBox.isSelected());
-            AppPreferences.setRemoteRpcRouterServer(routerServerField.getText());
-            RemoteRpcHostService.getInstance().applyPreferences();
-            updateRemoteRpcStatusLabel(statusLabel);
+            AppPreferences.setRemoteRpcRouterServer(ConnectionEntry.CLOUD_RPC_ROUTER_SERVER);
+            Thread worker = new Thread(() -> {
+                try {
+                    RemoteRpcHostService.getInstance().applyPreferences();
+                } finally {
+                    Platform.runLater(() -> {
+                        updateRemoteRpcStatus(statusControls);
+                        applyButton.setDisable(false);
+                    });
+                }
+            }, "remote-rpc-settings-apply");
+            worker.setDaemon(true);
+            worker.start();
         });
 
         HBox bindRow = new HBox(
@@ -253,15 +287,18 @@ public final class ApplicationSettingsPanelFactory {
         HBox routerRow = new HBox(
                 8,
                 routerEnabledBox,
-                new Label(I18n.t("settings.remoteRpc.router.server")),
-                routerServerField
+                routerServerLabel
         );
         routerRow.setAlignment(Pos.CENTER_LEFT);
 
         HBox actionRow = new HBox(8, enabledBox, applyButton);
         actionRow.setAlignment(Pos.CENTER_LEFT);
 
-        return new VBox(6, titleLabel, descriptionLabel, bindRow, keyRow, routerRow, actionRow, statusLabel);
+        HBox statusRow = new HBox(8, statusIndicator, statusLabel);
+        statusRow.setAlignment(Pos.CENTER_LEFT);
+        statusRow.getStyleClass().add("remote-rpc-status-row");
+
+        return new VBox(8, titleLabel, descriptionLabel, bindRow, keyRow, routerRow, actionRow, statusRow);
     }
 
     private static int parsePortOrDefault(String text) {
@@ -273,12 +310,13 @@ public final class ApplicationSettingsPanelFactory {
         }
     }
 
-    private static void updateRemoteRpcStatusLabel(Label statusLabel) {
+    private static void updateRemoteRpcStatus(RemoteRpcStatusControls controls) {
         RemoteRpcHostService service = RemoteRpcHostService.getInstance();
+        applyRemoteRpcStatusStyle(controls.statusIndicator(), remoteRpcStatusKind(service));
         if (service.isRunning()) {
             String direct = I18n.t("settings.remoteRpc.status.running", service.getPort());
             String router = routerStatusText(service);
-            statusLabel.setText(router.isBlank() ? direct : direct + "\n" + router);
+            controls.statusLabel().setText(router.isBlank() ? direct : direct + "\n" + router);
             return;
         }
         String error = service.getLastError();
@@ -286,7 +324,7 @@ public final class ApplicationSettingsPanelFactory {
                 ? I18n.t("settings.remoteRpc.status.stopped")
                 : I18n.t("settings.remoteRpc.status.error", error);
         String router = routerStatusText(service);
-        statusLabel.setText(router.isBlank() ? direct : direct + "\n" + router);
+        controls.statusLabel().setText(router.isBlank() ? direct : direct + "\n" + router);
     }
 
     private static String routerStatusText(RemoteRpcHostService service) {
@@ -302,19 +340,63 @@ public final class ApplicationSettingsPanelFactory {
                 : I18n.t("settings.remoteRpc.router.status.error", error);
     }
 
-    private static void installRemoteRpcStatusListener(Label statusLabel) {
+    private static RemoteRpcStatusKind remoteRpcStatusKind(RemoteRpcHostService service) {
+        if (AppPreferences.isRemoteRpcRouterEnabled()) {
+            if (service.isRouterConnected()) {
+                return RemoteRpcStatusKind.CONNECTED;
+            }
+            String routerError = service.getLastRouterError();
+            return routerError == null || routerError.isBlank()
+                    ? RemoteRpcStatusKind.CONNECTING
+                    : RemoteRpcStatusKind.ERROR;
+        }
+        if (!service.isRunning()) {
+            String error = service.getLastError();
+            return error == null || error.isBlank()
+                    ? RemoteRpcStatusKind.DISABLED
+                    : RemoteRpcStatusKind.ERROR;
+        }
+        return RemoteRpcStatusKind.CONNECTED;
+    }
+
+    private static void applyRemoteRpcStatusStyle(Label statusIndicator, RemoteRpcStatusKind statusKind) {
+        statusIndicator.getStyleClass().removeAll(
+                STATUS_CONNECTED_CLASS,
+                STATUS_CONNECTING_CLASS,
+                STATUS_ERROR_CLASS,
+                STATUS_DISABLED_CLASS
+        );
+        switch (statusKind) {
+            case CONNECTED -> statusIndicator.getStyleClass().add(STATUS_CONNECTED_CLASS);
+            case CONNECTING -> statusIndicator.getStyleClass().add(STATUS_CONNECTING_CLASS);
+            case ERROR -> statusIndicator.getStyleClass().add(STATUS_ERROR_CLASS);
+            case DISABLED -> statusIndicator.getStyleClass().add(STATUS_DISABLED_CLASS);
+        }
+    }
+
+    private static void installRemoteRpcStatusListener(RemoteRpcStatusControls controls) {
         RemoteRpcHostService service = RemoteRpcHostService.getInstance();
         Runnable listener = () -> Platform.runLater(() -> {
-            if (statusLabel.getScene() != null) {
-                updateRemoteRpcStatusLabel(statusLabel);
+            if (controls.statusLabel().getScene() != null) {
+                updateRemoteRpcStatus(controls);
             }
         });
         service.addStatusListener(listener);
-        statusLabel.sceneProperty().addListener((obs, oldScene, newScene) -> {
+        controls.statusLabel().sceneProperty().addListener((obs, oldScene, newScene) -> {
             if (oldScene != null && newScene == null) {
                 service.removeStatusListener(listener);
             }
         });
+    }
+
+    private enum RemoteRpcStatusKind {
+        CONNECTED,
+        CONNECTING,
+        ERROR,
+        DISABLED
+    }
+
+    private record RemoteRpcStatusControls(Label statusIndicator, Label statusLabel) {
     }
 
     private static VBox createMemoryLimitSettingRow() {

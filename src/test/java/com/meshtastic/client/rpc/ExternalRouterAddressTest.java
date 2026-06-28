@@ -35,4 +35,26 @@ class ExternalRouterAddressTest {
                 "wss://router.example.org:8443/mesh-rpc?roomId=erpc1_MpmfGysDJIvccpcIQYIfh0aeET-OORKNPAXG-UoAyK0&role=host",
                 uri.toString());
     }
+
+    @Test
+    void hostUriUsesHttpsPortForSecureRouterWithoutExplicitPort() {
+        RpcAccessKey key = RpcAccessKey.parse("mra1_AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8");
+
+        URI uri = ExternalRouterAddress.hostUri("wss://cloud.meshapp.privatepractice.app", key);
+
+        assertEquals(
+                "wss://cloud.meshapp.privatepractice.app:443/rpc?roomId=erpc1_MpmfGysDJIvccpcIQYIfh0aeET-OORKNPAXG-UoAyK0&role=host",
+                uri.toString());
+    }
+
+    @Test
+    void hostUriKeepsLocalRouterPortForPlainRouterWithoutExplicitPort() {
+        RpcAccessKey key = RpcAccessKey.parse("mra1_AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8");
+
+        URI uri = ExternalRouterAddress.hostUri("router.example.org", key);
+
+        assertEquals(
+                "ws://router.example.org:8080/rpc?roomId=erpc1_MpmfGysDJIvccpcIQYIfh0aeET-OORKNPAXG-UoAyK0&role=host",
+                uri.toString());
+    }
 }

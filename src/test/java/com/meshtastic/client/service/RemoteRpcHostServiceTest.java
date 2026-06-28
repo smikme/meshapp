@@ -28,6 +28,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class RemoteRpcHostServiceTest {
 
     private static final int START_AND_STOP_STATUS_NOTIFICATION_COUNT = 2;
+    private static final int ROUTER_START_STATUS_NOTIFICATION_COUNT = 1;
 
     @Test
     void notifiesStatusListenersWhenHostStatusChanges(@TempDir Path tempHome) {
@@ -44,6 +45,34 @@ class RemoteRpcHostServiceTest {
             host.stop();
 
             assertTrue(notifications.get() >= START_AND_STOP_STATUS_NOTIFICATION_COUNT);
+        } finally {
+            host.removeStatusListener(listener);
+            host.stop();
+            TestEnvironmentSupport.resetSingletons();
+        }
+    }
+
+    @Test
+    void startsRouterConnectorWhenRequestedWithDirectHost(@TempDir Path tempHome) {
+        TestEnvironmentSupport.setUserHome(tempHome);
+        TestEnvironmentSupport.resetSingletons();
+
+        RemoteRpcHostService host = RemoteRpcHostService.getInstance();
+        AtomicInteger notifications = new AtomicInteger();
+        Runnable listener = notifications::incrementAndGet;
+        try {
+            host.addStatusListener(listener);
+
+            host.start(
+                    "127.0.0.1",
+                    0,
+                    RpcAccessKey.generate().value(),
+                    true,
+                    "127.0.0.1:1");
+
+            assertTrue(host.isRunning());
+            assertTrue(notifications.get() >= ROUTER_START_STATUS_NOTIFICATION_COUNT);
+            assertTrue(waitForRouterError(host));
         } finally {
             host.removeStatusListener(listener);
             host.stop();
@@ -117,5 +146,22 @@ class RemoteRpcHostServiceTest {
         } finally {
             TestEnvironmentSupport.resetSingletons();
         }
+    }
+
+    private static boolean waitForRouterError(RemoteRpcHostService host) {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
+        while (System.nanoTime() < deadline) {
+            String error = host.getLastRouterError();
+            if (error != null && !error.isBlank()) {
+                return true;
+            }
+            try {
+                TimeUnit.MILLISECONDS.sleep(50);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return false;
+            }
+        }
+        return false;
     }
 }

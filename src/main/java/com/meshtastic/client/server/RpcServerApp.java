@@ -19,7 +19,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * Headless MeshApp Host process that exposes only the direct RPC server.
+ * Headless MeshApp Host process that exposes the RPC server and optional router connector.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -79,7 +79,12 @@ public final class RpcServerApp {
         initializeStorage();
 
         RemoteRpcHostService hostService = RemoteRpcHostService.getInstance();
-        hostService.start(config.bindAddress(), config.port(), config.accessKey().value());
+        hostService.start(
+                config.bindAddress(),
+                config.port(),
+                config.accessKey().value(),
+                config.routerEnabled(),
+                config.routerServer());
         if (!hostService.isRunning()) {
             String error = hostService.getLastError();
             log.error("Remote RPC host server did not start{}", error == null || error.isBlank() ? "" : ": " + error);
@@ -106,6 +111,11 @@ public final class RpcServerApp {
                 config.bindAddress(),
                 hostService.getPort(),
                 printKey ? config.accessKey().value() : "<configured>");
+        if (config.routerEnabled()) {
+            log.info("External RPC Router connector enabled: {}", config.routerServer());
+        } else {
+            log.info("External RPC Router connector disabled");
+        }
         if (!printKey) {
             log.info("Pass --print-rpc-key to print the configured key in console logs");
         }
@@ -133,6 +143,15 @@ public final class RpcServerApp {
         int port = options.portOverride() != null
                 ? options.portOverride()
                 : parsePortOrDefault(env(RpcServerOptions.ENV_PORT), AppPreferences.getRemoteRpcServerPort());
+        boolean routerEnabled = options.routerEnabledOverride() != null
+                ? options.routerEnabledOverride()
+                : AppPreferences.isRemoteRpcRouterEnabled();
+        String routerServer = firstText(options.routerServerOverride(), AppPreferences.getRemoteRpcRouterServer());
+        if (routerEnabled && (routerServer == null || routerServer.isBlank())) {
+            throw new IllegalArgumentException(
+                    "External RPC Router is enabled, but router server is not configured. "
+                            + "Pass --rpc-router SERVER or save it in Settings -> RPC.");
+        }
 
         KeySource keySource = KeySource.ARGUMENT_OR_ENVIRONMENT;
         String keyText = firstText(options.accessKeyOverride(), env(RpcServerOptions.ENV_KEY));
@@ -143,11 +162,27 @@ public final class RpcServerApp {
         if (keyText == null || keyText.isBlank()) {
             RpcAccessKey generated = RpcAccessKey.generate();
             AppPreferences.setRemoteRpcAccessKey(generated.value());
-            return new ServerConfig(bindAddress, port, generated, options.autoconnect(), options.printAccessKey(), KeySource.GENERATED);
+            return new ServerConfig(
+                    bindAddress,
+                    port,
+                    generated,
+                    options.autoconnect(),
+                    options.printAccessKey(),
+                    KeySource.GENERATED,
+                    routerEnabled,
+                    routerServer);
         }
 
         RpcAccessKey accessKey = RpcAccessKey.parse(keyText.trim());
-        return new ServerConfig(bindAddress, port, accessKey, options.autoconnect(), options.printAccessKey(), keySource);
+        return new ServerConfig(
+                bindAddress,
+                port,
+                accessKey,
+                options.autoconnect(),
+                options.printAccessKey(),
+                keySource,
+                routerEnabled,
+                routerServer);
     }
 
     private static int parsePortOrDefault(String value, int fallback) {
@@ -223,7 +258,9 @@ public final class RpcServerApp {
                                 RpcAccessKey accessKey,
                                 boolean autoconnect,
                                 boolean printAccessKey,
-                                KeySource keySource) {
+                                KeySource keySource,
+                                boolean routerEnabled,
+                                String routerServer) {
         boolean generatedAccessKey() {
             return keySource == KeySource.GENERATED;
         }

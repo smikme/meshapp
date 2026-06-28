@@ -15,6 +15,10 @@ import java.util.UUID;
  */
 public class ConnectionEntry {
 
+    public static final String CLOUD_RPC_ROUTER_DISPLAY_HOST = "cloud.meshapp.privatepractice.app";
+    public static final String CLOUD_RPC_ROUTER_SERVER = "wss://" + CLOUD_RPC_ROUTER_DISPLAY_HOST;
+    public static final int CLOUD_RPC_ROUTER_PORT = 443;
+
     private String id;
     private String name;
     private ProtocolType protocol;
@@ -84,16 +88,16 @@ public class ConnectionEntry {
         entry.protocol = ProtocolType.REMOTE_RPC;
         entry.type = ConnectionType.REMOTE_RPC;
         entry.name = name;
-        entry.host = host;
-        entry.port = port;
-        entry.remoteAccessKey = accessKey;
         entry.remoteRpcMode = mode != null ? mode : RemoteRpcConnectionMode.DIRECT;
+        entry.host = entry.remoteRpcMode == RemoteRpcConnectionMode.ROUTER ? CLOUD_RPC_ROUTER_SERVER : host;
+        entry.port = entry.remoteRpcMode == RemoteRpcConnectionMode.ROUTER ? CLOUD_RPC_ROUTER_PORT : port;
+        entry.remoteAccessKey = accessKey;
         return entry;
     }
 
     /** Constructor for External RPC Router client connections. */
     public static ConnectionEntry remoteRpcRouter(String name, String server, int port, String accessKey) {
-        return remoteRpc(name, server, port, accessKey, RemoteRpcConnectionMode.ROUTER);
+        return remoteRpc(name, CLOUD_RPC_ROUTER_SERVER, CLOUD_RPC_ROUTER_PORT, accessKey, RemoteRpcConnectionMode.ROUTER);
     }
 
     /**

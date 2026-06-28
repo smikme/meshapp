@@ -9,6 +9,9 @@ import java.io.IOException;
 import java.time.Duration;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BiConsumer;
@@ -25,6 +28,8 @@ import java.util.function.BiConsumer;
 public final class ExternalRouterRpcClient implements AutoCloseable {
 
     private static final Duration DEFAULT_CONNECT_TIMEOUT = Duration.ofSeconds(8);
+    private static final Duration ROUTER_PING_INTERVAL = Duration.ofSeconds(15);
+    private static final Duration ROUTER_PING_TIMEOUT = Duration.ofSeconds(45);
 
     private final ExternalRouterRpcTransport transport;
     private final RpcClient client;
@@ -93,12 +98,16 @@ public final class ExternalRouterRpcClient implements AutoCloseable {
         private final Runnable closedHandler;
         private final BiConsumer<String, Throwable> errorHandler;
         private final AtomicBoolean open = new AtomicBoolean(true);
+        private final Object outboundLock = new Object();
+        private final ScheduledExecutorService scheduler;
 
         private volatile ExternalRouterWebSocket webSocket;
         private volatile RpcSessionCipher sessionCipher;
         private volatile RpcTransportListener listener;
         private volatile String serverNonce;
         private volatile String clientNonce;
+        private volatile ScheduledFuture<?> pingTask;
+        private volatile long lastRouterPongNanos = System.nanoTime();
 
         private ExternalRouterRpcTransport(RpcAccessKey accessKey,
                                            Runnable closedHandler,
@@ -106,6 +115,11 @@ public final class ExternalRouterRpcClient implements AutoCloseable {
             this.accessKey = Objects.requireNonNull(accessKey, "accessKey");
             this.closedHandler = closedHandler != null ? closedHandler : () -> {};
             this.errorHandler = errorHandler != null ? errorHandler : (message, error) -> {};
+            this.scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+                Thread thread = new Thread(r, "erpc-router-client");
+                thread.setDaemon(true);
+                return thread;
+            });
         }
 
         private static ExternalRouterRpcTransport connect(String server,
@@ -126,6 +140,7 @@ public final class ExternalRouterRpcClient implements AutoCloseable {
                     transport::handleRouterClosed);
             try {
                 transport.authenticated.orTimeout(Math.max(1L, timeout.toMillis()), TimeUnit.MILLISECONDS).join();
+                transport.startRouterPing();
             } catch (RuntimeException e) {
                 transport.close();
                 throw new IOException("Failed to authenticate through ERPC Router", rootCause(e));
@@ -147,7 +162,9 @@ public final class ExternalRouterRpcClient implements AutoCloseable {
             if (cipher == null) {
                 throw new IllegalStateException("ERPC Router RPC transport is not authenticated");
             }
-            sendFrame(cipher.encrypt(Objects.requireNonNull(message, "message")));
+            synchronized (outboundLock) {
+                sendFrame(cipher.encrypt(Objects.requireNonNull(message, "message")));
+            }
         }
 
         @Override
@@ -166,6 +183,7 @@ public final class ExternalRouterRpcClient implements AutoCloseable {
             if (current != null) {
                 current.close();
             }
+            stopRouterPing();
             RpcTransportListener currentListener = listener;
             if (currentListener != null) {
                 currentListener.onClosed();
@@ -176,11 +194,11 @@ public final class ExternalRouterRpcClient implements AutoCloseable {
             String type = text(message, "type");
             switch (type) {
                 case "host_frame", "broadcast" -> handleHostFrame(payloadObject(message));
+                case "client_ready", "host_connected", "router_pong" -> lastRouterPongNanos = System.nanoTime();
                 case "host_disconnected" -> failAndClose("ERPC Router host disconnected", null);
                 case "router_error" -> failAndClose(text(message, "message"), null);
                 default -> {
-                    // client_ready / host_connected are status frames; authentication
-                    // starts when the host sends auth_challenge.
+                    // Authentication starts when the host sends auth_challenge.
                 }
             }
         }
@@ -249,6 +267,45 @@ public final class ExternalRouterRpcClient implements AutoCloseable {
             payload.addProperty("frame", frame);
             JsonObject envelope = new JsonObject();
             envelope.add("payload", payload);
+            sendRouterFrame(envelope);
+        }
+
+        private void startRouterPing() {
+            ScheduledFuture<?> previous = pingTask;
+            if (previous != null) {
+                previous.cancel(false);
+            }
+            lastRouterPongNanos = System.nanoTime();
+            pingTask = scheduler.scheduleAtFixedRate(
+                    this::sendRouterPing,
+                    ROUTER_PING_INTERVAL.toMillis(),
+                    ROUTER_PING_INTERVAL.toMillis(),
+                    TimeUnit.MILLISECONDS);
+        }
+
+        private void sendRouterPing() {
+            if (!isOpen()) {
+                return;
+            }
+            long silenceMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - lastRouterPongNanos);
+            if (silenceMs > ROUTER_PING_TIMEOUT.toMillis()) {
+                failAndClose("ERPC Router channel healthcheck timed out", null);
+                return;
+            }
+            JsonObject ping = new JsonObject();
+            ping.addProperty("type", "router_ping");
+            sendRouterFrame(ping);
+        }
+
+        private void stopRouterPing() {
+            ScheduledFuture<?> ping = pingTask;
+            if (ping != null) {
+                ping.cancel(false);
+            }
+            scheduler.shutdownNow();
+        }
+
+        private void sendRouterFrame(JsonObject envelope) {
             ExternalRouterWebSocket current = webSocket;
             if (current == null) {
                 throw new IllegalStateException("ERPC Router WebSocket is closed");
@@ -265,6 +322,7 @@ public final class ExternalRouterRpcClient implements AutoCloseable {
                 return;
             }
             open.set(false);
+            stopRouterPing();
             authenticated.completeExceptionally(new IOException("ERPC Router WebSocket closed"));
             RpcTransportListener currentListener = listener;
             if (currentListener != null) {

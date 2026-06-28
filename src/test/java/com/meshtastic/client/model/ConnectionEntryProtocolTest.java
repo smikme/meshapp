@@ -70,6 +70,8 @@ class ConnectionEntryProtocolTest {
         assertEquals(ConnectionType.REMOTE_RPC, entry.getEffectiveType());
         assertEquals(ProtocolType.REMOTE_RPC, entry.getEffectiveProtocol());
         assertEquals(RemoteRpcConnectionMode.ROUTER, entry.getEffectiveRemoteRpcMode());
+        assertEquals(ConnectionEntry.CLOUD_RPC_ROUTER_SERVER, entry.getHost());
+        assertEquals(ConnectionEntry.CLOUD_RPC_ROUTER_PORT, entry.getPort());
     }
 
     @Test
