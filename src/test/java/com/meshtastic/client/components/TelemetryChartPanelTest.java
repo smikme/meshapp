@@ -419,6 +419,8 @@ class TelemetryChartPanelTest {
     @Test
     void restoresSavedTelemetryDockDividerPositions() {
         TelemetryChartPanel panel = onFxThread(() -> new TelemetryChartPanel(false));
+        onFxThread(() -> null);
+        onFxThread(() -> null);
 
         onFxThread(() -> {
             workspace(panel).setDividerPositions(0.21, 0.79);

@@ -125,6 +125,7 @@ public final class SessionCrashLogManager {
                     if (shouldSuppressPreviousBundleReport(activeBundleDir)) {
                         deleteRecursivelyQuietly(activeBundleDir);
                     } else {
+                        writeAbnormalExitMarkerIfAbsent(activeBundleDir);
                         rotateActiveBundleToPending();
                     }
                 }
@@ -478,6 +479,23 @@ public final class SessionCrashLogManager {
         } catch (IOException e) {
             return false;
         }
+    }
+
+    private static void writeAbnormalExitMarkerIfAbsent(Path bundleDir) {
+        Path markerPath = bundleDir.resolve(FATAL_MARKER_FILE_NAME);
+        if (Files.isRegularFile(markerPath)) {
+            return;
+        }
+
+        Map<?, ?> previousState = readJsonMapQuietly(bundleDir.resolve(SESSION_STATE_FILE_NAME));
+        Map<String, Object> marker = new LinkedHashMap<>();
+        marker.put("type", "abnormal-exit");
+        marker.put("capturedAt", nowString());
+        marker.put("reason", "previous session ended without a normal shutdown marker");
+        if (!previousState.isEmpty()) {
+            marker.put("previousSession", previousState);
+        }
+        writeJsonQuietly(markerPath, marker);
     }
 
     private static boolean previousSessionWasInterruptedByReboot(Path bundleDir) {
