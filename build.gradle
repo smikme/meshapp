@@ -753,6 +753,25 @@ def patchWindowsStartScriptForJavaFx = { File scriptFile ->
 	scriptFile.setText(patched.join('\r\n') + '\r\n', 'UTF-8')
 }
 
+def writeWindowsRpcServerLauncherProperties = { File propertiesFile ->
+	propertiesFile.parentFile.mkdirs()
+
+	def properties = new Properties()
+	properties.setProperty('main-jar', applicationJarName)
+	properties.setProperty('main-class', 'com.meshtastic.client.server.RpcServerLauncher')
+	properties.setProperty('description', 'MeshApp RPC Server')
+	properties.setProperty('win-console', 'true')
+	properties.setProperty('win-menu', 'true')
+	def icoFile = file('src/main/resources/logo/MeshApp.ico')
+	if (icoFile.exists()) {
+		properties.setProperty('icon', icoFile.absolutePath)
+	}
+	propertiesFile.withOutputStream { output ->
+		properties.store(output, 'MeshApp RPC Server launcher')
+	}
+	return propertiesFile
+}
+
 def copyDirectory = { File sourceDir, File targetDir ->
 	if (!sourceDir.isDirectory()) {
 		throw new GradleException("copyDirectory: source directory not found: ${sourceDir}")
@@ -1990,6 +2009,11 @@ tasks.register('jpackage') {
 			args << '--win-menu'
 			args << '--win-upgrade-uuid'
 			args << 'd5765678-89ab-4def-8123-456789abcdef'
+			def rpcServerLauncherProperties = writeWindowsRpcServerLauncherProperties(
+				new File(outputDir, 'launchers/MeshAppRpcServer.properties')
+			)
+			args << '--add-launcher'
+			args << "MeshAppRpcServer=${rpcServerLauncherProperties.absolutePath}"
 		}
 
 		if (!os.isWindows() && !macBuild) {
