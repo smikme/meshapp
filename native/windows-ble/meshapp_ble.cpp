@@ -281,6 +281,10 @@ struct async_timeout_error : std::runtime_error {
     using std::runtime_error::runtime_error;
 };
 
+static constexpr auto GATT_READ_TIMEOUT = std::chrono::seconds(5);
+static constexpr auto GATT_WRITE_TIMEOUT = std::chrono::seconds(10);
+static constexpr auto GATT_CLEANUP_TIMEOUT = std::chrono::seconds(3);
+
 template<typename AsyncOp>
 static auto await_async_result(
         AsyncOp op,
@@ -487,7 +491,10 @@ static void drain_from_radio() {
     if (!g_connected || !g_ble || g_ble->from_radio == nullptr) return;
     for (int i = 0; i < 100; i++) {
         try {
-            auto result = g_ble->from_radio.ReadValueAsync(BluetoothCacheMode::Uncached).get();
+            auto result = await_async_result(
+                    g_ble->from_radio.ReadValueAsync(BluetoothCacheMode::Uncached),
+                    GATT_READ_TIMEOUT,
+                    "drain ReadValueAsync");
             if (result.Status() != GattCommunicationStatus::Success) break;
             auto data = buffer_to_bytes(result.Value());
             if (data.empty()) break;
@@ -580,8 +587,11 @@ static void do_disconnect() {
         if (g_ble->from_radio != nullptr) {
             try {
                 g_ble->from_radio.ValueChanged(g_ble->from_radio_notify_token);
-                g_ble->from_radio.WriteClientCharacteristicConfigurationDescriptorAsync(
-                    GattClientCharacteristicConfigurationDescriptorValue::None).get();
+                await_async_result(
+                        g_ble->from_radio.WriteClientCharacteristicConfigurationDescriptorAsync(
+                                GattClientCharacteristicConfigurationDescriptorValue::None),
+                        GATT_CLEANUP_TIMEOUT,
+                        "Disable notifications");
             } catch (...) {}
             g_ble->from_radio = nullptr;
         }
@@ -655,7 +665,10 @@ MESHBLE_API int meshble_get_adapter_state(void) {
     try {
         return run_on_worker([]() -> int {
             try {
-                auto radios = Radio::GetRadiosAsync().get();
+                auto radios = await_async_result(
+                        Radio::GetRadiosAsync(),
+                        GATT_READ_TIMEOUT,
+                        "GetRadiosAsync");
                 for (auto const& radio : radios) {
                     if (radio.Kind() == RadioKind::Bluetooth) {
                         switch (radio.State()) {
@@ -821,10 +834,11 @@ MESHBLE_API int meshble_connect(const char* address, int timeout_ms) {
                     g_notifications_active = false;
                     log_msg("[meshble] inbound: using polling only (native drains disabled)");
                 } else {
-                    auto status = g_ble->from_radio
-                            .WriteClientCharacteristicConfigurationDescriptorAsync(
-                                    GattClientCharacteristicConfigurationDescriptorValue::Notify)
-                            .get();
+                    auto status = await_async_result(
+                            g_ble->from_radio.WriteClientCharacteristicConfigurationDescriptorAsync(
+                                    GattClientCharacteristicConfigurationDescriptorValue::Notify),
+                            step_timeout,
+                            "Enable notifications");
                     if (status == GattCommunicationStatus::Success) {
                         g_ble->from_radio_notify_token =
                                 g_ble->from_radio.ValueChanged(on_from_radio_value_changed);
@@ -880,7 +894,10 @@ MESHBLE_API int meshble_write_to_radio(const unsigned char* data, int length) {
 
                 if (opt <= 0) {
                     // Try WriteWithResponse first (or if already known to work)
-                    auto r = g_ble->to_radio.WriteValueAsync(buf, GattWriteOption::WriteWithResponse).get();
+                    auto r = await_async_result(
+                            g_ble->to_radio.WriteValueAsync(buf, GattWriteOption::WriteWithResponse),
+                            GATT_WRITE_TIMEOUT,
+                            "WriteValueAsync(WithResponse)");
                     if (r == GattCommunicationStatus::Success) {
                         if (opt == -1) {
                             g_write_option = 0;
@@ -901,7 +918,10 @@ MESHBLE_API int meshble_write_to_radio(const unsigned char* data, int length) {
                     buf = bytes_to_buffer(copy.data(), (int)copy.size());
 
                     // Try WriteWithoutResponse
-                    auto r2 = g_ble->to_radio.WriteValueAsync(buf, GattWriteOption::WriteWithoutResponse).get();
+                    auto r2 = await_async_result(
+                            g_ble->to_radio.WriteValueAsync(buf, GattWriteOption::WriteWithoutResponse),
+                            GATT_WRITE_TIMEOUT,
+                            "WriteValueAsync(WithoutResponse)");
                     if (r2 == GattCommunicationStatus::Success) {
                         g_write_option = 1;
                         log_msg("[meshble] writeToRadio: WriteWithoutResponse works");
@@ -913,7 +933,10 @@ MESHBLE_API int meshble_write_to_radio(const unsigned char* data, int length) {
                 }
 
                 // opt == 1: WriteWithoutResponse known to work
-                auto r2 = g_ble->to_radio.WriteValueAsync(buf, GattWriteOption::WriteWithoutResponse).get();
+                auto r2 = await_async_result(
+                        g_ble->to_radio.WriteValueAsync(buf, GattWriteOption::WriteWithoutResponse),
+                        GATT_WRITE_TIMEOUT,
+                        "WriteValueAsync(WithoutResponse)");
                 if (r2 == GattCommunicationStatus::Success) {
                     return 0;
                 }
@@ -921,6 +944,9 @@ MESHBLE_API int meshble_write_to_radio(const unsigned char* data, int length) {
                 return (r2 == GattCommunicationStatus::AccessDenied) ? -2 : -1;
             } catch (const hresult_error& e) {
                 log_msg("[meshble] writeToRadio exception: %ls", e.message().c_str());
+                return -1;
+            } catch (const std::exception& e) {
+                log_msg("[meshble] writeToRadio exception: %s", e.what());
                 return -1;
             } catch (...) {
                 log_msg("[meshble] writeToRadio unknown exception");
@@ -937,7 +963,10 @@ MESHBLE_API int meshble_read_from_radio(unsigned char* buffer, int buf_size, int
         auto read = run_on_worker([]() -> ReadFromRadioResult {
             if (!g_connected || !g_ble || g_ble->from_radio == nullptr) return {-1, {}};
             try {
-                auto result = g_ble->from_radio.ReadValueAsync(BluetoothCacheMode::Uncached).get();
+                auto result = await_async_result(
+                        g_ble->from_radio.ReadValueAsync(BluetoothCacheMode::Uncached),
+                        GATT_READ_TIMEOUT,
+                        "ReadValueAsync");
                 if (result.Status() != GattCommunicationStatus::Success) return {-1, {}};
                 auto data = buffer_to_bytes(result.Value());
                 return {0, std::move(data)};

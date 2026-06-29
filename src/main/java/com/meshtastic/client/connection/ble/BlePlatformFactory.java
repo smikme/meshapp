@@ -3,6 +3,7 @@ package com.meshtastic.client.connection.ble;
 import com.meshtastic.client.connection.ble.linux.LinuxBle;
 import com.meshtastic.client.connection.ble.macos.MacOsBle;
 import com.meshtastic.client.connection.ble.windows.WinBle;
+import com.meshtastic.client.connection.ble.windows.WinBleProcess;
 import com.meshtastic.client.platform.OsDetect;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -34,8 +35,12 @@ public final class BlePlatformFactory {
                 yield new LinuxBle();
             }
             case WINDOWS -> {
-                log.info("Используется WinRT BLE (Windows)");
-                yield new WinBle();
+                if (Boolean.getBoolean("meshapp.windowsBle.inProcess")) {
+                    log.info("Используется WinRT BLE (Windows, in-process)");
+                    yield new WinBle();
+                }
+                log.info("Используется WinRT BLE helper process (Windows)");
+                yield new WinBleProcess();
             }
             case UNKNOWN -> throw new UnsupportedOperationException(
                     "BLE не поддерживается на этой ОС");
