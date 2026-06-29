@@ -114,7 +114,9 @@ public class WinBle implements BlePlatform {
 
         int result = lib.meshble_start_scan(scanCallback);
         if (result != 0) {
-            log.error("BLE scan не удалось запустить: error={}", result);
+            String message = "BLE scan не удалось запустить: error=" + result;
+            log.error(message);
+            throw new IllegalStateException(message);
         } else {
             log.info("BLE сканирование запущено");
         }

@@ -11,16 +11,21 @@ import org.slf4j.LoggerFactory;
 
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
+import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Base64;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
@@ -70,6 +75,8 @@ public final class WinBleProcess implements BlePlatform {
             call("start_scan", Map.of(), COMMAND_TIMEOUT);
         } catch (RuntimeException e) {
             log.error("Windows BLE helper scan failed: {}", e.getMessage());
+            scanConsumer = null;
+            throw e;
         }
     }
 
@@ -297,7 +304,13 @@ public final class WinBleProcess implements BlePlatform {
                 new InputStreamReader(owner.getErrorStream(), StandardCharsets.UTF_8))) {
             String line;
             while ((line = reader.readLine()) != null) {
-                Message message = GSON.fromJson(line, Message.class);
+                Message message;
+                try {
+                    message = GSON.fromJson(line, Message.class);
+                } catch (RuntimeException e) {
+                    log.debug("[win-ble-helper stderr] {}", line);
+                    continue;
+                }
                 if (message == null) {
                     continue;
                 }
@@ -451,11 +464,58 @@ public final class WinBleProcess implements BlePlatform {
         String bin = System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("win")
                 ? "java.exe"
                 : "java";
-        return java.util.List.of(
-                Path.of(System.getProperty("java.home"), "bin", bin).toString(),
-                "-cp",
-                System.getProperty("java.class.path"),
-                WinBleHelperMain.class.getName());
+        ArrayList<String> command = new ArrayList<>();
+        command.add(Path.of(System.getProperty("java.home"), "bin", bin).toString());
+        command.add("-XX:+IgnoreUnrecognizedVMOptions");
+        command.add("--enable-native-access=ALL-UNNAMED");
+        command.add("--sun-misc-unsafe-memory-access=allow");
+        command.add("-cp");
+        command.add(helperClasspath());
+        command.add(WinBleHelperMain.class.getName());
+        return java.util.List.copyOf(command);
+    }
+
+    private static String helperClasspath() {
+        LinkedHashSet<String> entries = new LinkedHashSet<>();
+        String classPath = System.getProperty("java.class.path", "");
+        for (String entry : classPath.split(java.util.regex.Pattern.quote(File.pathSeparator))) {
+            addClasspathEntry(entries, entry);
+        }
+
+        try {
+            var source = WinBleProcess.class.getProtectionDomain().getCodeSource();
+            if (source != null && source.getLocation() != null) {
+                addClasspathEntry(entries, Path.of(source.getLocation().toURI()).toString());
+            }
+        } catch (Exception ignored) {
+        }
+
+        return String.join(File.pathSeparator, entries);
+    }
+
+    private static void addClasspathEntry(Set<String> entries, String rawEntry) {
+        if (rawEntry == null || rawEntry.isBlank()) {
+            return;
+        }
+        entries.add(rawEntry);
+
+        File file = new File(rawEntry);
+        File directory = file.isDirectory() ? file : file.getParentFile();
+        if (directory != null) {
+            addSiblingJars(entries, directory);
+        }
+    }
+
+    private static void addSiblingJars(Set<String> entries, File directory) {
+        File[] jars = directory.listFiles(file -> file.isFile()
+                && file.getName().toLowerCase(java.util.Locale.ROOT).endsWith(".jar"));
+        if (jars == null || jars.length == 0) {
+            return;
+        }
+        Arrays.sort(jars, java.util.Comparator.comparing(File::getName));
+        for (File jar : jars) {
+            entries.add(jar.getPath());
+        }
     }
 
     private static final class Message {
