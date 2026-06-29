@@ -27,6 +27,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
 /**
@@ -47,12 +48,14 @@ public final class WinBleProcess implements BlePlatform {
     private final Object processLock = new Object();
     private final Object writeLock = new Object();
     private final AtomicInteger nextRequestId = new AtomicInteger(1);
+    private final AtomicBoolean connectInProgress = new AtomicBoolean(false);
     private final Map<Integer, CompletableFuture<Message>> pending = new ConcurrentHashMap<>();
 
     private volatile Process process;
     private volatile BufferedWriter writer;
     private volatile CompletableFuture<Void> readyFuture;
     private volatile boolean disposed;
+    private volatile boolean connected;
     private volatile BleProtocolProfile profile = BleProtocolProfile.MESHTASTIC;
     private volatile Consumer<BleDevice> scanConsumer;
     private volatile Consumer<byte[]> fromRadioListener;
@@ -63,6 +66,7 @@ public final class WinBleProcess implements BlePlatform {
     public void startScan(Consumer<BleDevice> onDeviceFound) {
         scanConsumer = onDeviceFound;
         try {
+            sendProfileToHelper();
             call("start_scan", Map.of(), COMMAND_TIMEOUT);
         } catch (RuntimeException e) {
             log.error("Windows BLE helper scan failed: {}", e.getMessage());
@@ -81,24 +85,23 @@ public final class WinBleProcess implements BlePlatform {
 
     @Override
     public void connect(String address) throws ConnectionException {
+        connectInProgress.set(true);
         try {
+            sendProfileToHelper();
             Message response = call("connect", Map.of("address", Objects.toString(address, "")), CONNECT_TIMEOUT);
             if (!Boolean.TRUE.equals(response.ok)) {
                 throw new ConnectionException(responseMessage(response, "Windows BLE helper connect failed"));
             }
         } catch (RuntimeException e) {
             throw new ConnectionException("Windows BLE helper connect failed: " + e.getMessage(), e);
+        } finally {
+            connectInProgress.set(false);
         }
     }
 
     @Override
     public void setProfile(BleProtocolProfile profile) {
         this.profile = profile == null ? BleProtocolProfile.MESHTASTIC : profile;
-        try {
-            call("set_profile", Map.of("profile", this.profile.nativeCode()), COMMAND_TIMEOUT);
-        } catch (RuntimeException e) {
-            log.warn("Windows BLE helper set profile failed: {}", e.getMessage());
-        }
     }
 
     @Override
@@ -112,6 +115,8 @@ public final class WinBleProcess implements BlePlatform {
             call("disconnect", Map.of(), COMMAND_TIMEOUT);
         } catch (RuntimeException e) {
             log.debug("Windows BLE helper disconnect failed: {}", e.getMessage());
+        } finally {
+            connected = false;
         }
     }
 
@@ -231,6 +236,10 @@ public final class WinBleProcess implements BlePlatform {
         }
     }
 
+    private void sendProfileToHelper() {
+        call("set_profile", Map.of("profile", profile.nativeCode()), COMMAND_TIMEOUT);
+    }
+
     private void ensureHelperStarted() {
         if (disposed) {
             throw new IllegalStateException("Windows BLE helper is disposed");
@@ -267,7 +276,6 @@ public final class WinBleProcess implements BlePlatform {
             logThread.start();
 
             ready.get(START_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
-            call("set_profile", Map.of("profile", profile.nativeCode()), COMMAND_TIMEOUT);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             stopHelper();
@@ -372,10 +380,25 @@ public final class WinBleProcess implements BlePlatform {
             return;
         }
         switch (message.state) {
-            case 0 -> listener.accept(new BleState.Connected());
-            case 1 -> listener.accept(new BleState.Disconnected());
-            case 2 -> listener.accept(new BleState.Error(
-                    message.message != null ? message.message : "Windows BLE helper error", null));
+            case 0 -> {
+                connected = true;
+                listener.accept(new BleState.Connected());
+            }
+            case 1 -> {
+                connected = false;
+                if (connectInProgress.get()) {
+                    return;
+                }
+                listener.accept(new BleState.Disconnected());
+            }
+            case 2 -> {
+                connected = false;
+                if (connectInProgress.get()) {
+                    return;
+                }
+                listener.accept(new BleState.Error(
+                        message.message != null ? message.message : "Windows BLE helper error", null));
+            }
             default -> {
             }
         }
@@ -390,7 +413,8 @@ public final class WinBleProcess implements BlePlatform {
             future.completeExceptionally(new IllegalStateException(message));
         }
         pending.clear();
-        if (!disposed) {
+        if (!disposed && connected && !connectInProgress.get()) {
+            connected = false;
             Consumer<BleState> listener = stateListener;
             if (listener != null) {
                 listener.accept(new BleState.Error(message, null));
