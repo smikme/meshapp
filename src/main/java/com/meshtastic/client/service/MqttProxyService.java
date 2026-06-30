@@ -3,6 +3,9 @@ package com.meshtastic.client.service;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.protocol.FromRadioListener;
 import com.meshtastic.client.protocol.ProtocolHandler;
+import com.meshtastic.client.utils.AppPreferences;
+import com.meshtastic.client.utils.AppPreferences.MqttDownlinkFilterMode;
+import com.google.protobuf.InvalidProtocolBufferException;
 import org.eclipse.paho.client.mqttv3.DisconnectedBufferOptions;
 import org.eclipse.paho.client.mqttv3.IMqttActionListener;
 import org.eclipse.paho.client.mqttv3.IMqttDeliveryToken;
@@ -13,8 +16,10 @@ import org.eclipse.paho.client.mqttv3.MqttConnectOptions;
 import org.eclipse.paho.client.mqttv3.MqttException;
 import org.eclipse.paho.client.mqttv3.MqttMessage;
 import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence;
+import org.meshtastic.proto.MQTTProtos;
 import org.meshtastic.proto.MeshProtos;
 import org.meshtastic.proto.ModuleConfigProtos;
+import org.meshtastic.proto.Portnums;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -31,9 +36,10 @@ import java.util.concurrent.TimeUnit;
 /**
  * Desktop-side MQTT bridge for nodes that proxy MQTT through the connected client.
  * <p>
- * The service intentionally stays transport-agnostic: it forwards topic/payload/retained
- * between Meshtastic {@code MqttClientProxyMessage} and the external broker without
- * trying to reinterpret Meshtastic MQTT envelopes.
+ * By default the bridge forwards topic/payload/retained between Meshtastic
+ * {@code MqttClientProxyMessage} and the external broker. When the application-level
+ * downlink filter is enabled, broker-to-device traffic is parsed as Meshtastic
+ * {@code ServiceEnvelope} protobuf and reduced before it reaches the radio link.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -384,6 +390,18 @@ public final class MqttProxyService implements FromRadioListener, AutoCloseable 
             return;
         }
 
+        MqttDownlinkFilterMode filterMode = AppPreferences.getMqttDownlinkFilterMode();
+        DownlinkFilterDecision filterDecision = evaluateDownlinkFilter(
+                payload,
+                filterMode,
+                deviceState != null ? deviceState.getMyNodeNum() : 0
+        );
+        if (!filterDecision.forward()) {
+            log.trace("Dropped MQTT downlink for '{}': topic='{}' bytes={} retained={} mode={} reason={}",
+                    connectionName, topic, payload.length, retained, filterMode, filterDecision.reason());
+            return;
+        }
+
         int queueDepth = downlinkExecutor.getQueue().size();
         log.trace("Received MQTT downlink for '{}': topic='{}' bytes={} retained={} queueDepth={}/{}",
                 connectionName, topic, payload.length, retained, queueDepth, DOWNLINK_QUEUE_SIZE);
@@ -406,6 +424,69 @@ public final class MqttProxyService implements FromRadioListener, AutoCloseable 
         }
         log.trace("Forwarded MQTT downlink for '{}': topic='{}' bytes={} retained={}",
                 connectionName, topic, payload.length, retained);
+    }
+
+    static DownlinkFilterDecision evaluateDownlinkFilter(byte[] payload,
+                                                         MqttDownlinkFilterMode mode,
+                                                         int localNodeNum) {
+        MqttDownlinkFilterMode safeMode = mode != null ? mode : MqttDownlinkFilterMode.NO_FILTER;
+        if (safeMode == MqttDownlinkFilterMode.NO_FILTER) {
+            return DownlinkFilterDecision.forward("filter disabled");
+        }
+
+        MQTTProtos.ServiceEnvelope envelope;
+        try {
+            envelope = MQTTProtos.ServiceEnvelope.parseFrom(
+                    payload != null ? payload : new byte[0]
+            );
+        } catch (InvalidProtocolBufferException e) {
+            return DownlinkFilterDecision.drop("invalid service envelope");
+        }
+
+        if (!envelope.hasPacket()) {
+            return DownlinkFilterDecision.drop("missing mesh packet");
+        }
+
+        MeshProtos.MeshPacket packet = envelope.getPacket();
+        if (isDecodedTextPacket(packet)) {
+            return DownlinkFilterDecision.forward("decoded text packet");
+        }
+        if (isDecodedRoutingAckForLocalNode(packet, localNodeNum)) {
+            return DownlinkFilterDecision.forward("decoded routing ACK for local node");
+        }
+
+        if (!packet.hasEncrypted()) {
+            return DownlinkFilterDecision.drop("not a text or encrypted packet");
+        }
+
+        if (safeMode == MqttDownlinkFilterMode.FILTERED_WITH_ENCRYPTED) {
+            return DownlinkFilterDecision.forward("encrypted packet");
+        }
+
+        if (localNodeNum != 0 && packet.getTo() == localNodeNum) {
+            return DownlinkFilterDecision.forward("encrypted packet for local node");
+        }
+
+        return DownlinkFilterDecision.drop("encrypted packet is not addressed to local node");
+    }
+
+    private static boolean isDecodedTextPacket(MeshProtos.MeshPacket packet) {
+        if (packet == null || !packet.hasDecoded()) {
+            return false;
+        }
+        Portnums.PortNum portNum = packet.getDecoded().getPortnum();
+        return portNum == Portnums.PortNum.TEXT_MESSAGE_APP
+                || portNum == Portnums.PortNum.TEXT_MESSAGE_COMPRESSED_APP;
+    }
+
+    private static boolean isDecodedRoutingAckForLocalNode(MeshProtos.MeshPacket packet, int localNodeNum) {
+        if (packet == null || !packet.hasDecoded() || localNodeNum == 0) {
+            return false;
+        }
+        MeshProtos.Data data = packet.getDecoded();
+        return data.getPortnum() == Portnums.PortNum.ROUTING_APP
+                && data.getRequestId() != 0
+                && packet.getTo() == localNodeNum;
     }
 
     private boolean awaitDownlinkSendWindow() {
@@ -459,6 +540,16 @@ public final class MqttProxyService implements FromRadioListener, AutoCloseable 
                        boolean tlsEnabled) {}
 
     record ProxyState(ProxyConfig config, String reason) {}
+
+    record DownlinkFilterDecision(boolean forward, String reason) {
+        static DownlinkFilterDecision forward(String reason) {
+            return new DownlinkFilterDecision(true, reason);
+        }
+
+        static DownlinkFilterDecision drop(String reason) {
+            return new DownlinkFilterDecision(false, reason);
+        }
+    }
 
     private record RecentPublication(String topic,
                                      byte[] payload,

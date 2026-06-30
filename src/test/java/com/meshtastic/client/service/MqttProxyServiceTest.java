@@ -6,8 +6,12 @@ import org.meshtastic.proto.ModuleConfigProtos;
 
 import com.google.protobuf.ByteString;
 import com.meshtastic.client.model.DeviceState;
+import com.meshtastic.client.utils.AppPreferences;
 
 import java.nio.charset.StandardCharsets;
+
+import org.meshtastic.proto.MQTTProtos;
+import org.meshtastic.proto.Portnums;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -20,6 +24,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 class MqttProxyServiceTest {
+
+    private static final int LOCAL_NODE_NUM = 0x12345678;
+    private static final int REMOTE_NODE_NUM = 0x76543210;
 
     @Test
     void loadProxyConfigReturnsNullWhenProxyIsDisabled() {
@@ -132,5 +139,159 @@ class MqttProxyServiceTest {
         suppressor.remember("msh/test", new byte[] {0x01});
 
         assertFalse(suppressor.consume("msh/test", new byte[] {0x01}));
+    }
+
+    @Test
+    void downlinkFilterDisabledForwardsUnparseablePayload() {
+        assertTrue(shouldForward(
+                new byte[] {0x01, 0x02, 0x03},
+                AppPreferences.MqttDownlinkFilterMode.NO_FILTER
+        ));
+    }
+
+    @Test
+    void downlinkFilterForwardsDecodedTextMessages() {
+        assertTrue(shouldForward(
+                serviceEnvelopePayload(decodedPacket(Portnums.PortNum.TEXT_MESSAGE_APP)),
+                AppPreferences.MqttDownlinkFilterMode.FILTERED
+        ));
+        assertTrue(shouldForward(
+                serviceEnvelopePayload(decodedPacket(Portnums.PortNum.TEXT_MESSAGE_COMPRESSED_APP)),
+                AppPreferences.MqttDownlinkFilterMode.FILTERED
+        ));
+    }
+
+    @Test
+    void downlinkFilterDropsDecodedNonChatMessages() {
+        assertFalse(shouldForward(
+                serviceEnvelopePayload(decodedPacket(Portnums.PortNum.POSITION_APP)),
+                AppPreferences.MqttDownlinkFilterMode.FILTERED
+        ));
+        assertFalse(shouldForward(
+                serviceEnvelopePayload(decodedPacket(Portnums.PortNum.NODEINFO_APP)),
+                AppPreferences.MqttDownlinkFilterMode.FILTERED_WITH_ENCRYPTED
+        ));
+    }
+
+    @Test
+    void downlinkFilterForwardsRoutingAcksAddressedToLocalNode() {
+        assertTrue(shouldForward(
+                serviceEnvelopePayload(routingAckPacket(LOCAL_NODE_NUM, 1234)),
+                AppPreferences.MqttDownlinkFilterMode.FILTERED
+        ));
+        assertTrue(shouldForward(
+                serviceEnvelopePayload(routingAckPacket(LOCAL_NODE_NUM, 1234)),
+                AppPreferences.MqttDownlinkFilterMode.FILTERED_WITH_ENCRYPTED
+        ));
+    }
+
+    @Test
+    void downlinkFilterDropsRoutingPacketsNotAddressedToLocalNode() {
+        assertFalse(shouldForward(
+                serviceEnvelopePayload(routingAckPacket(REMOTE_NODE_NUM, 1234)),
+                AppPreferences.MqttDownlinkFilterMode.FILTERED
+        ));
+        assertFalse(shouldForward(
+                serviceEnvelopePayload(routingAckPacket(0xFFFFFFFF, 1234)),
+                AppPreferences.MqttDownlinkFilterMode.FILTERED_WITH_ENCRYPTED
+        ));
+    }
+
+    @Test
+    void downlinkFilterDropsRoutingPacketsWithoutRequestId() {
+        assertFalse(shouldForward(
+                serviceEnvelopePayload(routingAckPacket(LOCAL_NODE_NUM, 0)),
+                AppPreferences.MqttDownlinkFilterMode.FILTERED
+        ));
+    }
+
+    @Test
+    void downlinkFilterForwardsEncryptedPacketsAddressedToLocalNode() {
+        assertTrue(shouldForward(
+                serviceEnvelopePayload(encryptedPacket(LOCAL_NODE_NUM)),
+                AppPreferences.MqttDownlinkFilterMode.FILTERED
+        ));
+    }
+
+    @Test
+    void downlinkFilterDropsEncryptedPacketsNotAddressedToLocalNode() {
+        assertFalse(shouldForward(
+                serviceEnvelopePayload(encryptedPacket(REMOTE_NODE_NUM)),
+                AppPreferences.MqttDownlinkFilterMode.FILTERED
+        ));
+        assertFalse(shouldForward(
+                serviceEnvelopePayload(encryptedPacket(0xFFFFFFFF)),
+                AppPreferences.MqttDownlinkFilterMode.FILTERED
+        ));
+    }
+
+    @Test
+    void downlinkFilterWithEncryptedForwardsAnyEncryptedPacket() {
+        assertTrue(shouldForward(
+                serviceEnvelopePayload(encryptedPacket(REMOTE_NODE_NUM)),
+                AppPreferences.MqttDownlinkFilterMode.FILTERED_WITH_ENCRYPTED
+        ));
+        assertTrue(shouldForward(
+                serviceEnvelopePayload(encryptedPacket(0xFFFFFFFF)),
+                AppPreferences.MqttDownlinkFilterMode.FILTERED_WITH_ENCRYPTED
+        ));
+    }
+
+    @Test
+    void downlinkFilterDropsInvalidOrEmptyEnvelopePayloads() {
+        assertFalse(shouldForward(
+                new byte[] {0x01, 0x02, 0x03},
+                AppPreferences.MqttDownlinkFilterMode.FILTERED
+        ));
+        assertFalse(shouldForward(
+                MQTTProtos.ServiceEnvelope.newBuilder().build().toByteArray(),
+                AppPreferences.MqttDownlinkFilterMode.FILTERED_WITH_ENCRYPTED
+        ));
+    }
+
+    private static boolean shouldForward(byte[] payload, AppPreferences.MqttDownlinkFilterMode mode) {
+        return MqttProxyService.evaluateDownlinkFilter(payload, mode, LOCAL_NODE_NUM).forward();
+    }
+
+    private static byte[] serviceEnvelopePayload(MeshProtos.MeshPacket packet) {
+        return MQTTProtos.ServiceEnvelope.newBuilder()
+                .setPacket(packet)
+                .build()
+                .toByteArray();
+    }
+
+    private static MeshProtos.MeshPacket decodedPacket(Portnums.PortNum portNum) {
+        return MeshProtos.MeshPacket.newBuilder()
+                .setFrom(REMOTE_NODE_NUM)
+                .setTo(0xFFFFFFFF)
+                .setChannel(0)
+                .setDecoded(MeshProtos.Data.newBuilder()
+                        .setPortnum(portNum)
+                        .setPayload(ByteString.copyFromUtf8("payload"))
+                        .build())
+                .build();
+    }
+
+    private static MeshProtos.MeshPacket routingAckPacket(int toNodeNum, int requestId) {
+        return MeshProtos.MeshPacket.newBuilder()
+                .setFrom(REMOTE_NODE_NUM)
+                .setTo(toNodeNum)
+                .setDecoded(MeshProtos.Data.newBuilder()
+                        .setPortnum(Portnums.PortNum.ROUTING_APP)
+                        .setRequestId(requestId)
+                        .setPayload(MeshProtos.Routing.newBuilder()
+                                .setErrorReason(MeshProtos.Routing.Error.NONE)
+                                .build()
+                                .toByteString())
+                        .build())
+                .build();
+    }
+
+    private static MeshProtos.MeshPacket encryptedPacket(int toNodeNum) {
+        return MeshProtos.MeshPacket.newBuilder()
+                .setFrom(REMOTE_NODE_NUM)
+                .setTo(toNodeNum)
+                .setEncrypted(ByteString.copyFrom(new byte[] {0x01, 0x02, 0x03}))
+                .build();
     }
 }

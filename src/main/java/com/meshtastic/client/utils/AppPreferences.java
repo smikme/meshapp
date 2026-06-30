@@ -27,6 +27,7 @@ public class AppPreferences {
     public static final String KEY_NOTIFICATIONS_ENABLED = "notificationsEnabled";
     public static final String KEY_NATIVE_WINDOW = "nativeWindow";
     public static final String KEY_DISABLE_TRANSPARENCY = "disableTransparency";
+    public static final String KEY_ENABLE_EFFECTS = "enableEffects";
     public static final String KEY_DISABLE_EFFECTS = "disableEffects";
     public static final String KEY_SOFTWARE_RENDERING = "softwareRendering";
     public static final String KEY_CHECK_UPDATES = "checkUpdates";
@@ -68,6 +69,7 @@ public class AppPreferences {
     public static final String KEY_REMOTE_RPC_ACCESS_KEY = "remoteRpcAccessKey";
     public static final String KEY_REMOTE_RPC_ROUTER_ENABLED = "remoteRpcRouterEnabled";
     public static final String KEY_REMOTE_RPC_ROUTER_SERVER = "remoteRpcRouterServer";
+    public static final String KEY_MQTT_DOWNLINK_FILTER_MODE = "mqttDownlinkFilterMode";
 
     public static final int DEFAULT_MEMORY_LIMIT_MB = 512;
     public static final int MIN_MEMORY_LIMIT_MB = 128;
@@ -75,6 +77,46 @@ public class AppPreferences {
     public static final int DEFAULT_REMOTE_RPC_SERVER_PORT = 44030;
 
     private static Preferences state;
+
+    public enum MqttDownlinkFilterMode {
+        NO_FILTER("none", "settings.mqttFilter.mode.none"),
+        FILTERED("filtered", "settings.mqttFilter.mode.filtered"),
+        FILTERED_WITH_ENCRYPTED(
+            "filtered_with_encrypted",
+            "settings.mqttFilter.mode.filteredWithEncrypted"
+        );
+
+        private final String preferenceValue;
+        private final String displayKey;
+
+        MqttDownlinkFilterMode(String preferenceValue, String displayKey) {
+            this.preferenceValue = preferenceValue;
+            this.displayKey = displayKey;
+        }
+
+        public String preferenceValue() {
+            return preferenceValue;
+        }
+
+        public String displayKey() {
+            return displayKey;
+        }
+
+        static MqttDownlinkFilterMode fromPreferenceValue(String value) {
+            if (value == null || value.isBlank()) {
+                return NO_FILTER;
+            }
+            for (MqttDownlinkFilterMode mode : values()) {
+                if (
+                    mode.preferenceValue.equals(value) ||
+                    mode.name().equalsIgnoreCase(value)
+                ) {
+                    return mode;
+                }
+            }
+            return NO_FILTER;
+        }
+    }
 
     public static void init() {
         state = Preferences.userRoot().node(PREFERENCES_ROOT_PATH);
@@ -123,16 +165,38 @@ public class AppPreferences {
         state().putBoolean(KEY_DISABLE_TRANSPARENCY, value);
     }
 
+    public static boolean isVisualEffectsEnabled() {
+        String value = state().get(KEY_ENABLE_EFFECTS, null);
+        if (value != null) {
+            return Boolean.parseBoolean(value);
+        }
+
+        String legacyDisabledValue = state().get(KEY_DISABLE_EFFECTS, null);
+        if (legacyDisabledValue != null) {
+            return !Boolean.parseBoolean(legacyDisabledValue);
+        }
+
+        return false;
+    }
+
+    public static boolean isVisualEffectsEnabledEffective() {
+        return isVisualEffectsEnabled() && !OsDetect.isWindows10();
+    }
+
+    public static void setVisualEffectsEnabled(boolean value) {
+        state().putBoolean(KEY_ENABLE_EFFECTS, value);
+    }
+
     public static boolean isDisableEffects() {
-        return state().getBoolean(KEY_DISABLE_EFFECTS, false);
+        return !isVisualEffectsEnabled();
     }
 
     public static boolean isDisableEffectsEffective() {
-        return isDisableEffects() || OsDetect.isWindows10();
+        return !isVisualEffectsEnabledEffective();
     }
 
     public static void setDisableEffects(boolean value) {
-        state().putBoolean(KEY_DISABLE_EFFECTS, value);
+        setVisualEffectsEnabled(!value);
     }
 
     public static boolean isSoftwareRendering() {
@@ -229,6 +293,21 @@ public class AppPreferences {
         } else {
             state().put(KEY_REMOTE_RPC_ROUTER_SERVER, value.trim());
         }
+        flushState();
+    }
+
+    public static MqttDownlinkFilterMode getMqttDownlinkFilterMode() {
+        return MqttDownlinkFilterMode.fromPreferenceValue(
+            state().get(
+                KEY_MQTT_DOWNLINK_FILTER_MODE,
+                MqttDownlinkFilterMode.NO_FILTER.preferenceValue()
+            )
+        );
+    }
+
+    public static void setMqttDownlinkFilterMode(MqttDownlinkFilterMode mode) {
+        MqttDownlinkFilterMode safeMode = mode != null ? mode : MqttDownlinkFilterMode.NO_FILTER;
+        state().put(KEY_MQTT_DOWNLINK_FILTER_MODE, safeMode.preferenceValue());
         flushState();
     }
 

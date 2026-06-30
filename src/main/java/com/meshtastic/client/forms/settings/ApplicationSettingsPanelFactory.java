@@ -52,19 +52,19 @@ public final class ApplicationSettingsPanelFactory {
         Label appearanceHeader = new Label(I18n.t("settings.appearance.title"));
         appearanceHeader.getStyleClass().add("section-title");
 
-        CheckBox disableEffectsCb = new CheckBox(
-            I18n.t("settings.effects.disable")
+        CheckBox enableEffectsCb = new CheckBox(
+            I18n.t("settings.effects.enable")
         );
-        disableEffectsCb.setSelected(
-            AppPreferences.isDisableEffectsEffective()
+        enableEffectsCb.setSelected(
+            AppPreferences.isVisualEffectsEnabledEffective()
         );
         if (OsDetect.isWindows10()) {
-            disableEffectsCb.setDisable(true);
+            enableEffectsCb.setDisable(true);
         }
-        disableEffectsCb
+        enableEffectsCb
             .selectedProperty()
             .addListener((obs, old, val) ->
-                AppPreferences.setDisableEffects(val)
+                AppPreferences.setVisualEffectsEnabled(val)
             );
 
         CheckBox softwareRenderingCb = new CheckBox(
@@ -121,7 +121,7 @@ public final class ApplicationSettingsPanelFactory {
             appearanceHeader,
             typographyGroup,
             createLanguageSettingRow(),
-            disableEffectsCb,
+            enableEffectsCb,
             softwareRenderingCb,
             minimizeToTrayCb,
             restartNote
@@ -170,6 +170,7 @@ public final class ApplicationSettingsPanelFactory {
         VBox integrationsGroup = new VBox(
             8,
             integrationsHeader,
+            createMqttDownlinkFilterSettingRow(),
             checkUpdatesCb,
             jfrDiagnosticsCb,
             diagnosticsNote
@@ -495,10 +496,57 @@ public final class ApplicationSettingsPanelFactory {
         );
     }
 
+    private static VBox createMqttDownlinkFilterSettingRow() {
+        Label titleLabel = new Label(I18n.t("settings.mqttFilter.title"));
+        titleLabel.getStyleClass().add("item-title");
+
+        Label descriptionLabel = new Label(
+            I18n.t("settings.mqttFilter.description")
+        );
+        descriptionLabel.getStyleClass().add("muted-note-label");
+        descriptionLabel.setWrapText(true);
+
+        ComboBox<AppPreferences.MqttDownlinkFilterMode> filterBox =
+            new ComboBox<>(
+                FXCollections.observableArrayList(
+                    AppPreferences.MqttDownlinkFilterMode.values()
+                )
+            );
+        filterBox.setButtonCell(createMqttDownlinkFilterModeCell());
+        filterBox.setCellFactory(ignored -> createMqttDownlinkFilterModeCell());
+        filterBox
+            .getSelectionModel()
+            .select(AppPreferences.getMqttDownlinkFilterMode());
+        filterBox.valueProperty().addListener((obs, oldValue, newValue) -> {
+            if (newValue != null) {
+                AppPreferences.setMqttDownlinkFilterMode(newValue);
+            }
+        });
+
+        return new VBox(6, titleLabel, descriptionLabel, filterBox);
+    }
+
     private static ListCell<I18n.LanguageOption> createLanguageCell() {
         return new ListCell<>() {
             @Override
             protected void updateItem(I18n.LanguageOption item, boolean empty) {
+                super.updateItem(item, empty);
+                setText(
+                    empty || item == null
+                        ? null
+                        : I18n.t(item.displayKey())
+                );
+            }
+        };
+    }
+
+    private static ListCell<AppPreferences.MqttDownlinkFilterMode> createMqttDownlinkFilterModeCell() {
+        return new ListCell<>() {
+            @Override
+            protected void updateItem(
+                AppPreferences.MqttDownlinkFilterMode item,
+                boolean empty
+            ) {
                 super.updateItem(item, empty);
                 setText(
                     empty || item == null
